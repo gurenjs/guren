@@ -445,6 +445,11 @@ Watch the YAML, because this one bites: `issues: [412, #398]` loses everything a
 - **`guren check` printed failures and exited 0.** Plain `check` reports; `check --docs`, `check --spec` and `guren gate` are what set an exit code. The gate is stricter still: it fails on warnings too.
 - **Do not set `stale_after:` in a document you are not going to revisit.** It warns from that date onward, and a warning fails the gate.
 
+## Exercises
+
+1. On a branch, add a column to `db/schema.ts` and run `bunx guren gate`. Which of the four views drifted, and which did not? Explain the ones that did not from what each view reads. Delete the branch.
+2. This app made a decision that is still undocumented: tags are normalised in the validator rather than in the model. Write the ADR, link it to `Post`, and make `bunx guren check --docs` pass. Then say what a future reader gains from that file that the code alone would not have told them.
+
 ## Next
 
 [Chapter 14: Production](./14-production.md) is the last one: sessions that survive a restart, rate limiting, what `NODE_ENV=production` changes for you, and an honest list of what this app still is not ready for.

@@ -931,6 +931,11 @@ git commit -m "feat: let authors publish and unpublish their posts"
 - **The test file will not compile after adding `publishedAt`.** It is meant to, until the column exists. If it still fails after the migration, codegen or the schema import is stale.
 - **`test-writer` wrote a test that a stranger can publish.** It tested the code, and the code allowed it. That is the lesson, not a bug in the subagent.
 
+## Exercises
+
+1. Delete the `await this.authorize('update', [Post, post])` line from `update` and run `bun test`. Count the failures, then restore the line. That count is what the policy is worth, and it is the number `guren audit` would not have given you.
+2. `this.can()` returns a boolean; `this.authorize()` throws. The page uses one and the action uses the other. What would a reader see if the two disagreed, and which of the two is the one that keeps the record safe?
+
 ## Next
 
 [Chapter 8: Teach the Agent Your Project](./08-teach-the-agent.md) turns "the agent forgot" into a rule it reads every time, a skill it follows on request, and a reviewer with your brief, and then proves them on a resource the agent builds unprompted.

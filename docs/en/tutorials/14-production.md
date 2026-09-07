@@ -362,6 +362,11 @@ More than that, you have a way of working. Every chapter here was the same four 
 - **Assets 404 in preview.** `bun run build` has not run since the last change; the manifest is missing or stale.
 - **CI is red on `--deps` only.** A dependency has an advisory. Upgrade it; do not drop the flag.
 
+## Exercises
+
+1. Start `bun run preview` with `APP_URL` unset, and ask for the home page with a `Host` header the app has never heard of. Then set `APP_URL` and ask again. Which answer is which, and which of the two would you rather ship by accident?
+2. The `Dockerfile` from chapter 1 does not copy `storage/`. Choose one of the two fixes named above, apply it, and write the one-paragraph reason in an ADR. Whichever you choose, say what you gave up.
+
 ## The end
 
 That is the course. The app is yours now, and so is the harness that helped build it: the rules, the skills, the subagent brief, the checks, and the gate. Add the next feature the way you added the last one, and if you get it wrong, the tests will say so before anyone else does.

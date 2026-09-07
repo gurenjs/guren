@@ -321,6 +321,11 @@ git commit -m "feat: add the contact page"
 - **The agent returned `this.text()` with HTML in it.** It works and the test passes, which is why the rubric says what the controller must do, not only what the test checks. Ask it to render the page instead; that is the fix you will make many times in this course.
 - **`guren check` warns that a controller has no test.** It looks for `tests/<Name>Controller.test.ts`. You wrote both; if the warning names another controller, that is chapter 3's job.
 
+## Exercises
+
+1. `/health` is an inline handler, not a controller. On a branch, add a second inline route that answers with the current time, and say what you lose by writing a route this way rather than as a controller action.
+2. `this.inertia(pages.about.Index, …)` takes a page from generated code, not a string. Change it to a page that does not exist and read the TypeScript error. That error is the whole argument for `pages.*`; put it back.
+
 ## Next
 
 [Chapter 3: The Posts Table](./03-the-posts-table.md) adds the first database table, a model, and the two pages that read it, then hands the create form to the agent.

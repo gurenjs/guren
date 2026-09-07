@@ -550,6 +550,11 @@ The generated controller differs from yours in two ways worth noticing: it valid
 - **`guren audit` fails with "Request body is read without validation".** The store action reads the body with something other than `validateBody()`. Use the schema.
 - **`this.model(Post)` throws "No model binding found".** The route has no `bind` option for that parameter. Binding is declared on the route, not inferred from the controller.
 
+## Exercises
+
+1. Open the `migration.sql` your migration wrote. Which columns did drizzle-kit make `NOT NULL`, and where in `db/schema.ts` did that come from? On a branch, make `body` nullable and run `bun run db:make` without applying it; read the SQL it produces and delete the branch.
+2. `Post.findOrFail(id)` answers a missing row with a 404. Nothing in `PostController` catches it. Find the piece that turns the exception into a response, and say what `Post.find(id)` would have produced instead.
+
 ## Next
 
 [Chapter 4: Validation and Resources](./04-validation-and-resources.md) moves the schema into a validator file with a route contract, shows validation errors on the form, introduces the resource layer, and hands editing, deleting and pagination to the agent.

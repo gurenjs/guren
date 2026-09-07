@@ -1450,6 +1450,11 @@ git commit -m "feat: add a gallery to posts"
 - **「The file must be an image.」** `image: 'require'` は拡張子ではなくバイト列を検査します。名前を変えただけのテキストファイルは拒否され、`.jpg` という名前の本物の PNG は受け入れられます。
 - **投稿を削除しても `storage/app/attachments` にファイルが残る。** `delete` の前に `purgeAttachments` が呼ばれていません。attachments テーブルには、代わりに purge してくれる外部キーがありません。`bunx guren attachments:prune` が残り物を見つけます。
 
+## 演習
+
+1. テキストファイルを `cover.png` に改名してアップロードしてください。アプリは何を返しますか。そう決めたのは `Post` のどの行ですか。次に、本物の PNG を `cover.txt` に改名してアップロードしてください。違いを一文で説明してください。
+2. カバー画像の付いた投稿を削除してから `bunx guren attachments:prune --dry-run` を走らせてください。何も報告されません。このコマンドに仕事が生まれるには、`destroy` で何が起きていなければなりませんか。
+
 ## 次へ
 
 [第 11 章: イベントとメール](./11-events-and-mail.md) では、誰かがコメントしたときに著者へ知らせます。イベント、リスナー、キューに入るジョブ、そしてメール本体です。コメントした全員への一斉送信はエージェントに委ねます。

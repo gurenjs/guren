@@ -855,6 +855,11 @@ git commit -m "feat: complete the posts CRUD with pagination"
 - **Page 2 shows nothing.** `perPage` is not 10, or `orderBy` is missing so the pages are in insertion order and the test's expectations about which post lands where do not hold.
 - **The Delete button navigates to a 404.** `Link` needs `method="delete"`; without it, the browser issues a `GET` to the destroy URL, which is not a route.
 
+## Exercises
+
+1. On a branch, add one rule to `PostPayloadSchema`: a title of only spaces is not a title. Write the failing test first, then make it pass. Which existing test would have caught this if the rule had been there from the start?
+2. Remove `body` from `PostResource.toArray()` and run `bun test`. Some tests fail; the page still renders. What does that tell you about where a resource's contract is actually checked?
+
 ## Next
 
 [Chapter 5: Users and Passwords](./05-users-and-passwords.md) gives the users table a model, hashes passwords, and builds registration, login and logout by hand.

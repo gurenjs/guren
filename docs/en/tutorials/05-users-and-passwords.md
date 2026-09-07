@@ -929,6 +929,21 @@ git commit -m "feat: add the profile page"
 - **`this.auth` throws "requires the auth middleware".** `AuthProvider` is not in `providers`, or `auth: {}` is missing. Both are needed: one mounts the session, the other names the model.
 - **`actingAs()` in a login test always succeeds.** It replaces the whole auth context, including `attempt()`, with stubs. Use it to *be* a user, never to test signing in.
 
+## Exercises
+
+1. Hashing a password is slow on purpose. Time it:
+
+```ts
+import { Hash } from '@guren/core'
+
+const started = performance.now()
+await Hash.make('correct horse battery')
+console.log(performance.now() - started, 'ms')
+```
+
+   Then say why the login route still needs the rate limit chapter 14 adds, even though every attempt costs that much.
+2. `actingAs()` skips the login flow, so it cannot test the flow itself. Write a test that posts the wrong password to `/login` and asserts the message a visitor sees. Where does that message come from, and why is it the same for a wrong password and an unknown email?
+
 ## Next
 
 [Chapter 6: Protecting Routes](./06-protecting-routes.md) puts the post mutations behind a login wall with `requireAuthenticated`, gives every post an author with a migration that survives real data, and compares what you built with what `bunx guren add auth` generates.

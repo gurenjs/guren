@@ -815,6 +815,11 @@ git commit -m "feat: mail commenters when a post is published"
 - **A test faking `mail` with `fakeMail()` directly throws.** `Mail.send()` calls `manager.transport(name)`, and the fake is a transport, not a manager. Register it on a real `MailManager` and bind that.
 - **The mail is sent during the request even though there is a queue.** That is `QUEUE_CONNECTION=sync` working as designed. Set it to `memory` and run `bunx guren queue:work` to watch a worker drain the queue instead.
 
+## Exercises
+
+1. Set `QUEUE_CONNECTION=memory` in `.env`, restart the server, and post a comment. No mail appears. Now run `bunx guren queue:work --once` in a second terminal: still nothing. Explain why, then put the value back. The answer is the reason `memory` is a development driver and not a deployment one.
+2. Register a second listener on `CommentPosted` with a higher `priority` that only logs. Which one runs first? Now make the first one throw, and say what happens to the second and to the request.
+
 ## Next
 
 [Chapter 12: Your App as an Agent's Tool](./12-agent-tools.md) turns the routes you already have into tools an agent can call, and shows the same authorization gap from chapter 7 becoming a hard failure instead of a passing audit.

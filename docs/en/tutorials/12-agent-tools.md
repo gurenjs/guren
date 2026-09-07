@@ -924,6 +924,11 @@ Do not confuse it with the endpoint your editor already talks to. `GUREN_MCP=1` 
 - **The Inertia page breaks after adding a schema.** An `output` schema on a page route validates the page JSON too. Page routes describe themselves with `resource`, which is type-level only.
 - **A tool call gets a 419 or a CSRF error.** Build the acting app with `withCsrf()` before calling `agent()`; a tool call in a test is a cookie-session request like any other.
 
+## Exercises
+
+1. Add `agent: { readOnlyHint: true }` to `posts.publish` and run `bunx guren check --ci`. Read the finding, then remove the hint. Why is a wrong annotation treated as seriously as a missing policy?
+2. Call `posts.show` through `TestApp.agent()` with an id no post has. What does the agent receive? Compare it with what a browser gets at the same URL, and say which parts of the difference are the framework's doing and which are yours.
+
 ## Next
 
 [Chapter 13: Documentation That Cannot Go Stale](./13-documented.md) makes the app describe itself: generated ER and domain views, docs an agent reads before it touches an entity, and a gate that fails when either drifts from the code.

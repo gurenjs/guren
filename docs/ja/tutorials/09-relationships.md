@@ -1648,6 +1648,11 @@ git commit -m "feat: tag posts through a pivot table"
 - **タグの大文字小文字がおかしい、または重複する。** 正規化がコントローラーへ移り、どこかの経路がそれを忘れています。バリデーターの `transform` に置いたままにしてください。
 - **`withCount('tags')` が throw する。** `withCount` が対応しているのは `hasMany`、`hasOne`、`belongsTo` で、`belongsToMany` は対象外です。`tags` を読み込んで `.length` を見てください。
 
+## 演習
+
+1. `Post.belongsToMany('tags', …, postTags, 'postId', 'tagId')` は中間テーブルの 2 つの列を順番で指定しています。ブランチを切って入れ替え、`bun test` を走らせて何が壊れるかを読んでください。そのうえで、中間テーブルの指定を間違えることが、指定を忘れることよりなぜ厄介なのかを答えてください。
+2. コメントの付いた投稿を削除して `comments` テーブルを確認してください。コメントを消したのはどの層ですか。外部キーに `onDelete: 'cascade'` が無かったら、アプリは代わりに何をしなければなりませんか。
+
 ## 次へ
 
 [第 10 章: ファイル](./10-files.md) では、attachments レイヤーで投稿にカバー画像を与え、署名付きの配信ルートを 1 本用意し、それからギャラリーをエージェントに委ねます。

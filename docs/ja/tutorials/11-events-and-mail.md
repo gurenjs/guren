@@ -815,6 +815,11 @@ git commit -m "feat: mail commenters when a post is published"
 - **`fakeMail()` で `mail` を直接 fake したテストが throw する。** `Mail.send()` は `manager.transport(name)` を呼びますが、fake はマネージャーではなくトランスポートです。本物の `MailManager` に登録し、それをバインドしてください。
 - **キューがあるのにメールがリクエストの中で送られる。** それは `QUEUE_CONNECTION=sync` が設計どおりに動いているということです。`memory` に設定して `bunx guren queue:work` を実行すれば、代わりにワーカーがキューを処理するのを見られます。
 
+## 演習
+
+1. `.env` の `QUEUE_CONNECTION` を `memory` にしてサーバーを再起動し、コメントを投稿してください。メールは出ません。次に別のターミナルで `bunx guren queue:work --once` を走らせてください。それでも何も起きません。理由を説明してから値を戻してください。その答えが、`memory` が開発用のドライバーであってデプロイ用でない理由です。
+2. `CommentPosted` に、ログを出すだけで `priority` の高い listener をもう 1 つ登録してください。先に走るのはどちらですか。次に先に走るほうで例外を投げて、もう一方とリクエストに何が起きるかを答えてください。
+
 ## 次へ
 
 [第 12 章: アプリをエージェントのツールにする](./12-agent-tools.md) では、すでにあるルートをエージェントが呼び出せるツールに変え、第 7 章と同じ認可のギャップが、通る audit ではなく明確な失敗になるところを示します。

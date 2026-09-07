@@ -550,6 +550,11 @@ git branch -D scratch/add-resource
 - **`guren audit` が「Request body is read without validation」で失敗する。** store アクションが `validateBody()` 以外の方法でボディを読んでいます。スキーマを使ってください。
 - **`this.model(Post)` が「No model binding found」で throw する。** そのパラメータに対する `bind` オプションがルートにありません。バインディングはルートに宣言するもので、コントローラーから推測されるものではありません。
 
+## 演習
+
+1. マイグレーションが書いた `migration.sql` を開いてください。drizzle-kit が `NOT NULL` にした列はどれで、それは `db/schema.ts` のどこから来ていますか。ブランチを切って `body` を nullable にし、適用せずに `bun run db:make` だけ走らせ、生成される SQL を読んでからブランチを削除してください。
+2. `Post.findOrFail(id)` は行が無ければ 404 を返します。`PostController` はそれを捕まえていません。例外をレスポンスに変えている部分を探してください。そして `Post.find(id)` だったら代わりに何が起きたかを答えてください。
+
 ## 次へ
 
 [第 4 章: バリデーションとリソース](./04-validation-and-resources.md) では、スキーマをルート契約付きのバリデーターファイルへ移し、フォームにバリデーションエラーを表示し、リソース層を導入して、編集・削除・ページネーションをエージェントに委ねます。

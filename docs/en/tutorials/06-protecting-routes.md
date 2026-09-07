@@ -908,6 +908,11 @@ Most of the diff is what you wrote, in the same shape: the model, the provider, 
 - **The stored post has `authorId: null`.** `store` used `Post.create`, and `fillable` dropped the author. Use `forceCreate` with a value the server chose.
 - **The list shows "unknown" for every author.** The `IN` query got ids of the wrong type, or the map is keyed by something other than the user's id. Log `authors` once; it should have one entry per distinct author.
 
+## Exercises
+
+1. A guest who opens `/posts/create` is redirected to `/login`. What happens to a guest who POSTs to `/posts`? Write the test and find out before you guess; then say whether that answer is the one you want.
+2. The backfill script filled `authorId` on rows that had none. On a branch, make the column nullable again and run `bun run db:make` without applying it. Read the SQL. Why does SQLite rebuild the table instead of altering the column?
+
 ## Next
 
 [Chapter 7: Authorization, and What the Gate Cannot See](./07-authorization.md) makes editing and deleting an author-only affair with a policy, then asks the agent for a feature without mentioning authorization, and shows you which of your safeguards notices.

@@ -69,6 +69,11 @@
 - Code is identical in both locales, test names and UI strings inside `file=`
   blocks included; `audit:tutorial-blocks` compares the executable blocks of
   `docs/ja/tutorials/` to the English ones byte for byte
+- Every chapter after 0 ends with two exercises, between the trip-ups and the
+  Next link. They carry no answers, and no fence in them takes an attribute, so
+  the smoke never runs one: the app it hands to the next chapter has to be the
+  app the text built. An exercise that changes a file says to do it on a branch,
+  because the next chapter rewrites whole files and would silently undo it
 - `bun run audit:tutorial-blocks` after editing; `GUREN_TUTORIAL_THROUGH=01
   bun run smoke:tutorial` to execute the chapters up to one
 

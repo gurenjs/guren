@@ -458,6 +458,13 @@ git commit -m "chore: add the Docker recipe"
 - **The agent's `Stop` hook did not run.** It runs only when the tree has uncommitted changes. An agent that commits before ending its turn is not gated by the hook; that is why the chapter has you run `bunx guren gate` yourself before committing.
 - **Port 3333 is busy.** The dev server walks forward to the next free port and prints the one it bound. Read the banner rather than assuming.
 
+## Exercises
+
+Nothing below is needed by a later chapter. Where an exercise changes a file, do it on a branch (`git switch -c exercise/…`) and delete the branch when you are done, so the next chapter starts from the state this one left.
+
+1. The workflow the scaffold wrote runs `bunx guren gate --deps`, and you have been running `bunx guren gate`. Run the longer one. What does `--deps` add, and what would it do on a machine with no network?
+2. Run `bunx guren doctor --next`. Pick one thing it reports and say what changing it would buy you. Some of its suggestions are for a production app you have not built yet; say which.
+
 ## Next
 
 [Chapter 2: One Request, by Hand](./02-one-request-by-hand.md) builds a route, a controller and a page from blank files, with a test in front, and then hands the second page to the agent.

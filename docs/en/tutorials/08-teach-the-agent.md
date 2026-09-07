@@ -496,6 +496,11 @@ git commit -m "feat: add the blogroll"
 - **The `has a policy` test passes but the 403 tests fail.** A policy file exists and nobody calls it. That is the exact gap `ownership-review` is briefed to find; run it.
 - **The reviewer reports findings in files the diff did not touch.** Its brief says `git diff`; if it read the whole app, tighten the brief. A subagent does what its file says, no more and no less.
 
+## Exercises
+
+1. Write a second rule for a convention this app has that no check enforces. One candidate: every page component declares a `Props` interface, because `spec:generate` reads it in chapter 13. Keep it under twenty lines and say in the rule why no command can see it.
+2. Run `bunx guren agent:sync --dry-run`. Which files would it replace, and which does it leave alone? The line between those two answers is the line between the framework's harness and yours.
+
 ## Next
 
 [Chapter 9: Relationships](./09-relationships.md) replaces the hand-rolled author lookup with `belongsTo` and `hasMany`, adds comments, and hands the agent a many-to-many: tags.

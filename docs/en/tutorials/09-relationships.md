@@ -1648,6 +1648,11 @@ git commit -m "feat: tag posts through a pivot table"
 - **The tags come back in the wrong case or twice.** Normalisation moved into the controller and one path forgot it. Keep it in the validator's `transform`.
 - **`withCount('tags')` throws.** `withCount` supports `hasMany`, `hasOne` and `belongsTo`, not `belongsToMany`. Load `tags` and read `.length`.
 
+## Exercises
+
+1. `Post.belongsToMany('tags', …, postTags, 'postId', 'tagId')` names the two pivot columns in an order. On a branch, swap them, run `bun test`, and read what breaks. Then say why a wrong pivot is worse than a missing one.
+2. Delete a post that has comments, and check the `comments` table. Which layer removed them, and what would the app have to do instead if the foreign key had no `onDelete: 'cascade'`?
+
 ## Next
 
 [Chapter 10: Files](./10-files.md) gives posts a cover image with the attachments layer, one signed delivery route, and then hands the agent a gallery.

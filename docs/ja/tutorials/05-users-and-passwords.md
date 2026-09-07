@@ -929,6 +929,21 @@ git commit -m "feat: add the profile page"
 - **`this.auth` が「requires the auth middleware」で throw する。** `AuthProvider` が `providers` に無いか、`auth: {}` が抜けています。両方必要です。片方がセッションをマウントし、もう片方がモデルを指名します。
 - **ログインのテストで `actingAs()` が常に成功する。** `attempt()` を含む認証コンテキスト全体をスタブに置き換えるからです。ユーザー*として振る舞う*ために使い、サインインのテストには決して使わないでください。
 
+## 演習
+
+1. パスワードのハッシュ化は意図的に遅くしてあります。時間を測ってみてください。
+
+```ts
+import { Hash } from '@guren/core'
+
+const started = performance.now()
+await Hash.make('correct horse battery')
+console.log(performance.now() - started, 'ms')
+```
+
+   そのうえで、1 回の試行にこれだけかかるのに、なぜログインのルートに第 14 章のレート制限が必要なのかを答えてください。
+2. `actingAs()` はログインの流れを飛ばすので、流れ自体はテストできません。`/login` に間違ったパスワードを送り、訪問者が見るメッセージを検証するテストを書いてください。そのメッセージはどこから来ていますか。そしてなぜ、パスワード違いと未登録のメールアドレスで同じ文言なのですか。
+
 ## 次へ
 
 [第 6 章: ルートを保護する](./06-protecting-routes.md) では、`requireAuthenticated` で投稿の変更をログインの壁の内側に置き、実データを壊さないマイグレーションですべての投稿に著者を与え、あなたが組んだものと `bunx guren add auth` が生成するものを比較します。

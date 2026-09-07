@@ -1450,6 +1450,11 @@ git commit -m "feat: add a gallery to posts"
 - **"The file must be an image."** `image: 'require'` checks the bytes, not the extension. A renamed text file is refused; a real PNG with a `.jpg` name is accepted.
 - **Deleting a post leaves files in `storage/app/attachments`.** `purgeAttachments` was not called before `delete`. The attachments table has no foreign key to purge for you; `bunx guren attachments:prune` finds the leftovers.
 
+## Exercises
+
+1. Rename a text file to `cover.png` and upload it. What does the app answer, and which line of `Post` decided that? Now rename a real PNG to `cover.txt` and upload that. Explain the difference in one sentence.
+2. Delete a post that has a cover, then run `bunx guren attachments:prune --dry-run`. Nothing is reported. What would have to go wrong in `destroy` for that command to have work to do?
+
 ## Next
 
 [Chapter 11: Events and Mail](./11-events-and-mail.md) tells the author when someone comments: an event, a listener, a queued job and a mailable, with the fan-out to every commenter delegated.
