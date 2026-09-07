@@ -9,6 +9,10 @@
    fill moves to them only inside a confirm step. */
 
 :root {
+  /* The dark block below follows the system preference, so the UA chrome
+     (scrollbars, native controls, Chrome's autofill wash) must too. */
+  color-scheme: light dark;
+
   --g-font-sans: system-ui, 'Noto Sans JP', 'Hiragino Sans', sans-serif;
   --g-font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, monospace;
 
