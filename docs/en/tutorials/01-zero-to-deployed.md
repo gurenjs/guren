@@ -40,6 +40,8 @@ bun run dev
 
 **Checkpoint:** open [http://localhost:3333](http://localhost:3333). You should see the welcome page, headed "Welcome to Guren Blog!", with six feature cards under it.
 
+![The scaffolded welcome page: "Powered by Bun + Hono" above the heading "Welcome to Guren Blog!", the tagline "A blog, built the Guren way", Documentation and GitHub buttons, and six cards naming routing, the ORM, Inertia, auth, queue and mail, and SQLite.](../../images/tutorial-welcome.png)
+
 The `dev` script does three things: regenerates the typed manifests under `.guren/` (`bun run codegen`), then starts the server with `GUREN_MCP=1` and `GUREN_DOCS=1`. Those two flags mount a development-only MCP endpoint at `/_guren/mcp` and the Docs Graph viewer at `/_guren/docs`. Chapter 8 connects an agent to the first; chapter 13 fills the second. Neither exists in production.
 
 Keep the dev server running in this terminal. Run everything below in a second one, from inside `guren-blog`.

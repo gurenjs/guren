@@ -11,6 +11,17 @@ Four names for that one sentence, and the chapter is mostly about why there are 
 | **Job** | Work that outlives the request. A payload on a queue, run by whoever picks it up. |
 | **Mail** | The message itself: a subject, a body, a recipient. |
 
+The request stops at the first box; everything after it is work the reader never waits for:
+
+```mermaid
+flowchart LR
+  Controller["CommentController<br/>emit(new CommentPosted)"]
+  Listener["SendCommentMailListener<br/>dispatches the job"]
+  Job["SendCommentMailJob<br/>payload: { commentId }"]
+  Mail["NewCommentMail<br/>to the post's author"]
+  Controller --> Listener --> Job --> Mail
+```
+
 **What you'll learn:**
 
 - Where each of the four is registered, and the one registration nothing checks for you

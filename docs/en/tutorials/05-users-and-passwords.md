@@ -701,6 +701,8 @@ bun run codegen
 bun test
 ```
 
+![The sign-in page: a card headed "Sign in" with Email and Password fields, a red Sign in button, and a "No account yet? Sign up" link.](../../images/tutorial-sign-in.png)
+
 Green. **Checkpoint:** open [http://localhost:3333/register](http://localhost:3333/register), create an account, and you land on the home page signed in, although nothing on it says so yet. Try `/login` with the wrong password: "Invalid credentials." Notice the two things you did not build: the session cookie, and the CSRF token the form sent. Both came with `auth: {}`.
 
 ```bash run

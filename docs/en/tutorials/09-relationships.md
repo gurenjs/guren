@@ -2,6 +2,17 @@
 
 Chapter 6 left you with `authorsOf`, a helper that collects author ids and runs one `IN` query. It works, and it is what a relationship does under the hood. This chapter replaces it with the real thing: `belongsTo` and `hasMany` declared once on the models, loaded with `with()`. Then it adds comments, the first table that points at two others, and hands the agent the one shape you have not built yet: a many-to-many, tags, through a pivot table.
 
+By the end of the chapter the blog has four tables pointing at each other:
+
+```mermaid
+erDiagram
+  direction LR
+  users ||--o{ posts : "writes"
+  users ||--o{ comments : "writes"
+  posts ||--o{ comments : "has"
+  posts }o--o{ tags : "post_tags"
+```
+
 **What you'll learn:**
 
 - How a relationship is declared on a model, typed, and loaded, and what the loaded record looks like

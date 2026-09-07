@@ -727,6 +727,8 @@ bun run codegen
 bun test
 ```
 
+![投稿ページ。タイトル「Hand-write once, then delegate」の上にカバー画像が横幅いっぱいに入り、続いて著者の署名、タグ 2 つ、本文、そして Delete リンク付きのコメントが 1 件。](../../images/tutorial-post-page.png)
+
 緑です。**チェックポイント:** 画像付きの投稿を書いてください。画像を新しいタブで開いて URL を見ます。`/attachments/<id>/<name>?expires=…&signature=…`。6 分待ってそのタブを再読み込みすると 404 です。リンクの期限が切れました。ページは次のレンダリングで新しいものを発行します。ここで「プライベート」が意味しているのはそれです。
 
 ## 4. `guren check` がファイルについて知っていること

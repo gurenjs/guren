@@ -701,6 +701,8 @@ bun run codegen
 bun test
 ```
 
+![サインインページ。「Sign in」の見出しが付いたカードに Email と Password の入力欄、赤い Sign in ボタン、そして「No account yet? Sign up」のリンク。](../../images/tutorial-sign-in.png)
+
 緑です。**チェックポイント:** [http://localhost:3333/register](http://localhost:3333/register) を開いてアカウントを作ると、サインイン済みの状態でホームページに着きます。まだそれを示すものは何もありませんが。`/login` で間違ったパスワードを試してみてください。「Invalid credentials.」。自分で組んでいない 2 つに気づいてください。セッション cookie と、フォームが送った CSRF トークンです。どちらも `auth: {}` に付いてきました。
 
 ```bash run

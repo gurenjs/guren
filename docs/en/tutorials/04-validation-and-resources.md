@@ -246,6 +246,8 @@ export default function NewPost() {
 
 **Checkpoint:** open [http://localhost:3333/posts/create](http://localhost:3333/posts/create) and submit the empty form. "Title is required" under the title, "Body is required" under the body. Inertia took the 422, put the messages into `form.errors`, and re-rendered the same page; you wrote no error handling.
 
+![The new-post form after submitting it empty: "Title is required" in red under the title field, "Body is required" in red under the body field, and the Publish button below them.](../../images/tutorial-validation-errors.png)
+
 ## 4. The resource
 
 Both `index` and `show` build a post-shaped object by hand, and they disagree about which fields it has. That map has a name in Guren: a **resource**. Create `app/Http/Resources/PostResource.ts`:

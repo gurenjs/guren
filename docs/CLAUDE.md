@@ -41,6 +41,12 @@
   usually needs different wording in each context
 - One image can back several docs (`grep -rn '<name>.png' docs/`), so
   recapturing one means rechecking every page that references it
+- The tutorial's `tutorial-*.png` are captured from the course's own app at the
+  chapter they illustrate, which `GUREN_TUTORIAL_THROUGH=NN bun run
+  smoke:tutorial` with `GUREN_KEEP_SMOKE_DIR=1` reproduces: welcome and sign-in
+  from any chapter after 5, the posts list and the post page from 10, the
+  validation errors from 4. Reset the app's database before capturing, or the
+  picture shows leftovers from an earlier run
 
 ## The Guren Tutorial (`tutorials/NN-*.md`)
 

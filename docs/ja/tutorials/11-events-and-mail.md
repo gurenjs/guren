@@ -11,6 +11,17 @@
 | **ジョブ** | リクエストより長生きする仕事。キューに載るペイロードで、拾った者が実行します。 |
 | **メール** | メッセージそのもの。件名、本文、宛先。 |
 
+リクエストは最初の箱で終わります。その先は、読者が待たされない仕事です。
+
+```mermaid
+flowchart LR
+  Controller["CommentController<br/>emit(new CommentPosted)"]
+  Listener["SendCommentMailListener<br/>ジョブを dispatch する"]
+  Job["SendCommentMailJob<br/>payload: { commentId }"]
+  Mail["NewCommentMail<br/>投稿の著者へ"]
+  Controller --> Listener --> Job --> Mail
+```
+
 **この章で学ぶこと:**
 
 - 4 つのそれぞれがどこで登録されるのか、そして誰も代わりに検査してくれない唯一の登録

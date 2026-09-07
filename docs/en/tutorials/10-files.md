@@ -727,6 +727,8 @@ bun run codegen
 bun test
 ```
 
+![A post page: the cover image fills the width above the title "Hand-write once, then delegate", followed by the author byline, two tags, the body, and one comment with a Delete link.](../../images/tutorial-post-page.png)
+
 Green. **Checkpoint:** write a post with a picture. Open the image in a new tab and look at its URL: `/attachments/<id>/<name>?expires=…&signature=…`. Wait six minutes and reload that tab: 404. The link expired; the page will mint a fresh one on its next render. That is what "private" means here.
 
 ## 4. What `guren check` knows about files

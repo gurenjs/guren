@@ -868,6 +868,8 @@ The rubric:
 
 **Checkpoint:** the posts list at [http://localhost:3333/posts](http://localhost:3333/posts) shows "by Legacy author" on the posts you wrote before this chapter, and your name on any you write now.
 
+![The posts list: a "Posts" heading with a New post button, and two cards, each with a title, a "by Ada" byline, and the start of the body.](../../images/tutorial-posts-index.png)
+
 ```bash run
 bunx guren gate
 ```

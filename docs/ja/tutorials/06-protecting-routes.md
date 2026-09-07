@@ -868,6 +868,8 @@ rubric は次のとおりです。
 
 **チェックポイント:** [http://localhost:3333/posts](http://localhost:3333/posts) の投稿一覧で、この章より前に書いた投稿には「by Legacy author」、これから書く投稿にはあなたの名前が付きます。
 
+![投稿一覧。「Posts」の見出しと New post ボタン、そしてカードが 2 枚。各カードにタイトル、「by Ada」の署名、本文の書き出しが並ぶ。](../../images/tutorial-posts-index.png)
+
 ```bash run
 bunx guren gate
 ```

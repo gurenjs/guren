@@ -40,6 +40,8 @@ bun run dev
 
 **チェックポイント:** [http://localhost:3333](http://localhost:3333) を開きます。「Welcome to Guren Blog!」と見出しの付いたウェルカムページと、その下に 6 枚の機能カードが見えるはずです。
 
+![雛形のウェルカムページ。見出し「Welcome to Guren Blog!」の上に「Powered by Bun + Hono」、タグラインは「A blog, built the Guren way」。Documentation と GitHub のボタン、そしてルーティング、ORM、Inertia、認証、キューとメール、SQLite を挙げた 6 枚のカード。](../../images/tutorial-welcome.png)
+
 `dev` スクリプトは 3 つのことをします。`.guren/` 配下の型付きマニフェストを再生成し(`bun run codegen`)、`GUREN_MCP=1` と `GUREN_DOCS=1` を付けてサーバーを起動します。この 2 つのフラグは、開発時専用の MCP エンドポイントを `/_guren/mcp` に、Docs Graph ビューアを `/_guren/docs` にマウントします。第 8 章で前者にエージェントを接続し、第 13 章で後者を埋めます。どちらも本番には存在しません。
 
 このターミナルでは開発サーバーを動かしたままにしてください。以降のコマンドはすべて、`guren-blog` の中で、別のターミナルから実行します。

@@ -246,6 +246,8 @@ export default function NewPost() {
 
 **チェックポイント:** [http://localhost:3333/posts/create](http://localhost:3333/posts/create) を開いて空のフォームを送信します。タイトルの下に「Title is required」、本文の下に「Body is required」。Inertia が 422 を受け取り、メッセージを `form.errors` に入れて同じページを再レンダリングしました。エラー処理は何も書いていません。
 
+![空のまま送信した新規投稿フォーム。タイトル欄の下に赤字で「Title is required」、本文欄の下に赤字で「Body is required」、その下に Publish ボタン。](../../images/tutorial-validation-errors.png)
+
 ## 4. リソース
 
 `index` も `show` も投稿の形をしたオブジェクトを手で組み立てていて、しかもどのフィールドを持つかで食い違っています。この写しには Guren での名前があります。**リソース**です。`app/Http/Resources/PostResource.ts` を作ります。
