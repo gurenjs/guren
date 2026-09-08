@@ -1,3 +1,4 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 export interface GurenVitePluginOptions {
@@ -27,9 +28,33 @@ export interface GurenVitePluginOptions {
   chunkFileNames?: string
   /** Rollup naming pattern for extracted assets (defaults to `[name]-[hash][extname]`). */
   assetFileNames?: string
+  /** Prototype mode (`vite --mode prototype`, RFC 0021): the static, server-less build. */
+  prototype?: GurenPrototypeOptions
 }
 
-const defaultOptions: Required<GurenVitePluginOptions> = {
+export interface GurenPrototypeOptions {
+  /** Vite `base` for a build hosted under a subpath (a GitHub project page, a preview URL). Defaults to `/`. */
+  base?: string
+  /** Output directory (defaults to `dist/prototype`). */
+  outDir?: string
+  /**
+   * The HTML shell, relative to the project root. Defaults to
+   * `resources/js/prototype/index.html` when that file exists, else a
+   * generated shell under `.guren/prototype/`.
+   */
+  shell?: string
+}
+
+/** Where the generated shell goes; `.guren/` is already gitignored and codegen-owned. */
+export const PROTOTYPE_SHELL_FILE = '.guren/prototype/index.html'
+/** The override a project may ship instead of the generated shell. */
+export const PROTOTYPE_SHELL_OVERRIDE = 'resources/js/prototype/index.html'
+export const PROTOTYPE_MODE = 'prototype'
+
+/** Every option defaulted except `prototype`, which is absent for the ordinary build. */
+type ResolvedOptions = Required<Omit<GurenVitePluginOptions, 'prototype'>> & Pick<GurenVitePluginOptions, 'prototype'>
+
+const defaultOptions: ResolvedOptions = {
   appAlias: '@',
   appDir: '.',
   resourcesAlias: '@resources',
@@ -47,20 +72,196 @@ const defaultOptions: Required<GurenVitePluginOptions> = {
 
 export function gurenVitePlugin(options: GurenVitePluginOptions = {}) {
   const resolved = { ...defaultOptions, ...options }
+  let prototype: ResolvedPrototype | undefined
 
   return {
     name: 'guren:vite-config',
     enforce: 'pre' as const,
     config(config: Record<string, any>, env: Record<string, any>) {
+      if (env?.mode === PROTOTYPE_MODE) {
+        prototype = ensurePrototype(config, resolved)
+        return
+      }
+      prototype = undefined
       ensureDefaults(config, resolved, env)
+    },
+    configResolved(config: Record<string, any>) {
+      if (prototype) {
+        prototype.outDir = path.resolve(config.root ?? prototype.root, config.build?.outDir ?? prototype.outDir)
+      }
+    },
+    configureServer(server: ViteDevServerLike) {
+      if (!prototype) return
+      const shellPath = prototype.shellPath
+      // Vite's own SPA fallback only serves a root `index.html`, which a Guren
+      // app has no reason to keep; with `appType: 'custom'` this answers every
+      // document request with the shell instead.
+      return () => {
+        server.middlewares.use(async (req, res, next) => {
+          if (req.method !== 'GET' && req.method !== 'HEAD') return next()
+          if (!String(req.headers.accept ?? '').includes('text/html')) return next()
+          const url = req.url ?? '/'
+          if (/\.[a-z0-9]+$/iu.test(url.split('?')[0] ?? '')) return next()
+          try {
+            const html = await server.transformIndexHtml(url, readFileSync(shellPath, 'utf8'), req.originalUrl)
+            res.setHeader('Content-Type', 'text/html; charset=utf-8')
+            res.end(html)
+          } catch (error) {
+            next(error)
+          }
+        })
+      }
+    },
+    writeBundle() {
+      if (prototype) finishPrototypeBuild(prototype)
     },
   }
 }
 
+interface ResolvedPrototype {
+  root: string
+  outDir: string
+  shellPath: string
+}
+
+interface ViteDevServerLike {
+  middlewares: {
+    use(handler: (req: IncomingLike, res: ResponseLike, next: (error?: unknown) => void) => void): void
+  }
+  transformIndexHtml(url: string, html: string, originalUrl?: string): Promise<string>
+}
+
+interface IncomingLike {
+  method?: string
+  url?: string
+  originalUrl?: string
+  headers: Record<string, string | string[] | undefined>
+}
+
+interface ResponseLike {
+  setHeader(name: string, value: string): void
+  end(body: string): void
+}
+
+/**
+ * The prototype branch, taken before the ordinary client defaults so none of
+ * `ensureBuild`'s outDir/base/publicDir reasoning applies: there is no server
+ * to serve `public/`, no manifest to read, and the entry is an HTML shell.
+ */
+function ensurePrototype(config: Record<string, any>, options: ResolvedOptions): ResolvedPrototype {
+  const root = resolveRoot(config.root)
+  const prototype = options.prototype ?? {}
+
+  ensureAliases(config, options, root)
+  ensureServer(config, options)
+  ensurePreview(config, options)
+
+  config.define ??= {}
+  config.define['import.meta.env.GUREN_PROTOTYPE'] ??= 'true'
+  // The dev shell comes from configureServer; Vite's spa handling would look
+  // for a root index.html and 404.
+  config.appType ??= 'custom'
+  config.base ??= prototype.base ?? '/'
+
+  // The default template sets `publicDir: false` because the ordinary build
+  // emits into `public/`; that reason is gone here, so `false` is replaced and
+  // only a custom directory is kept.
+  if (typeof config.publicDir !== 'string') {
+    config.publicDir = path.resolve(root, 'public')
+  }
+
+  config.build ??= {}
+  config.build.outDir ??= prototype.outDir ?? 'dist/prototype'
+  config.build.emptyOutDir ??= true
+  config.build.copyPublicDir = true
+  config.build.manifest ??= false
+  config.build.ssrManifest ??= false
+
+  const shellPath = resolvePrototypeShell(root, prototype.shell, options.entry)
+  config.build.rollupOptions ??= {}
+  config.build.rollupOptions.input ??= shellPath
+
+  const output = normalizeRollupOutput(config.build.rollupOptions.output)
+  output.entryFileNames ??= options.entryFileNames
+  output.chunkFileNames ??= options.chunkFileNames
+  output.assetFileNames ??= options.assetFileNames
+  output.manualChunks ??= createDefaultManualChunks(root)
+  config.build.rollupOptions.output = output
+
+  return { root, outDir: path.resolve(root, config.build.outDir), shellPath }
+}
+
+function resolvePrototypeShell(root: string, shell: string | undefined, entry: string): string {
+  if (shell) return path.resolve(root, shell)
+
+  const override = path.resolve(root, PROTOTYPE_SHELL_OVERRIDE)
+  if (existsSync(override)) return override
+
+  const generated = path.resolve(root, PROTOTYPE_SHELL_FILE)
+  const contents = renderPrototypeShell(entry)
+  // Written from config() rather than a build hook so the dev server has it
+  // too; skipped when unchanged so a watcher does not see a write per start.
+  if (!existsSync(generated) || readFileSync(generated, 'utf8') !== contents) {
+    mkdirSync(path.dirname(generated), { recursive: true })
+    writeFileSync(generated, contents)
+  }
+  return generated
+}
+
+export function renderPrototypeShell(entry: string): string {
+  const src = `/${entry.replace(/^\.?\//u, '')}`
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Prototype</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="${src}"></script>
+  </body>
+</html>
+`
+}
+
+/**
+ * Vite emits an HTML input at its path relative to the root, so the shell
+ * lands nested; move it to the top, then add the SPA fallbacks: `404.html`
+ * (GitHub Pages) and `_redirects` (Netlify, Cloudflare Pages).
+ */
+function finishPrototypeBuild(prototype: ResolvedPrototype): void {
+  const relative = path.relative(prototype.root, prototype.shellPath)
+  const nested = path.resolve(prototype.outDir, relative)
+  const top = path.resolve(prototype.outDir, 'index.html')
+
+  if (nested !== top && existsSync(nested)) {
+    renameSync(nested, top)
+    const topLevelDir = relative.split(path.sep)[0]
+    if (topLevelDir && topLevelDir !== '.' && topLevelDir !== '..') {
+      rmSync(path.resolve(prototype.outDir, topLevelDir), { recursive: true, force: true })
+    }
+  }
+
+  if (!existsSync(top)) {
+    throw new Error(`Prototype build produced no index.html in ${prototype.outDir}`)
+  }
+
+  writeFileSync(path.resolve(prototype.outDir, '404.html'), readFileSync(top))
+  writeFileSync(path.resolve(prototype.outDir, '_redirects'), '/*    /index.html   200\n')
+}
+
 export default gurenVitePlugin
 
-function ensureDefaults(config: Record<string, any>, options: Required<GurenVitePluginOptions>, env: Record<string, any>) {
+function ensureDefaults(config: Record<string, any>, options: ResolvedOptions, env: Record<string, any>) {
   const root = resolveRoot(config.root)
+
+  // A literal in every mode, so `import.meta.env.GUREN_PROTOTYPE ? … : undefined`
+  // is dead code outside prototype mode and its dynamic import never becomes a
+  // build dependency.
+  config.define ??= {}
+  config.define['import.meta.env.GUREN_PROTOTYPE'] ??= 'false'
 
   ensureAliases(config, options, root)
   ensureServer(config, options)
@@ -68,7 +269,7 @@ function ensureDefaults(config: Record<string, any>, options: Required<GurenVite
   ensureBuild(config, options, root, env)
 }
 
-function ensureAliases(config: Record<string, any>, options: Required<GurenVitePluginOptions>, root: string) {
+function ensureAliases(config: Record<string, any>, options: ResolvedOptions, root: string) {
   config.resolve ??= {}
   const alias = toAliasArray(config.resolve.alias)
 
@@ -78,7 +279,7 @@ function ensureAliases(config: Record<string, any>, options: Required<GurenViteP
   config.resolve.alias = alias
 }
 
-function ensureServer(config: Record<string, any>, options: Required<GurenVitePluginOptions>) {
+function ensureServer(config: Record<string, any>, options: ResolvedOptions) {
   config.server ??= {}
 
   // `server.host` is left alone so Vite's localhost-only default applies: the
@@ -90,7 +291,7 @@ function ensureServer(config: Record<string, any>, options: Required<GurenVitePl
   }
 }
 
-function ensurePreview(config: Record<string, any>, options: Required<GurenVitePluginOptions>) {
+function ensurePreview(config: Record<string, any>, options: ResolvedOptions) {
   config.preview ??= {}
 
   // Preview serves only `build.outDir`, never the project root, so binding
@@ -107,7 +308,7 @@ function ensurePreview(config: Record<string, any>, options: Required<GurenViteP
 
 function ensureBuild(
   config: Record<string, any>,
-  options: Required<GurenVitePluginOptions>,
+  options: ResolvedOptions,
   root: string,
   env: Record<string, any>,
 ) {

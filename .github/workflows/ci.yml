@@ -458,6 +458,12 @@ jobs:
           NODE_ENV: production
         run: bun run --cwd examples/blog e2e
 
+      # RFC 0021: the static prototype build, driven from a plain file host with
+      # the Bun server stopped. Rebuilds the production assets to prove the
+      # fixture stays out of them.
+      - name: Prototype build and static E2E
+        run: bun run smoke:prototype
+
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
