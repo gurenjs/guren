@@ -172,6 +172,23 @@ describe('blueprints', () => {
     expect(schemaCheck?.status).toBe('pass')
   })
 
+  it('adds the table to a schema that keeps an aggregate object', async () => {
+    await seedResourceWorkspace(`${PG_SCHEMA_FIXTURE}
+export const schema = {
+  users,
+}
+
+export type AppSchema = typeof schema
+`)
+
+    await runBlueprint('resource', { name: 'Post', fields: 'title:string' })
+
+    const schema = await readFile('db/schema.ts', 'utf8')
+    expect(schema).toContain('  users,\n  posts,\n}')
+    // Ahead of the aggregate, or `schema` names a binding declared below it (TS2448).
+    expect(schema.indexOf('export const posts =')).toBeLessThan(schema.indexOf('export const schema ='))
+  })
+
   // The check resolves the identifier the model actually imports, not one
   // guessed from the class, so it names the binding that is really missing.
   it('reports the bound identifier when its table is missing', async () => {

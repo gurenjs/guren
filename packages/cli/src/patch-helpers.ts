@@ -652,35 +652,34 @@ export async function addCreateAppOption(
 interface SchemaAggregate {
   /** Where the new table's declaration goes: ahead of the aggregate that names it. */
   declarationOffset: number
-  /** Where the new key goes, or null when the aggregate already lists it. */
-  keyOffset: number | null
-  keyText: string
+  /** Null when the aggregate already lists the table. */
+  key: { offset: number; text: string } | null
 }
 
-/** The offset the statement starts at, including any comment block written against it. */
-function statementStart(node: { start?: number | null; leadingComments?: unknown }, source: string): number {
-  let offset = node.start ?? 0
-  const comments = (node.leadingComments ?? []) as { start?: number | null; end?: number | null }[]
+/**
+ * The offset a statement starts at, taking the comment lines written directly above it.
+ * A text rule rather than Babel's `leadingComments`: Babel hands the *previous*
+ * statement's end-of-line comment to this node as a leading one, and its start is a
+ * column mid-line — splicing there emits two statements on one line, which without
+ * semicolons does not parse. Walking whole lines cannot produce a mid-line offset.
+ */
+function statementStart(source: string, offset: number): number {
+  let lineStart = lineStartAt(source, offset)
 
-  for (let i = comments.length - 1; i >= 0; i--) {
-    const end = comments[i]?.end
-    const start = comments[i]?.start
-    if (typeof end !== 'number' || typeof start !== 'number' || end > offset) break
-    // A blank line between the comment and what follows means the comment
-    // documents neither — Babel attaches it anyway, and swallowing it would
-    // move a file-level note below the table declaration spliced in here.
-    const gap = source.slice(end, offset)
-    if (!/^[^\S\n]*\n?[^\S\n]*$/.test(gap)) break
-    offset = start
+  while (lineStart > 0) {
+    const previous = lineStartAt(source, lineStart - 1)
+    const text = source.slice(previous, lineStart - 1).trim()
+    if (!text.startsWith('//') && !text.startsWith('/*') && !text.startsWith('*')) break
+    lineStart = previous
   }
 
-  return offset
+  return lineStart
 }
 
 /**
  * The app's hand-kept aggregate of its own tables — `export const schema = { posts, users }`,
- * which `typeof schema` then feeds to drizzle. A table appended without a key here leaves it
- * silently incomplete: the app still compiles and the table still exists.
+ * which an app hands to drizzle for relational queries. Nothing the framework generates reads
+ * it, so a table appended without a key here leaves it incomplete with nothing to notice.
  * Positive evidence only: every property a shorthand (or `name: name`) reference to a table
  * this same file declares, `name` excepted. Anything else, or a second candidate, answers null.
  */
@@ -707,10 +706,13 @@ function findSchemaAggregate(source: string, name: string): SchemaAggregate | nu
       let isAggregate = true
 
       for (const property of object.properties) {
-        const key = property.type === 'ObjectProperty' && !property.computed ? memberKeyName(property) : undefined
+        if (property.type !== 'ObjectProperty') {
+          isAggregate = false
+          break
+        }
+        const key = memberKeyName(property)
         const referencesKey =
-          property.type === 'ObjectProperty'
-          && (property.shorthand || (property.value.type === 'Identifier' && property.value.name === key))
+          property.shorthand || (property.value.type === 'Identifier' && property.value.name === key)
         if (!key || !referencesKey || !(tables.has(key) || key === name)) {
           isAggregate = false
           break
@@ -726,12 +728,20 @@ function findSchemaAggregate(source: string, name: string): SchemaAggregate | nu
       if (found) return null
 
       const multiline = source.slice(object.start ?? 0, object.end ?? 0).includes('\n')
-      const separator = multiline ? `,\n${indentOfLine(source, lastStart)}` : ', '
+      const indent = indentOfLine(source, lastStart)
+      // Past a line comment on the last entry's own line, so a note written against
+      // that entry is not re-attached to the new one. Only when a comma already
+      // separates the two, since one added here would land inside the comment.
+      const lineEnd = source.indexOf('\n', lastEnd)
+      const commented = multiline && lineEnd > 0 && /^\s*,\s*\/\//.test(source.slice(lastEnd, lineEnd))
 
       found = {
-        declarationOffset: statementStart(node, source),
-        keyOffset: listsName ? null : lastEnd,
-        keyText: `${separator}${name}`,
+        declarationOffset: statementStart(source, node.start ?? 0),
+        key: listsName
+          ? null
+          : commented
+            ? { offset: lineEnd, text: `\n${indent}${name},` }
+            : { offset: lastEnd, text: `${multiline ? `,\n${indent}` : ', '}${name}` },
       }
     }
   }
@@ -739,10 +749,41 @@ function findSchemaAggregate(source: string, name: string): SchemaAggregate | nu
   return found
 }
 
+/** The offset the line containing `offset` starts at. */
+function lineStartAt(source: string, offset: number): number {
+  return source.lastIndexOf('\n', offset - 1) + 1
+}
+
 /** The leading whitespace of the line `offset` sits on. */
 function indentOfLine(source: string, offset: number): string {
-  const lineStart = source.lastIndexOf('\n', offset - 1) + 1
-  return /^[^\S\n]*/.exec(source.slice(lineStart, offset))?.[0] ?? ''
+  return /^[^\S\n]*/.exec(source.slice(lineStartAt(source, offset), offset))?.[0] ?? ''
+}
+
+/**
+ * `source` with `block` declaring `name` added — the one rule for writing a table into a
+ * `db/schema.ts`, called by every scaffolder that adds one. End of file, unless the app
+ * keeps an aggregate object of its tables: then the key goes in and the declaration goes
+ * *ahead* of the object, since a `const` naming a table declared further down the file is
+ * a use before declaration (TS2448).
+ */
+export function appendTableToSchema(
+  source: string,
+  name: string,
+  block: string,
+): { source: string; aggregated: boolean } {
+  const aggregate = findSchemaAggregate(source, name)
+  if (!aggregate) return { source: `${source.trimEnd()}\n\n${block.trim()}\n`, aggregated: false }
+
+  // Both splices come from the one parse, applied high offset first so the earlier
+  // one still addresses the source it was measured against.
+  let updated = source
+  if (aggregate.key) {
+    updated = updated.slice(0, aggregate.key.offset) + aggregate.key.text + updated.slice(aggregate.key.offset)
+  }
+  return {
+    source: `${updated.slice(0, aggregate.declarationOffset)}${block.trim()}\n\n${updated.slice(aggregate.declarationOffset)}`,
+    aggregated: aggregate.key !== null,
+  }
 }
 
 export interface AppendSchemaTableOptions {
@@ -784,8 +825,8 @@ export async function appendSchemaTable(options: AppendSchemaTableOptions): Prom
     // right depends on where that declaration sits — an earlier release appended
     // it at end of file, below the aggregate, where adding the key alone is TS2448.
     const stale = findSchemaAggregate(existing, name)
-    if (stale && stale.keyOffset !== null) {
-      const declaredAt = declared.exec(existing)?.index ?? 0
+    if (stale?.key) {
+      const declaredAt = matchInCode(existing, declared)?.index ?? 0
       const fix = declaredAt > stale.declarationOffset
         ? `add it, moving \`export const ${name}\` above the object — below it the reference is a use before declaration`
         : `add it, or ${name} stays out of \`typeof schema\``
@@ -802,29 +843,10 @@ export async function appendSchemaTable(options: AppendSchemaTableOptions): Prom
     content = insertImport(content, extraImport) ?? content
   }
 
-  const block = blocks[dialect]
-  const aggregate = findSchemaAggregate(content, name)
-  let updated: string
-
-  if (aggregate) {
-    // Both splices come from the one parse, applied high offset first so the
-    // earlier one still addresses the source it was measured against. The
-    // declaration goes *ahead* of the aggregate: a `const` naming a table
-    // declared further down the file is a use before declaration (TS2448).
-    updated = content
-    if (aggregate.keyOffset !== null) {
-      updated = updated.slice(0, aggregate.keyOffset) + aggregate.keyText + updated.slice(aggregate.keyOffset)
-    }
-    updated =
-      `${updated.slice(0, aggregate.declarationOffset)}${block.trimEnd()}\n\n`
-      + updated.slice(aggregate.declarationOffset)
-  } else {
-    updated = `${content.trimEnd()}\n\n${block}`
-  }
-
-  await writeFile(resolve(process.cwd(), schemaFile), updated, 'utf8')
+  const written = appendTableToSchema(content, name, blocks[dialect])
+  await writeFile(resolve(process.cwd(), schemaFile), written.source, 'utf8')
   consola.info(`Added the ${name} table to ${schemaFile} (${dialect}).`)
-  if (aggregate && aggregate.keyOffset !== null) {
+  if (written.aggregated) {
     consola.info(`Added ${name} to the schema object in ${schemaFile}.`)
   }
   return 'appended'

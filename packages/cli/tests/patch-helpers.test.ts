@@ -1,9 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { consola } from 'consola'
+import { parseSourceFile } from '../src/parse-cache'
 import { addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertImport, insertProvider, PATCH_REASONS } from '../src/patch-helpers'
-import { createTempWorkspace } from './helpers'
+import { captureWarnings, createTempWorkspace, PG_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 
 describe('addImport', () => {
   it('inserts after a single-line leading import', async () => {
@@ -550,35 +550,33 @@ createApp({ providers: [DatabaseProvider] })`
   })
 })
 
-describe('appendSchemaTable', () => {
-  const PG_TABLES = `import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
-
-export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-  email: text('email').notNull(),
-})
-
+// The shared fixture plus the second table these cases need in the aggregate.
+const PG_TABLES = `${PG_SCHEMA_FIXTURE}
 export const posts = pgTable('posts', {
   id: serial('id').primaryKey(),
   title: text('title').notNull(),
 })
 `
 
-  const SESSIONS_BLOCK = `export const sessions = pgTable('sessions', {
+const SESSIONS_BLOCK = `export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
 })
 `
 
+const everyDialect = <T,>(value: T): Record<'pg' | 'sqlite' | 'mysql', T> => ({ pg: value, sqlite: value, mysql: value })
+const KEEP_IMPORTS = everyDialect((content: string) => content)
+
+describe('appendSchemaTable', () => {
+
   async function appendSessions(schemaSource: string): Promise<string> {
     const workspace = await createTempWorkspace('guren-cli-append-schema-')
     try {
-      await mkdir(join(workspace.dir, 'db'), { recursive: true })
-      await writeFile(join(workspace.dir, 'db/schema.ts'), schemaSource, 'utf8')
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': schemaSource })
 
       const result = await appendSchemaTable({
         name: 'sessions',
-        blocks: { pg: SESSIONS_BLOCK, sqlite: SESSIONS_BLOCK, mysql: SESSIONS_BLOCK },
-        imports: { pg: (content) => content, sqlite: (content) => content, mysql: (content) => content },
+        blocks: everyDialect(SESSIONS_BLOCK),
+        imports: KEEP_IMPORTS,
         manualGuidance: 'add it by hand.',
       })
       expect(result).toBe('appended')
@@ -613,6 +611,32 @@ export const schema = { users, posts }
 
     expect(content).toContain('export const schema = { users, posts, sessions }')
     expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const schema ='))
+  })
+
+  it('does not splice into the previous statement when it carries a trailing comment', async () => {
+    // Babel hands that comment to the aggregate as a leading one, and its start is
+    // a column mid-line, where a splice would emit two statements on one line.
+    const content = await appendSessions(`import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
+
+export const users = pgTable('users', { id: serial('id') }) // the users table
+export const schema = { users }
+`)
+
+    expect(content).toContain("export const users = pgTable('users', { id: serial('id') }) // the users table")
+    expect(content).toContain('export const schema = { users, sessions }')
+    expect(parseSourceFile(content, 'db/schema.ts')).not.toBeNull()
+  })
+
+  it('keeps a trailing comment with the entry it was written against', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+export const schema = {
+  posts,
+  users, // every table the app owns
+}
+`)
+
+    expect(content).toContain('  users, // every table the app owns\n  sessions,\n}')
+    expect(parseSourceFile(content, 'db/schema.ts')).not.toBeNull()
   })
 
   it('appends at end of file when the schema keeps no aggregate', async () => {
@@ -657,89 +681,49 @@ export const schema = { users, posts, sessions }
 })
 
 describe('appendSchemaTable on a schema that already declares the table', () => {
-  it('reports an aggregate that does not list it', async () => {
-    const workspace = await createTempWorkspace('guren-cli-stale-aggregate-')
-    const warnings: string[] = []
-    const original = consola.warn
-    consola.warn = ((message: string) => void warnings.push(message)) as typeof consola.warn
-
-    try {
-      await mkdir(join(workspace.dir, 'db'), { recursive: true })
-      // The shape `guren add session` left behind before it knew about aggregates.
-      await writeFile(
-        join(workspace.dir, 'db/schema.ts'),
-        `import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
-
-export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-})
-
-export const schema = { users }
-
-export const sessions = pgTable('sessions', {
+  const DECLARED = `export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
 })
-`,
-        'utf8',
-      )
+`
 
-      const block = "export const sessions = pgTable('sessions', {})\n"
-      const result = await appendSchemaTable({
+  async function warningsFor(schemaSource: string): Promise<string> {
+    const workspace = await createTempWorkspace('guren-cli-stale-aggregate-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': schemaSource })
+
+      const { result, warnings } = await captureWarnings(() => appendSchemaTable({
         name: 'sessions',
-        blocks: { pg: block, sqlite: block, mysql: block },
-        imports: { pg: (content) => content, sqlite: (content) => content, mysql: (content) => content },
+        blocks: everyDialect(SESSIONS_BLOCK),
+        imports: KEEP_IMPORTS,
         manualGuidance: 'add it by hand.',
-      })
-
+      }))
       expect(result).toBe('already-declared')
-      // Declared below the object, so adding the key alone would be TS2448.
-      expect(warnings.join('\n')).toContain('does not list sessions')
-      expect(warnings.join('\n')).toContain('moving `export const sessions` above the object')
+
+      return warnings.join('\n')
     } finally {
-      consola.warn = original
       await workspace.cleanup()
     }
+  }
+
+  it('asks for the declaration to move when it sits below the aggregate', async () => {
+    // The shape `guren add session` leaves behind when it appends at end of file:
+    // adding the key alone would reference a binding declared further down (TS2448).
+    const warned = await warningsFor(`${PG_TABLES}
+export const schema = { users }
+
+${DECLARED}`)
+
+    expect(warned).toContain('does not list sessions')
+    expect(warned).toContain('moving `export const sessions` above the object')
   })
 
   it('asks only for the key when the declaration already precedes the aggregate', async () => {
-    const workspace = await createTempWorkspace('guren-cli-stale-aggregate-ordered-')
-    const warnings: string[] = []
-    const original = consola.warn
-    consola.warn = ((message: string) => void warnings.push(message)) as typeof consola.warn
-
-    try {
-      await mkdir(join(workspace.dir, 'db'), { recursive: true })
-      await writeFile(
-        join(workspace.dir, 'db/schema.ts'),
-        `import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
-
-export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-})
-
-export const sessions = pgTable('sessions', {
-  id: text('id').primaryKey(),
-})
-
+    const warned = await warningsFor(`${PG_TABLES}
+${DECLARED}
 export const schema = { users }
-`,
-        'utf8',
-      )
+`)
 
-      const block = "export const sessions = pgTable('sessions', {})\n"
-      const result = await appendSchemaTable({
-        name: 'sessions',
-        blocks: { pg: block, sqlite: block, mysql: block },
-        imports: { pg: (content) => content, sqlite: (content) => content, mysql: (content) => content },
-        manualGuidance: 'add it by hand.',
-      })
-
-      expect(result).toBe('already-declared')
-      expect(warnings.join('\n')).toContain('stays out of `typeof schema`')
-      expect(warnings.join('\n')).not.toContain('moving `export const sessions`')
-    } finally {
-      consola.warn = original
-      await workspace.cleanup()
-    }
+    expect(warned).toContain('stays out of `typeof schema`')
+    expect(warned).not.toContain('moving `export const sessions`')
   })
 })

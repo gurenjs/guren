@@ -58,14 +58,12 @@ function tableFactoryDialect(
 }
 
 /**
- * The identifiers a parsed `db/schema.ts` binds to a table factory call, by the
- * same alias rule `parseSchemaFile` uses. Separate from `parseSchemaTables`
- * because `appendSchemaTable` judges source it holds in memory and has not
- * written yet, and because it needs no columns.
+ * Every top-level `const <identifier> = <factory>(…)` a parsed schema declares. The one
+ * scan behind both readers below, so "is this a table declaration" cannot answer
+ * differently depending on which one asked.
  */
-export function declaredTableIdentifiers(ast: File): Set<string> {
+function* tableDeclarations(ast: File): Generator<{ identifier: string; call: CallExpression; dialect: SchemaDialect }> {
   const aliases = collectFactoryAliases(ast.program.body)
-  const identifiers = new Set<string>()
 
   for (const node of ast.program.body) {
     const declaration = topLevelDeclaration(node)
@@ -73,12 +71,21 @@ export function declaredTableIdentifiers(ast: File): Set<string> {
     for (const declarator of declaration.declarations) {
       if (declarator.id.type !== 'Identifier') continue
       if (declarator.init?.type !== 'CallExpression') continue
-      if (!tableFactoryDialect(declarator.init, aliases)) continue
-      identifiers.add(declarator.id.name)
+      const dialect = tableFactoryDialect(declarator.init, aliases)
+      if (!dialect) continue
+      yield { identifier: declarator.id.name, call: declarator.init, dialect }
     }
   }
+}
 
-  return identifiers
+/**
+ * The table identifiers a parsed `db/schema.ts` declares. Separate from
+ * `parseSchemaTables` because `appendTableToSchema` judges source it holds in memory
+ * and has not written yet, and because it needs no columns — so unlike that reader it
+ * keeps a table whose columns are passed as an identifier rather than a literal.
+ */
+export function declaredTableIdentifiers(ast: File): Set<string> {
+  return new Set([...tableDeclarations(ast)].map((table) => table.identifier))
 }
 
 export interface SchemaColumnReference {
@@ -279,32 +286,21 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
   const ast = parseSourceFile(source, schemaPath)
   if (!ast) return []
 
-  const aliases = collectFactoryAliases(ast.program.body)
   const tables: SchemaTable[] = []
 
-  for (const node of ast.program.body) {
-    const declaration = topLevelDeclaration(node)
-    if (!declaration) continue
+  for (const { identifier, call, dialect } of tableDeclarations(ast)) {
+    // Columns passed as an identifier rather than a literal: this reader exists to
+    // report them, so a table it cannot read contributes nothing.
+    const columnsArg = firstObjectArgument(call)
+    if (!columnsArg) continue
 
-    for (const declarator of declaration.declarations) {
-      if (declarator.id.type !== 'Identifier') continue
-      if (declarator.init?.type !== 'CallExpression') continue
-      const dialect = tableFactoryDialect(declarator.init, aliases)
-      if (!dialect) continue
-
-      const tableName = literalString(declarator.init.arguments[0]) ?? undefined
-
-      const columnsArg = firstObjectArgument(declarator.init)
-      if (!columnsArg) continue
-
-      tables.push({
-        identifier: declarator.id.name,
-        tableName,
-        columns: columnsFromObject(columnsArg),
-        module,
-        dialect,
-      })
-    }
+    tables.push({
+      identifier,
+      tableName: literalString(call.arguments[0]) ?? undefined,
+      columns: columnsFromObject(columnsArg),
+      module,
+      dialect,
+    })
   }
 
   return tables

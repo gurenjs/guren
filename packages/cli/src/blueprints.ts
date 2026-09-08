@@ -16,7 +16,7 @@ import { makeJob } from './make-job'
 import { makeListener } from './make-listener'
 import { makeMail } from './make-mail'
 import { makeNotification } from './make-notification'
-import { detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
+import { appendTableToSchema, detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -409,7 +409,7 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
     const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
     const schemaBlock = `\nexport const ${schemaIdentifier} = sqliteTable('${tableName}', {\n  id: integer('id').primaryKey({ autoIncrement: true }),\n${fieldLines}\n  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),\n})\n`
 
-    content = `${content.trimEnd()}\n${schemaBlock}`
+    content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
   } else if (dialect === 'mysql') {
     if (content.includes(`export const ${schemaIdentifier} = mysqlTable(`)) {
       return
@@ -422,7 +422,7 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
     const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
     const schemaBlock = `\nexport const ${schemaIdentifier} = mysqlTable('${tableName}', {\n  id: int('id').primaryKey().autoincrement(),\n${fieldLines}\n  createdAt: timestamp('created_at').defaultNow().notNull(),\n})\n`
 
-    content = `${content.trimEnd()}\n${schemaBlock}`
+    content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
   } else {
     if (content.includes(`export const ${schemaIdentifier} = pgTable(`)) {
       return
@@ -435,7 +435,7 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
     const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
     const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n${fieldLines}\n  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),\n})\n`
 
-    content = `${content.trimEnd()}\n${schemaBlock}`
+    content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
   }
 
   await writeFile(schemaPath, content, 'utf8')
