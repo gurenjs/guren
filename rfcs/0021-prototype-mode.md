@@ -100,16 +100,19 @@ production is which code fills the props: the fixture or the controller.
 
 ```ts
 // resources/js/prototype/index.ts
-import { definePrototype, page, redirect, errors, notFound } from '@guren/inertia-client/prototype'
-import { pages } from '@/.guren/pages.gen'
-import type { routeManifest } from '@/.guren/routes.gen'
+import { apiRoutes, definePrototype, page } from '@guren/inertia-client/prototype'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
+import { pages } from '@/.guren/pages.gen'
+import { routeManifest } from '@/.guren/routes.gen'
 import type { InertiaSharedProps } from '@guren/core'
 
-export default definePrototype<typeof routeManifest, ApiRoutes, InertiaSharedProps>({
+export default definePrototype({
+  manifest: routeManifest,
+  api: apiRoutes<ApiRoutes>(),
+
   shared: {
     auth: { user: { id: 1, name: 'Demo User', email: 'demo@example.com' } },
-  },
+  } satisfies InertiaSharedProps,
 
   state: () => ({
     posts: [
@@ -122,12 +125,12 @@ export default definePrototype<typeof routeManifest, ApiRoutes, InertiaSharedPro
     'posts.index': ({ state }) =>
       page(pages.posts.Index, { posts: state.posts }),
 
-    'posts.show': ({ state, params }) => {
+    'posts.show': ({ state, params, notFound }) => {
       const post = state.posts.find((p) => p.id === Number(params.id))
       return post ? page(pages.posts.Show, { post }) : notFound()
     },
 
-    'posts.store': ({ state, body }) => {
+    'posts.store': ({ state, body, errors, redirect }) => {
       if (!body.title) return errors({ title: 'Title is required.' })
       const post = { id: state.posts.length + 1, ...body, published: false }
       state.posts.push(post)
@@ -136,6 +139,18 @@ export default definePrototype<typeof routeManifest, ApiRoutes, InertiaSharedPro
   },
 })
 ```
+
+~~`definePrototype<typeof routeManifest, ApiRoutes, InertiaSharedProps>({ shared, state, routes })`~~
+**Amended in implementation (Part 1):** the manifest is passed as a *value*
+(`manifest: routeManifest`) so the client can match URLs with it at runtime,
+and every generic is inferred from the object: `TManifest` from `manifest`,
+`TState` from `state()`, `TShared` from `shared`, `TApi` from the phantom
+`api: apiRoutes<ApiRoutes>()`. Explicit generics would have switched
+inference off for `state`, which is the one that must be inferred.
+`redirect`, `errors`, `notFound`, `location` and `flash` come from the handler
+context, where `redirect` is typed against the manifest's route names and
+params; the standalone exports remain for code outside a handler. A fifth
+result, `location(url)`, answers an external redirect (the 409 row below).
 
 Typing, all derived from the generated artifacts and the `Props` interfaces:
 
@@ -168,6 +183,7 @@ server package never imports the client package:
 type PrototypeResult =
   | { kind: 'page'; component: string; props: Record<string, unknown> }
   | { kind: 'redirect'; to: string; params?: Record<string, string | number> }
+  | { kind: 'location'; url: string }
   | { kind: 'errors'; errors: Record<string, string>; bag?: string }
   | { kind: 'not-found' }
 ```
@@ -339,6 +355,11 @@ The scaffolded `package.json` gets two scripts:
 "build:prototype": "guren codegen && guren check --prototype --ci && vite build --mode prototype"
 ```
 
+**Amended in implementation (Part 1):** `check --prototype` is Part 2, so the
+Part 1 script is `guren codegen && vite build --mode prototype`; Part 2 inserts
+the gate. `startInertiaClient` takes `prototype: { load, base }`, with `base`
+read from Vite's own `import.meta.env.BASE_URL` rather than a second define.
+
 Ordering: codegen loads `routes/web.ts` through `load-routes.ts`, which
 imports the file, runs the registrar and reads `definitions()`. A routes file
 that imports `prototype` from `@guren/core` and no controller loads fine, and
@@ -498,7 +519,7 @@ release that ships them, as `common-pitfalls.md` describes.
 
 ### 8. Delivery
 
-- **Part 1 — static prototype.** `@guren/inertia-client/prototype` with the
+- **Part 1 — static prototype** (shipped as `feat/rfc0021-part1`). `@guren/inertia-client/prototype` with the
   protocol conformance tests run against Inertia's real `Response` class (page,
   redirect, errors with and without a bag, not-found, external location,
   partial reload, cancellation, interceptors), `startInertiaClient({
