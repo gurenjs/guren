@@ -360,6 +360,10 @@ Part 1 script is `guren codegen && vite build --mode prototype`; Part 2 inserts
 the gate. `startInertiaClient` takes `prototype: { load, base }`, with `base`
 read from Vite's own `import.meta.env.BASE_URL` rather than a second define.
 
+**Amended in implementation (Part 2):** the gate is `guren check --prototype`
+without `--ci`: `--ci` promises the full suite and refuses a suite flag, and a
+suite flag already sets the exit code on failures, like `--arch` / `--docs`.
+
 Ordering: codegen loads `routes/web.ts` through `load-routes.ts`, which
 imports the file, runs the registrar and reads `definitions()`. A routes file
 that imports `prototype` from `@guren/core` and no controller loads fine, and
@@ -407,6 +411,14 @@ boot error naming the path; named but absent from the fixture is a boot error
 naming the route. Route middleware runs unchanged, so an `auth`-guarded
 prototype route is guarded by the real session middleware, and a fixture's
 `shared.auth` does **not** log anyone in.
+
+**Amended in implementation (Part 2):** the route contract is enforced before
+the fixture runs (`params`, `query` and `body` schemas answer 422 as for an
+inline handler), so `guren audit`'s "runtime-enforced" verdict for a
+schema-carrying route stays true; the fixture still receives the raw body. The
+fixture is loaded at boot whenever a prototype route exists, since the
+"named but absent from the fixture" rule cannot be judged without it; an app
+with no prototype route never loads it.
 
 The fixture module reaches the server through `createApp()`:
 
@@ -529,7 +541,7 @@ release that ships them, as `common-pitfalls.md` describes.
   serving `dist/prototype` from a plain static file server under `/` and under
   `/blog/`, and driving the posts CRUD in Playwright with the Bun server
   stopped.
-- **Part 2 — server side and check.** The sentinel, `createApp({ prototype })`,
+- **Part 2 — server side and check** (shipped as `feat/rfc0021-part2`). The sentinel, `createApp({ prototype })`,
   `RouteDefinition.prototype`, the boot validation and production refusal,
   `check --prototype`, `context` backlog, `doctor`. Proven by a TestApp test
   where a `prototype` route renders its fixture under the real shared-props
