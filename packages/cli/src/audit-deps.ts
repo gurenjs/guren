@@ -119,14 +119,11 @@ export interface DependencyScanOutput {
 }
 
 /**
- * Kick off `bun audit --json` without awaiting it, so the registry
- * round-trip can overlap the local file scanning. `null` means the process
- * could not even start.
- *
- * The cap is 15 s against a measured 1 s for a healthy scan: the only thing a
- * longer wait buys is a slower `unavailable`. `bun audit` spins at 100 % CPU
- * indefinitely on some trees (reproduced on a scaffolded app whose `@guren/*`
- * are `file:` links), so the cap is load-bearing, not a formality.
+ * Kick off `bun audit --json` without awaiting it, so the registry round-trip
+ * can overlap the local file scanning. `null` means it could not even start.
+ * The cap is load-bearing: `bun audit` spins at 100% CPU indefinitely on some
+ * trees (a scaffolded app whose `@guren/*` are `file:` links), and a healthy
+ * scan measures ~1 s, so a longer wait only buys a slower `unavailable`.
  */
 export function startDependencyScan(cwd: string): Promise<DependencyScanOutput | null> {
   let proc: ReturnType<typeof Bun.spawn>
