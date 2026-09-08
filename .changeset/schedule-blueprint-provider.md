@@ -6,4 +6,4 @@
 
 The blueprint now also scaffolds `app/Providers/SchedulingProvider.ts` — the shape the [Cloudflare Workers guide](https://guren.dev/en/guides/cloudflare#scheduled-tasks) already teaches and `examples/blog` uses — which rebinds `scheduler` with `scheduleTasksKernel().buildTasks()` added to it, and registers it after core's so the binding wins. A scheduler is still not a clock: call `start()` from your bootstrap on a long-lived process, or let a platform cron trigger drive it.
 
-An app that already ran the blueprint installs the provider by re-running it: an existing `app/Console/Kernel.ts` is now left unchanged rather than aborting the command.
+An app that already ran the blueprint installs the provider by re-running it: an existing `app/Console/Kernel.ts` is now left unchanged rather than aborting the command. A kernel that exports no `scheduleTasksKernel` — the registrar shape `schedule:list` also reads — gets no provider and a warning naming the missing step, since that provider's import would fail the app's boot.

@@ -636,6 +636,27 @@ export const users = pgTable('users', {
     expect(await readFile('src/app.ts', 'utf8')).toContain('SchedulingProvider')
   })
 
+  // The scaffolded provider imports scheduleTasksKernel; a registrar kernel (the
+  // other shape schedule:list reads) exports no such thing, so writing it anyway
+  // hands the app a provider whose import fails at boot.
+  it('writes no schedule provider against a kernel it cannot import', async () => {
+    await seedAppFile(APP_FIXTURE)
+    await mkdir('app/Console', { recursive: true })
+    await writeFile(
+      'app/Console/Kernel.ts',
+      'import type { Scheduler } from \'@guren/core\'\n\nexport function registerSchedules(scheduler: Scheduler): void {}\n',
+    )
+
+    const { result: created, warnings } = await captureWarnings(() => runBlueprint('schedule'))
+
+    expect(created.some((file) => file.endsWith('app/Providers/SchedulingProvider.ts'))).toBe(false)
+    expect(existsSync('app/Providers/SchedulingProvider.ts')).toBe(false)
+    expect(warnings.join('\n')).toContain('exports no scheduleTasksKernel()')
+    // Registering a provider whose file was not written is the same broken boot.
+    const providers = (await readFile('src/app.ts', 'utf8')).match(/providers:\s*\[([^\]]*)\]/)?.[1] ?? ''
+    expect(providers.split(',').map((entry) => entry.trim())).toEqual(['CoreSchedulingServiceProvider'])
+  })
+
   // `container.singleton()` overwrites its key, so the app provider only wins by
   // registering after core's. Reversed, core rebinds a task-less scheduler over it.
   it('registers the schedule app provider after the core one', async () => {
