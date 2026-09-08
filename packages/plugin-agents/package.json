@@ -54,10 +54,10 @@
     "@guren/plugin-cloudflare": "workspace:*",
     "@guren/plugin-mcp": "^0.4.0",
     "@types/node": "^20.14.10",
-    "hono": "^4.11.7",
+    "hono": "^4.13.7",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.0",
+    "vitest": "^4.1.11",
     "wrangler": "^4.128.0"
   }
 }

@@ -44,16 +44,17 @@ export const attachments = pgTable('attachments', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('attachments_attachable_idx').on(t.attachableType, t.attachableId, t.collection)])
 
-export const schema = {
-  attachments,
-  posts,
-  users,
-}
-
-export type BlogSchema = typeof schema
-
 export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
   data: jsonb('data').$type<Record<string, unknown>>().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 }, (t) => [index('sessions_expires_at_idx').on(t.expiresAt)])
+
+export const schema = {
+  attachments,
+  posts,
+  users,
+  sessions,
+}
+
+export type BlogSchema = typeof schema

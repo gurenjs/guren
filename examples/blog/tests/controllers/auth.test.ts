@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import {
   createControllerContext,
   createControllerModuleMock,
@@ -8,7 +9,10 @@ import type { Context } from '@guren/core'
 
 
 
-vi.mock('guren', () => createControllerModuleMock())
+vi.mock('guren', async (importOriginal) => ({
+  ...((await importOriginal()) as object),
+  ...createControllerModuleMock(),
+}))
 vi.mock('@guren/core', async () => {
   const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
   return {
@@ -22,7 +26,7 @@ import LoginController from '../../app/Http/Controllers/Auth/LoginController.js'
 
 type MockAuth = {
   user: ReturnType<typeof vi.fn>
-  session: ReturnType<typeof vi.fn>
+  session: Mock<() => MockSession>
   attempt: ReturnType<typeof vi.fn>
   logout: ReturnType<typeof vi.fn>
 }

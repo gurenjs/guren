@@ -33,11 +33,14 @@ const {
       links: {},
     }),
   }),
-  MockTaskCacheService: vi.fn().mockImplementation(() => ({
-    getUserTasks: mockGetUserTasks,
-    invalidateTask: vi.fn(),
-    invalidateUserTasks: vi.fn(),
-  })),
+  // vitest 4 refuses to `new` a mock whose implementation is an arrow function.
+  MockTaskCacheService: vi.fn().mockImplementation(function () {
+    return {
+      getUserTasks: mockGetUserTasks,
+      invalidateTask: vi.fn(),
+      invalidateUserTasks: vi.fn(),
+    }
+  }),
 }))
 
 vi.mock('@guren/core', async () => {

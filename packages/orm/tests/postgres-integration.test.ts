@@ -3,9 +3,10 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { sql } from 'drizzle-orm'
-import { integer, pgTable, serial, varchar } from 'drizzle-orm/pg-core'
+import { integer, pgTable, serial, timestamp, varchar } from 'drizzle-orm/pg-core'
 import { createPostgresDatabase, type PostgresDatabase } from '../src/postgres'
 import { Model, type PaginatedResult, type TransactionHandle } from '../src/Model'
+import { SoftDeletes } from '../src/SoftDeletes'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
 // postgres.test.ts mocks `postgres` and the migrator away, so it can assert a
@@ -305,6 +306,148 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
 
       expect(loaded.articlesCount).toBe(2)
 
+    })
+  })
+})
+
+// Its own database, for the same reason the relations block has one.
+const SOFT_DELETE_DATABASE = 'guren_orm_soft_delete_test'
+
+function createSoftDeleteMigrationsFolder(): string {
+  const migrationsFolder = mkdtempSync(join(tmpdir(), 'guren-orm-postgres-soft-delete-'))
+  const migrationDir = join(migrationsFolder, '20240101000000_init')
+  mkdirSync(migrationDir, { recursive: true })
+  writeFileSync(
+    join(migrationDir, 'migration.sql'),
+    'CREATE TABLE "notes" ("id" serial PRIMARY KEY NOT NULL, "title" varchar(255) NOT NULL,'
+    + ' "deleted_at" timestamp with time zone);\n',
+  )
+  return migrationsFolder
+}
+
+const notesTable = pgTable('notes', {
+  id: serial('id').primaryKey(),
+  title: varchar('title', { length: 255 }).notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+})
+
+type NoteRecord = typeof notesTable.$inferSelect
+
+// The SoftDeletes mixin builds its own scoped query for every write, so each one
+// is a place the caller's `trx` can be dropped. The fake adapters cannot see that
+// happen — they hand the pool and the transaction the same store — so only a
+// pooled driver makes an escaped write observable.
+describePostgres('SoftDeletes inside a transaction (requires POSTGRES_URL)', () => {
+  let database: PostgresDatabase
+
+  class Note extends SoftDeletes(Model<NoteRecord>) {
+    static override table = notesTable
+  }
+
+  beforeAll(async () => {
+    const url = POSTGRES_URL as string
+    await ensureTestDatabase(url, SOFT_DELETE_DATABASE)
+    database = createPostgresDatabase({
+      migrationsFolder: createSoftDeleteMigrationsFolder(),
+      connectionString: () => databaseUrl(url, SOFT_DELETE_DATABASE),
+      // Same reason as the relations block: on a single-connection pool the reads
+      // below would block on the connection the transaction holds.
+      clientOptions: { max: 5 },
+    })
+    await database.resetDatabase()
+    DrizzleAdapter.configure((await database.getDatabase()) as never)
+  })
+
+  afterAll(async () => {
+    await database?.closeDatabase()
+  })
+
+  /**
+   * Committed before the transaction opens. A row created *inside* it is invisible
+   * to the pool whatever the write did, which would pass every assertion for free.
+   */
+  async function seedNote(title: string, deletedAt: Date | null = null): Promise<NoteRecord> {
+    return (await Note.create({ title, deletedAt })) as NoteRecord
+  }
+
+  /** Runs the body in a transaction, then unwinds it without failing the test. */
+  async function rolledBack(body: (trx: TransactionHandle) => Promise<void>): Promise<void> {
+    await Note.transaction(async (trx) => {
+      await body(trx)
+      throw new RollbackSignal()
+    }).catch((error: unknown) => {
+      if (!(error instanceof RollbackSignal)) throw error
+    })
+  }
+
+  /** Reads on the pool, past the softDelete scope that would otherwise hide the row. */
+  async function fromPool(id: number): Promise<NoteRecord | null> {
+    const [row] = (await Note.withoutGlobalScopes().where('id', id).get()) as NoteRecord[]
+    return row ?? null
+  }
+
+  it('unwinds a soft delete made through the transaction-bound scope', async () => {
+    const note = await seedNote('scoped-delete')
+
+    await Note.transaction(async (_trx, txNote) => {
+      await txNote.delete({ id: note.id })
+
+      // The premise: the write is invisible outside the transaction that made it.
+      expect((await fromPool(note.id))?.deletedAt).toBeNull()
+
+      throw new RollbackSignal()
+    }).catch((error: unknown) => {
+      if (!(error instanceof RollbackSignal)) throw error
+    })
+
+    // With the handle dropped, the UPDATE ran on the pool and outlived the rollback.
+    expect((await fromPool(note.id))?.deletedAt).toBeNull()
+  })
+
+  it('unwinds a soft delete made through the static form', async () => {
+    const note = await seedNote('static-delete')
+
+    await rolledBack(async (trx) => {
+      await Note.delete({ id: note.id }, { trx })
+      expect((await fromPool(note.id))?.deletedAt).toBeNull()
+    })
+
+    expect((await fromPool(note.id))?.deletedAt).toBeNull()
+  })
+
+  it('unwinds a restore()', async () => {
+    const note = await seedNote('trashed-restore', new Date('2020-01-01T00:00:00Z'))
+
+    await rolledBack(async (trx) => {
+      await Note.restore({ id: note.id }, { trx })
+      expect((await fromPool(note.id))?.deletedAt).not.toBeNull()
+    })
+
+    expect((await fromPool(note.id))?.deletedAt).not.toBeNull()
+  })
+
+  it('unwinds a forceDelete()', async () => {
+    const note = await seedNote('trashed-force', new Date('2020-01-01T00:00:00Z'))
+
+    await rolledBack(async (trx) => {
+      await Note.forceDelete({ id: note.id }, { trx })
+      expect(await fromPool(note.id)).not.toBeNull()
+    })
+
+    // A hard delete that escapes the rollback cannot be undone.
+    expect(await fromPool(note.id)).not.toBeNull()
+  })
+
+  it('reads rows the transaction trashed with withTrashed() and onlyTrashed()', async () => {
+    await rolledBack(async (trx) => {
+      const note = (await Note.create({ title: 'tx-trashed', deletedAt: null }, { trx })) as NoteRecord
+      await Note.delete({ id: note.id }, { trx })
+
+      expect(await Note.onlyTrashed({ trx }).where('id', note.id).get()).toHaveLength(1)
+      expect(await Note.withTrashed({ trx }).where('id', note.id).get()).toHaveLength(1)
+
+      // Without the handle these read the pool, where the row does not exist yet.
+      expect(await Note.onlyTrashed().where('id', note.id).get()).toHaveLength(0)
     })
   })
 })
