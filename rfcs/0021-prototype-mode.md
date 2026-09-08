@@ -495,6 +495,16 @@ app code (the CLI never boots the app).
   dependency.
 - **`create-guren-app --prototype`** runs it after scaffolding, the way the
   `worker` blueprint runs its blueprints.
+**Amended in implementation (Part 3):** the fixture template always carries
+a demo author in `shared.auth` (an app without auth ignores the key), since
+the template is byte-pinned by the scaffold test and cannot vary per app;
+`--prototype` refuses `--module` for now (the fixture is app-wide); the seed's
+state key is the route variable (`blogPosts`), not the PascalCase collection;
+the pages import `<Entity>Data as <Entity>ResourceData` so the page
+generators do not fork; at promotion the validator the prototype run wrote
+is kept unless `--force`. The `prototype-pages-unreachable` result is
+advisory, so `guren gate` does not fail on walkthrough coverage.
+
 - **`make:feature Post --fields … --prototype`** writes the validator (the
   future controller needs it, and `RouteBody` typing needs it now), the page
   components, a fixture block appended to `resources/js/prototype/index.ts`
@@ -547,7 +557,7 @@ release that ships them, as `common-pitfalls.md` describes.
   where a `prototype` route renders its fixture under the real shared-props
   pipeline, redirects, and surfaces validation errors through
   `ValidationException`, plus a test that a production boot refuses.
-- **Part 3 — scaffolding.** `guren add prototype`, `create-guren-app
+- **Part 3 — scaffolding** (shipped as `feat/rfc0021-part3`; the proof runs inside `smoke:starter`). `guren add prototype`, `create-guren-app
   --prototype`, `make:feature --prototype` and promotion typing. Proven by a
   smoke that scaffolds with `--prototype`, runs `build:prototype` with no
   database configured, then promotes `Post` and runs the ordinary starter
