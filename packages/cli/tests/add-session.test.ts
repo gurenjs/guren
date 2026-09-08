@@ -6,10 +6,10 @@ import {
   MYSQL_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
+  captureWarnings,
   createTempWorkspace,
   type TempWorkspace,
 } from './helpers'
-import { consola } from 'consola'
 import { runBlueprint } from '../src/blueprints'
 import { addSession, appConfiguresSessions } from '../src/add-session'
 
@@ -155,15 +155,8 @@ describe('guren add session', () => {
 
   it('leaves an existing SESSION_DRIVER alone, and says when it names another store', async () => {
     await seedApp(PG_SCHEMA_FIXTURE, { env: 'APP_KEY=\nSESSION_DRIVER=memory\n' })
-    const warnings: string[] = []
-    const original = consola.warn
-    consola.warn = ((message: string) => { warnings.push(String(message)) }) as typeof consola.warn
 
-    try {
-      await runBlueprint('session', {})
-    } finally {
-      consola.warn = original
-    }
+    const { warnings } = await captureWarnings(() => runBlueprint('session', {}))
 
     // Kept, because the app chose it — but the table this just installed is
     // then one nothing writes to, which is worth a line.

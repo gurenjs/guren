@@ -8,8 +8,10 @@ export const sessionConfig: SessionConfig = {
   default: process.env.SESSION_DRIVER || 'database',
   stores: {
     database: { driver: 'database', table: sessions },
-    // No table, no binding — the fallback when D1 is unreachable. Everything
-    // in the session travels in the cookie, so keep only ids there.
+    // No table, no binding: everything in the session travels in the cookie,
+    // so keep only ids there. wrangler.jsonc declares no SESSION_DRIVER, so
+    // selecting this means adding the var and redeploying — it is not a switch
+    // that can be flipped while D1 is down.
     cookie: { driver: 'cookie' },
   },
 }

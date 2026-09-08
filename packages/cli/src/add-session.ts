@@ -110,9 +110,10 @@ export async function addSession(options: AddSessionOptions = {}): Promise<AddSe
   // The `SESSION_DRIVER` entry config/session.ts reads.
   await appendEnvEntry('SESSION_DRIVER', `
 # Which store config/session.ts uses. \`database\` needs the sessions table
-# and its migration.
+# and its migration; \`cookie\` needs neither, and caps the session at ~2.9 KB.
 SESSION_DRIVER=database
 # SESSION_DRIVER=memory
+# SESSION_DRIVER=cookie
 `, 'database')
 
   const migrationPending = options.migration !== false
