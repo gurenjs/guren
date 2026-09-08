@@ -62,6 +62,8 @@ export interface ContextRoute {
   output?: string
   /** Agent metadata as declared (RFC 0016); absence means the route is not an agent tool. */
   agent?: AgentRouteMetadata
+  /** Still on its prototype fixture (RFC 0021): registered with the `prototype` handler, no controller yet. */
+  prototype?: true
   authorization?: ContextRouteAuthorization
   summary?: string
   description?: string
@@ -86,6 +88,7 @@ export function routeDefinitionToContextRoute(def: RouteDefinition): ContextRout
     body: schemaToTypeString(def.schemas?.body, { io: 'input' }),
     output: schemaToTypeString(def.schemas?.output, { io: 'output' }),
     agent: def.agent,
+    prototype: def.prototype,
     authorization: routeAuthorization(def),
     summary: def.summary,
     description: def.description,

@@ -156,6 +156,14 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
     const method = definition.method.toUpperCase()
     const where = `${method} ${definition.path}`
 
+    // A fixture-backed route (RFC 0021) has no implementation to call: the
+    // manifest must not advertise it. `guren check` fails it; this warns so a
+    // router mid-migration still derives the rest.
+    if (definition.prototype) {
+      warnings.push(`${where}: declares agent metadata while still on its prototype fixture, so it is not exposed as a tool.`)
+      continue
+    }
+
     // A tool's name is its identity, and the route name is where it comes from:
     // `toolName` overrides the *spelling*, not the requirement, so a manifest
     // entry and a URL generator can never name different routes. A warning here

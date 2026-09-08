@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test'
 import { z } from 'zod'
 import { deriveAgentTools, type DerivedAgentTool } from '../../src/agent/derive'
 import { Router } from '../../src/mvc/Router'
+import { prototype } from '../../src/mvc/prototype'
 import { Controller } from '../../src/mvc/Controller'
 import { authorizeMiddleware, authorizeAllMiddleware, authorizeResourceMiddleware } from '../../src/authorization/middleware'
 import { requireAuthenticated } from '../../src/http/middleware/auth'
@@ -56,6 +57,18 @@ describe('deriveAgentTools (RFC 0016)', () => {
       const { tools, warnings } = derive(router)
       expect(tools.map((tool) => tool.toolName)).toEqual(['posts.index'])
       expect(warnings).toEqual([])
+    })
+
+    test('skips a route still on its prototype fixture, and says so', () => {
+      const router = new Router()
+      router.get('/posts', prototype).name('posts.index').agent({ description: 'List posts' })
+      router.get('/posts/:id', [PostController, 'show']).name('posts.show').agent({})
+
+      const { tools, warnings } = derive(router)
+      expect(tools.map((tool) => tool.toolName)).toEqual(['posts.show'])
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain('GET /posts')
+      expect(warnings[0]).toContain('prototype fixture')
     })
 
     test('skips an agent route with no name, and says so', () => {

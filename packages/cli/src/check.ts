@@ -31,6 +31,7 @@ import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
 import { checkSessionsConfig } from './sessions-check'
+import { checkPrototypeRoutes } from './prototype-check'
 import { checkDeployRuntime } from './deploy-runtime'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
@@ -90,6 +91,8 @@ export interface RunCheckOptions {
    * placeholder parity). Content-activated: apps without lang/ contribute none.
    */
   i18n?: boolean
+  /** Run prototype wiring checks only (RFC 0021 §5): fixture entries against the route graph. */
+  prototype?: boolean
 }
 
 /**
@@ -242,19 +245,23 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
   // union (never silently nothing). No flag = every suite.
-  const selected = new Set<'arch' | 'docs' | 'spec' | 'i18n'>([
+  const selected = new Set<'arch' | 'docs' | 'spec' | 'i18n' | 'prototype'>([
     ...(options.arch ? (['arch'] as const) : []),
     ...(options.docs ? (['docs'] as const) : []),
     ...(options.spec ? (['spec'] as const) : []),
     ...(options.i18n ? (['i18n'] as const) : []),
+    ...(options.prototype ? (['prototype'] as const) : []),
   ])
-  const runs = (suite: 'core' | 'arch' | 'docs' | 'spec' | 'i18n'): boolean =>
+  const runs = (suite: 'core' | 'arch' | 'docs' | 'spec' | 'i18n' | 'prototype'): boolean =>
     selected.size === 0 || (suite !== 'core' && selected.has(suite))
 
   // Undefined until the agent-registry check runs and finds a registry, so a
   // JSON consumer can tell "this app hosts no agents" from "it hosts agents
   // whose scopes expand to nothing".
   let agentScopeExpansions: AgentsConfigExpansion[] | undefined
+  // Loaded once by the core suite and reused by the prototype suite, which
+  // loads it itself only when running alone.
+  let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
 
   if (runs('core')) {
     // 1. Check controllers for empty methods
@@ -340,7 +347,6 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // resolve different routes entries and disagree about what the app mounted.
     // The entry is probed: the API-only template ships routes/api.ts only.
     const routeGraphFile = await routesEntryOrDefault(cwd, options.routesFile)
-    let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
     if (sourceChanged) {
       graph = await loadRouteGraph(cwd, routeGraphFile)
       if (graph.error) {
@@ -498,6 +504,17 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const i18nResults = await runI18nCheck({ cwd })
       checks.push(...i18nResults)
     }
+  }
+
+  // 10.6. Prototype wiring (RFC 0021 §5): every `prototype` route has a fixture
+  // entry, every entry names a route, and createApp() hands the fixture over.
+  // Reads the same graph as 7.7; a load failure was reported there, or is
+  // swallowed here when the suite runs alone (the graph check is core's).
+  if (runs('prototype')) {
+    if (!graph && !runs('core')) {
+      graph = await loadRouteGraph(cwd, await routesEntryOrDefault(cwd, options.routesFile))
+    }
+    checks.push(...(await checkPrototypeRoutes({ cwd, cache, definitions: graph?.definitions })))
   }
 
   // 11. Check architecture boundaries (guren.arch.ts + derived module rules)

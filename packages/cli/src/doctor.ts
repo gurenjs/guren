@@ -29,6 +29,9 @@ import { AGENTS_MANIFEST_FILE, planAgentManifest, type AgentManifestPlan } from 
 import { emptyActions } from './controller-methods'
 import { parseSourceFile } from './parse-cache'
 import { resolveRoutesEntry } from './route-registrar'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, resolveRoutesFile } from './load-routes'
+import { appDeclaresPrototypeRoutes } from './prototype-check'
+import type { RouteDefinition } from '@guren/core'
 import { analyzeDeployRuntime, judgeDeployRuntime } from './deploy-runtime'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
@@ -116,6 +119,8 @@ interface DoctorRuleContext {
   // is stale (RFC 0016). Shared for the same reason, and computed once because
   // it may load the app's route graph.
   agentManifest: Promise<AgentManifestPlan>
+  /** See {@link DoctorManifestPlans.routeGraph}. */
+  routeGraph: () => Promise<RouteDefinition[]>
 }
 
 interface DoctorRule {
@@ -340,6 +345,55 @@ async function detectRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
   }
 
   return createCheck('routes', 'Route Sources', 'pass', `Found ${routesFile}.`)
+}
+
+/**
+ * Routes still answered from the prototype fixture (RFC 0021) are a deploy
+ * blocker: the boot refuses them in production. Counted from the loaded route
+ * graph, the only place the `prototype` handler is visible.
+ */
+async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const key = 'prototype-routes'
+  const title = 'Prototype Routes'
+  const target = await resolveRoutesFile(context.cwd)
+  if (target.silentlyAbsent) {
+    return createCheck(key, title, 'pass', 'No routes to inspect.')
+  }
+  // Loading the graph walks the app's module graph; skipped for the app that
+  // never passes the handler, which is every app before it adopts RFC 0021.
+  if (!(await appDeclaresPrototypeRoutes(context.cwd))) {
+    return createCheck(key, title, 'pass', 'No route uses the prototype handler.')
+  }
+
+  let definitions: RouteDefinition[]
+  try {
+    definitions = await context.routeGraph()
+  } catch (error) {
+    return createCheck(
+      key,
+      title,
+      'warn',
+      `Routes could not be loaded, so routes on the prototype fixture were not counted: ${error instanceof Error ? error.message : String(error)}`,
+      { manualFix: 'Fix the load error, then run `bunx guren doctor` again.' },
+    )
+  }
+
+  const backlog = definitions.filter((route) => route.prototype)
+  if (backlog.length === 0) {
+    return createCheck(key, title, 'pass', 'No route answers from the prototype fixture.')
+  }
+
+  const listed = backlog.map((route) => `${route.method} ${route.path}${route.name ? ` (${route.name})` : ''}`).join(', ')
+  return createCheck(
+    key,
+    title,
+    'fail',
+    `${backlog.length} route(s) still answer from resources/js/prototype/index.ts (${listed}); a production boot refuses them.`,
+    {
+      fix: 'Replace each prototype handler with a controller (`bunx guren make:feature <Entity>`), or ship the static build (`bun run build:prototype`) instead of the server.',
+      manualFix: 'Replace each prototype handler with a controller, or set GUREN_PROTOTYPE_ROUTES=1 for a deliberately fixture-backed server.',
+    },
+  )
 }
 
 /**
@@ -1159,6 +1213,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'app-key', title: 'APP_KEY', detect: detectAppKey },
   { key: 'app-entry', title: 'Application Entry', detect: detectAppEntry },
   { key: 'routes', title: 'Route Sources', detect: detectRoutes },
+  { key: 'prototype-routes', title: 'Prototype Routes', detect: detectPrototypeRoutes },
   { key: 'page-contracts', title: 'Page Types', detect: detectPageContracts },
   ...GENERATED_FILES.map((generatedFile) => createGeneratedManifestRule(generatedFile)),
   createAgentManifestRule(),
@@ -1182,10 +1237,21 @@ const doctorRules: DoctorRule[] = [
 export interface DoctorManifestPlans {
   pageManifest: Promise<PageManifestPlan>
   agentManifest: Promise<AgentManifestPlan>
+  /**
+   * The route graph, loaded at most once per run and only by a rule that asks:
+   * the agent plan when the app declares agent routes, the prototype rule when
+   * it passes the `prototype` handler. Rejects with the load error.
+   */
+  routeGraph: () => Promise<RouteDefinition[]>
 }
 
 function createManifestPlans(cwd: string): DoctorManifestPlans {
-  return { pageManifest: planPageManifest(cwd), agentManifest: planAgentManifest(cwd) }
+  let graph: Promise<RouteDefinition[]> | undefined
+  const routeGraph = () => {
+    graph ??= loadRouteDefinitions(resolve(cwd, DEFAULT_ROUTES_FILE), cwd)
+    return graph
+  }
+  return { pageManifest: planPageManifest(cwd), agentManifest: planAgentManifest(cwd, DEFAULT_ROUTES_FILE, routeGraph), routeGraph }
 }
 
 export async function getDoctorRuleEvaluations(
