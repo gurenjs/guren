@@ -1,5 +1,55 @@
 # @guren/server
 
+## 2.20.0
+
+### Minor Changes
+
+- 3163cf5: **The `redis` cache store accepts a `client` function** — `stores: { redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) } }` now works, matching what `SessionManager`'s redis driver already accepted. A config entry's options are evaluated with the object around them, so passing a constructed ioredis client opened a connection at boot even when another store was selected (with `REDIS_URL` unset, a retrying handle on `127.0.0.1:6379`). A function runs when the store is first resolved instead. Passing the client directly still works; a function returning a Promise throws, naming the cause. `CacheManager.store()` now names the declared stores when it cannot find one, as `SessionManager` does.
+- c3c5919: The `cookie` session driver (RFC 0020 Part 3)
+
+  `{ driver: 'cookie' }` keeps the whole session inside the cookie, encrypted
+  under `APP_KEY` with `APP_PREVIOUS_KEYS` accepted for rotation. It is the one
+  store that needs no server-side resource — no table, no migration, no Redis, no
+  Workers binding — so it is the shortest path to sessions that survive on
+  Workers, Lambda and Vercel.
+
+  `SessionStore` grows one optional capability, `inline`, with `encode`/`decode`.
+  A store that has it keeps the session in the cookie: the middleware writes
+  `encode()`'s value instead of a signed id and reads the next request's back
+  through `decode()`, so `read`/`write`/`destroy` are never called. Every other
+  store is unaffected.
+
+  The limits are enforced, not just documented. `SessionOptions.maxCookieBytes`
+  (4096 by default, what browsers keep) is measured against the whole `Set-Cookie`
+  the middleware is about to send — name and attributes included — so a session
+  cannot pass its own check and then be dropped in transit; `decode` refuses an
+  expired, tampered, foreign, or unreadably-shaped payload, which is what makes
+  `ttlSeconds` real when nothing server-side can expire a cookie early. A logout
+  still cannot revoke a copy the client already has, so anything revocable
+  belongs in the database with only its id in the session.
+
+  `CookieSessionStore` packs its payload as `base64url(iv ‖ tag ‖ ciphertext)`
+  rather than reusing `Encrypter`'s JSON envelope, which base64s the ciphertext
+  into JSON and base64s that again: measured 1.4–2.0x the plaintext against
+  1.8–2.3x, which is a third more session inside the same cookie and fewer bytes
+  uploaded on every request. Its `read`/`write`/`destroy` throw rather than
+  answering emptily — there is no keyed store behind a cookie session, and
+  `SessionManager.store()` is public.
+
+### Patch Changes
+
+- d024c27: **New lint rule `guren/no-nullish-env-default`** — `process.env.FOO ?? 'default'` falls back only on `undefined`, so a key that is present but blank (`FOO=` in `.env`, or a hosting dashboard's cleared variable) passes an empty string through and names something that does not exist. That shipped in six generated configs: a session store called `''`, a cache store called `''`, an SMTP port of `0` from `Number('')`. The rule reports a non-empty string or numeric fallback and suggests `||`; `?? ''` is left alone, since both operators behave the same there, and a non-literal fallback cannot be judged from syntax. It is enabled in this repo and in the `.oxlintrc.json` the app templates and `guren add lint` ship, because the defect it was written for lives in scaffold output.
+
+  `@guren/server` carries the same fix at its own sites: a blank `AWS_REGION`, `AWS_LAMBDA_FUNCTION_VERSION` or `GUREN_INERTIA_ENTRY` no longer wins over the documented default, and `parseInt(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE ?? '128', 10)` no longer yields `NaN`.
+
+  An app that already ran `guren add lint` keeps its existing `.oxlintrc.json` — the blueprint skips a file it has already written, and `agent:sync` does not manage that file — so the rule reaches newly scaffolded apps rather than arriving as a red lint on an upgrade.
+
+  Where an empty value really is a choice — a mail `from` display name — the line carries `oxlint-disable-next-line guren/no-nullish-env-default` with that reason.
+
+- Updated dependencies [e413b6e]
+- Updated dependencies [3e479ea]
+  - @guren/orm@2.7.0
+
 ## 2.19.0
 
 ### Minor Changes
