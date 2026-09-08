@@ -477,6 +477,16 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   const scheduleKernel = await readFile(join(appDir, 'app/Console/Kernel.ts'), 'utf8')
   assert(scheduleKernel.includes("import { Schedule } from '@guren/core'"), 'Schedule blueprint must import Schedule from @guren/core.')
   assert(scheduleKernel.includes("name('app-heartbeat')"), 'Schedule blueprint must register the sample heartbeat task.')
+
+  // The kernel only declares tasks; without this provider feeding them in, the
+  // scaffolded app boots a scheduler with none of them.
+  const schedulingProvider = await readFile(join(appDir, 'app/Providers/SchedulingProvider.ts'), 'utf8')
+  assert(schedulingProvider.includes('createScheduler'), 'Schedule blueprint provider must create a scheduler.')
+  assert(schedulingProvider.includes("this.container.singleton('scheduler'"), 'Schedule blueprint provider must bind the scheduler in the container.')
+  assert(
+    schedulingProvider.includes('scheduleTasksKernel().buildTasks()') && schedulingProvider.includes('scheduler.addTask(task)'),
+    'Schedule blueprint provider must feed the kernel tasks to the scheduler.',
+  )
 }
 
 /**
@@ -708,6 +718,9 @@ async function main(): Promise<void> {
       assert(appTs.includes('EventServiceProvider'), 'Worker blueprint must scaffold events.')
       assert(appTs.includes('CacheServiceProvider'), 'Worker blueprint must scaffold cache.')
       assert(appTs.includes('SchedulingServiceProvider'), 'Worker blueprint must scaffold schedule.')
+      // Anchored on the providers array: the import line alone would satisfy a
+      // plain substring check while the provider stayed unregistered.
+      assert(/providers:\s*\[[^\]]*\bSchedulingProvider\b/.test(appTs), 'Worker blueprint must register the app scheduling provider.')
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir, runtimeEnv)
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--routes', 'routes/web.ts', '--out', 'types/generated/routes.d.ts', '--force'], appDir, runtimeEnv)
     }

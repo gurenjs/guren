@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.1.35",
+  "version": "0.1.36",
   "private": true,
   "type": "module",
   "scripts": {
@@ -48,7 +48,7 @@
     "tailwindcss": "^4.2.2",
     "typescript": "^7.0.2",
     "vite": "^8.0.0",
-    "vitest": "^3.2.6",
+    "vitest": "^4.1.11",
     "wrangler": "^4.118.0"
   }
 }

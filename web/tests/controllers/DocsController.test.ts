@@ -9,7 +9,10 @@ import type { Context } from '@guren/core'
 import type { DocCategoryGroup, DocPage } from '../../app/Services/DocsService.js'
 import { DEFAULT_DOC_LOCALE } from '../../app/Services/DocsService.js'
 
-vi.mock('@guren/core', () => createControllerModuleMock())
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return { ...actual, ...createControllerModuleMock() }
+})
 
 import DocsController from '../../app/Http/Controllers/DocsController.js'
 import { docsService } from '../../app/Services/DocsService.js'

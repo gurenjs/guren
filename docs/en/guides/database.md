@@ -673,6 +673,19 @@ the `softDelete` filter so they reach trashed rows, and keep the rest — a
 `tenant` scope still stops a force delete, which cannot be undone, from reaching
 another tenant's row.
 
+Inside a transaction, every one of them takes the handle. The transaction-bound
+scope covers `delete()`; the rest take it as a trailing argument, like any other
+write:
+
+```ts
+await Post.transaction(async (trx, txPost) => {
+  await txPost.delete({ id: 1 })
+  await Post.restore({ id: 2 }, { trx })
+  await Post.forceDelete({ id: 3 }, { trx })
+  const trashed = await Post.onlyTrashed({ trx }).get()
+})
+```
+
 > [!TIP]
 > Your schema must include a `deletedAt` timestamp column for soft deletes to work.
 

@@ -7,6 +7,7 @@ import {
   addCreateAppOption,
   detectSchemaDialect,
   ensureMysqlImports,
+  appendTableToSchema,
   ensurePgImports,
   ensureSqliteImports,
   PATCH_REASONS,
@@ -1297,7 +1298,7 @@ async function updateSchema({ includeVerify, includePassword, oauthProviders }: 
   if (usersTablePattern.test(content)) {
     content = content.replace(usersTablePattern, usersTableBlock)
   } else {
-    content = `${content.trimEnd()}\n\n${usersTableBlock}`
+    content = appendTableToSchema(content, 'users', usersTableBlock).source
   }
 
   if (oauthProviders.length > 0) {

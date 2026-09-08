@@ -1,4 +1,4 @@
-import type { File, Node, ObjectExpression } from '@babel/types'
+import type { File, Node, ObjectExpression, Statement, VariableDeclaration } from '@babel/types'
 
 /**
  * A Babel AST node, typed loosely so a walker can reach children the
@@ -33,6 +33,18 @@ export function walk(value: unknown, visit: (node: BabelNode) => boolean | void)
     if (key === 'loc' || key.endsWith('Comments')) continue
     walk(node[key], visit)
   }
+}
+
+/**
+ * The `VariableDeclaration` a top-level statement declares, exported or not.
+ * `export const x = …` and a bare `const x = …` bind the same name to the same
+ * module scope, and a scanner testing only one shape misses half a file.
+ */
+export function topLevelDeclaration(node: Statement): VariableDeclaration | null {
+  if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'VariableDeclaration') {
+    return node.declaration
+  }
+  return node.type === 'VariableDeclaration' ? node : null
 }
 
 /**
