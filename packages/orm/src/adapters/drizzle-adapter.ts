@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
 import type { AdapterQueryOptions, FindManyOptions, OrderByClause, PlainObject, WhereClause } from '../Model'
 import type { ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
@@ -41,10 +41,14 @@ type DrizzleDatabase = {
   insert(table: unknown): DrizzleLikeInsert
   update?(table: unknown): DrizzleLikeUpdate
   delete?(table: unknown): DrizzleLikeDelete
+  run?(query: unknown): Promise<unknown>
   transaction?<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult>
 }
 
 let database: DrizzleDatabase | undefined
+// Memo for the configured `database` only; `configure()` clears it. Module state
+// outlives a test file, and `bun test packages/orm` runs them in one process.
+let transactionAwaitsCallback: boolean | undefined
 
 function ensureDatabase(): DrizzleDatabase {
   if (!database) {
@@ -192,12 +196,94 @@ async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning:
   return { usedReturning: false, row: undefined }
 }
 
+const NOOP_TRANSACTION = (() => undefined) as unknown as (trx: unknown) => Promise<undefined>
+
+/**
+ * Whether `db.transaction()` awaits its callback before committing: drizzle's
+ * bun-sqlite COMMITs on whatever the callback returns, d1 and every pg/mysql
+ * driver await it. Probed rather than matched against a driver list, because
+ * this adapter takes any drizzle-shaped handle and one a list never named gets
+ * the wrong path silently. Costs one empty transaction per configured database.
+ */
+async function awaitsItsCallback(db: DrizzleDatabase): Promise<boolean> {
+  if (transactionAwaitsCallback === undefined) {
+    const probe = db.transaction?.(NOOP_TRANSACTION)
+    transactionAwaitsCallback = isPromiseLike(probe)
+    if (isPromiseLike(probe)) await probe
+  }
+
+  return transactionAwaitsCallback
+}
+
+/**
+ * BEGIN/COMMIT/ROLLBACK driven here so an async callback is honoured on a driver
+ * that would otherwise commit before awaiting it. The handle itself is the
+ * transaction scope: these drivers hold one connection. That is also why an
+ * overlap is refused rather than queued — measured on bun-sqlite, the second
+ * BEGIN throws and the first survives; a queue would deadlock a nested call.
+ */
+async function runOwnTransaction<TResult>(
+  db: DrizzleDatabase,
+  callback: (trx: unknown) => Promise<TResult>,
+): Promise<TResult> {
+  if (typeof db.run !== 'function') {
+    throw new Error(
+      'DrizzleAdapter: the configured database commits before its transaction callback has awaited anything, ' +
+        'and exposes no run() to drive BEGIN/COMMIT with, so transactions on it cannot be made atomic.',
+    )
+  }
+
+  try {
+    await db.run(sql.raw('begin'))
+  } catch (error) {
+    // Nothing is rolled back here: this BEGIN failed because another
+    // transaction is already open on the connection, and rolling back would
+    // discard *that* transaction's work.
+    throw new Error(
+      'DrizzleAdapter: could not begin a transaction. This driver holds a single connection and one transaction ' +
+        'is already open on it, so transactions cannot overlap: do not nest transactions, and do not await ' +
+        'non-database work inside one.',
+      { cause: error },
+    )
+  }
+
+  let result: TResult
+  try {
+    result = await callback(db)
+  } catch (error) {
+    // The callback's error is what the caller has to see, so a failing
+    // ROLLBACK must not replace it.
+    try {
+      await db.run(sql.raw('rollback'))
+    } catch {
+      /* empty */
+    }
+    throw error
+  }
+
+  try {
+    await db.run(sql.raw('commit'))
+  } catch (error) {
+    // A refused COMMIT leaves the transaction open, and the next BEGIN would
+    // then be refused for one this call never left behind.
+    try {
+      await db.run(sql.raw('rollback'))
+    } catch {
+      /* empty */
+    }
+    throw error
+  }
+
+  return result
+}
+
 export const DrizzleAdapter: ORMAdapterAdvanced & {
   configure(db: DrizzleDatabase): void
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase
 } = {
   configure(db: DrizzleDatabase) {
     database = db
+    transactionAwaitsCallback = undefined
   },
 
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase {
@@ -455,6 +541,11 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     if (typeof db.transaction !== 'function') {
       throw new Error('DrizzleAdapter: configured database does not support transactions.')
     }
-    return db.transaction(callback)
+
+    if (await awaitsItsCallback(db)) {
+      return db.transaction(callback)
+    }
+
+    return runOwnTransaction(db, callback)
   },
 }
