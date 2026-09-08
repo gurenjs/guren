@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import { readIfExists } from './discovery'
+import { memberKeyName, objectLiteral, topLevelDeclaration } from './ast-walk'
 import { parseSourceFile } from './parse-cache'
 import { resolve } from 'node:path'
 import { escapeRegExp } from './utils'
@@ -508,7 +509,7 @@ export async function hasAuthProvider(filePath: string): Promise<boolean> {
   }
 }
 
-import type { SchemaDialect } from './schema-parser'
+import { declaredTableIdentifiers, type SchemaDialect } from './schema-parser'
 export type { SchemaDialect }
 
 /**
@@ -648,6 +649,102 @@ export async function addCreateAppOption(
   return { modified: true }
 }
 
+interface SchemaAggregate {
+  /** Where the new table's declaration goes: ahead of the aggregate that names it. */
+  declarationOffset: number
+  /** Where the new key goes, or null when the aggregate already lists it. */
+  keyOffset: number | null
+  keyText: string
+}
+
+/** The offset the statement starts at, including any comment block written against it. */
+function statementStart(node: { start?: number | null; leadingComments?: unknown }, source: string): number {
+  let offset = node.start ?? 0
+  const comments = (node.leadingComments ?? []) as { start?: number | null; end?: number | null }[]
+
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const end = comments[i]?.end
+    const start = comments[i]?.start
+    if (typeof end !== 'number' || typeof start !== 'number' || end > offset) break
+    // A blank line between the comment and what follows means the comment
+    // documents neither — Babel attaches it anyway, and swallowing it would
+    // move a file-level note below the table declaration spliced in here.
+    const gap = source.slice(end, offset)
+    if (!/^[^\S\n]*\n?[^\S\n]*$/.test(gap)) break
+    offset = start
+  }
+
+  return offset
+}
+
+/**
+ * The app's hand-kept aggregate of its own tables — `export const schema = { posts, users }`,
+ * which `typeof schema` then feeds to drizzle. A table appended without a key here leaves it
+ * silently incomplete: the app still compiles and the table still exists.
+ * Positive evidence only: every property a shorthand (or `name: name`) reference to a table
+ * this same file declares, `name` excepted. Anything else, or a second candidate, answers null.
+ */
+function findSchemaAggregate(source: string, name: string): SchemaAggregate | null {
+  const ast = parseSourceFile(source, 'db/schema.ts')
+  if (!ast) return null
+
+  const tables = declaredTableIdentifiers(ast)
+  if (tables.size === 0) return null
+
+  let found: SchemaAggregate | null = null
+
+  for (const node of ast.program.body) {
+    const declaration = topLevelDeclaration(node)
+    if (!declaration) continue
+
+    for (const declarator of declaration.declarations) {
+      const object = objectLiteral(declarator.init)
+      if (!object || object.properties.length === 0) continue
+
+      let lastStart = -1
+      let lastEnd = -1
+      let listsName = false
+      let isAggregate = true
+
+      for (const property of object.properties) {
+        const key = property.type === 'ObjectProperty' && !property.computed ? memberKeyName(property) : undefined
+        const referencesKey =
+          property.type === 'ObjectProperty'
+          && (property.shorthand || (property.value.type === 'Identifier' && property.value.name === key))
+        if (!key || !referencesKey || !(tables.has(key) || key === name)) {
+          isAggregate = false
+          break
+        }
+        if (key === name) listsName = true
+        lastStart = property.start ?? -1
+        lastEnd = property.end ?? -1
+      }
+      if (!isAggregate || lastEnd < 0 || lastStart < 0) continue
+
+      // A second candidate means the file's shape does not identify one aggregate,
+      // so neither can this.
+      if (found) return null
+
+      const multiline = source.slice(object.start ?? 0, object.end ?? 0).includes('\n')
+      const separator = multiline ? `,\n${indentOfLine(source, lastStart)}` : ', '
+
+      found = {
+        declarationOffset: statementStart(node, source),
+        keyOffset: listsName ? null : lastEnd,
+        keyText: `${separator}${name}`,
+      }
+    }
+  }
+
+  return found
+}
+
+/** The leading whitespace of the line `offset` sits on. */
+function indentOfLine(source: string, offset: number): string {
+  const lineStart = source.lastIndexOf('\n', offset - 1) + 1
+  return /^[^\S\n]*/.exec(source.slice(lineStart, offset))?.[0] ?? ''
+}
+
 export interface AppendSchemaTableOptions {
   /** The exported binding, e.g. `sessions`. Also what the already-declared guard looks for. */
   name: string
@@ -682,6 +779,13 @@ export async function appendSchemaTable(options: AppendSchemaTableOptions): Prom
   )
   if (declared.test(existing)) {
     consola.info(`${schemaFile} already declares a ${name} table — left unchanged.`)
+    // Reported rather than repaired: the key can only be added where the
+    // declaration already precedes the aggregate, and moving a declaration this
+    // run did not write is beyond what a scaffolder should do to a hand-kept file.
+    const stale = findSchemaAggregate(existing, name)
+    if (stale && stale.keyOffset !== null) {
+      consola.warn(`The schema object in ${schemaFile} does not list ${name} — add it, or ${name} stays out of \`typeof schema\`.`)
+    }
     return 'already-declared'
   }
 
@@ -693,7 +797,30 @@ export async function appendSchemaTable(options: AppendSchemaTableOptions): Prom
     content = insertImport(content, extraImport) ?? content
   }
 
-  await writeFile(resolve(process.cwd(), schemaFile), `${content.trimEnd()}\n\n${blocks[dialect]}`, 'utf8')
+  const block = blocks[dialect]
+  const aggregate = findSchemaAggregate(content, name)
+  let updated: string
+
+  if (aggregate) {
+    // Both splices come from the one parse, applied high offset first so the
+    // earlier one still addresses the source it was measured against. The
+    // declaration goes *ahead* of the aggregate: a `const` naming a table
+    // declared further down the file is a use before declaration (TS2448).
+    updated = content
+    if (aggregate.keyOffset !== null) {
+      updated = updated.slice(0, aggregate.keyOffset) + aggregate.keyText + updated.slice(aggregate.keyOffset)
+    }
+    updated =
+      `${updated.slice(0, aggregate.declarationOffset)}${block.trimEnd()}\n\n`
+      + updated.slice(aggregate.declarationOffset)
+  } else {
+    updated = `${content.trimEnd()}\n\n${block}`
+  }
+
+  await writeFile(resolve(process.cwd(), schemaFile), updated, 'utf8')
   consola.info(`Added the ${name} table to ${schemaFile} (${dialect}).`)
+  if (aggregate && aggregate.keyOffset !== null) {
+    consola.info(`Added ${name} to the schema object in ${schemaFile}.`)
+  }
   return 'appended'
 }

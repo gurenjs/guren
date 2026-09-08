@@ -3,11 +3,12 @@ import { readFile } from 'node:fs/promises'
 import type {
   Expression,
   CallExpression,
+  File,
   ObjectExpression,
   ObjectProperty,
   Statement,
 } from '@babel/types'
-import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion } from './ast-walk'
+import { literalString, memberKeyName, objectLiteral, topLevelDeclaration, unwrapTypeAssertion } from './ast-walk'
 import { listAppRoots } from './discovery'
 import { parseSourceFile } from './parse-cache'
 
@@ -54,6 +55,30 @@ function tableFactoryDialect(
     return TABLE_FACTORIES.get(callee.property.name)
   }
   return undefined
+}
+
+/**
+ * The identifiers a parsed `db/schema.ts` binds to a table factory call, by the
+ * same alias rule `parseSchemaFile` uses. Separate from `parseSchemaTables`
+ * because `appendSchemaTable` judges source it holds in memory and has not
+ * written yet, and because it needs no columns.
+ */
+export function declaredTableIdentifiers(ast: File): Set<string> {
+  const aliases = collectFactoryAliases(ast.program.body)
+  const identifiers = new Set<string>()
+
+  for (const node of ast.program.body) {
+    const declaration = topLevelDeclaration(node)
+    if (!declaration) continue
+    for (const declarator of declaration.declarations) {
+      if (declarator.id.type !== 'Identifier') continue
+      if (declarator.init?.type !== 'CallExpression') continue
+      if (!tableFactoryDialect(declarator.init, aliases)) continue
+      identifiers.add(declarator.id.name)
+    }
+  }
+
+  return identifiers
 }
 
 export interface SchemaColumnReference {
@@ -258,12 +283,7 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
   const tables: SchemaTable[] = []
 
   for (const node of ast.program.body) {
-    const declaration =
-      node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'VariableDeclaration'
-        ? node.declaration
-        : node.type === 'VariableDeclaration'
-          ? node
-          : null
+    const declaration = topLevelDeclaration(node)
     if (!declaration) continue
 
     for (const declarator of declaration.declarations) {
