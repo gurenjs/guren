@@ -727,3 +727,66 @@ export const schema = { users }
     expect(warned).not.toContain('moving `export const sessions`')
   })
 })
+
+describe('array entries — depth-0 splitting', () => {
+  async function withFile(name: string, contents: string, run: () => Promise<void>): Promise<string> {
+    const workspace = await createTempWorkspace('guren-cli-array-depth-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { [name]: contents })
+      await run()
+      return await readFile(join(workspace.dir, name), 'utf8')
+    } finally {
+      await workspace.cleanup()
+    }
+  }
+
+  it('reads an entry whose object argument holds a comma as one entry', () => {
+    const app = 'createApp({ providers: [mcpPlugin({ path: mcpPath, prefix: mcpPrefix })] })'
+
+    const result = insertProvider(app, 'mcpPlugin({ path: mcpPath, prefix: mcpPrefix })')
+
+    expect(result.reason).toBe(PATCH_REASONS.providerAlreadyRegistered)
+  })
+
+  // The prefix predicate matched the leading fragment either way, so it is the
+  // half of `guren plugin` that never broke — pinned so the split cannot lose it.
+  it('still recognizes a factory prefix across that comma', () => {
+    const app = "createApp({ providers: [mcpPlugin({ path: '/mcp', prefix: '/x' })] })"
+
+    const result = insertProvider(app, 'mcpPlugin()', (entries) =>
+      entries.some((entry) => entry.startsWith('mcpPlugin(')),
+    )
+
+    expect(result.reason).toBe(PATCH_REASONS.providerAlreadyRegistered)
+  })
+
+  it('reads an entry holding a nested array as one entry', async () => {
+    const source = 'kernel.registerMany([group([alpha, beta])])\n'
+    const result = await withFile('src/console.ts', source, async () => {
+      const patch = await addToArrayArgument('src/console.ts', 'registerMany', 'group([alpha, beta])')
+      expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(source)
+  })
+
+  it('detects a valueSource that itself contains a comma on a second run', async () => {
+    const result = await withFile('src/app.ts', 'const app = createApp({ modules: [] })\n', async () => {
+      expect((await addToArrayOption('src/app.ts', 'modules', 'billingModule(extra, more)')).modified).toBe(true)
+      const second = await addToArrayOption('src/app.ts', 'modules', 'billingModule(extra, more)')
+      expect(second.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe('const app = createApp({ modules: [billingModule(extra, more)] })\n')
+  })
+
+  // Regex literals are not masked: the comma inside one sits at depth 1 and is
+  // no separator, and the `}` closes a brace never opened, which stops the
+  // split there — `Basic`, already split off before it, stands.
+  it('stops splitting at an unbalanced closer instead of cutting a fragment', async () => {
+    const source = 'kernel.registerMany([Basic, match(/a,}b/)])\n'
+    const result = await withFile('src/console.ts', source, async () => {
+      const patch = await addToArrayArgument('src/console.ts', 'registerMany', 'match(/a,}b/)')
+      expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(source)
+  })
+})

@@ -99,17 +99,38 @@ export function findClosingDelimiter(content: string, openIndex: number, open: s
   return -1
 }
 
+/** The closer each opener `parseArrayEntries` tracks expects to see. */
+const ARRAY_ENTRY_CLOSERS: Record<string, string> = { '(': ')', '[': ']', '{': '}' }
+
 /**
- * Entries of an array literal's interior. Masked first, so a name appearing
- * only in a comment is not mistaken for an existing entry — which is also why
- * the result answers membership only: string contents come out blanked, so
+ * Entries of an array literal's interior, split at depth 0 only. Masked first,
+ * so a name in a comment is not mistaken for an entry — which is also why the
+ * result answers membership only: string contents come out blanked, so
  * re-joining these entries into the file writes `'/mcp'` back as `'    '`.
+ * Regex literals are not masked; an unmatched closer stops the split there.
  */
 function parseArrayEntries(inner: string): string[] {
-  return maskNonCode(inner)
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
+  const masked = maskNonCode(inner)
+  const closers: string[] = []
+  const entries: string[] = []
+  let start = 0
+
+  for (let i = 0; i < masked.length; i++) {
+    const char = masked[i]
+    const closer = ARRAY_ENTRY_CLOSERS[char]
+
+    if (closer !== undefined) {
+      closers.push(closer)
+    } else if (char === ')' || char === ']' || char === '}') {
+      if (closers.pop() !== char) break
+    } else if (char === ',' && closers.length === 0) {
+      entries.push(masked.slice(start, i))
+      start = i + 1
+    }
+  }
+
+  entries.push(masked.slice(start))
+  return entries.map((entry) => entry.trim()).filter((entry) => entry.length > 0)
 }
 
 /**
