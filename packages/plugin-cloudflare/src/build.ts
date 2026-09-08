@@ -1071,7 +1071,11 @@ function renderWorkerModule(input: {
     lines.push("import './worker-env.js'")
   }
 
-  lines.push("import { createWorkersHandler } from '@guren/plugin-cloudflare'")
+  lines.push(
+    input.mcpOAuth
+      ? "import { createWorkersHandler, sweepOAuthStorage } from '@guren/plugin-cloudflare'"
+      : "import { createWorkersHandler } from '@guren/plugin-cloudflare'",
+  )
 
   if (hasAgents) {
     lines.push(
@@ -1111,7 +1115,10 @@ function renderWorkerModule(input: {
     lines.push(renderOAuthProvider(input.mcpPath, hasAgents ? 'agentEntry' : 'handler'), '')
   }
 
-  lines.push(renderDefaultExport(input.mcpOAuth ? 'oauth' : hasAgents ? 'agentEntry' : 'handler'), '')
+  lines.push(
+    renderDefaultExport(input.mcpOAuth ? 'oauth' : hasAgents ? 'agentEntry' : 'handler', input.mcpOAuth),
+    '',
+  )
 
   return lines.join('\n')
 }
@@ -1122,12 +1129,22 @@ function renderWorkerModule(input: {
  * an export that has none does nothing at all, with no error anywhere. Neither
  * `agentEntry` nor `OAuthProvider` carries one, so `scheduled` is the handler's.
  */
-function renderDefaultExport(fetchEntry: string): string {
+function renderDefaultExport(fetchEntry: string, sweepsOAuthStorage: boolean): string {
+  // The sweep runs first and cannot be skipped by the delegation below: an app
+  // whose cron exists *for* the sweep binds no `scheduler`, and `handler.scheduled`
+  // throws on that by design.
+  const scheduled = sweepsOAuthStorage
+    ? `scheduled: async (event, env, ctx) => {
+    await sweepOAuthStorage(oauth, event, env)
+    await handler.scheduled(event, env, ctx)
+  }`
+    : 'scheduled: (event, env, ctx) => handler.scheduled(event, env, ctx)'
+
   // An arrow rather than a bound reference: `OAuthProvider` is a class
   // instance, and `fetch` detached from it loses its `this`.
   return `export default {
   fetch: (request, env, ctx) => ${fetchEntry}.fetch(request, env, ctx),
-  scheduled: (event, env, ctx) => handler.scheduled(event, env, ctx),
+  ${scheduled},
 }`
 }
 

@@ -42,12 +42,26 @@ describe('the generated worker dispatches cron triggers', () => {
 
       const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
       expect(worker).toContain('const handler = createWorkersHandler(app)')
-      expect(worker).toContain('scheduled: (event, env, ctx) => handler.scheduled(event, env, ctx)')
 
       // The provider outranks the agent entry on requests, and neither carries
       // a scheduled of its own.
       const fetchEntry = shape.mcpOAuth ? 'oauth' : shape.agents ? 'agentEntry' : 'handler'
       expect(worker).toContain(`fetch: (request, env, ctx) => ${fetchEntry}.fetch(request, env, ctx)`)
+
+      // Exact strings, not a matcher loose enough to accept either: the two
+      // shapes that gained a sweep must not be able to drag the other two along.
+      expect(worker).toContain(
+        shape.mcpOAuth
+          ? 'scheduled: async (event, env, ctx) => {\n    await sweepOAuthStorage(oauth, event, env)\n    await handler.scheduled(event, env, ctx)\n  },'
+          : 'scheduled: (event, env, ctx) => handler.scheduled(event, env, ctx),',
+      )
+      // The sweep is imported, not emitted — `oauth-sweep.test.ts` is what
+      // exercises it. Only the wiring is this file's to pin.
+      expect(worker).toContain(
+        shape.mcpOAuth
+          ? "import { createWorkersHandler, sweepOAuthStorage } from '@guren/plugin-cloudflare'"
+          : "import { createWorkersHandler } from '@guren/plugin-cloudflare'",
+      )
     })
   }
 

@@ -438,6 +438,12 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
       // Which means something only if there is a real bundle to look at.
       expect(bundle).toContain('OAuthProvider')
       expect(bundle.length).toBeGreaterThan(1000)
+
+      // The sweep is imported from the package root rather than emitted, and the
+      // root also exports the deploy generator that the assertion above proves is
+      // tree-shaken out. So the marker key is the evidence the shaker kept the
+      // half that has to survive — a dropped sweep resolves and deploys fine.
+      expect(bundle).toContain('guren:oauth-purge:last')
     },
     300_000,
   )

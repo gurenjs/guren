@@ -26,6 +26,14 @@ export { createWorkersHandler } from './handler'
 export type { WorkersHandler } from './handler'
 export { bootAndFetch, bootAndRunDueTasks, bootWorkersApp } from './boot'
 export type { WorkersAppLike, WorkersExecutionContext, WorkersScheduledEvent } from './boot'
+export { sweepOAuthStorage, OAUTH_PURGE_BATCH, OAUTH_PURGE_INTERVAL_MS, OAUTH_PURGE_MARKER } from './oauth-sweep'
+export type {
+  OAuthPurgeOptions,
+  OAuthPurgeResult,
+  OAuthPurgerLike,
+  OAuthSweepEnv,
+  OAuthSweepKvLike,
+} from './oauth-sweep'
 export { buildCloudflareOutput, flattenD1Migrations } from './build'
 export type { BuildCloudflareOutputOptions } from './build'
 export { R2Driver } from './storage/R2Driver'
