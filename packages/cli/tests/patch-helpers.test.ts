@@ -728,18 +728,19 @@ export const schema = { users }
   })
 })
 
-describe('array entries — depth-0 splitting', () => {
-  async function withFile(name: string, contents: string, run: () => Promise<void>): Promise<string> {
-    const workspace = await createTempWorkspace('guren-cli-array-depth-')
-    try {
-      await writeWorkspaceFiles(workspace.dir, { [name]: contents })
-      await run()
-      return await readFile(join(workspace.dir, name), 'utf8')
-    } finally {
-      await workspace.cleanup()
-    }
+/** Runs `run()` against a workspace holding `name`, and returns what it left there. */
+async function withArrayFile(name: string, contents: string, run: () => Promise<void>): Promise<string> {
+  const workspace = await createTempWorkspace('guren-cli-array-entries-')
+  try {
+    await writeWorkspaceFiles(workspace.dir, { [name]: contents })
+    await run()
+    return await readFile(join(workspace.dir, name), 'utf8')
+  } finally {
+    await workspace.cleanup()
   }
+}
 
+describe('array entries — depth-0 splitting', () => {
   it('reads an entry whose object argument holds a comma as one entry', () => {
     const app = 'createApp({ providers: [mcpPlugin({ path: mcpPath, prefix: mcpPrefix })] })'
 
@@ -762,7 +763,7 @@ describe('array entries — depth-0 splitting', () => {
 
   it('reads an entry holding a nested array as one entry', async () => {
     const source = 'kernel.registerMany([group([alpha, beta])])\n'
-    const result = await withFile('src/console.ts', source, async () => {
+    const result = await withArrayFile('src/console.ts', source, async () => {
       const patch = await addToArrayArgument('src/console.ts', 'registerMany', 'group([alpha, beta])')
       expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
     })
@@ -770,7 +771,7 @@ describe('array entries — depth-0 splitting', () => {
   })
 
   it('detects a valueSource that itself contains a comma on a second run', async () => {
-    const result = await withFile('src/app.ts', 'const app = createApp({ modules: [] })\n', async () => {
+    const result = await withArrayFile('src/app.ts', 'const app = createApp({ modules: [] })\n', async () => {
       expect((await addToArrayOption('src/app.ts', 'modules', 'billingModule(extra, more)')).modified).toBe(true)
       const second = await addToArrayOption('src/app.ts', 'modules', 'billingModule(extra, more)')
       expect(second.reason).toBe(PATCH_REASONS.alreadyPresent)
@@ -783,8 +784,85 @@ describe('array entries — depth-0 splitting', () => {
   // split there — `Basic`, already split off before it, stands.
   it('stops splitting at an unbalanced closer instead of cutting a fragment', async () => {
     const source = 'kernel.registerMany([Basic, match(/a,}b/)])\n'
-    const result = await withFile('src/console.ts', source, async () => {
+    const result = await withArrayFile('src/console.ts', source, async () => {
       const patch = await addToArrayArgument('src/console.ts', 'registerMany', 'match(/a,}b/)')
+      expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(source)
+  })
+})
+
+describe('array entries — masked entries vs. an unmasked value', () => {
+  it('matches an existing entry whose argument holds a string literal', () => {
+    const app = "createApp({ providers: [mcpPlugin({ path: '/mcp' })] })"
+
+    const result = insertProvider(app, "mcpPlugin({ path: '/mcp' })")
+
+    expect(result.reason).toBe(PATCH_REASONS.providerAlreadyRegistered)
+  })
+
+  // Masking is length-preserving, so `'/mcp'` and `'/api'` are the same blanked
+  // run: comparing two masked sides would read this as registered and drop it.
+  it('separates two entries whose string literals are the same length', () => {
+    const app = "createApp({ providers: [mcpPlugin({ path: '/mcp' })] })"
+
+    const result = insertProvider(app, "mcpPlugin({ path: '/api' })")
+
+    expect(result.content).toBe(
+      "createApp({ providers: [mcpPlugin({ path: '/mcp' }), mcpPlugin({ path: '/api' })] })",
+    )
+  })
+
+  it('does not read a value that appears only in a comment inside the array', () => {
+    const app = "createApp({ providers: [DatabaseProvider /* , mcpPlugin({ path: '/mcp' }) */] })"
+
+    const result = insertProvider(app, "mcpPlugin({ path: '/mcp' })")
+
+    expect(result.content).toBe(
+      "createApp({ providers: [DatabaseProvider, mcpPlugin({ path: '/mcp' })"
+      + " /* , mcpPlugin({ path: '/mcp' }) */] })",
+    )
+  })
+
+  // The predicate reads the masked form, which is why `plugin.ts` tests a
+  // prefix that holds no string literal.
+  it('hands a membership predicate the masked entry', () => {
+    const app = "createApp({ providers: [mcpPlugin({ path: '/mcp' })] })"
+    const seen: string[] = []
+
+    insertProvider(app, 'mcpPlugin()', (entries) => {
+      seen.push(...entries)
+      return false
+    })
+
+    expect(seen).toEqual(["mcpPlugin({ path: '    ' })"])
+  })
+
+  it('detects an option value holding a string literal on a second run', async () => {
+    const value = "billingModule({ prefix: '/billing' })"
+    const result = await withArrayFile('src/app.ts', 'const app = createApp({ modules: [] })\n', async () => {
+      expect((await addToArrayOption('src/app.ts', 'modules', value)).modified).toBe(true)
+      expect((await addToArrayOption('src/app.ts', 'modules', value)).reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(`const app = createApp({ modules: [${value}] })\n`)
+  })
+
+  it('detects an array argument holding a string literal', async () => {
+    const source = "kernel.registerMany([namespaced('billing')])\n"
+    const result = await withArrayFile('src/console.ts', source, async () => {
+      const patch = await addToArrayArgument('src/console.ts', 'registerMany', "namespaced('billing')")
+      expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(source)
+  })
+
+  // An escape blanks to two characters like the pair it stands for, so the
+  // offsets a masked entry hands back still index the source.
+  it('keeps its offsets across an escape inside the literal', async () => {
+    const value = "namespaced('a\\'b')"
+    const source = `kernel.registerMany([${value}])\n`
+    const result = await withArrayFile('src/console.ts', source, async () => {
+      const patch = await addToArrayArgument('src/console.ts', 'registerMany', value)
       expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
     })
     expect(result).toBe(source)
