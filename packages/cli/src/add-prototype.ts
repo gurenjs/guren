@@ -12,10 +12,12 @@ import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
 import { readIfExists } from './discovery'
 import { addCreateAppOption, PATCH_REASONS } from './patch-helpers'
+import { PROTOTYPE_FIXTURE_FILE, PROTOTYPE_OPTION_PATTERN } from './prototype-check'
 import { scaffoldTemplateFile } from './scaffold-templates'
 import { writeRoot, writeScaffoldFiles, type WriterOptions } from './utils'
 
-export const PROTOTYPE_FIXTURE_PATH = 'resources/js/prototype/index.ts'
+/** One literal for the file this writes and `guren check` reads; owned there, since `check` must not load a scaffolder. */
+export const PROTOTYPE_FIXTURE_PATH = PROTOTYPE_FIXTURE_FILE
 const CLIENT_ENTRY = 'resources/js/app.tsx'
 const APP_ENTRY = 'src/app.ts'
 const ENV_DECLARATION_FILE = 'resources/js/vite-env.d.ts'
@@ -82,7 +84,7 @@ async function wireClientEntry(cwd: string): Promise<void> {
     consola.warn(`${CLIENT_ENTRY} not found — pass \`prototype\` to startInertiaClient() by hand:${CLIENT_WIRING}`)
     return
   }
-  if (/\bprototype\s*:/u.test(content)) return
+  if (PROTOTYPE_OPTION_PATTERN.test(content)) return
 
   const anchor = 'startInertiaClient({'
   const index = content.indexOf(anchor)
@@ -156,6 +158,8 @@ async function removePrototype(cwd: string): Promise<string[]> {
   if (client !== null && client.includes(CLIENT_WIRING)) {
     await writeFile(resolve(cwd, CLIENT_ENTRY), client.replace(CLIENT_WIRING, ''), 'utf8')
     consola.success(`Removed the prototype loader from ${CLIENT_ENTRY}`)
+  } else if (client !== null && PROTOTYPE_OPTION_PATTERN.test(client)) {
+    consola.warn(`${CLIENT_ENTRY} passes \`prototype\` to startInertiaClient() in a shape this cannot recognise — remove it by hand.`)
   }
 
   const app = await readIfExists(cwd, APP_ENTRY)
@@ -163,6 +167,8 @@ async function removePrototype(cwd: string): Promise<string[]> {
   if (app !== null && app.includes(optionLine)) {
     await writeFile(resolve(cwd, APP_ENTRY), app.replace(optionLine, ''), 'utf8')
     consola.success(`Removed the prototype loader from ${APP_ENTRY}`)
+  } else if (app !== null && PROTOTYPE_OPTION_PATTERN.test(app)) {
+    consola.warn(`${APP_ENTRY} passes \`prototype\` to createApp() in a shape this cannot recognise — remove it by hand.`)
   }
 
   await patchScripts(cwd, 'remove')

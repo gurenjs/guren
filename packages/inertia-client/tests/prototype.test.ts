@@ -9,6 +9,7 @@ import {
   formDataToObject,
   isPrototypeDefinition,
   page,
+  resetPrototypeState,
   resolveInitialPage,
   type PrototypeStorage,
 } from '../src/prototype'
@@ -335,6 +336,33 @@ describe('createPrototypeHttpClient', () => {
     const answered = pageOf(await client.request(get('/posts')))
 
     expect(answered.props.posts).toEqual([{ id: 1, title: 'First' }])
+  })
+
+  it('keeps one prototype per base apart in storage, and reset clears them all', async () => {
+    const shared = new MemoryStorage()
+    const root = createPrototypeHttpClient(buildPrototype(), { storage: shared })
+    const sub = createPrototypeHttpClient(buildPrototype(), { storage: shared, base: '/demo/' })
+    await root.request(post('/posts', { title: 'Root only' }))
+    await sub.request(get('/demo/posts'))
+
+    expect([...shared.map.keys()].sort()).toEqual([PROTOTYPE_STATE_KEY, `${PROTOTYPE_STATE_KEY}:/demo/`])
+    expect(pageOf(await sub.request(get('/demo/posts'))).props.posts).toEqual([{ id: 1, title: 'First' }])
+
+    const globals = globalThis as { sessionStorage?: unknown }
+    const previous = globals.sessionStorage
+    globals.sessionStorage = Object.assign(shared, {
+      get length() {
+        return shared.map.size
+      },
+      key: (index: number) => [...shared.map.keys()][index] ?? null,
+    })
+    try {
+      resetPrototypeState()
+    } finally {
+      if (previous === undefined) delete globals.sessionStorage
+      else globals.sessionStorage = previous
+    }
+    expect(shared.map.size).toBe(0)
   })
 
   it('strips and re-applies a subpath base', async () => {

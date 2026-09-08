@@ -1,16 +1,10 @@
 import { createInertiaApp } from '@inertiajs/react'
-import type { Page } from '@inertiajs/core'
+import type { HttpClient, Page } from '@inertiajs/core'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { createPagesResolver as createPagesResolverFactory, type ResolveComponent } from './resolve'
 import type { PageManifest } from './contracts'
-import {
-  createPrototypeHttpClient,
-  isPrototypeDefinition,
-  resetPrototypeState,
-  resolveInitialPage,
-  type AnyPrototypeDefinition,
-} from './prototype'
+import type { AnyPrototypeDefinition } from './prototype'
 
 type SetupArgs = {
   el: HTMLElement
@@ -65,14 +59,6 @@ export function startInertiaClient(options: StartInertiaClientOptions): Promise<
     return startPrototypeClient(options, options.prototype)
   }
 
-  const resolve =
-    options.resolve ??
-    createPagesResolverFactory({
-      pages: options.pages,
-      pageManifest: options.pageManifest,
-      resolveComponentPath: options.resolveComponentPath,
-    })
-
   const initialPage = options.page ?? getInitialPage()
 
   if (!initialPage) {
@@ -80,6 +66,19 @@ export function startInertiaClient(options: StartInertiaClientOptions): Promise<
       'Unable to locate the initial Inertia page payload. Pass `page` to startInertiaClient() or ensure SSR embeds window.__INERTIA_PAGE__.',
     )
   }
+
+  return mountInertiaApp(options, initialPage)
+}
+
+/** Both entry points mount through here; without `http` Inertia keeps its own XHR client. */
+function mountInertiaApp(options: StartInertiaClientOptions, page: Page, http?: HttpClient): Promise<unknown> {
+  const resolve =
+    options.resolve ??
+    createPagesResolverFactory({
+      pages: options.pages,
+      pageManifest: options.pageManifest,
+      resolveComponentPath: options.resolveComponentPath,
+    })
 
   // Inertia v3's ComponentResolver expects the component itself (or a
   // module with `default`) — unwrap our PageModule promise explicitly.
@@ -91,10 +90,11 @@ export function startInertiaClient(options: StartInertiaClientOptions): Promise<
   return createInertiaApp({
     resolve: resolveForInertia,
     setup({ el, App, props }) {
-      ; (options.setup ?? defaultSetup)({ el: el as HTMLElement, App: App as any, props: props as any })
+      (options.setup ?? defaultSetup)({ el: el as HTMLElement, App: App as any, props: props as any })
     },
     progress: options.progress,
-    page: initialPage,
+    page,
+    http,
   })
 }
 
@@ -103,6 +103,10 @@ async function startPrototypeClient(
   prototype: PrototypeLoader | PrototypeClientOptions,
 ): Promise<unknown> {
   const { load, base } = typeof prototype === 'function' ? { load: prototype, base: undefined } : prototype
+  // Loaded here, not at the top: a static import would put the fixture runtime
+  // (and Hono's router) into every production bundle of every app; a dynamic
+  // one is a chunk only a prototype build fetches.
+  const { createPrototypeHttpClient, isPrototypeDefinition, resetPrototypeState, resolveInitialPage } = await import('./prototype')
 
   if (typeof window !== 'undefined' && window.location) {
     const url = new URL(window.location.href)
@@ -110,6 +114,8 @@ async function startPrototypeClient(
       resetPrototypeState()
       url.searchParams.delete(PROTOTYPE_RESET_FLAG)
       window.location.replace(url.href)
+      // Never settles: the replace() navigation is already under way, and
+      // mounting into a document about to be discarded flashes a stale page.
       return new Promise(() => {})
     }
   }
@@ -121,31 +127,8 @@ async function startPrototypeClient(
   }
 
   const http = createPrototypeHttpClient(definition, { base })
-  const initialPage = options.page ?? (await resolveInitialPage(http, window.location))
-
-  const resolve =
-    options.resolve ??
-    createPagesResolverFactory({
-      pages: options.pages,
-      pageManifest: options.pageManifest,
-      resolveComponentPath: options.resolveComponentPath,
-    })
-  const resolveForInertia = async (name: string) => {
-    const mod = await resolve(name)
-    return (mod as { default?: React.ComponentType }).default ?? (mod as unknown as React.ComponentType)
-  }
-
-  return createInertiaApp({
-    resolve: resolveForInertia,
-    setup({ el, App, props }) {
-      ; (options.setup ?? defaultSetup)({ el: el as HTMLElement, App: App as any, props: props as any })
-    },
-    progress: options.progress,
-    page: initialPage,
-    http,
-  })
+  return mountInertiaApp(options, options.page ?? (await resolveInitialPage(http, window.location)), http)
 }
-
 
 function getInitialPage(): Page | undefined {
   if (typeof window === 'undefined') {

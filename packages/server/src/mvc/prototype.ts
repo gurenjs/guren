@@ -32,7 +32,7 @@ export type PrototypeResult =
   | { kind: 'page'; component: string; props: Record<string, unknown> }
   | { kind: 'redirect'; to: string; params?: Record<string, string | number> }
   | { kind: 'location'; url: string }
-  | { kind: 'errors'; errors: Record<string, string>; bag?: string }
+  | { kind: 'errors'; errors: Record<string, string> }
   | { kind: 'not-found' }
 
 export interface PrototypeServerContext {
@@ -47,7 +47,8 @@ export interface PrototypeServerContext {
   page(contract: { id: string; component?: string }, props: Record<string, unknown>): PrototypeResult
   redirect(to: string, params?: Record<string, string | number>): PrototypeResult
   location(url: string): PrototypeResult
-  errors(errors: Record<string, string>, bag?: string): PrototypeResult
+  /** No error bag: the framework's `ValidationException` has none, so the client-side `bag` is ignored here. */
+  errors(errors: Record<string, string>): PrototypeResult
   notFound(): PrototypeResult
   flash(key: string, value: unknown): void
 }
@@ -135,7 +136,7 @@ const BODYLESS_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 /**
  * The route's handler: the fixture entry for the route name, run against the
  * same context shape the browser client builds. The route contract is enforced
- * first, as `createContractHandler` does for an inline handler, so `guren
+ * first (`params`, `query`, `body`; not `output`, which only a response has), so `guren
  * audit`'s "runtime-enforced" verdict stays true here.
  */
 export function createPrototypeRouteHandler(
@@ -172,10 +173,10 @@ export function createPrototypeRouteHandler(
       body,
       state: stateOf(fixture),
       shared,
-      page: (contract, props) => ({ kind: 'page', component: contract.component ?? contract.id, props }),
+      page: (contract, props) => ({ kind: 'page', component: componentOf(contract), props }),
       redirect: (to, redirectParams) => ({ kind: 'redirect', to, params: redirectParams }),
       location: (target) => ({ kind: 'location', url: target }),
-      errors: (errors, bag) => ({ kind: 'errors', errors, bag }),
+      errors: (errors) => ({ kind: 'errors', errors }),
       notFound: () => ({ kind: 'not-found' }),
       flash: (key, value) => session?.flash(key, value),
     })
@@ -188,6 +189,10 @@ export function createPrototypeRouteHandler(
 }
 
 const RESULT_KINDS = new Set(['page', 'redirect', 'location', 'errors', 'not-found'])
+
+function componentOf(contract: { id: string; component?: string }): string {
+  return contract.component ?? contract.id
+}
 
 function isResult(value: unknown): value is PrototypeResult {
   return typeof value === 'object' && value !== null && RESULT_KINDS.has(String((value as { kind?: unknown }).kind))
@@ -233,7 +238,7 @@ async function answer(
     case 'not-found':
       if (fixture.notFoundPage) {
         return inertia(
-          fixture.notFoundPage.component ?? fixture.notFoundPage.id,
+          componentOf(fixture.notFoundPage),
           { ...shared, status: 404, message: 'Not Found' },
           { request: c.req.raw, status: 404 },
         )

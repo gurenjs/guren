@@ -146,7 +146,9 @@ export async function appendPrototypeEntries(cwd: string, feature: PrototypeFeat
   const stateIndex = content.indexOf(STATE_ANCHOR)
   const routesIndex = content.indexOf(ROUTES_ANCHOR)
   const alreadyThere = content.includes(`'${feature.routeName}.index':`)
-  if (stateIndex === -1 || routesIndex === -1 || alreadyThere) {
+  // `state` must precede `routes`: the routes splice is applied first so the
+  // state index stays valid, which a reordered fixture would break.
+  if (stateIndex === -1 || routesIndex === -1 || stateIndex > routesIndex || alreadyThere) {
     consola.warn(
       alreadyThere
         ? `${PROTOTYPE_FIXTURE_PATH} already answers '${feature.routeName}.index' — left unchanged. The generated blocks, for reference:`

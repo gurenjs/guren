@@ -34,6 +34,10 @@ function filesUnder(dir: string): string[] {
     .map((entry) => path.join(entry.parentPath ?? entry.path, entry.name))
 }
 
+function chunksCarryingFixture(files: string[]): string[] {
+  return files.filter((file) => file.endsWith('.js') && readFileSync(file, 'utf8').includes(FIXTURE_MARKER))
+}
+
 function assertBuild(outDir: string, label: string): void {
   for (const name of ['index.html', '404.html', '_redirects', 'favicon.svg']) {
     if (!existsSync(path.join(outDir, name))) fail(`${label}: missing ${name} in ${outDir}`)
@@ -44,17 +48,36 @@ function assertBuild(outDir: string, label: string): void {
   const index = readFileSync(path.join(outDir, 'index.html'), 'utf8')
   if (!index.includes('name="robots" content="noindex')) fail(`${label}: index.html lost its noindex tag`)
   if (readFileSync(path.join(outDir, '404.html'), 'utf8') !== index) fail(`${label}: 404.html differs from index.html`)
-  const hit = filesUnder(outDir).some((file) => file.endsWith('.js') && readFileSync(file, 'utf8').includes(FIXTURE_MARKER))
-  if (!hit) fail(`${label}: no chunk carries the fixture seed "${FIXTURE_MARKER}"`)
+  if (chunksCarryingFixture(filesUnder(outDir)).length === 0) fail(`${label}: no chunk carries the fixture seed "${FIXTURE_MARKER}"`)
   console.log(`[smoke:prototype] ${label}: ok (${outDir})`)
 }
 
-// 1. Production build: the fixture must be absent.
+// 1. Production build: the fixture must be absent, and the client library's
+// prototype runtime must be reachable only through a dynamic import — a lazy
+// chunk that no page fetches — never from a chunk the entry loads eagerly.
 run('production client build', ['bun', 'run', 'build'])
-const assets = path.join(blog, 'public/assets')
-const leaked = filesUnder(assets).filter((file) => file.endsWith('.js') && readFileSync(file, 'utf8').includes(FIXTURE_MARKER))
+const assetFiles = filesUnder(path.join(blog, 'public/assets'))
+const leaked = chunksCarryingFixture(assetFiles)
 if (leaked.length > 0) fail(`production bundle carries the fixture: ${leaked.map((f) => path.relative(blog, f)).join(', ')}`)
-if (filesUnder(assets).some((file) => /[\\/]prototype-[^\\/]+\.js$/u.test(file))) fail('production bundle emitted a prototype chunk')
+
+interface ManifestChunk { file: string; imports?: string[]; dynamicImports?: string[] }
+const manifest = JSON.parse(readFileSync(path.join(blog, 'public/assets/.vite/manifest.json'), 'utf8')) as Record<string, ManifestChunk>
+// A literal only the runtime body carries: the entry names the exports it
+// destructures from the dynamic import, so a symbol name would match it too.
+const RUNTIME_MARKER = 'http://prototype.invalid'
+const runtimeChunks = new Set(
+  Object.entries(manifest)
+    .filter(([, chunk]) => readFileSync(path.join(blog, 'public/assets', chunk.file), 'utf8').includes(RUNTIME_MARKER))
+    .map(([key]) => key),
+)
+if (runtimeChunks.size === 0) fail('no chunk carries the prototype runtime; the dynamic import was dropped or renamed, so this check sees nothing')
+for (const [key, chunk] of Object.entries(manifest)) {
+  const eager = (chunk.imports ?? []).filter((imported) => runtimeChunks.has(imported))
+  if (eager.length > 0) fail(`${chunk.file} (${key}) imports the prototype runtime statically: ${eager.join(', ')}`)
+}
+for (const key of runtimeChunks) {
+  if (!/prototype/u.test(manifest[key]!.file)) fail(`the prototype runtime landed in a shared chunk: ${manifest[key]!.file}`)
+}
 console.log('[smoke:prototype] production bundle: no fixture, ok')
 
 // 2. Prototype builds at the root and under a subpath.

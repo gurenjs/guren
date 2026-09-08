@@ -65,6 +65,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const withAuth = !options.publicAccess
   const withPolicy = Boolean(options.withPolicy)
   const writerOptions: WriterOptions = writerOptionsFrom(options)
+  const appRoot = writeRoot(options)
 
   // A collection named after a column is a compile error in the mixin, and one
   // named after an identifier the store action binds would shadow it. Both are
@@ -91,7 +92,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // guard because `make:feature` bypasses the blueprint registry. Judged at
   // `writeRoot()`: this command honours `options.cwd`, and the app judged must
   // be the app written into.
-  await assertNotApiOnly(writeRoot(options), {
+  await assertNotApiOnly(appRoot, {
     does: 'guren make:feature scaffolds Inertia pages and a controller that returns Inertia responses',
     instead: API_ONLY_FEATURE_ALTERNATIVE,
   })
@@ -99,7 +100,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // Also before the first write: without the attachments layer the mixin's
   // statics throw at first use, so refusing here beats scaffolding a feature
   // that crashes on its first upload (RFC 0013 Part 4).
-  if (attachments.length > 0 && !(await appConfiguresAttachments(writeRoot(options), new ParseCache()))) {
+  if (attachments.length > 0 && !(await appConfiguresAttachments(appRoot, new ParseCache()))) {
     throw new Error(
       'guren make:feature --attach scaffolds a model wired to the attachments layer, but this app has no '
       + 'configureAttachments() call. Run `bunx guren add attachments` first, then re-run this command. '
@@ -110,7 +111,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
 
   const prototypeFirst = Boolean(options.prototype)
-  if (prototypeFirst && !(await appHasPrototypeFixture(writeRoot(options)))) {
+  if (prototypeFirst && !(await appHasPrototypeFixture(appRoot))) {
     throw new Error(
       `guren make:feature --prototype appends entries to ${PROTOTYPE_FIXTURE_PATH}, which this app does not have. `
       + 'Run `bunx guren add prototype` first, then re-run this command. Nothing was scaffolded.',
@@ -121,7 +122,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
   // A feature scaffolded prototype-first leaves its page-data type behind;
   // finding one is what turns this run into the promotion.
-  const promoting = !prototypeFirst && !moduleName && (await fileExists(writeRoot(options), prototypeTypesPath(singular)))
+  const promoting = !prototypeFirst && !moduleName && (await fileExists(appRoot, prototypeTypesPath(singular)))
   // The pages read the entity through this import; the Resource joins it at promotion.
   const resourceImport = prototypeFirst || promoting
     ? `import type { ${singular}Data as ${singular}ResourceData } from '${prototypeTypesSpecifier(singular)}'`
@@ -131,8 +132,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // controller imports and the ones `make:validator` writes cannot drift. At
   // promotion the prototype run already wrote it, and it is kept as edited.
   const validatorRelPath = `${appPrefix}app/Http/Validators/${singular}Validator.ts`
-  const validatorPath = promoting && !options.force && (await fileExists(writeRoot(options), validatorRelPath))
-    ? resolve(writeRoot(options), validatorRelPath)
+  const validatorPath = promoting && !options.force && (await fileExists(appRoot, validatorRelPath))
+    ? resolve(appRoot, validatorRelPath)
     : await makeValidator(singular, { ...writerOptions, fields })
 
   const pageFiles = [
@@ -159,10 +160,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
       { path: prototypeTypesPath(singular), contents: generatePrototypeTypes(singular, fields) },
       ...pageFiles,
     ], writerOptions)
-    await ensureGurenUiTokens(writeRoot(writerOptions))
+    await ensureGurenUiTokens(appRoot)
     created.unshift(validatorPath)
-    const appended = await appendPrototypeEntries(writeRoot(writerOptions), { singular, collection: routeVar, routeName, variableName, fields })
-    if (appended === 'patched') created.push(resolve(writeRoot(writerOptions), PROTOTYPE_FIXTURE_PATH))
+    const appended = await appendPrototypeEntries(appRoot, { singular, collection: routeVar, routeName, variableName, fields })
+    if (appended === 'patched') created.push(resolve(appRoot, PROTOTYPE_FIXTURE_PATH))
 
     if (options.announce !== false) {
       announcePrototypeFeature({ created, singular, routeName, routeVar, withAuth })
@@ -187,7 +188,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   created.push(...(await writeScaffoldFiles(pageFiles, { ...writerOptions, skipExisting: promoting })))
 
   // The pages above style with Guren UI tokens (bg-g-page, …).
-  await ensureGurenUiTokens(writeRoot(writerOptions))
+  await ensureGurenUiTokens(appRoot)
 
   created.unshift(validatorPath)
 

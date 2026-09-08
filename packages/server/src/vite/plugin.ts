@@ -120,6 +120,7 @@ export function gurenVitePlugin(options: GurenVitePluginOptions = {}) {
 
 interface ResolvedPrototype {
   root: string
+  /** As configured until `configResolved` rewrites it to the absolute directory the build wrote to. */
   outDir: string
   shellPath: string
 }
@@ -188,7 +189,7 @@ function ensurePrototype(config: Record<string, any>, options: ResolvedOptions):
   output.manualChunks ??= createDefaultManualChunks(root)
   config.build.rollupOptions.output = output
 
-  return { root, outDir: path.resolve(root, config.build.outDir), shellPath }
+  return { root, outDir: config.build.outDir, shellPath }
 }
 
 function resolvePrototypeShell(root: string, shell: string | undefined, entry: string): string {
@@ -242,23 +243,24 @@ export function renderPrototypeShell(entry: string): string {
  */
 function finishPrototypeBuild(prototype: ResolvedPrototype): void {
   const relative = path.relative(prototype.root, prototype.shellPath)
-  const nested = path.resolve(prototype.outDir, relative)
-  const top = path.resolve(prototype.outDir, 'index.html')
+  const outDir = path.resolve(prototype.root, prototype.outDir)
+  const nested = path.resolve(outDir, relative)
+  const top = path.resolve(outDir, 'index.html')
 
   if (nested !== top && existsSync(nested)) {
     renameSync(nested, top)
     const topLevelDir = relative.split(path.sep)[0]
     if (topLevelDir && topLevelDir !== '.' && topLevelDir !== '..') {
-      rmSync(path.resolve(prototype.outDir, topLevelDir), { recursive: true, force: true })
+      rmSync(path.resolve(outDir, topLevelDir), { recursive: true, force: true })
     }
   }
 
   if (!existsSync(top)) {
-    throw new Error(`Prototype build produced no index.html in ${prototype.outDir}`)
+    throw new Error(`Prototype build produced no index.html in ${outDir}`)
   }
 
-  writeFileSync(path.resolve(prototype.outDir, '404.html'), readFileSync(top))
-  writeFileSync(path.resolve(prototype.outDir, '_redirects'), '/*    /index.html   200\n')
+  writeFileSync(path.resolve(outDir, '404.html'), readFileSync(top))
+  writeFileSync(path.resolve(outDir, '_redirects'), '/*    /index.html   200\n')
 }
 
 export default gurenVitePlugin
@@ -413,11 +415,21 @@ function ensureBuild(
   config.build.rollupOptions.output = output
 }
 
+/** `@guren/inertia-client`'s prototype entry (src or dist) and the Hono router it alone imports. */
+const PROTOTYPE_RUNTIME_MODULE = /\/inertia-client\/(?:src|dist)\/prototype(?:-[^/]+)?\.[jt]sx?$|\/node_modules\/hono\/dist\/router\//u
+
 function createDefaultManualChunks(root: string) {
   const normalizedRoot = root.replace(/\\/gu, '/')
 
   return (id: string): string | undefined => {
     const normalizedId = id.replace(/\\/gu, '/')
+
+    // Reached only through startInertiaClient()'s dynamic import; naming a
+    // vendor chunk for it would splice it into the eagerly loaded one, and the
+    // production bundle would carry the prototype runtime and Hono's router.
+    if (PROTOTYPE_RUNTIME_MODULE.test(normalizedId)) {
+      return undefined
+    }
 
     if (normalizedId.includes('/packages/inertia-client/')) {
       return 'inertia-vendor'

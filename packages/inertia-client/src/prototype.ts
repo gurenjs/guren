@@ -133,8 +133,12 @@ export function apiRoutes<TApi>(): TApi {
   return undefined as TApi
 }
 
+function componentOf(contract: { id: string; component?: string }): string {
+  return contract.component ?? contract.id
+}
+
 export function page<P extends AnyPageContract>(contract: P, props: PageProps<P>): PrototypeResult {
-  return { kind: 'page', component: contract.component ?? contract.id, props: props as Record<string, unknown> }
+  return { kind: 'page', component: componentOf(contract), props: props as Record<string, unknown> }
 }
 
 export function redirect(to: string, params?: Record<string, string | number>): PrototypeResult {
@@ -157,6 +161,9 @@ export interface PrototypeStorage {
   getItem(key: string): string | null
   setItem(key: string, value: string): void
   removeItem(key: string): void
+  /** Web Storage's enumeration, which `resetPrototypeState()` uses to find every base's key. */
+  readonly length?: number
+  key?(index: number): string | null
 }
 
 export interface PrototypeRuntimeOptions {
@@ -173,12 +180,25 @@ const STATE_VERSION = 1
 /** Redirect hops one visit may chain before the client gives up, as a browser would on a loop. */
 const MAX_REDIRECT_HOPS = 5
 
-/** Drops persisted state from both storages; the next load starts from `state()` again. */
+/** Two prototypes on one origin (`/app-a/`, `/app-b/`) must not resume each other's state. */
+export function prototypeStateKey(base: string | undefined): string {
+  const normalized = normalizeBase(base)
+  return normalized === '/' ? PROTOTYPE_STATE_KEY : `${PROTOTYPE_STATE_KEY}:${normalized}`
+}
+
+/** Drops persisted state, every base's, from both storages; the next load starts from `state()` again. */
 export function resetPrototypeState(): void {
   for (const name of ['sessionStorage', 'localStorage'] as const) {
     try {
       const storage = (globalThis as Record<string, unknown>)[name] as PrototypeStorage | undefined
-      storage?.removeItem(PROTOTYPE_STATE_KEY)
+      if (!storage) continue
+      const keys: string[] = []
+      for (let index = 0; index < (storage.length ?? 0); index += 1) {
+        const key = storage.key?.(index)
+        if (key?.startsWith(PROTOTYPE_STATE_KEY)) keys.push(key)
+      }
+      if (keys.length === 0) keys.push(PROTOTYPE_STATE_KEY)
+      for (const key of keys) storage.removeItem(key)
     } catch {
       // Storage access itself throws in some browsers' private modes.
     }
@@ -213,6 +233,7 @@ class PrototypeRuntime {
   private readonly router = new TrieRouter<string>()
   private readonly base: string
   private readonly storage: PrototypeStorage | undefined
+  private readonly stateKey: string
   private state: unknown
   private stateLoaded = false
 
@@ -222,6 +243,7 @@ class PrototypeRuntime {
   ) {
     this.base = normalizeBase(options.base)
     this.storage = options.storage ?? selectStorage(definition.persist ?? 'session')
+    this.stateKey = prototypeStateKey(this.base)
     for (const [name, route] of Object.entries(definition.manifest as RouteManifestLike)) {
       this.router.add(route.method.toUpperCase(), route.path, name)
     }
@@ -243,30 +265,29 @@ class PrototypeRuntime {
     const hops = options.hops ?? 0
     const url = new URL(target, 'http://prototype.invalid')
     const path = this.stripBase(url.pathname)
+    const requestUrl = path + url.search
     const bodyObject = toBodyObject(body)
-    const spoofed = method.toUpperCase() === 'POST' && typeof bodyObject?._method === 'string'
+    const sent = method.toUpperCase()
+    const spoofed = sent === 'POST' && typeof bodyObject?._method === 'string'
       ? String(bodyObject._method).toUpperCase()
-      : method.toUpperCase()
+      : sent
 
     const match = this.match(spoofed, path)
-    if (!match) return this.notFoundAnswer(path + url.search, `No named route matches ${spoofed} ${path}`)
+    if (!match) return this.notFoundAnswer(requestUrl, `No named route matches ${spoofed} ${path}`)
 
     const handler = this.definition.routes[match.name] as AnyHandler | undefined
     if (!handler) {
-      return this.notFoundAnswer(
-        path + url.search,
-        `Route "${match.name}" has no fixture entry in resources/js/prototype/index.ts`,
-      )
+      return this.notFoundAnswer(requestUrl, `Route "${match.name}" has no fixture entry in resources/js/prototype/index.ts`)
     }
 
     // Flash set by an earlier hop rides along, as a session flash survives the
     // redirect a mutating action answers with.
     const flash: Record<string, unknown> = { ...options.flash }
-    const ctx = this.context(spoofed, path + url.search, match.params, parseQuery(url.searchParams), bodyObject ?? body, flash)
+    const ctx = this.context(spoofed, requestUrl, match.params, parseQuery(url.searchParams), bodyObject ?? body, flash)
     const result = await handler(ctx)
     this.persistState()
 
-    return this.answer(result, path + url.search, flash, { ...options, hops })
+    return this.answer(result, requestUrl, flash, { ...options, hops })
   }
 
   private async answer(
@@ -322,12 +343,7 @@ class PrototypeRuntime {
 
   private notFoundAnswer(requestUrl: string, message: string): Dispatched {
     if (this.definition.notFoundPage) {
-      return this.pageAnswer(
-        this.definition.notFoundPage.component ?? this.definition.notFoundPage.id,
-        { status: 404, message },
-        requestUrl,
-        {},
-      )
+      return this.pageAnswer(componentOf(this.definition.notFoundPage), { status: 404, message }, requestUrl, {})
     }
     // What ExceptionHandler answers an Inertia request with: JSON, no x-inertia
     // header, which the client shows in its error dialog.
@@ -396,7 +412,7 @@ class PrototypeRuntime {
   private readStoredState(): unknown {
     if (!this.storage) return undefined
     try {
-      const raw = this.storage.getItem(PROTOTYPE_STATE_KEY)
+      const raw = this.storage.getItem(this.stateKey)
       if (!raw) return undefined
       const envelope = JSON.parse(raw) as { v?: number; state?: unknown }
       return envelope.v === STATE_VERSION ? envelope.state : undefined
@@ -408,7 +424,7 @@ class PrototypeRuntime {
   private persistState(): void {
     if (!this.storage || !this.stateLoaded) return
     try {
-      this.storage.setItem(PROTOTYPE_STATE_KEY, JSON.stringify({ v: STATE_VERSION, state: this.state }, dropBlobs))
+      this.storage.setItem(this.stateKey, JSON.stringify({ v: STATE_VERSION, state: this.state }, dropBlobs))
     } catch {
       // Quota or a private-mode refusal: the in-memory state stays authoritative for this tab.
     }
@@ -505,17 +521,19 @@ function toBodyObject(body: unknown): Record<string, unknown> | undefined {
   return undefined
 }
 
-function headerValue(headers: HttpRequestConfig['headers'], name: string): string | undefined {
-  if (!headers) return undefined
-  const wanted = name.toLowerCase()
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === wanted && value !== undefined && value !== null) return String(value)
+/** Header names are case-insensitive, and Inertia's own client spells them however it likes. */
+function headerMap(headers: HttpRequestConfig['headers']): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const [key, value] of Object.entries(headers ?? {})) {
+    if (value !== undefined && value !== null) map.set(key.toLowerCase(), String(value))
   }
-  return undefined
+  return map
 }
 
-function splitList(value: string | undefined): string[] {
-  return value ? value.split(',').map((item) => item.trim()).filter(Boolean) : []
+/** A partial-reload header as its top-level prop names: `author.name` selects `author`. */
+function propNames(value: string | undefined): Set<string> {
+  const items = value ? value.split(',').map((item) => item.trim()).filter(Boolean) : []
+  return new Set(items.map((item) => item.split('.')[0]!))
 }
 
 /**
@@ -523,11 +541,10 @@ function splitList(value: string | undefined): string[] {
  * `Response.mergeProps()` overlays every returned prop on the current page.
  * `errors` stays, since Inertia decides itself whether to preserve it.
  */
-function applyPartial(page: AnswerPage, headers: HttpRequestConfig['headers']): AnswerPage {
-  const component = headerValue(headers, 'X-Inertia-Partial-Component')
-  if (!component || component !== page.component) return page
-  const only = new Set(splitList(headerValue(headers, 'X-Inertia-Partial-Data')).map((key) => key.split('.')[0]!))
-  const except = new Set(splitList(headerValue(headers, 'X-Inertia-Partial-Except')).map((key) => key.split('.')[0]!))
+function applyPartial(page: AnswerPage, headers: Map<string, string>): AnswerPage {
+  if (headers.get('x-inertia-partial-component') !== page.component) return page
+  const only = propNames(headers.get('x-inertia-partial-data'))
+  const except = propNames(headers.get('x-inertia-partial-except'))
   if (only.size === 0 && except.size === 0) return page
   const props = Object.fromEntries(
     Object.entries(page.props).filter(([key]) => key === 'errors' || (only.size > 0 ? only.has(key) : !except.has(key))),
@@ -562,15 +579,16 @@ export function createPrototypeHttpClient(
       const processed = await http.processRequest(config)
       try {
         throwIfAborted(processed.signal, processed.url)
+        const headers = headerMap(processed.headers)
         const target = withParams(processed.url, processed.params)
         const answered = await runtime.dispatch(processed.method, target, processed.data, {
-          errorBag: headerValue(processed.headers, 'X-Inertia-Error-Bag'),
+          errorBag: headers.get('x-inertia-error-bag'),
         })
         throwIfAborted(processed.signal, processed.url)
 
         let body = answered.body
         if (answered.headers['x-inertia'] === 'true' && processed.method.toUpperCase() === 'GET') {
-          body = JSON.stringify(applyPartial(JSON.parse(body) as AnswerPage, processed.headers))
+          body = JSON.stringify(applyPartial(JSON.parse(body) as AnswerPage, headers))
         }
         const response: HttpResponse = { status: answered.status, data: body, headers: answered.headers }
         if (response.status >= 400) {

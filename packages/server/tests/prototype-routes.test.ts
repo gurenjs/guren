@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { z } from 'zod'
-import { Application, Controller, Router, prototype, setInertiaSharedProps, type PrototypeFixture } from '../src'
+import {
+  Application,
+  Controller,
+  Router,
+  prototype,
+  setInertiaSharedProps,
+  type PrototypeFixture,
+  type PrototypeServerContext,
+} from '../src'
 
 class RealController extends Controller {
   async index() {
@@ -8,28 +16,35 @@ class RealController extends Controller {
   }
 }
 
+interface DemoState {
+  posts: { id: number; title: string }[]
+}
+
 function fixture(overrides: Partial<PrototypeFixture> = {}): PrototypeFixture {
-  const state = { posts: [{ id: 1, title: 'Seeded' }] }
+  const seed: DemoState = { posts: [{ id: 1, title: 'Seeded' }] }
   return {
     manifest: {},
     shared: { auth: { user: { id: 1, name: 'Demo' } }, demo: true },
-    state: () => state,
+    state: () => seed,
+    // `routes` is declared `(ctx: never) => unknown` so a client-typed fixture
+    // stays assignable; a handler written here names its context instead.
     routes: {
-      'posts.index': ({ state, page, query }) =>
-        page({ id: 'posts/Index' }, { posts: (state as typeof state).posts, q: query.q ?? null }),
-      'posts.show': ({ state, params, page, notFound }) => {
-        const post = (state as typeof state).posts.find((p) => p.id === Number(params.id))
+      'posts.index': ({ state, page, query }: PrototypeServerContext) =>
+        page({ id: 'posts/Index' }, { posts: (state as DemoState).posts, q: query.q ?? null }),
+      'posts.show': ({ state, params, page, notFound }: PrototypeServerContext) => {
+        const post = (state as DemoState).posts.find((item) => item.id === Number(params.id))
         return post ? page({ id: 'posts/Show' }, { post }) : notFound()
       },
-      'posts.store': ({ state, body, redirect, errors, flash }) => {
+      'posts.store': ({ state, body, redirect, errors, flash }: PrototypeServerContext) => {
         const title = (body as { title?: string }).title
         if (!title) return errors({ title: 'Title is required.' })
-        const post = { id: (state as typeof state).posts.length + 1, title }
-        ;(state as typeof state).posts.push(post)
+        const posts = (state as DemoState).posts
+        const post = { id: posts.length + 1, title }
+        posts.push(post)
         flash('success', 'Created')
         return redirect('posts.show', { id: post.id })
       },
-      away: ({ location }) => location('https://example.com/'),
+      away: ({ location }: PrototypeServerContext) => location('https://example.com/'),
     },
     ...overrides,
   }

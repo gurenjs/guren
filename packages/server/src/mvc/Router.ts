@@ -45,7 +45,9 @@ export type RouteHandler<C extends ControllerConstructor = ControllerConstructor
   | ControllerAction<C>
   | PrototypeRouteHandler
 
-type AnyRouteHandler = ((c: Context, next: Next) => RouteResult | Promise<RouteResult>) | AnyControllerAction | PrototypeRouteHandler
+type CallableRouteHandler = ((c: Context, next: Next) => RouteResult | Promise<RouteResult>) | AnyControllerAction
+
+type AnyRouteHandler = CallableRouteHandler | PrototypeRouteHandler
 
 type ModelBindingResolver = (value: string) => Promise<unknown>
 
@@ -670,12 +672,12 @@ export class Router<M extends string = never> {
   mount(app: Hono, options: RouterMountOptions = {}): void {
     for (const route of this.registry) {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
-      const handler = route.prototype
+      const handler = isPrototypeHandler(route.handler)
         ? createPrototypeRouteHandler(route, {
             container: options.container,
             routeUrl: (name, params) => this.route(name, params),
           })
-        : resolveHandler(route.handler as Exclude<AnyRouteHandler, PrototypeRouteHandler>, this.modelBindings, options.container, route.bindings, route.path)
+        : resolveHandler(route.handler, this.modelBindings, options.container, route.bindings, route.path)
       const contractMiddleware = createContractValidationMiddleware(route)
       const inlineMiddlewares = [...route.scopedMiddlewares, ...route.middlewares]
       // Last before the handler, so a verdict answers only for a request that
@@ -1384,7 +1386,7 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
 }
 
 function resolveHandler(
-  action: Exclude<AnyRouteHandler, PrototypeRouteHandler>,
+  action: CallableRouteHandler,
   modelBindings: Map<string, RegisteredBinding>,
   container?: Container,
   routeBindings?: Map<string, ModelBinding>,
