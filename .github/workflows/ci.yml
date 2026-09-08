@@ -284,10 +284,8 @@ jobs:
   # themselves and run in parallel with everything else.
   starter-smokes:
     runs-on: ubuntu-latest
-    # Measured max 16m29s at eleven tutorial chapters: it rebuilds the packages,
-    # runs eight scaffold smokes, and executes every chapter of the tutorial in
-    # order. The tutorial grows, so the cap has headroom over the measurement.
-    timeout-minutes: 40
+    # Measured 3m41s without the tutorial, which is its own job below.
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -348,17 +346,32 @@ jobs:
       - name: Golden path smoke test
         run: bun run smoke:golden-path
 
-      # docs/en/tutorials/NN-*.md run as a script, chapter by chapter, each
-      # ending in guren gate and a build (RFC 0019).
-      - name: Tutorial smoke
-        run: bun run smoke:tutorial
-
       - name: Golden path smoke test (postgres)
         run: bun run smoke:golden-path:postgres
 
       # The only place a --db mysql scaffold is typechecked and migrated.
       - name: Golden path smoke test (mysql)
         run: bun run smoke:golden-path:mysql
+
+  tutorial-smoke:
+    runs-on: ubuntu-latest
+    # docs/en/tutorials/NN-*.md run as a script, chapter by chapter, each ending
+    # in guren gate and a build (RFC 0019). Its own job, not a starter-smokes
+    # step: at 18m34s (run 34225024536) it is five times the next longest job,
+    # so running it in series set the merge floor at its own length.
+    # No service container: chapter 1 scaffolds --db sqlite and no chapter
+    # reaches for a server.
+    timeout-minutes: 40
+    env:
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
+
+      - name: Tutorial smoke
+        run: bun run smoke:tutorial
 
   sqlite-smoke:
     runs-on: ubuntu-latest
