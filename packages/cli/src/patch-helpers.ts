@@ -720,13 +720,18 @@ function statementStart(source: string, offset: number): number {
 
 /**
  * Where `name`'s declaration and its aggregate key go, from the one aggregate reading in
- * `schema-parser.ts`. `name` is passed as the extra key so a re-run over a file that already
- * declares the table still recognizes the object listing it.
+ * `schema-parser.ts`, for an aggregate the file itself identifies. `name` is passed as the
+ * extra key so a re-run over a file that already declares the table still recognizes the
+ * object listing it.
  */
 function planAggregateSplice(source: string, name: string): AggregateSplice | null {
   const ast = parseSourceFile(source, 'db/schema.ts')
   const aggregate = ast && findSchemaAggregate(ast, name)
-  if (!aggregate) return null
+  // A shape match the file does not identify is not enough to edit a hand-kept object:
+  // `guren check` grades the same match advisory. Null here also silences
+  // `appendSchemaTable`'s stale-aggregate warning, deliberately — advising by hand the
+  // edit the writer itself declined is that same guess in prose.
+  if (!aggregate?.confident) return null
 
   const { object, statement, keys } = aggregate
   const last = object.properties[object.properties.length - 1]
@@ -764,10 +769,10 @@ function indentOfLine(source: string, offset: number): string {
 
 /**
  * `source` with `block` declaring `name` added — the one rule for writing a table into a
- * `db/schema.ts`, called by every scaffolder that adds one. End of file, unless the app
- * keeps an aggregate object of its tables: then the key goes in and the declaration goes
- * *ahead* of the object, since a `const` naming a table declared further down the file is
- * a use before declaration (TS2448).
+ * `db/schema.ts`, called by every scaffolder that adds one. End of file, unless the file
+ * identifies an aggregate object of its tables: then the key goes in and the declaration
+ * goes *ahead* of the object, since a `const` naming a table declared further down the
+ * file is a use before declaration (TS2448).
  */
 export function appendTableToSchema(
   source: string,

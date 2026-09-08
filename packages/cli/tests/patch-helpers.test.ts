@@ -658,6 +658,33 @@ export const options = { retries, timeout }
     expect(content.trimEnd().endsWith(SESSIONS_BLOCK.trimEnd())).toBe(true)
   })
 
+  it('adds the identifier to an aggregate the file reads in a `typeof`', async () => {
+    // The other half of the evidence `findSchemaAggregate` accepts: not named `schema`,
+    // but the file itself says what the object is.
+    const content = await appendSessions(`${PG_TABLES}
+export const appSchema = { users, posts }
+
+export type AppSchema = typeof appSchema
+`)
+
+    expect(content).toContain('export const appSchema = { users, posts, sessions }')
+    expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const appSchema ='))
+  })
+
+  it('leaves a table-shaped object the file does not identify alone', async () => {
+    // A deliberate grouping of some tables is indistinguishable from the aggregate on
+    // shape, so the writer falls all the way back: no key, and no declaration moved
+    // ahead of the object — the reordering exists only to make the key legal.
+    const content = await appendSessions(`${PG_TABLES}
+export const authTables = { users }
+`)
+
+    expect(content).toContain('export const authTables = { users }')
+    expect(content).not.toContain('sessions }')
+    expect(content.trimEnd().endsWith(SESSIONS_BLOCK.trimEnd())).toBe(true)
+    expect(content.indexOf('export const sessions =')).toBeGreaterThan(content.indexOf('export const authTables ='))
+  })
+
   it('leaves an aggregate ambiguous between two candidates alone', async () => {
     const content = await appendSessions(`${PG_TABLES}
 export const schema = { users, posts }
@@ -725,6 +752,17 @@ export const schema = { users }
 
     expect(warned).toContain('stays out of `typeof schema`')
     expect(warned).not.toContain('moving `export const sessions`')
+  })
+
+  it('says nothing about a table-shaped object the file does not identify', async () => {
+    // The writer declines to add the key here, so advising the same edit by hand would
+    // be the guess it just refused. `guren check` still reports it, advisory.
+    const warned = await warningsFor(`${PG_TABLES}
+export const authTables = { users }
+
+${DECLARED}`)
+
+    expect(warned).toBe('')
   })
 })
 
