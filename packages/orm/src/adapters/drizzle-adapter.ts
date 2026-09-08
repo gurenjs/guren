@@ -201,7 +201,6 @@ async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning:
 }
 
 const NOOP = () => undefined
-const NOOP_TRANSACTION = NOOP as unknown as (trx: unknown) => Promise<undefined>
 
 /**
  * Whether `db.transaction()` awaits its callback before committing: drizzle's
@@ -212,11 +211,10 @@ const NOOP_TRANSACTION = NOOP as unknown as (trx: unknown) => Promise<undefined>
  */
 async function awaitsItsCallback(db: DrizzleDatabase): Promise<boolean> {
   if (transactionAwaitsCallback === undefined) {
-    const probe = db.transaction?.(NOOP_TRANSACTION)
-    // The verdict is the shape of the return value, so it is already known here.
-    // Settling the probe only keeps its transaction from outliving this call, and
-    // its failure must not stand in for the caller's own — on a pooled driver the
-    // two hold different connections.
+    const probe = db.transaction?.(NOOP as unknown as (trx: unknown) => Promise<undefined>)
+    // Settling the probe only keeps its transaction from outliving this call; the
+    // verdict is already recorded. Its failure must not stand in for the caller's
+    // own — on a pooled driver the two hold different connections.
     transactionAwaitsCallback = isPromiseLike(probe)
     if (isPromiseLike(probe)) await probe.catch(NOOP)
   }
@@ -253,7 +251,8 @@ async function runOwnTransaction<TResult>(
   // Bound: these are methods, and a detached one loses the dialect it reads.
   const run = db.run.bind(db)
   const slot = transactionQueue.then(() => runExclusively(db, run, callback))
-  // The queue only orders; a rejected slot must not reject the next one.
+  // The queue only orders: a settled slot must neither reject the next one nor,
+  // via a value-preserving `.catch`, pin its result until the next transaction.
   transactionQueue = slot.then(NOOP, NOOP)
   return slot
 }
@@ -269,38 +268,25 @@ async function runExclusively<TResult>(
   run: NonNullable<DrizzleDatabase['run']>,
   callback: (trx: unknown) => Promise<TResult>,
 ): Promise<TResult> {
+  // Outside the try: a BEGIN that failed opened nothing to unwind, and the flag
+  // belongs to whichever transaction refused it.
   await run(sql.raw('begin'))
   transactionOpen = true
 
-  let result: TResult
   try {
-    result = await callback(db)
-  } catch (error) {
-    // The callback's error is what the caller has to see, so a failing
-    // ROLLBACK must not replace it.
-    await unwind(run)
-    throw error
-  }
-
-  try {
+    const result = await callback(db)
     await run(sql.raw('commit'))
-    transactionOpen = false
+    return result
   } catch (error) {
-    // A refused COMMIT leaves the transaction open, and the next caller would
-    // inherit one this call never left behind.
-    await unwind(run)
+    // Reached by a refused COMMIT too, which leaves the transaction open. The
+    // caller's error is what they have to see, so a failing ROLLBACK must not
+    // replace it.
+    try {
+      await run(sql.raw('rollback'))
+    } catch {
+      /* empty */
+    }
     throw error
-  }
-
-  return result
-}
-
-/** Ends the open transaction without letting its own failure mask the caller's. */
-async function unwind(run: NonNullable<DrizzleDatabase['run']>): Promise<void> {
-  try {
-    await run(sql.raw('rollback'))
-  } catch {
-    /* empty */
   } finally {
     transactionOpen = false
   }
