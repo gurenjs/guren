@@ -618,5 +618,16 @@ describe('DrizzleAdapter', () => {
         'DrizzleAdapter: configured database does not support transactions.',
       )
     })
+
+    it('throws when a database that commits without awaiting exposes no run()', async () => {
+      const { db } = createMockDatabase()
+      // The bun-sqlite shape: the callback's promise is committed on, never awaited.
+      DrizzleAdapter.configure({ ...db, transaction: (callback: (trx: unknown) => unknown) => void callback(db) } as never)
+
+      const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
+      await expect(runTransaction(async () => 'ok')).rejects.toThrow(
+        'exposes no run() to drive BEGIN/COMMIT with',
+      )
+    })
   })
 })
