@@ -8,7 +8,8 @@ import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 // Integration test against the real bun:sqlite driver, whose drizzle
 // `transaction()` COMMITs on whatever the callback returns without awaiting it.
 // Only a real driver can show whether a write survived a throw, which is why the
-// SQL-shape tests next door pass whether or not the transaction is atomic.
+// SQL-shape tests next door pass whether or not the transaction is atomic. The
+// adapter's queue is module-level; `beforeEach`'s `configure()` is what resets it.
 
 const postsTable = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -120,6 +121,26 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
     ).rejects.toThrow('cannot begin a transaction while one is already open')
 
     // The outer transaction saw the nested call's error and rolled back with it.
+    expect(titles()).toEqual(['original'])
+  })
+
+  it('should refuse a nested transaction opened before the outer callback awaits anything', async () => {
+    // Raced rather than left to the suite timeout: were the flag set any later
+    // than the BEGIN it follows, this call would queue behind the transaction it
+    // is running inside and hang, which reads as a neighbouring test failing.
+    const deadlock = new Promise((_resolve, reject) => {
+      setTimeout(() => reject(new Error('queued behind its own transaction')), 2000)
+    })
+
+    const nested = Post.transaction(async () => {
+      await Post.transaction(async (_inner, innerPost) => {
+        await innerPost.create({ title: 'nested' })
+      })
+    })
+
+    await expect(Promise.race([nested, deadlock])).rejects.toThrow(
+      'cannot begin a transaction while one is already open',
+    )
     expect(titles()).toEqual(['original'])
   })
 
