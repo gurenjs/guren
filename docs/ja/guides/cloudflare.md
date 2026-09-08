@@ -270,6 +270,66 @@ APP_KEY=base64:...
 
 `public/` から拡張子なし URL で HTML を配信したい場合は、`wrangler.jsonc` で `"html_handling"` を自分で指定してください。値が書かれていればビルドはそれを尊重します。その分 `.html` のルールは弱くなります。
 
+## スケジュールタスク
+
+生成されるワーカーは `fetch` と並んで `scheduled` ハンドラを export します。そのため Cloudflare の cron トリガーが、アプリが `createScheduler()` で登録したタスクを実行します。Workers には常駐プロセスがなく、`scheduler.start()` はそこでは動きません。時計を進めるのはトリガーです。
+
+用意するものは 2 つです。1 つめは、Bun サーバーのときとまったく同じ、タスクと scheduler をバインドするプロバイダです。タスクを `app/Console/Kernel.ts` に宣言しておくと、`guren schedule:list` と `guren schedule:run` からも見えるようになります。
+
+```ts
+// app/Console/Kernel.ts
+import { Schedule, getContainer, type SessionManager } from '@guren/core'
+
+export function scheduleTasksKernel(): Schedule {
+  const schedule = new Schedule()
+
+  // 解決はカーネルの構築時ではなくタスクの実行時です。コンテナを公開するのは
+  // app.boot() で、cron のエントリポイントはそれを先に await します。
+  schedule
+    .call(() => getContainer().make<SessionManager>('session').pruneExpired())
+    .hourly()
+    .name('sessions:prune')
+
+  return schedule
+}
+```
+
+```ts
+// app/Providers/SchedulingProvider.ts
+import { ServiceProvider, createScheduler } from '@guren/core'
+import { scheduleTasksKernel } from '../Console/Kernel.js'
+
+export default class SchedulingProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('scheduler', () => {
+      // logger を渡さないと、例外を投げたタスクは捕捉されて捨てられます (後述)。
+      const scheduler = createScheduler({ logger: console.log })
+      for (const task of scheduleTasksKernel().buildTasks()) {
+        scheduler.addTask(task)
+      }
+      return scheduler
+    })
+  }
+}
+```
+
+2 つめは `wrangler.jsonc` のトリガーそのものです。ビルドはこれを生成しません: トリガーはタスクの有無にかかわらず起動し、課金されるためです。
+
+```jsonc
+{
+  "triggers": { "crons": ["* * * * *"] }
+}
+```
+
+起動のたびに、その分に該当するタスクだけが実行されます。したがって**トリガーが最も細かいタスクより粗いと、そのタスクは一度も動きません**。`["0 * * * *"]` のトリガーと `.dailyAt('03:30')` のタスクは噛み合いません。スケジュールする最小粒度にトリガーを合わせるか、トリガーの境界だけにスケジュールしてください。
+
+Workers 固有の制約は次のとおりです。
+
+- **`schedule.command()` は動きません。** `node:child_process` 経由でシェルに委ねますが、Workers には実行するサブプロセスがありません。ビルド時ではなく、タスクの実行時に失敗します。`schedule.call()` または `schedule.job()` を使い、処理を直接呼んでください。上の例が `sessions:prune` をインプロセスで書いた形です。
+- **`scheduler` バインディングが見つからないトリガーは例外を投げます。** 何も掃除していないのに成功として報告することはありません。エラーメッセージが対処法を示し、他のワーカー例外と同じく `wrangler tail` に出ます。
+- **タスク自身の例外は投げません。** `runDueTasks()` はタスクごとに捕捉し、scheduler の `logger` に報告しますが、その既定値は何もしない関数です。そのため D1 のエラーで sweep が失敗しても成功として報告され、`wrangler tail` には何も出ません。scheduler の生成時に `logger` を渡してください。
+- **`preventOverlapping()` と `onOneServer()` は起動をまたいで効きません。** どちらもタスク上のメモリ内フラグで、起動ごとに新しい isolate になりうるためです。トリガー間隔より遅いタスクは自分自身と重なります。タスクを間隔より短く保つか、isolate より長生きする場所にガードを置いてください。D1 の行か、インスタンスごとの永続 state と alarm ベースのスケジュールを持つ Durable Object です([永続エージェント](./durable-agents.md))。cron トリガーが向くのは identity を持たないアプリ全体の sweep で、重複してはいけないジョブは identity を持ちます。それを表すのが Durable Object です。
+
 ## 永続エージェント
 
 Workers は、アプリケーション自身がホストするエージェントの基盤でもあります。Durable Object が、長命なエージェントに永続的な identity・永続的な state・alarm に支えられたスケジュールを与えます。`@guren/plugin-agents` はそれらを、ルートがすでに宣言しているエージェントツールの背後に置きます。
@@ -281,6 +341,8 @@ Workers は、アプリケーション自身がホストするエージェント
 ## 既存アプリの更新
 
 `wrangler.jsonc` は初回のみ生成され、その後は上書きされません。そのため、プラグイン更新前に作られたアプリは元の設定を保ち続けます。古い設定を検出すると、ビルドが不足している項目を具体的に出力するので、それを追記して再ビルドしてください。
+
+唯一出力しないのが `triggers.crons` です。アプリがスケジュールタスクを登録しているかどうかは、スケジュールカーネルを見つけて読み込めるビルドにしか分からず、それ以外の書き方で宣言されたタスクは「無い」と読めてしまいます。そのためビルドは推測せず黙ります。タスクを持っていて Workers でも動かしたい場合は、トリガーを手で追記してください。[スケジュールタスク](#スケジュールタスク)を参照してください。
 
 ## デプロイ後
 

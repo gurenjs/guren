@@ -270,6 +270,66 @@ Everything under `public/` is staged into `.cloudflare/assets/` and served by Wo
 
 If your app deliberately serves pretty-URL HTML out of `public/`, set `"html_handling"` yourself in `wrangler.jsonc`; the build leaves any value you name alone, and the `.html` rule is weaker for it.
 
+## Scheduled Tasks
+
+The generated worker exports a `scheduled` handler alongside `fetch`, so a Cloudflare cron trigger runs the tasks your app registered with `createScheduler()`. There is no long-lived process on Workers to hold a ticking scheduler, and `scheduler.start()` never runs there — the trigger is what advances the clock.
+
+Two things you supply. First, the tasks and a provider binding the scheduler, exactly as on a Bun server. Declaring them in `app/Console/Kernel.ts` is what also lets `guren schedule:list` and `guren schedule:run` see them:
+
+```ts
+// app/Console/Kernel.ts
+import { Schedule, getContainer, type SessionManager } from '@guren/core'
+
+export function scheduleTasksKernel(): Schedule {
+  const schedule = new Schedule()
+
+  // Resolved when the task runs, not when the kernel is built: the container
+  // is published by app.boot(), which the cron entrypoint awaits first.
+  schedule
+    .call(() => getContainer().make<SessionManager>('session').pruneExpired())
+    .hourly()
+    .name('sessions:prune')
+
+  return schedule
+}
+```
+
+```ts
+// app/Providers/SchedulingProvider.ts
+import { ServiceProvider, createScheduler } from '@guren/core'
+import { scheduleTasksKernel } from '../Console/Kernel.js'
+
+export default class SchedulingProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('scheduler', () => {
+      // Without a logger, a task that throws is caught and discarded — see below.
+      const scheduler = createScheduler({ logger: console.log })
+      for (const task of scheduleTasksKernel().buildTasks()) {
+        scheduler.addTask(task)
+      }
+      return scheduler
+    })
+  }
+}
+```
+
+Second, the trigger itself in `wrangler.jsonc`. The build does not scaffold one — a trigger fires and bills whether or not the app has tasks:
+
+```jsonc
+{
+  "triggers": { "crons": ["* * * * *"] }
+}
+```
+
+Each firing runs whichever tasks are due at that minute, so **a trigger coarser than your finest task means that task never runs**: a `["0 * * * *"]` trigger and a task at `.dailyAt('03:30')` never meet. Match the trigger to the finest granularity you schedule, or schedule only on the trigger's own boundaries.
+
+Constraints particular to Workers:
+
+- **`schedule.command()` does not work.** It shells out through `node:child_process`, which Workers has no subprocess to run. It fails when the task runs, not at build time. Use `schedule.call()` or `schedule.job()` and call the work directly — the example above is what `sessions:prune` looks like in-process.
+- **A trigger that finds no `scheduler` binding throws**, rather than reporting a successful sweep of nothing. The error names the fix and lands in `wrangler tail` like any other worker exception.
+- **A task that throws does not.** `runDueTasks()` catches per task and reports through the scheduler's `logger`, which defaults to a no-op — so a sweep failing on a D1 error would report success with nothing in `wrangler tail`. Pass a `logger` when you create the scheduler.
+- **`preventOverlapping()` and `onOneServer()` do not carry across firings.** Both are in-memory flags on the task, and every invocation may get a fresh isolate — so a task slower than the trigger interval overlaps itself. Keep tasks shorter than the interval, or hold the guard somewhere that outlives the isolate: a row in D1, or a Durable Object, which has durable per-instance state and its own alarm-backed schedules ([Durable Agents](./durable-agents.md)). A cron trigger is the right shape for an app-wide sweep with no identity; a job that must not overlap itself has an identity, and that is what a Durable Object addresses.
+
 ## Durable Agents
 
 Workers is also the substrate for agents your application hosts itself: Durable Objects give a long-lived agent durable identity, durable state and alarm-backed schedules. `@guren/plugin-agents` puts them behind the same agent tools your routes already declare.
@@ -281,6 +341,8 @@ The Free-plan measurements for a deployed agent, the D1 query budget a sweep has
 ## Upgrading an Existing App
 
 `wrangler.jsonc` is scaffolded once and never overwritten, so an app created before a plugin update keeps its original config. The build prints exactly which entries are missing when it finds an outdated one — add them and rebuild.
+
+`triggers.crons` is the one entry it does not print. Whether an app registers scheduled tasks is only visible to a build that can find and load its schedule kernel, and a task declared any other way would read as absent — so the build stays quiet rather than guessing. An app that has tasks and wants them to run on Workers adds the trigger by hand; see [Scheduled Tasks](#scheduled-tasks).
 
 ## Post-Deployment
 

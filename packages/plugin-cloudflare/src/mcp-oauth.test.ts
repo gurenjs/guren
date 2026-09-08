@@ -187,15 +187,16 @@ describe('cloudflare:build --mcp-oauth', () => {
       const worker = await build()
 
       expect(worker).toContain("import { OAuthProvider } from \"@cloudflare/workers-oauth-provider\"")
-      expect(worker).toContain('export default new OAuthProvider({')
+      expect(worker).toContain('const oauth = new OAuthProvider({')
       expect(worker).toContain('apiRoute: "/mcp"')
       expect(worker).toContain('defaultHandler: handler')
       expect(worker).toContain('authorizeEndpoint: "/oauth/authorize"')
       expect(worker).toContain('tokenEndpoint: "/oauth/token"')
       expect(worker).toContain('clientRegistrationEndpoint: "/oauth/register"')
-      // No bare `export default createWorkersHandler(app)` — that would serve
-      // the MCP endpoint outside the provider entirely.
-      expect(worker).not.toContain('export default createWorkersHandler(app)')
+      // Requests reach the provider, never the handler directly — that would
+      // serve the MCP endpoint outside the provider entirely.
+      expect(worker).toContain('fetch: (request, env, ctx) => oauth.fetch(request, env, ctx)')
+      expect(worker).not.toContain('handler.fetch(request, env, ctx)')
     })
 
     test('should import the seam from the plugin-mcp oauth subpath', async () => {
@@ -268,7 +269,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
       const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
-      expect(worker).toContain('export default createWorkersHandler(app)')
+      expect(worker).toContain('fetch: (request, env, ctx) => handler.fetch(request, env, ctx)')
       expect(worker).not.toContain('OAuthProvider')
       expect(worker).not.toContain('@guren/plugin-mcp/oauth')
     })

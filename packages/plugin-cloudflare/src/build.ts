@@ -1101,21 +1101,34 @@ function renderWorkerModule(input: {
     lines.push(`setInertiaSsrRenderer(ssrModule.${input.ssrImport.rendererExport})`, '')
   }
 
-  if (!input.mcpOAuth && !hasAgents) {
-    lines.push('export default createWorkersHandler(app)', '')
-    return lines.join('\n')
-  }
-
   lines.push('const handler = createWorkersHandler(app)', '')
 
   if (hasAgents) {
     lines.push(renderAgentWiring(input.out, input.root, input.agents, input.agentBindings), '')
   }
 
-  const entry = hasAgents ? 'agentEntry' : 'handler'
-  lines.push(input.mcpOAuth ? renderOAuthWorker(input.mcpPath, entry) : `export default ${entry}`, '')
+  if (input.mcpOAuth) {
+    lines.push(renderOAuthProvider(input.mcpPath, hasAgents ? 'agentEntry' : 'handler'), '')
+  }
+
+  lines.push(renderDefaultExport(input.mcpOAuth ? 'oauth' : hasAgents ? 'agentEntry' : 'handler'), '')
 
   return lines.join('\n')
+}
+
+/**
+ * The module's one default export, emitted the same way for every shape so none
+ * can gain a `fetch` without a `scheduled` beside it — a cron trigger reaching
+ * an export that has none does nothing at all, with no error anywhere. Neither
+ * `agentEntry` nor `OAuthProvider` carries one, so `scheduled` is the handler's.
+ */
+function renderDefaultExport(fetchEntry: string): string {
+  // An arrow rather than a bound reference: `OAuthProvider` is a class
+  // instance, and `fetch` detached from it loses its `this`.
+  return `export default {
+  fetch: (request, env, ctx) => ${fetchEntry}.fetch(request, env, ctx),
+  scheduled: (event, env, ctx) => handler.scheduled(event, env, ctx),
+}`
 }
 
 /** An import specifier for the generated worker, relative to it and quoted. */
@@ -1217,16 +1230,16 @@ function wranglerConfigExists(path: string): boolean {
 const HTML_HANDLING = 'none'
 
 /**
- * The OAuth-fronted export: the module's one handler threaded through both
+ * The OAuth-fronted entry: the module's one handler threaded through both
  * halves of the provider. The grant travels through the seam, not a header:
  * `ctx.props` is what the provider decrypted from the access token it validated.
  * @param defaultEntry What unprotected paths reach — the agent-routing entry
  *   when this app hosts agents, so `/agents/*` stays mounted and guarded.
  */
-function renderOAuthWorker(mcpPath: string, defaultEntry: string): string {
+function renderOAuthProvider(mcpPath: string, defaultEntry: string): string {
   // A template literal rather than a line array, so a reviewer can read the
   // generated program as one.
-  return `export default new OAuthProvider({
+  return `const oauth = new OAuthProvider({
   apiRoute: ${JSON.stringify(mcpPath)},
   apiHandler: {
     fetch(request, env, ctx) {
@@ -1335,6 +1348,11 @@ function scaffoldWranglerConfig(
     notes.push(`create the ${OAUTH_KV_BINDING} namespace (wrangler kv namespace create ${OAUTH_KV_BINDING}) and fill in its id`)
   }
   console.log(`Cloudflare build: scaffolded ${configPath} — ${notes.join(', and ')} before deploying.`)
+  // Not scaffolded: a cron trigger every app pays for whether or not it has
+  // tasks, on the same rule as the OAuth KV namespace above.
+  console.log(
+    `  Scheduled tasks need a cron trigger — add "triggers": { "crons": ["* * * * *"] } to run them. The worker runs whichever tasks are due at each firing, so a trigger coarser than your finest task means that task never runs.`,
+  )
 }
 
 /**

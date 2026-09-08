@@ -29,7 +29,8 @@ describe('buildCloudflareOutput', () => {
     expect(worker).toContain('import * as ssrModule from "../.guren/ssr/ssr-Xyz789.js"')
     expect(worker).toContain('import app from "../src/app.ts"')
     expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render)')
-    expect(worker).toContain('export default createWorkersHandler(app)')
+    expect(worker).toContain('const handler = createWorkersHandler(app)')
+    expect(worker).toContain('fetch: (request, env, ctx) => handler.fetch(request, env, ctx)')
 
     // The env assignments live in a module the worker imports *first*: a statement
     // in worker.js runs after the app's module graph evaluated, so a module-scope
@@ -224,7 +225,8 @@ describe('buildCloudflareOutput', () => {
 
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
     expect(worker).not.toContain('setInertiaSsrRenderer')
-    expect(worker).toContain('export default createWorkersHandler(app)')
+    expect(worker).toContain('const handler = createWorkersHandler(app)')
+    expect(worker).toContain('fetch: (request, env, ctx) => handler.fetch(request, env, ctx)')
   })
 
   test('should accept an SSR entry with a default export', async () => {

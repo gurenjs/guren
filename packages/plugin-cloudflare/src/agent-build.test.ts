@@ -50,7 +50,7 @@ describe('reading config/agents.ts', () => {
     // Byte-identical to a build that never learned about agents: the whole
     // feature hangs off the presence of one file.
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
-    expect(worker).toContain('export default createWorkersHandler(app)')
+    expect(worker).toContain('fetch: (request, env, ctx) => handler.fetch(request, env, ctx)')
     expect(worker).not.toContain('@guren/plugin-agents')
     expect(JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).durable_objects).toBeUndefined()
   })
@@ -206,7 +206,8 @@ describe('the generated worker for an app hosting agents', () => {
     expect(worker).toContain('configureAgentRuntime((env) => handler.boot(env))')
     expect(worker).toContain('export { Triager } from "../app/Agents/Triager.ts"')
     expect(worker).toContain('routeGuardedAgentRequest(request, env, agentsConfig.routing, agentBindings)')
-    expect(worker).toContain('export default agentEntry')
+    expect(worker).toContain('fetch: (request, env, ctx) => agentEntry.fetch(request, env, ctx)')
+    expect(worker).toContain('scheduled: (event, env, ctx) => handler.scheduled(event, env, ctx)')
     // A fresh scaffold binds the derived name, so that is the allowlist.
     expect(worker).toContain('const agentBindings = ["TRIAGER"]')
   })
