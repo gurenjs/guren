@@ -201,11 +201,20 @@ function resolvePrototypeShell(root: string, shell: string | undefined, entry: s
   const contents = renderPrototypeShell(entry)
   // Written from config() rather than a build hook so the dev server has it
   // too; skipped when unchanged so a watcher does not see a write per start.
-  if (!existsSync(generated) || readFileSync(generated, 'utf8') !== contents) {
+  if (readShell(generated) !== contents) {
     mkdirSync(path.dirname(generated), { recursive: true })
     writeFileSync(generated, contents)
   }
   return generated
+}
+
+/** The shell on disk, or null when there is none; read directly so no check-then-read window exists. */
+function readShell(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
 }
 
 export function renderPrototypeShell(entry: string): string {

@@ -179,7 +179,8 @@ describe('createPrototypeHttpClient', () => {
     const answered = pageOf(response)
     expect(answered.component).toBe('posts/Index')
     expect(answered.url).toBe('/posts?q=First')
-    expect(answered.props.errors).toEqual({ title: 'Title is required.' })
+    // `errors` is typed `Errors & ErrorBag`, which no literal satisfies; the wire value is what matters.
+    expect(answered.props.errors as unknown).toEqual({ title: 'Title is required.' })
   })
 
   it('scopes errors to the error bag the visit named', async () => {
@@ -187,7 +188,7 @@ describe('createPrototypeHttpClient', () => {
 
     const answered = pageOf(await client.request(post('/posts', { title: '' }, { 'X-Inertia-Error-Bag': 'createPost' })))
 
-    expect(answered.props.errors).toEqual({ createPost: { title: 'Title is required.' } })
+    expect(answered.props.errors as unknown).toEqual({ createPost: { title: 'Title is required.' } })
   })
 
   it('honours method spoofing through a POST body', async () => {
