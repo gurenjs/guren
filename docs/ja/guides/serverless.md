@@ -260,18 +260,39 @@ Lambda のファイルシステムは `/tmp`（512 MB、一時的）を除いて
 
 インメモリストアは呼び出しごとに失われるため、セッションには Lambda の呼び出しをまたいで生存するバックエンドが必要です。
 
-多くのアプリには `DatabaseSessionStore`（`@guren/core`）が推奨デフォルトです — アプリが既に接続しているデータベースにセッションを永続化するため、追加のインフラが不要です:
+`bunx guren add session` を実行し、`config/session.ts` でストアを選んでください。多くのアプリには `database` が推奨デフォルトです: アプリが既に接続しているデータベースにセッションを永続化するため追加のインフラが不要で、`createScheduleHandler` からスケジュールした `sessions:prune` がテーブルを小さく保ちます。
 
-```typescript
-import { DatabaseSessionStore } from '@guren/core'
-import { sessions } from '@/db/schema'
+### DynamoDB
 
-app.use(createSessionMiddleware({ store: new DatabaseSessionStore(sessions) }))
+セッションの書き込み負荷をプライマリ DB から逃したい場合、`@guren/plugin-lambda` が `dynamodb` ドライバを追加します:
+
+```bash
+bun add @aws-sdk/client-dynamodb
 ```
 
-期限切れの行は読み取り時に存在しないものとして扱われます。テーブルを小さく保つため、スケジュールタスク（`createScheduleHandler` 経由など）から `store.deleteExpired()` を呼んでください。
+```typescript
+// app/Providers/SessionProvider.ts
+import { registerDynamoDbSessionDriver } from '@guren/plugin-lambda'
 
-セッションの書き込み負荷をプライマリ DB から逃したい高トラフィックアプリでは、代わりに `RedisSessionStore`（ElastiCache）を使ってください。キャッシュには引き続き Redis や DynamoDB が有効です — 下のインフラ表を参照してください。
+const manager = createSessionManager(sessionConfig)
+registerDynamoDbSessionDriver(manager)
+```
+
+```typescript
+// config/session.ts
+export const sessionConfig: SessionConfig = {
+  default: process.env.SESSION_DRIVER || 'dynamodb',
+  stores: {
+    dynamodb: { driver: 'dynamodb' },
+  },
+}
+```
+
+テーブル名は `DYNAMODB_SESSIONS_TABLE` から読みます。CDK コンストラクトの `sessionsTable` が全関数に設定するもので、ストア設定に `table` を渡せば自分で指定できます。登録が import の副作用ではなく関数呼び出しなのは、未使用 import を落とすバンドラがドライバごと落とすのを防ぐためです。
+
+テーブルには文字列のパーティションキー `id` と、`expires_at` に対する TTL が必要です。読み取りは強い整合性で行うため、ログイン時に書いたセッションは直後のリダイレクトで必ず読めます。DynamoDB の TTL は期限ちょうどではなく 48 時間以内に削除するので、ストア自身も過ぎた `expires_at` を存在しないものとして扱います: TTL は掃除係であって時計ではありません。
+
+`redis` ドライバ（ElastiCache）も引き続き選べます。キャッシュには Redis や DynamoDB が有効です — 下のインフラ表を参照してください。
 
 ## インフラ推奨構成
 
@@ -279,7 +300,7 @@ app.use(createSessionMiddleware({ store: new DatabaseSessionStore(sessions) }))
 |------|------|
 | **HTTP トリガー** | API Gateway v2（HTTP API）または ALB |
 | **データベース** | Aurora Serverless v2 + Data API（`createAwsDataApiDatabase`）— または RDS + RDS Proxy |
-| **セッション** | `DatabaseSessionStore`（追加インフラ不要）— セッション負荷が高い場合は `RedisSessionStore`（ElastiCache） |
+| **セッション** | `database` ドライバ（追加インフラ不要）— セッション負荷が高い場合は `dynamodb`（コンストラクトの `sessionsTable`）や `redis`（ElastiCache） |
 | **キャッシュ** | `RedisCacheStore` 経由の Redis（`@guren/core/redis` にはセッション/レート制限/API トークンストアも同梱）、一時キャッシュなら `/tmp` + `FileStore` |
 | **キュー** | SQS（`SqsDriver` + `createSqsHandler()`） |
 | **スケジューリング** | EventBridge + `createScheduleHandler()` |

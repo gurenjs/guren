@@ -261,18 +261,39 @@ Lambda has a read-only filesystem except for `/tmp` (512 MB, ephemeral). Use `/t
 
 In-memory stores are lost between invocations, so sessions need a backend that survives across Lambda invocations.
 
-For most apps, `DatabaseSessionStore` (from `@guren/core`) is the recommended default — it persists sessions in the same database your app already talks to, so there's no extra infrastructure to provision:
+Run `bunx guren add session` and pick the store in `config/session.ts`. For most apps `database` is the recommended default — it persists sessions in the database your app already talks to, so there is no extra infrastructure to provision, and `sessions:prune` (scheduled through `createScheduleHandler`) keeps the table small.
 
-```typescript
-import { DatabaseSessionStore } from '@guren/core'
-import { sessions } from '@/db/schema'
+### DynamoDB
 
-app.use(createSessionMiddleware({ store: new DatabaseSessionStore(sessions) }))
+For apps that want session churn off the primary database, `@guren/plugin-lambda` adds a `dynamodb` driver:
+
+```bash
+bun add @aws-sdk/client-dynamodb
 ```
 
-Expired rows are treated as missing on read; call `store.deleteExpired()` from a scheduled task (e.g. via `createScheduleHandler`) to keep the table small.
+```typescript
+// app/Providers/SessionProvider.ts
+import { registerDynamoDbSessionDriver } from '@guren/plugin-lambda'
 
-For high-traffic apps that want to keep session churn off the primary database, use `RedisSessionStore` (ElastiCache) instead. Cache still benefits from Redis or DynamoDB — see the infrastructure table below.
+const manager = createSessionManager(sessionConfig)
+registerDynamoDbSessionDriver(manager)
+```
+
+```typescript
+// config/session.ts
+export const sessionConfig: SessionConfig = {
+  default: process.env.SESSION_DRIVER || 'dynamodb',
+  stores: {
+    dynamodb: { driver: 'dynamodb' },
+  },
+}
+```
+
+The table name comes from `DYNAMODB_SESSIONS_TABLE`, which the CDK construct's `sessionsTable` sets on every function; pass `table` in the store config to name it yourself. Registration is a call rather than an import side effect, so a bundler that drops an unused import cannot drop the driver with it.
+
+The table needs a `id` string partition key and TTL enabled on `expires_at`. Reads are strongly consistent, so a session written at login is readable on the redirect that follows. DynamoDB deletes expired items within 48 hours rather than at expiry, so the store treats a past `expires_at` as missing on its own — the TTL is the sweeper, not the clock.
+
+`ElastiCache` and the `redis` driver remain an option; cache still benefits from Redis or DynamoDB — see the infrastructure table below.
 
 ## Infrastructure Recommendations
 
@@ -280,7 +301,7 @@ For high-traffic apps that want to keep session churn off the primary database, 
 |---------|---------------|
 | **HTTP trigger** | API Gateway v2 (HTTP API) or ALB |
 | **Database** | Aurora Serverless v2 + Data API via `createAwsDataApiDatabase` — or RDS + RDS Proxy |
-| **Sessions** | `DatabaseSessionStore` (no extra infra) — or `RedisSessionStore` (ElastiCache) for high session churn |
+| **Sessions** | the `database` driver (no extra infra) — or `dynamodb` (the construct's `sessionsTable`) / `redis` (ElastiCache) for high session churn |
 | **Cache** | Redis via `RedisCacheStore` (`@guren/core/redis` ships session/rate-limit/API-token stores too), or `FileStore` with `/tmp` for ephemeral cache |
 | **Queue** | SQS via `SqsDriver` + `createSqsHandler()` |
 | **Scheduling** | EventBridge + `createScheduleHandler()` |
