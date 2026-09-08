@@ -222,6 +222,20 @@ describe('createMarkdownRenderer', () => {
       expect(html).not.toContain('<pre><code')
     })
 
+    test('should hand the highlighter the whole info string beside the language', async () => {
+      const renderer = createMarkdownRenderer({
+        // The allowlist drops data-* attributes; this asserts the arguments, not
+        // the sanitizer.
+        sanitize: false,
+        highlight: (code, lang, info) => `<pre data-lang="${lang ?? ''}" data-info="${info ?? ''}">${code}</pre>`,
+      })
+
+      const html = await renderer.render('```ts file=app/Models/Post.ts\nconst a = 1\n```')
+
+      expect(html).toContain('data-lang="ts"')
+      expect(html).toContain('data-info="ts file=app/Models/Post.ts"')
+    })
+
     test('should wrap inner-HTML highlighter results in the default pre/code', async () => {
       const renderer = createMarkdownRenderer({
         highlight: (code) => `<span class="tok">${code}</span>`,

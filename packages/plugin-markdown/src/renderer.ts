@@ -10,8 +10,10 @@ import { createSlugger } from './slugger'
  * Code-fence highlighter. A result beginning with `<pre` is emitted as-is
  * (shiki's shape — properly escaped inner HTML can never start with a literal
  * `<`); anything else is wrapped in the default `<pre><code>`.
+ * `lang` is the info string's first word; `info` is all of it, so a fence
+ * carrying attributes after the language is renderable without a second parser.
  */
-export type HighlightFn = (code: string, lang?: string) => string | Promise<string>
+export type HighlightFn = (code: string, lang?: string, info?: string) => string | Promise<string>
 
 export interface MarkdownRendererOptions {
   /** GitHub Flavored Markdown (tables, strikethrough, autolinks). Default true. */
@@ -84,7 +86,7 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
         async: true,
         // HighlightFn may return a plain string; the async marked-highlight
         // overload requires a Promise.
-        highlight: async (code: string, lang?: string) => highlight(code, lang),
+        highlight: async (code: string, lang?: string, info?: string) => highlight(code, lang, info),
       }),
       {
         renderer: {

@@ -1,5 +1,6 @@
 import { Controller } from '@guren/core'
 import { DOCS_CACHE_CONTROL, docsBasePath, pageTitle, type DocLocale } from '../../../config/site.js'
+import { DOC_REDIRECTS } from '../../Services/docs-config.js'
 import {
   DEFAULT_DOC_LOCALE,
   DOC_LOCALE_OPTIONS,
@@ -30,12 +31,42 @@ export default class DocsController extends Controller {
     const categoryParam = this.request.param('category') || undefined
     const slugParam = this.request.param('slug') || undefined
 
+    const moved = this.#redirectFor(categoryParam, slugParam, locale)
+    if (moved) {
+      return this.redirect(moved, { status: 301 })
+    }
+
     // /docs/guides/routing.md serves the raw Markdown source for LLM agents.
     if (slugParam?.endsWith('.md')) {
       return this.#serveMarkdown(categoryParam, slugParam, locale)
     }
 
     return this.#renderShow({ categoryParam, slugParam, locale })
+  }
+
+  /**
+   * Where a slug the docs absorbed now lives (DOC_REDIRECTS). Runs before the
+   * lookup so a retired page never depends on its file still being there, and
+   * keeps the `.md` suffix so an agent's raw-markdown link survives the move.
+   */
+  #redirectFor(
+    categoryParam: string | undefined,
+    slugParam: string | undefined,
+    locale: DocLocale,
+  ): string | null {
+    const category = normalizeDocCategory(categoryParam)
+    if (!category || !slugParam) {
+      return null
+    }
+
+    const markdown = slugParam.endsWith('.md')
+    const slug = normalizeDocSlug(markdown ? slugParam.slice(0, -'.md'.length) : slugParam)
+    const target = slug ? DOC_REDIRECTS[category][slug] : undefined
+    if (!target) {
+      return null
+    }
+
+    return `${this.#basePathForLocale(locale)}/${category}/${target}${markdown ? '.md' : ''}`
   }
 
   async #serveMarkdown(

@@ -120,7 +120,7 @@ describe('rewriteDocLink', () => {
   })
 
   it('resolves cross-category links', () => {
-    expect(rewriteDocLink('../tutorials/overview.md', ja)).toBe('/docs/ja/tutorials/overview')
+    expect(rewriteDocLink('../tutorials/00-overview.md', ja)).toBe('/docs/ja/tutorials/00-overview')
     expect(rewriteDocLink('../guides/database.md', { locale: 'en', category: 'tutorials' })).toBe(
       '/docs/guides/database',
     )
@@ -157,5 +157,28 @@ describe('rewriteDocLink', () => {
     expect(rewriteDocLink('#section', ja)).toBe('#section')
     expect(rewriteDocLink('./image.png', ja)).toBe('./image.png')
     expect(rewriteDocLink('mailto:hi@example.com', ja)).toBe('mailto:hi@example.com')
+  })
+})
+
+describe('tutorial listings', () => {
+  it('captions a fence that names the file it writes', async () => {
+    const html = await renderMarkdownToHtml('```ts file=app/Models/Post.ts\nconst a = 1\n```')
+
+    expect(html).toContain('class="doc-file-head" data-path="app/Models/Post.ts"')
+    expect(html).toContain('doc-file')
+    expect(html).not.toContain('doc-file--long')
+  })
+
+  it('caps a listing long enough to own the page', async () => {
+    const long = Array.from({ length: 40 }, (_, index) => `const x${index} = ${index}`).join('\n')
+    const html = await renderMarkdownToHtml(`\u0060\u0060\u0060ts file=long.ts\n${long}\n\u0060\u0060\u0060`)
+
+    expect(html).toContain('doc-file--long')
+  })
+
+  it('leaves a fence without a path alone', async () => {
+    const html = await renderMarkdownToHtml('```bash run\nbun test\n```')
+
+    expect(html).not.toContain('doc-file')
   })
 })

@@ -110,10 +110,39 @@ export function rewriteDocImage(src: string, context: DocLinkContext): string {
   return `${DOCS_IMAGE_URL_ROOT}${joined.slice(DOCS_IMAGE_DIR.length)}`
 }
 
+/**
+ * The path a tutorial fence names (```` ```ts file=app/Models/Post.ts ````), or
+ * null. The grammar is `scripts/smoke/tutorial-blocks.ts`'s; this reads the one
+ * attribute a reader benefits from seeing and ignores the rest.
+ */
+function fencePath(info: string | undefined): string | null {
+  const match = /(?:^|\s)file=(\S+)/u.exec(info ?? '')
+  return match ? match[1]! : null
+}
+
+/** Above this, a listing is capped and scrolls rather than owning the page. */
+const LONG_LISTING_LINES = 28
+
+/**
+ * A caption naming the file, inside the `<pre>` so the plugin still passes the
+ * block through untouched and the copy button keeps its positioning context.
+ * Sticky in CSS, so it stays legible while a long listing scrolls.
+ */
+function withFileCaption(html: string, path: string, lines: number): string {
+  const openTag = /^<pre([^>]*)>/u.exec(html)
+  if (!openTag) return html
+
+  const long = lines > LONG_LISTING_LINES ? ' doc-file--long' : ''
+  const attributes = openTag[1]!.replace(/class="([^"]*)"/u, (_, value: string) => `class="${value} doc-file${long}"`)
+  const opened = attributes === openTag[1] ? `<pre${openTag[1]} class="doc-file${long}">` : `<pre${attributes}>`
+  const caption = `<span class="doc-file-head" data-path="${escapeHtml(path)}">${escapeHtml(path)}</span>`
+  return `${opened}${caption}${html.slice(openTag[0].length)}`
+}
+
 // The full shiki entry rather than the plugin's fine-grained adapter, because
 // docs fences carry arbitrary languages. Affordable only because docs render at
 // build time; the Worker bundle never sees this import.
-async function highlightDocsCode(code: string, lang?: string): Promise<string> {
+async function highlightDocsCode(code: string, lang?: string, info?: string): Promise<string> {
   const normalizedLang = lang?.trim() || DEFAULT_LANGUAGE
   // shiki has no `mermaid` grammar and would fall back to `text`, rendering the
   // diagram source as a grey block. Hand it to the client in the same
@@ -121,11 +150,15 @@ async function highlightDocsCode(code: string, lang?: string): Promise<string> {
   if (normalizedLang === 'mermaid') {
     return `<pre class="mermaid">${escapeHtml(code)}</pre>`
   }
+  let html: string
   try {
-    return await codeToHtml(code, { lang: normalizedLang, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
+    html = await codeToHtml(code, { lang: normalizedLang, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
   } catch {
-    return await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
+    html = await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
   }
+
+  const path = fencePath(info)
+  return path ? withFileCaption(html, path, code.split('\n').length) : html
 }
 
 export async function renderMarkdownToHtml(

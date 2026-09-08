@@ -65,7 +65,7 @@ export function MobileMenu({ open, onClose, basePath, locales = [] }: MobileMenu
             Docs
           </Link>
           <Link
-            href={`${basePath}/tutorials/overview`}
+            href={`${basePath}/tutorials/00-overview`}
             className="rounded-lg px-3 py-2.5 text-[0.95rem] font-medium text-docs-text no-underline transition hover:bg-docs-accent-tint hover:text-docs-accent"
             onClick={onClose}
           >

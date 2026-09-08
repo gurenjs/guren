@@ -8,7 +8,7 @@ It assumes a running app (see [Getting Started](./getting-started.md)) with a po
 bunx guren add resource posts --fields "title:string,body:text,published:boolean"
 ```
 
-Prefer to build this yourself step by step? Take the [Build a Mini Blog tutorial](../tutorials/overview.md) instead — it covers the same ground hands-on.
+Prefer to build this yourself step by step? Take [The Guren Tutorial](../tutorials/00-overview.md) instead — it covers the same ground hands-on, and then keeps going.
 
 Here is the whole path first. `GET /posts` moves through these layers in order, and HTML comes back out.
 
@@ -190,4 +190,4 @@ bun run codegen
 
 ## Where to go next
 
-Ready to build for real? The **[Build a Mini Blog tutorial](../tutorials/overview.md)** walks you through posts, authentication, and comments hands-on. If any term was unfamiliar, check the [Glossary](./glossary.md).
+Ready to build for real? **[The Guren Tutorial](../tutorials/00-overview.md)** walks you through posts, users, authorization, uploads, mail and agent tools hands-on. If any term was unfamiliar, check the [Glossary](./glossary.md).
