@@ -49,6 +49,10 @@ let database: DrizzleDatabase | undefined
 // Memo for the configured `database` only; `configure()` clears it. Module state
 // outlives a test file, and `bun test packages/orm` runs them in one process.
 let transactionAwaitsCallback: boolean | undefined
+// Only for a database whose own transaction() does not await: one connection
+// takes one transaction, so these serialize the ones this adapter drives.
+let transactionQueue: Promise<unknown> = Promise.resolve()
+let transactionOpen = false
 
 function ensureDatabase(): DrizzleDatabase {
   if (!database) {
@@ -196,7 +200,8 @@ async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning:
   return { usedReturning: false, row: undefined }
 }
 
-const NOOP_TRANSACTION = (() => undefined) as unknown as (trx: unknown) => Promise<undefined>
+const NOOP = () => undefined
+const NOOP_TRANSACTION = NOOP as unknown as (trx: unknown) => Promise<undefined>
 
 /**
  * Whether `db.transaction()` awaits its callback before committing: drizzle's
@@ -216,11 +221,11 @@ async function awaitsItsCallback(db: DrizzleDatabase): Promise<boolean> {
 }
 
 /**
- * BEGIN/COMMIT/ROLLBACK driven here so an async callback is honoured on a driver
- * that would otherwise commit before awaiting it. The handle itself is the
- * transaction scope: these drivers hold one connection. That is also why an
- * overlap is refused rather than queued — measured on bun-sqlite, the second
- * BEGIN throws and the first survives; a queue would deadlock a nested call.
+ * Serializes what `runExclusively` drives, since one connection takes one
+ * transaction. Queueing is only safe for a caller that is not already inside
+ * one — that caller would be waiting on itself — and `transactionOpen` is what
+ * separates the two: a queued caller is suspended at its await and cannot be
+ * running this, so a set flag means the call arrived while a transaction was live.
  */
 async function runOwnTransaction<TResult>(
   db: DrizzleDatabase,
@@ -233,19 +238,35 @@ async function runOwnTransaction<TResult>(
     )
   }
 
-  try {
-    await db.run(sql.raw('begin'))
-  } catch (error) {
-    // Nothing is rolled back here: this BEGIN failed because another
-    // transaction is already open on the connection, and rolling back would
-    // discard *that* transaction's work.
+  if (transactionOpen) {
     throw new Error(
-      'DrizzleAdapter: could not begin a transaction. This driver holds a single connection and one transaction ' +
-        'is already open on it, so transactions cannot overlap: do not nest transactions, and do not await ' +
+      'DrizzleAdapter: cannot begin a transaction while one is already open. This driver holds a single ' +
+        'connection, which takes one transaction at a time: do not nest transactions, and do not await ' +
         'non-database work inside one.',
-      { cause: error },
     )
   }
+
+  // Bound: these are methods, and a detached one loses the dialect it reads.
+  const run = db.run.bind(db)
+  const slot = transactionQueue.then(() => runExclusively(db, run, callback))
+  // The queue only orders; a rejected slot must not reject the next one.
+  transactionQueue = slot.then(NOOP, NOOP)
+  return slot
+}
+
+/**
+ * BEGIN/COMMIT/ROLLBACK driven here so an async callback is honoured on a driver
+ * that would otherwise commit before awaiting it. The handle itself is the
+ * transaction scope: these drivers hold one connection, so every statement
+ * between BEGIN and COMMIT is inside it. Callers reach this one at a time.
+ */
+async function runExclusively<TResult>(
+  db: DrizzleDatabase,
+  run: NonNullable<DrizzleDatabase['run']>,
+  callback: (trx: unknown) => Promise<TResult>,
+): Promise<TResult> {
+  await run(sql.raw('begin'))
+  transactionOpen = true
 
   let result: TResult
   try {
@@ -253,28 +274,32 @@ async function runOwnTransaction<TResult>(
   } catch (error) {
     // The callback's error is what the caller has to see, so a failing
     // ROLLBACK must not replace it.
-    try {
-      await db.run(sql.raw('rollback'))
-    } catch {
-      /* empty */
-    }
+    await unwind(run)
     throw error
   }
 
   try {
-    await db.run(sql.raw('commit'))
+    await run(sql.raw('commit'))
+    transactionOpen = false
   } catch (error) {
-    // A refused COMMIT leaves the transaction open, and the next BEGIN would
-    // then be refused for one this call never left behind.
-    try {
-      await db.run(sql.raw('rollback'))
-    } catch {
-      /* empty */
-    }
+    // A refused COMMIT leaves the transaction open, and the next caller would
+    // inherit one this call never left behind.
+    await unwind(run)
     throw error
   }
 
   return result
+}
+
+/** Ends the open transaction without letting its own failure mask the caller's. */
+async function unwind(run: NonNullable<DrizzleDatabase['run']>): Promise<void> {
+  try {
+    await run(sql.raw('rollback'))
+  } catch {
+    /* empty */
+  } finally {
+    transactionOpen = false
+  }
 }
 
 export const DrizzleAdapter: ORMAdapterAdvanced & {
@@ -284,6 +309,8 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
   configure(db: DrizzleDatabase) {
     database = db
     transactionAwaitsCallback = undefined
+    transactionQueue = Promise.resolve()
+    transactionOpen = false
   },
 
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase {

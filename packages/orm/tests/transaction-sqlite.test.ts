@@ -76,21 +76,69 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
     expect(titles()).toEqual(['original', 'kept'])
   })
 
-  it('should refuse an overlapping transaction without disturbing the open one', async () => {
-    const outer = Post.transaction(async (_trx, txPost) => {
-      await txPost.create({ title: 'outer-a' })
+  it('should serialize transactions started concurrently', async () => {
+    const [first, second] = await Promise.all([
+      Post.transaction(async (_trx, txPost) => {
+        await txPost.create({ title: 'first-a' })
+        await txPost.create({ title: 'first-b' })
+        return 'first'
+      }),
+      Post.transaction(async (_trx, txPost) => {
+        await txPost.create({ title: 'second' })
+        return 'second'
+      }),
+    ])
+
+    expect([first, second]).toEqual(['first', 'second'])
+    expect(titles()).toEqual(['original', 'first-a', 'first-b', 'second'])
+  })
+
+  it('should roll back only the failing one of two concurrent transactions', async () => {
+    const [kept, discarded] = await Promise.allSettled([
+      Post.transaction(async (_trx, txPost) => {
+        await txPost.create({ title: 'kept' })
+      }),
+      Post.transaction(async (_trx, txPost) => {
+        await txPost.create({ title: 'discarded' })
+        throw new Error('boom')
+      }),
+    ])
+
+    expect(kept.status).toBe('fulfilled')
+    expect(discarded.status).toBe('rejected')
+    expect(titles()).toEqual(['original', 'kept'])
+  })
+
+  it('should refuse a nested transaction without disturbing the open one', async () => {
+    await expect(
+      Post.transaction(async (_trx, txPost) => {
+        await txPost.create({ title: 'outer' })
+        await Post.transaction(async (_inner, innerPost) => {
+          await innerPost.create({ title: 'nested' })
+        })
+      }),
+    ).rejects.toThrow('cannot begin a transaction while one is already open')
+
+    // The outer transaction saw the nested call's error and rolled back with it.
+    expect(titles()).toEqual(['original'])
+  })
+
+  it('should refuse a transaction that begins while another awaits non-database work', async () => {
+    const open = Post.transaction(async (_trx, txPost) => {
+      await txPost.create({ title: 'open-a' })
       await new Promise((resolve) => setTimeout(resolve, 10))
-      await txPost.create({ title: 'outer-b' })
-      return 'outer'
+      await txPost.create({ title: 'open-b' })
+      return 'open'
     })
 
-    const overlapping = Post.transaction(async (_trx, txPost) => {
-      await txPost.create({ title: 'overlapping' })
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    const arriving = Post.transaction(async (_trx, txPost) => {
+      await txPost.create({ title: 'arriving' })
     })
 
-    await expect(overlapping).rejects.toThrow('could not begin a transaction')
-    await expect(outer).resolves.toBe('outer')
+    await expect(arriving).rejects.toThrow('cannot begin a transaction while one is already open')
+    await expect(open).resolves.toBe('open')
 
-    expect(titles()).toEqual(['original', 'outer-a', 'outer-b'])
+    expect(titles()).toEqual(['original', 'open-a', 'open-b'])
   })
 })
