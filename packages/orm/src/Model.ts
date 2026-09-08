@@ -8,7 +8,7 @@ import type { ModelHooks } from './hooks'
 import { executeObservers } from './ModelObserver'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
-import { QueryBuilder, PREPARED_UPDATE } from './QueryBuilder'
+import { QueryBuilder, PREPARED_UPDATE, SEAL_SCOPES } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
   EagerLoadConstraints,
@@ -326,7 +326,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       this.defaultScope(builder)
     }
     this.getGlobalScopes().apply(builder, names)
-    return builder
+    return builder[SEAL_SCOPES]()
   }
 
   /** A query with no global scopes applied, `defaultScope` included. */
@@ -535,6 +535,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     key: keyof TRecordFor<T> & string = 'id' as keyof TRecordFor<T> & string,
     queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> | null> {
+    // An undefined identifier renders no WHERE clause at all, which would make
+    // `find` return an arbitrary row and `findOrFail` never throw. `null` is
+    // left alone: it renders `IS NULL`, which is a filter.
+    if (id === undefined) {
+      return null
+    }
     if (this.hasScopes()) {
       return this.newQuery(queryOptions).where(key, id as TRecordFor<T>[typeof key]).first()
     }
@@ -725,7 +731,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     if (registry && registry.size > 0) {
       registry.apply(builder)
     }
-    return builder
+    return builder[SEAL_SCOPES]()
   }
 
   /** No scopes applied — for soft-deleted records or bypassing global filters. */

@@ -130,6 +130,64 @@ describe('callback where groups on real bun:sqlite driver', () => {
     expect(titles).toEqual(['Bun speed', 'Deleted bun', 'Hono routing'])
   })
 
+  // A top-level orWhere folds every preceding condition into the OR's left arm.
+  // Global scopes live outside that fold, or a documented `.where().orWhere()`
+  // chain silently drops tenant isolation and soft-delete filtering.
+  describe('global scopes against a top-level orWhere', () => {
+    class ScopedPost extends Model<PostRecord> {
+      static override table = postsTable
+      static {
+        this.addGlobalScope('publishedOnly', (q) => q.where('published', true))
+      }
+    }
+
+    it('should not let a top-level orWhere escape a global scope', async () => {
+      const posts = await ScopedPost.where('title', 'like', '%bun%')
+        .orWhere('excerpt', 'like', '%unfinished%')
+        .get()
+
+      // 'Draft on bun' matches the OR arm but is unpublished.
+      expect(posts.map((p) => p.title).sort()).toEqual(['Bun speed', 'Deleted bun'])
+    })
+
+    it('should not let a top-level orWhere escape the scope in count()', async () => {
+      const total = await ScopedPost.where('title', 'like', '%bun%')
+        .orWhere('excerpt', 'like', '%unfinished%')
+        .count()
+
+      expect(total).toBe(2)
+    })
+
+    it('should not let a top-level orWhere escape the soft-delete scope', async () => {
+      const posts = await SoftPost.where('title', 'like', '%speed%')
+        .orWhere('excerpt', 'like', '%gone%')
+        .get()
+
+      // 'Deleted bun' carries excerpt 'gone' and is trashed.
+      expect(posts.map((p) => p.title)).toEqual(['Bun speed'])
+    })
+
+    it('should not let a top-level orWhere escape the scope on delete', async () => {
+      await ScopedPost.newQuery()
+        .where('title', 'like', '%speed%')
+        .orWhere('excerpt', 'like', '%unfinished%')
+        .delete()
+
+      const rows = sqlite.query<{ title: string }, []>('SELECT title FROM posts ORDER BY id').all()
+      expect(rows.map((r) => r.title)).toEqual(['Draft on bun', 'Hono routing', 'Deleted bun', 'Unrelated'])
+    })
+
+    it('should not let a top-level orWhere escape the scope on forceUpdate', async () => {
+      await ScopedPost.newQuery()
+        .where('title', 'like', '%speed%')
+        .orWhere('excerpt', 'like', '%unfinished%')
+        .forceUpdate({ excerpt: 'touched' })
+
+      const touched = sqlite.query<{ title: string }, []>("SELECT title FROM posts WHERE excerpt = 'touched'").all()
+      expect(touched.map((r) => r.title)).toEqual(['Bun speed'])
+    })
+  })
+
   it('should apply grouped conditions to bulk update and delete', async () => {
     await Post.newQuery()
       .where((q) => q.where('title', 'like', '%bun%').orWhere('excerpt', 'like', '%bun%'))

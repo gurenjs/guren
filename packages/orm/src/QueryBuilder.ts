@@ -21,6 +21,12 @@ type FieldKey<TRecord extends PlainObject> = keyof TRecord & string
  */
 export const PREPARED_UPDATE = Symbol('guren.orm.preparedUpdate')
 
+/**
+ * Key for the global-scope seal. Exported for `Model` across the module
+ * boundary, but kept out of the package entry point.
+ */
+export const SEAL_SCOPES = Symbol('guren.orm.sealScopes')
+
 export type WhereOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'not in' | 'is null' | 'is not null'
 
 export interface SimpleCondition {
@@ -79,6 +85,8 @@ export class QueryBuilder<
   TResult extends PlainObject = TRecord,
 > {
   private conditions: WhereCondition[] = []
+  private scopeConditions: WhereCondition[] = []
+  private droppedUndefinedFilters = false
   private options: QueryBuilderOptions = { orderBy: [] }
   private modelClass: typeof Model
   private table: unknown
@@ -114,10 +122,12 @@ export class QueryBuilder<
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
       for (const [key, val] of Object.entries(fieldOrConditions)) {
-        if (val !== undefined) {
-          // Array values mean IN — mirrors the adapter's object-where contract
-          this.addSimpleCondition(key, Array.isArray(val) ? 'in' : '=', val)
+        if (val === undefined) {
+          this.droppedUndefinedFilters = true
+          continue
         }
+        // Array values mean IN — mirrors the adapter's object-where contract
+        this.addSimpleCondition(key, Array.isArray(val) ? 'in' : '=', val)
       }
       return this
     }
@@ -155,9 +165,11 @@ export class QueryBuilder<
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
       for (const [key, val] of Object.entries(fieldOrConditions)) {
-        if (val !== undefined) {
-          orConditions.push({ type: 'simple', field: key, operator: Array.isArray(val) ? 'in' : '=', value: val })
+        if (val === undefined) {
+          this.droppedUndefinedFilters = true
+          continue
         }
+        orConditions.push({ type: 'simple', field: key, operator: Array.isArray(val) ? 'in' : '=', value: val })
       }
     } else {
       const field = fieldOrConditions as string
@@ -278,13 +290,13 @@ export class QueryBuilder<
   }
 
   async count(): Promise<number> {
-    if (typeof this.adapter.count === 'function' && this.conditions.length === 0) {
+    if (typeof this.adapter.count === 'function' && this.allConditions().length === 0) {
       return this.adapter.count(this.table, undefined, { trx: this.options.trx })
     }
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.countAdvanced === 'function') {
-      return advancedAdapter.countAdvanced(this.table, this.conditions, { trx: this.options.trx })
+      return advancedAdapter.countAdvanced(this.table, this.effectiveConditions(), { trx: this.options.trx })
     }
 
     const results = await this.executeQuery()
@@ -376,10 +388,11 @@ export class QueryBuilder<
     if (!this.adapter.update) {
       throw new Error('Configured adapter does not support update operations.')
     }
+    this.assertFiltersSurvived('update')
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.updateAdvanced === 'function') {
-      return advancedAdapter.updateAdvanced(this.table, this.conditions, payload, { trx: this.options.trx }) as Promise<TRecord>
+      return advancedAdapter.updateAdvanced(this.table, this.effectiveConditions(), payload, { trx: this.options.trx }) as Promise<TRecord>
     }
 
     const simpleWhere = this.toSimpleWhereClause()
@@ -394,10 +407,11 @@ export class QueryBuilder<
     if (!this.adapter.delete) {
       throw new Error('Configured adapter does not support delete operations.')
     }
+    this.assertFiltersSurvived('delete')
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.deleteAdvanced === 'function') {
-      return advancedAdapter.deleteAdvanced(this.table, this.conditions, { trx: this.options.trx })
+      return advancedAdapter.deleteAdvanced(this.table, this.effectiveConditions(), { trx: this.options.trx })
     }
 
     const simpleWhere = this.toSimpleWhereClause()
@@ -423,7 +437,22 @@ export class QueryBuilder<
   }
 
   getConditions(): WhereCondition[] {
-    return this.conditions
+    return this.effectiveConditions()
+  }
+
+  /**
+   * Freezes the conditions applied so far as this model's global scopes.
+   * They are AND-ed around the caller's expression from here on: left in the
+   * same list, a top-level `orWhere()` folds everything before it into the
+   * OR's left arm (see `normalizeConditionSequence`) and the query loses
+   * tenant isolation and soft-delete filtering.
+   */
+  [SEAL_SCOPES](): this {
+    if (this.conditions.length > 0) {
+      this.scopeConditions.push(...this.conditions)
+      this.conditions = []
+    }
+    return this
   }
 
   getOptions(): QueryBuilderOptions {
@@ -448,6 +477,38 @@ export class QueryBuilder<
     this.conditions.push(needsWrap ? { type: 'group', boolean, conditions: [grouped] } : grouped)
   }
 
+  /** Every condition on the builder, scopes first, as one flat list. */
+  private allConditions(): WhereCondition[] {
+    return this.scopeConditions.length === 0 ? this.conditions : [...this.scopeConditions, ...this.conditions]
+  }
+
+  /** Global scopes AND the caller's expression, never folded into it. */
+  private effectiveConditions(): WhereCondition[] {
+    if (this.scopeConditions.length === 0) return this.conditions
+    const caller = normalizeConditionSequence(this.conditions)
+    if (!caller) return [...this.scopeConditions]
+    // An or-group node means two things by position (see pushCallbackGroup):
+    // at the head of a list it reads as an orWhere continuation and would fold
+    // the scopes back in. Wrapping selects the parenthesized reading.
+    const guarded: WhereCondition = caller.type === 'group' && caller.boolean === 'or'
+      ? { type: 'group', boolean: 'and', conditions: [caller] }
+      : caller
+    return [...this.scopeConditions, guarded]
+  }
+
+  /**
+   * A criteria object whose every value was `undefined` leaves no caller
+   * condition at all, and the write then rewrites every row the scopes admit.
+   * `where({})` and a deliberately unfiltered builder are untouched: only a
+   * filter the caller wrote and lost counts.
+   */
+  private assertFiltersSurvived(operation: 'update' | 'delete'): void {
+    if (!this.droppedUndefinedFilters || this.conditions.length > 0) return
+    throw new Error(
+      `${this.modelClass.name}: refusing to ${operation} unfiltered — every value in the where clause was undefined.`,
+    )
+  }
+
   private addSimpleCondition(field: string, operator: WhereOperator, value: unknown): void {
     this.conditions.push({
       type: 'simple',
@@ -461,7 +522,7 @@ export class QueryBuilder<
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
 
     if (typeof advancedAdapter.findManyAdvanced === 'function') {
-      return advancedAdapter.findManyAdvanced<TResult>(this.table, this.conditions, {
+      return advancedAdapter.findManyAdvanced<TResult>(this.table, this.effectiveConditions(), {
         orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
         limit: this.options.limitValue,
         offset: this.options.offsetValue,
@@ -472,7 +533,7 @@ export class QueryBuilder<
     // Passing a null conversion on as `where: undefined` would drop every
     // condition — global scopes included — and return the whole table.
     const simpleWhere = this.toSimpleWhereClause()
-    if (simpleWhere === null && this.conditions.length > 0) {
+    if (simpleWhere === null && this.allConditions().length > 0) {
       throw new Error(
         `${this.modelClass.name}: this query uses conditions the configured adapter cannot express `
         + `(it implements neither findManyAdvanced nor countAdvanced). Running it would drop every `
@@ -489,13 +550,14 @@ export class QueryBuilder<
 
   /** Null when the conditions are too complex for a basic adapter's WhereClause. */
   private toSimpleWhereClause(): Record<string, unknown> | null {
-    if (this.conditions.length === 0) {
+    const conditions = this.allConditions()
+    if (conditions.length === 0) {
       return null
     }
 
     const result: Record<string, unknown> = {}
 
-    for (const condition of this.conditions) {
+    for (const condition of conditions) {
       if (condition.type !== 'simple') {
         return null // Cannot convert OR groups to simple where
       }

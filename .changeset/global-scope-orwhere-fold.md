@@ -1,0 +1,9 @@
+---
+"@guren/orm": patch
+---
+
+**A top-level `orWhere()` no longer folds a model's global scopes into the OR** — `Model.newQuery()` appended every global scope, `SoftDeletes` included, to the same flat condition list the caller's `where()` and `orWhere()` push onto, and an or-group folds everything before it into its left arm. A documented chain such as `Post.where('status', 'published').orWhere('excerpt', 'like', pattern)` therefore ran as `(scope AND status) OR excerpt`, and any row matching the OR arm came back with the scope dropped: another tenant's records for a `tenant` scope, trashed records for `softDelete`. The folded list reached `count()` (so `paginate()`'s `meta.total` confirmed the leaked rows), `updateAdvanced` and `deleteAdvanced`, so a bulk action behind the same builder shape reached and rewrote those rows too.
+
+Global scopes are now sealed when the query is created and AND-ed around the caller's expression, whatever the caller chains afterwards. `withoutGlobalScope()` and `withoutGlobalScopes()` are unchanged, and a scope registered through `static scopes` stays a caller-level filter as before.
+
+**Unfiltered writes from an all-`undefined` where clause are refused** — a criteria object whose every value was `undefined` produced no `WHERE` clause and the statement reached every row, so `Model.delete({ id: undefined })` emptied the table and `Model.update({ id: undefined }, data)` rewrote it. `update` and `delete` now throw when every filter the caller wrote was dropped; an explicitly empty `{}` and a deliberately unfiltered builder still mean "no filter", and an optional filter set keeps working as long as one value survives. `Model.find(undefined)` returns `null` instead of an arbitrary row, so `findOrFail(undefined)` throws `ModelNotFoundException` as documented (`null` is untouched: it renders `IS NULL`).
