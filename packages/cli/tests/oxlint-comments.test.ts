@@ -24,6 +24,12 @@ describe('guren/comment-*', () => {
     expect(findings(`/**\n${' * l\n'.repeat(9)} */\nexport const a = 1\n`)).toEqual(['comment-length@1'])
   })
 
+  test('a hashbang does not take the module-header slot from the header under it', () => {
+    expect(findings(`#!/usr/bin/env bun\n/**\n${' * l\n'.repeat(8)} */\nexport const a = 1\n`)).toEqual([])
+    expect(findings(`#!/usr/bin/env bun\n${'// l\n'.repeat(8)}export const a = 1\n`)).toEqual([])
+    expect(findings(`#!/usr/bin/env bun\n/**\n${' * l\n'.repeat(9)} */\nexport const a = 1\n`)).toEqual(['comment-length@2'])
+  })
+
   test('adjacent line comments form one block; trailing comments never do', () => {
     expect(findings(`const z = 0\n${LONG}const a = 1\n`)).toEqual(['comment-length@2'])
     expect(findings(`const a = 1 // one\nconst b = 2 // two\nconst c = 3 // three\nconst d = 4 // four\nconst e = 5 // five\nconst f = 6 // six\n`)).toEqual([])

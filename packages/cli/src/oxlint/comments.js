@@ -29,8 +29,13 @@ function stripLine(text) {
 export function collectBlocks(comments, sourceLines, firstStatementLine) {
   const blocks = []
   let run = null
+  const hashbang = (sourceLines[0] ?? '').startsWith('#!')
   for (const c of comments) {
     const startLine = c.loc.start.line
+    // oxc reports `#!` as a comment (type 'Shebang'), so left in it takes the
+    // module-header slot from the real header below it. Keyed on the source
+    // text rather than the type, which is oxc's name to change.
+    if (hashbang && startLine === 1) continue
     const prefix = (sourceLines[startLine - 1] ?? '').slice(0, c.loc.start.column)
     const trailing = prefix.trim().length > 0
     if (c.type === 'Line') {
