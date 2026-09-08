@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { CfnOutput, Duration } from 'aws-cdk-lib'
+import { CfnOutput, Duration, RemovalPolicy } from 'aws-cdk-lib'
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2'
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations'
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront'
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins'
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb'
 import * as events from 'aws-cdk-lib/aws-events'
 import * as targets from 'aws-cdk-lib/aws-events-targets'
 import * as iam from 'aws-cdk-lib/aws-iam'
@@ -34,6 +35,13 @@ export interface GurenLambdaScheduleProps {
 export interface GurenLambdaAssetsProps {
   /** The staged assets directory produced by `guren lambda:build` (`.lambda/assets`). */
   dir: string
+}
+
+export interface GurenLambdaSessionsTableProps {
+  /** Explicit table name. Omitted, CloudFormation names it. */
+  tableName?: string
+  /** Kept on `cdk destroy`. Defaults to true: a destroyed table logs everyone out. */
+  retainOnDelete?: boolean
 }
 
 export interface GurenLambdaDataApiProps {
@@ -66,6 +74,8 @@ export interface GurenLambdaAppProps {
   assets?: GurenLambdaAssetsProps
   /** Wire every function to Aurora via the RDS Data API: environment plus the rds-data and secret-read grants. */
   dataApi?: GurenLambdaDataApiProps
+  /** Provision the table the `dynamodb` session driver reads (RFC 0020 §4). */
+  sessionsTable?: GurenLambdaSessionsTableProps | true
 }
 
 /**
@@ -83,6 +93,7 @@ export class GurenLambdaApp extends Construct {
   readonly queueFunction?: lambda.Function
   readonly scheduleFunction?: lambda.Function
   readonly consoleFunction?: lambda.Function
+  readonly sessionsTable?: dynamodb.Table
   readonly assetsBucket?: s3.Bucket
   readonly distribution?: cloudfront.Distribution
 
@@ -174,6 +185,27 @@ export class GurenLambdaApp extends Construct {
       for (const fn of functions) {
         fn.addEnvironment('SQS_QUEUE_URL', this.queue.queueUrl)
         this.queue.grantSendMessages(fn)
+      }
+    }
+
+    if (props.sessionsTable) {
+      const sessionsProps = props.sessionsTable === true ? {} : props.sessionsTable
+
+      this.sessionsTable = new dynamodb.Table(this, 'SessionsTable', {
+        tableName: sessionsProps.tableName,
+        partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+        // The store writes epoch seconds here and checks them on read; the
+        // table's TTL is the sweeper, not the clock (it deletes within 48h).
+        timeToLiveAttribute: 'expires_at',
+        billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+        // A destroyed table logs every user out, so opting into deletion is
+        // explicit — CDK's own default for a Table is RETAIN either way.
+        removalPolicy: sessionsProps.retainOnDelete === false ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
+      })
+
+      for (const fn of functions) {
+        fn.addEnvironment('DYNAMODB_SESSIONS_TABLE', this.sessionsTable.tableName)
+        this.sessionsTable.grantReadWriteData(fn)
       }
     }
 

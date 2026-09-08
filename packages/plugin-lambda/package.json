@@ -46,13 +46,18 @@
   },
   "dependencies": {
     "@guren/core": "^1.15.0",
+    "@guren/server": "^2.20.0",
     "citty": "^0.1.6"
   },
   "peerDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.0.0",
     "aws-cdk-lib": "^2.156.0",
     "constructs": "^10.0.0"
   },
   "peerDependenciesMeta": {
+    "@aws-sdk/client-dynamodb": {
+      "optional": true
+    },
     "aws-cdk-lib": {
       "optional": true
     },

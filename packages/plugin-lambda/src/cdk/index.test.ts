@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { App, Stack } from 'aws-cdk-lib'
-import { Template } from 'aws-cdk-lib/assertions'
+import { Match, Template } from 'aws-cdk-lib/assertions'
 import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS } from '@guren/core/internal/deploy-build'
 import { GurenLambdaApp } from './index'
 
@@ -321,4 +321,80 @@ describe('GurenLambdaApp', () => {
       Environment: { Variables: { NODE_ENV: 'production', DATABASE_NAME: 'appdb' } },
     })
   })
+
+  describe('sessionsTable', () => {
+    test('should provision no table by default', () => {
+      const template = synth((stack) => {
+        new GurenLambdaApp(stack, 'App', { functionDir })
+      })
+
+      template.resourceCountIs('AWS::DynamoDB::Table', 0)
+    })
+
+    test('should key on id with TTL on expires_at, which is what the store reads', () => {
+      const template = synth((stack) => {
+        new GurenLambdaApp(stack, 'App', { functionDir, sessionsTable: true })
+      })
+
+      template.hasResourceProperties('AWS::DynamoDB::Table', {
+        KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+        TimeToLiveSpecification: { AttributeName: 'expires_at', Enabled: true },
+        BillingMode: 'PAY_PER_REQUEST',
+      })
+    })
+
+    test('should retain the table on destroy, since deleting it logs everyone out', () => {
+      const template = synth((stack) => {
+        new GurenLambdaApp(stack, 'App', { functionDir, sessionsTable: true })
+      })
+
+      template.hasResource('AWS::DynamoDB::Table', { DeletionPolicy: 'Retain' })
+    })
+
+    test('should delete the table only when retainOnDelete is explicitly false', () => {
+      const template = synth((stack) => {
+        new GurenLambdaApp(stack, 'App', { functionDir, sessionsTable: { retainOnDelete: false } })
+      })
+
+      template.hasResource('AWS::DynamoDB::Table', { DeletionPolicy: 'Delete' })
+    })
+
+    test('should name the table when asked', () => {
+      const template = synth((stack) => {
+        new GurenLambdaApp(stack, 'App', { functionDir, sessionsTable: { tableName: 'app-sessions' } })
+      })
+
+      template.hasResourceProperties('AWS::DynamoDB::Table', { TableName: 'app-sessions' })
+    })
+
+    test('should give every function the table name and read/write access', () => {
+      const template = synth((stack) => {
+        new GurenLambdaApp(stack, 'App', {
+          functionDir,
+          sessionsTable: true,
+          queue: {},
+          schedule: {},
+          console: true,
+        })
+      })
+
+      // Four functions: a driver reaching the table from only the HTTP one
+      // would leave `sessions:prune` and the console unable to touch it.
+      template.resourceCountIs('AWS::Lambda::Function', 4)
+      const functions = Object.values(template.findResources('AWS::Lambda::Function'))
+      for (const fn of functions) {
+        const environment = (fn.Properties as { Environment?: { Variables?: Record<string, unknown> } }).Environment
+        expect(environment?.Variables).toHaveProperty('DYNAMODB_SESSIONS_TABLE')
+      }
+
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({ Action: Match.arrayWith(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem']) }),
+          ]),
+        },
+      })
+    })
+  })
+
 })

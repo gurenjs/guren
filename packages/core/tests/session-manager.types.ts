@@ -25,5 +25,8 @@ export const manager = createSessionManager(config)
 // @ts-expect-error `table` is required by the database driver.
 export const missingTable: SessionConfig = { stores: { database: { driver: 'database' } } }
 
+// The name must stay unclaimed by every package in the workspace: the root
+// program sees every `SessionDrivers` augmentation, so a driver some plugin
+// declares (`dynamodb` did, once plugin-lambda shipped it) stops erroring here.
 // @ts-expect-error An undeclared driver name is not assignable.
-export const unknownDriver: SessionConfig = { stores: { x: { driver: 'dynamodb', table: 'sessions' } } }
+export const unknownDriver: SessionConfig = { stores: { x: { driver: 'no-such-session-driver' } } }
