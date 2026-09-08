@@ -48,6 +48,20 @@ export type SessionStoreConfig = {
 export const DEFAULT_SESSION_STORE_NAME = 'memory'
 export const PER_PROCESS_SESSION_DRIVERS: ReadonlySet<string> = new Set([DEFAULT_SESSION_STORE_NAME])
 
+/**
+ * Every driver the framework itself registers, and whether it survives a
+ * runtime that shares no memory between requests. Read by static checks that
+ * cannot boot the app; a plugin's driver is declared in its `gurenPlugin`
+ * manifest instead, and a name in neither is unverifiable, not absent.
+ */
+export const BUILT_IN_SESSION_DRIVERS: ReadonlyMap<string, boolean> = new Map([
+  ['memory', false],
+  // Nothing is stored server-side, so no instance has to share anything.
+  ['cookie', true],
+  ['database', true],
+  ['redis', true],
+])
+
 /** Cookie and TTL settings plus the named stores one of which is the default. */
 export interface SessionConfig extends SessionCookieOptions {
   /** @default 'memory' */

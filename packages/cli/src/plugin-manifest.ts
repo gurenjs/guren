@@ -18,6 +18,18 @@ export interface GurenPluginManifest {
   publishes?: GurenPluginPublishEntry[]
   /** CLI commands contributed by the plugin (RFC 0001, Part C). */
   commands?: GurenPluginCommands
+  /** Stores the plugin registers, for checks that cannot boot the app (RFC 0020 §4). */
+  drivers?: GurenPluginDrivers
+}
+
+export interface GurenPluginDrivers {
+  session?: GurenPluginSessionDriver[]
+}
+
+export interface GurenPluginSessionDriver {
+  name: string
+  /** Whether the store survives a runtime that shares no memory between requests. */
+  persistent?: boolean
 }
 
 export interface GurenPluginEnvEntry {

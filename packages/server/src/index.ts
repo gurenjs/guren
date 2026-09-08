@@ -314,6 +314,7 @@ export {
   SessionManager,
   CookieSessionStore,
   DEFAULT_SESSION_STORE_NAME,
+  BUILT_IN_SESSION_DRIVERS,
   PER_PROCESS_SESSION_DRIVERS,
   getSessionFromContext,
   requireAuthenticated,

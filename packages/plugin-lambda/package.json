@@ -22,6 +22,14 @@
       "names": [
         "lambda:build"
       ]
+    },
+    "drivers": {
+      "session": [
+        {
+          "name": "dynamodb",
+          "persistent": true
+        }
+      ]
     }
   },
   "files": [
