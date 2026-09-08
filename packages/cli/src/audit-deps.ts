@@ -20,6 +20,7 @@ interface BunAuditAdvisory {
   vulnerable_versions: string
 }
 
+const DEPENDENCY_SCAN_TIMEOUT_MS = 15_000
 const GHSA_PATTERN = /GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/i
 const BAD_SHAPE = 'unrecognized bun audit output shape'
 
@@ -121,6 +122,11 @@ export interface DependencyScanOutput {
  * Kick off `bun audit --json` without awaiting it, so the registry
  * round-trip can overlap the local file scanning. `null` means the process
  * could not even start.
+ *
+ * The cap is 15 s against a measured 1 s for a healthy scan: the only thing a
+ * longer wait buys is a slower `unavailable`. `bun audit` spins at 100 % CPU
+ * indefinitely on some trees (reproduced on a scaffolded app whose `@guren/*`
+ * are `file:` links), so the cap is load-bearing, not a formality.
  */
 export function startDependencyScan(cwd: string): Promise<DependencyScanOutput | null> {
   let proc: ReturnType<typeof Bun.spawn>
@@ -129,7 +135,7 @@ export function startDependencyScan(cwd: string): Promise<DependencyScanOutput |
       cwd,
       stdout: 'pipe',
       stderr: 'pipe',
-      timeout: 60_000,
+      timeout: DEPENDENCY_SCAN_TIMEOUT_MS,
     })
   } catch {
     return Promise.resolve(null)
