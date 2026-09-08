@@ -1,5 +1,23 @@
 # @guren/orm
 
+## 2.7.0
+
+### Minor Changes
+
+- 3e479ea: **`SoftDeletes` runs inside the transaction it was given** — the mixin's `delete()` override was declared `(where)` only and cast to `typeof Model.delete`, so the write options carrying `trx` were dropped where the type system could not see it. A soft delete made inside `Model.transaction()` therefore ran on the default connection: it survived a rollback, and the transaction's own reads could not see it. The override now takes `writeOptions` and threads them into the scoped builder, which is all `Model.transaction()`'s bound scope needed — `txPost.delete({ id })` is correct with no change to the transaction proxy.
+
+  `restore()`, `forceDelete()`, `withTrashed()` and `onlyTrashed()` could not be given a transaction at all, since they reach trashed rows through `withoutGlobalScope()`, which took only scope names. Each now accepts write or query options as a trailing argument, and `withoutGlobalScope()` gained an overload taking them _first_ — `names` is a rest parameter and cannot be followed by an optional one. The name-only form is unchanged. `withoutGlobalScopes()` takes them trailing, like every other entry point.
+
+  `forceDelete()` is the sharp end of the group: a hard delete that escapes the surrounding rollback cannot be undone.
+
+### Patch Changes
+
+- e413b6e: **A top-level `orWhere()` no longer folds a model's global scopes into the OR** — `Model.newQuery()` appended every global scope, `SoftDeletes` included, to the same flat condition list the caller's `where()` and `orWhere()` push onto, and an or-group folds everything before it into its left arm. A documented chain such as `Post.where('status', 'published').orWhere('excerpt', 'like', pattern)` therefore ran as `(scope AND status) OR excerpt`, and any row matching the OR arm came back with the scope dropped: another tenant's records for a `tenant` scope, trashed records for `softDelete`. The folded list reached `count()` (so `paginate()`'s `meta.total` confirmed the leaked rows), `updateAdvanced` and `deleteAdvanced`, so a bulk action behind the same builder shape reached and rewrote those rows too.
+
+  Global scopes are now sealed when the query is created and AND-ed around the caller's expression, whatever the caller chains afterwards. `withoutGlobalScope()` and `withoutGlobalScopes()` are unchanged, and a scope registered through `static scopes` stays a caller-level filter as before.
+
+  **Unfiltered writes from an all-`undefined` where clause are refused** — a criteria object whose every value was `undefined` produced no `WHERE` clause and the statement reached every row, so `Model.delete({ id: undefined })` emptied the table and `Model.update({ id: undefined }, data)` rewrote it. `update` and `delete` now throw when every filter the caller wrote was dropped; an explicitly empty `{}` and a deliberately unfiltered builder still mean "no filter", and an optional filter set keeps working as long as one value survives. `Model.find(undefined)` returns `null` instead of an arbitrary row, so `findOrFail(undefined)` throws `ModelNotFoundException` as documented (`null` is untouched: it renders `IS NULL`).
+
 ## 2.6.3
 
 ### Patch Changes
