@@ -1,18 +1,14 @@
 import { defineConfig } from 'drizzle-kit'
 
+// Read by two different SQLite implementations that disagree about URI
+// filenames: the app opens it with `bun:sqlite`, which honours them, while
+// drizzle-kit opens it with `node:sqlite`, which does not. So `file:` is not a
+// shared spelling of anything — `file:local.db` migrates the app into
+// `local.db` and drizzle-kit into a file *named* `file:local.db`.
 const filename = process.env.DATABASE_URL || './data/guren.db'
 
-/**
- * DATABASE_URL is read by two different SQLite implementations that disagree
- * about URI filenames: the app opens it with `bun:sqlite`, which honours them,
- * while drizzle-kit opens it with `node:sqlite`, which does not. So `file:` is
- * not a shared spelling of anything — `file:local.db` migrates the app into
- * `local.db` and drizzle-kit into a file *named* `file:local.db`. The safe set
- * is what both agree on: plain paths, and `:memory:`.
- *
- * The scheme must be two characters or more, since no registered scheme is one
- * letter while `C:/data/app.db` is a Windows drive path.
- */
+// Two characters or more: no registered scheme is one letter, while
+// `C:/data/app.db` is a Windows drive path.
 const uriScheme = /^([a-z][a-z0-9+.-]+):/i.exec(filename)
 
 if (uriScheme) {

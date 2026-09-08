@@ -7,21 +7,25 @@ import { ServiceProvider, createStorageManager } from '@guren/core'
 // throw (a required-env helper) out of it.
 const disks = {
   local: { driver: 'local', root: './storage/app' },
+
   // Declared public because it is: everything under it is served. A local
   // disk has no per-object visibility, so this is where that is decided.
   // Rooted inside public/ so the root asset server serves these files and
   // disk.url() returns a URL that actually resolves (images and the other
   // allowlisted extensions; add a route for anything else).
-  //
+
   // For assets you ship, then. Never for bytes someone uploaded: anything on
   // this disk is fetchable by URL with no signature, no expiry and no
-  // authorization check. The framework forces a download for document types
-  // served out of public/, so an uploaded .svg will not execute on your
-  // origin — but that is a backstop against one consequence, not access
-  // control, and inlineDocuments: true opts out of it. Uploads belong on
-  // `local` above, handed out through the attachments delivery route — which
-  // is what `guren add attachments` configures, and what `guren check`
-  // verifies.
+  // authorization check.
+
+  // The framework forces a download for document types served out of public/,
+  // so an uploaded .svg will not execute on your origin — but that is a
+  // backstop against one consequence, not access control, and
+  // inlineDocuments: true opts out of it.
+
+  // Uploads belong on `local` above, handed out through the attachments
+  // delivery route — which is what `guren add attachments` configures, and
+  // what `guren check` verifies.
   public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
 } as const
 

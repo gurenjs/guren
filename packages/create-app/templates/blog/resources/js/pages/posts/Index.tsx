@@ -10,8 +10,9 @@ interface Props extends PaginatedPageProps<PostResourceData> {}
 
 // posts.search is an HTTP QUERY route (RFC 10008): safe like GET, but the
 // criteria travel in a JSON body — HTML forms and Inertia navigation cannot
-// send it, so the page calls it through the generated typed client. The
-// client types the request body from the schema bound to the route, and
+// send it, so the page calls it through the generated typed client.
+
+// The client types the request body from the schema bound to the route, and
 // json() from the `resource` hint the route declares — both come from the
 // route definition, so this file never restates the wire shape.
 const api = createApiClient<ApiRoutes>({ baseUrl: '' })

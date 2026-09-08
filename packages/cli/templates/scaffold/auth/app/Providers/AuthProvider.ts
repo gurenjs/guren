@@ -13,11 +13,10 @@ export default class AuthProvider extends ServiceProvider {
     })
   }
 
+  // Nothing shares the signed-in user with the frontend by default, so every
+  // page would render as a guest. Layout.tsx reads this to choose between
+  // "Sign in" and the Log out control.
   boot(): void {
-    // Nothing shares the signed-in user with the frontend by default, so every
-    // page would render as a guest. Layout.tsx reads this to choose between
-    // "Sign in" and the Log out control.
-    //
     // shareInertiaProps merges over resolvers registered earlier instead of
     // replacing them, so the framework's flashed `errors` still come through.
     // Passing this.container scopes the props to this app.

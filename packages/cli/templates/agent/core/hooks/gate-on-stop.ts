@@ -4,12 +4,6 @@
  * turn with uncommitted changes in this app, run `guren gate` (the CI stages:
  * codegen, typecheck, lint, check, audit, test) and block the stop with the
  * findings (exit 2, stderr), so the fix happens in this turn rather than in CI.
- * A clean tree is not gated, so a turn that ends by committing is not gated
- * here: run `guren gate` before committing.
- *
- * The app root is this script's grandparent (`<app>/.claude/hooks/`,
- * `<app>/.codex/hooks/`): Codex runs hooks in the session cwd, which may be a
- * subdirectory, and a monorepo app is not the git root.
  */
 import { resolve } from 'node:path'
 
@@ -40,7 +34,12 @@ try {
   process.exit(2)
 }
 
+// The app root is this script's grandparent (`<app>/.claude/hooks/`,
+// `<app>/.codex/hooks/`): Codex runs hooks in the session cwd, which may be a
+// subdirectory, and a monorepo app is not the git root.
 const findings = await cli.stopGateFindings(resolve(import.meta.dir, '../..'))
+// null when the tree is clean, so a turn that ends by committing is not gated
+// here: run `guren gate` before committing.
 if (findings === null) {
   process.exit(0)
 }
