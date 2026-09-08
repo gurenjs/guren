@@ -1,31 +1,46 @@
-import type { Model, PlainObject } from './Model'
+import type { Model, ModelQueryOptions, ModelWriteOptions, PlainObject } from './Model'
 import { PREPARED_UPDATE, type QueryBuilder } from './QueryBuilder'
 
 /** The static methods the SoftDeletes mixin adds. */
 export interface SoftDeletesStatic {
   deletedAtColumn: string
   /** Start a query that includes soft-deleted records. */
-  withTrashed(): QueryBuilder<PlainObject>
+  withTrashed(queryOptions?: ModelQueryOptions): QueryBuilder<PlainObject>
   /** Start a query that returns only soft-deleted records. */
-  onlyTrashed(): QueryBuilder<PlainObject>
+  onlyTrashed(queryOptions?: ModelQueryOptions): QueryBuilder<PlainObject>
   /** Restore soft-deleted records by setting deletedAt back to null. */
-  restore(where: Partial<Record<string, unknown>>): Promise<PlainObject>
+  restore(where: Partial<Record<string, unknown>>, writeOptions?: ModelWriteOptions): Promise<PlainObject>
   /** Permanently delete records from the database, bypassing soft delete. */
-  forceDelete(where: Partial<Record<string, unknown>>): Promise<number | PlainObject | void>
+  forceDelete(
+    where: Partial<Record<string, unknown>>,
+    writeOptions?: ModelWriteOptions,
+  ): Promise<number | PlainObject | void>
 }
 
-/** A query carrying every global scope this model has, including softDelete. */
-function scopedQuery(model: typeof Model, where: Partial<Record<string, unknown>>): QueryBuilder<PlainObject> {
-  return (model.newQuery() as QueryBuilder<PlainObject>).where(where)
+/**
+ * A query carrying every global scope this model has, including softDelete.
+ * `queryOptions` carries the caller's `trx`; dropping it here sends the write to
+ * the default connection, outside the transaction meant to own it.
+ */
+function scopedQuery(
+  model: typeof Model,
+  where: Partial<Record<string, unknown>>,
+  queryOptions?: ModelQueryOptions,
+): QueryBuilder<PlainObject> {
+  return (model.newQuery(queryOptions) as QueryBuilder<PlainObject>).where(where)
 }
 
 /** A query carrying every global scope *except* softDelete, so it sees trashed rows. */
-function withoutSoftDeleteScope(model: typeof Model): QueryBuilder<PlainObject> {
-  return model.withoutGlobalScope('softDelete') as QueryBuilder<PlainObject>
+function withoutSoftDeleteScope(model: typeof Model, queryOptions?: ModelQueryOptions): QueryBuilder<PlainObject> {
+  return model.withoutGlobalScope(queryOptions ?? {}, 'softDelete') as QueryBuilder<PlainObject>
 }
 
-function trashedScopedQuery(model: typeof Model, where: Partial<Record<string, unknown>>): QueryBuilder<PlainObject> {
-  return withoutSoftDeleteScope(model).where(where)
+function trashedScopedQuery(
+  model: typeof Model,
+  where: Partial<Record<string, unknown>>,
+  queryOptions?: ModelQueryOptions,
+): QueryBuilder<PlainObject> {
+  return withoutSoftDeleteScope(model, queryOptions).where(where)
 }
 
 /**
@@ -51,6 +66,7 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
   ;(SoftDeleteModel as unknown as typeof Model).delete = async function (
     this: typeof Model,
     where: Partial<Record<string, unknown>>,
+    writeOptions?: ModelWriteOptions,
   ): Promise<number | PlainObject | void> {
     const adapter = this.getAdapter()
     if (!adapter.update) {
@@ -60,21 +76,28 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
     // Through the scoped builder, not straight to the adapter: the caller's
     // `where` alone ignores every global scope, so one tenant could
     // soft-delete another tenant's row. PREPARED_UPDATE skips mutators/casts.
-    return scopedQuery(this, where)[PREPARED_UPDATE]({ [column]: new Date() })
+    return scopedQuery(this, where, writeOptions)[PREPARED_UPDATE]({ [column]: new Date() })
   } as typeof Model.delete
 
-  SoftDeleteModel.withTrashed = function (this: typeof Model): QueryBuilder<PlainObject> {
-    return withoutSoftDeleteScope(this)
+  SoftDeleteModel.withTrashed = function (
+    this: typeof Model,
+    queryOptions?: ModelQueryOptions,
+  ): QueryBuilder<PlainObject> {
+    return withoutSoftDeleteScope(this, queryOptions)
   }
 
-  SoftDeleteModel.onlyTrashed = function (this: typeof Model): QueryBuilder<PlainObject> {
+  SoftDeleteModel.onlyTrashed = function (
+    this: typeof Model,
+    queryOptions?: ModelQueryOptions,
+  ): QueryBuilder<PlainObject> {
     const column = (this as unknown as SoftDeletesStatic).deletedAtColumn
-    return withoutSoftDeleteScope(this).whereNotNull(column)
+    return withoutSoftDeleteScope(this, queryOptions).whereNotNull(column)
   }
 
   SoftDeleteModel.restore = async function (
     this: typeof Model,
     where: Partial<Record<string, unknown>>,
+    writeOptions?: ModelWriteOptions,
   ): Promise<PlainObject> {
     const adapter = this.getAdapter()
     if (!adapter.update) {
@@ -83,12 +106,13 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
     const column = (this as unknown as SoftDeletesStatic).deletedAtColumn
     // Drops only the softDelete filter, so this reaches a trashed row while a
     // tenant scope still stops it from un-deleting somebody else's.
-    return trashedScopedQuery(this, where)[PREPARED_UPDATE]({ [column]: null })
+    return trashedScopedQuery(this, where, writeOptions)[PREPARED_UPDATE]({ [column]: null })
   }
 
   SoftDeleteModel.forceDelete = async function (
     this: typeof Model,
     where: Partial<Record<string, unknown>>,
+    writeOptions?: ModelWriteOptions,
   ): Promise<number | PlainObject | void> {
     const adapter = this.getAdapter()
     if (!adapter.delete) {
@@ -96,7 +120,7 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
     }
     // An unscoped hard delete is unrecoverable, so every scope but softDelete
     // has to survive; dropping that one is what reaches trashed rows too.
-    return trashedScopedQuery(this, where).delete()
+    return trashedScopedQuery(this, where, writeOptions).delete()
   }
 
   return SoftDeleteModel
