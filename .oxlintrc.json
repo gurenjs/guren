@@ -78,17 +78,11 @@
       "rules": { "no-restricted-imports": "off" }
     },
     {
-      // Scaffold templates are user-facing starter code whose comments guide the
-      // reader, and audit:starter-template asserts their text literally; test
-      // fixtures and stubs are inputs, not commentary.
-      "files": ["packages/*/templates/**", "**/tests/fixtures/**", "**/stubs/**"],
-      "rules": {
-        "guren/comment-length": "off",
-        "guren/comment-banner": "off",
-        "guren/comment-step-label": "off",
-        "guren/comment-history": "off",
-        "guren/comment-param-restates": "off"
-      }
+      // The one template still exempt: gurenjs/guren#726 (RFC 0020 Part 5)
+      // rewrites this block into three, so trimming it here would only collide.
+      // Delete this entry when #726 lands; lint then proves it is spent.
+      "files": ["packages/cli/templates/scaffold/session/config/session.ts"],
+      "rules": { "guren/comment-length": "off" }
     }
   ]
 }
