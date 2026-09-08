@@ -274,7 +274,7 @@ If your app deliberately serves pretty-URL HTML out of `public/`, set `"html_han
 
 The generated worker exports a `scheduled` handler alongside `fetch`, so a Cloudflare cron trigger runs the tasks your app registered with `createScheduler()`. There is no long-lived process on Workers to hold a ticking scheduler, and `scheduler.start()` never runs there — the trigger is what advances the clock.
 
-Two things you supply. First, the tasks and a provider binding the scheduler, exactly as on a Bun server. Declaring them in `app/Console/Kernel.ts` is what also lets `guren schedule:list` and `guren schedule:run` see them:
+Two things you supply. First, the tasks and a provider binding the scheduler, exactly as on a Bun server. Declaring them in `app/Console/Kernel.ts` is what also lets `guren schedule:list` and `guren schedule:run` see them — the file is the requirement, in either shape those commands accept ([Making tasks visible to the CLI](./scheduling.md#making-tasks-visible-to-the-cli)):
 
 ```ts
 // app/Console/Kernel.ts

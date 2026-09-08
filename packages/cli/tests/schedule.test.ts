@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
+import { consola } from 'consola'
 import { getNextRunTime, listScheduledTasks, runScheduledTasks } from '../src/schedule'
 
 describe('schedule', () => {
@@ -219,5 +220,213 @@ describe('getNextRunTime', () => {
   test('returns null for an expression that cannot match', () => {
     expect(getNextRunTime('0 25 * * *', undefined, new Date(2026, 5, 10))).toBeNull()
     expect(getNextRunTime('not a cron', undefined, new Date(2026, 5, 10))).toBeNull()
+  })
+})
+
+describe('schedule kernel discovery', () => {
+  const root = resolve(import.meta.dir, '.test-schedule-discovery')
+
+  // A fresh directory per test: `import()` caches by URL, so a second kernel
+  // written to a path already loaded in this process is never read.
+  let fixtures = 0
+  let testDir: string
+  let kernelPath: string
+
+  // Kept apart so the `--json` test can assert on stdout alone; every other
+  // assertion reads both.
+  let stdout: string[] = []
+  let stderr: string[] = []
+
+  const original = {
+    info: consola.info, warn: consola.warn, error: consola.error, success: consola.success,
+    log: console.log,
+  }
+
+  beforeEach(() => {
+    fixtures += 1
+    testDir = join(root, `app-${fixtures}`)
+    kernelPath = join(testDir, 'app/Console/Kernel.ts')
+    mkdirSync(join(testDir, 'app/Console'), { recursive: true })
+    stdout = []
+    stderr = []
+    const record = (into: string[]) => (...args: unknown[]) => { into.push(args.map(String).join(' ')) }
+    Object.assign(consola, {
+      info: record(stderr), warn: record(stderr), error: record(stderr), success: record(stderr),
+    })
+    console.log = record(stdout) as typeof console.log
+    // Bun ignores `process.exitCode = undefined`, and a leaked 1 here would
+    // fail the whole test run, not just the assertion.
+    process.exitCode = 0
+  })
+
+  afterEach(() => {
+    Object.assign(consola, original)
+    console.log = original.log
+    process.exitCode = 0
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  const listed = (): string => [...stdout, ...stderr].join('\n')
+
+  test('discovers a registrar taking the scheduler, the shape apps bind in a provider', async () => {
+    writeFileSync(kernelPath, `
+export function registerAppSchedules(scheduler) {
+  scheduler.schedule((schedule) => {
+    schedule.call(() => {}).hourly().name('app:warm-cache')
+  })
+}
+`)
+
+    await listScheduledTasks({ appRoot: testDir })
+
+    expect(listed()).toContain('app:warm-cache')
+    expect(listed()).toContain('Total: 1 task')
+    expect(process.exitCode).toBe(0)
+  })
+
+  test('counts a registrar exported twice once', async () => {
+    writeFileSync(kernelPath, `
+export function registerAppSchedules(scheduler) {
+  scheduler.schedule((schedule) => {
+    schedule.call(() => {}).hourly().name('app:warm-cache')
+  })
+}
+export default registerAppSchedules
+`)
+
+    await listScheduledTasks({ appRoot: testDir })
+
+    expect(listed()).toContain('Total: 1 task')
+  })
+
+  test('leaves a one-argument export alone unless its name says it is a registrar', async () => {
+    writeFileSync(kernelPath, `
+export function registerAppSchedules(scheduler) {
+  scheduler.schedule((schedule) => {
+    schedule.call(() => {}).hourly().name('app:warm-cache')
+  })
+}
+export function summarize(row) {
+  return row.missing.field
+}
+`)
+
+    await listScheduledTasks({ appRoot: testDir })
+
+    expect(listed()).not.toContain('summarize')
+    expect(listed()).toContain('app:warm-cache')
+  })
+
+  test('reports a registrar the naming convention misses rather than staying silent', async () => {
+    writeFileSync(kernelPath, `
+export function scheduleTasks(scheduler) {
+  scheduler.schedule((schedule) => {
+    schedule.call(() => {}).hourly().name('app:warm-cache')
+  })
+}
+`)
+
+    await listScheduledTasks({ appRoot: testDir })
+
+    expect(listed()).toContain('exports nothing the scheduler recognizes')
+    expect(listed()).toContain('Found: scheduleTasks')
+    expect(listed()).toContain('register…Schedules')
+    expect(process.exitCode).toBe(1)
+  })
+
+  test('awaits an async registrar, so tasks added after an await are seen', async () => {
+    writeFileSync(kernelPath, `
+export async function registerAppSchedules(scheduler) {
+  await Promise.resolve()
+  scheduler.schedule((schedule) => {
+    schedule.call(() => {}).hourly().name('app:late-task')
+  })
+}
+`)
+
+    await listScheduledTasks({ appRoot: testDir })
+
+    expect(listed()).toContain('app:late-task')
+  })
+
+  test('reports an async registrar that rejects rather than leaving it unhandled', async () => {
+    writeFileSync(kernelPath, `
+export async function registerAppSchedules(scheduler) {
+  await Promise.resolve()
+  throw new Error('async registrar failed')
+}
+`)
+
+    await listScheduledTasks({ appRoot: testDir })
+
+    expect(listed()).toContain('registerAppSchedules(scheduler) threw')
+    expect(listed()).toContain('async registrar failed')
+    expect(process.exitCode).toBe(1)
+  })
+
+  test('runs a registrar-declared task', async () => {
+    const marker = join(testDir, 'ran.txt')
+    writeFileSync(kernelPath, `
+import { writeFileSync } from 'node:fs'
+
+export function registerAppSchedules(scheduler) {
+  scheduler.schedule((schedule) => {
+    schedule.call(() => { writeFileSync(${JSON.stringify(marker)}, 'ran') }).hourly().name('app:warm-cache')
+  })
+}
+`)
+
+    await runScheduledTasks({ appRoot: testDir, force: true })
+
+    expect(existsSync(marker)).toBe(true)
+  })
+
+  test('names the kernel that exports nothing it recognizes, rather than the missing-kernel hint', async () => {
+    writeFileSync(kernelPath, 'export const commands = []\n')
+
+    await listScheduledTasks({ appRoot: testDir })
+
+    expect(listed()).toContain('exports nothing the scheduler recognizes')
+    expect(listed()).toContain('Kernel.ts')
+    expect(listed()).toContain('Found: commands')
+    expect(listed()).not.toContain('create a kernel file at')
+    expect(process.exitCode).toBe(1)
+  })
+
+  test('reports a kernel that throws instead of swallowing it into debug output', async () => {
+    writeFileSync(kernelPath, "throw new Error('kernel exploded')\n")
+
+    await listScheduledTasks({ appRoot: testDir })
+
+    expect(listed()).toContain('Failed to load the schedule kernel')
+    expect(listed()).toContain('kernel exploded')
+    expect(process.exitCode).toBe(1)
+  })
+
+  test('keeps the create-a-kernel hint for an app with no kernel file', async () => {
+    rmSync(kernelPath, { force: true })
+
+    await listScheduledTasks({ appRoot: testDir })
+
+    expect(listed()).toContain('To define scheduled tasks, create a kernel file at:')
+    expect(process.exitCode).toBe(0)
+  })
+
+  test('names an explicit --kernel path that does not exist', async () => {
+    await listScheduledTasks({ appRoot: testDir, kernel: 'app/Console/Missing.ts' })
+
+    expect(listed()).toContain('No schedule kernel at')
+    expect(listed()).toContain('Missing.ts')
+    expect(listed()).not.toContain('create a kernel file at')
+    expect(process.exitCode).toBe(1)
+  })
+
+  test('keeps --json stdout parseable when the kernel is unusable', async () => {
+    writeFileSync(kernelPath, 'export const commands = []\n')
+
+    await listScheduledTasks({ appRoot: testDir, json: true })
+
+    expect(JSON.parse(stdout.join('\n'))).toEqual([])
+    expect(stderr.join('\n')).toContain('exports nothing the scheduler recognizes')
   })
 })
