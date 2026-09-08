@@ -46,6 +46,12 @@ export interface BlueprintDefinition {
   run: (options: RunBlueprintOptions) => Promise<string[]>
 }
 
+/** The scaffolded schedule kernel, and the export `SchedulingProvider` imports from it. */
+const SCHEDULE_KERNEL_PATH = 'app/Console/Kernel.ts'
+const SCHEDULE_KERNEL_EXPORT = 'scheduleTasksKernel'
+/** `export` and the name on one line: the function, `const`, and re-export forms. */
+const SCHEDULE_KERNEL_EXPORT_PATTERN = /\bexport\b[^\n]*\bscheduleTasksKernel\b/
+
 const blueprintRegistry: Record<string, BlueprintDefinition> = {
   attachments: {
     description: 'Install the attachments layer: schema table, config, provider, and the prune command.',
@@ -317,11 +323,32 @@ export default registerAdminRoutes
     description: 'Install a schedule kernel with a sample recurring task.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await writeScaffoldFiles([
-        scaffoldTemplateFile('schedule', 'app/Console/Kernel.ts'),
-      ], writerOptions)
+      // The provider imports `scheduleTasksKernel`. A kernel already on disk that
+      // exports something else — the registrar shape `schedule:list` also reads —
+      // makes that provider a file the app cannot boot, so it is not written.
+      const existingKernel = writerOptions.force ? null : await readIfExists(process.cwd(), SCHEDULE_KERNEL_PATH)
+      const kernelFeedsProvider = existingKernel === null || SCHEDULE_KERNEL_EXPORT_PATTERN.test(existingKernel)
 
-      await wireProviders([{ name: 'CoreSchedulingServiceProvider', importStatement: "import { SchedulingServiceProvider as CoreSchedulingServiceProvider } from '@guren/core'" }])
+      // `skipExisting`, so an app that ran this before the provider existed can
+      // re-run it for the provider alone: without it the present Kernel.ts aborts
+      // the command, and --force would overwrite the tasks the app has written.
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('schedule', SCHEDULE_KERNEL_PATH),
+        ...(kernelFeedsProvider ? [scaffoldTemplateFile('schedule', 'app/Providers/SchedulingProvider.ts')] : []),
+      ], { ...writerOptions, skipExisting: true })
+
+      if (!kernelFeedsProvider) {
+        consola.warn(`${SCHEDULE_KERNEL_PATH} exports no ${SCHEDULE_KERNEL_EXPORT}() — app/Providers/SchedulingProvider.ts was not written.`)
+        consola.info('Feed your own kernel to the scheduler from a provider of your own, or its tasks reach no scheduler: https://guren.dev/en/guides/scheduling')
+      }
+
+      // Order matters: the app provider registers after core's and rebinds
+      // `scheduler` with the kernel's tasks. Core's binding on its own is an empty
+      // scheduler, which no task from the kernel this just wrote ever reaches.
+      await wireProviders([
+        { name: 'CoreSchedulingServiceProvider', importStatement: "import { SchedulingServiceProvider as CoreSchedulingServiceProvider } from '@guren/core'" },
+        ...(kernelFeedsProvider ? [{ name: 'SchedulingProvider' }] : []),
+      ])
 
       return created
     },

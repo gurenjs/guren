@@ -564,6 +564,15 @@ export const users = pgTable('users', {
     expect(eventFiles.some((file) => file.endsWith('app/Providers/EventProvider.ts'))).toBe(true)
     expect(cacheFiles.some((file) => file.endsWith('app/Providers/CacheProvider.ts'))).toBe(true)
     expect(scheduleFiles.some((file) => file.endsWith('app/Console/Kernel.ts'))).toBe(true)
+    expect(scheduleFiles.some((file) => file.endsWith('app/Providers/SchedulingProvider.ts'))).toBe(true)
+
+    // The kernel declares tasks and runs nothing; core's provider binds a scheduler
+    // with none. Without this feed, `app-heartbeat` never reaches the container's
+    // scheduler even though `schedule:list` reads it straight off the kernel.
+    const schedulingProviderSource = await readFile('app/Providers/SchedulingProvider.ts', 'utf8')
+    expect(schedulingProviderSource).toContain("this.container.singleton('scheduler'")
+    expect(schedulingProviderSource).toContain('scheduleTasksKernel().buildTasks()')
+    expect(schedulingProviderSource).toContain('scheduler.addTask(task)')
     expect(notificationFiles.some((file) => file.endsWith('app/Providers/NotificationProvider.ts'))).toBe(true)
     expect(storageFiles.some((file) => file.endsWith('app/Providers/StorageProvider.ts'))).toBe(true)
 
@@ -601,6 +610,7 @@ export const users = pgTable('users', {
     expect(appSource).toContain('NotificationProvider')
     expect(appSource).toContain('StorageProvider')
     expect(appSource).toContain('BroadcastProvider')
+    expect(appSource).toContain('SchedulingProvider')
     expect(appSource).toContain('OAuthProvider')
 
     const routesSource = await readFile('routes/web.ts', 'utf8')
@@ -609,6 +619,56 @@ export const users = pgTable('users', {
     expect(adminFiles.some((file) => file.endsWith('routes/admin.ts'))).toBe(true)
     expect(routesSource).toContain("import registerAdminRoutes from './admin.js'")
     expect(routesSource).toContain('registerAdminRoutes(router)')
+  })
+
+  // The population that has the bug this provider fixes all have a Kernel.ts
+  // already; aborting on it, or overwriting their tasks under --force, leaves
+  // them no way to install the provider by re-running the blueprint.
+  it('adds the schedule provider to an app whose kernel already exists', async () => {
+    await seedAppFile(APP_FIXTURE)
+    await mkdir('app/Console', { recursive: true })
+    await writeFile('app/Console/Kernel.ts', 'export function scheduleTasksKernel() { return null }\n')
+
+    const created = await runBlueprint('schedule')
+
+    expect(created.some((file) => file.endsWith('app/Providers/SchedulingProvider.ts'))).toBe(true)
+    expect(await readFile('app/Console/Kernel.ts', 'utf8')).not.toContain('app-heartbeat')
+    expect(await readFile('src/app.ts', 'utf8')).toContain('SchedulingProvider')
+  })
+
+  // The scaffolded provider imports scheduleTasksKernel; a registrar kernel (the
+  // other shape schedule:list reads) exports no such thing, so writing it anyway
+  // hands the app a provider whose import fails at boot.
+  it('writes no schedule provider against a kernel it cannot import', async () => {
+    await seedAppFile(APP_FIXTURE)
+    await mkdir('app/Console', { recursive: true })
+    await writeFile(
+      'app/Console/Kernel.ts',
+      'import type { Scheduler } from \'@guren/core\'\n\nexport function registerSchedules(scheduler: Scheduler): void {}\n',
+    )
+
+    const { result: created, warnings } = await captureWarnings(() => runBlueprint('schedule'))
+
+    expect(created.some((file) => file.endsWith('app/Providers/SchedulingProvider.ts'))).toBe(false)
+    expect(existsSync('app/Providers/SchedulingProvider.ts')).toBe(false)
+    expect(warnings.join('\n')).toContain('exports no scheduleTasksKernel()')
+    // Registering a provider whose file was not written is the same broken boot.
+    const providers = (await readFile('src/app.ts', 'utf8')).match(/providers:\s*\[([^\]]*)\]/)?.[1] ?? ''
+    expect(providers.split(',').map((entry) => entry.trim())).toEqual(['CoreSchedulingServiceProvider'])
+  })
+
+  // `container.singleton()` overwrites its key, so the app provider only wins by
+  // registering after core's. Reversed, core rebinds a task-less scheduler over it.
+  it('registers the schedule app provider after the core one', async () => {
+    await seedAppFile(APP_FIXTURE)
+
+    await runBlueprint('schedule')
+
+    const providers = (await readFile('src/app.ts', 'utf8')).match(/providers:\s*\[([^\]]*)\]/)?.[1] ?? ''
+    expect(providers.split(',').map((entry) => entry.trim())).toEqual([
+      'CoreSchedulingServiceProvider',
+      'SchedulingProvider',
+    ])
   })
 
   // `addImport`/`addProvider` report an unpatchable app entry by returning a
