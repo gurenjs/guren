@@ -2,7 +2,12 @@
 
 **Author:** 7nohe
 **Date:** 2026-09-08
-**Status:** Draft
+**Status:** Accepted (2026-09-08 — the standard two-week discussion window
+was shortened by the deciding maintainer for this solo-driven change, after
+one external design review. The three must-decide open questions were
+settled as proposed: generated shell with a `resources/js/prototype/index.html`
+override; server-side prototype routes refused in production without
+`GUREN_PROTOTYPE_ROUTES=1`; persona switching deferred to a follow-up)
 
 ## Problem
 
