@@ -495,6 +495,16 @@ app code (the CLI never boots the app).
   dependency.
 - **`create-guren-app --prototype`** runs it after scaffolding, the way the
   `worker` blueprint runs its blueprints.
+**Amended after review (Parts 1–3):** `@guren/inertia-client` loads its
+prototype runtime with a dynamic import inside `startPrototypeClient()`; a
+static import shipped the runtime (and Hono's router) in every production
+bundle, which the changeset's dead-code claim had promised it would not, and
+`smoke:prototype` now asserts the absence. `hono` is an optional peer. The
+persisted state key carries the `base`, so two prototypes on one origin do
+not resume each other's state, and `?prototype.reset=1` clears every base's
+key. The server-side `errors()` takes no error bag: `ValidationException`
+has none, so a bag a fixture names is honoured only in the browser.
+
 **Amended in implementation (Part 3):** the fixture template always carries
 a demo author in `shared.auth` (an app without auth ignores the key), since
 the template is byte-pinned by the scaffold test and cannot vary per app;
