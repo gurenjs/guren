@@ -274,7 +274,7 @@ APP_KEY=base64:...
 
 生成されるワーカーは `fetch` と並んで `scheduled` ハンドラを export します。そのため Cloudflare の cron トリガーが、アプリが `createScheduler()` で登録したタスクを実行します。Workers には常駐プロセスがなく、`scheduler.start()` はそこでは動きません。時計を進めるのはトリガーです。
 
-用意するものは 2 つです。1 つめは、Bun サーバーのときとまったく同じ、タスクと scheduler をバインドするプロバイダです。タスクを `app/Console/Kernel.ts` に宣言しておくと、`guren schedule:list` と `guren schedule:run` からも見えるようになります。
+用意するものは 2 つです。1 つめは、Bun サーバーのときとまったく同じ、タスクと scheduler をバインドするプロバイダです。タスクを `app/Console/Kernel.ts` に宣言しておくと、`guren schedule:list` と `guren schedule:run` からも見えるようになります。条件はこのファイルであることで、形はこれらのコマンドが受け入れるどちらでもかまいません（[CLIから見えるようにする](./scheduling.md#cliから見えるようにする)）。
 
 ```ts
 // app/Console/Kernel.ts

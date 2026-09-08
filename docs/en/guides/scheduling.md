@@ -292,21 +292,89 @@ await scheduler.runDueTasks()           // Run all due tasks now
 
 ## CLI Integration
 
-Run the scheduler from the command line:
+The ticking scheduler lives inside your application — `scheduler.start()`, above.
+The CLI covers the other half: seeing what is registered, and driving a run from
+outside the process, which is what a system cron or a platform trigger calls.
 
 ```bash
-# Start the scheduler
-bunx guren schedule:work
-
-# Start with custom timezone
-bunx guren schedule:work --timezone=Asia/Tokyo
-
 # List scheduled tasks
 bunx guren schedule:list
+bunx guren schedule:list --json
 
-# Run a specific task immediately
-bunx guren schedule:run cleanup-sessions
+# Run whichever tasks are due now
+bunx guren schedule:run
+
+# Run one task immediately, due or not
+bunx guren schedule:run --task cleanup-sessions --force
 ```
+
+### Making tasks visible to the CLI
+
+`schedule:list` and `schedule:run` do not boot your application. They load the
+schedule kernel directly, probing `app/Console/Kernel.ts` (and the lowercase and
+`src/` variants), or the path given to `--kernel`. Tasks declared anywhere else
+are invisible to both commands, however reliably they run under
+`scheduler.start()`.
+
+Two export shapes are recognized, each under its own naming convention.
+
+**A registrar** is the shape most app code already has: a provider builds the
+scheduler and hands it over, and the CLI supplies one of its own.
+
+```ts
+// app/Console/Kernel.ts
+import type { Scheduler } from '@guren/core'
+
+export function registerSchedules(scheduler: Scheduler): void {
+  scheduler.schedule((schedule) => {
+    schedule.call(warmCache).hourly().name('warm-cache')
+  })
+}
+```
+
+Name it `register…Schedules` — `registerSchedules`, `registerBillingSchedules`
+— or make it the default export. A kernel may export several, and they all
+receive the same scheduler. The convention is what keeps the CLI from calling
+every helper the file happens to export; a registrar named anything else is
+reported as unrecognized rather than silently skipped.
+
+**A kernel factory** takes nothing and returns the `Schedule` it built. It is
+recognized as `scheduleTasksKernel`, `schedule`, `defineSchedule`, or the default
+export, and is what `bunx guren add schedule` scaffolds.
+
+```ts
+// app/Console/Kernel.ts
+import { Schedule } from '@guren/core'
+
+export function scheduleTasksKernel(): Schedule {
+  const schedule = new Schedule()
+  schedule.call(warmCache).hourly().name('warm-cache')
+  return schedule
+}
+```
+
+A factory declares the tasks but runs nothing on its own — a provider still has
+to feed them to the scheduler it binds:
+
+```ts
+for (const task of scheduleTasksKernel().buildTasks()) scheduler.addTask(task)
+```
+
+Prefer the registrar in application code: it is the same `Scheduler` API the rest
+of this guide teaches, and the tasks reach the running scheduler without a second
+wiring step.
+
+Either way, resolve services *inside* the task callback rather than while the
+kernel is being built — the CLI reads this file without booting your app, so a
+container lookup at build time has nothing to resolve:
+
+```ts
+schedule.call(() => getContainer().make<SessionManager>('session').pruneExpired()).hourly()
+```
+
+A kernel that exists but matches neither shape, or that throws while loading, is
+reported as such and exits non-zero — it is not the same state as an app that has
+not scheduled anything yet.
 
 ## Testing
 

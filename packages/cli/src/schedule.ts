@@ -1,8 +1,8 @@
 import { consola } from 'consola'
 import { resolve } from 'node:path'
-import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { matchesCron, parseCron, toTimezone, type ParsedCron } from '@guren/core'
+import { isDefinitelyAbsent } from './discovery'
+import { createScheduler, matchesCron, parseCron, toTimezone, type ParsedCron, type Scheduler } from '@guren/core'
 
 export interface ScheduleOptions {
   appRoot?: string
@@ -64,8 +64,108 @@ function normalizeTask(raw: ScheduledTaskLike): TaskInfo {
   }
 }
 
+/** Why a listing has no tasks; see {@link reportEmptyKernel} for what each state means. */
+type KernelLoad =
+  | { kind: 'loaded'; path: string; tasks: TaskInfo[]; warnings: string[] }
+  | { kind: 'missing' }
+  | { kind: 'not-found'; path: string }
+  | { kind: 'failed'; path: string; reasons: string[] }
+  | { kind: 'unrecognized'; path: string; exports: string[] }
+
+/** Export names carrying a kernel factory: called with no scheduler, returns the schedule. */
+const KERNEL_FACTORY_EXPORTS = ['scheduleTasksKernel', 'schedule', 'defineSchedule', 'default']
+
+/**
+ * Export names carrying a registrar: handed the scheduler, returns nothing. Named
+ * rather than shape-matched, for the reason `route-registrar.ts` gives about routes
+ * — a helper that merely takes one argument is not the entry point, and a loader
+ * that calls every such export runs app code nobody pointed it at.
+ */
+const REGISTRAR_PATTERN = /^register\w*Schedules$/u
+
+function isRegistrarExportName(name: string): boolean {
+  return name === 'default' || REGISTRAR_PATTERN.test(name)
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function tasksFromSchedule(value: unknown): TaskInfo[] | null {
+  const schedule = value as { buildTasks?: () => unknown[]; getTasks?: () => unknown[] } | null
+  const raw =
+    typeof schedule?.buildTasks === 'function'
+      ? schedule.buildTasks()
+      : typeof schedule?.getTasks === 'function'
+        ? schedule.getTasks()
+        : null
+
+  return raw ? raw.map((task) => normalizeTask(task as ScheduledTaskLike)) : null
+}
+
+/**
+ * Reads one kernel module in both shapes the docs teach: a factory returning a
+ * `Schedule` (`scheduleTasksKernel()`), and a registrar taking the `Scheduler`
+ * the app binds in a provider. Arity is what tells them apart — a registrar's
+ * export name belongs to the app, so no name list can find it.
+ */
+async function readKernelModule(kernelPath: string): Promise<KernelLoad> {
+  let mod: Record<string, unknown>
+  try {
+    mod = (await import(pathToFileURL(kernelPath).href)) as Record<string, unknown>
+  } catch (error) {
+    return { kind: 'failed', path: kernelPath, reasons: [describeError(error)] }
+  }
+
+  const reasons: string[] = []
+
+  for (const name of KERNEL_FACTORY_EXPORTS) {
+    const exported = mod[name]
+    if (typeof exported !== 'function' || exported.length > 0) continue
+
+    try {
+      const tasks = tasksFromSchedule(await (exported as () => unknown)())
+      if (tasks) return { kind: 'loaded', path: kernelPath, tasks, warnings: [] }
+    } catch (error) {
+      reasons.push(`${name}() threw: ${describeError(error)}`)
+    }
+  }
+
+  // One scheduler across every registrar, so an app may split its tasks over
+  // several. Deduplicated by identity: `export default registerSchedules` beside
+  // the named export is the same function twice, not two sets of tasks.
+  const registrars = new Map<(scheduler: Scheduler) => unknown, string>()
+  for (const [name, exported] of Object.entries(mod)) {
+    if (typeof exported === 'function' && exported.length === 1 && isRegistrarExportName(name)) {
+      const registrar = exported as (scheduler: Scheduler) => unknown
+      if (!registrars.has(registrar)) registrars.set(registrar, name)
+    }
+  }
+
+  if (registrars.size > 0) {
+    const scheduler = createScheduler()
+    for (const [registrar, name] of registrars) {
+      try {
+        await registrar(scheduler)
+      } catch (error) {
+        reasons.push(`${name}(scheduler) threw: ${describeError(error)}`)
+      }
+    }
+
+    // The `await` above is what keeps an async registrar's rejection reportable
+    // rather than escaping as an unhandled one.
+    const tasks = scheduler.getTasks().map((task) => normalizeTask(task as ScheduledTaskLike))
+    if (tasks.length > 0 || reasons.length === 0) {
+      return { kind: 'loaded', path: kernelPath, tasks, warnings: reasons }
+    }
+  }
+
+  if (reasons.length > 0) return { kind: 'failed', path: kernelPath, reasons }
+  return { kind: 'unrecognized', path: kernelPath, exports: Object.keys(mod) }
+}
+
 /** Loads the schedule kernel from `--kernel`, or from the conventional locations. */
-async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ tasks: TaskInfo[]; scheduler?: unknown } | null> {
+async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<KernelLoad> {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
 
   const kernelPaths = options.kernel
@@ -79,37 +179,20 @@ async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ task
         resolve(appRoot, 'src/console/Kernel.ts'),
       ]
 
+  let firstProblem: KernelLoad | null = null
+
   for (const kernelPath of kernelPaths) {
-    if (existsSync(kernelPath)) {
-      try {
-        const mod = await import(pathToFileURL(kernelPath).href)
+    // Loader semantics: a kernel whose directory cannot be read must reach the
+    // import and be diagnosed, not be reported as an app that has no kernel.
+    if (await isDefinitelyAbsent(appRoot, kernelPath)) continue
 
-        const scheduleFunction =
-          mod.scheduleTasksKernel ||
-          mod.schedule ||
-          mod.defineSchedule ||
-          mod.default
-
-        if (typeof scheduleFunction === 'function') {
-          const schedule = scheduleFunction()
-
-          if (schedule && typeof schedule.buildTasks === 'function') {
-            const tasks = schedule.buildTasks()
-            return { tasks: tasks.map((t: unknown) => normalizeTask(t as ScheduledTaskLike)) }
-          }
-
-          if (schedule && typeof schedule.getTasks === 'function') {
-            const tasks = schedule.getTasks()
-            return { tasks: tasks.map((t: unknown) => normalizeTask(t as ScheduledTaskLike)) }
-          }
-        }
-      } catch (error) {
-        consola.debug(`Failed to load kernel from ${kernelPath}:`, error)
-      }
-    }
+    const load = await readKernelModule(kernelPath)
+    if (load.kind === 'loaded') return load
+    firstProblem ??= load
   }
 
-  return null
+  if (firstProblem) return firstProblem
+  return options.kernel ? { kind: 'not-found', path: kernelPaths[0] } : { kind: 'missing' }
 }
 
 /**
@@ -184,31 +267,86 @@ function formatTimeUntil(date: Date): string {
   return 'in < 1 min'
 }
 
-export async function listScheduledTasks(options: ScheduleOptions = {}): Promise<void> {
+/**
+ * Says why there are no tasks to show. `missing` is the only state the "create a
+ * kernel" hint fits: a kernel that exists but threw, exported nothing usable, or
+ * was named by a `--kernel` that is not there, is a wiring bug, and the hint would
+ * answer a question nobody asked. Diagnostics go through consola's error/warn
+ * (stderr), leaving `--json` stdout machine-readable.
+ */
+function reportEmptyKernel(kernel: KernelLoad, json: boolean): void {
+  switch (kernel.kind) {
+    case 'not-found':
+      consola.error(`No schedule kernel at ${kernel.path}.`)
+      process.exitCode = 1
+      return
+
+    case 'failed':
+      consola.error(
+        [`Failed to load the schedule kernel at ${kernel.path}:`, ...kernel.reasons.map((reason) => `  ${reason}`)].join('\n'),
+      )
+      process.exitCode = 1
+      return
+
+    case 'unrecognized':
+      consola.error(
+        [
+          `${kernel.path} exports nothing the scheduler recognizes.`,
+          `  Found: ${kernel.exports.join(', ') || '(no exports)'}`,
+          '  Export a kernel factory `scheduleTasksKernel(): Schedule`, or a registrar',
+          '  named `register…Schedules(scheduler: Scheduler)`. Either may be the default export.',
+        ].join('\n'),
+      )
+      process.exitCode = 1
+      return
+
+    case 'loaded':
+      consola.warn(`${kernel.path} loaded, but registered no tasks.`)
+      return
+
+    case 'missing':
+      if (json) return
+      consola.info('No scheduled tasks found.')
+      consola.info('')
+      consola.info('To define scheduled tasks, create a kernel file at:')
+      consola.info('  app/Console/Kernel.ts')
+      consola.info('')
+      consola.info('Example:')
+      consola.info('  export function scheduleTasksKernel() {')
+      consola.info('    const schedule = new Schedule()')
+      consola.info('    schedule.call(myTask).daily().name("my-task")')
+      consola.info('    return schedule')
+      consola.info('  }')
+  }
+}
+
+/**
+ * The kernel's tasks, or `null` once the reason there are none has been reported.
+ * `reportEmptyKernel`'s `loaded` case relies on the emptiness test here, so the two
+ * stay in one place.
+ */
+async function resolveTasks(options: ScheduleOptions): Promise<TaskInfo[] | null> {
   const kernel = await loadScheduleKernel(options)
 
-  if (!kernel || kernel.tasks.length === 0) {
-    if (options.json) {
-      console.log(JSON.stringify([], null, 2))
-      return
-    }
+  if (kernel.kind !== 'loaded' || kernel.tasks.length === 0) {
+    reportEmptyKernel(kernel, Boolean(options.json))
+    return null
+  }
 
-    consola.info('No scheduled tasks found.')
-    consola.info('')
-    consola.info('To define scheduled tasks, create a kernel file at:')
-    consola.info('  app/Console/Kernel.ts')
-    consola.info('')
-    consola.info('Example:')
-    consola.info('  export function scheduleTasksKernel() {')
-    consola.info('    const schedule = new Schedule()')
-    consola.info('    schedule.call(myTask).daily().name("my-task")')
-    consola.info('    return schedule')
-    consola.info('  }')
+  for (const warning of kernel.warnings) consola.warn(warning)
+  return kernel.tasks
+}
+
+export async function listScheduledTasks(options: ScheduleOptions = {}): Promise<void> {
+  const tasks = await resolveTasks(options)
+
+  if (!tasks) {
+    if (options.json) console.log(JSON.stringify([], null, 2))
     return
   }
 
   if (options.json) {
-    const data = kernel.tasks.map((task) => {
+    const data = tasks.map((task) => {
       const nextRun = getNextRunTime(task.expression, task.timezone)
       return {
         name: task.name,
@@ -223,7 +361,7 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
 
   const rows: string[][] = []
 
-  for (const task of kernel.tasks) {
+  for (const task of tasks) {
     const nextRun = getNextRunTime(task.expression, task.timezone)
     rows.push([
       task.name,
@@ -251,20 +389,14 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
   }
 
   console.log('')
-  console.log(`Total: ${kernel.tasks.length} task${kernel.tasks.length === 1 ? '' : 's'}`)
+  console.log(`Total: ${tasks.length} task${tasks.length === 1 ? '' : 's'}`)
 }
 
 export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promise<void> {
-  const kernel = await loadScheduleKernel(options)
+  const tasks = await resolveTasks(options)
+  if (!tasks) return
 
-  if (!kernel || kernel.tasks.length === 0) {
-    consola.error('No scheduled tasks found.')
-    return
-  }
-
-  const tasksToRun = options.task
-    ? kernel.tasks.filter((t) => t.name === options.task)
-    : kernel.tasks
+  const tasksToRun = options.task ? tasks.filter((t) => t.name === options.task) : tasks
 
   if (tasksToRun.length === 0) {
     consola.error(`Task "${options.task}" not found.`)
@@ -300,8 +432,7 @@ export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promi
       consola.success(`  Ran: ${task.name} (${Date.now() - startedAt}ms)`)
     } catch (error) {
       failures += 1
-      const reason = error instanceof Error ? error.message : String(error)
-      consola.error(`  Failed: ${task.name} — ${reason}`)
+      consola.error(`  Failed: ${task.name} — ${describeError(error)}`)
     }
   }
 

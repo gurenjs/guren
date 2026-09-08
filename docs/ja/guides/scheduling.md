@@ -292,21 +292,88 @@ await scheduler.runDueTasks()           // 実行予定の全タスクを今す�
 
 ## CLI統合
 
-コマンドラインからスケジューラーを実行します。
+常駐するスケジューラーはアプリケーションの中で動きます(前述の`scheduler.start()`)。
+CLIが担うのはもう半分、つまり登録内容の確認と、プロセスの外からの実行です。後者は
+システムのcronやプラットフォームのトリガーが呼ぶものです。
 
 ```bash
-# スケジューラーを開始
-bunx guren schedule:work
-
-# カスタムタイムゾーンで開始
-bunx guren schedule:work --timezone=Asia/Tokyo
-
 # スケジュールされたタスクを一覧
 bunx guren schedule:list
+bunx guren schedule:list --json
 
-# 特定のタスクを即座に実行
-bunx guren schedule:run cleanup-sessions
+# 実行時刻を迎えたタスクを実行
+bunx guren schedule:run
+
+# 特定のタスクを時刻に関係なく即座に実行
+bunx guren schedule:run --task cleanup-sessions --force
 ```
+
+### CLIから見えるようにする
+
+`schedule:list`と`schedule:run`はアプリケーションをbootしません。スケジュール
+カーネルを直接読み込み、`app/Console/Kernel.ts`(小文字版と`src/`版も含む)、
+あるいは`--kernel`で渡したパスを探索します。それ以外の場所で宣言されたタスクは、
+`scheduler.start()`の下でどれだけ確実に動いていても、両コマンドからは見えません。
+
+認識されるエクスポートの形は2つで、それぞれに命名規約があります。
+
+**レジストラ**は多くのアプリケーションコードが既に持っている形です。プロバイダー
+がスケジューラーを構築して渡し、CLIは自前のスケジューラーを渡します。
+
+```ts
+// app/Console/Kernel.ts
+import type { Scheduler } from '@guren/core'
+
+export function registerSchedules(scheduler: Scheduler): void {
+  scheduler.schedule((schedule) => {
+    schedule.call(warmCache).hourly().name('warm-cache')
+  })
+}
+```
+
+名前は`register…Schedules`(`registerSchedules`、`registerBillingSchedules`など)
+にするか、デフォルトエクスポートにします。1つのカーネルが複数エクスポートしても
+よく、その全部が同じスケジューラーを受け取ります。この規約があるおかげで、CLIは
+ファイルが偶然エクスポートしているヘルパーまで呼ばずに済みます。規約から外れた名前
+のレジストラは、黙って無視されるのではなく「認識できない」として報告されます。
+
+**カーネルファクトリ**は引数を取らず、構築した`Schedule`を返します。
+`scheduleTasksKernel`、`schedule`、`defineSchedule`、またはデフォルトエクスポート
+として認識され、`bunx guren add schedule`が生成するのはこの形です。
+
+```ts
+// app/Console/Kernel.ts
+import { Schedule } from '@guren/core'
+
+export function scheduleTasksKernel(): Schedule {
+  const schedule = new Schedule()
+  schedule.call(warmCache).hourly().name('warm-cache')
+  return schedule
+}
+```
+
+ファクトリはタスクを宣言するだけで、それ自体は何も実行しません。プロバイダーが
+バインドするスケジューラーへ渡す必要があります。
+
+```ts
+for (const task of scheduleTasksKernel().buildTasks()) scheduler.addTask(task)
+```
+
+アプリケーションコードではレジストラを推奨します。このガイドの他の箇所が教える
+`Scheduler` APIそのままであり、2度目の配線なしにタスクが実行中のスケジューラーへ
+届きます。
+
+どちらの形でも、サービスの解決はカーネル構築時ではなくタスクのコールバック内で
+行ってください。CLIはアプリをbootせずにこのファイルを読むため、構築時のコンテナ
+参照には解決先がありません。
+
+```ts
+schedule.call(() => getContainer().make<SessionManager>('session').pruneExpired()).hourly()
+```
+
+カーネルが存在するのにどちらの形にも一致しない場合、あるいは読み込み中に例外を
+投げた場合は、その旨を報告して非ゼロで終了します。まだ何もスケジュールしていない
+アプリとは別の状態として扱われます。
 
 ## テスト
 
