@@ -1,7 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import { readIfExists } from './discovery'
-import { memberKeyName, objectLiteral, topLevelDeclaration } from './ast-walk'
 import { parseSourceFile } from './parse-cache'
 import { resolve } from 'node:path'
 import { escapeRegExp } from './utils'
@@ -509,7 +508,7 @@ export async function hasAuthProvider(filePath: string): Promise<boolean> {
   }
 }
 
-import { declaredTableIdentifiers, type SchemaDialect } from './schema-parser'
+import { findSchemaAggregate, type SchemaDialect } from './schema-parser'
 export type { SchemaDialect }
 
 /**
@@ -649,7 +648,7 @@ export async function addCreateAppOption(
   return { modified: true }
 }
 
-interface SchemaAggregate {
+interface AggregateSplice {
   /** Where the new table's declaration goes: ahead of the aggregate that names it. */
   declarationOffset: number
   /** Null when the aggregate already lists the table. */
@@ -677,76 +676,37 @@ function statementStart(source: string, offset: number): number {
 }
 
 /**
- * The app's hand-kept aggregate of its own tables — `export const schema = { posts, users }`,
- * which an app hands to drizzle for relational queries. Nothing the framework generates reads
- * it, so a table appended without a key here leaves it incomplete with nothing to notice.
- * Positive evidence only: every property a shorthand (or `name: name`) reference to a table
- * this same file declares, `name` excepted. Anything else, or a second candidate, answers null.
+ * Where `name`'s declaration and its aggregate key go, from the one aggregate reading in
+ * `schema-parser.ts`. `name` is passed as the extra key so a re-run over a file that already
+ * declares the table still recognizes the object listing it.
  */
-function findSchemaAggregate(source: string, name: string): SchemaAggregate | null {
+function planAggregateSplice(source: string, name: string): AggregateSplice | null {
   const ast = parseSourceFile(source, 'db/schema.ts')
-  if (!ast) return null
+  const aggregate = ast && findSchemaAggregate(ast, name)
+  if (!aggregate) return null
 
-  const tables = declaredTableIdentifiers(ast)
-  if (tables.size === 0) return null
+  const { object, statement, keys } = aggregate
+  const last = object.properties[object.properties.length - 1]
+  const lastStart = last.start ?? -1
+  const lastEnd = last.end ?? -1
+  if (lastStart < 0 || lastEnd < 0) return null
 
-  let found: SchemaAggregate | null = null
+  const multiline = source.slice(object.start ?? 0, object.end ?? 0).includes('\n')
+  const indent = indentOfLine(source, lastStart)
+  // Past a line comment on the last entry's own line, so a note written against
+  // that entry is not re-attached to the new one. Only when a comma already
+  // separates the two, since one added here would land inside the comment.
+  const lineEnd = source.indexOf('\n', lastEnd)
+  const commented = multiline && lineEnd > 0 && /^\s*,\s*\/\//.test(source.slice(lastEnd, lineEnd))
 
-  for (const node of ast.program.body) {
-    const declaration = topLevelDeclaration(node)
-    if (!declaration) continue
-
-    for (const declarator of declaration.declarations) {
-      const object = objectLiteral(declarator.init)
-      if (!object || object.properties.length === 0) continue
-
-      let lastStart = -1
-      let lastEnd = -1
-      let listsName = false
-      let isAggregate = true
-
-      for (const property of object.properties) {
-        if (property.type !== 'ObjectProperty') {
-          isAggregate = false
-          break
-        }
-        const key = memberKeyName(property)
-        const referencesKey =
-          property.shorthand || (property.value.type === 'Identifier' && property.value.name === key)
-        if (!key || !referencesKey || !(tables.has(key) || key === name)) {
-          isAggregate = false
-          break
-        }
-        if (key === name) listsName = true
-        lastStart = property.start ?? -1
-        lastEnd = property.end ?? -1
-      }
-      if (!isAggregate || lastEnd < 0 || lastStart < 0) continue
-
-      // A second candidate means the file's shape does not identify one aggregate,
-      // so neither can this.
-      if (found) return null
-
-      const multiline = source.slice(object.start ?? 0, object.end ?? 0).includes('\n')
-      const indent = indentOfLine(source, lastStart)
-      // Past a line comment on the last entry's own line, so a note written against
-      // that entry is not re-attached to the new one. Only when a comma already
-      // separates the two, since one added here would land inside the comment.
-      const lineEnd = source.indexOf('\n', lastEnd)
-      const commented = multiline && lineEnd > 0 && /^\s*,\s*\/\//.test(source.slice(lastEnd, lineEnd))
-
-      found = {
-        declarationOffset: statementStart(source, node.start ?? 0),
-        key: listsName
-          ? null
-          : commented
-            ? { offset: lineEnd, text: `\n${indent}${name},` }
-            : { offset: lastEnd, text: `${multiline ? `,\n${indent}` : ', '}${name}` },
-      }
-    }
+  return {
+    declarationOffset: statementStart(source, statement.start ?? 0),
+    key: keys.includes(name)
+      ? null
+      : commented
+        ? { offset: lineEnd, text: `\n${indent}${name},` }
+        : { offset: lastEnd, text: `${multiline ? `,\n${indent}` : ', '}${name}` },
   }
-
-  return found
 }
 
 /** The offset the line containing `offset` starts at. */
@@ -771,7 +731,7 @@ export function appendTableToSchema(
   name: string,
   block: string,
 ): { source: string; aggregated: boolean } {
-  const aggregate = findSchemaAggregate(source, name)
+  const aggregate = planAggregateSplice(source, name)
   if (!aggregate) return { source: `${source.trimEnd()}\n\n${block.trim()}\n`, aggregated: false }
 
   // Both splices come from the one parse, applied high offset first so the earlier
@@ -824,7 +784,7 @@ export async function appendSchemaTable(options: AppendSchemaTableOptions): Prom
     // is beyond what a scaffolder should do to a hand-kept file. Which advice is
     // right depends on where that declaration sits — an earlier release appended
     // it at end of file, below the aggregate, where adding the key alone is TS2448.
-    const stale = findSchemaAggregate(existing, name)
+    const stale = planAggregateSplice(existing, name)
     if (stale?.key) {
       const declaredAt = matchInCode(existing, declared)?.index ?? 0
       const fix = declaredAt > stale.declarationOffset
