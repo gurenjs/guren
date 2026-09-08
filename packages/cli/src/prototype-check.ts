@@ -281,8 +281,10 @@ function checkEntries(
     (route) => route.name && route.method.toUpperCase() === 'GET' && !fixture.names.has(route.name),
   )
   if (unreachable.length > 0) {
-    results.push(
-      check(
+    // Advisory: a walkthrough rarely covers every screen, and a gate that fails
+    // on coverage would fail every app that keeps its fixture after promotion.
+    results.push({
+      ...check(
         'prototype-pages-unreachable',
         title,
         'warn',
@@ -290,7 +292,8 @@ function checkEntries(
         `Add entries to ${relPath} for the screens the walkthrough should reach; a link to one of these opens the 404 dialog.`,
         relPath,
       ),
-    )
+      advisory: true,
+    })
   }
 
   return results

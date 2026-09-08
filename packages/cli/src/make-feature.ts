@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
 import { appConfiguresAttachments } from './attachments-check'
@@ -11,6 +12,15 @@ import { parseAttachString, parseFieldsString, type AttachmentDefinition, type F
 import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
 import { schemaPathFor } from './schema-parser'
+import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
+import {
+  appendPrototypeEntries,
+  generatePromotedResource,
+  generatePrototypeTypes,
+  prototypeTypesPath,
+  prototypeTypesSpecifier,
+} from './make-feature-prototype'
+import { fileExists } from './discovery'
 
 /**
  * The alternative the API-only refusal names, shared with the resource
@@ -34,6 +44,14 @@ export interface MakeFeatureOptions extends WriterOptions {
   withPolicy?: boolean
   /** Print created files and next steps (default: true). Callers that wire routes/schema themselves pass false. */
   announce?: boolean
+  /**
+   * Prototype-first (RFC 0021): pages, validator, the page-data type and fixture
+   * entries only — no model, migration, Resource or controller. Requires
+   * `guren add prototype`. Re-running without the flag later promotes the
+   * feature: the Resource is typed against the page-data type and the pages
+   * are left as they are.
+   */
+  prototype?: boolean
 }
 
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
@@ -91,26 +109,40 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     )
   }
 
-  // Composed rather than emitted inline, so the schema names the generated
-  // controller imports and the ones `make:validator` writes cannot drift.
-  const validatorPath = await makeValidator(singular, { ...writerOptions, fields })
+  const prototypeFirst = Boolean(options.prototype)
+  if (prototypeFirst && !(await appHasPrototypeFixture(writeRoot(options)))) {
+    throw new Error(
+      `guren make:feature --prototype appends entries to ${PROTOTYPE_FIXTURE_PATH}, which this app does not have. `
+      + 'Run `bunx guren add prototype` first, then re-run this command. Nothing was scaffolded.',
+    )
+  }
+  if (prototypeFirst && moduleName) {
+    throw new Error('guren make:feature --prototype does not support --module yet: the fixture is app-wide. Nothing was scaffolded.')
+  }
+  // A feature scaffolded prototype-first leaves its page-data type behind;
+  // finding one is what turns this run into the promotion.
+  const promoting = !prototypeFirst && !moduleName && (await fileExists(writeRoot(options), prototypeTypesPath(singular)))
+  // The pages read the entity through this import; the Resource joins it at promotion.
+  const resourceImport = prototypeFirst || promoting
+    ? `import type { ${singular}Data as ${singular}ResourceData } from '${prototypeTypesSpecifier(singular)}'`
+    : `import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'`
 
-  const created = await writeScaffoldFiles([
-    {
-      path: `${appPrefix}app/Http/Resources/${singular}Resource.ts`,
-      contents: generateResource(singular, fields),
-    },
-    {
-      path: `${appPrefix}app/Http/Controllers/${singular}Controller.ts`,
-      contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy, moduleName, attachments),
-    },
+  // Composed rather than emitted inline, so the schema names the generated
+  // controller imports and the ones `make:validator` writes cannot drift. At
+  // promotion the prototype run already wrote it, and it is kept as edited.
+  const validatorRelPath = `${appPrefix}app/Http/Validators/${singular}Validator.ts`
+  const validatorPath = promoting && !options.force && (await fileExists(writeRoot(options), validatorRelPath))
+    ? resolve(writeRoot(options), validatorRelPath)
+    : await makeValidator(singular, { ...writerOptions, fields })
+
+  const pageFiles = [
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/Index.tsx`,
-      contents: generateIndexPage(singular, collection, routeName, variableName, fields, appPrefix),
+      contents: generateIndexPage(singular, collection, routeName, variableName, fields, resourceImport),
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/Show.tsx`,
-      contents: generateShowPage(singular, routeName, variableName, fields, appPrefix),
+      contents: generateShowPage(singular, routeName, variableName, fields, resourceImport),
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/New.tsx`,
@@ -120,7 +152,39 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
       path: `resources/js/pages/${pagePrefix}${routeName}/Edit.tsx`,
       contents: generateEditPage(singular, routeName, variableName, fields),
     },
+  ]
+
+  if (prototypeFirst) {
+    const created = await writeScaffoldFiles([
+      { path: prototypeTypesPath(singular), contents: generatePrototypeTypes(singular, fields) },
+      ...pageFiles,
+    ], writerOptions)
+    await ensureGurenUiTokens(writeRoot(writerOptions))
+    created.unshift(validatorPath)
+    const appended = await appendPrototypeEntries(writeRoot(writerOptions), { singular, collection: routeVar, routeName, variableName, fields })
+    if (appended === 'patched') created.push(resolve(writeRoot(writerOptions), PROTOTYPE_FIXTURE_PATH))
+
+    if (options.announce !== false) {
+      announcePrototypeFeature({ created, singular, routeName, routeVar, withAuth })
+    }
+    return created
+  }
+
+  const created = await writeScaffoldFiles([
+    {
+      path: `${appPrefix}app/Http/Resources/${singular}Resource.ts`,
+      contents: promoting
+        ? generatePromotedResource(singular, fields, resourceFieldExpression)
+        : generateResource(singular, fields),
+    },
+    {
+      path: `${appPrefix}app/Http/Controllers/${singular}Controller.ts`,
+      contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy, moduleName, attachments),
+    },
   ], writerOptions)
+  // At promotion the pages are the prototype's, possibly hand-edited since; a
+  // page that exists is kept, and only a missing one is written.
+  created.push(...(await writeScaffoldFiles(pageFiles, { ...writerOptions, skipExisting: promoting })))
 
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens(writeRoot(writerOptions))
@@ -165,6 +229,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   for (const line of buildRouteRegistrationHint({ singular, routeName, routeVar, withAuth })) {
     consola.info(`     ${line}`)
   }
+  if (promoting) {
+    consola.info(`     (promotion: replace each \`prototype\` handler for ${routeName}.* with the [${singular}Controller, '<action>'] above;`)
+    consola.info(`      the fixture entries keep serving \`bun run build:prototype\`)`)
+  }
   consola.info(`  3. Run: bunx guren db:migrate`)
   consola.info(`  4. Run: bunx guren codegen`)
   if (withPolicy) {
@@ -202,6 +270,25 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   return created
 }
 
+function announcePrototypeFeature(options: { created: string[]; singular: string; routeName: string; routeVar: string; withAuth: boolean }): void {
+  const { created, singular, routeName, routeVar, withAuth } = options
+  for (const file of created) {
+    consola.success(`Created ${file}`)
+  }
+  consola.info('')
+  consola.info('Next steps:')
+  consola.info('  1. Register the routes in routes/web.ts with the prototype handler:')
+  consola.info(`     import { prototype } from '@guren/core'`)
+  consola.info(`     import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`)
+  for (const line of buildRouteRegistrationHint({ singular, routeName, routeVar, withAuth, handler: 'prototype' })) {
+    consola.info(`     ${line}`)
+  }
+  consola.info('  2. Run: bunx guren codegen')
+  consola.info('  3. Walk it: bun run dev:prototype (or ship dist/prototype/ with bun run build:prototype)')
+  consola.info(`  When the specification settles, run \`bunx guren make:feature ${singular} --fields "…"\` without --prototype:`)
+  consola.info(`  it writes the model, migration, Resource and controller, keeps these pages, and prints the handler replacements.`)
+}
+
 /**
  * The route-registration block for a resource: printed by `make:feature`, written
  * into `routes/web.ts` by `guren add resource`, one builder so the two cannot
@@ -215,23 +302,26 @@ export function buildRouteRegistrationHint(options: {
   routeVar: string
   withAuth: boolean
   receiver?: string
+  /** `prototype` registers every action with the fixture-backed handler (RFC 0021). */
+  handler?: 'controller' | 'prototype'
 }): string[] {
   const { singular, routeName, routeVar, withAuth, receiver = 'router' } = options
   const authSuffix = withAuth ? `.middleware('auth')` : ''
   const groupRouter = withAuth ? 'authRouter' : receiver
+  const action = (name: string): string => (options.handler === 'prototype' ? 'prototype' : `[${singular}Controller, '${name}']`)
 
   return [
     ...(withAuth
       ? [`const ${groupRouter} = ${receiver}.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`]
       : []),
     `${groupRouter}.group('/${routeName}', (${routeVar}) => {`,
-    `  ${routeVar}.get('/', [${singular}Controller, 'index']).name('${routeName}.index')`,
-    `  ${routeVar}.get('/create', [${singular}Controller, 'create']).name('${routeName}.create')`,
-    `  ${routeVar}.get('/:id', [${singular}Controller, 'show']).name('${routeName}.show')`,
-    `  ${routeVar}.get('/:id/edit', [${singular}Controller, 'edit']).name('${routeName}.edit')`,
-    `  ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${singular}Controller, 'store'])${authSuffix}`,
-    `  ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, [${singular}Controller, 'update'])${authSuffix}`,
-    `  ${routeVar}.delete('/:id', { name: '${routeName}.destroy' }, [${singular}Controller, 'destroy'])${authSuffix}`,
+    `  ${routeVar}.get('/', ${action('index')}).name('${routeName}.index')`,
+    `  ${routeVar}.get('/create', ${action('create')}).name('${routeName}.create')`,
+    `  ${routeVar}.get('/:id', ${action('show')}).name('${routeName}.show')`,
+    `  ${routeVar}.get('/:id/edit', ${action('edit')}).name('${routeName}.edit')`,
+    `  ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, ${action('store')})${authSuffix}`,
+    `  ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, ${action('update')})${authSuffix}`,
+    `  ${routeVar}.delete('/:id', { name: '${routeName}.destroy' }, ${action('destroy')})${authSuffix}`,
     `})`,
   ]
 }
@@ -462,7 +552,7 @@ function generateIndexPage(
   routeName: string,
   variableName: string,
   fields: FieldDefinition[],
-  appPrefix: string,
+  resourceImport: string,
 ): string {
   // A json column is an object, which React cannot render as a child — and it
   // would make a poor list heading anyway. Skip to the next usable field.
@@ -472,7 +562,7 @@ function generateIndexPage(
 
   return `import { Link } from '@inertiajs/react'
 import type { PaginatedPageProps } from '@guren/core'
-import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'
+${resourceImport}
 import { route } from '@/.guren/routes.gen'
 
 interface Props extends PaginatedPageProps<${singular}ResourceData> {}
@@ -517,7 +607,7 @@ function generateShowPage(
   routeName: string,
   variableName: string,
   fields: FieldDefinition[],
-  appPrefix: string,
+  resourceImport: string,
 ): string {
   const fieldRenders = fields.map((f) => {
     if (f.type === 'boolean') {
@@ -531,7 +621,7 @@ function generateShowPage(
   }).join('\n')
 
   return `import { Link } from '@inertiajs/react'
-import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'
+${resourceImport}
 import { route } from '@/.guren/routes.gen'
 
 interface Props {

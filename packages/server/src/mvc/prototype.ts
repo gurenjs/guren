@@ -54,13 +54,19 @@ export interface PrototypeServerContext {
 
 export type PrototypeServerHandler = (ctx: PrototypeServerContext) => PrototypeResult | Promise<PrototypeResult>
 
-/** What `definePrototype()` from `@guren/inertia-client/prototype` produces, seen from the server. */
+/**
+ * What `definePrototype()` from `@guren/inertia-client/prototype` produces,
+ * seen from the server. Handlers are accepted at `(ctx: never) => unknown`:
+ * the client types each one against its own manifest and page contracts,
+ * which is contravariant with any concrete context declared here, and the
+ * runtime hands over {@link PrototypeServerContext} and checks the result's `kind`.
+ */
 export interface PrototypeFixture {
   manifest: Record<string, { method: string; path: string }>
   shared?: Record<string, unknown>
   state?: () => unknown
   notFoundPage?: { id: string; component?: string }
-  routes: Record<string, PrototypeServerHandler | undefined>
+  routes: Record<string, ((ctx: never) => unknown) | undefined>
 }
 
 export type PrototypeFixtureModule = { default: PrototypeFixture } | PrototypeFixture
@@ -139,7 +145,7 @@ export function createPrototypeRouteHandler(
   return async (c) => {
     const fixture = resolveFixture(deps.container)
     const name = route.name
-    const handler = name ? fixture.routes[name] : undefined
+    const handler = name ? (fixture.routes[name] as PrototypeServerHandler | undefined) : undefined
     if (!name || !handler) {
       throw new Error(`Prototype route ${route.method} ${route.path} has no fixture entry${name ? ` for "${name}"` : ''}.`)
     }
@@ -174,8 +180,17 @@ export function createPrototypeRouteHandler(
       flash: (key, value) => session?.flash(key, value),
     })
 
+    if (!isResult(result)) {
+      throw new Error(`Prototype entry "${name}" returned something other than page()/redirect()/errors()/location()/notFound().`)
+    }
     return answer(result, c, fixture, shared, deps)
   }
+}
+
+const RESULT_KINDS = new Set(['page', 'redirect', 'location', 'errors', 'not-found'])
+
+function isResult(value: unknown): value is PrototypeResult {
+  return typeof value === 'object' && value !== null && RESULT_KINDS.has(String((value as { kind?: unknown }).kind))
 }
 
 function resolveFixture(container: ContainerLike | undefined): PrototypeFixture {

@@ -9,18 +9,44 @@
       "templates/scaffold/events",
       "tests/fixtures/scaffold-typecheck/events",
       "templates/scaffold/queue",
-      "tests/fixtures/scaffold-typecheck/queue"
+      "tests/fixtures/scaffold-typecheck/queue",
+      "templates/scaffold/prototype",
+      "tests/fixtures/scaffold-typecheck/prototype"
     ],
     "paths": {
-      "@/.guren/pages.gen": ["./tests/fixtures/scaffold-typecheck/auth/.guren/pages.gen.ts"],
-      "@guren/core": ["../core/src/index.ts"],
-      "@guren/core/*": ["../core/src/*"],
-      "@guren/server": ["../server/src/index.ts"],
-      "@guren/server/*": ["../server/src/*"],
-      "@guren/orm": ["../orm/src/index.ts"],
-      "@guren/orm/*": ["../orm/src/*"],
-      "@guren/inertia-client": ["../inertia-client/src/index.ts"],
-      "@guren/inertia-client/*": ["../inertia-client/src/*"]
+      "@/.guren/pages.gen": [
+        "./tests/fixtures/scaffold-typecheck/auth/.guren/pages.gen.ts"
+      ],
+      "@/.guren/routes.gen": [
+        "./tests/fixtures/scaffold-typecheck/prototype/.guren/routes.gen.ts"
+      ],
+      "@/.guren/api-client.gen": [
+        "./tests/fixtures/scaffold-typecheck/prototype/.guren/api-client.gen.ts"
+      ],
+      "@guren/core": [
+        "../core/src/index.ts"
+      ],
+      "@guren/core/*": [
+        "../core/src/*"
+      ],
+      "@guren/server": [
+        "../server/src/index.ts"
+      ],
+      "@guren/server/*": [
+        "../server/src/*"
+      ],
+      "@guren/orm": [
+        "../orm/src/index.ts"
+      ],
+      "@guren/orm/*": [
+        "../orm/src/*"
+      ],
+      "@guren/inertia-client": [
+        "../inertia-client/src/index.ts"
+      ],
+      "@guren/inertia-client/*": [
+        "../inertia-client/src/*"
+      ]
     }
   },
   "include": [

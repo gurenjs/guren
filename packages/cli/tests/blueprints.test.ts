@@ -83,6 +83,7 @@ describe('blueprints', () => {
       'mail',
       'notifications',
       'oauth',
+      'prototype',
       'queue',
       'resource',
       'schedule',
