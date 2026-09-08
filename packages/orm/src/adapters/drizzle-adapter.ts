@@ -213,8 +213,12 @@ const NOOP_TRANSACTION = NOOP as unknown as (trx: unknown) => Promise<undefined>
 async function awaitsItsCallback(db: DrizzleDatabase): Promise<boolean> {
   if (transactionAwaitsCallback === undefined) {
     const probe = db.transaction?.(NOOP_TRANSACTION)
+    // The verdict is the shape of the return value, so it is already known here.
+    // Settling the probe only keeps its transaction from outliving this call, and
+    // its failure must not stand in for the caller's own — on a pooled driver the
+    // two hold different connections.
     transactionAwaitsCallback = isPromiseLike(probe)
-    if (isPromiseLike(probe)) await probe
+    if (isPromiseLike(probe)) await probe.catch(NOOP)
   }
 
   return transactionAwaitsCallback
