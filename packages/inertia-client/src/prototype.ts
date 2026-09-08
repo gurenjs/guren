@@ -350,12 +350,12 @@ class PrototypeRuntime {
     const first = handlers[0]
     if (!first) return undefined
     const [name, paramMap] = first
-    const params: Record<string, string> = {}
+    const params = new Map<string, string>()
     for (const [key, value] of Object.entries(paramMap)) {
       const raw = typeof value === 'number' ? stash?.[value] : value
-      if (raw !== undefined) params[key] = safeDecode(raw)
+      if (raw !== undefined) params.set(key, safeDecode(raw))
     }
-    return { name, params }
+    return { name, params: Object.fromEntries(params) }
   }
 
   private context(
@@ -432,8 +432,14 @@ function dropBlobs(_key: string, value: unknown): unknown {
 
 function normalizeBase(base: string | undefined): string {
   if (!base || base === '/' || base === './' || base === '') return '/'
-  const trimmed = base.replace(/^\.?\/*/u, '/').replace(/\/*$/u, '/')
-  return trimmed === '//' ? '/' : trimmed
+  // Trimmed by index rather than `/\/*$/`: a base of many slashes would make
+  // that regex quadratic, and the value can come from a build flag.
+  let start = base.startsWith('./') ? 2 : 0
+  while (start < base.length && base[start] === '/') start += 1
+  let end = base.length
+  while (end > start && base[end - 1] === '/') end -= 1
+  const middle = base.slice(start, end)
+  return middle === '' ? '/' : `/${middle}/`
 }
 
 function selectStorage(persist: PrototypePersistence): PrototypeStorage | undefined {
@@ -455,33 +461,34 @@ function safeDecode(value: string): string {
 }
 
 function parseQuery(params: URLSearchParams): PrototypeQuery {
-  const query: PrototypeQuery = {}
-  for (const [rawKey, value] of params) {
-    const key = rawKey.endsWith('[]') ? rawKey.slice(0, -2) : rawKey
-    appendValue(query, key, value, rawKey.endsWith('[]'))
-  }
-  return query
-}
-
-function appendValue(target: Record<string, unknown>, key: string, value: unknown, forceArray: boolean): void {
-  const existing = target[key]
-  if (existing === undefined) {
-    target[key] = forceArray ? [value] : value
-  } else if (Array.isArray(existing)) {
-    existing.push(value)
-  } else {
-    target[key] = [existing, value]
-  }
+  return collectEntries(params) as PrototypeQuery
 }
 
 /** A `FormData` body as a plain object; a repeated key or a `name[]` key becomes an array. */
 export function formDataToObject(data: FormData): Record<string, unknown> {
-  const object: Record<string, unknown> = {}
-  for (const [rawKey, value] of data.entries()) {
-    const key = rawKey.endsWith('[]') ? rawKey.slice(0, -2) : rawKey
-    appendValue(object, key, value, rawKey.endsWith('[]'))
+  return collectEntries(data.entries())
+}
+
+/**
+ * Entries keyed by user-supplied names, gathered in a Map and materialized
+ * with `Object.fromEntries`, which defines own properties: a `__proto__` key
+ * lands as data instead of reaching the prototype setter.
+ */
+function collectEntries(entries: Iterable<[string, unknown]>): Record<string, unknown> {
+  const collected = new Map<string, unknown>()
+  for (const [rawKey, value] of entries) {
+    const forceArray = rawKey.endsWith('[]')
+    const key = forceArray ? rawKey.slice(0, -2) : rawKey
+    const existing = collected.get(key)
+    if (existing === undefined) {
+      collected.set(key, forceArray ? [value] : value)
+    } else if (Array.isArray(existing)) {
+      existing.push(value)
+    } else {
+      collected.set(key, [existing, value])
+    }
   }
-  return object
+  return Object.fromEntries(collected)
 }
 
 function toBodyObject(body: unknown): Record<string, unknown> | undefined {
@@ -522,11 +529,9 @@ function applyPartial(page: AnswerPage, headers: HttpRequestConfig['headers']): 
   const only = new Set(splitList(headerValue(headers, 'X-Inertia-Partial-Data')).map((key) => key.split('.')[0]!))
   const except = new Set(splitList(headerValue(headers, 'X-Inertia-Partial-Except')).map((key) => key.split('.')[0]!))
   if (only.size === 0 && except.size === 0) return page
-  const props: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(page.props)) {
-    const keep = only.size > 0 ? only.has(key) : !except.has(key)
-    if (keep || key === 'errors') props[key] = value
-  }
+  const props = Object.fromEntries(
+    Object.entries(page.props).filter(([key]) => key === 'errors' || (only.size > 0 ? only.has(key) : !except.has(key))),
+  )
   return { ...page, props: props as AnswerPage['props'] }
 }
 
