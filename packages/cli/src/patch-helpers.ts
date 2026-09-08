@@ -100,7 +100,9 @@ export function findClosingDelimiter(content: string, openIndex: number, open: s
 
 /**
  * Entries of an array literal's interior. Masked first, so a name appearing
- * only in a comment is not mistaken for an existing entry.
+ * only in a comment is not mistaken for an existing entry — which is also why
+ * the result answers membership only: string contents come out blanked, so
+ * re-joining these entries into the file writes `'/mcp'` back as `'    '`.
  */
 function parseArrayEntries(inner: string): string[] {
   return maskNonCode(inner)
@@ -274,9 +276,9 @@ export type InsertResult = { content: string; reason?: undefined } | { content?:
 /**
  * Pure, and split out for the same reason as `insertImport`: a caller adding
  * the provider's import too applies both here and writes once, so a failure
- * cannot leave half the pair on disk. Re-joins from parsed entries rather than
- * appending in place, collapsing a multi-line array onto one line — long-
- * standing output that every provider-wiring test pins.
+ * cannot leave half the pair on disk. Splices into the array's own span rather
+ * than re-joining `parseArrayEntries` output, which writes the mask back and
+ * blanked an unrelated `mcpPlugin({ path: '/mcp' })` to `'    '`.
  */
 export function insertProvider(
   content: string,
@@ -287,14 +289,23 @@ export function insertProvider(
    */
   isRegistered?: (entries: string[]) => boolean,
 ): InsertResult {
-  const providersArrayPattern = /providers:\s*\[([\s\S]*?)\]/
-  const match = content.match(providersArrayPattern)
+  const match = matchInCode(content, /providers:\s*\[/)
 
   if (!match) {
     return { reason: PATCH_REASONS.providersArrayNotFound }
   }
 
-  const providers = parseArrayEntries(match[1])
+  // Depth-counted rather than matched to the first `]`, which a nested array
+  // or an object argument holding one ends early.
+  const open = match.index + match[0].length - 1
+  const close = findClosingDelimiter(content, open, '[', ']')
+
+  if (close === -1) {
+    return { reason: PATCH_REASONS.providersArrayNotFound }
+  }
+
+  const interior = content.slice(open + 1, close)
+  const providers = parseArrayEntries(interior)
 
   const alreadyRegistered = isRegistered
     ? isRegistered(providers)
@@ -303,10 +314,8 @@ export function insertProvider(
     return { reason: PATCH_REASONS.providerAlreadyRegistered }
   }
 
-  providers.push(providerName)
-
   return {
-    content: content.replace(providersArrayPattern, `providers: [${providers.join(', ')}]`),
+    content: content.slice(0, open + 1) + appendArrayEntry(interior, providerName) + content.slice(close),
   }
 }
 

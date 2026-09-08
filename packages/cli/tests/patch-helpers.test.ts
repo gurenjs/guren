@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { addImport, addToArrayArgument, addToArrayOption, insertImport } from '../src/patch-helpers'
+import { addImport, addToArrayArgument, addToArrayOption, insertImport, insertProvider, PATCH_REASONS } from '../src/patch-helpers'
 import { createTempWorkspace } from './helpers'
 
 describe('addImport', () => {
@@ -473,5 +473,78 @@ describe('insertImport — already-imported detection', () => {
   it('sees a binding through a comment between the braces', () => {
     const commented = "import {\n  Router,\n  /* delivery helper */ registerAttachmentRoutes,\n} from '@guren/core'\n"
     expect(insertImport(commented, STATEMENT)).toBeNull()
+  })
+})
+
+describe('insertProvider', () => {
+  // The array a scaffolded worker app actually has: several lines, and a
+  // plugin argument whose string literal is unrelated to the registration.
+  const MULTILINE_APP = `const app = createApp({
+  routes: registerWebRoutes,
+  providers: [
+    DatabaseProvider,
+    AuthProvider,
+    cloudflarePlugin(),
+    mcpPlugin({ path: '/mcp' }),
+  ],
+})
+`
+
+  it('appends without rewriting an unrelated string literal', () => {
+    const result = insertProvider(MULTILINE_APP, 'SessionProvider')
+
+    expect(result.content).toBeDefined()
+    expect(result.content).toContain('SessionProvider')
+    // The defect wrote the mask back, leaving `path: '    '` — a four-space
+    // route that boots, typechecks and passes `guren check`.
+    expect(result.content).toContain("mcpPlugin({ path: '/mcp' })")
+  })
+
+  it('leaves the array spanning the lines it already spanned', () => {
+    const result = insertProvider(MULTILINE_APP, 'SessionProvider')
+
+    // Asserted separately from the literal: re-joining entries collapses the
+    // array and blanks the literal, and either alone can regress.
+    expect(result.content).toContain('\n    DatabaseProvider,\n')
+    expect(result.content).toContain('  ],\n')
+  })
+
+  it('keeps a single-line array on one line', () => {
+    const result = insertProvider('createApp({ providers: [DatabaseProvider] })', 'AuthProvider')
+
+    expect(result.content).toBe('createApp({ providers: [DatabaseProvider, AuthProvider] })')
+  })
+
+  it('spans an array holding a nested one', () => {
+    const nested = "createApp({ providers: [plugin({ hosts: ['a'] })] })"
+
+    const result = insertProvider(nested, 'SessionProvider')
+
+    // Matching to the first `]` ended the array inside `hosts`, splicing the
+    // new entry into the middle of the plugin's own argument.
+    expect(result.content).toBe("createApp({ providers: [plugin({ hosts: ['a'] }), SessionProvider] })")
+  })
+
+  it('does not treat a `$` in an existing entry as a replacement pattern', () => {
+    const result = insertProvider('createApp({ providers: [$1, $$legacy] })', 'SessionProvider')
+
+    expect(result.content).toBe('createApp({ providers: [$1, $$legacy, SessionProvider] })')
+  })
+
+  it('ignores a providers array that exists only in a comment', () => {
+    const commented = `// providers: [OldProvider],
+createApp({ providers: [DatabaseProvider] })`
+
+    const result = insertProvider(commented, 'SessionProvider')
+
+    expect(result.content).toContain('// providers: [OldProvider],')
+    expect(result.content).toContain('providers: [DatabaseProvider, SessionProvider]')
+  })
+
+  it('reports an app with no providers array rather than inventing one', () => {
+    const result = insertProvider('createApp({ routes: registerWebRoutes })', 'SessionProvider')
+
+    expect(result.content).toBeUndefined()
+    expect(result.reason).toBe(PATCH_REASONS.providersArrayNotFound)
   })
 })
