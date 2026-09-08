@@ -98,6 +98,24 @@ describe('guren add session', () => {
     })
   }
 
+  it('adds sessions to a schema that keeps an aggregate object of its tables', async () => {
+    await seedApp(`${PG_SCHEMA_FIXTURE}
+export const schema = {
+  users,
+}
+
+export type AppSchema = typeof schema
+`)
+
+    await addSession()
+
+    const schema = await readFile('db/schema.ts', 'utf8')
+    expect(schema).toContain('  users,\n  sessions,\n}')
+    // Ahead of the aggregate, or `schema` names a binding declared below it (TS2448).
+    expect(schema.indexOf('export const sessions =')).toBeLessThan(schema.indexOf('export const schema ='))
+    expect(schema).toContain('export type AppSchema = typeof schema')
+  })
+
   it('leaves an existing sessions table and config alone on a re-run', async () => {
     await seedApp(`${PG_SCHEMA_FIXTURE}\nexport const sessions = pgTable('sessions', { id: text('id').primaryKey() })\n`)
     await mkdir('config', { recursive: true })

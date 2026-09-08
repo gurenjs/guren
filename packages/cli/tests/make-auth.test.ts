@@ -210,6 +210,41 @@ export function registerWebRoutes(router: Router): void {
     }
   })
 
+  it('adds the users table to a schema that keeps an aggregate object', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-aggregate-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+})
+
+export const schema = {
+  posts,
+}
+
+export type AppSchema = typeof schema
+`,
+        'utf8',
+      )
+
+      await makeAuth({ force: true, minimal: true })
+
+      // Both tables the command adds: make:auth runs the session blueprint too.
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).toContain('  posts,\n  users,\n  sessions,\n}')
+      // Ahead of the aggregate, or `schema` names bindings declared below it (TS2448).
+      expect(schema.indexOf('export const users =')).toBeLessThan(schema.indexOf('export const schema ='))
+      expect(schema.indexOf('export const sessions =')).toBeLessThan(schema.indexOf('export const schema ='))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('skips registration scaffolding with --minimal', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-minimal-')
     try {
