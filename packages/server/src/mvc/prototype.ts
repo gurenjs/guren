@@ -32,7 +32,7 @@ export type PrototypeResult =
   | { kind: 'page'; component: string; props: Record<string, unknown> }
   | { kind: 'redirect'; to: string; params?: Record<string, string | number> }
   | { kind: 'location'; url: string }
-  | { kind: 'errors'; errors: Record<string, string>; bag?: string }
+  | { kind: 'errors'; errors: Record<string, string> }
   | { kind: 'not-found' }
 
 export interface PrototypeServerContext {
@@ -47,20 +47,27 @@ export interface PrototypeServerContext {
   page(contract: { id: string; component?: string }, props: Record<string, unknown>): PrototypeResult
   redirect(to: string, params?: Record<string, string | number>): PrototypeResult
   location(url: string): PrototypeResult
-  errors(errors: Record<string, string>, bag?: string): PrototypeResult
+  /** No error bag: the framework's `ValidationException` has none, so the client-side `bag` is ignored here. */
+  errors(errors: Record<string, string>): PrototypeResult
   notFound(): PrototypeResult
   flash(key: string, value: unknown): void
 }
 
 export type PrototypeServerHandler = (ctx: PrototypeServerContext) => PrototypeResult | Promise<PrototypeResult>
 
-/** What `definePrototype()` from `@guren/inertia-client/prototype` produces, seen from the server. */
+/**
+ * What `definePrototype()` from `@guren/inertia-client/prototype` produces,
+ * seen from the server. Handlers are accepted at `(ctx: never) => unknown`:
+ * the client types each one against its own manifest and page contracts,
+ * which is contravariant with any concrete context declared here, and the
+ * runtime hands over {@link PrototypeServerContext} and checks the result's `kind`.
+ */
 export interface PrototypeFixture {
   manifest: Record<string, { method: string; path: string }>
   shared?: Record<string, unknown>
   state?: () => unknown
   notFoundPage?: { id: string; component?: string }
-  routes: Record<string, PrototypeServerHandler | undefined>
+  routes: Record<string, ((ctx: never) => unknown) | undefined>
 }
 
 export type PrototypeFixtureModule = { default: PrototypeFixture } | PrototypeFixture
@@ -129,7 +136,7 @@ const BODYLESS_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 /**
  * The route's handler: the fixture entry for the route name, run against the
  * same context shape the browser client builds. The route contract is enforced
- * first, as `createContractHandler` does for an inline handler, so `guren
+ * first (`params`, `query`, `body`; not `output`, which only a response has), so `guren
  * audit`'s "runtime-enforced" verdict stays true here.
  */
 export function createPrototypeRouteHandler(
@@ -139,7 +146,7 @@ export function createPrototypeRouteHandler(
   return async (c) => {
     const fixture = resolveFixture(deps.container)
     const name = route.name
-    const handler = name ? fixture.routes[name] : undefined
+    const handler = name ? (fixture.routes[name] as PrototypeServerHandler | undefined) : undefined
     if (!name || !handler) {
       throw new Error(`Prototype route ${route.method} ${route.path} has no fixture entry${name ? ` for "${name}"` : ''}.`)
     }
@@ -166,16 +173,29 @@ export function createPrototypeRouteHandler(
       body,
       state: stateOf(fixture),
       shared,
-      page: (contract, props) => ({ kind: 'page', component: contract.component ?? contract.id, props }),
+      page: (contract, props) => ({ kind: 'page', component: componentOf(contract), props }),
       redirect: (to, redirectParams) => ({ kind: 'redirect', to, params: redirectParams }),
       location: (target) => ({ kind: 'location', url: target }),
-      errors: (errors, bag) => ({ kind: 'errors', errors, bag }),
+      errors: (errors) => ({ kind: 'errors', errors }),
       notFound: () => ({ kind: 'not-found' }),
       flash: (key, value) => session?.flash(key, value),
     })
 
+    if (!isResult(result)) {
+      throw new Error(`Prototype entry "${name}" returned something other than page()/redirect()/errors()/location()/notFound().`)
+    }
     return answer(result, c, fixture, shared, deps)
   }
+}
+
+const RESULT_KINDS = new Set(['page', 'redirect', 'location', 'errors', 'not-found'])
+
+function componentOf(contract: { id: string; component?: string }): string {
+  return contract.component ?? contract.id
+}
+
+function isResult(value: unknown): value is PrototypeResult {
+  return typeof value === 'object' && value !== null && RESULT_KINDS.has(String((value as { kind?: unknown }).kind))
 }
 
 function resolveFixture(container: ContainerLike | undefined): PrototypeFixture {
@@ -218,7 +238,7 @@ async function answer(
     case 'not-found':
       if (fixture.notFoundPage) {
         return inertia(
-          fixture.notFoundPage.component ?? fixture.notFoundPage.id,
+          componentOf(fixture.notFoundPage),
           { ...shared, status: 404, message: 'Not Found' },
           { request: c.req.raw, status: 404 },
         )

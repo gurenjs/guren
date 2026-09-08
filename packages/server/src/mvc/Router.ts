@@ -45,7 +45,9 @@ export type RouteHandler<C extends ControllerConstructor = ControllerConstructor
   | ControllerAction<C>
   | PrototypeRouteHandler
 
-type AnyRouteHandler = ((c: Context, next: Next) => RouteResult | Promise<RouteResult>) | AnyControllerAction | PrototypeRouteHandler
+type CallableRouteHandler = ((c: Context, next: Next) => RouteResult | Promise<RouteResult>) | AnyControllerAction
+
+type AnyRouteHandler = CallableRouteHandler | PrototypeRouteHandler
 
 type ModelBindingResolver = (value: string) => Promise<unknown>
 
@@ -429,7 +431,7 @@ export class Router<M extends string = never> {
     method: string,
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   on(method: string, path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register(method.toUpperCase(), path, handlerOrOptions, rest)
@@ -455,7 +457,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   get(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('GET', path, handlerOrOptions, rest)
@@ -481,7 +483,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   post(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('POST', path, handlerOrOptions, rest)
@@ -507,7 +509,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   put(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('PUT', path, handlerOrOptions, rest)
@@ -533,7 +535,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   patch(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('PATCH', path, handlerOrOptions, rest)
@@ -559,7 +561,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('DELETE', path, handlerOrOptions, rest)
@@ -590,7 +592,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   query(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('QUERY', path, handlerOrOptions, rest)
@@ -670,12 +672,12 @@ export class Router<M extends string = never> {
   mount(app: Hono, options: RouterMountOptions = {}): void {
     for (const route of this.registry) {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
-      const handler = route.prototype
+      const handler = isPrototypeHandler(route.handler)
         ? createPrototypeRouteHandler(route, {
             container: options.container,
             routeUrl: (name, params) => this.route(name, params),
           })
-        : resolveHandler(route.handler as Exclude<AnyRouteHandler, PrototypeRouteHandler>, this.modelBindings, options.container, route.bindings, route.path)
+        : resolveHandler(route.handler, this.modelBindings, options.container, route.bindings, route.path)
       const contractMiddleware = createContractValidationMiddleware(route)
       const inlineMiddlewares = [...route.scopedMiddlewares, ...route.middlewares]
       // Last before the handler, so a verdict answers only for a request that
@@ -931,7 +933,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   get(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.get(path, handlerOrOptions as never, ...(rest as never[])))
@@ -957,7 +959,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   post(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.post(path, handlerOrOptions as never, ...(rest as never[])))
@@ -983,7 +985,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   put(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.put(path, handlerOrOptions as never, ...(rest as never[])))
@@ -1009,7 +1011,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   patch(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.patch(path, handlerOrOptions as never, ...(rest as never[])))
@@ -1035,7 +1037,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.delete(path, handlerOrOptions as never, ...(rest as never[])))
@@ -1061,7 +1063,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   query(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.query(path, handlerOrOptions as never, ...(rest as never[])))
@@ -1089,7 +1091,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
     method: string,
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   on(method: string, path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.on(method, path, handlerOrOptions as never, ...(rest as never[])))
@@ -1384,7 +1386,7 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
 }
 
 function resolveHandler(
-  action: Exclude<AnyRouteHandler, PrototypeRouteHandler>,
+  action: CallableRouteHandler,
   modelBindings: Map<string, RegisteredBinding>,
   container?: Container,
   routeBindings?: Map<string, ModelBinding>,
