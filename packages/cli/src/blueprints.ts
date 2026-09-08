@@ -317,10 +317,13 @@ export default registerAdminRoutes
     description: 'Install a schedule kernel with a sample recurring task.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      // `skipExisting`, so an app that ran this before the provider existed can
+      // re-run it for the provider alone: without it the present Kernel.ts aborts
+      // the command, and --force would overwrite the tasks the app has written.
       const created = await writeScaffoldFiles([
         scaffoldTemplateFile('schedule', 'app/Console/Kernel.ts'),
         scaffoldTemplateFile('schedule', 'app/Providers/SchedulingProvider.ts'),
-      ], writerOptions)
+      ], { ...writerOptions, skipExisting: true })
 
       // Order matters: the app provider registers after core's and rebinds
       // `scheduler` with the kernel's tasks. Core's binding on its own is an empty
