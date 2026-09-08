@@ -499,7 +499,10 @@ app code (the CLI never boots the app).
 prototype runtime with a dynamic import inside `startPrototypeClient()`; a
 static import shipped the runtime (and Hono's router) in every production
 bundle, which the changeset's dead-code claim had promised it would not, and
-`smoke:prototype` now asserts the absence. `hono` is an optional peer. The
+`smoke:prototype` now asserts the absence. The Vite plugin's `manualChunks`
+leaves that entry and Hono's router out of the vendor chunks, since naming a
+chunk for a module splices it into the eagerly loaded one regardless of the
+import being dynamic. `hono` is an optional peer. The
 persisted state key carries the `base`, so two prototypes on one origin do
 not resume each other's state, and `?prototype.reset=1` clears every base's
 key. The server-side `errors()` takes no error bag: `ValidationException`
