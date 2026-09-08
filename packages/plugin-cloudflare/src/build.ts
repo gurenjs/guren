@@ -193,6 +193,16 @@ const MCP_OAUTH_SEAM_SPECIFIER = '@guren/plugin-mcp/oauth'
 /** The KV binding name `OAuthProvider` requires, fixed by the provider. */
 const OAUTH_KV_BINDING = 'OAUTH_KV'
 
+/**
+ * How often the OAuth-fronted worker sweeps KV, independent of the cron the app
+ * declares. Hourly matches the guide's own `sessions:prune` example, and keeps a
+ * `* * * * *` app's sweeps inside KV's free read tier.
+ */
+const OAUTH_PURGE_INTERVAL_MS = 3_600_000
+
+/** Records `purgeExpiredData` checks per phase; the window's depth, see `renderOAuthPurge`. */
+const OAUTH_PURGE_BATCH_SIZE = 100
+
 /** The three endpoints the provider owns or hands back, in one place. */
 const OAUTH_ENDPOINTS = {
   authorize: '/oauth/authorize',
@@ -1108,10 +1118,21 @@ function renderWorkerModule(input: {
   }
 
   if (input.mcpOAuth) {
-    lines.push(renderOAuthProvider(input.mcpPath, hasAgents ? 'agentEntry' : 'handler'), '')
+    lines.push(
+      renderOAuthProvider(input.mcpPath, hasAgents ? 'agentEntry' : 'handler'),
+      '',
+      renderOAuthPurge(),
+      '',
+    )
   }
 
-  lines.push(renderDefaultExport(input.mcpOAuth ? 'oauth' : hasAgents ? 'agentEntry' : 'handler'), '')
+  lines.push(
+    renderDefaultExport(
+      input.mcpOAuth ? 'oauth' : hasAgents ? 'agentEntry' : 'handler',
+      input.mcpOAuth ? OAUTH_PURGE_FUNCTION : undefined,
+    ),
+    '',
+  )
 
   return lines.join('\n')
 }
@@ -1121,13 +1142,24 @@ function renderWorkerModule(input: {
  * can gain a `fetch` without a `scheduled` beside it — a cron trigger reaching
  * an export that has none does nothing at all, with no error anywhere. Neither
  * `agentEntry` nor `OAuthProvider` carries one, so `scheduled` is the handler's.
+ * @param sweep Storage sweep to run before the app's tasks, for a shape that has one.
  */
-function renderDefaultExport(fetchEntry: string): string {
+function renderDefaultExport(fetchEntry: string, sweep?: string): string {
+  // The sweep runs first and cannot be skipped by the delegation below: an app
+  // whose cron exists *for* the sweep binds no `scheduler`, and `handler.scheduled`
+  // throws on that by design.
+  const scheduled = sweep
+    ? `scheduled: async (event, env, ctx) => {
+    await ${sweep}(event, env)
+    await handler.scheduled(event, env, ctx)
+  },`
+    : 'scheduled: (event, env, ctx) => handler.scheduled(event, env, ctx),'
+
   // An arrow rather than a bound reference: `OAuthProvider` is a class
   // instance, and `fetch` detached from it loses its `this`.
   return `export default {
   fetch: (request, env, ctx) => ${fetchEntry}.fetch(request, env, ctx),
-  scheduled: (event, env, ctx) => handler.scheduled(event, env, ctx),
+  ${scheduled}
 }`
 }
 
@@ -1269,6 +1301,68 @@ function renderOAuthProvider(mcpPath: string, defaultEntry: string): string {
   // what shipping MCP SDK 1.x clients use to register themselves today.
   clientRegistrationEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.register)},
 })`
+}
+
+/** The sweep `renderOAuthPurge` defines, named where the default export calls it. */
+const OAUTH_PURGE_FUNCTION = 'sweepOAuthStorage'
+
+/**
+ * Records the provider writes but nothing expires: an orphaned grant, one whose
+ * client is gone, carries no `expiresAt` for a KV TTL to act on. `purgeExpiredData`
+ * is the only thing that removes them, and the provider never calls it itself.
+ * @see https://github.com/cloudflare/workers-oauth-provider — `PurgeOptions`.
+ */
+function renderOAuthPurge(): string {
+  return `// KV TTLs already drop expiring records. This sweep is for the ones that have
+// no expiry to act on: grants orphaned by a client that no longer exists.
+//
+// Throttled through KV, not \`event.cron\`: the trigger belongs to the app and the
+// build scaffolds none, so a \`* * * * *\` app would otherwise pay ~200 KV reads a
+// minute here. The marker's prefix is one the provider itself never lists.
+const OAUTH_PURGE_MARKER = 'guren:oauth-purge:last'
+const OAUTH_PURGE_INTERVAL_MS = ${OAUTH_PURGE_INTERVAL_MS}
+
+// The depth of the only window ever swept, not a throughput knob: the provider's
+// cursor lives inside one call and PurgeOptions carries none, so every firing
+// restarts at the head of the key space and records past this many are never
+// reached. Not raised further because a firing that purges everything it sees
+// costs roughly ten subrequests per record, against the thousand Workers allows.
+const OAUTH_PURGE_BATCH = ${OAUTH_PURGE_BATCH_SIZE}
+
+async function ${OAUTH_PURGE_FUNCTION}(event, env) {
+  // The minute the trigger was meant for, matching how tasks are dispatched.
+  const now = event.scheduledTime ?? Date.now()
+  try {
+    const last = await env.${OAUTH_KV_BINDING}.get(OAUTH_PURGE_MARKER)
+    const elapsed = now - Number(last)
+    // \`elapsed >= 0\` as well: a marker dated ahead of now, from clock skew or a
+    // key written by hand, would otherwise skip every firing from then on.
+    if (last && elapsed >= 0 && elapsed < OAUTH_PURGE_INTERVAL_MS) return
+
+    // One call per phase, for the same total reads as one call for both. The
+    // provider returns as soon as the grant sweep fills its budget, so an app
+    // holding more grants than OAUTH_PURGE_BATCH never reaches the token sweep
+    // behind it — orphaned tokens would then accumulate exactly as grants did.
+    const grants = await oauth.purgeExpiredData(env, {
+      batchSize: OAUTH_PURGE_BATCH,
+      purgeOrphanedTokens: false,
+    })
+    const tokens = await oauth.purgeExpiredData(env, {
+      batchSize: OAUTH_PURGE_BATCH,
+      purgeOrphanedGrants: false,
+      purgeExpiredGrants: false,
+    })
+    // Written only when the sweep ran, never on the firings it skips: a marker
+    // touched every minute is 1440 KV writes a day against a free tier of 1000.
+    await env.${OAUTH_KV_BINDING}.put(OAUTH_PURGE_MARKER, String(now))
+    if (!grants.done || !tokens.done) {
+      console.warn('OAuth sweep stopped at its batch limit; records past it stay unswept.', grants, tokens)
+    }
+  } catch (error) {
+    // Reported, never rethrown: the app's own scheduled tasks still have to run.
+    console.error('OAuth storage sweep failed.', error)
+  }
+}`
 }
 
 function scaffoldWranglerConfig(
