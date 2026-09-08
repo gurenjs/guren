@@ -49,6 +49,6 @@
     "mermaid": "^11.0.0",
     "tailwindcss": "^4.2.2",
     "vite": "^8.0.0",
-    "vitest": "^3.2.6"
+    "vitest": "^4.1.11"
   }
 }

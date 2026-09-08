@@ -6,7 +6,10 @@ import {
 import type { Context } from '@guren/core'
 import type { DocCategoryGroup } from '../../app/Services/DocsService.js'
 
-vi.mock('@guren/core', () => createControllerModuleMock())
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return { ...actual, ...createControllerModuleMock() }
+})
 
 // Mocked at the boundary this controller actually depends on. Loading the real
 // blog module here would drag its providers, routes and controllers into a

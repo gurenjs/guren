@@ -34,10 +34,13 @@ const {
   mockGetPaginatedPosts: vi.fn(),
   mockInvalidatePost: vi.fn(),
   mockEmit: vi.fn(),
-  MockPostCacheService: vi.fn().mockImplementation(() => ({
-    getPaginatedPosts: mockGetPaginatedPosts,
-    invalidatePost: mockInvalidatePost,
-  })),
+  // vitest 4 refuses to `new` a mock whose implementation is an arrow function.
+  MockPostCacheService: vi.fn().mockImplementation(function () {
+    return {
+      getPaginatedPosts: mockGetPaginatedPosts,
+      invalidatePost: mockInvalidatePost,
+    }
+  }),
 }))
 
 vi.mock('../../app/Models/Post.js', () => ({
@@ -58,7 +61,10 @@ vi.mock('../../app/Services/PostCacheService.js', () => ({
   PostCacheService: MockPostCacheService,
 }))
 
-vi.mock('guren', () => createControllerModuleMock())
+vi.mock('guren', async (importOriginal) => ({
+  ...((await importOriginal()) as object),
+  ...createControllerModuleMock(),
+}))
 vi.mock('@guren/core', async () => {
   const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
   return {
