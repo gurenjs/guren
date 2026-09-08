@@ -779,12 +779,17 @@ export async function appendSchemaTable(options: AppendSchemaTableOptions): Prom
   )
   if (declared.test(existing)) {
     consola.info(`${schemaFile} already declares a ${name} table — left unchanged.`)
-    // Reported rather than repaired: the key can only be added where the
-    // declaration already precedes the aggregate, and moving a declaration this
-    // run did not write is beyond what a scaffolder should do to a hand-kept file.
+    // Reported rather than repaired: moving a declaration this run did not write
+    // is beyond what a scaffolder should do to a hand-kept file. Which advice is
+    // right depends on where that declaration sits — an earlier release appended
+    // it at end of file, below the aggregate, where adding the key alone is TS2448.
     const stale = findSchemaAggregate(existing, name)
     if (stale && stale.keyOffset !== null) {
-      consola.warn(`The schema object in ${schemaFile} does not list ${name} — add it, or ${name} stays out of \`typeof schema\`.`)
+      const declaredAt = declared.exec(existing)?.index ?? 0
+      const fix = declaredAt > stale.declarationOffset
+        ? `add it, moving \`export const ${name}\` above the object — below it the reference is a use before declaration`
+        : `add it, or ${name} stays out of \`typeof schema\``
+      consola.warn(`The schema object in ${schemaFile} does not list ${name} — ${fix}.`)
     }
     return 'already-declared'
   }
