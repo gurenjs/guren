@@ -51,3 +51,9 @@ export const schema = {
 }
 
 export type BlogSchema = typeof schema
+
+export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey(),
+  data: jsonb('data').$type<Record<string, unknown>>().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (t) => [index('sessions_expires_at_idx').on(t.expiresAt)])

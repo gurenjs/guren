@@ -25,6 +25,7 @@ import NotificationProvider from '../app/Providers/NotificationProvider.js'
 import StorageProvider from '../app/Providers/StorageProvider.js'
 import AttachmentsProvider from '../app/Providers/AttachmentsProvider.js'
 import BroadcastProvider from '../app/Providers/BroadcastProvider.js'
+import SessionProvider from '../app/Providers/SessionProvider.js'
 import { registerWebRoutes } from '../routes/web.js'
 import '../config/inertia.js'
 
@@ -73,6 +74,7 @@ const app = createApp({
     BroadcastProvider,
     EventServiceProvider,
     SchedulingProvider,
+    SessionProvider,
   ],
   i18n: {
     supported: ['en', 'ja'],

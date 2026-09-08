@@ -6,6 +6,7 @@ import {
   MYSQL_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
+  captureWarnings,
   createTempWorkspace,
   type TempWorkspace,
 } from './helpers'
@@ -150,6 +151,17 @@ describe('guren add session', () => {
 
     const env = await readFile(resolve('.env.example'), 'utf8')
     expect(env.match(/SESSION_DRIVER/g)).toHaveLength(1)
+  })
+
+  it('leaves an existing SESSION_DRIVER alone, and says when it names another store', async () => {
+    await seedApp(PG_SCHEMA_FIXTURE, { env: 'APP_KEY=\nSESSION_DRIVER=memory\n' })
+
+    const { warnings } = await captureWarnings(() => runBlueprint('session', {}))
+
+    // Kept, because the app chose it — but the table this just installed is
+    // then one nothing writes to, which is worth a line.
+    expect(await readFile(resolve('.env.example'), 'utf8')).toContain('SESSION_DRIVER=memory')
+    expect(warnings.join('\n')).toContain('already sets SESSION_DRIVER=memory')
   })
 
   it('writes SESSION_DRIVER into .env too, which is the file the app reads', async () => {
