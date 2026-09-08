@@ -738,6 +738,162 @@ export class Post extends defineModel(posts) {}`,
     }
   })
 
+  it('warns when the schema object omits a table the same file declares', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+})
+
+export const schema = { users }
+export type AppSchema = typeof schema
+`,
+    })
+
+    const stale = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
+    expect(stale).toBeDefined()
+    expect(stale!.status).toBe('warn')
+    // The file names the object `schema` and reads it with `typeof`, so this is the
+    // aggregate rather than a guess, and the gate counts it.
+    expect(stale!.advisory).toBe(false)
+    expect(stale!.message).toContain('posts')
+    expect(stale!.message).not.toContain('users')
+    expect(stale!.suggestion).toContain('Add posts to it')
+  })
+
+  it('passes when the schema object lists every table the file declares', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+})
+
+export const schema = { users, posts }
+`,
+    })
+
+    const stale = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
+    expect(stale).toBeDefined()
+    expect(stale!.status).toBe('pass')
+  })
+
+  it('contributes nothing for an app that keeps no schema object', async () => {
+    const report = await withWorkspace({ 'db/schema.ts': PG_SCHEMA_FIXTURE })
+
+    expect(report.checks.some(c => c.key.startsWith('schema-aggregate-keys:'))).toBe(false)
+  })
+
+  // The shape `make:module` produces: the module's tables reach the root schema
+  // through `export *`, so no identifier exists here for the object to list.
+  it('does not ask the root schema object for a module table it re-exports', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export * from '../modules/billing/db/schema'
+
+export const schema = { users }
+`,
+      'modules/billing/db/schema.ts': `import { pgTable, serial } from '@guren/orm/drizzle/pg'
+
+export const invoices = pgTable('invoices', {
+  id: serial('id').primaryKey(),
+})
+`,
+    })
+
+    const stale = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
+    expect(stale).toBeDefined()
+    expect(stale!.status).toBe('pass')
+    expect(report.checks.some(c => c.key === 'schema-aggregate-keys:billing')).toBe(false)
+  })
+
+  // A spread carries tables the object never names, so the file does not
+  // identify one aggregate and the rule reports nothing rather than guessing.
+  it('reports nothing for a schema object holding a spread', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+})
+
+export const schema = { users, ...extra }
+`,
+    })
+
+    expect(report.checks.some(c => c.key.startsWith('schema-aggregate-keys:'))).toBe(false)
+  })
+
+  // A grouping object of table shorthands is indistinguishable from the aggregate on
+  // shape alone, and this one is neither named `schema` nor read by a `typeof`.
+  it('does not gate on a table-shaped object the file does not identify', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+})
+
+export const authTables = { users }
+`,
+    })
+
+    const stale = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
+    expect(stale!.status).toBe('warn')
+    expect(stale!.advisory).toBe(true)
+    // No scaffolder writes to this object either, so the fix names the evidence that
+    // would make one rather than only the edit.
+    expect(stale!.suggestion).toContain('Nothing identifies this object as the schema')
+    expect(stale!.suggestion).toContain('posts')
+  })
+
+  // parseSchemaTables drops a table whose columns are an identifier; visiting roots
+  // rather than its rows is what keeps such a file in reach.
+  it('reads a schema whose tables pass their columns as an identifier', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `import { pgTable, serial } from '@guren/orm/drizzle/pg'
+
+const userColumns = { id: serial('id').primaryKey() }
+const postColumns = { id: serial('id').primaryKey() }
+
+export const users = pgTable('users', userColumns)
+export const posts = pgTable('posts', postColumns)
+
+export const schema = { users }
+`,
+    })
+
+    const stale = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
+    expect(stale).toBeDefined()
+    expect(stale!.status).toBe('warn')
+    expect(stale!.message).toContain('posts')
+  })
+
+  // No scaffolder writes a module's own aggregate — appendSchemaTable targets the
+  // root db/schema.ts alone — but the rule's question is file-local, so it answers here too.
+  it('reports a module schema object that omits its own table', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export * from '../modules/billing/db/schema'
+`,
+      'modules/billing/db/schema.ts': `import { pgTable, serial } from '@guren/orm/drizzle/pg'
+
+export const invoices = pgTable('invoices', {
+  id: serial('id').primaryKey(),
+})
+
+export const receipts = pgTable('receipts', {
+  id: serial('id').primaryKey(),
+})
+
+export const billingSchema = { invoices }
+`,
+    })
+
+    const stale = report.checks.find(c => c.key === 'schema-aggregate-keys:billing')
+    expect(stale).toBeDefined()
+    expect(stale!.status).toBe('warn')
+    expect(stale!.message).toContain('modules/billing/db/schema.ts')
+    expect(stale!.message).toContain('receipts')
+  })
+
   it('warns when a module has a schema but the project has no root db/schema.ts', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-schema-agg-no-root-')
 

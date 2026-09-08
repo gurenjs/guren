@@ -76,13 +76,6 @@
         "packages/cli/tests/define-command.test.ts"
       ],
       "rules": { "no-restricted-imports": "off" }
-    },
-    {
-      // The one template still exempt: gurenjs/guren#726 (RFC 0020 Part 5)
-      // rewrites this block into three, so trimming it here would only collide.
-      // Delete this entry when #726 lands; lint then proves it is spent.
-      "files": ["packages/cli/templates/scaffold/session/config/session.ts"],
-      "rules": { "guren/comment-length": "off" }
     }
   ]
 }

@@ -297,3 +297,123 @@ describe('SoftDeletes: models with no other scopes', () => {
     await expect(Post.forceDelete({ id: 1 })).rejects.toThrow('does not support delete operations')
   })
 })
+
+/**
+ * Every SoftDeletes entry point builds its own scoped query, so each is a place
+ * the caller's `trx` can be dropped on the floor — the write then runs on the
+ * default connection, outside the transaction that was supposed to own it.
+ * `queryOptions` sits in a different argument position per adapter method, so
+ * the recorder reads each one where that method actually carries it.
+ */
+function recordingPost() {
+  const store = SEED.map((r) => ({ ...r }))
+  const base = createAdapter(store) as unknown as Record<string, (...args: unknown[]) => unknown>
+  const seen: Array<{ method: string; trx: unknown }> = []
+
+  const record = (method: string, position: number) =>
+    (...args: unknown[]) => {
+      seen.push({ method, trx: (args[position] as { trx?: unknown } | undefined)?.trx })
+      return base[method]?.(...args)
+    }
+
+  const adapter = {
+    ...base,
+    findManyAdvanced: record('findManyAdvanced', 3),
+    update: record('update', 3),
+    delete: record('delete', 2),
+  } as unknown as ORMAdapter
+
+  class Post extends SoftDeletes(Model<PostRecord>) {
+    static table = 'posts'
+  }
+  Post.useAdapter(adapter)
+  ;(Post as unknown as typeof Model).addGlobalScope('tenant', (q) => q.where('tenantId', 1))
+
+  return { Post, store, seen }
+}
+
+const TRX = { sentinel: 'transaction-handle' }
+
+describe('SoftDeletes: transaction handles', () => {
+  it('delete() runs the soft-delete UPDATE on the caller\'s transaction', async () => {
+    const { Post, seen } = recordingPost()
+
+    await Post.delete({ id: 1 }, { trx: TRX })
+
+    expect(seen).toEqual([{ method: 'update', trx: TRX }])
+  })
+
+  it('delete() through the transaction-bound scope carries the handle', async () => {
+    const { Post, seen } = recordingPost()
+
+    // `Model.transaction()` builds this scope, and its `delete` resolves through
+    // the prototype chain to the mixin's override, which builds its own query.
+    await (Post as unknown as typeof Model).inTransaction(TRX).delete({ id: 1 })
+
+    expect(seen).toEqual([{ method: 'update', trx: TRX }])
+  })
+
+  it('restore() runs on the caller\'s transaction', async () => {
+    const { Post, seen } = recordingPost()
+
+    await Post.restore({ id: 2 }, { trx: TRX })
+
+    expect(seen).toEqual([{ method: 'update', trx: TRX }])
+  })
+
+  it('forceDelete() runs on the caller\'s transaction', async () => {
+    const { Post, seen } = recordingPost()
+
+    await Post.forceDelete({ id: 2 }, { trx: TRX })
+
+    expect(seen).toEqual([{ method: 'delete', trx: TRX }])
+  })
+
+  it('withTrashed() and onlyTrashed() read on the caller\'s transaction', async () => {
+    const { Post, seen } = recordingPost()
+
+    expect(titles(await Post.withTrashed({ trx: TRX }).get())).toEqual(['ours-live', 'ours-trashed'])
+    expect(titles(await Post.onlyTrashed({ trx: TRX }).get())).toEqual(['ours-trashed'])
+
+    expect(seen).toEqual([
+      { method: 'findManyAdvanced', trx: TRX },
+      { method: 'findManyAdvanced', trx: TRX },
+    ])
+  })
+
+  it('keeps every other global scope while carrying the handle', async () => {
+    const { Post, store, seen } = recordingPost()
+
+    // The tenant scope is what stops a transaction-bound force delete from
+    // reaching another tenant's trashed row.
+    await Post.forceDelete({ id: 4 }, { trx: TRX })
+
+    expect(store.find((r) => r.id === 4)).toBeDefined()
+    expect(seen).toEqual([{ method: 'delete', trx: TRX }])
+  })
+
+  it('withoutGlobalScope() takes leading query options without disturbing the name-only form', async () => {
+    const { Post, seen } = recordingPost()
+    const model = Post as unknown as typeof Model
+
+    expect(titles(await model.withoutGlobalScope({ trx: TRX }, 'softDelete').get())).toEqual([
+      'ours-live',
+      'ours-trashed',
+    ])
+    expect(titles(await model.withoutGlobalScope('softDelete').get())).toEqual(['ours-live', 'ours-trashed'])
+
+    expect(seen).toEqual([
+      { method: 'findManyAdvanced', trx: TRX },
+      { method: 'findManyAdvanced', trx: undefined },
+    ])
+  })
+
+  it('withoutGlobalScopes() takes query options too', async () => {
+    const { Post, seen } = recordingPost()
+    const model = Post as unknown as typeof Model
+
+    expect(await model.withoutGlobalScopes({ trx: TRX }).get()).toHaveLength(4)
+
+    expect(seen).toEqual([{ method: 'findManyAdvanced', trx: TRX }])
+  })
+})

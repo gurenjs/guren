@@ -596,6 +596,18 @@ await Post.forceDelete({ id: 1 })
 残りのスコープは維持します。したがって `tenant` スコープがあれば、取り消しのきかない
 `forceDelete()` が別テナントの行に届くことはありません。
 
+トランザクション内では、いずれもハンドルを受け取れます。`delete()` はトランザクション
+スコープが担い、残りは他の書き込みと同じく末尾の引数で受け取ります。
+
+```ts
+await Post.transaction(async (trx, txPost) => {
+  await txPost.delete({ id: 1 })
+  await Post.restore({ id: 2 }, { trx })
+  await Post.forceDelete({ id: 3 }, { trx })
+  const trashed = await Post.onlyTrashed({ trx }).get()
+})
+```
+
 ## 属性キャスト
 
 `static casts` を定義すると、データベースから読み取ったカラムの値を自動的に変換できます。

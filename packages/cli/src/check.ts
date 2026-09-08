@@ -11,6 +11,7 @@ import {
   describeControllerTestMiss,
   classNameFromPath,
   toPosixRelative,
+  listAppRoots,
   listModuleNames,
   moduleFlagFor,
   moduleNameFor,
@@ -50,7 +51,7 @@ import {
   checkAttachmentsPublicDisk,
 } from './attachments-check'
 import { checkAgentsConfig, type AgentsConfigExpansion } from './agents-config-check'
-import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
+import { findSchemaAggregate, parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
@@ -231,6 +232,54 @@ async function checkModuleSchemaAggregation(cwd: string): Promise<CheckResult[]>
   return results
 }
 
+/**
+ * The hand-kept aggregate object (`export const schema = { posts, users }`) missing a table
+ * the same file declares. Gating only where the file itself identifies the object
+ * (`findSchemaAggregate`'s `confident`) — on a shape match alone the report is a guess, and a
+ * grouping the app keeps for itself must not turn a correct schema's CI red. Content-activated;
+ * a root reaching module tables through `export *` lists no identifier to be asked for.
+ */
+async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
+  const results: CheckResult[] = []
+
+  // Roots, not `schemaTables`: a table whose columns are passed as an identifier is one
+  // `declaredTableIdentifiers` keeps and `parseSchemaTables` drops, and a file holding only
+  // those would never be visited. `read()`, so a root with no schema records no skip.
+  for (const { module } of await listAppRoots(cwd)) {
+    const relPath = schemaPathFor(module)
+    const outcome = await cache.read(resolve(cwd, relPath))
+    if (outcome.status !== 'parsed') continue
+
+    const aggregate = findSchemaAggregate(outcome.ast)
+    if (!aggregate) continue
+
+    const scope = module ?? 'app'
+    const missing = [...aggregate.declared].filter((name) => !aggregate.keys.includes(name))
+    const complete = missing.length === 0
+
+    // The fix splits on the same evidence the writer does: on a shape match alone no
+    // scaffolder will add the key either, so it names what would make them.
+    const fix = aggregate.confident
+      ? `Add ${missing.join(', ')} to it, keeping each table's own declaration above the object.`
+      : `Nothing identifies this object as the schema, so scaffolders leave it alone: name it \`schema\` or read it in a \`typeof\` to have them keep it current, or add ${missing.join(', ')} by hand.`
+
+    results.push({
+      ...check(
+        `schema-aggregate-keys:${scope}`,
+        `${scope} schema object`,
+        complete ? 'pass' : 'warn',
+        complete
+          ? `The schema object in ${relPath} lists every table the file declares.`
+          : `The schema object in ${relPath} does not list ${formatTruncatedList(missing)}.`,
+        complete ? undefined : fix,
+      ),
+      advisory: !aggregate.confident,
+    })
+  }
+
+  return results
+}
+
 export async function runCheck(options: RunCheckOptions = {}): Promise<CheckReport> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const checks: CheckResult[] = []
@@ -370,6 +419,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // db/schema.ts, for modules created or edited by hand.
     const schemaAggregationResults = await checkModuleSchemaAggregation(cwd)
     checks.push(...schemaAggregationResults)
+
+    // 6.5. Check the app's own aggregate object lists every table its file
+    // declares, for a table added by hand or by a release before the
+    // scaffolders wrote the key. Not changed-filtered, for check 8's reason.
+    checks.push(...(await checkSchemaAggregateKeys(cwd, cache)))
 
     // 7. Check every console command is registered with a kernel, for commands
     // written or moved by hand. Content-activated.

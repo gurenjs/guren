@@ -1,7 +1,0 @@
----
-"@guren/cli": patch
----
-
-**`schedule:list` and `schedule:run` see the schedule kernels apps actually write** — both commands accepted only a kernel *factory* (`scheduleTasksKernel(): Schedule`, and three other export names), while the scheduling guide teaches a `Scheduler` that a provider builds and hands to a registrar. An app following that guide, `examples/blog` and `examples/api` included, got "No scheduled tasks found." for tasks that really run. A kernel may now also export a registrar taking the scheduler, `(scheduler: Scheduler) => void`, named `register…Schedules` or exported as `default` — the same naming convention `route-registrar.ts` applies to route registrars, so a helper that merely takes one argument is not mistaken for an entry point. A kernel may export several, and they share one scheduler.
-
-A kernel that exists is no longer reported as an app that has none. Loading one that threw was swallowed into `consola.debug`; one exporting nothing recognizable, and a `--kernel` path that is not there, printed the same "here is how to create one" hint as a missing file. All three now name the path, say what went wrong, and exit non-zero, and the unrecognized message names the two conventions. `--json` keeps stdout parseable — diagnostics go to stderr. Kernel paths are probed with loader semantics (`isDefinitelyAbsent`), so a kernel whose directory cannot be read reaches the import and is diagnosed rather than reported as absent.

@@ -192,18 +192,25 @@ async function startBackground(session: Session, block: RunBlock, chapter: strin
   void pump(proc.stderr as ReadableStream<Uint8Array>)
   session.background.push({ block, proc, logPath, port })
 
+  // The banner and a live /health are raced, not sequenced: a production-mode
+  // server (`bun run preview`) prints no banner at all, so sequencing spent the
+  // whole timeout on every one. GUREN_STRICT_PORT=1 above makes the handed port
+  // the only one this app can hold, so a 200 there is this app answering.
   const deadline = Date.now() + BANNER_TIMEOUT_MS
   let bound: string | null = null
   while (Date.now() < deadline) {
     if (proc.exitCode !== null) break
     bound = boundPort(await readFile(logPath, 'utf8').catch(() => ''))
     if (bound) break
+    if ((await probeHealth(port)).ok) {
+      bound = String(port)
+      break
+    }
     await Bun.sleep(500)
   }
   if (!bound) {
-    // A production-mode server (`NODE_ENV=production bun bin/serve.ts`) prints no
-    // banner, so there is nothing to read. `GUREN_STRICT_PORT=1` above forbids the
-    // walk, which is what makes the port it was handed the only one it can hold.
+    // Alive but silent on both channels: fall back to the handed port and let
+    // the probe loop below decide.
     if (proc.exitCode !== null) {
       console.error(await readFile(logPath, 'utf8').catch(() => ''))
       throw new Error(`background block at line ${block.line} exited before answering (code ${proc.exitCode})`)
@@ -217,24 +224,30 @@ async function startBackground(session: Session, block: RunBlock, chapter: strin
   let lastError = ''
   while (Date.now() < probeDeadline) {
     bound = boundPort(await readFile(logPath, 'utf8').catch(() => '')) ?? bound
-    // `/health`, not `/`: it is the one path the scaffold excludes from host
-    // authorization, and a production-mode server answers every other path with
-    // 403 unless the probe's Host matches APP_URL.
-    const url = `http://127.0.0.1:${bound}/health`
-    try {
-      const response = await fetch(url)
-      if (response.status === 200) {
-        console.log(`background block answered 200 at ${url}`)
-        return
-      }
-      lastError = `answered ${response.status}`
-    } catch (error) {
-      lastError = String(error)
+    const probe = await probeHealth(bound)
+    if (probe.ok) {
+      console.log(`background block answered 200 at http://127.0.0.1:${bound}/health`)
+      return
     }
+    lastError = probe.error
     await Bun.sleep(500)
   }
   console.error(await readFile(logPath, 'utf8').catch(() => ''))
   throw new Error(`background block at line ${block.line} never answered 200 on its reported port (${lastError})`)
+}
+
+/**
+ * `/health`, not `/`: it is the one path the scaffold excludes from host
+ * authorization, and a production-mode server answers every other path with 403
+ * unless the probe's Host matches APP_URL.
+ */
+async function probeHealth(port: string | number): Promise<{ ok: boolean; error: string }> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/health`)
+    return { ok: response.status === 200, error: `answered ${response.status}` }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
 }
 
 /** Last `:<digits>` on the newest `Bound address` banner line, the same rule as smoke-golden-path.sh. */

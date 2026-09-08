@@ -1,5 +1,96 @@
 # @guren/cli
 
+## 2.19.0
+
+### Minor Changes
+
+- 3163cf5: **`guren add cache` reads `CACHE_STORE`** — the scaffolded `CacheProvider` hardcoded `default: 'memory'` and ignored the variable, while the app template shipped a `CACHE_STORE=memory` line nothing read. The provider now selects with `process.env.CACHE_STORE ?? 'memory'`, and the blueprint appends the `CACHE_STORE` entry to `.env.example` and `.env` when it installs the provider. The dead line is gone from the scaffolded `.env.example`, which now gains the variable only once an app has a provider that reads it. Re-running the blueprint repairs a partly-installed app instead of throwing on the provider it already wrote.
+
+  The provider declares `memory` alone and documents the `redis` entry in a comment, as `guren add session` does: importing `createRedisClient` pulls ioredis into every bundle, on a runtime that may never select it. That entry passes `client` as a function, so the client is constructed when the store is first resolved rather than when the config object is built.
+
+- d024c27: **New lint rule `guren/no-nullish-env-default`** — `process.env.FOO ?? 'default'` falls back only on `undefined`, so a key that is present but blank (`FOO=` in `.env`, or a hosting dashboard's cleared variable) passes an empty string through and names something that does not exist. That shipped in six generated configs: a session store called `''`, a cache store called `''`, an SMTP port of `0` from `Number('')`. The rule reports a non-empty string or numeric fallback and suggests `||`; `?? ''` is left alone, since both operators behave the same there, and a non-literal fallback cannot be judged from syntax. It is enabled in this repo and in the `.oxlintrc.json` the app templates and `guren add lint` ship, because the defect it was written for lives in scaffold output.
+
+  `@guren/server` carries the same fix at its own sites: a blank `AWS_REGION`, `AWS_LAMBDA_FUNCTION_VERSION` or `GUREN_INERTIA_ENTRY` no longer wins over the documented default, and `parseInt(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE ?? '128', 10)` no longer yields `NaN`.
+
+  An app that already ran `guren add lint` keeps its existing `.oxlintrc.json` — the blueprint skips a file it has already written, and `agent:sync` does not manage that file — so the rule reaches newly scaffolded apps rather than arriving as a red lint on an upgrade.
+
+  Where an empty value really is a choice — a mail `from` display name — the line carries `oxlint-disable-next-line guren/no-nullish-env-default` with that reason.
+
+### Patch Changes
+
+- 9f07906: **Array-entry parsing now splits at depth 0**, so an entry holding a comma is one entry. Every patcher that answers "is this already registered" — `guren plugin`, `guren add`'s provider wiring, `make:module`, `make:command` — split an array literal's interior on _every_ comma, with no awareness of nesting: `providers: [mcpPlugin({ path: '/mcp', prefix: '/x' })]` parsed as the two fragments `mcpPlugin({ path: '/mcp'` and `prefix: '/x' })`, and a nested array split the same way. A fragment matches neither the exact value a caller looks for nor, once the entry does not begin with the factory call, its prefix — so an existing registration read as absent and the command appended a duplicate.
+
+  Nesting is tracked with a stack over `()`, `[]` and `{}` on the same masked copy as before, so a name mentioned only in a comment still does not read as a registration. Regex literals are not masked; an unmatched closer stops the split there rather than cutting a fragment out of an entry, and the splits made before it stand.
+
+- 70d4685: Compare an array entry against a caller's value on its unmasked source. Entries came back with string contents blanked, so a value holding a string literal — `mcpPlugin({ path: '/mcp' })` — never equalled an existing entry and the registration was appended a second time.
+- 7bd6049: **`guren audit` stops spending a minute on a dependency scan that cannot finish** — `bun audit --json` spins at 100% CPU indefinitely on some dependency trees (reproduced on a scaffolded app whose `@guren/*` are `file:` links; the same app with those entries removed scans in under a second), and the scan's own cap was 60 s. Every such run therefore cost a minute before reporting the `Dependencies could not be scanned` warning it was always going to report. The cap is now 15 s, still an order of magnitude above the ~1 s a healthy scan takes. Nothing about the verdict changes: an unfinished scan is `unavailable`, never a pass.
+- 0c98d16: **Scaffolded configs survive a blanked environment variable** — the generated configs selected a store, disk, transport, host or port with `process.env.FOO ?? 'default'`, which passes an empty string straight through. Blanking a key rather than deleting the line, or a hosting dashboard supplying a cleared variable, therefore named something that does not exist: `config/session.ts` failed the boot with `Session store not found:  (declared: memory)`, `CacheProvider` threw `Cache store not found:` on first use, `config/mail.ts` picked a transport called `''`, `StorageProvider` a disk called `''`, and `Number(process.env.SMTP_PORT ?? 587)` produced port **0** rather than 587. Each now uses `||`, which is what the fallback was written to mean.
+
+  `MAIL_FROM_NAME` and the credential variables keep `??`, where an empty value is a real choice rather than a missing one. `appendEnvEntry()` additionally refuses an entry that does not assign the key it is probed by, which would otherwise be re-appended on every run.
+
+- 61d0402: Say when `SESSION_DRIVER` already names another store (RFC 0020 Part 5)
+
+  `guren add session` leaves an env file that already assigns `SESSION_DRIVER`
+  alone, which is right — the app chose it. It now warns when the value names a
+  store other than the one it just installed, because the silent version of that
+  is a `sessions` table and a migration nothing ever writes to.
+
+  Found by running the blueprint against `examples/blog`, whose `.env.example`
+  still carried the dead `SESSION_DRIVER=memory` line: the app came out with a
+  database store, a migration, and `memory` selected.
+
+  Also from the same run: `config/session.ts`'s scaffolded comment was an
+  11-line block, and scaffolded apps lint with `guren/comment-length` — so
+  framework-generated code warned in the user's own lint. It is now three blocks
+  inside the limit.
+
+  The scaffolded `stores` map now declares `cookie` beside `database`.
+  `SessionManager` resolves a store from that map rather than from the driver
+  registry, so `SESSION_DRIVER=cookie` threw `Session store not found: cookie`
+  on an app that had the driver compiled in. Declaring it costs no import: the
+  driver is built into `@guren/server`.
+
+- a06b28d: **The Guren UI token sheet declares `color-scheme`** — `resources/css/guren.css` defined a full dark palette behind `@media (prefers-color-scheme: dark)` but never told the user agent about it, so under a dark system preference the scrollbars, native form controls and Chrome's autofill highlight kept rendering light against the dark `--g-page` ground. `:root` now carries `color-scheme: light dark`, which follows the same preference the palette does. Scaffolded apps pick it up from the template; an existing app copies the one declaration into its own `resources/css/guren.css` by hand, since `make:auth` and `make:feature` never overwrite a sheet that is already there.
+- 8769a10: `guren/comment-length` now gives the module-header allowance (8 lines) to the JSDoc under a `#!/usr/bin/env bun` line. oxc reports the hashbang as a comment, so it was taking the header slot and leaving the real header on the 5-line body limit — which is what the hook scripts an app scaffolds are written against.
+- e9ecc4b: **Provider registration no longer rewrites the rest of the `providers` array** — every command that registers a provider (`guren add session`, `add cache`, `add attachments`, `make:auth`, `guren plugin`, and the `guren add` blueprints) rebuilt the array by re-joining parsed entries. Those entries come from a _masked_ copy of the source, where string contents are blanked character for character so a name mentioned in a comment cannot read as a registration. Joining them back therefore wrote the mask to disk: `mcpPlugin({ path: '/mcp' })` became `mcpPlugin({ path: '    ' })`, mounting the endpoint at a four-space path on an app that still boots, typechecks and passes `guren check`. The array was also flattened onto one line, and matching to the first `]` truncated an array holding a nested one — `providers: [plugin({ hosts: ['a'] })]` had the new provider spliced inside the plugin's own argument.
+
+  The insert now splices into the array's own span, the way `addToArrayOption` and `addToArrayArgument` already did: existing text is preserved verbatim, the span is found by depth-counting rather than by the first `]`, and a `providers: [` appearing only in a comment is no longer mistaken for the real one.
+
+- 68826a1: Split the over-long comment blocks in the scaffold and agent-harness templates so a freshly scaffolded app's first `bun run lint` reports no `guren/comment-length` warnings on framework-generated files. Each block is split by fact and placed on the code it describes; no guidance is dropped.
+- 81225bb: **`guren add schedule` now feeds the kernel it writes to the scheduler it binds** — the blueprint wrote `app/Console/Kernel.ts` and wired core's `SchedulingServiceProvider`, whose `register()` only binds `createScheduler()`. Nothing read the kernel, so the container's scheduler held zero tasks and the sample `app-heartbeat` never reached it. `guren schedule:list` hid the gap by loading the kernel file directly.
+
+  The blueprint now also scaffolds `app/Providers/SchedulingProvider.ts` — the shape the [Cloudflare Workers guide](https://guren.dev/en/guides/cloudflare#scheduled-tasks) already teaches and `examples/blog` uses — which rebinds `scheduler` with `scheduleTasksKernel().buildTasks()` added to it, and registers it after core's so the binding wins. A scheduler is still not a clock: call `start()` from your bootstrap on a long-lived process, or let a platform cron trigger drive it.
+
+  An app that already ran the blueprint installs the provider by re-running it: an existing `app/Console/Kernel.ts` is now left unchanged rather than aborting the command. A kernel that exports no `scheduleTasksKernel` — the registrar shape `schedule:list` also reads — gets no provider and a warning naming the missing step, since that provider's import would fail the app's boot.
+
+- 6c9235b: **`schedule:list` and `schedule:run` see the schedule kernels apps actually write** — both commands accepted only a kernel _factory_ (`scheduleTasksKernel(): Schedule`, and three other export names), while the scheduling guide teaches a `Scheduler` that a provider builds and hands to a registrar. An app following that guide, `examples/blog` and `examples/api` included, got "No scheduled tasks found." for tasks that really run. A kernel may now also export a registrar taking the scheduler, `(scheduler: Scheduler) => void`, named `register…Schedules` or exported as `default` — the same naming convention `route-registrar.ts` applies to route registrars, so a helper that merely takes one argument is not mistaken for an entry point. A kernel may export several, and they share one scheduler.
+
+  A kernel that exists is no longer reported as an app that has none. Loading one that threw was swallowed into `consola.debug`; one exporting nothing recognizable, and a `--kernel` path that is not there, printed the same "here is how to create one" hint as a missing file. All three now name the path, say what went wrong, and exit non-zero, and the unrecognized message names the two conventions. `--json` keeps stdout parseable — diagnostics go to stderr. Kernel paths are probed with loader semantics (`isDefinitelyAbsent`), so a kernel whose directory cannot be read reaches the import and is diagnosed rather than reported as absent.
+
+- d72b321: **`guren check` now reports a `db/schema.ts` whose aggregate object omits a table the same file declares.** An app that keeps `export const schema = { posts, users }` and hands `typeof schema` to drizzle had only one way to hear about a stale object: re-running a scaffolder over a table it had already added. An aggregate that went stale from a hand-added table, or from a release before the scaffolders wrote the key, was never mentioned.
+
+  The rule reads the object through the same detection the scaffolders use, so both agree on which object is the aggregate: every property a shorthand (or `name: name`) reference to a table the file declares, and exactly one such candidate. An app that keeps no aggregate contributes nothing.
+
+  The verdict is graded by how firmly the file identifies the object. Named `schema`, or read by a `typeof` (`export type AppSchema = typeof schema`) — the shape all three example apps use — and the `warn` counts against `guren check --ci` and `guren gate`. On a shape match alone it is advisory: an object of table shorthands may equally be a grouping the app keeps for itself, and a guess must not turn a correct schema's CI red. Plain `guren check` stays informational either way.
+
+  Two shapes are deliberately silent. A root schema reaching a module's tables through `export * from '../modules/<name>/db/schema'` has no identifier here to list, so those tables are never asked for; and an object holding a spread carries tables it does not name, which stops it being recognized as an aggregate at all.
+
+- 5da4d89: **A scaffolded table now reaches the schema's aggregate object** — an app may keep `export const schema = { posts, users }` in its `db/schema.ts` and hand `typeof schema` to drizzle for relational queries. Nothing the framework generates reads that object, so when a scaffolder appended its table at end of file the aggregate was left silently incomplete: the app compiles, the table exists, and only the app's own consumer sees the gap. `examples/blog` hit exactly this.
+
+  `appendTableToSchema()` is now the one rule for writing a table into a `db/schema.ts`, and `guren add session`, `guren add attachments`, `guren make:auth` and `guren add resource` (which backs `make:feature`) all go through it — the last two each had their own end-of-file append. When the app keeps an aggregate, the identifier goes in and the declaration is spliced **ahead** of the object, since a `const` naming a table declared further down the file is a use before declaration (TS2448).
+
+  Detection is positive evidence only: every property must be a shorthand (or `name: name`) reference to a table the same file declares. Anything else, an ambiguous second candidate, or no such object at all appends exactly as before and says nothing. A schema that already declares the table but omits the key is reported rather than repaired, with the advice branching on whether that declaration sits above or below the object.
+
+  `make:module` re-exports a module's schema wholesale (`export * from …`) and so has no identifier to contribute; that case still needs a spread rather than a key.
+
+- Updated dependencies [3163cf5]
+- Updated dependencies [c3c5919]
+- Updated dependencies [e413b6e]
+- Updated dependencies [d024c27]
+- Updated dependencies [3e479ea]
+  - @guren/server@2.20.0
+  - @guren/orm@2.7.0
+
 ## 2.18.0
 
 ### Minor Changes

@@ -98,17 +98,59 @@ export function findClosingDelimiter(content: string, openIndex: number, open: s
   return -1
 }
 
+/** The closer each opener `parseArrayEntries` tracks expects to see. */
+const ARRAY_ENTRY_CLOSERS: Record<string, string> = { '(': ')', '[': ']', '{': '}' }
+
 /**
- * Entries of an array literal's interior. Masked first, so a name appearing
- * only in a comment is not mistaken for an existing entry — which is also why
- * the result answers membership only: string contents come out blanked, so
- * re-joining these entries into the file writes `'/mcp'` back as `'    '`.
+ * One entry of an array literal, in both the forms its readers need. Masking
+ * preserves length, so one pair of offsets indexes the masked copy and `inner`
+ * alike. Two entries can share a `code` and differ in `source`: `'/mcp'` and
+ * `'/api'` blank to the same run, so only `source` may answer "is this the
+ * value the caller asked for".
  */
-function parseArrayEntries(inner: string): string[] {
-  return maskNonCode(inner)
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
+interface ArrayEntry {
+  /** Masked and trimmed: string and comment contents blanked. */
+  code: string
+  /** The same span, verbatim out of `inner`. */
+  source: string
+}
+
+/**
+ * Entries of an array literal's interior, split at depth 0 only. Masked first,
+ * so a name in a comment is not mistaken for an entry, and so an entry's own
+ * trailing comment trims away with its whitespace.
+ * Regex literals are not masked; an unmatched closer stops the split there.
+ */
+function parseArrayEntries(inner: string): ArrayEntry[] {
+  const masked = maskNonCode(inner)
+  const closers: string[] = []
+  const bounds: number[] = [0]
+
+  for (let i = 0; i < masked.length; i++) {
+    const char = masked[i]
+    const closer = ARRAY_ENTRY_CLOSERS[char]
+
+    if (closer !== undefined) {
+      closers.push(closer)
+    } else if (char === ')' || char === ']' || char === '}') {
+      if (closers.pop() !== char) break
+    } else if (char === ',' && closers.length === 0) {
+      bounds.push(i, i + 1)
+    }
+  }
+
+  bounds.push(masked.length)
+
+  const entries: ArrayEntry[] = []
+  for (let i = 0; i < bounds.length; i += 2) {
+    const span = masked.slice(bounds[i], bounds[i + 1])
+    const code = span.trim()
+    if (code.length === 0) continue
+    const from = bounds[i] + (span.length - span.trimStart().length)
+    entries.push({ code, source: inner.slice(from, from + code.length) })
+  }
+
+  return entries
 }
 
 /**
@@ -285,7 +327,8 @@ export function insertProvider(
   providerName: string,
   /**
    * Defaults to exact-match against `providerName`; factory registrations pass
-   * a prefix check so `vercelPlugin({ ... })` counts as registered.
+   * a prefix check so `vercelPlugin({ ... })` counts as registered. Entries
+   * arrive masked, so a predicate must not test text holding a string literal.
    */
   isRegistered?: (entries: string[]) => boolean,
 ): InsertResult {
@@ -308,8 +351,8 @@ export function insertProvider(
   const providers = parseArrayEntries(interior)
 
   const alreadyRegistered = isRegistered
-    ? isRegistered(providers)
-    : providers.some(p => p === providerName)
+    ? isRegistered(providers.map((entry) => entry.code))
+    : providers.some((entry) => entry.source === providerName)
   if (alreadyRegistered) {
     return { reason: PATCH_REASONS.providerAlreadyRegistered }
   }
@@ -406,7 +449,7 @@ export async function addToArrayOption(
 
   const interior = content.slice(open + 1, close)
 
-  if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
+  if (parseArrayEntries(interior).some((entry) => entry.source === valueSource)) {
     return { modified: false, reason: PATCH_REASONS.alreadyPresent }
   }
 
@@ -473,7 +516,7 @@ export function insertArrayArgument(content: string, methodName: string, valueSo
   }
 
   const interior = content.slice(open + 1, close)
-  if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
+  if (parseArrayEntries(interior).some((entry) => entry.source === valueSource)) {
     return content
   }
 
@@ -508,7 +551,7 @@ export async function hasAuthProvider(filePath: string): Promise<boolean> {
   }
 }
 
-import type { SchemaDialect } from './schema-parser'
+import { findSchemaAggregate, type SchemaDialect } from './schema-parser'
 export type { SchemaDialect }
 
 /**
@@ -648,6 +691,109 @@ export async function addCreateAppOption(
   return { modified: true }
 }
 
+interface AggregateSplice {
+  /** Where the new table's declaration goes: ahead of the aggregate that names it. */
+  declarationOffset: number
+  /** Null when the aggregate already lists the table. */
+  key: { offset: number; text: string } | null
+}
+
+/**
+ * The offset a statement starts at, taking the comment lines written directly above it.
+ * A text rule rather than Babel's `leadingComments`: Babel hands the *previous*
+ * statement's end-of-line comment to this node as a leading one, and its start is a
+ * column mid-line — splicing there emits two statements on one line, which without
+ * semicolons does not parse. Walking whole lines cannot produce a mid-line offset.
+ */
+function statementStart(source: string, offset: number): number {
+  let lineStart = lineStartAt(source, offset)
+
+  while (lineStart > 0) {
+    const previous = lineStartAt(source, lineStart - 1)
+    const text = source.slice(previous, lineStart - 1).trim()
+    if (!text.startsWith('//') && !text.startsWith('/*') && !text.startsWith('*')) break
+    lineStart = previous
+  }
+
+  return lineStart
+}
+
+/**
+ * Where `name`'s declaration and its aggregate key go, from the one aggregate reading in
+ * `schema-parser.ts`, for an aggregate the file itself identifies. `name` is passed as the
+ * extra key so a re-run over a file that already declares the table still recognizes the
+ * object listing it.
+ */
+function planAggregateSplice(source: string, name: string): AggregateSplice | null {
+  const ast = parseSourceFile(source, 'db/schema.ts')
+  const aggregate = ast && findSchemaAggregate(ast, name)
+  // A shape match the file does not identify is not enough to edit a hand-kept object:
+  // `guren check` grades the same match advisory. Null here also silences
+  // `appendSchemaTable`'s stale-aggregate warning, deliberately — advising by hand the
+  // edit the writer itself declined is that same guess in prose.
+  if (!aggregate?.confident) return null
+
+  const { object, statement, keys } = aggregate
+  const last = object.properties[object.properties.length - 1]
+  const lastStart = last.start ?? -1
+  const lastEnd = last.end ?? -1
+  if (lastStart < 0 || lastEnd < 0) return null
+
+  const multiline = source.slice(object.start ?? 0, object.end ?? 0).includes('\n')
+  const indent = indentOfLine(source, lastStart)
+  // Past a line comment on the last entry's own line, so a note written against
+  // that entry is not re-attached to the new one. Only when a comma already
+  // separates the two, since one added here would land inside the comment.
+  const lineEnd = source.indexOf('\n', lastEnd)
+  const commented = multiline && lineEnd > 0 && /^\s*,\s*\/\//.test(source.slice(lastEnd, lineEnd))
+
+  return {
+    declarationOffset: statementStart(source, statement.start ?? 0),
+    key: keys.includes(name)
+      ? null
+      : commented
+        ? { offset: lineEnd, text: `\n${indent}${name},` }
+        : { offset: lastEnd, text: `${multiline ? `,\n${indent}` : ', '}${name}` },
+  }
+}
+
+/** The offset the line containing `offset` starts at. */
+function lineStartAt(source: string, offset: number): number {
+  return source.lastIndexOf('\n', offset - 1) + 1
+}
+
+/** The leading whitespace of the line `offset` sits on. */
+function indentOfLine(source: string, offset: number): string {
+  return /^[^\S\n]*/.exec(source.slice(lineStartAt(source, offset), offset))?.[0] ?? ''
+}
+
+/**
+ * `source` with `block` declaring `name` added — the one rule for writing a table into a
+ * `db/schema.ts`, called by every scaffolder that adds one. End of file, unless the file
+ * identifies an aggregate object of its tables: then the key goes in and the declaration
+ * goes *ahead* of the object, since a `const` naming a table declared further down the
+ * file is a use before declaration (TS2448).
+ */
+export function appendTableToSchema(
+  source: string,
+  name: string,
+  block: string,
+): { source: string; aggregated: boolean } {
+  const aggregate = planAggregateSplice(source, name)
+  if (!aggregate) return { source: `${source.trimEnd()}\n\n${block.trim()}\n`, aggregated: false }
+
+  // Both splices come from the one parse, applied high offset first so the earlier
+  // one still addresses the source it was measured against.
+  let updated = source
+  if (aggregate.key) {
+    updated = updated.slice(0, aggregate.key.offset) + aggregate.key.text + updated.slice(aggregate.key.offset)
+  }
+  return {
+    source: `${updated.slice(0, aggregate.declarationOffset)}${block.trim()}\n\n${updated.slice(aggregate.declarationOffset)}`,
+    aggregated: aggregate.key !== null,
+  }
+}
+
 export interface AppendSchemaTableOptions {
   /** The exported binding, e.g. `sessions`. Also what the already-declared guard looks for. */
   name: string
@@ -682,6 +828,18 @@ export async function appendSchemaTable(options: AppendSchemaTableOptions): Prom
   )
   if (declared.test(existing)) {
     consola.info(`${schemaFile} already declares a ${name} table — left unchanged.`)
+    // Reported rather than repaired: moving a declaration this run did not write
+    // is beyond what a scaffolder should do to a hand-kept file. Which advice is
+    // right depends on where that declaration sits — an earlier release appended
+    // it at end of file, below the aggregate, where adding the key alone is TS2448.
+    const stale = planAggregateSplice(existing, name)
+    if (stale?.key) {
+      const declaredAt = matchInCode(existing, declared)?.index ?? 0
+      const fix = declaredAt > stale.declarationOffset
+        ? `add it, moving \`export const ${name}\` above the object — below it the reference is a use before declaration`
+        : `add it, or ${name} stays out of \`typeof schema\``
+      consola.warn(`The schema object in ${schemaFile} does not list ${name} — ${fix}.`)
+    }
     return 'already-declared'
   }
 
@@ -693,7 +851,11 @@ export async function appendSchemaTable(options: AppendSchemaTableOptions): Prom
     content = insertImport(content, extraImport) ?? content
   }
 
-  await writeFile(resolve(process.cwd(), schemaFile), `${content.trimEnd()}\n\n${blocks[dialect]}`, 'utf8')
+  const written = appendTableToSchema(content, name, blocks[dialect])
+  await writeFile(resolve(process.cwd(), schemaFile), written.source, 'utf8')
   consola.info(`Added the ${name} table to ${schemaFile} (${dialect}).`)
+  if (written.aggregated) {
+    consola.info(`Added ${name} to the schema object in ${schemaFile}.`)
+  }
   return 'appended'
 }

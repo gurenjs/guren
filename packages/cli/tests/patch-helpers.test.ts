@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { addImport, addToArrayArgument, addToArrayOption, insertImport, insertProvider, PATCH_REASONS } from '../src/patch-helpers'
-import { createTempWorkspace } from './helpers'
+import { parseSourceFile } from '../src/parse-cache'
+import { addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertImport, insertProvider, PATCH_REASONS } from '../src/patch-helpers'
+import { captureWarnings, createTempWorkspace, PG_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 
 describe('addImport', () => {
   it('inserts after a single-line leading import', async () => {
@@ -546,5 +547,362 @@ createApp({ providers: [DatabaseProvider] })`
 
     expect(result.content).toBeUndefined()
     expect(result.reason).toBe(PATCH_REASONS.providersArrayNotFound)
+  })
+})
+
+// The shared fixture plus the second table these cases need in the aggregate.
+const PG_TABLES = `${PG_SCHEMA_FIXTURE}
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+})
+`
+
+const SESSIONS_BLOCK = `export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey(),
+})
+`
+
+const everyDialect = <T,>(value: T): Record<'pg' | 'sqlite' | 'mysql', T> => ({ pg: value, sqlite: value, mysql: value })
+const KEEP_IMPORTS = everyDialect((content: string) => content)
+
+describe('appendSchemaTable', () => {
+
+  async function appendSessions(schemaSource: string): Promise<string> {
+    const workspace = await createTempWorkspace('guren-cli-append-schema-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': schemaSource })
+
+      const result = await appendSchemaTable({
+        name: 'sessions',
+        blocks: everyDialect(SESSIONS_BLOCK),
+        imports: KEEP_IMPORTS,
+        manualGuidance: 'add it by hand.',
+      })
+      expect(result).toBe('appended')
+
+      return await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+    } finally {
+      await workspace.cleanup()
+    }
+  }
+
+  it('adds the identifier to a multi-line aggregate object', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+export const schema = {
+  posts,
+  users,
+}
+
+export type AppSchema = typeof schema
+`)
+
+    expect(content).toContain('  users,\n  sessions,\n}')
+    // The declaration must precede the aggregate that names it: a `const`
+    // referencing a table declared further down is TS2448, not a style nit.
+    expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const schema ='))
+    expect(content).toContain('export type AppSchema = typeof schema')
+  })
+
+  it('adds the identifier to a single-line aggregate object', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+export const schema = { users, posts }
+`)
+
+    expect(content).toContain('export const schema = { users, posts, sessions }')
+    expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const schema ='))
+  })
+
+  it('does not splice into the previous statement when it carries a trailing comment', async () => {
+    // Babel hands that comment to the aggregate as a leading one, and its start is
+    // a column mid-line, where a splice would emit two statements on one line.
+    const content = await appendSessions(`import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
+
+export const users = pgTable('users', { id: serial('id') }) // the users table
+export const schema = { users }
+`)
+
+    expect(content).toContain("export const users = pgTable('users', { id: serial('id') }) // the users table")
+    expect(content).toContain('export const schema = { users, sessions }')
+    expect(parseSourceFile(content, 'db/schema.ts')).not.toBeNull()
+  })
+
+  it('keeps a trailing comment with the entry it was written against', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+export const schema = {
+  posts,
+  users, // every table the app owns
+}
+`)
+
+    expect(content).toContain('  users, // every table the app owns\n  sessions,\n}')
+    expect(parseSourceFile(content, 'db/schema.ts')).not.toBeNull()
+  })
+
+  it('appends at end of file when the schema keeps no aggregate', async () => {
+    const content = await appendSessions(PG_TABLES)
+
+    expect(content).toBe(`${PG_TABLES}\n${SESSIONS_BLOCK}`)
+  })
+
+  it('leaves an object that is not a table aggregate alone', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+const retries = 3
+const timeout = 1000
+
+export const options = { retries, timeout }
+`)
+
+    expect(content).not.toContain('sessions }')
+    expect(content).toContain('export const options = { retries, timeout }')
+    expect(content.trimEnd().endsWith(SESSIONS_BLOCK.trimEnd())).toBe(true)
+  })
+
+  it('adds the identifier to an aggregate the file reads in a `typeof`', async () => {
+    // The other half of the evidence `findSchemaAggregate` accepts: not named `schema`,
+    // but the file itself says what the object is.
+    const content = await appendSessions(`${PG_TABLES}
+export const appSchema = { users, posts }
+
+export type AppSchema = typeof appSchema
+`)
+
+    expect(content).toContain('export const appSchema = { users, posts, sessions }')
+    expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const appSchema ='))
+  })
+
+  it('leaves a table-shaped object the file does not identify alone', async () => {
+    // A deliberate grouping of some tables is indistinguishable from the aggregate on
+    // shape, so the writer falls all the way back: no key, and no declaration moved
+    // ahead of the object — the reordering exists only to make the key legal.
+    const content = await appendSessions(`${PG_TABLES}
+export const authTables = { users }
+`)
+
+    expect(content).toContain('export const authTables = { users }')
+    expect(content).not.toContain('sessions }')
+    expect(content.trimEnd().endsWith(SESSIONS_BLOCK.trimEnd())).toBe(true)
+    expect(content.indexOf('export const sessions =')).toBeGreaterThan(content.indexOf('export const authTables ='))
+  })
+
+  it('leaves an aggregate ambiguous between two candidates alone', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+export const schema = { users, posts }
+export const auditable = { users }
+`)
+
+    expect(content).toContain('export const schema = { users, posts }\n')
+    expect(content).toContain('export const auditable = { users }')
+    expect(content.trimEnd().endsWith(SESSIONS_BLOCK.trimEnd())).toBe(true)
+  })
+
+  it('does not duplicate a key an aggregate already lists', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+export const schema = { users, posts, sessions }
+`)
+
+    expect(content).toContain('export const schema = { users, posts, sessions }')
+    expect(content).not.toContain('sessions, sessions')
+    expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const schema ='))
+  })
+})
+
+describe('appendSchemaTable on a schema that already declares the table', () => {
+  const DECLARED = `export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey(),
+})
+`
+
+  async function warningsFor(schemaSource: string): Promise<string> {
+    const workspace = await createTempWorkspace('guren-cli-stale-aggregate-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': schemaSource })
+
+      const { result, warnings } = await captureWarnings(() => appendSchemaTable({
+        name: 'sessions',
+        blocks: everyDialect(SESSIONS_BLOCK),
+        imports: KEEP_IMPORTS,
+        manualGuidance: 'add it by hand.',
+      }))
+      expect(result).toBe('already-declared')
+
+      return warnings.join('\n')
+    } finally {
+      await workspace.cleanup()
+    }
+  }
+
+  it('asks for the declaration to move when it sits below the aggregate', async () => {
+    // The shape `guren add session` leaves behind when it appends at end of file:
+    // adding the key alone would reference a binding declared further down (TS2448).
+    const warned = await warningsFor(`${PG_TABLES}
+export const schema = { users }
+
+${DECLARED}`)
+
+    expect(warned).toContain('does not list sessions')
+    expect(warned).toContain('moving `export const sessions` above the object')
+  })
+
+  it('asks only for the key when the declaration already precedes the aggregate', async () => {
+    const warned = await warningsFor(`${PG_TABLES}
+${DECLARED}
+export const schema = { users }
+`)
+
+    expect(warned).toContain('stays out of `typeof schema`')
+    expect(warned).not.toContain('moving `export const sessions`')
+  })
+
+  it('says nothing about a table-shaped object the file does not identify', async () => {
+    // The writer declines to add the key here, so advising the same edit by hand would
+    // be the guess it just refused. `guren check` still reports it, advisory.
+    const warned = await warningsFor(`${PG_TABLES}
+export const authTables = { users }
+
+${DECLARED}`)
+
+    expect(warned).toBe('')
+  })
+})
+
+/** Runs `run()` against a workspace holding `name`, and returns what it left there. */
+async function withArrayFile(name: string, contents: string, run: () => Promise<void>): Promise<string> {
+  const workspace = await createTempWorkspace('guren-cli-array-entries-')
+  try {
+    await writeWorkspaceFiles(workspace.dir, { [name]: contents })
+    await run()
+    return await readFile(join(workspace.dir, name), 'utf8')
+  } finally {
+    await workspace.cleanup()
+  }
+}
+
+describe('array entries — depth-0 splitting', () => {
+  it('reads an entry whose object argument holds a comma as one entry', () => {
+    const app = 'createApp({ providers: [mcpPlugin({ path: mcpPath, prefix: mcpPrefix })] })'
+
+    const result = insertProvider(app, 'mcpPlugin({ path: mcpPath, prefix: mcpPrefix })')
+
+    expect(result.reason).toBe(PATCH_REASONS.providerAlreadyRegistered)
+  })
+
+  // The prefix predicate matched the leading fragment either way, so it is the
+  // half of `guren plugin` that never broke — pinned so the split cannot lose it.
+  it('still recognizes a factory prefix across that comma', () => {
+    const app = "createApp({ providers: [mcpPlugin({ path: '/mcp', prefix: '/x' })] })"
+
+    const result = insertProvider(app, 'mcpPlugin()', (entries) =>
+      entries.some((entry) => entry.startsWith('mcpPlugin(')),
+    )
+
+    expect(result.reason).toBe(PATCH_REASONS.providerAlreadyRegistered)
+  })
+
+  it('reads an entry holding a nested array as one entry', async () => {
+    const source = 'kernel.registerMany([group([alpha, beta])])\n'
+    const result = await withArrayFile('src/console.ts', source, async () => {
+      const patch = await addToArrayArgument('src/console.ts', 'registerMany', 'group([alpha, beta])')
+      expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(source)
+  })
+
+  it('detects a valueSource that itself contains a comma on a second run', async () => {
+    const result = await withArrayFile('src/app.ts', 'const app = createApp({ modules: [] })\n', async () => {
+      expect((await addToArrayOption('src/app.ts', 'modules', 'billingModule(extra, more)')).modified).toBe(true)
+      const second = await addToArrayOption('src/app.ts', 'modules', 'billingModule(extra, more)')
+      expect(second.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe('const app = createApp({ modules: [billingModule(extra, more)] })\n')
+  })
+
+  // Regex literals are not masked: the comma inside one sits at depth 1 and is
+  // no separator, and the `}` closes a brace never opened, which stops the
+  // split there — `Basic`, already split off before it, stands.
+  it('stops splitting at an unbalanced closer instead of cutting a fragment', async () => {
+    const source = 'kernel.registerMany([Basic, match(/a,}b/)])\n'
+    const result = await withArrayFile('src/console.ts', source, async () => {
+      const patch = await addToArrayArgument('src/console.ts', 'registerMany', 'match(/a,}b/)')
+      expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(source)
+  })
+})
+
+describe('array entries — masked entries vs. an unmasked value', () => {
+  it('matches an existing entry whose argument holds a string literal', () => {
+    const app = "createApp({ providers: [mcpPlugin({ path: '/mcp' })] })"
+
+    const result = insertProvider(app, "mcpPlugin({ path: '/mcp' })")
+
+    expect(result.reason).toBe(PATCH_REASONS.providerAlreadyRegistered)
+  })
+
+  // Masking is length-preserving, so `'/mcp'` and `'/api'` are the same blanked
+  // run: comparing two masked sides would read this as registered and drop it.
+  it('separates two entries whose string literals are the same length', () => {
+    const app = "createApp({ providers: [mcpPlugin({ path: '/mcp' })] })"
+
+    const result = insertProvider(app, "mcpPlugin({ path: '/api' })")
+
+    expect(result.content).toBe(
+      "createApp({ providers: [mcpPlugin({ path: '/mcp' }), mcpPlugin({ path: '/api' })] })",
+    )
+  })
+
+  it('does not read a value that appears only in a comment inside the array', () => {
+    const app = "createApp({ providers: [DatabaseProvider /* , mcpPlugin({ path: '/mcp' }) */] })"
+
+    const result = insertProvider(app, "mcpPlugin({ path: '/mcp' })")
+
+    expect(result.content).toBe(
+      "createApp({ providers: [DatabaseProvider, mcpPlugin({ path: '/mcp' })"
+      + " /* , mcpPlugin({ path: '/mcp' }) */] })",
+    )
+  })
+
+  // The predicate reads the masked form, which is why `plugin.ts` tests a
+  // prefix that holds no string literal.
+  it('hands a membership predicate the masked entry', () => {
+    const app = "createApp({ providers: [mcpPlugin({ path: '/mcp' })] })"
+    const seen: string[] = []
+
+    insertProvider(app, 'mcpPlugin()', (entries) => {
+      seen.push(...entries)
+      return false
+    })
+
+    expect(seen).toEqual(["mcpPlugin({ path: '    ' })"])
+  })
+
+  it('detects an option value holding a string literal on a second run', async () => {
+    const value = "billingModule({ prefix: '/billing' })"
+    const result = await withArrayFile('src/app.ts', 'const app = createApp({ modules: [] })\n', async () => {
+      expect((await addToArrayOption('src/app.ts', 'modules', value)).modified).toBe(true)
+      expect((await addToArrayOption('src/app.ts', 'modules', value)).reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(`const app = createApp({ modules: [${value}] })\n`)
+  })
+
+  it('detects an array argument holding a string literal', async () => {
+    const source = "kernel.registerMany([namespaced('billing')])\n"
+    const result = await withArrayFile('src/console.ts', source, async () => {
+      const patch = await addToArrayArgument('src/console.ts', 'registerMany', "namespaced('billing')")
+      expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(source)
+  })
+
+  // An escape blanks to two characters like the pair it stands for, so the
+  // offsets a masked entry hands back still index the source.
+  it('keeps its offsets across an escape inside the literal', async () => {
+    const value = "namespaced('a\\'b')"
+    const source = `kernel.registerMany([${value}])\n`
+    const result = await withArrayFile('src/console.ts', source, async () => {
+      const patch = await addToArrayArgument('src/console.ts', 'registerMany', value)
+      expect(patch.reason).toBe(PATCH_REASONS.alreadyPresent)
+    })
+    expect(result).toBe(source)
   })
 })

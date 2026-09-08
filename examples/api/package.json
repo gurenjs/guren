@@ -1,6 +1,6 @@
 {
   "name": "@guren/example-api",
-  "version": "0.1.35",
+  "version": "0.1.36",
   "private": true,
   "type": "module",
   "scripts": {
@@ -25,6 +25,6 @@
   "devDependencies": {
     "drizzle-kit": "1.0.0-rc.4",
     "typescript": "^7.0.2",
-    "vitest": "^3.2.6"
+    "vitest": "^4.1.11"
   }
 }

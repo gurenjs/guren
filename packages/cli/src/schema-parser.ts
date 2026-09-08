@@ -3,11 +3,12 @@ import { readFile } from 'node:fs/promises'
 import type {
   Expression,
   CallExpression,
+  File,
   ObjectExpression,
   ObjectProperty,
   Statement,
 } from '@babel/types'
-import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion } from './ast-walk'
+import { literalString, memberKeyName, objectLiteral, topLevelDeclaration, unwrapTypeAssertion, walk } from './ast-walk'
 import { listAppRoots } from './discovery'
 import { parseSourceFile } from './parse-cache'
 
@@ -54,6 +55,118 @@ function tableFactoryDialect(
     return TABLE_FACTORIES.get(callee.property.name)
   }
   return undefined
+}
+
+/**
+ * Every top-level `const <identifier> = <factory>(…)` a parsed schema declares. The one
+ * scan behind both readers below, so "is this a table declaration" cannot answer
+ * differently depending on which one asked.
+ */
+function* tableDeclarations(ast: File): Generator<{ identifier: string; call: CallExpression; dialect: SchemaDialect }> {
+  const aliases = collectFactoryAliases(ast.program.body)
+
+  for (const node of ast.program.body) {
+    const declaration = topLevelDeclaration(node)
+    if (!declaration) continue
+    for (const declarator of declaration.declarations) {
+      if (declarator.id.type !== 'Identifier') continue
+      if (declarator.init?.type !== 'CallExpression') continue
+      const dialect = tableFactoryDialect(declarator.init, aliases)
+      if (!dialect) continue
+      yield { identifier: declarator.id.name, call: declarator.init, dialect }
+    }
+  }
+}
+
+/**
+ * The table identifiers a parsed `db/schema.ts` declares. Needs no columns, so unlike
+ * `parseSchemaTables` it keeps a table whose columns are passed as an identifier rather
+ * than a literal — the difference that decides which tables an aggregate is asked for.
+ */
+function declaredTableIdentifiers(ast: File): Set<string> {
+  return new Set([...tableDeclarations(ast)].map((table) => table.identifier))
+}
+
+export interface SchemaAggregate {
+  /** The object literal, for a caller that needs its span. */
+  object: ObjectExpression
+  /** The statement declaring it, whose start a table's own declaration must precede. */
+  statement: Statement
+  /** Table identifiers the object lists, in source order. */
+  keys: string[]
+  /** Every table the same file declares. */
+  declared: Set<string>
+  /**
+   * The file's own evidence that this object is the schema drizzle is handed: named
+   * `schema`, or read by a `typeof`. False leaves a caller holding a shape match alone,
+   * which a grouping of table shorthands satisfies just as well.
+   */
+  confident: boolean
+}
+
+/** Whether the file reads `name` in a `typeof` position — `export type X = typeof schema`. */
+function typeQueried(ast: File, name: string): boolean {
+  let found = false
+  walk(ast.program, (node) => {
+    if (found) return false
+    if (node.type !== 'TSTypeQuery') return
+    const exprName = node.exprName as { type?: string; name?: string } | undefined
+    if (exprName?.type === 'Identifier' && exprName.name === name) found = true
+  })
+  return found
+}
+
+/**
+ * The app's hand-kept aggregate of its own tables — `export const schema = { posts, users }`,
+ * handed to drizzle for relational queries. Nothing the framework generates reads it, so a
+ * table missing a key here leaves it incomplete with nothing to notice. Positive evidence only:
+ * every property a shorthand (or `name: name`) reference to a table this file declares,
+ * `extraKey` excepted; a second candidate answers null, and `confident` grades what is left.
+ */
+export function findSchemaAggregate(ast: File, extraKey?: string): SchemaAggregate | null {
+  const declared = declaredTableIdentifiers(ast)
+  if (declared.size === 0) return null
+
+  let found: SchemaAggregate | null = null
+
+  for (const node of ast.program.body) {
+    const declaration = topLevelDeclaration(node)
+    if (!declaration) continue
+
+    for (const declarator of declaration.declarations) {
+      const object = objectLiteral(declarator.init)
+      if (!object || object.properties.length === 0) continue
+      if (declarator.id.type !== 'Identifier') continue
+
+      const keys: string[] = []
+      let isAggregate = true
+
+      for (const property of object.properties) {
+        if (property.type !== 'ObjectProperty') {
+          isAggregate = false
+          break
+        }
+        const key = memberKeyName(property)
+        const referencesKey =
+          property.shorthand || (property.value.type === 'Identifier' && property.value.name === key)
+        if (!key || !referencesKey || !(declared.has(key) || key === extraKey)) {
+          isAggregate = false
+          break
+        }
+        keys.push(key)
+      }
+      if (!isAggregate) continue
+
+      // A second candidate means the file's shape does not identify one aggregate,
+      // so neither can this.
+      if (found) return null
+
+      const name = declarator.id.name
+      found = { object, statement: node, keys, declared, confident: name === 'schema' || typeQueried(ast, name) }
+    }
+  }
+
+  return found
 }
 
 export interface SchemaColumnReference {
@@ -254,37 +367,21 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
   const ast = parseSourceFile(source, schemaPath)
   if (!ast) return []
 
-  const aliases = collectFactoryAliases(ast.program.body)
   const tables: SchemaTable[] = []
 
-  for (const node of ast.program.body) {
-    const declaration =
-      node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'VariableDeclaration'
-        ? node.declaration
-        : node.type === 'VariableDeclaration'
-          ? node
-          : null
-    if (!declaration) continue
+  for (const { identifier, call, dialect } of tableDeclarations(ast)) {
+    // Columns passed as an identifier rather than a literal: this reader exists to
+    // report them, so a table it cannot read contributes nothing.
+    const columnsArg = firstObjectArgument(call)
+    if (!columnsArg) continue
 
-    for (const declarator of declaration.declarations) {
-      if (declarator.id.type !== 'Identifier') continue
-      if (declarator.init?.type !== 'CallExpression') continue
-      const dialect = tableFactoryDialect(declarator.init, aliases)
-      if (!dialect) continue
-
-      const tableName = literalString(declarator.init.arguments[0]) ?? undefined
-
-      const columnsArg = firstObjectArgument(declarator.init)
-      if (!columnsArg) continue
-
-      tables.push({
-        identifier: declarator.id.name,
-        tableName,
-        columns: columnsFromObject(columnsArg),
-        module,
-        dialect,
-      })
-    }
+    tables.push({
+      identifier,
+      tableName: literalString(call.arguments[0]) ?? undefined,
+      columns: columnsFromObject(columnsArg),
+      module,
+      dialect,
+    })
   }
 
   return tables

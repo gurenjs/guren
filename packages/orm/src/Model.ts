@@ -321,13 +321,33 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * this is asked to drop, so a mixin whose filter must be opt-out-able has to
    * register a named scope and nothing else.
    */
-  static withoutGlobalScope<T extends typeof Model>(this: T, ...names: string[]): QueryBuilder<TRecordFor<T>> {
-    return this.buildScopedQuery(undefined, names)
+  static withoutGlobalScope<T extends typeof Model>(this: T, ...names: string[]): QueryBuilder<TRecordFor<T>>
+  /**
+   * Query options lead here because `names` is a rest parameter and cannot be
+   * followed by an optional one; every other entry point takes them trailing.
+   */
+  static withoutGlobalScope<T extends typeof Model>(
+    this: T,
+    queryOptions: ModelQueryOptions,
+    ...names: string[]
+  ): QueryBuilder<TRecordFor<T>>
+  static withoutGlobalScope<T extends typeof Model>(
+    this: T,
+    ...args: Array<string | ModelQueryOptions>
+  ): QueryBuilder<TRecordFor<T>> {
+    const [first, ...rest] = args
+    if (typeof first === 'string' || first === undefined) {
+      return this.buildScopedQuery(undefined, args as string[])
+    }
+    return this.buildScopedQuery(first, rest as string[])
   }
 
   /** A query with no global scopes applied, `defaultScope` included. */
-  static withoutGlobalScopes<T extends typeof Model>(this: T): QueryBuilder<TRecordFor<T>> {
-    return new QueryBuilder<TRecordFor<T>>(this)
+  static withoutGlobalScopes<T extends typeof Model>(
+    this: T,
+    queryOptions?: ModelQueryOptions,
+  ): QueryBuilder<TRecordFor<T>> {
+    return new QueryBuilder<TRecordFor<T>>(this, queryOptions)
   }
 
   /**
