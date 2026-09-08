@@ -6,7 +6,10 @@ import {
 } from '../../../packages/testing/src/controller.js'
 import type { Context } from '@guren/core'
 
-vi.mock('@guren/core', () => createControllerModuleMock())
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return { ...actual, ...createControllerModuleMock() }
+})
 
 import HomeController from '../../app/Http/Controllers/HomeController.js'
 
