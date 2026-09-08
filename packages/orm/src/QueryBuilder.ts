@@ -1,6 +1,6 @@
 import { DEFAULT_PAGINATION_SIZE } from './Model'
 import { ModelNotFoundException } from './ModelNotFoundException'
-import { normalizeConditionSequence } from './where-conditions'
+import { groupConditionSequence } from './where-conditions'
 import type {
   AdapterQueryOptions,
   FindManyOptions,
@@ -20,6 +20,12 @@ type FieldKey<TRecord extends PlainObject> = keyof TRecord & string
  * the module boundary, but kept out of the package entry point.
  */
 export const PREPARED_UPDATE = Symbol('guren.orm.preparedUpdate')
+
+/**
+ * Key for the global-scope seal. Exported for `Model` across the module
+ * boundary, but kept out of the package entry point.
+ */
+export const SEAL_SCOPES = Symbol('guren.orm.sealScopes')
 
 export type WhereOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'not in' | 'is null' | 'is not null'
 
@@ -79,6 +85,9 @@ export class QueryBuilder<
   TResult extends PlainObject = TRecord,
 > {
   private conditions: WhereCondition[] = []
+  private scopeConditions: WhereCondition[] = []
+  /** Fold this up wherever a nested builder's conditions are (pushCallbackGroup). */
+  private droppedUndefinedFilters = false
   private options: QueryBuilderOptions = { orderBy: [] }
   private modelClass: typeof Model
   private table: unknown
@@ -113,12 +122,7 @@ export class QueryBuilder<
     }
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
-      for (const [key, val] of Object.entries(fieldOrConditions)) {
-        if (val !== undefined) {
-          // Array values mean IN — mirrors the adapter's object-where contract
-          this.addSimpleCondition(key, Array.isArray(val) ? 'in' : '=', val)
-        }
-      }
+      this.conditions.push(...this.simpleConditionsFrom(fieldOrConditions))
       return this
     }
 
@@ -154,11 +158,7 @@ export class QueryBuilder<
     const orConditions: SimpleCondition[] = []
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
-      for (const [key, val] of Object.entries(fieldOrConditions)) {
-        if (val !== undefined) {
-          orConditions.push({ type: 'simple', field: key, operator: Array.isArray(val) ? 'in' : '=', value: val })
-        }
-      }
+      orConditions.push(...this.simpleConditionsFrom(fieldOrConditions))
     } else {
       const field = fieldOrConditions as string
 
@@ -258,6 +258,9 @@ export class QueryBuilder<
   }
 
   async first(): Promise<TResult | null> {
+    // Same contract as Model.find(): an evaporated filter would hand back an
+    // arbitrary row rather than the "no match" the caller asked about.
+    if (this.filtersEvaporated()) return null
     const prev = this.options.limitValue
     this.options.limitValue = 1
     try {
@@ -278,13 +281,13 @@ export class QueryBuilder<
   }
 
   async count(): Promise<number> {
-    if (typeof this.adapter.count === 'function' && this.conditions.length === 0) {
+    if (typeof this.adapter.count === 'function' && !this.hasConditions()) {
       return this.adapter.count(this.table, undefined, { trx: this.options.trx })
     }
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.countAdvanced === 'function') {
-      return advancedAdapter.countAdvanced(this.table, this.conditions, { trx: this.options.trx })
+      return advancedAdapter.countAdvanced(this.table, this.effectiveConditions(), { trx: this.options.trx })
     }
 
     const results = await this.executeQuery()
@@ -376,10 +379,11 @@ export class QueryBuilder<
     if (!this.adapter.update) {
       throw new Error('Configured adapter does not support update operations.')
     }
+    this.assertFiltersSurvived('update')
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.updateAdvanced === 'function') {
-      return advancedAdapter.updateAdvanced(this.table, this.conditions, payload, { trx: this.options.trx }) as Promise<TRecord>
+      return advancedAdapter.updateAdvanced(this.table, this.effectiveConditions(), payload, { trx: this.options.trx }) as Promise<TRecord>
     }
 
     const simpleWhere = this.toSimpleWhereClause()
@@ -394,10 +398,11 @@ export class QueryBuilder<
     if (!this.adapter.delete) {
       throw new Error('Configured adapter does not support delete operations.')
     }
+    this.assertFiltersSurvived('delete')
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.deleteAdvanced === 'function') {
-      return advancedAdapter.deleteAdvanced(this.table, this.conditions, { trx: this.options.trx })
+      return advancedAdapter.deleteAdvanced(this.table, this.effectiveConditions(), { trx: this.options.trx })
     }
 
     const simpleWhere = this.toSimpleWhereClause()
@@ -423,7 +428,20 @@ export class QueryBuilder<
   }
 
   getConditions(): WhereCondition[] {
-    return this.conditions
+    return this.effectiveConditions()
+  }
+
+  /**
+   * Freezes the conditions applied so far as this model's global scopes, to be
+   * AND-ed around the caller's expression from here on. Left in the same list,
+   * a top-level `orWhere()` folds them into its left arm (see
+   * `normalizeConditionSequence`) and the query loses tenant isolation and
+   * soft-delete filtering.
+   */
+  [SEAL_SCOPES](): this {
+    this.scopeConditions.push(...this.conditions)
+    this.conditions = []
+    return this
   }
 
   getOptions(): QueryBuilderOptions {
@@ -438,14 +456,55 @@ export class QueryBuilder<
   private pushCallbackGroup(callback: WhereGroupCallback<TRecord>, boolean: 'and' | 'or'): void {
     const nested = new QueryBuilder<TRecord>(this.modelClass, { trx: this.options.trx })
     callback(nested)
-    const grouped = normalizeConditionSequence(nested.conditions)
-    if (!grouped) return
+    // The flag has to outlive the nested builder: a group whose every filter
+    // evaporated pushes no node at all, and the write guard would see nothing.
+    this.droppedUndefinedFilters ||= nested.droppedUndefinedFilters
+    const grouped = groupConditionSequence(nested.conditions, boolean)
+    if (grouped) this.conditions.push(grouped)
+  }
 
-    // An or-group node means two things by position: in member position a
-    // parenthesized disjunction, at the top level an orWhere continuation that
-    // folds the preceding conditions in. Wrapping selects the first reading.
-    const needsWrap = boolean === 'or' || (grouped.type === 'group' && grouped.boolean === 'or')
-    this.conditions.push(needsWrap ? { type: 'group', boolean, conditions: [grouped] } : grouped)
+  private simpleConditionsFrom(criteria: Record<string, unknown>): SimpleCondition[] {
+    const conditions: SimpleCondition[] = []
+    for (const [field, value] of Object.entries(criteria)) {
+      if (value === undefined) {
+        this.droppedUndefinedFilters = true
+        continue
+      }
+      // Array values mean IN — mirrors the adapter's object-where contract
+      conditions.push({ type: 'simple', field, operator: Array.isArray(value) ? 'in' : '=', value })
+    }
+    return conditions
+  }
+
+  private hasConditions(): boolean {
+    return this.scopeConditions.length > 0 || this.conditions.length > 0
+  }
+
+  /** Flat list, for the basic-adapter conversion that cannot read group nodes. */
+  private allConditions(): WhereCondition[] {
+    return this.scopeConditions.length === 0 ? this.conditions : [...this.scopeConditions, ...this.conditions]
+  }
+
+  /** Global scopes AND the caller's expression, never folded into it. */
+  private effectiveConditions(): WhereCondition[] {
+    if (this.scopeConditions.length === 0) return this.conditions
+    const caller = groupConditionSequence(this.conditions)
+    return caller ? [...this.scopeConditions, caller] : [...this.scopeConditions]
+  }
+
+  /**
+   * `where({})` and a deliberately unfiltered builder are untouched: only a
+   * filter the caller wrote and then lost counts.
+   */
+  private filtersEvaporated(): boolean {
+    return this.droppedUndefinedFilters && this.conditions.length === 0
+  }
+
+  private assertFiltersSurvived(operation: 'update' | 'delete'): void {
+    if (!this.filtersEvaporated()) return
+    throw new Error(
+      `${this.modelClass.name}: refusing to ${operation} unfiltered — every value in the where clause was undefined.`,
+    )
   }
 
   private addSimpleCondition(field: string, operator: WhereOperator, value: unknown): void {
@@ -461,7 +520,7 @@ export class QueryBuilder<
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
 
     if (typeof advancedAdapter.findManyAdvanced === 'function') {
-      return advancedAdapter.findManyAdvanced<TResult>(this.table, this.conditions, {
+      return advancedAdapter.findManyAdvanced<TResult>(this.table, this.effectiveConditions(), {
         orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
         limit: this.options.limitValue,
         offset: this.options.offsetValue,
@@ -472,7 +531,7 @@ export class QueryBuilder<
     // Passing a null conversion on as `where: undefined` would drop every
     // condition — global scopes included — and return the whole table.
     const simpleWhere = this.toSimpleWhereClause()
-    if (simpleWhere === null && this.conditions.length > 0) {
+    if (simpleWhere === null && this.hasConditions()) {
       throw new Error(
         `${this.modelClass.name}: this query uses conditions the configured adapter cannot express `
         + `(it implements neither findManyAdvanced nor countAdvanced). Running it would drop every `
@@ -489,13 +548,14 @@ export class QueryBuilder<
 
   /** Null when the conditions are too complex for a basic adapter's WhereClause. */
   private toSimpleWhereClause(): Record<string, unknown> | null {
-    if (this.conditions.length === 0) {
+    const conditions = this.allConditions()
+    if (conditions.length === 0) {
       return null
     }
 
     const result: Record<string, unknown> = {}
 
-    for (const condition of this.conditions) {
+    for (const condition of conditions) {
       if (condition.type !== 'simple') {
         return null // Cannot convert OR groups to simple where
       }

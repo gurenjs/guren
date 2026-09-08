@@ -8,7 +8,8 @@ import type { ModelHooks } from './hooks'
 import { executeObservers } from './ModelObserver'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
-import { QueryBuilder, PREPARED_UPDATE } from './QueryBuilder'
+import { everyFilterDropped } from './where-conditions'
+import { QueryBuilder, PREPARED_UPDATE, SEAL_SCOPES } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
   EagerLoadConstraints,
@@ -321,17 +322,24 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * register a named scope and nothing else.
    */
   static withoutGlobalScope<T extends typeof Model>(this: T, ...names: string[]): QueryBuilder<TRecordFor<T>> {
-    const builder = new QueryBuilder<TRecordFor<T>>(this)
-    if (this.defaultScope) {
-      this.defaultScope(builder)
-    }
-    this.getGlobalScopes().apply(builder, names)
-    return builder
+    return this.buildScopedQuery(undefined, names)
   }
 
   /** A query with no global scopes applied, `defaultScope` included. */
   static withoutGlobalScopes<T extends typeof Model>(this: T): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this)
+  }
+
+  /**
+   * Both write entry points fork on `hasScopes()`, and only one arm reaches a
+   * builder — so the refusal belongs above the fork, where every adapter is
+   * still in scope.
+   */
+  private static assertFiltersSurvived(where: unknown, operation: 'update' | 'delete'): void {
+    if (!everyFilterDropped(where)) return
+    throw new Error(
+      `${this.name}: refusing to ${operation} unfiltered — every value in the where clause was undefined.`,
+    )
   }
 
   /** Applies hidden/visible filtering, accessors and appends. */
@@ -535,6 +543,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     key: keyof TRecordFor<T> & string = 'id' as keyof TRecordFor<T> & string,
     queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> | null> {
+    // An undefined identifier renders no WHERE clause at all, so `find` would
+    // return an arbitrary row. `null` is left alone: it renders `IS NULL`.
+    if (id === undefined) {
+      return null
+    }
     if (this.hasScopes()) {
       return this.newQuery(queryOptions).where(key, id as TRecordFor<T>[typeof key]).first()
     }
@@ -625,6 +638,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     where?: WhereClauseFor<T>,
     queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> | null> {
+    // Same contract as find(); the scoped arm below never reaches
+    // QueryBuilder.first(), which carries this rule for builder chains.
+    if (everyFilterDropped(where)) {
+      return null
+    }
     if (this.hasScopes()) {
       const builder = this.newQuery(queryOptions).limit(1)
       if (where) {
@@ -717,15 +735,28 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   static newQuery<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): QueryBuilder<TRecordFor<T>> {
+    return this.buildScopedQuery(queryOptions)
+  }
+
+  /**
+   * The one place a scoped builder is born: applying scopes without sealing
+   * them leaves them foldable by a later `orWhere()`, and nothing else would
+   * report it. `except` names the global scopes to leave off.
+   */
+  private static buildScopedQuery<T extends typeof Model>(
+    this: T,
+    queryOptions?: ModelQueryOptions,
+    except?: string[],
+  ): QueryBuilder<TRecordFor<T>> {
     const builder = new QueryBuilder<TRecordFor<T>>(this, queryOptions)
     if (this.defaultScope) {
       this.defaultScope(builder)
     }
     const registry = this.globalScopeRegistry
     if (registry && registry.size > 0) {
-      registry.apply(builder)
+      registry.apply(builder, except)
     }
-    return builder
+    return builder[SEAL_SCOPES]()
   }
 
   /** No scopes applied — for soft-deleted records or bypassing global filters. */
@@ -1185,6 +1216,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     if (!adapter.update) {
       throw new Error('Configured adapter does not support update operations.')
     }
+    this.assertFiltersSurvived(where, 'update')
 
     const filtered = applyFillable ? this.filterFillable(data) : { ...(data as PlainObject) }
     const payload = await this.preparePersistencePayload(filtered)
@@ -1245,6 +1277,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     if (!adapter.delete) {
       throw new Error('Configured adapter does not support delete operations.')
     }
+
+    this.assertFiltersSurvived(where, 'delete')
 
     const hooks = this.hooks
     const observers = this.observers
