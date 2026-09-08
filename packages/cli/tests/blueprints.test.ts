@@ -564,6 +564,15 @@ export const users = pgTable('users', {
     expect(eventFiles.some((file) => file.endsWith('app/Providers/EventProvider.ts'))).toBe(true)
     expect(cacheFiles.some((file) => file.endsWith('app/Providers/CacheProvider.ts'))).toBe(true)
     expect(scheduleFiles.some((file) => file.endsWith('app/Console/Kernel.ts'))).toBe(true)
+    expect(scheduleFiles.some((file) => file.endsWith('app/Providers/SchedulingProvider.ts'))).toBe(true)
+
+    // The kernel declares tasks and runs nothing; core's provider binds a scheduler
+    // with none. Without this feed, `app-heartbeat` never reaches the container's
+    // scheduler even though `schedule:list` reads it straight off the kernel.
+    const schedulingProviderSource = await readFile('app/Providers/SchedulingProvider.ts', 'utf8')
+    expect(schedulingProviderSource).toContain("this.container.singleton('scheduler'")
+    expect(schedulingProviderSource).toContain('scheduleTasksKernel().buildTasks()')
+    expect(schedulingProviderSource).toContain('scheduler.addTask(task)')
     expect(notificationFiles.some((file) => file.endsWith('app/Providers/NotificationProvider.ts'))).toBe(true)
     expect(storageFiles.some((file) => file.endsWith('app/Providers/StorageProvider.ts'))).toBe(true)
 
@@ -601,6 +610,7 @@ export const users = pgTable('users', {
     expect(appSource).toContain('NotificationProvider')
     expect(appSource).toContain('StorageProvider')
     expect(appSource).toContain('BroadcastProvider')
+    expect(appSource).toContain('SchedulingProvider')
     expect(appSource).toContain('OAuthProvider')
 
     const routesSource = await readFile('routes/web.ts', 'utf8')
@@ -609,6 +619,20 @@ export const users = pgTable('users', {
     expect(adminFiles.some((file) => file.endsWith('routes/admin.ts'))).toBe(true)
     expect(routesSource).toContain("import registerAdminRoutes from './admin.js'")
     expect(routesSource).toContain('registerAdminRoutes(router)')
+  })
+
+  // `container.singleton()` overwrites its key, so the app provider only wins by
+  // registering after core's. Reversed, core rebinds a task-less scheduler over it.
+  it('registers the schedule app provider after the core one', async () => {
+    await seedAppFile(APP_FIXTURE)
+
+    await runBlueprint('schedule')
+
+    const providers = (await readFile('src/app.ts', 'utf8')).match(/providers:\s*\[([^\]]*)\]/)?.[1] ?? ''
+    expect(providers.split(',').map((entry) => entry.trim())).toEqual([
+      'CoreSchedulingServiceProvider',
+      'SchedulingProvider',
+    ])
   })
 
   // `addImport`/`addProvider` report an unpatchable app entry by returning a

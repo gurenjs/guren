@@ -319,9 +319,16 @@ export default registerAdminRoutes
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const created = await writeScaffoldFiles([
         scaffoldTemplateFile('schedule', 'app/Console/Kernel.ts'),
+        scaffoldTemplateFile('schedule', 'app/Providers/SchedulingProvider.ts'),
       ], writerOptions)
 
-      await wireProviders([{ name: 'CoreSchedulingServiceProvider', importStatement: "import { SchedulingServiceProvider as CoreSchedulingServiceProvider } from '@guren/core'" }])
+      // Order matters: the app provider registers after core's and rebinds
+      // `scheduler` with the kernel's tasks. Core's binding on its own is an empty
+      // scheduler, which no task from the kernel this just wrote ever reaches.
+      await wireProviders([
+        { name: 'CoreSchedulingServiceProvider', importStatement: "import { SchedulingServiceProvider as CoreSchedulingServiceProvider } from '@guren/core'" },
+        { name: 'SchedulingProvider' },
+      ])
 
       return created
     },
