@@ -254,6 +254,12 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
     const missing = [...aggregate.declared].filter((name) => !aggregate.keys.includes(name))
     const complete = missing.length === 0
 
+    // The fix splits on the same evidence the writer does: on a shape match alone no
+    // scaffolder will add the key either, so it names what would make them.
+    const fix = aggregate.confident
+      ? `Add ${missing.join(', ')} to it, keeping each table's own declaration above the object.`
+      : `Nothing identifies this object as the schema, so scaffolders leave it alone: name it \`schema\` or read it in a \`typeof\` to have them keep it current, or add ${missing.join(', ')} by hand.`
+
     results.push({
       ...check(
         `schema-aggregate-keys:${scope}`,
@@ -262,9 +268,7 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
         complete
           ? `The schema object in ${relPath} lists every table the file declares.`
           : `The schema object in ${relPath} does not list ${formatTruncatedList(missing)}.`,
-        complete
-          ? undefined
-          : `Add ${missing.join(', ')} to it, keeping each table's own declaration above the object.`,
+        complete ? undefined : fix,
       ),
       advisory: !aggregate.confident,
     })

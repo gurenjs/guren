@@ -838,6 +838,10 @@ export const authTables = { users }
     const stale = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
     expect(stale!.status).toBe('warn')
     expect(stale!.advisory).toBe(true)
+    // No scaffolder writes to this object either, so the fix names the evidence that
+    // would make one rather than only the edit.
+    expect(stale!.suggestion).toContain('Nothing identifies this object as the schema')
+    expect(stale!.suggestion).toContain('posts')
   })
 
   // parseSchemaTables drops a table whose columns are an identifier; visiting roots
