@@ -102,17 +102,29 @@ export function findClosingDelimiter(content: string, openIndex: number, open: s
 const ARRAY_ENTRY_CLOSERS: Record<string, string> = { '(': ')', '[': ']', '{': '}' }
 
 /**
+ * One entry of an array literal, in both the forms its readers need. Masking
+ * preserves length, so one pair of offsets indexes the masked copy and `inner`
+ * alike. Two entries can share a `code` and differ in `source`: `'/mcp'` and
+ * `'/api'` blank to the same run, so only `source` may answer "is this the
+ * value the caller asked for".
+ */
+interface ArrayEntry {
+  /** Masked and trimmed: string and comment contents blanked. */
+  code: string
+  /** The same span, verbatim out of `inner`. */
+  source: string
+}
+
+/**
  * Entries of an array literal's interior, split at depth 0 only. Masked first,
- * so a name in a comment is not mistaken for an entry — which is also why the
- * result answers membership only: string contents come out blanked, so
- * re-joining these entries into the file writes `'/mcp'` back as `'    '`.
+ * so a name in a comment is not mistaken for an entry, and so an entry's own
+ * trailing comment trims away with its whitespace.
  * Regex literals are not masked; an unmatched closer stops the split there.
  */
-function parseArrayEntries(inner: string): string[] {
+function parseArrayEntries(inner: string): ArrayEntry[] {
   const masked = maskNonCode(inner)
   const closers: string[] = []
-  const entries: string[] = []
-  let start = 0
+  const bounds: number[] = [0]
 
   for (let i = 0; i < masked.length; i++) {
     const char = masked[i]
@@ -123,13 +135,22 @@ function parseArrayEntries(inner: string): string[] {
     } else if (char === ')' || char === ']' || char === '}') {
       if (closers.pop() !== char) break
     } else if (char === ',' && closers.length === 0) {
-      entries.push(masked.slice(start, i))
-      start = i + 1
+      bounds.push(i, i + 1)
     }
   }
 
-  entries.push(masked.slice(start))
-  return entries.map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+  bounds.push(masked.length)
+
+  const entries: ArrayEntry[] = []
+  for (let i = 0; i < bounds.length; i += 2) {
+    const span = masked.slice(bounds[i], bounds[i + 1])
+    const code = span.trim()
+    if (code.length === 0) continue
+    const from = bounds[i] + (span.length - span.trimStart().length)
+    entries.push({ code, source: inner.slice(from, from + code.length) })
+  }
+
+  return entries
 }
 
 /**
@@ -306,7 +327,8 @@ export function insertProvider(
   providerName: string,
   /**
    * Defaults to exact-match against `providerName`; factory registrations pass
-   * a prefix check so `vercelPlugin({ ... })` counts as registered.
+   * a prefix check so `vercelPlugin({ ... })` counts as registered. Entries
+   * arrive masked, so a predicate must not test text holding a string literal.
    */
   isRegistered?: (entries: string[]) => boolean,
 ): InsertResult {
@@ -329,8 +351,8 @@ export function insertProvider(
   const providers = parseArrayEntries(interior)
 
   const alreadyRegistered = isRegistered
-    ? isRegistered(providers)
-    : providers.some(p => p === providerName)
+    ? isRegistered(providers.map((entry) => entry.code))
+    : providers.some((entry) => entry.source === providerName)
   if (alreadyRegistered) {
     return { reason: PATCH_REASONS.providerAlreadyRegistered }
   }
@@ -427,7 +449,7 @@ export async function addToArrayOption(
 
   const interior = content.slice(open + 1, close)
 
-  if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
+  if (parseArrayEntries(interior).some((entry) => entry.source === valueSource)) {
     return { modified: false, reason: PATCH_REASONS.alreadyPresent }
   }
 
@@ -494,7 +516,7 @@ export function insertArrayArgument(content: string, methodName: string, valueSo
   }
 
   const interior = content.slice(open + 1, close)
-  if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
+  if (parseArrayEntries(interior).some((entry) => entry.source === valueSource)) {
     return content
   }
 
