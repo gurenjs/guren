@@ -118,16 +118,16 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
           await innerPost.create({ title: 'nested' })
         })
       }),
-    ).rejects.toThrow('cannot begin a transaction while one is already open')
+    ).rejects.toThrow('cannot begin a transaction inside another one')
 
     // The outer transaction saw the nested call's error and rolled back with it.
     expect(titles()).toEqual(['original'])
   })
 
   it('should refuse a nested transaction opened before the outer callback awaits anything', async () => {
-    // Raced rather than left to the suite timeout: were the flag set any later
-    // than the BEGIN it follows, this call would queue behind the transaction it
-    // is running inside and hang, which reads as a neighbouring test failing.
+    // Raced rather than left to the suite timeout: were the async context entered
+    // any later than the callback it wraps, this call would queue behind the
+    // transaction it runs inside and hang, reading as a neighbouring test failing.
     const deadlock = new Promise((_resolve, reject) => {
       setTimeout(() => reject(new Error('queued behind its own transaction')), 2000)
     })
@@ -139,12 +139,15 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
     })
 
     await expect(Promise.race([nested, deadlock])).rejects.toThrow(
-      'cannot begin a transaction while one is already open',
+      'cannot begin a transaction inside another one',
     )
     expect(titles()).toEqual(['original'])
   })
 
-  it('should refuse a transaction that begins while another awaits non-database work', async () => {
+  it('should queue a transaction that begins while another awaits non-database work', async () => {
+    // The shape a scaffolded app hits first: `await hash(password)` inside a
+    // signup transaction, with a second request arriving during it. Unrelated to
+    // the open transaction, so it waits rather than being refused for nesting.
     const open = Post.transaction(async (_trx, txPost) => {
       await txPost.create({ title: 'open-a' })
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -155,11 +158,28 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
     await new Promise((resolve) => setTimeout(resolve, 1))
     const arriving = Post.transaction(async (_trx, txPost) => {
       await txPost.create({ title: 'arriving' })
+      return 'arriving'
     })
 
-    await expect(arriving).rejects.toThrow('cannot begin a transaction while one is already open')
     await expect(open).resolves.toBe('open')
+    await expect(arriving).resolves.toBe('arriving')
 
-    expect(titles()).toEqual(['original', 'open-a', 'open-b'])
+    expect(titles()).toEqual(['original', 'open-a', 'open-b', 'arriving'])
+  })
+
+  it('should refuse a nested transaction opened after the outer callback awaits non-database work', async () => {
+    // Nesting is an async-context fact, not a timing one: the outer callback has
+    // crossed a timer here, which is exactly where an arrival-order rule loses it.
+    await expect(
+      Post.transaction(async (_trx, txPost) => {
+        await txPost.create({ title: 'outer' })
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        await Post.transaction(async (_inner, innerPost) => {
+          await innerPost.create({ title: 'nested' })
+        })
+      }),
+    ).rejects.toThrow('cannot begin a transaction inside another one')
+
+    expect(titles()).toEqual(['original'])
   })
 })

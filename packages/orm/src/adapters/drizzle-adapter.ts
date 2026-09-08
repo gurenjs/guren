@@ -50,9 +50,10 @@ let database: DrizzleDatabase | undefined
 // outlives a test file, and `bun test packages/orm` runs them in one process.
 let transactionAwaitsCallback: boolean | undefined
 // Only for a database whose own transaction() does not await: one connection
-// takes one transaction, so these serialize the ones this adapter drives.
+// takes one transaction, so this serializes the ones this adapter drives.
 let transactionQueue: Promise<unknown> = Promise.resolve()
-let transactionOpen = false
+// Outlives configure(): a new storage would lose the context of an open transaction.
+let transactionScope: Promise<TransactionScope> | undefined
 
 function ensureDatabase(): DrizzleDatabase {
   if (!database) {
@@ -222,12 +223,33 @@ async function awaitsItsCallback(db: DrizzleDatabase): Promise<boolean> {
   return transactionAwaitsCallback
 }
 
+interface TransactionScope {
+  /** Runs `fn` in a context every transaction started under it can be recognised by. */
+  run<TResult>(fn: () => TResult): TResult
+  isInside(): boolean
+}
+
+/**
+ * Imported on demand so `node:async_hooks` stays off the module graph of a
+ * Workers or Lambda bundle, whose drivers all await their callback and never
+ * reach this branch. The promise is what is memoized, not the storage: two
+ * concurrent first callers must not end up asking different instances.
+ */
+function loadTransactionScope(): Promise<TransactionScope> {
+  transactionScope ??= import('node:async_hooks').then(({ AsyncLocalStorage }) => {
+    const store = new AsyncLocalStorage<true>()
+    return { run: (fn) => store.run(true, fn), isInside: () => store.getStore() === true }
+  })
+
+  return transactionScope
+}
+
 /**
  * Serializes what `runExclusively` drives, since one connection takes one
- * transaction. Queueing is only safe for a caller that is not already inside
- * one — that caller would be waiting on itself — and `transactionOpen` is what
- * separates the two: a queued caller is suspended at its await and cannot be
- * running this, so a set flag means the call arrived while a transaction was live.
+ * transaction. Waiting is only safe for a caller that is not already inside one:
+ * that caller would be queued behind itself. Async context is what separates the
+ * two, and it is the only thing that can — arrival order cannot tell a nested
+ * call from an unrelated concurrent one, and refusing both punishes the second.
  */
 async function runOwnTransaction<TResult>(
   db: DrizzleDatabase,
@@ -240,17 +262,18 @@ async function runOwnTransaction<TResult>(
     )
   }
 
-  if (transactionOpen) {
+  const scope = await loadTransactionScope()
+  if (scope.isInside()) {
     throw new Error(
-      'DrizzleAdapter: cannot begin a transaction while one is already open. This driver holds a single ' +
-        'connection, which takes one transaction at a time: do not nest transactions, and do not await ' +
-        'non-database work inside one.',
+      'DrizzleAdapter: cannot begin a transaction inside another one. This driver holds a single connection, ' +
+        'which takes one transaction at a time, so the inner transaction would wait on the outer one to ' +
+        'finish and the outer on the inner.',
     )
   }
 
   // Bound: these are methods, and a detached one loses the dialect it reads.
   const run = db.run.bind(db)
-  const slot = transactionQueue.then(() => runExclusively(db, run, callback))
+  const slot = transactionQueue.then(() => runExclusively(db, run, scope, callback))
   // The queue only orders: a settled slot must neither reject the next one nor,
   // via a value-preserving `.catch`, pin its result until the next transaction.
   transactionQueue = slot.then(NOOP, NOOP)
@@ -266,15 +289,16 @@ async function runOwnTransaction<TResult>(
 async function runExclusively<TResult>(
   db: DrizzleDatabase,
   run: NonNullable<DrizzleDatabase['run']>,
+  scope: TransactionScope,
   callback: (trx: unknown) => Promise<TResult>,
 ): Promise<TResult> {
-  // Outside the try: a BEGIN that failed opened nothing to unwind, and the flag
-  // belongs to whichever transaction refused it.
+  // Outside the try: a BEGIN that failed opened nothing to unwind.
   await run(sql.raw('begin'))
-  transactionOpen = true
 
   try {
-    const result = await callback(db)
+    // Entered synchronously, which is what puts every await inside the callback
+    // — and so any transaction it starts — in this transaction's async context.
+    const result = await scope.run(() => callback(db))
     await run(sql.raw('commit'))
     return result
   } catch (error) {
@@ -287,8 +311,6 @@ async function runExclusively<TResult>(
       /* empty */
     }
     throw error
-  } finally {
-    transactionOpen = false
   }
 }
 
@@ -300,7 +322,6 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     database = db
     transactionAwaitsCallback = undefined
     transactionQueue = Promise.resolve()
-    transactionOpen = false
   },
 
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase {
