@@ -78,6 +78,25 @@ describe('unfiltered write guard on real bun:sqlite driver', () => {
     expect(rowCount()).toBe(3)
   })
 
+  it('should refuse a delete whose only filter was undefined inside a group', async () => {
+    await expect(
+      Post.newQuery().where((q) => q.where({ id: undefined })).delete(),
+    ).rejects.toThrow(/refusing to delete unfiltered/)
+    expect(rowCount()).toBe(3)
+  })
+
+  it('should return null from first() when every filter was undefined', async () => {
+    expect(await Post.first({ title: undefined })).toBeNull()
+    expect(await ScopedPost.first({ title: undefined })).toBeNull()
+  })
+
+  it('should agree with Model.first() when the same query is spelled on a builder', async () => {
+    expect(await Post.newQuery().where({ title: undefined }).first()).toBeNull()
+    await expect(Post.newQuery().where({ title: undefined }).firstOrFail()).rejects.toThrow(
+      ModelNotFoundException,
+    )
+  })
+
   it('should still run when one filter of an optional set survives', async () => {
     await Post.newQuery().where({ published: true, title: undefined }).delete()
 

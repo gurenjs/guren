@@ -1,6 +1,6 @@
 import { DEFAULT_PAGINATION_SIZE } from './Model'
 import { ModelNotFoundException } from './ModelNotFoundException'
-import { normalizeConditionSequence } from './where-conditions'
+import { groupConditionSequence } from './where-conditions'
 import type {
   AdapterQueryOptions,
   FindManyOptions,
@@ -86,6 +86,7 @@ export class QueryBuilder<
 > {
   private conditions: WhereCondition[] = []
   private scopeConditions: WhereCondition[] = []
+  /** Fold this up wherever a nested builder's conditions are (pushCallbackGroup). */
   private droppedUndefinedFilters = false
   private options: QueryBuilderOptions = { orderBy: [] }
   private modelClass: typeof Model
@@ -121,14 +122,7 @@ export class QueryBuilder<
     }
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
-      for (const [key, val] of Object.entries(fieldOrConditions)) {
-        if (val === undefined) {
-          this.droppedUndefinedFilters = true
-          continue
-        }
-        // Array values mean IN — mirrors the adapter's object-where contract
-        this.addSimpleCondition(key, Array.isArray(val) ? 'in' : '=', val)
-      }
+      this.conditions.push(...this.simpleConditionsFrom(fieldOrConditions))
       return this
     }
 
@@ -164,13 +158,7 @@ export class QueryBuilder<
     const orConditions: SimpleCondition[] = []
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
-      for (const [key, val] of Object.entries(fieldOrConditions)) {
-        if (val === undefined) {
-          this.droppedUndefinedFilters = true
-          continue
-        }
-        orConditions.push({ type: 'simple', field: key, operator: Array.isArray(val) ? 'in' : '=', value: val })
-      }
+      orConditions.push(...this.simpleConditionsFrom(fieldOrConditions))
     } else {
       const field = fieldOrConditions as string
 
@@ -270,6 +258,9 @@ export class QueryBuilder<
   }
 
   async first(): Promise<TResult | null> {
+    // Same contract as Model.find(): an evaporated filter would hand back an
+    // arbitrary row rather than the "no match" the caller asked about.
+    if (this.filtersEvaporated()) return null
     const prev = this.options.limitValue
     this.options.limitValue = 1
     try {
@@ -290,7 +281,7 @@ export class QueryBuilder<
   }
 
   async count(): Promise<number> {
-    if (typeof this.adapter.count === 'function' && this.allConditions().length === 0) {
+    if (typeof this.adapter.count === 'function' && !this.hasConditions()) {
       return this.adapter.count(this.table, undefined, { trx: this.options.trx })
     }
 
@@ -441,17 +432,15 @@ export class QueryBuilder<
   }
 
   /**
-   * Freezes the conditions applied so far as this model's global scopes.
-   * They are AND-ed around the caller's expression from here on: left in the
-   * same list, a top-level `orWhere()` folds everything before it into the
-   * OR's left arm (see `normalizeConditionSequence`) and the query loses
-   * tenant isolation and soft-delete filtering.
+   * Freezes the conditions applied so far as this model's global scopes, to be
+   * AND-ed around the caller's expression from here on. Left in the same list,
+   * a top-level `orWhere()` folds them into its left arm (see
+   * `normalizeConditionSequence`) and the query loses tenant isolation and
+   * soft-delete filtering.
    */
   [SEAL_SCOPES](): this {
-    if (this.conditions.length > 0) {
-      this.scopeConditions.push(...this.conditions)
-      this.conditions = []
-    }
+    this.scopeConditions.push(...this.conditions)
+    this.conditions = []
     return this
   }
 
@@ -467,17 +456,31 @@ export class QueryBuilder<
   private pushCallbackGroup(callback: WhereGroupCallback<TRecord>, boolean: 'and' | 'or'): void {
     const nested = new QueryBuilder<TRecord>(this.modelClass, { trx: this.options.trx })
     callback(nested)
-    const grouped = normalizeConditionSequence(nested.conditions)
-    if (!grouped) return
-
-    // An or-group node means two things by position: in member position a
-    // parenthesized disjunction, at the top level an orWhere continuation that
-    // folds the preceding conditions in. Wrapping selects the first reading.
-    const needsWrap = boolean === 'or' || (grouped.type === 'group' && grouped.boolean === 'or')
-    this.conditions.push(needsWrap ? { type: 'group', boolean, conditions: [grouped] } : grouped)
+    // The flag has to outlive the nested builder: a group whose every filter
+    // evaporated pushes no node at all, and the write guard would see nothing.
+    this.droppedUndefinedFilters ||= nested.droppedUndefinedFilters
+    const grouped = groupConditionSequence(nested.conditions, boolean)
+    if (grouped) this.conditions.push(grouped)
   }
 
-  /** Every condition on the builder, scopes first, as one flat list. */
+  private simpleConditionsFrom(criteria: Record<string, unknown>): SimpleCondition[] {
+    const conditions: SimpleCondition[] = []
+    for (const [field, value] of Object.entries(criteria)) {
+      if (value === undefined) {
+        this.droppedUndefinedFilters = true
+        continue
+      }
+      // Array values mean IN — mirrors the adapter's object-where contract
+      conditions.push({ type: 'simple', field, operator: Array.isArray(value) ? 'in' : '=', value })
+    }
+    return conditions
+  }
+
+  private hasConditions(): boolean {
+    return this.scopeConditions.length > 0 || this.conditions.length > 0
+  }
+
+  /** Flat list, for the basic-adapter conversion that cannot read group nodes. */
   private allConditions(): WhereCondition[] {
     return this.scopeConditions.length === 0 ? this.conditions : [...this.scopeConditions, ...this.conditions]
   }
@@ -485,25 +488,20 @@ export class QueryBuilder<
   /** Global scopes AND the caller's expression, never folded into it. */
   private effectiveConditions(): WhereCondition[] {
     if (this.scopeConditions.length === 0) return this.conditions
-    const caller = normalizeConditionSequence(this.conditions)
-    if (!caller) return [...this.scopeConditions]
-    // An or-group node means two things by position (see pushCallbackGroup):
-    // at the head of a list it reads as an orWhere continuation and would fold
-    // the scopes back in. Wrapping selects the parenthesized reading.
-    const guarded: WhereCondition = caller.type === 'group' && caller.boolean === 'or'
-      ? { type: 'group', boolean: 'and', conditions: [caller] }
-      : caller
-    return [...this.scopeConditions, guarded]
+    const caller = groupConditionSequence(this.conditions)
+    return caller ? [...this.scopeConditions, caller] : [...this.scopeConditions]
   }
 
   /**
-   * A criteria object whose every value was `undefined` leaves no caller
-   * condition at all, and the write then rewrites every row the scopes admit.
    * `where({})` and a deliberately unfiltered builder are untouched: only a
-   * filter the caller wrote and lost counts.
+   * filter the caller wrote and then lost counts.
    */
+  private filtersEvaporated(): boolean {
+    return this.droppedUndefinedFilters && this.conditions.length === 0
+  }
+
   private assertFiltersSurvived(operation: 'update' | 'delete'): void {
-    if (!this.droppedUndefinedFilters || this.conditions.length > 0) return
+    if (!this.filtersEvaporated()) return
     throw new Error(
       `${this.modelClass.name}: refusing to ${operation} unfiltered — every value in the where clause was undefined.`,
     )
@@ -533,7 +531,7 @@ export class QueryBuilder<
     // Passing a null conversion on as `where: undefined` would drop every
     // condition — global scopes included — and return the whole table.
     const simpleWhere = this.toSimpleWhereClause()
-    if (simpleWhere === null && this.allConditions().length > 0) {
+    if (simpleWhere === null && this.hasConditions()) {
       throw new Error(
         `${this.modelClass.name}: this query uses conditions the configured adapter cannot express `
         + `(it implements neither findManyAdvanced nor countAdvanced). Running it would drop every `

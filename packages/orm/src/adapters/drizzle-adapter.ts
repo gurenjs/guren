@@ -81,20 +81,6 @@ async function resolveList(result: DrizzleLikeSelect): Promise<unknown[]> {
 
 type DrizzleTableLike = Record<string, unknown>
 
-/**
- * An all-undefined criteria object renders no WHERE clause, and the write then
- * reaches every row. An explicitly empty `{}` still means "no filter", so only
- * a criteria object that carried keys is refused.
- */
-function assertFiltersSurvived(where: WhereClause | undefined, operation: 'update' | 'delete'): void {
-  if (!where || typeof where !== 'object') return
-  const values = Object.values(where)
-  if (values.length === 0 || values.some((value) => value !== undefined)) return
-  throw new Error(
-    `DrizzleAdapter: refusing to ${operation} unfiltered — every value in the where clause was undefined.`,
-  )
-}
-
 function resolveWhere(table: unknown, where?: WhereClause): unknown {
   if (!where || typeof where !== 'object') {
     return where
@@ -321,7 +307,6 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     if (!db.update) {
       throw new Error('DrizzleAdapter: configured database does not support updates.')
     }
-    assertFiltersSurvived(where, 'update')
 
     const clause = resolveWhere(table, where)
     const finalQuery = clause ? db.update(table).set(data).where(clause) : db.update(table).set(data)
@@ -340,7 +325,6 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     if (!db.delete) {
       throw new Error('DrizzleAdapter: configured database does not support deletes.')
     }
-    assertFiltersSurvived(where, 'delete')
 
     const clause = resolveWhere(table, where)
     const finalQuery = clause ? db.delete(table).where(clause) : db.delete(table)
