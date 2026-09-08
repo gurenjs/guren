@@ -1,5 +1,5 @@
 ---
-"@guren/orm": patch
+"@guren/orm": minor
 ---
 
 **`SoftDeletes` runs inside the transaction it was given** — the mixin's `delete()` override was declared `(where)` only and cast to `typeof Model.delete`, so the write options carrying `trx` were dropped where the type system could not see it. A soft delete made inside `Model.transaction()` therefore ran on the default connection: it survived a rollback, and the transaction's own reads could not see it. The override now takes `writeOptions` and threads them into the scoped builder, which is all `Model.transaction()`'s bound scope needed — `txPost.delete({ id })` is correct with no change to the transaction proxy.
