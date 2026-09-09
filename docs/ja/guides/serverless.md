@@ -272,14 +272,23 @@ bun add @aws-sdk/client-dynamodb
 
 ```typescript
 // app/Providers/SessionProvider.ts
+import { createSessionManager, ServiceProvider } from '@guren/core'
 import { registerDynamoDbSessionDriver } from '@guren/plugin-lambda'
+import { sessionConfig } from '../../config/session.js'
 
-const manager = createSessionManager(sessionConfig)
-registerDynamoDbSessionDriver(manager)
+export default class SessionProvider extends ServiceProvider {
+  register(): void {
+    const manager = createSessionManager(sessionConfig)
+    registerDynamoDbSessionDriver(manager)
+    this.container.instance('session', manager)
+  }
+}
 ```
 
 ```typescript
 // config/session.ts
+import { type SessionConfig } from '@guren/core'
+
 export const sessionConfig: SessionConfig = {
   default: process.env.SESSION_DRIVER || 'dynamodb',
   stores: {
@@ -290,7 +299,7 @@ export const sessionConfig: SessionConfig = {
 
 テーブル名は `DYNAMODB_SESSIONS_TABLE` から読みます。CDK コンストラクトの `sessionsTable` が全関数に設定するもので、ストア設定に `table` を渡せば自分で指定できます。登録が import の副作用ではなく関数呼び出しなのは、未使用 import を落とすバンドラがドライバごと落とすのを防ぐためです。
 
-テーブルには文字列のパーティションキー `id` と、`expires_at` に対する TTL が必要です。読み取りは強い整合性で行うため、ログイン時に書いたセッションは直後のリダイレクトで必ず読めます。DynamoDB の TTL は期限ちょうどではなく 48 時間以内に削除するので、ストア自身も過ぎた `expires_at` を存在しないものとして扱います: TTL は掃除係であって時計ではありません。
+テーブルには文字列のパーティションキー `id` と、`expires_at` に対する TTL が必要です。読み取りは強い整合性で行うため、ログイン時に書いたセッションは直後のリダイレクトで必ず読めます。DynamoDB の TTL は期限ちょうどではなく 48 時間以内に削除するので、ストア自身も過ぎた `expires_at` を存在しないものとして扱います: TTL は掃除係であって時計ではありません。DynamoDB のアイテム上限は 400 KB なので、セッションには id だけを入れてください。
 
 `redis` ドライバ（ElastiCache）も引き続き選べます。キャッシュには Redis や DynamoDB が有効です — 下のインフラ表を参照してください。
 

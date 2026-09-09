@@ -8,13 +8,13 @@
  * scaffold passes the config by name across modules.
  */
 import type { ObjectExpression, Node, Statement } from '@babel/types'
-import { DEFAULT_SESSION_STORE_NAME, PER_PROCESS_SESSION_DRIVERS } from '@guren/core'
+import { DEFAULT_SESSION_STORE_NAME } from '@guren/core'
 import { literalString, memberKeyName, objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 
 const SESSION_CONFIG_TYPE = 'SessionConfig'
 const GUREN_PACKAGE_PREFIX = '@guren/'
 
-export { DEFAULT_SESSION_STORE_NAME, PER_PROCESS_SESSION_DRIVERS }
+export { DEFAULT_SESSION_STORE_NAME }
 
 export interface SessionConfigRead {
   /** Whether `default:` was written at all; absent means the manager picks {@link DEFAULT_SESSION_STORE_NAME}. */

@@ -704,6 +704,8 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
   )
 }
 
+const UNKNOWN_DRIVER_FIX = 'A driver registered in application code cannot be seen by a static check; a plugin declares its own in `gurenPlugin.drivers.session`. This check never fails a build, so an app whose driver is correct can leave it.'
+
 const BACKED_STORE_FIX = 'Run `bunx guren add session` for a database-backed session store, use DatabaseOAuthStateStore from `@guren/core` (or the Redis equivalent from `@guren/core/redis`) for OAuth state, and a Redis-backed cache/queue driver.'
 
 /**
@@ -723,6 +725,7 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
 
   const labels = formatTargetLabels(analysis.targets)
   const issues: string[] = []
+  const fixes: string[] = []
 
   if (analysis.memoryStoreSignals.length > 0) {
     issues.push(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`)
@@ -735,6 +738,9 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
   }
 
   if (analysis.unknownSessionDriverSignals.length > 0) {
+    // Its own fix: the generic one says to install a database-backed store,
+    // which is the wrong advice for a driver the app registered deliberately.
+    fixes.push(UNKNOWN_DRIVER_FIX)
     issues.push(
       `the session config names a driver this check cannot vouch for, being neither built in nor declared by an installed plugin's \`gurenPlugin.drivers.session\` (${formatSignals(analysis.unknownSessionDriverSignals)})`,
     )
@@ -762,12 +768,16 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
     return verdict(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.${caveat}`)
   }
 
+  // An unverifiable driver is the only issue with its own remedy; anything
+  // else here is an in-memory store, which the generic fix addresses.
+  if (issues.length > fixes.length) fixes.push(BACKED_STORE_FIX)
+
   return verdict(
     key,
     title,
     'warn',
     `${labels} shares no memory between requests, but ${issues.join('; ')}.${caveat}`,
-    BACKED_STORE_FIX,
+    fixes.join(' '),
   )
 }
 

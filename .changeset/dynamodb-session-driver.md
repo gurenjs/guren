@@ -22,6 +22,8 @@ on `expires_at` and grants every function read/write plus
 `DYNAMODB_SESSIONS_TABLE`. It retains the table on `cdk destroy` unless
 `retainOnDelete: false` is passed: deleting it logs every user out.
 
-`@guren/server` is now a direct dependency. The `SessionDrivers` augmentation
-has to name the module that declares the interface, and `@guren/core`
-re-exports it rather than declaring it.
+`@guren/server` is now an optional peer dependency. The `SessionDrivers`
+augmentation has to name the module that declares the interface, and
+`@guren/core` re-exports it rather than declaring it — but every use in the
+plugin's shipped code is `import type`, so a peer is what resolves the
+declarations without adding an install.

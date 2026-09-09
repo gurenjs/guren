@@ -132,8 +132,10 @@ export class DynamoDbSessionStore implements SessionStore {
 
     try {
       // The condition is the contract: a bare UpdateItem *creates* the item,
-      // so without it refreshing a destroyed or expired session would
-      // resurrect it with no data (SessionStore.touch forbids exactly that).
+      // so without it refreshing a destroyed session would resurrect it empty
+      // (SessionStore.touch forbids exactly that).
+      // `id` and `expires_at` need no alias — neither is in DynamoDB's
+      // reserved-word list, which does contain `DATA`; keep `data` out of one.
       await client.send(new UpdateItemCommand({
         TableName: this.table,
         Key: { id: { S: id } },

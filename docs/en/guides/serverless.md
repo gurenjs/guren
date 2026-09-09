@@ -273,14 +273,23 @@ bun add @aws-sdk/client-dynamodb
 
 ```typescript
 // app/Providers/SessionProvider.ts
+import { createSessionManager, ServiceProvider } from '@guren/core'
 import { registerDynamoDbSessionDriver } from '@guren/plugin-lambda'
+import { sessionConfig } from '../../config/session.js'
 
-const manager = createSessionManager(sessionConfig)
-registerDynamoDbSessionDriver(manager)
+export default class SessionProvider extends ServiceProvider {
+  register(): void {
+    const manager = createSessionManager(sessionConfig)
+    registerDynamoDbSessionDriver(manager)
+    this.container.instance('session', manager)
+  }
+}
 ```
 
 ```typescript
 // config/session.ts
+import { type SessionConfig } from '@guren/core'
+
 export const sessionConfig: SessionConfig = {
   default: process.env.SESSION_DRIVER || 'dynamodb',
   stores: {
@@ -291,9 +300,9 @@ export const sessionConfig: SessionConfig = {
 
 The table name comes from `DYNAMODB_SESSIONS_TABLE`, which the CDK construct's `sessionsTable` sets on every function; pass `table` in the store config to name it yourself. Registration is a call rather than an import side effect, so a bundler that drops an unused import cannot drop the driver with it.
 
-The table needs a `id` string partition key and TTL enabled on `expires_at`. Reads are strongly consistent, so a session written at login is readable on the redirect that follows. DynamoDB deletes expired items within 48 hours rather than at expiry, so the store treats a past `expires_at` as missing on its own — the TTL is the sweeper, not the clock.
+The table needs an `id` string partition key and TTL enabled on `expires_at`. Reads are strongly consistent, so a session written at login is readable on the redirect that follows. DynamoDB deletes expired items within 48 hours rather than at expiry, so the store treats a past `expires_at` as missing on its own — the TTL is the sweeper, not the clock. A DynamoDB item caps at 400 KB, so keep only ids in the session.
 
-`ElastiCache` and the `redis` driver remain an option; cache still benefits from Redis or DynamoDB — see the infrastructure table below.
+ElastiCache and the `redis` driver remain an option; cache still benefits from Redis or DynamoDB — see the infrastructure table below.
 
 ## Infrastructure Recommendations
 
