@@ -888,8 +888,13 @@ git switch -c scratch/add-auth
 bunx guren add auth --force
 git diff main --stat
 git switch main
+git restore .
+git clean -fdn
+git clean -fd
 git branch -D scratch/add-auth
 ```
+
+The `restore` and the `clean` are not tidiness. `git switch main` and `git branch -D` move a reference; neither undoes work you never committed, so without them everything `add auth` wrote is still in your working tree on `main` — including a migration folder under `db/migrations/`. Nobody applies that folder on purpose. The next `bun run dev` applies it at boot without a word, and eight chapters from here, when chapter 14 creates the `sessions` table itself, the migration fails on a table that is already there.
 
 Most of the diff is what you wrote, in the same shape: the model, the provider, the two controllers, the validators. The rest is what you did not: password reset by email, email verification, a "remember me" token, a seeder with a demo user, a dashboard. From now on, when the course needs one of those, you will reach for the generator, and you will be able to read what it wrote.
 
@@ -911,7 +916,7 @@ Most of the diff is what you wrote, in the same shape: the model, the provider, 
 ## Exercises
 
 1. A guest who opens `/posts/create` is redirected to `/login`. What happens to a guest who POSTs to `/posts`? Write the test and find out before you guess; then say whether that answer is the one you want.
-2. The backfill script filled `authorId` on rows that had none. On a branch, make the column nullable again and run `bun run db:make` without applying it. Read the SQL. Why does SQLite rebuild the table instead of altering the column?
+2. The backfill script filled `authorId` on rows that had none. On a branch, make the column nullable again and run `bun run db:make` without applying it. Read the SQL. Why does SQLite rebuild the table instead of altering the column? Undo it with `git restore .` and `git clean -fd`, not with `git branch -D` alone.
 
 ## Next
 

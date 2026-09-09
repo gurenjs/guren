@@ -447,7 +447,7 @@ Watch the YAML, because this one bites: `issues: [412, #398]` loses everything a
 
 ## Exercises
 
-1. On a branch, add a column to `db/schema.ts` and run `bunx guren gate`. Which of the four views drifted, and which did not? Explain the ones that did not from what each view reads. Delete the branch.
+1. On a branch, add a column to `db/schema.ts` and run `bunx guren gate`. Which of the four views drifted, and which did not? Explain the ones that did not from what each view reads. Throw the branch and the edit away, not just the branch.
 2. This app made a decision that is still undocumented: tags are normalised in the validator rather than in the model. Write the ADR, link it to `Post`, and make `bunx guren check --docs` pass. Then say what a future reader gains from that file that the code alone would not have told them.
 
 ## Next
