@@ -133,6 +133,17 @@ await app.actingAs(user).post('/posts', data).assertStatus(201)
 await app.get('/dashboard').assertUnauthorized()
 ```
 
+### テストでのパスワードハッシュ
+
+パスワードのテストを速く保つために設定することはありません。`TestApp` は `GUREN_TESTING=1` を設定し、この変数がある間、既定のハッシャーは軽量なパラメータを使います(Bun では Argon2id を 1 MiB・1 反復、それ以外では scrypt を N=1024)。本番強度のハッシュは1回100ms以上かかり、次のようなテストの時間の大半を占めます。
+
+```ts
+const user = await User.create({ email: 'ada@example.com', name: 'Ada', password: 'correct horse battery' })
+await app.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
+```
+
+ログインのテストは本物のハッシュを検証します。検証はハッシュに埋め込まれたパラメータを読むので、軽量なハッシュはテスト内で、本番のハッシュも同じように検証できます。テスト外では `Hash.needsRehash()` が軽量なハッシュを古いものとして報告するので、[暗号化ガイド](./encryption.md)の rehash-on-login パターンがテストモードのプロセスが書いた行を昇格させます。デプロイしたアプリでこの変数を設定するものはありません。
+
 ### カスタムリクエストヘッダー
 
 `withHeaders()` / `withHeader()` で全リクエストにヘッダーを付与できます。
