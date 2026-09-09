@@ -8,7 +8,7 @@ import {
   docPaths,
 } from '../../../config/site.js'
 import { xmlEscape } from '../../../config/xml.js'
-import { docsService, type DocCategoryGroup } from '../../Services/DocsService.js'
+import { docsService } from '../../Services/DocsService.js'
 import { listPublishedPosts, type PublishedPost } from '../../../modules/blog/index.js'
 
 /**
@@ -88,8 +88,12 @@ export default class MetaController extends Controller {
     return this.text(body, { headers: { 'Cache-Control': DOCS_CACHE_CONTROL } })
   }
 
+  /**
+   * On Workers the static `public/llms-full.txt` answers first and this is
+   * never reached; it serves `bun run dev` (built live) and `bun run preview`.
+   */
   async llmsFull(): Promise<Response> {
-    const body = await cachedBody('llms-full', buildLlmsFull)
+    const body = await cachedBody('llms-full', () => docsService.getLlmsFull())
 
     return this.text(body, { headers: { 'Cache-Control': DOCS_CACHE_CONTROL } })
   }
@@ -183,44 +187,4 @@ function renderLlms(docsSections: string, posts: PublishedPost[]): string {
   lines.push('')
 
   return lines.join('\n')
-}
-
-async function buildLlmsFull(): Promise<string> {
-  const categories = await docsService.listDocs('en')
-
-  const chunks: string[] = [
-    `# ${SITE_NAME} — Full Documentation`,
-    '',
-    `> ${SITE_DESCRIPTION.en}`,
-    '',
-    `Source: ${absoluteUrl('/docs')} — per-page Markdown is available by appending \`.md\` to any docs URL.`,
-    '',
-  ]
-
-  const categoryChunks = await Promise.all(categories.map(concatCategory))
-  chunks.push(...categoryChunks)
-
-  return chunks.join('\n')
-}
-
-async function concatCategory(group: DocCategoryGroup): Promise<string> {
-  const markdowns = await Promise.all(
-    group.docs.map((doc) => docsService.getRawMarkdown(group.category, doc.slug, 'en')),
-  )
-
-  const parts: string[] = []
-
-  group.docs.forEach((doc, index) => {
-    const markdown = markdowns[index]
-    if (!markdown) {
-      return
-    }
-    parts.push('---')
-    parts.push(`<!-- ${absoluteUrl(docPaths(group.category, doc.slug).en)} -->`)
-    parts.push('')
-    parts.push(markdown.trim())
-    parts.push('')
-  })
-
-  return parts.join('\n')
 }

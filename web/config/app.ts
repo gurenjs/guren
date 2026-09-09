@@ -1,4 +1,6 @@
-import { configureOrm, isWorkersRuntime, seedDatabase } from './database.js'
+import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
+
+import { configureOrm, seedDatabase } from './database.js'
 
 let bootstrapped = false
 

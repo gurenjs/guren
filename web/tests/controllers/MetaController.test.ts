@@ -81,17 +81,14 @@ describe('MetaController', () => {
     expect(body).toContain('/llms-full.txt')
   })
 
-  it('serves llms-full.txt with concatenated markdown', async () => {
-    vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)
-    vi.spyOn(docsService, 'getRawMarkdown').mockResolvedValue('# Routing\n\nDefine routes.')
+  it('serves llms-full.txt from the docs service as cacheable text', async () => {
+    vi.spyOn(docsService, 'getLlmsFull').mockResolvedValue('# Guren — Full Documentation\n')
 
     const response = await createController('http://guren.dev/llms-full.txt').llmsFull()
-    const body = await response.text()
 
-    expect(docsService.getRawMarkdown).toHaveBeenCalledWith('guides', 'routing', 'en')
-    expect(body).toContain('# Guren — Full Documentation')
-    expect(body).toContain('<!-- https://guren.dev/docs/guides/routing -->')
-    expect(body).toContain('# Routing')
+    expect(response.headers.get('Content-Type')).toContain('text/plain')
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=3600')
+    await expect(response.text()).resolves.toBe('# Guren — Full Documentation\n')
   })
 
   it('lists the blog index and published posts in the sitemap', async () => {

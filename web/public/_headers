@@ -1,0 +1,15 @@
+# Headers for the prerendered docs that Workers Static Assets serve before the
+# Worker runs. Paths and Cache-Control restate app/Services/docs-manifest.ts and
+# DOCS_CACHE_CONTROL; tests/services/docs-headers.test.ts keeps them in step.
+# `guren cloudflare:build` prepends its own rules; the platform stops parsing
+# at 100 rules in total.
+
+/_docs/*
+  X-Robots-Tag: noindex
+  Cache-Control: public, max-age=3600
+
+/docs/*.md
+  Cache-Control: public, max-age=3600
+
+/llms-full.txt
+  Cache-Control: public, max-age=3600
