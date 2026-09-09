@@ -42,7 +42,7 @@
     "mermaid": "^11.0.0",
     "oxlint": "~1.81.0",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5.4.0",
+    "typescript": "^7.0.2",
     "vite": "^8.0.0"
   }
 }
