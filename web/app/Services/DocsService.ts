@@ -96,8 +96,7 @@ export class DocsService {
 
   /** Prebuilt where the store carries one (production); assembled from the raw markdown otherwise. */
   async getLlmsFull(): Promise<string> {
-    const store = await this.#resolveStore()
-    return store.getLlmsFull ? store.getLlmsFull() : buildLlmsFull(this)
+    return (await this.#resolveStore()).getLlmsFull?.() ?? buildLlmsFull(this)
   }
 
   #resolveStore(): Promise<DocsStore> {

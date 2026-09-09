@@ -84,12 +84,7 @@ async function build(): Promise<void> {
   mkdirSync(outDir, { recursive: true })
 
   const { readPrerenderedDocs } = await import('./lib/read-prerendered-docs.js')
-  const docs = readPrerenderedDocs()
-  if (!docs) {
-    throw new Error('Docs are not prerendered — run `bun run prerender` first.')
-  }
-
-  const rows = collectRows(docs)
+  const rows = collectRows(readPrerenderedDocs())
   if (rows.length === 0) {
     throw new Error('No sections were extracted — the rendered docs carry no headings.')
   }

@@ -36,11 +36,10 @@ function sitemapEntry(path: string, alternates?: { en: string; ja: string }): st
     .join('\n')
 }
 
-// Docs content is immutable per deploy, so each docs-derived body is built once
-// per process (max-age gives no CDN guarantee). Blog posts stay outside this
-// cache: the admin UI mutates them, and per-isolate memoization would show a
-// published post from some isolates and not others. llms-full.txt stays out
-// too: in production it is a static asset, and 1.2 MB does not belong in a heap.
+// Docs content is immutable per deploy, so each body is built once per process
+// (max-age gives no CDN guarantee). Blog posts stay outside this cache: the
+// admin UI mutates them, and per-isolate memoization would show a published
+// post from some isolates and not others.
 const bodyCache = new Map<string, Promise<string>>()
 
 function cachedBody(key: string, build: () => Promise<string>): Promise<string> {
@@ -94,7 +93,7 @@ export default class MetaController extends Controller {
    * never reached; it serves `bun run dev` (built live) and `bun run preview`.
    */
   async llmsFull(): Promise<Response> {
-    const body = await docsService.getLlmsFull()
+    const body = await cachedBody('llms-full', () => docsService.getLlmsFull())
 
     return this.text(body, { headers: { 'Cache-Control': DOCS_CACHE_CONTROL } })
   }

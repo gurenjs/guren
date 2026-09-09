@@ -3,9 +3,8 @@
 // manifest module is the only docs data the bundle carries. FsDocsStore
 // renders live from docs/ and is dynamically imported only when selected, so
 // the renderer never ships to production.
+import { HttpException } from '@guren/core'
 import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
-
-import { docsManifest } from '@/.guren/docs-manifest.gen.js'
 
 import type { AssetsBindingLike, WorkersEnv } from '../../config/workers-env.js'
 import { shouldUsePrerendered, type DocCategory, type DocLocale, type DocSummary } from './docs-config.js'
@@ -13,6 +12,7 @@ import {
   docFragmentPath,
   docMarkdownPath,
   LLMS_FULL_PATH,
+  manifestEntry,
   type DocFragment,
   type DocManifestEntry,
   type DocsManifest,
@@ -38,15 +38,13 @@ export type AssetReader = (path: string) => Promise<string | null>
  * without the other. A 503 rather than a 404, which would present a broken
  * deploy as a page that never existed.
  */
-export class DocsAssetUnavailableError extends Error {
-  readonly statusCode = 503
-
+export class DocsAssetUnavailableError extends HttpException {
   constructor(path: string) {
     super(
+      503,
       `The docs manifest names ${path}, but no such asset was deployed. ` +
         'Run `bun run prerender` and redeploy: the manifest and public/ are written by the same build.',
     )
-    this.name = 'DocsAssetUnavailableError'
   }
 }
 
@@ -62,7 +60,7 @@ export class AssetDocsStore implements DocsStore {
   async list(category: DocCategory, locale: DocLocale): Promise<DocSummary[]> {
     const docs = this.#manifest.docs[locale]?.[category] ?? {}
 
-    return Object.entries(docs).map(([slug, entry]) => summary(slug, entry))
+    return Object.entries(docs).map(([slug, entry]) => ({ slug, ...manifestEntry(entry) }))
   }
 
   async getRendered(
@@ -76,7 +74,7 @@ export class AssetDocsStore implements DocsStore {
 
     const fragment = JSON.parse(await this.#require(docFragmentPath(locale, category, slug))) as DocFragment
 
-    return { ...summary(slug, fragment), html: fragment.html }
+    return { slug, ...manifestEntry(fragment), html: fragment.html }
   }
 
   async getRaw(category: DocCategory, slug: string, locale: DocLocale): Promise<string | null> {
@@ -104,14 +102,6 @@ export class AssetDocsStore implements DocsStore {
   }
 }
 
-function summary(slug: string, entry: DocManifestEntry): DocSummary {
-  return {
-    slug,
-    title: entry.title,
-    ...(entry.description !== undefined ? { description: entry.description } : {}),
-  }
-}
-
 /**
  * Read through the ASSETS binding. Any host name works, only the path is
  * matched. The status is the whole signal: a `_headers` rule matching the
@@ -133,6 +123,10 @@ export function createWorkersAssetReader(assets: () => AssetsBindingLike): Asset
 }
 
 export async function createDefaultDocsStore(): Promise<DocsStore> {
+  // Imported here rather than at module scope so that nothing on this path
+  // needs the generated module to exist before the prerender that writes it.
+  const { docsManifest } = await import('@/.guren/docs-manifest.gen.js')
+
   if (shouldUsePrerendered(docsManifest.prerendered)) {
     return new AssetDocsStore(docsManifest, await createAssetReader())
   }

@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { buildDocsViewerData, docsViewerAssetPath } from '@guren/cli'
 
+import { formatBytes } from './lib/format-bytes.js'
 import { stageMermaid } from './lib/stage-mermaid.js'
 
 const webRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -71,12 +72,6 @@ function write(path: string, content: string): void {
 function report(path: string): void {
   const bytes = statSync(path).size
   console.log(`  ${path.replace(webRoot, 'web/')} — ${formatBytes(bytes)}`)
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 const data = await buildDocsViewerData(bundleRoot)
