@@ -618,5 +618,34 @@ describe('DrizzleAdapter', () => {
         'DrizzleAdapter: configured database does not support transactions.',
       )
     })
+
+    it('runs the callback when only the probe transaction fails', async () => {
+      const { db } = createMockDatabase()
+      let attempts = 0
+      DrizzleAdapter.configure({
+        ...db,
+        transaction: async (callback: (trx: unknown) => unknown) => {
+          attempts += 1
+          if (attempts === 1) throw new Error('transient connection reset')
+          return callback(db)
+        },
+      } as never)
+
+      const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
+      // The probe holds a different pooled connection than the caller's transaction,
+      // so its failure must not be reported as theirs.
+      await expect(runTransaction(async () => 'ok')).resolves.toBe('ok')
+    })
+
+    it('throws when a database that commits without awaiting exposes no run()', async () => {
+      const { db } = createMockDatabase()
+      // The bun-sqlite shape: the callback's promise is committed on, never awaited.
+      DrizzleAdapter.configure({ ...db, transaction: (callback: (trx: unknown) => unknown) => void callback(db) } as never)
+
+      const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
+      await expect(runTransaction(async () => 'ok')).rejects.toThrow(
+        'exposes no run() to drive BEGIN/COMMIT with',
+      )
+    })
   })
 })
