@@ -1,5 +1,27 @@
 # @guren/core
 
+## 1.16.0
+
+### Minor Changes
+
+- 104b5ea: **Server-side prototype routes and `guren check --prototype` (RFC 0021 Part 2)** — `router.get('/posts', prototype).name('posts.index')` registers a route that answers from the app's fixture module (`createApp({ prototype: () => import('../resources/js/prototype/index.js') })`) until a controller replaces it. The route contract is enforced first, as for an inline handler; a `page()` result renders through the shared-props pipeline with the real resolvers winning over the fixture's, `redirect()` is a 303 to the named route, `errors()` takes the `ValidationException` path, `location()` is an Inertia location visit, and `notFound()` a 404. The boot validates every prototype route (named, answered by the fixture, a loader present) and refuses them in production unless `GUREN_PROTOTYPE_ROUTES=1`, since the fixture's state is shared by every request of the process. `RouteDefinition.prototype` marks them: `guren context` lists a prototype backlog, `guren doctor` reports them as a deploy blocker, agent derivation skips them with a warning, and `guren check --prototype` runs the wiring rules (fixture entries against the route graph, ambiguous paths, `.agent()` on a fixture-backed route, the `createApp()` loader), gating the build script.
+- ca9bc47: **`vite --mode prototype` (RFC 0021 Part 1)** — the Guren Vite plugin gains a prototype branch: `import.meta.env.GUREN_PROTOTYPE` is defined as `true` (and as `false` in every other mode, so the client's prototype wiring is statically dead in production), the build takes a generated HTML shell (`.guren/prototype/index.html`, or `resources/js/prototype/index.html` when the project ships one) as its input and emits a static `dist/prototype/` with `index.html`, `404.html` and `_redirects` for SPA fallback, `public/` is copied in, and the dev server answers every document request with the shell. `guren({ prototype: { base, outDir, shell } })` sets the subpath base for a build hosted under one.
+
+### Patch Changes
+
+- Updated dependencies [f8dca72]
+- Updated dependencies [a1928a8]
+- Updated dependencies [5e8300f]
+- Updated dependencies [104b5ea]
+- Updated dependencies [ca9bc47]
+- Updated dependencies [9dbcab6]
+- Updated dependencies [45704c2]
+- Updated dependencies [e01b5ff]
+- Updated dependencies [3ed49af]
+  - @guren/server@2.21.0
+  - @guren/cli@2.20.0
+  - @guren/orm@2.7.1
+
 ## 1.15.0
 
 ### Minor Changes

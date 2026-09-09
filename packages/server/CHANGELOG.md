@@ -1,5 +1,40 @@
 # @guren/server
 
+## 2.21.0
+
+### Minor Changes
+
+- 104b5ea: **Server-side prototype routes and `guren check --prototype` (RFC 0021 Part 2)** — `router.get('/posts', prototype).name('posts.index')` registers a route that answers from the app's fixture module (`createApp({ prototype: () => import('../resources/js/prototype/index.js') })`) until a controller replaces it. The route contract is enforced first, as for an inline handler; a `page()` result renders through the shared-props pipeline with the real resolvers winning over the fixture's, `redirect()` is a 303 to the named route, `errors()` takes the `ValidationException` path, `location()` is an Inertia location visit, and `notFound()` a 404. The boot validates every prototype route (named, answered by the fixture, a loader present) and refuses them in production unless `GUREN_PROTOTYPE_ROUTES=1`, since the fixture's state is shared by every request of the process. `RouteDefinition.prototype` marks them: `guren context` lists a prototype backlog, `guren doctor` reports them as a deploy blocker, agent derivation skips them with a warning, and `guren check --prototype` runs the wiring rules (fixture entries against the route graph, ambiguous paths, `.agent()` on a fixture-backed route, the `createApp()` loader), gating the build script.
+- ca9bc47: **`vite --mode prototype` (RFC 0021 Part 1)** — the Guren Vite plugin gains a prototype branch: `import.meta.env.GUREN_PROTOTYPE` is defined as `true` (and as `false` in every other mode, so the client's prototype wiring is statically dead in production), the build takes a generated HTML shell (`.guren/prototype/index.html`, or `resources/js/prototype/index.html` when the project ships one) as its input and emits a static `dist/prototype/` with `index.html`, `404.html` and `_redirects` for SPA fallback, `public/` is copied in, and the dev server answers every document request with the shell. `guren({ prototype: { base, outDir, shell } })` sets the subpath base for a build hosted under one.
+- 45704c2: Judge a session driver against what is installed, not against its name (RFC 0020 Part 4)
+
+  `BUILT_IN_SESSION_DRIVERS` names every driver the framework registers and
+  whether it survives a runtime that shares no memory between requests. A plugin
+  declares its own in `gurenPlugin.drivers.session`, which is data the CLI reads
+  from `node_modules` the way it reads `compatibility` — never executed.
+
+  The deploy-runtime check used to treat every driver that was not `memory` as
+  persistent, so it vouched for names nothing in the install stands behind: a
+  plugin driver whose package is absent, and a misspelled `datbase`, both passed
+  as backed. Those are now reported as unverified rather than as passing, which
+  is a new warning for an app whose driver is registered only in its own code.
+  Declaring it in a plugin manifest, or reading the warning as the reminder it
+  is, are both fine — the check never sets an exit code.
+
+- 3ed49af: `DefaultHasher` (the hasher behind `Hash`, `AuthenticatableModel` and `ModelUserProvider`) hashes with cheap parameters while `GUREN_TESTING` is set — Argon2id at 1 MiB / 1 iteration on Bun, scrypt at N=1024 elsewhere — instead of the production defaults. `TestApp` sets that variable, so a test that creates a user no longer pays ~136 ms per password; a 68-test suite that took 8.3 s runs in 0.6 s. Verification is unchanged: it reads the parameters the stored hash carries.
+
+### Patch Changes
+
+- f8dca72: **Clear the open dependency advisories** — `bun run audit:deps` went red on `main` when nine advisories were published upstream against installed versions of hono, js-yaml, nodemailer, sharp and vitest. The audit runs ahead of the test step in CI, so every branch was blocked, not just failing.
+
+  `hono` moves to the fixed 4.13.7 and `nodemailer` to 9.1.1, both as declared floors on the packages that ship them, so an installed app gets the fixed minimum rather than only this repo's lockfile. `js-yaml` (4.3.2) and `sharp` (0.35.4) reach the monorepo only through `@changesets/parse` and `miniflare`, the latter on an exact pin, so they are pinned in the root `overrides` block beside the entries already there.
+
+  `vitest` needed the fixed 4.1.11, a major from the 3.2.x the workspace was on. `@guren/testing` declares it as an _optional_ peer, so that range widens to `^3.2.6 || ^4.1.11` rather than dropping vitest 3 consumers — the union form the neighbouring `react` and `@testing-library/react` peers already use.
+
+- a1928a8: `vite --mode prototype` no longer ships the ordinary build's output in `dist/prototype/`: copying `public/` brought `public/assets/` (the production client bundle) along with it, and the prototype build now removes that directory from its output while keeping everything else under `public/`.
+- Updated dependencies [e01b5ff]
+  - @guren/orm@2.7.1
+
 ## 2.20.0
 
 ### Minor Changes

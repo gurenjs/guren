@@ -1,5 +1,26 @@
 # web
 
+## 0.1.37
+
+### Patch Changes
+
+- eaf09da: Serve the prerendered docs from Workers Static Assets instead of bundling them into the worker. The rendered HTML (one JSON fragment per doc), the markdown source and `llms-full.txt` are written under `public/` at build time; the Worker reads a page through its `ASSETS` binding, and `.md` URLs and `/llms-full.txt` are answered by the asset layer before the Worker runs. Only a manifest of titles and descriptions stays in the bundle, which drops from 28.6 MiB to about 7.5 MiB uncompressed and frees the ~40 MB of heap the docs strings held in every isolate.
+- Updated dependencies [f8dca72]
+- Updated dependencies [ca9bc47]
+- Updated dependencies [5e8300f]
+- Updated dependencies [104b5ea]
+- Updated dependencies [ca9bc47]
+- Updated dependencies [9dbcab6]
+- Updated dependencies [45704c2]
+- Updated dependencies [e01b5ff]
+- Updated dependencies [05dbba3]
+  - @guren/testing@1.10.0
+  - @guren/plugin-cloudflare@0.9.1
+  - @guren/inertia-client@1.2.0
+  - @guren/cli@2.20.0
+  - @guren/core@1.16.0
+  - @guren/orm@2.7.1
+
 ## 0.1.36
 
 ### Patch Changes
