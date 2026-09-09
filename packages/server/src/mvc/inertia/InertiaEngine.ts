@@ -238,7 +238,6 @@ async function renderDocument(
     ...options.importMap,
   };
   const importMap = JSON.stringify({ imports: importMapEntries }, null, 2);
-  const serializedPage = serializePage(page);
   const stylesheetLinks = renderStyles(styles);
   const criticalCss = resolveDocumentValue(
     "criticalCss",
@@ -257,17 +256,17 @@ async function renderDocument(
     /<title\b[^>]*>/iu.test(element)
   );
   // Inertia v3 contract: the initial page ships in a JSON script element and
-  // the container div stays empty. serializePage escapes `<`, so </script>
-  // breakout is safe.
+  // the container div stays empty (serializePage escapes `<`). Serialized once:
+  // an SSR body carrying the element is used as is, any other body gets the
+  // engine's element appended, and the global is read back from the element
+  // (a second serialized copy was a third of a docs page gzipped, RFC 0014).
+  const ssrBody = ssrResult?.body;
   const appMarkup =
-    ssrResult?.body ??
-    `<script data-page="app" type="application/json">${serializedPage}</script><div id="app"></div>`;
-  // The payload ships once. Inertia's SSR body and the CSR shell both carry it
-  // in a `data-page` element the client reads, so the head global is derived
-  // from that element rather than serialized again: the copy was a third of a
-  // docs page's gzipped response (RFC 0014). A custom SSR body without the
-  // element keeps the full global, so no document is left without a payload.
-  const pageEmbedded = appMarkup.includes("data-page=");
+    ssrBody === undefined
+      ? `${pagePayloadElement(page)}<div id="app"></div>`
+      : embedsPagePayload(ssrBody)
+        ? ssrBody
+        : `${ssrBody}${pagePayloadElement(page)}`;
   const headSegments = [
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
@@ -282,11 +281,7 @@ async function renderDocument(
     Object.keys(importMapEntries).length > 0
       ? `<script type="importmap">${importMap}</script>`
       : "",
-    pageEmbedded
-      ? ""
-      : `<script>window.__INERTIA_PAGE__ = ${serializedPage};</script>`,
   ].filter((segment) => segment && segment.length > 0);
-  const pageGlobal = pageEmbedded ? PAGE_GLOBAL_FROM_ELEMENT : "";
   const bodyClass = resolveDocumentValue("bodyClass", options, page.component);
   const bodyAttributes = bodyClass ? ` class="${escapeAttribute(bodyClass)}"` : "";
   const lang = escapeAttribute(options.lang ?? "en");
@@ -297,23 +292,41 @@ async function renderDocument(
     ${headSegments.join("\n    ")}
   </head>
   <body${bodyAttributes}>
-    ${appMarkup}${pageGlobal}
+    ${appMarkup}${PAGE_GLOBAL_FROM_ELEMENT}
     <script type="module" src="${entry}"></script>
   </body>
 </html>`;
 }
 
+function pagePayloadElement(page: InertiaPagePayload): string {
+  return `<script data-page="app" type="application/json">${serializePage(page)}</script>`;
+}
+
 /**
- * `window.__INERTIA_PAGE__` for whatever reads it (a client older than the
- * `data-page` fallback, an app's own script), parsed from the element already
- * in the document. Reads both shapes the client accepts: the v3 JSON script
- * and the legacy attribute on the container. An inline classic script, so it
- * has run before the module entry does.
+ * Exactly the two shapes PAGE_GLOBAL_FROM_ELEMENT and the client read, matched
+ * at a tag boundary: the v3 JSON script, or the legacy attribute on the `app`
+ * container in either attribute order. Anything looser (a `data-page=` in
+ * prose, on another element) would skip the element and leave nothing to hydrate.
  */
-const PAGE_GLOBAL_FROM_ELEMENT =
-  '<script>(function(){var s=document.querySelector(\'script[data-page="app"]\')||document.getElementById("app");' +
-  'var t=s&&(s.tagName==="SCRIPT"?s.textContent:s.getAttribute("data-page"));' +
-  "if(t)window.__INERTIA_PAGE__=JSON.parse(t)})();</script>";
+export function embedsPagePayload(markup: string): boolean {
+  return (
+    /<script\b[^>]*\bdata-page="app"/iu.test(markup) ||
+    /<[a-z][\w-]*\b(?=[^>]*\bid="app")[^>]*\bdata-page="/iu.test(markup)
+  );
+}
+
+/**
+ * `window.__INERTIA_PAGE__` for readers other than the client, which reads the
+ * element itself: the client's selector and guards, so a container carrying a
+ * non-payload `data-page` is ignored rather than mounted. A classic inline
+ * script, so it has run before the module entry does.
+ */
+const PAGE_GLOBAL_FROM_ELEMENT = `<script>(function(){
+var s=document.querySelector('script[data-page="app"][type="application/json"]')||document.getElementById("app");
+var t=s&&(s.tagName==="SCRIPT"?s.textContent:s.getAttribute("data-page"));
+if(!t)return;
+try{var p=JSON.parse(t);if(p&&typeof p==="object"&&p.component)window.__INERTIA_PAGE__=p}catch(e){}
+})();</script>`;
 
 async function tryRenderSsr(
   page: InertiaPagePayload,
