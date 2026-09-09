@@ -4,7 +4,7 @@ Guren provides utilities for encrypting data and hashing passwords securely.
 
 ## APP_KEY
 
-Every Guren application needs an `APP_KEY` — a base64-encoded 32-byte secret used for encryption, cookie signing, and token signing. Guren uses HKDF to derive separate keys for each purpose, so a single `APP_KEY` secures all subsystems without sharing raw key material.
+Every Guren application needs an `APP_KEY`, a base64-encoded 32-byte secret used for encryption, cookie signing, and token signing. Guren uses HKDF to derive separate keys for each purpose, so a single `APP_KEY` secures all subsystems without sharing raw key material.
 
 ### Generating a Key
 
@@ -136,7 +136,7 @@ import { Hash } from '@guren/core'
 const hash = new Hash()
 ```
 
-To pin an algorithm or its cost parameters, construct `ScryptHasher` or `NodeHasher` directly — see [Algorithm Options](#algorithm-options).
+To pin an algorithm or its cost parameters, construct `ScryptHasher` or `NodeHasher` directly (see [Algorithm Options](#algorithm-options)).
 
 ### Hashing Passwords
 
@@ -167,7 +167,7 @@ if (!user) {
 }
 ```
 
-Name the guard. `TokenGuard.validate()` throws — bearer tokens are not credential-based — so a token-only API issuing a token from an email and password has to reach a session guard, or a `ModelUserProvider`, explicitly.
+Name the guard. `TokenGuard.validate()` throws (bearer tokens are not credential-based), so a token-only API issuing a token from an email and password has to reach a session guard, or a `ModelUserProvider`, explicitly.
 
 ### Checking If Rehash Needed
 
@@ -258,11 +258,11 @@ export default class AuthController extends Controller {
 
 ## Security Best Practices
 
-1. **Never store plain passwords** — Always hash passwords before storing.
-2. **Use a strong APP_KEY** — Run `bunx guren key:generate --write` to generate one. Never commit it to version control.
-3. **Don't roll your own crypto** — Use the provided utilities.
-4. **Rotate keys periodically** — Use `APP_PREVIOUS_KEYS` to rotate without downtime (see [Key Rotation](#key-rotation)).
-5. **Let `Hash` pick the algorithm** — it is Argon2id on Bun and scrypt on Node, and it is the only hasher that runs on both.
+1. **Never store plain passwords**: always hash passwords before storing.
+2. **Use a strong APP_KEY**: run `bunx guren key:generate --write` to generate one. Never commit it to version control.
+3. **Don't roll your own crypto**: use the provided utilities.
+4. **Rotate keys periodically**: use `APP_PREVIOUS_KEYS` to rotate without downtime (see [Key Rotation](#key-rotation)).
+5. **Let `Hash` pick the algorithm**: it is Argon2id on Bun and scrypt on Node, and it is the only hasher that runs on both.
 
 ## Testing
 

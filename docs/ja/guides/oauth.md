@@ -4,10 +4,10 @@ Guren には「GitHub / Google / Discordでサインイン」のようなログ�
 
 ## コアコンセプト
 
-- **OAuthManager** – プロバイダーを登録し、認可からコールバックまでの流れを進めます。
-- **OAuthProviderConfig** – 1つのプロバイダー（GitHub、Google、Discord、または任意の OAuth 2.0 プロバイダー）のクライアントID/シークレット、エンドポイント、スコープ。
-- **OAuthStateStore** – CSRFとオープンリダイレクト攻撃を防ぐ、一度限りのstateの保管場所。デフォルトはメモリで、マルチプロセス構成では `DatabaseOAuthStateStore`（またはRedis）を使います。
-- **プロバイダーファクトリ** – `createGitHubOAuthProviderConfig`、`createGoogleOAuthProviderConfig`、`createDiscordOAuthProviderConfig` が、各プロバイダーの既知のエンドポイントをあらかじめ埋めてくれます。
+- **OAuthManager**: プロバイダーを登録し、認可からコールバックまでの流れを進めます。
+- **OAuthProviderConfig**: 1つのプロバイダー（GitHub、Google、Discord、または任意の OAuth 2.0 プロバイダー）のクライアントID/シークレット、エンドポイント、スコープ。
+- **OAuthStateStore**: CSRFとオープンリダイレクト攻撃を防ぐ、一度限りのstateの保管場所。デフォルトはメモリで、マルチプロセス構成では `DatabaseOAuthStateStore`（またはRedis）を使います。
+- **プロバイダーファクトリ**: `createGitHubOAuthProviderConfig`、`createGoogleOAuthProviderConfig`、`createDiscordOAuthProviderConfig` が、各プロバイダーの既知のエンドポイントをあらかじめ埋めてくれます。
 
 フロー全体には 4 者が登場します。アプリはブラウザーを 2 回受け取り、その間に state ストアが「この `state` を発行したのは本当にこのブラウザーか」を答えます。
 
@@ -107,7 +107,7 @@ export function registerWebRoutes(router: Router): void {
 
 ## stateをブラウザに束縛する
 
-`state` は推測できず一度しか使えませんが、それだけでは**別のブラウザに移し替えられてしまいます**。攻撃者はまずアプリでフローを開始し、自分のプロバイダーアカウントで認可を済ませます。そして受け取った `code` を未消費のまま持っておき、訪問者に次のURLを開かせることができます。
+`state` は推測できず一度しか使えませんが、それだけでは**別のブラウザに移し替えられてしまいます**。攻撃者はまずアプリでフローを開始し、自分のプロバイダーアカウントで認可を済ませます。そして受け取った `code` を未消費のまま持っておき、訪問者に次のURLを開かせるだけです。
 
 ```
 https://your.app/auth/github/callback?code=<攻撃者のもの>&state=<攻撃者のもの>

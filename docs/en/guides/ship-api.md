@@ -149,11 +149,11 @@ bun run codegen
 
 Codegen writes no `.guren/pages.gen.ts` here. That manifest imports
 `@guren/inertia-client`, which an API-only app does not install, while its
-`tsconfig.json` type-checks everything under `.guren/` — so generating one would
+`tsconfig.json` type-checks everything under `.guren/`, so generating one would
 break `bun run typecheck` on its first line.
 
 The rule is codegen's, not the scaffolders': if page components ever appear under
-`resources/js/pages` — copied in by hand, or arriving with a checkout — codegen
+`resources/js/pages` (copied in by hand, or arriving with a checkout), codegen
 still declines to write the manifest and says so:
 
 ```
@@ -205,7 +205,7 @@ curl -X DELETE http://localhost:3333/api/tasks/1
 ## 9. Add API Token Authentication
 
 For routes that require authentication, wire up API tokens. There is no scaffold
-for this — `guren add auth` generates an Inertia sign-in experience and refuses to
+for this: `guren add auth` generates an Inertia sign-in experience and refuses to
 run on an API-only app, so build the middleware yourself:
 
 ```typescript
@@ -241,7 +241,7 @@ curl -X POST http://localhost:3333/api/tasks \
 
 ## Next Steps
 
-- [Rate Limiting](./rate-limiting.md) — protect endpoints from abuse
-- [API Resources](./api-resources.md) — shape JSON responses with resource classes
-- [Validation](./validation.md) — advanced validation patterns
-- [Error Handling](./error-handling.md) — customize API error responses
+- [Rate Limiting](./rate-limiting.md): protect endpoints from abuse
+- [API Resources](./api-resources.md): shape JSON responses with resource classes
+- [Validation](./validation.md): advanced validation patterns
+- [Error Handling](./error-handling.md): customize API error responses

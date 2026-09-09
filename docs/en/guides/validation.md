@@ -2,7 +2,7 @@
 
 Guren's primary validation path is schema-first. Use Zod-compatible schemas in controllers, route definitions, or middleware so request parsing and type inference stay in one place. A legacy `FormRequest` compatibility layer still exists for migrations.
 
-> **Supported Zod version:** the zod 4 API only. Runtime validation duck-types any schema with `safeParse`, but the tools that read schemas structurally — `guren codegen`, OpenAPI generation, `guren context` — refuse schemas authored with the zod v3 API (the old `zod@3` package or the `zod/v3` subpath) and say so with a warning. Author schemas with `import { z } from 'zod'`.
+> **Supported Zod version:** the zod 4 API only. Runtime validation duck-types any schema with `safeParse`, but the tools that read schemas structurally (`guren codegen`, OpenAPI generation, `guren context`) refuse schemas authored with the zod v3 API (the old `zod@3` package or the `zod/v3` subpath) and say so with a warning. Author schemas with `import { z } from 'zod'`.
 
 ## Quick Start
 
@@ -96,7 +96,7 @@ export default class PostsController extends Controller {
 | `this.validateParams(schema)` | Route params | No | Parses `:id`, `:slug`, etc. |
 
 > [!TIP]
-> These helpers work with any schema library that implements `safeParse()` — Zod, Valibot, or custom validators.
+> These helpers work with any schema library that implements `safeParse()`: Zod, Valibot, or custom validators.
 
 ### Array-Style Query Parameters
 
@@ -340,7 +340,7 @@ function Login({ errors }: { errors?: Record<string, string> }) {
 }
 ```
 
-This applies to `validateBody` / `validateQuery` / `validateParams` failures as well as `ValidationException.withMessages(...)` thrown from your own code. Flashing requires session middleware, which is mounted automatically when the `auth` option is set. To customize the behavior, register your own renderer for `ValidationException` in a service provider — it takes precedence over the built-in one.
+This applies to `validateBody` / `validateQuery` / `validateParams` failures as well as `ValidationException.withMessages(...)` thrown from your own code. Flashing requires session middleware, which is mounted automatically when the `auth` option is set. To customize the behavior, register your own renderer for `ValidationException` in a service provider; it takes precedence over the built-in one.
 
 ### Displaying in Inertia
 

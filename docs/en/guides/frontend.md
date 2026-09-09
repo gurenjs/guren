@@ -96,7 +96,7 @@ Handle validation errors by returning them from the controller and reading `form
 The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css` or add custom CSS frameworks as needed. If you introduce additional assets (images, fonts), place them under `public/`.
 
 ## Favicon and Document Head
-The production document is built by the server, not from `public/index.html`, so a `<link>` added to that file never reaches a browser. Register site-wide head markup with `setInertiaDocument()` instead — the scaffold already links the placeholder `public/favicon.svg` from `src/app.ts`:
+The production document is built by the server, not from `public/index.html`, so a `<link>` added to that file never reaches a browser. Register site-wide head markup with `setInertiaDocument()` instead. The scaffold already links the placeholder `public/favicon.svg` from `src/app.ts`:
 
 ```typescript
 import { setInertiaDocument } from '@guren/core'
@@ -108,9 +108,9 @@ setInertiaDocument({
 
 The markup is emitted verbatim, so keep it to developer-authored strings. Files at the root of `public/` are served by the Bun runtime; on Node-based deployments serve them from a CDN.
 
-Files a browser would render as a *document* — `.html`, `.htm`, `.svg`, `.xhtml`, `.xml` — are served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, so navigating straight to one downloads it instead of running its script on your origin. Images, scripts, stylesheets and fonts are unaffected: an `<img src="/logo.svg">`, a CSS `url()` and a `<link rel="icon">` all still load, because the disposition only decides navigate-versus-download. An `<iframe>` or `<object>` embed *is* a navigation, so a document embedded that way stops rendering. For a public directory holding nothing user-supplied, `rootPublicAssets: { inlineDocuments: true }` and `inlineDocuments: true` turn this off per route family; otherwise serve the page from a controller.
+Files a browser would render as a *document* (`.html`, `.htm`, `.svg`, `.xhtml`, `.xml`) are served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, so navigating straight to one downloads it instead of running its script on your origin. Images, scripts, stylesheets and fonts are unaffected: an `<img src="/logo.svg">`, a CSS `url()` and a `<link rel="icon">` all still load, because the disposition only decides navigate-versus-download. An `<iframe>` or `<object>` embed *is* a navigation, so a document embedded that way stops rendering. For a public directory holding nothing user-supplied, `rootPublicAssets: { inlineDocuments: true }` and `inlineDocuments: true` turn this off per route family; otherwise serve the page from a controller.
 
-The same policy follows your app onto the deploy targets whose platform serves `public/` before the app runs: the Cloudflare, Vercel and Lambda plugins declare it to the platform at build time, so a file that downloads locally downloads in production. Those declarations are keyed on file extension rather than on the content type the framework computes, and `inlineDocuments` does not reach them — the plugins read a built directory, not your route configuration. An app that turned the policy off deliberately can undo it at the platform: delete the rules from the generated `.cloudflare/assets/_headers`, the `handle: "hit"` route from `.vercel/output/config.json`, or the CloudFront function association from the CDK stack — a step to repeat after each build, since the build regenerates those files.
+The same policy follows your app onto the deploy targets whose platform serves `public/` before the app runs: the Cloudflare, Vercel and Lambda plugins declare it to the platform at build time, so a file that downloads locally downloads in production. Those declarations are keyed on file extension rather than on the content type the framework computes, and `inlineDocuments` does not reach them: the plugins read a built directory, not your route configuration. An app that turned the policy off deliberately can undo it at the platform: delete the rules from the generated `.cloudflare/assets/_headers`, the `handle: "hit"` route from `.vercel/output/config.json`, or the CloudFront function association from the CDK stack. Repeat that after each build, since the build regenerates those files.
 
 ## Server-Side Rendering
 Each application ships with a default `resources/js/ssr.tsx` entry that calls `renderInertiaServer()` from `@guren/inertia-client`. When you bootstrap the app with `autoConfigureInertiaAssets(app, { importMeta })`, Guren will:
@@ -126,7 +126,7 @@ To produce the required assets run the app build, which runs codegen before the 
 bun run build
 ```
 
-You can override the default resolver—useful for custom component lookups—by editing `resources/js/ssr.tsx` and passing a different `resolve` function to `renderInertiaServer()`. If you opt out of `autoConfigureInertiaAssets`, make sure you populate the required environment variables before calling `configureInertiaAssets` yourself.
+You can override the default resolver (useful for custom component lookups) by editing `resources/js/ssr.tsx` and passing a different `resolve` function to `renderInertiaServer()`. If you opt out of `autoConfigureInertiaAssets`, make sure you populate the required environment variables before calling `configureInertiaAssets` yourself.
 
 ## Type Safety
 
@@ -144,7 +144,7 @@ flowchart LR
   Codegen -- "supplies the Props type" --> Controller
 ```
 
-1. **Define Props in the page component** — each page declares an `interface Props` describing the data it expects:
+1. **Define Props in the page component.** Each page declares an `interface Props` describing the data it expects:
 
 ```tsx
 // resources/js/pages/posts/Show.tsx
@@ -159,7 +159,7 @@ export default function Show({ post }: Props) {
 }
 ```
 
-2. **Codegen extracts Props** — running `bun run codegen` (or automatically during `bun run dev`) scans every page component, extracts the `interface Props`, and writes them into `.guren/pages.gen.ts`:
+2. **Codegen extracts Props.** Running `bun run codegen` (or automatically during `bun run dev`) scans every page component, extracts the `interface Props`, and writes them into `.guren/pages.gen.ts`:
 
 ```ts
 // .guren/pages.gen.ts (auto-generated)
@@ -174,7 +174,7 @@ export const pages = {
 }
 ```
 
-3. **Controller gets type-checked** — when a controller calls `this.inertia(pages.posts.Show, { ... })`, TypeScript checks the second argument against the `PageContract`'s embedded props type. Missing or mistyped props cause a compile error:
+3. **Controller gets type-checked.** When a controller calls `this.inertia(pages.posts.Show, { ... })`, TypeScript checks the second argument against the `PageContract`'s embedded props type. Missing or mistyped props cause a compile error:
 
 ```ts
 // app/Http/Controllers/PostController.ts
@@ -220,13 +220,13 @@ Codegen rewrites the import path so `pages.gen.ts` can reference the same type.
 ### Tips
 
 - Share types between backend and frontend by re-exporting the Drizzle-inferred types from models (e.g. `export type PostRecord = typeof posts.$inferSelect`).
-- Use the `@/` alias (the project root) instead of long relative imports — it resolves in server code via tsconfig `paths` and in the frontend build via the Guren Vite plugin.
+- Use the `@/` alias (the project root) instead of long relative imports. It resolves in server code via tsconfig `paths` and in the frontend build via the Guren Vite plugin.
 - Run `bun run codegen` after adding or changing Props to keep `pages.gen.ts` up to date.
 
 ## Hot Reloading
 Running `bun run dev` automatically launches the Vite dev server from the Bun process, so changes to TSX files trigger instant reloads without extra commands.
 
-Backend files reload too: `dev:server` runs `bun --hot bin/serve.ts`, so edits to controllers, routes, and models take effect on the next request without a restart. Adding a route re-runs codegen and reloads once more, then settles. State held in the process does not survive a reload: the memory-backed session and cache stores are rebuilt empty, and module-level variables are reinitialized. External stores — Redis, your database — are unaffected, so you stay signed in as long as sessions live outside the process.
+Backend files reload too: `dev:server` runs `bun --hot bin/serve.ts`, so edits to controllers, routes, and models take effect on the next request without a restart. Adding a route re-runs codegen and reloads once more, then settles. State held in the process does not survive a reload: the memory-backed session and cache stores are rebuilt empty, and module-level variables are reinitialized. External stores (Redis, your database) are unaffected, so you stay signed in as long as sessions live outside the process.
 
 If your project predates this default, add the flag yourself:
 

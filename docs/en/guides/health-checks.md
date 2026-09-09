@@ -1,6 +1,6 @@
 # Health Checks
 
-Guren provides a comprehensive health checking system to monitor your application's dependencies and services. Use health checks to expose a `/health` endpoint for load balancers, orchestrators, and monitoring tools.
+A health manager runs the checks you register (database, Redis, cache, storage, process memory, or one you write yourself) and reports `healthy`, `degraded`, or `unhealthy`. Serve that report on a `/health` endpoint for load balancers, orchestrators, and monitoring tools.
 
 ## Configuration
 

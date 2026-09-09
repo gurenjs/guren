@@ -159,12 +159,12 @@ export default class DashboardController extends Controller {
 1. Navigate to `/register` and create a user.
 2. Navigate to `/login` and sign in with your new credentials.
 3. Confirm you land on `/dashboard` and can see your user name.
-4. Visit `/dashboard` in an incognito window — you should be redirected to `/login`.
-5. Click logout — you should return to the login page.
+4. Visit `/dashboard` in an incognito window and confirm you are redirected to `/login`.
+5. Click logout and confirm you return to the login page.
 
 ## Next Steps
 
-- [Email Verification](./email-verification.md) — require users to verify their address before accessing protected routes
-- [Password Reset](./password-reset.md) — let users recover their accounts
-- [Authorization](./authorization.md) — add role-based access control
-- [API Tokens](./api-tokens.md) — issue tokens for programmatic access
+- [Email Verification](./email-verification.md): require users to verify their address before accessing protected routes
+- [Password Reset](./password-reset.md): let users recover their accounts
+- [Authorization](./authorization.md): add role-based access control
+- [API Tokens](./api-tokens.md): issue tokens for programmatic access

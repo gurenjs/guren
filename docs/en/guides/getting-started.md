@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide has two parts. **Part A** gets a fresh Guren app running in about five minutes with SQLite — no Docker, no database server. **Part B** covers the full setup: Postgres or MySQL, environment variables, feature generators, and production builds. Start with Part A; come back to Part B when you need it.
+This guide has two parts. **Part A** gets a fresh Guren app running in about five minutes with SQLite: no Docker, no database server. **Part B** covers the full setup: Postgres or MySQL, environment variables, feature generators, and production builds. Start with Part A; come back to Part B when you need it.
 
 The instructions target macOS and Linux, and also work on Windows with WSL2.
 
@@ -11,7 +11,7 @@ The instructions target macOS and Linux, and also work on Windows with WSL2.
 
 ### Prerequisites
 
-- **Bun 1.1 or later** — that is all.
+- **Bun 1.1 or later**: that is all.
 
 ```bash
 curl -fsSL https://bun.sh/install | bash
@@ -24,13 +24,13 @@ bunx create-guren-app my-app
 cd my-app
 ```
 
-The scaffolder walks you through a few choices — the defaults are right for getting started:
+The scaffolder walks you through a few choices, and the defaults are right for getting started:
 
 - **Rendering mode**: SSR (default) or SPA. SSR gives you server-rendered HTML with automatic Vite asset discovery.
 - **Database**: SQLite (default, zero-config), PostgreSQL, or MySQL.
-- **AI agents**: which coding agents to set up the [agent harness](./cli.md#ai-agent-harness) for — Claude Code (default), Codex, Cursor, GitHub Copilot, OpenCode.
+- **AI agents**: which coding agents to set up the [agent harness](./cli.md#ai-agent-harness) for: Claude Code (default), Codex, Cursor, GitHub Copilot, OpenCode.
 
-It then installs dependencies and creates a `.env` file with a generated `APP_KEY` for you. Flags answer the prompts non-interactively — `--mode ssr`, `--db sqlite`, `--agents codex,cursor` — and `--auth` includes authentication scaffolding from the start.
+It then installs dependencies and creates a `.env` file with a generated `APP_KEY` for you. Flags answer the prompts non-interactively (`--mode ssr`, `--db sqlite`, `--agents codex,cursor`), and `--auth` includes authentication scaffolding from the start.
 
 ### 2. Start the dev server
 
@@ -42,12 +42,12 @@ This regenerates the typed route/page manifests (codegen) and boots the server. 
 
 ### 3. What you should see
 
-A crimson ASCII banner in the terminal with the Guren version and URLs, and the welcome page in your browser. The SQLite database file is created on demand at `./data/guren.db` — the fresh app defines no tables yet, so there is nothing to migrate before your first run.
+A crimson ASCII banner in the terminal with the Guren version and URLs, and the welcome page in your browser. The SQLite database file is created on demand at `./data/guren.db`. The fresh app defines no tables yet, so there is nothing to migrate before your first run.
 
 ![The welcome page in the browser: a "Welcome to My Blog!" heading above six cards — Routing & Controllers, Eloquent-style ORM, Inertia + React, Auth & Sessions, Queue & Mail, and Zero-config SQLite](../../images/welcome-page.png)
 
 > [!TIP]
-> The dev server spawns Vite automatically for frontend assets, so edits to your React pages appear instantly. Backend changes — controllers, routes, models — are picked up too, without a restart, since the dev server runs under `bun --hot`. Set `GUREN_DEV_VITE=0` to run Vite yourself, or `GUREN_DEV_BANNER=0` to silence the banner in scripts.
+> The dev server spawns Vite automatically for frontend assets, so edits to your React pages appear instantly. Backend changes (controllers, routes, models) are picked up too, without a restart, since the dev server runs under `bun --hot`. Set `GUREN_DEV_VITE=0` to run Vite yourself, or `GUREN_DEV_BANNER=0` to silence the banner in scripts.
 
 ### 4. Explore the project knowledge graph
 
@@ -81,14 +81,14 @@ Default connection strings:
 Stop the container with `bun run db:down` when you are done.
 
 > [!TIP]
-> Already running Postgres locally or in the cloud? Skip Docker entirely and point `DATABASE_URL` at that instance — the rest of the guide works unchanged. An existing SQLite app can switch later by updating `config/database.ts`; see the [Database Guide](./database.md).
+> Already running Postgres locally or in the cloud? Skip Docker entirely and point `DATABASE_URL` at that instance, and the rest of the guide works unchanged. An existing SQLite app can switch later by updating `config/database.ts`; see the [Database Guide](./database.md).
 
 ### Environment variables
 
 The scaffolder creates `.env` from `.env.example` and fills in a fresh `APP_KEY`. Key settings:
 
 - `APP_URL`: Base URL reported to Inertia (default `http://localhost:3333`).
-- `DATABASE_URL`: Connection string — a file path for SQLite, a URL for Postgres/MySQL.
+- `DATABASE_URL`: Connection string (a file path for SQLite, a URL for Postgres/MySQL).
 - `PORT`: HTTP port for the dev server (default `3333`).
 - `CACHE_STORE`, `QUEUE_CONNECTION`, `MAIL_MAILER`: read by the providers `guren add cache` / `guren add queue` / `guren add mail` scaffold, and each value has to name a store that provider declares. `SESSION_DRIVER` appears once `guren add auth` (or `guren add session`) writes `config/session.ts`, which reads it; until then sessions live in process memory.
 
@@ -122,7 +122,7 @@ Once you have added resources (and therefore migrations), apply the schema and p
 bun run db:migrate && bun run db:seed
 ```
 
-This works the same for SQLite, Postgres, and MySQL — migrations come from your Drizzle schema in `db/schema.ts`.
+This works the same for SQLite, Postgres, and MySQL: migrations come from your Drizzle schema in `db/schema.ts`.
 
 ### Typecheck and test
 
@@ -130,7 +130,7 @@ This works the same for SQLite, Postgres, and MySQL — migrations come from you
 bun run typecheck
 ```
 
-Fix type errors as they appear — catching issues early is much easier than debugging a running app. As you add tests (see the [Testing Guide](./testing.md)), run them with `bun test`.
+Fix type errors as they appear: catching issues early is much easier than debugging a running app. As you add tests (see the [Testing Guide](./testing.md)), run them with `bun test`.
 
 ### Production build
 
@@ -145,8 +145,8 @@ bun run preview
 
 ## Where to go next
 
-- **[The Guren Tutorial](../tutorials/00-overview.md)** — the recommended hands-on course for newcomers: a blog with users, authorization, relationships, uploads, mail and agent tools.
-- **[First Steps](./first-steps.md)** — a ten-minute tour of how one request flows through the framework.
+- **[The Guren Tutorial](../tutorials/00-overview.md)**: the recommended hands-on course for newcomers, a blog with users, authorization, relationships, uploads, mail and agent tools.
+- **[First Steps](./first-steps.md)**: a ten-minute tour of how one request flows through the framework.
 
 Then continue through the guides in this order:
 
@@ -159,4 +159,4 @@ Then continue through the guides in this order:
 7. [Testing Guide](./testing.md)
 8. [Deployment Guide](./deployment.md)
 
-Keep the [CLI Reference](./cli.md) handy along the way, and if you spot issues or have ideas, please open an issue or PR — we welcome contributions.
+Keep the [CLI Reference](./cli.md) handy along the way, and if you spot issues or have ideas, please open an issue or PR. Contributions are welcome.

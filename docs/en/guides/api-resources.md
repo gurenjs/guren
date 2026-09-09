@@ -318,7 +318,7 @@ bunx guren make:resource User
 
 ## Typing API Responses from Resources
 
-`guren codegen` extracts each Resource's shape into `.guren/data.gen.ts` (as `Data.Post`, `Data.User`, …). A route that answers with a Resource can declare that shape as its response type — no Zod schema, no restating the fields — by naming the Resource in its route contract:
+`guren codegen` extracts each Resource's shape into `.guren/data.gen.ts` (as `Data.Post`, `Data.User`, …). A route that answers with a Resource can declare that shape as its response type (no Zod schema, no restating the fields) by naming the Resource in its route contract:
 
 ```ts
 router.query('/posts/search', {
@@ -332,7 +332,7 @@ The generated API client then types `json()` for that route as `{ data: Data.Pos
 
 ### Declaring the shape codegen reads
 
-Extraction is source-level, so a Resource has to state its payload type in its own file — an object literal returned from an unannotated `toArray()` is correct TypeScript that codegen cannot read. Declare an interface named after the class and annotate `toArray()` with it, which is what `make:resource` scaffolds:
+Extraction is source-level, so a Resource has to state its payload type in its own file: an object literal returned from an unannotated `toArray()` is correct TypeScript that codegen cannot read. Declare an interface named after the class and annotate `toArray()` with it, which is what `make:resource` scaffolds:
 
 ```ts
 export interface UserResourceData {
@@ -351,7 +351,7 @@ The second type argument is the payload type, and passing it makes `toJSON()` re
 
 The interface must be declared in the resource's own file — one imported from a shared types module is not read. A Resource codegen cannot extract a type from is named in a `guren codegen` warning rather than dropped in silence, so a missing `Data.*` member always says why.
 
-The payload type does not have to be a plain interface. An **exported** alias whose shape codegen cannot copy — one derived from a Zod schema, an intersection, a merged interface — is emitted as a reference to the declaration itself, so one schema can be the single source of truth for the runtime contract and the payload type alike:
+The payload type does not have to be a plain interface. An **exported** alias whose shape codegen cannot copy (one derived from a Zod schema, an intersection, a merged interface) is emitted as a reference to the declaration itself, so one schema can be the single source of truth for the runtime contract and the payload type alike:
 
 ```ts
 export const UserResourceSchema = z.object({ id: z.number(), name: z.string() })
@@ -364,11 +364,11 @@ export class UserResource extends Resource<User> {
 }
 ```
 
-The declaration must be exported — `data.gen.ts` names it through the resource's module — and a generic type stays unsupported either way, since a reference has no type arguments to pass it.
+The declaration must be exported (`data.gen.ts` names it through the resource's module), and a generic type stays unsupported either way, since a reference has no type arguments to pass it.
 
 ### Resources inside modules
 
-Codegen scans `app/Http/Resources` at the project root and inside every `modules/<name>/` directory. A module's Resource is emitted under a name qualified with its module, so `modules/billing/app/Http/Resources/InvoiceResource.ts` becomes `Data.BillingInvoice`. The qualifier is always applied, never only on collision — that way a type's name depends solely on where its class lives, and adding a second `InvoiceResource` elsewhere cannot rename one the frontend already imports.
+Codegen scans `app/Http/Resources` at the project root and inside every `modules/<name>/` directory. A module's Resource is emitted under a name qualified with its module, so `modules/billing/app/Http/Resources/InvoiceResource.ts` becomes `Data.BillingInvoice`. The qualifier is always applied, never only on collision: that way a type's name depends solely on where its class lives, and adding a second `InvoiceResource` elsewhere cannot rename one the frontend already imports.
 
 A response hint carries only the Resource's class name, so two app roots that both declare an `InvoiceResource` make the hint unresolvable: codegen warns, naming both files, and leaves that route's response untyped rather than guessing which module's payload the route returns. Rename one of the classes to resolve it.
 

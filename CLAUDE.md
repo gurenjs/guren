@@ -458,6 +458,9 @@ export const handler = createLambdaHandler(app)
 4. Run `bun run test` - all tests pass
 5. Run `bun run audit:core-first` - no `@guren/server` references in docs/templates
 6. Run `bun run audit:docs` - docs reference valid commands and APIs
+   and `bun run audit:prose` if you touched `docs/` - AI-writing tells (em-dash
+   density, filler vocabulary) and translated-English tells are banned; the
+   judgment half is `.claude/rules/prose.md`
 7. **If you touched `packages/create-app/templates/**` or `packages/cli/templates/**`:**
    also run `bun run audit:starter-template` and `bun run smoke:starter` /
    `smoke:starter:api`. The audits assert scaffold contents literally, so a

@@ -62,10 +62,10 @@ process.on('SIGTERM', () => {
 
 `scheduler.start()` needs a long-lived process, which neither Cloudflare Workers nor AWS Lambda has. There the platform's own scheduler supplies the tick and the app only registers tasks:
 
-- **Cloudflare Workers** — the worker `guren cloudflare:build` generates exports a `scheduled` handler; a `triggers.crons` entry in `wrangler.jsonc` drives it. See [Cloudflare Workers Deployment](./cloudflare.md#scheduled-tasks).
-- **AWS Lambda** — `createScheduleHandler(scheduler)` from `@guren/core/lambda`, wired to an EventBridge rule. See [Serverless](./serverless.md).
+- **Cloudflare Workers**: the worker `guren cloudflare:build` generates exports a `scheduled` handler; a `triggers.crons` entry in `wrangler.jsonc` drives it. See [Cloudflare Workers Deployment](./cloudflare.md#scheduled-tasks).
+- **AWS Lambda**: `createScheduleHandler(scheduler)` from `@guren/core/lambda`, wired to an EventBridge rule. See [Serverless](./serverless.md).
 
-Each firing runs only the tasks due at that moment, so the platform trigger must be at least as frequent as your finest task. `preventOverlapping()` and `onOneServer()` are in-memory flags on the task, so neither carries across firings on a runtime that does not keep the process alive. `schedule.command()` shells out through `node:child_process` and does not work on Workers — use `schedule.call()` or `schedule.job()` there.
+Each firing runs only the tasks due at that moment, so the platform trigger must be at least as frequent as your finest task. `preventOverlapping()` and `onOneServer()` are in-memory flags on the task, so neither carries across firings on a runtime that does not keep the process alive. `schedule.command()` shells out through `node:child_process` and does not work on Workers, so use `schedule.call()` or `schedule.job()` there.
 
 ## Defining Schedules
 
@@ -332,8 +332,8 @@ export function registerSchedules(scheduler: Scheduler): void {
 }
 ```
 
-Name it `register…Schedules` — `registerSchedules`, `registerBillingSchedules`
-— or make it the default export. A kernel may export several, and they all
+Name it `register…Schedules` (`registerSchedules`, `registerBillingSchedules`),
+or make it the default export. A kernel may export several, and they all
 receive the same scheduler. The convention is what keeps the CLI from calling
 every helper the file happens to export; a registrar named anything else is
 reported as unrecognized rather than silently skipped.
@@ -353,7 +353,7 @@ export function scheduleTasksKernel(): Schedule {
 }
 ```
 
-A factory declares the tasks but runs nothing on its own — a provider still has
+A factory declares the tasks but runs nothing on its own: a provider still has
 to feed them to the scheduler it binds:
 
 ```ts
@@ -365,7 +365,7 @@ of this guide teaches, and the tasks reach the running scheduler without a secon
 wiring step.
 
 Either way, resolve services *inside* the task callback rather than while the
-kernel is being built — the CLI reads this file without booting your app, so a
+kernel is being built. The CLI reads this file without booting your app, so a
 container lookup at build time has nothing to resolve:
 
 ```ts
@@ -373,8 +373,8 @@ schedule.call(() => getContainer().make<SessionManager>('session').pruneExpired(
 ```
 
 A kernel that exists but matches neither shape, or that throws while loading, is
-reported as such and exits non-zero — it is not the same state as an app that has
-not scheduled anything yet.
+reported as such and exits non-zero, which is not the same state as an app that
+has not scheduled anything yet.
 
 ## Testing
 

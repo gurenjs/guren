@@ -43,7 +43,7 @@ bunx guren make:auth --install --minimal
 
 ### Password reset
 
-Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `verifyPasswordResetToken` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store — swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_DRIVER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
+Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `verifyPasswordResetToken` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store, so swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_DRIVER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
 
 ### Email verification
 
@@ -53,7 +53,7 @@ Pass `--verify` to also scaffold an email verification flow:
 bunx guren make:auth --install --verify
 ```
 
-This adds an `emailVerifiedAt` column to the `users` table, a `VerifyEmailController` (shows a "check your email" notice, resends the verification link, and confirms the token), and a `VerifyEmail` page. Registering now sends a verification email and redirects to `/verify-email` instead of `/dashboard`, and the generated `/dashboard` route is guarded with `requireVerifiedEmail` — unverified users are redirected back to `/verify-email` until they confirm. Verification links use the same in-memory store and `log`-driver mail setup as password reset, so this also works with zero setup in development. `--verify` requires the default (non-minimal) experience, since it builds on the registration flow.
+This adds an `emailVerifiedAt` column to the `users` table, a `VerifyEmailController` (shows a "check your email" notice, resends the verification link, and confirms the token), and a `VerifyEmail` page. Registering now sends a verification email and redirects to `/verify-email` instead of `/dashboard`, and the generated `/dashboard` route is guarded with `requireVerifiedEmail`: unverified users are redirected back to `/verify-email` until they confirm. Verification links use the same in-memory store and `log`-driver mail setup as password reset, so this also works with zero setup in development. `--verify` requires the default (non-minimal) experience, since it builds on the registration flow.
 
 ### OAuth login buttons
 
@@ -63,11 +63,11 @@ Pass `--oauth` with a comma-separated provider list to also scaffold "Continue w
 bunx guren make:auth --install --oauth github,google
 ```
 
-This adds a `githubId` / `googleId` column per provider to the `users` table, an `OAuthProvider` that registers each provider against the shared `OAuthManager` (only once its client ID, secret, and redirect URI are all set — see [OAuth / Social login](#oauth-social-login) below for the env var names), and an `OAuthController` with `redirectToProvider` and `callback` actions. The callback looks up the user by provider ID, refuses to link an existing account with the same email (that account signs in with the method it was created with), and otherwise creates a **passwordless** account before logging the user in — nothing is hashed at signup, and the scaffolded `users.passwordHash` column is left nullable. Account creation is refused when the provider reports the address as unverified (Google's `email_verified`, Discord's `verified`); returning an email is not a claim that the provider checked it, and an unverified one would let an account claim an address it does not own. Existing links are unaffected if a provider's status changes later. Unlike `--verify`, `--oauth` works with `--minimal` — it doesn't depend on the registration scaffold.
+This adds a `githubId` / `googleId` column per provider to the `users` table, an `OAuthProvider` that registers each provider against the shared `OAuthManager` (only once its client ID, secret, and redirect URI are all set, with the env var names listed under [OAuth / Social login](#oauth-social-login) below), and an `OAuthController` with `redirectToProvider` and `callback` actions. The callback looks up the user by provider ID, refuses to link an existing account with the same email (that account signs in with the method it was created with), and otherwise creates a **passwordless** account before logging the user in. Nothing is hashed at signup, and the scaffolded `users.passwordHash` column is left nullable. Account creation is refused when the provider reports the address as unverified (Google's `email_verified`, Discord's `verified`); returning an email is not a claim that the provider checked it, and an unverified one would let an account claim an address it does not own. Existing links are unaffected if a provider's status changes later. Unlike `--verify`, `--oauth` works with `--minimal`, since it doesn't depend on the registration scaffold.
 
 `--oauth` without `--verify` scaffolds the profile email **read-only**: `ProfileUpdateSchema` omits the field and `ProfileController.update()` never reads one, so neither the form nor a hand-crafted request can move an account off the address its provider vouched for. With `--verify` the field stays editable, because a replacement address resets `emailVerifiedAt` and has to be confirmed through a link sent to it. Note that in every mode an address is only *claimed*, never reserved: registration accepts any well-formed email and `users.email` is unique, so an account already holding an address blocks its real owner's first OAuth sign-in. Add your own ownership checks if that matters for your app.
 
-`--oauth` shares its `OAuthController` / `OAuthProvider` file paths and wiring conventions with `guren add oauth` below, just with a complete (not stub) callback — don't run both against the same app, since the second run either aborts (no `--force`) or overwrites the first (`--force`).
+`--oauth` shares its `OAuthController` / `OAuthProvider` file paths and wiring conventions with `guren add oauth` below, just with a complete (not stub) callback. Don't run both against the same app, since the second run either aborts (no `--force`) or overwrites the first (`--force`).
 
 ### OAuth as the only sign-in method
 
@@ -77,17 +77,17 @@ This adds a `githubId` / `googleId` column per provider to the `users` table, an
 bunx guren make:auth --install --oauth github --oauth-only
 ```
 
-`/login` becomes a provider-buttons page with no credential form and no `POST /login` route; `LoginController` keeps only `show()` and `destroy()` (logout). Registration, password reset, the login and profile password fields, `LoginValidator`, and the demo `UsersSeeder` are all skipped — a seeded password could never be used to sign in. `--oauth-only` requires `--oauth` with at least one provider (otherwise the app would have no way in at all) and subsumes `--minimal`; `--verify` is skipped under it, since provider-supplied emails arrive already vouched for.
+`/login` becomes a provider-buttons page with no credential form and no `POST /login` route; `LoginController` keeps only `show()` and `destroy()` (logout). Registration, password reset, the login and profile password fields, `LoginValidator`, and the demo `UsersSeeder` are all skipped: a seeded password could never be used to sign in. `--oauth-only` requires `--oauth` with at least one provider (otherwise the app would have no way in at all) and subsumes `--minimal`; `--verify` is skipped under it, since provider-supplied emails arrive already vouched for.
 
-Like plain `--oauth` without `--verify`, the profile email is read-only in this mode — see above.
+Like plain `--oauth` without `--verify`, the profile email is read-only in this mode (see above).
 
-`make:auth` only writes the files it scaffolds; it never deletes. Converting an existing password app with `--oauth-only --force` therefore leaves the old registration and reset files behind — the scaffold prints the list. Delete them: the stale `db/seeders/UsersSeeder.ts` in particular is picked up by `db:seed` rather than by the route table, so a dead `routes/auth.ts` does not neutralize it.
+`make:auth` only writes the files it scaffolds; it never deletes. Converting an existing password app with `--oauth-only --force` therefore leaves the old registration and reset files behind, and the scaffold prints the list. Delete them: the stale `db/seeders/UsersSeeder.ts` in particular is picked up by `db:seed` rather than by the route table, so a dead `routes/auth.ts` does not neutralize it.
 
 This is the recommended shape for CPU-metered runtimes such as the Cloudflare Workers free tier, where a single password hash exceeds the per-request CPU budget no matter which hashing algorithm you pick.
 
 ## OAuth / Social login
 
-Guren ships first-party OAuth primitives plus provider presets for GitHub / Google / Discord. This is a lower-level, standalone scaffold — for OAuth buttons wired directly into `make:auth`'s login/registration pages with automatic account creation, see [OAuth login buttons](#oauth-login-buttons) above instead.
+Guren ships first-party OAuth primitives plus provider presets for GitHub / Google / Discord. This is a lower-level, standalone scaffold. For OAuth buttons wired directly into `make:auth`'s login/registration pages with automatic account creation, see [OAuth login buttons](#oauth-login-buttons) above instead.
 
 ### Scaffold OAuth in an app
 
@@ -125,7 +125,7 @@ router.get('/auth/:provider/callback', [OAuthController, 'callback'])
 
 ### Post-login redirect (`redirectTo`)
 
-Pass `redirectTo` when starting the flow and read it back — sanitized — after the callback. In the scaffolded `OAuthController` (which resolves the manager with `this.oauth()`):
+Pass `redirectTo` when starting the flow and read it back, sanitized, after the callback. In the scaffolded `OAuthController` (which resolves the manager with `this.oauth()`):
 
 ```ts
 // /auth/github?redirectTo=/settings
@@ -148,9 +148,9 @@ async callback(): Promise<Response> {
 }
 ```
 
-`redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped — `redirectTo` comes back as `undefined` and your fallback applies.
+`redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped: `redirectTo` comes back as `undefined` and your fallback applies.
 
-To allow specific external hosts (wildcards supported), bind the manager with an allowlist before anything resolves it — in a scaffolded app, at the top of `app/Providers/OAuthProvider.ts`'s `register()`:
+To allow specific external hosts (wildcards supported), bind the manager with an allowlist before anything resolves it. In a scaffolded app, that is the top of `app/Providers/OAuthProvider.ts`'s `register()`:
 
 ```ts
 this.container.singleton('oauth', () =>
@@ -160,7 +160,7 @@ this.container.singleton('oauth', () =>
 )
 ```
 
-> **Note:** `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement — otherwise the middleware rewrites an approved external redirect to `/`.
+> **Note:** `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement, or the middleware rewrites an approved external redirect to `/`.
 
 ### Manual Setup
 
@@ -218,7 +218,7 @@ app.use('*', createSessionMiddleware())
 
 ### Selecting a store with `SessionManager`
 
-`bunx guren add session` writes the `sessions` table and its migration, `config/session.ts` (declaring the `database` store), a `SessionProvider`, the `SESSION_DRIVER` entry in `.env` and `.env.example`, and the `sessions:prune` command. The `redis` store below is the one addition you make by hand — importing `@guren/core/redis` pulls ioredis into every bundle, so the scaffold leaves it out until you want it. `guren add auth` runs it for you, so a scaffolded app is database-backed from the start. The rest of this section is what it produces, for an app wiring it by hand.
+`bunx guren add session` writes the `sessions` table and its migration, `config/session.ts` (declaring the `database` store), a `SessionProvider`, the `SESSION_DRIVER` entry in `.env` and `.env.example`, and the `sessions:prune` command. The `redis` store below is the one addition you make by hand: importing `@guren/core/redis` pulls ioredis into every bundle, so the scaffold leaves it out until you want it. `guren add auth` runs it for you, so a scaffolded app is database-backed from the start. The rest of this section is what it produces, for an app wiring it by hand.
 
 For more than one candidate store, declare them once and pick by environment. Bind a `SessionManager` under the `session` key from a provider's `register()` and `AuthServiceProvider` builds the session middleware around it at boot, resolving the store itself on the first request:
 
@@ -252,7 +252,7 @@ export default class SessionProvider extends ServiceProvider {
 
 #### The `cookie` store
 
-`{ driver: 'cookie' }` keeps the whole session inside the cookie, encrypted under your `APP_KEY` (AES-256-GCM, with `APP_PREVIOUS_KEYS` accepted so a key rotation does not log everyone out). It is the one store that needs **no server-side resource at all** — no table, no migration, no Redis, no Workers binding:
+`{ driver: 'cookie' }` keeps the whole session inside the cookie, encrypted under your `APP_KEY` (AES-256-GCM, with `APP_PREVIOUS_KEYS` accepted so a key rotation does not log everyone out). It is the one store that needs **no server-side resource at all** (no table, no migration, no Redis, no Workers binding):
 
 ```ts
 stores: {
@@ -264,11 +264,11 @@ Three things it cannot do, and you should decide against them deliberately:
 
 - **Everything in the session travels in the cookie**, so it is capped. The middleware measures the whole `Set-Cookie` it is about to send — name and attributes included — against `maxCookieBytes` (4096 by default, what browsers keep) and throws rather than emitting one the browser silently drops. That leaves roughly 2.9 KB for the session itself. Keep records in the database and only their ids in the session.
 - **A logout cannot revoke a cookie the client already copied.** `invalidate()` clears it on that client; the copy stays valid until it expires. Anything that must be revocable belongs in the database.
-- **No "log out everywhere", and no session listing** — there is nothing server-side to enumerate.
+- **No "log out everywhere", and no session listing**: there is nothing server-side to enumerate.
 
 Set `ttlSeconds` deliberately: nothing server-side can expire the cookie early, so the encrypted payload's own expiry is the only limit.
 
-The `database` driver needs a `sessions` table in `db/schema.ts` and a migration. It has three columns — `id` (text primary key), `data`, and `expiresAt` — and the dialect-specific shape is in the [Cloudflare guide](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed). Sweep expired rows on a schedule with `manager.pruneExpired()`; `read()` already treats them as missing.
+The `database` driver needs a `sessions` table in `db/schema.ts` and a migration. It has three columns: `id` (text primary key), `data`, and `expiresAt`. The dialect-specific shape is in the [Cloudflare guide](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed). Sweep expired rows on a schedule with `manager.pruneExpired()`; `read()` already treats them as missing.
 
 Cookie and TTL settings on the manager are the base; `auth.sessionOptions` overrides them field by field. Setting `auth.sessionOptions.store` *and* binding a manager fails the boot rather than picking one silently, as does a `default` store whose driver nobody registered; an unknown `default` name fails at construction. Either way a typo in `SESSION_DRIVER` stops the boot instead of the first login. `memory` is always declared, so `SESSION_DRIVER=memory` works without an entry. Bind the manager in `register()`, not `boot()`: `AuthServiceProvider` boots before your providers do (a deferred provider is the exception; it is activated on the first request). A plugin adds a driver by augmenting the `SessionDrivers` interface and calling `manager.registerDriver(name, factory)`; resolution is lazy, so the plugin's `register()` may run after the config was declared.
 
@@ -363,11 +363,11 @@ export class User extends defineModel(users, {
 
 Pass `AuthenticatableModel` as the `base` and reshape the create payload in the same call. The type `defineModel()` infers from the table requires every non-defaulted column, which is the wrong shape here: callers pass a plain `password` the model hashes for them, not a `passwordHash`. `optionalOnCreate` makes the column optional and `requireOnCreate` makes the virtual field required, both at the type level with no cast and no redeclared markers.
 
-Optional means optional: a caller may still pass `passwordHash` and it will type-check. At runtime, `AuthenticatableModel` denies the hash column (and the remember token) from mass assignment entirely — a request body carrying it throws a `MassAssignmentException`, whatever the model's `fillable` says. Use `forceCreate()` / `forceUpdate()` for trusted server-side values such as `passwordHash: 'oauth:...'`.
+Optional means optional: a caller may still pass `passwordHash` and it will type-check. At runtime, `AuthenticatableModel` denies the hash column (and the remember token) from mass assignment entirely: a request body carrying it throws a `MassAssignmentException`, whatever the model's `fillable` says. Use `forceCreate()` / `forceUpdate()` for trusted server-side values such as `passwordHash: 'oauth:...'`.
 
 Leave `requireOnCreate` off when accounts can also arrive without a password — an OAuth-only sign-up, for instance — so `password` stays optional.
 
-A credential column holding something that is not a password hash means the account cannot authenticate with one. `ModelUserProvider` treats a null column, an empty string, and a sentinel such as `'oauth:...'` alike: the login is denied, and the same hashing work is spent as on a real verification so the response is not distinguishable by time. A value that *claims* a hash format and fails to satisfy it still throws — that is a corrupt or truncated column, and denying it in silence would leave nothing to notice it by. A nullable column is the clearer choice for a passwordless account; `make:auth --oauth` scaffolds one.
+A credential column holding something that is not a password hash means the account cannot authenticate with one. `ModelUserProvider` treats a null column, an empty string, and a sentinel such as `'oauth:...'` alike: the login is denied, and the same hashing work is spent as on a real verification so the response is not distinguishable by time. A value that *claims* a hash format and fails to satisfy it still throws. That is a corrupt or truncated column, and denying it in silence would leave nothing to notice it by. A nullable column is the clearer choice for a passwordless account; `make:auth --oauth` scaffolds one.
 
 The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
 
@@ -395,7 +395,7 @@ export default class DashboardController extends Controller {
 
 Use `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` with Zod schemas for typed validation. Reserve `FormRequest` for compatibility code.
 
-Surfacing the logged-in user on every Inertia page is already wired for you. The `app/Providers/AuthProvider.ts` that `bunx guren add auth` (equivalently `bunx guren make:auth --install`) generates registers it in `boot()`, so `auth.user` is readable from every page's props right after scaffolding — it is what the generated layout reads to toggle between **Sign in** and **Log out**.
+Surfacing the logged-in user on every Inertia page is already wired for you. The `app/Providers/AuthProvider.ts` that `bunx guren add auth` (equivalently `bunx guren make:auth --install`) generates registers it in `boot()`, so `auth.user` is readable from every page's props right after scaffolding. It is what the generated layout reads to toggle between **Sign in** and **Log out**.
 
 ```ts
 // app/Providers/AuthProvider.ts (generated; register()'s useModel setup elided)
@@ -468,7 +468,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 ## Sanitized User Records
 
-`auth.user()` — and the cached user available right after `login()` or `attempt()` — never exposes credential material. `ModelUserProvider` strips the password column, the remember-token column, and any fields the model marks as `hidden` before the record leaves the auth layer:
+`auth.user()` (and the cached user available right after `login()` or `attempt()`) never exposes credential material. `ModelUserProvider` strips the password column, the remember-token column, and any fields the model marks as `hidden` before the record leaves the auth layer:
 
 ```ts
 export class User extends defineModel(users, {
@@ -481,7 +481,7 @@ export class User extends defineModel(users, {
 
 The `make:auth` scaffolder generates the user model with this `hidden` configuration out of the box. See [Hiding Fields](./database.md#hiding-fields) for the option and the still-supported `static hidden = [...]` form.
 
-Credential validation still runs on the raw database record internally, so login and remember-me tokens are unaffected — sanitization only changes what `auth.user()` exposes to application code.
+Credential validation still runs on the raw database record internally, so login and remember-me tokens are unaffected: sanitization only changes what `auth.user()` exposes to application code.
 
 Custom user providers can opt in by implementing the optional `sanitize(user)` method on the `UserProvider` interface. `SessionGuard` calls it before caching or returning the user:
 
@@ -512,7 +512,7 @@ If your model hides additional fields via `hidden`, or your credential columns u
 type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
 ```
 
-The runtime strips exactly the columns your provider is configured with plus the model's `hidden` fields — a static type cannot see that configuration, so `Sanitized<T>` reflects the conventional names and relies on you to pass anything else. `guren audit` warns about sensitive columns missing from `hidden`, which keeps the runtime side honest.
+The runtime strips exactly the columns your provider is configured with plus the model's `hidden` fields. A static type cannot see that configuration, so `Sanitized<T>` reflects the conventional names and relies on you to pass anything else. `guren audit` warns about sensitive columns missing from `hidden`, which keeps the runtime side honest.
 
 ## Remember Tokens
 

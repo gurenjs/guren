@@ -62,7 +62,7 @@ flowchart LR
 
 The last two stages are not something `.middleware()` can reorder: a schema attached to the route is always validated after every middleware has run, immediately before the action.
 
-Aliases are also the only form that `guren audit` can report by name. Guards the framework recognizes — `requireAuthenticated()` and `requireGuest()` — are detected either way, but any other middleware is invisible to the audit unless it is registered under an alias.
+Aliases are also the only form that `guren audit` can report by name. Guards the framework recognizes (`requireAuthenticated()` and `requireGuest()`) are detected either way, but any other middleware is invisible to the audit unless it is registered under an alias.
 
 ## Middleware Aliases
 

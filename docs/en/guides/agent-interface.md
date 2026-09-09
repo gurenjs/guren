@@ -8,9 +8,9 @@ the policy its middleware chain checks becomes the tool's authorization.
 
 There is no tool class to write and no second JSON Schema to keep in sync. A
 tool cannot advertise a shape the endpoint does not validate, because there is
-only one shape — and when a tool is called, the call re-enters your application
-as a real HTTP request, so validation, middleware and policies run exactly
-once, in the place they already run.
+only one shape. When a tool is called, the call re-enters your application as a
+real HTTP request, so validation, middleware and policies run exactly once, in
+the place they already run.
 
 Exposure is opt-in per route. Nothing becomes a tool until you say so.
 
@@ -52,9 +52,9 @@ posts.store | POST   | /posts | yes | yes    | create | destructive
 Total: 2 tools
 ```
 
-`tool:inspect` shows one tool's whole derivation — the merged input, the output
+`tool:inspect` shows one tool's whole derivation (the merged input, the output
 schema, the authorization ability, the annotations, and any warning that
-applies to that tool:
+applies to that tool):
 
 ```bash
 bunx guren tool:inspect posts.store
@@ -92,8 +92,8 @@ none. See [CLI — Agent Tool Commands](./cli.md#agent-tool-commands).
 
 ## Calling a tool yourself
 
-`tool:list` describes the surface. `tool:call` uses it — no MCP client, no
-token, no running server:
+`tool:list` describes the surface. `tool:call` uses it, with no MCP client, no
+token and no running server:
 
 ```bash
 bunx guren tool:call posts.store --input '{"title":"Hello agents"}'
@@ -152,7 +152,7 @@ bunx guren tool:call posts.store --input '{"title":"no"}' --json
 
 `--as user:42` runs the call as that user. It works by setting `GUREN_TESTING=1`
 for the process, which makes the app accept an injected user instead of a real
-credential — the same mechanism `@guren/testing` uses. The command says so every
+credential (the same mechanism `@guren/testing` uses). The command says so every
 time it is passed.
 
 This is a development flag on the same trust boundary as `bunx guren console`:
@@ -182,7 +182,7 @@ not evaluated.
 
 The request runs the route's middleware and validates the contract the tool
 advertises, then stops before the handler. `unverified` names what a real call
-would still evaluate — a route that authorizes inside its action is a check this
+would still evaluate: a route that authorizes inside its action is a check this
 seam structurally cannot reach.
 
 **A rehearsal is not a dry run of the whole request.** The seam is mounted last
@@ -192,8 +192,8 @@ middleware that increments a quota, consumes a rate-limit bucket, touches a
 session, or calls something else has already done so. Only the handler is
 skipped.
 
-MCP reaches the same seam through a companion tool rather than a flag — see
-[Rehearsing a call over MCP](#rehearsing-a-call-over-mcp). A tool that
+MCP reaches the same seam through a companion tool rather than a flag (see
+[Rehearsing a call over MCP](#rehearsing-a-call-over-mcp)). A tool that
 advertises an `outputSchema` must answer with `structuredContent` conforming to
 it, and a verdict conforms to no route's output, so the verdict needs a tool of
 its own. `tool:call` and `@guren/testing` are not bound by that rule and ask
@@ -237,12 +237,12 @@ await app.agent().call('secret.show').assertDenied()
 Three things worth knowing:
 
 - **`{ as: user }` is `actingAs(user)`,** the `X-Testing-User` envelope. There
-  is no token here, so `assertDenied()` means "the application refused" — its
+  is no token here, so `assertDenied()` means "the application refused": its
   authentication or its policies. Bearer scopes belong to the MCP endpoint and
   are not reachable from a test.
 - **Mount CSRF or skip it, deliberately.** A dispatched tool call carries no
   cookie and no bearer, so an app created with `auth` refuses a mutating call
-  with `403` before any policy is consulted — which `assertDenied()` cannot tell
+  with `403` before any policy is consulted, which `assertDenied()` cannot tell
   apart from a policy refusal. Dispatch through
   `(await app.withCsrf()).agent()`, or test against an app that mounts no CSRF.
 - **The app must carry a route graph.** `TestApp.create({ routes })` and
@@ -282,7 +282,7 @@ Two rules the router enforces at registration:
 
 - **The options object is the second argument, the handler the last.**
   `router.post(path, options, handler)`. The router recognizes an options
-  object by its keys — `agent` included — so an object carrying only `agent` is
+  object by its keys, `agent` included, so an object carrying only `agent` is
   still options and not a handler.
 - **Declare it once.** Passing `agent` in the route options *and* chaining
   `.agent()` throws. A merge would silently drop security-relevant fields
@@ -314,7 +314,7 @@ Deny by default is the point. Auto-converting every endpoint into a tool is the
 known anti-pattern: it produces oversized catalogs that degrade the agents
 reading them. Expose the few routes an agent actually needs. Declaring metadata
 for an action this call did not register (excluded via `only`/`except`, or
-absent from the controller) throws — a tool that cannot exist is a wiring
+absent from the controller) throws. A tool that cannot exist is a wiring
 mistake, not a no-op.
 
 ### Metadata fields
@@ -358,7 +358,7 @@ The details worth knowing:
   the `params` schema does not describe is supplemented as a required string;
   one the schema *does* describe stays required whatever the schema says, since
   the URL cannot be built without it. (Known limitation: Hono's optional
-  modifier, `/posts/:id?`, is advertised as required too — the same rendering
+  modifier, `/posts/:id?`, is advertised as required too, the same rendering
   the OpenAPI document uses.)
 - **A non-object body nests.** If `body` is an array, a primitive, a union or a
   record, it lands under a single `body` property rather than flattening,
@@ -387,7 +387,7 @@ Three rungs, in order:
 | 2 | a [`resource` hint](./routing.md#resource-response-hints) | no schema; `bunx guren codegen` embeds the Resource's extracted payload type into the tool description |
 | 3 | neither | no output shape at all; `guren check` warns |
 
-`output` outranks the hint whenever both are declared — the `output` schema is
+`output` outranks the hint whenever both are declared: the `output` schema is
 the one shape validated at runtime, and carrying both would leave two
 descriptions of one response with nothing keeping them in agreement.
 
@@ -411,7 +411,7 @@ array, a non-JSON body) comes back as an error result naming the mismatch,
 rather than a success the client would reject after the route has already run.
 
 An action answering with `this.inertia(...)` returns whatever the page happens
-to pass its component — a shape nothing checks and any UI change can move.
+to pass its component, a shape nothing checks and any UI change can move.
 Prefer `output` plus `this.json(...)` on agent-facing routes; `guren check`
 warns about the Inertia case.
 
@@ -505,15 +505,15 @@ You do not need to write a CSRF exemption for it. A request carrying
 `Authorization: Bearer` and no `Cookie` header at all skips CSRF verification
 framework-wide, and the dispatcher synthesizes cookie-less bearer requests by
 construction. The plugin also declares its own configured path as authenticating
-without cookies, so a request that misses that rule — one with no bearer, or one
-a browser attached cookies to — is answered by the `401` above rather than by a
+without cookies, so a request that misses that rule (one with no bearer, or one
+a browser attached cookies to) is answered by the `401` above rather than by a
 CSRF `403` that hides the real reason. Neither skip authenticates anything: both
 ways in are a bearer token and the in-process external-auth seam, and a browser
 can present neither.
 
 `bunx guren audit` reports that declaration, and any other package's, under
-**Plugin CSRF exemptions** — the audit's only view into an exemption made from
-inside `node_modules`. It names packages rather than paths: each path is an
+**Plugin CSRF exemptions** (the audit's only view into an exemption made from
+inside `node_modules`). It names packages rather than paths: each path is an
 argument computed at boot from that package's own configuration. A declaration
 from a package outside the `@guren/` scope is a warning, since only this
 repository can vouch for its own. The packages it reads are the ones your
@@ -547,7 +547,7 @@ per instance. A global budget still needs a shared store and your app's own
 
 > Your app's own rate-limit middleware on an agent route cannot substitute for
 > this one. Its default key comes from the socket peer, and the re-entrant
-> request never arrived over a socket — so every MCP caller collapses into that
+> request never arrived over a socket, so every MCP caller collapses into that
 > route's shared bucket.
 
 ### Rehearsing a call over MCP
@@ -575,10 +575,10 @@ call to another tool would be allowed, and never performs it:
 
 It reaches the same seam `--preflight` does: the checked tool's own
 middleware runs, its advertised contract is validated, and the request stops
-before the handler. The action itself does not happen — but the middleware
+before the handler. The action itself does not happen, but the middleware
 really did run, so anything it does of its own accord has taken effect.
 
-A refusal is a **successful** result, not an error — the caller asked whether
+A refusal is a **successful** result, not an error. The caller asked whether
 the call would be allowed, and "no, here is why" answers that:
 
 ```json
@@ -592,7 +592,7 @@ the call would be allowed, and "no, here is why" answers that:
 ```
 
 `validated` and `unverified` are present only when the request reached the
-seam. A call refused earlier — by authentication or authorization middleware —
+seam. A call refused earlier (by authentication or authorization middleware)
 has no answer to give about checks it never reached, so those fields are
 absent rather than empty.
 
@@ -604,11 +604,11 @@ Four rules worth knowing:
   direct call to it is.
 - **A tool that requires approval can still be checked.** It is not callable
   and not listed, which is precisely when "would this be accepted?" is worth
-  asking — and the rehearsal executes nothing.
+  asking, and the rehearsal executes nothing.
 - **`guren.preflight` is listed only for a token that grants at least one
   tool.** A token that can call nothing has nothing to rehearse.
 - **The name is reserved.** A route whose `.agent()` tool name claims it fails
-  `bunx guren check`, and the endpoint refuses to serve it — two tools under
+  `bunx guren check`, and the endpoint refuses to serve it. Two tools under
   one name makes an MCP client reject the whole catalogue.
 
 Rehearsing is not requesting. Preflighting an approval-gated tool creates no
@@ -644,7 +644,7 @@ approvers are notified, and the agent is handed the request id:
 Once a human approves the record, the agent repeats **the same call with the
 same arguments** and it goes through — once. Repeating it is the caller's job
 here; an agent your own application hosts retries automatically from a durable
-ledger of its own — see [Durable Agents](./durable-agents.md).
+ledger of its own (see [Durable Agents](./durable-agents.md)).
 
 ### Configuring the queue
 
@@ -677,21 +677,21 @@ mcpPlugin({
 
 Two guarantees an implementation owes:
 
-- **`consume` must be a compare-and-set** — set `consumedAt` only if it is not
+- **`consume` must be a compare-and-set**: set `consumedAt` only if it is not
   already set, and answer `false` when it was. Two concurrent calls will find
   the same approved record, and an unconditional write hands the approval to
   both.
 - **`findMatch` filters neither expiry nor status.** The framework judges both,
-  so a store that judged them too would be a second copy of the rule — and the
-  copy that fails open, because a comparison it forgets is an approval granted
-  last month letting a call through today.
+  so a store that judged them too would be a second copy of the rule: the copy
+  that fails open, because a comparison it forgets is an approval granted last
+  month letting a call through today.
 
 `notify` hands the request over and you decide who hears about it: the
 framework never picks approvers, because it cannot see your list.
 `AgentApprovalRequested` is a ready-made notification for the common case, and
 you can subclass it or send anything else. The record is persisted *before*
 `notify` runs and is not awaited afterwards, so a mail channel that is down
-costs an approver an email, never the request — the failure is logged with the
+costs an approver an email, never the request. The failure is logged with the
 request id in it.
 
 Resolving a request is your application's job, over your own storage: set
@@ -704,7 +704,7 @@ through an interface it cannot see.
 - **An approval is bound to the arguments.** Approving `posts.destroy {id: 5}`
   does not authorize `{id: 9}`. Key order and nesting do not change the match;
   types do, so `{id: 5}` and `{id: '5'}` are different calls. The match is a
-  SHA-256 of a canonical form of the **raw** arguments — the stored record
+  SHA-256 of a canonical form of the **raw** arguments: the stored record
   carries the hash and the *redacted* copy of the arguments, so the queue never
   becomes a second place your secrets live.
 - **An approval is single-use, and it expires.** One call goes through; the
@@ -747,7 +747,7 @@ counts against the token's read budget, like `guren.preflight`, so polling in a
 tight loop throttles.
 
 A caller may read only the status of a request **it** created. Another
-principal's id answers exactly as an unknown id does — otherwise the tool would
+principal's id answers exactly as an unknown id does. Otherwise the tool would
 be a way to enumerate what your colleagues are waiting to have approved. Your
 audit trail keeps the distinction the caller does not get; a status check is an
 ordinary invocation recorded under `guren.approval_status`.
@@ -759,8 +759,8 @@ queue the tool is not guarded, it is uncallable.
 ## Tokens and scopes
 
 **An existing `['*']` token grants no agent tools.** Only `tool:` and `tools:`
-abilities are read as tool scopes; every other ability — including the default
-`['*']` an `ApiToken` carries — matches nothing here. This is deliberate: an
+abilities are read as tool scopes; every other ability, including the default
+`['*']` an `ApiToken` carries, matches nothing here. This is deliberate: an
 app declaring its first `.agent()` route must not hand its whole agent surface
 to every token issued before agent tools existed. Access to the agent surface
 is granted explicitly or not at all.
@@ -775,8 +775,8 @@ Four scope forms, and no more:
 | `tools:*` | every tool |
 
 Scopes are additive and there is no deny form. A tool the token's scopes do not
-cover is not merely refused — it is **absent from `tools/list`**, so an
-ungranted catalog cannot map your write surface for a read-only agent.
+cover is **absent from `tools/list`**, not merely refused, so an ungranted
+catalog cannot map your write surface for a read-only agent.
 
 ### Issuing a token
 
@@ -822,13 +822,13 @@ The command refuses more than it warns, because a typo on a credential command
 line is cheapest to fix while you are still looking at it:
 
 - **A scope matching no current tool is refused.** It is either a typo or a
-  *latent grant* — a stored pattern that would activate, with nobody's consent,
+  *latent grant*: a stored pattern that would activate, with nobody's consent,
   the moment a matching tool is added. `--allow-unmatched` overrides it and
   warns about exactly that.
 - **`tools:*` needs `--yes`.** It grants every tool the app exposes now and
   every one it gains later, destructive ones included.
 - **`--read-only` stores concrete entries.** The grant is expanded at issuance
-  and written as `tool:<name>` entries, never as the pattern — the grammar has
+  and written as `tool:<name>` entries, never as the pattern. The grammar has
   no "read-only subset of `posts.*`" form. That is fail-closed: a write tool
   added to the `posts.` family later joins no stored entry. Under `--read-only`
   an unmatched scope is refused even with `--allow-unmatched`, since it could
@@ -852,14 +852,14 @@ forward them wherever you already forward events.
 | `AgentToolInvoked` | the call reached the application | `principal`, `tool`, `arguments`, `status`, `durationMs`, `surface` |
 | `AgentToolDenied` | the adapter refused before any HTTP happened | `principal`, `tool`, `arguments`, `reason`, `surface` |
 
-`reason` is one of `'auth'`, `'scope'`, `'approval'`, `'rate-limit'` — exactly
+`reason` is one of `'auth'`, `'scope'`, `'approval'`, `'rate-limit'`: exactly
 the checks that precede the request. **A policy denial is not one of them:**
 policies evaluate inside the dispatched request, so it arrives as an
 `AgentToolInvoked` with status `403`. A denial carries no status or duration
 because nothing ran.
 
 A `guren.preflight` call is recorded like any other invocation, under
-`tool: 'guren.preflight'` — an agent probing what it is allowed to do is
+`tool: 'guren.preflight'`. An agent probing what it is allowed to do is
 exactly what a trail wants to show. The tool it checked gets no record of its
 own, because nothing was invoked. A refusal is recorded the same way, as an
 `AgentToolDenied` for `guren.preflight`: naming the checked tool instead would
@@ -887,7 +887,7 @@ Events.on(AgentToolDenied, (event) => {
 })
 ```
 
-An event manager has to be bound for any of this to happen — register
+An event manager has to be bound for any of this to happen: register
 `EventServiceProvider` (or your app's own event provider) alongside
 `mcpPlugin()`. Without one the plugin warns at boot and emits nothing.
 
@@ -912,7 +912,7 @@ createApp({
 One JSON record per line, rotated daily into `agent-audit-YYYY-MM-DD.log`
 beside the path you name, with files older than `days` swept on rotation
 (14 by default). `file` is resolved by the filesystem, so give an absolute path
-or one relative to the process's working directory — it is not resolved against
+or one relative to the process's working directory. It is not resolved against
 an application root.
 
 For anywhere other than a file, pass a function instead:
@@ -932,9 +932,9 @@ recording.
 
 Configuring a sink also covers `bunx guren tool:call`. That command boots your
 application, so it finds the trail the application configured and writes to it
-— one record per call, `surface: 'cli'`, arguments masked by the same
+(one record per call, `surface: 'cli'`, arguments masked by the same
 `.agent({ redact })` list, alongside your MCP records rather than in a second
-file. It is worth having: a call from a terminal runs as whoever `--as` names,
+file). It is worth having: a call from a terminal runs as whoever `--as` names,
 with no credential to verify, which is exactly the kind of write an audit trail
 is for.
 
@@ -942,12 +942,12 @@ A `bunx guren tool:call --preflight` is recorded as `guren.preflight`, exactly
 as a rehearsal over MCP is, with the tool it checked in the arguments. The
 handler did not run, so a record naming that tool would read as a call that
 completed. If your application's `@guren/core` predates the preflight seam it
-runs the call for real — the command warns about that — and the record then
+runs the call for real (the command warns about that), and the record then
 names the tool that actually executed.
 
 `tool:call` records only invocations, never denials. The four denial reasons
-name checks an adapter runs before sending a request, and this one runs none —
-it holds no token and dispatches straight into the app. A 401 or a 403 your
+name checks an adapter runs before sending a request, and this one runs none.
+It holds no token and dispatches straight into the app. A 401 or a 403 your
 application answers with is a response, so it is recorded as an invocation
 carrying that status, the same as everywhere else. The principal is the user
 `--as` named, or `null` when it named nobody; `abilities` is absent, because
@@ -957,7 +957,7 @@ An application with no sink configured records nothing here either, and the
 call still runs and reports normally.
 
 **The sink is opt-in on purpose.** The endpoint runs on Workers, where there is
-no writable filesystem, and on Lambda, where it is ephemeral — a framework that
+no writable filesystem, and on Lambda, where it is ephemeral. A framework that
 started appending on its own would give you a trail that quietly degrades per
 deployment while the configuration looks identical. An audit trail is only
 worth something if you know whether it is complete, so Guren makes you say
@@ -992,14 +992,14 @@ bunx guren tool:log --json | jq 'select(.status >= 400)'
 | `--app <dir>` | Application root the base path is resolved against |
 | `--json` | One raw record per line |
 
-`tool:log` boots nothing — an audit trail has to be readable when the
+`tool:log` boots nothing. An audit trail has to be readable when the
 application it records is not startable. It reads across the rotation set
 newest-file-first, so `-n` spanning a midnight boundary works, and applies
 `-n` **after** filtering: `--denied -n 50` is the last fifty denials, not the
 denials among the last fifty records.
 
 If there is no trail, the command says so and prints the configuration line to
-add rather than an empty list — an empty listing here would read as "no agent
+add rather than an empty list. An empty listing here would read as "no agent
 touched this application", which is exactly the wrong conclusion to draw from a
 sink that was never wired.
 
@@ -1029,8 +1029,8 @@ Matching is blunt on purpose, in the safe direction:
 - the key decides before the value's shape does: a nested object under a key
   named `token` is masked whole, not walked
 
-Masked values are replaced with `[REDACTED]`. The walk is total — a cycle
-becomes `[Circular]` and an absurdly deep payload `[Truncated]` — because it
+Masked values are replaced with `[REDACTED]`. The walk is total (a cycle
+becomes `[Circular]` and an absurdly deep payload `[Truncated]`) because it
 runs while recording that something happened, including denials taken before
 your route's own validation.
 
@@ -1080,9 +1080,9 @@ The full finding-key tables are in
 
 ## Related
 
-- [Routing — Agent tools](./routing.md#agent-tools) — where `.agent()` sits among the other route contracts
-- [API Tokens](./api-tokens.md) — the store the MCP endpoint verifies bearers against
-- [Authorization](./authorization.md) — the policies that decide what a principal may do
-- [Events](./events.md) — listener registration and the event manager
-- [CLI](./cli.md) — `tool:list`, `tool:inspect`, and the check/audit finding keys
-- [Durable Agents](./durable-agents.md) — hosting an agent of your own that calls this surface
+- [Routing — Agent tools](./routing.md#agent-tools): where `.agent()` sits among the other route contracts
+- [API Tokens](./api-tokens.md): the store the MCP endpoint verifies bearers against
+- [Authorization](./authorization.md): the policies that decide what a principal may do
+- [Events](./events.md): listener registration and the event manager
+- [CLI](./cli.md): `tool:list`, `tool:inspect`, and the check/audit finding keys
+- [Durable Agents](./durable-agents.md): hosting an agent of your own that calls this surface

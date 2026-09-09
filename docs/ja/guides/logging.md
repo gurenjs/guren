@@ -4,10 +4,10 @@ Guren のロギングは、RFC 5424 に準拠したログレベル、複数の�
 
 ## コアコンセプト
 
-- **LogManager** – ロギングチャンネルを管理する中央ハブ。
-- **Logger** – コンテキストサポート付きでログエントリを書き込むインスタンス。
-- **LogChannel** – ログエントリの出力先（コンソール、ファイルなど）。
-- **LogLevel** – RFC 5424 に準拠した重大度レベル（emergency、alert、critical、error、warning、notice、info、debug）。
+- **LogManager**: ロギングチャンネルを管理する中央ハブ。
+- **Logger**: コンテキストサポート付きでログエントリを書き込むインスタンス。
+- **LogChannel**: ログエントリの出力先（コンソール、ファイルなど）。
+- **LogLevel**: RFC 5424 に準拠した重大度レベル（emergency、alert、critical、error、warning、notice、info、debug）。
 
 ## 基本的な使い方
 
@@ -135,7 +135,7 @@ const log = new LogManager({
 
 ### スタックチャンネル
 
-複数のチャンネルを組み合わせることができます。
+複数のチャンネルを組み合わせられます。
 
 ```ts
 const log = new LogManager({

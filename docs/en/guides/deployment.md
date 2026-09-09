@@ -19,7 +19,7 @@ DATABASE_URL=postgres://user:password@db-host:5432/database
 NODE_ENV=production
 ```
 
-Avoid committing this file—use your platform’s secret manager instead.
+Avoid committing this file. Use your platform’s secret manager instead.
 
 > [!WARNING]
 > Treat every value in `.env` as sensitive. Prefer secret managers or environment variables provided by your platform so credentials never appear in git history, build logs, or container images.
@@ -52,7 +52,7 @@ bun run db:seed
 Run these commands on every deployment to keep the schema in sync. Seeders are optional and typically used for demo or staging data.
 
 > [!IMPORTANT]
-> Run migrations before the new code begins serving traffic. Rolling back partially applied migrations is messy—if a deploy fails after running them, redeploy the previous commit **without** re-running migrations.
+> Run migrations before the new code begins serving traffic. Rolling back partially applied migrations is messy: if a deploy fails after running them, redeploy the previous commit **without** re-running migrations.
 
 ## 5. Start the Server
 You can start the Bun server directly:
@@ -65,8 +65,8 @@ For reliability, wrap this command with a process manager (e.g. `systemd`, `pm2`
 
 - The startup banner only renders in non-production environments by default. If you want to show it (or disable it explicitly) set `GUREN_DEV_BANNER=1` or `GUREN_DEV_BANNER=0`.
 - The framework skips launching the Vite dev server when `NODE_ENV=production`. If you’re running a custom dev workflow in production-like environments, toggle it with `GUREN_DEV_VITE=1` (on) or `GUREN_DEV_VITE=0` (off).
-- Outside production, a busy port makes the server try the next one so `bun run dev` keeps working. Set `GUREN_STRICT_PORT=1` to bind the requested port or fail with `EADDRINUSE` instead. Use it anywhere a run has to know it reached the app it started — smoke scripts, E2E runners, CI — because walking to another port otherwise lets the run pass against whatever was already listening.
-- The HTTP server's own teardown is already wired: `listen()` closes the socket on `SIGINT`, `SIGTERM`, and process exit, which is what a process manager or container runtime sends to stop the service. Anything else your app runs still needs its own shutdown handler — a scheduler, a queue worker, or a store holding timers, as [Scheduling](./scheduling.md), [Queue](./queue.md), and [Rate Limiting](./rate-limiting.md) show. Call [`app.stop()`](./architecture.md#stopping-the-server) when application code, rather than the process ending, decides when the server stops.
+- Outside production, a busy port makes the server try the next one so `bun run dev` keeps working. Set `GUREN_STRICT_PORT=1` to bind the requested port or fail with `EADDRINUSE` instead. Use it anywhere a run has to know it reached the app it started (smoke scripts, E2E runners, CI), because walking to another port otherwise lets the run pass against whatever was already listening.
+- The HTTP server's own teardown is already wired: `listen()` closes the socket on `SIGINT`, `SIGTERM`, and process exit, which is what a process manager or container runtime sends to stop the service. Anything else your app runs still needs its own shutdown handler: a scheduler, a queue worker, or a store holding timers, as [Scheduling](./scheduling.md), [Queue](./queue.md), and [Rate Limiting](./rate-limiting.md) show. Call [`app.stop()`](./architecture.md#stopping-the-server) when application code, rather than the process ending, decides when the server stops.
 
 ```ini
 [Unit]
@@ -128,7 +128,7 @@ The CLI scaffolds `src/lambda.ts` (whose exports become your Lambda handlers) an
 bunx guren lambda:build
 ```
 
-The build assembles a `.lambda/` directory: a self-contained function bundle, static assets staged for S3, and the environment the function expects. CloudFront serves those staged files ahead of the function, so the CDK construct puts a viewer-response function on the asset behaviors that gives the types a browser renders as a document — `.html`, `.htm`, `.svg`, `.xhtml`, `.xml` — `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, matching what the framework does for `public/` when it serves those files itself. The framework provides dedicated handlers for HTTP, SQS queues, EventBridge scheduling, and CLI commands. See the **[Serverless Deployment Guide](./serverless.md)** for the full setup including the database, SSR, and CDK deployment.
+The build assembles a `.lambda/` directory: a self-contained function bundle, static assets staged for S3, and the environment the function expects. CloudFront serves those staged files ahead of the function, so the CDK construct puts a viewer-response function on the asset behaviors that sets `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` on the types a browser renders as a document (`.html`, `.htm`, `.svg`, `.xhtml`, `.xml`), matching what the framework does for `public/` when it serves those files itself. The framework provides dedicated handlers for HTTP, SQS queues, EventBridge scheduling, and CLI commands. See the **[Serverless Deployment Guide](./serverless.md)** for the full setup including the database, SSR, and CDK deployment.
 
 ## Vercel (Serverless)
 
@@ -151,7 +151,7 @@ Before writing any output, `vercel:build` runs the deploy-runtime checks `guren 
 > [!NOTE]
 > The plugin targets SSR apps only. It reads Vite manifests to inject the correct `GUREN_INERTIA_*` environment variables into the serverless function. API-only apps should use Docker or Lambda instead.
 
-`public/` is copied to `.vercel/output/static`, which the CDN serves ahead of the function. The generated `config.json` therefore carries a route that gives the types a browser renders as a document — `.html`, `.htm`, `.svg`, `.xhtml`, `.xml` — `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, matching what the framework does for `public/` when it serves those files itself. It sits after `handle: "hit"`, so it applies only to files the CDN answered and never to a path your function serves, such as a dynamic `/sitemap.xml`.
+`public/` is copied to `.vercel/output/static`, which the CDN serves ahead of the function. The generated `config.json` therefore carries a route that sets `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` on the types a browser renders as a document (`.html`, `.htm`, `.svg`, `.xhtml`, `.xml`), matching what the framework does for `public/` when it serves those files itself. It sits after `handle: "hit"`, so it applies only to files the CDN answered and never to a path your function serves, such as a dynamic `/sitemap.xml`.
 
 ## Cloudflare Workers
 
@@ -172,7 +172,7 @@ Workers has no filesystem and shares no memory between requests, so sessions and
 ## Post-Deployment Tasks
 - Follow the [Production Operations Runbook](./operations.md) for SLO, incident response, and backup/restore drill policy.
 - Set up HTTPS (e.g. via a reverse proxy such as Nginx, Caddy, or your cloud platform).
-- Configure logging and monitoring—Bun prints to stdout/stderr, so ship logs to your chosen aggregator.
+- Configure logging and monitoring. Bun prints to stdout/stderr, so ship logs to your chosen aggregator.
 - Schedule automated backups for the PostgreSQL database.
 - Implement health checks (e.g. expose `/health` from a `registerHealthRoutes(router)` registrar via `router.get('/health', (ctx) => ctx.json({ ok: true }))`) and wire them into your load balancer.
 

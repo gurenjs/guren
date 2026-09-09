@@ -219,7 +219,7 @@ const off = feed.on('NewPost', (payload) => {
 
 This gives you typed channel/event names and inferred payload shapes in the frontend.
 
-Each `useChannel(name)` call opens its own `EventSource` on `endpoint?channels=name` (default endpoint `/broadcasting/events`; an endpoint that already has a query string gets `&channels=`). The channel argument is what the server subscribes, not just a type — the stream is authorized and subscribed up front exactly like the `?channels=` example below, so a private or presence channel works through the same call when the SSE route resolves the user with `getUser`. A channel the server refuses is left out of the `connected` event's `channels` list and delivers nothing. One stream per channel is deliberate: events are dispatched by event name, so keeping each channel on its own stream is what lets `feed.on('NewPost', …)` mean "`NewPost` on `announcements`". `channelStreamUrl(endpoint, channel)` is exported for building that URL by hand.
+Each `useChannel(name)` call opens its own `EventSource` on `endpoint?channels=name` (default endpoint `/broadcasting/events`; an endpoint that already has a query string gets `&channels=`). The channel argument is what the server subscribes, not just a type. The stream is authorized and subscribed up front exactly like the `?channels=` example below, so a private or presence channel works through the same call when the SSE route resolves the user with `getUser`. A channel the server refuses is left out of the `connected` event's `channels` list and delivers nothing. One stream per channel is deliberate: events are dispatched by event name, so keeping each channel on its own stream is what lets `feed.on('NewPost', …)` mean "`NewPost` on `announcements`". `channelStreamUrl(endpoint, channel)` is exported for building that URL by hand.
 
 ### End-to-end typed realtime flow
 
@@ -237,7 +237,7 @@ await typed.toChannel('announcements').broadcast('NewPost', { id: 2 })
 
 ### Client-Side Integration
 
-Pass public channels in the `?channels=` query parameter to subscribe them as soon as the stream opens. Right after connecting, the server sends a `connected` event carrying your `clientId` and the list of channels that were authorized and subscribed — capture the `clientId`, because you need it to subscribe to private and presence channels later.
+Pass public channels in the `?channels=` query parameter to subscribe them as soon as the stream opens. Right after connecting, the server sends a `connected` event carrying your `clientId` and the list of channels that were authorized and subscribed. Capture the `clientId`, because you need it to subscribe to private and presence channels later.
 
 ```ts
 // Connect to SSE and subscribe public channels up front
@@ -272,7 +272,7 @@ eventSource.onerror = (error) => {
 
 ### Authorizing Channels (Client)
 
-Private and presence channels are subscribed through `POST /broadcasting/auth`. A single request with `{ clientId, channel }` both authorizes the channel for the current user and subscribes your SSE connection to it — the response reports both results per channel:
+Private and presence channels are subscribed through `POST /broadcasting/auth`. A single request with `{ clientId, channel }` both authorizes the channel for the current user and subscribes your SSE connection to it. The response reports both results per channel:
 
 ```ts
 async function subscribeToPrivateChannel(channel: string) {
@@ -303,7 +303,7 @@ if (await subscribeToPrivateChannel('private-orders.123')) {
 ```
 
 > [!IMPORTANT]
-> Omitting `clientId` from the request only authorizes the channel (`subscribed: false`) — no events will reach the browser. Always send the `clientId` you received in the `connected` event.
+> Omitting `clientId` from the request only authorizes the channel (`subscribed: false`), so no events reach the browser. Always send the `clientId` you received in the `connected` event.
 
 > [!NOTE]
 > Channels with a `private-` or `presence-` prefix that have no registered authorizer are denied by default. Register them with `broadcast.privateChannel()` / `broadcast.presenceChannel()` before clients can subscribe.

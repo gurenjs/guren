@@ -64,25 +64,25 @@ affects mutating actions, `--public` here opens the whole dashboard:
 bunx guren add admin --public
 ```
 
-You can run `add admin` before `add auth`. The guard still holds — an app with no
+You can run `add admin` before `add auth`. The guard still holds: an app with no
 authentication configured has no signed-in user, so every request is redirected
 to `/login`, a route that only exists once you run `bunx guren add auth`. Add
 authentication first if you want a usable dashboard, or pass `--public` and add
 your own check later.
 
 `add admin` needs a fullstack app. The dashboard is an Inertia page, so on an app
-scaffolded from the `api` blueprint — no `@guren/inertia-client` dependency and no
-web routes entry (`routes/web.ts` or `routes/web.js`) — the command refuses and
+scaffolded from the `api` blueprint, with no `@guren/inertia-client` dependency and
+no web routes entry (`routes/web.ts` or `routes/web.js`), the command refuses and
 writes nothing rather than scaffolding a controller that does not typecheck and a
 routes file nothing mounts. Scaffold an admin endpoint with `make:controller`
 instead, and register it in `routes/api.ts`.
 
 `add auth` needs a fullstack app for the same reason, and refuses on the same two
-signals — as does `make:auth`, which reaches the same scaffold. Auth also patches
+signals, as does `make:auth`, which reaches the same scaffold. Auth also patches
 `db/schema.ts` and generates a migration, so the refusal comes before all of that,
 not just before the first file: the app is left exactly as it was. For a
 token-based API, guard `routes/api.ts` with `createBearerTokenMiddleware` from
-`@guren/core` and issue tokens with `createApiToken` — see the
+`@guren/core` and issue tokens with `createApiToken`. See the
 [API tokens guide](./api-tokens.md).
 
 `add resource` refuses on those same two signals, and for the same reason: it
@@ -108,14 +108,14 @@ no fixture entry fails the build rather than the customer's click.
 an app they identify as API-only, the generated controller returns JSON
 (`this.json(...)`) rather than an Inertia page, so it typechecks as written and
 can be wired into `routes/api.ts` as-is. Whenever the signals cannot confirm an
-API-only app, you get the usual Inertia template — installing
+API-only app, you get the usual Inertia template. Installing
 `@guren/inertia-client` is enough to switch back.
 
 `make:view` refuses on those signals like the scaffolds above, because a page has
 no JSON shape to adapt to and the app has no way to render one. `guren codegen`
 (which `bun run dev` runs for you) leaves such components out of
-`.guren/pages.gen.ts` rather than folding them in — that file imports the
-`@guren/inertia-client` an API-only app never installs — so the refusal is about
+`.guren/pages.gen.ts` rather than folding them in, because that file imports
+the `@guren/inertia-client` an API-only app never installs. The refusal is about
 saying so at the command that caused it, not about preventing a broken
 `typecheck`. Install `@guren/inertia-client` first when taking an API app
 fullstack, and the command works again.
@@ -124,7 +124,7 @@ fullstack, and the command works again.
 rest of your app is: it appends its table to `db/schema.ts` and registers the CRUD
 routes in `routes/web.ts`, and unless those routes are registered already,
 `routes/web.ts` must export a route registrar it can patch. When one of those is
-missing, the command names it and writes nothing — rather than leaving a scaffold
+missing, the command names it and writes nothing, rather than leaving a scaffold
 behind and a table appended for routes that were never registered. Use
 `bunx guren make:feature` instead if you want the files without the two patches;
 it prints the route block to paste and tells you which schema file to add the
@@ -157,7 +157,7 @@ table to.
 
 ## Inspection & Audit Commands
 
-Validate your app before shipping — these commands are also designed for AI coding agents (add `--json` for machine-readable output):
+Validate your app before shipping. These commands are also designed for AI coding agents (add `--json` for machine-readable output):
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -170,7 +170,7 @@ Validate your app before shipping — these commands are also designed for AI co
 | `spec:generate` | Regenerates the derived spec views in `docs/spec/` (ER diagram, domain model, screens, module map) — see [Spec-Anchored Development](./spec-anchored.md) | `bunx guren spec:generate` |
 
 `audit` exits with a non-zero status when it finds failures. Plain
-`check` is informational — its suite flags each exit non-zero on
+`check` is informational. Its suite flags each exit non-zero on
 failures in that suite, and `gate` (below) is what the scaffolded CI
 workflow runs:
 
@@ -183,13 +183,13 @@ bunx guren check --prototype  # routes on the prototype handler have a named fix
 ```
 
 Combining suite flags runs their union. `--changed` restricts any of
-them to files changed against the merge base with `main` — the fast
+them to files changed against the merge base with `main`, the fast
 path the agent-harness edit hook uses.
 
 `gate` is the one command that answers "is this change done?". It runs
 codegen, typecheck, lint (when the app has an `.oxlintrc.json`),
-`check` under the `--ci` rule, `audit`, and the test suite — the stages
-the scaffolded CI workflow runs — reports every stage, and exits
+`check` under the `--ci` rule, `audit`, and the test suite (the stages
+the scaffolded CI workflow runs), reports every stage, and exits
 non-zero if any failed. A stage that *cannot* run is a failure, not a
 skip: an `.oxlintrc.json` with no oxlint installed, a missing
 `typecheck` script, a routes entry that will not load. Only an app with
@@ -239,7 +239,7 @@ Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checke
 
 `audit` adds two rules for the same routes:
 
-- A body-validation finding that is a warning for an ordinary route becomes a **failure** when the route is agent-exposed, under the same `validation:*` key — so an existing `config/audit.ts` entry keeps applying.
+- A body-validation finding that is a warning for an ordinary route becomes a **failure** when the route is agent-exposed, under the same `validation:*` key, so an existing `config/audit.ts` entry keeps applying.
 - `agent-annotation:*` warns when `destructiveHint: false` is declared on an action that deletes, updates, or force-writes records, and also when that claim could not be checked because the action body was unreadable.
 - `controller-unreadable:*` warns when a controller file could not be read, since every rule above saw no body for the actions it declares.
 
@@ -250,7 +250,7 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 const apiKey = 'example-not-a-real-key'
 ```
 
-Route- and model-level findings (`authz:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to — they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
+Route- and model-level findings (`authz:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
 
 ```ts
 // config/audit.ts
@@ -261,13 +261,13 @@ export default {
 }
 ```
 
-Ignored findings stay in the report with `status: "ignored"` and an `ignoreReason` — nothing is silently dropped. An entry with a missing `key`/`reason`, or one that never matches a finding, produces its own warning so stale rules don't rot unnoticed.
+Ignored findings stay in the report with `status: "ignored"` and an `ignoreReason`. Nothing is silently dropped. An entry with a missing `key`/`reason`, or one that never matches a finding, produces its own warning so stale rules don't rot unnoticed.
 
-`config/audit.ts` only accepts findings that have no source line — the route- and model-level ones above. Line-scoped findings (hardcoded secrets, raw SQL, disabled security toggles) already have `// guren-audit-ignore` for that; an entry targeting one is rejected with a warning pointing you back to the inline comment, rather than becoming a second, less visible way to silence them.
+`config/audit.ts` only accepts findings that have no source line, the route- and model-level ones above. Line-scoped findings (hardcoded secrets, raw SQL, disabled security toggles) already have `// guren-audit-ignore` for that; an entry targeting one is rejected with a warning pointing you back to the inline comment, rather than becoming a second, less visible way to silence them.
 
 ### Architecture boundaries
 
-Drop a `guren.arch.ts` file at your project root and `guren check` starts enforcing it — no flag required:
+Drop a `guren.arch.ts` file at your project root and `guren check` starts enforcing it, with no flag required:
 
 ```typescript
 // guren.arch.ts
@@ -289,7 +289,7 @@ export default defineArchRules({
 
 Each rule's `from` and `disallow` accept either a layer name declared above or an inline glob. Add `severity: 'warn'` while rolling out a new boundary on an existing codebase, then drop it (defaulting to `'fail'`) once violations reach zero.
 
-Rules analyse *runtime* dependencies. Type-only imports (`import type { X } from '...'`, `export type { X } from '...'`, and `import('...').X` in a type position) compile away, so they are skipped by default — sharing a DTO or a props interface across layers is usually fine. For a boundary that should hold at the type level too, set `includeTypeImports: true` on the rule (or once on the whole set; a rule's own setting wins):
+Rules analyse *runtime* dependencies. Type-only imports (`import type { X } from '...'`, `export type { X } from '...'`, and `import('...').X` in a type position) compile away, so they are skipped by default. Sharing a DTO or a props interface across layers is usually fine. For a boundary that should hold at the type level too, set `includeTypeImports: true` on the rule (or once on the whole set; a rule's own setting wins):
 
 ```typescript
 rules: [
@@ -307,7 +307,7 @@ bunx guren check --arch      # architecture checks only — fast path for an edi
 bunx guren check --changed   # restrict checks to files changed vs. the merge base with main
 ```
 
-An import Guren can't resolve to a project file is reported as a warning, never a failure — an unresolved path shouldn't block your build.
+An import Guren can't resolve to a project file is reported as a warning, never a failure: an unresolved path shouldn't block your build.
 
 ## Application Modules
 
@@ -326,9 +326,9 @@ bunx guren make:controller Invoice --module billing   # modules/billing/app/Http
 bunx guren make:model Invoice --module billing        # modules/billing/app/Models/Invoice.ts
 ```
 
-`guren check`, `guren audit`, `guren context`, `model:list`, and `doctor` all scan `modules/*/` automatically — no extra configuration needed. Two exceptions: `make:auth` (authentication is an app-wide concern, not a per-module one) and `make:migration` (drizzle-kit driven; migrations are generated from whichever schema paths `drizzle.config.ts` points at, module or not).
+`guren check`, `guren audit`, `guren context`, `model:list`, and `doctor` all scan `modules/*/` automatically, with no extra configuration needed. Two exceptions: `make:auth` (authentication is an app-wide concern, not a per-module one) and `make:migration` (drizzle-kit driven; migrations are generated from whichever schema paths `drizzle.config.ts` points at, module or not).
 
-A module's public API is its `index.ts` — the `defineModule()` descriptor it exports — plus `db/schema.ts` for table definitions shared across modules. Once a `modules/` directory exists, `guren check` enforces this automatically, with no `guren.arch.ts` required: a file inside one module reaching into another module's internals (anything other than its `index.ts` or `db/schema.ts`) is a failure, and so is top-level app code doing the same.
+A module's public API is its `index.ts` (the `defineModule()` descriptor it exports) plus `db/schema.ts` for table definitions shared across modules. Once a `modules/` directory exists, `guren check` enforces this automatically, with no `guren.arch.ts` required: a file inside one module reaching into another module's internals (anything other than its `index.ts` or `db/schema.ts`) is a failure, and so is top-level app code doing the same.
 
 ```typescript
 // modules/billing/index.ts
@@ -343,20 +343,20 @@ export const billingModule = defineModule({
 })
 ```
 
-Inertia pages are not colocated inside `modules/<name>/` — they stay under the top-level `resources/js/pages/`, namespaced by module name instead (`resources/js/pages/billing/Invoices/Index.tsx`). `make:feature Invoice --module billing` follows this convention automatically.
+Inertia pages are not colocated inside `modules/<name>/`. They stay under the top-level `resources/js/pages/`, namespaced by module name instead (`resources/js/pages/billing/Invoices/Index.tsx`). `make:feature Invoice --module billing` follows this convention automatically.
 
 ## AI Agent Harness
 
-Apps scaffolded with `create-guren-app` include an AI agent harness out of the box. The scaffolder asks which coding agents you use — Claude Code, Codex, Cursor, GitHub Copilot, OpenCode — and installs the files each one reads natively (answer non-interactively with `--agents codex,cursor`, or skip the harness with `--agents none`).
+Apps scaffolded with `create-guren-app` include an AI agent harness out of the box. The scaffolder asks which coding agents you use (Claude Code, Codex, Cursor, GitHub Copilot, OpenCode) and installs the files each one reads natively (answer non-interactively with `--agents codex,cursor`, or skip the harness with `--agents none`).
 
 What each selection writes:
 
-- **Claude Code**: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint (the scaffolded `dev` script enables it via `GUREN_MCP=1`), and hooks that close the feedback loop — the `guren context` project map loads at session start, `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent, and `guren gate` runs from a `Stop` hook when a turn ends with uncommitted changes, blocking the stop once with the findings of any failing stage so the fix lands in the same turn rather than in CI.
+- **Claude Code**: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint (the scaffolded `dev` script enables it via `GUREN_MCP=1`), and hooks that close the feedback loop: the `guren context` project map loads at session start, `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent, and `guren gate` runs from a `Stop` hook when a turn ends with uncommitted changes, blocking the stop once with the findings of any failing stage so the fix lands in the same turn rather than in CI.
 - **Codex, Cursor, GitHub Copilot, OpenCode**: an `AGENTS.md` project guide plus the same rules and skills under `.agents/rules/` and `.agents/skills/` (skills follow the cross-agent SKILL.md standard). Cursor additionally gets the rules in its native format (`.cursor/rules/guren-*.mdc`), Copilot as path-scoped instructions (`.github/instructions/guren-*.instructions.md`), and Codex a command-approval allowlist for the harness's own commands (`.codex/rules/guren.rules`). MCP client configs land where each tool looks: `.codex/config.toml`, `.cursor/mcp.json`, `.vscode/mcp.json`, or the `mcp` entry in `opencode.json`. Cursor and Codex also get the `guren gate` stop hook (`.cursor/hooks.json` + `.cursor/hooks/gate-on-stop.ts`, `.codex/hooks.json` + `.codex/hooks/gate-on-stop.ts`): when a turn ends with uncommitted changes and a stage fails, Cursor receives the findings as an automatic follow-up message (bounded by `loop_limit`) and Codex blocks the stop once with them (Codex runs a project hook only after you trust it once with `/hooks`), the same loop Claude Code gets. The hooks gate the app they are installed in, so a monorepo app is gated on its own tree; Cursor reads `.cursor/hooks.json` from the workspace root, so open the app as its own workspace. Cursor can also load `.claude/settings.json` hooks when its third-party setting is on; the Claude hook steps aside there so the gate runs once. Copilot and OpenCode have no turn-end hook that can feed output back, and none of these agents run the edit hook, so `AGENTS.md` instructs them to run `guren context` at session start, `guren check` after edits, and `guren gate` before declaring a change done.
 
 ### Before you have an app: install the Guren skills from a catalog
 
-The harness above lives inside an app's `@guren/cli`, so it only exists once an app does. For the step before that — an agent that has never seen Guren, in a directory with nothing in it — Guren publishes two on-ramp skills to the agent catalogs from [`gurenjs/agent-skills`](https://github.com/gurenjs/agent-skills):
+The harness above lives inside an app's `@guren/cli`, so it only exists once an app does. For the step before that (an agent that has never seen Guren, in a directory with nothing in it), Guren publishes two on-ramp skills to the agent catalogs from [`gurenjs/agent-skills`](https://github.com/gurenjs/agent-skills):
 
 ```bash
 # Claude Code
@@ -367,18 +367,18 @@ claude plugin install guren@gurenjs --scope user
 npx skills add gurenjs/agent-skills
 ```
 
-Install it at user scope: these skills are for the step *before* a project exists, and they are the same two skills whatever you are building — project scope would write them into whichever repository you happened to be standing in, and share an on-ramp with collaborators of an app that already has the harness. The plugin also conforms to [Agent Plugins v1](https://agent-plugins.org), so any client that reads a root `plugin.json` can install it from that repository directly. It ships `guren-new-app` (explains Guren, scaffolds an app with `bunx create-guren-app`, hands off) and `guren-harness` (runs `bunx guren agent:init --target <agents>` and explains the `guren context` → edit → `guren check` → `guren audit` loop). It deliberately does **not** copy the harness's rules or skills: those are installed by the app's own CLI and stay version-matched to it. The repository is generated from `packages/cli/templates/agent-catalog/` on each release; send changes there, not to `gurenjs/agent-skills`.
+Install it at user scope: these skills are for the step *before* a project exists, and they are the same two skills whatever you are building. Project scope would write them into whichever repository you happened to be standing in, and share an on-ramp with collaborators of an app that already has the harness. The plugin also conforms to [Agent Plugins v1](https://agent-plugins.org), so any client that reads a root `plugin.json` can install it from that repository directly. It ships `guren-new-app` (explains Guren, scaffolds an app with `bunx create-guren-app`, hands off) and `guren-harness` (runs `bunx guren agent:init --target <agents>` and explains the `guren context` → edit → `guren check` → `guren audit` loop). It deliberately does **not** copy the harness's rules or skills: those are installed by the app's own CLI and stay version-matched to it. The repository is generated from `packages/cli/templates/agent-catalog/` on each release; send changes there, not to `gurenjs/agent-skills`.
 
 | Command | Description | Example |
 |---------|-------------|---------|
 | `agent:init` | Install the agent harness for the selected agents into an existing app (skips files that already exist; `--force` overwrites) | `bunx guren agent:init --target codex,cursor` |
 | `agent:sync` | Refresh framework-managed files (rules, skills, subagents, hooks) for every agent detected on disk | `bunx guren agent:sync` |
 
-`agent:init --target` accepts `claude` (the default), `codex`, `cursor`, `copilot`, `opencode`, and `all`. `agent:sync` never overwrites user-owned files — `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, and the MCP client configs — so your customizations survive framework updates (a user-owned file you deleted is recreated). When an MCP config already exists, `agent:init` leaves it alone and prints the snippet to merge by hand.
+`agent:init --target` accepts `claude` (the default), `codex`, `cursor`, `copilot`, `opencode`, and `all`. `agent:sync` never overwrites user-owned files (`CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, and the MCP client configs), so your customizations survive framework updates (a user-owned file you deleted is recreated). When an MCP config already exists, `agent:init` leaves it alone and prints the snippet to merge by hand.
 
-Framework-managed files (rules, skills, subagents, hooks) *are* overwritten by `agent:sync` — that is its job — so keep project-specific rules in files of your own instead of appending to the shipped ones. The sync makes every overwrite visible: files that already match the latest version are skipped, and any file that held different contents is called out as replaced. Run `agent:sync --dry-run` first to see what a sync would write, replace, or prune without changing anything — `agent:init` accepts `--dry-run` too, as the preview for `--force`.
+Framework-managed files (rules, skills, subagents, hooks) *are* overwritten by `agent:sync`, which is its job, so keep project-specific rules in files of your own instead of appending to the shipped ones. The sync makes every overwrite visible: files that already match the latest version are skipped, and any file that held different contents is called out as replaced. Run `agent:sync --dry-run` first to see what a sync would write, replace, or prune without changing anything. `agent:init` accepts `--dry-run` too, as the preview for `--force`.
 
-When a framework rule or skill is renamed or removed in a release, the old copies stay behind in every root that received them — and Cursor and Copilot keep auto-loading stale `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` files. `agent:sync` lists any files in the framework-managed locations that are no longer part of the harness; `agent:sync --prune` deletes them. Everything is claimed **by name**: the rules roots (`.claude/rules/`, `.agents/rules/`) only for the rule filenames the harness ships or used to ship, the native rules only for the `guren-` prefix, and the skills roots (`.claude/skills/`, `.agents/skills/`) only for the skill directories the harness ships or used to ship. So a rules file of your own next to the shipped ones (in a subdirectory too), or a skill you added yourself (or one `npx skills add` and Agent Plugins clients install into those same directories), is never listed and never deleted — as long as its name is not one the harness itself ships: `dev-workflow`, `db-manage`, `scaffold`, `feature`, `guren-api`, `plugin-authoring`, `agent-interface`, `github-projects` for skills, the rule filenames listed in your entry document for rules (compared ignoring case), and **any** `guren-`prefixed file for Cursor and Copilot, where the claim is the prefix rather than a list of names. Keep your own Cursor/Copilot rules under a different prefix, and review the report before `--prune`: a file of your own under a claimed name is the one case it removes.
+When a framework rule or skill is renamed or removed in a release, the old copies stay behind in every root that received them, and Cursor and Copilot keep auto-loading stale `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` files. `agent:sync` lists any files in the framework-managed locations that are no longer part of the harness; `agent:sync --prune` deletes them. Everything is claimed **by name**: the rules roots (`.claude/rules/`, `.agents/rules/`) only for the rule filenames the harness ships or used to ship, the native rules only for the `guren-` prefix, and the skills roots (`.claude/skills/`, `.agents/skills/`) only for the skill directories the harness ships or used to ship. So a rules file of your own next to the shipped ones (in a subdirectory too), or a skill you added yourself (or one `npx skills add` and Agent Plugins clients install into those same directories), is never listed and never deleted, as long as its name is not one the harness itself ships: `dev-workflow`, `db-manage`, `scaffold`, `feature`, `guren-api`, `plugin-authoring`, `agent-interface`, `github-projects` for skills, the rule filenames listed in your entry document for rules (compared ignoring case), and **any** `guren-`prefixed file for Cursor and Copilot, where the claim is the prefix rather than a list of names. Keep your own Cursor/Copilot rules under a different prefix, and review the report before `--prune`: a file of your own under a claimed name is the one case it removes.
 
 ## Deployment Recipes
 
@@ -499,7 +499,7 @@ bunx guren route:list --format compact # Compact single-line format
 
 ## Agent Tool Commands
 
-Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (see [Routing — Agent tools](./routing.md)). These commands report what an agent would see, derived live from your route graph — not read from `.guren/agents.gen.ts`, so they answer correctly even when that manifest is missing or stale.
+Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (see [Routing — Agent tools](./routing.md)). These commands report what an agent would see, derived live from your route graph rather than read from `.guren/agents.gen.ts`, so they answer correctly even when that manifest is missing or stale.
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -536,7 +536,7 @@ bunx guren tool:dev --as 42 --port 4000
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output the derived tools as JSON |
 
-`tool:call` goes one step further and actually invokes a tool, through the same dispatch contract an MCP client's call goes through. It boots the application, so its tools come from the graph the running app serves — which is why it takes no `--routes`.
+`tool:call` goes one step further and actually invokes a tool, through the same dispatch contract an MCP client's call goes through. It boots the application, so its tools come from the graph the running app serves, which is why it takes no `--routes`.
 
 ```bash
 # Call a tool with arguments
@@ -559,9 +559,9 @@ bunx guren tool:call posts.index --as user:42 --json
 
 The command exits non-zero when the call comes back as an error result, so a 422 or a 403 is not read as a success by a script. See [Agent Interface — Calling a tool yourself](./agent-interface.md#calling-a-tool-yourself).
 
-If the application it boots has an [audit trail](./agent-interface.md#the-audit-trail) configured, the call is recorded in it as `surface: 'cli'` — the same file, the same masking, alongside the MCP records. A call from here runs as whoever `--as` names, with nothing verified, so it is worth being able to see later. An application with no trail configured records nothing and the call is unaffected.
+If the application it boots has an [audit trail](./agent-interface.md#the-audit-trail) configured, the call is recorded in it as `surface: 'cli'` (the same file, the same masking, alongside the MCP records). A call from here runs as whoever `--as` names, with nothing verified, so it is worth being able to see later. An application with no trail configured records nothing and the call is unaffected.
 
-`tool:dev` serves the application's *own* endpoint — it requires
+`tool:dev` serves the application's *own* endpoint, so it requires
 [`@guren/plugin-mcp`](./agent-interface.md) to be installed and registered, and
 says so if no endpoint answers. The token it issues lives in memory for that
 process only: nothing is written to your app's token store, and stopping the
@@ -576,9 +576,9 @@ command revokes it. It refuses to run with `NODE_ENV=production`.
 | `--app` | Current directory | Application root directory |
 
 > [!WARNING]
-> The printed token grants `tools:*`. The default bind is loopback, so it stays on your machine; `--host 0.0.0.0` makes the endpoint — and that token — reachable from your network for as long as the command runs.
+> The printed token grants `tools:*`. The default bind is loopback, so it stays on your machine; `--host 0.0.0.0` makes the endpoint (and that token) reachable from your network for as long as the command runs.
 
-`tool:log` reads the audit trail back. Unlike its neighbours it boots nothing — an audit trail has to be readable when the application it records is not startable.
+`tool:log` reads the audit trail back. Unlike its neighbours it boots nothing. An audit trail has to be readable when the application it records is not startable.
 
 ```bash
 # The last 50 records
@@ -607,7 +607,7 @@ bunx guren tool:log --json | jq 'select(.status >= 400)'
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output one raw record per line, for piping |
 
-`-n` applies **after** filtering, so `--denied -n 50` is the last fifty denials rather than the denials among the last fifty records. Records only exist once a sink is configured — the trail is opt-in, and the command prints the configuration line to add when it finds none. See [Agent Interface — The audit trail](./agent-interface.md#the-audit-trail).
+`-n` applies **after** filtering, so `--denied -n 50` is the last fifty denials rather than the denials among the last fifty records. Records only exist once a sink is configured: the trail is opt-in, and the command prints the configuration line to add when it finds none. See [Agent Interface — The audit trail](./agent-interface.md#the-audit-trail).
 
 Everything shown is derived from contracts the route already carries: the input schema merges its `params`, `query` and `body` schemas, the output schema comes from `output`, and the authorization ability comes from the policy its middleware chain checks. Nothing is declared twice, so a tool cannot advertise a schema the endpoint does not validate.
 
@@ -677,7 +677,7 @@ bunx guren db:rollback --all
 
 ### db:seed Options
 
-`db:seed` runs every seeder in the folder `config/database.ts` configures as `seedersFolder` (`db/seeders` in a scaffolded app), in filename order. There is no option to run a single seeder — prefix the filenames (`001_`, `002_`, …) when the order matters.
+`db:seed` runs every seeder in the folder `config/database.ts` configures as `seedersFolder` (`db/seeders` in a scaffolded app), in filename order. There is no option to run a single seeder. Prefix the filenames (`001_`, `002_`, …) when the order matters.
 
 ```bash
 # Run all seeders
@@ -694,7 +694,7 @@ bunx guren db:seed --json
 ```
 
 > [!NOTE]
-> `--json` covers the command's own summary. Seeder stdout is not suppressed — the `make:seeder` template logs a line per seeder — so silence those before piping to `jq`.
+> `--json` covers the command's own summary. Seeder stdout is not suppressed (the `make:seeder` template logs a line per seeder), so silence those before piping to `jq`.
 
 ## Queue Commands
 
@@ -734,7 +734,7 @@ Generated files match the Laravel-inspired ergonomics of the framework:
 - Models extend `Model<TRecord>` and prefill `static table`. Use the helpers for quick CRUD, or call Drizzle’s RQB directly. `Model.query(db)` lets you start from the model while still writing Drizzle-flavoured queries.
 - Views are React + TypeScript + Tailwind CSS functional components.
 
-After generation remember to wire up routes and connect `static table` to the proper Drizzle schema. Complex queries can skip the model entirely—use your Drizzle database (`getDatabase()`) or `Model.query()` to stay type-safe.
+After generation remember to wire up routes and connect `static table` to the proper Drizzle schema. Complex queries can skip the model entirely: use your Drizzle database (`getDatabase()`) or `Model.query()` to stay type-safe.
 
 ## Scaffolding New Apps
 
@@ -759,9 +759,9 @@ Launch the framework-aware console with:
 bunx guren console
 ```
 
-> This is an interactive REPL, not your application's commands. To run those, use `bun run console <command>` — see the [console commands guide](./console.md).
+> This is an interactive REPL, not your application's commands. To run those, use `bun run console <command>`. See the [console commands guide](./console.md).
 
-The command boots your application (honouring `src/main.ts` and registered providers), then drops into a prompt preloaded with useful globals—`app`, `auth`, discovered models, database helpers, and utilities from `@guren/testing`. Use `:help` to explore console shortcuts, or `:editor` when you need a multiline buffer.
+The command boots your application (honouring `src/main.ts` and registered providers), then drops into a prompt preloaded with useful globals: `app`, `auth`, discovered models, database helpers, and utilities from `@guren/testing`. Use `:help` to explore console shortcuts, or `:editor` when you need a multiline buffer.
 
 ### Typical workflow
 

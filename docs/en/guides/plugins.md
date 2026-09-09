@@ -125,7 +125,7 @@ Your `package.json` must include the `gurenPlugin` field:
 | `env` | Env keys appended to the app's `.env.example` (and `.env` when present) at install time. |
 | `publishes` | Files copied from your package into the app (`config/`, `db/migrations/`, or `resources/` only). Existing files are never overwritten without `--force`. |
 
-The manifest is pure data — the CLI never executes plugin code during installation.
+The manifest is pure data: the CLI never executes plugin code during installation.
 
 ### Optional: Contribute CLI Commands
 
@@ -158,7 +158,7 @@ export default {
 }
 ```
 
-Once the plugin is installed in an app, `bunx guren analytics:flush` runs the command and `bunx guren --help` lists it. Names must contain a `:` namespace, built-in command names always win, and a name declared by two plugins is dropped for both with a warning. The entry module is imported only when one of the declared commands is invoked (or renders its own `--help`) — never for the root listing.
+Once the plugin is installed in an app, `bunx guren analytics:flush` runs the command and `bunx guren --help` lists it. Names must contain a `:` namespace, built-in command names always win, and a name declared by two plugins is dropped for both with a warning. The entry module is imported only when one of the declared commands is invoked (or renders its own `--help`), never for the root listing.
 
 ## Step 5: Write Tests
 
@@ -227,9 +227,9 @@ bun add file:../guren-plugin-analytics
 bunx guren plugin guren-plugin-analytics
 ```
 
-`bun add file:` (and the `link:`/`workspace:` protocols) install the package as symlinks back to your plugin's source directory instead of copying it. If your plugin's `package.json` still has its own `node_modules` installed — from adding `@guren/core` as a `devDependency` in Step 1 — the app can end up loading two separate copies of `@guren/core`: one from its own install, one through the plugin's. This shows up as duplicate-module warnings at runtime, or a TypeScript error like `Property 'bindings' is protected but type 'Container' is not a class derived from 'Container'` at compile time.
+`bun add file:` (and the `link:`/`workspace:` protocols) install the package as symlinks back to your plugin's source directory instead of copying it. If your plugin's `package.json` still has its own `node_modules` installed (from adding `@guren/core` as a `devDependency` in Step 1), the app can end up loading two separate copies of `@guren/core`: one from its own install, one through the plugin's. This shows up as duplicate-module warnings at runtime, or a TypeScript error like `Property 'bindings' is protected but type 'Container' is not a class derived from 'Container'` at compile time.
 
-If you hit this, delete `node_modules` inside your plugin's package directory before linking it into the app — the app's own `@guren/core` install then satisfies the plugin's `peerDependencies` with nothing left to shadow it. A published plugin never ships its `node_modules`, so this only affects local testing before publishing.
+If you hit this, delete `node_modules` inside your plugin's package directory before linking it into the app. The app's own `@guren/core` install then satisfies the plugin's `peerDependencies` with nothing left to shadow it. A published plugin never ships its `node_modules`, so this only affects local testing before publishing.
 
 ## Step 8: Publish
 
@@ -240,7 +240,7 @@ npm publish
 
 ## Installing Plugins
 
-Any plugin — official (`@guren/plugin-*`) or community (`guren-plugin-*`) — can be installed via the CLI:
+Any plugin, official (`@guren/plugin-*`) or community (`guren-plugin-*`), can be installed via the CLI:
 
 ```bash
 bunx guren plugin @guren/plugin-vercel
@@ -250,7 +250,7 @@ The `plugin` command installs the package with `bun add` when missing (pass `--n
 
 > **Note:** Automatic registration covers class-based provider exports and the official zero-config factory plugins (`@guren/plugin-vercel`, `@guren/plugin-cloudflare`), which are registered as `providers: [vercelPlugin()]`-style calls. Third-party plugins built with `definePlugin()` export a factory that must be called with its configuration, so register them manually in `createApp({ providers })` as shown below.
 
-The same applies to first-party factory plugins that take configuration. `@guren/plugin-agents` is one: `agentsPlugin(agents)` takes the durable-agent registry from `config/agents.ts`, so `guren plugin` installs it and checks its compatibility range while the registration stays yours to write — see [Durable Agents](./durable-agents.md).
+The same applies to first-party factory plugins that take configuration. `@guren/plugin-agents` is one: `agentsPlugin(agents)` takes the durable-agent registry from `config/agents.ts`, so `guren plugin` installs it and checks its compatibility range while the registration stays yours to write (see [Durable Agents](./durable-agents.md)).
 
 ## Usage in a Guren Application
 

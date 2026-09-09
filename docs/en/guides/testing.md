@@ -47,7 +47,7 @@ await app.query('/posts/search', body) // HTTP QUERY (RFC 10008)
 
 ### Wrapping the real application
 
-`TestApp.create({ ... })` assembles an app from the parts you pass — good for isolated slices, but the subset can silently drift from what the server actually runs (providers, `auth`, `i18n`, security defaults). For tests that should exercise the real configuration, wrap the app your project exports:
+`TestApp.create({ ... })` assembles an app from the parts you pass, which is good for isolated slices, but the subset can silently drift from what the server actually runs (providers, `auth`, `i18n`, security defaults). For tests that should exercise the real configuration, wrap the app your project exports:
 
 ```ts
 import { TestApp } from '@guren/testing'
@@ -64,7 +64,7 @@ test('serves the home page', async () => {
 })
 ```
 
-`fromApp()` boots the app and binds its fetch handler for you. Several test files may call it on the same instance — `boot()` is idempotent and reuses the first boot.
+`fromApp()` boots the app and binds its fetch handler for you. Several test files may call it on the same instance: `boot()` is idempotent and reuses the first boot.
 
 You may also see the longer form below, which does the same thing by hand. Note the arrow function: `fetch` reads instance state, so handing the unbound `app.fetch` reference to `fromFetch` throws on the first request. `fromApp()` exists to remove that footgun; reach for `fromFetch` when you have an arbitrary fetch function rather than a Guren application.
 
@@ -160,7 +160,7 @@ test('API validates input', async () => {
 
 ## Custom Request Headers
 
-Use `withHeaders()` / `withHeader()` to send headers on every request — handy
+Use `withHeaders()` / `withHeader()` to send headers on every request, handy
 for locale detection, API versioning, or bearer tokens. Like `actingAs()` and
 `json()`, they return a new `TestApp`, so variants compose freely:
 
@@ -195,10 +195,10 @@ function resolveDatabaseFilename(): string {
 }
 ```
 
-Tests read and write `./data/guren.test.db` by default — a separate file from `./data/guren.db`, so nothing a test creates ever leaks into the data you're looking at in the dev server. Override the test file itself with `TEST_DATABASE_URL` (for example, to give each parallel CI shard its own file); `DATABASE_URL` stays authoritative for every other environment.
+Tests read and write `./data/guren.test.db` by default, a separate file from `./data/guren.db`, so nothing a test creates ever leaks into the data you're looking at in the dev server. Override the test file itself with `TEST_DATABASE_URL` (for example, to give each parallel CI shard its own file); `DATABASE_URL` stays authoritative for every other environment.
 
 > [!WARNING]
-> Scaffolds created before this branch existed write straight to `DATABASE_URL` (or `./data/guren.db`) regardless of `NODE_ENV`, so `bun test` pollutes the same database your dev server reads from. Retrofit it by replacing the `filename` option, not just adding the helper — the helper alone does nothing until `createSqliteDatabase()` is actually pointed at it:
+> Scaffolds created before this branch existed write straight to `DATABASE_URL` (or `./data/guren.db`) regardless of `NODE_ENV`, so `bun test` pollutes the same database your dev server reads from. Retrofit it by replacing the `filename` option, not just adding the helper. The helper alone does nothing until `createSqliteDatabase()` is actually pointed at it:
 >
 > ```diff
 >  import { createSqliteDatabase } from '@guren/orm'
@@ -220,7 +220,7 @@ Tests read and write `./data/guren.test.db` by default — a separate file from 
 
 ### Cleaning Up Between Tests
 
-For most suites, the separate test-database file is isolation enough — reset it back to a clean slate in `beforeEach` using the `resetDatabase()` helper your `config/database.ts` already exports. It drops every table and re-applies migrations, the same end state `guren db:reset` leaves behind, so your tables are ready to query straight after:
+For most suites, the separate test-database file is isolation enough. Reset it back to a clean slate in `beforeEach` using the `resetDatabase()` helper your `config/database.ts` already exports. It drops every table and re-applies migrations, the same end state `guren db:reset` leaves behind, so your tables are ready to query straight after:
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
@@ -255,7 +255,7 @@ interface DatabaseConnection {
 }
 ```
 
-Guren's SQLite adapter doesn't hand you a ready-made `DatabaseConnection` — `getDatabase()` from `config/database.ts` resolves to the underlying Drizzle instance, not this interface — so using these helpers means writing a small adapter yourself and passing it to `setTestDatabase()` before your tests run. `useDatabaseTransactions()` specifically **must wrap the same connection your models write through**: it begins a transaction on `beforeEach` and rolls it back on `afterEach`, and a second, independently-opened connection to the same file won't see (or roll back) writes made via the first one. `useTruncateTables()` has no such requirement — a `DELETE FROM` on any connection to the same database file removes the rows your models see, since it commits immediately rather than participating in a shared transaction. If the adapter plumbing sounds like more than your suite needs, the `resetDatabase()` pattern above is simpler and sidesteps the whole question.
+Guren's SQLite adapter doesn't hand you a ready-made `DatabaseConnection` (`getDatabase()` from `config/database.ts` resolves to the underlying Drizzle instance, not this interface), so using these helpers means writing a small adapter yourself and passing it to `setTestDatabase()` before your tests run. `useDatabaseTransactions()` specifically **must wrap the same connection your models write through**: it begins a transaction on `beforeEach` and rolls it back on `afterEach`, and a second, independently-opened connection to the same file won't see (or roll back) writes made via the first one. `useTruncateTables()` has no such requirement: a `DELETE FROM` on any connection to the same database file removes the rows your models see, since it commits immediately rather than participating in a shared transaction. If the adapter plumbing sounds like more than your suite needs, the `resetDatabase()` pattern above is simpler and sidesteps the whole question.
 
 ## Faking Services
 

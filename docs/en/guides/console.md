@@ -1,6 +1,6 @@
 # Console Commands
 
-Console commands let you run application code from a terminal — backfills, one-off maintenance, reports — with the same models, services, and container your HTTP handlers use.
+Console commands let you run application code from a terminal (backfills, one-off maintenance, reports) with the same models, services, and container your HTTP handlers use.
 
 A command is a class. A kernel collects those classes and dispatches one of them based on `argv`. Your app owns both, so nothing runs until you register it.
 
@@ -31,9 +31,9 @@ export default class SendDigestCommand extends Command {
 
 Two statics and one method are all a command needs:
 
-- `static signature` — the command's name plus its arguments and options (see below).
-- `static description` — the one-line summary shown by `list` and `help`.
-- `handle()` — the work. Return nothing (or `0`) for success, or a non-zero number to set the exit code. An uncaught exception is reported via `this.error()` and exits `1`.
+- `static signature`: the command's name plus its arguments and options (see below).
+- `static description`: the one-line summary shown by `list` and `help`.
+- `handle()`: the work. Return nothing (or `0`) for success, or a non-zero number to set the exit code. An uncaught exception is reported via `this.error()` and exits `1`.
 
 Pass `--command` to choose the invocation name instead of accepting the kebab-cased default:
 
@@ -124,7 +124,7 @@ If stdin closes before a prompt is answered, `ask()`, `confirm()` and `choice()`
 
 ## Registering Commands
 
-Nothing scans `app/Console/Commands` for you. A generated command is dead code until a kernel registers it — deliberately, so that deployments never depend on filesystem globbing.
+Nothing scans `app/Console/Commands` for you. A generated command is dead code until a kernel registers it. That is deliberate: deployments never depend on filesystem globbing.
 
 Scaffolded apps ship `src/console.ts` for exactly this, and `bunx guren make:command` adds the import and the registration to it for you:
 
@@ -140,7 +140,7 @@ kernel.registerMany([SendDigestCommand])
 
 Passing `app.container` lets commands resolve services with `this.resolve()`. `register(OneCommand)` is equivalent for a single class.
 
-If your project predates this file, create it yourself — the export must be named `kernel`, since the deployment recipes import it by that name. `make:command` prints the exact lines to add when it cannot patch the file itself.
+If your project predates this file, create it yourself. The export must be named `kernel`, since the deployment recipes import it by that name. `make:command` prints the exact lines to add when it cannot patch the file itself.
 
 Because registration is explicit, `bunx guren check` warns about any command class no console entrypoint uses:
 
@@ -149,7 +149,7 @@ Because registration is explicit, `bunx guren check` warns about any command cla
   outside its imports, so no kernel receives it.
 ```
 
-An import on its own does not count — that is precisely the state left behind when a registration is deleted but the import is not.
+An import on its own does not count: that is precisely the state left behind when a registration is deleted but the import is not.
 
 ## Running Commands
 
@@ -182,7 +182,7 @@ bun run console help users:create # usage, arguments, and options for one comman
 An unrecognised name exits `1` and suggests the closest matches.
 
 Note that `bin/console.ts` boots the application before dispatching, so even
-`list` pays that cost — and in a development app with migrations, boot also runs
+`list` pays that cost, and in a development app with migrations, boot also runs
 your seeders. Reach for `list` and `help` freely in development; on a deployed
 environment, remember the invocation is a full boot.
 
@@ -224,11 +224,11 @@ async handle(): Promise<number | void> {
 }
 ```
 
-This requires the calling command to have been dispatched through a kernel — `this.call()` throws when a command is instantiated directly.
+This requires the calling command to have been dispatched through a kernel. `this.call()` throws when a command is instantiated directly.
 
 ## Modules
 
-Commands scaffolded with `--module` land under `modules/<name>/app/Console/Commands/`. There is no per-module console kernel, so they reach the root kernel through the module's own descriptor — `defineModule()` carries a `commands` array alongside `routes` and `providers`, which `make:command --module` fills in:
+Commands scaffolded with `--module` land under `modules/<name>/app/Console/Commands/`. There is no per-module console kernel, so they reach the root kernel through the module's own descriptor: `defineModule()` carries a `commands` array alongside `routes` and `providers`, which `make:command --module` fills in:
 
 ```ts
 // modules/billing/index.ts
@@ -250,17 +250,17 @@ import { billingModule } from '../modules/billing/index.js'
 kernel.registerMany(billingModule.commands)
 ```
 
-That second line is the one step the scaffold leaves to you — add it once per module, and every later `make:command --module billing` is picked up automatically. `bunx guren check` warns until you do.
+That second line is the one step the scaffold leaves to you. Add it once per module, and every later `make:command --module billing` is picked up automatically. `bunx guren check` warns until you do.
 
-Importing a command file straight from `src/console.ts` would work at runtime but reaches into the module's internals, which `bunx guren check --arch` reports as a failure — `modules/<name>/index.ts` and `modules/<name>/db/schema.ts` are the module's only public surface.
+Importing a command file straight from `src/console.ts` would work at runtime but reaches into the module's internals, which `bunx guren check --arch` reports as a failure: `modules/<name>/index.ts` and `modules/<name>/db/schema.ts` are the module's only public surface.
 
 ## Running in Deployed Environments
 
 Where the kernel runs depends on the platform:
 
-- **A long-lived server or container** — run `bun run console <command>` inside it, the same way you would locally. This is also how you drive commands from a container-based scheduler or cron entry.
-- **Serverless** — export a dedicated handler that feeds the kernel and deploy it as its own function. See the [serverless guide](./serverless.md) for the `createConsoleHandler(kernel)` adapter and how to invoke it.
+- **A long-lived server or container**: run `bun run console <command>` inside it, the same way you would locally. This is also how you drive commands from a container-based scheduler or cron entry.
+- **Serverless**: export a dedicated handler that feeds the kernel and deploy it as its own function. See the [serverless guide](./serverless.md) for the `createConsoleHandler(kernel)` adapter and how to invoke it.
 
 Commands that touch the database need the application booted first, which is why `bin/console.ts` awaits `ready` before dispatching. Skipping the boot leaves models unconfigured and every query fails.
 
-For work that should run *on a timer* rather than on demand, see the [task scheduling guide](./scheduling.md) — a scheduler can invoke commands, and the two subsystems are separate on purpose.
+For work that should run *on a timer* rather than on demand, see the [task scheduling guide](./scheduling.md). A scheduler can invoke commands, and the two subsystems are separate on purpose.
