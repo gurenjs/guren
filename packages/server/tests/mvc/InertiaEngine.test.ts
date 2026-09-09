@@ -64,7 +64,8 @@ describe('InertiaEngine SSR integration', () => {
     // The shim is JavaScript no other test runs; executed against a stub document.
     describe('the inline global shim', () => {
       async function runShim(stub: { script?: string; attribute?: string }): Promise<unknown> {
-        const source = (await renderDocument()).match(SHIM)![0].replace(/^<script>|<\/script>$/gu, '')
+        const element = (await renderDocument()).match(SHIM)![0]
+        const source = element.slice('<script>'.length, -'</script>'.length)
         const window: { __INERTIA_PAGE__?: unknown } = {}
         const document = {
           querySelector: () =>
