@@ -1,6 +1,6 @@
 # アタッチメントガイド
 
-アタッチメントは、アップロードされたファイルをモデルに結び付けます。「`Post` は `cover` 画像を1つと `images` を複数持つ」という宣言をモデルに書くと、ファイルは[ストレージディスク](./storage.md)に保存され、1つの `attachments` テーブルで追跡され、画像バリデーションとサムネイル用のバリアント生成が組み込みで付いてきます。宣言はモデル上にあるため、コレクション名、one/many の種別、バリアント名はすべてコンパイル時に検査されます。
+アタッチメントは、アップロードされたファイルをモデルに結び付けます。「`Post` は `cover` 画像を1つと `images` を複数持つ」という宣言をモデルに書くと、ファイルは[ストレージディスク](./storage.md)に保存され、1つの `attachments` テーブルで追跡されます。画像バリデーションとサムネイル用のバリアント生成も組み込みです。宣言はモデル上にあるため、コレクション名、one/many の種別、バリアント名はすべてコンパイル時に検査されます。
 
 ```ts
 import { Attachable, defineModel, hasOneAttached, hasManyAttached } from '@guren/core'
@@ -142,28 +142,27 @@ export const { Attachment } = configureAttachments({
 
 ### アタッチメント付きフィーチャーのスキャフォールド
 
-レイヤーの導入後は、`make:feature`（および `guren add resource`）で
+レイヤーを導入したら、`make:feature`(および `guren add resource`)で
 アタッチメント対応のフィーチャー一式をスキャフォールドできます:
 
 ```bash
 bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:one,images:many"
 ```
 
-`--attach` はカンマ区切りの `name:kind` ペア（`one` または `many`、省略時は
-`one`）を受け取ります。生成されるモデルは各コレクションに
-`image: 'require'` を付けた `Attachable` ミックスインでラップされ（画像以外の
-アップロードにはコレクションごとにこのオプションを外してください）、store
-アクションは同名の multipart フィールドを `this.file()` / `this.files()` で
-読んで `Post.attach()` を呼び、destroy アクションは行の削除前に
+`--attach` はカンマ区切りの `name:kind` ペア(`one` または `many`、省略時は
+`one`)を受け取ります。生成されるモデルは、各コレクションに `image: 'require'`
+を付けた `Attachable` ミックスインでラップされます(画像以外のアップロードを
+受けるコレクションでは、このオプションを外してください)。store アクションは
+同名の multipart フィールドを `this.file()` / `this.files()` で読んで
+`Post.attach()` を呼び、destroy アクションは行を削除する前に
 `Post.purgeAttachments()` を呼びます。アプリに `configureAttachments()` が
-ない場合、このコマンドはスキャフォールドを拒否します。先に
-`bunx guren add attachments` を実行してください。生成された New
-ページへの `<input type="file">` の追加は手動で行います（Inertia の
-`useForm` はフォームデータに `File` が含まれると自動的に multipart POST に
-切り替わります）。生成された `update()` はアタッチメントに触れません。
-Edit ページからのアップロードも受け付けるには、同じ `this.file()` と
-`Post.attach()` の行を `update()` にも追加してください（`hasOne` は置換、
-`hasMany` は追加になります）。
+無い場合、このコマンドはスキャフォールドを拒否するので、先に
+`bunx guren add attachments` を実行してください。生成された New ページへの
+`<input type="file">` の追加は手動です(Inertia の `useForm` は、フォームデータに
+`File` が含まれると自動で multipart POST に切り替わります)。生成された
+`update()` はアタッチメントに触れません。Edit ページからのアップロードも
+受け付けるには、同じ `this.file()` と `Post.attach()` の行を `update()` にも
+追加してください(`hasOne` は置換、`hasMany` は追加になります)。
 
 ## アタッチメントの操作
 
@@ -213,7 +212,7 @@ const loaded = await Post.with('attachments').get() // 全コレクションの�
 
 1. **バイト数上限**: `maxImageBytes` を超える入力は 413 で拒否します。
 2. **ヘッダ寸法**: 依存ゼロのヘッダパーサ(PNG、JPEG、GIF、WebP、AVIF/HEIC)が宣言済みの寸法を読み、`maxPixels` を超えるものはデコーダがピクセルバッファを確保する*前に* 422 で拒否します。
-3. **フルデコード**: 画像を実際にデコードします。ヘッダで嘘をつく破損ファイルや途中で切れたファイルはここで 422 になります。スニフした content type やクライアント申告の MIME は記録されますが、画像かどうかの判定には決して使われません。
+3. **フルデコード**: 画像を実際にデコードします。ヘッダで嘘をつく破損ファイルや途中で切れたファイルはここで 422 になります。スニフした content type やクライアント申告の MIME は記録しますが、画像かどうかの判定には使いません。
 
 ゲート1と2は純粋な JavaScript で、どのランタイムでも実行されます。ゲート3は画像プロセッサが存在する環境で実行されます(後述)。プロセッサがない場合、アップロードはヘッダの証拠に基づいて受理され、寸法もヘッダ由来になります。
 
@@ -227,7 +226,7 @@ const loaded = await Post.with('attachments').get() // 全コレクションの�
 どの環境でも守られるルール:
 
 - **バイト列のみ。** `attach()` が受け付けるのは `File | Blob | Uint8Array` だけです。ファイルシステムのパス文字列は任意ファイル読み取りの入口になるため、型でも実行時でも拒否されます。
-- **HEIC/HEIF はデフォルトで 415 拒否。** HEIC のデコードは OS コーデック依存で、macOS の開発機では動き Linux の本番では失敗する、というずれを既定で見逃すわけにはいきません。`accepts: { heic: 'convert' }` でオプトインすると、デコードして JPEG として保存します。コーデックがデコードできないランタイムではやはり 415 を返します。この拒否は画像パイプラインが走るとき常に適用されます。`image: 'allow'` のコレクションも対象で、iPhone の HEIC 写真は `'convert'` にオプトインしない限り 415 になります。HEIC のバイト列を不透明ファイルとして保存するのは、`image` ポリシーを持たないコレクションだけです。
+- **HEIC/HEIF はデフォルトで 415 拒否。** HEIC のデコードは OS のコーデックに依存します。macOS の開発機では動くのに Linux の本番では失敗する、というずれを既定で見逃すわけにはいきません。`accepts: { heic: 'convert' }` でオプトインすると、デコードして JPEG として保存します。コーデックがデコードできないランタイムではやはり 415 を返します。この拒否は画像パイプラインが走るとき常に適用されます。`image: 'allow'` のコレクションも対象で、iPhone の HEIC 写真は `'convert'` にオプトインしない限り 415 になります。HEIC のバイト列を不透明ファイルとして保存するのは、`image` ポリシーを持たないコレクションだけです。
 - **ファイル名はサニタイズされます**(パス区切りや制御文字の除去)。オブジェクトキーの一部になるためです。
 - **フレームワークが配信する箇所は強化済みです。** 署名配信ルートの proxy 応答には[URL と可視性](#url-と可視性)に挙げた強化ヘッダ一式が付きます。public ディスクは従来どおり `disk.url()` でアプリ側のルールに従って配信されるため、自分のドメインでユーザーのアップロードを配信する場合は正しい `Content-Type` と `X-Content-Type-Options: nosniff` ヘッダを自分で付けてください。同一オリジンのページとして表示される SVG はスクリプトになりえます。
 
@@ -320,7 +319,7 @@ export function registerWebRoutes(router: Router): void {
 private ディスクの `attachmentUrl()` は**パス相対の署名付き URL**(`/attachments/{id}/{filename}?expires=…&signature=…`)を返すようになります。アタッチメント配信専用に導出した鍵で HMAC 署名され、`urlExpiresIn` 後に失効します(URL 単位の上書きは `{ expiresIn }`、ダウンロード強制は `{ disposition: 'attachment' }`。ただし強制が保証されるのは proxy 応答で、リダイレクトするディスクではバックエンドが presigned の response override を尊重するかに依存します。R2 は尊重しません: [Cloudflare ガイド](./cloudflare.md#attachments-on-workers)参照)。ルートは署名を検証し(失敗はすべて同一の 404)、variant を配信時に解決し(宣言済みだが未生成の variant はオリジナルを配信し、生成完了後は同じ URL が variant を配信し始めます)、その上で:
 
 - ドライバが `capabilities.presignedGet` を宣言するディスク(S3、`presign` 付き R2)では短寿命の presigned URL へ **302 リダイレクト**します。バケットがバイト列を配信し、アプリの帯域を使いません。
-- それ以外では強化ヘッダ付きで**プロキシ配信**します(inline allowlist、`nosniff`、`Content-Security-Policy: sandbox`、`Referrer-Policy: no-referrer`、ETag/304)。これにより **local ディスク上の private が本当に private になり**、**R2 の private ディスクが `presign` クレデンシャル無しのバインディングだけで動きます**。
+- それ以外では強化ヘッダ付きで**プロキシ配信**します(inline allowlist、`nosniff`、`Content-Security-Policy: sandbox`、`Referrer-Policy: no-referrer`、ETag/304)。この経路なら **local ディスク上の private が本当に private になり**、**R2 の private ディスクが `presign` クレデンシャル無しのバインディングだけで動きます**。
 
 ディスク単位の上書きは `disks` のオブジェクト形式で行います: `{ docs: { visibility: 'private', serve: 'proxy' } }`。`serve` は `'auto'`(デフォルト)、`'redirect'`、`'proxy'`、`'direct'`(ルートを使わず従来の `temporaryUrl()` URL を維持)です。`guren check` は `delivery` 設定時にルートがマウントされているかを検証し、presign できないドライバのディスクへの `serve: 'redirect'` も検出します。
 
@@ -345,7 +344,7 @@ async destroy() {
 }
 ```
 
-- `detach`/`purgeAttachments` はストレージオブジェクトを先に(アタッチメントごとのプレフィックスで)削除し、その後に行を削除します。途中でクラッシュしても残るのは「何も指していない行」で、次の描画が大きな音を立てて教えてくれます。逆順だと、バケット監査でしか見つからない不可視の孤児オブジェクトが残ります。
+- `detach`/`purgeAttachments` はストレージオブジェクトを先に(アタッチメントごとのプレフィックスで)削除し、その後に行を削除します。途中でクラッシュしても残るのは「何も指していない行」で、次の描画ではっきりと表面化します。逆順だと、バケット監査でしか見つからない不可視の孤児オブジェクトが残ります。
 - モデルの delete フックはパージの仕組みとして*使いません*。フックは一部の削除経路でしか発火せず、受け取るのも行ではなく where 句です。destroy アクションで `purgeAttachments()` を明示的に呼んでください。
 - `SoftDeletes` と併用する場合、ソフトデリートはアタッチメントをそのまま残します(restore が機能する必要があるため)。`forceDelete` の経路で `purgeAttachments()` を呼んでください。
 

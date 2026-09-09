@@ -1,13 +1,13 @@
 # 第 10 章: ファイル
 
-ブログには画像が要ります。この章では Guren の attachments レイヤーを導入し、公開ディレクトリの外に保存されて署名付き URL 経由で配信されるカバー画像をすべての投稿に与え、それからギャラリーをエージェントに委ねます。その途中で `guren check` は正しくあるべき事柄をひとそろい新しく手にし、「プライベート」を「公開」に変えてしまうあの間違いをそれが捕まえるところを、あなたは目にします。
+ブログには画像が必要です。この章では Guren の attachments レイヤーを導入し、公開ディレクトリの外に保存して署名付き URL で配信するカバー画像をすべての投稿に持たせ、そのあとギャラリーをエージェントに委ねます。その途中で `guren check` に新しい検査項目がひとそろい加わり、「プライベート」を「公開」に変えてしまう間違いをそれが捕まえることも確認します。
 
 **この章で学ぶこと:**
 
-- アップロードとはサーバー上で何なのか: multipart ボディの中の `File`、`attachments` テーブルの 1 行、ディスク上のオブジェクト
-- アップロードが決して `public/` の下に置かれない理由と、代わりに署名付きの配信ルートが何をするのか
-- モデルが attachments をどう宣言するか、そしてそれらを扱う 4 つの呼び出し: `attach`、`withAttachments`、`detach`、`purgeAttachments`
-- フォームがファイルを送る方法と、テストがそれを送る方法
+- サーバーから見たアップロードの正体: multipart ボディの中の `File`、`attachments` テーブルの 1 行、ディスク上のオブジェクト
+- アップロードを `public/` の下に置かない理由と、代わりに置かれる署名付き配信ルートの働き
+- モデルでの attachments の宣言方法と、それを扱う 4 つの呼び出し: `attach`、`withAttachments`、`detach`、`purgeAttachments`
+- フォームからファイルを送る方法と、テストから送る方法
 - `guren check` が強制する attachment のルールと、そのうちひとつが警告ではなく失敗である理由
 
 開発サーバーが動いていなければ起動します。
@@ -24,7 +24,7 @@ bun run dev
 bunx guren add attachments
 ```
 
-何をしたのかを読んでください。これから保守するのはあなたです。まずストレージレイヤーが導入されました(`app/Providers/StorageProvider.ts`、ディスクは 2 つ、`./storage/app` を根とする `local` と `./public/storage` を根とする `public`)。それから `db/schema.ts` に `attachments` テーブルが追加され、`config/attachments.ts` と `app/Providers/AttachmentsProvider.ts` が書かれ、`src/app.ts` にプロバイダーが登録され、ルート registrar の先頭で `registerAttachmentRoutes` を呼ぶことで配信ルートがマウントされ、`attachments:prune` コンソールコマンドが登録されました。テーブルにはマイグレーションが要ります。
+何が行われたのかを読んでおきましょう。これから保守するのは自分自身です。まずストレージレイヤーが導入されました(`app/Providers/StorageProvider.ts`、ディスクは 2 つ、`./storage/app` を根とする `local` と `./public/storage` を根とする `public`)。続いて `db/schema.ts` に `attachments` テーブルが追加され、`config/attachments.ts` と `app/Providers/AttachmentsProvider.ts` が書かれ、`src/app.ts` にプロバイダーが登録され、ルート registrar の先頭で `registerAttachmentRoutes` を呼ぶことで配信ルートがマウントされ、`attachments:prune` コンソールコマンドが登録されました。テーブルにはマイグレーションが必要です。
 
 ```bash run
 bun run db:make create_attachments
@@ -34,13 +34,13 @@ bun run db:make create_attachments
 bun run db:migrate
 ```
 
-手で行う編集が 2 つ。ディスクには commit すべきでないファイルが入ります。
+手で入れる変更が 2 つあります。まず、ディスクには commit すべきでないファイルが入ります。
 
 ```bash run
 printf 'storage/app/\npublic/storage/\n' >> .gitignore
 ```
 
-そして config には、ジェネレーターが代わりに書けない行がひとつ加わります。あなたのどのモデルが attachments を持つことになるかを、ジェネレーターは知らないからです。prune コマンドは、attachment の持ち主がまだ存在するかを確かめるためにこのマップを必要とします。
+もうひとつ、config にはジェネレーターが代わりに書けない行が 1 行加わります。どのモデルが attachments を持つことになるかまでは、ジェネレーターには分からないからです。prune コマンドは、attachment の持ち主がまだ存在するかを確かめるのにこのマップを使います。
 
 ```ts file=config/attachments.ts
 import { Model, configureAttachments, getContainer } from '@guren/core'
@@ -71,13 +71,13 @@ export const { Attachment } = configureAttachments({
 Model.morphMap = { Post }
 ```
 
-このファイルには決定が 3 つあり、それがこの章のセキュリティの中身です。
+このファイルには決定が 3 つあります。この章のセキュリティの中身は、ここに集まっています。
 
 - **`disk: 'local'`**、根は `./storage/app`。このディレクトリを配信するものは何もありません。`public/` の下のファイルはパスを言い当てた誰にでも届きますが、ここのファイルは、渡すと判断したコードを通してしか届きません。
-- **`disks: { local: 'private' }`**。private なディスクの URL はファイルへのパスではありません。ルートへの、署名付きで期限のあるリンクです。
-- **`delivery: {}`**。そのルートです。オブジェクトをストリーミングし、アップロードを画像かダウンロード以外のものとしてブラウザが扱わないようにするヘッダーを付けます。インラインで表示できる型の許可リスト、`nosniff`、サンドボックス化した CSP。第 14 章では同じルートがオブジェクトストレージへのリダイレクトに変わりますが、ページが使う URL は変わりません。
+- **`disks: { local: 'private' }`**。private なディスクの URL は、ファイルへのパスではなく、ルートへの署名付きで期限のあるリンクになります。
+- **`delivery: {}`**。これがそのルートです。オブジェクトをストリーミングし、ブラウザがアップロードを画像かダウンロード以外のものとして扱わないようにヘッダーを付けます。インラインで表示できる型の許可リスト、`nosniff`、サンドボックス化した CSP です。第 14 章では同じルートがオブジェクトストレージへのリダイレクトに変わりますが、ページが使う URL は変わりません。
 
-ルートファイルは配信ルートで始まるようになりました。呼び出しがどこに入ったかを目で確かめ、そのまま残しておけるように、ファイルを置き換えます。
+ルートファイルは配信ルートの登録から始まるようになりました。呼び出しがどこに入ったかを確かめたうえでそのまま残せるように、ファイルを置き換えます。
 
 ```ts file=routes/web.ts
 import { Router, registerAttachmentRoutes, requireAuthenticated, requireGuest } from '@guren/core'
@@ -153,7 +153,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 ## 2. カバー画像を仕様化する
 
-テストには画像が要ります。1 ピクセルの PNG で十分で、ファイルの中に置いておけるほど小さくて済みます。
+テストには画像が必要です。1 ピクセルの PNG で十分で、テストファイルの中に直接書けるほど小さく収まります。
 
 ```ts file=tests/PostAttachments.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -237,17 +237,17 @@ describe('post attachments', () => {
 })
 ```
 
-このファイルで読む価値のあるところが 3 つ。アップロードは `File` を含む `FormData` で、`TestApp` はそれを見つけると multipart として送ります。JSON のボディではファイルを運べません。URL は、ただ存在することではなく署名されていることをアサートしています。署名の無い URL は、ディスクが公開されていることを意味するからです。そして最後のテストは、attachment の行が記録するオブジェクトキーを通してディスクそのものを検査します。投稿を削除したら、そのファイルを残していってはいけません。そしてそれは、データベースへのどんなアサーションからも分かりません。
+このファイルで読む価値があるのは 3 か所です。1 つ目、アップロードは `File` を含む `FormData` で、`TestApp` はそれを見つけると multipart として送ります。JSON のボディではファイルを運べません。2 つ目、URL については存在するかどうかではなく、署名されているかどうかをアサートしています。署名の無い URL は、ディスクが公開されていることを意味するからです。3 つ目、最後のテストは attachment の行が記録するオブジェクトキーをたどってディスクそのものを検査します。投稿を削除したら、そのファイルを残してはいけません。これはデータベースへのアサーションだけでは分からないことです。
 
 ```bash run expect-fail
 bun test
 ```
 
-赤、しかも 3 つのテストがどれも走る前に落ちます。`Post.withAttachments` が関数ではないからで、`Post` はまだ attachable ではないのです。
+赤です。しかも 3 つのテストはどれも走る前に落ちます。`Post.withAttachments` が関数ではないからで、`Post` はまだ attachable になっていません。
 
 ## 3. カバー画像を手で書く
 
-モデルはクラスを包むことでコレクションを宣言します。`image: 'require'` は、画像でないファイルは名前や type ヘッダーが何を主張していようと、attach の時点でバリデーションメッセージとともに拒否されるという意味です。
+モデルはクラスを包む形でコレクションを宣言します。`image: 'require'` を付けると、画像でないファイルは名前や type ヘッダーが何を主張していても、attach の時点でバリデーションメッセージとともに拒否されます。
 
 ```ts file=app/Models/Post.ts
 import { Attachable, defineModel, hasOneAttached, type BelongsToRecord, type BelongsToManyRecord, type HasManyRecord } from '@guren/core'
@@ -274,9 +274,9 @@ Post.hasMany('comments', () => import('./Comment.js').then((m) => m.Comment), 'p
 Post.belongsToMany('tags', () => import('./Tag.js').then((m) => m.Tag), postTags, 'postId', 'tagId')
 ```
 
-`Attachable` は `Post` に static を 4 つ足します。`attach(id, collection, file)`、`detach(id, collection, attachmentId?)`、`withAttachments(records, names)`、`purgeAttachments(id)` です。テーブルやディスクの話はここには一切出てきません。config が一度だけ決めました。
+`Attachable` は `Post` に static を 4 つ足します。`attach(id, collection, file)`、`detach(id, collection, attachmentId?)`、`withAttachments(records, names)`、`purgeAttachments(id)` です。テーブルやディスクの話はここには出てきません。それは config が一度決めたきりです。
 
-リソースはカバー画像を `AttachmentData` として運びます。id、名前、コンテンツタイプ、サイズ、寸法、そしてページが使うべき URL です。その URL が署名付きのルートなのか CDN のパスなのかは config の仕事であって、リソースの仕事ではありません。
+リソースはカバー画像を `AttachmentData` として運びます。id、名前、コンテンツタイプ、サイズ、寸法、そしてページが使うべき URL です。その URL が署名付きのルートなのか CDN のパスなのかを決めるのは config で、リソースではありません。
 
 ```ts file=app/Http/Resources/PostResource.ts
 import { Resource, type AttachmentData } from '@guren/core'
@@ -318,7 +318,7 @@ export class PostResource extends Resource<PostWithRelations, PostResourceData> 
 }
 ```
 
-コントローラーです。`store` はカバー画像が送られていれば attach し、`show` はそれを読み込み、`destroy` は行より先にファイルを purge し、新しい `cover` アクションがそれを差し替えます。`this.file('cover')` は multipart のフィールドを読み、無いか空なら `null` を返します。
+次はコントローラーです。`store` はカバー画像が送られていれば attach し、`show` はそれを読み込み、`destroy` は行より先にファイルを purge し、新しい `cover` アクションがそれを差し替えます。`this.file('cover')` は multipart のフィールドを読み、無いか空なら `null` を返します。
 
 ```ts file=app/Http/Controllers/PostController.ts
 import { Controller, ValidationException, paginate, type PaginatedPageProps } from '@guren/core'
@@ -445,9 +445,9 @@ export default class PostController extends Controller {
 }
 ```
 
-この章を支える細部が 2 つ。`hasOneAttached` のコレクションに対する `Post.attach(post.id, 'cover', cover)` は**差し替え**です。古いファイルは削除され、新しいものが保存され、行はひとつ。そして `purgeAttachments` は `delete` より前に来ます。attachments テーブルは `posts` への外部キーを持たないので(ポリモーフィックで、すべてのモデルにひとつのテーブル)、何も cascade しません。purge せずに削除された投稿は、ディスクに孤児のファイルを、テーブルに孤児の行を残すことになります。`attachments:prune` はあとからそれを見つけるために存在し、3 つ目のテストはそれが起きるのを許しません。
+この章を支える細部が 2 つあります。ひとつは、`hasOneAttached` のコレクションに対する `Post.attach(post.id, 'cover', cover)` が**差し替え**だという点です。古いファイルは削除され、新しいものが保存され、行は 1 件のままです。もうひとつは、`purgeAttachments` が `delete` より前に来ることです。attachments テーブルは `posts` への外部キーを持たないので(ポリモーフィックで、すべてのモデルにひとつのテーブル)、cascade は起きません。purge せずに削除した投稿は、ディスクに孤児のファイルを、テーブルに孤児の行を残します。`attachments:prune` はそれをあとから見つけるためにあり、3 つ目のテストはそもそもその状態を許しません。
 
-カバー画像を差し替えるルートは `POST` で、`update` の一部ではありません。Inertia のフォームからファイルを `PUT` で運ぶにはメソッドの詐称が要りますが、Guren はそれをしません。ルートを分けたほうが単純ですし、読みやすくもあります。
+カバー画像を差し替えるルートは `update` の一部ではなく、独立した `POST` です。Inertia のフォームからファイルを `PUT` で運ぶにはメソッドの詐称が必要ですが、Guren はそれをしません。ルートを分けたほうが単純で、読みやすくもなります。
 
 ```ts file=routes/web.ts
 import { Router, registerAttachmentRoutes, requireAuthenticated, requireGuest } from '@guren/core'
@@ -520,7 +520,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 }
 ```
 
-フォームです。Inertia の `useForm` は、データが `File` を持った瞬間に自分で multipart のリクエストへ切り替えます。足すのは input と、フォームの型のフィールドがもうひとつだけです。バリデーターがそれを知らないので、ルートの契約もそれを知りません。
+続いてフォームです。Inertia の `useForm` は、データが `File` を持った時点で multipart のリクエストへ自動的に切り替えます。足すのは input ひとつと、フォームの型のフィールドひとつだけです。バリデーターはこのフィールドを知らないので、ルートの契約にも現れません。
 
 ```tsx file=resources/js/pages/posts/New.tsx
 import { Head, useForm } from '@inertiajs/react'
@@ -729,7 +729,7 @@ bun test
 
 ![投稿ページ。タイトル「Hand-write once, then delegate」の上にカバー画像が横幅いっぱいに入り、続いて著者の署名、タグ 2 つ、本文、そして Delete リンク付きのコメントが 1 件。](../../images/tutorial-post-page.png)
 
-緑です。**チェックポイント:** 画像付きの投稿を書いてください。画像を新しいタブで開いて URL を見ます。`/attachments/<id>/<name>?expires=…&signature=…`。6 分待ってそのタブを再読み込みすると 404 です。リンクの期限が切れました。ページは次のレンダリングで新しいものを発行します。ここで「プライベート」が意味しているのはそれです。
+緑になりました。**チェックポイント:** 画像付きの投稿を書いてください。画像を新しいタブで開いて URL を見ると、`/attachments/<id>/<name>?expires=…&signature=…` になっています。6 分待ってそのタブを再読み込みすると 404 です。リンクの期限が切れたためで、ページは次のレンダリングで新しい URL を発行します。ここでの「プライベート」はこういう意味です。
 
 ## 4. `guren check` がファイルについて知っていること
 
@@ -737,9 +737,9 @@ bun test
 bunx guren check
 ```
 
-並んだ行のうち 4 つが新顔で、どれも通っています。モデルが attachments を宣言していて `configureAttachments()` が存在すること。config がスキーマの export するテーブルを結びつけていること。配信が有効で `registerAttachmentRoutes()` がマウントされていること。そしてディスク `local` の根が `public/` の外にあること。どれも、ランタイムで遅く静かに失敗するがゆえに `check` が捕まえるために作られた間違いです。最後のものは、長いメッセージを伴う失敗です。`public/` の中に根を持つディスクは、配信ルートがどう設定されていようと、すべてのアップロードを署名も期限も無い URL で取得できるようにしてしまいます。ファイルに届くのにルートを通る必要がまったく無いからです。それが、ファイルがサーバーにあることと、ファイルがウェブにあることの違いです。
+並んだ行のうち 4 つが新顔で、どれも通っています。モデルが attachments を宣言していて `configureAttachments()` が存在すること。config がスキーマの export するテーブルを結びつけていること。配信が有効で `registerAttachmentRoutes()` がマウントされていること。そしてディスク `local` の根が `public/` の外にあること。いずれもランタイムでは遅く静かに失敗する間違いなので、`check` が先に捕まえます。最後のひとつは、長いメッセージを伴う失敗になります。`public/` の中に根を持つディスクは、配信ルートをどう設定していようと、すべてのアップロードを署名も期限も無い URL で取得できる状態にしてしまいます。ファイルに届くのにルートを通る必要がないからです。ファイルがサーバーにあることと、ファイルがウェブにあることの違いは、ここにあります。
 
-この章のハーネスのてこは、そのチェックです。`PostToolUse` フックはモデルや config ファイルを編集するたびにそれを走らせるので、ディスクを `public` に「単純化」したエージェントは、次の一歩に進む前に同じ言葉でそれを聞かされます。
+この章のハーネス要素は、このチェックです。`PostToolUse` フックはモデルや config ファイルを編集するたびにこれを走らせるので、ディスクを `public` に「単純化」したエージェントは、次の作業に移る前に同じ指摘を受け取ります。
 
 ```bash run
 bunx guren gate
@@ -871,7 +871,7 @@ describe('post attachments', () => {
 bun test
 ```
 
-赤が 2 件。`images` は `Post` が宣言しているコレクションではありません。
+赤が 2 件です。`images` は `Post` が宣言しているコレクションではありません。
 
 ## 6. 委ねる
 
@@ -879,7 +879,7 @@ bun test
 
 > Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` attaches each one, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
 
-これはカバー画像と同じ形の、ひとつ上の階層です。`this.file('cover')` の代わりに `this.files('images')`、nullable の代わりに配列、差し替える `attach` の代わりに attachment の id を渡す `detach`。rubric で面白いのは削除ルートです。URL の id で attachment を探し、*かつ*この投稿のコレクションの中だけを探さなければなりません。そうすることで、他人の投稿の有効な attachment id は拒否されます。`detach(post.id, 'images', attachmentId)` はまさにそれを行います。attachment の id だけで自前の削除を書いたなら、そうはなりません。
+これはカバー画像と同じ形を、ひとつ上の階層でやるだけです。`this.file('cover')` の代わりに `this.files('images')`、nullable の代わりに配列、差し替える `attach` の代わりに attachment の id を渡す `detach` を使います。rubric で見どころなのは削除ルートです。URL の id で attachment を探すだけでなく、*かつ*この投稿のコレクションの中だけを探す必要があります。こうすることで、他人の投稿の有効な attachment id は拒否されます。`detach(post.id, 'images', attachmentId)` がまさにそれを行います。attachment の id だけを見る削除を自分で書くと、こうはなりません。
 
 **手元にエージェントが無い場合は、** モデルにコレクションがひとつ増えます。
 
@@ -1419,12 +1419,12 @@ bun test
 rubric は次のとおりです。
 
 - `images` が `hasManyAttached({ image: 'require' })` で宣言され、モデルのほかの宣言は変わっていない。
-- `store` が `this.files('images')` のファイルをすべて attach し、`destroyImage` が投稿にスコープされた `detach(post.id, 'images', attachmentId)` で 1 枚を取り除く。投稿へのほかのすべての変更と同じ `authorize('update', ...)` を通したあとに。
+- `store` が `this.files('images')` のファイルをすべて attach し、`destroyImage` が投稿にスコープされた `detach(post.id, 'images', attachmentId)` で 1 枚を取り除く。投稿へのほかの変更と同じく、`authorize('update', ...)` を通したあとに行う。
 - `show` が `cover` と `images` を 1 回の `withAttachments` 呼び出しで読み込み、リソースがギャラリーを `AttachmentData[]` として公開する。
 - 削除ルートが、投稿には `bind` を、attachment の id には `params` スキーマを持ち、`auth` グループの中にある。
-- attachment のテスト 5 件が緑で、`guren check` は attachment の 4 つのルールを相変わらず通す。
+- attachment のテスト 5 件が緑で、`guren check` は attachment の 4 つのルールを引き続き通す。
 
-**チェックポイント:** 画像が 3 枚ある投稿と、あなたが取り除いた 4 枚目。
+**チェックポイント:** 画像が 3 枚ある投稿と、そこから取り除いた 4 枚目。
 
 ```bash run
 bunx guren gate
@@ -1446,7 +1446,7 @@ git commit -m "feat: add a gallery to posts"
 
 - **`guren check` が「Attachable model wiring」で失敗する。** モデルが `Attachable` を mixin しているのに、`config/`、`src/`、`app/` のどこにも `configureAttachments()` の呼び出しがありません。mixin はレイヤーを初回利用時に解決するので、このチェックが無ければ最初のアップロードで失敗していたはずです。`bunx guren add attachments` が欠けている半分を導入します。
 - **ブラウザで画像の URL が 404 になる。** 署名付き URL の期限が切れています(既定では 5 分)。ページを再読み込みすれば新しいものが得られます。レンダリングし直したページでも 404 なら、`registerAttachmentRoutes` がマウントされていません。
-- **編集フォームからアップロードしても何も起きない。** ファイルを伴う `form.put()` にはメソッドの詐称が要りますが、フレームワークはそれをしません。`posts.cover` がそうしているように、ファイルには `POST` のルートを使ってください。
+- **編集フォームからアップロードしても何も起きない。** ファイルを伴う `form.put()` にはメソッドの詐称が必要ですが、フレームワークはそれをしません。`posts.cover` と同じように、ファイルには `POST` のルートを使ってください。
 - **「The file must be an image.」** `image: 'require'` は拡張子ではなくバイト列を検査します。名前を変えただけのテキストファイルは拒否され、`.jpg` という名前の本物の PNG は受け入れられます。
 - **投稿を削除しても `storage/app/attachments` にファイルが残る。** `delete` の前に `purgeAttachments` が呼ばれていません。attachments テーブルには、代わりに purge してくれる外部キーがありません。`bunx guren attachments:prune` が残り物を見つけます。
 

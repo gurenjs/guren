@@ -1,15 +1,15 @@
 # OAuthガイド
 
-Guren は「GitHub / Google / Discordでサインイン」のようなログインのための OAuth 2.0 認可コードフローを提供します。リダイレクト、CSRF対策済みのstate管理、トークン交換、プロフィール取得を処理し、あなたは自分のログインコントローラーとセッションに組み込むだけです。
+Guren には「GitHub / Google / Discordでサインイン」のようなログインを実装するための OAuth 2.0 認可コードフローが用意されています。リダイレクト、CSRF対策込みのstate管理、トークン交換、プロフィール取得までは Guren 側で行うので、ログインコントローラーとセッションへの組み込みだけを書けば済みます。
 
 ## コアコンセプト
 
-- **OAuthManager** – プロバイダーを登録し、認可 → コールバックのフローを駆動します。
+- **OAuthManager** – プロバイダーを登録し、認可からコールバックまでの流れを進めます。
 - **OAuthProviderConfig** – 1つのプロバイダー（GitHub、Google、Discord、または任意の OAuth 2.0 プロバイダー）のクライアントID/シークレット、エンドポイント、スコープ。
-- **OAuthStateStore** – CSRFとオープンリダイレクト攻撃を防ぐ、一度限りのstateストレージ。デフォルトはメモリ、マルチプロセス構成では `DatabaseOAuthStateStore`（またはRedis）を使用します。
-- **プロバイダーファクトリ** – `createGitHubOAuthProviderConfig`、`createGoogleOAuthProviderConfig`、`createDiscordOAuthProviderConfig` が各プロバイダーの既知のエンドポイントをあらかじめ埋めてくれます。
+- **OAuthStateStore** – CSRFとオープンリダイレクト攻撃を防ぐ、一度限りのstateの保管場所。デフォルトはメモリで、マルチプロセス構成では `DatabaseOAuthStateStore`（またはRedis）を使います。
+- **プロバイダーファクトリ** – `createGitHubOAuthProviderConfig`、`createGoogleOAuthProviderConfig`、`createDiscordOAuthProviderConfig` が、各プロバイダーの既知のエンドポイントをあらかじめ埋めてくれます。
 
-フロー全体では 4 者が登場します。アプリはブラウザーを 2 回受け取り、その間に state ストアが「この `state` を発行したのは本当にこのブラウザーか」を答えます。
+フロー全体には 4 者が登場します。アプリはブラウザーを 2 回受け取り、その間に state ストアが「この `state` を発行したのは本当にこのブラウザーか」を答えます。
 
 ```mermaid
 sequenceDiagram
@@ -35,7 +35,7 @@ sequenceDiagram
 
 ### マネージャーの登録
 
-`OAuthServiceProvider` が `OAuthManager` のシングルトンをコンテナに `oauth` として束縛します。アプリの起動時にプロバイダーを登録します。
+`OAuthServiceProvider` が `OAuthManager` のシングルトンをコンテナに `oauth` として束縛します。プロバイダーはアプリの起動時に登録します。
 
 ```ts
 // config/oauth.ts
@@ -107,15 +107,15 @@ export function registerWebRoutes(router: Router): void {
 
 ## stateをブラウザに束縛する
 
-`state` は推測不能かつ一度きりですが、それだけでは**別のブラウザに移し替えられます**。攻撃者はあなたのアプリでフローを開始し、自分のプロバイダーアカウントで認可を済ませ、受け取った `code` を未消費のまま持っておいて、訪問者に次を開かせることができます。
+`state` は推測できず一度しか使えませんが、それだけでは**別のブラウザに移し替えられてしまいます**。攻撃者はまずアプリでフローを開始し、自分のプロバイダーアカウントで認可を済ませます。そして受け取った `code` を未消費のまま持っておき、訪問者に次のURLを開かせることができます。
 
 ```
 https://your.app/auth/github/callback?code=<攻撃者のもの>&state=<攻撃者のもの>
 ```
 
-この組み合わせには「どのブラウザが開始したか」を示すものが何もないため、コールバックは成功し、訪問者は**攻撃者のアカウント**にログインさせられます。その後に訪問者が書いたもの — 投稿、アップロード、登録した決済手段 — はすべて攻撃者が読めるアカウントに入ります。
+この組み合わせには「どのブラウザが開始したか」を示す情報が何もないため、コールバックは成功し、訪問者は**攻撃者のアカウント**にログインさせられます。その後に訪問者が書いた投稿、アップロード、登録した決済手段は、すべて攻撃者が読めるアカウントに入ります。
 
-両方の脚にセッションを渡すと塞げます。
+開始時とコールバック時の両方でセッションを渡せば塞げます。
 
 ```ts
 // フロー開始時
@@ -125,16 +125,16 @@ const { url } = await oauth.authorize('github', { session: this.auth.session() }
 await oauth.handleCallback('github', { code, state, session: this.auth.session() })
 ```
 
-`authorize()` はフローごとに新しい値を発行してセッションに保持し、そのハッシュだけを state と一緒に保存します。`handleCallback()` は値を読み戻し（同時に削除し）、束縛が一致しない state を拒否します。セッションへの書き込みは、初回訪問者のセッションをプロバイダーとの往復をまたいで永続化させる役割も果たすため、コールバックのリクエストが同じセッションを持って戻ってきます。
+`authorize()` はフローごとに新しい値を発行してセッションに保持し、そのハッシュだけを state と一緒に保存します。`handleCallback()` は値を読み戻し（同時に削除し）、束縛が一致しない state を拒否します。セッションへの書き込みには、初回訪問者のセッションをプロバイダーとの往復をまたいで残す役割もあります。そのおかげで、コールバックのリクエストが同じセッションを持って戻ってきます。
 
 束縛は state 単位で保持されるので、同じブラウザで複数のフローを並行させても（タブを2つ開く、プロバイダーを選び直す）互いに無効化しません。
 
-`this.auth.session()` が `undefined` を返す場合（セッションミドルウェアが無い等）は、単に未束縛のまま通ります。壊れはしませんが、保護もされません。
+`this.auth.session()` が `undefined` を返す場合（セッションミドルウェアが無い等）は、そのまま未束縛で通ります。動かなくなることはありませんが、保護もされません。
 
-束縛をセッション以外の場所に置く必要がある場合（暗号化Cookie、ネイティブアプリのセキュアストレージ）は、`bindTo` で自分で管理します。そのブラウザだけが提示できる値を `authorize()` に渡し、同じ値を `handleCallback()` に渡してください。両方指定した場合は `bindTo` が優先されます。
+束縛をセッション以外の場所に置きたい場合（暗号化Cookie、ネイティブアプリのセキュアストレージなど）は、`bindTo` で自分で管理します。そのブラウザだけが提示できる値を `authorize()` に渡し、同じ値を `handleCallback()` にも渡してください。両方指定した場合は `bindTo` が優先されます。
 
 > [!WARNING]
-> `session` も `bindTo` も渡さない `authorize()` は従来どおり動作するため、以前のAPIで書かれたアプリは壊れません。ただしプロセスごとに一度警告を出し、採用するまで上記の攻撃に晒されたままです。`make:auth` と `oauth` ブループリントは束縛版を生成します。
+> `session` も `bindTo` も渡さない `authorize()` は従来どおり動くので、以前のAPIで書かれたアプリは壊れません。ただしプロセスごとに一度警告を出しますし、束縛を使い始めるまでは上記の攻撃に晒されたままです。`make:auth` と `oauth` ブループリントは束縛版を生成します。
 
 ## ログイン後のリダイレクト
 
@@ -154,7 +154,7 @@ const { redirectTo } = await oauth.handleCallback('github', {
 return this.redirect(redirectTo ?? '/dashboard')
 ```
 
-`redirectTo` は自動的にサニタイズされます。アプリ相対パス（`/settings/billing`）は常に許可されますが、絶対URLは `allowedRedirectHosts` にホストが含まれていない限り破棄されます。これにより、攻撃者がログイン後にユーザーを外部サイトへリダイレクトするリンクを細工することを防ぎます。
+`redirectTo` は自動的にサニタイズされます。アプリ相対パス（`/settings/billing`）は常に許可されますが、絶対URLは `allowedRedirectHosts` にホストが含まれていない限り破棄されます。攻撃者がログイン後のユーザーを外部サイトへ飛ばすリンクを細工するのを防ぐためです。
 
 ```ts
 export const oauth = createOAuthManager({
@@ -194,7 +194,7 @@ oauth.registerProvider('discord', createDiscordOAuthProviderConfig({
 
 ### 任意の OAuth 2.0 プロバイダー
 
-直接登録するプロバイダーには、生のエンドポイントと、必要に応じてユーザー情報レスポンスを正規化する `mapProfile` 関数が必要です。
+直接登録するプロバイダーには、エンドポイントをそのまま指定します。ユーザー情報レスポンスを正規化する必要があれば `mapProfile` 関数も渡します。
 
 ```ts
 import type { OAuthProviderConfig } from '@guren/core'
@@ -222,7 +222,7 @@ oauth.registerProvider('gitlab', gitlabConfig)
 
 ## プロバイダーによるメールアドレスの検証状態
 
-プロバイダーがメールアドレスを返したことは、そのアドレスを検証したという主張ではありません。多くのプロバイダーは検証状態を別に報告しており（Google は OIDC の `email_verified`、Discord は `verified`）、プロフィールでは `profile.emailVerified` として公開されます。
+プロバイダーがメールアドレスを返したからといって、そのアドレスを検証済みだと主張しているわけではありません。多くのプロバイダーは検証状態を別のフィールドで報告しており（Google は OIDC の `email_verified`、Discord は `verified`）、プロフィールでは `profile.emailVerified` として読めます。
 
 | 値 | 意味 |
 |----|------|
@@ -230,7 +230,7 @@ oauth.registerProvider('gitlab', gitlabConfig)
 | `false` | プロバイダーが未検証と報告している |
 | `undefined` | プロバイダーがこの情報を返していない（アプリ側で方針を決める） |
 
-`false` の場合はアカウントの**新規作成**を拒否してください。未検証のアドレスをそのまま受け入れると、所有していないメールアドレスを名乗れてしまい、重複メールを弾くコールバックが本来の所有者を恒久的に締め出すことになります。既に紐付け済みのアカウントが後から状態変化で締め出されないよう、チェックは作成パスだけに置きます。
+`false` の場合はアカウントの**新規作成**を拒否してください。未検証のアドレスをそのまま受け入れると、所有していないメールアドレスを名乗れてしまいます。重複メールを弾くコールバックでは、本来の所有者がそのアドレスで二度とログインできなくなります。チェックは作成パスだけに置いてください。そうすれば、既に紐付け済みのアカウントが後からの状態変化で締め出されることもありません。
 
 ```ts
 if (!user && profile.emailVerified === false) {
@@ -240,7 +240,7 @@ if (!user && profile.emailVerified === false) {
 }
 ```
 
-組み込みプリセットは自分のキーを宣言済みです。自前で登録するプロバイダーが標準以外のキー名を使う場合は `emailVerifiedKey` を設定してください。デフォルトでは OIDC の `email_verified` を読み、boolean 値のみを有効な信号として扱います。
+組み込みプリセットは自分のキーを宣言済みです。自前で登録するプロバイダーが標準以外のキー名を使う場合は `emailVerifiedKey` を設定してください。デフォルトでは OIDC の `email_verified` を読み、boolean の値だけを有効な情報として扱います。
 
 ```ts
 const discordish: OAuthProviderConfig = {
@@ -249,9 +249,9 @@ const discordish: OAuthProviderConfig = {
 }
 ```
 
-`mapProfile` はマッピング全体を担うため、それを使うプロバイダーでは `emailVerified` も自分で設定し、`emailVerifiedKey` は無視されます。GitHub の `/user` には検証状態のフィールドがないため `emailVerified` は `undefined` のままですが、メールアドレス非公開時のフォールバックが動いた場合は例外です（`/user/emails` は検証済みのプライマリアドレスしか返さないため）。
+`mapProfile` はマッピング全体を担うので、これを使うプロバイダーでは `emailVerified` も自分で設定することになり、`emailVerifiedKey` は無視されます。GitHub の `/user` には検証状態のフィールドがないため、`emailVerified` は `undefined` のままです。例外はメールアドレス非公開時のフォールバックが動いた場合で、`/user/emails` は検証済みのプライマリアドレスしか返さないためです。
 
-`fetchFallbackEmail` はメールアドレスを含まないレスポンスに対して読んだ後に呼ばれるため、上記のキーはその戻り値を保証できません。文字列をそのまま返す場合は検証状態を主張せず `undefined` のままになります。主張する場合はオブジェクトを返してください。
+`fetchFallbackEmail` が呼ばれるのは、メールアドレスを含まないレスポンスから上記のキーを読んだ後です。そのため、キーの値がフォールバックの戻り値まで保証することはありません。文字列をそのまま返した場合、検証状態は主張されず `undefined` のままです。主張したい場合はオブジェクトを返してください。
 
 ```ts
 fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVerified: true }),
@@ -259,9 +259,9 @@ fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVe
 
 ## Stateストレージ
 
-コールバックを元のリクエストに結びつける一度限りの `state` 値は、サーバー側で保存されます。デフォルトの `MemoryOAuthStateStore` は単一プロセスの開発環境では動作しますが、複数プロセス（ロードバランサー、サーバーレス）構成の本番環境では共有ストレージが必要です。そうしないと、コールバックがstateを発行していないプロセスに到達してしまう可能性があります。
+コールバックを元のリクエストに結びつける一度限りの `state` 値は、サーバー側で保存されます。デフォルトの `MemoryOAuthStateStore` は単一プロセスの開発環境なら動きますが、複数プロセス（ロードバランサー、サーバーレス）構成の本番環境では共有ストレージが要ります。そうしないと、コールバックがstateを発行していないプロセスに届いてしまうことがあります。
 
-ほとんどのアプリでは `DatabaseOAuthStateStore` が推奨のデフォルトです。アプリが既に使っているデータベースにstateを保存するため、追加のインフラは不要です:
+ほとんどのアプリでは `DatabaseOAuthStateStore` を選んでおけば十分です。アプリが既に使っているデータベースにstateを保存するので、追加のインフラは要りません:
 
 ```ts
 import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
@@ -283,9 +283,9 @@ export const oauthStates = sqliteTable('oauth_states', {
 })
 ```
 
-`binding` 列は[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュを保持します。この列が無いとストアは束縛を永続化できず、束縛済みのstateがすべて未束縛で戻ってくるため、保護が黙って無効化されます。`session` / `bindTo` を使う前に列を追加してください。
+`binding` 列は[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュを保持します。この列が無いとストアは束縛を保存できません。束縛済みのstateがすべて未束縛で戻ってくるため、保護が黙って無効になります。`session` / `bindTo` を使う前に列を追加してください。
 
-期限切れのstate行は参照時に削除されます。まとめて掃除する場合はスケジュールジョブから `store.deleteExpired()` を呼んでください。既にRedisを運用しているアプリではRedisも引き続き使えます:
+期限切れのstate行は参照時に削除されます。まとめて掃除したい場合は、スケジュールジョブから `store.deleteExpired()` を呼んでください。既にRedisを運用しているアプリなら、Redisも引き続き使えます:
 
 ```ts
 import { createOAuthManager } from '@guren/core'

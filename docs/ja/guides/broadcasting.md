@@ -1,13 +1,13 @@
 # ブロードキャスティングガイド
 
-Guren は接続されたクライアントへのリアルタイムイベント配信のためのブロードキャスティングシステムを提供します。ライブ通知、チャットアプリケーション、リアルタイムダッシュボードなどの機能を構築するのに便利です。
+Guren のブロードキャスティングは、接続中のクライアントへリアルタイムにイベントを配信する仕組みです。ライブ通知、チャットアプリケーション、リアルタイムダッシュボードといった機能を作るときに使います。
 
 ## コアコンセプト
 
 - **BroadcastManager** – チャンネル、ドライバー、SSEクライアントを管理する中央ハブ。
 - **Channel** – イベントをブロードキャストするための名前付き経路。チャンネルはpublic、private、presenceのいずれか。
 - **BroadcastDriver** – イベント配信のバックエンド（MemoryまたはRedis）。
-- **SSE (Server-Sent Events)** – ブラウザクライアントへのイベントプッシュの組み込みサポート。
+- **SSE (Server-Sent Events)** – ブラウザクライアントへイベントを送り込むための組み込み機能。
 - **WebSocket Clients** – ソケットクライアントの登録・購読・解除を扱う基盤API。
 
 ## チャンネルタイプ
@@ -118,7 +118,7 @@ broadcast.presenceChannel('chat.{roomId}', async (channel, user) => {
 
 ### パターンマッチング
 
-チャンネルパターンはサポート：
+チャンネルパターンでは次の記法が使えます。
 - `{param}` – ドット以外の任意のセグメントにマッチ
 - `*` – 任意の単一セグメントにマッチ
 - `**` – 複数セグメントにマッチ
@@ -151,11 +151,11 @@ export function registerBroadcastRoutes(router: Router): void {
 }
 ```
 
-SSE エンドポイントは `?channels=` クエリパラメータを受け取り、指定したチャンネルをストリーム開始前に購読します。リクエストされた各チャンネルは `getUser` が返すユーザーに対して認可されるため、パブリックチャンネルであれば追加のリクエストなしに素の `EventSource` だけで動作します。プライベート・プレゼンスチャンネルは後から `/broadcasting/auth` を通じて購読します（[チャンネルの認可（クライアント）](#チャンネルの認可クライアント)を参照）。
+SSE エンドポイントは `?channels=` クエリパラメータを受け取り、指定したチャンネルをストリーム開始前に購読します。リクエストされた各チャンネルは `getUser` が返すユーザーに対して認可されます。そのため、パブリックチャンネルであれば素の `EventSource` だけで、追加のリクエストなしに動きます。プライベート・プレゼンスチャンネルは、後から `/broadcasting/auth` を通じて購読します（[チャンネルの認可（クライアント）](#チャンネルの認可クライアント)を参照）。
 
 ## WebSocket 基盤
 
-`BroadcastManager` に WebSocket クライアントのライフサイクルAPIが追加されています。  
+`BroadcastManager` には WebSocket クライアントのライフサイクルAPIがあります。  
 クライアント登録、チャンネル購読、解除を SSE と同じブロードキャスト経路で扱えます。
 
 ```ts
@@ -171,11 +171,11 @@ broadcast.unsubscribeWebSocketClient(clientId, 'notifications')
 broadcast.removeWebSocketClient(clientId)
 ```
 
-このAPIを使うことで、Bun の WebSocket upgrade ルートを既存の channel/driver 構成に接続できます。
+このAPIを使えば、Bun の WebSocket upgrade ルートを既存の channel/driver 構成につなげられます。
 
 ### 型安全 channel codegen
 
-`guren codegen` で `.guren/channels.gen.ts` が生成されるようになりました。  
+`guren codegen` は `.guren/channels.gen.ts` を生成します。  
 サーバー側の broadcast 利用箇所からチャンネルとイベント名を抽出します。
 
 ```ts
@@ -207,13 +207,13 @@ const off = feed.on('NewPost', (payload) => {
 })
 ```
 
-これにより、フロント側で channel/event 名だけでなく payload 形状も型安全に扱えます。
+フロント側では channel/event 名だけでなく、payload の形も型安全に扱えます。
 
-`useChannel(name)` は呼び出しごとに `endpoint?channels=name` へ専用の `EventSource` を開きます（デフォルトの endpoint は `/broadcasting/events`。endpoint に既にクエリ文字列がある場合は `&channels=` で連結します）。チャンネル引数は型のためだけのものではなく、サーバーが実際に購読するチャンネルです。後述の `?channels=` の例と同じくストリーム開始時に認可・購読されるため、SSE ルートが `getUser` でユーザーを解決していればプライベート・プレゼンスチャンネルも同じ呼び出しで動作します。サーバーが拒否したチャンネルは `connected` イベントの `channels` 一覧に含まれず、何も届きません。チャンネルごとに 1 ストリームなのは意図的です。イベントはイベント名で振り分けられるため、チャンネルをストリーム単位で分けることで `feed.on('NewPost', …)` が「`announcements` の `NewPost`」を意味できます。URL を自前で組み立てる場合は `channelStreamUrl(endpoint, channel)` を使えます。
+`useChannel(name)` は呼び出しごとに `endpoint?channels=name` へ専用の `EventSource` を開きます（デフォルトの endpoint は `/broadcasting/events`。endpoint に既にクエリ文字列がある場合は `&channels=` で連結します）。チャンネル引数は型のためだけのものではなく、サーバーが実際に購読するチャンネルです。後述の `?channels=` の例と同じく、ストリーム開始時に認可と購読が行われます。SSE ルートが `getUser` でユーザーを解決していれば、プライベート・プレゼンスチャンネルも同じ呼び出しで動きます。サーバーが拒否したチャンネルは `connected` イベントの `channels` 一覧に載らず、イベントも届きません。チャンネルごとに 1 ストリームなのは意図的です。イベントはイベント名で振り分けられるので、チャンネルをストリーム単位で分けておけば、`feed.on('NewPost', …)` が「`announcements` の `NewPost`」を指せます。URL を自分で組み立てる場合は `channelStreamUrl(endpoint, channel)` が使えます。
 
 ### E2E 型安全リアルタイム
 
-生成された `ChannelEvents` をサーバー側 emit にも適用すると、送信時 payload もコンパイル時に検証できます。
+生成された `ChannelEvents` をサーバー側の emit にも適用すると、送信する payload もコンパイル時に検証できます。
 
 ```ts
 import type { ChannelEvents } from '@/.guren/channels.gen'
@@ -227,7 +227,7 @@ await typed.toChannel('announcements').broadcast('NewPost', { id: 2 })
 
 ### クライアント側の統合
 
-パブリックチャンネルは `?channels=` クエリパラメータで指定すると、ストリーム開始と同時に購読されます。接続直後、サーバーは `clientId` と「認可・購読済みチャンネルの一覧」を載せた `connected` イベントを送信します。プライベート・プレゼンスチャンネルの購読に必要になるため、`clientId` を必ず保持してください。
+パブリックチャンネルは `?channels=` クエリパラメータで指定すると、ストリーム開始と同時に購読されます。接続直後、サーバーは `clientId` と「認可・購読済みチャンネルの一覧」を載せた `connected` イベントを送ってきます。`clientId` はプライベート・プレゼンスチャンネルの購読に要るので、必ず保持してください。
 
 ```ts
 // Connect to SSE and subscribe public channels up front
@@ -262,7 +262,7 @@ eventSource.onerror = (error) => {
 
 ### チャンネルの認可（クライアント）
 
-プライベート・プレゼンスチャンネルは `POST /broadcasting/auth` を通じて購読します。`{ clientId, channel }` を含む 1 回のリクエストで、現在のユーザーに対するチャンネル認可と SSE 接続への購読が同時に行われます。レスポンスにはチャンネルごとに両方の結果が含まれます。
+プライベート・プレゼンスチャンネルは `POST /broadcasting/auth` を通じて購読します。`{ clientId, channel }` を含む 1 回のリクエストで、現在のユーザーに対するチャンネル認可と、SSE 接続への購読が同時に行われます。レスポンスには、チャンネルごとに両方の結果が入っています。
 
 ```ts
 async function subscribeToPrivateChannel(channel: string) {
@@ -296,13 +296,13 @@ if (await subscribeToPrivateChannel('private-orders.123')) {
 > リクエストから `clientId` を省略するとチャンネルの認可のみが行われ（`subscribed: false`）、イベントはブラウザに届きません。必ず `connected` イベントで受け取った `clientId` を送信してください。
 
 > [!NOTE]
-> `private-` / `presence-` プレフィックスを持つチャンネルは、認可関数が未登録の場合デフォルトで拒否されます。クライアントが購読する前に `broadcast.privateChannel()` / `broadcast.presenceChannel()` で登録してください。
+> `private-` / `presence-` プレフィックスを持つチャンネルは、認可関数が未登録だとデフォルトで拒否されます。クライアントが購読する前に `broadcast.privateChannel()` / `broadcast.presenceChannel()` で登録してください。
 
 ## 設定
 
 ### Redisドライバー
 
-本番環境とマルチサーバーサポートにはRedisドライバーを使用します。
+本番環境や複数サーバー構成ではRedisドライバーを使います。
 
 ```ts
 import { BroadcastManager, RedisDriver } from '@guren/core'
@@ -337,7 +337,7 @@ await driver.publish('test-channel', 'TestEvent', data)
 
 ## イベントからのブロードキャスト
 
-イベントシステムとブロードキャスティングを統合できます。
+イベントシステムとブロードキャスティングを組み合わせられます。
 
 ```ts
 import { Event } from '@guren/core'

@@ -40,13 +40,13 @@ bun init
 ```
 
 ポイント:
-- `@guren/core`は**peerDependency** -- ホストアプリケーションが提供します。
-- `@guren/core`と`@guren/testing`はビルドとテスト用の**devDependencies**です。
+- `@guren/core`は**peerDependency**で、ホストアプリケーションが用意します。
+- `@guren/core`と`@guren/testing`はビルドとテストのための**devDependencies**です。
 - `gurenPlugin.compatibility`フィールドでサポートするGurenバージョンを宣言します。
 
 ## ステップ2: プラグインを定義する
 
-`@guren/core`の`definePlugin()`ヘルパーを使用します。設定はクロージャに捕捉され、呼び出しごとに独立したプロバイダークラスを生成するため、同じプラグインを異なる設定で複数回登録できます:
+`@guren/core`の`definePlugin()`ヘルパーを使います。設定はクロージャに閉じ込められ、呼び出しごとに独立したプロバイダークラスができるため、同じプラグインを異なる設定で複数回登録できます:
 
 ```typescript
 // src/plugin.ts
@@ -87,9 +87,9 @@ export const analyticsPlugin = definePlugin<AnalyticsConfig>({
 })
 ```
 
-初期化コストの高いプラグインは`deferred: true`と`provides: ['analytics']`を併せて指定すると、提供するサービスが最初に解決されるまでプロバイダーの読み込みを遅延できます。`container.make()`は同期なので、deferredプラグインの`register()`はサービスを同期的にバインドする必要があります（そうでない場合`make()`は例外を投げます）。`boot()`は非同期でもよく、最初の解決の直後に実行されます。
+初期化コストの高いプラグインは、`deferred: true`と`provides: ['analytics']`を併せて指定すると、提供するサービスが最初に解決されるまでプロバイダーの読み込みを遅らせられます。`container.make()`は同期なので、deferredプラグインの`register()`はサービスを同期的にバインドしてください（そうしないと`make()`が例外を投げます）。`boot()`は非同期でもよく、最初の解決の直後に実行されます。
 
-`definePlugin()`でカバーできないライフサイクル制御が必要な場合は、従来通り`ServiceProvider`のサブクラスを直接エクスポートすることもできます。ただし設定をstaticプロパティに保存するのは避けてください。staticは共有されるため、プラグインを2回登録すると最初の設定が上書きされます。
+`definePlugin()`では足りないライフサイクル制御が必要な場合は、`ServiceProvider`のサブクラスを直接エクスポートすることもできます。ただし設定をstaticプロパティに保存するのは避けてください。staticは共有されるため、プラグインを2回登録すると最初の設定が上書きされます。
 
 ## ステップ3: プラグインをエクスポートする
 
@@ -125,11 +125,11 @@ export type { AnalyticsConfig } from './plugin'
 | `env` | インストール時にアプリの`.env.example`（`.env`が存在すればそちらにも）へ追記される環境変数キー。 |
 | `publishes` | パッケージからアプリへコピーされるファイル（`config/`、`db/migrations/`、`resources/`のみ）。既存ファイルは`--force`なしでは上書きされません。 |
 
-マニフェストは純粋なデータです — CLIはインストール中にプラグインのコードを一切実行しません。
+マニフェストはただのデータです。CLIはインストール中にプラグインのコードを実行しません。
 
 ### オプション: CLIコマンドを追加する
 
-プラグインはマニフェストで宣言することで`guren` CLIにコマンドを追加できます:
+マニフェストで宣言すれば、プラグインから`guren` CLIにコマンドを追加できます:
 
 ```json
 {
@@ -158,7 +158,7 @@ export default {
 }
 ```
 
-プラグインをアプリにインストールすると、`bunx guren analytics:flush`でコマンドが実行でき、`bunx guren --help`にも表示されます。コマンド名には`:`名前空間が必須で、ビルトインコマンド名が常に優先され、複数のプラグインが同じ名前を宣言した場合は警告とともに両方とも無効化されます。エントリモジュールがimportされるのは宣言したコマンドが実行される時（またはそのコマンド自身の`--help`を表示する時）だけで、ルートの一覧表示では実行されません。
+プラグインをアプリにインストールすると、`bunx guren analytics:flush`でコマンドを実行でき、`bunx guren --help`にも表示されます。コマンド名には`:`名前空間が必須です。ビルトインコマンド名が常に優先され、複数のプラグインが同じ名前を宣言した場合は、警告を出したうえで両方とも無効になります。エントリモジュールがimportされるのは、宣言したコマンドを実行する時（またはそのコマンド自身の`--help`を表示する時）だけで、ルートの一覧表示では読み込まれません。
 
 ## ステップ5: テストを書く
 
@@ -219,7 +219,7 @@ bun test src/plugin.test.ts
 
 ## ステップ7: 公開前にローカルで動作確認する
 
-公開する前に、実際のGurenアプリにプラグインをリンクしてエンドツーエンドで検証しましょう:
+公開する前に、実際のGurenアプリにプラグインをリンクして、通しで動作を確認しましょう:
 
 ```bash
 # アプリのディレクトリで実行
@@ -227,9 +227,9 @@ bun add file:../guren-plugin-analytics
 bunx guren plugin guren-plugin-analytics
 ```
 
-`bun add file:`(および`link:`・`workspace:`プロトコル)は、パッケージをコピーするのではなく、プラグインのソースディレクトリへのシンボリックリンクとしてインストールします。プラグインの`package.json`に、ステップ1で`@guren/core`を`devDependencies`として追加した際の`node_modules`がまだ残っている場合、アプリは`@guren/core`を2つの別々のコピーとして読み込んでしまうことがあります — 1つはアプリ自身のインストール、もう1つはプラグイン経由です。これはランタイムでの重複モジュール警告や、コンパイル時の`Property 'bindings' is protected but type 'Container' is not a class derived from 'Container'`のようなTypeScriptエラーとして現れます。
+`bun add file:`(および`link:`・`workspace:`プロトコル)は、パッケージをコピーせずに、プラグインのソースディレクトリへのシンボリックリンクとしてインストールします。プラグイン側に、ステップ1で`@guren/core`を`devDependencies`として追加したときの`node_modules`がまだ残っていると、アプリが`@guren/core`を2つの別々のコピーとして読み込んでしまうことがあります。1つはアプリ自身のインストール、もう1つはプラグイン経由のものです。この状態は、ランタイムでの重複モジュール警告や、コンパイル時の`Property 'bindings' is protected but type 'Container' is not a class derived from 'Container'`のようなTypeScriptエラーとして現れます。
 
-この問題が発生した場合は、アプリにリンクする前にプラグインのパッケージディレクトリ内の`node_modules`を削除してください。プラグイン側に隠蔽するコピーがなくなれば、アプリ自身の`@guren/core`インストールがプラグインの`peerDependencies`を満たすようになります。公開済みのプラグインは`node_modules`を同梱しないため、これは公開前のローカル検証にのみ影響します。
+この問題が起きたら、アプリにリンクする前にプラグインのパッケージディレクトリ内の`node_modules`を削除してください。プラグイン側に隠れたコピーがなくなれば、アプリ自身の`@guren/core`インストールがプラグインの`peerDependencies`を満たすようになります。公開済みのプラグインは`node_modules`を同梱しないため、これは公開前のローカル検証でしか起きません。
 
 ## ステップ8: 公開する
 
@@ -246,11 +246,11 @@ npm publish
 bunx guren plugin @guren/plugin-vercel
 ```
 
-`plugin`コマンドは、依存が未インストールなら`bun add`でインストールし（`--no-install`でスキップ可能）、プラグインが宣言するGuren互換性を検証した上で（`--ignore-compatibility`で無視して登録可能）、プロバイダーのimport追加と`createApp({ providers })`への登録、マニフェストの`env`・`publishes`エントリの適用を行います。`--force`は公開済みファイルの上書きに使います。
+`plugin`コマンドは、依存が未インストールなら`bun add`でインストールし（`--no-install`でスキップできます）、プラグインが宣言するGuren互換性を検証します（`--ignore-compatibility`を付ければ、無視して登録できます）。そのうえでプロバイダーのimportを追加して`createApp({ providers })`に登録し、マニフェストの`env`・`publishes`エントリを適用します。`--force`は公開済みファイルの上書きに使います。
 
-> **注意:** 自動登録が対応しているのは、クラスベースのプロバイダーエクスポートと、公式のゼロ設定ファクトリプラグイン(`@guren/plugin-vercel`・`@guren/plugin-cloudflare`。`providers: [vercelPlugin()]`形式の呼び出しで登録されます)です。サードパーティの`definePlugin()`プラグインは設定を渡してファクトリを呼び出す必要があるため、下記のように`createApp({ providers })`へ手動で登録してください。
+> **注意:** 自動登録が対応しているのは、クラスベースのプロバイダーエクスポートと、公式のゼロ設定ファクトリプラグイン(`@guren/plugin-vercel`・`@guren/plugin-cloudflare`。`providers: [vercelPlugin()]`形式の呼び出しで登録されます)です。サードパーティの`definePlugin()`プラグインは設定を渡してファクトリを呼ぶ必要があるため、下記のように`createApp({ providers })`へ手動で登録してください。
 
-設定を取る公式のファクトリプラグインも同じです。`@guren/plugin-agents` がそれにあたります。`agentsPlugin(agents)` は `config/agents.ts` の永続エージェントレジストリを引数に取るため、`guren plugin` はインストールと互換性レンジの検証までを行い、登録自体は自分で書くことになります([永続エージェント](./durable-agents.md)を参照)。
+設定を取る公式のファクトリプラグインも同じで、`@guren/plugin-agents` がそれにあたります。`agentsPlugin(agents)` は `config/agents.ts` の永続エージェントレジストリを引数に取るため、`guren plugin` が行うのはインストールと互換性レンジの検証までで、登録は自分で書くことになります([永続エージェント](./durable-agents.md)を参照)。
 
 ## Gurenアプリケーションでの使用方法
 
@@ -336,8 +336,8 @@ describe('RequestLoggerProvider', () => {
 
 ## ヒント
 
-- **可能な場合は`register()`を同期的に保つ。** 両フックはasyncをサポートしますが、同期的な登録の方が高速です。
-- **重い依存関係にはdeferredプロバイダーを使用する。** プラグインが大きなSDKを読み込む場合、必要な時にだけ初期化されるようにdeferredとしてマークしてください。
-- **importではなくコンテナに依存する。** フレームワーク内部を直接importするのではなく、`this.container.make()`でサービスを解決してください。
-- **複数のGurenバージョンに対してテストする。** CIマトリクスを使用して、サポートする最小バージョンと最新バージョンに対してテストスイートを実行してください。
-- **登録するサービスをドキュメント化する。** ユーザーが自身のコードでサービスを解決できるよう、プラグインが提供するコンテナキーを明記してください。
+- **可能なら`register()`は同期のままにする。** どちらのフックもasyncにできますが、同期の登録の方が高速です。
+- **重い依存関係にはdeferredプロバイダーを使う。** プラグインが大きなSDKを読み込む場合は、必要になった時にだけ初期化されるようdeferredを指定してください。
+- **importではなくコンテナに依存する。** フレームワーク内部を直接importせず、`this.container.make()`でサービスを解決してください。
+- **複数のGurenバージョンでテストする。** CIマトリクスを使い、サポートする最小バージョンと最新バージョンの両方でテストスイートを走らせてください。
+- **登録するサービスをドキュメントに書く。** 利用者が自分のコードでサービスを解決できるよう、プラグインが提供するコンテナキーを明記してください。

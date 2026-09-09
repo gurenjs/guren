@@ -1,6 +1,6 @@
 # 第 9 章: リレーションシップ
 
-第 6 章は `authorsOf` を残しました。著者の id を集めて `IN` クエリを 1 本走らせるヘルパーです。これは動きますし、リレーションシップが内部でやっていることそのものです。この章ではそれを本物に置き換えます。モデルに一度だけ宣言し、`with()` で読み込む `belongsTo` と `hasMany` です。それからコメントを追加します。ほかの 2 つを指す最初のテーブルです。そして、あなたがまだ作っていない唯一の形をエージェントに渡します。中間テーブルを通した多対多、タグです。
+第 6 章は `authorsOf` を残しました。著者の id を集めて `IN` クエリを 1 本走らせるヘルパーです。これは動きますし、リレーションシップが内部でやっていることそのものです。この章ではそれを本物に置き換えます。モデルに一度だけ宣言し、`with()` で読み込む `belongsTo` と `hasMany` です。それからコメントを追加します。ほかの 2 つを指す最初のテーブルです。そして、まだ作っていない唯一の形をエージェントに渡します。中間テーブルを通した多対多、タグです。
 
 章を終えると、ブログには互いを指す 4 つのテーブルが揃います。
 
@@ -15,10 +15,10 @@ erDiagram
 
 **この章で学ぶこと:**
 
-- リレーションシップをモデルにどう宣言し、どう型付けし、どう読み込むか。そして読み込まれたレコードがどう見えるか
+- リレーションシップをモデルに宣言し、型付けし、読み込む方法。そして読み込まれたレコードの見え方
 - `findOrFail` と `paginate` の隣に `findWithOrFail` と `withPaginate` がある理由
-- ほかの 2 つを参照するテーブル(コメント)を、両側からどうモデリングするか
-- 中間テーブルとは何か、そして Guren に `attach()` が無い理由。中間テーブルもほかと同じくひとつのモデルです
+- ほかの 2 つを参照するテーブル(コメント)を両側からモデリングする方法
+- 中間テーブルの正体と、Guren に `attach()` が無い理由。中間テーブルもほかと同じくひとつのモデルです
 - `orm-models.md` の rule と API ダイジェストが、エージェントに存在しないクエリメソッドを発明させない仕組み
 
 開発サーバーが動いていなければ起動します。
@@ -29,7 +29,7 @@ bun run dev
 
 ## 1. リレーションシップとしての著者
 
-この節では観測できる変化は何もありません。`authorsOf` が消える間、投稿のテスト 14 件はすべて緑のままです。`Post` にリレーションを宣言します。
+この節では、目に見える変化は何もありません。`authorsOf` が消えても、投稿のテスト 14 件はすべて緑のままです。`Post` にリレーションを宣言します。
 
 ```ts file=app/Models/Post.ts
 import { defineModel, type BelongsToRecord } from '@guren/core'
@@ -48,7 +48,7 @@ export class Post extends defineModel(posts, { fillable: ['title', 'body'] }) {
 Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 ```
 
-半分が 2 つ。`relationTypes` は型の側です。読み込まれた `author` が `UserRecord` か `null` であることを述べており、プレースホルダーの値(to-one なら `null`、to-many なら `[]`)もそれに合っていなければなりません。クラスの後ろの `Post.belongsTo(...)` はランタイムの側です。リレーションの名前、相手側のモデル、このテーブルの外部キー、それが指すキー。相手のモデルを関数の中で遅延 import しているのは、`User` がまもなく `Post` を指し返すからで、2 つのモジュールは読み込み時に互いを import できません。
+宣言はふたつの側からできています。`relationTypes` は型の側です。読み込まれた `author` が `UserRecord` か `null` であることを述べており、プレースホルダーの値(to-one なら `null`、to-many なら `[]`)もそれに合っていなければなりません。クラスの後ろの `Post.belongsTo(...)` はランタイムの側です。リレーションの名前、相手側のモデル、このテーブルの外部キー、それが指すキー。相手のモデルを関数の中で遅延 import しているのは、`User` がまもなく `Post` を指し返すからです。2 つのモジュールは、読み込み時に互いを import できません。
 
 逆側は `User` に書きます。
 
@@ -182,8 +182,8 @@ export default class PostController extends Controller {
 }
 ```
 
-- `Post.withPaginate('author', options)` はリレーション付きの `paginate` です。投稿を 1 ページ分、それから著者のための `IN` クエリを 1 本。`authorsOf` が走らせていたのと同じ 2 本で、`result.data` のすべてのレコードが `relationTypes` で型付けされた `author` プロパティを持ちます。
-- `Post.findWithOrFail(id, 'author')` はリレーション付きの `findOrFail` です。検索と 404 を 1 回の呼び出しで行うので、`show` はルートモデルバインディングではなく `PostIdParamSchema` で自分で id を解決するようになります。ほかのアクションは `bind` のままです。ポリシーのために素のレコードが欲しいだけで、著者のためにクエリをもう 1 本走らせるのは無駄だからです。
+- `Post.withPaginate('author', options)` はリレーション付きの `paginate` です。投稿を 1 ページ分、それから著者のための `IN` クエリを 1 本。`authorsOf` が走らせていたのと同じ 2 本です。`result.data` のすべてのレコードが、`relationTypes` で型付けされた `author` プロパティを持ちます。
+- `Post.findWithOrFail(id, 'author')` はリレーション付きの `findOrFail` です。検索と 404 を 1 回の呼び出しで行うので、`show` はルートモデルバインディングを使わず、`PostIdParamSchema` で自分で id を解決します。ほかのアクションは `bind` のままです。ポリシーのために素のレコードが欲しいだけで、著者のためにクエリをもう 1 本走らせるのは無駄だからです。
 - `PostResource` は変わりません。著者を伴うかもしれない投稿をすでに受け付けていて、今は常に伴うようになっただけです。
 
 `show` ルートから `bind` が消えます。
@@ -350,7 +350,7 @@ describe('CommentController', () => {
 })
 ```
 
-最後のテストに注目してください。Ada は投稿を書いた本人ですが、それでも Grace のコメントは削除できません。所有権はコメントのものであり、第 8 章の所有権のルールが、投稿やリンクに当てはまったのとまったく同じようにここにも当てはまります。
+最後のテストに注目してください。Ada は投稿を書いた本人ですが、それでも Grace のコメントは削除できません。所有権はコメント単位です。第 8 章の所有権のルールが、投稿やリンクと同じようにここにも当てはまります。
 
 ```bash run expect-fail
 bun test
@@ -360,7 +360,7 @@ bun test
 
 ## 3. コメントを手で書く
 
-このテーブルはほかの 2 つを参照します。投稿側の `onDelete: 'cascade'` は、コメントが投稿より長生きできないことを述べています。
+このテーブルはほかの 2 つを参照します。投稿側の `onDelete: 'cascade'` は、コメントが投稿より長生きできないことを表しています。
 
 ```ts file=db/schema.ts
 import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
@@ -408,7 +408,7 @@ bun run db:make create_comments
 bun run db:migrate
 ```
 
-モデルは、2 つの `belongsTo` の側を両方持ちます。
+モデルは 2 つの `belongsTo` を両方持ちます。
 
 ```ts file=app/Models/Comment.ts
 import { defineModel, type BelongsToRecord } from '@guren/core'
@@ -431,7 +431,7 @@ Comment.belongsTo('author', () => import('./User.js').then((m) => m.User), 'auth
 
 fillable なのは `body` だけです。2 つの外部キーはどちらもサーバーが設定します。投稿は URL から、著者はセッションから。
 
-そして `Post` が `hasMany` の側を獲得します。
+そして `Post` に `hasMany` の側を足します。
 
 ```ts file=app/Models/Post.ts
 import { defineModel, type BelongsToRecord, type HasManyRecord } from '@guren/core'
@@ -574,7 +574,7 @@ export default class CommentController extends Controller {
 }
 ```
 
-素のクラスを渡す `this.authorize('create', Comment)`。まだレコードが無いので、ポリシーの `create` はユーザーだけについて尋ねられます。投稿ページはコメントとその著者を 1 本のリレーションクエリで読み込み、それぞれについてポリシーに尋ねます。そうすることで、実際に動く場所にだけ削除ボタンを出せます。
+`this.authorize('create', Comment)` には素のクラスを渡します。まだレコードが無いので、ポリシーの `create` はユーザーだけを見て判断します。投稿ページはコメントとその著者を 1 本のリレーションクエリで読み込み、それぞれについてポリシーに尋ねます。こうして、実際に動く場所にだけ削除ボタンを出せます。
 
 ```ts file=app/Http/Controllers/PostController.ts
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
@@ -671,7 +671,7 @@ export default class PostController extends Controller {
 }
 ```
 
-`Comment.where('postId', post.id).with('author').orderBy('id', 'asc').get()` はクエリビルダーの形です。絞り込み、その結果にリレーションを読み込み、並べ替える。件数がいくつでも、コメントに 1 本、その著者に 1 本のクエリで済みます。2 つ目のテストが使う `Post.findWithOrFail(id, 'comments')` と比べてください。あちらは同じコメントを `hasMany` 経由で読み込むもので、まず投稿が欲しく、その子をプロパティとして欲しいときに正しい呼び出しです。ビルダーの形が正しいのは、子そのものが一覧の対象で、その並べ方まで指定したいときです。
+`Comment.where('postId', post.id).with('author').orderBy('id', 'asc').get()` はクエリビルダーの形です。絞り込み、その結果にリレーションを読み込み、並べ替える。件数がいくつでも、コメントに 1 本、その著者に 1 本のクエリで済みます。2 つ目のテストが使う `Post.findWithOrFail(id, 'comments')` と比べてください。あちらは同じコメントを `hasMany` 経由で読み込みます。まず投稿が欲しくて、その子をプロパティとして受け取りたいときは、あちらが正しい呼び出しです。子そのものが一覧の対象で、並べ方まで指定したいときは、ビルダーの形を使います。
 
 ルートは 2 本、どちらもサインイン済み限定です。
 
@@ -853,7 +853,7 @@ export default function PostShow({ post, canManage, comments }: Props) {
 }
 ```
 
-`usePage()` は第 5 章の共有プロパティを読みます。コントローラーが渡さなくても、どのページでも誰かがサインインしているかを知る手段が `auth.user` です。
+`usePage()` は第 5 章の共有プロパティを読みます。`auth.user` があるので、コントローラーが渡さなくても、どのページからでも誰かがサインインしているかを知ることができます。
 
 ```bash run
 bun run codegen
@@ -876,7 +876,7 @@ git commit -m "feat: add comments with a hasMany and two belongsTo relations"
 
 ## 4. タグを仕様化する
 
-投稿は多数のタグを持ち、タグは多数の投稿を持ちます。多対多で、間にテーブルが要ります。エージェントが宣言することになるリレーションを、どちらも読むテストを 2 つ、投稿のテストに追加します。
+投稿は多数のタグを持ち、タグは多数の投稿を持ちます。多対多で、間にテーブルが要ります。エージェントがこれから宣言するリレーションを、2 つのテストがどちらも読みます。それを投稿のテストに追加します。
 
 ```ts file=tests/PostController.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -1099,7 +1099,7 @@ bun test
 
 > Add tags to posts as a many-to-many. Tables `tags` (unique `name`) and `post_tags` (`postId`, `tagId`, composite primary key, cascade on delete) with a migration; models `Tag` and `PostTag`; a `tags` relation on `Post` declared with `belongsToMany` through the `postTags` table and typed in `relationTypes`. The post forms get a `tags` text field: a comma-separated list, lower-cased, trimmed, de-duplicated, empty allowed. `store` and `update` replace the post's tags with the list, creating tag rows that do not exist yet; the post page shows the tag names; `PostResource` carries `tags` as names. `tests/PostController.test.ts` describes it; make it pass.
 
-ここでのハーネスのてこは **`orm-models.md` の rule** と、セッション開始時に `guren context` がエージェントの目の前に置く API ダイジェストです。どちらも Guren に `attach()`、`detach()`、`sync()` は無いとはっきり述べています。中間テーブルはモデルであり、ほかと同じように `create` と `delete` で書き込みます。ほかの ORM を扱ったことのあるエージェントはそれらのメソッドを記憶に持っていて、平気で `post.tags().sync(ids)` と書くでしょう。あなたのエージェントが代わりに `PostTag` モデルへ手を伸ばすかどうかを見ていてください。そうなったなら、理由は rule とダイジェストです。
+ここでハーネスが効いてくるのは、**`orm-models.md` の rule** と、セッション開始時に `guren context` がエージェントの目の前に置く API ダイジェストです。どちらも Guren に `attach()`、`detach()`、`sync()` は無いとはっきり述べています。中間テーブルはモデルであり、ほかと同じように `create` と `delete` で書き込みます。ほかの ORM を扱ったことのあるエージェントはそれらのメソッドを記憶に持っていて、平気で `post.tags().sync(ids)` と書くでしょう。使っているエージェントが代わりに `PostTag` モデルへ手を伸ばすかどうかを確かめてください。そうなったなら、rule とダイジェストが効いています。
 
 **手元にエージェントが無い場合は、** まずスキーマです。`primaryKey` は `sqliteTable` と同じモジュールから来ます。
 
@@ -1163,7 +1163,7 @@ bun run db:make create_tags
 bun run db:migrate
 ```
 
-モデルは 2 つ。中間テーブルは、儀式めいたものが一切無いモデルです。
+モデルは 2 つ。中間テーブルも、特別な作法のいらないただのモデルです。
 
 ```ts file=app/Models/Tag.ts fallback
 import { defineModel } from '@guren/core'
@@ -1379,7 +1379,7 @@ export class PostResource extends Resource<PostWithRelations, PostResourceData> 
 }
 ```
 
-2 つのフォームがフィールドをひとつ得ます。`RouteBody<ApiRoutes, 'posts.store'>` はスキーマから `tags` を拾います。transform はサーバーで走るので、フォームから見ればただの文字列です。
+2 つのフォームにフィールドをひとつ足します。`RouteBody<ApiRoutes, 'posts.store'>` はスキーマから `tags` を拾います。transform はサーバーで走るので、フォームから見ればただの文字列です。
 
 ```tsx file=resources/js/pages/posts/New.tsx fallback
 import { Head, useForm } from '@inertiajs/react'
@@ -1643,7 +1643,7 @@ git commit -m "feat: tag posts through a pivot table"
 ## よくあるつまずき
 
 - **`Post.hasMany('comments', ...)` がコンパイルできない。** `relationTypes` にまだ `comments` のキーがありません。型宣言と呼び出しはセットで入れます。呼び出しはキーに対して検査されます。
-- **`post.author` が `undefined` になる。** レコードがリレーション無しで読み込まれています。読み込まれたリレーションは、空なら `null` か `[]` であって `undefined` にはなりません。`undefined` は、`findWithOrFail` のつもりで `findOrFail` を使ったということです。
+- **`post.author` が `undefined` になる。** レコードがリレーション無しで読み込まれています。読み込まれたリレーションは、空なら `null` か `[]` であって `undefined` にはなりません。`undefined` が出たら、`findWithOrFail` のつもりで `findOrFail` を使っています。
 - **起動時に循環 import。** モデルが別のモデルのクラスをトップレベルで import しています。レコード型には `import type` を、リレーションの相手には遅延させた `() => import(...)` を使ってください。
 - **タグの大文字小文字がおかしい、または重複する。** 正規化がコントローラーへ移り、どこかの経路がそれを忘れています。バリデーターの `transform` に置いたままにしてください。
 - **`withCount('tags')` が throw する。** `withCount` が対応しているのは `hasMany`、`hasOne`、`belongsTo` で、`belongsToMany` は対象外です。`tags` を読み込んで `.length` を見てください。

@@ -1,17 +1,17 @@
 # 第 11 章: イベントとメール
 
-ここまでの処理はすべてリクエストの中で完結していました。検証し、行を 1 つ書き、リダイレクトする。この章の主題は、そうであってはならない仕事です。Bob が Ada の投稿にコメントすると Ada にメールが届きますが、Bob のブラウザは、ページを目にする前にメールサーバーの応答を待たされてはいけません。
+ここまでの処理はすべてリクエストの中で完結していました。検証し、行を 1 つ書き、リダイレクトする。この章で扱うのは、そこに収めてはいけない仕事です。Bob が Ada の投稿にコメントすると Ada にメールが届きます。ただし Bob のブラウザは、ページが表示されるまでメールサーバーの応答を待たされてはいけません。
 
-その一文に名前が 4 つ付きます。そしてこの章の大半は、なぜ 4 つなのかという話です。
+この一文に名前が 4 つ付きます。この章の大半は、なぜ 4 つに分かれるのかの説明です。
 
 | 部品 | 答えるもの |
 |---|---|
 | **イベント** | 何かが起きた。コントローラーはそれを告知し、あとは気にしません。 |
 | **listener** | 気にする誰か。告知に対して何をするかを決めます。 |
-| **ジョブ** | リクエストより長生きする仕事。キューに載るペイロードで、拾った者が実行します。 |
+| **ジョブ** | リクエストより長生きする仕事。キューに載るペイロードで、拾った側が実行します。 |
 | **メール** | メッセージそのもの。件名、本文、宛先。 |
 
-リクエストは最初の箱で終わります。その先は、読者が待たされない仕事です。
+リクエストは最初の箱で終わります。その先は、読者を待たせずに進む仕事です。
 
 ```mermaid
 flowchart LR
@@ -24,10 +24,10 @@ flowchart LR
 
 **この章で学ぶこと:**
 
-- 4 つのそれぞれがどこで登録されるのか、そして誰も代わりに検査してくれない唯一の登録
+- 4 つがそれぞれどこで登録されるのかと、誰も代わりに検査してくれない唯一の登録
 - ジョブのペイロードがレコードではなく id である理由
-- `QUEUE_CONNECTION=sync` が実際に何をしているのか、そして sync でなくなったときに何が変わるのか
-- 3 つの異なる継ぎ目に対する 3 つの fake と、そのうちひとつがコンテナのバインディングになり得ない理由
+- `QUEUE_CONNECTION=sync` が実際にしていることと、sync をやめたときに変わること
+- 3 つの異なる継ぎ目に対する 3 つの fake と、そのうちひとつをコンテナのバインディングにできない理由
 
 開発サーバーが動いていなければ起動します。
 
@@ -49,19 +49,19 @@ bunx guren add queue
 bunx guren add mail
 ```
 
-それぞれが、その種類のサンプルとプロバイダーを 1 つずつ書き、フレームワークのサービスプロバイダーとあなたのものの両方を `src/app.ts` に登録しました。開いてみてください。providers の配列は 1 行に書き直され、末尾に 6 つの要素が増えています。コマンドごとに、フレームワークのプロバイダーとアプリのプロバイダーが 1 つずつです。この 1 行化はパッチを当てたコマンドの仕業であってあなたのものではなく、どの `add` コマンドも同じ形を残していきます。
+どのコマンドも、その種類のサンプルとプロバイダーを 1 つずつ書き、フレームワーク側とアプリ側の両方のサービスプロバイダーを `src/app.ts` に登録しました。開いてみてください。providers の配列は 1 行に書き直され、末尾に 6 つの要素が増えています。コマンドごとに、フレームワークのプロバイダーとアプリのプロバイダーが 1 つずつです。この 1 行化はパッチを当てたコマンドによるもので、どの `add` コマンドも同じ形を残していきます。
 
-この 3 つのプロバイダーは読む価値があります。うち 2 つは、これからあなたが編集するファイルだからです。
+この 3 つのプロバイダーは読んでおく価値があります。うち 2 つは、このあと自分で編集するファイルです。
 
-- `app/Providers/EventProvider.ts` はイベントクラスを listener オブジェクトに結び付けます。その結び付きは規約ではなくコードの 1 行です。`app/Listeners/` を走査して仕事を探すものは何もありません。
-- `app/Providers/QueueProvider.ts` はキューマネージャーを構築し、ジョブクラスごとに `registerJob()` を呼びます。ドライバーの行に注目してください。`QUEUE_CONNECTION=sync` は dispatch されたジョブを**インラインで、dispatch したプロセスの中で**実行します。`memory` はワーカーが処理するキューに載せます。あなたの `.env` はすでに `sync` と言っています。
-- `app/Providers/MailProvider.ts` はメールマネージャーを構築します。こちらもすでに `.env` にある `MAIL_MAILER=log` は、送信する代わりに送信予定のメールをサーバーの出力に印字します。申し込むものは何も無く、うっかり配送してしまうものも何もありません。
+- `app/Providers/EventProvider.ts` はイベントクラスを listener オブジェクトに結び付けます。結び付けているのは規約ではなくコードの 1 行です。`app/Listeners/` を走査して仕事を探すものは何もありません。
+- `app/Providers/QueueProvider.ts` はキューマネージャーを構築し、ジョブクラスごとに `registerJob()` を呼びます。ドライバーの行に注目してください。`QUEUE_CONNECTION=sync` は dispatch されたジョブを**インラインで、dispatch したプロセスの中で**実行します。`memory` はワーカーが処理するキューに載せます。`.env` にはすでに `sync` と書かれています。
+- `app/Providers/MailProvider.ts` はメールマネージャーを構築します。同じく `.env` にある `MAIL_MAILER=log` は、メールを送る代わりに送信予定の内容をサーバーの出力に印字します。サービスの申し込みは要りませんし、うっかり本当に配送してしまうこともありません。
 
-サンプル(`OrderPlaced`、`SendOrderReceiptListener`、`ProcessWelcomeSequenceJob`、`WelcomeEmailMail`)は、それぞれのファイルの形を目にできるように置かれています。第 3 節でこの 4 つすべてを置き換えます。
+サンプル(`OrderPlaced`、`SendOrderReceiptListener`、`ProcessWelcomeSequenceJob`、`WelcomeEmailMail`)は、それぞれのファイルの形を確認できるように置かれています。第 3 節でこの 4 つをすべて置き換えます。
 
 ## 2. メールを仕様化する
 
-テストは 3 つ、そのそれぞれが意図的に違う形の fake を使っています。アサーションより先にセットアップを読んでください。
+テストは 3 つで、それぞれ意図的に違う形の fake を使っています。アサーションより先にセットアップを読んでください。
 
 ```ts file=tests/CommentMail.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
@@ -134,9 +134,9 @@ describe('comment mail', () => {
 })
 ```
 
-`assertPushed` にはペイロードの型を明示的に渡しています。`Job.dispatch` はジェネリックな static なので、ジョブクラスだけでは自分のペイロードが何かを TypeScript に伝えられず、推論された `unknown` は述語をコンパイルできなくします。
+`assertPushed` にはペイロードの型を明示的に渡しています。`Job.dispatch` はジェネリックな static なので、ジョブクラスだけでは TypeScript にペイロードの型が伝わりません。推論結果が `unknown` になると、述語がコンパイルできなくなります。
 
-3 つ目のテストは、機能ではなく設計を記述しているものです。fake のキュードライバーを差し込むとジョブは記録されるだけで実行されないので、メールは 1 通も出ません。もしこのテストが通り、*かつ*メールが送られているなら、コントローラーが自分で仕事をしているということです。
+3 つ目のテストが記述しているのは、機能ではなく設計です。fake のキュードライバーを差し込むとジョブは記録されるだけで実行されないので、メールは 1 通も出ません。このテストが通っていて*かつ*メールが送られているなら、コントローラーが自分で仕事をしています。
 
 ```bash run expect-fail
 bun test
@@ -160,7 +160,7 @@ export class CommentPosted extends Event {
 }
 ```
 
-listener は、それが起きたことの意味を決めます。この listener は自分では何もせず、仕事をキューに渡して戻ります。
+listener は、それが起きたことの意味を決めます。この listener 自身は何もせず、仕事をキューに渡して戻ります。
 
 ```ts file=app/Listeners/SendCommentMailListener.ts
 import { Listener } from '@guren/core'
@@ -212,9 +212,9 @@ export class SendCommentMailJob extends Job<SendCommentMailPayload> {
 }
 ```
 
-このファイルの中の 2 つの決定が、この章の本当の中身です。ペイロードはコメントではなく `commentId` です。これが走るころには行が変わっているかもしれませんし、そもそもレコードはキューにシリアライズできません。そして「自分のコメントについて自分にメールを送らない」は、コントローラーではなくここ、送信の隣にあります。コントローラーは何が起きたかを告知するのであって、誰がそれについてのメールを受け取るに値するかを決めるのではありません。
+このファイルにある 2 つの判断が、この章の本題です。ひとつは、ペイロードがコメントそのものではなく `commentId` であること。実行されるころには行が変わっているかもしれませんし、そもそもレコードはキューにシリアライズできません。もうひとつは、「自分のコメントについて自分にメールを送らない」というルールが、コントローラーではなく送信の隣にあること。コントローラーは何が起きたかを告知するだけで、誰がそのメールを受け取るべきかは決めません。
 
-メールはメッセージであって、それ以外の何物でもありません。
+メールはメッセージそのもので、それ以上のことはしません。
 
 ```ts file=app/Mail/NewCommentMail.ts
 import { Mail, type MailManager } from '@guren/core'
@@ -244,7 +244,7 @@ export class NewCommentMail extends Mail {
 
 `build()` を自分で呼ぶことはありません。`send()` が一度だけ呼び、それからメッセージに宛先と件名と本文があることを検査して、トランスポートに渡します。
 
-では 2 つの登録です。イベントプロバイダーは、クラスが購読になる場所です。
+続いて 2 つの登録です。イベントプロバイダーは、クラスを購読に変える場所です。
 
 ```ts file=app/Providers/EventProvider.ts
 import { ServiceProvider, type EventManager } from '@guren/core'
@@ -265,7 +265,7 @@ export default class EventProvider extends ServiceProvider {
 }
 ```
 
-この配線はよく読んでください。そうしないとあとで出会うことになるバグの一群を説明しているからです。プロバイダーは `priority` を渡し、`handle` を呼びます。読んでいるのはそれだけです。`Listener` 基底クラスは `shouldQueue`、`queue`、そして省略可能な `shouldHandle()` も宣言していますが、この配線はそのどれも尊重しません。`shouldQueue = true` を設定してフレームワークがキューに載せてくれると期待した listener は、黙ってインラインで実行されます。クラスが何を宣言していようと、真実はこのファイルの中の行です。
+この配線はよく読んでください。あとで出くわす一群のバグの原因がここにあります。プロバイダーが渡すのは `priority` で、呼ぶのは `handle` です。読んでいるのはそれだけです。`Listener` 基底クラスは `shouldQueue`、`queue`、省略可能な `shouldHandle()` も宣言していますが、この配線はそのどれも見ていません。`shouldQueue = true` を設定してフレームワークがキューに載せてくれると期待した listener は、黙ってインラインで実行されます。クラスの宣言が何であれ、実際の挙動を決めるのはこのファイルの行です。
 
 キュープロバイダーは、ジョブクラスが dispatch 可能になる場所です。
 
@@ -328,9 +328,9 @@ export default class CommentController extends Controller {
 }
 ```
 
-`emit` は await されており、それが優先度順にすべての listener を await します。`sync` のもとでは、ジョブも含めた連鎖全体がリダイレクトの返却より前に終わるということです。ここは目を曇らせずに見ておく価値があります。`sync` は仕事を非同期にするのではなく、*コード*を非同期の形にするのです。ワーカーへ移行しても、コントローラーは変わりません。
+`emit` は await されており、その中で優先度順にすべての listener が await されます。`sync` のもとでは、ジョブまで含めた連鎖全体がリダイレクトを返す前に終わります。ここは正確に捉えておいてください。`sync` が非同期にするのは仕事そのものではなく、*コード*の形です。ワーカーへ移行しても、コントローラーは変わりません。
 
-ブループリントが導入した 4 つのサンプルは、もう持ち主がいません。
+ブループリントが置いた 4 つのサンプルは、もう役目を終えました。
 
 ```bash run
 rm app/Events/OrderPlaced.ts app/Listeners/SendOrderReceiptListener.ts app/Jobs/ProcessWelcomeSequenceJob.ts app/Mail/WelcomeEmailMail.ts
@@ -357,7 +357,7 @@ bun test
 [mail] ------------------------------------------------------------
 ```
 
-これが `log` トランスポートです。`MAIL_MAILER` を本物のトランスポートに向ければ、同じメッセージが建物の外へ出ていきます。
+これが `log` トランスポートです。`MAIL_MAILER` を本物のトランスポートに向ければ、同じメッセージがそのまま外へ送られます。
 
 ```bash run
 bunx guren gate
@@ -370,19 +370,19 @@ git commit -m "feat: mail the post author when someone comments"
 
 ## 4. 誰も検査しない登録
 
-整合性チェックを実行し、そこに*無い*ものを読み取ってください。
+整合性チェックを実行して、そこに*無い*ものを読み取ってください。
 
 ```bash run
 bunx guren check
 ```
 
-これはあなたのルートについて、ページについて、スキーマについて、attachments について意見を持っています。`app/Jobs/` については何も持っていません。`registerJob()` に届かないジョブクラスは完璧に見えます。コンパイルは通り、lint も通り、キューを fake するテストなら通ります。それが失敗するのは、何かが本当にそれを dispatch した最初のときで、少なくとも問題の名前は告げてくれるメッセージを伴います。
+このコマンドはルート、ページ、スキーマ、attachments については意見を持ちますが、`app/Jobs/` については何も言いません。`registerJob()` に届いていないジョブクラスも完璧に見えます。コンパイルは通り、lint も通り、キューを fake するテストなら通ります。失敗するのは、何かが実際にそれを dispatch した最初のときです。そのときのメッセージは、少なくとも問題のジョブ名は教えてくれます。
 
 ```bash manual
 SyncDriver: job class "SendCommentMailJob" is not registered. Call registerJob() with the class whose jobName (or class name) is "SendCommentMailJob".
 ```
 
-これはまさに第 8 章が扱っていた状況です。フレームワークには見えないプロジェクトの不変条件。ならば、エージェントが読む場所に書き留めましょう。
+これは第 8 章で扱った状況そのものです。フレームワークからは見えない、プロジェクト固有の不変条件です。エージェントが読む場所に書き留めておきましょう。
 
 ```md file=.claude/rules/background-work.md
 ---
@@ -405,7 +405,7 @@ globs:
 5. **Test the seam, not the plumbing.** Mail is faked by registering a `fakeMail()` transport on a real `MailManager` and binding that with `app.container.fake('mail', manager)`. The queue is faked with `setQueueDriver(fakeQueue().getDriver())`, never through the container, because `Job.dispatch()` reads a module-level driver.
 ```
 
-`PostToolUse` hook は編集のたびに `guren check --arch` を実行しますが、check はこの 5 つのどれについても黙ったままです。rule こそがチェックなのです。
+`PostToolUse` hook は編集のたびに `guren check --arch` を実行しますが、check はこの 5 つのどれについても何も言いません。ここではこの rule 自体がチェックの役目を果たします。
 
 ```bash run
 git add -A
@@ -414,7 +414,7 @@ git commit -m "docs: add a background-work rule for the agent"
 
 ## 5. 告知を仕様化する
 
-投稿の公開は、わざわざコメントしてくれた全員に知らせるべきです。同じ 4 つの部品で、形はひとつ難しくなります。重複排除のルールを伴う一斉送信です。
+投稿を公開したら、わざわざコメントしてくれた全員に知らせたいところです。使う部品は同じ 4 つですが、形はひとつ難しくなります。重複排除のルールを伴う一斉送信です。
 
 ```ts file=tests/PostPublishedMail.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
@@ -474,7 +474,7 @@ describe('publishing a post', () => {
 })
 ```
 
-`assertSentTimes(2)` が最初のテストの要点のすべてです。Bob は 2 回コメントしましたが、Bob が受け取るメールは 1 通です。
+最初のテストの要点は `assertSentTimes(2)` に尽きます。Bob は 2 回コメントしましたが、受け取るメールは 1 通です。
 
 ```bash run expect-fail
 bun test
@@ -486,7 +486,7 @@ bun test
 
 > When a post is published, mail everyone who commented on it. Emit a `PostPublished` event from `publish` in `PostController`, wire a listener in `EventProvider` that dispatches a `NotifyCommentersJob`, and send a `PostPublishedMail` to each distinct commenter, skipping the post's author. `tests/PostPublishedMail.test.ts` describes it; make it pass.
 
-このプロンプトは `registerJob` に触れていませんし、その必要もありません。第 4 節であなたが書いた rule は `app/Jobs/**` と `app/Providers/QueueProvider.ts` にスコープされているので、エージェントはそのどちらかを書く前にそれを読みます。それがこの実験のすべてです。ほかの何より先に、diff の中の登録の行を確かめてください。
+このプロンプトは `registerJob` に触れていませんが、触れる必要もありません。第 4 節で書いた rule は `app/Jobs/**` と `app/Providers/QueueProvider.ts` にスコープされているので、エージェントはそのどちらかを書く前に rule を読みます。この実験の狙いはそこにあります。何よりも先に、diff の中の登録の行を確かめてください。
 
 **手元にエージェントが無い場合は、** イベントが投稿を運びます。
 
@@ -782,9 +782,9 @@ bun test
 
 rubric は次のとおりです。
 
-- `registerJob(NotifyCommentersJob)` が `QueueProvider.boot()` にあり、`events.on(PostPublished, …)` が `EventProvider.boot()` にある。両方が無ければ、この機能はコンパイルの通る死んだコードです。
+- `registerJob(NotifyCommentersJob)` が `QueueProvider.boot()` にあり、`events.on(PostPublished, …)` が `EventProvider.boot()` にある。この 2 つが揃っていなければ、この機能はコンパイルの通る死んだコードです。
 - ペイロードは `{ postId }`。宛先は渡されるのではなく `handle` の中で解決される。
-- コメントした人が著者 id で重複排除され、投稿の著者がリストから除かれる。しかもジョブの中で。Bob からのコメント 2 件は、Bob へのメール 1 通です。
+- コメントした人が著者 id で重複排除され、投稿の著者がリストから外れる。しかもジョブの中で。Bob からのコメント 2 件に対して、Bob へのメールは 1 通です。
 - `publish` は emit して戻る。コメントを問い合わせもしないし、メールの存在も知らない。
 - 新しいテスト 2 件と、第 2 節の 3 件がどちらも緑。
 
@@ -801,25 +801,25 @@ git commit -m "feat: mail commenters when a post is published"
 
 ## いまいる場所
 
-- イベント、listener、ジョブ、メール。そのそれぞれが、指し示せる場所で登録されている。
+- イベント、listener、ジョブ、メール。それぞれが、場所を指し示せる形で登録されている。
 - 告知して戻るコントローラーと、送信の隣に置かれた宛先に関する業務ルール。
 - テストの継ぎ目 3 つ: 本物のマネージャーの中のメールトランスポート、グローバルに設定されたキュードライバー、そしてその 2 つがつながっていることを示すリクエスト。
-- `guren check` が意見を持たない唯一の不変条件を運ぶプロジェクトの rule と、それに従ったエージェント。
+- `guren check` が意見を持たない唯一の不変条件を書き留めたプロジェクトの rule と、それに従ったエージェント。
 
 ## よくあるつまずき
 
-- **`SyncDriver: job class "X" is not registered.`** `QueueProvider.boot()` に `registerJob(X)` がありません。第 4 節の rule が防ぐために存在する、まさにこのエラーです。
+- **`SyncDriver: job class "X" is not registered.`** `QueueProvider.boot()` に `registerJob(X)` がありません。第 4 節の rule は、まさにこのエラーを防ぐために存在します。
 - **`Email must have at least one recipient`(あるいは subject、body)。** `send()` は組み立てられたメッセージを検証します。`undefined` を受け取った `to()` も、件名を設定する前に return する `build()` も、どちらもここに行き着きます。
 - **何も届かないのにエラーも出ない。** listener が `EventProvider.boot()` で配線されているか確かめてください。listener がひとつも無いイベントは、成功した `emit` です。
 - **テストで `container.fake('queue', …)` をしても何も変わらない。** `Job.dispatch()` はコンテナではなく、モジュールレベルの setter からドライバーを解決します。`setQueueDriver()` を使い、前のドライバーを戻してください。
 - **`fakeMail()` で `mail` を直接 fake したテストが throw する。** `Mail.send()` は `manager.transport(name)` を呼びますが、fake はマネージャーではなくトランスポートです。本物の `MailManager` に登録し、それをバインドしてください。
-- **キューがあるのにメールがリクエストの中で送られる。** それは `QUEUE_CONNECTION=sync` が設計どおりに動いているということです。`memory` に設定して `bunx guren queue:work` を実行すれば、代わりにワーカーがキューを処理するのを見られます。
+- **キューがあるのにメールがリクエストの中で送られる。** `QUEUE_CONNECTION=sync` が設計どおりに動いています。`memory` に設定して `bunx guren queue:work` を実行すれば、代わりにワーカーがキューを処理します。
 
 ## 演習
 
-1. `.env` の `QUEUE_CONNECTION` を `memory` にしてサーバーを再起動し、コメントを投稿してください。メールは出ません。次に別のターミナルで `bunx guren queue:work --once` を走らせてください。それでも何も起きません。理由を説明してから値を戻してください。その答えが、`memory` が開発用のドライバーであってデプロイ用でない理由です。
+1. `.env` の `QUEUE_CONNECTION` を `memory` にしてサーバーを再起動し、コメントを投稿してください。メールは出ません。次に別のターミナルで `bunx guren queue:work --once` を走らせてください。それでも何も起きません。理由を説明してから値を戻してください。その答えが、`memory` が開発用のドライバーであってデプロイ向きではない理由です。
 2. `CommentPosted` に、ログを出すだけで `priority` の高い listener をもう 1 つ登録してください。先に走るのはどちらですか。次に先に走るほうで例外を投げて、もう一方とリクエストに何が起きるかを答えてください。
 
 ## 次へ
 
-[第 12 章: アプリをエージェントのツールにする](./12-agent-tools.md) では、すでにあるルートをエージェントが呼び出せるツールに変え、第 7 章と同じ認可のギャップが、通る audit ではなく明確な失敗になるところを示します。
+[第 12 章: アプリをエージェントのツールにする](./12-agent-tools.md) では、すでにあるルートをエージェントが呼び出せるツールに変えます。第 7 章と同じ認可のギャップが、通過する audit ではなくはっきりした失敗として現れます。

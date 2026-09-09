@@ -1,11 +1,11 @@
 # ストレージガイド
 
-Guren は複数のストレージバックエンドをサポートする統一されたファイルストレージAPIを提供します。ストレージシステムにより、ローカルファイルシステム、Amazon S3、その他のクラウドストレージプロバイダーを一貫したインターフェースで簡単に扱えます。
+Guren のファイルストレージAPIは、複数のストレージバックエンドを同じ書き方で扱えます。ローカルファイルシステム、Amazon S3、その他のクラウドストレージプロバイダーを、いずれも同じインターフェースで操作できます。
 
 ## コアコンセプト
 
-- **StorageManager** – 複数のストレージディスクを設定・アクセスするための中央レジストリ。
-- **StorageDriver** – ストレージ操作（put、get、deleteなど）のインターフェース。すべてのドライバがこのインターフェースを実装。
+- **StorageManager** – 複数のストレージディスクを設定し、そこへアクセスするための中央レジストリ。
+- **StorageDriver** – ストレージ操作（put、get、deleteなど）のインターフェース。すべてのドライバがこれを実装します。
 - **Drivers** – ストレージバックエンド：Local（ファイルシステム）、S3（AWS/互換サービス）、Memory（テスト用）。
 
 ## 基本的な使い方
@@ -120,10 +120,10 @@ await disk.deleteDirectory('uploads/temp')
 
 ### 可視性
 
-可視性がどこに属するかはバックエンド次第で、ドライバは「できるふり」をせずどちらであるかを示します。
+可視性をどの単位で持つかはバックエンドによって違います。ドライバは対応しているふりをせず、どちらの方式かをはっきり示します。
 
-- **オブジェクト単位** — ACL が有効な S3。`setVisibility()` は1ファイルだけを変更します。
-- **ディスク単位** — ローカルディスク（到達可能性はディスクのルートと、それを配信する仕組みで決まります）、`acl: false` の S3、Cloudflare R2。ディスク側で `visibility` を宣言し、逆の値を求められた場合は黙って無視せず拒否します。S3 と R2 では現在すでにエラーですが、ローカルドライバはこれまで受け付けてきた経緯があるため、今は警告のみで次のメジャーでエラーになります。
+- **オブジェクト単位**: ACL が有効な S3。`setVisibility()` は1ファイルだけを変更します。
+- **ディスク単位**: ローカルディスク（到達できるかどうかはディスクのルートと、それを配信する仕組みで決まります）、`acl: false` の S3、Cloudflare R2。ディスク側で `visibility` を宣言し、逆の値を求められた場合は黙って無視せず拒否します。S3 と R2 では現在すでにエラーです。ローカルドライバはこれまで受け付けてきた経緯があるため、今のところ警告のみで、次のメジャーからエラーになります。
 
 ```ts
 const disk = storage.disk('public')       // visibility: 'public' を宣言したディスク
@@ -144,7 +144,7 @@ await storage.disk('local').put('secret.pdf', content)
 
 ### 複数のディスク
 
-アプリケーションで複数のストレージバックエンドを設定できます。
+1つのアプリケーションに複数のストレージバックエンドを設定できます。
 
 ```ts
 import { StorageManager } from '@guren/core'
@@ -283,7 +283,7 @@ const storage = new StorageManager({
 })
 ```
 
-S3 のオブジェクト ACL に対応していないエンドポイント（R2 は `x-amz-acl` と ACL 操作を非対応と明記しており、MinIO は構成によります）では `acl: false` を指定します。ドライバはヘッダの送出をやめ、`getVisibility()` はディスクに設定した `visibility` を返し、`put({ visibility })` や `setVisibility()` で逆の値を求められた場合は、黙って無視せず例外を投げます。
+S3 のオブジェクト ACL に対応していないエンドポイント（R2 は `x-amz-acl` と ACL 操作を非対応と明記しており、MinIO は構成によります）では `acl: false` を指定します。するとドライバはヘッダを送らなくなり、`getVisibility()` はディスクに設定した `visibility` を返します。`put({ visibility })` や `setVisibility()` で逆の値を求められた場合は、黙って無視せず例外を投げます。
 
 ```ts
 const storage = new StorageManager({
@@ -304,7 +304,7 @@ const storage = new StorageManager({
 ```
 
 > [!NOTE]
-> Cloudflare Workers 上では S3 API ではなくバケットバインディングを使ってください。`@guren/plugin-cloudflare` の `R2Driver` は資格情報も AWS SDK も不要です。上の S3 のレシピは他のランタイム（Bun サーバー、スクリプト、Lambda）から R2 に到達するためのものです。[Cloudflare Workers ガイド](./cloudflare.md#ストレージr2)を参照してください。
+> Cloudflare Workers 上では S3 API ではなくバケットバインディングを使ってください。`@guren/plugin-cloudflare` の `R2Driver` なら資格情報も AWS SDK も要りません。上の S3 のレシピは、他のランタイム（Bun サーバー、スクリプト、Lambda）から R2 を使うためのものです。[Cloudflare Workers ガイド](./cloudflare.md#ストレージr2)を参照してください。
 
 ### 署名付きURL
 
@@ -320,7 +320,7 @@ const url = await disk.temporaryUrl('private/document.pdf', expiration)
 
 ### 環境ごとのディスク切り替え
 
-ディスクはまとめて宣言しておき、環境変数で選びます（`bunx guren add storage` はこの形で生成します）。ドライバは初回利用時に構築されるため、触らないディスクはクライアントも接続も作りません。
+ディスクはまとめて宣言しておき、環境変数で選びます（`bunx guren add storage` はこの形で生成します）。ドライバが作られるのは初回利用時なので、触らないディスクはクライアントも接続も作りません。
 
 ```ts
 const storage = createStorageManager({
@@ -335,18 +335,18 @@ const storage = createStorageManager({
 })
 ```
 
-開発では `STORAGE_DISK=local`、本番では `STORAGE_DISK=s3`。コードの変更は不要で、`storage.disk()` は選ばれた方を返します。
+開発では `STORAGE_DISK=local`、本番では `STORAGE_DISK=s3` にします。コードを書き換える必要はなく、`storage.disk()` が選ばれた方を返します。
 
 > **アップロードを受け取るディスクを `public/` 配下、および `guren storage:link` が公開する場所に置かないでください。** 配信ツリー配下のファイルは、署名も有効期限も認可チェックもなしに URL で取得できます。見知らぬ相手がアップロードしたファイルも同様です。アップロードは上記の `local` のようなディスクに置き、[attachments の配信ルート](./attachments.md)経由で渡してください。`guren check` は、その形になっている attachments 設定を失敗として報告します。
 
 この形について、2点注意があります。
 
-- **設定値は解決しないディスクの分も先に読まれます。** オブジェクトを組み立てた時点で評価されるためです。`process.env.S3_BUCKET` が未設定でも無害ですが、未設定時に例外を投げるヘルパーを書くと、そのディスクを一度も使わなくても起動時に落ちます。そうしたヘルパーはディスクの定義に置かず、`storage.registerDisk('s3', () => new S3Driver({ ... }))` を使ってください。こちらのコールバックは本当に初回利用時に実行されます。
-- **未知のディスク名は構築時には弾かれません。** `createStorageManager({ default: 'typo' })` は成功し、最初にディスクを解決したときに初めて `Storage disk not found: typo` を投げます。キュージョブの中かもしれません。生成される StorageProvider が起動時に名前を検証しているのはこのためです。設定を手書きする場合も同じようにしてください。
+- **解決しないディスクの設定値も先に読まれます。** オブジェクトを組み立てた時点で評価されるためです。`process.env.S3_BUCKET` が未設定でも害はありませんが、未設定時に例外を投げるヘルパーを書くと、そのディスクを一度も使わなくても起動時に落ちます。そうしたヘルパーはディスクの定義に置かず、`storage.registerDisk('s3', () => new S3Driver({ ... }))` を使ってください。このコールバックなら、本当に初回利用時まで実行されません。
+- **知らないディスク名は構築時には弾かれません。** `createStorageManager({ default: 'typo' })` は成功し、最初にディスクを解決したときに初めて `Storage disk not found: typo` を投げます。それがキュージョブの中ということもあり得ます。生成される StorageProvider が起動時に名前を検証しているのはこのためです。設定を手書きする場合も同じようにしてください。
 
 ## ファイルアップロード
 
-> 投稿のカバー画像やユーザーのアバターのように、モデルに属するアップロードには[アタッチメントレイヤー](./attachments.md)が使えます。命名、保存、画像バリデーション、サムネイルバリアント、後片付けまでを1呼び出し(`Post.attach(post.id, 'cover', file)`)で扱います。以下のレシピは、より低レベルのパス指向ストレージ API です。
+> 投稿のカバー画像やユーザーのアバターのように、モデルに属するアップロードには[アタッチメントレイヤー](./attachments.md)が使えます。命名、保存、画像バリデーション、サムネイルバリアント、後片付けまでを1呼び出し(`Post.attach(post.id, 'cover', file)`)でまかなえます。ここから先のレシピは、もっと低レベルなパス指向のストレージ API です。
 
 ### フォームアップロードの処理
 
@@ -391,7 +391,7 @@ export class UploadController extends Controller {
 
 ### 大きなファイルのストリーミング
 
-大きなファイルの場合はストリーミングを検討してください。
+サイズの大きいファイルではストリーミングを検討してください。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -420,7 +420,7 @@ export class DownloadController extends Controller {
 
 ## テスト
 
-テストにはMemoryドライバを使用します。
+テストではMemoryドライバを使います。
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'

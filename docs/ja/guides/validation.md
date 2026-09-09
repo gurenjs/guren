@@ -2,11 +2,11 @@
 
 Guren のバリデーションは schema-first が基本です。Zod 互換スキーマをコントローラー、ルートコントラクト、ミドルウェアで使い回し、必要な場合だけ legacy な `FormRequest` 互換レイヤーを使います。
 
-> **サポートする Zod バージョン:** zod 4 API のみです。ランタイムのバリデーション自体は `safeParse` を持つ任意のスキーマを受け付けますが、スキーマを構造的に読むツール — `guren codegen`、OpenAPI 生成、`guren context` — は zod v3 API(旧 `zod@3` パッケージおよび `zod/v3` サブパス)で書かれたスキーマを警告付きで拒否します。スキーマは `import { z } from 'zod'` で書いてください。
+> **サポートする Zod バージョン:** zod 4 API のみです。ランタイムのバリデーション自体は `safeParse` を持つ任意のスキーマを受け付けます。ただし、スキーマを構造的に読むツール(`guren codegen`、OpenAPI 生成、`guren context`)は、zod v3 API(旧 `zod@3` パッケージおよび `zod/v3` サブパス)で書かれたスキーマを警告付きで拒否します。スキーマは `import { z } from 'zod'` で書いてください。
 
 ## クイックスタート
 
-推奨パターンはコントローラーの validation helper を使う方法です。
+推奨するのは、コントローラーの validation helper を使う書き方です。
 
 ```ts
 import { Controller, paginate } from '@guren/core'
@@ -51,7 +51,7 @@ export default class PostsController extends Controller {
 
 ### `validateRequest(schema)` 互換ミドルウェア
 
-バリデーションミドルウェアを作成するファクトリです。
+バリデーションミドルウェアを作るファクトリです。
 
 ```ts
 import { Router, validateRequest } from '@guren/core'
@@ -71,7 +71,7 @@ router.post('/login', [AuthController, 'login'], validateRequest(schema))
 
 ### `validateRequestWith(schemaFactory)`
 
-リクエストコンテキストに基づく動的スキーマ用です。
+リクエストコンテキストに応じてスキーマを組み立てたい場合に使います。
 
 ```ts
 import { Router, validateRequestWith } from '@guren/core'
@@ -92,7 +92,7 @@ router.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) =
 
 ## 検証済みデータの取得
 
-バリデーションミドルウェア実行後、`getValidatedData()` で型付きデータを取得できます。
+バリデーションミドルウェアが動いた後は、`getValidatedData()` で型付きのデータを取り出せます。
 
 ```ts
 import { getValidatedData } from '@guren/core'
@@ -115,7 +115,7 @@ router.post('/posts', async (ctx) => {
 
 ## 手動バリデーション
 
-ミドルウェア外でのバリデーションには `validate()` または `validateSafe()` を使用します。
+ミドルウェアの外でバリデーションするときは `validate()` か `validateSafe()` を使います。
 
 ```ts
 import { validate, validateSafe } from '@guren/core'
@@ -134,7 +134,7 @@ if (result.success) {
 
 ## カスタムエラーハンドリング
 
-デフォルトのエラーレスポンスをオーバーライドできます。
+デフォルトのエラーレスポンスは差し替えられます。
 
 ```ts
 validateRequest(schema, {
@@ -153,7 +153,7 @@ validateRequest(schema, {
 
 ## スキーマインターフェース
 
-Guren のバリデーションはスキーマライブラリに依存しません。`ValidationSchema` を実装する任意のオブジェクトが使用可能です。
+Guren のバリデーションは特定のスキーマライブラリに依存しません。`ValidationSchema` を実装したオブジェクトなら何でも渡せます。
 
 ```ts
 interface ValidationSchema<T> {
@@ -162,7 +162,7 @@ interface ValidationSchema<T> {
 }
 ```
 
-これにより Zod、Valibot、カスタムバリデーターが使用できます。
+Zod、Valibot、自作のバリデーターのいずれも使えます。
 
 ```ts
 // Valibot を使用
@@ -242,7 +242,7 @@ const schema = z.object({
 
 ## フォームバリデーションエラー
 
-バリデーション失敗時のデフォルトレスポンス形式です。
+バリデーションに失敗したときのデフォルトのレスポンス形式です。
 
 ```json
 {
@@ -262,7 +262,7 @@ const schema = z.object({
 
 ### Inertia リクエストの自動ハンドリング
 
-Inertia リクエスト（`X-Inertia` ヘッダー付き）で `ValidationException` が throw された場合、上記の JSON は返りません。代わりに Laravel と同様に、エラーをセッションに flash して直前のページへ `303` リダイレクトします。次のページロードで flash されたエラーが共有プロップ `errors`（フィールドごとに 1 メッセージへフラット化）として注入されます。
+Inertia リクエスト（`X-Inertia` ヘッダー付き）で `ValidationException` が throw された場合、上記の JSON は返りません。Laravel と同じように、エラーをセッションに flash して直前のページへ `303` リダイレクトします。flash されたエラーは次のページロードで、共有プロップ `errors`（フィールドごとに 1 メッセージへフラット化）として渡されます。
 
 ```tsx
 function Login({ errors }: { errors?: Record<string, string> }) {
@@ -275,7 +275,7 @@ function Login({ errors }: { errors?: Record<string, string> }) {
 }
 ```
 
-これは `validateBody` / `validateQuery` / `validateParams` の失敗と、自前のコードから throw した `ValidationException.withMessages(...)` の両方に適用されます。flash にはセッションミドルウェアが必要です（`auth` オプションを設定すると自動でマウントされます）。挙動をカスタマイズしたい場合は、サービスプロバイダで `ValidationException` 用のレンダラーを登録してください。組み込みのレンダラーより優先されます。
+この扱いは `validateBody` / `validateQuery` / `validateParams` の失敗と、自前のコードから throw した `ValidationException.withMessages(...)` の両方に適用されます。flash にはセッションミドルウェアが必要です（`auth` オプションを設定すると自動でマウントされます）。挙動を変えたい場合は、サービスプロバイダで `ValidationException` 用のレンダラーを登録してください。組み込みのレンダラーより優先されます。
 
 ### Inertia での表示
 
@@ -324,7 +324,7 @@ function CreateUser({ errors }: Props) {
 
 ## コントローラーバリデーションヘルパー
 
-コントローラーで最もシンプルにバリデーションを行う方法は `validateBody`、`validateQuery`、`validateParams` です。`safeParse()` を持つ任意の Zod ライクなスキーマを受け取り、失敗時に `ValidationException`（422）をスローします。
+コントローラーでいちばん手軽なのは `validateBody`、`validateQuery`、`validateParams` です。`safeParse()` を持つ Zod ライクなスキーマを受け取り、失敗すると `ValidationException`（422）をスローします。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -371,11 +371,11 @@ export default class PostsController extends Controller {
 | `this.validateParams(schema)` | ルートパラメータ | No | `:id`、`:slug` などをパース |
 
 > [!TIP]
-> これらのヘルパーは `safeParse()` を実装する任意のスキーマライブラリ（Zod、Valibot、カスタムバリデーター）で動作します。
+> これらのヘルパーは `safeParse()` を実装したスキーマライブラリ（Zod、Valibot、自作のバリデーター）ならどれでも動きます。
 
 ### 配列形式のクエリパラメータ
 
-同じクエリキーが繰り返された場合、スキーマには配列として渡されます。`?tag=a&tag=b` は `{ tag: ['a', 'b'] }` になります。1 回しか出現しないキーはプレーンな文字列のままなので、1 回以上出現しうるパラメータには `union` を使用してください。
+同じクエリキーが繰り返された場合、スキーマには配列として渡されます。`?tag=a&tag=b` は `{ tag: ['a', 'b'] }` になります。1 回しか出現しないキーはプレーンな文字列のままなので、1 回以上出現しうるパラメータには `union` を使ってください。
 
 ```ts
 const FilterQuerySchema = z.object({
@@ -389,7 +389,7 @@ const FilterQuerySchema = z.object({
 
 ## 型安全なリクエストパース
 
-完全な型安全性のため、リクエストパースと組み合わせます。
+型安全性を徹底するには、リクエストパースと組み合わせます。
 
 ```ts
 import { Router, parseRequestPayload, validateRequest, getValidatedData } from '@guren/core'
@@ -416,7 +416,7 @@ zod 4.5 はスキーマを高速な生成コードへコンパイルできます
 import 'zod/compile'
 ```
 
-このimport以降に構築されたスキーマは、自動的にコンパイル済みの経路でパースされます。Gurenのバリデーションヘルパー、ルート契約(`params`、`query`、`body`、`output`)、バリデーションミドルウェアはいずれもスキーマ自身の `parse`/`safeParse` を呼ぶため、追加の変更なしで高速化されます。
+このimport以降に構築されたスキーマは、コンパイル済みの経路でパースされます。Gurenのバリデーションヘルパー、ルート契約(`params`、`query`、`body`、`output`)、バリデーションミドルウェアはいずれもスキーマ自身の `parse`/`safeParse` を呼ぶので、何も書き換えずに速くなります。
 
 既存アプリに導入するには、`zod` の依存を `^4.5.0` へ上げ、エントリモジュールの**最初の行**として(スキーマを定義するどのモジュールよりも前に)このimportを追加してください。
 
@@ -425,7 +425,7 @@ Bunでの計測では、100件のリスト出力の検証が約19µsから1.2µs
 知っておくべきことは3つです。
 
 - **importの順序が重要です。** import前に構築されたスキーマは通常のパーサーのまま動きます。エントリモジュールの先頭に置いてください。
-- **制限のあるランタイムにも対応します。** 生成コードを禁止するランタイム(厳格なCSPなど)では `z.config({ jitless: true })` を呼べばコンパイルはスキップされ、すべてそのまま動きます。未対応のスキーマ機能も通常のパーサーに静かにフォールバックし、コンパイルが例外を投げることはありません。
-- **refinementは副作用なしに保ってください。** 不正な入力では `.refine()` や `.transform()` のコールバックが2回実行されることがあります(高速経路の後、完全なエラーを組み立てるフォールバックが走るため)。検証結果は変わりませんが、コールバック内の副作用は二重になります。
+- **制限のあるランタイムにも対応します。** 生成コードを禁止するランタイム(厳格なCSPなど)では `z.config({ jitless: true })` を呼べばコンパイルはスキップされ、すべてそのまま動きます。未対応のスキーマ機能もそのまま通常のパーサーにフォールバックし、コンパイルが例外を投げることはありません。
+- **refinementには副作用を持たせないでください。** 不正な入力では `.refine()` や `.transform()` のコールバックが2回実行されることがあります(高速経路の後、完全なエラーを組み立てるフォールバックが走るため)。検証結果は変わりませんが、コールバック内の副作用は二重になります。
 
 スキーマ非依存のバリデーションには影響しません。Valibotや自作バリデータは従来どおり自身の `parse`/`safeParse` の挙動で動きます。

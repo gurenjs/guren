@@ -8,7 +8,7 @@
 ## 前提条件
 
 - **Bun 1.1 以降**
-- **Docker Desktop (Compose v2)** — Postgres 用
+- **Docker Desktop (Compose v2)**: Postgres 用
 
 ## 1. API プロジェクトを作成する
 
@@ -148,13 +148,13 @@ bun run codegen
 ```
 
 ここでは `.guren/pages.gen.ts` は生成されません。このマニフェストは
-`@guren/inertia-client` を import しますが、API 専用アプリはそのパッケージを
-インストールしていない一方で、`tsconfig.json` は `.guren/` 配下をすべて型検査
-します。生成してしまうと `bun run typecheck` が 1 行目で落ちます。
+`@guren/inertia-client` を import しますが、API 専用アプリにはそのパッケージが
+入っていません。それでいて `tsconfig.json` は `.guren/` 配下をすべて型検査するため、
+生成すると `bun run typecheck` が 1 行目で落ちます。
 
-この判断はスキャフォルダーではなく codegen が持っています。`resources/js/pages`
-にページコンポーネントが現れたとき — 手でコピーした場合でも、チェックアウトで
-入ってきた場合でも — codegen はマニフェストを書かず、その理由を出力します:
+この判断を下すのはスキャフォルダーではなく codegen です。`resources/js/pages`
+にページコンポーネントが現れたときは、手でコピーした場合でもチェックアウトで
+入ってきた場合でも、codegen はマニフェストを書かずにその理由を出力します:
 
 ```
 [warn] 1 page component under resources/js/pages, but this app has no
@@ -163,13 +163,13 @@ bun run codegen
 ```
 
 `guren check` と `guren doctor` も同じ状態を報告します。アプリがこの形になる前に
-生成された `.guren/pages.gen.ts` がディスクに残っている場合はより強く警告します。
+生成された `.guren/pages.gen.ts` がディスクに残っている場合は、より強く警告します。
 `tsc` を落とすのはこの残骸なので、原因となったページコンポーネントを削除した後でも
 報告され、`guren check --ci` はこの状態で失敗します（未使用のページコンポーネント
-だけでは CI は失敗しません）。codegen はそのファイルを削除しません。本当に必要な
-ファイルを消してしまうと、型エラーが原因不明の不具合に変わるからです。不要なら
-自分で削除し、Inertia のページを描画するアプリであれば `@guren/inertia-client` の
-依存と `routes/web.ts` を追加してください。
+だけでは CI は失敗しません）。codegen はこのファイルを削除しません。本当に必要な
+ファイルを消してしまうと、型エラーが原因不明の不具合に変わるからです。不要であれば
+自分で削除してください。Inertia のページを描画するアプリなら、`@guren/inertia-client`
+の依存と `routes/web.ts` を追加します。
 
 ## 8. エンドポイントをテストする
 
@@ -204,9 +204,9 @@ curl -X DELETE http://localhost:3333/api/tasks/1
 
 ## 9. API トークン認証を追加する
 
-認証が必要なルートにはAPIトークンを配線します。これにスキャフォールドはありません
-— `guren add auth` は Inertia のサインイン画面を生成するため、API 専用アプリでは
-実行を拒否します。ミドルウェアは自分で用意してください:
+認証が必要なルートには API トークンを配線します。これを生成するスキャフォールドは
+ありません。`guren add auth` は Inertia のサインイン画面を作るため、API 専用アプリ
+では実行を拒否します。ミドルウェアは自分で用意してください:
 
 ```typescript
 import { createBearerTokenMiddleware, DatabaseApiTokenStore } from '@guren/core'
@@ -228,7 +228,7 @@ router.middleware(requireApiToken).group((auth) => {
 ```
 
 `api_tokens` テーブル、`createApiToken` でのトークン発行、abilities によるスコープ
-制限については[APIトークンガイド](./api-tokens.md)を参照してください。
+制限については[API トークンガイド](./api-tokens.md)を参照してください。
 
 クライアントは `Authorization` ヘッダーにトークンを含めます:
 
@@ -241,7 +241,7 @@ curl -X POST http://localhost:3333/api/tasks \
 
 ## 次のステップ
 
-- [レート制限](./rate-limiting.md) — エンドポイントを不正利用から保護する
-- [API リソース](./api-resources.md) — リソースクラスで JSON レスポンスを整形する
-- [バリデーション](./validation.md) — 高度なバリデーションパターン
-- [エラーハンドリング](./error-handling.md) — API エラーレスポンスをカスタマイズする
+- [レート制限](./rate-limiting.md): エンドポイントを不正利用から守る
+- [API リソース](./api-resources.md): リソースクラスで JSON レスポンスを整形する
+- [バリデーション](./validation.md): 込み入ったバリデーションのパターン
+- [エラーハンドリング](./error-handling.md): API のエラーレスポンスをカスタマイズする

@@ -1,6 +1,6 @@
 # メールガイド
 
-Guren はメール送信のための Fluent API を提供し、複数のトランスポートバックエンドをサポートしています。メールシステムはキューシステムと統合して非同期送信を実現し、HTMLテンプレート、添付ファイルなどをサポートします。
+Guren のメール送信は Fluent API で書け、トランスポートのバックエンドを複数使い分けられます。キューと組み合わせれば非同期に送信でき、HTML テンプレートや添付ファイルにも対応しています。
 
 推奨パターン: `@guren/core` から mail API をインポートし、provider で mail manager を構成します。コントローラーではメールの組み立てと送信に集中します。
 
@@ -8,7 +8,7 @@ Guren はメール送信のための Fluent API を提供し、複数のトラ�
 
 - **MailManager** – メールトランスポートを設定・アクセスするための中央レジストリ。
 - **Mail** – メールを作成・送信するための Fluent ビルダー。
-- **Transport** – メール配信バックエンド。GurenにはSMTP、Resend、Memory（テスト用）トランスポートが付属。
+- **Transport** – メール配信のバックエンド。Guren には SMTP、Resend、Memory（テスト用）のトランスポートが付属。
 
 ## 基本的な使い方
 
@@ -142,18 +142,18 @@ await mail(mailManager)
 **SMTP Transport:**
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
-| `host` | 必須 | SMTPサーバーのホスト名 |
-| `port` | `587` | SMTPサーバーのポート |
-| `secure` | `false` | TLSを使用（通常ポート465で使用） |
-| `auth.user` | - | SMTPユーザー名 |
-| `auth.pass` | - | SMTPパスワード |
+| `host` | 必須 | SMTP サーバーのホスト名 |
+| `port` | `587` | SMTP サーバーのポート |
+| `secure` | `false` | TLS を使用（通常はポート 465 で使用） |
+| `auth.user` | - | SMTP ユーザー名 |
+| `auth.pass` | - | SMTP パスワード |
 | `pool` | `true` | コネクションプーリングを使用 |
 | `maxConnections` | `5` | 最大プール接続数 |
 
 **Resend Transport:**
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
-| `apiKey` | 必須 | Resend APIキー |
+| `apiKey` | 必須 | Resend API キー |
 
 **Memory Transport（テスト用）:**
 | オプション | デフォルト | 説明 |
@@ -165,7 +165,7 @@ await mail(mailManager)
 
 ### React Emailの使用
 
-Guren は型安全なメールテンプレートのために[React Email](https://react.email/)と統合できます。
+型安全なメールテンプレートを書きたい場合は、[React Email](https://react.email/) と組み合わせられます。
 
 ```bash
 bun add @react-email/render react
@@ -263,7 +263,7 @@ await mail(mailManager)
 
 ## キューによるメール送信
 
-キューシステムを使用してメールを非同期で送信します。実アプリでは mail manager を provider で構成し、container から利用します。`setMailManager()` は queued mail job から同じ manager を参照するための bridge です。
+キューを使うとメールを非同期に送信できます。実アプリでは mail manager を provider で構成し、container から取り出して使います。`setMailManager()` は、queued mail job から同じ manager を参照するための bridge です。
 
 ```ts
 import { mail, setMailManager, createQueueManager, MemoryDriver } from '@guren/core'
@@ -294,7 +294,7 @@ await mail(mailManager)
 
 ## Mailableクラス
 
-再利用可能なメールテンプレート用のMailableクラスを生成できます。
+使い回せるメールテンプレートとして、Mailable クラスを生成できます。
 
 ```bash
 bunx guren make:mail WelcomeMail
@@ -359,7 +359,7 @@ await welcomeMail.queue('emails')
 
 ## テスト
 
-テストにはMemoryトランスポートを使用します。
+テストでは Memory トランスポートを使います。
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
@@ -409,16 +409,16 @@ describe('Email', () => {
 
 ## ベストプラクティス
 
-1. **環境変数を使用**: SMTP認証情報やAPIキーをハードコードしない。
+1. **環境変数を使う**: SMTP の認証情報や API キーをハードコードしない。
 
-2. **デフォルトの送信元を設定**: 繰り返しを避けるためデフォルトの送信者を設定。
+2. **デフォルトの送信元を設定する**: 毎回書かずに済むよう、送信者を既定値として持たせます。
 
-3. **大量メールにはキュー送信を使用**: 同期送信でリクエストをブロックしない。
+3. **大量メールはキューに乗せる**: 同期送信でリクエストを止めない。
 
-4. **複雑なテンプレートにはReact Emailを使用**: 型安全なテンプレートは保守が容易。
+4. **複雑なテンプレートには React Email を**: 型安全なテンプレートは保守が楽になります。
 
-5. **Memoryトランスポートでテスト**: テストで実際のメールを送信しない。
+5. **Memory トランスポートでテストする**: テストから実際のメールを送らない。
 
-6. **送信失敗を処理**: `SendResult`を確認し、重要なメールにはリトライロジックを実装。
+6. **送信失敗を処理する**: `SendResult` を確認し、重要なメールにはリトライを組み込みます。
 
-7. **意味のある件名を使用**: 明確な件名はメールの配信率とユーザー体験を向上させる。
+7. **件名は具体的に**: 明確な件名は配信率にもユーザー体験にも効きます。

@@ -1,6 +1,6 @@
 # APIトークンガイド
 
-Guren はAPIリクエストを認証するためのセキュアなAPIトークンシステムを提供します。トークンは保存前にハッシュ化され、abilities（スコープ）をサポートし、有効期限を設定できます。
+Guren には、APIリクエストを認証するためのAPIトークンの仕組みが用意されています。トークンは保存前にハッシュ化され、abilities（スコープ）と有効期限を指定できます。
 
 ## コアコンセプト
 
@@ -38,7 +38,7 @@ return ctx.json({ token: plainTextToken })
 abc123def456...|xyz789ghi012...
 ```
 
-トークン部分は保存前にハッシュ化されます。プレーンテキストのトークンは復元できません。
+トークン部分は保存前にハッシュ化されるため、プレーンテキストのトークンは復元できません。
 
 ### トークンの検証
 
@@ -80,7 +80,7 @@ tokenCanAny(token, ['users:read', 'users:write'])   // false
 
 ### ワイルドカードAbility
 
-`*`を使用してすべてのabilitiesを付与できます。
+`*`を指定すると、すべてのabilitiesを付与できます。
 
 ```ts
 const { plainTextToken } = await createApiToken(store, {
@@ -222,7 +222,7 @@ router.post('/api/tokens/revoke-all', async (ctx) => {
 
 ### 組み込みの DatabaseApiTokenStore
 
-本番環境では組み込みの `DatabaseApiTokenStore` を使います。`api_tokens` スキーマの Drizzle テーブルを渡すだけで、カスタムストアの実装は不要です。
+本番環境では組み込みの `DatabaseApiTokenStore` を使います。`api_tokens` スキーマの Drizzle テーブルを渡すだけで済み、カスタムストアを実装する必要はありません。
 
 ```ts
 import { DatabaseApiTokenStore } from '@guren/core'
@@ -237,7 +237,7 @@ const { plainTextToken } = await createApiToken(store, {
 })
 ```
 
-ストアはアプリで設定済みの ORM 接続（標準の `DatabaseProvider` セットアップ）を利用するため、追加の配線は不要です。期限切れトークンは `verifyApiToken` が拒否します。テーブルから削除するには、スケジュールジョブから `store.deleteExpired()` を呼んでください。
+ストアはアプリで設定済みの ORM 接続（標準の `DatabaseProvider` セットアップ）を使うので、追加の配線は要りません。期限切れトークンは `verifyApiToken` が拒否します。テーブルから削除するには、スケジュールジョブから `store.deleteExpired()` を呼んでください。
 
 ### データベーススキーマ
 
@@ -267,7 +267,7 @@ const store = new DatabaseApiTokenStore(apiTokens, { abilitiesMode: 'text' })
 
 ### カスタムストア
 
-`ApiTokenStore` インターフェースを実装したオブジェクトであれば何でも利用できます。トークンを外部システムに保存する場合は自前で実装してください。
+`ApiTokenStore` インターフェースを実装したオブジェクトであれば何でも使えます。トークンを外部システムに保存したい場合は自前で実装してください。
 
 ```ts
 import type { ApiTokenStore, ApiToken } from '@guren/core'
@@ -396,18 +396,18 @@ describe('APIトークン', () => {
 
 ## ベストプラクティス
 
-1. **プレーントークンを保存しない**: ハッシュ化されたトークンのみが保存される。プレーンテキストは作成時に一度だけ表示。
+1. **プレーントークンを保存しない**: 保存されるのはハッシュ化したトークンだけ。プレーンテキストは作成時に一度だけ表示する。
 
-2. **具体的なabilitiesを使用**: セキュリティ向上のため、`['*']`よりも`['posts:read', 'posts:write']`を推奨。
+2. **具体的なabilitiesを使用**: `['*']`ではなく`['posts:read', 'posts:write']`のように絞る。
 
-3. **有効期限を設定**: セキュリティのためトークンには有効期限を設定。30〜90日が一般的。
+3. **有効期限を設定**: トークンには有効期限を付ける。30〜90日が一般的。
 
-4. **パスワード変更時に無効化**: ユーザーがパスワードを変更したら、すべてのトークンを無効化。
+4. **パスワード変更時に無効化**: ユーザーがパスワードを変更したら、すべてのトークンを無効化する。
 
-5. **本番環境ではデータベースストレージを使用**: `MemoryApiTokenStore`はテスト用のみ。
+5. **本番環境ではデータベースストレージを使用**: `MemoryApiTokenStore`はテスト専用。
 
-6. **最終使用日時を追跡**: `lastUsedAt`フィールドで未使用トークンを特定。
+6. **最終使用日時を追跡**: `lastUsedAt`フィールドで使われていないトークンを見つける。
 
-7. **トークンに意味のある名前を付ける**: 識別しやすいよう「モバイルアプリ」「CI/CDパイプライン」などの名前を使用。
+7. **トークンに意味のある名前を付ける**: 「モバイルアプリ」「CI/CDパイプライン」など、見て分かる名前にする。
 
 8. **トークンローテーションを実装**: ユーザーが定期的にトークンを再生成できるようにする。

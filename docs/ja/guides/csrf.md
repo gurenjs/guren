@@ -1,6 +1,6 @@
 # CSRF 保護
 
-CSRF（Cross-Site Request Forgery）保護は、悪意のあるウェブサイトが認証済みユーザーの代わりにフォームを送信することを防ぎます。Guren はセッションとシームレスに統合する組み込みの CSRF ミドルウェアを提供しています。
+CSRF（Cross-Site Request Forgery）保護は、悪意のあるウェブサイトが認証済みユーザーになりすましてフォームを送信するのを防ぎます。Guren には、セッションと連携する CSRF ミドルウェアが組み込まれています。
 
 トークンは 2 つのリクエストにまたがって働きます。フォームを表示する GET で発行され、送信する POST で照合されます。
 
@@ -43,15 +43,15 @@ app.use('*', createCsrfMiddleware())
 ミドルウェアは自動的に以下を行います。
 - セッションごとにトークンを生成（ゲストにはステートレスな double-submit トークン）
 - 状態を変更するリクエスト（POST、PUT、PATCH、DELETE）でトークンを検証
-- 安全なメソッド（GET、HEAD、OPTIONS、QUERY）は検証なしで許可 — QUERY（RFC 10008）は仕様上安全なメソッドのため、QUERY ハンドラーは読み取り専用に保つこと。トークンを要求したい場合は `methods` オプションに `'QUERY'` を追加
+- 安全なメソッド（GET、HEAD、OPTIONS、QUERY）は検証なしで許可。QUERY（RFC 10008）は仕様上安全なメソッドなので、QUERY ハンドラーは読み取り専用に保ってください。トークンを要求したい場合は `methods` オプションに `'QUERY'` を追加します
 
 ## フォームにトークンを含める
 
-ネイティブの `<form method="post">` はトークンを `_token` フィールドとして含める必要が
-あります。含めないと Guren が 403 で拒否します。Inertia アプリなら `useForm()` と
+ネイティブの `<form method="post">` には、トークンを `_token` フィールドとして含めてくだ
+さい。含めないと Guren が 403 で拒否します。Inertia アプリなら `useForm()` と
 `<Link method="post">` が自動で送信します（[Inertia.js との統合](#inertiajs-との統合)を参照）。
 
-`csrfField()` ヘルパーを使用して hidden input フィールドを生成します。
+hidden input フィールドは `csrfField()` ヘルパーで生成します。
 
 ```ts
 // コントローラー内

@@ -105,7 +105,7 @@ export default class PostsController extends Controller {
 }
 ```
 
-`inject` の `as const` アサーションにより型安全性が確保されます。配列内の各文字列は、サービスコンテナに登録されたキーに対応します。
+`inject` に `as const` を付けることで型が保たれます。配列内の各文字列は、サービスコンテナに登録されたキーに対応します。
 
 ## ルート登録
 コントローラーは `routes/web.ts` の registrar からルートに接続します。
@@ -120,7 +120,7 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-`[Controller, 'method']` タプルは、Guren にどのクラスをインスタンス化し、どのメソッドを呼び出すかを指示します。メソッドは非同期にできます。
+`[Controller, 'method']` のタプルが、どのクラスをインスタンス化してどのメソッドを呼ぶかを決めます。メソッドは非同期でもかまいません。
 
 ## リクエストへのアクセス
 - `this.ctx` で Hono コンテキスト全体にアクセスできます。ヘッダーやレスポンスヘルパーも含まれます。
@@ -277,14 +277,14 @@ export default class AppInfoProvider extends ServiceProvider {
 ```
 
 > [!NOTE]
-> リクエストのロケールと翻訳カタログは、`createApp({ i18n })` でアプリを作成していれば自動的に共有されます — [i18nガイド](./i18n.md)を参照してください。ここでロケール検出を手書きする必要はありません。
+> リクエストのロケールと翻訳カタログは、`createApp({ i18n })` でアプリを作成していれば自動的に共有されます（[i18nガイド](./i18n.md)を参照してください）。ここでロケール検出を手書きする必要はありません。
 
 先に登録されたリゾルバーの props にマージされるので、複数のプロバイダーがそれぞれ共有 props を足しても互いを壊しません。
 
-`this.container` を渡すと、その props はそのアプリケーションだけに閉じます。省略するとプロセス全体で共有されるため、同一プロセスで起動した2つ目のアプリケーション（テストスイートや暖機済みのサーバーレス環境）にも渡ってしまいます。
+`this.container` を渡すと、その props はそのアプリケーションだけに閉じます。省略するとプロセス全体で共有されるため、同一プロセスで起動した 2 つ目のアプリケーション（テストスイートや暖機済みのサーバーレス環境）にも渡ってしまいます。
 
 > [!NOTE]
-> 認証ユーザー（`auth.user`）の共有は `bunx guren add auth` が生成する `AuthProvider` が既に登録済みです。自分で登録し直す必要はありません — 詳細は[認証ガイド](./authentication.md)を参照してください。
+> 認証ユーザー（`auth.user`）の共有は `bunx guren add auth` が生成する `AuthProvider` が既に登録済みです。自分で登録し直す必要はありません（詳細は[認証ガイド](./authentication.md)を参照してください）。
 
 エクスポートされた `InertiaSharedProps` インターフェースを拡張して、コントローラーと React ページ全体でプロパティの型を維持しましょう。
 
@@ -302,7 +302,7 @@ declare module '@guren/core' {
 コンポーネントのプロパティ型が必要な場合は、`InferInertiaProps<ReturnType<Controller['action']>>` でアクションプロパティと共有プロパティの両方を含む型を取得できます。
 
 ## コントローラーのテスト
-- `TestApp` を使うと、Fluent アサーションで表現力豊かな HTTP レベルのテストが書けます。
+- `TestApp` を使うと、Fluent アサーションで HTTP レベルのテストを書けます。
 
 ```ts
 import { TestApp } from '@guren/testing'
