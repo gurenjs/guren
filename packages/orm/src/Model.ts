@@ -100,6 +100,7 @@ export interface PaginatedResult<TRecord extends PlainObject = PlainObject> {
 
 /** Interface for ORM adapters that power the Model class; DrizzleAdapter by default. */
 export interface ORMAdapter {
+  /** Must not commit before the callback's promise settles: drizzle's bun-sqlite does. */
   transaction?<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult>
   findMany<TRecord extends PlainObject = PlainObject>(
     table: unknown,

@@ -232,6 +232,10 @@ await Post.transaction(async (trx) => {
 
 If an error is thrown in the callback, Guren rolls back the transaction.
 
+SQLite holds a single connection, which takes one transaction at a time, so concurrent transactions are queued and run one after another — each committing or rolling back on its own. Awaiting non-database work inside the callback is fine; it only makes the next transaction wait.
+
+The one thing it cannot do is nest. A `Model.transaction()` opened inside another one would be queued behind the transaction it is running inside, so it is refused with an error instead. Pooled databases such as PostgreSQL and MySQL are unaffected.
+
 You can also use the transaction-bound scope for cleaner type-safe writes:
 
 ```ts

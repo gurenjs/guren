@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
 import type { AdapterQueryOptions, FindManyOptions, OrderByClause, PlainObject, WhereClause } from '../Model'
 import type { ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
@@ -41,10 +41,19 @@ type DrizzleDatabase = {
   insert(table: unknown): DrizzleLikeInsert
   update?(table: unknown): DrizzleLikeUpdate
   delete?(table: unknown): DrizzleLikeDelete
+  run?(query: unknown): Promise<unknown>
   transaction?<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult>
 }
 
 let database: DrizzleDatabase | undefined
+// Memo for the configured `database` only; `configure()` clears it. Module state
+// outlives a test file, and `bun test packages/orm` runs them in one process.
+let transactionAwaitsCallback: boolean | undefined
+// Only for a database whose own transaction() does not await: one connection
+// takes one transaction, so this serializes the ones this adapter drives.
+let transactionQueue: Promise<unknown> = Promise.resolve()
+// Outlives configure(): a new storage would lose the context of an open transaction.
+let transactionScope: Promise<TransactionScope> | undefined
 
 function ensureDatabase(): DrizzleDatabase {
   if (!database) {
@@ -192,12 +201,127 @@ async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning:
   return { usedReturning: false, row: undefined }
 }
 
+const NOOP = () => undefined
+
+/**
+ * Whether `db.transaction()` awaits its callback before committing: drizzle's
+ * bun-sqlite COMMITs on whatever the callback returns, d1 and every pg/mysql
+ * driver await it. Probed rather than matched against a driver list, because
+ * this adapter takes any drizzle-shaped handle and one a list never named gets
+ * the wrong path silently. Costs one empty transaction per configured database.
+ */
+async function awaitsItsCallback(db: DrizzleDatabase): Promise<boolean> {
+  if (transactionAwaitsCallback === undefined) {
+    const probe = db.transaction?.(NOOP as unknown as (trx: unknown) => Promise<undefined>)
+    // Settling the probe only keeps its transaction from outliving this call; the
+    // verdict is already recorded. Its failure must not stand in for the caller's
+    // own — on a pooled driver the two hold different connections.
+    transactionAwaitsCallback = isPromiseLike(probe)
+    if (isPromiseLike(probe)) await probe.catch(NOOP)
+  }
+
+  return transactionAwaitsCallback
+}
+
+interface TransactionScope {
+  /** Runs `fn` in a context every transaction started under it can be recognised by. */
+  run<TResult>(fn: () => TResult): TResult
+  isInside(): boolean
+}
+
+/**
+ * Imported on demand so `node:async_hooks` stays off the module graph of a
+ * Workers or Lambda bundle, whose drivers all await their callback and never
+ * reach this branch. The promise is what is memoized, not the storage: two
+ * concurrent first callers must not end up asking different instances.
+ */
+function loadTransactionScope(): Promise<TransactionScope> {
+  transactionScope ??= import('node:async_hooks').then(({ AsyncLocalStorage }) => {
+    const store = new AsyncLocalStorage<true>()
+    return { run: (fn) => store.run(true, fn), isInside: () => store.getStore() === true }
+  })
+
+  return transactionScope
+}
+
+/**
+ * Serializes what `runExclusively` drives, since one connection takes one
+ * transaction. Waiting is only safe for a caller that is not already inside one:
+ * that caller would be queued behind itself. Async context is what separates the
+ * two, and it is the only thing that can — arrival order cannot tell a nested
+ * call from an unrelated concurrent one, and refusing both punishes the second.
+ */
+async function runOwnTransaction<TResult>(
+  db: DrizzleDatabase,
+  callback: (trx: unknown) => Promise<TResult>,
+): Promise<TResult> {
+  if (typeof db.run !== 'function') {
+    throw new Error(
+      'DrizzleAdapter: the configured database commits before its transaction callback has awaited anything, ' +
+        'and exposes no run() to drive BEGIN/COMMIT with, so transactions on it cannot be made atomic.',
+    )
+  }
+
+  const scope = await loadTransactionScope()
+  if (scope.isInside()) {
+    throw new Error(
+      'DrizzleAdapter: cannot begin a transaction inside another one. This driver holds a single connection, ' +
+        'which takes one transaction at a time, so the inner transaction would wait on the outer one to ' +
+        'finish and the outer on the inner.',
+    )
+  }
+
+  // Bound: these are methods, and a detached one loses the dialect it reads.
+  const run = db.run.bind(db)
+  const slot = transactionQueue.then(() => runExclusively(db, run, scope, callback))
+  // The queue only orders: a settled slot must neither reject the next one nor,
+  // via a value-preserving `.catch`, pin its result until the next transaction.
+  transactionQueue = slot.then(NOOP, NOOP)
+  return slot
+}
+
+/**
+ * BEGIN/COMMIT/ROLLBACK driven here so an async callback is honoured on a driver
+ * that would otherwise commit before awaiting it. The handle itself is the
+ * transaction scope: these drivers hold one connection, so every statement
+ * between BEGIN and COMMIT is inside it. Callers reach this one at a time.
+ */
+async function runExclusively<TResult>(
+  db: DrizzleDatabase,
+  run: NonNullable<DrizzleDatabase['run']>,
+  scope: TransactionScope,
+  callback: (trx: unknown) => Promise<TResult>,
+): Promise<TResult> {
+  // Outside the try: a BEGIN that failed opened nothing to unwind.
+  await run(sql.raw('begin'))
+
+  try {
+    // Entered synchronously, which is what puts every await inside the callback
+    // — and so any transaction it starts — in this transaction's async context.
+    const result = await scope.run(() => callback(db))
+    await run(sql.raw('commit'))
+    return result
+  } catch (error) {
+    // Reached by a refused COMMIT too, which leaves the transaction open. The
+    // caller's error is what they have to see, so a failing ROLLBACK must not
+    // replace it.
+    try {
+      await run(sql.raw('rollback'))
+    } catch {
+      /* empty */
+    }
+    throw error
+  }
+}
+
 export const DrizzleAdapter: ORMAdapterAdvanced & {
   configure(db: DrizzleDatabase): void
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase
 } = {
   configure(db: DrizzleDatabase) {
     database = db
+    transactionAwaitsCallback = undefined
+    transactionQueue = Promise.resolve()
   },
 
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase {
@@ -455,6 +579,11 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     if (typeof db.transaction !== 'function') {
       throw new Error('DrizzleAdapter: configured database does not support transactions.')
     }
-    return db.transaction(callback)
+
+    if (await awaitsItsCallback(db)) {
+      return db.transaction(callback)
+    }
+
+    return runOwnTransaction(db, callback)
   },
 }

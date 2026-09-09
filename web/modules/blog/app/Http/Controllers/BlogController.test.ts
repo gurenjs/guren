@@ -7,7 +7,10 @@ import {
 } from '@guren/testing'
 import type { Context } from '@guren/core'
 
-vi.mock('@guren/core', () => createControllerModuleMock())
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return { ...actual, ...createControllerModuleMock() }
+})
 
 import BlogController from './BlogController.js'
 import { Post, type PostRecord } from '../../Models/Post.js'
