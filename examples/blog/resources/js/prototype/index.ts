@@ -26,15 +26,16 @@ function toResource(post: PostSeed): PostResourceData {
 
 const PER_PAGE = 10
 
-function paginate(posts: PostSeed[], pageNumber: number, path: string) {
-  const total = posts.length
+/** The `PaginatedPageProps` shape an index page expects, over an in-memory list; same helper `guren add prototype` ships. */
+function paginate<T>(items: T[], pageNumber: number, path: string) {
+  const total = items.length
   const lastPage = Math.max(1, Math.ceil(total / PER_PAGE))
-  const currentPage = Math.min(Math.max(1, pageNumber), lastPage)
+  const currentPage = Math.min(Math.max(1, pageNumber || 1), lastPage)
   const start = (currentPage - 1) * PER_PAGE
   const urlFor = (n: number) => (n === 1 ? path : `${path}?page=${n}`)
 
   return {
-    data: posts.slice(start, start + PER_PAGE).map(toResource),
+    data: items.slice(start, start + PER_PAGE),
     pagination: {
       meta: {
         currentPage,
@@ -97,10 +98,10 @@ export default definePrototype({
   notFoundPage: pages.Error,
 
   routes: {
-    home: ({ state, query }) => page(pages.posts.Index, paginate(state.posts, Number(query.page ?? 1), '/')),
+    home: ({ state, query }) => page(pages.posts.Index, paginate(state.posts.map(toResource), Number(query.page ?? 1), '/')),
 
     'posts.index': ({ state, query }) =>
-      page(pages.posts.Index, paginate(state.posts, Number(query.page ?? 1), '/posts')),
+      page(pages.posts.Index, paginate(state.posts.map(toResource), Number(query.page ?? 1), '/posts')),
 
     'posts.show': ({ state, params, notFound }) => {
       const post = state.posts.find((p) => p.id === Number(params.id))

@@ -3,6 +3,7 @@ import { addAttachments, appBindsStorage } from './add-attachments'
 import { addCache } from './add-cache'
 import { addLint } from './add-lint'
 import { addSession } from './add-session'
+import { addPrototype } from './add-prototype'
 import { assertNotApiOnly } from './app-surface'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
@@ -77,6 +78,10 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
   lint: {
     description: 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.',
     run: async (options) => addLint({ force: Boolean(options.force) }),
+  },
+  prototype: {
+    description: 'Install prototype mode (RFC 0021): the fixture module, the dev:prototype/build:prototype scripts, and the client and app wiring.',
+    run: async (options) => addPrototype({ force: Boolean(options.force) }),
   },
   admin: {
     description: 'Install a starter admin dashboard with dedicated routes and controller.',

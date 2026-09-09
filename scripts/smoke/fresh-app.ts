@@ -6,6 +6,7 @@ import { FIELD_TYPES } from '../../packages/cli/src/fields'
 import { DATABASE_DRIVERS } from '../../packages/create-app/src/blueprints'
 import { fileExists } from '../../packages/create-app/src/utils'
 import { assertSessionDrivers } from './session-drivers'
+import { runPrototypeScaffold } from './prototype-scaffold'
 import { auditBlueprintTemplates, auditConsoleWiring, auditStarterTemplate } from './starter-template-audit'
 import {
   collectLocalPackages,
@@ -72,6 +73,8 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['schedule'],
   // The templates ship .oxlintrc.json, so this exercises the overwrite path.
   ['lint', '--force'],
+  // Wiring only here; runPrototypeScaffold() drives the fixture and the static build.
+  ['prototype'],
 ]
 
 /**
@@ -699,6 +702,15 @@ async function main(): Promise<void> {
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       await assertCanonicalScaffolds(appDir)
       await assertFeatureScaffolds(appDir)
+      // RFC 0021 Part 3: prototype-first, a static build with no database,
+      // then promotion; the app that reaches the typecheck, build and gate
+      // below is the promoted one.
+      await runPrototypeScaffold({
+        appDir,
+        cliBin: resolve(repoRoot, 'packages/cli/src/bin.ts'),
+        env: { ...runtimeEnv, GUREN_QUIET_DUPLICATE_ORM: '1' },
+        run,
+      })
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir, runtimeEnv)
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--routes', 'routes/web.ts', '--out', 'types/generated/routes.d.ts', '--force'], appDir, runtimeEnv)
     } else if (blueprint === 'api') {

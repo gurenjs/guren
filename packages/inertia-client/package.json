@@ -85,5 +85,10 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "hono": "^4.13.0"
+  },
+  "peerDependenciesMeta": {
+    "hono": {
+      "optional": true
+    }
   }
 }

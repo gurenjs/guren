@@ -2875,6 +2875,10 @@ const makeFeatureCommand = defineCommand({
       type: 'boolean',
       description: 'Also generate an authorization policy and enforce it in store/update/destroy.',
     },
+    prototype: {
+      type: 'boolean',
+      description: 'Prototype-first (RFC 0021): pages, validator, page-data type and fixture entries only; no model, migration or controller. Needs `guren add prototype`.',
+    },
     module: MODULE_ARG,
   },
   async run({ args }) {
@@ -2886,6 +2890,7 @@ const makeFeatureCommand = defineCommand({
       withTest: Boolean(args.test),
       publicAccess: Boolean(args.public),
       withPolicy: Boolean(args.policy),
+      prototype: Boolean(args.prototype),
     })
   },
 })
@@ -3094,6 +3099,27 @@ const addPluginCommand = defineCommand({
   },
 })
 
+const addPrototypeCommand = defineCommand({
+  meta: {
+    name: 'prototype',
+    description: 'Install prototype mode (RFC 0021): the fixture module, the dev:prototype/build:prototype scripts, and the client and app wiring.',
+  },
+  args: {
+    force: {
+      type: 'boolean',
+      description: 'Overwrite the fixture module if it exists.',
+    },
+    remove: {
+      type: 'boolean',
+      description: 'Reverse the wiring and the scripts; the fixture module is left in place.',
+    },
+  },
+  async run({ args }) {
+    const { addPrototype } = await import('./add-prototype')
+    await addPrototype({ force: Boolean(args.force), remove: Boolean(args.remove) })
+  },
+})
+
 const addCommand = defineCommand({
   meta: {
     name: 'add',
@@ -3120,6 +3146,7 @@ const addCommand = defineCommand({
     queue: createAddBlueprintCommand('queue', 'Install queue scaffolding with a sample job.'),
     resource: addResourceCommand,
     plugin: addPluginCommand,
+    prototype: addPrototypeCommand,
     session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, SessionProvider, and sessions:prune.'),
     schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
     storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),

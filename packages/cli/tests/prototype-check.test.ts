@@ -155,6 +155,7 @@ describe('checkPrototypeRoutes', () => {
 
     const warn = byKey(results, 'prototype-pages-unreachable')
     expect(warn?.status).toBe('warn')
+    expect(warn?.advisory).toBe(true)
     expect(warn?.message).toContain('about')
   })
 

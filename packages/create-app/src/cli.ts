@@ -290,6 +290,10 @@ const command = defineCommand({
       type: 'boolean',
       description: 'Include authentication scaffolding with auto-configured providers and middleware',
     },
+    prototype: {
+      type: 'boolean',
+      description: 'Install prototype mode (RFC 0021): a fixture module and a static, server-less build for customer walkthroughs',
+    },
     blueprint: {
       type: 'string',
       description: `Starter blueprint to scaffold (${listAppBlueprints().join(', ')})`,
@@ -359,6 +363,22 @@ const command = defineCommand({
     let installed = false
     if (shouldInstall) {
       installed = await installDependencies(targetDir)
+    }
+
+    if (args.prototype && blueprint.name !== 'api') {
+      let prototypeInstalled = false
+      if (installed) {
+        consola.start('Installing prototype mode...')
+        prototypeInstalled = await runAppCli(targetDir, ['add', 'prototype'])
+        if (prototypeInstalled) {
+          consola.success('Prototype mode installed: bun run dev:prototype / bun run build:prototype')
+        }
+      }
+      if (!prototypeInstalled) {
+        consola.warn('Prototype mode was not installed automatically. Run `bunx guren add prototype` inside the app after installing dependencies.')
+      }
+    } else if (args.prototype) {
+      consola.info('The api blueprint has no pages to prototype — ignoring --prototype.')
     }
 
     if (agents === null) {

@@ -136,6 +136,22 @@ describe('gurenVitePlugin in prototype mode', () => {
   })
 })
 
+describe('manualChunks and the prototype runtime', () => {
+  it('leaves the prototype entry and the Hono router out of the eager vendor chunks', () => {
+    const plugin = gurenVitePlugin()
+    const config: Record<string, any> = {}
+    plugin.config(config, { command: 'build', mode: 'production' })
+    const manualChunks = config.build.rollupOptions.output.manualChunks as (id: string) => string | undefined
+
+    expect(manualChunks('/app/node_modules/@guren/inertia-client/dist/app.js')).toBe('framework-vendor')
+    expect(manualChunks('/repo/packages/inertia-client/src/app.tsx')).toBe('inertia-vendor')
+    expect(manualChunks('/app/node_modules/@guren/inertia-client/dist/prototype.js')).toBeUndefined()
+    expect(manualChunks('/repo/packages/inertia-client/src/prototype.ts')).toBeUndefined()
+    expect(manualChunks('/app/node_modules/hono/dist/router/trie-router/router.js')).toBeUndefined()
+    expect(manualChunks('/app/node_modules/hono/dist/jsx/index.js')).toBe('framework-vendor')
+  })
+})
+
 describe('renderPrototypeShell', () => {
   it('points the module script at the entry and asks robots to stay away', () => {
     const shell = renderPrototypeShell('./resources/js/app.tsx')
