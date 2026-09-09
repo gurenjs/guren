@@ -1,5 +1,40 @@
 # @guren/cli
 
+## 2.20.0
+
+### Minor Changes
+
+- 5e8300f: **Prototype-first scaffolding (RFC 0021 Part 3)** — `guren add prototype` installs prototype mode into an app: the fixture module (`resources/js/prototype/index.ts`, with a `paginate()` helper and a demo author in `shared.auth`), the `dev:prototype` / `build:prototype` scripts, the `startInertiaClient({ prototype })` and `createApp({ prototype })` wiring, and the `GUREN_PROTOTYPE` env declaration; idempotent, and `--remove` reverses the wiring and scripts while keeping the fixture. `create-guren-app --prototype` runs it after install. `guren make:feature <Entity> --fields … --prototype` scaffolds pages, the validator, a page-data type (`resources/js/types/<Entity>.ts`) and seven fixture entries with seed data, and prints the route registrations with the `prototype` handler; no model, migration, Resource or controller. Running `make:feature` again without the flag promotes the feature: the Resource is typed against that page-data type, the pages and validator are kept as edited, and the handler replacements are printed. The `prototype-pages-unreachable` check result is advisory, so a gate does not fail on walkthrough coverage.
+- 104b5ea: **Server-side prototype routes and `guren check --prototype` (RFC 0021 Part 2)** — `router.get('/posts', prototype).name('posts.index')` registers a route that answers from the app's fixture module (`createApp({ prototype: () => import('../resources/js/prototype/index.js') })`) until a controller replaces it. The route contract is enforced first, as for an inline handler; a `page()` result renders through the shared-props pipeline with the real resolvers winning over the fixture's, `redirect()` is a 303 to the named route, `errors()` takes the `ValidationException` path, `location()` is an Inertia location visit, and `notFound()` a 404. The boot validates every prototype route (named, answered by the fixture, a loader present) and refuses them in production unless `GUREN_PROTOTYPE_ROUTES=1`, since the fixture's state is shared by every request of the process. `RouteDefinition.prototype` marks them: `guren context` lists a prototype backlog, `guren doctor` reports them as a deploy blocker, agent derivation skips them with a warning, and `guren check --prototype` runs the wiring rules (fixture entries against the route graph, ambiguous paths, `.agent()` on a fixture-backed route, the `createApp()` loader), gating the build script.
+- 45704c2: Judge a session driver against what is installed, not against its name (RFC 0020 Part 4)
+
+  `BUILT_IN_SESSION_DRIVERS` names every driver the framework registers and
+  whether it survives a runtime that shares no memory between requests. A plugin
+  declares its own in `gurenPlugin.drivers.session`, which is data the CLI reads
+  from `node_modules` the way it reads `compatibility` — never executed.
+
+  The deploy-runtime check used to treat every driver that was not `memory` as
+  persistent, so it vouched for names nothing in the install stands behind: a
+  plugin driver whose package is absent, and a misspelled `datbase`, both passed
+  as backed. Those are now reported as unverified rather than as passing, which
+  is a new warning for an app whose driver is registered only in its own code.
+  Declaring it in a plugin manifest, or reading the warning as the reminder it
+  is, are both fine — the check never sets an exit code.
+
+### Patch Changes
+
+- 9dbcab6: Scaffolders that add a table to `db/schema.ts` now leave an aggregate object alone unless the file itself identifies it as the schema — named `schema`, or read in a `typeof`. On a bare shape match (`export const authTables = { users }`) the new table is appended at end of file with no key added and no declaration moved, the same evidence `guren check` already refuses to gate on.
+- Updated dependencies [f8dca72]
+- Updated dependencies [a1928a8]
+- Updated dependencies [104b5ea]
+- Updated dependencies [ca9bc47]
+- Updated dependencies [45704c2]
+- Updated dependencies [e01b5ff]
+- Updated dependencies [3ed49af]
+  - @guren/server@2.21.0
+  - @guren/core@1.16.0
+  - @guren/orm@2.7.1
+
 ## 2.19.0
 
 ### Minor Changes
