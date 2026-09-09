@@ -129,16 +129,17 @@ step 2 "Vendor local packages into the app"
 
 VENDOR_DIR="$APP_DIR/.guren-vendor"
 
-# Copies each package's dist/ and manifest into the app, points their
-# cross-references at each other, and rewrites the app's own @guren/*
-# dependencies at the entry the template declares them in — a devDependency
-# rewritten into `dependencies` would leave the template's published range
-# behind for bun to resolve from the registry.
+# Stages each package's shipped files, packs them into tarballs inside the app
+# (a `file:` directory dependency stalls `bun audit` on Bun 1.3.14), and rewrites
+# the app's own @guren/* dependencies at the entry the template declares them
+# in — a devDependency rewritten into `dependencies` would leave the template's
+# published range behind for bun to resolve from the registry.
 bun "$LOCAL_PACKAGES_BIN" vendor "$APP_DIR" "$VENDOR_DIR"
 
 echo ""
 echo "  Running bun install..."
 (cd "$APP_DIR" && bun install)
+bun "$LOCAL_PACKAGES_BIN" assert-installed "$APP_DIR"
 
 # ---------------------------------------------------------------------------
 # Step 3: Add auth scaffold

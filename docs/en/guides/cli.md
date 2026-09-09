@@ -552,7 +552,7 @@ bunx guren tool:call posts.index --as user:42 --json
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--input` | `{}` | Tool arguments as a JSON object |
-| `--as` | (unauthenticated) | Authenticate as a user (`user:42`). Development only: sets `GUREN_TESTING=1` for the process, so the app accepts an injected user instead of a real credential |
+| `--as` | (unauthenticated) | Authenticate as a user (`user:42`). Development only: sets `GUREN_TESTING=1` for the process, so the app accepts an injected user instead of a real credential, and passwords hash with the cheap test parameters (see [Testing](./testing.md#password-hashing-in-tests)) |
 | `--preflight` | `false` | Ask for a verdict instead of an execution — the handler does not run |
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output the call result as JSON |

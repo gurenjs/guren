@@ -105,6 +105,20 @@ describe('auditCsrfExemptions', () => {
     expect((await auditCsrfExemptions(cwd, findings)).declaredBy).toEqual(['acme-mcp'])
   })
 
+  // The smokes' vendored @guren/* tarballs name each other only as optional
+  // peers (scripts/smoke/local-packages.ts); this is what keeps them in the scan.
+  it('reads a package whose only link to Guren is a peerDependency', async () => {
+    const cwd = await appWith({
+      'acme-mcp': {
+        manifest: { peerDependencies: { '@guren/server': '2.20.0' }, peerDependenciesMeta: { '@guren/server': { optional: true } } },
+        files: DECLARES,
+      },
+    })
+    const findings: AuditFinding[] = []
+
+    expect((await auditCsrfExemptions(cwd, findings)).declaredBy).toEqual(['acme-mcp'])
+  })
+
   it('does not walk a dependency with no relationship to Guren', async () => {
     const cwd = await appWith({
       react: { manifest: { dependencies: {} }, files: DECLARES },
