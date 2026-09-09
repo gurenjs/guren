@@ -98,6 +98,43 @@ describe('gurenVitePlugin in prototype mode', () => {
     expect(existsSync(path.resolve(outDir, '.guren'))).toBe(false)
   })
 
+  it('drops the ordinary build output that the public/ copy brought along', () => {
+    const root = makeRoot()
+    const plugin = gurenVitePlugin()
+    const config: Record<string, any> = { root }
+    plugin.config(config, { command: 'build', mode: 'prototype' })
+    plugin.configResolved({ root, build: { outDir: config.build.outDir } })
+
+    const outDir = path.resolve(root, 'dist/prototype')
+    // What Vite's copyPublicDir leaves when `public/assets/` holds a production build.
+    mkdirSync(path.resolve(outDir, 'assets/.vite'), { recursive: true })
+    writeFileSync(path.resolve(outDir, 'assets/app-abc123.js'), 'production')
+    writeFileSync(path.resolve(outDir, 'favicon.svg'), '<svg/>')
+    writeFileSync(path.resolve(outDir, 'index.html'), '<!doctype html><title>built</title>')
+
+    plugin.writeBundle()
+
+    expect(existsSync(path.resolve(outDir, 'assets'))).toBe(false)
+    expect(existsSync(path.resolve(outDir, 'favicon.svg'))).toBe(true)
+  })
+
+  it('keeps public/ intact when the ordinary build writes elsewhere', () => {
+    const root = makeRoot()
+    const plugin = gurenVitePlugin({ outDir: 'build/client' })
+    const config: Record<string, any> = { root }
+    plugin.config(config, { command: 'build', mode: 'prototype' })
+    plugin.configResolved({ root, build: { outDir: config.build.outDir } })
+
+    const outDir = path.resolve(root, 'dist/prototype')
+    mkdirSync(path.resolve(outDir, 'assets'), { recursive: true })
+    writeFileSync(path.resolve(outDir, 'assets/logo.png'), 'png')
+    writeFileSync(path.resolve(outDir, 'index.html'), '<!doctype html><title>built</title>')
+
+    plugin.writeBundle()
+
+    expect(existsSync(path.resolve(outDir, 'assets/logo.png'))).toBe(true)
+  })
+
   it('serves the shell for document requests in dev and leaves assets to Vite', async () => {
     const root = makeRoot()
     const plugin = gurenVitePlugin()

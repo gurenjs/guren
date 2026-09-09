@@ -123,6 +123,8 @@ interface ResolvedPrototype {
   /** As configured until `configResolved` rewrites it to the absolute directory the build wrote to. */
   outDir: string
   shellPath: string
+  /** The ordinary build's output, relative to `publicDir`, when it lives inside it; copied along with `public/` and removed again. */
+  copiedBuildDir?: string
 }
 
 interface ViteDevServerLike {
@@ -170,6 +172,12 @@ function ensurePrototype(config: Record<string, any>, options: ResolvedOptions):
   if (typeof config.publicDir !== 'string') {
     config.publicDir = path.resolve(root, 'public')
   }
+  // The scaffold's ordinary build emits into `public/assets/`, so copying
+  // `public/` would ship the production bundle beside the prototype's.
+  const publicDir = path.resolve(root, config.publicDir)
+  const buildOutDir = resolveBuildOutputDirectory(root, options.outDir)
+  const copiedBuildDir = path.relative(publicDir, buildOutDir)
+  const copiesBuild = copiedBuildDir !== '' && !copiedBuildDir.startsWith('..') && !path.isAbsolute(copiedBuildDir)
 
   config.build ??= {}
   config.build.outDir ??= prototype.outDir ?? 'dist/prototype'
@@ -189,7 +197,7 @@ function ensurePrototype(config: Record<string, any>, options: ResolvedOptions):
   output.manualChunks ??= createDefaultManualChunks(root)
   config.build.rollupOptions.output = output
 
-  return { root, outDir: config.build.outDir, shellPath }
+  return { root, outDir: config.build.outDir, shellPath, ...(copiesBuild ? { copiedBuildDir } : {}) }
 }
 
 function resolvePrototypeShell(root: string, shell: string | undefined, entry: string): string {
@@ -259,6 +267,9 @@ function finishPrototypeBuild(prototype: ResolvedPrototype): void {
     throw new Error(`Prototype build produced no index.html in ${outDir}`)
   }
 
+  if (prototype.copiedBuildDir) {
+    rmSync(path.resolve(outDir, prototype.copiedBuildDir), { recursive: true, force: true })
+  }
   writeFileSync(path.resolve(outDir, '404.html'), readFileSync(top))
   writeFileSync(path.resolve(outDir, '_redirects'), '/*    /index.html   200\n')
 }
