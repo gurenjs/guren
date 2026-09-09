@@ -35,6 +35,22 @@ export type {
   OAuthSweepKvLike,
 } from './oauth-sweep'
 export { buildCloudflareOutput, flattenD1Migrations } from './build'
+export {
+  attributeBundle,
+  parseWranglerSize,
+  printBundleReport,
+  renderBundleReport,
+  reportBundleSize,
+  WORKER_SIZE_LIMIT,
+  WORKER_SIZE_WARN_SHARE,
+} from './bundle-size'
+export type {
+  BundleAttribution,
+  BundleReport,
+  BundleSize,
+  EsbuildMetafile,
+  ReportBundleSizeOptions,
+} from './bundle-size'
 export type { BuildCloudflareOutputOptions } from './build'
 export { R2Driver } from './storage/R2Driver'
 export type { R2DriverOptions, R2PresignOptions, R2BucketLike } from './storage/R2Driver'

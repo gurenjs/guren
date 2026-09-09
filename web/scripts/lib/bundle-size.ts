@@ -13,26 +13,6 @@ export interface BundleSize {
   gzipKiB: number | null
 }
 
-const UNIT_KIB: Record<string, number> = { B: 1 / 1024, KiB: 1, MiB: 1024 }
-
-function toKiB(value: string, unit: string): number {
-  return Number.parseFloat(value) * UNIT_KIB[unit]!
-}
-
-/** wrangler prints `Total Upload: 4935.14 KiB / gzip: 900.47 KiB`; the unit can move. */
-export function parseWranglerSize(output: string): BundleSize | null {
-  const total = output.match(/Total Upload:\s*([\d.]+)\s*(B|KiB|MiB)/u)
-  if (!total) {
-    return null
-  }
-  const gzip = output.match(/gzip:\s*([\d.]+)\s*(B|KiB|MiB)/u)
-
-  return {
-    totalKiB: toKiB(total[1]!, total[2]!),
-    gzipKiB: gzip ? toKiB(gzip[1]!, gzip[2]!) : null,
-  }
-}
-
 export function judgeBundleSize(
   size: BundleSize,
   budgetKiB = BUNDLE_BUDGET_KIB,
@@ -46,7 +26,7 @@ export function judgeBundleSize(
     ok,
     message: ok
       ? line
-      : `${line}\nOver budget. Find what grew with \`wrangler deploy --dry-run --outdir <dir>\` and the source map, ` +
+      : `${line}\nOver budget. The largest sources above are where to look, ` +
         'or raise BUNDLE_BUDGET_KIB in web/scripts/lib/bundle-size.ts with the number that justifies it.',
   }
 }

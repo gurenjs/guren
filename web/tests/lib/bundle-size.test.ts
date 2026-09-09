@@ -1,29 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUNDLE_BUDGET_KIB, judgeBundleSize, parseWranglerSize } from '../../scripts/lib/bundle-size.js'
-
-const WRANGLER_OUTPUT = `
- ⛅️ wrangler 4.129.0
-───────────────────
-Total Upload: 4935.14 KiB / gzip: 900.47 KiB
---dry-run: exiting now.
-`
-
-describe('parseWranglerSize', () => {
-  it('should read the uncompressed and gzip sizes wrangler prints', () => {
-    expect(parseWranglerSize(WRANGLER_OUTPUT)).toEqual({ totalKiB: 4935.14, gzipKiB: 900.47 })
-  })
-
-  it('should normalise the unit to KiB when wrangler picks another', () => {
-    expect(parseWranglerSize('Total Upload: 1.5 MiB / gzip: 512 B')).toEqual({
-      totalKiB: 1536,
-      gzipKiB: 0.5,
-    })
-  })
-
-  it('should return null rather than a size when the line is missing', () => {
-    expect(parseWranglerSize('Something else entirely')).toBeNull()
-  })
-})
+import { BUNDLE_BUDGET_KIB, judgeBundleSize } from '../../scripts/lib/bundle-size.js'
 
 describe('judgeBundleSize', () => {
   it('should pass a bundle within the budget and say how much of it is used', () => {
