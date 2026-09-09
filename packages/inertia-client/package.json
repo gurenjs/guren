@@ -53,6 +53,11 @@
       "import": "./dist/components.js",
       "default": "./dist/components.js"
     },
+    "./prototype": {
+      "types": "./dist/prototype.d.ts",
+      "import": "./dist/prototype.js",
+      "default": "./dist/prototype.js"
+    },
     "./package.json": {
       "default": "./package.json"
     }
@@ -73,10 +78,12 @@
     "tsdown": "^0.22.14",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "hono": "^4.13.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "hono": "^4.13.0"
   }
 }

@@ -180,10 +180,12 @@
       "devDependencies": {
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
+        "hono": "^4.13.0",
         "tsdown": "^0.22.14",
         "typescript": "^7.0.2",
       },
       "peerDependencies": {
+        "hono": "^4.13.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
       },

@@ -138,3 +138,11 @@ export function createTypedForm<TManifest extends RouteManifestLike>(manifest: T
     props: TypedFormProps<TManifest, TName>,
   ) => React.ReactElement
 }
+
+/** The params a manifest path declares, for callers outside the mirrored block above. */
+export type RoutePathParams<TPath extends string> = PathParamsOf<TPath>
+
+/** `substituteParams` for callers outside the mirrored block above. */
+export function substituteRouteParams(path: string, params?: Record<string, string | number>): string {
+  return substituteParams(path, params)
+}
