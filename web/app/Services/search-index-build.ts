@@ -29,7 +29,7 @@ export interface PrerenderedDocLike {
   html: string
 }
 
-/** `docsData.docs` — locale, then category, then slug. */
+/** The prerendered docs — locale, then category, then slug. */
 export type DocsByLocale = Record<string, Record<string, Record<string, PrerenderedDocLike>>>
 
 export interface IndexRow {

@@ -11,6 +11,7 @@ import {
   type DocPage,
 } from './docs-config.js'
 import { createDefaultDocsStore, type DocsStore } from './DocsStore.js'
+import { buildLlmsFull } from './llms-full.js'
 
 export type {
   DocCategory,
@@ -91,6 +92,12 @@ export class DocsService {
 
     const store = await this.#resolveStore()
     return store.getRaw(normalizedCategory, normalizedSlug, locale)
+  }
+
+  /** Prebuilt where the store carries one (production); assembled from the raw markdown otherwise. */
+  async getLlmsFull(): Promise<string> {
+    const store = await this.#resolveStore()
+    return store.getLlmsFull ? store.getLlmsFull() : buildLlmsFull(this)
   }
 
   #resolveStore(): Promise<DocsStore> {

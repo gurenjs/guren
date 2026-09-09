@@ -44,8 +44,12 @@
     "process.env.NODE_ENV": "\"production\"",
     "import.meta.url": "\"file:///worker.js\""
   },
+  // The binding is how the Worker reads the prerendered docs back out of the
+  // same asset set (app/Services/DocsStore.ts); the fragments are files under
+  // public/_docs rather than bundled data.
   "assets": {
-    "directory": ".cloudflare/assets"
+    "directory": ".cloudflare/assets",
+    "binding": "ASSETS"
   },
   // Cookie-less first-party analytics (see app/Http/Middleware/site-analytics.ts).
   // Free-plan quota: 100k data points written per day.

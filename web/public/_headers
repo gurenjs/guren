@@ -1,0 +1,15 @@
+# Headers for the prerendered docs that Workers Static Assets serve before the
+# Worker runs (paths from app/Services/docs-manifest.ts). `guren cloudflare:build`
+# prepends its own rules; the platform stops parsing at 100 rules in total.
+# Cache-Control matches DOCS_CACHE_CONTROL in config/site.ts, which the Worker
+# still sets on the same content off Workers.
+
+/_docs/*
+  X-Robots-Tag: noindex
+  Cache-Control: public, max-age=3600
+
+/docs/*.md
+  Cache-Control: public, max-age=3600
+
+/llms-full.txt
+  Cache-Control: public, max-age=3600

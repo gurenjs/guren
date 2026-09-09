@@ -1,9 +1,7 @@
 import { createD1Database, createSqliteDatabase } from '@guren/core'
 import { getWorkersEnv } from '@guren/plugin-cloudflare'
 
-interface WorkersEnv {
-  DB: unknown
-}
+import type { WorkersEnv } from './workers-env.js'
 
 /** workerd identifies itself through the standard navigator user agent. */
 export function isWorkersRuntime(): boolean {

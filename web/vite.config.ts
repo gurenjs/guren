@@ -20,7 +20,7 @@ export default defineConfig(({ command }) => ({
     // tests/sqlite needs FTS5, which the SQLite bundled with Node — the
     // runtime vitest executes in — is compiled without. Those files run
     // under `bun test` instead.
-    exclude: ['node_modules/**', 'tests/sqlite/**'],
+    exclude: ['node_modules/**', 'tests/sqlite/**', 'tests/cloudflare/**'],
   },
   build: {
     rollupOptions: {

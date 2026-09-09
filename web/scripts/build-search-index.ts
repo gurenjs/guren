@@ -1,12 +1,12 @@
 /**
- * Build the docs search index D1 serves, from `.guren/docs.gen.ts`. Writes two
- * uncommitted files: `.guren/search-index.sql` (applied to D1 by the deploy
- * workflow) and `.guren/search-index.gen.ts` (table names, bundled into the
- * Worker by wrangler at deploy time). Runs after the docs prerender and before
- * `wrangler deploy`; never into `.cloudflare/`, which `buildCloudflareOutput()`
- * deletes wholesale. Every build names its own tables: a contentless FTS5 table
- * cannot be emptied (`DELETE` fails) and D1 has no transactions to make a
- * rename atomic against a serving Worker. `--stub` writes an empty module if none exists.
+ * Build the docs search index D1 serves, from what prerender-docs.ts wrote
+ * (manifest module + public/_docs fragments). Writes two uncommitted files:
+ * `.guren/search-index.sql` (applied to D1 by the deploy workflow) and
+ * `.guren/search-index.gen.ts` (table names, bundled into the Worker by wrangler
+ * at deploy time). Runs after the prerender and before `wrangler deploy`; never
+ * into `.cloudflare/`, which `buildCloudflareOutput()` deletes wholesale. Every
+ * build names its own tables: a contentless FTS5 table cannot be emptied and D1
+ * has no transactions for an atomic rename. `--stub` writes an empty module if none exists.
  */
 import { closeSync, mkdirSync, openSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -18,7 +18,6 @@ import {
   renderIndexSql,
   searchTableName,
   sectionsTableName,
-  type DocsByLocale,
 } from '../app/Services/search-index-build.js'
 
 const webRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -84,12 +83,13 @@ function writeStub(): void {
 async function build(): Promise<void> {
   mkdirSync(outDir, { recursive: true })
 
-  const { docsData } = await import('../.guren/docs.gen.js')
-  if (!docsData.prerendered) {
+  const { readPrerenderedDocs } = await import('./lib/read-prerendered-docs.js')
+  const docs = readPrerenderedDocs()
+  if (!docs) {
     throw new Error('Docs are not prerendered — run `bun run prerender` first.')
   }
 
-  const rows = collectRows(docsData.docs as DocsByLocale)
+  const rows = collectRows(docs)
   if (rows.length === 0) {
     throw new Error('No sections were extracted — the rendered docs carry no headings.')
   }
