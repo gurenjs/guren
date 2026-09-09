@@ -33,6 +33,7 @@
     "audit:bundle-budgets": "bun run ./scripts/smoke/build-budget.ts --max-kb 600",
     "audit:starter-template": "bun run ./scripts/smoke/starter-template-audit.ts",
     "audit:docs": "bun run ./scripts/smoke/docs-audit.ts",
+    "audit:prose": "bun run ./scripts/smoke/prose-audit.ts",
     "audit:tutorial-blocks": "bun run ./scripts/smoke/tutorial-blocks-audit.ts",
     "audit:deps": "bun run ./scripts/smoke/dependency-audit.ts",
     "audit:plugin-compat": "bun run ./scripts/smoke/plugin-compat-audit.ts",

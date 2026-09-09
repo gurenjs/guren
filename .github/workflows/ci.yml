@@ -150,6 +150,12 @@ jobs:
       - name: Docs audit
         run: bun run audit:docs
 
+      # AI-writing tells in docs/en (vocabulary, stock phrases, em-dash
+      # density) and translated-English tells in docs/ja; the judgment half
+      # lives in .claude/rules/prose.md.
+      - name: Prose audit
+        run: bun run audit:prose
+
       # The tutorial chapters are executed by smoke:tutorial; this is the fast
       # half: fence grammar, and the Japanese mirror's code blocks byte-identical
       # to the English ones (RFC 0019).

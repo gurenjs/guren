@@ -853,7 +853,7 @@ export default function PostShow({ post, canManage, comments }: Props) {
 }
 ```
 
-`usePage()` は第 5 章の共有プロパティを読みます。`auth.user` があるので、コントローラーが渡さなくても、どのページからでも誰かがサインインしているかを知ることができます。
+`usePage()` は第 5 章の共有プロパティを読みます。`auth.user` があるので、コントローラーが渡さなくても、どのページからでも誰かがサインインしているかが分かります。
 
 ```bash run
 bun run codegen

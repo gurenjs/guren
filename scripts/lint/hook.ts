@@ -13,7 +13,16 @@ try {
 }
 if (!filePath) process.exit(0)
 const rel = relative(repoRoot, filePath)
-if (rel.startsWith('..') || !/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(rel)) process.exit(0)
+if (rel.startsWith('..')) process.exit(0)
+
+if (/^docs\/(?:en|ja)\/.*\.md$/.test(rel)) {
+  const prose = Bun.spawnSync(['bun', resolve(repoRoot, 'scripts/smoke/prose-audit.ts'), rel], { cwd: repoRoot })
+  if (prose.success) process.exit(0)
+  console.error(prose.stderr.toString().trim())
+  process.exit(2)
+}
+
+if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(rel)) process.exit(0)
 
 const result = Bun.spawnSync([resolve(repoRoot, 'node_modules/.bin/oxlint'), '--deny-warnings', '--disable-nested-config', '--format', 'unix', rel], { cwd: repoRoot })
 const findings = result.stdout.toString().trim()

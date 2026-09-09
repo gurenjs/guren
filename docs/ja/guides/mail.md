@@ -6,9 +6,9 @@ Guren のメール送信は Fluent API で書け、トランスポートのバ�
 
 ## コアコンセプト
 
-- **MailManager** – メールトランスポートを設定・アクセスするための中央レジストリ。
-- **Mail** – メールを作成・送信するための Fluent ビルダー。
-- **Transport** – メール配信のバックエンド。Guren には SMTP、Resend、Memory（テスト用）のトランスポートが付属。
+- **MailManager**: メールトランスポートを設定・アクセスするための中央レジストリ。
+- **Mail**: メールを作成・送信するための Fluent ビルダー。
+- **Transport**: メール配信のバックエンド。Guren には SMTP、Resend、Memory（テスト用）のトランスポートが付属。
 
 ## 基本的な使い方
 

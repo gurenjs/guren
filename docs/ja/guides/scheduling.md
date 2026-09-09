@@ -6,10 +6,10 @@ Guren では、スケジュールタスクをアプリケーション内の Flue
 
 ## コアコンセプト
 
-- **Scheduler** – スケジュールされたタスクを管理し、適切なタイミングで実行する。
-- **Schedule** – Fluent API でタスクを定義するビルダー。
-- **ScheduledTask** – スケジュールと設定を持つ個別のタスク。
-- **Cron Expression** – タスクの実行タイミングを定義する標準的なcron構文。
+- **Scheduler**: スケジュールされたタスクを管理し、適切なタイミングで実行する。
+- **Schedule**: Fluent API でタスクを定義するビルダー。
+- **ScheduledTask**: スケジュールと設定を持つ個別のタスク。
+- **Cron Expression**: タスクの実行タイミングを定義する標準的なcron構文。
 
 ## 基本的な使い方
 

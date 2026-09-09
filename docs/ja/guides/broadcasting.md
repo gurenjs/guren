@@ -4,17 +4,17 @@ Guren のブロードキャスティングは、接続中のクライアント�
 
 ## コアコンセプト
 
-- **BroadcastManager** – チャンネル、ドライバー、SSEクライアントを管理する中央ハブ。
-- **Channel** – イベントをブロードキャストするための名前付き経路。チャンネルはpublic、private、presenceのいずれか。
-- **BroadcastDriver** – イベント配信のバックエンド（MemoryまたはRedis）。
-- **SSE (Server-Sent Events)** – ブラウザクライアントへイベントを送り込むための組み込み機能。
-- **WebSocket Clients** – ソケットクライアントの登録・購読・解除を扱う基盤API。
+- **BroadcastManager**: チャンネル、ドライバー、SSEクライアントを管理する中央ハブ。
+- **Channel**: イベントをブロードキャストするための名前付き経路。チャンネルはpublic、private、presenceのいずれか。
+- **BroadcastDriver**: イベント配信のバックエンド（MemoryまたはRedis）。
+- **SSE (Server-Sent Events)**: ブラウザクライアントへイベントを送り込むための組み込み機能。
+- **WebSocket Clients**: ソケットクライアントの登録・購読・解除を扱う基盤API。
 
 ## チャンネルタイプ
 
-- **Public Channels** – 誰でも購読可能。
-- **Private Channels** – 購読にユーザー認証が必要。
-- **Presence Channels** – 誰が購読しているかを追跡（「オンラインユーザー」機能など）。
+- **Public Channels**: 誰でも購読可能。
+- **Private Channels**: 購読にユーザー認証が必要。
+- **Presence Channels**: 誰が購読しているかを追跡（「オンラインユーザー」機能など）。
 
 ## 基本的な使い方
 
@@ -119,9 +119,9 @@ broadcast.presenceChannel('chat.{roomId}', async (channel, user) => {
 ### パターンマッチング
 
 チャンネルパターンでは次の記法が使えます。
-- `{param}` – ドット以外の任意のセグメントにマッチ
-- `*` – 任意の単一セグメントにマッチ
-- `**` – 複数セグメントにマッチ
+- `{param}`: ドット以外の任意のセグメントにマッチ
+- `*`: 任意の単一セグメントにマッチ
+- `**`: 複数セグメントにマッチ
 
 ```ts
 broadcast.channel('posts.*', () => true)           // posts.123, posts.456
@@ -192,9 +192,9 @@ broadcast.broadcast('announcements', 'NewPost', { id: 1 })
 
 生成物には以下が含まれます。
 
-- `ChannelName` – パターンを含むチャンネル名 union（template literal type）
-- `ChannelEvents` – チャンネルごとのイベント map（リテラル/object/array の payload 型を推論）
-- `channelEventManifest` – 検出済み channel/event の runtime manifest
+- `ChannelName`: パターンを含むチャンネル名 union（template literal type）
+- `ChannelEvents`: チャンネルごとのイベント map（リテラル/object/array の payload 型を推論）
+- `channelEventManifest`: 検出済み channel/event の runtime manifest
 
 ```ts
 import type { ChannelEvents } from '@/.guren/channels.gen'

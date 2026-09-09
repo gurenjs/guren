@@ -242,7 +242,7 @@ const app = createApp({
 
 スキャフォールドされた `config/app.ts` は、ローカル開発の利便性としてブート時にシードを実行し、`NODE_ENV=production` ではスキップします。このガードはそのまま残してください。Lambda はコールドスタートのたびにアプリをブートするため、ブート時シードは本番データに対して繰り返し実行されてしまいます。
 
-**マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、`db:migrate` コンソールコマンドでその場で適用できます。コマンド定義と呼び出し方は [コンソール — `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
+**マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、`db:migrate` コンソールコマンドでその場で適用できます。コマンド定義と呼び出し方は [コンソールハンドラ `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
 
 **シーダーは関数内では実行できません。** シーダーはスキーマや `@guren/core` を import する通常の `.ts` モジュールです。一方、デプロイされる関数は `node_modules` も TypeScript ローダーも持たない自己完結バンドルなので、Node.js ランタイムはこれらを読み込めません。プロジェクトのソースがある環境からシードしてください:
 

@@ -4,10 +4,10 @@ Guren では、メール・データベース・Slackなど複数のチャンネ
 
 ## コアコンセプト
 
-- **Notification** – 通知そのものを表すクラス。配信チャンネルごとにメソッドを持ちます。
-- **NotificationManager** – チャンネルの登録と通知の送信を行う中央ハブ。
-- **Notifiable** – 通知を受け取れるエンティティ（ユーザー、チームなど）のインターフェース。
-- **Channel** – 配信メカニズム（mail、database、Slackなど）。
+- **Notification**: 通知そのものを表すクラス。配信チャンネルごとにメソッドを持ちます。
+- **NotificationManager**: チャンネルの登録と通知の送信を行う中央ハブ。
+- **Notifiable**: 通知を受け取れるエンティティ（ユーザー、チームなど）のインターフェース。
+- **Channel**: 配信メカニズム（mail、database、Slackなど）。
 
 ## 通知の作成
 
