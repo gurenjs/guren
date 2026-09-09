@@ -25,6 +25,6 @@
   "devDependencies": {
     "drizzle-kit": "1.0.0-rc.4",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   }
 }
