@@ -480,7 +480,7 @@ describe('publishing a post', () => {
 bun test
 ```
 
-Two red.
+One red. The second test is green already, and not for a good reason: nothing sends mail yet, so `assertNothingSent()` is satisfied by an app that does nothing at all. It starts carrying its weight once the first test passes.
 
 ## 6. Delegate it
 

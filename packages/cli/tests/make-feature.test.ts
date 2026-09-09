@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
+import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
 import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig } from './helpers'
 
@@ -724,7 +725,15 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       const resource = await readFile(join(workspace.dir, 'app/Http/Resources/NoteResource.ts'), 'utf8')
       expect(resource).toContain("import type { NoteData } from '@/resources/js/types/Note'")
       expect(resource).toContain('export type NoteResourceData = NoteData')
-      expect(resource).toContain('toArray(): NoteData {')
+      expect(resource).toContain('toArray(): NoteResourceData {')
+
+      // The annotation names the local alias so codegen still emits Data.Note:
+      // data.gen.ts reads only the resource's own source.
+      const generated = await generateDataTypes({ appRoot: workspace.dir })
+      expect(generated.warnings).toEqual([])
+      expect(generated.definitions.find((d) => d.className === 'NoteResource')?.rawType)
+        .toContain('.NoteResourceData')
+      expect(await readFile(join(workspace.dir, '.guren/data.gen.ts'), 'utf8')).toContain('Note =')
     } finally {
       await workspace.cleanup()
     }

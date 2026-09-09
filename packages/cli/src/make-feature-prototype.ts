@@ -187,11 +187,15 @@ export function generatePromotedResource(singular: string, fields: FieldDefiniti
 import type { ${singular}Record } from '../../Models/${singular}.js'
 import type { ${singular}Data } from '${prototypeTypesSpecifier(singular)}'
 
-/** The shape the prototype pages were built against, now the serializer's contract. */
+/**
+ * The shape the prototype pages were built against, now the serializer's contract.
+ * Annotate toArray() with this alias, not the imported ${singular}Data: data.gen.ts
+ * reads only this file, and an imported annotation drops Data.${singular}.
+ */
 export type ${singular}ResourceData = ${singular}Data
 
-export class ${singular}Resource extends Resource<${singular}Record, ${singular}Data> {
-  toArray(): ${singular}Data {
+export class ${singular}Resource extends Resource<${singular}Record, ${singular}ResourceData> {
+  toArray(): ${singular}ResourceData {
     return {
 ${toArrayFields}
     }

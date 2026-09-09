@@ -655,7 +655,7 @@ The middle test is the one worth keeping. A tool call that sends a bad argument 
 bun test
 ```
 
-Two red, one passing by accident.
+Three red, with no accidental green this time, and the reason is worth knowing. `agent().call()` looks the tool up by name before it builds a request, so a name that is not exposed yet throws `No agent tool named "comments.destroy"` instead of answering with a status. Even the refusal test, which wants a 403, cannot be refused by a tool that does not exist.
 
 ## 6. Delegate it
 

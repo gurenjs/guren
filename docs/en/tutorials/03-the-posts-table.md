@@ -127,7 +127,7 @@ Two new things in this test. `resetDatabase()` runs before each test: it drops e
 bun test
 ```
 
-Three new failures, all 404s. Now build what they describe.
+Two new failures, both 404s, and a third test that is green already. That third one is worth a moment: `/posts/999` is supposed to answer 404 because the post does not exist, and right now it answers 404 because the *route* does not exist. It only begins proving what it was written to prove once the route is there. Now build what they describe.
 
 ## 4. The controller and the routes
 
@@ -185,7 +185,7 @@ export function registerWebRoutes(router: Router): void {
 ```
 
 - `router.group('/posts', ...)` prefixes every route inside it, so `'/:id'` is `/posts/:id`.
-- `bind: { id: Post }` is **route model binding**: before the action runs, Guren calls `Post.findOrFail(id)` with the path parameter and hands the record to the controller, where `this.model(Post)` returns it typed as a `PostRecord`. If there is no such post, `findOrFail` throws and the response is a 404. That is the third test, and you wrote no code for it.
+- `bind: { id: Post }` is **route model binding**: before the action runs, Guren calls `Post.findOrFail(id)` with the path parameter and hands the record to the controller, where `this.model(Post)` returns it typed as a `PostRecord`. If there is no such post, `findOrFail` throws and the response is a 404. That is the third test, green now for the reason it was written for, and you wrote no code for it.
 - The options object is the second argument when a route has options; `.name()` works either way.
 
 ## 5. The pages
@@ -551,6 +551,7 @@ The generated controller differs from yours in two ways worth noticing: it valid
 
 - **`db:make` says "No schema changes".** The schema file is unchanged since the last migration, or you edited a different file. Check that `posts` is exported from `db/schema.ts`.
 - **Tests fail with "no such table: posts".** The test database is created on first use and migrated then; if a previous run left a half-migrated `data/guren.test.db` behind, delete the file and run the tests again.
+- **A new page renders unstyled, and `bun run dev` logs `Unable to locate Inertia page "posts/New" in the generated page manifest.`** Adding a page file while the dev server is running can leave both the page manifest and the generated Tailwind CSS stale, even when codegen ran and `.guren/pages.gen.ts` is current. A hard reload does not clear it; restart `bun run dev`.
 - **`/posts/create` returns 404.** It is registered after `/posts/:id`. Order matters: routes match top to bottom.
 - **`guren audit` fails with "Request body is read without validation".** The store action reads the body with something other than `validateBody()`. Use the schema.
 - **`this.model(Post)` throws "No model binding found".** The route has no `bind` option for that parameter. Binding is declared on the route, not inferred from the controller.
