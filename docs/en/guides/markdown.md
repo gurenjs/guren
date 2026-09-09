@@ -18,7 +18,7 @@ const renderer = createMarkdownRenderer()
 const html = await renderer.render('# Hello\n\n> [!NOTE]\n> Sanitized by default.')
 ```
 
-`render()` is a pure async function of its input: one renderer instance is safe under concurrent requests, and the package keeps no cache. Render at save time and store the HTML (the blog pattern), or render per request — that choice belongs to your app.
+`render()` is a pure async function of its input: one renderer instance is safe under concurrent requests, and the package keeps no cache. Render at save time and store the HTML (the blog pattern), or render per request; that choice belongs to your app.
 
 All options with their defaults:
 
@@ -44,7 +44,7 @@ Markdown syntax alone can carry `javascript:` and `data:` URLs into `href` and `
 
 The result is safe to inject with `dangerouslySetInnerHTML`.
 
-Extend the allowlist without replacing it by passing a callback — it receives the defaults and returns the options to use:
+Extend the allowlist without replacing it by passing a callback, which receives the defaults and returns the options to use:
 
 ```ts
 createMarkdownRenderer({
@@ -55,7 +55,7 @@ createMarkdownRenderer({
 })
 ```
 
-For trusted content — your own docs rendered at build time — opt out explicitly with `sanitize: false`.
+For trusted content (your own docs rendered at build time), opt out explicitly with `sanitize: false`.
 
 ## Alerts
 
@@ -69,9 +69,9 @@ GitHub's five blockquote directives render as labeled alert blocks:
 > Something worth checking.
 ```
 
-The markup uses framework-neutral class names (`guren-markdown-alert`, `guren-markdown-alert--note` … `--caution`, `__label`, `__body`) and the package applies no styling itself — see [Styling](#styling).
+The markup uses framework-neutral class names (`guren-markdown-alert`, `guren-markdown-alert--note` … `--caution`, `__label`, `__body`) and the package applies no styling itself; see [Styling](#styling).
 
-`alertLabels` overrides the rendered label text per type (requires `@guren/plugin-markdown` 0.2.0 or later), for i18n or a different vocabulary — several types may share one label, class names stay keyed to the directive that was written, and labels render as escaped text:
+`alertLabels` overrides the rendered label text per type (requires `@guren/plugin-markdown` 0.2.0 or later), for i18n or a different vocabulary. Several types may share one label, class names stay keyed to the directive that was written, and labels render as escaped text:
 
 ```ts
 createMarkdownRenderer({
@@ -83,11 +83,11 @@ An explicit empty string suppresses the label text; omitted types keep their def
 
 ## Heading anchors
 
-With `anchors: true` every heading gets a slug `id` — unicode-aware, duplicate-safe within a render (`Setup`, `Setup-1`, `Setup` yields `setup`, `setup-1`, `setup-2`), and hardened against HTML smuggled into heading text.
+With `anchors: true` every heading gets a slug `id`: unicode-aware, duplicate-safe within a render (`Setup`, `Setup-1`, `Setup` yields `setup`, `setup-1`, `setup-2`), and hardened against HTML smuggled into heading text.
 
 ## Link rewriting
 
-`rewriteLink` runs over every link `href` before rendering — for example, turning GitHub-compatible relative `.md` links into site routes:
+`rewriteLink` runs over every link `href` before rendering, for example turning GitHub-compatible relative `.md` links into site routes:
 
 ```ts
 createMarkdownRenderer({
@@ -97,7 +97,7 @@ createMarkdownRenderer({
 
 ## Code highlighting with shiki
 
-`shiki` is an optional peer dependency behind its own subpath — install it only if you use it:
+`shiki` is an optional peer dependency behind its own subpath, so install it only if you use it:
 
 ```bash
 bun add shiki
@@ -115,11 +115,11 @@ const renderer = createMarkdownRenderer({
 })
 ```
 
-This builds a fine-grained `shiki/core` highlighter — only the listed grammars, with the JavaScript regex engine instead of the oniguruma WASM blob — and emits dual-theme output: the light palette inline, the dark palette in `--shiki-dark` custom properties. Fences in unloaded languages fall back to plain text instead of throwing.
+This builds a fine-grained `shiki/core` highlighter (only the listed grammars, with the JavaScript regex engine instead of the oniguruma WASM blob) and emits dual-theme output: the light palette inline, the dark palette in `--shiki-dark` custom properties. Fences in unloaded languages fall back to plain text instead of throwing.
 
 ### On Cloudflare Workers
 
-Bundlers that must see every import statically cannot resolve grammar names at runtime. Pass explicit module thunks instead — the thunks also keep loading lazy, so importing the module costs nothing until the first render:
+Bundlers that must see every import statically cannot resolve grammar names at runtime. Pass explicit module thunks instead. The thunks also keep loading lazy, so importing the module costs nothing until the first render:
 
 ```ts
 createShikiHighlight({
@@ -132,7 +132,7 @@ createShikiHighlight({
 })
 ```
 
-Never import the full `shiki` entry in code that ends up in a Workers bundle — it pulls every grammar plus the oniguruma WASM. The full entry is fine in build-time code (prerendering docs, for example), where arbitrary languages matter more than bundle size.
+Never import the full `shiki` entry in code that ends up in a Workers bundle: it pulls every grammar plus the oniguruma WASM. The full entry is fine in build-time code (prerendering docs, for example), where arbitrary languages matter more than bundle size.
 
 ### Custom highlighters
 
@@ -171,4 +171,4 @@ import type { MarkdownRenderer } from '@guren/plugin-markdown'
 const renderer = container.make<MarkdownRenderer>('markdown')
 ```
 
-The plugin form is optional — `createMarkdownRenderer` works without `createApp` at all.
+The plugin form is optional. `createMarkdownRenderer` works without `createApp` at all.

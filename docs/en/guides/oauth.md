@@ -1,6 +1,6 @@
 # OAuth Guide
 
-Guren ships an OAuth 2.0 authorization-code flow for "Sign in with GitHub / Google / Discord" style login. It handles the redirect, CSRF-safe state, token exchange, and profile fetch — you wire it into your own login controller and session.
+Guren ships an OAuth 2.0 authorization-code flow for "Sign in with GitHub / Google / Discord" style login. It handles the redirect, CSRF-safe state, token exchange, and profile fetch. You wire it into your own login controller and session.
 
 ## Core Concepts
 
@@ -118,7 +118,7 @@ https://your.app/auth/github/callback?code=<attacker's>&state=<attacker's>
 
 Nothing in the pair identifies whose browser began the flow, so the callback
 succeeds and logs that visitor into the **attacker's** account. Everything the
-visitor writes afterwards — posts, uploads, a saved payment method — lands in an
+visitor writes afterwards (posts, uploads, a saved payment method) lands in an
 account the attacker can also read.
 
 Pass the session to both legs of the flow to close it:
@@ -136,7 +136,7 @@ only its hash with the state; `handleCallback()` reads the value back (removing
 it in the same step) and refuses a state whose binding it cannot match. Writing
 to the session is also what makes a first-time visitor's session persist across
 the round trip to the provider, so the callback request carries the same one.
-When `this.auth.session()` returns `undefined` — no session middleware — the
+When `this.auth.session()` returns `undefined` (no session middleware), the
 state is simply left unbound, so nothing breaks; it just stays unprotected.
 
 If the binding must live somewhere other than the session (an encrypted cookie,
@@ -152,7 +152,7 @@ value to `handleCallback()`. `bindTo` wins when both options are given.
 
 ## Redirect After Login
 
-Pass a `redirectTo` when starting the flow (e.g. the page the user was on) — it survives the round trip to the provider and comes back from `handleCallback`:
+Pass a `redirectTo` when starting the flow (e.g. the page the user was on). It survives the round trip to the provider and comes back from `handleCallback`:
 
 ```ts
 const { url } = await oauth.authorize('github', {
@@ -236,7 +236,7 @@ oauth.registerProvider('gitlab', gitlabConfig)
 
 ## Provider Email Verification
 
-A provider returning an email is not a claim that it checked the address. Most report that separately — Google sends OIDC's `email_verified`, Discord sends `verified` — and the profile exposes it as `profile.emailVerified`:
+A provider returning an email is not a claim that it checked the address. Most report that separately (Google sends OIDC's `email_verified`, Discord sends `verified`), and the profile exposes it as `profile.emailVerified`:
 
 | Value | Meaning |
 |-------|---------|
@@ -254,7 +254,7 @@ if (!user && profile.emailVerified === false) {
 }
 ```
 
-The built-in presets declare their own key. For a provider you register yourself, set `emailVerifiedKey` when it uses a non-standard name — the default reads OIDC's `email_verified`, and only boolean values count:
+The built-in presets declare their own key. For a provider you register yourself, set `emailVerifiedKey` when it uses a non-standard name. The default reads OIDC's `email_verified`, and only boolean values count:
 
 ```ts
 const discordish: OAuthProviderConfig = {
@@ -273,9 +273,9 @@ fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVe
 
 ## State Storage
 
-The one-time `state` value that ties the callback back to the original request is stored server-side. The default `MemoryOAuthStateStore` works for single-process dev, but production deployments with more than one process (load balancers, serverless) need shared storage — otherwise the callback can land on a process that never issued the state.
+The one-time `state` value that ties the callback back to the original request is stored server-side. The default `MemoryOAuthStateStore` works for single-process dev, but production deployments with more than one process (load balancers, serverless) need shared storage. Otherwise the callback can land on a process that never issued the state.
 
-For most apps, `DatabaseOAuthStateStore` is the recommended default — it stores state in the same database your app already uses, with no extra infrastructure:
+For most apps, `DatabaseOAuthStateStore` is the recommended default, since it stores state in the same database your app already uses, with no extra infrastructure:
 
 ```ts
 import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
@@ -299,7 +299,7 @@ export const oauthStates = sqliteTable('oauth_states', {
 
 The `binding` column holds the hashed browser binding from
 [Binding State to the Browser](#binding-state-to-the-browser). Without it the
-store cannot persist a binding, and every bound state comes back unbound — which
+store cannot persist a binding, and every bound state comes back unbound, which
 silently reverts the protection. Add the column before binding flows via
 `session` or `bindTo`.
 
@@ -366,7 +366,7 @@ describe('GitHub OAuth', () => {
 
 ## Best Practices
 
-1. **Never skip state verification**: `handleCallback` verifies and consumes the state automatically — don't build a custom callback path that trusts `code` alone. Always pass `session` (or `bindTo`) as well; state verification on its own does not tell you the flow started in the same browser (see [Binding State to the Browser](#binding-state-to-the-browser)).
+1. **Never skip state verification**: `handleCallback` verifies and consumes the state automatically, so don't build a custom callback path that trusts `code` alone. Always pass `session` (or `bindTo`) as well; state verification on its own does not tell you the flow started in the same browser (see [Binding State to the Browser](#binding-state-to-the-browser)).
 
 2. **Set `allowedRedirectHosts` explicitly**: without it, only app-relative `redirectTo` paths are honored, which is the safest default. Add hosts only if you redirect to a separate domain after login.
 
@@ -374,4 +374,4 @@ describe('GitHub OAuth', () => {
 
 4. **Match accounts by provider ID, not email**: store the provider's `profile.id` (e.g. `githubId`) on your user model. Emails can be unverified or reused across providers.
 
-5. **Request the minimum scopes you need**: each provider factory defaults to a small scope set (e.g. GitHub's `read:user user:email`) — extend it only when you need more.
+5. **Request the minimum scopes you need**: each provider factory defaults to a small scope set (e.g. GitHub's `read:user user:email`). Extend it only when you need more.

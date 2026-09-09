@@ -85,7 +85,7 @@ Install the driver package alongside it:
 bun add @aws-sdk/client-rds-data
 ```
 
-The adapter exposes the same runtime API as the other drivers, and migrations use the standard drizzle-kit folders. One deliberate difference: `getDatabase()` does **not** run pending migrations automatically — on Lambda that check would cost several serialized Data API round trips on every cold start. Run migrations out of band (`bun run db:migrate`, or the console handler once deployed), or opt back in with `migrateOnStart: true`. For `drizzle-kit generate`/`push` against the Data API, set `driver: 'aws-data-api'` in `drizzle.config.ts` with the same `database`/`resourceArn`/`secretArn` credentials.
+The adapter exposes the same runtime API as the other drivers, and migrations use the standard drizzle-kit folders. One deliberate difference: `getDatabase()` does **not** run pending migrations automatically. On Lambda that check would cost several serialized Data API round trips on every cold start. Run migrations out of band (`bun run db:migrate`, or the console handler once deployed), or opt back in with `migrateOnStart: true`. For `drizzle-kit generate`/`push` against the Data API, set `driver: 'aws-data-api'` in `drizzle.config.ts` with the same `database`/`resourceArn`/`secretArn` credentials.
 
 > [!NOTE]
 > Authentication uses the standard AWS SDK credential chain (IAM role on Lambda, `AWS_PROFILE` locally). Pass `clientOptions` to override the region or credentials explicitly.
@@ -119,7 +119,7 @@ export class User extends defineModel(users, {
 }) {}
 ```
 
-`optionalOnCreate` makes columns optional — they keep their type, callers just need not supply them. `requireOnCreate` goes the other way, and accepts both table columns (Drizzle marks defaulted ones optional) and fields contributed by `base`. Both are type-level only and are checked against the real keys, so a typo fails to compile.
+`optionalOnCreate` makes columns optional: they keep their type, callers just need not supply them. `requireOnCreate` goes the other way, and accepts both table columns (Drizzle marks defaulted ones optional) and fields contributed by `base`. Both are type-level only and are checked against the real keys, so a typo fails to compile.
 
 Neither closes the payload: a create type always admits unknown keys as `unknown`, so `fillable` remains what rejects an unwanted field at runtime.
 
@@ -232,7 +232,7 @@ await Post.transaction(async (trx) => {
 
 If an error is thrown in the callback, Guren rolls back the transaction.
 
-SQLite holds a single connection, which takes one transaction at a time, so concurrent transactions are queued and run one after another — each committing or rolling back on its own. Awaiting non-database work inside the callback is fine; it only makes the next transaction wait.
+SQLite holds a single connection, which takes one transaction at a time, so concurrent transactions are queued and run one after another, each committing or rolling back on its own. Awaiting non-database work inside the callback is fine; it only makes the next transaction wait.
 
 The one thing it cannot do is nest. A `Model.transaction()` opened inside another one would be queued behind the transaction it is running inside, so it is refused with an error instead. Pooled databases such as PostgreSQL and MySQL are unaffected.
 
@@ -268,7 +268,7 @@ await Post.create({ title: 'Hello', body: '...', status: 'draft', authorId: 1 })
 // MassAssignmentException: Post: mass assignment blocked for field(s) "authorId"
 ```
 
-For trusted, server-side-assembled data — OAuth account linking, seeders, system records — bypass the allowlist with `forceCreate()` / `forceUpdate()`:
+For trusted, server-side-assembled data (OAuth account linking, seeders, system records), bypass the allowlist with `forceCreate()` / `forceUpdate()`:
 
 ```ts
 const user = await User.forceCreate({
@@ -289,7 +289,7 @@ Two protections apply regardless of `fillable`:
 - On models extending `AuthenticatableModel`, credential columns (the password hash and remember token) always throw. Listing them in `fillable` does not open them; pass a plain `password` and let the model hash it, or use `forceCreate()`/`forceUpdate()` for trusted server-side values.
 
 > [!NOTE]
-> If `fillable` is not set, all columns except `id` and the denied credential columns are assignable — declare it on any model that accepts user input.
+> If `fillable` is not set, all columns except `id` and the denied credential columns are assignable. Declare it on any model that accepts user input.
 
 ## Relationships
 
@@ -378,7 +378,7 @@ const posts = await Post.with('author')             // posts[0].author is UserRe
 const filtered = await Post.with('author', { authorId: [1, 2] })
 ```
 
-Eager loading also works on the QueryBuilder, so you can combine it with filters and ordering. The record-returning methods — `get()`, `first()`, `firstOrFail()`, and `paginate()` — all attach the relations:
+Eager loading also works on the QueryBuilder, so you can combine it with filters and ordering. The record-returning methods (`get()`, `first()`, `firstOrFail()`, and `paginate()`) all attach the relations:
 
 ```ts
 const activeUsers = await User.where('active', true)
@@ -457,7 +457,7 @@ await User.newQuery()
 > reference columns every target shares.
 
 For `belongsToMany` and `hasManyThrough`, the callback constrains the query for
-the **related** model — not the pivot or through-table lookup that finds which
+the **related** model, not the pivot or through-table lookup that finds which
 rows to fetch. Filter on the related model's own columns:
 
 ```ts
@@ -467,7 +467,7 @@ await Post.newQuery()
   .get()
 ```
 
-The static `Model.with()` is a different signature — its second argument filters
+The static `Model.with()` is a different signature: its second argument filters
 the *parent* records, not the relation. Use `Model.newQuery().with({ ... })` for
 constraint callbacks.
 
@@ -486,7 +486,7 @@ loaded[0].posts[0].comments // CommentRecord[] — typed end to end
 ```
 
 > [!NOTE]
-> Only the head segment (`posts` above) is checked against `relationTypes` — anything after the first dot is an unvalidated string, so a typo'd or malformed tail (`'posts.'`, `'posts..comments'`, `'posts.typo'`) still compiles. At runtime, an unknown tail relation throws — but only once the loader actually has a loaded row to recurse into. If every record's head relation loads zero rows, the tail is never inspected and the call quietly no-ops instead of throwing. Nesting through a `morphTo` relation always throws at runtime regardless — that constraint isn't enforced at the type level either.
+> Only the head segment (`posts` above) is checked against `relationTypes`: anything after the first dot is an unvalidated string, so a typo'd or malformed tail (`'posts.'`, `'posts..comments'`, `'posts.typo'`) still compiles. At runtime, an unknown tail relation throws, but only once the loader actually has a loaded row to recurse into. If every record's head relation loads zero rows, the tail is never inspected and the call quietly no-ops instead of throwing. Nesting through a `morphTo` relation always throws at runtime regardless. That constraint isn't enforced at the type level either.
 
 `BelongsToRecord<T>` is always `T | null` — the loader cannot know the row
 exists. When the foreign key is `NOT NULL` and the parent is guaranteed,
@@ -506,7 +506,7 @@ comments[0].author.name // no null check required
 
 ### Relation Counts
 
-`withCount()` attaches a `${name}Count` field without loading the related rows —
+`withCount()` attaches a `${name}Count` field without loading the related rows,
 ideal for list pages that only display totals:
 
 ```ts
@@ -551,14 +551,14 @@ User.addGlobalScope('tenant', (q) => q.where('tenantId', currentTenantId()))
 User.addGlobalScope('active', (q) => q.where('active', true))
 ```
 
-Every query entry point applies both scopes automatically — `all()`, `find()`,
+Every query entry point applies both scopes automatically: `all()`, `find()`,
 `first()`, `where()` and its `whereIn`/`whereNull`/`select` siblings, `scope()`,
 `orderBy()`, `paginate()` (the count as well as the rows), `newQuery()`, and the
 queries that eager-load a relation, which apply the *related* model's scopes.
 
 Writes honor them too: `update()`, `forceUpdate()`, and `delete()` add the same
 scopes to their `where`, so a `tenant` scope stops one tenant from updating or
-deleting another tenant's row — not just from reading it.
+deleting another tenant's row, not just from reading it.
 
 The only way past them is to ask explicitly, below.
 
@@ -583,7 +583,7 @@ User.removeGlobalScope('active')
 ```
 
 > [!TIP]
-> The `SoftDeletes` mixin registers a global scope named `'softDelete'`. `withTrashed()` *is* `withoutGlobalScope('softDelete')` — either spelling reaches trashed rows while every other global scope stays applied, so a `tenant` scope keeps isolating them. `withoutGlobalScopes()` is the one that drops those too.
+> The `SoftDeletes` mixin registers a global scope named `'softDelete'`. `withTrashed()` *is* `withoutGlobalScope('softDelete')`: either spelling reaches trashed rows while every other global scope stays applied, so a `tenant` scope keeps isolating them. `withoutGlobalScopes()` is the one that drops those too.
 
 ## Model Hooks
 
@@ -647,7 +647,7 @@ Post.observe(PostObserver)
 
 Returning `false` from a before-event (`creating`, `updating`, `deleting`, `saving`) aborts the operation, just like inline hooks.
 
-Observers and inline hooks coexist — hooks fire first, then observers.
+Observers and inline hooks coexist: hooks fire first, then observers.
 
 ## Soft Deletes
 
@@ -673,7 +673,7 @@ Every one of these honors the model's *other* global scopes. `delete()` marks
 only a live row the current scopes can see — on an already-trashed row it
 matches nothing and leaves the original `deletedAt` alone. `restore()` and
 `forceDelete()` drop
-the `softDelete` filter so they reach trashed rows, and keep the rest — a
+the `softDelete` filter so they reach trashed rows, and keep the rest: a
 `tenant` scope still stops a force delete, which cannot be undone, from reaching
 another tenant's row.
 
@@ -807,7 +807,7 @@ export class User extends defineModel(users, {
 }) {}
 ```
 
-`appends` may only name accessors declared in the same options object — an undeclared name is a compile error.
+`appends` may only name accessors declared in the same options object: an undeclared name is a compile error.
 
 ```ts
 const json = User.serialize(user)
@@ -857,7 +857,7 @@ async index() {
 
 ## SQLite Support
 
-Guren supports SQLite out of the box via Bun's built-in SQLite driver. New projects use SQLite by default — no Docker or external database needed.
+Guren supports SQLite out of the box via Bun's built-in SQLite driver. New projects use SQLite by default, with no Docker or external database needed.
 
 ```ts
 // config/database.ts
@@ -951,7 +951,7 @@ bun run db:seed
 
 `defineSeeder()` hands the seeder the Drizzle database itself, which is useful
 for bulk inserts and upserts that bypass the model layer. Its type depends on
-the dialect, so annotate the context with `AppSeederContext` — the alias
+the dialect, so annotate the context with `AppSeederContext`, the alias
 `config/database.ts` exports for whichever database the app is configured with:
 
 ```ts
@@ -968,7 +968,7 @@ export default defineSeeder(async ({ db }: AppSeederContext) => {
 `SeederContext` without a type argument means PostgreSQL, so on MySQL or SQLite
 it rejects the app's own schema. `AppSeederContext` is exported by
 `config/database.ts` in apps scaffolded from this release onwards; an older app
-imports its dialect's alias from `@guren/core` directly instead —
+imports its dialect's alias from `@guren/core` directly instead, one of
 `PostgresSeederContext`, `MySqlSeederContext`, `SqliteSeederContext`, or
 `AwsDataApiSeederContext`:
 

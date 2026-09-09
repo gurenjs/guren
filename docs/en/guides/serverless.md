@@ -1,6 +1,6 @@
 # Serverless Deployment (AWS Lambda)
 
-Guren runs on AWS Lambda's Node.js runtime. The official `@guren/plugin-lambda` plugin handles bundling, and a CDK construct provisions the full stack — HTTP, queues, scheduled tasks, CLI commands, and static assets.
+Guren runs on AWS Lambda's Node.js runtime. The official `@guren/plugin-lambda` plugin handles bundling, and a CDK construct provisions the full stack: HTTP, queues, scheduled tasks, CLI commands, and static assets.
 
 ## Setup
 
@@ -9,7 +9,7 @@ bunx guren plugin @guren/plugin-lambda
 bun add @guren/plugin-lambda
 ```
 
-Installing registers `lambdaPlugin()` in `src/app.ts` and scaffolds `src/lambda.ts` — the module whose exports become your Lambda handlers:
+Installing registers `lambdaPlugin()` in `src/app.ts` and scaffolds `src/lambda.ts`, the module whose exports become your Lambda handlers:
 
 ```typescript
 // src/lambda.ts (scaffolded)
@@ -34,7 +34,7 @@ Uncomment the `schedule` and `console` exports in the scaffold once your app def
 bunx guren lambda:build
 ```
 
-The command runs the deploy-runtime checks `guren doctor` reports (a warning, never a failure, on an in-memory session or OAuth store, a `ScryptHasher`, or filesystem provider discovery — each works locally and breaks on Lambda), then your app's `build` script, then assembles a `.lambda/` directory:
+The command runs the deploy-runtime checks `guren doctor` reports (a warning, never a failure, on an in-memory session or OAuth store, a `ScryptHasher`, or filesystem provider discovery, each of which works locally and breaks on Lambda), then your app's `build` script, then assembles a `.lambda/` directory:
 
 | Path | Contents |
 |------|----------|
@@ -44,7 +44,7 @@ The command runs the deploy-runtime checks `guren doctor` reports (a warning, ne
 
 Handler identifiers follow the bundle: `handler.http`, `handler.queue`, `handler.schedule`, `handler.console`.
 
-`process.env.NODE_ENV` is pinned to `"production"` at bundle time — the bundler inlines it, so runtime configuration alone cannot fix a development-mode bundle. Inertia asset locations (`GUREN_INERTIA_ENTRY`, `GUREN_INERTIA_STYLES`, and the SSR entry) are baked in as defaults too; real function environment variables still override them.
+`process.env.NODE_ENV` is pinned to `"production"` at bundle time: the bundler inlines it, so runtime configuration alone cannot fix a development-mode bundle. Inertia asset locations (`GUREN_INERTIA_ENTRY`, `GUREN_INERTIA_STYLES`, and the SSR entry) are baked in as defaults too; real function environment variables still override them.
 
 Pass `--zip` to also produce `function.zip` for direct uploads. CDK archives the directory on its own.
 
@@ -56,7 +56,7 @@ Wraps the app's fetch handler for API Gateway v1/v2 and ALB. Routes, controllers
 
 ### Queue — `createSqsHandler()`
 
-Processes SQS messages as Guren jobs. Supports **partial batch failure** — only failed messages are returned to SQS for retry.
+Processes SQS messages as Guren jobs. Supports **partial batch failure**: only failed messages are returned to SQS for retry.
 
 Configure the SQS driver in your queue provider:
 
@@ -74,7 +74,7 @@ setQueueDriver(new SqsDriver(adapter, {
 }))
 ```
 
-Jobs are dispatched the same way as on the server — `await SendEmailJob.dispatch({ to: 'user@example.com' })`. The `SqsDriver` serializes the job to SQS, and the Lambda handler deserializes and executes it.
+Jobs are dispatched the same way as on the server: `await SendEmailJob.dispatch({ to: 'user@example.com' })`. The `SqsDriver` serializes the job to SQS, and the Lambda handler deserializes and executes it.
 
 ### Schedule — `createScheduleHandler(scheduler)`
 
@@ -82,11 +82,11 @@ Runs due tasks when invoked by EventBridge. Configure an EventBridge rule with `
 
 ### Console — `createConsoleHandler(kernel)`
 
-Executes the commands registered on your app's `ConsoleKernel` — the one `src/console.ts` exports as `kernel`. See the [console commands guide](./console.md) for defining commands and registering them.
+Executes the commands registered on your app's `ConsoleKernel`, the one `src/console.ts` exports as `kernel`. See the [console commands guide](./console.md) for defining commands and registering them.
 
 Uncomment the `console` export in the scaffolded `src/lambda.ts` to enable the handler.
 
-The kernel has no built-in commands. You need a migration command only on the Data API adapter, whose `getDatabase()` deliberately skips pending migrations — the other adapters apply them on first use. See [the Aurora Serverless notes](./database.md#aurora-serverless-aws-data-api) for that tradeoff and the `migrateOnStart` alternative. Running them out of band keeps the latency off the request path either way:
+The kernel has no built-in commands. You need a migration command only on the Data API adapter, whose `getDatabase()` deliberately skips pending migrations. The other adapters apply them on first use. See [the Aurora Serverless notes](./database.md#aurora-serverless-aws-data-api) for that tradeoff and the `migrateOnStart` alternative. Running them out of band keeps the latency off the request path either way:
 
 ```bash
 bunx guren make:command Migrate --command db:migrate
@@ -119,7 +119,7 @@ Returns `{ exitCode: 0 }` on success, `{ exitCode: 1 }` on failure.
 
 ## Server-Side Rendering
 
-SSR works on Lambda without extra configuration. `lambda:build` copies the Vite SSR bundle into the function directory and bakes its location into the bundle; the server loads the renderer on the first Inertia render. Apps without an SSR build produce a CSR-only function — no flag needed either way.
+SSR works on Lambda without extra configuration. `lambda:build` copies the Vite SSR bundle into the function directory and bakes its location into the bundle; the server loads the renderer on the first Inertia render. Apps without an SSR build produce a CSR-only function, with no flag needed either way.
 
 ## Database
 
@@ -140,13 +140,13 @@ const database = createAwsDataApiDatabase({
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 ```
 
-Install the driver alongside it (`bun add @aws-sdk/client-rds-data`). The function needs the `rds-data` actions on the cluster plus `secretsmanager:GetSecretValue` on the secret — the CDK construct's `dataApi` option (below) wires both, and authentication uses the function's IAM role. For `drizzle-kit generate`/`push`, set `driver: 'aws-data-api'` in `drizzle.config.ts`.
+Install the driver alongside it (`bun add @aws-sdk/client-rds-data`). The function needs the `rds-data` actions on the cluster plus `secretsmanager:GetSecretValue` on the secret. The CDK construct's `dataApi` option (below) wires both, and authentication uses the function's IAM role. For `drizzle-kit generate`/`push`, set `driver: 'aws-data-api'` in `drizzle.config.ts`.
 
 See the [Database Guide](./database.md) for the full factory reference.
 
 ### Classic RDS with RDS Proxy
 
-`createPostgresDatabase` works against RDS when the function runs inside the VPC. Route connections through RDS Proxy and disable prepared statements — they pin proxy sessions:
+`createPostgresDatabase` works against RDS when the function runs inside the VPC. Route connections through RDS Proxy and disable prepared statements, which pin proxy sessions:
 
 ```typescript
 const database = createPostgresDatabase({
@@ -159,15 +159,15 @@ const database = createPostgresDatabase({
 ### Only the client you use is bundled
 
 The ORM reaches every dialect's client through a dynamic import, and bundlers
-follow those whether or not the branch can be taken — so a Postgres app would
+follow those whether or not the branch can be taken, so a Postgres app would
 otherwise fail to build on `mysql2`, a database it never chose. The build reads
 which factories `config/database.ts` calls and replaces the clients for every
 other dialect with a stub that throws if it is ever reached.
 
 Only `config/database.ts` (or `db/config.ts`) is read, so an app that opens a
 second connection elsewhere should name its databases explicitly. So should
-one whose config reaches a factory without naming it — through a re-export, or
-an indirection into another module — which the build reports as not being able
+one whose config reaches a factory without naming it (through a re-export, or
+an indirection into another module), which the build reports as not being able
 to tell, and stubs nothing:
 
 ```bash
@@ -217,7 +217,7 @@ const log = new LogManager({
 
 Lambda is not suited for serving static files. `lambda:build` stages `public/` into `.lambda/assets`, ready for S3, and the CDK construct (below) provisions the bucket and a CloudFront distribution that routes `/assets/*` and `/public/*` to it, with the app as the default origin.
 
-The distribution answers for those files before the function runs, so the guard the framework applies when it serves `public/` itself never sees them. The construct restores it with a viewer-response CloudFront function on the asset behaviors: the types a browser renders as a document — `.html`, `.htm`, `.svg`, `.xhtml`, `.xml` — come back with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, at any depth and whatever the extension's case. Images, scripts, stylesheets and fonts are untouched, and the default behavior — your app — is left to its own headers.
+The distribution answers for those files before the function runs, so the guard the framework applies when it serves `public/` itself never sees them. The construct restores it with a viewer-response CloudFront function on the asset behaviors: the types a browser renders as a document (`.html`, `.htm`, `.svg`, `.xhtml`, `.xml`) come back with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, at any depth and whatever the extension's case. Images, scripts, stylesheets and fonts are untouched, and the default behavior — your app — is left to its own headers.
 
 Deploying assets by hand instead? Sync `.lambda/assets` to a bucket and set `GUREN_INERTIA_ENTRY` / `GUREN_INERTIA_STYLES` on the function to the CDN URLs (the values are listed in `.lambda/env.json`). Note that the document rule above comes with the CDK construct, not with the staged directory: a hand-rolled distribution serves an `.svg` under `public/` inline, on your app's origin.
 
@@ -241,11 +241,11 @@ const app = createApp({
 
 ### Migrations & Seeding
 
-The scaffolded `config/app.ts` seeds the database on boot as a local development convenience and skips it when `NODE_ENV=production`. Keep that guard — Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
+The scaffolded `config/app.ts` seeds the database on boot as a local development convenience and skips it when `NODE_ENV=production`. Keep that guard. Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
 
 **Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so a `db:migrate` console command can apply them in place. See [Console — `createConsoleHandler(kernel)`](#console--createconsolehandlerkernel) for the command and how to invoke it.
 
-**Seeders cannot run inside the function.** They are ordinary `.ts` modules that import your schema and `@guren/core`, and the deployed function is a self-contained bundle with no `node_modules` and no TypeScript loader — the Node.js runtime rejects them outright. Seed from somewhere that has the project source instead:
+**Seeders cannot run inside the function.** They are ordinary `.ts` modules that import your schema and `@guren/core`, and the deployed function is a self-contained bundle with no `node_modules` and no TypeScript loader, so the Node.js runtime rejects them outright. Seed from somewhere that has the project source instead:
 
 ```bash
 DATABASE_URL='<production connection string>' bunx guren db:seed --force
@@ -261,7 +261,7 @@ Lambda has a read-only filesystem except for `/tmp` (512 MB, ephemeral). Use `/t
 
 In-memory stores are lost between invocations, so sessions need a backend that survives across Lambda invocations.
 
-Run `bunx guren add session` and pick the store in `config/session.ts`. For most apps `database` is the recommended default — it persists sessions in the database your app already talks to, so there is no extra infrastructure to provision, and `sessions:prune` (scheduled through `createScheduleHandler`) keeps the table small.
+Run `bunx guren add session` and pick the store in `config/session.ts`. For most apps `database` is the recommended default. It persists sessions in the database your app already talks to, so there is no extra infrastructure to provision, and `sessions:prune` (scheduled through `createScheduleHandler`) keeps the table small.
 
 ### DynamoDB
 
@@ -300,9 +300,9 @@ export const sessionConfig: SessionConfig = {
 
 The table name comes from `DYNAMODB_SESSIONS_TABLE`, which the CDK construct's `sessionsTable` sets on every function; pass `table` in the store config to name it yourself. Registration is a call rather than an import side effect, so a bundler that drops an unused import cannot drop the driver with it.
 
-The table needs an `id` string partition key and TTL enabled on `expires_at`. Reads are strongly consistent, so a session written at login is readable on the redirect that follows. DynamoDB deletes expired items within 48 hours rather than at expiry, so the store treats a past `expires_at` as missing on its own — the TTL is the sweeper, not the clock. A DynamoDB item caps at 400 KB, so keep only ids in the session.
+The table needs an `id` string partition key and TTL enabled on `expires_at`. Reads are strongly consistent, so a session written at login is readable on the redirect that follows. DynamoDB deletes expired items within 48 hours rather than at expiry, so the store treats a past `expires_at` as missing on its own. The TTL is the sweeper, not the clock. A DynamoDB item caps at 400 KB, so keep only ids in the session.
 
-ElastiCache and the `redis` driver remain an option; cache still benefits from Redis or DynamoDB — see the infrastructure table below.
+ElastiCache and the `redis` driver remain an option; cache still benefits from Redis or DynamoDB (see the infrastructure table below).
 
 ## Infrastructure Recommendations
 
@@ -320,7 +320,7 @@ ElastiCache and the `redis` driver remain an option; cache still benefits from R
 
 ## Deploy with CDK
 
-The plugin ships a CDK construct that wires the whole topology — the HTTP API, queue worker with dead-letter queue and partial batch failures, EventBridge rule, console function, and CloudFront + S3 for assets:
+The plugin ships a CDK construct that wires the whole topology: the HTTP API, queue worker with dead-letter queue and partial batch failures, EventBridge rule, console function, and CloudFront + S3 for assets:
 
 ```bash
 bun add aws-cdk-lib constructs
@@ -352,7 +352,7 @@ new GurenLambdaApp(stack, 'App', {
 })
 ```
 
-Every sub-resource is exposed as a property (`httpFunction`, `queue`, `distribution`, ...) for further customization — attaching a custom domain, adding IAM grants, tuning memory per function. A complete, deployable CDK app lives in the [deploy recipes](https://github.com/gurenjs/guren/tree/main/examples/deploy/serverless).
+Every sub-resource is exposed as a property (`httpFunction`, `queue`, `distribution`, ...) for further customization: attaching a custom domain, adding IAM grants, tuning memory per function. A complete, deployable CDK app lives in the [deploy recipes](https://github.com/gurenjs/guren/tree/main/examples/deploy/serverless).
 
 ```bash
 bunx guren lambda:build
@@ -360,6 +360,6 @@ bunx cdk deploy
 ```
 
 > [!WARNING]
-> If you replace `lambda:build` with your own bundler, disable identifier mangling. Guren stores class names inside durable records — queued jobs carry the job's wire name, which defaults to its class name, persisted notifications carry their notification type, and HTTP exceptions report their own name — so a mangled build cannot resolve records written by the previous deploy. With `bun build`, use `--minify-whitespace --minify-syntax` instead of `--minify`. With `esbuild`, set `minifyIdentifiers: false`. With `tsdown` or `rolldown`, `mangle: false` alone is not enough: the compressor inlines a single-use class as an anonymous class expression, so its `name` becomes `""`. Set `minify: { compress: { keepNames: { class: true, function: true } }, mangle: false }` instead of `minify: true`. `--keep-names` / `keepNames` is not a substitute on Bun: as of Bun 1.3.14 the flag is accepted and class names stay mangled. `lambda:build` already does this for you.
+> If you replace `lambda:build` with your own bundler, disable identifier mangling. Guren stores class names inside durable records: queued jobs carry the job's wire name, which defaults to its class name, persisted notifications carry their notification type, and HTTP exceptions report their own name. A mangled build therefore cannot resolve records written by the previous deploy. With `bun build`, use `--minify-whitespace --minify-syntax` instead of `--minify`. With `esbuild`, set `minifyIdentifiers: false`. With `tsdown` or `rolldown`, `mangle: false` alone is not enough: the compressor inlines a single-use class as an anonymous class expression, so its `name` becomes `""`. Set `minify: { compress: { keepNames: { class: true, function: true } }, mangle: false }` instead of `minify: true`. `--keep-names` / `keepNames` is not a substitute on Bun: as of Bun 1.3.14 the flag is accepted and class names stay mangled. `lambda:build` already does this for you.
 >
-> If you must mangle, every job has to declare a `jobName` and every notification an explicit `type`, so their durable identities no longer depend on class names — see [Pinning a Job's Wire Identity](./queue.md#pinning-a-jobs-wire-identity). Both default to the class name when not declared, and exception names are always class-name derived, so leaving identifiers intact remains the safer default.
+> If you must mangle, every job has to declare a `jobName` and every notification an explicit `type`, so their durable identities no longer depend on class names (see [Pinning a Job's Wire Identity](./queue.md#pinning-a-jobs-wire-identity)). Both default to the class name when not declared, and exception names are always class-name derived, so leaving identifiers intact remains the safer default.

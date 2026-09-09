@@ -80,7 +80,7 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
    bun run db:up
    ```
 
-   Projects scaffolded before `db:up` existed do not have that script — run `docker compose up -d` instead, or add it to `package.json`.
+   Projects scaffolded before `db:up` existed do not have that script, so run `docker compose up -d` instead, or add it to `package.json`.
 
 2. Verify the connection string in `.env`:
 
@@ -195,7 +195,7 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
 
 2. Open the browser console for JavaScript errors.
 
-3. If using SSR, check the terminal output for server-side rendering errors — they appear in the Bun process logs, not the browser.
+3. If using SSR, check the terminal output for server-side rendering errors. They appear in the Bun process logs, not the browser.
 
 ---
 
@@ -226,9 +226,9 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
 
 The `doctor` command groups findings by severity:
 
-- **Error** — must be fixed before the app can run correctly (e.g., a route references a controller that does not exist)
-- **Warning** — the app runs but may behave unexpectedly (e.g., a page component exists but is not referenced by any route)
-- **Info** — suggestions for improvement (e.g., unused imports)
+- **Error**: must be fixed before the app can run correctly (e.g., a route references a controller that does not exist)
+- **Warning**: the app runs but may behave unexpectedly (e.g., a page component exists but is not referenced by any route)
+- **Info**: suggestions for improvement (e.g., unused imports)
 
 Each finding includes a description and a suggested fix. Apply the suggestions, then re-run `bunx guren doctor` to confirm the issues are resolved.
 

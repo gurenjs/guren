@@ -1,10 +1,10 @@
 # Guren at a Glance
 
-The fullstack TypeScript framework that feels like Laravel — powered by Bun.
+The fullstack TypeScript framework that feels like Laravel, powered by Bun.
 
 ## See for Yourself
 
-A route, a controller, a typed response — in a few lines:
+A route, a controller, and a typed response in a few lines:
 
 ```ts
 // routes/web.ts
@@ -55,7 +55,7 @@ export default class TaskController extends Controller {
 }
 ```
 
-Your React page receives typed props directly from the controller — no manual API layer:
+Your React page receives typed props directly from the controller, with no manual API layer in between:
 
 ```tsx
 // resources/js/pages/tasks/Index.tsx
@@ -90,21 +90,21 @@ await app.actingAs(user).get('/dashboard').assertOk()
 
 ## What Makes Guren Different
 
-**Bun-native from day one.** Guren runs on Bun's runtime with Hono as the HTTP layer. There is no Node.js compatibility shim — you get Bun's fast startup, native TypeScript execution, and built-in test runner out of the box.
+**Bun-native from day one.** Guren runs on Bun's runtime with Hono as the HTTP layer. There is no Node.js compatibility shim, so you get Bun's fast startup, native TypeScript execution, and built-in test runner out of the box.
 
-**Laravel's developer experience, in TypeScript.** If you have used Laravel, the patterns are instantly familiar: resource routing, `Controller` base classes with `this.inertia()`, and `Model.where().orderBy().get()`. If you have not, you will find them intuitive anyway — the API reads like what it does.
+**Laravel's developer experience, in TypeScript.** If you have used Laravel, the patterns are instantly familiar: resource routing, `Controller` base classes with `this.inertia()`, and `Model.where().orderBy().get()`. If you have not, you will find them intuitive anyway: the API reads like what it does.
 
-**End-to-end type safety.** Your Drizzle schema types flow into your Model, through your Controller, and into your React page props. Change a column name and TypeScript catches every place that needs updating — from database to browser.
+**End-to-end type safety.** Your Drizzle schema types flow into your Model, through your Controller, and into your React page props. Change a column name and TypeScript catches every place that needs updating, from database to browser.
 
 **Project knowledge that stays connected to code.** Guren links architecture decisions and generated spec views to the entities and paths they govern, validates those relations, and renders the whole corpus as an interactive Docs Graph during development. See [Spec-Anchored Development](./spec-anchored.md) for the complete workflow.
 
-**Batteries included, not forced.** Authentication, validation, caching, queues, mail, events, broadcasting, scheduling — they are all there when you need them. Each subsystem is opt-in through ServiceProviders, so you only load what you use.
+**Batteries included, not forced.** Authentication, validation, caching, queues, mail, events, broadcasting, and scheduling are all there when you need them. Each subsystem is opt-in through ServiceProviders, so you only load what you use.
 
 **Convention over configuration.** Generate a full feature with `bunx guren add auth` or `bunx guren add resource posts`. The CLI scaffolds the files in the right place with the right structure so you spend time building features, not debating folder layout.
 
 **Router registrars over global state.** Generated apps export route registrars and pass them into `createApp({ routes })`, which keeps routing scoped to each application instance.
 
-For a deeper, honest comparison with Hono, Next.js, and Laravel — and how Guren is designed for AI coding agents — see [Why Guren](./why-guren.md).
+For a deeper, honest comparison with Hono, Next.js, and Laravel, and for how Guren is designed for AI coding agents, see [Why Guren](./why-guren.md).
 
 ## Get Started
 
@@ -123,15 +123,15 @@ Open `http://localhost:3333` and you have a running Guren app.
 
 Follow this path, in order:
 
-1. **[Quickstart](./getting-started.md)** — scaffold a project and see it running in about five minutes.
-2. **[The Guren Tutorial](../tutorials/00-overview.md)** — **recommended for newcomers.** A hands-on fourteen-chapter course that builds a blog from an empty directory to a deployed app. Every chapter hands one slice to a coding agent and judges the result with a test and `guren gate`, so you finish having touched every core concept and knowing how to delegate the next one.
-3. **Topic guides** — deep dives once you know your way around:
-   - [Routing](./routing.md) — route groups, middleware, and resource routes.
-   - [Controllers](./controllers.md) — request handling, input helpers, and validation.
-   - [Database](./database.md) — Drizzle schemas, migrations, QueryBuilder, and relationships.
-   - [Frontend](./frontend.md) — Inertia-powered React pages and SSR.
-   - [Testing](./testing.md) — TestApp, fluent assertions, and test utilities.
-   - [Spec-Anchored Development](./spec-anchored.md) — generated diagrams, architecture decisions, verified links, and the Docs Graph.
+1. **[Quickstart](./getting-started.md)**: scaffold a project and see it running in about five minutes.
+2. **[The Guren Tutorial](../tutorials/00-overview.md)**, recommended for newcomers: a hands-on fourteen-chapter course that builds a blog from an empty directory to a deployed app. Every chapter hands one slice to a coding agent and judges the result with a test and `guren gate`, so you finish having touched every core concept and knowing how to delegate the next one.
+3. **Topic guides** for deep dives once you know your way around:
+   - [Routing](./routing.md): route groups, middleware, and resource routes.
+   - [Controllers](./controllers.md): request handling, input helpers, and validation.
+   - [Database](./database.md): Drizzle schemas, migrations, QueryBuilder, and relationships.
+   - [Frontend](./frontend.md): Inertia-powered React pages and SSR.
+   - [Testing](./testing.md): TestApp, fluent assertions, and test utilities.
+   - [Spec-Anchored Development](./spec-anchored.md): generated diagrams, architecture decisions, verified links, and the Docs Graph.
 
 Prefer a quick guided tour before the tutorial? [First Steps](./first-steps.md) traces one request through every layer in ten minutes.
 

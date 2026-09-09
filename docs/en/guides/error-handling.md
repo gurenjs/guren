@@ -1,6 +1,6 @@
 # Error Handling
 
-Guren provides multiple layers of error handling, from a centralized `ExceptionHandler` to controller-level exception catching. Built on Hono's robust error handling primitives, you can customize how errors are displayed to users in both development and production.
+An exception thrown anywhere in a request ends up at the `ExceptionHandler`, which decides what gets reported and what the client sees. Hono's `onError` hook and ordinary `try`/`catch` inside a controller are the other two places an error can be handled. Each layer can answer differently in development and in production.
 
 ## ExceptionHandler
 

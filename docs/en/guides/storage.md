@@ -122,8 +122,8 @@ await disk.deleteDirectory('uploads/temp')
 
 Where visibility lives depends on the backend, and the driver tells you which one you have rather than pretending:
 
-- **Per object** — S3 with ACLs enabled. `setVisibility()` changes one file.
-- **Per disk** — a local disk (reachability comes from the disk root and whatever serves it), S3 with `acl: false`, and Cloudflare R2. The disk declares its `visibility`; asking for the other value is refused instead of silently doing nothing. On S3 and R2 that is an error today; the local driver warns and will error in the next major, since it has been accepting these calls for a while.
+- **Per object**: S3 with ACLs enabled. `setVisibility()` changes one file.
+- **Per disk**: a local disk (reachability comes from the disk root and whatever serves it), S3 with `acl: false`, and Cloudflare R2. The disk declares its `visibility`; asking for the other value is refused instead of silently doing nothing. On S3 and R2 that is an error today; the local driver warns and will error in the next major, since it has been accepting these calls for a while.
 
 ```ts
 const disk = storage.disk('public')       // declared visibility: 'public'
@@ -283,7 +283,7 @@ const storage = new StorageManager({
 })
 ```
 
-Endpoints that do not implement S3 object ACLs — R2 documents `x-amz-acl` and the ACL operations as unsupported, and MinIO deployments vary — need `acl: false`. The driver then stops sending the header, `getVisibility()` reports the disk's configured `visibility`, and `put({ visibility })` / `setVisibility()` throw when asked for the other value instead of silently not applying it:
+Endpoints that do not implement S3 object ACLs (R2 documents `x-amz-acl` and the ACL operations as unsupported, and MinIO deployments vary) need `acl: false`. The driver then stops sending the header, `getVisibility()` reports the disk's configured `visibility`, and `put({ visibility })` / `setVisibility()` throw when asked for the other value instead of silently not applying it:
 
 ```ts
 const storage = new StorageManager({
@@ -335,19 +335,19 @@ const storage = createStorageManager({
 })
 ```
 
-`STORAGE_DISK=local` in development, `STORAGE_DISK=s3` in production — no code change, and `storage.disk()` returns whichever one is selected.
+`STORAGE_DISK=local` in development, `STORAGE_DISK=s3` in production: no code change, and `storage.disk()` returns whichever one is selected.
 
 > **Do not root a disk that receives uploads inside `public/`, or anywhere `guren storage:link` exposes.** Everything under the served tree is fetchable by URL with no signature, no expiry and no authorization check — including files a stranger uploaded. Keep uploads on a disk like `local` above and hand them out through the [attachments delivery route](./attachments.md); `guren check` fails an attachments config whose disk is reachable that way.
 
 Two things to know about this shape:
 
-- **The config values are read eagerly**, even for a disk you never resolve — they are evaluated when you build the object. `process.env.S3_BUCKET` being unset is harmless, but a helper that *throws* on a missing variable will throw at startup for a disk the app never touches. Keep those out of the disk map, or build that disk with `storage.registerDisk('s3', () => new S3Driver({ ... }))`, whose callback really does run on first use.
-- **An unknown name is not caught at construction.** `createStorageManager({ default: 'typo' })` succeeds and only throws `Storage disk not found: typo` when a disk is first resolved — which can be inside a queued job. The scaffolded provider checks the value against its own disk map at boot for this reason; do the same if you write the config by hand.
+- **The config values are read eagerly**, even for a disk you never resolve: they are evaluated when you build the object. `process.env.S3_BUCKET` being unset is harmless, but a helper that *throws* on a missing variable will throw at startup for a disk the app never touches. Keep those out of the disk map, or build that disk with `storage.registerDisk('s3', () => new S3Driver({ ... }))`, whose callback really does run on first use.
+- **An unknown name is not caught at construction.** `createStorageManager({ default: 'typo' })` succeeds and only throws `Storage disk not found: typo` when a disk is first resolved, which can be inside a queued job. The scaffolded provider checks the value against its own disk map at boot for this reason; do the same if you write the config by hand.
 
 ## File Uploads
 
-> For uploads that belong to a model — a post's cover image, a user's
-> avatar — the [attachments layer](./attachments.md) handles naming,
+> For uploads that belong to a model (a post's cover image, a user's
+> avatar), the [attachments layer](./attachments.md) handles naming,
 > storage, image validation, thumbnail variants, and cleanup in one call
 > (`Post.attach(post.id, 'cover', file)`). The recipes below are the
 > lower-level, path-oriented storage API.
@@ -477,7 +477,7 @@ describe('File uploads', () => {
 
 4. **Use appropriate visibility**: Default to private; only make files public when necessary.
 
-5. **Use pre-signed URLs**: For private files, generate temporary URLs instead of making them public. For model attachments, the [signed delivery route](./attachments.md#urls-and-visibility) covers this on every driver — local disks and binding-only R2 included.
+5. **Use pre-signed URLs**: For private files, generate temporary URLs instead of making them public. For model attachments, the [signed delivery route](./attachments.md#urls-and-visibility) covers this on every driver, local disks and binding-only R2 included.
 
 6. **Organize with directories**: Use meaningful directory structures (`avatars/`, `documents/`, etc.).
 

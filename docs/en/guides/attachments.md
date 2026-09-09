@@ -47,8 +47,8 @@ async store() {
 Your app owns the table (the same convention as the sessions table): add the
 snippet for your dialect to `db/schema.ts` and run a migration.
 
-**PostgreSQL** (timestamps must use `withTimezone: true` — `guren check`
-enforces this):
+**PostgreSQL** (timestamps must use `withTimezone: true`, which
+`guren check` enforces):
 
 ```ts
 import { index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
@@ -141,7 +141,7 @@ export const { Attachment } = configureAttachments({
 
 Import this module once at boot (for example from `src/app.ts`, next to your
 other config). The returned `Attachment` is a ready-made model bound to the
-table with `morphTo('attachable', 'attachable')` pre-declared — useful for
+table with `morphTo('attachable', 'attachable')` pre-declared, useful for
 morph relations and advanced queries. The framework itself deliberately
 exports no `Attachment` class; the app-local name comes from this call.
 
@@ -168,13 +168,13 @@ bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:o
 
 `--attach` takes comma-separated `name:kind` pairs (`one` or `many`; the kind
 defaults to `one`). The generated model is wrapped in the `Attachable` mixin
-with `image: 'require'` on every collection — drop that option per collection
-for non-image uploads — the store action reads matching multipart fields via
+with `image: 'require'` on every collection (drop that option per collection
+for non-image uploads), the store action reads matching multipart fields via
 `this.file()` / `this.files()` and calls `Post.attach()`, and the destroy
 action calls `Post.purgeAttachments()` before deleting the row. The command
 refuses to scaffold when the app has no `configureAttachments()`; run
 `bunx guren add attachments` first. Add `<input type="file">` fields to the
-generated New page yourself — Inertia's `useForm` switches to a multipart
+generated New page yourself. Inertia's `useForm` switches to a multipart
 POST automatically when the form data contains a `File`. The generated
 `update()` does not touch attachments; to accept uploads from the Edit page
 too, add the same `this.file()` + `Post.attach()` lines there (`hasOne`
@@ -209,8 +209,8 @@ const thumb = await Post.attachmentUrl(post, 'cover', { variant: 'thumb' })
 await Post.purgeAttachments(post.id)
 ```
 
-`AttachmentData` is the resource-facing shape — `{ id, collection, name,
-contentType, size, width, height, url, placeholder, variants }` — ready to
+`AttachmentData` is the resource-facing shape (`{ id, collection, name,
+contentType, size, width, height, url, placeholder, variants }`), ready to
 return from a `JsonResource.toArray()` so pages receive typed attachment
 props. `placeholder` is a ThumbHash LQIP data URL you can render while the
 real image loads.
@@ -235,11 +235,11 @@ path is `withAttachments()`.
 When a collection declares `image: 'require'` (or `'allow'`), uploads pass
 a three-gate pipeline:
 
-1. **Byte cap** — input larger than `maxImageBytes` is rejected with 413.
-2. **Header dimensions** — a dependency-free header parser (PNG, JPEG, GIF,
+1. **Byte cap**: input larger than `maxImageBytes` is rejected with 413.
+2. **Header dimensions**: a dependency-free header parser (PNG, JPEG, GIF,
    WebP, AVIF/HEIC) reads the declared dimensions and rejects anything over
    `maxPixels` with 422 *before* a decoder allocates pixel buffers.
-3. **Full decode** — the image is actually decoded. Truncated or corrupt
+3. **Full decode**: the image is actually decoded. Truncated or corrupt
    files that lie in their headers fail here with 422. Sniffed and
    client-declared content types are recorded but never trusted for the
    image/not-image decision.
@@ -250,25 +250,25 @@ accepted on header evidence and dimensions come from the header.
 
 The `image` option per collection:
 
-- unset — opaque bytes: no image pipeline, `width`/`height`/`placeholder`
+- unset: opaque bytes, no image pipeline, `width`/`height`/`placeholder`
   stay `null` (documents, archives, …)
-- `'allow'` — images are decoded and measured; other files are stored as
+- `'allow'`: images are decoded and measured; other files are stored as
   opaque bytes
-- `'require'` — non-images are rejected with a 422 `ValidationException`
+- `'require'`: non-images are rejected with a 422 `ValidationException`
   (the error keys on the collection name, so Inertia forms display it)
-- `'forbid'` — anything that sniffs as an image is rejected with 422
+- `'forbid'`: anything that sniffs as an image is rejected with 422
 
 Other rules that hold everywhere:
 
 - **Bytes only.** `attach()` accepts `File | Blob | Uint8Array` and nothing
-  else — filesystem path strings are an arbitrary-file-read primitive and
-  are rejected at both the type level and runtime.
+  else. Filesystem path strings are an arbitrary-file-read primitive and are
+  rejected at both the type level and runtime.
 - **HEIC/HEIF is rejected with 415 by default.** HEIC decoding depends on
-  OS codecs — it typically works on a macOS dev machine and fails on Linux
+  OS codecs: it typically works on a macOS dev machine and fails on Linux
   production, and the default must not let that skew pass silently. Opt in
   with `accepts: { heic: 'convert' }`: the upload is decoded and stored as
   JPEG, and still answers 415 on runtimes whose codecs cannot decode it.
-  The rejection applies whenever the image pipeline runs — `image: 'allow'`
+  The rejection applies whenever the image pipeline runs, `image: 'allow'`
   collections included, so an iPhone HEIC photo is 415 there too unless the
   collection opts into `'convert'`; only collections with no `image` policy
   at all store HEIC bytes as opaque files.
@@ -299,7 +299,7 @@ cover: hasOneAttached({
 `fit` supports `'fill'` and `'inside'` (what the Bun-native processor
 actually implements; a crop mode can be added without breaking changes).
 
-Every *declared* variant gets a status entry on the attachment row —
+Every *declared* variant gets a status entry on the attachment row:
 `ready`, `failed`, `unavailable` (no processor on this runtime), or
 `pending` (queued generation, below). `attachmentUrl(post, 'cover',
 { variant: 'thumb' })` serves a `ready` variant's own URL and **falls back
@@ -310,7 +310,7 @@ original.
 ### Runtimes and processors
 
 The default processor is Bun-native (`Bun.Image`) and is resolved by
-feature detection — image variants and full-decode validation require a Bun
+feature detection: image variants and full-decode validation require a Bun
 runtime with `Bun.Image` (Bun 1.4; the API first appeared in 1.3.14). On
 older Bun versions and non-Bun runtimes (Node/Lambda, Workers):
 
@@ -321,7 +321,7 @@ older Bun versions and non-Bun runtimes (Node/Lambda, Workers):
   sharp-backed one) via `configureAttachments({ processor })`.
 
 Whether a specific format (HEIC, AVIF) can be decoded or encoded is a
-property of the OS codecs, discovered at call time — expect 415 responses
+property of the OS codecs, discovered at call time. Expect 415 responses
 for formats the deployed runtime cannot handle, and test uploads on the
 runtime you deploy to.
 
@@ -353,14 +353,14 @@ What to know:
 
 - `configureAttachments()` registers the job, so any worker process that
   boots the app's config (`bunx guren queue:work`) can process it.
-  Point the worker at a runtime with an image processor — Bun with
+  Point the worker at a runtime with an image processor: Bun with
   `Bun.Image`, or a custom `configureAttachments({ processor })`; a worker
   without one settles the variants as `unavailable`.
 - Without the `queue` option, `queued: true` dispatches through the app's
   already-booted queue driver, and throws a clear error before writing
   anything when there is none.
 - The full decode moves to the worker, so the one class the synchronous
-  gates cannot catch — bytes whose header lies — is detected *after*
+  gates cannot catch (bytes whose header lies) is detected *after*
   acceptance: on an `image: 'require'` collection the job purges the
   attachment; on other collections the bytes stay as an opaque file.
 - On Cloudflare Workers this is the only mode that generates variants; see
@@ -369,8 +369,8 @@ What to know:
 ## URLs and visibility
 
 Visibility is declared **per disk** in the attachments config, not per
-attachment — matching drivers like R2 where visibility is a property of the
-bucket:
+attachment. This matches drivers like R2, where visibility is a property of
+the bucket:
 
 ```ts
 configureAttachments({
@@ -404,20 +404,20 @@ export function registerWebRoutes(router: Router): void {
 ```
 
 `attachmentUrl()` on a private disk now returns a **path-relative signed
-URL** (`/attachments/{id}/{filename}?expires=…&signature=…`) — HMAC-signed
+URL** (`/attachments/{id}/{filename}?expires=…&signature=…`), HMAC-signed
 with a key derived for attachment delivery only, expiring after
 `urlExpiresIn` (override per URL with `{ expiresIn }`; force a download
-with `{ disposition: 'attachment' }` — guaranteed on proxy responses,
+with `{ disposition: 'attachment' }`, guaranteed on proxy responses,
 while a redirecting disk depends on its backend honouring the presigned
 response overrides, which R2 does not: see the
 [Cloudflare guide](./cloudflare.md#attachments-on-workers)). The route
 verifies the signature
-(any failure is a uniform 404), resolves the variant at serve time — a
+(any failure is a uniform 404), resolves the variant at serve time (a
 declared-but-not-ready variant serves the original, and the same URL
-starts serving the variant once generation completes — and then either:
+starts serving the variant once generation completes), and then either:
 
 - **redirects** (302) to a short-lived presigned URL on disks whose driver
-  declares `capabilities.presignedGet` (S3, R2 with `presign`) — the
+  declares `capabilities.presignedGet` (S3, R2 with `presign`): the
   bucket serves the bytes, zero app bandwidth; or
 - **proxies** the bytes with hardened headers (inline allowlist, `nosniff`,
   `Content-Security-Policy: sandbox`, `Referrer-Policy: no-referrer`,
@@ -426,22 +426,22 @@ starts serving the variant once generation completes — and then either:
   the binding alone, no `presign` credentials**.
 
 Per-disk override via the `disks` object form:
-`{ docs: { visibility: 'private', serve: 'proxy' } }` — `'auto'`
+`{ docs: { visibility: 'private', serve: 'proxy' } }`. The modes are `'auto'`
 (default), `'redirect'`, `'proxy'`, or `'direct'` (bypass the route and
 keep raw `temporaryUrl()` URLs). `guren check` verifies the route is
 mounted whenever `delivery` is configured, and flags `serve: 'redirect'`
 on a disk whose driver cannot presign.
 
 Two things the route does not do: it is a capability URL, not per-request
-authorization (anyone holding an unexpired URL can read the bytes — wrap
+authorization (anyone holding an unexpired URL can read the bytes, so wrap
 `attachmentUrl()` in your own controller for revocable access), and it
 cannot un-publish a backing store that is itself public. On a local disk,
-also stop serving the private disk's directory statically — registering
+also stop serving the private disk's directory statically. Registering
 the route without closing the public mount is a lock on an open door.
 
 Two operational notes: the signature is a bearer credential in a query
 string, so redact query parameters for the route prefix in access logs
-(browser history holds them too — one reason the default lifetime is
+(browser history holds them too, one reason the default lifetime is
 minutes, not days); and the proxy path serves bytes through your app, so
 bandwidth-sensitive apps should rate-limit the prefix with the usual
 route middleware and prefer redirect-capable disks.
@@ -469,8 +469,8 @@ async destroy() {
 
 - `detach`/`purgeAttachments` delete storage objects first (one prefix per
   attachment), then the rows. A crash between the two leaves a row pointing
-  at nothing — which the next render surfaces loudly — rather than
-  invisible orphaned objects.
+  at nothing (which the next render surfaces loudly) rather than invisible
+  orphaned objects.
 - Model delete hooks are *not* used as the purge mechanism: they only fire
   on one of the delete paths and receive the where clause, not the row.
   Call `purgeAttachments()` explicitly in destroy actions.
@@ -481,8 +481,8 @@ async destroy() {
 ### Sweeping orphans: `attachments:prune`
 
 The contract is explicit-plus-sweep: whatever slips past the explicit purge
-— records deleted through paths that never called `purgeAttachments()`,
-storage prefixes left behind by crashed or raced jobs — is reclaimed by the
+(records deleted through paths that never called `purgeAttachments()`,
+storage prefixes left behind by crashed or raced jobs) is reclaimed by the
 `AttachmentsPruneCommand` sweeper. Register it in the console kernel:
 
 ```ts
@@ -498,7 +498,7 @@ bunx guren attachments:prune --dry-run   # report without deleting
 ```
 
 Orphan rows are detected by resolving each `attachableType` through
-`Model.morphMap` and querying for the owning records — so register every
+`Model.morphMap` and querying for the owning records, so register every
 model that declares attachments:
 
 ```ts
@@ -515,8 +515,8 @@ scheduled job or CI on whatever cadence fits the app.
 The model itself is typed by the mixin's generics, but pages, resources, and
 upload clients cannot see `typeof Post.attachments`. `guren codegen` reads
 each model's `Attachable(...)` declaration and generates a cross-boundary
-map (the Vite plugin regenerates it whenever a file under `app/Models/` —
-or a module's — changes):
+map (the Vite plugin regenerates it whenever a file under `app/Models/`, or
+a module's, changes):
 
 ```ts
 // .guren/attachments.gen.ts — generated, do not edit
@@ -531,18 +531,18 @@ export type AttachmentName<M extends keyof AttachmentsMap> = keyof AttachmentsMa
 ```
 
 Apps without `Attachable` models get no file. The generator reads the
-declaration statically, so one it cannot fully parse — a spread, an options
-object built elsewhere — is skipped with a warning rather than emitted
+declaration statically, so one it cannot fully parse (a spread, an options
+object built elsewhere) is skipped with a warning rather than emitted
 partially; keep declarations inline object literals to stay in the map.
 
 ### What the agent commands verify
 
 - `bunx guren check` validates that `configureAttachments()` binds a table
-  your `db/schema.ts` actually exports — the layer takes the table untyped,
+  your `db/schema.ts` actually exports: the layer takes the table untyped,
   so a renamed schema export would otherwise only fail at runtime, on the
   first attach.
 - `bunx guren check` also flags models mixing in `Attachable(...)` when the
-  app has no `configureAttachments()` call at all — the mixin resolves the
+  app has no `configureAttachments()` call at all: the mixin resolves the
   layer at first use, so the missing config would otherwise only fail at
   runtime too.
 - `bunx guren audit` treats uploads handed to a typed `attach()` as

@@ -40,9 +40,9 @@ router.query('/posts/search', {
 
 Things to know before reaching for it:
 
-- **Handlers must not mutate state.** QUERY is a safe method, and Guren's CSRF protection skips it on that assumption (browsers cannot send QUERY without a CORS preflight, so cross-site request forgery is not a concern — as long as the handler really is read-only). To force CSRF tokens anyway, add `'QUERY'` to the CSRF middleware's `methods` option.
+- **Handlers must not mutate state.** QUERY is a safe method, and Guren's CSRF protection skips it on that assumption (browsers cannot send QUERY without a CORS preflight, so cross-site request forgery is not a concern, as long as the handler really is read-only). To force CSRF tokens anyway, add `'QUERY'` to the CSRF middleware's `methods` option.
 - **Call it with `fetch` or the generated API client** (`client.request('posts.search', { body })`). HTML forms and Inertia form helpers cannot send QUERY.
-- **Check your deployment path.** Guren's fetch-based adapters (Bun, the Cloudflare Workers and Vercel plugins) do not block QUERY, but verify that your platform's ingress accepts it — some proxies and CDNs reject methods outside the classic set. Notably CloudFront, which the Lambda plugin's asset distribution puts in front of your app, does not forward QUERY. Intermediary caching of QUERY responses is also not widely implemented yet.
+- **Check your deployment path.** Guren's fetch-based adapters (Bun, the Cloudflare Workers and Vercel plugins) do not block QUERY, but verify that your platform's ingress accepts it: some proxies and CDNs reject methods outside the classic set. Notably CloudFront, which the Lambda plugin's asset distribution puts in front of your app, does not forward QUERY. Intermediary caching of QUERY responses is also not widely implemented yet.
 - **OpenAPI 3.1 cannot express QUERY**, so `guren openapi:generate` skips QUERY routes with a warning.
 - To advertise support to clients, set the `Accept-Query` response header yourself, e.g. `ctx.header('Accept-Query', 'application/json')` on the resource's GET handler.
 
@@ -188,7 +188,7 @@ If the record is not found, a 404 is returned automatically.
 
 ### Binding by another column
 
-The class alone always looks up by primary key. To resolve a slug (or any other unique column), bind a `[Model, column]` tuple — the router calls `Post.findOrFail(value, 'slug')` and `this.model(Post)` returns the same record:
+The class alone always looks up by primary key. To resolve a slug (or any other unique column), bind a `[Model, column]` tuple. The router calls `Post.findOrFail(value, 'slug')` and `this.model(Post)` returns the same record:
 
 ```ts
 router.get('/posts/:slug', { bind: { slug: [Post, 'slug'] }, name: 'posts.show' }, [PostsController, 'show'])
@@ -199,7 +199,7 @@ async show() {
 }
 ```
 
-The column name is a plain string — a misspelled column fails the query rather than returning 404, so keep it aligned with your schema. When the same parameter is bound both on the router (below) and on the route, the route's own `bind` wins and the record is looked up once.
+The column name is a plain string: a misspelled column fails the query rather than returning 404, so keep it aligned with your schema. When the same parameter is bound both on the router (below) and on the route, the route's own `bind` wins and the record is looked up once.
 
 ### Router-level bindings
 
@@ -274,14 +274,14 @@ const id = this.ctx.req.param('id')
 const userId = this.ctx.req.param('userId')
 ```
 
-Optional segments (`router.get('/posts/:id?', handler)`) and regex constraints (`router.get('/items/:id{[0-9]+}', handler)`) follow Hono's pattern support. To match across multiple segments, use a constrained parameter such as `:path{.+}`. Note that `/:slug*` is not Hono wildcard syntax: it registers a single-segment parameter literally named `slug*` — asterisk included, so you would have to read it as `this.ctx.req.param('slug*')` — and `/files/x/y` 404s rather than matching. Avoid it.
+Optional segments (`router.get('/posts/:id?', handler)`) and regex constraints (`router.get('/items/:id{[0-9]+}', handler)`) follow Hono's pattern support. To match across multiple segments, use a constrained parameter such as `:path{.+}`. Note that `/:slug*` is not Hono wildcard syntax: it registers a single-segment parameter literally named `slug*` (asterisk included, so you would have to read it as `this.ctx.req.param('slug*')`), and `/files/x/y` 404s rather than matching. Avoid it.
 
 > [!NOTE]
 > For large apps, split routes into multiple registrars (`routes/api.ts`, `routes/admin.ts`) and compose them from `src/app.ts`.
 
 ## Route Contracts
 
-Pass an options object as the second argument to attach Zod schemas and metadata to a route. The framework uses these schemas for request validation, codegen, and OpenAPI document generation. Write them with the zod 4 API (`import { z } from 'zod'`) — schemas authored with the zod v3 API are refused by the structural tools with a warning (see [Validation](./validation.md)).
+Pass an options object as the second argument to attach Zod schemas and metadata to a route. The framework uses these schemas for request validation, codegen, and OpenAPI document generation. Write them with the zod 4 API (`import { z } from 'zod'`). Schemas authored with the zod v3 API are refused by the structural tools with a warning (see [Validation](./validation.md)).
 
 ```ts
 import { z } from 'zod'
@@ -320,11 +320,11 @@ Available contract fields:
 | `middlewares` | Array of middleware handlers |
 
 > [!NOTE]
-> Repeated query keys reach the `query` schema as arrays (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`), while a key that appears once stays a string — see [Array-Style Query Parameters](./validation.md#array-style-query-parameters).
+> Repeated query keys reach the `query` schema as arrays (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`), while a key that appears once stays a string. See [Array-Style Query Parameters](./validation.md#array-style-query-parameters).
 
 ### Resource Response Hints
 
-Routes that answer with [API Resources](./api-resources.md) already have a response type — the one codegen extracts from the Resource class into `.guren/data.gen.ts`. Writing an `output` schema for such a route would restate that shape in Zod and leave two copies to drift. Declare the Resource itself instead:
+Routes that answer with [API Resources](./api-resources.md) already have a response type: the one codegen extracts from the Resource class into `.guren/data.gen.ts`. Writing an `output` schema for such a route would restate that shape in Zod and leave two copies to drift. Declare the Resource itself instead:
 
 ```ts
 import { PostResource } from '@/app/Http/Resources/PostResource'
@@ -336,12 +336,12 @@ router.query('/posts/search', {
 }, [PostController, 'search'])
 ```
 
-The hint mirrors the JSON the controller builds: a bare class (`resource: PostResource`) for a single resource, a one-element array (`resource: [PostResource]`) for a collection, and a plain object for an envelope — `{ data: [PostResource] }` matches `this.json({ data: PostResource.collection(posts) })`. Nesting works to any depth.
+The hint mirrors the JSON the controller builds: a bare class (`resource: PostResource`) for a single resource, a one-element array (`resource: [PostResource]`) for a collection, and a plain object for an envelope, where `{ data: [PostResource] }` matches `this.json({ data: PostResource.collection(posts) })`. Nesting works to any depth.
 
-`guren codegen` resolves each class against `app/Http/Resources` — at the project root and inside every `modules/<name>/` — and types the generated API client's `json()` with the assembled shape (`{ data: Data.Post[] }` here). Unlike `output`, nothing runs at request time — the hint is a declaration, checked only in the sense that codegen warns and leaves the response untyped if it names a Resource class it cannot find. When a route sets both, `output` wins: it is the one actually enforced.
+`guren codegen` resolves each class against `app/Http/Resources` (at the project root and inside every `modules/<name>/`) and types the generated API client's `json()` with the assembled shape (`{ data: Data.Post[] }` here). Unlike `output`, nothing runs at request time: the hint is a declaration, checked only in the sense that codegen warns and leaves the response untyped if it names a Resource class it cannot find. When a route sets both, `output` wins: it is the one actually enforced.
 
 > [!NOTE]
-> Every leaf of the hint must be a Resource class. An envelope that mixes Resources with plain typed objects — a paginated response's `meta` and `links`, for example — cannot be expressed yet; bind an `output` schema for those routes instead.
+> Every leaf of the hint must be a Resource class. An envelope that mixes Resources with plain typed objects (a paginated response's `meta` and `links`, for example) cannot be expressed yet; bind an `output` schema for those routes instead.
 
 ### OpenAPI Metadata
 
@@ -380,7 +380,7 @@ See the [OpenAPI guide](#openapi) section in the CLI reference for generating th
 
 ### Agent Tools
 
-A named route can be exposed to AI agents as an MCP tool by declaring `agent` metadata on it. Everything about the tool — its input schema, its output schema, its authorization — is derived from the contracts above; nothing is restated.
+A named route can be exposed to AI agents as an MCP tool by declaring `agent` metadata on it. Everything about the tool (its input schema, its output schema, its authorization) is derived from the contracts above; nothing is restated.
 
 ```ts
 // Fluent
@@ -488,7 +488,7 @@ await app.listen({ port: 0 })
 ```
 
 `app.address` is where `listen()` bound this app, and `undefined` until it has.
-Reading it inside the function is what keeps the entrypoint out of it — nothing
+Reading it inside the function is what keeps the entrypoint out of it: nothing
 has to carry the address back down into the app that produced it. Mounting
 against a plain Hono instance leaves you without an `Application` to ask, so
 supply the value the function returns however that app knows it.

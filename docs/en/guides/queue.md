@@ -1,6 +1,6 @@
 # Queue Guide
 
-Guren provides a robust queue system for deferring time-consuming tasks to be processed in the background. This is essential for maintaining fast response times while handling operations like sending emails, processing uploads, or making external API calls.
+The queue moves slow work off the request: sending mail, processing uploads, calling an external API. A controller dispatches a job and responds immediately; a worker process picks the job up and runs it afterwards.
 
 The standard vNext path is: import queue APIs from `@guren/core`, configure the queue manager in a provider, and keep controllers focused on dispatching jobs.
 

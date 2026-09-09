@@ -37,9 +37,9 @@ bun run test
 
 #### Structural mass assignment
 
-- **What changed**: `static guarded` and `static strictFillable` are removed. `fillable` is always strict; the primary key (`id`) is always silently stripped. On `AuthenticatableModel` subclasses, the password-hash and remember-token columns can never be mass-assigned — a request body carrying them throws a `MassAssignmentException`, whatever `fillable` says.
+- **What changed**: `static guarded` and `static strictFillable` are removed. `fillable` is always strict; the primary key (`id`) is always silently stripped. On `AuthenticatableModel` subclasses, the password-hash and remember-token columns can never be mass-assigned: a request body carrying them throws a `MassAssignmentException`, whatever `fillable` says.
 - **Who is affected**: Models declaring `guarded` or `strictFillable` (now flagged as errors by `guren check`), and code that mass-assigns a precomputed hash or remember token through `create()`/`update()`.
-- **How to migrate**: Delete `guarded`/`strictFillable` declarations — `bunx guren upgrade --check-only` lists the affected files. **If a `guarded` list carried app-specific fields beyond `id` and the credential columns (e.g. `tenantId`, `isAdmin`), deleting the line makes them mass-assignable**: declare `static fillable = [...]` without those fields to keep them protected. Where a model relied on `strictFillable = false`, each new throw names a field that was being silently dropped: add it to `fillable` or remove it from the payload. Replace `create({ ..., passwordHash })` with `create({ ..., password })` and let the model hash it, or `forceCreate({ ..., passwordHash: 'oauth:...' })` for trusted server-side values — never with request input.
+- **How to migrate**: Delete `guarded`/`strictFillable` declarations; `bunx guren upgrade --check-only` lists the affected files. **If a `guarded` list carried app-specific fields beyond `id` and the credential columns (e.g. `tenantId`, `isAdmin`), deleting the line makes them mass-assignable**: declare `static fillable = [...]` without those fields to keep them protected. Where a model relied on `strictFillable = false`, each new throw names a field that was being silently dropped: add it to `fillable` or remove it from the payload. Replace `create({ ..., passwordHash })` with `create({ ..., password })` and let the model hash it, or `forceCreate({ ..., passwordHash: 'oauth:...' })` for trusted server-side values — never with request input.
 
 ```ts
 // Before
@@ -54,7 +54,7 @@ export class User extends defineModel(users, { base: AuthenticatableModel }) {
 }
 ```
 
-`ModelUserProvider` now reads credential column names from the model (`passwordHashField` / the new `rememberTokenField`), so a renamed column needs no matching provider option; explicit `passwordColumn`/`rememberTokenColumn` options still win. The deprecated `createType` option of `defineModel()` is removed — use `optionalOnCreate`/`requireOnCreate`.
+`ModelUserProvider` now reads credential column names from the model (`passwordHashField` / the new `rememberTokenField`), so a renamed column needs no matching provider option; explicit `passwordColumn`/`rememberTokenColumn` options still win. The deprecated `createType` option of `defineModel()` is removed; use `optionalOnCreate`/`requireOnCreate`.
 
 ### rc → 1.0.0
 

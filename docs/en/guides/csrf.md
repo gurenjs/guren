@@ -1,6 +1,6 @@
 # CSRF Protection
 
-Cross-Site Request Forgery (CSRF) protection prevents malicious websites from submitting forms on behalf of authenticated users. Guren provides built-in CSRF middleware that integrates seamlessly with sessions.
+Cross-Site Request Forgery (CSRF) protection prevents malicious websites from submitting forms on behalf of authenticated users. Guren's CSRF middleware issues a token per session (or a double-submit token for guests) and verifies it on POST, PUT, PATCH, and DELETE.
 
 The token spans two requests: it is issued on the GET that renders the form, and matched on the POST that submits it.
 
@@ -43,13 +43,13 @@ app.use('*', createCsrfMiddleware())
 The middleware automatically:
 - Generates a token per session, or a stateless double-submit token for guests
 - Validates tokens on state-changing requests (POST, PUT, PATCH, DELETE)
-- Allows safe methods (GET, HEAD, OPTIONS, QUERY) without validation — QUERY (RFC 10008) is safe by contract, so keep QUERY handlers read-only, or add `'QUERY'` to the `methods` option to require tokens anyway
+- Allows safe methods (GET, HEAD, OPTIONS, QUERY) without validation. QUERY (RFC 10008) is safe by contract, so keep QUERY handlers read-only, or add `'QUERY'` to the `methods` option to require tokens anyway
 
 ## Including the Token in Forms
 
 A native `<form method="post">` must carry the token as a `_token` field, or Guren
 rejects it with a 403. In an Inertia app, `useForm()` and `<Link method="post">`
-send it for you — see [Inertia.js Integration](#inertiajs-integration).
+send it for you (see [Inertia.js Integration](#inertiajs-integration)).
 
 Use the `csrfField()` helper to generate a hidden input field:
 
@@ -108,7 +108,7 @@ fetch('/api/posts', {
 })
 ```
 
-Axios — and therefore Inertia.js — does this for you, so you only need the code
+Axios, and therefore Inertia.js, does this for you, so you only need the code
 above for plain `fetch`.
 
 The middleware accepts the token from three places, in this order:
@@ -119,7 +119,7 @@ The middleware accepts the token from three places, in this order:
 
 These names are not configurable. If you turn the cookie off (`cookie: false`
 below), pass the token to the page yourself with `getCsrfToken(ctx)` and send it
-as `X-CSRF-TOKEN` — do this only for session-authenticated flows, because guest
+as `X-CSRF-TOKEN`. Do this only for session-authenticated flows, because guest
 tokens verify against the cookie and cannot work without it.
 
 ## Configuration Options
