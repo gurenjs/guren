@@ -64,10 +64,10 @@ interface ManifestChunk { file: string; imports?: string[]; dynamicImports?: str
 const manifest = JSON.parse(readFileSync(path.join(blog, 'public/assets/.vite/manifest.json'), 'utf8')) as Record<string, ManifestChunk>
 // A literal only the runtime body carries: the entry names the exports it
 // destructures from the dynamic import, so a symbol name would match it too.
-const RUNTIME_MARKER = 'http://prototype.invalid'
+const RUNTIME_MARKER = /['"`]http:\/\/prototype\.invalid['"`]/u
 const runtimeChunks = new Set(
   Object.entries(manifest)
-    .filter(([, chunk]) => readFileSync(path.join(blog, 'public/assets', chunk.file), 'utf8').includes(RUNTIME_MARKER))
+    .filter(([, chunk]) => RUNTIME_MARKER.test(readFileSync(path.join(blog, 'public/assets', chunk.file), 'utf8')))
     .map(([key]) => key),
 )
 if (runtimeChunks.size === 0) fail('no chunk carries the prototype runtime; the dynamic import was dropped or renamed, so this check sees nothing')
