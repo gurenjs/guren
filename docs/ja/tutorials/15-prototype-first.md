@@ -1,16 +1,16 @@
 # 第 15 章: プロトタイプファースト
 
-14 の章は、ブログをバックエンドから先に作りました。テーブル、モデル、コントローラー、そしてやっとページ。何を作るか分かっているなら、その順序は正しい。しかしほとんどの機能は、誰にも分かっていないうちに始まります。文書として書かれた仕様は議論の的になり、顧客がクリックできる仕様は訂正されます。この章は次の機能を逆順で作ります。まず画面を、シードデータの上で、サーバー無しの静的ファイルとしてホストし、顧客が「これで」と言ってから、同じコードでバックエンドを作ります。
+ここまでの 14 章は、ブログをバックエンドから作ってきました。テーブル、モデル、コントローラー、そしてやっとページ。何を作るか分かっているなら、その順序で正しい。しかしほとんどの機能は、誰にも分かっていないうちに始まります。文書として書かれた仕様は議論の的になり、顧客がクリックできる仕様は訂正されます。この章では次の機能を逆順で作ります。まず画面を、シードデータの上で、サーバー無しの静的ファイルとしてホストします。顧客が「これで」と言ってから、同じコードでバックエンドを作ります。
 
-機能はサイトのお知らせです。著者が投稿し、編集し、取り下げられる、ピン留めできる通知。クリックできるプロトタイプを出荷し、その裏にバックエンドを入れ、デモに使ったページが変更なしでそのまま出荷するページになるのを見届けます。
+作る機能はサイトのお知らせです。著者が投稿し、編集し、取り下げられる、ピン留めできる通知。クリックできるプロトタイプを出荷し、その裏にバックエンドを入れて、デモに使ったページが手を加えないまま出荷されるページになるのを確かめます。
 
 **この章で学ぶこと:**
 
-- `guren add prototype` が何を配線し、なぜそのどれも本番バンドルに届かないのか
-- fixture がブラウザ内ですべての Inertia の visit に、コントローラーと同じページの `Props` に対して型付けされて答える仕組み
-- `bun run build:prototype` が何を出力し、静的ホストがそこに何を必要とするか
+- `guren add prototype` が配線するものと、そのどれもが本番バンドルに届かない理由
+- fixture がブラウザ内で Inertia の visit すべてに、コントローラーと同じページの `Props` に型付けされて答える仕組み
+- `bun run build:prototype` の出力と、静的ホスト側に要るもの
 - ルートがまだ `prototype` ハンドラーに乗っている間、同じ fixture が `bun run dev` の描画をどう支えるか
-- 昇格とは何か、そしてどのファイルに触らないか
+- 昇格が何をするのかと、そのとき触らないファイル
 
 ## 1. プロトタイプモードを導入する
 
@@ -25,11 +25,11 @@ git status --short
 ```
 
 - `resources/js/prototype/index.ts` が **fixture** です。`state` と `routes` が空の `definePrototype({ … })` 呼び出しと、index ページが受け取る props の形をした `paginate()` ヘルパー。
-- `resources/js/app.tsx` は `startInertiaClient()` に `prototype` を渡すようになりました。`import.meta.env.GUREN_PROTOTYPE` で守られています。Vite はこれを `--mode prototype` ではリテラルの `true`、それ以外ではリテラルの `false` として定義するので、この分岐と fixture の import は `bun run build` ではデッドコードです。
+- `resources/js/app.tsx` は `startInertiaClient()` に `prototype` を渡すようになり、`import.meta.env.GUREN_PROTOTYPE` で守られています。Vite はこれを `--mode prototype` ではリテラルの `true`、それ以外ではリテラルの `false` として定義するので、この分岐と fixture の import は `bun run build` ではデッドコードになります。
 - `src/app.ts` は `createApp()` に `prototype: () => import('../resources/js/prototype/index.js')` を渡すようになりました。サーバーはルートが求めたときだけこれを読み込みます。
 - `package.json` に `dev:prototype` と `build:prototype` が増え、`resources/js/vite-env.d.ts` が環境変数を宣言しています。
 
-それ以外は何も変わっておらず、手元のアプリは以前とまったく同じにビルドされ、テストされ、動きます。
+それ以外は何も変わっていません。アプリは以前とまったく同じようにビルドでき、テストでき、動きます。
 
 ## 2. 画面を生成する
 
@@ -37,7 +37,7 @@ git status --short
 bunx guren make:feature Announcement --fields "title:string,body:text,pinned:boolean" --prototype
 ```
 
-`--prototype` は、機能のうち顧客に見える半分だけを書き、それ以外は書きません。`resources/js/pages/announcements/` の下の 4 つのページコンポーネント、バリデーター、ページが描画する `AnnouncementData` をエクスポートする `resources/js/types/Announcement.ts`、そしてこの機能が持つルートごとにひとつ、fixture に追記される 7 つのエントリ。モデルも、マイグレーションも、Resource も、コントローラーもありません。登録すべきルートが出力されますが、それはすぐあとで手で書きます。
+`--prototype` は、機能のうち顧客に見える半分だけを書きます。`resources/js/pages/announcements/` の下の 4 つのページコンポーネント、バリデーター、ページが描画する `AnnouncementData` をエクスポートする `resources/js/types/Announcement.ts`、そしてこの機能が持つルートごとにひとつ、fixture に追記される 7 つのエントリ。モデルも、マイグレーションも、Resource も、コントローラーも作りません。登録すべきルートは出力されますが、それはすぐあとで手で書きます。
 
 fixture の `pages.announcements.*` とルート名が存在するよう、マニフェストを再生成します:
 
@@ -47,7 +47,7 @@ bunx guren codegen
 
 ## 3. ルートを登録する
 
-fixture はルート名をキーにしているので、何かが答える前にルートが存在している必要があります。コントローラーの代わりに `prototype` ハンドラーで登録します。お知らせは読者のためのものなので、一覧とページは公開。ひとつを変更するものはすべて、他の著者専用ルートと一緒に `auth` グループに置きます。
+fixture はルート名をキーにしているので、何かが答えるより先にルートが存在している必要があります。コントローラーの代わりに `prototype` ハンドラーで登録します。お知らせは読者のためのものなので、一覧とページは公開にします。お知らせを変更するルートはすべて、ほかの著者専用ルートと一緒に `auth` グループに置きます。
 
 ```ts file=routes/web.ts
 import { Router, prototype, registerAttachmentRoutes, requireAuthenticated, requireGuest } from '@guren/core'
@@ -179,7 +179,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 }
 ```
 
-二度読む価値があるところが 2 つあります。`prototype` は、契約オプションの有無にかかわらず、どちらのルートの形でもコントローラーのタプルが来る場所に置きます。そして契約は本物です。`/announcements/:id` の `params: AnnouncementIdParamSchema` は、`/announcements/abc` が fixture に尋ねられる前にサーバーで 422 になることを意味します。コントローラーが置かれたときとまったく同じです。fixture はルートの契約を受け継ぐのであって、置き換えるのではありません。
+二度読む価値があるところが 2 つあります。ひとつ、`prototype` は契約オプションの有無にかかわらず、どちらのルートの形でもコントローラーのタプルが来る場所に置きます。もうひとつ、契約が本物だという点です。`/announcements/:id` に `params: AnnouncementIdParamSchema` があると、`/announcements/abc` は fixture に届く前にサーバーで 422 になります。コントローラーを置いたときとまったく同じです。fixture はルートの契約を受け継ぐのであって、置き換えるわけではありません。
 
 ```bash run
 bunx guren codegen
@@ -187,7 +187,7 @@ bunx guren codegen
 
 ## 4. デモを本物らしくする
 
-`make:feature --prototype` は fixture に `Sample title 1` をシードしました。顧客はシードデータを製品として読むので、プロトタイプの中で手で書く価値があるのはここ、画面が何を言うかです。ファイルの残りはジェネレーターが書いたもので、ここで学ぶべきは各エントリの形です。それは、あとで書くコントローラーからデータベースを引いた形だからです。
+`make:feature --prototype` は fixture に `Sample title 1` をシードしました。顧客はシードデータを製品として読むので、プロトタイプの中で手で書く価値があるのはここ、画面が何を言うかです。ファイルの残りはジェネレーターが書いたものです。ここで見ておきたいのは各エントリの形で、あとで書くコントローラーからデータベースを引いた形になっています。
 
 ```ts file=resources/js/prototype/index.ts
 /**
@@ -312,9 +312,9 @@ export default definePrototype({
 })
 ```
 
-エントリをひとつ、知っているコントローラーのパターンと見比べてください。`'announcements.show'` はルートのパスから型付けされた `params` と、上のファクトリから型付けされた `state` を受け取り、`page(pages.announcements.Show, { announcement })` を返します。`announcement` はページの `Props` を満たす必要があります。コントローラーの `show()` は `this.validateParams()` を読み、`findOrFail()` を呼び、同じ `Props` に対して検査された `this.inertia(pages.announcements.Show, { announcement })` を返します。両者は同じ生成コードによって同じ契約に縛られており、違うのはデータがどこから来るかだけです。`'announcements.store'` はルートの `body` スキーマから型付けされた `body` を受け取り(コントローラーで `this.validateBody()` が型付けするのと同じ)、`redirect('announcements.show', …)` で答えます。こちらはルートマニフェストに対して検査されますが、`this.redirect()` はされません。
+エントリをひとつ、見慣れたコントローラーのパターンと見比べてください。`'announcements.show'` はルートのパスから型付けされた `params` と、上のファクトリから型付けされた `state` を受け取り、`page(pages.announcements.Show, { announcement })` を返します。`announcement` はページの `Props` を満たす必要があります。コントローラーの `show()` は `this.validateParams()` を読み、`findOrFail()` を呼び、同じ `Props` に対して検査された `this.inertia(pages.announcements.Show, { announcement })` を返します。どちらも同じ生成コードによって同じ契約に縛られていて、違うのはデータの出どころだけです。`'announcements.store'` はルートの `body` スキーマから型付けされた `body` を受け取り(コントローラーで `this.validateBody()` が型付けするのと同じです)、`redirect('announcements.show', …)` で答えます。こちらはルートマニフェストに対して検査されますが、`this.redirect()` は検査されません。
 
-fixture が型付けの根拠にするものはすべて `.guren/` から来ます。ルートを改名する、ページの `Props` を変える、すると fixture は、コントローラーが落ちるのと同じ `bun run typecheck` の実行で落ちます。
+fixture が型付けの根拠にするものは、すべて `.guren/` から来ます。ルートを改名しても、ページの `Props` を変えても、fixture はコントローラーが落ちるのと同じ `bun run typecheck` で落ちます。
 
 ## 5. チェックし、ビルドし、歩く
 
@@ -322,7 +322,7 @@ fixture が型付けの根拠にするものはすべて `.guren/` から来ま�
 bunx guren check --prototype
 ```
 
-このスイートは型検査器には見えない配線を確認します。すべての `prototype` ルートに名前と fixture のエントリがあること、すべてのエントリが存在するルートを名指ししていること、メソッドとパスを共有するルートが 2 つないこと(ブラウザのマッチャーが区別できません)、そして `createApp()` がローダーを持っていること。さらに、エントリの無い名前付き GET ルートを助言として一覧します。`home`、`about`、`posts.index` などはこのプロトタイプでは到達できません。ひとつの機能のプロトタイプにはそれで正しく、お知らせページからそれらへのリンクは 404 ダイアログを開きます。この警告は、ブログ全体を歩けるようにしたいなら何を足せばいいかの一覧です。
+このスイートは、型検査器には見えない配線を確認します。すべての `prototype` ルートに名前と fixture のエントリがあること、すべてのエントリが存在するルートを名指ししていること、メソッドとパスを共有するルートが 2 つ無いこと(ブラウザのマッチャーが区別できません)、そして `createApp()` がローダーを持っていること。さらに、エントリの無い名前付き GET ルートを助言として一覧します。`home`、`about`、`posts.index` などはこのプロトタイプからは到達できません。ひとつの機能のプロトタイプならそれで正しく、お知らせページからそれらへのリンクは 404 ダイアログを開きます。この警告は、ブログ全体を歩けるようにしたいときに何を足せばよいかの一覧でもあります。
 
 サーバー側も同じ fixture から答えます。7 つのルートが fixture に乗り、裏にコントローラーが無くても、既存のテストはそのまま通ります:
 
@@ -340,7 +340,7 @@ bun run build:prototype
 ls dist/prototype
 ```
 
-`index.html` がシェルで、プロトタイプは見つけられるべきものではないので `<meta name="robots" content="noindex, nofollow">` が入っています。`404.html` はそのコピーで、未知のパスにこのファイルを返すホスト(GitHub Pages)のためのもの、`_redirects` は `/* /index.html 200` と書かれていて、これを読むホスト(Cloudflare Pages、Netlify)のためのものです。その横にハッシュ付きのバンドルが fixture ごと並び、`public/` の下のものはすべてコピーされます。例外は `public/assets/` で、これは通常ビルド自身の出力です。このディレクトリを任意の静的ホストにアップロードし、未知のパスには `index.html` で答えるよう設定し、リンクを送ってください。サーバーも、データベースも、動かし続けるものも何もありません。ホストごとの一覧と、`/repo/` の下のプロジェクトページ向けのサブパスの注意は[プロトタイプファーストガイド](../guides/prototype-first.md#出荷する)にあります。
+`index.html` がシェルで、プロトタイプは見つけられるべきものではないので `<meta name="robots" content="noindex, nofollow">` が入っています。`404.html` はそのコピーで、未知のパスにこのファイルを返すホスト(GitHub Pages)向けです。`_redirects` は `/* /index.html 200` と書かれていて、これを読むホスト(Cloudflare Pages、Netlify)向けです。その横にハッシュ付きのバンドルが fixture ごと並び、`public/` の下のものはすべてコピーされます。例外は `public/assets/` で、これは通常ビルド自身の出力です。このディレクトリを好きな静的ホストにアップロードし、未知のパスには `index.html` で答えるよう設定して、リンクを送ってください。サーバーも、データベースも、動かし続けるものもありません。ホストごとの一覧と、`/repo/` の下のプロジェクトページ向けのサブパスの注意は[プロトタイプファーストガイド](../guides/prototype-first.md#出荷する)にあります。
 
 送る前に自分で歩くには:
 
@@ -348,9 +348,9 @@ ls dist/prototype
 bun run dev:prototype
 ```
 
-これは Vite だけです。`bun run dev` が動いていれば止めるか、Vite に別のポートを与えてください。`/announcements` を開き、ひとつ投稿し、編集し、削除し、リロードする。状態はタブの `sessionStorage` に住んでいるので、リロードしても操作は残り、新しいタブはシードから始まります。任意の URL に `?prototype.reset=1` を付けて開くとやり直しです。顧客の前でリセットできないデモは、繰り返せないデモです。
+動くのは Vite だけです。`bun run dev` が動いていれば止めるか、Vite に別のポートを与えてください。`/announcements` を開き、ひとつ投稿し、編集し、削除して、リロードしてみてください。状態はタブの `sessionStorage` にあるので、リロードしても操作は残り、新しいタブはシードから始まります。どの URL でも `?prototype.reset=1` を付けて開けばやり直せます。顧客の前でリセットできないデモは、繰り返せないデモです。
 
-歩いていると 2 つのことにぶつかりますが、どちらもバグではありません。**ログインページは描画されるがフォームはどこにも行かない**: fixture に届くのは Inertia の visit だけで、ネイティブのフォーム送信、素の `<a href>`、`window.location` は代わりに静的ホストのフォールバックに当たります。そして **保護された画面がサインイン無しで開く**: ブラウザではミドルウェアが走らず、fixture の `shared.auth` は Ada がサインイン済みだと言っています。そこを `user: null` にすると、ゲストとしてプロトタイプを歩けます。
+歩いていると 2 つのことにぶつかりますが、どちらもバグではありません。**ログインページは描画されるがフォームはどこにも行かない**: fixture に届くのは Inertia の visit だけで、ネイティブのフォーム送信、素の `<a href>`、`window.location` は静的ホストのフォールバックに当たります。そして **保護された画面がサインイン無しで開く**: ブラウザではミドルウェアが走らず、fixture の `shared.auth` が Ada はサインイン済みだと言っているからです。そこを `user: null` にすれば、ゲストとしてプロトタイプを歩けます。
 
 バックログは CLI からも見えます。`guren context` はまだ fixture 上にあるルートを一覧します。「次の画面を実装して」と頼まれたエージェントが読むべきはこれです:
 
@@ -363,11 +363,11 @@ git add -A
 git commit -m "feat: prototype the announcements feature"
 ```
 
-`dist/` は無視されるので、コミットは fixture、ページ、バリデーター、型、ルート、配線です。これがプロトタイプの全部で、使い捨てではなく機能の始まりです。
+`dist/` は無視されるので、コミットされるのは fixture、ページ、バリデーター、型、ルート、配線です。これがプロトタイプのすべてで、使い捨てではなく機能の始まりです。
 
 ## 6. バックエンドを指定する
 
-顧客はクリックして回り、「これで」と言いました。次はバックエンドで、「完了」の意味を告げるテストが先です。大事なアサーションはひとつ、プロトタイプには通せないもの。一覧はデータベースから来なければならない。
+顧客はクリックして回り、「これで」と言いました。次はバックエンドですが、その前に「完了」の意味を告げるテストを書きます。大事なアサーションはひとつ、プロトタイプには通せないものです。一覧はデータベースから来なければなりません。
 
 ```ts file=tests/AnnouncementController.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
@@ -422,7 +422,7 @@ describe('AnnouncementController', () => {
 bun test tests/AnnouncementController.test.ts
 ```
 
-赤がひとつ、緑が 3 つ。面白いのは緑のほうです。422 が緑なのは、ルートの契約が fixture より先に強制されるからで、これから来るコントローラーと同じくサーバー上でそうなります。保存して一覧が緑なのは、fixture がどちらにも、サーバーがプロセスのために保持している状態オブジェクトから答えるからです。ゲストのリダイレクトが緑なのは、裏で何が答えようとルートのミドルウェアが走るからです。空の一覧だけが赤です。fixture には 3 件のお知らせがあり、データベースには 1 件もない。このテストが、プロトタイプと機能の境界線です。
+赤がひとつ、緑が 3 つ。注目すべきは緑のほうです。422 が緑なのは、ルートの契約が fixture より先に強制されるからで、これから書くコントローラーと同じようにサーバー上で強制されます。保存して一覧が緑なのは、fixture がどちらにも、サーバーがプロセスのために保持している状態オブジェクトから答えるからです。ゲストのリダイレクトが緑なのは、裏で何が答えようとルートのミドルウェアが走るからです。赤いのは空の一覧だけです。fixture には 3 件のお知らせがあり、データベースには 1 件もありません。このテストが、プロトタイプと機能の境界線です。
 
 ## 7. 昇格を委任する
 
@@ -433,7 +433,7 @@ bun test tests/AnnouncementController.test.ts
 rubric:
 
 - **`db/schema.ts`** に 4 つの列を持つ `announcements` テーブルが増え、それ以外は変わっていない。`db/migrations/` の下にマイグレーションが生成され、適用されている。
-- **`app/Models/Announcement.ts`**、**`app/Http/Resources/AnnouncementResource.ts`**、**`app/Http/Controllers/AnnouncementController.ts`** が存在する。Resource の `toArray()` はページが組み立てられた型 `AnnouncementData` を返す。顧客が見た形が、シリアライザーの契約になっている。
+- **`app/Models/Announcement.ts`**、**`app/Http/Resources/AnnouncementResource.ts`**、**`app/Http/Controllers/AnnouncementController.ts`** が存在する。Resource の `toArray()` は、ページが組み立てられた型 `AnnouncementData` を返す。顧客が見た形が、そのままシリアライザーの契約になっている。
 - **`routes/web.ts`** に `announcements.*` の `prototype` ハンドラーが残っておらず、`index` と `show` は公開のまま、残りは `auth` グループのまま、`params` と `body` のスキーマは変わっていない。
 - **`resources/js/pages/announcements/`**、**`app/Http/Validators/AnnouncementValidator.ts`**、**`resources/js/prototype/index.ts`** に触れていない。`git diff --stat` で確認する。ページこそがこの演習の要点で、fixture は `build:prototype` に答え続ける。
 - **`docs/spec/`** が再生成され、`check --spec` が緑。
@@ -539,13 +539,13 @@ bun run db:make create_announcements
 bun run db:migrate
 ```
 
-次に、第 2 節と同じコマンドをフラグ無しで。`announcements.*` のルートが `prototype` ハンドラーに乗っているアプリでは、このコマンドは自分が昇格していることを知っています。モデル、Resource、コントローラーを書き、見つけたページとバリデーターはそのまま残し、ハンドラーの置き換えを出力します。
+次に、第 2 節と同じコマンドをフラグ無しで実行します。`announcements.*` のルートが `prototype` ハンドラーに乗っているアプリでは、このコマンドは自分が昇格していることを知っています。モデル、Resource、コントローラーを書き、すでにあるページとバリデーターはそのまま残し、ハンドラーの置き換えを出力します。
 
 ```bash run fallback
 bunx guren make:feature Announcement --fields "title:string,body:text,pinned:boolean"
 ```
 
-置き換えを適用します。ファイルは第 3 節のものから、7 つのルートの `prototype` をコントローラーに替え、コントローラーを import したものです:
+置き換えを適用します。第 3 節のファイルから、7 つのルートの `prototype` をコントローラーに替え、そのコントローラーを import しただけのものです:
 
 ```ts file=routes/web.ts fallback
 import { Router, registerAttachmentRoutes, requireAuthenticated, requireGuest } from '@guren/core'
@@ -680,7 +680,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 bunx guren codegen
 ```
 
-スキーマが変わったので `docs/spec/` の ER ビューは古くなっており、第 13 章はそれをゲートにしました:
+スキーマが変わったので `docs/spec/` の ER ビューは古くなっています。第 13 章では、これをゲートにしました:
 
 ```bash run fallback
 bunx guren spec:generate
@@ -692,7 +692,7 @@ bunx guren spec:generate
 bun test tests/AnnouncementController.test.ts
 ```
 
-4 つとも緑。赤だったものは今、空のテーブルを読んでいます。すでに緑だった 3 つは変わっていません。契約、ミドルウェア、リダイレクトは最初から fixture のものではなかったからです。
+4 つとも緑。赤だったものは、いま空のテーブルを読んでいます。すでに緑だった 3 つは変わっていません。契約もミドルウェアもリダイレクトも、もともと fixture のものではなかったからです。
 
 ```bash run
 bunx guren check --prototype
@@ -719,13 +719,13 @@ git add -A
 git commit -m "feat: announcements backed by the database"
 ```
 
-fixture はまだそこにあり、`bun run build:prototype` はまだ動きます。顧客のリンクは同じ画面を描画し続け、今やそれはサーバーが描画するのと同じ画面です。次の機能が来たら、そのファイルから始めます。fixture が用済みになったら、`bunx guren add prototype --remove` が 2 つのローダーの配線を外し、ファイルは削除用に残します。
+fixture はまだそこにあり、`bun run build:prototype` もまだ動きます。顧客のリンクは同じ画面を描画し続け、それはいまやサーバーが描画するのと同じ画面です。次の機能が来たら、そのファイルから始めてください。fixture が用済みになったら、`bunx guren add prototype --remove` が 2 つのローダーの配線を外し、ファイル自体は削除できるよう残します。
 
 ## ここまでで
 
 - バックエンドが存在する前に機能を静的ファイルとして出荷し、サーバーを動かさずに歩きました。
-- fixture のエントリが何か分かりました。同じルートマニフェストとページの `Props` に対して型付けされた、データベース抜きのコントローラーアクションです。
-- 同じ fixture からサーバーが、ルートの契約とミドルウェアを前に置いて答えるのを見ました。そして本番の boot がそれを拒否するのも。
+- fixture のエントリが何かが分かりました。同じルートマニフェストとページの `Props` に型付けされた、データベース抜きのコントローラーアクションです。
+- サーバーが同じ fixture から、ルートの契約とミドルウェアを手前に置いたまま答えるのを見ました。そして本番の boot がそれを拒否することも。
 - プロトタイプをバックエンドに昇格させ、ページ、バリデーター、fixture が触られずに残るのを見ました。昇格が変えるのはデータの出どころで、顧客が見たものは何も変わらないからです。
 
 ## よくあるつまずき
@@ -733,15 +733,15 @@ fixture はまだそこにあり、`bun run build:prototype` はまだ動きま�
 - **fixture の中で `pages.announcements.Index` が存在しない。** `make:feature --prototype` がページを書いてから codegen が走っていません。`bunx guren codegen`。`build:prototype` も最初にこれを走らせます。
 - **boot が、fixture にエントリの無いルートを名指しして失敗する。** ルートが `prototype` ハンドラーに乗っていて、fixture にその名前のキーがありません。エントリを足すか、ルートにコントローラーを付けてください。`check --prototype` は boot せずに同じことを報告します。
 - **プロトタイプのリンクが Inertia のエラーダイアログを開く。** 遷移先が fixture にエントリの無い名前付き GET ルートで、`check --prototype` が到達不能として挙げていたものです。エントリを足すか、デザインされた 404 のために `definePrototype()` に `notFoundPage` を渡してください。
-- **リロードすると顧客の編集が消えている。** 新しいタブを開いたか、ホストがフルページロードで答えて状態が `persist: false` でした。既定の `'session'` は同じタブのリロードを生き延び、`'local'` はタブをまたいで生き延びます。
+- **リロードすると顧客の編集が消えている。** 新しいタブを開いたか、ホストがフルページロードで答えたうえに状態が `persist: false` になっています。既定の `'session'` は同じタブのリロードを生き延び、`'local'` はタブをまたいで生き延びます。
 - **`bun run preview` が起動を拒否する。** ルートがまだ `prototype` ハンドラーに乗っていて、`NODE_ENV=production` はプロセス共有の状態を拒否します。昇格させるか、サーバーの代わりに `dist/prototype/` を出荷してください。`bunx guren doctor` がルートを名指しします。
 - **昇格のあと `check --spec` が赤い。** スキーマにテーブルが増えたのに ER ビューが再生成されていません。`bunx guren spec:generate`。
 
 ## 演習
 
-1. fixture の `shared.auth.user` は Ada です。ブランチ上でこれを `null` にして `bun run dev:prototype` を実行し、`/announcements/create` を開いてください。描画されます。なぜサーバーならそうならなかったのか、そしてプロトタイプにこれを正直に言わせるには fixture のどこにゲストのチェックを置く必要があるのかを述べてください。
+1. fixture の `shared.auth.user` は Ada です。ブランチ上でこれを `null` にして `bun run dev:prototype` を実行し、`/announcements/create` を開いてください。描画されます。サーバーならそうならない理由と、プロトタイプにこれを正直に言わせるには fixture のどこにゲストのチェックを置けばよいのかを述べてください。
 2. ブランチ上で、`definePrototype()` に自分のページを指す `notFoundPage` を足し、プロトタイプで `/announcements/99` を開いてください。次にそのページコンポーネントを削除して `bun run typecheck` を実行してください。何が捕まえましたか。同じ間違いをコントローラーでしたら、同じ場所で捕まったでしょうか。
 
 ## 終わり、もう一度
 
-これがコース最後の機能で、逆順で作りました。月曜に顧客がクリックできるリンク、水曜にその裏のバックエンド、その間に顧客が見たものは何も書き直されていない。[プロトタイプファーストガイド](../guides/prototype-first.md)には、この章が省いた部分があります。ホストごとの設定、サブパスでのビルド、favicon のためのシェルの差し替え、そしてブラウザのランタイムが再現しないものの一覧です。
+これがコース最後の機能で、逆順で作りました。月曜に顧客がクリックできるリンクを渡し、水曜にその裏のバックエンドを入れ、その間に顧客が見たものは何ひとつ書き直していません。[プロトタイプファーストガイド](../guides/prototype-first.md)には、この章が省いた部分があります。ホストごとの設定、サブパスでのビルド、favicon のためのシェルの差し替え、そしてブラウザのランタイムが再現しないものの一覧です。

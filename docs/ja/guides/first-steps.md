@@ -1,6 +1,6 @@
 # ファーストステップ: 1 つのリクエストを辿る 10 分ツアー
 
-このツアーでは、単一のリクエスト — `GET /posts` — が Guren アプリのすべてのレイヤーを通る様子を追いかけます: ルート、コントローラー、バリデーション、モデル、リソース、Inertia ページ、そしてテストです。頭の中に地図を作るために読んでください。各ストップには、より深く学べるガイドへのリンクがあります。
+このツアーでは、`GET /posts` という 1 つのリクエストが Guren アプリのすべてのレイヤーを通っていく様子を追いかけます。通る先は、ルート、コントローラー、バリデーション、モデル、リソース、Inertia ページ、そしてテストです。全体像を頭に入れるために読んでください。各ストップには、より深く学べるガイドへのリンクがあります。
 
 前提として、動いているアプリ（[はじめる](./getting-started.md) 参照）に、次のコマンドで posts リソースが生成されているものとします。
 
@@ -46,7 +46,7 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-`GET /posts` は 1 行目にマッチするため、Guren は `PostController.index` にディスパッチします。グループ、ミドルウェア、名前付きルートもすべてここに書きます — 詳しくは [ルーティングガイド](./routing.md) を参照してください。
+`GET /posts` は 1 行目にマッチするため、Guren は `PostController.index` にディスパッチします。グループ、ミドルウェア、名前付きルートもすべてここに書きます。詳しくは [ルーティングガイド](./routing.md) を参照してください。
 
 ## 2. コントローラー
 
@@ -102,7 +102,7 @@ export class Post extends defineModel(posts) {}
 
 ## 5. リソース
 
-`app/Http/Resources/PostResource.ts` は、サーバーから外に出るデータを決めます — 内部カラムがうっかり漏れることはありません。
+`app/Http/Resources/PostResource.ts` は、サーバーから外に出るデータを決めます。内部カラムがうっかり漏れることはありません。
 
 ```ts
 import { Resource } from '@guren/core'
@@ -119,7 +119,7 @@ export class PostResource extends Resource<Post> {
 
 ## 6. Inertia ページ
 
-`this.inertia(pages.posts.Index, props)` は `resources/js/pages/posts/Index.tsx` をレンダリングします。これはコントローラーの props を直接受け取る、ごく普通の React コンポーネントです — 間に API レイヤーはありません。
+`this.inertia(pages.posts.Index, props)` は `resources/js/pages/posts/Index.tsx` をレンダリングします。コントローラーの props を直接受け取る、ごく普通の React コンポーネントです。間に API レイヤーはありません。
 
 ```tsx
 import type { PageProps } from '@guren/inertia-client/contracts'
@@ -162,7 +162,7 @@ fluent なアサーション、`actingAs`、データベースヘルパーにつ
 
 ## 8. プロジェクト知識
 
-ここまでのリクエスト経路はアプリが何をするかを説明します。プロジェクト知識は、なぜその設計なのかを記録し、全体像を最新に保ちます。`bunx guren spec:generate` はコードから ER、ドメイン、画面、モジュールのビューを導出します。`bunx guren make:adr` で作る ADR は、自分が統べるエンティティとコードパスを宣言し、`bunx guren check --docs` がその関係を検証します。
+ここまでのリクエスト経路はアプリが何をするかを説明します。プロジェクト知識は、なぜその設計なのかを記録し、全体像を最新に保ちます。`bunx guren spec:generate` はコードから ER、ドメイン、画面、モジュールのビューを導出します。`bunx guren make:adr` で作る ADR は、その決定が対象とするエンティティとコードパスを宣言し、`bunx guren check --docs` がその関係を検証します。
 
 `bun run dev` の実行中に [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開くと、それらの文書、エンティティ、コードパスを一つのインタラクティブな Docs Graph として閲覧できます。
 

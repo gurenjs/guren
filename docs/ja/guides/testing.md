@@ -1,10 +1,10 @@
 # テストガイド
 
-よく書かれた一つのテストは、ユーザーより先にバグを見つけてくれます。Guren はテストを書くことがブラウザで手動確認するより速く感じられるほど便利にできています。
+よく書かれた一つのテストは、ユーザーより先にバグを見つけてくれます。Guren では、ブラウザで手動確認するよりテストを書くほうが速いと感じられるようにしています。
 
 ## TestApp
 
-`TestApp` は、アプリケーションの HTTP レイヤーをテストするための高レベルで表現力豊かな API を提供します。ミドルウェアとルーティングスタック一式を備えた軽量なアプリケーションインスタンスを起動し、リクエストの送信と Fluent インターフェースによるレスポンスのアサーションが可能です。
+`TestApp` は、アプリケーションの HTTP レイヤーをテストするための API です。ミドルウェアとルーティングスタック一式を備えた軽量なアプリケーションインスタンスを起動し、リクエストの送信と、Fluent インターフェースによるレスポンスのアサーションができます。
 
 ### TestApp の作成
 
@@ -38,7 +38,7 @@ describe('Posts API', () => {
 
 ### 実アプリをラップする
 
-`TestApp.create({ ... })`は渡したパーツからアプリを組み立てます — 単体スライスのテストには便利ですが、その部分集合はサーバーが実際に動かす構成(プロバイダー、`auth`、`i18n`、セキュリティデフォルト)から静かにドリフトし得ます。実構成を検証したいテストでは、プロジェクトがエクスポートするアプリをラップします:
+`TestApp.create({ ... })` は渡したパーツからアプリを組み立てます。単体スライスのテストには便利ですが、その部分集合はサーバーが実際に動かす構成(プロバイダー、`auth`、`i18n`、セキュリティデフォルト)から知らないうちにずれていきます。実構成を検証したいテストでは、プロジェクトがエクスポートするアプリをラップしてください:
 
 ```ts
 import { TestApp } from '@guren/testing'
@@ -55,16 +55,16 @@ test('ホームページを返す', async () => {
 })
 ```
 
-`fromApp()`はアプリのbootとfetchハンドラの束縛を代わりに行います。同じインスタンスに対して複数のテストファイルから呼んで構いません — `boot()`は冪等で、最初のbootを再利用します。
+`fromApp()` はアプリの boot と fetch ハンドラの束縛を代わりに行います。同じインスタンスに対して複数のテストファイルから呼んで構いません。`boot()` は冪等で、最初の boot を再利用します。
 
-同じことを手作業で行う次の長い形も見かけるでしょう。アロー関数に注目してください — `fetch`はインスタンス状態を読むため、束縛していない`app.fetch`をそのまま`fromFetch`に渡すと最初のリクエストで例外になります。`fromApp()`はこの罠を取り除くために存在します。`fromFetch`は、Gurenアプリケーションではなく任意のfetch関数を持っている場合に使ってください。
+同じことを手作業で行う、次の長い書き方もあります。アロー関数に注目してください。`fetch` はインスタンス状態を読むため、束縛していない `app.fetch` をそのまま `fromFetch` に渡すと最初のリクエストで例外になります。`fromApp()` はこの罠を取り除くためにあります。`fromFetch` は、Guren アプリケーションではなく任意の fetch 関数を持っている場合に使ってください。
 
 ```ts
 await app.boot()
 http = TestApp.fromFetch((request) => app.fetch(request))
 ```
 
-パーツから組み立てる場合、`TestApp.create()`は`createApp`のオプションをミラーします: セッション+CSRFミドルウェアには`auth`を、テスト対象のコントローラーが`this.t()` / `this.tc()`を使うなら`i18n`を渡します:
+パーツから組み立てる場合、`TestApp.create()` は `createApp` と同じオプションを受け取ります: セッションと CSRF のミドルウェアが必要なら `auth` を、テスト対象のコントローラーが `this.t()` / `this.tc()` を使うなら `i18n` を渡します:
 
 ```ts
 const app = await TestApp.create({
@@ -135,14 +135,14 @@ await app.get('/dashboard').assertUnauthorized()
 
 ### テストでのパスワードハッシュ
 
-パスワードのテストを速く保つために設定することはありません。`TestApp` は `GUREN_TESTING=1` を設定し、この変数がある間、既定のハッシャーは軽量なパラメータを使います(Bun では Argon2id を 1 MiB・1 反復、それ以外では scrypt を N=1024)。本番強度のハッシュは1回100ms以上かかり、次のようなテストの時間の大半を占めます。
+パスワードのテストを速く保つための設定は要りません。`TestApp` が `GUREN_TESTING=1` を設定し、この変数がある間、既定のハッシャーは軽量なパラメータを使います(Bun では Argon2id を 1 MiB・1 反復、それ以外では scrypt を N=1024)。本番強度のハッシュは 1 回 100ms 以上かかるため、次のようなテストでは実行時間の大半をそこで使ってしまいます。
 
 ```ts
 const user = await User.create({ email: 'ada@example.com', name: 'Ada', password: 'correct horse battery' })
 await app.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
 ```
 
-ログインのテストは本物のハッシュを検証します。検証はハッシュに埋め込まれたパラメータを読むので、軽量なハッシュはテスト内で、本番のハッシュも同じように検証できます。テスト外では `Hash.needsRehash()` が軽量なハッシュを古いものとして報告するので、[暗号化ガイド](./encryption.md)の rehash-on-login パターンがテストモードのプロセスが書いた行を昇格させます。デプロイしたアプリでこの変数を設定するものはありません。
+それでも、ログインのテストが検証するのは本物のハッシュです。検証はハッシュに埋め込まれたパラメータを読むので、テストでは軽量なハッシュが、本番では本番のハッシュが、どちらも同じように検証されます。テスト外では `Hash.needsRehash()` が軽量なハッシュを古いものとして報告するので、[暗号化ガイド](./encryption.md)の rehash-on-login パターンが、テストモードのプロセスが書いた行を昇格させます。デプロイしたアプリでこの変数を設定するものはありません。
 
 ### カスタムリクエストヘッダー
 
@@ -191,23 +191,23 @@ fakeMail.assertSentTo('new@test.com')
 
 `@guren/testing` パッケージには、コントローラーテスト向けのヘルパーが用意されています。
 
-- `createControllerContext(url, init?)` — コントローラー用の Hono コンテキストを構築します。
-- `createGurenControllerModule()` — Vitest 実行時に `guren` パッケージをモックし、コントローラーを分離してテストできるようにします。
-- `createControllerModuleMock()` — `@guren/core` の `Controller`、`json`、`redirect` を Vitest 向けに配線したドロップインモックです。
-- `readInertiaResponse(response)` — Inertia レスポンスを `{ format, payload, body }` に正規化し、アサーションを簡単にします。
+- `createControllerContext(url, init?)`: コントローラー用の Hono コンテキストを構築します。
+- `createGurenControllerModule()`: Vitest 実行時に `guren` パッケージをモックし、コントローラーを分離してテストできるようにします。
+- `createControllerModuleMock()`: `@guren/core` の `Controller`、`json`、`redirect` を Vitest 向けに配線したドロップインモックです。
+- `readInertiaResponse(response)`: Inertia レスポンスを `{ format, payload, body }` に正規化し、アサーションを簡単にします。
 
-これらのユーティリティを Vitest スイート（例: `examples/blog/tests`）にインポートすれば、Bun 固有の API を避けつつ、React/Inertia コントローラーテストを表現力豊かに書けます。
+これらのユーティリティを Vitest スイート（例: `examples/blog/tests`）にインポートすれば、Bun 固有の API を避けつつ React/Inertia のコントローラーテストを書けます。
 
 ### トラブルシューティング
 
 - `vi.mock is not a function` が表示される場合、そのテストは Bun で実行されています。上記の Vitest コマンドに切り替えてください。
 - `ReferenceError: document is not defined` は、DOM 依存のテストが jsdom の外で実行されていることを示しています。Vitest ランナーを使うか、jsdom を明示的に設定してください。
 
-ランナーを分離することで、フレームワークコードには Bun の高速フィードバックを、SPA テストにはリアルな DOM 動作を両立できます。
+ランナーを分けることで、フレームワークコードには Bun の高速なフィードバックを、SPA テストにはリアルな DOM 動作を、それぞれ確保できます。
 
 ## テスト用フェイク
 
-`@guren/testing` パッケージは、テスト用のサービスのフェイク実装を提供します。実際にメール送信、イベントディスパッチ、ジョブキューイングを行わずにコードをテストできます。
+`@guren/testing` パッケージには、サービスのフェイク実装が入っています。実際にメールを送信したり、イベントをディスパッチしたり、ジョブをキューに入れたりせずにコードをテストできます。
 
 ### FakeMail
 
@@ -368,7 +368,7 @@ function resolveDatabaseFilename(): string {
 テストはデフォルトで `./data/guren.db` とは別ファイルの `./data/guren.test.db` を読み書きします。そのため、テストが作成したデータが開発サーバーで見ているデータに混ざることはありません。テスト用ファイル自体は `TEST_DATABASE_URL` で上書きできます(例: 並列実行する CI シャードごとに別ファイルを割り当てる場合)。それ以外の環境では引き続き `DATABASE_URL` が優先されます。
 
 > [!WARNING]
-> このブランチが導入される前にスキャフォールドされたプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)へ直接書き込みます。そのため `bun test` が開発サーバーと同じデータベースを汚染してしまいます。後付けする際はヘルパー関数を追加するだけでなく `filename` オプション自体を差し替えてください — ヘルパーを定義しただけでは `createSqliteDatabase()` がまだ古い `filename` を参照したままなので効果がありません:
+> このブランチが導入される前にスキャフォールドされたプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)へ直接書き込みます。そのため `bun test` が開発サーバーと同じデータベースを汚染してしまいます。後付けする際はヘルパー関数を追加するだけでなく `filename` オプション自体を差し替えてください。ヘルパーを定義しただけでは `createSqliteDatabase()` が古い `filename` を参照したままで、効果がありません:
 >
 > ```diff
 >  import { createSqliteDatabase } from '@guren/orm'
@@ -425,7 +425,7 @@ interface DatabaseConnection {
 }
 ```
 
-Guren の SQLite アダプターはこの `DatabaseConnection` をそのまま提供しません — `config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスであり、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。**同一の接続でなければならない**という制約があるのは `useDatabaseTransactions()` だけです — `beforeEach` でトランザクションを開始し `afterEach` でロールバックするため、同じファイルへ独立に開いた 2 本目の接続では 1 本目の接続で行った書き込みが見えず、ロールバックもされません。`useTruncateTables()` にはこの制約はありません — `DELETE FROM` は即座にコミットされる操作なので、同じデータベースファイルへの接続であればどれを使ってもモデル側から見える行を削除できます。アダプターの配線が過剰だと感じる場合は、上記の `resetDatabase()` パターンの方がシンプルで、この問題自体を回避できます。
+Guren の SQLite アダプターは、この `DatabaseConnection` をそのままは提供しません。`config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスで、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。**同一の接続でなければならない**という制約があるのは `useDatabaseTransactions()` だけです。`beforeEach` でトランザクションを開始し `afterEach` でロールバックするため、同じファイルへ独立に開いた 2 本目の接続からは、1 本目の接続で行った書き込みが見えず、ロールバックもされません。`useTruncateTables()` にこの制約はありません。`DELETE FROM` は即座にコミットされる操作なので、同じデータベースファイルへの接続であればどれを使ってもモデル側から見える行を削除できます。アダプターの配線が大げさだと感じる場合は、上記の `resetDatabase()` パターンの方がシンプルで、この問題自体を避けられます。
 
 ### HTTP テスト
 
@@ -479,7 +479,7 @@ it('ユーザー一覧を返す', async () => {
 
 ### ベストプラクティス
 
-1. **ほとんどのテストには TestApp を使う** - ミドルウェアとルーティング一式を含む、最もリアルなテスト環境を提供します。
+1. **ほとんどのテストには TestApp を使う** - ミドルウェアとルーティング一式を含む、最もリアルなテスト環境になります。
 2. **beforeEach でフェイクをリセットする** - 常にクリーンな状態から始めましょう。
 3. **具体的なアサーションを使う** - 可能な限り `assertSent` より `assertSentWith` を優先しましょう。
 4. **失敗ケースをテストする** - エラーシナリオでイベントやメールが送信されないことを検証しましょう。

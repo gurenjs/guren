@@ -1,10 +1,10 @@
 # エラーハンドリング
 
-Guren はグローバルエラーハンドラーからコントローラーレベルの例外キャッチまで、複数層のエラーハンドリングを提供しています。Hono の堅牢なエラーハンドリングプリミティブをベースに、ユーザーへのエラー表示をカスタマイズできます。
+Guren のエラーハンドリングは、グローバルエラーハンドラーからコントローラーでの例外キャッチまで複数の層に分かれています。Hono のエラーハンドリング機構を土台にしており、ユーザーに見せるエラーは自由にカスタマイズできます。
 
 ## グローバルエラーハンドラー
 
-Hono の `onError` メソッドを使用してグローバルエラーハンドラーを登録します。
+グローバルエラーハンドラーは Hono の `onError` メソッドで登録します。
 
 > 登録は `src/app.ts` で `createApp(...)` の直後、または `boot(hono)` コールバック内で行います。`app.boot()` の前に設定してください。
 
@@ -99,7 +99,7 @@ app.hono.notFound((ctx) => {
 
 ## コントローラーでのエラーハンドリング
 
-`validateBody`/`validateQuery`/`validateParams`、`findOrFail`、`userOrFail` を使えば、ほとんどのエラーハンドリングは自動です — try-catch は不要です。
+`validateBody`/`validateQuery`/`validateParams`、`findOrFail`、`userOrFail` を使えば、ほとんどのエラー処理は自動で行われ、try-catch を書く必要はありません。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -126,11 +126,11 @@ export default class PostController extends Controller {
 }
 ```
 
-`ExceptionHandler` がスローされた例外をすべてキャッチし自動でレンダリングします。try-catch は特定のコントローラーメソッド内でカスタムエラーリカバリが必要な場合のみ使用してください。
+スローされた例外は `ExceptionHandler` がすべてキャッチし、自動でレンダリングします。try-catch を書くのは、そのコントローラーメソッドの中で独自のエラー復旧処理が必要なときだけにしてください。
 
 ## バリデーションエラー
 
-`formatValidationErrors` を使用して Zod エラーをフラットなオブジェクトに変換できます。
+`formatValidationErrors` を使うと、Zod のエラーをフラットなオブジェクトに変換できます。
 
 ```ts
 import { formatValidationErrors } from '@guren/core'
@@ -263,7 +263,7 @@ async show(): Promise<Response> {
 
 ## 組み込み例外クラス
 
-Guren は一般的な HTTP エラーシナリオ用の型付き例外クラスを提供しています。
+よくある HTTP エラー向けに、型付きの例外クラスが用意されています。
 
 ```ts
 import {
@@ -294,7 +294,7 @@ throw new AuthorizationException('この投稿を編集する権限がありま�
 
 ### Duck-typed `statusCode`
 
-`ExceptionHandler` は `HttpException` のサブクラスだけでなく、数値の `statusCode` プロパティを持つ任意のエラーに対応します。これにより `ModelNotFoundException`（`@guren/orm` から、`statusCode: 404` を持つ）は追加設定なしで自動的に 404 レスポンスとしてレンダリングされます。`statusCode >= 500` のエラーは本番環境でメッセージが隠されます（"Internal Server Error" に置換）。
+`ExceptionHandler` は `HttpException` のサブクラスに限らず、数値の `statusCode` プロパティを持つエラーであれば扱えます。そのため `@guren/orm` の `ModelNotFoundException`（`statusCode: 404` を持つ）は、追加の設定なしに 404 レスポンスとしてレンダリングされます。`statusCode >= 500` のエラーは、本番環境ではメッセージが隠され、"Internal Server Error" に置き換わります。
 
 ## 非同期エラーバウンダリ
 
@@ -373,5 +373,5 @@ const app = createApp({
 2. **コンテキスト付きでログを記録** - リクエスト ID、ユーザー ID、関連データを含める
 3. **適切なステータスコードを使用** - クライアントエラーは 4xx、サーバーエラーは 5xx
 4. **機密データを公開しない** - 本番環境ではスタックトレースや内部詳細を隠す
-5. **ユーザーフレンドリーなメッセージを提供** - 技術的なエラーは分かりやすいメッセージに変換
+5. **分かりやすいメッセージを返す** - 技術的なエラーは平易な言葉に置き換える
 6. **エラーを監視** - 本番環境ではエラー追跡サービスを使用

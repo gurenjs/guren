@@ -89,7 +89,7 @@ docker run -p 3333:3333 --env-file .env.production my-app
 
 ## 3. データベースマイグレーションを実行する
 
-マイグレーションは Dockerfile 内ではなく、デプロイパイプラインの一部として実行します。これにより、コンテナ起動のたびにマイグレーションが走るのを防げます:
+マイグレーションは Dockerfile の中ではなく、デプロイパイプラインの一部として実行します。コンテナが起動するたびにマイグレーションが走るのを防ぐためです:
 
 ```bash
 # CI/CD パイプラインまたはデプロイスクリプト内で
@@ -182,14 +182,14 @@ docker compose -f docker-compose.production.yml logs app --tail 50
 
 アプリがデプロイされて稼働したら、以下の追加対策を検討してください:
 
-- **リバースプロキシ** — Nginx や Caddy を Bun の前に配置して TLS 終端と静的アセット配信を担当させる
-- **HSTS** — `NODE_ENV=production` では `Strict-Transport-Security: max-age=31536000` が自動送信されます。`createApp` の `securityHeaders: { hsts: { ... } }` で `includeSubDomains`/`preload` を追加、内部で平文 HTTP を配信する場合は `hsts: false` で無効化できます
-- **プロセス監視** — Docker の `restart: unless-stopped` や systemd などのプロセスマネージャーを使用する
-- **ロギング** — 構造化ログを設定し、集約サービスに転送する
-- **バックアップ** — `pg_dump` やマネージドデータベースサービスで定期的な Postgres バックアップをスケジュールする
+- **リバースプロキシ**: Nginx や Caddy を Bun の前に置き、TLS 終端と静的アセット配信を任せる
+- **HSTS**: `NODE_ENV=production` では `Strict-Transport-Security: max-age=31536000` が自動で送信されます。`createApp` の `securityHeaders: { hsts: { ... } }` で `includeSubDomains`/`preload` を追加でき、内部で平文 HTTP を配信する場合は `hsts: false` で無効化できます
+- **プロセス監視**: Docker の `restart: unless-stopped` や systemd などのプロセスマネージャーを使う
+- **ロギング**: 構造化ログを設定し、集約サービスに転送する
+- **バックアップ**: `pg_dump` やマネージドデータベースサービスで、Postgres の定期バックアップをスケジュールする
 
 ## 次のステップ
 
-- [サーバーレスガイド](./serverless.md) — AWS Lambda にデプロイする
-- [運用](./operations.md) — 監視、スケーリング、メンテナンス
-- [ヘルスチェック](./health-checks.md) — ヘルスチェックの詳細設定
+- [サーバーレスガイド](./serverless.md): AWS Lambda にデプロイする
+- [運用](./operations.md): 監視、スケーリング、メンテナンス
+- [ヘルスチェック](./health-checks.md): ヘルスチェックの詳細設定

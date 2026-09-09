@@ -8,7 +8,7 @@
 ## 前提条件
 
 - **Bun 1.1 以降**
-- **Docker Desktop (Compose v2)** — Postgres 用
+- **Docker Desktop (Compose v2)**: Postgres 用
 
 ## 1. プロジェクトを作成する
 
@@ -53,7 +53,7 @@ bunx guren db:migrate
 bun run codegen
 ```
 
-ルートとページの型付きマニフェストが生成され、コントローラーとフロントエンドコンポーネントの型安全性が確保されます。
+ルートとページの型付きマニフェストが生成され、コントローラーとフロントエンドコンポーネントを型で結び付けられます。
 
 ## 5. 開発サーバーを起動する
 
@@ -106,7 +106,7 @@ export default class LoginController extends Controller {
 
 ### 認証ミドルウェア
 
-ジェネレーターは `routes/auth.ts` を生成し、ルートレジストラから呼び出すよう配線します。各ルートは自分のガードを個別に持ちます:
+ジェネレーターは `routes/auth.ts` を生成し、ルートレジストラから呼び出すよう配線します。ガードはルートごとに個別に指定します:
 
 ```typescript
 import { Router, requireAuthenticated, requireGuest } from '@guren/core'
@@ -152,7 +152,7 @@ export default class DashboardController extends Controller {
 }
 ```
 
-`this.auth.user<T>()` はゲストの場合 `null` を返します。null 分岐ではなく 401 にしたい場合は `this.auth.userOrFail<T>()` を使ってください。
+`this.auth.user<T>()` はゲストの場合 `null` を返します。null を分岐で処理せず 401 にしたい場合は `this.auth.userOrFail<T>()` を使ってください。
 
 ## 7. フローを検証する
 
@@ -164,7 +164,7 @@ export default class DashboardController extends Controller {
 
 ## 次のステップ
 
-- [メール認証](./email-verification.md) — 保護されたルートへのアクセス前にメールアドレスの確認を要求する
-- [パスワードリセット](./password-reset.md) — ユーザーがアカウントを復旧できるようにする
-- [認可](./authorization.md) — ロールベースのアクセス制御を追加する
-- [API トークン](./api-tokens.md) — プログラムからのアクセス用トークンを発行する
+- [メール認証](./email-verification.md): 保護されたルートへのアクセス前にメールアドレスの確認を求める
+- [パスワードリセット](./password-reset.md): ユーザーが自分でアカウントを復旧できるようにする
+- [認可](./authorization.md): ロールベースのアクセス制御を追加する
+- [API トークン](./api-tokens.md): プログラムからのアクセス用にトークンを発行する

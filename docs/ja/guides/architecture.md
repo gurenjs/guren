@@ -3,7 +3,7 @@
 Guren は Laravel の設計思想を TypeScript 上で再構成し、Bun・Hono・Inertia.js・React・Drizzle ORM を束ねたフルスタック MVC フレームワークです。ここではルーティングからレスポンス生成までの流れと主要コンポーネントを説明します。
 
 ## ハイレベルな流れ
-1. **ルーティング**: `routes/web.ts` に registrar を export し、app-local な `Router` にルートを定義。
+1. **ルーティング**: `routes/web.ts` に registrar を export し、アプリ固有の `Router` にルートを定義。
 2. **コントローラー**: `Controller` を継承し、Hono の `Context` を利用。
 3. **モデル**: `defineModel(table)` で Drizzle スキーマからモデルを導出。
 4. **ビュー**: `resources/js/pages/` の React コンポーネントを Inertia 経由で描画。
@@ -70,7 +70,7 @@ export default class PostController extends Controller {
 - `this.inertia(component, props, options)`: Inertia レスポンスを生成。
 
 ## モデルと ORM
-モデルは `defineModel(table)` を使って Drizzle スキーマに接続します。レイヤーは薄く、簡単な CRUD はヘルパーで、高度なクエリは Drizzle RQB に直接落とせます。
+モデルは `defineModel(table)` で Drizzle のスキーマに接続します。層は薄く保たれており、単純な CRUD はヘルパーで書き、込み入ったクエリは Drizzle RQB に直接落とせます。
 
 ```ts
 export type PostRecord = typeof posts.$inferSelect
@@ -78,7 +78,7 @@ export type PostRecord = typeof posts.$inferSelect
 export class Post extends defineModel(posts) {}
 ```
 
-- `Model.all()`, `Model.find(id)`, `Model.findOrFail()`, `Model.first()`, `Model.create(data)` など Laravel 風のヘルパーを提供。
+- `Model.all()`, `Model.find(id)`, `Model.findOrFail()`, `Model.first()`, `Model.create(data)` など、Laravel 風のヘルパーが使えます。
 - Drizzle の推論により静的ヘルパーが型安全になります（例: `Post.find()` が `PostRecord | null` を返す）。
 - `DatabaseProvider`（内部で `bootModels()` を呼び、`DrizzleAdapter.configure(db)` を実行）などのプロバイダーを使うと、全モデルでアダプターが使えるようになります。より細かい制御が必要なら `Model.query(db)` や Drizzle の DB インスタンスを直接利用します。
 
@@ -110,7 +110,7 @@ export default class AppServiceProvider extends ServiceProvider {
 
 > **グローバルミドルウェアは `register()` で追加してください。** ルートは
 > `register()` と `boot()` の**間**にマウントされ、Hono はマッチしたルートより
-> 前に登録されたミドルウェアしか適用しません — `boot()` からの `app.use()` は
+> 前に登録されたミドルウェアしか適用しないため、`boot()` から呼んだ `app.use()` は
 > ルートに対して実行されません。リソースの読み込みが必要な場合は両フックとも
 > `async` にできます:
 >
@@ -138,12 +138,12 @@ const { Cache, Events, Log, Mail, Queue } = createFacades(app.container)
 ```
 
 ## アプリケーションのブート
-生成済みプロジェクトの `src/main.ts` は以下の手順を示します。
+生成されたプロジェクトの `src/main.ts` は、次の手順をたどります。
 
 1. `routes/web.ts` から registrar を export する。
 2. `const app = createApp({ routes: registerWebRoutes, providers: [DatabaseProvider, ...] })` のように生成し、サービスを早期登録。
 3. `await app.boot()` でルートをマウントし、プロバイダーのブートフックを実行し、ミドルウェアを準備。
-4. `await app.listen()`（または Bun では `app.listen()`）で HTTP サーバーを開始。戻り値は実際にバインドしたアドレス `{ port, hostname, url }` です。`port: 0` を指定すると OS が空きポートを選び、本番以外ではポートが使用中の場合に次のポートへ移動するため、要求したポートと一致するとは限りません。ポート番号は要求値ではなく戻り値から読み取ってください。
+4. `await app.listen()`（または Bun では `app.listen()`）で HTTP サーバーを開始。戻り値は実際にバインドしたアドレス `{ port, hostname, url }` です。`port: 0` を指定すると OS が空きポートを選びます。また本番以外では、指定したポートが使用中だと次のポートへずれるため、要求したポートと一致するとは限りません。ポート番号は要求値ではなく戻り値から読み取ってください。
 
    ```ts
    const { url, port } = await app.listen({ port: 3333 })
@@ -182,7 +182,7 @@ await app.listen({ port: 0 }) // 新しいソケット
 
 `app.address` は停止中は `undefined` になり、再起動後は新しいアドレスを返します。
 
-`stop()` が要るのは、サーバーの稼働時間をプロセスの寿命以外が決める場合です。たとえば、より大きなプログラムに組み込んだアプリ、リクエストを処理してから終了するスクリプト、実際のソケットを必要としてそれを解放しなければならないハーネスなどが該当します。通常のデプロイでは不要です。`listen()` は `SIGINT`、`SIGTERM`、プロセス終了時にすでにサーバーを片付けており、これらはプロセスマネージャーやコンテナランタイムが送るシグナルだからです。本番運用での位置づけは [デプロイ](./deployment.md) を参照してください。
+`stop()` が要るのは、サーバーの稼働時間をプロセスの寿命以外が決める場合です。たとえば、大きなプログラムに組み込んだアプリ、リクエストを処理してから終了するスクリプト、実際のソケットを開いて解放しなければならないハーネスなどです。通常のデプロイでは不要です。`listen()` は `SIGINT` と `SIGTERM`、そしてプロセス終了時にすでにサーバーを片付けており、これらはプロセスマネージャーやコンテナランタイムが送るシグナルだからです。本番運用での位置づけは [デプロイ](./deployment.md) を参照してください。
 
 ## データベーススキーマ
 - Drizzle のスキーマ定義は `db/schema.ts` に配置。

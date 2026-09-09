@@ -1,6 +1,6 @@
 # フロントエンドガイド
 
-Guren は Inertia.js と React を組み合わせ、単一ページアプリの体験を提供します。コントローラーは Inertia レスポンスを返し、フロントエンドは `resources/js/pages/` 配下の React コンポーネントを描画します。
+Guren では Inertia.js と React を組み合わせて単一ページアプリの体験を作ります。コントローラーは Inertia レスポンスを返し、フロントエンドは `resources/js/pages/` 配下の React コンポーネントを描画します。
 
 ## プロジェクト構成
 - `resources/js/app.tsx`: Inertia アプリのブートストラップとグローバルプロバイダー登録。
@@ -49,10 +49,10 @@ export default function Index({ data, pagination }: Props) {
 }
 ```
 
-TypeScript で props を型付けするとコンパイル時の安全性が高まります。
+TypeScript で props を型付けしておくと、コンパイル時に食い違いを検出できます。
 
 ## レイアウトと共有 UI
-ナビゲーションや共通 UI を保つため、ページをレイアウトコンポーネントでラップします。
+ナビゲーションや共通 UI を保つには、ページをレイアウトコンポーネントで包みます。
 
 ```tsx
 // resources/js/components/Layout.tsx
@@ -130,7 +130,7 @@ bun run build
 
 ## 型安全
 
-Guren はコントローラーとページコンポーネント間のエンドツーエンド型安全を自動 codegen パイプラインで実現します。
+コントローラーとページコンポーネントのあいだのエンドツーエンドの型安全は、自動で走る codegen パイプラインが支えています。
 
 ### 型の流れ
 
@@ -144,7 +144,7 @@ flowchart LR
   Codegen -- "Props の型を供給" --> Controller
 ```
 
-1. **ページコンポーネントで Props を定義** — 各ページが受け取るデータを `interface Props` で宣言します:
+1. **ページコンポーネントで Props を定義**。各ページが受け取るデータを `interface Props` で宣言します:
 
 ```tsx
 // resources/js/pages/posts/Show.tsx
@@ -159,7 +159,7 @@ export default function Show({ post }: Props) {
 }
 ```
 
-2. **codegen が Props を抽出** — `bun run codegen`（`bun run dev` 時にも自動実行）がすべてのページコンポーネントをスキャンし、`interface Props` を抽出して `.guren/pages.gen.ts` に書き出します:
+2. **codegen が Props を抽出**。`bun run codegen`（`bun run dev` 時にも自動実行）がすべてのページコンポーネントをスキャンし、`interface Props` を抽出して `.guren/pages.gen.ts` に書き出します:
 
 ```ts
 // .guren/pages.gen.ts（自動生成）
@@ -174,7 +174,7 @@ export const pages = {
 }
 ```
 
-3. **コントローラーが型チェックされる** — コントローラーが `this.inertia(pages.posts.Show, { ... })` を呼ぶと、TypeScript が第二引数を `PageContract` の Props 型と照合します。プロパティの不足や型の不一致はコンパイルエラーになります:
+3. **コントローラーが型チェックされる**。コントローラーが `this.inertia(pages.posts.Show, { ... })` を呼ぶと、TypeScript が第二引数を `PageContract` の Props 型と照合します。プロパティの不足や型の不一致はコンパイルエラーになります:
 
 ```ts
 // app/Http/Controllers/PostController.ts
@@ -238,4 +238,4 @@ codegen がインポートパスを書き換え、`pages.gen.ts` から同じ型
 
 ワークフローを調整したい場合は `@guren/core/runtime` の `startViteDevServer()` を使って自前で Vite を制御できます。
 
-これらのパターンでページとコンポーネントを構成すれば、React と Inertia だけでミニマムなボイラープレートの SPA 体験を得られます。
+ここまでのパターンでページとコンポーネントを組み立てれば、React と Inertia だけで、ボイラープレートの少ない SPA 体験を作れます。

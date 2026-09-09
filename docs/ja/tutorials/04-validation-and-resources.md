@@ -1,14 +1,14 @@
 # 第 4 章: バリデーションとリソース
 
-第 3 章ではスキーマをコントローラーの中に置き、ページには生のフィールドの写しを送っていました。この章では両方にきちんとした置き場所を与えます。ルート、コントローラー、フォームが共有する、人が書くようなメッセージ付きのバリデーターファイル。そして、投稿がブラウザからどう見えるかを決めるリソースクラスです。その後、編集、削除、ページネーションをテストで仕様化してエージェントに委ね、受け入れる前に `code-review` subagent を第二の読者として使います。
+第 3 章では、スキーマをコントローラーの中に置き、ページには生のフィールドの写しを送っていました。この章では、その両方にきちんとした置き場所を用意します。ひとつはバリデーターファイルで、人が書いたようなメッセージを持ち、ルートとコントローラーとフォームで共有します。もうひとつはリソースクラスで、投稿がブラウザからどう見えるかを決めます。そのあと編集、削除、ページネーションをテストで仕様化してエージェントに委ね、受け入れる前に `code-review` subagent に第二の読者として目を通してもらいます。
 
 **この章で学ぶこと:**
 
 - バリデーションの置き場所と、ひとつの Zod スキーマがルート契約、コントローラー、フォームを型付けする仕組み
-- 422 レスポンスが運ぶもの、Inertia がフィールドのメッセージを `form.errors` に入れる仕組み
-- リソースは何のためにあるか、なぜページは生のレコードを決して見ないのか
+- 422 レスポンスが運ぶ内容と、Inertia がフィールドごとのメッセージを `form.errors` に入れる仕組み
+- リソースの役割と、ページに生のレコードを渡さない理由
 - 生成マニフェストの `Data.Post` がリソースに追随する仕組み
-- subagent に変更のレビューを頼む方法と、その答えをどう扱うか
+- subagent に変更のレビューを頼む方法と、返ってきた指摘の扱い方
 
 開発サーバーが動いていなければ起動します。
 
@@ -18,7 +18,7 @@ bun run dev
 
 ## 1. まずテスト: 人が書くメッセージ
 
-今 `POST /posts` に空のフォームを送ると、スキーマは拒否しますが、文言は Zod 自身のものです。代わりに何が欲しいかを書きます。`tests/PostController.test.ts` にテストをひとつ足します。
+今 `POST /posts` に空のフォームを送ると、スキーマは拒否しますが、返る文言は Zod のものです。どんな文言が欲しいのかを先に書きましょう。`tests/PostController.test.ts` にテストをひとつ足します。
 
 ```ts file=tests/PostController.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -88,11 +88,11 @@ describe('PostController', () => {
 bun test
 ```
 
-赤いのはメッセージだけです。ステータスはすでに 422 です。これが Guren のバリデーション失敗すべてに共通する形です。ステータス 422、フィールドをキーにした `errors` を持つ JSON ボディ、各フィールドはメッセージの配列。Inertia のフォームはまさにこれを読みます。
+落ちているのはメッセージだけで、ステータスはすでに 422 です。Guren のバリデーション失敗はすべてこの形になります。ステータスは 422、ボディはフィールド名をキーにした `errors` を持つ JSON で、各フィールドの値はメッセージの配列です。Inertia のフォームはこれをそのまま読みます。
 
 ## 2. バリデーター
 
-スキーマをコントローラーから専用ファイルへ移し、メッセージを与えます。`app/Http/Validators/PostValidator.ts` を作ります。
+スキーマをコントローラーから専用のファイルへ移し、メッセージを添えます。`app/Http/Validators/PostValidator.ts` を作ります。
 
 ```ts file=app/Http/Validators/PostValidator.ts
 import { z } from 'zod'
@@ -133,7 +133,7 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-`body: PostPayloadSchema` は**ルート契約**です。これ自体がリクエストを検証するわけではありません。コントローラーアクションでは、検証はコントローラーの `validateBody()` 呼び出しであり、その呼び出しがあることを `guren audit` が検査します。契約がすることは codegen への供給です。ルートのボディ型が生成される `ApiRoutes` の一部になり、次の節でフォームを型付けするのがそれです。
+`body: PostPayloadSchema` は**ルート契約**で、これ自体がリクエストを検証するわけではありません。コントローラーアクションでの検証はコントローラーの `validateBody()` 呼び出しが行い、その呼び出しがあるかどうかを `guren audit` が検査します。契約の役割は codegen に情報を渡すことです。ルートのボディ型が生成される `ApiRoutes` に入り、次の節でフォームを型付けするのがこの型です。
 
 そしてコントローラーはスキーマをバリデーターから読みます。
 
@@ -176,7 +176,7 @@ export default class PostController extends Controller {
 bun test
 ```
 
-緑です。スキーマはひとつ、読み手は 3 つ。ルート契約、コントローラー、そして(次は)フォームです。
+緑になりました。スキーマはひとつ、読み手は 3 つです。ルート契約、コントローラー、そして次に見るフォームです。
 
 ## 3. メッセージを表示する
 
@@ -186,7 +186,7 @@ bun test
 bun run codegen
 ```
 
-そしてフォームを置き換えます。変更は 2 つ。データ型がルートから導出されるようになったことと、`form.errors` をレンダリングすることです。
+そしてフォームを置き換えます。変更点は 2 つで、データ型をルートから導出するようになったことと、`form.errors` を表示するようになったことです。
 
 ```tsx file=resources/js/pages/posts/New.tsx
 import { Head, useForm } from '@inertiajs/react'
@@ -242,15 +242,15 @@ export default function NewPost() {
 }
 ```
 
-`RouteBody<ApiRoutes, 'posts.store'>` は `{ title: string; body: string }` で、ルート契約を通して `PostPayloadSchema` から導出されています。スキーマにフィールドを足せばフォームの型もそれを得ますし、ルート名を打ち間違えれば型は `never` になります。形を書いたのはバリデーターの中の一度だけで、書き直すことなくブラウザまで届きました。
+`RouteBody<ApiRoutes, 'posts.store'>` は `{ title: string; body: string }` で、ルート契約を経由して `PostPayloadSchema` から導出されています。スキーマにフィールドを足せばフォームの型にもそれが増えますし、ルート名を打ち間違えれば型は `never` になります。形を書いたのはバリデーターの中の一度だけで、それが書き写すことなくブラウザまで届きました。
 
-**チェックポイント:** [http://localhost:3333/posts/create](http://localhost:3333/posts/create) を開いて空のフォームを送信します。タイトルの下に「Title is required」、本文の下に「Body is required」。Inertia が 422 を受け取り、メッセージを `form.errors` に入れて同じページを再レンダリングしました。エラー処理は何も書いていません。
+**チェックポイント:** [http://localhost:3333/posts/create](http://localhost:3333/posts/create) を開いて空のフォームを送信します。タイトルの下に「Title is required」、本文の下に「Body is required」が出ます。Inertia が 422 を受け取り、メッセージを `form.errors` に入れて同じページを再描画しました。エラー処理のコードは 1 行も書いていません。
 
 ![空のまま送信した新規投稿フォーム。タイトル欄の下に赤字で「Title is required」、本文欄の下に赤字で「Body is required」、その下に Publish ボタン。](../../images/tutorial-validation-errors.png)
 
 ## 4. リソース
 
-`index` も `show` も投稿の形をしたオブジェクトを手で組み立てていて、しかもどのフィールドを持つかで食い違っています。この写しには Guren での名前があります。**リソース**です。`app/Http/Resources/PostResource.ts` を作ります。
+`index` も `show` も投稿の形をしたオブジェクトを手で組み立てていて、しかもフィールドの顔ぶれが食い違っています。この写しには Guren での呼び名があり、**リソース**といいます。`app/Http/Resources/PostResource.ts` を作ります。
 
 ```ts file=app/Http/Resources/PostResource.ts
 import { Resource } from '@guren/core'
@@ -275,7 +275,7 @@ export class PostResource extends Resource<PostRecord, PostResourceData> {
 }
 ```
 
-リソースは、サーバーの外から投稿がどう見えるかを決める唯一の場所です。列が 4 つでは儀式に見えます。第 5 章でアプリにパスワードハッシュ付きのユーザーが加わったとき、`passwordHash` が決して prop にならないよう守っているのがリソースです。ここからのルールはこうです。**ページは生のレコードを受け取らない。**
+リソースは、サーバーの外から投稿がどう見えるかを決める唯一の場所です。列が 4 つしかない今は形ばかりの手続きに見えます。ただし第 5 章でパスワードハッシュを持つユーザーが加わると、`passwordHash` が prop に混ざらないよう守るのはこのリソースです。ここからのルールはこうです。**ページは生のレコードを受け取らない。**
 
 コントローラーで使います。
 
@@ -315,7 +315,7 @@ export default class PostController extends Controller {
 }
 ```
 
-ページには形を言い直させず、import させます。
+ページ側では形を書き直さず、import して使います。
 
 ```tsx file=resources/js/pages/posts/Index.tsx
 import { Head, Link } from '@inertiajs/react'
@@ -391,13 +391,13 @@ export default function PostShow({ post }: Props) {
 bun run codegen
 ```
 
-codegen はリソースに気づきました。`.guren/data.gen.ts` が `PostResourceData` と同じ形の `Data.Post` を export するようになり、リソースを import せずに投稿の型を名指ししたいコードから使えます。すべて走らせます。
+codegen はリソースに気づきました。`.guren/data.gen.ts` が `PostResourceData` と同じ形の `Data.Post` を export するようになり、リソースを import せずに投稿の型を名指ししたいコードから使えます。まとめて走らせます。
 
 ```bash run
 bun test
 ```
 
-緑で、観察できる変化は何もありません。テストの下でのリファクタリングとはこういうものです。
+緑のままで、外から見える変化はありません。テストに守られたリファクタリングとはこういうものです。
 
 ```bash run
 bunx guren gate
@@ -529,7 +529,7 @@ describe('PostController', () => {
 bun test
 ```
 
-赤が 5 つ。委ねる前にもう一度読んでください。編集ページは投稿を運ぶこと、更新と削除は読者が期待する場所へリダイレクトすること、不正な更新は不正な作成と同じ形で失敗すること、11 件目の投稿は 2 ページ目に落ちること。これでスライスの仕様は完全です。
+赤が 5 つです。委ねる前にもう一度読んでください。編集ページは投稿を運ぶこと、更新と削除は読者が期待する場所へリダイレクトすること、不正な更新は不正な作成と同じ形で失敗すること、11 件目の投稿は 2 ページ目に回ること。これでこのスライスの仕様は出そろいました。
 
 ## 6. 委ねる
 
@@ -537,13 +537,13 @@ bun test
 
 > Complete the posts CRUD. Add `edit`, `update` and `destroy` actions to `PostController` using route model binding like `show`, and register `GET /posts/:id/edit` (`posts.edit`), `PUT /posts/:id` (`posts.update`, with `body: PostPayloadSchema`) and `DELETE /posts/:id` (`posts.destroy`). Add `resources/js/pages/posts/Edit.tsx` as a form like `New.tsx` that submits with `form.put`, and give `Show.tsx` an Edit link and a Delete button. Paginate `index` at ten posts per page with `Post.paginate` and the `paginate` helper, validating `?page=` with a `ListPostsQuerySchema` in the validator, and render the page links in `Index.tsx`. Use `PostResource` for every post sent to a page. `tests/PostController.test.ts` describes all of it; make it pass.
 
-ここまでで最大のスライスなので、この章のハーネス要素にふさわしい場面です。`.claude/agents/code-review.md` の **`code-review` subagent** です。subagent は独自の brief と独自のコンテキストを持つエージェントで、メインのエージェントが呼び出します。この subagent の brief は Guren のコードレビューです。すべての変更系ルートにバリデーションがあるか、すべてのレコードの前にリソースがあるか、ルートの順序、`audit` と `check` が見るものとそれらには見えないいくつかのこと。エージェントが完了を報告したら、自分で rubric を確かめる前にこう頼んでください。
+ここまでで最大のスライスなので、この章のハーネス要素を出す場面です。`.claude/agents/code-review.md` の **`code-review` subagent** です。subagent は独自の brief と独自のコンテキストを持つエージェントで、メインのエージェントから呼び出します。この subagent の brief は Guren のコードレビューで、変更系ルートにバリデーションがあるか、レコードの手前にリソースがあるか、ルートの順序、`audit` と `check` が見るもの、そして両者には見えないいくつかのことを見ます。エージェントが完了を報告したら、自分で rubric を確かめる前にこう頼んでください。
 
 > Use the code-review subagent to review the uncommitted changes.
 
-返ってきたものを、下の自分の rubric と並べて読んでください。固定された brief を持つ第二の読者は、作業の渦中にいる第一の読者とは違うものを捕まえますし、費用は一文だけです。第 8 章ではその brief を自分で書きます。
+返ってきた指摘を、下の rubric と並べて読んでください。固定された brief を持つ第二の読者は、作業の渦中にいる第一の読者とは違うものを見つけます。しかも頼むのに必要なのは一文だけです。第 8 章ではその brief を自分で書きます。
 
-**手元にエージェントが無い場合は、** 6 ファイルです。バリデーターはクエリのスキーマを得ます。
+**手元にエージェントが無い場合は、** 6 ファイルです。バリデーターにはクエリのスキーマが加わります。
 
 ```ts file=app/Http/Validators/PostValidator.ts fallback
 import { z } from 'zod'
@@ -815,12 +815,12 @@ bun run codegen
 bun test
 ```
 
-rubric は次のとおりで、subagent の指摘と並べて読んでください。
+rubric は次のとおりです。subagent の指摘と並べて読んでください。
 
 - `update` と `destroy` は `this.model(Post)` で投稿を解決し、`update` は `store` と同じ `PostPayloadSchema` で検証している。両方のルートに `bind` があり、`update` には `body` もある。
 - `index` は `?page=` を `validateQuery` とスキーマで検証している。素の `Number(query.page)` は指摘対象。
 - ページに届くすべての投稿が `PostResource` を通っている。編集ページのフォーム型は `RouteBody<ApiRoutes, 'posts.update'>`。
-- `Show.tsx` の削除は確認付きの `method="delete"` リンクで、削除する `GET` ルートではない。
+- `Show.tsx` の削除は確認付きの `method="delete"` リンクになっている。削除を行う `GET` ルートではない。
 - 11 件のテストがすべて緑。
 
 **チェックポイント:** [http://localhost:3333/posts/create](http://localhost:3333/posts/create) で投稿を 12 件作り(フォームに付き合える範囲で少なくても構いません)、2 ページ目が現れるのを見てください。1 件編集し、1 件削除します。
@@ -833,7 +833,7 @@ bunx guren gate
 bunx guren audit
 ```
 
-今度は警告が 3 つです。`POST`、`PUT`、`DELETE /posts` に認証チェックがありません。相変わらず正しく、相変わらず意図的で、相変わらず第 6 章です。
+今度は警告が 3 つです。`POST`、`PUT`、`DELETE /posts` に認証チェックがありません。指摘は正しく、そのままにしているのも意図どおりで、対応するのは第 6 章です。
 
 ```bash run
 git add -A
@@ -844,7 +844,7 @@ git commit -m "feat: complete the posts CRUD with pagination"
 
 - 人が読めるメッセージ付きのバリデーターファイル。ルートに束縛され、コントローラーが読み、フォームを型付けしている。
 - 投稿がどう見えるかを決めるリソースと、それに追随する `Data.Post` 型。
-- 11 件のテストで仕様化し、エージェントが作り、subagent とあなたがレビューした、フル CRUD とページネーション。
+- 11 件のテストで仕様化し、エージェントが実装し、subagent と自分でレビューしたフル CRUD とページネーション。
 - 意図的に抱えている audit の警告 3 件。
 
 ## よくあるつまずき
@@ -853,11 +853,11 @@ git commit -m "feat: complete the posts CRUD with pagination"
 - **422 のテストは通るのにブラウザにメッセージが出ない。** ページは `form.errors.title` をレンダリングしています。フィールド名がスキーマのキーと正確に一致しているか確認してください。Inertia はサーバーが返したキーのエラーだけを埋めます。
 - **`Post.update` が `id` について文句を言う。** `update` は最初に `where` オブジェクト、次にデータを取ります。`Post.update({ id }, data)` です。バリデーション済みデータに `id` が含まれることはなく、含まれても `fillable` が落とします。
 - **2 ページ目に何も出ない。** `perPage` が 10 でないか、`orderBy` が無くて挿入順になっており、どの投稿がどこに落ちるかというテストの期待が成り立っていません。
-- **Delete ボタンが 404 へ遷移する。** `Link` には `method="delete"` が要ります。無いとブラウザは destroy の URL に `GET` を発行し、それはルートではありません。
+- **Delete ボタンが 404 へ遷移する。** `Link` には `method="delete"` が要ります。無いとブラウザは destroy の URL に `GET` を送りますが、そのようなルートはありません。
 
 ## 演習
 
-1. ブランチを切って `PostPayloadSchema` にルールを 1 つ足してください。空白だけのタイトルはタイトルではありません。先に失敗するテストを書き、それから通してください。このルールが最初からあったなら、どの既存テストが先に気づいたはずですか。
+1. ブランチを切って `PostPayloadSchema` にルールを 1 つ足してください。空白だけのタイトルはタイトルとして認めない、というルールです。先に失敗するテストを書き、それから通してください。このルールが最初からあったなら、どの既存テストが先に気づいたはずですか。
 2. `PostResource.toArray()` から `body` を消して `bun test` を走らせてください。いくつかのテストは落ちますが、ページ自体は表示されます。リソースの契約が実際にどこで検査されているのか、この差から何が言えますか。
 
 ## 次へ

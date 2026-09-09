@@ -1,6 +1,6 @@
 # 用語集
 
-Guren のドキュメントで頻出する言葉を、初学者向けに短くまとめます。ここにない用語は各ガイドの文脈で補足しています。
+Guren のドキュメントによく出てくる言葉を、初学者向けに短くまとめます。ここにない用語は、それぞれのガイドの中で補足しています。
 
 ## スタック
 - **Bun**: JavaScript/TypeScript のランタイム。`bun run` でスクリプトを実行し、`bunx` で CLI ツールを起動します。
@@ -34,7 +34,7 @@ Guren のドキュメントで頻出する言葉を、初学者向けに短く�
 - **SSR**: サーバー側で HTML を生成して返す方式。初回表示が速くなります。
 - **Props（プロップス）**: コンポーネントに渡すデータ。Inertia ではサーバーが props を返します。
 - **HMR**: Vite によるフロントエンドのホットリロード。ページを保存すると画面が即時更新されます。バックエンド（コントローラー・ルート・モデル）も `bun --hot` で動くため、再起動なしで反映されます。
-- **Inertia ページ**: `resources/js/pages/` に置く React コンポーネント。通常は `pages.posts.Index` のような page definition を通して `this.inertia()` で参照します。`pages` は `.guren/pages.gen.ts` から codegen で自動生成されます。
+- **Inertia ページ**: `resources/js/pages/` に置く React コンポーネント。通常は `pages.posts.Index` のような page definition を使い、`this.inertia()` から参照します。`pages` は codegen が `.guren/pages.gen.ts` に生成します。
 
 ## CLI
 - **create-guren-app**: 新規アプリのひな形を作る CLI。

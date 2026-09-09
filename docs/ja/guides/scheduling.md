@@ -1,8 +1,8 @@
 # タスクスケジューリングガイド
 
-Guren はアプリケーション内でスケジュールタスクを定義するための Fluent API を提供します。複数のcronエントリを管理する代わりに、コード内でタスクスケジュール全体を定義できます。
+Guren では、スケジュールタスクをアプリケーション内の Fluent API で定義します。cronのエントリを複数管理する代わりに、タスクのスケジュール全体をコードに書けます。
 
-推奨パターン: `@guren/core` から scheduling API をインポートし、スケジュールを一箇所で登録します。各機能のコードでは、実行されるジョブやコマンドの実装に集中します。
+推奨パターン: `@guren/core` から scheduling API をインポートし、スケジュールは一箇所で登録します。各機能のコードでは、実行されるジョブやコマンドの実装だけを書きます。
 
 ## コアコンセプト
 
@@ -60,12 +60,12 @@ process.on('SIGTERM', () => {
 
 ### サーバーレスランタイムでの実行
 
-`scheduler.start()` は常駐プロセスを前提にしますが、Cloudflare Workers にも AWS Lambda にもそれはありません。これらの環境では、プラットフォーム側のスケジューラが時計を刻み、アプリはタスクの登録だけを行います。
+`scheduler.start()` は常駐プロセスを前提にしますが、Cloudflare Workers にも AWS Lambda にも常駐プロセスはありません。これらの環境では、プラットフォーム側のスケジューラが時計を刻み、アプリはタスクを登録するだけです。
 
 - **Cloudflare Workers**: `guren cloudflare:build` が生成するワーカーが `scheduled` ハンドラを export し、`wrangler.jsonc` の `triggers.crons` がそれを駆動します。[Cloudflare Workers へのデプロイ](./cloudflare.md#スケジュールタスク)を参照してください。
 - **AWS Lambda**: `@guren/core/lambda` の `createScheduleHandler(scheduler)` を EventBridge ルールに接続します。[サーバーレス](./serverless.md)を参照してください。
 
-起動のたびに、その時点で該当するタスクだけが実行されます。そのためプラットフォームのトリガーは、最も細かいタスクと同じかそれより細かい頻度である必要があります。また `preventOverlapping()` と `onOneServer()` はタスク上のメモリ内フラグなので、プロセスが常駐しないランタイムでは起動をまたいで効きません。`schedule.command()` は `node:child_process` 経由でシェルに委ねるため Workers では動きません。そこでは `schedule.call()` または `schedule.job()` を使ってください。
+起動のたびに、その時点で実行時刻を迎えているタスクだけが動きます。そのためプラットフォームのトリガーは、いちばん細かいタスクと同じかそれより細かい頻度にしてください。また `preventOverlapping()` と `onOneServer()` はタスク上のメモリ内フラグなので、プロセスが常駐しないランタイムでは起動をまたいで効きません。`schedule.command()` は `node:child_process` 経由でシェルに任せるため、Workers では動きません。そちらでは `schedule.call()` か `schedule.job()` を使ってください。
 
 ## スケジュールの定義
 
@@ -222,7 +222,7 @@ schedule.call(task)
 
 ### 単一サーバーでの実行
 
-マルチサーバー環境で、1台のサーバーでのみタスクを実行します。
+複数サーバー構成で、1台のサーバーだけがタスクを実行するようにします。
 
 ```ts
 schedule.call(task)
@@ -293,8 +293,8 @@ await scheduler.runDueTasks()           // 実行予定の全タスクを今す�
 ## CLI統合
 
 常駐するスケジューラーはアプリケーションの中で動きます(前述の`scheduler.start()`)。
-CLIが担うのはもう半分、つまり登録内容の確認と、プロセスの外からの実行です。後者は
-システムのcronやプラットフォームのトリガーが呼ぶものです。
+CLIが担うのは残りの半分、登録内容の確認と、プロセスの外からの実行です。後者は
+システムのcronやプラットフォームのトリガーから呼びます。
 
 ```bash
 # スケジュールされたタスクを一覧
@@ -311,9 +311,9 @@ bunx guren schedule:run --task cleanup-sessions --force
 ### CLIから見えるようにする
 
 `schedule:list`と`schedule:run`はアプリケーションをbootしません。スケジュール
-カーネルを直接読み込み、`app/Console/Kernel.ts`(小文字版と`src/`版も含む)、
-あるいは`--kernel`で渡したパスを探索します。それ以外の場所で宣言されたタスクは、
-`scheduler.start()`の下でどれだけ確実に動いていても、両コマンドからは見えません。
+カーネルを直接読み込むだけで、`app/Console/Kernel.ts`(小文字版と`src/`版も含む)、
+あるいは`--kernel`で渡したパスを探します。それ以外の場所で宣言したタスクは、
+`scheduler.start()`の下で問題なく動いていても、この2つのコマンドからは見えません。
 
 認識されるエクスポートの形は2つで、それぞれに命名規約があります。
 
@@ -333,9 +333,9 @@ export function registerSchedules(scheduler: Scheduler): void {
 
 名前は`register…Schedules`(`registerSchedules`、`registerBillingSchedules`など)
 にするか、デフォルトエクスポートにします。1つのカーネルが複数エクスポートしても
-よく、その全部が同じスケジューラーを受け取ります。この規約があるおかげで、CLIは
-ファイルが偶然エクスポートしているヘルパーまで呼ばずに済みます。規約から外れた名前
-のレジストラは、黙って無視されるのではなく「認識できない」として報告されます。
+よく、そのすべてが同じスケジューラーを受け取ります。この規約があるおかげで、CLIは
+ファイルがたまたまエクスポートしているヘルパーまで呼ばずに済みます。規約から外れた
+名前のレジストラは、黙って無視されるのではなく「認識できない」と報告されます。
 
 **カーネルファクトリ**は引数を取らず、構築した`Schedule`を返します。
 `scheduleTasksKernel`、`schedule`、`defineSchedule`、またはデフォルトエクスポート
@@ -353,15 +353,15 @@ export function scheduleTasksKernel(): Schedule {
 ```
 
 ファクトリはタスクを宣言するだけで、それ自体は何も実行しません。プロバイダーが
-バインドするスケジューラーへ渡す必要があります。
+バインドするスケジューラーに渡してください。
 
 ```ts
 for (const task of scheduleTasksKernel().buildTasks()) scheduler.addTask(task)
 ```
 
-アプリケーションコードではレジストラを推奨します。このガイドの他の箇所が教える
-`Scheduler` APIそのままであり、2度目の配線なしにタスクが実行中のスケジューラーへ
-届きます。
+アプリケーションコードではレジストラを推奨します。このガイドの他の箇所で説明して
+いる`Scheduler` APIをそのまま使えますし、配線をもう一度書かなくてもタスクが実行中
+のスケジューラーに届きます。
 
 どちらの形でも、サービスの解決はカーネル構築時ではなくタスクのコールバック内で
 行ってください。CLIはアプリをbootせずにこのファイルを読むため、構築時のコンテナ
@@ -371,9 +371,9 @@ for (const task of scheduleTasksKernel().buildTasks()) scheduler.addTask(task)
 schedule.call(() => getContainer().make<SessionManager>('session').pruneExpired()).hourly()
 ```
 
-カーネルが存在するのにどちらの形にも一致しない場合、あるいは読み込み中に例外を
-投げた場合は、その旨を報告して非ゼロで終了します。まだ何もスケジュールしていない
-アプリとは別の状態として扱われます。
+カーネルがあるのにどちらの形にも一致しない場合、あるいは読み込み中に例外を投げた
+場合は、その旨を報告して非ゼロで終了します。まだ何もスケジュールしていないアプリ
+とは、別の状態として扱います。
 
 ## テスト
 

@@ -34,7 +34,7 @@ export const queue = createSqsHandler()
 bunx guren lambda:build
 ```
 
-このコマンドはまず `guren doctor` と同じデプロイランタイムチェックを走らせ(インメモリのセッション/OAuth ストア、`ScryptHasher`、ファイルシステムからのプロバイダ探索に当たると警告します。ビルドは止めません。どれもローカルでは動き、Lambda では壊れるものです)、次にアプリの `build` スクリプトを実行し、`.lambda/` ディレクトリを組み立てます:
+このコマンドはまず `guren doctor` と同じデプロイランタイムチェックを走らせます(インメモリのセッション/OAuth ストア、`ScryptHasher`、ファイルシステムからのプロバイダ探索に当たると警告します。ビルドは止めません。どれもローカルでは動き、Lambda では壊れるものです)。そのあとアプリの `build` スクリプトを実行し、`.lambda/` ディレクトリを組み立てます:
 
 | パス | 内容 |
 |------|------|
@@ -44,7 +44,7 @@ bunx guren lambda:build
 
 ハンドラー識別子はバンドルに対応します: `handler.http`、`handler.queue`、`handler.schedule`、`handler.console`。
 
-`process.env.NODE_ENV` はバンドル時に `"production"` に固定されます — バンドラーがこの値をインライン化するため、実行時の設定だけでは開発モードのバンドルを直せません。Inertia のアセット位置（`GUREN_INERTIA_ENTRY`、`GUREN_INERTIA_STYLES`、SSR エントリ）もデフォルトとして焼き込まれますが、関数の実際の環境変数が常に優先されます。
+`process.env.NODE_ENV` はバンドル時に `"production"` に固定されます。バンドラーがこの値をインライン化するため、実行時の設定だけでは開発モードのバンドルを直せません。Inertia のアセット位置（`GUREN_INERTIA_ENTRY`、`GUREN_INERTIA_STYLES`、SSR エントリ）もデフォルトとして焼き込まれますが、関数の実際の環境変数が常に優先されます。
 
 `--zip` を渡すと直接アップロード用の `function.zip` も生成されます。CDK はディレクトリを自動でアーカイブするため不要です。
 
@@ -56,7 +56,7 @@ bunx guren lambda:build
 
 ### キュー — `createSqsHandler()`
 
-SQS メッセージを Guren のジョブとして処理します。**部分バッチ失敗**に対応 — 失敗したメッセージだけが SQS に戻されリトライされます。
+SQS メッセージを Guren のジョブとして処理します。**部分バッチ失敗**に対応しており、失敗したメッセージだけが SQS に戻されてリトライされます。
 
 キュープロバイダで SQS ドライバを設定します:
 
@@ -74,7 +74,7 @@ setQueueDriver(new SqsDriver(adapter, {
 }))
 ```
 
-ジョブのディスパッチはサーバー上と同じです — `await SendEmailJob.dispatch({ to: 'user@example.com' })`。`SqsDriver` がジョブを SQS にシリアライズし、Lambda ハンドラーがデシリアライズして実行します。
+ジョブのディスパッチはサーバー上と同じです（`await SendEmailJob.dispatch({ to: 'user@example.com' })`）。`SqsDriver` がジョブを SQS にシリアライズし、Lambda ハンドラーがデシリアライズして実行します。
 
 ### スケジュール — `createScheduleHandler(scheduler)`
 
@@ -82,7 +82,7 @@ EventBridge から呼び出されたときに実行予定のタスクを処理�
 
 ### コンソール — `createConsoleHandler(kernel)`
 
-アプリの `ConsoleKernel` に登録したコマンド — `src/console.ts` が `kernel` としてエクスポートするもの — を実行します。コマンドの定義と登録については [コンソールコマンドガイド](./console.md) を参照してください。
+アプリの `ConsoleKernel`（`src/console.ts` が `kernel` としてエクスポートするもの）に登録したコマンドを実行します。コマンドの定義と登録については [コンソールコマンドガイド](./console.md) を参照してください。
 
 スキャフォールドされた `src/lambda.ts` の `console` export のコメントを外すとハンドラが有効になります。
 
@@ -119,7 +119,7 @@ aws lambda invoke --function-name my-app-console \
 
 ## サーバーサイドレンダリング
 
-SSR は追加設定なしで Lambda 上で動作します。`lambda:build` が Vite の SSR バンドルを関数ディレクトリにコピーし、その場所をバンドルに焼き込みます。サーバーは最初の Inertia レンダリング時にレンダラーをロードします。SSR ビルドがないアプリは CSR のみの関数になります — どちらの場合もフラグは不要です。
+SSR は追加設定なしで Lambda 上で動作します。`lambda:build` が Vite の SSR バンドルを関数ディレクトリにコピーし、その場所をバンドルに焼き込みます。サーバーは最初の Inertia レンダリング時にレンダラーをロードします。SSR ビルドがないアプリは CSR のみの関数になります。どちらの場合もフラグは不要です。
 
 ## データベース
 
@@ -140,13 +140,13 @@ const database = createAwsDataApiDatabase({
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 ```
 
-ドライバも合わせてインストールしてください（`bun add @aws-sdk/client-rds-data`）。関数にはクラスターへの `rds-data` アクションとシークレットへの `secretsmanager:GetSecretValue` が必要です — 後述の CDK コンストラクトの `dataApi` オプションが両方を配線します。認証は関数の IAM ロールを使用します。`drizzle-kit generate`/`push` には `drizzle.config.ts` で `driver: 'aws-data-api'` を設定します。
+ドライバも合わせてインストールしてください（`bun add @aws-sdk/client-rds-data`）。関数にはクラスターへの `rds-data` アクションとシークレットへの `secretsmanager:GetSecretValue` が必要です。後述の CDK コンストラクトの `dataApi` オプションが、その両方を配線します。認証は関数の IAM ロールを使用します。`drizzle-kit generate`/`push` には `drizzle.config.ts` で `driver: 'aws-data-api'` を設定します。
 
 ファクトリの詳細は[データベースガイド](./database.md)を参照してください。
 
 ### 従来の RDS + RDS Proxy
 
-関数を VPC 内で動かす場合は `createPostgresDatabase` が RDS に対して動作します。接続は RDS Proxy 経由にし、プリペアドステートメントは無効化してください — プロキシのセッションピニングを引き起こします:
+関数を VPC 内で動かす場合は `createPostgresDatabase` が RDS に対して動作します。接続は RDS Proxy 経由にし、プリペアドステートメントは無効化してください。プロキシのセッションピニングを引き起こします:
 
 ```typescript
 const database = createPostgresDatabase({
@@ -214,7 +214,7 @@ const log = new LogManager({
 
 ## 静的アセット
 
-Lambda は静的ファイルの配信に向きません。`lambda:build` が `public/` を `.lambda/assets` にステージングし、CDK コンストラクト（後述）が S3 バケットと、`/assets/*`・`/public/*` をバケットへルーティングする CloudFront ディストリビューション（デフォルトオリジンはアプリ）をプロビジョニングします。
+Lambda は静的ファイルの配信に向きません。`lambda:build` が `public/` を `.lambda/assets` にステージングし、CDK コンストラクト（後述）が S3 バケットと CloudFront ディストリビューションをプロビジョニングして、`/assets/*`・`/public/*` をバケットへルーティングします（デフォルトオリジンはアプリ）。
 
 このディストリビューションは関数より先にファイルに応答するため、フレームワーク自身が `public/` を配信するときのガードはここでは動きません。コンストラクトはアセット向けビヘイビアに viewer-response の CloudFront Function を付けてこれを復元します: ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) には、階層の深さや拡張子の大文字小文字によらず `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。画像、スクリプト、スタイルシート、フォントはそのままで、デフォルトビヘイビア (つまりアプリ) も自分のヘッダーのままです。
 
@@ -244,7 +244,7 @@ const app = createApp({
 
 **マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、`db:migrate` コンソールコマンドでその場で適用できます。コマンド定義と呼び出し方は [コンソール — `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
 
-**シーダーは関数内では実行できません。** シーダーはスキーマや `@guren/core` を import する通常の `.ts` モジュールですが、デプロイされる関数は `node_modules` も TypeScript ローダーも持たない自己完結バンドルであり、Node.js ランタイムはこれらを読み込めません。プロジェクトのソースがある環境からシードしてください:
+**シーダーは関数内では実行できません。** シーダーはスキーマや `@guren/core` を import する通常の `.ts` モジュールです。一方、デプロイされる関数は `node_modules` も TypeScript ローダーも持たない自己完結バンドルなので、Node.js ランタイムはこれらを読み込めません。プロジェクトのソースがある環境からシードしてください:
 
 ```bash
 DATABASE_URL='<本番の接続文字列>' bunx guren db:seed --force
@@ -301,7 +301,7 @@ export const sessionConfig: SessionConfig = {
 
 テーブルには文字列のパーティションキー `id` と、`expires_at` に対する TTL が必要です。読み取りは強い整合性で行うため、ログイン時に書いたセッションは直後のリダイレクトで必ず読めます。DynamoDB の TTL は期限ちょうどではなく 48 時間以内に削除するので、ストア自身も過ぎた `expires_at` を存在しないものとして扱います: TTL は掃除係であって時計ではありません。DynamoDB のアイテム上限は 400 KB なので、セッションには id だけを入れてください。
 
-`redis` ドライバ（ElastiCache）も引き続き選べます。キャッシュには Redis や DynamoDB が有効です — 下のインフラ表を参照してください。
+`redis` ドライバ（ElastiCache）も引き続き選べます。キャッシュには Redis や DynamoDB が有効です（下のインフラ表を参照してください）。
 
 ## インフラ推奨構成
 
@@ -319,7 +319,7 @@ export const sessionConfig: SessionConfig = {
 
 ## CDK でデプロイ
 
-プラグインは全トポロジーを配線する CDK コンストラクトを同梱しています — HTTP API、デッドレターキューと部分バッチ失敗対応のキューワーカー、EventBridge ルール、コンソール関数、そしてアセット用の CloudFront + S3:
+プラグインは全トポロジーを配線する CDK コンストラクトを同梱しています。HTTP API、デッドレターキューと部分バッチ失敗対応のキューワーカー、EventBridge ルール、コンソール関数、そしてアセット用の CloudFront + S3 です:
 
 ```bash
 bun add aws-cdk-lib constructs
@@ -359,6 +359,6 @@ bunx cdk deploy
 ```
 
 > [!WARNING]
-> `lambda:build` を自前のバンドラーに置き換える場合は、識別子マングリングを無効にしてください。Guren はキュー投入されたジョブ（既定でクラス名となる wire name）、永続化された通知の種別、HTTP 例外の名前といった永続レコードにクラス名を保存するため、マングルすると前回のデプロイが書き込んだレコードを解決できなくなります。`bun build` では `--minify` ではなく `--minify-whitespace --minify-syntax` を、`esbuild` では `minifyIdentifiers: false` を、`tsdown` / `rolldown` では `mangle: false` だけでは不十分です(compressが1箇所でしか使われないクラスを無名クラス式にインライン化し、`name` が `""` になります)。`minify: true` ではなく `minify: { compress: { keepNames: { class: true, function: true } }, mangle: false }` を指定します。Bun では `--keep-names` / `keepNames` は代替になりません。Bun 1.3.14 時点でフラグは受け付けられますが、クラス名はマングルされたままです。`lambda:build` はこの設定を済ませてあります。
+> `lambda:build` を自前のバンドラーに置き換える場合は、識別子マングリングを無効にしてください。Guren はキュー投入されたジョブ（既定でクラス名となる wire name）、永続化された通知の種別、HTTP 例外の名前といった永続レコードにクラス名を保存するため、マングルすると前回のデプロイが書き込んだレコードを解決できなくなります。`bun build` では `--minify` ではなく `--minify-whitespace --minify-syntax` を、`esbuild` では `minifyIdentifiers: false` を指定してください。`tsdown` / `rolldown` では `mangle: false` だけでは足りません(compress が1箇所でしか使われないクラスを無名クラス式にインライン化し、`name` が `""` になります)。`minify: true` ではなく `minify: { compress: { keepNames: { class: true, function: true } }, mangle: false }` を指定します。Bun では `--keep-names` / `keepNames` は代替になりません。Bun 1.3.14 時点でフラグは受け付けられますが、クラス名はマングルされたままです。`lambda:build` はこの設定を済ませてあります。
 >
 > どうしてもマングルする場合は、すべてのジョブに `jobName` を、すべての通知に明示的な `type` を宣言し、永続レコード上の識別子をクラス名から切り離す必要があります（[ジョブ名を固定する](./queue.md#ジョブ名を固定する) を参照）。どちらも未宣言ならクラス名が既定値になり、例外名は常にクラス名から導出されます。識別子を保持するほうが安全な既定であることに変わりはありません。

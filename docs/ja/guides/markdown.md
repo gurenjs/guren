@@ -1,6 +1,6 @@
 # Markdownレンダリング
 
-`@guren/plugin-markdown`は、堅牢なデフォルト設定でmarkdownをHTMLにレンダリングします。GitHub Flavored Markdown、`dangerouslySetInnerHTML`に安全なサニタイズ済み出力、GitHubスタイルのアラート、見出しアンカー、そしてオプションのshikiコードハイライトを備えています。guren.dev自身のdocsとブログが使っているパイプラインです。
+`@guren/plugin-markdown`は、そのまま使えるデフォルト設定でmarkdownをHTMLにレンダリングします。GitHub Flavored Markdown、`dangerouslySetInnerHTML`に渡しても安全なサニタイズ済み出力、GitHubスタイルのアラート、見出しアンカー、オプションのshikiコードハイライトを備えています。guren.dev自身のdocsとブログもこのパイプラインを使っています。
 
 ## インストール
 
@@ -18,7 +18,7 @@ const renderer = createMarkdownRenderer()
 const html = await renderer.render('# Hello\n\n> [!NOTE]\n> デフォルトでサニタイズされます。')
 ```
 
-`render()`は入力に対する純粋な非同期関数です。1つのレンダラインスタンスは並行リクエスト下でも安全で、パッケージはキャッシュを持ちません。保存時にレンダリングしてHTMLを格納する（ブログのパターン）か、リクエストごとにレンダリングするかはアプリ側の選択です。
+`render()`は入力に対する純粋な非同期関数です。1つのレンダラインスタンスは並行リクエスト下でも安全で、パッケージはキャッシュを持ちません。保存時にレンダリングしてHTMLを格納する（ブログのパターン）か、リクエストごとにレンダリングするかは、アプリ側で選べます。
 
 全オプションとデフォルト値:
 
@@ -37,9 +37,9 @@ createMarkdownRenderer({
 
 markdown記法だけでも`javascript:`や`data:`のURLは`href`や`src`に入り込めるため、生HTMLのエスケープだけでは不十分です。デフォルトの`sanitize: true`では、レンダリング結果は返される前に`sanitize-html`のallowlistを通過します。
 
-- 構造タグのみ許可。`<script>`のような生HTMLは黙って消えるのではなくエスケープされます
+- 構造タグのみ許可。`<script>`のような生HTMLはエスケープされます。黙って消えることはありません
 - `href`/`src`は`http`、`https`、`mailto`に限定。プロトコル相対URL（`//host/path`）は拒否されます
-- インラインstyleはshikiが出力する宣言（色と`--shiki-dark`カスタムプロパティ）だけに限定されるため、ハイライト済みコードはサニタイズを無傷で通過します
+- インラインstyleはshikiが出力する宣言（色と`--shiki-dark`カスタムプロパティ）だけに限定されます。ハイライト済みコードはそのまま通過します
 - 見出しの`id`とアラートのマークアップは、値の完全一致で許可されます
 
 結果は`dangerouslySetInnerHTML`で安全に注入できます。
@@ -83,7 +83,7 @@ createMarkdownRenderer({
 
 ## 見出しアンカー
 
-`anchors: true`ではすべての見出しにslugの`id`が付きます。unicode対応で、1レンダリング内の重複にも安全です（`Setup`、`Setup-1`、`Setup`は`setup`、`setup-1`、`setup-2`になります）。見出しテキストに紛れ込ませたHTMLに対しても堅牢化されています。
+`anchors: true`ではすべての見出しにslugの`id`が付きます。unicode対応で、1レンダリング内の重複にも安全です（`Setup`、`Setup-1`、`Setup`は`setup`、`setup-1`、`setup-2`になります）。見出しテキストにHTMLが紛れ込んでも壊れません。
 
 ## リンクの書き換え
 
@@ -132,7 +132,7 @@ createShikiHighlight({
 })
 ```
 
-Workersバンドルに入るコードでフルの`shiki`エントリをimportしてはいけません。全文法とoniguruma WASMを引き込みます。ビルド時コード（docsのプリレンダリングなど）では、バンドルサイズより任意言語対応が重要なのでフルエントリで問題ありません。
+Workersバンドルに入るコードでは、フルの`shiki`エントリをimportしないでください。全文法とoniguruma WASMを引き込んでしまいます。ビルド時に動くコード（docsのプリレンダリングなど）では、バンドルサイズより任意の言語に対応できることが重要なので、フルエントリで問題ありません。
 
 ### カスタムハイライタ
 

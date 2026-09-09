@@ -61,7 +61,7 @@ bun run db:seed
 NODE_ENV=production bun run bin/serve.ts
 ```
 
-信頼性のため、プロセスマネージャー（`systemd`, `pm2`, `supervisord` など）やホスティングの起動コマンドでラップしてください。以下は `systemd` ユニットの例です。
+安定して動かすために、プロセスマネージャー（`systemd`, `pm2`, `supervisord` など）やホスティングの起動コマンドでラップしてください。以下は `systemd` ユニットの例です。
 
 - スタートアップバナーは本番では既定で非表示です。表示したい/明示的に消したい場合は `GUREN_DEV_BANNER=1` または `GUREN_DEV_BANNER=0` を設定。
 - `NODE_ENV=production` では Vite dev サーバーを起動しません。もし本番相当環境で起動したい/抑制したい場合は `GUREN_DEV_VITE=1`/`0` を切り替えてください。
@@ -113,7 +113,7 @@ docker run --env-file .env.prod -p 3333:3333 my-app
 
 ## AWS Lambda（サーバーレス）
 
-Guren は AWS Lambda の Node.js ランタイム上で動作します。トラフィックが変動するアプリやインフラ管理を最小化したい場合に最適です。公式プラグインがバンドルを担当し、インフラ用の CDK コンストラクトも同梱しています:
+Guren は AWS Lambda の Node.js ランタイム上で動きます。トラフィックの増減が激しいアプリや、インフラの管理を減らしたい場合に向いています。バンドルは公式プラグインが担当し、インフラ用の CDK コンストラクトも同梱しています:
 
 ```bash
 bunx guren plugin @guren/plugin-lambda
@@ -126,7 +126,7 @@ CLI は `src/lambda.ts`（その export がそのまま Lambda ハンドラー�
 bunx guren lambda:build
 ```
 
-ビルドは `.lambda/` ディレクトリを生成します: 自己完結の関数バンドル、S3 用にステージングされた静的アセット、関数が必要とする環境変数の一覧です。CloudFront はステージングされたファイルを関数より先に配信するため、CDK コンストラクトはアセット向けビヘイビアに viewer-response の関数を置き、ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) に `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` を付けます。フレームワークが自分で `public/` を配信するときと同じ扱いです。HTTP、SQS キュー、EventBridge スケジューリング、CLI コマンドの専用ハンドラーを提供しています。データベース・SSR・CDK デプロイまで含めた詳細は **[サーバーレスデプロイガイド](./serverless.md)** を参照してください。
+ビルドは `.lambda/` ディレクトリを生成します: 自己完結の関数バンドル、S3 用にステージングされた静的アセット、関数が必要とする環境変数の一覧です。CloudFront はステージングされたファイルを関数より先に配信します。そのため CDK コンストラクトはアセット向けビヘイビアに viewer-response の関数を置き、ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) に `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` を付けます。フレームワークが自分で `public/` を配信するときと同じ扱いです。HTTP、SQS キュー、EventBridge スケジューリング、CLI コマンドには、それぞれ専用のハンドラーが用意されています。データベース・SSR・CDK デプロイまで含めた詳細は **[サーバーレスデプロイガイド](./serverless.md)** を参照してください。
 
 ## Vercel（サーバーレス）
 

@@ -39,7 +39,7 @@ bun run test
 
 - **何が変わったか**: `static guarded` と `static strictFillable` は削除されました。`fillable` は常に厳格で、主キー（`id`）は常に黙って除外されます。`AuthenticatableModel` のサブクラスでは、パスワードハッシュとリメンバートークンのカラムは一括代入できません。リクエストボディにこれらが含まれると、`fillable` の内容に関わらず `MassAssignmentException` がスローされます。
 - **誰に影響するか**: `guarded` や `strictFillable` を宣言しているモデル（`guren check` がエラーとして検出します）、および `create()` / `update()` で計算済みハッシュやリメンバートークンを一括代入しているコード。
-- **移行方法**: `guarded` / `strictFillable` の宣言を削除してください（`bunx guren upgrade --check-only` が対象ファイルを一覧します）。**`guarded` が `id` と認証情報カラム以外のアプリ固有フィールド（`tenantId` や `isAdmin` など）を含んでいた場合、行の削除によりそれらは一括代入可能になります**。それらを含まない `static fillable = [...]` を宣言して保護を維持してください。`strictFillable = false` に依存していたモデルでは、新たにスローされる例外が「黙って破棄されていたフィールド」を示します。`fillable` に追加するかペイロードから除いてください。`create({ ..., passwordHash })` は `create({ ..., password })` に置き換えてモデルにハッシュ化させるか、信頼できるサーバーサイドの値には `forceCreate({ ..., passwordHash: 'oauth:...' })` を使ってください（リクエスト入力には決して使わないこと）。
+- **移行方法**: `guarded` / `strictFillable` の宣言を削除してください（対象ファイルは `bunx guren upgrade --check-only` が一覧します）。**`guarded` に `id` と認証情報カラム以外のアプリ固有フィールド（`tenantId` や `isAdmin` など）が含まれていた場合、行を削除するとそれらは一括代入できるようになります**。保護を保つには、それらを含まない `static fillable = [...]` を宣言してください。`strictFillable = false` に頼っていたモデルでは、新たにスローされる例外が、これまで黙って破棄されていたフィールドを教えてくれます。`fillable` に追加するか、ペイロードから外してください。`create({ ..., passwordHash })` は `create({ ..., password })` に置き換えて、モデル側でハッシュ化させます。信頼できるサーバーサイドの値であれば `forceCreate({ ..., passwordHash: 'oauth:...' })` を使えます（リクエスト入力には使わないでください）。
 
 ```ts
 // Before
@@ -62,7 +62,7 @@ export class User extends defineModel(users, { base: AuthenticatableModel }) {
 
 - **何が変わったか**: `fillable` を定義したモデルで、許可リスト外のフィールドを `create()` / `update()` に渡すと `MassAssignmentException` がスローされるようになりました。以前は余分なフィールドは黙って破棄されていました。
 - **誰に影響するか**: フィルタリングしていないオブジェクト（スプレッドしたリクエストボディ、マージしたデフォルト値など）を `create()` / `update()` に渡しているコード。
-- **移行方法**: 許可リスト内のフィールドだけを渡すか、シーダーやシステムレコードなど信頼できるサーバーサイドのデータには `forceCreate()` / `forceUpdate()` を使用してください。
+- **移行方法**: 許可リスト内のフィールドだけを渡してください。シーダーやシステムレコードなど信頼できるサーバーサイドのデータには `forceCreate()` / `forceUpdate()` を使います。
 
 ```ts
 // Before: authorId silently dropped when not in fillable
