@@ -18,6 +18,7 @@
     "db:migrate": "bun ../packages/cli/src/bin.ts db:migrate",
     "db:seed": "bun ../packages/cli/src/bin.ts db:seed",
     "cloudflare:build": "bun run build && bun scripts/cloudflare-build.ts && bun scripts/build-search-index.ts",
+    "bundle:check": "bun scripts/check-bundle-size.ts",
     "search:prune": "bun scripts/prune-search-tables.ts",
     "search:apply": "bun scripts/apply-search-index.ts",
     "deploy:cloudflare": "bun run cloudflare:build && bunx wrangler d1 migrations apply guren-web --remote && bun run search:apply && bunx wrangler deploy && bun run search:prune"

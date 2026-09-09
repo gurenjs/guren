@@ -59,6 +59,12 @@ jobs:
       - name: Build worker
         run: bun run --cwd web cloudflare:build
 
+      # wrangler's dry run on the assembled output, judged against the budget
+      # in web/scripts/lib/bundle-size.ts. Before the D1 steps: a bundle that
+      # will not be deployed must not have loaded a search index first.
+      - name: Check worker bundle size
+        run: cd web && bun run bundle:check
+
       # Idempotent: only unapplied migrations run. Before deploy so new code
       # never runs against an old schema.
       - name: Apply D1 migrations
