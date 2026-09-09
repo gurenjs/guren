@@ -6,14 +6,12 @@ import {
 } from '@guren/testing'
 import type { Context } from '@guren/core'
 
-vi.mock('@guren/core', () => {
-  const mock = createControllerModuleMock()
-  // The module mock has no AuthorizationException; a 403-carrying stand-in
-  // keeps admin-allowlist working under it.
-  class AuthorizationException extends Error {
-    statusCode = 403
-  }
-  return { ...mock, AuthorizationException }
+// Async like every other mock in this suite: awaiting the real module settles
+// the server/hono graph inside the factory, rather than leaving it to load
+// while vitest is tearing the environment down (seen on bun 1.4.2 only).
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return { ...actual, ...createControllerModuleMock() }
 })
 
 import OAuthController from './OAuthController.js'
