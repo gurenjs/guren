@@ -3,7 +3,9 @@ import type { Context } from '@guren/server'
 import { createControllerContext, createControllerModuleMock } from '../src/controller'
 
 // Apps mock `@guren/core`, which re-exports `@guren/server` plus an ORM
-// allowlist; mocking server here covers everything but that allowlist.
+// allowlist; mocking server here covers everything but that allowlist. Kept a
+// *full* mock, unlike the app-side call sites: what it proves is that the mock
+// covers the surface on its own, which spreading the real module would hide.
 vi.mock('@guren/server', () => createControllerModuleMock())
 
 // Loading this controller loads a module's `index.ts`, which calls
