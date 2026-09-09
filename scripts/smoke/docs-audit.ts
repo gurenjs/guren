@@ -408,10 +408,45 @@ async function auditImportSources(root: string): Promise<void> {
   )
 }
 
+/** `major.minor` of a workspace manifest, the granularity the tutorial claims. */
+async function manifestMajorMinor(root: string, manifestPath: string): Promise<string> {
+  const { version } = JSON.parse(await read(root, manifestPath)) as { version?: string }
+  assert(typeof version === 'string', `${manifestPath} declares no version, so the tutorial's version claim cannot be checked against it.`)
+  const [major, minor] = version.split('.')
+  return `${major}.${minor}`
+}
+
+/**
+ * The tutorial's "verified against" line is the one version claim in docs/ that
+ * nothing generates, while `smoke:tutorial` verifies the chapters against *this*
+ * workspace. Left to a human it goes stale silently at every release, so it is
+ * asserted against the workspace's own numbers, in both locales. Guren's number
+ * is `@guren/server`'s: that is what the repo tags releases after.
+ */
+async function auditTutorialVersionClaim(root: string): Promise<void> {
+  const scaffolder = await manifestMajorMinor(root, 'packages/create-app/package.json')
+  const framework = await manifestMajorMinor(root, 'packages/server/package.json')
+
+  const claims = [
+    ['en', `\`create-guren-app\` ${scaffolder} and Guren ${framework}`],
+    ['ja', `\`create-guren-app\` ${scaffolder} と Guren ${framework}`],
+  ] as const
+
+  for (const [locale, claim] of claims) {
+    const overview = await read(root, `docs/${locale}/tutorials/00-overview.md`)
+    assert(
+      overview.includes(claim),
+      `docs/${locale}/tutorials/00-overview.md must say it is verified against ${claim}. Bump the line `
+        + 'with the release that moved the version, and re-run smoke:tutorial if the chapters have not run since.',
+    )
+  }
+}
+
 async function main(): Promise<void> {
   const root = resolve(process.argv[2] ?? '.')
   await auditEnglishDocs(root)
   await auditJapaneseDocs(root)
+  await auditTutorialVersionClaim(root)
   await auditDocLineRules(root)
   await auditImportSources(root)
   console.log(`Docs audit passed for ${root}`)

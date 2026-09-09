@@ -135,13 +135,9 @@ setInertiaDocument({
 })
 
 // The Host header is client-controlled, so production should answer only to the
-// host this app is deployed as, which APP_URL carries.
-//
-// Read at module scope, where not every platform has populated process.env yet
-// (the Cloudflare worker imports this module before wrangler `vars` land). A
-// missing value therefore warns and leaves the check off, rather than throwing
-// and stopping the app from booting at all. Emailed links do not depend on this
-// — app/Auth/AppUrl.ts resolves those per request and fails closed there.
+// host this app is deployed as, which APP_URL carries. Emailed links do not
+// depend on this — app/Auth/AppUrl.ts resolves those per request and fails
+// closed there.
 function hostAuthorization() {
   const exclude = ['/health']
 
@@ -150,6 +146,10 @@ function hostAuthorization() {
   }
 
   const appUrl = process.env.APP_URL?.trim()
+  // Read at module scope, where not every platform has populated process.env yet
+  // (the Cloudflare worker imports this module before wrangler `vars` land), so a
+  // missing value warns and leaves the check off rather than throwing and
+  // stopping the app from booting at all.
   if (!appUrl) {
     console.warn('[app] APP_URL is not set — host authorization is disabled. Set it to the public base URL of this app.')
     return false
@@ -927,6 +927,7 @@ git commit -m "feat: add the profile page"
 - **`withCsrf()` throws "did not set an XSRF-TOKEN cookie".** `auth` is not on `createApp`, or the priming path is not served by the app. Pass a path that returns a page.
 - **Registering the same email twice gives a 500.** The unique constraint is doing its job and nothing above it is checking first. Chapter 6 adds the check; until then it is a database error, which is still better than two accounts.
 - **`this.auth` throws "requires the auth middleware".** `AuthProvider` is not in `providers`, or `auth: {}` is missing. Both are needed: one mounts the session, the other names the model.
+- **You were signed in, and then you were not.** `bun run dev` runs the server under `bun --hot`, and the sessions `auth: {}` gives you live in memory, so a hot reload throws them away. Sign in again; this is how it works until chapter 14 moves sessions into the database.
 - **`actingAs()` in a login test always succeeds.** It replaces the whole auth context, including `attempt()`, with stubs. Use it to *be* a user, never to test signing in.
 
 ## Exercises

@@ -317,7 +317,7 @@ git commit -m "feat: add the contact page"
 ## Common trip-ups
 
 - **`pages.about.Index` does not exist.** Codegen has not run since the page was created. `bun run codegen`, or let `bun run dev` do it; the dev server regenerates when a page is added while it is running.
-- **The test passes but the browser shows the old page.** The dev server rendered it before your last save and Inertia kept the old props. Reload with the cache off, or check the terminal running `bun run dev` for a codegen error.
+- **The test passes but the browser shows the old page.** The dev server rendered it before your last save and Inertia kept the old props. Reload with the cache off, or check the terminal running `bun run dev` for a codegen error. If neither helps, restart `bun run dev`.
 - **The agent returned `this.text()` with HTML in it.** It works and the test passes, which is why the rubric says what the controller must do, not only what the test checks. Ask it to render the page instead; that is the fix you will make many times in this course.
 - **`guren check` warns that a controller has no test.** It looks for `tests/<Name>Controller.test.ts`. You wrote both; if the warning names another controller, that is chapter 3's job.
 

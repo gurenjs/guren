@@ -127,7 +127,7 @@ describe('PostController', () => {
 bun test
 ```
 
-新しい失敗が 3 つ、いずれも 404 です。ここからは、テストが書いたとおりのものを作っていきます。
+新しい失敗は 2 つ、どちらも 404 です。そして 3 つ目のテストは最初から緑です。この 3 つ目は一度立ち止まる価値があります。`/posts/999` が 404 を返してほしいのは投稿が存在しないからですが、いまは*ルート*が存在しないから 404 になっています。ルートができて初めて、このテストは書かれたとおりのことを証明しはじめます。ここからは、テストが書いたとおりのものを作っていきます。
 
 ## 4. コントローラーとルート
 
@@ -185,7 +185,7 @@ export function registerWebRoutes(router: Router): void {
 ```
 
 - `router.group('/posts', ...)` は中のすべてのルートにプレフィックスを付けるので、`'/:id'` は `/posts/:id` です。
-- `bind: { id: Post }` が**ルートモデルバインディング**です。アクションが走る前に Guren がパスパラメータで `Post.findOrFail(id)` を呼び、レコードをコントローラーに渡します。コントローラーでは `this.model(Post)` がそれを `PostRecord` 型で返します。該当する投稿が無ければ `findOrFail` が throw し、レスポンスは 404 になります。3 つ目のテストが通るのはこのためで、そのためのコードは 1 行も書いていません。
+- `bind: { id: Post }` が**ルートモデルバインディング**です。アクションが走る前に Guren がパスパラメータで `Post.findOrFail(id)` を呼び、レコードをコントローラーに渡します。コントローラーでは `this.model(Post)` がそれを `PostRecord` 型で返します。該当する投稿が無ければ `findOrFail` が throw し、レスポンスは 404 になります。3 つ目のテストが書かれたとおりの理由で緑になるのはこのためで、そのためのコードは 1 行も書いていません。
 - ルートにオプションがあるときは options オブジェクトが第 2 引数です。`.name()` はどちらの書き方でも使えます。
 
 ## 5. ページ
@@ -546,6 +546,7 @@ git branch -D scratch/add-resource
 
 - **`db:make` が「No schema changes」と言う。** 最後のマイグレーション以降スキーマファイルが変わっていないか、別のファイルを編集しています。`db/schema.ts` から `posts` が export されているか確認してください。
 - **テストが「no such table: posts」で失敗する。** テスト用データベースは初回利用時に作られ、そのときにマイグレーションされます。前回の実行が中途半端にマイグレーションされた `data/guren.test.db` を残していたら、ファイルを削除してテストをやり直してください。
+- **新しいページのレイアウトが崩れ、`bun run dev` のログに `Unable to locate Inertia page "posts/New" in the generated page manifest.` が出る。** 開発サーバーを動かしたままページファイルを追加すると、ページマニフェストと生成された Tailwind の CSS が古いまま固まることがあります。codegen は正常に走っていて `.guren/pages.gen.ts` は最新、ということも起こります。ハードリロードでは直りません。`bun run dev` を再起動してください。
 - **`/posts/create` が 404 を返す。** `/posts/:id` より後に登録されています。順序が大事です。ルートは上から順に照合されます。
 - **`guren audit` が「Request body is read without validation」で失敗する。** store アクションが `validateBody()` 以外の方法でボディを読んでいます。スキーマを使ってください。
 - **`this.model(Post)` が「No model binding found」で throw する。** そのパラメータに対する `bind` オプションがルートにありません。バインディングはルートに宣言するもので、コントローラーから推測されることはありません。

@@ -263,7 +263,7 @@ export default class HomeController extends Controller {
 }
 ```
 
-And replace `resources/js/pages/Home.tsx`. The two changes are the `tagline` field in `Props` and the paragraph that renders it; the rest is the scaffold's page as it was:
+And replace `resources/js/pages/Home.tsx`. The two changes are the `tagline` field in `Props` and the paragraph that renders it, which takes the place of the scaffold's "Edit `resources/js/pages/Home.tsx` to get started" line; the rest of the page is untouched:
 
 ```tsx file=resources/js/pages/Home.tsx
 import { Head } from '@inertiajs/react'
