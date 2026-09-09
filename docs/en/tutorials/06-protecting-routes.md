@@ -409,7 +409,11 @@ Green. Now look at the audit:
 bunx guren audit
 ```
 
-The three warnings are gone, replaced by "Protected by an authentication guard (verified via middleware capabilities)". That last phrase matters. `requireAuthenticated` carries a marker the framework stamps on it; `audit` trusts the marker, not the name. Had you written your own `requireLogin` middleware and aliased it as `auth`, the audit would say the middleware is *named like* a guard but is not one it recognises, and keep warning. That is the right answer: a reviewer, human or machine, cannot tell from a name whether a function checks anything.
+The three authentication warnings are gone, replaced by "Protected by an authentication guard (verified via middleware capabilities)". That last phrase matters. `requireAuthenticated` carries a marker the framework stamps on it; `audit` trusts the marker, not the name. Had you written your own `requireLogin` middleware and aliased it as `auth`, the audit would say the middleware is *named like* a guard but is not one it recognises, and keep warning. That is the right answer: a reviewer, human or machine, cannot tell from a name whether a function checks anything.
+
+One warning is left, and it is not a mistake: `[warn] [API3] PostController.store force write`, on a method that validates a body and then calls `forceCreate`. Every action of that shape gets it, here and in the chapters after this one.
+
+It is a review prompt, not a verdict. `audit` can see that validated input reaches `forceCreate`; it cannot follow the data to know that the validator is the allowlist standing in for `fillable`. That is the judgement you made above, and it holds, so the warning is right to be raised and right for you to accept. For the same reason it is only ever a warning: `guren gate` below passes with it in place. Read a finding and decide, rather than arranging for it to disappear. The next force write might be one that really does pass a raw body through.
 
 ```bash run
 bunx guren gate
@@ -896,7 +900,7 @@ Most of the diff is what you wrote, in the same shape: the model, the provider, 
 ## Where you are
 
 - Post mutations, the profile and logout behind `requireAuthenticated`; the login and registration pages behind `requireGuest`.
-- A clean audit, and an understanding of why it trusts the framework's guard and not a name.
+- An audit you can read: the authentication warnings answered, the force-write warning accepted on purpose, and an understanding of why it trusts the framework's guard and not a name.
 - An author on every post, added without losing a row: nullable, backfilled, required.
 - The agent's first migration, run under the `db-manage` skill's rules.
 
