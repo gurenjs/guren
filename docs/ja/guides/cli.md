@@ -33,6 +33,7 @@ bunx guren add session
 bunx guren add broadcasting
 bunx guren add schedule
 bunx guren add lint
+bunx guren add prototype
 ```
 > **Golden path:** まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリの成長に応じて他の機能を追加してください。
 
@@ -88,6 +89,18 @@ bunx guren add admin --public
 同じスキャフォールドに直接到達する `make:feature` も同様に中断します。JSON を
 返すコントローラーは `make:controller` で生成し、`routes/api.ts` に結線して
 ください。
+
+`add prototype` はプロトタイプモード([プロトタイプファースト](./prototype-first.md))を
+導入します。シードデータから Inertia の visit に答える `resources/js/prototype/` の fixture、
+`dev:prototype` と `build:prototype` のスクリプト、そして `resources/js/app.tsx` と
+`src/app.ts` のローダー 2 行です。`--remove` はスクリプトとローダーを取り除きます。続けて
+`make:feature <Entity> --fields "…" --prototype` を実行すると、機能の見える半分だけ、
+ページ、バリデーター、ページデータ型、fixture のエントリを書き、`prototype` ハンドラーで
+登録するルートを出力します。同じコマンドをフラグ無しで、そのエンティティのルートがまだ
+`prototype` に乗っているアプリで実行すると昇格になります。モデル、Resource、コントローラーを
+書き、Resource はページデータ型に対して型付けされ、ページはそのまま残ります。
+`bun run build:prototype` は Vite の前に `check --prototype` を走らせるので、fixture に
+エントリの無いルートは顧客のクリックではなくビルドで落ちます。
 
 `make:controller` は同じ2つのシグナルを読みますが、中断ではなく適応します。
 API専用と判定されたアプリでは、生成されるコントローラーは Inertia ページではなく
@@ -163,6 +176,7 @@ bunx guren audit
 bunx guren check --arch    # アーキテクチャ境界(guren.arch.ts + モジュールルール)
 bunx guren check --docs    # docリンク: OKF frontmatter(type/entities/related)+ 本文リンク + @docsタグ
 bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
+bunx guren check --prototype  # prototype ハンドラーのルートに名前付きの fixture エントリがあり、ローダーが配線されているか
 ```
 
 スイートフラグは併用すると和集合で実行されます。`--changed` はいずれの
@@ -534,7 +548,7 @@ bunx guren tool:call posts.index --as user:42 --json
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
 | `--input` | `{}` | ツールの引数を JSON オブジェクトで指定 |
-| `--as` | (未認証) | 指定ユーザーとして呼び出す(`user:42`)。開発専用: プロセスに `GUREN_TESTING=1` を設定し、実際の資格情報の代わりに注入されたユーザーをアプリが受け入れるようにします |
+| `--as` | (未認証) | 指定ユーザーとして呼び出す(`user:42`)。開発専用: プロセスに `GUREN_TESTING=1` を設定し、実際の資格情報の代わりに注入されたユーザーをアプリが受け入れるようにし、パスワードはテスト用の軽量パラメータでハッシュされます([テスト](./testing.md#テストでのパスワードハッシュ)を参照) |
 | `--preflight` | `false` | 実行ではなく verdict を要求する。ハンドラーは実行されません |
 | `--app` | カレントディレクトリ | アプリケーションルートディレクトリ |
 | `--json` | `false` | 呼び出し結果を JSON で出力 |

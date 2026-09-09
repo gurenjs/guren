@@ -17,6 +17,12 @@ void import('@guren/inertia-client').then(({ startInertiaClient }) =>
   startInertiaClient({
     pages,
     pageManifest,
+    // `vite --mode prototype` defines GUREN_PROTOTYPE as `true`; in every
+    // other build it is the literal `false`, so this branch and its import are
+    // dropped from the bundle (RFC 0021).
+    prototype: import.meta.env.GUREN_PROTOTYPE
+      ? { load: () => import('./prototype/index.js'), base: import.meta.env.BASE_URL }
+      : undefined,
     resolve: pages
       ? undefined
       : (name) => import(/* @vite-ignore */ pageManifest[name as keyof typeof pageManifest] ?? `./pages/${name}.tsx`),

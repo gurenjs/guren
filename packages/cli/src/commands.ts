@@ -2491,6 +2491,10 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only translation catalog checks (lang/<locale> key and placeholder parity).',
     },
+    prototype: {
+      type: 'boolean',
+      description: 'Run only prototype wiring checks (RFC 0021): fixture entries against the route graph.',
+    },
     changed: {
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
@@ -2503,8 +2507,8 @@ const checkCommand = defineCommand({
   async run({ args }) {
     // --ci promises a full-suite gate; letting a suite flag narrow the run
     // underneath it would report success while docs/spec/core went unchecked.
-    if (args.ci && (args.arch || args.docs || args.spec || args.i18n)) {
-      consola.error('check --ci runs the full suite — drop --arch/--docs/--spec/--i18n (they gate on their own).')
+    if (args.ci && (args.arch || args.docs || args.spec || args.i18n || args.prototype)) {
+      consola.error('check --ci runs the full suite — drop --arch/--docs/--spec/--i18n/--prototype (they gate on their own).')
       process.exitCode = 1
       return
     }
@@ -2517,6 +2521,7 @@ const checkCommand = defineCommand({
       docs: Boolean(args.docs),
       spec: Boolean(args.spec),
       i18n: Boolean(args.i18n),
+      prototype: Boolean(args.prototype),
       changed: Boolean(args.changed),
     })
 
@@ -2529,7 +2534,7 @@ const checkCommand = defineCommand({
     // Only the suite flags and the opt-in `--ci` gate on exit code. Plain
     // `guren check` has never set one, and changing that on a v1.0-stable
     // command is a breaking change reserved for a major release.
-    if ((args.arch || args.docs || args.spec || args.i18n) && report.failCount > 0) {
+    if ((args.arch || args.docs || args.spec || args.i18n || args.prototype) && report.failCount > 0) {
       process.exitCode = 1
     }
     if (args.ci && gatingResults(report).length > 0) {
@@ -2870,6 +2875,10 @@ const makeFeatureCommand = defineCommand({
       type: 'boolean',
       description: 'Also generate an authorization policy and enforce it in store/update/destroy.',
     },
+    prototype: {
+      type: 'boolean',
+      description: 'Prototype-first (RFC 0021): pages, validator, page-data type and fixture entries only; no model, migration or controller. Needs `guren add prototype`.',
+    },
     module: MODULE_ARG,
   },
   async run({ args }) {
@@ -2881,6 +2890,7 @@ const makeFeatureCommand = defineCommand({
       withTest: Boolean(args.test),
       publicAccess: Boolean(args.public),
       withPolicy: Boolean(args.policy),
+      prototype: Boolean(args.prototype),
     })
   },
 })
@@ -3089,6 +3099,27 @@ const addPluginCommand = defineCommand({
   },
 })
 
+const addPrototypeCommand = defineCommand({
+  meta: {
+    name: 'prototype',
+    description: 'Install prototype mode (RFC 0021): the fixture module, the dev:prototype/build:prototype scripts, and the client and app wiring.',
+  },
+  args: {
+    force: {
+      type: 'boolean',
+      description: 'Overwrite the fixture module if it exists.',
+    },
+    remove: {
+      type: 'boolean',
+      description: 'Reverse the wiring and the scripts; the fixture module is left in place.',
+    },
+  },
+  async run({ args }) {
+    const { addPrototype } = await import('./add-prototype')
+    await addPrototype({ force: Boolean(args.force), remove: Boolean(args.remove) })
+  },
+})
+
 const addCommand = defineCommand({
   meta: {
     name: 'add',
@@ -3115,6 +3146,7 @@ const addCommand = defineCommand({
     queue: createAddBlueprintCommand('queue', 'Install queue scaffolding with a sample job.'),
     resource: addResourceCommand,
     plugin: addPluginCommand,
+    prototype: addPrototypeCommand,
     session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, SessionProvider, and sessions:prune.'),
     schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
     storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),

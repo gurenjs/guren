@@ -161,9 +161,20 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
     for (const route of ctx.routes) {
       const controller = route.controller
         ? `${route.controller.name}.${route.controller.action}`
-        : ''
+        : route.prototype
+          ? '(prototype fixture)'
+          : ''
       const cells = [route.method, route.path, route.name ?? '', controller]
       lines.push(`| ${cells.map(escapeMarkdownTableCell).join(' | ')} |`)
+    }
+    const backlog = ctx.routes.filter((route) => route.prototype)
+    if (backlog.length > 0) {
+      lines.push('')
+      lines.push(`### Prototype backlog (${backlog.length})`)
+      lines.push('Routes still answered from resources/js/prototype/index.ts; each needs a controller before the app can boot in production (RFC 0021).')
+      for (const route of backlog) {
+        lines.push(`- ${route.method} ${route.path}${route.name ? ` (${route.name})` : ''}`)
+      }
     }
   } else if (ctx.routesError) {
     lines.push(`Routes could not be read: ${ctx.routesError}`)

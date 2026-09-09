@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
-import { Router } from '../mvc/Router'
+import { Router, type RouteDefinition } from '../mvc/Router'
+import { loadPrototypeFixture, PROTOTYPE_FIXTURE_BINDING, type PrototypeFixtureLoader } from '../mvc/prototype'
 import { Container, mountModuleRoutes, setContainer, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
@@ -411,6 +412,12 @@ export interface ApplicationOptions {
   readonly securityHeaders?: SecurityHeadersOptions | false
   /** DNS rebinding protection. Off unless configured; the template configures it. */
   readonly hostAuthorization?: HostAuthorizationOptions | false
+  /**
+   * The fixture module routes registered with the `prototype` handler answer
+   * from (RFC 0021): `() => import('../resources/js/prototype/index.js')`.
+   * Loaded at boot only when such a route exists.
+   */
+  readonly prototype?: PrototypeFixtureLoader
 }
 
 export interface I18nPluginOptions {
@@ -647,7 +654,56 @@ export class Application {
       this.routesRegistered = true
     }
 
+    await this.preparePrototypeRoutes()
     this.router.mount(this.hono, { container: this.container })
+  }
+
+  /**
+   * Every failure here is one a request would otherwise surface as a 500:
+   * an unnamed prototype route cannot be looked up, a named one the fixture
+   * does not answer, no loader to answer from at all. Process-shared fixture
+   * state is a developer's own `bun run dev`, not a deployment, hence the
+   * production refusal; `GUREN_PROTOTYPE_ROUTES=1` overrides it deliberately.
+   */
+  private async preparePrototypeRoutes(): Promise<void> {
+    if (this.container.has(PROTOTYPE_FIXTURE_BINDING)) return
+    const routes = this.router.definitions().filter((route) => route.prototype)
+    if (routes.length === 0) return
+
+    const describe = (route: RouteDefinition): string => `${route.method} ${route.path}${route.name ? ` (${route.name})` : ''}`
+    const unnamed = routes.find((route) => !route.name)
+    if (unnamed) {
+      throw new Error(
+        `Route ${describe(unnamed)} uses the prototype handler but has no name; the fixture is keyed by route name. `
+          + 'Chain .name() on it or pass { name } in its options.',
+      )
+    }
+
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production' && process.env.GUREN_PROTOTYPE_ROUTES !== '1') {
+      throw new Error(
+        `${routes.length} route(s) still answer from the prototype fixture (${routes.map(describe).join(', ')}), `
+          + 'whose state is shared by every request of this process. Replace them with controllers before deploying, '
+          + 'or set GUREN_PROTOTYPE_ROUTES=1 to run a deliberately fixture-backed server.',
+      )
+    }
+
+    if (!this.options.prototype) {
+      throw new Error(
+        `Route ${describe(routes[0]!)} uses the prototype handler, but createApp() has no \`prototype\` option. `
+          + "Pass `prototype: () => import('../resources/js/prototype/index.js')`.",
+      )
+    }
+
+    const fixture = await loadPrototypeFixture(this.options.prototype)
+    const missing = routes.filter((route) => typeof fixture.routes[route.name!] !== 'function')
+    if (missing.length > 0) {
+      throw new Error(
+        `The prototype fixture has no entry for ${missing.map(describe).join(', ')}. `
+          + 'Add the route name to `routes` in resources/js/prototype/index.ts, or replace the handler with a controller.',
+      )
+    }
+
+    this.container.instance(PROTOTYPE_FIXTURE_BINDING, fixture)
   }
 
   use(path: string, ...middleware: MiddlewareHandler[]): void {

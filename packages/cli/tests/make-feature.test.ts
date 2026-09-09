@@ -623,3 +623,117 @@ describe('makeFeature on an API-only app', () => {
     }
   })
 })
+
+describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
+  const CLIENT_ENTRY = `void import('@guren/inertia-client').then(({ startInertiaClient }) => startInertiaClient({ pages: {} }))\n`
+
+  async function seedPrototypeApp(dir: string): Promise<void> {
+    const { seedInertiaApp, writeWorkspaceFiles } = await import('./helpers')
+    await seedInertiaApp(dir)
+    await writeWorkspaceFiles(dir, {
+      'resources/js/app.tsx': CLIENT_ENTRY,
+      'package.json': JSON.stringify({ name: 'app', scripts: {} }),
+    })
+    const { runBlueprint } = await import('../src/blueprints')
+    await runBlueprint('prototype', {})
+  }
+
+  it('refuses without the fixture the entries go into', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-prototype-missing-')
+    try {
+      const { seedInertiaApp } = await import('./helpers')
+      await seedInertiaApp(workspace.dir)
+      await expect(makeFeature('Note', { fields: 'title:string', prototype: true })).rejects.toThrow('guren add prototype')
+      expect(existsSync(join(workspace.dir, 'resources/js/pages/notes/Index.tsx'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('writes the pages, validator, page-data type and fixture entries, and no backend', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-prototype-')
+    try {
+      await seedPrototypeApp(workspace.dir)
+
+      const created = await makeFeature('Note', { fields: 'title:string,body:text?,done:boolean', prototype: true })
+
+      expect(created.some((file) => file.endsWith('resources/js/types/Note.ts'))).toBe(true)
+      expect(created.some((file) => file.endsWith('resources/js/prototype/index.ts'))).toBe(true)
+      expect(existsSync(join(workspace.dir, 'app/Http/Controllers/NoteController.ts'))).toBe(false)
+      expect(existsSync(join(workspace.dir, 'app/Models/Note.ts'))).toBe(false)
+      expect(existsSync(join(workspace.dir, 'app/Http/Resources/NoteResource.ts'))).toBe(false)
+      expect(existsSync(join(workspace.dir, 'app/Http/Validators/NoteValidator.ts'))).toBe(true)
+
+      const types = await readFile(join(workspace.dir, 'resources/js/types/Note.ts'), 'utf8')
+      expect(types).toContain('export interface NoteData extends Record<string, unknown> {')
+      expect(types).toContain('  body: string | null')
+
+      const index = await readFile(join(workspace.dir, 'resources/js/pages/notes/Index.tsx'), 'utf8')
+      expect(index).toContain("import type { NoteData as NoteResourceData } from '@/resources/js/types/Note'")
+      expect(index).not.toContain('app/Http/Resources')
+
+      const fixture = await readFile(join(workspace.dir, 'resources/js/prototype/index.ts'), 'utf8')
+      expect(fixture).toContain("import { pages } from '@/.guren/pages.gen'")
+      expect(fixture).toContain("import type { NoteData } from '@/resources/js/types/Note'")
+      expect(fixture).toContain('    notes: [')
+      expect(fixture).toContain("      { id: 1, title: 'Sample title 1', body: 'Longer sample text for body 1.', done: true },")
+      expect(fixture).toContain('    ] as NoteData[],')
+      expect(fixture).toContain('    nextNoteId: 4,')
+      expect(fixture).toContain("'notes.index': ({ state, query, page }) =>")
+      expect(fixture).toContain("page(pages.notes.Index, paginate(state.notes, Number(query.page ?? 1), '/notes'))")
+      expect(fixture).toContain("'notes.destroy': ({ state, params, redirect }) => {")
+      // The seed sits inside state() and the entries inside routes, in that order.
+      expect(fixture.indexOf('state: () => ({')).toBeLessThan(fixture.indexOf('    notes: ['))
+      expect(fixture.indexOf('routes: {')).toBeLessThan(fixture.indexOf("'notes.index'"))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('leaves the fixture alone when the feature is already there', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-prototype-twice-')
+    try {
+      await seedPrototypeApp(workspace.dir)
+      await makeFeature('Note', { fields: 'title:string', prototype: true })
+      const before = await readFile(join(workspace.dir, 'resources/js/prototype/index.ts'), 'utf8')
+
+      const created = await makeFeature('Note', { fields: 'title:string', prototype: true, force: true })
+
+      expect(created.some((file) => file.endsWith('resources/js/prototype/index.ts'))).toBe(false)
+      expect(await readFile(join(workspace.dir, 'resources/js/prototype/index.ts'), 'utf8')).toBe(before)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('promotes a prototype feature: Resource typed against the page-data type, pages kept', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-promote-')
+    try {
+      await seedPrototypeApp(workspace.dir)
+      await makeFeature('Note', { fields: 'title:string,done:boolean', prototype: true })
+      const indexPath = join(workspace.dir, 'resources/js/pages/notes/Index.tsx')
+      await writeFile(indexPath, '// edited during the walkthrough\n' + (await readFile(indexPath, 'utf8')))
+
+      const created = await makeFeature('Note', { fields: 'title:string,done:boolean' })
+
+      expect(created.some((file) => file.endsWith('app/Http/Controllers/NoteController.ts'))).toBe(true)
+      expect(created.some((file) => file.endsWith('app/Models/Note.ts'))).toBe(true)
+      expect(created.some((file) => file.endsWith('resources/js/pages/notes/Index.tsx'))).toBe(false)
+      expect(await readFile(indexPath, 'utf8')).toStartWith('// edited during the walkthrough')
+
+      const resource = await readFile(join(workspace.dir, 'app/Http/Resources/NoteResource.ts'), 'utf8')
+      expect(resource).toContain("import type { NoteData } from '@/resources/js/types/Note'")
+      expect(resource).toContain('export type NoteResourceData = NoteData')
+      expect(resource).toContain('toArray(): NoteData {')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('prints prototype handlers in the route hint when asked', () => {
+    const lines = buildRouteRegistrationHint({ singular: 'Note', routeName: 'notes', routeVar: 'notes', withAuth: false, handler: 'prototype' })
+    expect(lines).toContain("  notes.get('/', prototype).name('notes.index')")
+    expect(lines).toContain("  notes.post('/', { name: 'notes.store', body: NotePayloadSchema }, prototype)")
+    expect(lines.join('\n')).not.toContain('NoteController')
+  })
+})

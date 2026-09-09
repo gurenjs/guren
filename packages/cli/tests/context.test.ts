@@ -200,6 +200,31 @@ export class Post extends defineModel(posts) {}`,
 })
 
 describe('renderContextMarkdown', () => {
+  it('lists routes still on the prototype fixture as a backlog', () => {
+    const markdown = renderContextMarkdown({
+      framework: { name: 'Guren', version: '0.0.0' },
+      models: [],
+      routes: [
+        { method: 'GET', path: '/posts', name: 'posts.index', controller: { name: 'PostController', action: 'index' } },
+        { method: 'GET', path: '/posts/:id', name: 'posts.show', prototype: true },
+      ],
+      pages: [],
+      controllers: [],
+      resources: [],
+      events: [],
+      jobs: [],
+      middleware: [],
+      listeners: [],
+      validators: [],
+      policies: [],
+      commands: [],
+    })
+
+    expect(markdown).toContain('| GET | /posts/:id | posts.show | (prototype fixture) |')
+    expect(markdown).toContain('### Prototype backlog (1)')
+    expect(markdown).toContain('- GET /posts/:id (posts.show)')
+  })
+
   it('renders structured markdown', () => {
     const md = renderContextMarkdown({
       framework: { name: 'Guren', version: '1.0.0' },

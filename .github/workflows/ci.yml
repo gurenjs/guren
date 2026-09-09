@@ -284,7 +284,7 @@ jobs:
   # themselves and run in parallel with everything else.
   starter-smokes:
     runs-on: ubuntu-latest
-    # Measured 3m26s (run 34229657662); the tutorial is its own job below.
+    # Measured 2m48s (run 34344198364); the tutorial is its own job below.
     timeout-minutes: 20
     services:
       postgres:
@@ -356,11 +356,11 @@ jobs:
   tutorial-smoke:
     runs-on: ubuntu-latest
     # docs/en/tutorials/NN-*.md run as a script, chapter by chapter, each ending
-    # in guren gate and a build (RFC 0019). Measured 12m51s at fifteen chapters
-    # (run 34229657662); the tutorial grows, so the cap has headroom.
+    # in guren gate and a build (RFC 0019). Measured 4m00s at fifteen chapters
+    # (run 34344198364); the tutorial grows, so the cap has headroom.
     # No service container: chapter 1 scaffolds --db sqlite and no chapter
     # reaches for a database server.
-    timeout-minutes: 40
+    timeout-minutes: 20
     env:
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
@@ -469,6 +469,12 @@ jobs:
         env:
           NODE_ENV: production
         run: bun run --cwd examples/blog e2e
+
+      # RFC 0021: the static prototype build, driven from a plain file host with
+      # the Bun server stopped. Rebuilds the production assets to prove the
+      # fixture stays out of them.
+      - name: Prototype build and static E2E
+        run: bun run smoke:prototype
 
       - name: Upload test results
         if: failure()

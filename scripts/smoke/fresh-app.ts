@@ -6,8 +6,10 @@ import { FIELD_TYPES } from '../../packages/cli/src/fields'
 import { DATABASE_DRIVERS } from '../../packages/create-app/src/blueprints'
 import { fileExists } from '../../packages/create-app/src/utils'
 import { assertSessionDrivers } from './session-drivers'
+import { runPrototypeScaffold } from './prototype-scaffold'
 import { auditBlueprintTemplates, auditConsoleWiring, auditStarterTemplate } from './starter-template-audit'
 import {
+  assertSingleInstalledCopies,
   collectLocalPackages,
   declaredDependencies,
   ensureBuiltPackages,
@@ -72,6 +74,8 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['schedule'],
   // The templates ship .oxlintrc.json, so this exercises the overwrite path.
   ['lint', '--force'],
+  // Wiring only here; runPrototypeScaffold() drives the fixture and the static build.
+  ['prototype'],
 ]
 
 /**
@@ -675,16 +679,19 @@ async function main(): Promise<void> {
     }
     await rewriteAppDependencies(appDir, dependencyRoots, `The ${installMode} app`)
     if (installMode === 'packed') {
-      // A tarball dependency is the one claim only this mode can make, and
-      // the only thing that catches it degrading into the vendored one.
+      // Both modes install tarballs now; only `packPackages()` writes under
+      // `.guren-packed/`, so the path is what catches this mode degrading into
+      // the vendored one.
       const declared = declaredDependencies(
         JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as DependencyManifest,
       )
       for (const pkg of await collectLocalPackages()) {
         const dependencyValue = declared[pkg.name]
         assert(
-          typeof dependencyValue === 'string' && dependencyValue.endsWith('.tgz'),
-          `Fresh app did not rewrite ${pkg.name} to a local tarball dependency.`,
+          typeof dependencyValue === 'string'
+            && dependencyValue.startsWith('file:.guren-packed/')
+            && dependencyValue.endsWith('.tgz'),
+          `Fresh app did not rewrite ${pkg.name} to an npm-packed tarball dependency.`,
         )
       }
       console.log(`\nPacked artifact audit passed (${blueprint}): ${appDir}`)
@@ -692,6 +699,7 @@ async function main(): Promise<void> {
     }
 
     await run(['bun', 'install'], appDir, runtimeEnv)
+    await assertSingleInstalledCopies(appDir)
 
     const scaffoldsFeatures = blueprint === 'default'
     if (scaffoldsFeatures) {
@@ -699,6 +707,15 @@ async function main(): Promise<void> {
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       await assertCanonicalScaffolds(appDir)
       await assertFeatureScaffolds(appDir)
+      // RFC 0021 Part 3: prototype-first, a static build with no database,
+      // then promotion; the app that reaches the typecheck, build and gate
+      // below is the promoted one.
+      await runPrototypeScaffold({
+        appDir,
+        cliBin: resolve(repoRoot, 'packages/cli/src/bin.ts'),
+        env: { ...runtimeEnv, GUREN_QUIET_DUPLICATE_ORM: '1' },
+        run,
+      })
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir, runtimeEnv)
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--routes', 'routes/web.ts', '--out', 'types/generated/routes.d.ts', '--force'], appDir, runtimeEnv)
     } else if (blueprint === 'api') {

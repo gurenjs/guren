@@ -127,6 +127,17 @@ await app.actingAs(user).post('/posts', data).assertStatus(201)
 await app.get('/dashboard').assertUnauthorized()
 ```
 
+### Password hashing in tests
+
+You do not need to configure anything to keep password tests fast. `TestApp` sets `GUREN_TESTING=1`, and while that variable is set the default hasher uses cheap parameters: Argon2id at 1 MiB and one iteration on Bun, scrypt at N=1024 elsewhere. A production-strength hash costs over 100 ms, which is most of what a test like this spends:
+
+```ts
+const user = await User.create({ email: 'ada@example.com', name: 'Ada', password: 'correct horse battery' })
+await app.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
+```
+
+Your login test still verifies a real hash: verification reads the parameters stored in it, so a cheap hash verifies in tests and a production hash verifies too. Outside tests, `Hash.needsRehash()` reports a cheap hash as stale, so the rehash-on-login pattern from the [Encryption guide](./encryption.md) upgrades any row a test-mode process wrote. Nothing sets the variable in a deployed app.
+
 ## Testing JSON APIs
 
 For API endpoints, use `.json()` to set the appropriate headers and get JSON-focused assertions:

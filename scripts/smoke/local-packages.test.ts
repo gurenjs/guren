@@ -5,7 +5,12 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { assertLocalGurenDependencies, collectLocalPackages } from './local-packages'
+import {
+  assertLocalGurenDependencies,
+  collectLocalPackages,
+  vendorLocalPackages,
+  type DependencyManifest,
+} from './local-packages'
 
 async function withApp(
   manifest: unknown,
@@ -87,3 +92,53 @@ describe('assertLocalGurenDependencies', () => {
     )
   })
 })
+
+describe('vendorLocalPackages', () => {
+  // Reads the checkout's dist/, so this runs after `bun run build` like the smokes.
+  test('packs every local package into a tarball whose manifest hoists its @guren/* references', async () => {
+    const vendorRoot = await mkdtemp(join(tmpdir(), 'guren-vendor-'))
+    try {
+      const roots = await vendorLocalPackages(vendorRoot)
+      const packages = await collectLocalPackages()
+      expect([...roots.keys()].sort()).toEqual(packages.map((pkg) => pkg.name).sort())
+
+      for (const [name, tarball] of roots) {
+        expect(tarball.endsWith('.tgz')).toBe(true)
+        expect(await Bun.file(tarball).exists()).toBe(true)
+
+        const entries = await tarEntries(tarball)
+        expect(entries).toContain('package/dist/index.js')
+        if (name === '@guren/cli') {
+          // What agent:init and agent:sync read from an installed @guren/cli.
+          expect(entries.some((entry) => entry.startsWith('package/templates/agent/'))).toBe(true)
+        }
+
+        const manifest = await packedManifest(tarball)
+        for (const group of ['dependencies', 'devDependencies', 'optionalDependencies'] as const) {
+          expect(Object.keys(manifest[group] ?? {}).filter((dep) => dep.startsWith('@guren/'))).toEqual([])
+        }
+        for (const [dep, range] of Object.entries(manifest.peerDependencies ?? {})) {
+          if (!dep.startsWith('@guren/')) continue
+          expect(range).toMatch(/^\d+\.\d+\.\d+/)
+          expect(manifest.peerDependenciesMeta?.[dep]).toEqual({ optional: true })
+        }
+      }
+    } finally {
+      await rm(vendorRoot, { recursive: true, force: true })
+    }
+  })
+})
+
+async function tarEntries(tarball: string): Promise<string[]> {
+  const proc = Bun.spawn({ cmd: ['tar', '-tf', tarball], stdout: 'pipe', stderr: 'pipe' })
+  const output = await new Response(proc.stdout).text()
+  expect(await proc.exited).toBe(0)
+  return output.split('\n').map((line) => line.trim()).filter(Boolean)
+}
+
+async function packedManifest(tarball: string): Promise<DependencyManifest> {
+  const proc = Bun.spawn({ cmd: ['tar', '-xOf', tarball, 'package/package.json'], stdout: 'pipe', stderr: 'pipe' })
+  const output = await new Response(proc.stdout).text()
+  expect(await proc.exited).toBe(0)
+  return JSON.parse(output) as DependencyManifest
+}

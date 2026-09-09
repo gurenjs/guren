@@ -23,6 +23,16 @@ export type { ContentfulStatusCode } from 'hono/utils/http-status'
 export { viteAsset } from './http/vite-assets'
 export type { ViteAssetOptions } from './http/vite-assets'
 export { Router } from './mvc/Router'
+// Prototype mode (RFC 0021): the handler a route keeps until its controller
+// exists, and the fixture contract `createApp({ prototype })` loads.
+export { prototype } from './mvc/prototype'
+export type {
+  PrototypeFixture,
+  PrototypeFixtureLoader,
+  PrototypeResult,
+  PrototypeRouteHandler,
+  PrototypeServerContext,
+} from './mvc/prototype'
 export type {
   BindableModel,
   AgentRouteMetadata,

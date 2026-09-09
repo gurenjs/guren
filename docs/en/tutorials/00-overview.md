@@ -40,6 +40,7 @@ A blog, and everything a real one needs:
 | 9–11 | Comments, tags, cover images and a gallery, and email when someone comments on your post |
 | 12–13 | Your app exposed as tools an agent can call, and an architecture that documents itself |
 | 14 | The same app with database-backed sessions and rate limiting, running in production mode behind the CI gate it was given in chapter 1 |
+| 15 | One more feature, built the other way round: its screens shipped as static files for a customer to click before any backend existed, then promoted to a real one from the same code |
 
 ## The chapters
 
@@ -61,6 +62,7 @@ Each chapter starts where the previous one ended. Follow them in order.
 | 12 | [Your App as an Agent's Tool](./12-agent-tools.md) | 75 min |
 | 13 | [Documentation That Cannot Go Stale](./13-documented.md) | 60 min |
 | 14 | [Production](./14-production.md) | 45 min |
+| 15 | [Prototype First](./15-prototype-first.md) | 60 min |
 
 ## Prerequisites
 
