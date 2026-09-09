@@ -16,6 +16,92 @@ describe('InertiaEngine SSR integration', () => {
   })
 
 
+  describe('page payload', () => {
+    const SHIM = /<script>try\{[\s\S]*?\}catch\(_\)\{\}<\/script>/u
+    const ELEMENT = '<script data-page="app" type="application/json">'
+    const countOf = (body: string, needle: string) => body.split(needle).length - 1
+
+    function renderDocument(): Promise<string> {
+      return inertia('Dashboard', { stats: { users: 2 } }, { url: '/dashboard' }).then((r) => r.text())
+    }
+
+    function renderWithSsr(result: { body: string; pageEmbedded?: boolean }): Promise<string> {
+      return inertia('Dashboard', { stats: { users: 2 } }, {
+        url: '/dashboard',
+        ssr: { render: async () => ({ head: [], ...result }) },
+      }).then((r) => r.text())
+    }
+
+    it('serializes the payload once, into the element, and defines the global from it', async () => {
+      const body = await renderDocument()
+
+      expect(countOf(body, '"users":2')).toBe(1)
+      expect(body).not.toContain('window.__INERTIA_PAGE__ = ')
+      expect(body).toContain(ELEMENT)
+      // After the element and before the module entry, in document order.
+      const shimAt = body.search(SHIM)
+      expect(shimAt).toBeGreaterThan(body.indexOf(ELEMENT))
+      expect(shimAt).toBeLessThan(body.indexOf('<script type="module"'))
+    })
+
+    it('uses an SSR body as is when the renderer reports the payload embedded', async () => {
+      const body = await renderWithSsr({
+        body: `${ELEMENT}{"component":"Dashboard","props":{"stats":{"users":2}}}</script><div id="app">SSR</div>`,
+        pageEmbedded: true,
+      })
+
+      expect(countOf(body, ELEMENT)).toBe(1)
+      expect(countOf(body, '"users":2')).toBe(1)
+    })
+
+    it('appends the payload element to an SSR body whose renderer reports nothing', async () => {
+      const body = await renderWithSsr({ body: '<div id="app">SSR</div>' })
+
+      expect(body).toContain(`SSR</div>${ELEMENT}{"component":"Dashboard"`)
+      expect(countOf(body, '"users":2')).toBe(1)
+    })
+
+    // The shim is JavaScript no other test runs; executed against a stub document.
+    describe('the inline global shim', () => {
+      async function runShim(stub: { script?: string; attribute?: string }): Promise<unknown> {
+        const element = (await renderDocument()).match(SHIM)![0]
+        const source = element.slice('<script>'.length, -'</script>'.length)
+        const window: { __INERTIA_PAGE__?: unknown } = {}
+        const document = {
+          querySelector: () =>
+            stub.script === undefined ? null : { tagName: 'SCRIPT', textContent: stub.script },
+          getElementById: () =>
+            stub.attribute === undefined ? null : { tagName: 'DIV', getAttribute: () => stub.attribute },
+        }
+        new Function('window', 'document', source)(window, document)
+        return window.__INERTIA_PAGE__
+      }
+
+      it('should use the client selector for the JSON script element', async () => {
+        const body = await renderDocument()
+
+        expect(body.match(SHIM)![0]).toContain(`querySelector('script[data-page="app"][type="application/json"]')`)
+        await expect(runShim({ script: '{"component":"Dashboard","props":{}}' })).resolves.toEqual({
+          component: 'Dashboard',
+          props: {},
+        })
+      })
+
+      it('should define the global from the legacy attribute on the container', async () => {
+        await expect(runShim({ attribute: '{"component":"Dashboard","props":{}}' })).resolves.toEqual({
+          component: 'Dashboard',
+          props: {},
+        })
+      })
+
+      it('should ignore a container attribute that is not a page payload', async () => {
+        await expect(runShim({ attribute: '3' })).resolves.toBeUndefined()
+        await expect(runShim({ attribute: 'products' })).resolves.toBeUndefined()
+        await expect(runShim({})).resolves.toBeUndefined()
+      })
+    })
+  })
+
   it('ships a bare body and head when no document options are registered', async () => {
     const response = await inertia('Docs/Show', { categories: [] }, { url: '/docs/guides/overview' })
     const body = await response.text()

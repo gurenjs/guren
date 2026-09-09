@@ -45,6 +45,12 @@ export interface InertiaSsrContext {
 export interface InertiaSsrResult {
   head: string[];
   body: string;
+  /**
+   * True when `body` already carries the page in its `data-page` element, as
+   * Inertia's own `createInertiaApp` writes it. Unset, the engine appends its
+   * element after the body: a second copy, never a document without a payload.
+   */
+  pageEmbedded?: boolean;
 }
 
 export type InertiaSsrRenderer = (
@@ -238,7 +244,6 @@ async function renderDocument(
     ...options.importMap,
   };
   const importMap = JSON.stringify({ imports: importMapEntries }, null, 2);
-  const serializedPage = serializePage(page);
   const stylesheetLinks = renderStyles(styles);
   const criticalCss = resolveDocumentValue(
     "criticalCss",
@@ -256,6 +261,16 @@ async function renderDocument(
   const hasCustomTitle = headElements.some((element) =>
     /<title\b[^>]*>/iu.test(element)
   );
+  // Inertia v3 contract: the initial page ships in a JSON script element and
+  // the container div stays empty (serializePage escapes `<`). One copy: the
+  // global is read back from that element, and a second serialized copy is a
+  // third of a docs page's gzipped response (RFC 0014).
+  const appMarkup =
+    ssrResult === undefined
+      ? `${pagePayloadElement(page)}<div id="app"></div>`
+      : ssrResult.pageEmbedded
+        ? ssrResult.body
+        : `${ssrResult.body}${pagePayloadElement(page)}`;
   const headSegments = [
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
@@ -270,14 +285,7 @@ async function renderDocument(
     Object.keys(importMapEntries).length > 0
       ? `<script type="importmap">${importMap}</script>`
       : "",
-    `<script>window.__INERTIA_PAGE__ = ${serializedPage};</script>`,
   ].filter((segment) => segment && segment.length > 0);
-  // Inertia v3 contract: the initial page ships in a JSON script element and
-  // the container div stays empty. serializePage escapes `<`, so </script>
-  // breakout is safe.
-  const appMarkup =
-    ssrResult?.body ??
-    `<script data-page="app" type="application/json">${serializedPage}</script><div id="app"></div>`;
   const bodyClass = resolveDocumentValue("bodyClass", options, page.component);
   const bodyAttributes = bodyClass ? ` class="${escapeAttribute(bodyClass)}"` : "";
   const lang = escapeAttribute(options.lang ?? "en");
@@ -288,11 +296,25 @@ async function renderDocument(
     ${headSegments.join("\n    ")}
   </head>
   <body${bodyAttributes}>
-    ${appMarkup}
+    ${appMarkup}${PAGE_GLOBAL_FROM_ELEMENT}
     <script type="module" src="${entry}"></script>
   </body>
 </html>`;
 }
+
+function pagePayloadElement(page: InertiaPagePayload): string {
+  return `<script data-page="app" type="application/json">${serializePage(page)}</script>`;
+}
+
+/**
+ * `window.__INERTIA_PAGE__` for readers other than the client. Same selector
+ * and guards as the client's `getInitialPage` (@guren/inertia-client), so a
+ * container carrying a non-payload `data-page` is ignored rather than mounted.
+ * A classic inline script, so it has run before the module entry does.
+ */
+const PAGE_GLOBAL_FROM_ELEMENT =
+  `<script>try{var e=document.querySelector('script[data-page="app"][type="application/json"]')||document.getElementById("app"),` +
+  `p=JSON.parse(e.tagName==="SCRIPT"?e.textContent:e.getAttribute("data-page"));if(p&&p.component)window.__INERTIA_PAGE__=p}catch(_){}</script>`;
 
 async function tryRenderSsr(
   page: InertiaPagePayload,
@@ -333,6 +355,7 @@ async function tryRenderSsr(
     return {
       body: result.body,
       head: Array.isArray(result.head) ? result.head : [],
+      pageEmbedded: result.pageEmbedded === true,
     };
   } catch (error) {
     console.error(
