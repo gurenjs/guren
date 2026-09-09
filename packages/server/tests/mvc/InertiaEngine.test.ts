@@ -16,6 +16,47 @@ describe('InertiaEngine SSR integration', () => {
   })
 
 
+  // A docs page's props were a third of its gzipped response when the head
+  // repeated the JSON the data-page element already carried (RFC 0014).
+  it('serializes the page payload once and derives the head global from it', async () => {
+    const response = await inertia('Dashboard', { stats: { users: 2 } }, { url: '/dashboard' })
+    const body = await response.text()
+
+    expect(body.split('"users":2').length - 1).toBe(1)
+    expect(body).not.toContain('window.__INERTIA_PAGE__ = ')
+    expect(body).toContain('<script data-page="app" type="application/json">')
+    expect(body).toContain('window.__INERTIA_PAGE__=JSON.parse(t)')
+    // Defined before the module entry runs, in document order.
+    expect(body.indexOf('window.__INERTIA_PAGE__=JSON.parse(t)')).toBeLessThan(body.indexOf('<script type="module"'))
+  })
+
+  it('derives the head global from a legacy data-page attribute in an SSR body', async () => {
+    const response = await inertia('Dashboard', { stats: { users: 2 } }, {
+      url: '/dashboard',
+      ssr: {
+        render: async () => ({
+          head: [],
+          body: '<div id="app" data-page="{&quot;component&quot;:&quot;Dashboard&quot;}">SSR</div>',
+        }),
+      },
+    })
+    const body = await response.text()
+
+    expect(body).not.toContain('window.__INERTIA_PAGE__ = ')
+    expect(body).toContain('window.__INERTIA_PAGE__=JSON.parse(t)')
+  })
+
+  it('keeps the full head global when a custom SSR body carries no payload element', async () => {
+    const response = await inertia('Dashboard', { stats: { users: 2 } }, {
+      url: '/dashboard',
+      ssr: { render: async () => ({ head: [], body: '<div id="app">SSR</div>' }) },
+    })
+    const body = await response.text()
+
+    expect(body).toContain('window.__INERTIA_PAGE__ = {"component":"Dashboard"')
+    expect(body).not.toContain('JSON.parse(t)')
+  })
+
   it('ships a bare body and head when no document options are registered', async () => {
     const response = await inertia('Docs/Show', { categories: [] }, { url: '/docs/guides/overview' })
     const body = await response.text()

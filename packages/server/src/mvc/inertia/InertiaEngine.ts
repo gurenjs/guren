@@ -256,6 +256,18 @@ async function renderDocument(
   const hasCustomTitle = headElements.some((element) =>
     /<title\b[^>]*>/iu.test(element)
   );
+  // Inertia v3 contract: the initial page ships in a JSON script element and
+  // the container div stays empty. serializePage escapes `<`, so </script>
+  // breakout is safe.
+  const appMarkup =
+    ssrResult?.body ??
+    `<script data-page="app" type="application/json">${serializedPage}</script><div id="app"></div>`;
+  // The payload ships once. Inertia's SSR body and the CSR shell both carry it
+  // in a `data-page` element the client reads, so the head global is derived
+  // from that element rather than serialized again: the copy was a third of a
+  // docs page's gzipped response (RFC 0014). A custom SSR body without the
+  // element keeps the full global, so no document is left without a payload.
+  const pageEmbedded = appMarkup.includes("data-page=");
   const headSegments = [
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
@@ -270,14 +282,11 @@ async function renderDocument(
     Object.keys(importMapEntries).length > 0
       ? `<script type="importmap">${importMap}</script>`
       : "",
-    `<script>window.__INERTIA_PAGE__ = ${serializedPage};</script>`,
+    pageEmbedded
+      ? ""
+      : `<script>window.__INERTIA_PAGE__ = ${serializedPage};</script>`,
   ].filter((segment) => segment && segment.length > 0);
-  // Inertia v3 contract: the initial page ships in a JSON script element and
-  // the container div stays empty. serializePage escapes `<`, so </script>
-  // breakout is safe.
-  const appMarkup =
-    ssrResult?.body ??
-    `<script data-page="app" type="application/json">${serializedPage}</script><div id="app"></div>`;
+  const pageGlobal = pageEmbedded ? PAGE_GLOBAL_FROM_ELEMENT : "";
   const bodyClass = resolveDocumentValue("bodyClass", options, page.component);
   const bodyAttributes = bodyClass ? ` class="${escapeAttribute(bodyClass)}"` : "";
   const lang = escapeAttribute(options.lang ?? "en");
@@ -288,11 +297,23 @@ async function renderDocument(
     ${headSegments.join("\n    ")}
   </head>
   <body${bodyAttributes}>
-    ${appMarkup}
+    ${appMarkup}${pageGlobal}
     <script type="module" src="${entry}"></script>
   </body>
 </html>`;
 }
+
+/**
+ * `window.__INERTIA_PAGE__` for whatever reads it (a client older than the
+ * `data-page` fallback, an app's own script), parsed from the element already
+ * in the document. Reads both shapes the client accepts: the v3 JSON script
+ * and the legacy attribute on the container. An inline classic script, so it
+ * has run before the module entry does.
+ */
+const PAGE_GLOBAL_FROM_ELEMENT =
+  '<script>(function(){var s=document.querySelector(\'script[data-page="app"]\')||document.getElementById("app");' +
+  'var t=s&&(s.tagName==="SCRIPT"?s.textContent:s.getAttribute("data-page"));' +
+  "if(t)window.__INERTIA_PAGE__=JSON.parse(t)})();</script>";
 
 async function tryRenderSsr(
   page: InertiaPagePayload,
