@@ -147,13 +147,9 @@ setInertiaDocument({
 })
 
 // The Host header is client-controlled, so production should answer only to the
-// host this app is deployed as, which APP_URL carries.
-//
-// Read at module scope, where not every platform has populated process.env yet
-// (the Cloudflare worker imports this module before wrangler `vars` land). A
-// missing value therefore warns and leaves the check off, rather than throwing
-// and stopping the app from booting at all. Emailed links do not depend on this
-// — app/Auth/AppUrl.ts resolves those per request and fails closed there.
+// host this app is deployed as, which APP_URL carries. Emailed links do not
+// depend on this — app/Auth/AppUrl.ts resolves those per request and fails
+// closed there.
 function hostAuthorization() {
   const exclude = ['/health']
 
@@ -162,6 +158,10 @@ function hostAuthorization() {
   }
 
   const appUrl = process.env.APP_URL?.trim()
+  // Read at module scope, where not every platform has populated process.env yet
+  // (the Cloudflare worker imports this module before wrangler `vars` land), so a
+  // missing value warns and leaves the check off rather than throwing and
+  // stopping the app from booting at all.
   if (!appUrl) {
     console.warn('[app] APP_URL is not set — host authorization is disabled. Set it to the public base URL of this app.')
     return false

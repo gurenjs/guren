@@ -263,7 +263,7 @@ export default class HomeController extends Controller {
 }
 ```
 
-そして `resources/js/pages/Home.tsx` を置き換えます。変更点は `Props` の `tagline` フィールドと、それをレンダリングする段落の 2 か所で、残りは雛形のページそのままです。
+そして `resources/js/pages/Home.tsx` を置き換えます。変更点は `Props` の `tagline` フィールドと、それをレンダリングする段落の 2 か所です。この段落は、雛形にある「Edit `resources/js/pages/Home.tsx` to get started」の一文と入れ替わります。ページの残りはそのままです。
 
 ```tsx file=resources/js/pages/Home.tsx
 import { Head } from '@inertiajs/react'

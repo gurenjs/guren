@@ -135,13 +135,9 @@ setInertiaDocument({
 })
 
 // The Host header is client-controlled, so production should answer only to the
-// host this app is deployed as, which APP_URL carries.
-//
-// Read at module scope, where not every platform has populated process.env yet
-// (the Cloudflare worker imports this module before wrangler `vars` land). A
-// missing value therefore warns and leaves the check off, rather than throwing
-// and stopping the app from booting at all. Emailed links do not depend on this
-// — app/Auth/AppUrl.ts resolves those per request and fails closed there.
+// host this app is deployed as, which APP_URL carries. Emailed links do not
+// depend on this — app/Auth/AppUrl.ts resolves those per request and fails
+// closed there.
 function hostAuthorization() {
   const exclude = ['/health']
 
@@ -150,6 +146,10 @@ function hostAuthorization() {
   }
 
   const appUrl = process.env.APP_URL?.trim()
+  // Read at module scope, where not every platform has populated process.env yet
+  // (the Cloudflare worker imports this module before wrangler `vars` land), so a
+  // missing value warns and leaves the check off rather than throwing and
+  // stopping the app from booting at all.
   if (!appUrl) {
     console.warn('[app] APP_URL is not set — host authorization is disabled. Set it to the public base URL of this app.')
     return false
@@ -927,6 +927,7 @@ git commit -m "feat: add the profile page"
 - **`withCsrf()` が「did not set an XSRF-TOKEN cookie」で throw する。** `createApp` に `auth` が無いか、用意のための GET パスがアプリで配信されていません。ページを返すパスを渡してください。
 - **同じメールで 2 回登録すると 500 になる。** 一意制約が仕事をしていて、その上で先に検査するものが無い状態です。第 6 章でチェックを足します。それまではデータベースエラーですが、アカウントが 2 つできるよりはましです。
 - **`this.auth` が「requires the auth middleware」で throw する。** `AuthProvider` が `providers` に無いか、`auth: {}` が抜けています。両方必要です。片方がセッションをマウントし、もう片方がモデルを指名します。
+- **サインインしていたのに、いつのまにかログアウトしている。** `bun run dev` はサーバーを `bun --hot` で動かしますが、`auth: {}` が用意するセッションはメモリ上にあるので、ホットリロードのたびに消えます。サインインし直してください。第 14 章でセッションをデータベースに移すまでは、これが正常な挙動です。
 - **ログインのテストで `actingAs()` が常に成功する。** `attempt()` を含む認証コンテキスト全体をスタブに置き換えるからです。ユーザー*として振る舞う*ために使うものなので、サインインそのもののテストには使わないでください。
 
 ## 演習
