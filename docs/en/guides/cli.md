@@ -33,6 +33,7 @@ bunx guren add session
 bunx guren add broadcasting
 bunx guren add schedule
 bunx guren add lint
+bunx guren add prototype
 ```
 
 > **Golden path:** Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
@@ -90,6 +91,18 @@ Its refusal likewise comes before the table it would otherwise append to your
 `db/schema.ts`. So does `make:feature`, which reaches the same scaffold
 directly. Scaffold a JSON controller with `make:controller` instead, and wire it
 into `routes/api.ts`.
+
+`add prototype` installs prototype mode ([Prototype First](./prototype-first.md)): a
+fixture under `resources/js/prototype/` that answers Inertia visits from seed data, the
+`dev:prototype` and `build:prototype` scripts, and the two loader lines in
+`resources/js/app.tsx` and `src/app.ts`. `--remove` takes the scripts and the loaders
+back out. `make:feature <Entity> --fields "…" --prototype` then writes the visible half
+of a feature only, pages, validator, a page-data type and fixture entries, and prints the
+routes to register on the `prototype` handler; the same command without the flag, in an
+app whose routes for that entity are still on `prototype`, promotes it: model, Resource
+and controller, with the Resource typed against the page-data type and the pages left as
+they are. `bun run build:prototype` runs `check --prototype` before Vite, so a route with
+no fixture entry fails the build rather than the customer's click.
 
 `make:controller` reads the same two signals but adapts instead of refusing: on
 an app they identify as API-only, the generated controller returns JSON
@@ -166,6 +179,7 @@ bunx guren audit
 bunx guren check --arch    # architecture boundaries (guren.arch.ts + module rules)
 bunx guren check --docs    # doc links: OKF frontmatter (type/entities/related) + body links + @docs tags
 bunx guren check --spec    # docs/spec/ views match a fresh regeneration
+bunx guren check --prototype  # routes on the prototype handler have a named fixture entry, and the loaders are wired
 ```
 
 Combining suite flags runs their union. `--changed` restricts any of

@@ -575,10 +575,16 @@ release that ships them, as `common-pitfalls.md` describes.
   smoke that scaffolds with `--prototype`, runs `build:prototype` with no
   database configured, then promotes `Post` and runs the ordinary starter
   smoke.
-- **Part 4 — docs and dogfood.** A "Prototype first" guide (host matrix, the
+- **Part 4 — docs and dogfood** (shipped as `feat/rfc0021-part4`; the blog fixture landed with Part 1). A "Prototype first" guide (host matrix, the
   reset flow, the navigation limitations, the noindex default and the
   access-control warning), a tutorial chapter that starts from the prototype,
   and the blog example carrying a fixture.
+  **Amended in implementation (Part 4):** the guide is
+  `docs/{en,ja}/guides/prototype-first.md`, and the chapter is an epilogue
+  (chapter 15) to the RFC 0019 course rather than a course that starts from a
+  prototype: it prototypes one more feature on the course's finished blog,
+  hosts it, then promotes it, so `smoke:tutorial` executes the whole loop
+  against the app the reader already has.
 
 ## Alternatives Considered
 

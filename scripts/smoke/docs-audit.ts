@@ -41,6 +41,13 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(cli.includes('bunx guren check --docs'), 'CLI guide must document the doc-link CI gate.')
   assert(cli.includes('bunx guren check --spec'), 'CLI guide must document the spec drift CI gate.')
   assert(!cli.includes('`check` and `audit` both exit'), 'CLI guide must not claim plain check sets an exit code — only the suite flags gate CI.')
+  assert(cli.includes('bunx guren add prototype'), 'CLI guide must document the prototype scaffold path.')
+  assert(cli.includes('bunx guren check --prototype'), 'CLI guide must document the prototype wiring gate.')
+  const prototypeFirst = await read(root, 'docs/en/guides/prototype-first.md')
+  assert(prototypeFirst.includes('?prototype.reset=1'), 'Prototype First guide must document the reset flow.')
+  assert(prototypeFirst.includes('noindex'), 'Prototype First guide must name the noindex default of the shell.')
+  assert(prototypeFirst.includes('GUREN_PROTOTYPE_ROUTES=1'), 'Prototype First guide must document the production refusal override.')
+  assert(prototypeFirst.includes('not_found_handling'), 'Prototype First guide must carry the host matrix, Workers Static Assets included.')
   assert(cli.includes('`make:command <Name>`'), 'CLI guide must list make:command in the scaffold table.')
   assert(cli.includes('bun run console <command>'), 'CLI guide must distinguish the app command runner from the `guren console` REPL.')
   // the per-agent MCP config map mirrors planComponents (agent-targets.ts);
@@ -182,6 +189,11 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   }
   assert(cli.includes('agent:init --target'), 'Japanese CLI guide must document agent:init --target.')
   assert(!/db:seed[^\n]*--class/.test(cli), 'Japanese CLI guide must not spell a per-seeder flag on a db:seed line — the command takes no such argument and would silently seed everything.')
+  assert(cli.includes('bunx guren add prototype'), 'Japanese CLI guide must document the prototype scaffold path.')
+  assert(cli.includes('bunx guren check --prototype'), 'Japanese CLI guide must document the prototype wiring gate.')
+  const prototypeFirst = await read(root, 'docs/ja/guides/prototype-first.md')
+  assert(prototypeFirst.includes('?prototype.reset=1'), 'Japanese Prototype First guide must document the reset flow.')
+  assert(prototypeFirst.includes('GUREN_PROTOTYPE_ROUTES=1'), 'Japanese Prototype First guide must document the production refusal override.')
 
   const firstSteps = await read(root, 'docs/ja/guides/first-steps.md')
   assert(firstSteps.includes('@guren/core'), 'Japanese First Steps must describe the @guren/core standard path.')
