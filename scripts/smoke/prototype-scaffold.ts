@@ -121,5 +121,11 @@ export async function runPrototypeScaffold(options: PrototypeScaffoldOptions): P
   )
   const promotedFixture = await readFile(join(appDir, 'resources/js/prototype/index.ts'), 'utf8')
   assert(promotedFixture === fixture, 'promotion must leave the fixture as it was')
-  console.log('[smoke:prototype-scaffold] promoted: backend written, pages and fixture kept')
+
+  // The promoted Resource must still yield a `Data` member. codegen only warns
+  // when it cannot read one, so nothing downstream fails on a silent omission.
+  await cli('codegen', '--force')
+  const dataTypes = await readFile(join(appDir, '.guren/data.gen.ts'), 'utf8')
+  assert(/^\s*export type Note = /mu.test(dataTypes), 'promotion left Data.Note out of data.gen.ts')
+  console.log('[smoke:prototype-scaffold] promoted: backend written, pages and fixture kept, Data.Note emitted')
 }

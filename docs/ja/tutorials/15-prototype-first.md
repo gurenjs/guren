@@ -433,7 +433,7 @@ bun test tests/AnnouncementController.test.ts
 rubric:
 
 - **`db/schema.ts`** に 4 つの列を持つ `announcements` テーブルが増え、それ以外は変わっていない。`db/migrations/` の下にマイグレーションが生成され、適用されている。
-- **`app/Models/Announcement.ts`**、**`app/Http/Resources/AnnouncementResource.ts`**、**`app/Http/Controllers/AnnouncementController.ts`** が存在する。Resource の `toArray()` は、ページが組み立てられた型 `AnnouncementData` を返す。顧客が見た形が、そのままシリアライザーの契約になっている。
+- **`app/Models/Announcement.ts`**、**`app/Http/Resources/AnnouncementResource.ts`**、**`app/Http/Controllers/AnnouncementController.ts`** が存在する。Resource の `toArray()` は、ページが組み立てられた型 `AnnouncementData` の別名 `AnnouncementResourceData` を返す。顧客が見た形が、そのままシリアライザーの契約になり、`codegen` はそれを `Data.Announcement` として書き出す。
 - **`routes/web.ts`** に `announcements.*` の `prototype` ハンドラーが残っておらず、`index` と `show` は公開のまま、残りは `auth` グループのまま、`params` と `body` のスキーマは変わっていない。
 - **`resources/js/pages/announcements/`**、**`app/Http/Validators/AnnouncementValidator.ts`**、**`resources/js/prototype/index.ts`** に触れていない。`git diff --stat` で確認する。ページこそがこの演習の要点で、fixture は `build:prototype` に答え続ける。
 - **`docs/spec/`** が再生成され、`check --spec` が緑。

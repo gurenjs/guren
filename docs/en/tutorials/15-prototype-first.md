@@ -433,7 +433,7 @@ Hand the backend to the agent:
 The rubric:
 
 - **`db/schema.ts`** gained an `announcements` table with the four columns and nothing else changed. A migration under `db/migrations/` was generated and applied.
-- **`app/Models/Announcement.ts`**, **`app/Http/Resources/AnnouncementResource.ts`** and **`app/Http/Controllers/AnnouncementController.ts`** exist. The Resource's `toArray()` returns `AnnouncementData`, the type the pages were built against, so the shape the customer saw is now the serializer's contract.
+- **`app/Models/Announcement.ts`**, **`app/Http/Resources/AnnouncementResource.ts`** and **`app/Http/Controllers/AnnouncementController.ts`** exist. The Resource's `toArray()` returns `AnnouncementResourceData`, its own alias for the `AnnouncementData` the pages were built against, so the shape the customer saw is now the serializer's contract and `codegen` emits it as `Data.Announcement`.
 - **`routes/web.ts`** has no `prototype` handler left for `announcements.*`, `index` and `show` are still public, the rest still in the `auth` group, and the `params` and `body` schemas are unchanged.
 - **`resources/js/pages/announcements/`**, **`app/Http/Validators/AnnouncementValidator.ts`** and **`resources/js/prototype/index.ts`** are untouched. `git diff --stat` is the check; the pages are the point of the exercise, and the fixture keeps serving `build:prototype`.
 - **`docs/spec/`** was regenerated, so `check --spec` is green.
