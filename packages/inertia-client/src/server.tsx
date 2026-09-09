@@ -29,6 +29,8 @@ export interface RenderInertiaServerOptions {
 export interface RenderInertiaServerResult {
   head: string[]
   body: string
+  /** Always true: createInertiaApp writes the page into the body's `data-page` element itself. */
+  pageEmbedded: true
 }
 
 const defaultRender = renderToString
@@ -64,5 +66,6 @@ export async function renderInertiaServer(options: RenderInertiaServerOptions): 
   return {
     head: result.head ?? [],
     body: result.body,
+    pageEmbedded: true,
   }
 }

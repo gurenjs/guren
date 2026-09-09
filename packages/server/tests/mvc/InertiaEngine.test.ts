@@ -16,106 +16,87 @@ describe('InertiaEngine SSR integration', () => {
   })
 
 
-  // The payload is the largest thing in a docs document: a second serialized
-  // copy measured at a third of the gzipped response (RFC 0014).
   describe('page payload', () => {
-    const SHIM = /<script>\(function\(\)\{[\s\S]*?\}\)\(\);<\/script>/u
+    const SHIM = /<script>try\{[\s\S]*?\}catch\(_\)\{\}<\/script>/u
     const ELEMENT = '<script data-page="app" type="application/json">'
+    const countOf = (body: string, needle: string) => body.split(needle).length - 1
 
-    async function render(ssrBody?: string): Promise<string> {
-      const response = await inertia('Dashboard', { stats: { users: 2 } }, {
+    function renderDocument(): Promise<string> {
+      return inertia('Dashboard', { stats: { users: 2 } }, { url: '/dashboard' }).then((r) => r.text())
+    }
+
+    function renderWithSsr(result: { body: string; pageEmbedded?: boolean }): Promise<string> {
+      return inertia('Dashboard', { stats: { users: 2 } }, {
         url: '/dashboard',
-        ...(ssrBody === undefined ? {} : { ssr: { render: async () => ({ head: [], body: ssrBody }) } }),
-      })
-      return response.text()
+        ssr: { render: async () => ({ head: [], ...result }) },
+      }).then((r) => r.text())
     }
 
     it('serializes the payload once, into the element, and defines the global from it', async () => {
-      const body = await render()
+      const body = await renderDocument()
 
-      expect(body.split('"users":2').length - 1).toBe(1)
+      expect(countOf(body, '"users":2')).toBe(1)
       expect(body).not.toContain('window.__INERTIA_PAGE__ = ')
       expect(body).toContain(ELEMENT)
-      // The shim sits after the element and before the module entry, in document order.
+      // After the element and before the module entry, in document order.
       const shimAt = body.search(SHIM)
       expect(shimAt).toBeGreaterThan(body.indexOf(ELEMENT))
       expect(shimAt).toBeLessThan(body.indexOf('<script type="module"'))
     })
 
-    it('uses an SSR body as is when it carries the payload element', async () => {
-      const body = await render(`${ELEMENT}{"component":"Dashboard","props":{"stats":{"users":2}}}</script><div id="app">SSR</div>`)
+    it('uses an SSR body as is when the renderer reports the payload embedded', async () => {
+      const body = await renderWithSsr({
+        body: `${ELEMENT}{"component":"Dashboard","props":{"stats":{"users":2}}}</script><div id="app">SSR</div>`,
+        pageEmbedded: true,
+      })
 
-      expect(body.split(ELEMENT).length - 1).toBe(1)
-      expect(body.split('"users":2').length - 1).toBe(1)
+      expect(countOf(body, ELEMENT)).toBe(1)
+      expect(countOf(body, '"users":2')).toBe(1)
     })
 
-    it('uses an SSR body as is when it carries the legacy attribute on the container', async () => {
-      const body = await render('<div data-ssr="true" id="app" data-page="{&quot;component&quot;:&quot;Dashboard&quot;}">SSR</div>')
-
-      expect(body).not.toContain(ELEMENT)
-      expect(body).toMatch(SHIM)
-    })
-
-    it('appends the payload element to a custom SSR body that carries none', async () => {
-      const body = await render('<div id="app">SSR</div>')
+    it('appends the payload element to an SSR body whose renderer reports nothing', async () => {
+      const body = await renderWithSsr({ body: '<div id="app">SSR</div>' })
 
       expect(body).toContain(`SSR</div>${ELEMENT}{"component":"Dashboard"`)
-      expect(body.split('"users":2').length - 1).toBe(1)
+      expect(countOf(body, '"users":2')).toBe(1)
     })
 
-    // A substring test would take these for the element and leave nothing to hydrate.
-    it('is not fooled by data-page mentioned in prose or set on another element', async () => {
-      for (const decoy of [
-        '<div id="app"><code>&lt;div id="app" data-page="..."&gt;</code></div>',
-        '<div id="app"><button data-page="2">next</button></div>',
-        '<div id="root" data-page="{&quot;component&quot;:&quot;X&quot;}">SSR</div>',
-      ]) {
-        expect(await render(decoy)).toContain(ELEMENT)
-      }
-    })
-
-    // The shim is JavaScript the tests would otherwise never run: it is executed
-    // here against a stub document for each element shape the client accepts.
+    // The shim is JavaScript no other test runs; executed against a stub document.
     describe('the inline global shim', () => {
-      type Stub = { script?: string; attribute?: string }
-
-      async function runShim(stub: Stub): Promise<{ page: unknown; selector: string | undefined }> {
-        const body = await render()
-        const source = body.match(SHIM)![0].replace(/^<script>|<\/script>$/gu, '')
+      async function runShim(stub: { script?: string; attribute?: string }): Promise<unknown> {
+        const source = (await renderDocument()).match(SHIM)![0].replace(/^<script>|<\/script>$/gu, '')
         const window: { __INERTIA_PAGE__?: unknown } = {}
-        let selector: string | undefined
         const document = {
-          querySelector(query: string) {
-            selector = query
-            return stub.script === undefined ? null : { tagName: 'SCRIPT', textContent: stub.script }
-          },
-          getElementById() {
-            return stub.attribute === undefined
-              ? null
-              : { tagName: 'DIV', getAttribute: () => stub.attribute }
-          },
+          querySelector: () =>
+            stub.script === undefined ? null : { tagName: 'SCRIPT', textContent: stub.script },
+          getElementById: () =>
+            stub.attribute === undefined ? null : { tagName: 'DIV', getAttribute: () => stub.attribute },
         }
         new Function('window', 'document', source)(window, document)
-        return { page: window.__INERTIA_PAGE__, selector }
+        return window.__INERTIA_PAGE__
       }
 
-      it('should define the global from the JSON script element, with the client selector', async () => {
-        const { page, selector } = await runShim({ script: '{"component":"Dashboard","props":{}}' })
+      it('should use the client selector for the JSON script element', async () => {
+        const body = await renderDocument()
 
-        expect(page).toEqual({ component: 'Dashboard', props: {} })
-        expect(selector).toBe('script[data-page="app"][type="application/json"]')
+        expect(body.match(SHIM)![0]).toContain(`querySelector('script[data-page="app"][type="application/json"]')`)
+        await expect(runShim({ script: '{"component":"Dashboard","props":{}}' })).resolves.toEqual({
+          component: 'Dashboard',
+          props: {},
+        })
       })
 
       it('should define the global from the legacy attribute on the container', async () => {
-        const { page } = await runShim({ attribute: '{"component":"Dashboard","props":{}}' })
-
-        expect(page).toEqual({ component: 'Dashboard', props: {} })
+        await expect(runShim({ attribute: '{"component":"Dashboard","props":{}}' })).resolves.toEqual({
+          component: 'Dashboard',
+          props: {},
+        })
       })
 
       it('should ignore a container attribute that is not a page payload', async () => {
-        expect((await runShim({ attribute: '3' })).page).toBeUndefined()
-        expect((await runShim({ attribute: 'products' })).page).toBeUndefined()
-        expect((await runShim({})).page).toBeUndefined()
+        await expect(runShim({ attribute: '3' })).resolves.toBeUndefined()
+        await expect(runShim({ attribute: 'products' })).resolves.toBeUndefined()
+        await expect(runShim({})).resolves.toBeUndefined()
       })
     })
   })

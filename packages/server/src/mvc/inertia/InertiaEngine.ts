@@ -45,6 +45,12 @@ export interface InertiaSsrContext {
 export interface InertiaSsrResult {
   head: string[];
   body: string;
+  /**
+   * True when `body` already carries the page in its `data-page` element, as
+   * Inertia's own `createInertiaApp` writes it. Unset, the engine appends its
+   * element after the body: a second copy, never a document without a payload.
+   */
+  pageEmbedded?: boolean;
 }
 
 export type InertiaSsrRenderer = (
@@ -256,17 +262,15 @@ async function renderDocument(
     /<title\b[^>]*>/iu.test(element)
   );
   // Inertia v3 contract: the initial page ships in a JSON script element and
-  // the container div stays empty (serializePage escapes `<`). Serialized once:
-  // an SSR body carrying the element is used as is, any other body gets the
-  // engine's element appended, and the global is read back from the element
-  // (a second serialized copy was a third of a docs page gzipped, RFC 0014).
-  const ssrBody = ssrResult?.body;
+  // the container div stays empty (serializePage escapes `<`). One copy: the
+  // global is read back from that element, and a second serialized copy is a
+  // third of a docs page's gzipped response (RFC 0014).
   const appMarkup =
-    ssrBody === undefined
+    ssrResult === undefined
       ? `${pagePayloadElement(page)}<div id="app"></div>`
-      : embedsPagePayload(ssrBody)
-        ? ssrBody
-        : `${ssrBody}${pagePayloadElement(page)}`;
+      : ssrResult.pageEmbedded
+        ? ssrResult.body
+        : `${ssrResult.body}${pagePayloadElement(page)}`;
   const headSegments = [
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
@@ -303,30 +307,14 @@ function pagePayloadElement(page: InertiaPagePayload): string {
 }
 
 /**
- * Exactly the two shapes PAGE_GLOBAL_FROM_ELEMENT and the client read, matched
- * at a tag boundary: the v3 JSON script, or the legacy attribute on the `app`
- * container in either attribute order. Anything looser (a `data-page=` in
- * prose, on another element) would skip the element and leave nothing to hydrate.
+ * `window.__INERTIA_PAGE__` for readers other than the client. Same selector
+ * and guards as the client's `getInitialPage` (@guren/inertia-client), so a
+ * container carrying a non-payload `data-page` is ignored rather than mounted.
+ * A classic inline script, so it has run before the module entry does.
  */
-export function embedsPagePayload(markup: string): boolean {
-  return (
-    /<script\b[^>]*\bdata-page="app"/iu.test(markup) ||
-    /<[a-z][\w-]*\b(?=[^>]*\bid="app")[^>]*\bdata-page="/iu.test(markup)
-  );
-}
-
-/**
- * `window.__INERTIA_PAGE__` for readers other than the client, which reads the
- * element itself: the client's selector and guards, so a container carrying a
- * non-payload `data-page` is ignored rather than mounted. A classic inline
- * script, so it has run before the module entry does.
- */
-const PAGE_GLOBAL_FROM_ELEMENT = `<script>(function(){
-var s=document.querySelector('script[data-page="app"][type="application/json"]')||document.getElementById("app");
-var t=s&&(s.tagName==="SCRIPT"?s.textContent:s.getAttribute("data-page"));
-if(!t)return;
-try{var p=JSON.parse(t);if(p&&typeof p==="object"&&p.component)window.__INERTIA_PAGE__=p}catch(e){}
-})();</script>`;
+const PAGE_GLOBAL_FROM_ELEMENT =
+  `<script>try{var e=document.querySelector('script[data-page="app"][type="application/json"]')||document.getElementById("app"),` +
+  `p=JSON.parse(e.tagName==="SCRIPT"?e.textContent:e.getAttribute("data-page"));if(p&&p.component)window.__INERTIA_PAGE__=p}catch(_){}</script>`;
 
 async function tryRenderSsr(
   page: InertiaPagePayload,
@@ -367,6 +355,7 @@ async function tryRenderSsr(
     return {
       body: result.body,
       head: Array.isArray(result.head) ? result.head : [],
+      pageEmbedded: result.pageEmbedded === true,
     };
   } catch (error) {
     console.error(

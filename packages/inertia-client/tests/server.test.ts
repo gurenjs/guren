@@ -58,6 +58,8 @@ describe('renderInertiaServer', () => {
 
     expect(result.head).toEqual(['<title>Test</title>'])
     expect(result.body).toBe('<main>Rendered</main>')
+    // What tells @guren/server not to append its own payload element.
+    expect(result.pageEmbedded).toBe(true)
   })
 
   it('supports custom resolveComponentPath', async () => {
