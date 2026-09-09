@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, pendingMigrationNames, reportAppliedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -91,7 +91,36 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     return resolved
   }
 
+  // A reset drops the tracker along with everything else, so the re-apply that
+  // follows reads as all-pending. Reporting it would put the whole migration
+  // list on the console for every `db:reset` and every `resetDatabase()` in a
+  // test's `beforeEach`, which is where the report stops being readable.
+  let reapplyingAfterReset = false
+
+  /**
+   * Tracker rows over an open handle. Only a missing tracker means "nothing
+   * applied": a denied SELECT or an unreachable server must not read as
+   * all-pending.
+   */
+  async function readAppliedMigrations(adminDb: MySql2Database): Promise<AppliedMigrationRow[]> {
+    const { sql } = await import('drizzle-orm')
+    try {
+      const [rows] = (await adminDb.execute(
+        sql.raw('SELECT name, applied_at FROM __drizzle_migrations'),
+      )) as unknown as [Array<{ name: string | null; applied_at: string | Date | null }>]
+      return rows.map((row) => ({ name: row.name, appliedAt: row.applied_at }))
+    } catch (error) {
+      if (isMissingTrackerTable(error, 'mysql')) return []
+      throw error
+    }
+  }
+
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
+    // Read and cleared before the first await, so it describes this attempt and
+    // not one a later reset started.
+    const report = !reapplyingAfterReset
+    reapplyingAfterReset = false
+
     // Resolved below, not up front: resolveConnectionString() throws when
     // nothing is configured, so it must not run before the early return.
     let endpoint: string | undefined
@@ -112,7 +141,15 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
           client: migrationClient,
           ...(relations ? { relations } : {}),
         } as DrizzleConfig)
+        // Over the migration pool, and before the migrator writes: a second
+        // admin pool here would cost a connect on every cold start.
+        const pending = report
+          ? await pendingMigrationNames(resolvedMigrationsFolder, () =>
+              readAppliedMigrations(migrationDb as unknown as MySql2Database),
+            )
+          : []
         await migrate(migrationDb, { migrationsFolder: resolvedMigrationsFolder })
+        reportAppliedMigrations(pending, resolvedMigrationsFolder)
       } finally {
         await closePool(migrationClient)
       }
@@ -228,6 +265,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     // memo re-applies from scratch; a caller that then migrates again hits the
     // fresh memo and no-ops.
     migrations.reset()
+    reapplyingAfterReset = true
     return migrations.get()
   }
 
@@ -235,22 +273,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
     if (localMigrations.length === 0) return []
 
-    const { sql } = await import('drizzle-orm')
-    const appliedRows = await withAdminDb(async (adminDb) => {
-      try {
-        const [rows] = (await adminDb.execute(
-          sql.raw('SELECT name, applied_at FROM __drizzle_migrations'),
-        )) as unknown as [Array<{ name: string | null; applied_at: string | Date | null }>]
-        return rows.map((row) => ({ name: row.name, appliedAt: row.applied_at }))
-      } catch (error) {
-        // Only a missing tracker means "nothing applied". A denied SELECT or
-        // an unreachable server must not read as all-pending.
-        if (isMissingTrackerTable(error, 'mysql')) return []
-        throw error
-      }
-    })
-
-    return buildMigrationStatus(localMigrations, appliedRows)
+    return buildMigrationStatus(localMigrations, await withAdminDb(readAppliedMigrations))
   }
 
   return {

@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, pendingMigrationNames, reportAppliedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -126,7 +126,18 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     } as DrizzleConfig
   }
 
+  // A reset drops the tracker along with everything else, so the re-apply that
+  // follows reads as all-pending. Reporting it would put the whole migration
+  // list on the console for every `db:reset` and every `resetDatabase()` in a
+  // test's `beforeEach`, which is where the report stops being readable.
+  let reapplyingAfterReset = false
+
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
+    // Read and cleared before the first await, so it describes this attempt and
+    // not one a later reset started.
+    const report = !reapplyingAfterReset
+    reapplyingAfterReset = false
+
     try {
       const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
       if (summary.migrationsFound === 0) {
@@ -134,7 +145,14 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       }
 
       const { migrate } = await loadAwsDataApiModules()
-      await withAdminDb((db) => migrate(db, { migrationsFolder: resolvedMigrationsFolder }))
+      await withAdminDb(async (db) => {
+        // Read before the migrator writes: afterwards every row is applied.
+        const pending = report
+          ? await pendingMigrationNames(resolvedMigrationsFolder, () => readAppliedMigrations(db))
+          : []
+        await migrate(db, { migrationsFolder: resolvedMigrationsFolder })
+        reportAppliedMigrations(pending, resolvedMigrationsFolder)
+      })
 
       return summary
     } catch (error) {
@@ -220,33 +238,36 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     // memo re-applies from scratch; a caller that then migrates again hits the
     // fresh memo and no-ops.
     migrations.reset()
+    reapplyingAfterReset = true
     return migrations.get()
+  }
+
+  /**
+   * Tracker rows over an open handle. Only a missing tracker table means
+   * "nothing applied". Anything else (IAM denial, network) must surface:
+   * reporting it as all-pending could prompt a re-run of applied migrations.
+   */
+  async function readAppliedMigrations(adminDb: AwsDataApiPgDatabase): Promise<AppliedMigrationRow[]> {
+    const { sql } = await import('drizzle-orm')
+    try {
+      const result = (await adminDb.execute(
+        sql.raw('SELECT name FROM drizzle.__drizzle_migrations'),
+      )) as unknown as { rows?: Array<{ name: string | null }> } | Array<{ name: string | null }>
+      const rows = Array.isArray(result) ? result : (result.rows ?? [])
+      return rows.map((row) => ({ name: row.name, appliedAt: null }))
+    } catch (error) {
+      if (isMissingTrackerTableError(error)) {
+        return []
+      }
+      throw error
+    }
   }
 
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {
     const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
     if (localMigrations.length === 0) return []
 
-    const { sql } = await import('drizzle-orm')
-    const appliedRows = await withAdminDb(async (adminDb) => {
-      try {
-        const result = (await adminDb.execute(
-          sql.raw('SELECT name FROM drizzle.__drizzle_migrations'),
-        )) as unknown as { rows?: Array<{ name: string | null }> } | Array<{ name: string | null }>
-        const rows = Array.isArray(result) ? result : (result.rows ?? [])
-        return rows.map((row) => ({ name: row.name, appliedAt: null }))
-      } catch (error) {
-        // Only a missing tracker table means "nothing applied". Anything else
-        // (IAM denial, network) must surface — reporting it as all-pending
-        // could prompt a re-run of applied migrations.
-        if (isMissingTrackerTableError(error)) {
-          return []
-        }
-        throw error
-      }
-    })
-
-    return buildMigrationStatus(localMigrations, appliedRows)
+    return buildMigrationStatus(localMigrations, await withAdminDb(readAppliedMigrations))
   }
 
   return {

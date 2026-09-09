@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, pendingMigrationNames, reportAppliedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -219,7 +219,31 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     }
   }
 
+  // A reset drops the tracker along with everything else, so the re-apply that
+  // follows reads as all-pending. Reporting it would put the whole migration
+  // list on the console for every `db:reset` and every `resetDatabase()` in a
+  // test's `beforeEach`, which is where the report stops being readable.
+  let reapplyingAfterReset = false
+
+  /** Tracker rows over the open handle. Only a missing tracker means "nothing applied"; a drifted column must not read as all-pending. */
+  function readAppliedMigrations(): AppliedMigrationRow[] {
+    try {
+      const rows = sqliteClient
+        ?.query('SELECT name, applied_at FROM __drizzle_migrations')
+        .all() as Array<{ name: string | null; applied_at: string | null }> | undefined
+      return (rows ?? []).map((row) => ({ name: row.name, appliedAt: row.applied_at }))
+    } catch (error) {
+      if (!isMissingTrackerTable(error, 'sqlite')) throw error
+      return []
+    }
+  }
+
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
+    // Read and cleared before the first await, so it describes this attempt and
+    // not one a later reset started.
+    const report = !reapplyingAfterReset
+    reapplyingAfterReset = false
+
     try {
       const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
       if (summary.migrationsFound === 0) {
@@ -227,8 +251,11 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       }
 
       const db = await database.get()
+      // Read before the migrator writes: afterwards every row is applied.
+      const pending = report ? await pendingMigrationNames(resolvedMigrationsFolder, readAppliedMigrations) : []
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrate(db as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
+      reportAppliedMigrations(pending, resolvedMigrationsFolder)
 
       return summary
     } catch (error) {
@@ -278,6 +305,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       // the memo re-applies from scratch; a caller that then migrates again
       // hits the fresh memo and no-ops.
       migrations.reset()
+      reapplyingAfterReset = true
       return migrations.get()
     },
 
@@ -286,19 +314,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       if (localMigrations.length === 0) return []
 
       await database.get()
-      let appliedRows: Array<{ name: string | null; appliedAt: string | null }> = []
-      try {
-        const rows = sqliteClient
-          ?.query('SELECT name, applied_at FROM __drizzle_migrations')
-          .all() as Array<{ name: string | null; applied_at: string | null }> | undefined
-        appliedRows = (rows ?? []).map((row) => ({ name: row.name, appliedAt: row.applied_at }))
-      } catch (error) {
-        // Only a missing tracker means "nothing applied". A drifted tracker
-        // column must not read as all-pending.
-        if (!isMissingTrackerTable(error, 'sqlite')) throw error
-      }
-
-      return buildMigrationStatus(localMigrations, appliedRows)
+      return buildMigrationStatus(localMigrations, readAppliedMigrations())
     },
 
     async configureOrm() {

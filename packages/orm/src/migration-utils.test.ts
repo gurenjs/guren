@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sql } from 'drizzle-orm'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, listLocalMigrations } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, listLocalMigrations, pendingMigrationNames, reportAppliedMigrations } from './migration-utils'
 import { createSqliteDatabase } from './sqlite'
 
 function writeDrizzleMigration(migrationsDir: string, name: string, sql: string): void {
@@ -370,5 +370,58 @@ describe('describeDatabaseFailure', () => {
 
   test('should stringify non-Error rejections', () => {
     expect(describeDatabaseFailure('plain string failure')).toBe('plain string failure')
+  })
+})
+
+describe('pendingMigrationNames', () => {
+  let migrationsDir: string
+
+  beforeEach(() => {
+    migrationsDir = mkdtempSync(join(tmpdir(), 'guren-pending-'))
+    writeDrizzleMigration(migrationsDir, '20260101000000_first', 'SELECT 1;')
+    writeDrizzleMigration(migrationsDir, '20260102000000_second', 'SELECT 1;')
+  })
+
+  afterEach(() => {
+    rmSync(migrationsDir, { recursive: true, force: true })
+  })
+
+  test('should list the local migrations the tracker has no row for, in apply order', async () => {
+    const pending = await pendingMigrationNames(migrationsDir, () => [{ name: '20260101000000_first', appliedAt: null }])
+    expect(pending).toEqual(['20260102000000_second'])
+  })
+
+  test('should cost the names, not the boot, when the tracker cannot be read', async () => {
+    // The names exist to be logged. A driver that cannot read its tracker must
+    // still migrate, so an unreadable one reports nothing rather than throwing.
+    const pending = await pendingMigrationNames(migrationsDir, () => {
+      throw new Error('permission denied for schema drizzle')
+    })
+    expect(pending).toEqual([])
+  })
+})
+
+describe('reportAppliedMigrations', () => {
+  function capture(run: () => void): string[] {
+    const lines: string[] = []
+    const original = console.info
+    console.info = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
+    try {
+      run()
+    } finally {
+      console.info = original
+    }
+    return lines
+  }
+
+  test('should name every migration it applied, and where they came from', () => {
+    const lines = capture(() => reportAppliedMigrations(['20260102000000_orphan'], '/app/db/migrations'))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('20260102000000_orphan')
+    expect(lines[0]).toContain('/app/db/migrations')
+  })
+
+  test('should say nothing when the run applied nothing', () => {
+    expect(capture(() => reportAppliedMigrations([], '/app/db/migrations'))).toEqual([])
   })
 })

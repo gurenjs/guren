@@ -262,3 +262,32 @@ export function buildMigrationStatus(
     }
   })
 }
+
+/**
+ * Local migrations the tracker has no row for, in the order the migrator will
+ * apply them. Best-effort by contract: the names exist to be logged, and a
+ * tracker this driver cannot read costs the names, not the boot.
+ */
+export async function pendingMigrationNames(
+  migrationsFolder: string,
+  readApplied: () => Promise<AppliedMigrationRow[]> | AppliedMigrationRow[],
+): Promise<string[]> {
+  try {
+    const status = buildMigrationStatus(listLocalMigrations(migrationsFolder), await readApplied())
+    return status.filter((entry) => !entry.applied).map((entry) => entry.name)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Names what a run applied, so a migration nobody added on purpose — an orphan
+ * folder a generator left behind on a branch that was deleted, say — does not
+ * reach the database in silence. Silent when the run applied nothing: an
+ * up-to-date database boots on every restart, and a line there is one nobody reads.
+ */
+export function reportAppliedMigrations(applied: readonly string[], migrationsFolder: string): void {
+  if (applied.length === 0) return
+
+  console.info(`[guren/orm] Applied ${applied.length} migration(s) from ${migrationsFolder}: ${applied.join(', ')}`)
+}

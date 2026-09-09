@@ -529,8 +529,13 @@ git switch -c scratch/add-resource
 bunx guren add resource Post --fields "title:string,body:text" --force
 git diff main --stat
 git switch main
+git reset --hard
+git clean -fdn
+git clean -fd
 git branch -D scratch/add-resource
 ```
+
+`git switch main` と `git branch -D` が動かすのは参照だけで、どちらもコミットしていない作業を元には戻しません。`reset` と `clean` を省くと、ジェネレーターが書いたものはすべて `main` の作業ツリーに残ります。`-n` の空実行があるのは、消す前にその一覧を読むためです。
 
 生成されたコントローラーは、いま書いたものと 2 か所違います。どちらも見ておく価値があります。`:id` パラメータをモデルにバインドせずスキーマで検証していること、そして `index` がページネーションしていることです。いずれも第 4 章で扱います。
 
@@ -553,7 +558,7 @@ git branch -D scratch/add-resource
 
 ## 演習
 
-1. マイグレーションが書いた `migration.sql` を開いてください。drizzle-kit が `NOT NULL` にした列はどれで、それは `db/schema.ts` のどこから来ていますか。ブランチを切って `body` を nullable にし、適用せずに `bun run db:make` だけ走らせ、生成される SQL を読んでからブランチを削除してください。
+1. マイグレーションが書いた `migration.sql` を開いてください。drizzle-kit が `NOT NULL` にした列はどれで、それは `db/schema.ts` のどこから来ていますか。ブランチを切って `body` を nullable にし、適用せずに `bun run db:make` だけ走らせて、生成される SQL を読んでください。そのあとは上の比較と同じ手順で捨てます。`git switch main`、`git reset --hard`、`git clean -fd` です。ブランチを消すだけではマイグレーションフォルダがディスクに残り、次の `bun run dev` がそれを適用します。
 2. `Post.findOrFail(id)` は行が無ければ 404 を返しますが、`PostController` ではそれを捕まえていません。例外をレスポンスに変換している場所を探してください。そのうえで、`Post.find(id)` だった場合に何が起きたかを答えてください。
 
 ## 次へ

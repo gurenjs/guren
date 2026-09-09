@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { sql } from 'drizzle-orm'
@@ -239,6 +239,94 @@ describe('createSqliteDatabase resetDatabase', () => {
     expect(db.all(sql`SELECT name FROM main.sqlite_master`)).toEqual([])
 
     await database.closeDatabase()
+  })
+})
+
+describe('createSqliteDatabase migration reporting', () => {
+  function writeMigration(name: string, statement: string): void {
+    const folder = join(workDir, 'migrations', name)
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(join(folder, 'migration.sql'), statement)
+  }
+
+  async function captureInfo(run: () => Promise<void>): Promise<string[]> {
+    const lines: string[] = []
+    const original = console.info
+    console.info = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
+    try {
+      await run()
+    } finally {
+      console.info = original
+    }
+    return lines
+  }
+
+  test('should name what a boot applied and say nothing on the next one', async () => {
+    writeMigration('20260101000000_create_widgets', 'CREATE TABLE widgets (id integer primary key);')
+    const options = {
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    }
+
+    const first = createSqliteDatabase(options)
+    const applied = await captureInfo(async () => void (await first.getDatabase()))
+    await first.closeDatabase()
+    expect(applied.join('\n')).toContain('20260101000000_create_widgets')
+
+    const second = createSqliteDatabase(options)
+    const reboot = await captureInfo(async () => void (await second.getDatabase()))
+    await second.closeDatabase()
+    // An up-to-date database boots on every restart; a line there is one nobody reads.
+    expect(reboot).toEqual([])
+  })
+
+  test('should stay silent while resetDatabase re-applies what it just dropped', async () => {
+    // A reset drops the tracker, so every migration reads as pending again.
+    // The framework's own testing rules put resetDatabase() in `beforeEach`,
+    // where a line per test naming every migration is the whole log's ruin.
+    writeMigration('20260101000000_create_widgets', 'CREATE TABLE widgets (id integer primary key);')
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+    await database.getDatabase()
+
+    const lines = await captureInfo(async () => void (await database.resetDatabase()))
+    expect(lines).toEqual([])
+
+    // The suppression is spent on that one run, not left on for the next boot.
+    await database.closeDatabase()
+    writeMigration('20260102000000_orphan_sessions', 'CREATE TABLE sessions (id text primary key);')
+    const next = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+    const applied = await captureInfo(async () => void (await next.getDatabase()))
+    await next.closeDatabase()
+    expect(applied.join('\n')).toContain('20260102000000_orphan_sessions')
+  })
+
+  test('should name only the migration that arrived after the database was current', async () => {
+    // The accident this reports: a generator left a folder behind, nobody
+    // applied it on purpose, and the next boot applies it.
+    writeMigration('20260101000000_create_widgets', 'CREATE TABLE widgets (id integer primary key);')
+    const options = {
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    }
+
+    const first = createSqliteDatabase(options)
+    await first.getDatabase()
+    await first.closeDatabase()
+
+    writeMigration('20260102000000_orphan_sessions', 'CREATE TABLE sessions (id text primary key);')
+    const second = createSqliteDatabase(options)
+    const applied = await captureInfo(async () => void (await second.getDatabase()))
+    await second.closeDatabase()
+
+    expect(applied).toHaveLength(1)
+    expect(applied[0]).toContain('20260102000000_orphan_sessions')
+    expect(applied[0]).not.toContain('20260101000000_create_widgets')
   })
 })
 

@@ -909,6 +909,29 @@ bunx guren make:migration --dialect postgresql
 > [!NOTE]
 > Once a migration has shipped to any environment, treat it as immutable. Create a follow-up migration to correct mistakes.
 
+### When migrations run
+
+`db:migrate` is not the only thing that applies them. Every driver except the
+Data API and D1 adapters applies pending migrations on the first `getDatabase()`
+or `configureOrm()` call, in every environment: `bun run dev`, `bun test`, and the
+container the scaffolded `Dockerfile` starts with `bun bin/serve.ts` all migrate
+at boot, which is what lets a deploy that ships only a new image arrive
+migrated. A boot that applies something prints one line naming what it applied
+and where it came from; an up-to-date database boots silently.
+
+The cost of that convenience is that a migration you did not mean to keep still
+reaches the database. A generator writes one as a new, untracked folder under
+`db/migrations/`, and neither `git switch` nor `git branch -D` removes an
+untracked file, so a migration generated on a branch you threw away is still on
+disk and still pending. Remove it with `git clean -fd` (`git clean -fdn` first
+shows what that would take) rather than expecting the branch to take it with it.
+
+The two exceptions never migrate at boot, for different reasons. The Data API
+adapter is opt-in (`migrateOnStart`) because the check costs serialized round
+trips on every Lambda cold start. D1 has no runtime path at all: migrations go
+through `wrangler d1 migrations apply <database>`, and `migrateDatabase()` says
+so rather than trying.
+
 ## Seeding
 
 ```ts

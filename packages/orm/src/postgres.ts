@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, pendingMigrationNames, reportAppliedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -86,7 +86,33 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     return resolved
   }
 
+  // A reset drops the tracker along with everything else, so the re-apply that
+  // follows reads as all-pending. Reporting it would put the whole migration
+  // list on the console for every `db:reset` and every `resetDatabase()` in a
+  // test's `beforeEach`, which is where the report stops being readable.
+  let reapplyingAfterReset = false
+
+  /**
+   * Tracker rows over an open client. Only a missing tracker means "nothing
+   * applied": a denied SELECT, a broken schema, or an unreachable server must
+   * not read as all-pending.
+   */
+  async function readAppliedMigrations(client: ReturnType<typeof postgres>): Promise<AppliedMigrationRow[]> {
+    try {
+      const rows = await client.unsafe('SELECT name FROM drizzle.__drizzle_migrations')
+      return rows.map((row) => ({ name: (row as unknown as { name: string | null }).name, appliedAt: null }))
+    } catch (error) {
+      if (isMissingTrackerTable(error, 'postgres')) return []
+      throw error
+    }
+  }
+
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
+    // Read and cleared before the first await, so it describes this attempt and
+    // not one a later reset started.
+    const report = !reapplyingAfterReset
+    reapplyingAfterReset = false
+
     // Resolved below, not up front: resolveConnectionString() throws when
     // nothing is configured, so it must not run before the early return.
     let endpoint: string | undefined
@@ -107,7 +133,13 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
 
       try {
         const db = drizzle({ client: migrationClient, ...(relations ? { relations } : {}) } as DrizzleConfig)
+        // Over the migration client, and before the migrator writes: a second
+        // admin connection here would cost a round trip on every cold start.
+        const pending = report
+          ? await pendingMigrationNames(resolvedMigrationsFolder, () => readAppliedMigrations(migrationClient))
+          : []
         await migrate(db, { migrationsFolder: resolvedMigrationsFolder })
+        reportAppliedMigrations(pending, resolvedMigrationsFolder)
       } finally {
         await migrationClient.end({ timeout: 0 })
       }
@@ -208,6 +240,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     // memo re-applies from scratch; a caller that then migrates again hits the
     // fresh memo and no-ops.
     migrations.reset()
+    reapplyingAfterReset = true
     return migrations.get()
   }
 
@@ -215,22 +248,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
     if (localMigrations.length === 0) return []
 
-    const appliedRows = await withAdminClient(async (adminClient) => {
-      try {
-        const rows = await adminClient.unsafe('SELECT name FROM drizzle.__drizzle_migrations')
-        return rows.map((row) => {
-          const record = row as unknown as { name: string | null }
-          return { name: record.name, appliedAt: null }
-        })
-      } catch (error) {
-        // Only a missing tracker means "nothing applied". A denied SELECT, a
-        // broken schema, or an unreachable server must not read as all-pending.
-        if (isMissingTrackerTable(error, 'postgres')) return []
-        throw error
-      }
-    })
-
-    return buildMigrationStatus(localMigrations, appliedRows)
+    return buildMigrationStatus(localMigrations, await withAdminClient(readAppliedMigrations))
   }
 
   return {

@@ -892,8 +892,13 @@ git switch -c scratch/add-auth
 bunx guren add auth --force
 git diff main --stat
 git switch main
+git reset --hard
+git clean -fdn
+git clean -fd
 git branch -D scratch/add-auth
 ```
+
+`reset` と `clean` は行儀の話ではありません。`git switch main` と `git branch -D` が動かすのは参照だけで、どちらもコミットしていない作業を元には戻しません。省けば `add auth` が書いたものはすべて `main` の作業ツリーに残ります。`db/migrations/` の下のマイグレーションフォルダもです。そのフォルダを誰かが意図して適用することはありません。次の `bun run dev` が起動時に黙って適用し、8 章あと、第 14 章が `sessions` テーブルを自分で作ろうとしたときに、すでにあるテーブルの上でマイグレーションが失敗します。
 
 差分の大半は、自分で書いたものと同じ形です。モデル、プロバイダー、2 つのコントローラー、バリデーター。残りは書かなかった部分です。メールによるパスワードリセット、メール確認、「ログイン状態を保持する」トークン、デモユーザーのシーダー、ダッシュボード。これ以降、コースでそのどれかが必要になったらジェネレーターを使います。そのとき生成されたものは、もう読めるはずです。
 
@@ -915,7 +920,7 @@ git branch -D scratch/add-auth
 ## 演習
 
 1. `/posts/create` を開いたゲストは `/login` にリダイレクトされます。では `/posts` に POST したゲストはどうなりますか。推測する前にテストを書いて確かめてください。そのうえで、その挙動が望ましいかどうかを答えてください。
-2. backfill のスクリプトは `authorId` の無い行を埋めました。ブランチを切って列をもう一度 nullable に戻し、適用せずに `bun run db:make` を走らせてください。SQL を読んでください。SQLite が列の変更ではなくテーブルの作り直しを選ぶのはなぜですか。
+2. backfill のスクリプトは `authorId` の無い行を埋めました。ブランチを切って列をもう一度 nullable に戻し、適用せずに `bun run db:make` を走らせてください。SQL を読んでください。SQLite が列の変更ではなくテーブルの作り直しを選ぶのはなぜですか。終わったら `git branch -D` だけで済ませず、`git reset --hard` と `git clean -fd` で元に戻してください。
 
 ## 次へ
 
