@@ -77,7 +77,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   },
   {
     title: { en: 'AI-Native Development', ja: 'AIネイティブ開発' },
-    slugs: ['spec-anchored', 'agent-interface', 'durable-agents'],
+    slugs: ['spec-anchored', 'prototype-first', 'agent-interface', 'durable-agents'],
   },
   {
     title: { en: 'Reference', ja: 'リファレンス' },
@@ -97,7 +97,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
 ]
 
 // The Guren Tutorial (RFC 0019). Chapter files are `NN-<slug>.md`, grouped into
-// the arcs the course moves through rather than listed as fifteen siblings.
+// the arcs the course moves through rather than listed as sixteen siblings.
 const TUTORIAL_SECTIONS: readonly DocSectionConfig[] = [
   {
     title: { en: 'Start here', ja: 'はじめに' },
@@ -126,6 +126,10 @@ const TUTORIAL_SECTIONS: readonly DocSectionConfig[] = [
   {
     title: { en: 'Production', ja: '本番' },
     slugs: ['14-production'],
+  },
+  {
+    title: { en: 'The other way round', ja: '逆順で' },
+    slugs: ['15-prototype-first'],
   },
 ]
 

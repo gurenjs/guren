@@ -120,9 +120,13 @@ export function gurenVitePlugin(options: GurenVitePluginOptions = {}) {
 
 interface ResolvedPrototype {
   root: string
-  /** As configured until `configResolved` rewrites it to the absolute directory the build wrote to. */
   outDir: string
   shellPath: string
+  /**
+   * The scaffold's ordinary build emits into `public/assets/`, so copying
+   * `public/` would ship the production bundle beside the prototype's.
+   */
+  copiedBuildDir?: string
 }
 
 interface ViteDevServerLike {
@@ -170,6 +174,10 @@ function ensurePrototype(config: Record<string, any>, options: ResolvedOptions):
   if (typeof config.publicDir !== 'string') {
     config.publicDir = path.resolve(root, 'public')
   }
+  const copiedBuildDir = relativeIfInside(
+    path.resolve(root, config.publicDir),
+    resolveBuildOutputDirectory(root, options.outDir),
+  )
 
   config.build ??= {}
   config.build.outDir ??= prototype.outDir ?? 'dist/prototype'
@@ -189,7 +197,7 @@ function ensurePrototype(config: Record<string, any>, options: ResolvedOptions):
   output.manualChunks ??= createDefaultManualChunks(root)
   config.build.rollupOptions.output = output
 
-  return { root, outDir: config.build.outDir, shellPath }
+  return { root, outDir: path.resolve(root, config.build.outDir), shellPath, copiedBuildDir }
 }
 
 function resolvePrototypeShell(root: string, shell: string | undefined, entry: string): string {
@@ -243,24 +251,28 @@ export function renderPrototypeShell(entry: string): string {
  */
 function finishPrototypeBuild(prototype: ResolvedPrototype): void {
   const relative = path.relative(prototype.root, prototype.shellPath)
-  const outDir = path.resolve(prototype.root, prototype.outDir)
-  const nested = path.resolve(outDir, relative)
-  const top = path.resolve(outDir, 'index.html')
+  const nested = path.resolve(prototype.outDir, relative)
+  const top = path.resolve(prototype.outDir, 'index.html')
 
   if (nested !== top && existsSync(nested)) {
     renameSync(nested, top)
     const topLevelDir = relative.split(path.sep)[0]
     if (topLevelDir && topLevelDir !== '.' && topLevelDir !== '..') {
-      rmSync(path.resolve(outDir, topLevelDir), { recursive: true, force: true })
+      rmSync(path.resolve(prototype.outDir, topLevelDir), { recursive: true, force: true })
     }
   }
 
   if (!existsSync(top)) {
-    throw new Error(`Prototype build produced no index.html in ${outDir}`)
+    throw new Error(`Prototype build produced no index.html in ${prototype.outDir}`)
   }
 
-  writeFileSync(path.resolve(outDir, '404.html'), readFileSync(top))
-  writeFileSync(path.resolve(outDir, '_redirects'), '/*    /index.html   200\n')
+  // Safe only while the prototype's own files are flat (`entryFileNames` and
+  // friends default to no `assets/` prefix); an `assets/` output pattern would be deleted here.
+  if (prototype.copiedBuildDir) {
+    rmSync(path.resolve(prototype.outDir, prototype.copiedBuildDir), { recursive: true, force: true })
+  }
+  writeFileSync(path.resolve(prototype.outDir, '404.html'), readFileSync(top))
+  writeFileSync(path.resolve(prototype.outDir, '_redirects'), '/*    /index.html   200\n')
 }
 
 export default gurenVitePlugin
@@ -472,6 +484,13 @@ function createDefaultManualChunks(root: string) {
 
 function resolveBuildOutputDirectory(root: string, outDir: string): string {
   return path.isAbsolute(outDir) ? outDir : path.resolve(root, outDir)
+}
+
+/** The path from `parent` down to `child`, or undefined when `child` is not below it. */
+function relativeIfInside(parent: string, child: string): string | undefined {
+  const relative = path.relative(parent, child)
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return undefined
+  return relative
 }
 
 function deriveHttpBaseFromOutDir(outDir: string): string | undefined {

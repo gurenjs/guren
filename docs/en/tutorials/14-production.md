@@ -370,3 +370,7 @@ More than that, you have a way of working. Every chapter here was the same four 
 ## The end
 
 That is the course. The app is yours now, and so is the harness that helped build it: the rules, the skills, the subagent brief, the checks, and the gate. Add the next feature the way you added the last one, and if you get it wrong, the tests will say so before anyone else does.
+
+## One more, the other way round
+
+[Chapter 15: Prototype First](./15-prototype-first.md) is an epilogue. It builds one last feature backend-last: the screens first, hosted as static files for a customer to click with no server behind them, then the backend from the same code once they have said yes.
