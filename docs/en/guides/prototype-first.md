@@ -91,7 +91,7 @@ export default definePrototype({
 | `api` | `apiRoutes<ApiRoutes>()`, a type-only marker. It types each handler's `body` from the route's `body` schema |
 | `shared` | Props every page receives under its own, like `shareInertiaProps()`. The demo user keeps guarded screens reachable; set `user: null` to walk the prototype as a guest |
 | `state` | A factory for the seed data. The browser keeps the object in `sessionStorage` between reloads; `persist: 'local'` keeps it across tabs, `persist: false` keeps it in memory only |
-| `notFoundPage` | A page contract rendered as a 200 for `notFound()` and unmatched URLs. Without it the prototype shows Inertia's error dialog, as the server would |
+| `notFoundPage` | A page contract rendered for `notFound()` and unmatched URLs, as a 200 in the browser and a 404 on the server. Without it the prototype shows Inertia's error dialog, as the server would |
 | `routes` | One handler per route name. A name the manifest does not know is a type error |
 
 A handler receives `{ params, query, body, state, shared }` plus the five ways to answer:
@@ -100,13 +100,15 @@ A handler receives `{ params, query, body, state, shared }` plus the five ways t
 |---|---|
 | `page(pages.posts.Show, props)` | That page. `props` must satisfy the page's `Props`, so a field added to the component fails the fixture in the same `tsc` run as the controller |
 | `redirect('posts.show', { id })` | The target route's handler runs and its page is shown at that URL, as following a 303 would |
-| `errors({ title: '…' })` | The originating page again with `errors` set, the shape a failed `validateBody()` produces. A second argument names an error bag |
+| `errors({ title: '…' })` | The originating page again with `errors` set, the shape a failed `validateBody()` produces. In the browser a second argument names an error bag |
 | `notFound()` | The 404 dialog, or `notFoundPage` |
 | `location('https://…')` | A full-page visit to an external URL |
 
-`flash(key, value)` sets a flash message on the next page. `body` is the raw body the form sent, not the schema's parsed output, in both runtimes: a `FormData` body arrives as a plain object with repeated keys as arrays, so `tags[]` inputs and multi-file fields survive. Call the schema yourself if you want coercion.
+`flash(key, value)` sets a flash message on the next page. `body` is the raw body the form sent, not the schema's parsed output, in both runtimes; call the schema yourself if you want coercion.
 
-`bunx guren make:feature Post --fields "title:string,body:text,published:boolean" --prototype` writes all of this for you: the page components, the validator, a `resources/js/types/Post.ts` exporting `PostData`, and seven entries appended to the fixture (index, show, create, edit, store, update, destroy). No model, migration, Resource or controller is written. It prints the route registrations to add, with `prototype` in place of a controller.
+**Where the two runtimes differ.** The server builds the same context from a real request, and it is narrower in four places, each because the server behaves as it would for a controller: a `FormData` body arrives in the browser as a plain object with repeated keys as arrays (`tags[]` inputs and multi-file fields survive), while the server keeps the first value of a repeated key, as `validateBody()` does; `errors()` takes no error bag on the server, because `ValidationException` has none; `notFoundPage` is a 200 in the browser and a 404 on the server; and `flash()` on the server writes to the session, so it does nothing in an app with no session middleware.
+
+`bunx guren make:feature Post --fields "title:string,body:text,published:boolean" --prototype` writes all of this for you: the page components, the validator, a `resources/js/types/Post.ts` exporting `PostData`, and seven entries appended to the fixture (index, create, show, edit, store, update, destroy). No model, migration, Resource or controller is written. It prints the route registrations to add, with `prototype` in place of a controller.
 
 ## Walk it
 
@@ -203,7 +205,7 @@ Three rules apply at boot, each a hard error naming the route:
 
 ## `guren check --prototype`
 
-Content-activated: an app with no fixture and no `prototype` route contributes nothing. Like `--arch` and `--docs`, the flag selects the suite and sets the exit code, which is what lets `build:prototype` gate on it.
+Content-activated: an app with no fixture, no `prototype` route and no loader wired in `app.tsx` contributes nothing. Like `--arch` and `--docs`, the flag selects the suite and sets the exit code, which is what lets `build:prototype` gate on it.
 
 | Rule | Level |
 |---|---|

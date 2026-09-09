@@ -739,7 +739,7 @@ The fixture is still there, and `bun run build:prototype` still works: the custo
 
 ## Exercises
 
-1. The fixture's `shared.auth.user` is Ada. Set it to `null`, run `bun run dev:prototype`, and open `/announcements/create`. It renders. Say why the server would not have, and where in the fixture a guest check would have to go to make the prototype honest about it.
+1. The fixture's `shared.auth.user` is Ada. On a branch, set it to `null`, run `bun run dev:prototype`, and open `/announcements/create`. It renders. Say why the server would not have, and where in the fixture a guest check would have to go to make the prototype honest about it.
 2. On a branch, add a `notFoundPage` to `definePrototype()` pointing at a page of your own, and open `/announcements/99` in the prototype. Then remove the page component and run `bun run typecheck`. What caught it, and would the same mistake in a controller have been caught in the same place?
 
 ## The end, again

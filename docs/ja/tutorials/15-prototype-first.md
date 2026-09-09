@@ -739,7 +739,7 @@ fixture はまだそこにあり、`bun run build:prototype` はまだ動きま�
 
 ## 演習
 
-1. fixture の `shared.auth.user` は Ada です。これを `null` にして `bun run dev:prototype` を実行し、`/announcements/create` を開いてください。描画されます。なぜサーバーならそうならなかったのか、そしてプロトタイプにこれを正直に言わせるには fixture のどこにゲストのチェックを置く必要があるのかを述べてください。
+1. fixture の `shared.auth.user` は Ada です。ブランチ上でこれを `null` にして `bun run dev:prototype` を実行し、`/announcements/create` を開いてください。描画されます。なぜサーバーならそうならなかったのか、そしてプロトタイプにこれを正直に言わせるには fixture のどこにゲストのチェックを置く必要があるのかを述べてください。
 2. ブランチ上で、`definePrototype()` に自分のページを指す `notFoundPage` を足し、プロトタイプで `/announcements/99` を開いてください。次にそのページコンポーネントを削除して `bun run typecheck` を実行してください。何が捕まえましたか。同じ間違いをコントローラーでしたら、同じ場所で捕まったでしょうか。
 
 ## 終わり、もう一度

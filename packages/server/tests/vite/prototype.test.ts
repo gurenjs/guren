@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import type { GurenVitePluginOptions } from '../../src/vite/plugin'
 import { PROTOTYPE_SHELL_FILE, PROTOTYPE_SHELL_OVERRIDE, gurenVitePlugin, renderPrototypeShell } from '../../src/vite/plugin'
 
 const roots: string[] = []
@@ -15,6 +16,16 @@ function makeRoot(): string {
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
+
+/** A prototype plugin taken through config and configResolved, with the directory its build writes to. */
+function startPrototypeBuild(options?: GurenVitePluginOptions) {
+  const root = makeRoot()
+  const plugin = gurenVitePlugin(options)
+  const config: Record<string, any> = { root }
+  plugin.config(config, { command: 'build', mode: 'prototype' })
+  plugin.configResolved({ root, build: { outDir: config.build.outDir } })
+  return { plugin, outDir: path.resolve(root, config.build.outDir) }
+}
 
 describe('gurenVitePlugin in prototype mode', () => {
   it('takes the prototype branch instead of the client defaults', () => {
@@ -79,13 +90,7 @@ describe('gurenVitePlugin in prototype mode', () => {
   })
 
   it('moves the nested shell to the top of the output and writes the SPA fallbacks', () => {
-    const root = makeRoot()
-    const plugin = gurenVitePlugin()
-    const config: Record<string, any> = { root }
-    plugin.config(config, { command: 'build', mode: 'prototype' })
-    plugin.configResolved({ root, build: { outDir: config.build.outDir } })
-
-    const outDir = path.resolve(root, 'dist/prototype')
+    const { plugin, outDir } = startPrototypeBuild()
     const nested = path.resolve(outDir, PROTOTYPE_SHELL_FILE)
     mkdirSync(path.dirname(nested), { recursive: true })
     writeFileSync(nested, '<!doctype html><title>built</title>')
@@ -99,13 +104,7 @@ describe('gurenVitePlugin in prototype mode', () => {
   })
 
   it('drops the ordinary build output that the public/ copy brought along', () => {
-    const root = makeRoot()
-    const plugin = gurenVitePlugin()
-    const config: Record<string, any> = { root }
-    plugin.config(config, { command: 'build', mode: 'prototype' })
-    plugin.configResolved({ root, build: { outDir: config.build.outDir } })
-
-    const outDir = path.resolve(root, 'dist/prototype')
+    const { plugin, outDir } = startPrototypeBuild()
     // What Vite's copyPublicDir leaves when `public/assets/` holds a production build.
     mkdirSync(path.resolve(outDir, 'assets/.vite'), { recursive: true })
     writeFileSync(path.resolve(outDir, 'assets/app-abc123.js'), 'production')
@@ -118,21 +117,36 @@ describe('gurenVitePlugin in prototype mode', () => {
     expect(existsSync(path.resolve(outDir, 'favicon.svg'))).toBe(true)
   })
 
-  it('keeps public/ intact when the ordinary build writes elsewhere', () => {
+  it('follows a custom publicDir when locating the copied build output', () => {
     const root = makeRoot()
-    const plugin = gurenVitePlugin({ outDir: 'build/client' })
-    const config: Record<string, any> = { root }
+    const plugin = gurenVitePlugin({ outDir: 'static/bundle' })
+    const config: Record<string, any> = { root, publicDir: 'static' }
     plugin.config(config, { command: 'build', mode: 'prototype' })
     plugin.configResolved({ root, build: { outDir: config.build.outDir } })
-
-    const outDir = path.resolve(root, 'dist/prototype')
-    mkdirSync(path.resolve(outDir, 'assets'), { recursive: true })
-    writeFileSync(path.resolve(outDir, 'assets/logo.png'), 'png')
+    const outDir = path.resolve(root, config.build.outDir)
+    mkdirSync(path.resolve(outDir, 'bundle'), { recursive: true })
+    writeFileSync(path.resolve(outDir, 'bundle/app.js'), 'production')
     writeFileSync(path.resolve(outDir, 'index.html'), '<!doctype html><title>built</title>')
 
     plugin.writeBundle()
 
+    expect(existsSync(path.resolve(outDir, 'bundle'))).toBe(false)
+  })
+
+  it('keeps public/ intact when the ordinary build writes elsewhere', () => {
+    const { plugin, outDir } = startPrototypeBuild({ outDir: 'build/client' })
+    mkdirSync(path.resolve(outDir, 'assets'), { recursive: true })
+    writeFileSync(path.resolve(outDir, 'assets/logo.png'), 'png')
+    writeFileSync(path.resolve(outDir, 'index.html'), '<!doctype html><title>built</title>')
+    // Where an unguarded `path.relative(publicDir, outDir)` (`../build/client`) would point from the output.
+    const escaped = path.resolve(outDir, '../build/client')
+    mkdirSync(escaped, { recursive: true })
+    writeFileSync(path.resolve(escaped, 'keep.js'), 'mine')
+
+    plugin.writeBundle()
+
     expect(existsSync(path.resolve(outDir, 'assets/logo.png'))).toBe(true)
+    expect(existsSync(path.resolve(escaped, 'keep.js'))).toBe(true)
   })
 
   it('serves the shell for document requests in dev and leaves assets to Vite', async () => {

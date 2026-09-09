@@ -91,7 +91,7 @@ export default definePrototype({
 | `api` | `apiRoutes<ApiRoutes>()`、型だけのマーカー。ルートの `body` スキーマから各ハンドラーの `body` を型付けします |
 | `shared` | `shareInertiaProps()` と同じく、すべてのページが自分の props の下に受け取る props。デモユーザーがあると保護された画面に到達できます。ゲストとして歩くなら `user: null` にします |
 | `state` | シードデータのファクトリ。ブラウザはこのオブジェクトをリロードをまたいで `sessionStorage` に保持します。`persist: 'local'` ならタブをまたいで保持、`persist: false` ならメモリ上だけです |
-| `notFoundPage` | `notFound()` と一致しない URL に対して 200 で描画するページ契約。無ければサーバーと同じく Inertia のエラーダイアログが出ます |
+| `notFoundPage` | `notFound()` と一致しない URL に対して描画するページ契約。ブラウザでは 200、サーバーでは 404 です。無ければサーバーと同じく Inertia のエラーダイアログが出ます |
 | `routes` | ルート名ごとにハンドラーひとつ。マニフェストに無い名前は型エラーです |
 
 ハンドラーは `{ params, query, body, state, shared }` と、答え方 5 つを受け取ります:
@@ -100,13 +100,15 @@ export default definePrototype({
 |---|---|
 | `page(pages.posts.Show, props)` | そのページ。`props` はページの `Props` を満たす必要があるので、コンポーネントに足したフィールドは、コントローラーと同じ `tsc` の実行で fixture も落とします |
 | `redirect('posts.show', { id })` | 遷移先ルートのハンドラーが走り、そのページがその URL で表示されます。303 を追った結果と同じです |
-| `errors({ title: '…' })` | 元のページを `errors` 付きでもう一度。`validateBody()` の失敗が作るのと同じ形です。第 2 引数でエラーバッグを指定できます |
+| `errors({ title: '…' })` | 元のページを `errors` 付きでもう一度。`validateBody()` の失敗が作るのと同じ形です。ブラウザでは第 2 引数でエラーバッグを指定できます |
 | `notFound()` | 404 ダイアログ、または `notFoundPage` |
 | `location('https://…')` | 外部 URL へのフルページ遷移 |
 
-`flash(key, value)` は次のページにフラッシュメッセージを載せます。`body` はどちらのランタイムでも、フォームが送った生のボディで、スキーマのパース結果ではありません。`FormData` のボディは、繰り返しキーを配列にしたプレーンオブジェクトとして届くので、`tags[]` 形式の入力や複数ファイルのフィールドも失われません。強制変換が欲しければ自分でスキーマを呼んでください。
+`flash(key, value)` は次のページにフラッシュメッセージを載せます。`body` はどちらのランタイムでも、フォームが送った生のボディで、スキーマのパース結果ではありません。強制変換が欲しければ自分でスキーマを呼んでください。
 
-`bunx guren make:feature Post --fields "title:string,body:text,published:boolean" --prototype` がこれを全部書いてくれます。ページコンポーネント、バリデーター、`PostData` をエクスポートする `resources/js/types/Post.ts`、そして fixture に追記される 7 つのエントリ(index、show、create、edit、store、update、destroy)です。モデル、マイグレーション、Resource、コントローラーは書きません。登録すべきルートは、コントローラーの代わりに `prototype` を置いた形で出力されます。
+**2 つのランタイムが違うところ。** サーバーは同じ文脈を本物のリクエストから組み立てますが、4 箇所で狭く、どれもサーバーがコントローラーに対してそうするのと同じ振る舞いです。`FormData` のボディはブラウザでは繰り返しキーを配列にしたプレーンオブジェクトとして届きます(`tags[]` 形式の入力や複数ファイルのフィールドも失われません)が、サーバーは `validateBody()` と同じく繰り返しキーの最初の値だけを残します。`errors()` はサーバーではエラーバッグを取りません。`ValidationException` に無いからです。`notFoundPage` はブラウザでは 200、サーバーでは 404 です。そして `flash()` はサーバーではセッションに書くので、セッションミドルウェアの無いアプリでは何もしません。
+
+`bunx guren make:feature Post --fields "title:string,body:text,published:boolean" --prototype` がこれを全部書いてくれます。ページコンポーネント、バリデーター、`PostData` をエクスポートする `resources/js/types/Post.ts`、そして fixture に追記される 7 つのエントリ(index、create、show、edit、store、update、destroy)です。モデル、マイグレーション、Resource、コントローラーは書きません。登録すべきルートは、コントローラーの代わりに `prototype` を置いた形で出力されます。
 
 ## 歩く
 
@@ -203,7 +205,7 @@ boot 時にはルールが 3 つあり、どれもルートを名指しするハ
 
 ## `guren check --prototype`
 
-内容で活性化します。fixture も `prototype` ルートも無いアプリは何も報告しません。`--arch` や `--docs` と同じく、このフラグはスイートを選び、exit code を決めます。それが `build:prototype` をこのチェックでゲートできる理由です。
+内容で活性化します。fixture も `prototype` ルートも、`app.tsx` に配線されたローダーも無いアプリは何も報告しません。`--arch` や `--docs` と同じく、このフラグはスイートを選び、exit code を決めます。それが `build:prototype` をこのチェックでゲートできる理由です。
 
 | ルール | レベル |
 |---|---|
