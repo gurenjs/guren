@@ -24,6 +24,13 @@ describe('public/_headers', () => {
     expect(headers).toContain(`  Cache-Control: ${DOCS_CACHE_CONTROL}\n`)
   })
 
+  // Workers Static Assets serve a bare `text/markdown`; without an explicit
+  // charset a browser guesses the encoding of the Japanese source.
+  it('should declare utf-8 on the text files it serves', () => {
+    expect(headers).toContain(`\n${docsBasePath('en')}/*.md\n  Content-Type: text/markdown; charset=utf-8\n`)
+    expect(headers).toContain(`\n${LLMS_FULL_PATH}\n  Content-Type: text/plain; charset=utf-8\n`)
+  })
+
   it('should cover the generated paths with those rules', () => {
     expect(docFragmentPath('ja', 'guides', 'routing').startsWith(`${DOC_FRAGMENT_ROOT}/`)).toBe(true)
     // The Japanese markdown lives under the English prefix, so one rule covers both.

@@ -8,8 +8,13 @@
   X-Robots-Tag: noindex
   Cache-Control: public, max-age=3600
 
+# The charset is explicit: the platform serves these as bare `text/markdown`
+# and `text/plain` (measured on guren.dev), and a browser opening the Japanese
+# markdown directly then guesses the encoding. DOCS_CACHE_CONTROL's routes set it.
 /docs/*.md
+  Content-Type: text/markdown; charset=utf-8
   Cache-Control: public, max-age=3600
 
 /llms-full.txt
+  Content-Type: text/plain; charset=utf-8
   Cache-Control: public, max-age=3600
