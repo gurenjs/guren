@@ -2,7 +2,8 @@ import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import type { File, Node, ObjectExpression } from '@babel/types'
 import { memberKeyName, objectLiteral, walk, type BabelNode } from './ast-walk'
-import { DEFAULT_SESSION_STORE_NAME, PER_PROCESS_SESSION_DRIVERS, readSessionConfig, sessionConfigsIn } from './session-config'
+import { DEFAULT_SESSION_STORE_NAME, readSessionConfig, sessionConfigsIn } from './session-config'
+import { resolveSessionDrivers, type SessionDriverRegistry } from './session-drivers'
 import {
   collectFiles,
   toPosixRelative,
@@ -96,6 +97,8 @@ export interface DeployRuntimeAnalysis {
   backedOAuthSignals: SourceSignal[]
   /** Explicit `new Memory*Store()` / `new MemoryDriver()` constructions. */
   memoryStoreSignals: SourceSignal[]
+  /** Drivers this check could not vouch for either way. */
+  unknownSessionDriverSignals: SourceSignal[]
   /** A session config that selects the per-process `memory` store. */
   memorySessionDefaultSignals: SourceSignal[]
   /** Explicit use of filesystem-scanning provider discovery. */
@@ -134,6 +137,8 @@ type SignalKind =
   | 'lambda'
   /** A session config whose selected store is the per-process `memory` driver. */
   | 'memorySessionDefault'
+  /** A session config naming a driver neither built in nor declared by an installed plugin. */
+  | 'unknownSessionDriver'
 
 interface ExtractedSignal {
   kind: SignalKind
@@ -232,7 +237,7 @@ function propertyKeyName(property: BabelNode): string | null {
   return memberKeyName({ computed: Boolean(property.computed), key }) ?? null
 }
 
-function extractSignals(ast: File): ExtractedSignal[] {
+function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSignal[] {
   // Local name → canonical exported name, for value imports from `@guren/*`
   // only, so a same-named export from another package resolves to nothing.
   const gurenNames = new Map<string, string>()
@@ -314,9 +319,19 @@ function extractSignals(ast: File): ExtractedSignal[] {
     }
 
     if (candidates.length === 0) return
-    if (candidates.every((driver) => driver !== undefined && !PER_PROCESS_SESSION_DRIVERS.has(driver))) {
+
+    // A name in neither the built-in map nor a plugin manifest is reported
+    // rather than assumed: nothing in the install stands behind it, so
+    // counting it as persistent would vouch for a store that may not exist.
+    const unknown = candidates.filter((driver) => driver !== undefined && !drivers.has(driver))
+    if (unknown.length > 0) {
+      emit('unknownSessionDriver', `${label} (unknown driver${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')})`, line)
+      return
+    }
+
+    if (candidates.every((driver) => driver !== undefined && drivers.get(driver) === true)) {
       emit('backedSession', label, line)
-    } else if (candidates.every((driver) => driver !== undefined && PER_PROCESS_SESSION_DRIVERS.has(driver))) {
+    } else if (candidates.every((driver) => driver !== undefined && drivers.get(driver) === false)) {
       emit('memorySessionDefault', label, line)
     }
   }
@@ -469,7 +484,10 @@ async function readRootSourceFiles(cwd: string): Promise<string[]> {
  * constructing a backed store would otherwise satisfy the remediation check on
  * behalf of an app that never wires one up.
  */
-async function readAppSources(cwd: string): Promise<{ files: ScannedFile[]; unparsed: string[] }> {
+async function readAppSources(
+  cwd: string,
+  drivers: SessionDriverRegistry,
+): Promise<{ files: ScannedFile[]; unparsed: string[] }> {
   const [directoryFiles, rootFiles] = await Promise.all([
     Promise.all(
       DEPLOY_SCAN_DIRS.map((dir) =>
@@ -492,7 +510,7 @@ async function readAppSources(cwd: string): Promise<{ files: ScannedFile[]; unpa
       // contribute no signals.
       if (source === null) return { filePath, signals: null }
       const ast = parseSourceFile(source, path)
-      return { filePath, signals: ast ? extractSignals(ast) : null }
+      return { filePath, signals: ast ? extractSignals(ast, drivers) : null }
     }),
   )
 
@@ -544,7 +562,10 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
  * declared deploy targets, and Bun-only defaults still in force.
  */
 export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAnalysis> {
-  const { files, unparsed } = await readAppSources(cwd)
+  // Read once, before the per-file walk: resolving a driver name means
+  // reading node_modules, and the walk that needs the answer is synchronous.
+  const drivers = await resolveSessionDrivers(cwd)
+  const { files, unparsed } = await readAppSources(cwd, drivers)
   const targets = await detectDeployTargets(cwd, files)
 
   const collect = (kind: SignalKind): SourceSignal[] =>
@@ -566,6 +587,7 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
     backedOAuthSignals: collect('backedOAuth'),
     memoryStoreSignals: collect('memoryStore'),
     memorySessionDefaultSignals: collect('memorySessionDefault'),
+    unknownSessionDriverSignals: collect('unknownSessionDriver'),
     discoverySignals: collect('discovery'),
     unparsedFiles: unparsed,
   }
@@ -681,6 +703,8 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
   )
 }
 
+const UNKNOWN_DRIVER_FIX = 'A driver registered in application code cannot be seen by a static check; a plugin declares its own in `gurenPlugin.drivers.session`. This check never fails a build, so an app whose driver is correct can leave it.'
+
 const BACKED_STORE_FIX = 'Run `bunx guren add session` for a database-backed session store, use DatabaseOAuthStateStore from `@guren/core` (or the Redis equivalent from `@guren/core/redis`) for OAuth state, and a Redis-backed cache/queue driver.'
 
 /**
@@ -700,14 +724,30 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
 
   const labels = formatTargetLabels(analysis.targets)
   const issues: string[] = []
+  // Each issue names the remedy that fits it, deduped in order: telling an app
+  // that deliberately registered a driver to install a database store instead
+  // is the wrong advice, and the generic fix says exactly that.
+  const fixes: string[] = []
+  const raise = (issue: string, fix: string): void => {
+    issues.push(issue)
+    if (!fixes.includes(fix)) fixes.push(fix)
+  }
 
   if (analysis.memoryStoreSignals.length > 0) {
-    issues.push(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`)
+    raise(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`, BACKED_STORE_FIX)
   }
 
   if (analysis.memorySessionDefaultSignals.length > 0 && analysis.sessionDisabledSignals.length === 0) {
-    issues.push(
+    raise(
       `the session config selects the per-process \`memory\` store (${formatSignals(analysis.memorySessionDefaultSignals)})`,
+      BACKED_STORE_FIX,
+    )
+  }
+
+  if (analysis.unknownSessionDriverSignals.length > 0) {
+    raise(
+      `the session config names a driver this check cannot vouch for, being neither built in nor declared by an installed plugin's \`gurenPlugin.drivers.session\` (${formatSignals(analysis.unknownSessionDriverSignals)})`,
+      UNKNOWN_DRIVER_FIX,
     )
   }
 
@@ -715,16 +755,19 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
     analysis.sessionSignals.length > 0 &&
     analysis.backedSessionSignals.length === 0 &&
     analysis.memorySessionDefaultSignals.length === 0 &&
+    analysis.unknownSessionDriverSignals.length === 0 &&
     analysis.sessionDisabledSignals.length === 0
   ) {
-    issues.push(
+    raise(
       `sessions are enabled (${formatSignals(analysis.sessionSignals)}) with no persistent store: no SessionConfig selects one, and no DatabaseSessionStore or RedisSessionStore is constructed`,
+      BACKED_STORE_FIX,
     )
   }
 
   if (analysis.oauthSignals.length > 0 && analysis.backedOAuthSignals.length === 0) {
-    issues.push(
+    raise(
       `OAuth is configured (${formatSignals(analysis.oauthSignals)}) with no DatabaseOAuthStateStore or RedisOAuthStateStore`,
+      BACKED_STORE_FIX,
     )
   }
 
@@ -737,7 +780,7 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
     title,
     'warn',
     `${labels} shares no memory between requests, but ${issues.join('; ')}.${caveat}`,
-    BACKED_STORE_FIX,
+    fixes.join(' '),
   )
 }
 

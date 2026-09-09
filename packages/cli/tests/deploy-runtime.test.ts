@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
-import { SESSION_PROVIDER, sessionConfigSource } from './helpers'
+import { SESSION_PROVIDER, sessionConfigSource, writeInstalledPackage } from './helpers'
 import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { buildJsonOutput, getDoctorRuleEvaluations, runDoctor } from '../src/doctor'
@@ -1168,6 +1168,7 @@ describe('analyzeDeployRuntime', () => {
 // the deploy builds (RFC 0020 Part 0).
 describe('session config driver reading (RFC 0020)', () => {
   const cloudflare = { '@guren/plugin-cloudflare': '^0.8.0' }
+  const lambda = { '@guren/plugin-lambda': '^0.5.0' }
 
   it('reads a scaffolded config as a backed store, so the blueprint does not warn', async () => {
     const files = {
@@ -1182,6 +1183,89 @@ describe('session config driver reading (RFC 0020)', () => {
 
       const check = (await deployChecks(dir))['deploy-runtime-stores']
       expect(check.status).toBe('pass')
+    })
+  })
+
+  it('vouches for a plugin driver its manifest declares persistent', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'config/session.ts': sessionConfigSource("dynamodb: { driver: 'dynamodb' }", "'dynamodb'"),
+    }
+
+    await withApp('guren-session-plugin-driver-', files, lambda, async (dir) => {
+      await writeInstalledPackage('@guren/plugin-lambda', {
+        version: '0.0.0',
+        gurenPlugin: { drivers: { session: [{ name: 'dynamodb', persistent: true }] } },
+      }, {}, dir)
+
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.backedSessionSignals.map((signal) => signal.symbol)).toEqual([
+        "SessionConfig default: 'dynamodb'",
+      ])
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+    })
+  })
+
+  it('does not vouch for a driver name nothing installed declares', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      // The same config, with the plugin absent from node_modules: the name
+      // reads identically, and nothing in the install stands behind it.
+      'config/session.ts': sessionConfigSource("dynamodb: { driver: 'dynamodb' }", "'dynamodb'"),
+    }
+
+    await withApp('guren-session-unknown-driver-', files, lambda, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+
+      expect(analysis.backedSessionSignals).toEqual([])
+      expect(analysis.unknownSessionDriverSignals.map((signal) => signal.symbol)).toEqual([
+        "SessionConfig default: 'dynamodb' (unknown driver: dynamodb)",
+      ])
+
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('cannot vouch for')
+      // The generic "no persistent store" line would be a second, redundant issue.
+      expect(check.message).not.toContain('no persistent store')
+      // And its own remedy: telling an app that registered this driver on
+      // purpose to install a database-backed store instead is wrong advice.
+      expect(check.fix).toContain('gurenPlugin.drivers.session')
+      expect(check.fix).not.toContain('guren add session')
+    })
+  })
+
+  it('reports a misspelled built-in rather than assuming it is backed', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'config/session.ts': sessionConfigSource("datbase: { driver: 'datbase', table: sessions }", "'datbase'"),
+    }
+
+    await withApp('guren-session-typo-driver-', files, cloudflare, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+
+      expect(analysis.backedSessionSignals).toEqual([])
+      expect(analysis.unknownSessionDriverSignals).toHaveLength(1)
+    })
+  })
+
+  it('refuses a manifest that redefines a built-in driver', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'config/session.ts': sessionConfigSource("memory: { driver: 'memory' }", "'memory'"),
+    }
+
+    await withApp('guren-session-manifest-override-', files, lambda, async (dir) => {
+      // The framework registers `memory` itself, so a manifest claiming it is
+      // persistent must not make the check vouch for a store that is not there.
+      await writeInstalledPackage('@guren/plugin-lambda', {
+        version: '0.0.0',
+        gurenPlugin: { drivers: { session: [{ name: 'memory', persistent: true }] } },
+      }, {}, dir)
+
+      const analysis = await analyzeDeployRuntime(dir)
+
+      expect(analysis.backedSessionSignals).toEqual([])
+      expect(analysis.memorySessionDefaultSignals).toHaveLength(1)
     })
   })
 
@@ -1201,6 +1285,7 @@ describe('session config driver reading (RFC 0020)', () => {
       expect(check.message).toContain('selects the per-process `memory` store')
       // The generic "no persistent store" line would be a second, redundant issue.
       expect(check.message).not.toContain('no persistent store')
+      expect(check.fix).toContain('guren add session')
     })
   })
 

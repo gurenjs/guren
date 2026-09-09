@@ -527,7 +527,16 @@ the same "missing optional dependency" pattern as `S3Driver`), items
 table's TTL attribute with `read` treating a past `expires_at` as missing
 (DynamoDB TTL deletes lazily, within 48 hours). The CDK construct adds an
 optional `sessionsTable` that creates the table with TTL enabled and grants
-the function access; `gurenPlugin.env` gains `DYNAMODB_SESSIONS_TABLE`.
+the function access; ~~`gurenPlugin.env` gains `DYNAMODB_SESSIONS_TABLE`~~
+**Amended in implementation:** `applyEnvEntries` writes a manifest's env keys
+on every `guren plugin` install, so an app on Aurora would get a dead
+`DYNAMODB_SESSIONS_TABLE=` line — the shape Part 5 spent its dogfooding
+removing from the blog. The variable is documented in serverless.md instead,
+and the CDK construct sets it on every function. **Added in implementation:**
+reads are strongly consistent rather than DynamoDB's default, for the same
+read-after-write reason that rules KV out above; the construct retains the
+table on `cdk destroy` unless asked otherwise, since deleting it logs every
+user out.
 The `database` driver over Aurora Data API remains the documented default on
 Lambda (serverless.md already recommends it); `dynamodb` is for apps that
 want session churn off the primary database, which is where Laravel's
