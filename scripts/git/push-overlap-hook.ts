@@ -3,22 +3,23 @@
 // main has since rewritten (.claude/rules/common-pitfalls.md, "Duplicate Work").
 // It runs the fetch itself: a stale origin/main reports "0 behind" and fails
 // open, and skipping the fetch is what the recorded rule never prevented.
-// Every git call runs where the push will (`cd <dir> &&`, `git -C <dir>`) and on
-// the ref the command names, not the hook's cwd and HEAD: those describe the
-// session's worktree, which a push from a sibling worktree never touches (#349).
+// Every git call runs where the push will (the payload `cwd`, then `cd <dir>`
+// and `git -C <dir>` in the command) and on the refs the command names, not in
+// the hook process's cwd on HEAD: those describe the session's worktree, which
+// a push from a sibling worktree never touches (the same defect class as #349).
 
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 
 type Result = { ok: boolean; out: string; err: string }
 
+// spawnSync throws ENOENT (blaming `git`) on a missing cwd instead of failing the child.
 const run = (cwd: string, ...args: string[]): Result => {
   try {
     const r = Bun.spawnSync(['git', ...args], { cwd })
     return { ok: r.exitCode === 0, out: r.stdout.toString().trim(), err: r.stderr.toString().trim() }
   } catch (e) {
-    // The shell's own `cd` fails on a missing directory, so no push follows.
-    return { ok: false, out: '', err: String(e) }
+    return { ok: false, out: '', err: `cannot run git in ${cwd}: ${e instanceof Error ? e.message : String(e)}` }
   }
 }
 
@@ -34,66 +35,106 @@ const indent = (text: string): string => text.split('\n').map((line) => `  ${lin
 /** Where a push runs and which local ref it sends; `HEAD` when the command names none. */
 export type PushTarget = { cwd: string; ref: string }
 
+/** A simple command's words, or a subshell boundary. */
+type Item = string[] | '(' | ')'
+
 /**
- * Shell words per simple command: `&&`, `||`, `|`, `;`, `&`, newlines and bare
- * parentheses end a command. Quotes, backslashes and `$(...)` keep their span
- * inside one word, so `echo 'git push'` yields no `git` word.
+ * Shell words per simple command: `&&`, `||`, `|`, `;`, `&` and newlines end a
+ * command; `(`/`)` are emitted so a `cd` inside a subshell can be scoped.
+ * Quotes, backslashes, `$(...)` and backticks keep their span inside one word,
+ * so `echo 'git push'` yields no `git` word. A heredoc body is skipped whole.
  */
-export function splitCommands(command: string): string[][] {
-  const commands: string[][] = []
+function splitCommands(command: string): Item[] {
+  const items: Item[] = []
   let words: string[] = []
   let word = ''
-  let started = false
+  let heredocs: string[] = []
+  let tagPending = false
   const endWord = (): void => {
-    if (started) words.push(word)
+    if (word === '') return
+    if (tagPending) {
+      heredocs.push(word)
+      tagPending = false
+    } else if (/^<<-?$/.test(word)) tagPending = true
+    else {
+      const m = /^<<-?(.+)$/.exec(word)
+      if (m && !word.startsWith('<<<')) heredocs.push(m[1]!)
+    }
+    words.push(word)
     word = ''
-    started = false
   }
   const endCommand = (): void => {
     endWord()
-    if (words.length > 0) commands.push(words)
+    if (words.length > 0) items.push(words)
     words = []
   }
-  const take = (text: string): void => {
-    word += text
-    started = true
-  }
   const s = command
+  // Index just past the `)` matching the `(` at `open`.
+  const substitutionEnd = (open: number): number => {
+    let depth = 0
+    for (let j = open; j < s.length; j++) {
+      if (s[j] === '(') depth++
+      else if (s[j] === ')' && --depth === 0) return j + 1
+    }
+    return s.length
+  }
+  const skipHeredocBodies = (from: number): number => {
+    let i = from
+    for (const tag of heredocs) {
+      while (i < s.length) {
+        const nl = s.indexOf('\n', i)
+        const end = nl === -1 ? s.length : nl
+        const line = s.slice(i, end).replace(/^\t+/, '')
+        i = end + 1
+        if (line === tag) break
+      }
+    }
+    heredocs = []
+    return Math.min(i, s.length)
+  }
   let i = 0
   while (i < s.length) {
     const c = s[i]!
     if (c === "'" || c === '`') {
       const close = s.indexOf(c, i + 1)
       const end = close === -1 ? s.length : close
-      take(c === '`' ? s.slice(i, end + 1) : s.slice(i + 1, end))
+      word += c === '`' ? s.slice(i, end + 1) : s.slice(i + 1, end)
       i = end + 1
     } else if (c === '"') {
       let j = i + 1
-      let inner = ''
       while (j < s.length && s[j] !== '"') {
+        if (s[j] === '$' && s[j + 1] === '(') {
+          const end = substitutionEnd(j + 1)
+          word += s.slice(j, end)
+          j = end
+          continue
+        }
         if (s[j] === '\\' && j + 1 < s.length && '"\\$`'.includes(s[j + 1]!)) j++
-        inner += s[j]
+        word += s[j]
         j++
       }
-      take(inner)
       i = j + 1
+    } else if (c === '\\' && s[i + 1] === '\n') {
+      i += 2
     } else if (c === '\\' && i + 1 < s.length) {
-      take(s[i + 1]!)
+      word += s[i + 1]
       i += 2
     } else if (c === '$' && s[i + 1] === '(') {
-      let depth = 0
-      let j = i + 1
-      for (; j < s.length; j++) {
-        if (s[j] === '(') depth++
-        else if (s[j] === ')' && --depth === 0) break
-      }
-      take(s.slice(i, j + 1))
-      i = j + 1
+      const end = substitutionEnd(i + 1)
+      word += s.slice(i, end)
+      i = end
     } else if (c === ' ' || c === '\t') {
       endWord()
       i++
-    } else if (c === '\n' || c === ';' || c === '(' || c === ')') {
+    } else if (c === '\n') {
       endCommand()
+      i = heredocs.length > 0 ? skipHeredocBodies(i + 1) : i + 1
+    } else if (c === ';') {
+      endCommand()
+      i++
+    } else if (c === '(' || c === ')') {
+      endCommand()
+      items.push(c)
       i++
     } else if (c === '|') {
       endCommand()
@@ -104,77 +145,88 @@ export function splitCommands(command: string): string[][] {
         i += 2
       } else if (s[i + 1] === '>' || word.endsWith('>') || word.endsWith('<')) {
         // `2>&1`, `>&2` and `&>log` are redirections, not the background operator.
-        take(c)
+        word += c
         i++
       } else {
         endCommand()
         i++
       }
     } else {
-      take(c)
+      word += c
       i++
     }
   }
   endCommand()
-  return commands
+  return items
 }
 
-/** Drops `>log`, `2>&1`, and a bare `>` together with the file word after it. */
+/** Drops `>log`, `2>&1`, `<<EOF`, and a bare `>` / `&>` together with the file word after it. */
 function withoutRedirections(words: string[]): string[] {
   const kept: string[] = []
   for (let i = 0; i < words.length; i++) {
     const w = words[i]!
-    if (/^\d*[<>]{1,2}$/.test(w)) i++
+    if (/^(\d*[<>]{1,2}|&>>?)$/.test(w)) i++
     else if (!/^(\d*[<>]|&>)/.test(w)) kept.push(w)
   }
   return kept
 }
 
-/** `~` and `$VAR` expanded; undefined when the path cannot be known statically. */
+// A word the shell computes at run time; the hook cannot know its value.
+const DYNAMIC = /[$`(]/
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+// Words that precede the command they run without changing its directory.
+const CONTROL = new Set(['if', 'then', 'else', 'elif', 'while', 'until', 'do', '{', '!', 'command', 'exec'])
+// Wrappers whose own arguments sit between them and the command.
+const WRAPPERS = new Set(['time', 'nice', 'nohup', 'timeout', 'env', 'sudo', 'xargs'])
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash'])
+// Global git options that take a separate value; `--opt=value` carries its own.
+const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env'])
+const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option'])
+
+/** `~`, `~<me>` and `$VAR` expanded; undefined when the path cannot be known statically. */
 function resolvePath(base: string, raw: string): string | undefined {
   const expanded = raw
-    .replace(/^~(?=\/|$)/, homedir())
+    .replace(/^~([^/]*)(?=\/|$)/, (m, user: string) => (user === '' || user === process.env.USER ? homedir() : m))
     .replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g, (m, name: string) => process.env[name] ?? m)
-  if (/[$`(]/.test(expanded)) return undefined
+  if (expanded.startsWith('~') || DYNAMIC.test(expanded)) return undefined
   return resolve(base, expanded)
 }
 
-/** The directory a `cd` command lands in; null when it is not a cd, undefined when unknowable. */
-function cdTarget(words: string[], cwd: string): string | null | undefined {
-  if (words[0] !== 'cd') return null
-  const arg = words.slice(1).find((w) => !/^-[LPe@]+$/.test(w))
+/** The directory `cd <args>` lands in; undefined when it cannot be known statically. */
+function cdTarget(args: string[], cwd: string): string | undefined {
+  const arg = args.find((w) => w !== '--' && !/^-[LPe@]+$/.test(w))
   if (arg === undefined) return homedir()
   if (arg === '-') return undefined
   return resolvePath(cwd, arg)
 }
 
-// Global git options that take a separate value; `--opt=value` carries its own.
-const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env'])
-const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option'])
+const isGit = (w: string): boolean => w === 'git' || w.endsWith('/git')
 
 /** The local side of a refspec, or undefined for a deletion (`:remote`). */
-function localRef(refspec: string | undefined): string | undefined {
-  if (refspec === undefined) return 'HEAD'
-  // A refspec the shell computes at run time cannot be read here.
-  if (/[$`(]/.test(refspec)) return 'HEAD'
+function localRef(refspec: string): string | undefined {
+  if (DYNAMIC.test(refspec)) return 'HEAD'
   const src = refspec.replace(/^\+/, '').split(':')[0]!
   return src === '' ? undefined : src
 }
 
-/** The push a simple command performs from `cwd`, if it is a `git push`. */
-function pushIn(rawWords: string[], cwd: string): PushTarget | undefined {
-  const words = withoutRedirections(rawWords)
+/** The pushes a `git push` command performs from `cwd`; empty for any other command. */
+function pushesIn(words: string[], cwd: string): PushTarget[] {
   let i = 0
-  while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]!)) i++
-  if (words[i] !== 'git') return undefined
+  if (!isGit(words[0]!)) {
+    if (!WRAPPERS.has(words[0]!) && !ASSIGNMENT.test(words[0]!)) return []
+    i = words.findIndex(isGit)
+    if (i === -1) return []
+  }
   let dir = cwd
   for (i++; i < words.length && words[i]!.startsWith('-'); i++) {
     const w = words[i]!
-    if (!GIT_VALUE_OPTIONS.has(w)) continue
-    const value = words[++i]
-    if (w === '-C' && value !== undefined) dir = resolvePath(dir, value) ?? dir
+    if (/^-C.+/.test(w)) dir = resolvePath(dir, w.slice(2)) ?? dir
+    else if (GIT_VALUE_OPTIONS.has(w)) {
+      const value = words[++i]
+      if (w === '-C' && value !== undefined) dir = resolvePath(dir, value) ?? dir
+    }
   }
-  if (words[i] !== 'push') return undefined
+  if (words[i] !== 'push') return []
   const positional: string[] = []
   for (i++; i < words.length; i++) {
     const w = words[i]!
@@ -182,51 +234,75 @@ function pushIn(rawWords: string[], cwd: string): PushTarget | undefined {
       positional.push(...words.slice(i + 1))
       break
     }
-    if (w === '-d' || w === '--delete') return undefined
+    if (w === '-d' || w === '--delete') return []
     if (w.startsWith('-')) {
       if (PUSH_VALUE_OPTIONS.has(w)) i++
       continue
     }
     positional.push(w)
   }
-  const ref = localRef(positional[1])
-  return ref === undefined ? undefined : { cwd: dir, ref }
+  const refs = positional.length > 1 ? positional.slice(1).map(localRef) : ['HEAD']
+  return refs.flatMap((ref) => (ref === undefined ? [] : [{ cwd: dir, ref }]))
 }
 
 /**
  * Every push a command line performs, each with the directory it runs in.
  * A `cd` that cannot be followed statically (`cd -`, an unset variable) falls
- * back to `hookCwd`: a wrong check is visible, a skipped one is not.
+ * back to `baseCwd`: a wrong check is visible, a skipped one is not.
  */
-export function pushTargets(command: string, hookCwd: string): PushTarget[] {
+export function pushTargets(command: string, baseCwd: string): PushTarget[] {
   const targets: PushTarget[] = []
-  let cwd = hookCwd
-  for (const words of splitCommands(command)) {
-    const moved = cdTarget(words, cwd)
-    if (moved !== null) {
-      cwd = moved ?? hookCwd
+  const scopes: string[] = []
+  let cwd = baseCwd
+  for (const item of splitCommands(command)) {
+    if (item === '(') {
+      scopes.push(cwd)
       continue
     }
-    const push = pushIn(words, cwd)
-    if (push !== undefined) targets.push(push)
+    if (item === ')') {
+      cwd = scopes.pop() ?? cwd
+      continue
+    }
+    const words = withoutRedirections(item)
+    while (words.length > 0 && CONTROL.has(words[0]!)) words.shift()
+    if (words.length === 0) continue
+    if (words[0] === 'cd') {
+      cwd = cdTarget(words.slice(1), cwd) ?? baseCwd
+      continue
+    }
+    if (SHELLS.has(words[0]!)) {
+      const script = words[words.indexOf('-c') + 1]
+      if (words.includes('-c') && script !== undefined) targets.push(...pushTargets(script, cwd))
+      continue
+    }
+    targets.push(...pushesIn(words, cwd))
   }
-  return targets
+  return targets.filter((t, i) => targets.findIndex((u) => u.cwd === t.cwd && u.ref === t.ref) === i)
 }
 
-/** The message to block a push with, or undefined when there is nothing to say. */
-export function checkOverlap({ cwd, ref }: PushTarget = { cwd: process.cwd(), ref: 'HEAD' }): string | undefined {
+/**
+ * The message to block a push with, or undefined when there is nothing to say.
+ * `fetched` memoises the origin/main fetch per directory across one command's pushes.
+ */
+export function checkOverlap({ cwd, ref }: PushTarget, fetched = new Set<string>()): string | undefined {
   const branch = run(cwd, 'rev-parse', '--abbrev-ref', ref)
+  if (!branch.ok && branch.err.startsWith('cannot run git')) {
+    return `${branch.err}, so this push is unchecked for work main already carries.`
+  }
   if (!branch.ok || branch.out === 'HEAD' || branch.out === 'main') return undefined
   // Without this, a repo with no origin would fail the fetch and block wrongly.
   if (!run(cwd, 'remote', 'get-url', 'origin').ok) return undefined
 
-  const fetched = run(cwd, 'fetch', '-q', 'origin', 'main')
-  if (!fetched.ok) {
-    const why = fetched.err === '' ? 'no output' : fetched.err
-    return [
-      `Could not fetch origin/main (${why}), so this push is unchecked for work main`,
-      'already carries. Re-run after fetching, or push knowing it was not checked.',
-    ].join(' ')
+  if (!fetched.has(cwd)) {
+    const fetch = run(cwd, 'fetch', '-q', 'origin', 'main')
+    if (!fetch.ok) {
+      const why = fetch.err === '' ? 'no output' : fetch.err
+      return [
+        `Could not fetch origin/main (${why}), so this push is unchecked for work main`,
+        'already carries. Re-run after fetching, or push knowing it was not checked.',
+      ].join(' ')
+    }
+    fetched.add(cwd)
   }
 
   const base = run(cwd, 'merge-base', ref, 'origin/main')
@@ -253,18 +329,21 @@ export function checkOverlap({ cwd, ref }: PushTarget = { cwd: process.cwd(), re
   ].join('\n')
 }
 
-// `import.meta.main` so a test can import the parser and `checkOverlap` without this firing.
+// `import.meta.main` so a test can import `pushTargets` without this firing.
 if (import.meta.main) {
-  let command: string | undefined
+  let payload: { cwd?: string; tool_input?: { command?: string } }
   try {
-    command = (JSON.parse(await Bun.stdin.text()) as { tool_input?: { command?: string } }).tool_input?.command
+    payload = JSON.parse(await Bun.stdin.text()) as typeof payload
   } catch {
     process.exit(0)
   }
+  const command = payload.tool_input?.command
   if (command === undefined) process.exit(0)
 
-  for (const target of pushTargets(command, process.cwd())) {
-    const message = checkOverlap(target)
+  // The payload `cwd` follows the Bash tool's `cd` across calls; the hook process's does not.
+  const fetched = new Set<string>()
+  for (const target of pushTargets(command, payload.cwd ?? process.cwd())) {
+    const message = checkOverlap(target, fetched)
     if (message === undefined) continue
     console.error(message)
     process.exit(2)
