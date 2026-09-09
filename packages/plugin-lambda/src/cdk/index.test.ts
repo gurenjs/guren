@@ -381,8 +381,7 @@ describe('GurenLambdaApp', () => {
       // Four functions: a driver reaching the table from only the HTTP one
       // would leave `sessions:prune` and the console unable to touch it.
       template.resourceCountIs('AWS::Lambda::Function', 4)
-      const functions = Object.values(template.findResources('AWS::Lambda::Function'))
-      for (const fn of functions) {
+      for (const fn of Object.values(template.findResources('AWS::Lambda::Function'))) {
         const environment = (fn.Properties as { Environment?: { Variables?: Record<string, unknown> } }).Environment
         expect(environment?.Variables).toHaveProperty('DYNAMODB_SESSIONS_TABLE')
       }
@@ -396,5 +395,4 @@ describe('GurenLambdaApp', () => {
       })
     })
   })
-
 })

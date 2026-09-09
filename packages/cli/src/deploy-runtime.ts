@@ -321,9 +321,8 @@ function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSig
     if (candidates.length === 0) return
 
     // A name in neither the built-in map nor a plugin manifest is reported
-    // rather than assumed: before this, every driver that was not `memory`
-    // counted as persistent, so an app could be vouched for on a name nothing
-    // in the install declares.
+    // rather than assumed: nothing in the install stands behind it, so
+    // counting it as persistent would vouch for a store that may not exist.
     const unknown = candidates.filter((driver) => driver !== undefined && !drivers.has(driver))
     if (unknown.length > 0) {
       emit('unknownSessionDriver', `${label} (unknown driver${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')})`, line)
@@ -725,24 +724,30 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
 
   const labels = formatTargetLabels(analysis.targets)
   const issues: string[] = []
+  // Each issue names the remedy that fits it, deduped in order: telling an app
+  // that deliberately registered a driver to install a database store instead
+  // is the wrong advice, and the generic fix says exactly that.
   const fixes: string[] = []
+  const raise = (issue: string, fix: string): void => {
+    issues.push(issue)
+    if (!fixes.includes(fix)) fixes.push(fix)
+  }
 
   if (analysis.memoryStoreSignals.length > 0) {
-    issues.push(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`)
+    raise(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`, BACKED_STORE_FIX)
   }
 
   if (analysis.memorySessionDefaultSignals.length > 0 && analysis.sessionDisabledSignals.length === 0) {
-    issues.push(
+    raise(
       `the session config selects the per-process \`memory\` store (${formatSignals(analysis.memorySessionDefaultSignals)})`,
+      BACKED_STORE_FIX,
     )
   }
 
   if (analysis.unknownSessionDriverSignals.length > 0) {
-    // Its own fix: the generic one says to install a database-backed store,
-    // which is the wrong advice for a driver the app registered deliberately.
-    fixes.push(UNKNOWN_DRIVER_FIX)
-    issues.push(
+    raise(
       `the session config names a driver this check cannot vouch for, being neither built in nor declared by an installed plugin's \`gurenPlugin.drivers.session\` (${formatSignals(analysis.unknownSessionDriverSignals)})`,
+      UNKNOWN_DRIVER_FIX,
     )
   }
 
@@ -753,24 +758,22 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
     analysis.unknownSessionDriverSignals.length === 0 &&
     analysis.sessionDisabledSignals.length === 0
   ) {
-    issues.push(
+    raise(
       `sessions are enabled (${formatSignals(analysis.sessionSignals)}) with no persistent store: no SessionConfig selects one, and no DatabaseSessionStore or RedisSessionStore is constructed`,
+      BACKED_STORE_FIX,
     )
   }
 
   if (analysis.oauthSignals.length > 0 && analysis.backedOAuthSignals.length === 0) {
-    issues.push(
+    raise(
       `OAuth is configured (${formatSignals(analysis.oauthSignals)}) with no DatabaseOAuthStateStore or RedisOAuthStateStore`,
+      BACKED_STORE_FIX,
     )
   }
 
   if (issues.length === 0) {
     return verdict(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.${caveat}`)
   }
-
-  // An unverifiable driver is the only issue with its own remedy; anything
-  // else here is an in-memory store, which the generic fix addresses.
-  if (issues.length > fixes.length) fixes.push(BACKED_STORE_FIX)
 
   return verdict(
     key,

@@ -183,11 +183,11 @@ function isMissingModule(error: unknown, moduleName: string): boolean {
   )
 }
 
-async function importDynamoDb<T>(): Promise<T> {
+async function importDynamoDb(): Promise<unknown> {
   const moduleName = '@aws-sdk/client-dynamodb'
 
   try {
-    return await import(moduleName) as T
+    return await import(moduleName)
   } catch (error) {
     if (isMissingModule(error, moduleName)) {
       throw new Error(

@@ -10,12 +10,6 @@ import { readInstalledPluginManifests } from './plugin-manifest'
  */
 export type SessionDriverRegistry = ReadonlyMap<string, boolean>
 
-export interface PluginSessionDriver {
-  name: string
-  /** Whether state survives between requests on separate instances. */
-  persistent?: boolean
-}
-
 export async function resolveSessionDrivers(cwd: string = process.cwd()): Promise<SessionDriverRegistry> {
   const drivers = new Map<string, boolean>(BUILT_IN_SESSION_DRIVERS)
 
@@ -31,5 +25,3 @@ export async function resolveSessionDrivers(cwd: string = process.cwd()): Promis
 
   return drivers
 }
-
-export { BUILT_IN_SESSION_DRIVERS }

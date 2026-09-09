@@ -198,8 +198,7 @@ export class GurenLambdaApp extends Construct {
         // table's TTL is the sweeper, not the clock (it deletes within 48h).
         timeToLiveAttribute: 'expires_at',
         billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-        // A destroyed table logs every user out, so opting into deletion is
-        // explicit — CDK's own default for a Table is RETAIN either way.
+        // CDK's own default for a Table is RETAIN either way.
         removalPolicy: sessionsProps.retainOnDelete === false ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
       })
 
