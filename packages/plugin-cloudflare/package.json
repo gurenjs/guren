@@ -20,7 +20,8 @@
     "commands": {
       "entry": "./dist/commands.js",
       "names": [
-        "cloudflare:build"
+        "cloudflare:build",
+        "cloudflare:size"
       ]
     }
   },

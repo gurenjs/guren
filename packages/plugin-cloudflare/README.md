@@ -20,6 +20,8 @@ bunx wrangler deploy
 
 Before the app build it runs the deploy-runtime checks `guren doctor` reports and warns, without failing, when sessions or OAuth state would sit in process memory, a `ScryptHasher` is constructed, or providers are discovered from the filesystem. Each works locally and breaks on Workers, and the warning prints where you are still reading rather than after the Vite output.
 
+`bunx guren cloudflare:size` (or `cloudflare:build --report-size`) measures the bundle a deploy would upload through wrangler's dry run and lists its largest sources by package. The platform limit is 64 MiB uncompressed on every plan; the report warns from half of it.
+
 ## API
 
 - **`createWorkersHandler(app)`** — wraps a Guren `Application` in a Workers module handler. Boot is lazy and deduplicated on the first request, because `boot()` performs I/O that workerd forbids in global scope. The handler deduplicates boot itself, so boot-once holds for anything matching `WorkersAppLike`, not only Guren's `Application`. It also exposes `boot(env)`, for an entrypoint that holds `env` but no request — an agent Durable Object woken by an alarm. The latch behind both is `bootWorkersApp(app, env)` / `bootAndFetch(app, request, env, ctx)`, keyed on the app.
