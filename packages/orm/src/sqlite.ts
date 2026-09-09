@@ -219,6 +219,12 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     }
   }
 
+  // A reset drops the tracker along with everything else, so the re-apply that
+  // follows reads as all-pending. Reporting it would put the whole migration
+  // list on the console for every `db:reset` and every `resetDatabase()` in a
+  // test's `beforeEach`, which is where the report stops being readable.
+  let reapplyingAfterReset = false
+
   /** Tracker rows over the open handle. Only a missing tracker means "nothing applied"; a drifted column must not read as all-pending. */
   function readAppliedMigrations(): AppliedMigrationRow[] {
     try {
@@ -233,6 +239,11 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   }
 
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
+    // Read and cleared before the first await, so it describes this attempt and
+    // not one a later reset started.
+    const report = !reapplyingAfterReset
+    reapplyingAfterReset = false
+
     try {
       const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
       if (summary.migrationsFound === 0) {
@@ -241,7 +252,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
       const db = await database.get()
       // Read before the migrator writes: afterwards every row is applied.
-      const pending = await pendingMigrationNames(resolvedMigrationsFolder, readAppliedMigrations)
+      const pending = report ? await pendingMigrationNames(resolvedMigrationsFolder, readAppliedMigrations) : []
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrate(db as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
       reportAppliedMigrations(pending, resolvedMigrationsFolder)
@@ -294,6 +305,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       // the memo re-applies from scratch; a caller that then migrates again
       // hits the fresh memo and no-ops.
       migrations.reset()
+      reapplyingAfterReset = true
       return migrations.get()
     },
 

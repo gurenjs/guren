@@ -280,6 +280,32 @@ describe('createSqliteDatabase migration reporting', () => {
     expect(reboot).toEqual([])
   })
 
+  test('should stay silent while resetDatabase re-applies what it just dropped', async () => {
+    // A reset drops the tracker, so every migration reads as pending again.
+    // The framework's own testing rules put resetDatabase() in `beforeEach`,
+    // where a line per test naming every migration is the whole log's ruin.
+    writeMigration('20260101000000_create_widgets', 'CREATE TABLE widgets (id integer primary key);')
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+    await database.getDatabase()
+
+    const lines = await captureInfo(async () => void (await database.resetDatabase()))
+    expect(lines).toEqual([])
+
+    // The suppression is spent on that one run, not left on for the next boot.
+    await database.closeDatabase()
+    writeMigration('20260102000000_orphan_sessions', 'CREATE TABLE sessions (id text primary key);')
+    const next = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+    const applied = await captureInfo(async () => void (await next.getDatabase()))
+    await next.closeDatabase()
+    expect(applied.join('\n')).toContain('20260102000000_orphan_sessions')
+  })
+
   test('should name only the migration that arrived after the database was current', async () => {
     // The accident this reports: a generator left a folder behind, nobody
     // applied it on purpose, and the next boot applies it.

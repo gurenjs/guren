@@ -86,6 +86,12 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     return resolved
   }
 
+  // A reset drops the tracker along with everything else, so the re-apply that
+  // follows reads as all-pending. Reporting it would put the whole migration
+  // list on the console for every `db:reset` and every `resetDatabase()` in a
+  // test's `beforeEach`, which is where the report stops being readable.
+  let reapplyingAfterReset = false
+
   /**
    * Tracker rows over an open client. Only a missing tracker means "nothing
    * applied": a denied SELECT, a broken schema, or an unreachable server must
@@ -102,6 +108,11 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
   }
 
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
+    // Read and cleared before the first await, so it describes this attempt and
+    // not one a later reset started.
+    const report = !reapplyingAfterReset
+    reapplyingAfterReset = false
+
     // Resolved below, not up front: resolveConnectionString() throws when
     // nothing is configured, so it must not run before the early return.
     let endpoint: string | undefined
@@ -124,9 +135,9 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
         const db = drizzle({ client: migrationClient, ...(relations ? { relations } : {}) } as DrizzleConfig)
         // Over the migration client, and before the migrator writes: a second
         // admin connection here would cost a round trip on every cold start.
-        const pending = await pendingMigrationNames(resolvedMigrationsFolder, () =>
-          readAppliedMigrations(migrationClient),
-        )
+        const pending = report
+          ? await pendingMigrationNames(resolvedMigrationsFolder, () => readAppliedMigrations(migrationClient))
+          : []
         await migrate(db, { migrationsFolder: resolvedMigrationsFolder })
         reportAppliedMigrations(pending, resolvedMigrationsFolder)
       } finally {
@@ -229,6 +240,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     // memo re-applies from scratch; a caller that then migrates again hits the
     // fresh memo and no-ops.
     migrations.reset()
+    reapplyingAfterReset = true
     return migrations.get()
   }
 

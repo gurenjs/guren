@@ -126,7 +126,18 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     } as DrizzleConfig
   }
 
+  // A reset drops the tracker along with everything else, so the re-apply that
+  // follows reads as all-pending. Reporting it would put the whole migration
+  // list on the console for every `db:reset` and every `resetDatabase()` in a
+  // test's `beforeEach`, which is where the report stops being readable.
+  let reapplyingAfterReset = false
+
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
+    // Read and cleared before the first await, so it describes this attempt and
+    // not one a later reset started.
+    const report = !reapplyingAfterReset
+    reapplyingAfterReset = false
+
     try {
       const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
       if (summary.migrationsFound === 0) {
@@ -136,7 +147,9 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       const { migrate } = await loadAwsDataApiModules()
       await withAdminDb(async (db) => {
         // Read before the migrator writes: afterwards every row is applied.
-        const pending = await pendingMigrationNames(resolvedMigrationsFolder, () => readAppliedMigrations(db))
+        const pending = report
+          ? await pendingMigrationNames(resolvedMigrationsFolder, () => readAppliedMigrations(db))
+          : []
         await migrate(db, { migrationsFolder: resolvedMigrationsFolder })
         reportAppliedMigrations(pending, resolvedMigrationsFolder)
       })
@@ -225,6 +238,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     // memo re-applies from scratch; a caller that then migrates again hits the
     // fresh memo and no-ops.
     migrations.reset()
+    reapplyingAfterReset = true
     return migrations.get()
   }
 

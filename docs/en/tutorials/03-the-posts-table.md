@@ -529,13 +529,13 @@ git switch -c scratch/add-resource
 bunx guren add resource Post --fields "title:string,body:text" --force
 git diff main --stat
 git switch main
-git restore .
+git reset --hard
 git clean -fdn
 git clean -fd
 git branch -D scratch/add-resource
 ```
 
-`git switch main` and `git branch -D` move a reference; neither undoes work you never committed. Without the `restore` and the `clean`, everything the generator wrote is still in your working tree on `main`. The dry run (`-n`) is there so you read that list before deleting it.
+`git switch main` and `git branch -D` move a reference; neither undoes work you never committed. Without the `reset` and the `clean`, everything the generator wrote is still in your working tree on `main`. The dry run (`-n`) is there so you read that list before deleting it.
 
 The generated controller differs from yours in two ways worth noticing: it validates the `:id` parameter with a schema instead of binding the model, and its `index` paginates. Both are chapter 4.
 
@@ -557,7 +557,7 @@ The generated controller differs from yours in two ways worth noticing: it valid
 
 ## Exercises
 
-1. Open the `migration.sql` your migration wrote. Which columns did drizzle-kit make `NOT NULL`, and where in `db/schema.ts` did that come from? On a branch, make `body` nullable and run `bun run db:make` without applying it; read the SQL it produces, then throw it away the way the comparison above does: `git switch main`, `git restore .`, `git clean -fd`. Deleting the branch on its own leaves the migration folder on disk, and the next `bun run dev` applies it.
+1. Open the `migration.sql` your migration wrote. Which columns did drizzle-kit make `NOT NULL`, and where in `db/schema.ts` did that come from? On a branch, make `body` nullable and run `bun run db:make` without applying it; read the SQL it produces, then throw it away the way the comparison above does: `git switch main`, `git reset --hard`, `git clean -fd`. Deleting the branch on its own leaves the migration folder on disk, and the next `bun run dev` applies it.
 2. `Post.findOrFail(id)` answers a missing row with a 404. Nothing in `PostController` catches it. Find the piece that turns the exception into a response, and say what `Post.find(id)` would have produced instead.
 
 ## Next
