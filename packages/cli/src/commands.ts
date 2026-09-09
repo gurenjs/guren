@@ -2491,6 +2491,10 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only translation catalog checks (lang/<locale> key and placeholder parity).',
     },
+    prototype: {
+      type: 'boolean',
+      description: 'Run only prototype wiring checks (RFC 0021): fixture entries against the route graph.',
+    },
     changed: {
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
@@ -2503,8 +2507,8 @@ const checkCommand = defineCommand({
   async run({ args }) {
     // --ci promises a full-suite gate; letting a suite flag narrow the run
     // underneath it would report success while docs/spec/core went unchecked.
-    if (args.ci && (args.arch || args.docs || args.spec || args.i18n)) {
-      consola.error('check --ci runs the full suite — drop --arch/--docs/--spec/--i18n (they gate on their own).')
+    if (args.ci && (args.arch || args.docs || args.spec || args.i18n || args.prototype)) {
+      consola.error('check --ci runs the full suite — drop --arch/--docs/--spec/--i18n/--prototype (they gate on their own).')
       process.exitCode = 1
       return
     }
@@ -2517,6 +2521,7 @@ const checkCommand = defineCommand({
       docs: Boolean(args.docs),
       spec: Boolean(args.spec),
       i18n: Boolean(args.i18n),
+      prototype: Boolean(args.prototype),
       changed: Boolean(args.changed),
     })
 
@@ -2529,7 +2534,7 @@ const checkCommand = defineCommand({
     // Only the suite flags and the opt-in `--ci` gate on exit code. Plain
     // `guren check` has never set one, and changing that on a v1.0-stable
     // command is a breaking change reserved for a major release.
-    if ((args.arch || args.docs || args.spec || args.i18n) && report.failCount > 0) {
+    if ((args.arch || args.docs || args.spec || args.i18n || args.prototype) && report.failCount > 0) {
       process.exitCode = 1
     }
     if (args.ci && gatingResults(report).length > 0) {

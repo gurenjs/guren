@@ -13,7 +13,7 @@
     "test": "vitest run",
     "build": "bun run codegen && bunx vite build && bunx vite build --ssr",
     "dev:prototype": "bun run codegen && bunx vite --mode prototype",
-    "build:prototype": "bun run codegen && bunx vite build --mode prototype",
+    "build:prototype": "bun run codegen && bun ../../packages/cli/src/bin.ts check --prototype && bunx vite build --mode prototype",
     "e2e": "playwright test",
     "e2e:server": "bun bin/serve.ts",
     "e2e:ui": "playwright test --ui",

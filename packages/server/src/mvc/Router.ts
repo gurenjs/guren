@@ -9,6 +9,7 @@ import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
 import { trimSlashes } from '../support/trim-slashes'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from '../internal/route-path'
+import { createPrototypeRouteHandler, isPrototypeHandler, type PrototypeRouteHandler } from './prototype'
 
 /** Constructor type for Controller classes. */
 export type ControllerConstructor<T extends Controller = Controller> = (new (...args: any[]) => T) & {
@@ -42,8 +43,11 @@ export type RouteResult =
 export type RouteHandler<C extends ControllerConstructor = ControllerConstructor> =
   | ((c: Context, next: Next) => RouteResult | Promise<RouteResult>)
   | ControllerAction<C>
+  | PrototypeRouteHandler
 
-type AnyRouteHandler = ((c: Context, next: Next) => RouteResult | Promise<RouteResult>) | AnyControllerAction
+type CallableRouteHandler = ((c: Context, next: Next) => RouteResult | Promise<RouteResult>) | AnyControllerAction
+
+type AnyRouteHandler = CallableRouteHandler | PrototypeRouteHandler
 
 type ModelBindingResolver = (value: string) => Promise<unknown>
 
@@ -232,6 +236,8 @@ interface RegisteredRoute {
   openapi?: RouteOpenApiMetadata
   bindings?: Map<string, ModelBinding>
   agent?: AgentRouteMetadata
+  /** Registered with the `prototype` handler (RFC 0021): answered from the fixture until a controller replaces it. */
+  prototype?: true
 }
 
 /** A registered route definition, as handed out for introspection. */
@@ -268,6 +274,8 @@ export interface RouteDefinition {
   bindings?: Record<string, string>
   /** Agent metadata as declared (RFC 0016), no defaults applied. Absent: not a tool. */
   agent?: AgentRouteMetadata
+  /** Still on its fixture (RFC 0021): registered with the `prototype` handler rather than a controller. */
+  prototype?: true
   summary?: string
   description?: string
   tags?: string[]
@@ -423,7 +431,7 @@ export class Router<M extends string = never> {
     method: string,
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   on(method: string, path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register(method.toUpperCase(), path, handlerOrOptions, rest)
@@ -449,7 +457,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   get(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('GET', path, handlerOrOptions, rest)
@@ -475,7 +483,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   post(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('POST', path, handlerOrOptions, rest)
@@ -501,7 +509,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   put(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('PUT', path, handlerOrOptions, rest)
@@ -527,7 +535,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   patch(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('PATCH', path, handlerOrOptions, rest)
@@ -553,7 +561,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('DELETE', path, handlerOrOptions, rest)
@@ -584,7 +592,7 @@ export class Router<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   query(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('QUERY', path, handlerOrOptions, rest)
@@ -664,7 +672,12 @@ export class Router<M extends string = never> {
   mount(app: Hono, options: RouterMountOptions = {}): void {
     for (const route of this.registry) {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
-      const handler = resolveHandler(route.handler, this.modelBindings, options.container, route.bindings, route.path)
+      const handler = isPrototypeHandler(route.handler)
+        ? createPrototypeRouteHandler(route, {
+            container: options.container,
+            routeUrl: (name, params) => this.route(name, params),
+          })
+        : resolveHandler(route.handler, this.modelBindings, options.container, route.bindings, route.path)
       const contractMiddleware = createContractValidationMiddleware(route)
       const inlineMiddlewares = [...route.scopedMiddlewares, ...route.middlewares]
       // Last before the handler, so a verdict answers only for a request that
@@ -694,11 +707,12 @@ export class Router<M extends string = never> {
   }
 
   definitions(): RouteDefinition[] {
-    return this.registry.map(({ method, path, name, schemas, resource, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings, agent }) => ({
+    return this.registry.map(({ method, path, name, schemas, resource, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings, agent, prototype }) => ({
       method,
       path,
       name,
       schemas,
+      prototype,
       resource: serializeResourceHint(resource),
       agent: agent ? cloneAgentMetadata(agent) : undefined,
       middlewareNames: [...routeMiddlewareNames],
@@ -741,6 +755,17 @@ export class Router<M extends string = never> {
         return builder
       }
 
+      // Detected here, before wrapping: a function sentinel would lose its
+      // identity inside createContractHandler(), and the name it resolves by
+      // only exists once .name() has run on the builder, so mount() reads it.
+      if (isPrototypeHandler(handlerOrAction)) {
+        const builder = this.add(method, path, handlerOrAction, options.middlewares ?? [])
+        if (options.name) builder.name(options.name)
+        const route = this.registry[this.registry.length - 1]
+        applyRouteContract(route, options)
+        return builder
+      }
+
       const contractHandler = handlerOrAction as TypedRouteHandler<SchemaLike<unknown>, SchemaLike<unknown>, SchemaLike<unknown>, SchemaLike<unknown>>
       if (typeof contractHandler !== 'function') {
         throw new Error(`Router.${method.toLowerCase()} requires a handler function when route contract options are provided.`)
@@ -774,6 +799,7 @@ export class Router<M extends string = never> {
       scopedMiddlewares: scope.handlers,
       routeMiddlewareNames: scope.names,
     }
+    if (isPrototypeHandler(handler)) route.prototype = true
 
     this.registry.push(route)
     return createRouteBuilder(route, this.namedRoutes)
@@ -907,7 +933,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   get(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.get(path, handlerOrOptions as never, ...(rest as never[])))
@@ -933,7 +959,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   post(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.post(path, handlerOrOptions as never, ...(rest as never[])))
@@ -959,7 +985,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   put(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.put(path, handlerOrOptions as never, ...(rest as never[])))
@@ -985,7 +1011,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   patch(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.patch(path, handlerOrOptions as never, ...(rest as never[])))
@@ -1011,7 +1037,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.delete(path, handlerOrOptions as never, ...(rest as never[])))
@@ -1037,7 +1063,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   >(
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   query(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.query(path, handlerOrOptions as never, ...(rest as never[])))
@@ -1065,7 +1091,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
     method: string,
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-    handler: ControllerAction<C>,
+    handler: ControllerAction<C> | PrototypeRouteHandler,
   ): RouteBuilder<M>
   on(method: string, path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.on(method, path, handlerOrOptions as never, ...(rest as never[])))
@@ -1360,7 +1386,7 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
 }
 
 function resolveHandler(
-  action: AnyRouteHandler,
+  action: CallableRouteHandler,
   modelBindings: Map<string, RegisteredBinding>,
   container?: Container,
   routeBindings?: Map<string, ModelBinding>,

@@ -85,11 +85,15 @@ export interface AgentManifestPlan {
 export async function planAgentManifest(
   cwd: string,
   routesFile: string = DEFAULT_ROUTES_FILE,
-  preloadedDefinitions?: RouteDefinition[],
+  /** Definitions already loaded, or a memoized loader shared with other rules so the graph runs once. */
+  preloadedDefinitions?: RouteDefinition[] | (() => Promise<RouteDefinition[]>),
 ): Promise<AgentManifestPlan> {
   const present = await fileExists(cwd, AGENTS_MANIFEST_FILE)
 
-  let definitions = preloadedDefinitions
+  let definitions = typeof preloadedDefinitions === 'function' ? undefined : preloadedDefinitions
+  const load = typeof preloadedDefinitions === 'function'
+    ? preloadedDefinitions
+    : () => loadRouteDefinitions(resolve(cwd, routesFile), cwd)
   if (definitions === undefined) {
     if (!present && !(await appDeclaresAgentRoutes(cwd, routesFile))) {
       return { reason: 'no-tools', toolCount: 0, staleManifest: false }
@@ -100,7 +104,7 @@ export async function planAgentManifest(
     }
 
     try {
-      definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
+      definitions = await load()
     } catch (error) {
       // Never swallowed: silence is indistinguishable from an app that exposes nothing.
       return {
