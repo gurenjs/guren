@@ -4,11 +4,13 @@ import { pathToFileURL } from 'node:url'
 import {
   AGENTS_CONFIG_FILE,
   appUsesMcpPlugin,
+  DATABASE_FACTORIES,
   DEV_ONLY_MODULES,
   MCP_PLUGIN_PACKAGE,
   MCP_TRANSPORT_SPECIFIER,
   SQL_CLIENT_MODULES,
   clientManifestJson,
+  detectDatabaseDialects,
   DOCUMENT_ASSET_EXTENSIONS,
   DOCUMENT_ASSET_HEADERS,
   importSpecifier,
@@ -128,6 +130,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // drops every login after deploy, and the warning belongs where the
   // developer is still reading (RFC 0020 Part 0).
   await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
+  warnDatabaseWithoutD1(root)
 
   if (!options.skipAppBuild) {
     runAppBuild(root, packageJson.scripts ?? {})
@@ -686,6 +689,28 @@ function nextMigrationTag(config: Record<string, unknown>): string {
   }
 
   return `v${highest + 1}`
+}
+
+/**
+ * Every SQL client is stubbed below whether or not the app calls
+ * `createD1Database()`, so a config that never does deploys clean and throws on
+ * its first query. Advice, not a gate, and silent when detection returns no
+ * dialects: a name scan cannot see a factory reached indirectly. A config naming
+ * D1 beside another factory (`web/config/database.ts` switches at runtime) passes.
+ */
+function warnDatabaseWithoutD1(root: string): void {
+  const { dialects, source } = detectDatabaseDialects(root)
+  if (!dialects || !source || dialects.includes('d1')) {
+    return
+  }
+
+  const factories = Object.entries(DATABASE_FACTORIES)
+    .filter(([, dialect]) => dialects.includes(dialect))
+    .map(([factory]) => `${factory}()`)
+    .join(', ')
+  console.warn(
+    `Cloudflare build: ${source} calls ${factories} and never createD1Database(). On Cloudflare Workers only createD1Database() can connect — every other database client is stubbed in this worker — so the deployed worker will throw at its first database call. Switch the config to createD1Database() (keeping the other factory behind an isWorkersRuntime() branch if it serves local development).`,
+  )
 }
 
 /**
