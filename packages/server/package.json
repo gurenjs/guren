@@ -176,6 +176,7 @@
     "@types/ioredis": "^5.0.0",
     "@types/node": "^20.14.10",
     "@types/nodemailer": "^8.0.1",
+    "miniflare": "5.20260801.1-alpha",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
     "vite": "^8.0.0"

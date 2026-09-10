@@ -179,4 +179,73 @@ describe('the audit emitter', () => {
     expect(seen).toEqual(['posts.index', 'posts.store'])
     expect(warnings()).toBe('')
   })
+
+  describe('deferred work', () => {
+    test('should hand the sink promise to defer, already carrying its catch', async () => {
+      const deferred: Promise<unknown>[] = []
+      let settle: (() => void) | undefined
+      const emit = createAuditEmitter(
+        () => new Promise<void>((done) => { settle = done }),
+        undefined,
+        () => NOW,
+        { defer: (work) => void deferred.push(work) },
+      )
+
+      emit(INVOKED)
+
+      // The one property `waitUntil` needs: a promise still pending when the
+      // emitter returns, so the runtime has something to keep alive.
+      expect(deferred).toHaveLength(1)
+      settle!()
+      await expect(deferred[0]).resolves.toBeUndefined()
+    })
+
+    test('should defer a rejecting sink as a settled promise, not an unhandled one', async () => {
+      // `waitUntil` on a rejecting promise raises an unhandled rejection in
+      // workerd, which is louder than the warning it replaces.
+      const deferred: Promise<unknown>[] = []
+      const emit = createAuditEmitter(
+        () => Promise.reject(new Error('delivery refused')),
+        undefined,
+        () => NOW,
+        { defer: (work) => void deferred.push(work) },
+      )
+
+      emit(INVOKED)
+      await expect(deferred[0]).resolves.toBeUndefined()
+      expect(warnings()).toContain('delivery refused')
+    })
+
+    test('should defer the listener promise too', async () => {
+      const events = new EventManager()
+      let settle: (() => void) | undefined
+      events.on(AgentToolInvoked, () => new Promise<void>((done) => { settle = done }))
+      const deferred: Promise<unknown>[] = []
+
+      createAuditEmitter(undefined, events, () => NOW, { defer: (work) => void deferred.push(work) })(INVOKED)
+
+      // Resolves only once the listener does, which is what identifies the
+      // deferred promise as the listener's rather than the sink's.
+      expect(deferred).toHaveLength(1)
+      settle!()
+      await expect(deferred[0]).resolves.toBeUndefined()
+    })
+
+    test('should warn and not throw when defer itself throws', async () => {
+      // `waitUntil` throws in workerd when the response has already settled. A
+      // best-effort trail may not turn that into a failed tool call.
+      const records: AgentAuditRecord[] = []
+      const emit = createAuditEmitter((record) => void records.push(record), undefined, () => NOW, {
+        defer: () => {
+          throw new Error('Cannot perform I/O on behalf of a different request')
+        },
+      })
+
+      expect(() => emit(INVOKED)).not.toThrow()
+      await flush()
+
+      expect(records.map((record) => record.tool)).toEqual(['posts.index'])
+      expect(warnings()).toContain('agent audit work could not be deferred')
+    })
+  })
 })

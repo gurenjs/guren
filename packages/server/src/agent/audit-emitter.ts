@@ -30,6 +30,17 @@ export type AgentAuditSink = (record: AgentAuditRecord) => void | Promise<void>
  */
 export type AgentAuditEmitter = (event: AgentToolInvoked | AgentToolDenied) => void
 
+/** Options an emitter is built with, beyond its sink and its events. */
+export interface AuditEmitterOptions {
+  /**
+   * Where an unfinished write goes so the runtime keeps it alive past the
+   * response: `ExecutionContext.waitUntil` on Workers, where an undeferred one
+   * is abandoned with the request context, silently. Passed rather than reached
+   * for, since this package is runtime-agnostic.
+   */
+  defer?: (work: Promise<unknown>) => void
+}
+
 /**
  * **The sink is called directly, not subscribed as a listener**:
  * `EventManager.emit` awaits listeners in a bare `for` loop, so one unrelated
@@ -41,21 +52,36 @@ export function createAuditEmitter(
   sink: AgentAuditSink | undefined,
   events: EventManager | undefined,
   now: () => Date = () => new Date(),
+  options: AuditEmitterOptions = {},
 ): AgentAuditEmitter {
+  const { defer } = options
+  // `defer` itself throws in workerd when called after the response settled,
+  // and a best-effort trail may not turn that into a failed tool call.
+  const keepAlive = (work: Promise<unknown> | undefined): void => {
+    if (!work || !defer) return
+    try {
+      defer(work)
+    } catch (error) {
+      console.warn(`[guren] agent audit work could not be deferred: ${String(error)}`)
+    }
+  }
+
   return (event) => {
     if (sink) {
       // The clock is read once, here, and the record carries the instant it
       // produced — see `toAuditRecord`.
       try {
-        void Promise.resolve(sink(toAuditRecord(event, now()))).catch(warnSinkFailure)
+        // Deferred *after* the catch is attached: `waitUntil` on a rejecting
+        // promise raises an unhandled rejection in workerd.
+        keepAlive(Promise.resolve(sink(toAuditRecord(event, now()))).catch(warnSinkFailure))
       } catch (error) {
         warnSinkFailure(error)
       }
     }
 
-    void events?.emit(event).catch((error) => {
+    keepAlive(events?.emit(event).catch((error) => {
       console.warn(`[guren] audit event listener failed: ${String(error)}`)
-    })
+    }))
   }
 }
 

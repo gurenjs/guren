@@ -59,8 +59,8 @@ export interface McpPluginConfig {
   /**
    * Audit trail (RFC 0016 §5.2), opt-in because Workers and Lambda filesystems
    * are read-only or ephemeral. `file` is a *base* path: the trail lands in
-   * `agent-audit-YYYY-MM-DD.log` beside it, rotated daily. A `sink` is not
-   * awaited (write synchronously, or hand it to `waitUntil`); a throw warns.
+   * `agent-audit-YYYY-MM-DD.log` beside it, rotated daily. A `sink` is never
+   * awaited — handed to `waitUntil` on Workers so a slow write lands; a throw warns.
    * @default undefined — no sink; events are emitted, nothing is written
    */
   audit?: { file?: string; days?: number } | { sink: (record: AgentAuditRecord) => void | Promise<void> }
@@ -179,13 +179,18 @@ const factory = definePlugin<McpPluginConfig>({
       const approvals = createAgentApprovalContext(config.approvals, principal)
 
       const executionCtx = executionContext(c)
+      // Rebuilt per request because `waitUntil` is. The container binding stays
+      // the boot-time emitter, which is what a surface holding no request
+      // (`guren tool:call`) resolves.
+      const defer = deferrer(executionCtx)
+      const record = defer ? createAuditEmitter(sink, events, undefined, { defer }) : emit
 
       const pipeline = createAgentInvocationPipeline({
         app,
         principal,
         abilities,
         surface: 'mcp',
-        audit: emit,
+        audit: record,
         ...(approvals ? { approvals } : {}),
         // The pipeline is protocol-neutral, so both the configuration line in
         // a fail-closed refusal and the subject of a scope refusal have to
@@ -225,7 +230,7 @@ const factory = definePlugin<McpPluginConfig>({
         limiter,
         rateKey,
         onInvoked: (tool, args, status, durationMs) => {
-          emit(
+          record(
             new AgentToolInvoked(
               principal,
               tool.toolName,
@@ -237,7 +242,7 @@ const factory = definePlugin<McpPluginConfig>({
           )
         },
         onDenied: (tool, args, reason: AgentToolDenialReason) => {
-          emit(
+          record(
             new AgentToolDenied(
               principal,
               tool.toolName,
@@ -356,6 +361,15 @@ async function resolveAuditSink(
 
   const { createFileAuditSink } = await import('./audit-file')
   return createFileAuditSink(config.file ?? DEFAULT_AGENT_AUDIT_PATH, config.days)
+}
+
+/**
+ * `c.executionCtx` is a cast, not a check, so a third `app.fetch` argument
+ * without a callable `waitUntil` would throw here — and a trail that cannot
+ * defer may not fail the call it was recording.
+ */
+function deferrer(ctx: ExecutionContext | undefined): ((work: Promise<unknown>) => void) | undefined {
+  return typeof ctx?.waitUntil === 'function' ? ctx.waitUntil.bind(ctx) : undefined
 }
 
 /** Hono throws on `executionCtx` outside Workers; absent is a normal answer here. */
