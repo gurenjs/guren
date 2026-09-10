@@ -440,6 +440,17 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
+   * @internal The one read-transform pass for a result set. QueryBuilder calls
+   * it on every materialised row, which is what makes a relation loader's rows
+   * carry the *related* model's casts, since each loader queries through
+   * `related.newQuery()`.
+   */
+  static applyReadTransformsMany<T extends PlainObject>(records: T[]): T[] {
+    if (!this.casts && !this.accessors) return records
+    return records.map((record) => this.applyReadTransforms(record))
+  }
+
+  /**
    * In order: `deniedFields()` throws, checked on the raw input so no later
    * rule can swallow them; `id` is stripped silently; then, with `fillable`
    * set, anything outside it throws.
@@ -552,10 +563,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
     const table = this.resolveTable()
     const records = await this.getAdapter().findMany(table, undefined, queryOptions) as Array<TRecordFor<T>>
-    if (this.casts || this.accessors) {
-      return records.map((r) => this.applyReadTransforms(r))
-    }
-    return records
+    return this.applyReadTransformsMany(records)
   }
 
   static async find<T extends typeof Model>(
@@ -1028,7 +1036,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       options.where = where
     }
 
-    return this.getAdapter().findMany(table, options, queryOptions) as Promise<TRecordFor<T>[]>
+    const records = await this.getAdapter().findMany(table, options, queryOptions) as TRecordFor<T>[]
+    return this.applyReadTransformsMany(records)
   }
 
   /**
@@ -1086,7 +1095,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       offset,
     }
 
-    const data = await adapter.findMany(table, findOptions, queryOptions) as Array<TRecordFor<T>>
+    const data = this.applyReadTransformsMany(
+      await adapter.findMany(table, findOptions, queryOptions) as Array<TRecordFor<T>>,
+    )
 
     const from = total === 0 ? 0 : offset + 1
     const to = total === 0 ? 0 : offset + data.length

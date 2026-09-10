@@ -253,7 +253,7 @@ export class QueryBuilder<
   }
 
   async get(): Promise<TResult[]> {
-    const results = await this.executeQuery()
+    const results = this.modelClass.applyReadTransformsMany(await this.executeQuery())
     return this.loadEagerRelations(results)
   }
 
