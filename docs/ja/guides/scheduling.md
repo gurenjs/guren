@@ -65,7 +65,7 @@ process.on('SIGTERM', () => {
 - **Cloudflare Workers**: `guren cloudflare:build` が生成するワーカーが `scheduled` ハンドラを export し、`wrangler.jsonc` の `triggers.crons` がそれを駆動します。[Cloudflare Workers へのデプロイ](./cloudflare.md#スケジュールタスク)を参照してください。
 - **AWS Lambda**: `@guren/core/lambda` の `createScheduleHandler(scheduler)` を EventBridge ルールに接続します。[サーバーレス](./serverless.md)を参照してください。
 
-起動のたびに、その時点で実行時刻を迎えているタスクだけが動きます。そのためプラットフォームのトリガーは、いちばん細かいタスクと同じかそれより細かい頻度にしてください。また `preventOverlapping()` と `onOneServer()` はタスク上のメモリ内フラグなので、プロセスが常駐しないランタイムでは起動をまたいで効きません。`schedule.command()` は `node:child_process` 経由でシェルに任せるため、Workers では動きません。そちらでは `schedule.call()` か `schedule.job()` を使ってください。
+起動のたびに、その時点で実行時刻を迎えているタスクだけが動きます。そのためプラットフォームのトリガーは、いちばん細かいタスクと同じかそれより細かい頻度にしてください。また `preventOverlapping()` はタスク上のメモリ内フラグなので、プロセスが常駐しないランタイムでは起動をまたいで効きません。`runOnOneServer()` はスケジューラの `lock` に取得記録を置くため、ロックの保存先が起動より長く残る限り効きます。`schedule.command()` は `node:child_process` 経由でシェルに任せるため、Workers では動きません。そちらでは `schedule.call()` か `schedule.job()` を使ってください。
 
 ## スケジュールの定義
 
@@ -220,15 +220,31 @@ schedule.call(task)
   .preventOverlapping(600000)  // ミリ秒で10分
 ```
 
+このガードはプロセス内のタスクに置かれたフラグです。有効期限を付けないと、ハングした実行がプロセスの再起動まで後続の実行をすべて止めます。有効期限を付けると、そのミリ秒が経過した時点で次の実行が進みます。ハングした実行が後から終わっても、その次の実行には影響しません。
+
 ### 単一サーバーでの実行
 
-複数サーバー構成で、1台のサーバーだけがタスクを実行するようにします。
+複数サーバー構成ではすべてのサーバーがスケジュールを刻むため、スケジュールごとに1回だけ動かすタスクにはサーバー間で共有するロックが必要です。`SchedulerLock` をスケジューラに渡し、タスクに印を付けます。
 
 ```ts
-schedule.call(task)
-  .daily()
-  .runOnOneServer()            // 分散ロック（Redis）が必要
+import { createScheduler, createRedisClient } from '@guren/core'
+import { RedisSchedulerLock } from '@guren/core/redis'
+
+const scheduler = createScheduler({
+  lock: new RedisSchedulerLock(createRedisClient({ url: process.env.REDIS_URL })),
+})
+
+scheduler.schedule((schedule) => {
+  schedule.call(task)
+    .daily()
+    .name('daily-report')
+    .runOnOneServer()
+})
 ```
+
+取得記録のキーはタスク名と実行時刻の分なので、タスクには `.name()` が必要です。記録は1時間保持され、実行が終わっても解放しません。解放すると、時計が数秒遅れているサーバーが同じ分に達したときにタスクをもう一度実行してしまいます。取得に勝ったサーバーが実行を見送った場合（自身の重複ガード、または `when()` / `skip()`）は記録を返すので、別のサーバーがその分を引き受けられます。
+
+`MemorySchedulerLock` は単一プロセス用のロックで、サーバー1台の構成やテストに使います。`runOnOneServer()` のタスクを持つスケジューラに `lock` が無い場合、`start()` と `runDueTasks()` は全サーバーで実行する代わりに例外を投げます。Redis 以外の保存先を使うときは `SchedulerLock` を自分で実装します。`acquire(key, ttlSeconds)` は有効期限付きの set-if-absent をアトミックに行い、`release(key)` はキーを削除します。
 
 ### 条件付き実行
 

@@ -11,10 +11,13 @@ export interface TaskDefinition {
 
   withoutOverlapping?: boolean
 
-  /** Milliseconds. */
+  /**
+   * Milliseconds after which a still-running invocation stops blocking the
+   * next one under `withoutOverlapping`, so a hung run does not block forever.
+   */
   overlapExpiresAt?: number
 
-  /** Requires a distributed lock. */
+  /** Runs only on the server that wins the tick's `SchedulerLock`; needs `SchedulerOptions.lock`. */
   onOneServer?: boolean
 
   when?: () => boolean | Promise<boolean>
@@ -30,6 +33,16 @@ export interface TaskDefinition {
   onFailure?: (error: Error) => void | Promise<void>
 }
 
+/**
+ * Cross-server mutex for `runOnOneServer()` tasks. `acquire` must be atomic
+ * (set-if-absent with expiry): two servers asking for the same key in the same
+ * tick must get one `true` between them.
+ */
+export interface SchedulerLock {
+  acquire(key: string, ttlSeconds: number): Promise<boolean>
+  release(key: string): Promise<void>
+}
+
 export interface SchedulerOptions {
   /** @default 'UTC' */
   timezone?: string
@@ -38,6 +51,12 @@ export interface SchedulerOptions {
   checkInterval?: number
 
   logger?: (message: string) => void
+
+  /**
+   * Required once any task calls `runOnOneServer()`: `start()` and
+   * `runDueTasks()` refuse such a task without one rather than run it everywhere.
+   */
+  lock?: SchedulerLock
 }
 
 export interface ParsedCron {

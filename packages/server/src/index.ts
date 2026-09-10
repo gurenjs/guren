@@ -624,11 +624,13 @@ export {
   isDueInTimezone,
   toTimezone,
   createScheduler,
+  MemorySchedulerLock,
 } from './scheduling'
 export type {
   TaskCallback,
   TaskDefinition,
   SchedulerOptions,
+  SchedulerLock,
   ParsedCron,
   JobClass as ScheduledJobClass,
 } from './scheduling'

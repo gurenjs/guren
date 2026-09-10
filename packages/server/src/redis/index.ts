@@ -18,3 +18,6 @@ export type { RedisEmailVerificationStoreOptions } from './RedisEmailVerificatio
 
 export { RedisOAuthStateStore } from './RedisOAuthStateStore'
 export type { RedisOAuthStateStoreOptions } from './RedisOAuthStateStore'
+
+export { RedisSchedulerLock } from './RedisSchedulerLock'
+export type { RedisSchedulerLockOptions } from './RedisSchedulerLock'

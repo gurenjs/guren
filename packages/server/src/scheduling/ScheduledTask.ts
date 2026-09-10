@@ -4,7 +4,8 @@ import { isDue, isDueInTimezone } from './CronParser'
 export class ScheduledTask {
   private readonly definition: TaskDefinition
   private lastRun: Date | null = null
-  private isRunning = false
+  /** Start of the invocation holding the overlap guard; null when idle. */
+  private runningSince: number | null = null
 
   constructor(definition: TaskDefinition) {
     this.definition = definition
@@ -47,25 +48,26 @@ export class ScheduledTask {
     return true
   }
 
-  async run(): Promise<void> {
-    // Check overlapping first (synchronously) to prevent race conditions
-    if (this.definition.withoutOverlapping) {
-      if (this.isRunning) {
-        return
-      }
-      this.isRunning = true
+  /**
+   * `now` is the instant the overlap guard is judged against; a fixed clock can
+   * be handed in. Resolves false when the guard or `when`/`skip` declined.
+   */
+  async run(now: Date = new Date()): Promise<boolean> {
+    // Judged before the first await, so two runs started in one tick cannot both pass.
+    if (this.definition.withoutOverlapping && this.isRunningAt(now.getTime())) {
+      return false
     }
+
+    // Only the start that claimed the guard releases it: a run that outlived
+    // `overlapExpiresAt` must not clear the flag of its successor.
+    const startedAt = now.getTime()
+    this.runningSince = startedAt
 
     if (!(await this.shouldRun())) {
-      if (this.definition.withoutOverlapping) {
-        this.isRunning = false
-      }
-      return
+      this.releaseIfOwner(startedAt)
+      return false
     }
 
-    if (!this.definition.withoutOverlapping) {
-      this.isRunning = true
-    }
     let error: Error | null = null
 
     try {
@@ -86,7 +88,7 @@ export class ScheduledTask {
         await this.definition.onFailure(error)
       }
     } finally {
-      this.isRunning = false
+      this.releaseIfOwner(startedAt)
 
       if (this.definition.after) {
         await this.definition.after()
@@ -96,6 +98,20 @@ export class ScheduledTask {
     if (error) {
       throw error
     }
+    return true
+  }
+
+  private isRunningAt(now: number): boolean {
+    if (this.runningSince === null) return false
+    const expiresAt = this.definition.overlapExpiresAt
+    if (expiresAt === undefined) return true
+    return now - this.runningSince < expiresAt
+  }
+
+  private releaseIfOwner(startedAt: number): void {
+    if (this.runningSince === startedAt) {
+      this.runningSince = null
+    }
   }
 
   getLastRun(): Date | null {
@@ -103,7 +119,7 @@ export class ScheduledTask {
   }
 
   isCurrentlyRunning(): boolean {
-    return this.isRunning
+    return this.runningSince !== null
   }
 
   getDefinition(): TaskDefinition {

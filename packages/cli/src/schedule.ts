@@ -23,16 +23,24 @@ interface TaskInfo {
   timezone?: string
   nextRun?: Date
   /** Execute the task (bound to ScheduledTask.run() when available). */
-  run?: () => Promise<void>
+  run?: () => Promise<unknown>
   /** Whether the cron expression matches the given time. */
   isDue?: (date: Date) => boolean
+  withoutOverlapping: boolean
+  onOneServer: boolean
 }
 
-type ScheduledTaskLike = {
+interface TaskFlags {
+  withoutOverlapping?: boolean
+  onOneServer?: boolean
+}
+
+type ScheduledTaskLike = TaskFlags & {
   getName?: () => string
   getExpression?: () => string
   getTimezone?: () => string | undefined
-  run?: () => Promise<void>
+  getDefinition?: () => TaskFlags
+  run?: () => Promise<unknown>
   isDue?: (date?: Date) => boolean
   toTask?: () => ScheduledTaskLike
   name?: string
@@ -46,12 +54,15 @@ function normalizeTask(raw: ScheduledTaskLike): TaskInfo {
   const task = typeof raw.toTask === 'function' ? raw.toTask() : raw
 
   if (typeof task.getName === 'function' && typeof task.getExpression === 'function') {
+    const definition = task.getDefinition?.() ?? {}
     return {
       name: task.getName(),
       expression: task.getExpression(),
       timezone: task.getTimezone?.(),
       run: typeof task.run === 'function' ? () => task.run!() : undefined,
       isDue: typeof task.isDue === 'function' ? (date) => task.isDue!(date) : undefined,
+      withoutOverlapping: definition.withoutOverlapping === true,
+      onOneServer: definition.onOneServer === true,
     }
   }
 
@@ -61,7 +72,17 @@ function normalizeTask(raw: ScheduledTaskLike): TaskInfo {
     expression: task.expression || '* * * * *',
     timezone: task.timezone,
     run: typeof task.callback === 'function' ? async () => { await task.callback!() } : undefined,
+    withoutOverlapping: task.withoutOverlapping === true,
+    onOneServer: task.onOneServer === true,
   }
+}
+
+/** The listing's Flags cell: "-" when neither guard is set. */
+function formatFlags(task: TaskInfo): string {
+  const flags: string[] = []
+  if (task.withoutOverlapping) flags.push('no-overlap')
+  if (task.onOneServer) flags.push('one-server')
+  return flags.length > 0 ? flags.join(', ') : '-'
 }
 
 /** Why a listing has no tasks; see {@link reportEmptyKernel} for what each state means. */
@@ -353,6 +374,8 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
         expression: task.expression,
         nextRun: nextRun ? nextRun.toISOString() : null,
         timezone: task.timezone || 'UTC',
+        withoutOverlapping: task.withoutOverlapping,
+        onOneServer: task.onOneServer,
       }
     })
     console.log(JSON.stringify(data, null, 2))
@@ -368,6 +391,7 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
       task.expression,
       nextRun ? formatTimeUntil(nextRun) : '-',
       task.timezone || 'UTC',
+      formatFlags(task),
     ])
   }
 
@@ -376,7 +400,7 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
   console.log('================')
   console.log('')
 
-  const headers = ['Name', 'Expression', 'Next Run', 'Timezone']
+  const headers = ['Name', 'Expression', 'Next Run', 'Timezone', 'Flags']
   const colWidths = headers.map((h, i) =>
     Math.max(h.length, ...rows.map((r) => r[i].length))
   )
@@ -424,6 +448,12 @@ export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promi
     if (!task.run) {
       consola.warn(`  Cannot run: ${task.name} (no runnable callback found)`)
       continue
+    }
+
+    // The CLI never boots the app, so it has no SchedulerLock to hand the
+    // task; the in-process scheduler is what honours runOnOneServer().
+    if (task.onOneServer) {
+      consola.warn(`  Running ${task.name} here: runOnOneServer() is not enforced by schedule:run.`)
     }
 
     try {

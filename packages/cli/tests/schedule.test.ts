@@ -284,6 +284,44 @@ export function registerAppSchedules(scheduler) {
     expect(process.exitCode).toBe(0)
   })
 
+  test('shows the overlap and one-server guards a task declares', async () => {
+    writeFileSync(kernelPath, `
+export function registerAppSchedules(scheduler) {
+  scheduler.schedule((schedule) => {
+    schedule.call(() => {}).hourly().name('app:report').preventOverlapping().runOnOneServer()
+    schedule.call(() => {}).hourly().name('app:plain')
+  })
+}
+`)
+
+    await listScheduledTasks({ appRoot: testDir })
+    expect(listed()).toContain('Flags')
+    expect(listed()).toMatch(/app:report.*no-overlap, one-server/)
+    expect(listed()).toMatch(/app:plain.*UTC\s+-\s*\n/)
+
+    stdout.length = 0
+    await listScheduledTasks({ appRoot: testDir, json: true })
+    const json = JSON.parse(stdout.join('\n')) as Array<Record<string, unknown>>
+    expect(json.map((task) => [task.name, task.withoutOverlapping, task.onOneServer])).toEqual([
+      ['app:report', true, true],
+      ['app:plain', false, false],
+    ])
+  })
+
+  test('warns that schedule:run cannot enforce runOnOneServer()', async () => {
+    writeFileSync(kernelPath, `
+export function registerAppSchedules(scheduler) {
+  scheduler.schedule((schedule) => {
+    schedule.call(() => {}).hourly().name('app:report').runOnOneServer()
+  })
+}
+`)
+
+    await runScheduledTasks({ appRoot: testDir, force: true })
+    expect(listed()).toContain('runOnOneServer() is not enforced by schedule:run')
+    expect(listed()).toContain('Ran: app:report')
+  })
+
   test('counts a registrar exported twice once', async () => {
     writeFileSync(kernelPath, `
 export function registerAppSchedules(scheduler) {

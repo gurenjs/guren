@@ -1,11 +1,18 @@
-import type { SchedulerOptions } from './types'
+import type { SchedulerLock, SchedulerOptions } from './types'
 import { Schedule } from './Schedule'
 import { ScheduledTask } from './ScheduledTask'
 import { claimHotDisposable, isHotReloadRuntime, type HotDisposableClaim } from '../hot-reload/hot-disposables'
 
+/**
+ * How long a tick's `runOnOneServer()` claim stays held. It is never released
+ * after a completed run: a release would let a server whose clock reaches the
+ * same minute later re-run the tick. An hour outlives any realistic clock skew.
+ */
+export const ONE_SERVER_LOCK_TTL_SECONDS = 3600
+
 export class Scheduler {
   private tasks: ScheduledTask[] = []
-  private readonly options: Required<SchedulerOptions>
+  private readonly options: Required<Omit<SchedulerOptions, 'lock'>> & { lock?: SchedulerLock }
   private interval: ReturnType<typeof setInterval> | null = null
   private isRunning = false
   private lastCheck: Date | null = null
@@ -17,6 +24,7 @@ export class Scheduler {
       timezone: options.timezone ?? 'UTC',
       checkInterval: options.checkInterval ?? 60000,
       logger: options.logger ?? (() => {}),
+      lock: options.lock,
     }
   }
 
@@ -38,26 +46,78 @@ export class Scheduler {
     return this.tasks.filter((task) => task.isDue(date))
   }
 
+  /**
+   * Due tasks run concurrently: awaited one by one, a slow task pushed the rest
+   * past their minute, where the tick's once-per-minute check dropped them.
+   * Each task's own overlap guard still serialises that task with itself.
+   * @throws When a task calls `runOnOneServer()` and no `lock` was configured.
+   */
   async runDueTasks(date: Date = new Date()): Promise<void> {
-    const dueTasks = this.getDueTasks(date)
+    this.assertOneServerTasksAreLockable()
 
-    for (const task of dueTasks) {
-      this.options.logger(`Running task: ${task.getName()}`)
+    await Promise.allSettled(this.getDueTasks(date).map((task) => this.runTask(task, date)))
+  }
 
-      try {
-        await task.run()
+  private async runTask(task: ScheduledTask, date: Date): Promise<void> {
+    const lockKey = task.getDefinition().onOneServer ? this.oneServerLockKey(task, date) : null
+
+    if (lockKey !== null && !(await this.options.lock!.acquire(lockKey, ONE_SERVER_LOCK_TTL_SECONDS))) {
+      this.options.logger(`Task skipped, another server holds it: ${task.getName()}`)
+      return
+    }
+
+    this.options.logger(`Running task: ${task.getName()}`)
+
+    try {
+      const ran = await task.run(date)
+      if (ran) {
         this.options.logger(`Task completed: ${task.getName()}`)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        this.options.logger(`Task failed: ${task.getName()} - ${message}`)
+      } else {
+        // This server declined (overlap guard, `when`/`skip`); give the tick
+        // back so another server may still run it.
+        if (lockKey !== null) await this.options.lock!.release(lockKey)
+        this.options.logger(`Task skipped: ${task.getName()}`)
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.options.logger(`Task failed: ${task.getName()} - ${message}`)
     }
   }
 
+  /** Same on every server for the same task and minute; the minute is UTC epoch, so timezones cannot split it. */
+  private oneServerLockKey(task: ScheduledTask, date: Date): string {
+    return `schedule:${task.getName()}:${Math.floor(date.getTime() / 60000)}`
+  }
+
+  private assertOneServerTasksAreLockable(): void {
+    const oneServerTasks = this.tasks.filter((task) => task.getDefinition().onOneServer)
+    if (oneServerTasks.length === 0) return
+
+    if (!this.options.lock) {
+      const names = oneServerTasks.map((task) => task.getName()).join(', ')
+      throw new Error(
+        `Scheduled task(s) call runOnOneServer() but the scheduler has no lock: ${names}. ` +
+          'Pass createScheduler({ lock }) a SchedulerLock (RedisSchedulerLock for a multi-server deploy, ' +
+          'MemorySchedulerLock for a single process), or drop runOnOneServer().',
+      )
+    }
+
+    const unnamed = oneServerTasks.filter((task) => task.getDefinition().name === undefined)
+    if (unnamed.length > 0) {
+      throw new Error(
+        `${unnamed.length} scheduled task(s) call runOnOneServer() without a name. ` +
+          'The lock is keyed on the name, so give each one .name() before scheduling it.',
+      )
+    }
+  }
+
+  /** @throws When a task calls `runOnOneServer()` and no `lock` was configured. */
   start(): void {
     if (this.isRunning) {
       return
     }
+
+    this.assertOneServerTasksAreLockable()
 
     this.isRunning = true
     this.options.logger('Scheduler started')
