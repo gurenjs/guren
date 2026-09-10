@@ -366,6 +366,13 @@ export interface ResourceRouteOptions {
 
 /** Instance-based router for app-local route registration and mounting. */
 export class Router<M extends string = never> {
+  /**
+   * Without this, `M` appears only in method parameters, which TypeScript
+   * compares bivariantly, so a `Router<never>` passes as a `Router<'auth'>` and
+   * fails at `mount()`. A function-typed property is checked contravariantly:
+   * a router carrying more aliases still substitutes for one needing fewer.
+   */
+  declare readonly __middlewareAliases?: (name: M) => void
   private readonly registry: RegisteredRoute[] = []
   private readonly prefixStack: string[] = []
   private readonly namedRoutes: Map<string, RegisteredRoute> = new Map()

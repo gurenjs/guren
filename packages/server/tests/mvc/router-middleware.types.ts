@@ -76,3 +76,55 @@ export const verifiedEmailLegacyCallback = requireVerifiedEmail({ getUser: legac
 export const unregisteredAliasRejected = new Router().aliasMiddleware('auth', auditLogger)
 // @ts-expect-error 'nope' is not a registered alias on this router
 unregisteredAliasRejected.middleware('nope')
+
+/**
+ * Method parameters are compared bivariantly, so without `Router`'s phantom
+ * property a `Router<never>` flows into a `Router<'auth'>` slot and fails at
+ * `mount()`. With it the parameter is contravariant: a router needing the
+ * alias rejects one that never registered it, and one carrying extra aliases
+ * still passes.
+ */
+export function registrarNeedingAuth(router: Router<'auth'>): void {
+  router.middleware('auth').get('/dashboard', [DemoController, 'index'])
+}
+
+// A bare `new Router()` in argument position would infer `M` from the parameter, so hold it first.
+const plainRouter = new Router()
+// @ts-expect-error a router that never aliased 'auth' cannot satisfy a registrar that reads it
+registrarNeedingAuth(plainRouter)
+
+// @ts-expect-error nor can one that registered a different alias
+registrarNeedingAuth(new Router().aliasMiddleware('guest', auditLogger))
+
+registrarNeedingAuth(new Router().aliasMiddleware('auth', auditLogger))
+registrarNeedingAuth(new Router().aliasMiddleware('auth', auditLogger).aliasMiddleware('guest', rateLimiter))
+
+/** The documented flow: capture the return, which carries the alias in its type. */
+export function documentedFlow(baseRouter: Router): void {
+  const router = baseRouter.aliasMiddleware('auth', auditLogger)
+  registrarNeedingAuth(router)
+  router.middleware('auth').group((authed) => {
+    authed.get('/dashboard', [DemoController, 'index'])
+  })
+}
+
+/** Discarding the return keeps the parameter at `Router<never>`, which the registrar rejects. */
+export function discardedReturn(baseRouter: Router): void {
+  baseRouter.aliasMiddleware('auth', auditLogger)
+  // @ts-expect-error the alias is registered at runtime but absent from `baseRouter`'s type
+  registrarNeedingAuth(baseRouter)
+}
+
+/** A registrar that needs no alias accepts any router, the direction `registerAttachmentRoutes(router)` relies on. */
+export function registrarNeedingNone(router: Router): void {
+  router.get('/health', [DemoController, 'index'])
+}
+registrarNeedingNone(new Router().aliasMiddleware('auth', auditLogger))
+
+/** The scope builder inherits the variance through the router it wraps. */
+export function scopeNeedingAuth(scope: ReturnType<Router<'auth'>['middleware']>): void {
+  scope.get('/dashboard', [DemoController, 'index'])
+}
+// @ts-expect-error a scope opened on a router without 'auth' cannot stand in for one that has it
+scopeNeedingAuth(new Router().middleware(rateLimiter))
+scopeNeedingAuth(new Router().aliasMiddleware('auth', auditLogger).middleware('auth'))
