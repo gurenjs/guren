@@ -145,11 +145,17 @@ that actually catches a stale entry is the build's own check
 modules, except that `createPostgresDatabase`, `createMySqlDatabase`,
 `createSqliteDatabase` and `createAwsDataApiDatabase` are shims. The prototype
 measured above threw at *call* time; the shipped shim must not: today's stub
-throws when the handle's `getDatabase()` first imports the client, so a config
-that constructs two handles at module scope and picks at runtime (the
-`web/config/database.ts` shape, in the other order) would regress from "works"
-to "throws on import". The shim returns a handle whose methods throw, with the
-message `UNAVAILABLE_ON_WORKERS.sqlite` carries now.
+throws only when an operation first imports the client, so construction, a
+`closeDatabase()` before anything opened, and status paths that never load a
+client all succeed. A config that constructs two handles at module scope and
+picks at runtime (the `web/config/database.ts` shape, in the other order) must
+keep working. So the shim preserves behaviour up to the first operation that
+needs the client, then throws the message the stub carries now:
+`UNAVAILABLE_ON_WORKERS.sqlite` for SQLite, `UNAVAILABLE_ON_WORKERS['sql-driver']`
+for the other three. The workerd root keeps `import './instance-guard'` (the
+prototype did) and `package.json#sideEffects` gains `./dist/index.workerd.js`,
+or a bundler drops the guard; an export-name parity test cannot see either, so
+the parity test also asserts the guard's marker is set.
 
 What it buys, on Cloudflare only: `bun:sqlite` leaves `DEV_ONLY_MODULES`'s
 Workers set and the four `SQL_CLIENT_MODULES` aliases go — five of the nine
@@ -205,8 +211,9 @@ release preceding it. That argument holds once a major is on the roadmap, not
 before. When one is, step 1 above lands one minor ahead of it and this RFC
 moves to Discussion with the measurement re-run.
 
-**Design B: viable, additive, not decided here.** It is the only route to
-"avoidance rather than stubs" that needs no major, and it is Workers-only by
+**Design B: viable, additive, not decided here.** It is the measured route to
+"avoidance rather than stubs" that needs no major (the compile-time constant
+also needs none, but needs every bundler configured), and it is Workers-only by
 construction. Whether five fewer alias lines and one fewer stub kind are worth a
 second root artifact is the maintainer's call; this RFC records that it works
 (case F) and what the shim must preserve.
@@ -233,5 +240,6 @@ None blocking the decision. For the eventual major:
   wrangler's, so a page graph that reached the ORM would carry the default root,
   edges and all, into a file wrangler then bundles. Page components import
   resource *types* today, which erase; the check is a grep of the SSR output for
-  `bun:sqlite`, and the fix would be adding `workerd` to the SSR build's
-  conditions.
+  `bun:sqlite`. The fix would be `ssr.resolve.conditions` (Vite 8's SSR
+  environment setting, not the client `resolve.conditions`), and only in the
+  Cloudflare build: the Lambda and Vercel SSR builds must not see the shims.
