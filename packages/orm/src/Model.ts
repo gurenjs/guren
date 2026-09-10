@@ -1464,18 +1464,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       case 'hasOne': {
         const related = await resolveModelReference(definition.related)
         const { foreignKey, localKey } = definition
-        const values = Array.from(
-          new Set(records.map((record) => record[localKey]).filter((value) => value != null)),
+        const counts = await countByChunks(
+          distinctKeys(records, localKey),
+          (chunk) => related.newQuery(queryOptions).where({ [foreignKey]: chunk } as WhereClause).countBy(foreignKey),
         )
-
-        const counts = new Map<unknown, number>()
-        if (values.length > 0) {
-          const relatedRecords = (await related.newQuery(queryOptions).where({ [foreignKey]: values } as WhereClause)) as PlainObject[]
-          for (const item of relatedRecords) {
-            const key = item[foreignKey]
-            counts.set(key, (counts.get(key) ?? 0) + 1)
-          }
-        }
 
         for (const record of records) {
           record[countField] = counts.get(record[localKey]) ?? 0
@@ -1483,32 +1475,34 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         return
       }
       case 'morphMany': {
-        const withRelation = records.map((record) => ({ ...record }))
-        await this.loadRelationInto(withRelation, relationName, queryOptions)
-        for (const [index, record] of records.entries()) {
-          const value = withRelation[index]?.[relationName]
-          record[countField] = Array.isArray(value) ? value.length : 0
+        const related = await resolveModelReference(definition.related)
+        const { morphName, localKey } = definition
+        const typeColumn = `${morphName}Type`
+        const idColumn = `${morphName}Id`
+        const parentType = this.name
+        const counts = await countByChunks(distinctKeys(records, localKey), (chunk) =>
+          related
+            .newQuery(queryOptions)
+            .where({ [typeColumn]: parentType, [idColumn]: chunk } as WhereClause)
+            .countBy(idColumn),
+        )
+
+        for (const record of records) {
+          record[countField] = counts.get(record[localKey]) ?? 0
         }
         return
       }
       case 'belongsTo': {
         const related = await resolveModelReference(definition.related)
         const { foreignKey, ownerKey } = definition
-        const values = Array.from(
-          new Set(records.map((record) => record[foreignKey]).filter((value) => value != null)),
+        const owners = await countByChunks(
+          distinctKeys(records, foreignKey),
+          (chunk) => related.newQuery(queryOptions).where({ [ownerKey]: chunk } as WhereClause).countBy(ownerKey),
         )
-
-        const ownerKeys = new Set<unknown>()
-        if (values.length > 0) {
-          const owners = (await related.newQuery(queryOptions).where({ [ownerKey]: values } as WhereClause)) as PlainObject[]
-          for (const owner of owners) {
-            ownerKeys.add(owner[ownerKey])
-          }
-        }
 
         for (const record of records) {
           const key = record[foreignKey]
-          record[countField] = key != null && ownerKeys.has(key) ? 1 : 0
+          record[countField] = key != null && owners.has(key) ? 1 : 0
         }
         return
       }
@@ -1696,9 +1690,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const { pivotTable, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, name } = definition
     const related = await resolveModelReference(definition.related)
 
-    const parentValues = Array.from(
-      new Set(records.map((r) => r[parentKey]).filter((v): v is unknown => v != null)),
-    )
+    const parentValues = distinctKeys(records, parentKey)
 
     if (parentValues.length === 0) {
       for (const record of records) {
@@ -1708,9 +1700,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const adapter = this.getAdapter()
-    const pivotRows = await adapter.findMany<PlainObject>(pivotTable, {
-      where: { [foreignPivotKey]: parentValues } as WhereClause,
-    }, queryOptions)
+    const pivotRows = await loadByChunks(parentValues, (chunk) =>
+      adapter.findMany<PlainObject>(pivotTable, { where: { [foreignPivotKey]: chunk } as WhereClause }, queryOptions),
+    )
 
     const pivotMap = new Map<unknown, unknown[]>()
     const allRelatedIds = new Set<unknown>()
@@ -1730,9 +1722,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     // The constraint filters the related rows, not the pivot lookup.
-    const relatedRecords = await applyEagerConstraint(
-      related.newQuery(queryOptions).where({ [relatedKey]: Array.from(allRelatedIds) } as WhereClause),
-      constraint,
+    const relatedRecords = await loadByChunks(Array.from(allRelatedIds), (chunk) =>
+      applyEagerConstraint(related.newQuery(queryOptions).where({ [relatedKey]: chunk } as WhereClause), constraint),
     )
 
     const relatedMap = new Map<unknown, PlainObject>()
@@ -1763,9 +1754,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const related = await resolveModelReference(definition.related)
     const through = await resolveModelReference(definition.through)
 
-    const localValues = Array.from(
-      new Set(records.map((r) => r[localKey]).filter((v): v is unknown => v != null)),
-    )
+    const localValues = distinctKeys(records, localKey)
 
     if (localValues.length === 0) {
       for (const record of records) {
@@ -1774,9 +1763,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    const throughRecords = await through.newQuery(queryOptions).where({
-      [firstKey]: localValues,
-    } as WhereClause) as PlainObject[]
+    const throughRecords = await loadByChunks(
+      localValues,
+      (chunk) => through.newQuery(queryOptions).where({ [firstKey]: chunk } as WhereClause).get() as Promise<PlainObject[]>,
+    )
 
     const throughMap = new Map<unknown, unknown[]>()
     const allThroughIds = new Set<unknown>()
@@ -1796,9 +1786,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     // The constraint filters the related rows, not the intermediate lookup.
-    const relatedRecords = await applyEagerConstraint(
-      related.newQuery(queryOptions).where({ [secondKey]: Array.from(allThroughIds) } as WhereClause),
-      constraint,
+    const relatedRecords = await loadByChunks(Array.from(allThroughIds), (chunk) =>
+      applyEagerConstraint(related.newQuery(queryOptions).where({ [secondKey]: chunk } as WhereClause), constraint),
     )
 
     const relatedByKey = new Map<unknown, PlainObject[]>()
@@ -1836,18 +1825,18 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const idColumn = `${morphName}Id`
     const parentType = this.name
 
-    const localValues = Array.from(
-      new Set(records.map((r) => r[localKey]).filter((v): v is unknown => v != null)),
-    )
+    const localValues = distinctKeys(records, localKey)
 
     if (localValues.length === 0) {
       for (const record of records) record[name] = []
       return
     }
 
-    const allRelated = await applyEagerConstraint(
-      related.newQuery(queryOptions).where({ [typeColumn]: parentType, [idColumn]: localValues } as WhereClause),
-      constraint,
+    const allRelated = await loadByChunks(localValues, (chunk) =>
+      applyEagerConstraint(
+        related.newQuery(queryOptions).where({ [typeColumn]: parentType, [idColumn]: chunk } as WhereClause),
+        constraint,
+      ),
     )
 
     const map = new Map<unknown, PlainObject[]>()
@@ -1893,9 +1882,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       const uniqueIds = Array.from(new Set(ids))
       // Runs once per morph target, so a constraint here may only reference
       // columns every target shares.
-      const results = await applyEagerConstraint(
-        modelClass.newQuery(queryOptions).where({ id: uniqueIds } as WhereClause),
-        constraint,
+      const results = await loadByChunks(uniqueIds, (chunk) =>
+        applyEagerConstraint(modelClass.newQuery(queryOptions).where({ id: chunk } as WhereClause), constraint),
       )
       const idMap = new Map<unknown, PlainObject>()
       for (const r of results) idMap.set(r.id, { ...r })
@@ -1938,9 +1926,7 @@ async function loadRelationData(
   queryOptions?: ModelQueryOptions,
   constraint?: EagerLoadConstraint,
 ): Promise<void> {
-  const values = Array.from(
-    new Set(records.map((r) => r[parentKey]).filter((v): v is unknown => v != null)),
-  )
+  const values = distinctKeys(records, parentKey)
 
   if (values.length === 0) {
     for (const record of records) {
@@ -1949,9 +1935,8 @@ async function loadRelationData(
     return
   }
 
-  const relatedRecords = await applyEagerConstraint(
-    related.newQuery(queryOptions).where({ [relatedKey]: values } as WhereClause),
-    constraint,
+  const relatedRecords = await loadByChunks(values, (chunk) =>
+    applyEagerConstraint(related.newQuery(queryOptions).where({ [relatedKey]: chunk } as WhereClause), constraint),
   )
   const map = new Map<unknown, PlainObject | PlainObject[]>()
 
@@ -1973,6 +1958,50 @@ async function loadRelationData(
     }
     record[name] = map.get(key) ?? (isArray ? [] : null)
   }
+}
+
+/**
+ * Keys per IN list. SQLite's compile-time default caps bound variables at 999,
+ * and a relation load binds one per parent key, so a page of parents that
+ * happens to exceed it fails only in production data.
+ */
+const IN_CHUNK_SIZE = 500
+
+function distinctKeys(records: readonly PlainObject[], key: string): unknown[] {
+  return Array.from(new Set(records.map((r) => r[key]).filter((v) => v != null)))
+}
+
+function chunkKeys(values: readonly unknown[]): unknown[][] {
+  const chunks: unknown[][] = []
+  for (let i = 0; i < values.length; i += IN_CHUNK_SIZE) {
+    chunks.push(values.slice(i, i + IN_CHUNK_SIZE))
+  }
+  return chunks
+}
+
+/**
+ * A constraint's `limit()` or `offset()` applies to each chunk's query, not to
+ * the union; only a parent set past IN_CHUNK_SIZE keys can tell the difference.
+ */
+async function loadByChunks<T>(values: readonly unknown[], load: (chunk: unknown[]) => Promise<T[]>): Promise<T[]> {
+  const results: T[] = []
+  for (const chunk of chunkKeys(values)) {
+    results.push(...(await load(chunk)))
+  }
+  return results
+}
+
+async function countByChunks(
+  values: readonly unknown[],
+  count: (chunk: unknown[]) => Promise<Map<unknown, number>>,
+): Promise<Map<unknown, number>> {
+  const counts = new Map<unknown, number>()
+  for (const chunk of chunkKeys(values)) {
+    for (const [key, n] of await count(chunk)) {
+      counts.set(key, (counts.get(key) ?? 0) + n)
+    }
+  }
+  return counts
 }
 
 async function resolveModelReference(

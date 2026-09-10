@@ -9,6 +9,7 @@ type DrizzleLikeSelect = {
   orderBy?: (...clauses: unknown[]) => DrizzleLikeSelect
   limit?: (value: number) => DrizzleLikeSelect
   offset?: (value: number) => DrizzleLikeSelect
+  groupBy?: (...columns: unknown[]) => DrizzleLikeSelect
   all?: () => Promise<unknown[]>
   get?: () => Promise<unknown>
 }
@@ -539,6 +540,39 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     const raw = first?.value ?? 0
     const total = typeof raw === 'bigint' ? Number(raw) : Number(raw)
     return Number.isNaN(total) ? 0 : total
+  },
+
+  async countByAdvanced(
+    table: unknown,
+    field: string,
+    conditions: WhereCondition[],
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<Array<{ key: unknown; count: number }>> {
+    const db = resolveExecutor(queryOptions)
+    const column = (table as DrizzleTableLike)[field]
+    if (!column) {
+      throw new Error(`DrizzleAdapter: unknown column "${field}" on provided table.`)
+    }
+
+    let query = db.select({ key: column, value: count() }).from(table)
+
+    if (typeof query.where === 'function') {
+      const clause = buildDrizzleConditions(table, conditions)
+      if (clause) {
+        query = query.where(clause) as DrizzleLikeSelect
+      }
+    }
+
+    if (typeof query.groupBy !== 'function') {
+      throw new Error('DrizzleAdapter: configured database does not support groupBy().')
+    }
+    query = query.groupBy(column)
+
+    const rows = (await resolveList(query)) as Array<{ key: unknown; value?: unknown }>
+    return rows.map(({ key, value }) => {
+      const total = Number(value ?? 0)
+      return { key, count: Number.isNaN(total) ? 0 : total }
+    })
   },
 
   async updateAdvanced<TRecord extends PlainObject = PlainObject>(

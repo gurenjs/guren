@@ -236,7 +236,7 @@ export class QueryBuilder<
    * callbacks, each run after the foreign-key filter on exactly the level its key
    * names. Pitfalls: a top-level `orWhere()` ORs against the foreign-key filter
    * (group it); `select()` must keep the relation's key column or the relation is
-   * empty; `limit()` applies to the one batched query, not per parent record.
+   * empty; `limit()` applies to the batched query (one per 500 parent keys), not per parent record.
    */
   with(...relations: (string | Record<string, EagerLoadConstraint>)[]): this {
     for (const rel of relations) {
@@ -292,6 +292,33 @@ export class QueryBuilder<
 
     const results = await this.executeQuery()
     return results.length
+  }
+
+  /**
+   * @internal Row count per distinct value of `field`, as one grouped COUNT
+   * where the adapter can issue it. The fallback reads only that column.
+   */
+  async countBy(field: FieldKey<TRecord>): Promise<Map<unknown, number>> {
+    const advancedAdapter = this.adapter as ORMAdapterAdvanced
+    const counts = new Map<unknown, number>()
+
+    if (typeof advancedAdapter.countByAdvanced === 'function') {
+      const rows = await advancedAdapter.countByAdvanced(this.table, field, this.effectiveConditions(), { trx: this.options.trx })
+      for (const { key, count } of rows) counts.set(key, count)
+      return counts
+    }
+
+    const prev = this.options.selectFields
+    if (typeof advancedAdapter.findManyAdvanced === 'function') this.options.selectFields = [field]
+    try {
+      for (const row of await this.executeQuery()) {
+        const key = (row as PlainObject)[field]
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+      }
+    } finally {
+      this.options.selectFields = prev
+    }
+    return counts
   }
 
   /**
@@ -625,6 +652,13 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
     conditions: WhereCondition[],
     queryOptions?: AdapterQueryOptions,
   ): Promise<number>
+  /** `SELECT field, COUNT(*) ... GROUP BY field` under `conditions`. */
+  countByAdvanced?(
+    table: unknown,
+    field: string,
+    conditions: WhereCondition[],
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<Array<{ key: unknown; count: number }>>
   updateAdvanced?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],
