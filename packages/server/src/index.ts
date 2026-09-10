@@ -494,6 +494,7 @@ export {
   Event,
   EventManager,
   createEventManager,
+  createQueueEventDispatcher,
   Listener,
   // Built-in events
   RequestReceived,
@@ -509,6 +510,7 @@ export type {
   EventClass,
   EventListener,
   ListenerOptions,
+  QueueEventDispatcher,
   RegisteredListener,
   EventSubscription,
   ListenerClass,

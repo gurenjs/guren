@@ -198,29 +198,12 @@ export class SendWelcomeEmail extends Listener<UserRegistered> {
 
 ### Registering Class Listeners
 
+`events.listen()` reads the class statics: `event` picks the event, `priority` orders it, and `shouldQueue` with `queue` sends it to a queue (see [Queued Listeners](#queued-listeners)). `shouldHandle()` runs first when defined; a `handle()` that throws reaches `failed()` when the class defines it, and propagates to the emitter otherwise.
+
 ```ts
 import { SendWelcomeEmail } from '@/app/Listeners/SendWelcomeEmail'
 
-// Register the listener class
-const listenerClass = SendWelcomeEmail
-const instance = new listenerClass()
-
-events.on(
-  listenerClass.event,
-  async (event) => {
-    if (instance.shouldHandle?.(event) ?? true) {
-      try {
-        await instance.handle(event)
-      } catch (error) {
-        await instance.failed?.(event, error as Error)
-      }
-    }
-  },
-  {
-    priority: listenerClass.priority,
-    queue: listenerClass.shouldQueue ? listenerClass.queue : undefined,
-  }
-)
+events.listen(SendWelcomeEmail)
 ```
 
 ## Emitting Events
@@ -307,21 +290,17 @@ events.on(ApplicationShutdown, (event) => {
 
 ## Queued Listeners
 
-Dispatch listeners to a queue for async processing:
+A listener registered with `queue` runs in a queue worker instead of inline. The `EventServiceProvider` wires the events to the queue when the app also binds a `QueueManager` as `queue` (`QueueServiceProvider`, or a provider of your own):
 
 ```ts
-// Configure queue integration
-import { createQueueManager, MemoryDriver } from '@guren/core'
+import { createApp, EventServiceProvider, QueueServiceProvider } from '@guren/core'
 
-const queue = createQueueManager({
-  default: 'memory',
-  drivers: {
-    memory: () => new MemoryDriver(),
-  },
+const app = createApp({
+  providers: [EventServiceProvider, QueueServiceProvider],
 })
+```
 
-queue.driver()
-
+```ts
 // Register a queued listener
 events.on(
   UserRegistered,
@@ -332,6 +311,19 @@ events.on(
   { queue: 'emails' }
 )
 ```
+
+An emit pushes one job per queue per event, carrying the event's fields. The worker for that queue rebuilds the event as an instance of its class and runs every listener registered for it on that queue, so the worker process registers listeners the same way the web process does: the same provider boots in both. A listener registered with `queue` on a manager with no queue wired makes `emit()` throw and name the missing wiring, rather than run the listener inline.
+
+An app that builds its own `EventManager` wires it in one line:
+
+```ts
+import { createEventManager, createQueueEventDispatcher } from '@guren/core'
+
+const events = createEventManager()
+events.setQueueDispatcher(createQueueEventDispatcher())
+```
+
+The dispatcher sends through the queue driver `Job.dispatch()` resolves, so the app still needs a `QueueManager` bound as `queue` or a driver published with `queue.driver()`.
 
 ## Event Manager Utilities
 
