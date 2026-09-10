@@ -136,6 +136,8 @@ router.get('/api/me', (ctx) => {
 })
 ```
 
+読み込んだユーザーはそのリクエストの auth context にもなります。コントローラの `this.auth.user()`、`requireAuthenticated()`、Gate（Policy、`this.authorize()`、`authorizeMiddleware()`）はすべてこのユーザーを見ます。`loadUser` が `null` を返した場合、リクエストは未認証のままです。セッションのユーザーへは戻りません。
+
 ### カスタムエラーハンドラー
 
 ```ts

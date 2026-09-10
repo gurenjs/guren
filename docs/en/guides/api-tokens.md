@@ -136,6 +136,12 @@ router.get('/api/me', (ctx) => {
 })
 ```
 
+The loaded user also becomes the request's auth context, so `this.auth.user()`
+in a controller, `requireAuthenticated()`, and the Gate (policies,
+`this.authorize()`, `authorizeMiddleware()`) all see it. A `loadUser` that
+returns `null` leaves the request unauthenticated rather than falling back to
+a session user.
+
 ### Custom Error Handlers
 
 ```ts
