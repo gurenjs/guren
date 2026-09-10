@@ -692,7 +692,9 @@ framework never picks approvers, because it cannot see your list.
 you can subclass it or send anything else. The record is persisted *before*
 `notify` runs and is not awaited afterwards, so a mail channel that is down
 costs an approver an email, never the request. The failure is logged with the
-request id in it.
+request id in it. A channel still delivering when the response goes out is not
+dropped either: on Workers its promise is handed to the request's `waitUntil`,
+which is what lets a webhook or an SMTP handshake finish.
 
 Resolving a request is your application's job, over your own storage: set
 `status` to `'approved'` or `'rejected'`, with `resolvedAt` and `resolvedBy`.

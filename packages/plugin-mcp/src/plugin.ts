@@ -65,10 +65,10 @@ export interface McpPluginConfig {
    */
   audit?: { file?: string; days?: number } | { sink: (record: AgentAuditRecord) => void | Promise<void> }
   /**
-   * The approval queue (RFC 0016 §5.4 item 4): an `approval: 'required'` route
-   * answers with a request id; approved, the same call with the same arguments
-   * runs once. No memory-backed default — Workers or Lambda would answer "approved"
-   * for a record the next isolate never saw. `notify` is unawaited, post-persist.
+   * The approval queue (RFC 0016 §5.4 item 4): an `approval: 'required'` route answers with a
+   * request id; approved, the same call with the same arguments runs once. No memory-backed
+   * default — Workers or Lambda would answer "approved" for a record the next isolate never saw.
+   * `notify` is post-persist and never awaited — handed to `waitUntil` on Workers so it lands.
    * @default undefined — no queue; such tools are refused fail-closed and unlisted
    */
   approvals?: {
@@ -171,19 +171,19 @@ const factory = definePlugin<McpPluginConfig>({
 
       const { principal, abilities, rateKey, credential } = resolved
 
-      // Rebuilt per request because the principal is: an approval is bound to
-      // who asked, and a context hoisted to boot would carry whichever caller
-      // arrived first. One object for both halves — the gate that files records
-      // and the status tool that reports on them — so the two cannot disagree
-      // about whether a queue exists; the server reads only three of its keys.
-      const approvals = createAgentApprovalContext(config.approvals, principal)
-
       const executionCtx = executionContext(c)
       // Rebuilt per request because `waitUntil` is. The container binding stays
       // the boot-time emitter, which is what a surface holding no request
       // (`guren tool:call`) resolves.
       const defer = deferrer(executionCtx)
       const record = defer ? createAuditEmitter(sink, events, undefined, { defer }) : emit
+
+      // Rebuilt per request because the principal is: an approval is bound to who
+      // asked, and a context hoisted to boot would carry whichever caller arrived
+      // first. One object for both halves — the gate that files records and the
+      // status tool that reports on them — so the two cannot disagree about whether
+      // a queue exists; the server reads only three of its keys. `defer` rides along.
+      const approvals = createAgentApprovalContext(config.approvals, principal, defer)
 
       const pipeline = createAgentInvocationPipeline({
         app,

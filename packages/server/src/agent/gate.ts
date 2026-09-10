@@ -20,6 +20,7 @@ import {
 } from './approval'
 import type { DerivedAgentTool } from './derive'
 import type { AgentPrincipal, AgentToolDenialReason } from './events'
+import { keepAlive, type AgentDeferrer } from './keep-alive'
 import { APPROVAL_STATUS_TOOL_NAME } from './meta-tools'
 import { scopesAllowTool } from './scopes'
 
@@ -92,27 +93,34 @@ export interface ApprovalGateContext {
   /**
    * Called once, only for a record this call created, and **never awaited**: a
    * channel that is down must not fail the call or lose the persisted record.
-   * Implementations report their own failures; see {@link notifyApprovers}.
+   * Implementations report their own failures and keep a slow channel alive
+   * past the response where the runtime needs telling; see {@link notifyApprovers}.
    */
   notify(request: AgentApprovalRequest): void
 }
 
 /**
- * Wrap the application's `notify` so a failure can neither fail the tool call nor
- * lose the record: it is already persisted when this runs, so a dead channel costs
- * an approver an email, not a request. The failure is warned about with the request
- * id, which is what finds the record sitting there unannounced. Both shapes are
- * caught — a synchronous throw and a rejected promise.
+ * A failure may neither fail the tool call nor lose the record: it is persisted
+ * before this runs, so a dead channel costs an approver an email. The warning
+ * carries the request id, which is what finds the record sitting there
+ * unannounced. Everything else about invoking a best-effort channel — which
+ * failures are caught, and when `defer` runs — is {@link keepAlive}'s.
  */
 export function notifyApprovers(
   notify: (request: AgentApprovalRequest) => void | Promise<void>,
+  defer?: AgentDeferrer,
 ): (request: AgentApprovalRequest) => void {
   return (request) => {
-    try {
-      void Promise.resolve(notify(request)).catch((error) => warnNotifyFailure(request, error))
-    } catch (error) {
-      warnNotifyFailure(request, error)
-    }
+    keepAlive(
+      {
+        run: () => notify(request),
+        onFailure: (error) => warnNotifyFailure(request, error),
+        // Named per record: what a deferral failure costs is *this* request
+        // sitting there unannounced.
+        label: `approval notification for request ${request.id}`,
+      },
+      defer,
+    )
   }
 }
 

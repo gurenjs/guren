@@ -20,6 +20,7 @@ import {
 } from '@guren/core'
 
 import { mcpPlugin } from './plugin'
+import { callToolOverSeam, recordingExecutionContext } from './seam-tool-call'
 
 /**
  * The endpoint end to end: a real Application with token auth and agent routes,
@@ -453,5 +454,75 @@ describe('mcpPlugin with an approval queue (integration)', () => {
     const again = await client.callTool(CALL)
     expect(again.isError).toBe(true)
     expect(executed.length).toBe(1)
+  })
+})
+
+/**
+ * That the endpoint hands the *approval* half the request's `waitUntil`, not
+ * only the audit half. Whether workerd really drops an undeferred notification
+ * is proved in `packages/server/tests/agent/approval-notify.workerd.test.ts`.
+ */
+describe('mcpPlugin approval notification deferral', () => {
+  function gatedRoutes(router: Router): void {
+    router
+      .post('/wires', { body: z.object({ amount: z.number() }) }, () => Response.json({ ok: true }))
+      .name('wires.store')
+      .agent({ approval: 'required' })
+  }
+
+  /**
+   * No `EventServiceProvider` and no audit sink, so the *only* work this
+   * endpoint can defer is the notification. With either in place the audit
+   * emitter defers too, and an assertion counting deferred promises passes
+   * whether or not the approval half was ever given the deferrer.
+   */
+  async function bootWith(notify: (request: AgentApprovalRequest) => void | Promise<void>): Promise<Application> {
+    const app: Application = createApp({
+      routes: gatedRoutes,
+      providers: [mcpPlugin({ auth: 'external', approvals: { store: new MemoryApprovalStore(), notify } })],
+    })
+    await app.boot()
+    return app
+  }
+
+  test('should hand a slow notify to the request\'s waitUntil', async () => {
+    const notified: string[] = []
+    // Every resolver, not the latest: a second record would otherwise leave the
+    // first promise pending and hang the test instead of failing it.
+    const release: (() => void)[] = []
+    const app = await bootWith(
+      (request) =>
+        new Promise<void>((done) => {
+          release.push(() => {
+            notified.push(request.tool)
+            done()
+          })
+        }),
+    )
+
+    const deferred: Promise<unknown>[] = []
+    await callToolOverSeam(app, {
+      tool: 'wires.store',
+      arguments: { amount: 250 },
+      executionCtx: recordingExecutionContext(deferred),
+    })
+
+    // Still pending when the refusal was produced: exactly the promise that is
+    // lost without `waitUntil`, and the reason the call may not await it.
+    expect(notified).toEqual([])
+    expect(deferred).toHaveLength(1)
+
+    for (const done of release) done()
+    await Promise.all(deferred)
+    expect(notified).toEqual(['wires.store'])
+  })
+
+  test('should notify with no execution context, as on Bun', async () => {
+    const notified: string[] = []
+    const app = await bootWith((request) => void notified.push(request.tool))
+
+    await callToolOverSeam(app, { tool: 'wires.store', arguments: { amount: 250 } })
+
+    expect(notified).toEqual(['wires.store'])
   })
 })

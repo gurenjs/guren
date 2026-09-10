@@ -39,6 +39,7 @@ import {
   type GateVerdict,
   type ScopeGateOptions,
 } from './gate'
+import type { AgentDeferrer } from './keep-alive'
 import { redactAgentArguments } from './redact'
 import { installAgentPrincipal } from '../internal/agent-principal'
 
@@ -189,11 +190,11 @@ export interface AgentInvocationOptions {
 }
 
 /**
- * Build {@link AgentInvocationOptions.approvals} for one caller.
- *
- * The TTL default, the redaction rules and the `notify` wrapping are invariants
- * of an approval record rather than of a protocol. Per caller, because an
- * approval binds to the principal that asked; `undefined` means no queue.
+ * Build {@link AgentInvocationOptions.approvals} for one caller — an approval binds
+ * to the principal that asked; `undefined` means no queue. The TTL default, the
+ * redaction rules and the `notify` wrapping are invariants of an approval record
+ * rather than of a protocol, which is why `defer` arrives here: a `notify` the
+ * pipeline received already wrapped cannot be given a deferrer afterwards.
  */
 export function createAgentApprovalContext(
   config:
@@ -204,6 +205,7 @@ export function createAgentApprovalContext(
       }
     | undefined,
   principal: AgentPrincipal | null,
+  defer?: AgentDeferrer,
 ): NonNullable<AgentInvocationOptions['approvals']> | undefined {
   if (!config) return undefined
 
@@ -216,7 +218,7 @@ export function createAgentApprovalContext(
     // record a human reads and a store persists must not carry a field the
     // route declared must never be written down.
     redact: (tool, args) => redactAgentArguments(args, tool.redact),
-    notify: notifyApprovers(config.notify),
+    notify: notifyApprovers(config.notify, defer),
   }
 }
 

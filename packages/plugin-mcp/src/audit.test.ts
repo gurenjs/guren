@@ -17,8 +17,8 @@ import {
 } from '@guren/core'
 
 import { createFileAuditSink } from './audit-file'
-import { presentExternalMcpAuth } from './external-auth'
 import { mcpPlugin } from './plugin'
+import { callToolOverSeam, recordingExecutionContext } from './seam-tool-call'
 
 /**
  * What this endpoint does *with* the emitter, plus the file sink it can build;
@@ -41,40 +41,6 @@ const INVOKED = new AgentToolInvoked(
   'mcp',
 )
 const DENIED = new AgentToolDenied({ kind: 'user', id: 42 }, 'posts.store', { title: 'x' }, 'scope', 'mcp')
-
-/**
- * One `tools/call` over the external-auth seam, dispatched with the execution
- * context the Workers runtime would pass. The SDK client is not used: it owns
- * the `fetch` it calls, and the third `app.fetch` argument is the whole point.
- */
-async function callOverSeam(app: Application, executionCtx?: unknown): Promise<void> {
-  const post = (body: unknown): Request =>
-    presentExternalMcpAuth(
-      new Request('http://localhost/mcp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-        body: JSON.stringify(body),
-      }),
-      { principal: { kind: 'user', id: 'u_1', abilities: ['tools:*'] }, scopes: ['tools:*'] },
-    )
-
-  const initialize = {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } },
-  }
-  await app.fetch(post(initialize), undefined, executionCtx as never).then((r) => r.arrayBuffer())
-
-  const call = {
-    jsonrpc: '2.0',
-    id: 2,
-    method: 'tools/call',
-    params: { name: 'posts.index', arguments: {} },
-  }
-  const response = await app.fetch(post(call), undefined, executionCtx as never)
-  await response.arrayBuffer()
-}
 
 describe('the audit sink through the plugin', () => {
   function registerRoutes(router: Router): void {
@@ -161,12 +127,7 @@ describe('the audit sink through the plugin', () => {
       await app.boot()
 
       const deferred: Promise<unknown>[] = []
-      const executionCtx = {
-        waitUntil: (work: Promise<unknown>) => void deferred.push(work),
-        passThroughOnException: () => {},
-        props: {},
-      }
-      await callOverSeam(app, executionCtx)
+      await callToolOverSeam(app, { tool: 'posts.index', executionCtx: recordingExecutionContext(deferred) })
 
       // Still pending when the response was produced: exactly the promise that
       // is lost without `waitUntil`, and the reason the call may not await it.
@@ -194,7 +155,7 @@ describe('the audit sink through the plugin', () => {
       })
       await app.boot()
 
-      await callOverSeam(app)
+      await callToolOverSeam(app, { tool: 'posts.index' })
 
       expect(records).toEqual(['posts.index'])
       expect(warn.mock.calls.flat().map(String).join('\n')).not.toContain('could not be deferred')
@@ -218,7 +179,7 @@ describe('the audit sink through the plugin', () => {
       })
       await app.boot()
 
-      await callOverSeam(app, { passThroughOnException: () => {} })
+      await callToolOverSeam(app, { tool: 'posts.index', executionCtx: { passThroughOnException: () => {} } })
 
       expect(records).toEqual(['posts.index'])
     } finally {
