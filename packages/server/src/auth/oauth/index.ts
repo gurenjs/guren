@@ -196,18 +196,19 @@ let warnedAboutDroppedBinding = false
 
 /**
  * The flow was bound at authorize time but the state came back without one,
- * so the configured `OAuthStateStore` is not persisting `binding` — which
- * silently reverts the protection to the transferable state it replaced.
+ * so the configured `OAuthStateStore` is not persisting `binding`. The
+ * callback is rejected; this names the cause, since "Invalid or expired OAuth
+ * state" alone reads as a user problem.
  */
 function warnOnceAboutDroppedBinding(): void {
   if (warnedAboutDroppedBinding) return
   warnedAboutDroppedBinding = true
   console.warn(
     '[guren] An OAuth state was created with `bindTo` but came back from the state store '
-    + 'without its binding, so the callback could not be tied to the browser that started the '
-    + 'flow. The configured OAuthStateStore is dropping `OAuthStatePayload.binding` — for '
-    + 'DatabaseOAuthStateStore this usually means the `oauth_states` table has no `binding` '
-    + 'column. See: https://guren.dev/docs/guides/oauth',
+    + 'without its binding, so the callback was rejected: it cannot be tied to the browser '
+    + 'that started the flow. The configured OAuthStateStore is dropping '
+    + '`OAuthStatePayload.binding` — for DatabaseOAuthStateStore this usually means the '
+    + '`oauth_states` table has no `binding` column. See: https://guren.dev/docs/guides/oauth',
   )
 }
 
@@ -499,9 +500,9 @@ export async function verifyOAuthState(
 
 /**
  * Whether the presented value matches the binding recorded at authorize time.
- * A state created without a binding still verifies, so an app that has not
- * adopted `bindTo` keeps working; a state created *with* one is useless to a
- * browser that cannot present it, so a missing or wrong value fails.
+ * A flow bound on neither side verifies, so an app that has not adopted
+ * `bindTo` keeps working. A bound flow fails on a missing value on either side:
+ * a browser that cannot present the binding, or a store that did not keep it.
  */
 function bindingMatches(
   stored: string | undefined,
@@ -509,13 +510,13 @@ function bindingMatches(
   hashAlgorithm: 'sha256' | 'sha512',
 ): boolean {
   if (!stored) {
-    // The caller bound this flow, so a payload coming back without one means
-    // the store dropped the field rather than that the state was never bound.
-    // Verification cannot tell the two apart, so it stays permissive — but a
-    // store that silently discards the binding turns the protection off, and
-    // nothing else would say so.
-    if (presented) warnOnceAboutDroppedBinding()
-    return true
+    if (!presented) return true
+    // The caller bound this flow, so a payload coming back unbound means the
+    // store dropped the field. Accepting it would hand the protection back to
+    // the transferable state it replaced, so the callback fails; the warning
+    // is what tells the store author why.
+    warnOnceAboutDroppedBinding()
+    return false
   }
   if (!presented) return false
   // Both sides are hex digests, so this takes the hex-decoding comparator —

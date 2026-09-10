@@ -283,7 +283,7 @@ export const oauthStates = sqliteTable('oauth_states', {
 })
 ```
 
-`binding` 列は[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュを保持します。この列が無いとストアは束縛を保存できません。束縛済みのstateがすべて未束縛で戻ってくるため、保護が黙って無効になります。`session` / `bindTo` を使う前に列を追加してください。
+`binding` 列は[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュを保持します。この列が無いとストアは束縛を保存できません。束縛済みのstateがすべて未束縛で戻ってくるため、`handleCallback` は「Invalid or expired OAuth state」として拒否します。原因のストアはコンソールの警告が示します。`session` / `bindTo` を使う前に列を追加してください。
 
 期限切れのstate行は参照時に削除されます。まとめて掃除したい場合は、スケジュールジョブから `store.deleteExpired()` を呼んでください。既にRedisを運用しているアプリなら、Redisも引き続き使えます:
 

@@ -92,9 +92,10 @@ describe('oauth helpers', () => {
     expect(state).toBe('fixed-state')
   })
 
-  // A store that drops `binding` reverts the protection with no other signal, so the
-  // mismatch between "bound at authorize" and "unbound at callback" must be reported.
-  it('warns when a bound flow comes back from the store unbound', async () => {
+  // A store that drops `binding` would otherwise revert the protection to the
+  // transferable state it replaced, with no other signal. So the callback fails,
+  // and the warning is what names the store as the cause.
+  it('rejects, and warns, when a bound flow comes back from the store unbound', async () => {
     const store = new MemoryOAuthStateStore()
     const original = console.warn
     const warnings: string[] = []
@@ -103,7 +104,7 @@ describe('oauth helpers', () => {
     try {
       const { state } = await createOAuthState('github', store, {}, undefined, 'dropped-state')
       // Minted unbound but presented with a binding: the shape a dropping store produces.
-      expect(await verifyOAuthState(state, 'github', store, {}, 'session-abc')).not.toBeNull()
+      expect(await verifyOAuthState(state, 'github', store, {}, 'session-abc')).toBeNull()
     } finally {
       console.warn = original
     }
