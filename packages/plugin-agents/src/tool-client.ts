@@ -227,7 +227,10 @@ export function createAgentToolClient(options: AgentToolClientOptions): AgentToo
   )
 
   // Per client, which is per instance, because the principal above is: an
-  // approval is bound to who asked for it.
+  // approval is bound to who asked for it. No deferrer, here or on the audit
+  // emitter below: a Durable Object finishes work its handler left running, which
+  // a fetch handler drops (@guren/server tests/agent/durable-object.workerd.test.ts).
+  // Called from a Worker's fetch handler instead, both would be lost.
   const approvals = createAgentApprovalContext(runtime.approvals, principal)
 
   // Forwarded per event, not resolved here: the binding behind
