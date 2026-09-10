@@ -11,7 +11,7 @@
 import type { AgentToolDenied, AgentToolInvoked } from './events'
 import type { EventManager } from '../events'
 import { toAuditRecord, type AgentAuditRecord } from './audit'
-import { createKeepAlive, type AgentDeferrer } from './keep-alive'
+import { keepAlive, type AgentDeferrer } from './keep-alive'
 
 /**
  * The container service an application's audit emitter is published under
@@ -36,7 +36,7 @@ export interface AuditEmitterOptions {
   /**
    * Where an unfinished write goes so the runtime keeps it alive past the
    * response: `ExecutionContext.waitUntil` on Workers, where an undeferred one
-   * is abandoned with the request context, silently. See {@link createKeepAlive}.
+   * is abandoned with the request context, silently. See {@link keepAlive}.
    */
   defer?: AgentDeferrer
 }
@@ -54,25 +54,26 @@ export function createAuditEmitter(
   now: () => Date = () => new Date(),
   options: AuditEmitterOptions = {},
 ): AgentAuditEmitter {
-  const keepAlive = createKeepAlive(options.defer, 'agent audit work')
-
   return (event) => {
     if (sink) {
       // The clock is read once, here, and the record carries the instant it
       // produced — see `toAuditRecord`.
-      try {
-        // Deferred *after* the catch is attached: `waitUntil` on a rejecting
-        // promise raises an unhandled rejection in workerd.
-        keepAlive(Promise.resolve(sink(toAuditRecord(event, now()))).catch(warnSinkFailure))
-      } catch (error) {
-        warnSinkFailure(error)
-      }
+      keepAlive(
+        { run: () => sink(toAuditRecord(event, now())), onFailure: warnSinkFailure, label: LABEL },
+        options.defer,
+      )
     }
 
-    keepAlive(events?.emit(event).catch((error) => {
-      console.warn(`[guren] audit event listener failed: ${String(error)}`)
-    }))
+    if (events) {
+      keepAlive({ run: () => events.emit(event), onFailure: warnListenerFailure, label: LABEL }, options.defer)
+    }
   }
+}
+
+const LABEL = 'agent audit work'
+
+function warnListenerFailure(error: unknown): void {
+  console.warn(`[guren] audit event listener failed: ${String(error)}`)
 }
 
 function warnSinkFailure(error: unknown): void {

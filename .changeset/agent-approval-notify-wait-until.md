@@ -19,11 +19,15 @@ nobody was told about, and nothing anywhere said so.
 `notifyApprovers` and `createAgentApprovalContext` now take an optional
 `defer`, and the App MCP endpoint supplies the request's
 `ExecutionContext.waitUntil` — the same one it already hands the audit emitter.
-The rule that decides what deferral means now lives
-in one place shared by both: `defer` itself throws in workerd once the response
-has settled, and a second copy of that guard is how one of the two comes to
-fail the call it was only recording. Off Workers there is no execution context
-and the behaviour is what it was.
+
+How a best-effort side channel is invoked now lives in one place both use,
+`keepAlive`: a synchronous throw and a rejection both reach the channel's own
+warner, the `.catch` is attached *before* deferring (`waitUntil` on a rejecting
+promise raises an unhandled rejection in workerd), and `defer` itself throws
+there once the response has settled. Each of those is wrong in a way tests off
+Workers cannot see, which is why they are one function rather than a comment
+repeated at every site. Off Workers there is no execution context and the
+behaviour is what it was.
 
 The durable-agents surface (`@guren/plugin-agents`) is unchanged: it builds its
 approval context with no execution context to pass. Whether a Durable Object
