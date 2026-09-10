@@ -77,12 +77,14 @@ health.register(new MemoryCheck({
 
 ### キャッシュチェック
 
-キャッシュストアへの接続を確かめます。
+`CacheStore` にキーをひとつ書き込み、読み戻して削除します。渡すのはマネージャではなくストア本体です（`CacheManager` の `cache.store()`、または自作のストア）。
 
 ```typescript
 import { CacheCheck } from '@guren/core'
 
-health.register(new CacheCheck(cache, {
+const cache = app.container.make('cache') // CacheManager
+
+health.register(new CacheCheck(cache.store(), {
   name: 'cache',   // カスタム名（デフォルト: 'cache'）
 }))
 ```

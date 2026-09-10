@@ -77,12 +77,16 @@ Memory check returns status based on heap usage:
 
 ### Cache Check
 
-Verifies cache store connectivity:
+Writes, reads back, and deletes one key on a `CacheStore`. Pass the store
+itself (`cache.store()` from the `CacheManager`, or any store you built), not
+the manager:
 
 ```typescript
 import { CacheCheck } from '@guren/core'
 
-health.register(new CacheCheck(cache, {
+const cache = app.container.make('cache') // CacheManager
+
+health.register(new CacheCheck(cache.store(), {
   name: 'cache',   // Custom name (default: 'cache')
 }))
 ```

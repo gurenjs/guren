@@ -13,6 +13,7 @@ import {
   customCheck,
 } from '../../src/health'
 import type { CacheStoreInterface, CheckResult, HealthStatus } from '../../src/health'
+import { MemoryStore } from '../../src/cache'
 
 describe('HealthCheck', () => {
   class TestCheck extends HealthCheck {
@@ -439,34 +440,44 @@ describe('RedisCheck', () => {
 })
 
 describe('CacheCheck', () => {
-  it('should return healthy when cache operations succeed', async () => {
-    let stored: unknown = null
-    const cache = {
-      get: mock(() => Promise.resolve(stored)),
-      put: mock((key: string, value: unknown) => {
-        stored = value
-        return Promise.resolve()
-      }),
-      forget: mock(() => Promise.resolve(true)),
-    }
-
-    const check = new CacheCheck(cache as unknown as CacheStoreInterface)
+  it('should accept the built-in cache store and leave no key behind', async () => {
+    const store = new MemoryStore()
+    const check = new CacheCheck(store)
     const result = await check.check()
 
     expect(result.status).toBe('healthy')
-    expect(cache.put).toHaveBeenCalled()
-    expect(cache.get).toHaveBeenCalled()
-    expect(cache.forget).toHaveBeenCalled()
+    expect(await store.has('__health_check__')).toBe(false)
+  })
+
+  it('should return healthy when cache operations succeed', async () => {
+    let stored: unknown = null
+    const get = mock((_key: string) => Promise.resolve(stored))
+    const cache: CacheStoreInterface = {
+      get: <T>(key: string) => get(key) as Promise<T | null>,
+      set: mock((key: string, value: unknown) => {
+        stored = value
+        return Promise.resolve()
+      }),
+      delete: mock(() => Promise.resolve(true)),
+    }
+
+    const check = new CacheCheck(cache)
+    const result = await check.check()
+
+    expect(result.status).toBe('healthy')
+    expect(cache.set).toHaveBeenCalled()
+    expect(get).toHaveBeenCalled()
+    expect(cache.delete).toHaveBeenCalled()
   })
 
   it('should return degraded when read/write mismatch', async () => {
-    const cache = {
-      get: mock(() => Promise.resolve('wrong_value')),
-      put: mock(() => Promise.resolve()),
-      forget: mock(() => Promise.resolve(true)),
+    const cache: CacheStoreInterface = {
+      get: <T>() => Promise.resolve('wrong_value' as T | null),
+      set: mock(() => Promise.resolve()),
+      delete: mock(() => Promise.resolve(true)),
     }
 
-    const check = new CacheCheck(cache as unknown as CacheStoreInterface)
+    const check = new CacheCheck(cache)
     const result = await check.check()
 
     expect(result.status).toBe('degraded')
@@ -474,13 +485,13 @@ describe('CacheCheck', () => {
   })
 
   it('should return unhealthy when operation fails', async () => {
-    const cache = {
+    const cache: CacheStoreInterface = {
       get: mock(() => Promise.reject(new Error('Cache error'))),
-      put: mock(() => Promise.resolve()),
-      forget: mock(() => Promise.resolve(true)),
+      set: mock(() => Promise.resolve()),
+      delete: mock(() => Promise.resolve(true)),
     }
 
-    const check = new CacheCheck(cache as unknown as CacheStoreInterface)
+    const check = new CacheCheck(cache)
     const result = await check.check()
 
     expect(result.status).toBe('unhealthy')
@@ -489,19 +500,19 @@ describe('CacheCheck', () => {
 
   it('should use custom test key', async () => {
     let usedKey: string | null = null
-    const cache = {
-      get: mock((key: string) => {
+    const cache: CacheStoreInterface = {
+      get: <T>(key: string) => {
         usedKey = key
-        return Promise.resolve('test')
-      }),
-      put: mock((key: string, _value: unknown) => {
+        return Promise.resolve('test' as T | null)
+      },
+      set: mock((key: string, _value: unknown) => {
         usedKey = key
         return Promise.resolve()
       }),
-      forget: mock(() => Promise.resolve(true)),
+      delete: mock(() => Promise.resolve(true)),
     }
 
-    const check = new CacheCheck(cache as unknown as CacheStoreInterface, { testKey: 'custom_key' })
+    const check = new CacheCheck(cache, { testKey: 'custom_key' })
     await check.check()
 
     expect(usedKey ?? '').toBe('custom_key')
