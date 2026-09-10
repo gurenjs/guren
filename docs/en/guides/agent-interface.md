@@ -928,7 +928,9 @@ mcpPlugin({
 ```
 
 A sink that throws is warned about and does not fail the tool call it was
-recording.
+recording. A sink still writing when the response goes out is not dropped
+either: on Workers its promise is handed to the request's `waitUntil`, which is
+what lets a D1 write finish.
 
 Configuring a sink also covers `bunx guren tool:call`. That command boots your
 application, so it finds the trail the application configured and writes to it
