@@ -144,7 +144,7 @@ until the backlog clears.
 
 ### Using the Facade
 
-The simplest way to interact with the queue is through the `QueueManager`:
+The `queue` binding is the `QueueManager` your provider registered (`QueueServiceProvider`, or a provider of your own). `Job.dispatch()` resolves the manager's default driver from the container by itself, so binding the manager and registering a driver is all a dispatch needs. Resolve the manager when you want the driver in hand, for a worker or to inspect a queue:
 
 ```ts
 // Resolve the queue manager from the container
@@ -156,7 +156,7 @@ const driver = Queue.driver()
 
 ### Manual Setup
 
-You can also configure a queue manager directly:
+A manager that is not bound in the container works too. Call `driver()` once: it publishes the default driver for `dispatch()`, which otherwise has no way to find a manager nothing binds.
 
 ```ts
 import { createQueueManager, MemoryDriver } from '@guren/core'
@@ -288,7 +288,8 @@ const queueManager = createQueueManager({
   },
 })
 
-// Resolve the default driver and make it active for dispatching
+// Resolve the default driver; a manager not bound as `queue` in the
+// container needs this call before dispatch() can find it
 const driver = queueManager.driver()
 
 // Get a specific driver

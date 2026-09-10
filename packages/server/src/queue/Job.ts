@@ -1,16 +1,32 @@
 import { randomBytes } from 'node:crypto'
 import type { QueueDriver, QueuedJob, JobOptions } from './types'
+import type { QueueManager } from './QueueManager'
 import type { ServiceBindings } from '../container/bindings'
 import { getContainer } from '../container/Container'
 
 let globalDriver: QueueDriver | null = null
 
+/** Overrides the container's `queue` manager for `Job.dispatch()`; `QueueManager.driver()` sets it as a side effect. */
 export function setQueueDriver(driver: QueueDriver): void {
   globalDriver = driver
 }
 
+/**
+ * The driver `Job.dispatch()` sends through: the global override when set,
+ * else the default driver of the `queue` manager bound in the container, else
+ * null. Resolving through the manager publishes its driver as the global.
+ */
 export function getQueueDriver(): QueueDriver | null {
-  return globalDriver
+  if (globalDriver) return globalDriver
+
+  let container: ReturnType<typeof getContainer>
+  try {
+    container = getContainer()
+  } catch {
+    return null
+  }
+  const manager = container.makeOptional<QueueManager>('queue')
+  return manager ? manager.driver() : null
 }
 
 function generateJobId(): string {
@@ -55,9 +71,12 @@ export abstract class Job<T = unknown> {
     payload: T,
     options: JobOptions = {}
   ): Promise<string> {
-    const driver = globalDriver
+    const driver = getQueueDriver()
     if (!driver) {
-      throw new Error('Queue driver not configured. Call setQueueDriver() first.')
+      throw new Error(
+        'Queue driver not configured. Register a provider that binds a QueueManager as "queue" ' +
+          '(QueueServiceProvider, or your own), or call setQueueDriver() first.',
+      )
     }
 
     const jobId = generateJobId()

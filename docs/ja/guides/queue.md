@@ -144,21 +144,19 @@ class ProxyJob extends BaseJob {
 
 ### ファサードを使用（推奨）
 
-`QueueManager` を使うと、キュードライバをコンテナから遅延解決したうえで、短い記述でジョブをディスパッチできます。
+`queue` バインディングは、プロバイダ（`QueueServiceProvider` か自前のプロバイダ）が登録した `QueueManager` です。`Job.dispatch()` はそのデフォルトドライバをコンテナから自分で解決するので、マネージャーをバインドしてドライバを登録すればディスパッチに必要な準備は終わりです。ワーカーに渡すときやキューを調べるときは、マネージャーを解決してドライバを取り出します。
 
 ```ts
 // Resolve the queue manager from the container
 const Queue = app.container.make('queue')
 
-await Queue.push(new SendWelcomeEmailJob({
-  userId: '123',
-  email: 'user@example.com',
-}))
+// Access the default driver
+const driver = Queue.driver()
 ```
 
 ### 直接セットアップ
 
-ジョブをディスパッチする前に、キューマネージャーを設定します。
+コンテナにバインドしないマネージャーも使えます。その場合は `driver()` を一度呼びます。この呼び出しがデフォルトドライバを `dispatch()` に公開します。どこにもバインドされていないマネージャーを `dispatch()` が見つける手段は他にありません。
 
 ```ts
 import { createQueueManager, MemoryDriver } from '@guren/core'
@@ -290,7 +288,8 @@ const queueManager = createQueueManager({
   },
 })
 
-// デフォルトドライバを解決し、dispatch の既定ドライバとして有効化
+// デフォルトドライバを解決する。コンテナに `queue` としてバインドしない
+// マネージャーは、この呼び出しが無いと dispatch() から見つからない
 const driver = queueManager.driver()
 
 // 特定のドライバを取得
