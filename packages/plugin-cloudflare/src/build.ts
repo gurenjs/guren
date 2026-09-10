@@ -1316,6 +1316,13 @@ function renderOAuthProvider(mcpPath: string, defaultEntry: string): string {
   // those \`tool:<name>\` entries, so a refresh must echo the token response's own
   // scope and never this list, which the provider downscopes to nothing.
   scopesSupported: ['tools:*', 'tools:read'],
+  // The half a conforming MCP client actually reads. Its scope selection
+  // strategy consults the 401 \`WWW-Authenticate\` challenge and Protected
+  // Resource Metadata (RFC 9728) — never the RFC 8414 document above — and this
+  // one option feeds both. Only \`tools:read\`, because a client is told to
+  // request everything listed here and this field is specified to carry the
+  // minimum basic functionality needs; the wider scope stays discoverable above.
+  resourceMetadata: { scopes_supported: ['tools:read'] },
 })`
 }
 

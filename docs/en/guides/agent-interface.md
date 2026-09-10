@@ -778,6 +778,29 @@ Scopes are additive and there is no deny form. A tool the token's scopes do not
 cover is **absent from `tools/list`**, not merely refused, so an ungranted
 catalog cannot map your write surface for a read-only agent.
 
+### What an OAuth client asks for
+
+This grammar is your application's, not the MCP specification's, so a generic
+client cannot guess it and sends no scope at all. A
+`guren cloudflare:build --mcp-oauth` worker therefore advertises what it
+accepts, in the two documents the specification tells a client to read: the
+`scope` on the 401 `WWW-Authenticate` challenge, and Protected Resource
+Metadata (RFC 9728). Both carry `tools:read`.
+
+That value is the coarse read scope on purpose. A conforming client requests
+everything the field lists, and the field is specified to carry the minimum
+that basic functionality needs, so listing `tools:*` there would have every
+client ask for your whole tool surface. The wider `tools:*` stays advertised in
+the authorization server metadata (RFC 8414), which no client reads to *choose*
+a scope, for anyone inspecting what the server accepts.
+
+A client that ignores all of it and still sends nothing reaches the consent
+screen with a default applied, so it is never offered an empty page. Widening
+to a write tool needs that tool's exact name, and a read grant cannot reveal
+one: a tool outside the grant is absent from `tools/list`, and
+`guren.preflight` refuses it too. Read the name from `bunx guren tool:list` and
+re-authorize with `tool:<name>`.
+
 ### Issuing a token
 
 ```bash

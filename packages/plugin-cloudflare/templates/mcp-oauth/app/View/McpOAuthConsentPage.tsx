@@ -44,6 +44,7 @@ const STYLES = `
   .desc { display: block; margin: .25rem 0 0 1.75rem; opacity: .8; }
   .badge { border: 1px solid currentColor; border-radius: .5rem; font-size: .75rem; margin-left: .5rem; padding: 0 .4rem; }
   .empty { opacity: .8; }
+  code { font-family: ui-monospace, monospace; font-size: .9em; }
   button { font: inherit; padding: .5rem 1rem; }
 `
 
@@ -72,6 +73,27 @@ const ToolRow: FC<{ tool: DerivedAgentTool }> = ({ tool }) => (
   </li>
 )
 
+/**
+ * The dead end, with the way out: a requested scope that expands to no tool
+ * here. The grammar is this application's own (RFC 0016), so naming it is what
+ * separates a dead end from something an operator can act on. It says nothing
+ * back about what was asked for — `scope` is whatever a stranger put in the
+ * link, and here a stranger's sentence would read as the application's own.
+ */
+const NothingToGrant: FC = () => (
+  <>
+    <p class="empty">
+      None of the requested tools are available here, so there is nothing to approve.
+    </p>
+    <p class="empty">
+      This application grants its tools by scope: <code>tools:read</code> for every read-only
+      tool, <code>tool:&lt;name&gt;</code> for one tool by exact name, or{' '}
+      <code>tools:&lt;prefix&gt;.*</code> for a family. Run <code>guren tool:list</code> in the
+      application to see the names it exposes.
+    </p>
+  </>
+)
+
 export const McpOAuthConsentPage: FC<McpOAuthConsentPageProps> = ({
   clientName,
   query,
@@ -97,10 +119,7 @@ export const McpOAuthConsentPage: FC<McpOAuthConsentPageProps> = ({
         <input type="hidden" name={CSRF_FORM_FIELD} value={csrfToken} />
         <input type="hidden" name={QUERY_FIELD} value={query} />
         {tools.length === 0 ? (
-          <p class="empty">
-            This application requested no tools it can be granted. Nothing here would give it
-            access, so there is nothing to approve.
-          </p>
+          <NothingToGrant />
         ) : (
           <ul class="tools">
             {tools.map((tool) => (
