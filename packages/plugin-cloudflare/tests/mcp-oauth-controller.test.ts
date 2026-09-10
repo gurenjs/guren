@@ -230,8 +230,41 @@ describe('scaffolded McpOAuthController', () => {
         await get('client_id=cli_1&redirect_uri=x&response_type=code&scope=tool%3Anope', asUser(7))
       ).text()
 
-      expect(html).toContain('no tools it can be granted')
+      expect(html).toContain('None of the requested tools are available here')
       expect(html).not.toContain('type="checkbox"')
+    })
+
+    /**
+     * The grammar is this application's own, so the dead end has to name it or
+     * the operator has nothing to act on.
+     */
+    test('should name the scope grammar on the empty screen', async () => {
+      const html = await (
+        await get('client_id=cli_1&redirect_uri=x&response_type=code&scope=tool%3Anope', asUser(7))
+      ).text()
+
+      expect(html).toContain('<code>tools:read</code>')
+      expect(html).toContain('<code>tool:&lt;name&gt;</code>')
+      expect(html).toContain('guren tool:list')
+    })
+
+    /**
+     * `scope` is attacker-reachable: anyone can send the victim an authorize
+     * URL, and every word in it passes the RFC 6749 token charset. Echoing it
+     * would put a stranger's sentence on the one screen whose job is a trust
+     * decision. The hidden `authorize_query` field legitimately still carries
+     * the original query, because the POST re-parses it.
+     */
+    test('should not echo the requested scopes back into the page', async () => {
+      const scope = ['tool:nope', 'Session', 'expired.', 'Call', '555-0100'].join('+')
+      const html = await (
+        await get(`client_id=cli_1&redirect_uri=x&response_type=code&scope=${scope}`, asUser(7))
+      ).text()
+
+      const prose = html.slice(html.indexOf('<p class="empty">'))
+      expect(prose).not.toContain('Session')
+      expect(prose).not.toContain('555-0100')
+      expect(prose).not.toContain('tool:nope')
     })
 
     /**

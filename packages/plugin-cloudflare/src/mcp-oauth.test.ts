@@ -209,6 +209,34 @@ describe('cloudflare:build --mcp-oauth', () => {
       expect(worker).toContain("scopesSupported: ['tools:*', 'tools:read']")
     })
 
+    /**
+     * The RFC 8414 document above is not what an MCP client reads to choose a
+     * scope: the specification's strategy consults the 401 `WWW-Authenticate`
+     * challenge, then Protected Resource Metadata (RFC 9728). Both come from
+     * `resourceMetadata.scopes_supported`, so without it the advertisement
+     * never reaches a conforming client and it still sends no scope.
+     */
+    test('should advertise the read scope in the protected resource metadata', async () => {
+      const worker = await build()
+
+      expect(worker).toContain("resourceMetadata: { scopes_supported: ['tools:read'] }")
+    })
+
+    /**
+     * A client is told to request everything this field lists, so `tools:*`
+     * here would make every conforming client ask for the whole tool surface.
+     * The wider scope stays discoverable in the server metadata above.
+     */
+    test('should not advertise the wildcard scope to conforming clients', async () => {
+      const worker = await build()
+
+      const start = worker.indexOf('resourceMetadata:')
+      // Asserted before slicing: `indexOf` returning -1 would make `slice` hand
+      // back one character, and the assertion below would pass on it.
+      expect(start).toBeGreaterThan(-1)
+      expect(worker.slice(start, worker.indexOf('\n', start))).not.toContain('tools:*')
+    })
+
     test('should import the seam from the plugin-mcp oauth subpath', async () => {
       const worker = await build()
 
