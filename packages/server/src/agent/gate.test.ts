@@ -1,8 +1,19 @@
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test'
 
-import type { AgentApprovalMatch, AgentApprovalRequest, AgentApprovalStore } from './approval'
+import {
+  buildAgentApprovalRequest,
+  type AgentApprovalMatch,
+  type AgentApprovalRequest,
+  type AgentApprovalStore,
+} from './approval'
 import { deriveAgentTools, type DerivedAgentTool } from './derive'
-import { DEFAULT_SCOPE_SUBJECT, gateApproval, gatePreflight, gateToolCall } from './gate'
+import {
+  DEFAULT_SCOPE_SUBJECT,
+  gateApproval,
+  gatePreflight,
+  gateToolCall,
+  notifyApprovers,
+} from './gate'
 import { Router } from '../mvc/Router'
 
 const NOW = new Date('2026-09-01T12:00:00.000Z')
@@ -207,5 +218,114 @@ describe('gateApproval', () => {
     expect(verdict.allowed).toBe(false)
     expect(store.records).toEqual([])
     expect(notified).toEqual([])
+  })
+})
+
+/**
+ * The notification wrapper alone. `defer` is what a fire-and-forget channel
+ * needs on Workers, where an unawaited promise is abandoned when the request
+ * context closes — and so is the warning it would have printed, leaving the
+ * record pending with nothing anywhere saying nobody was told. That the
+ * runtime really does drop it is proved in `tests/agent/approval-notify.workerd.test.ts`.
+ */
+describe('notifyApprovers', () => {
+  let warn: Mock<typeof console.warn>
+
+  beforeEach(() => {
+    warn = spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warn.mockRestore()
+  })
+
+  function warnings(): string {
+    return warn.mock.calls.flat().map(String).join('\n')
+  }
+
+  function request(): AgentApprovalRequest {
+    return buildAgentApprovalRequest(
+      {
+        tool: 'posts.destroy',
+        input: { id: 5 },
+        fingerprint: 'fp',
+        principal: { kind: 'user', id: 7 },
+      },
+      NOW,
+    )
+  }
+
+  test('should hand the notify promise to defer, still pending', async () => {
+    const deferred: Promise<unknown>[] = []
+    let settle: (() => void) | undefined
+
+    notifyApprovers(
+      () => new Promise<void>((done) => { settle = done }),
+      (work) => void deferred.push(work),
+    )(request())
+
+    // The one property `waitUntil` needs: a promise still unsettled when the
+    // wrapper returns, so the runtime has something to keep alive.
+    expect(deferred).toHaveLength(1)
+    settle!()
+    await expect(deferred[0]).resolves.toBeUndefined()
+  })
+
+  test('should defer a rejecting notify as a settled promise, not an unhandled one', async () => {
+    // `waitUntil` on a rejecting promise raises an unhandled rejection in
+    // workerd, which is louder than the warning it replaces.
+    const deferred: Promise<unknown>[] = []
+    const filed = request()
+
+    notifyApprovers(
+      () => Promise.reject(new Error('slack is down')),
+      (work) => void deferred.push(work),
+    )(filed)
+
+    await expect(deferred[0]).resolves.toBeUndefined()
+    expect(warnings()).toContain('slack is down')
+    expect(warnings()).toContain(filed.id)
+  })
+
+  test('should warn naming the record when defer itself throws', async () => {
+    // `waitUntil` throws in workerd when the response has already settled. The
+    // record is filed by then, so the warning has to say which one it is.
+    const notified: AgentApprovalRequest[] = []
+    const filed = request()
+
+    expect(() =>
+      notifyApprovers(
+        (sent) => void notified.push(sent),
+        () => {
+          throw new Error('Cannot perform I/O on behalf of a different request')
+        },
+      )(filed),
+    ).not.toThrow()
+
+    expect(notified).toEqual([filed])
+    expect(warnings()).toContain(`approval notification for request ${filed.id} could not be deferred`)
+  })
+
+  test('should notify with no deferrer, as off Workers', async () => {
+    const notified: AgentApprovalRequest[] = []
+    const filed = request()
+
+    notifyApprovers((sent) => void notified.push(sent))(filed)
+
+    expect(notified).toEqual([filed])
+    expect(warnings()).toBe('')
+  })
+
+  test('should warn and not throw when notify throws synchronously', () => {
+    const filed = request()
+
+    expect(() =>
+      notifyApprovers(() => {
+        throw new Error('no transport configured')
+      })(filed),
+    ).not.toThrow()
+
+    expect(warnings()).toContain('no transport configured')
+    expect(warnings()).toContain(filed.id)
   })
 })

@@ -11,6 +11,7 @@
 import type { AgentToolDenied, AgentToolInvoked } from './events'
 import type { EventManager } from '../events'
 import { toAuditRecord, type AgentAuditRecord } from './audit'
+import { createKeepAlive, type AgentDeferrer } from './keep-alive'
 
 /**
  * The container service an application's audit emitter is published under
@@ -35,10 +36,9 @@ export interface AuditEmitterOptions {
   /**
    * Where an unfinished write goes so the runtime keeps it alive past the
    * response: `ExecutionContext.waitUntil` on Workers, where an undeferred one
-   * is abandoned with the request context, silently. Passed rather than reached
-   * for, since this package is runtime-agnostic.
+   * is abandoned with the request context, silently. See {@link createKeepAlive}.
    */
-  defer?: (work: Promise<unknown>) => void
+  defer?: AgentDeferrer
 }
 
 /**
@@ -54,17 +54,7 @@ export function createAuditEmitter(
   now: () => Date = () => new Date(),
   options: AuditEmitterOptions = {},
 ): AgentAuditEmitter {
-  const { defer } = options
-  // `defer` itself throws in workerd when called after the response settled,
-  // and a best-effort trail may not turn that into a failed tool call.
-  const keepAlive = (work: Promise<unknown> | undefined): void => {
-    if (!work || !defer) return
-    try {
-      defer(work)
-    } catch (error) {
-      console.warn(`[guren] agent audit work could not be deferred: ${String(error)}`)
-    }
-  }
+  const keepAlive = createKeepAlive(options.defer, 'agent audit work')
 
   return (event) => {
     if (sink) {

@@ -19,6 +19,7 @@ import {
   type Router,
 } from '@guren/core'
 
+import { presentExternalMcpAuth } from './external-auth'
 import { mcpPlugin } from './plugin'
 
 /**
@@ -453,5 +454,112 @@ describe('mcpPlugin with an approval queue (integration)', () => {
     const again = await client.callTool(CALL)
     expect(again.isError).toBe(true)
     expect(executed.length).toBe(1)
+  })
+})
+
+/**
+ * That the endpoint hands the *approval* half the request's `waitUntil`, not
+ * only the audit half. Driven over the external-auth seam rather than through
+ * the SDK client, which owns the `fetch` it calls: the third `app.fetch`
+ * argument is the whole point. Whether workerd really drops an undeferred
+ * notification is proved in `packages/server/tests/agent/approval-notify.workerd.test.ts`.
+ */
+describe('mcpPlugin approval notification deferral', () => {
+  function gatedRoutes(router: Router): void {
+    router
+      .post('/wires', { body: z.object({ amount: z.number() }) }, () => Response.json({ ok: true }))
+      .name('wires.store')
+      .agent({ approval: 'required' })
+  }
+
+  async function callOverSeam(app: Application, executionCtx?: unknown): Promise<void> {
+    const post = (body: unknown): Request =>
+      presentExternalMcpAuth(
+        new Request('http://localhost/mcp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+          body: JSON.stringify(body),
+        }),
+        { principal: { kind: 'user', id: 'u_1', abilities: ['tools:*'] }, scopes: ['tools:*'] },
+      )
+
+    await app
+      .fetch(
+        post({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } },
+        }),
+        undefined,
+        executionCtx as never,
+      )
+      .then((response) => response.arrayBuffer())
+
+    const response = await app.fetch(
+      post({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'wires.store', arguments: { amount: 250 } },
+      }),
+      undefined,
+      executionCtx as never,
+    )
+    await response.arrayBuffer()
+  }
+
+  /**
+   * No `EventServiceProvider` and no audit sink, so the *only* work this
+   * endpoint can defer is the notification. With either in place the audit
+   * emitter defers too, and an assertion counting deferred promises passes
+   * whether or not the approval half was ever given the deferrer.
+   */
+  async function bootWith(notify: (request: AgentApprovalRequest) => void | Promise<void>): Promise<Application> {
+    const app: Application = createApp({
+      routes: gatedRoutes,
+      providers: [mcpPlugin({ auth: 'external', approvals: { store: new MemoryApprovalStore(), notify } })],
+    })
+    await app.boot()
+    return app
+  }
+
+  test('should hand a slow notify to the request\'s waitUntil', async () => {
+    const notified: string[] = []
+    let release: (() => void) | undefined
+    const app = await bootWith(
+      (request) =>
+        new Promise<void>((done) => {
+          release = () => {
+            notified.push(request.tool)
+            done()
+          }
+        }),
+    )
+
+    const deferred: Promise<unknown>[] = []
+    await callOverSeam(app, {
+      waitUntil: (work: Promise<unknown>) => void deferred.push(work),
+      passThroughOnException: () => {},
+      props: {},
+    })
+
+    // Still pending when the refusal was produced: exactly the promise that is
+    // lost without `waitUntil`, and the reason the call may not await it.
+    expect(notified).toEqual([])
+    expect(deferred).toHaveLength(1)
+
+    release!()
+    await Promise.all(deferred)
+    expect(notified).toEqual(['wires.store'])
+  })
+
+  test('should notify with no execution context, as on Bun', async () => {
+    const notified: string[] = []
+    const app = await bootWith((request) => void notified.push(request.tool))
+
+    await callOverSeam(app)
+
+    expect(notified).toEqual(['wires.store'])
   })
 })
