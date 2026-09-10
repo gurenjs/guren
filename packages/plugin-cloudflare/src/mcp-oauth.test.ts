@@ -199,6 +199,16 @@ describe('cloudflare:build --mcp-oauth', () => {
       expect(worker).not.toContain('handler.fetch(request, env, ctx)')
     })
 
+    /**
+     * Without `scopes_supported` a well-behaved client has nothing to discover
+     * and sends no scope, which the consent screen then has to default.
+     */
+    test('should advertise the set-level scopes in the server metadata', async () => {
+      const worker = await build()
+
+      expect(worker).toContain("scopesSupported: ['tools:*', 'tools:read']")
+    })
+
     test('should import the seam from the plugin-mcp oauth subpath', async () => {
       const worker = await build()
 
@@ -499,6 +509,13 @@ describe('mcp-oauth templates', () => {
   test('should intersect the submission with what the client requested', () => {
     expect(controller).toContain('expandToolScopes(')
     expect(controller).toContain('offeredScopes.has(scope)')
+  })
+
+  test('should offer a default rather than nothing when the client sends no scope', () => {
+    expect(controller).toContain("const DEFAULT_SCOPE = 'tools:*'")
+    // In `offeredTools`, so the POST path defaults identically; and keyed on the
+    // request being empty, not on its expansion, which must stay empty.
+    expect(controller).toContain('requested.length > 0 ? requested : [DEFAULT_SCOPE]')
   })
 
   test('should carry the CSRF field into the consent form', () => {
