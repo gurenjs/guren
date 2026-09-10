@@ -19,10 +19,6 @@ vi.mock('../../app/Jobs/SendPasswordResetEmailJob.js', () => ({
   SendPasswordResetEmailJob: { dispatch: mockDispatch },
 }))
 
-vi.mock('guren', async (importOriginal) => ({
-  ...((await importOriginal()) as object),
-  ...createControllerModuleMock(),
-}))
 vi.mock('@guren/core', async () => {
   const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
   return {

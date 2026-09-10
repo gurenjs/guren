@@ -25,10 +25,6 @@ vi.mock('../../app/Mail/EmailVerificationMail.js', () => ({
   sendEmailVerificationMail: mockSendEmailVerificationMail,
 }))
 
-vi.mock('guren', async (importOriginal) => ({
-  ...((await importOriginal()) as object),
-  ...createControllerModuleMock(),
-}))
 vi.mock('@guren/core', async () => {
   const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
   return {
