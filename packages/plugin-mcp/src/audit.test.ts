@@ -137,7 +137,9 @@ describe('the audit sink through the plugin', () => {
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const records: string[] = []
-      let release: (() => void) | undefined
+      // Every resolver, not the latest: a second record would otherwise leave
+      // the first promise pending and hang the test instead of failing it.
+      const release: (() => void)[] = []
       const app: Application = createApp({
         routes: registerRoutes,
         providers: [
@@ -147,10 +149,10 @@ describe('the audit sink through the plugin', () => {
             audit: {
               sink: (record) =>
                 new Promise<void>((done) => {
-                  release = () => {
+                  release.push(() => {
                     records.push(record.tool)
                     done()
-                  }
+                  })
                 }),
             },
           }),
@@ -171,7 +173,7 @@ describe('the audit sink through the plugin', () => {
       expect(records).toEqual([])
       expect(deferred.length).toBeGreaterThan(0)
 
-      release!()
+      for (const done of release) done()
       await Promise.all(deferred)
       expect(records).toEqual(['posts.index'])
     } finally {
@@ -196,6 +198,29 @@ describe('the audit sink through the plugin', () => {
 
       expect(records).toEqual(['posts.index'])
       expect(warn.mock.calls.flat().map(String).join('\n')).not.toContain('could not be deferred')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  test('should record through a context with no callable waitUntil', async () => {
+    // `c.executionCtx` is a cast, not a check. A partial context must not turn
+    // the tool call into a 500 — a trail may not fail what it records.
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const records: string[] = []
+      const app: Application = createApp({
+        routes: registerRoutes,
+        providers: [
+          EventServiceProvider,
+          mcpPlugin({ auth: 'external', audit: { sink: (record) => void records.push(record.tool) } }),
+        ],
+      })
+      await app.boot()
+
+      await callOverSeam(app, { passThroughOnException: () => {} })
+
+      expect(records).toEqual(['posts.index'])
     } finally {
       warn.mockRestore()
     }

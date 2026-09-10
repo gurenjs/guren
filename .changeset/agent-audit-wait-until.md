@@ -21,3 +21,8 @@ implement — and the container binding stays the boot-time emitter that a surfa
 holding no request (`guren tool:call`) resolves. The event listeners are
 deferred on the same terms. Off Workers there is no execution context and the
 behaviour is what it was.
+
+The durable-agents surface (`@guren/plugin-agents`) is unchanged: it resolves
+that same boot-time emitter and its pipeline carries no execution context.
+Whether a Durable Object drops an undeferred promise the way a fetch handler
+does is an open question, not one this change judged.

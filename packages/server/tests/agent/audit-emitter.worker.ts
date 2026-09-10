@@ -3,11 +3,8 @@
 // does not know about is abandoned when that context closes.
 import type { ExecutionContext } from 'hono'
 
-import { createAuditEmitter } from './audit-emitter'
-import { AgentToolInvoked } from './events'
-
-/** workerd's own timer; `setTimeout` would do, but this is the platform API. */
-declare const scheduler: { wait: (ms: number) => Promise<void> }
+import { createAuditEmitter } from '../../src/agent/audit-emitter'
+import { AgentToolInvoked } from '../../src/agent/events'
 
 interface Env {
   DB: { prepare: (sql: string) => { bind: (...values: unknown[]) => { run: () => Promise<unknown> } } }
@@ -15,18 +12,19 @@ interface Env {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const tool = new URL(request.url).searchParams.get('tool') ?? 'unknown'
-    const defer = new URL(request.url).searchParams.get('defer') === '1'
+    const params = new URL(request.url).searchParams
+    const tool = params.get('tool') ?? 'unknown'
+    const defer = params.get('defer') === '1'
 
     const emit = createAuditEmitter(
       async (record) => {
         // A sink that has not finished by the time the response is produced —
         // any D1 write is this, the round trip being the delay.
-        await scheduler.wait(50)
+        await new Promise((done) => setTimeout(done, 50))
         await env.DB.prepare('INSERT INTO audit (tool) VALUES (?)').bind(record.tool).run()
       },
       undefined,
-      () => new Date(),
+      undefined,
       defer ? { defer: ctx.waitUntil.bind(ctx) } : {},
     )
 

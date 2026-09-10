@@ -47,10 +47,10 @@ export interface ServiceBindings {
   'inertia.sharedProps': SharedInertiaPropsRegistry
   /**
    * How an agent surface records what it did (RFC 0016 §5.2). Bound by
-   * `@guren/plugin-mcp` at boot, absent when no MCP plugin is registered. The
-   * binding is the *emitter*, not the sink, so every surface's records reach
-   * the same place the same way. The runtime spelling of this name lives in
-   * `AGENT_AUDIT_BINDING` — rename here and there together.
+   * `@guren/plugin-mcp` at boot, absent without it; the *emitter*, not the sink,
+   * so every surface's records reach one place. It defers nothing: on Workers a
+   * sink it starts inside a request is abandoned with that context. The runtime
+   * spelling lives in `AGENT_AUDIT_BINDING` — rename here and there together.
    */
   'agent.audit': AgentAuditEmitter
   'exception.handler': ExceptionHandler

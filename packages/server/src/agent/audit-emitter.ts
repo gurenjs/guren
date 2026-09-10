@@ -54,12 +54,13 @@ export function createAuditEmitter(
   now: () => Date = () => new Date(),
   options: AuditEmitterOptions = {},
 ): AgentAuditEmitter {
+  const { defer } = options
   // `defer` itself throws in workerd when called after the response settled,
   // and a best-effort trail may not turn that into a failed tool call.
-  const keepAlive = (work: Promise<unknown>): void => {
-    if (!options.defer) return
+  const keepAlive = (work: Promise<unknown> | undefined): void => {
+    if (!work || !defer) return
     try {
-      options.defer(work)
+      defer(work)
     } catch (error) {
       console.warn(`[guren] agent audit work could not be deferred: ${String(error)}`)
     }
@@ -78,12 +79,9 @@ export function createAuditEmitter(
       }
     }
 
-    const emitted = events?.emit(event).catch((error) => {
+    keepAlive(events?.emit(event).catch((error) => {
       console.warn(`[guren] audit event listener failed: ${String(error)}`)
-    })
-    if (emitted) {
-      keepAlive(emitted)
-    }
+    }))
   }
 }
 

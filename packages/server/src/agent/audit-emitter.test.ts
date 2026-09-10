@@ -224,9 +224,11 @@ describe('the audit emitter', () => {
 
       createAuditEmitter(undefined, events, () => NOW, { defer: (work) => void deferred.push(work) })(INVOKED)
 
+      // Resolves only once the listener does, which is what identifies the
+      // deferred promise as the listener's rather than the sink's.
       expect(deferred).toHaveLength(1)
       settle!()
-      await flush()
+      await expect(deferred[0]).resolves.toBeUndefined()
     })
 
     test('should warn and not throw when defer itself throws', async () => {
@@ -244,17 +246,6 @@ describe('the audit emitter', () => {
 
       expect(records.map((record) => record.tool)).toEqual(['posts.index'])
       expect(warnings()).toContain('agent audit work could not be deferred')
-    })
-
-    test('should leave the promise merely unhandled with no defer', async () => {
-      const records: AgentAuditRecord[] = []
-      const emit = createAuditEmitter((record) => void records.push(record), new EventManager(), () => NOW)
-
-      emit(INVOKED)
-      await flush()
-
-      expect(records.map((record) => record.tool)).toEqual(['posts.index'])
-      expect(warnings()).toBe('')
     })
   })
 })

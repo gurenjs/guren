@@ -179,16 +179,11 @@ const factory = definePlugin<McpPluginConfig>({
       const approvals = createAgentApprovalContext(config.approvals, principal)
 
       const executionCtx = executionContext(c)
-      // The boot-time `emit` is unawaited, which on workerd means abandoned the
-      // moment this request's context closes — silently, so a slow D1 write
-      // just leaves no row. Rebuilt per request because `waitUntil` is: the
-      // container binding stays the boot-time one, which is what a surface
-      // holding no request (`guren tool:call`) resolves.
-      const record = executionCtx
-        ? createAuditEmitter(sink, events, undefined, {
-            defer: executionCtx.waitUntil.bind(executionCtx),
-          })
-        : emit
+      // Rebuilt per request because `waitUntil` is. The container binding stays
+      // the boot-time emitter, which is what a surface holding no request
+      // (`guren tool:call`) resolves.
+      const defer = deferrer(executionCtx)
+      const record = defer ? createAuditEmitter(sink, events, undefined, { defer }) : emit
 
       const pipeline = createAgentInvocationPipeline({
         app,
@@ -366,6 +361,15 @@ async function resolveAuditSink(
 
   const { createFileAuditSink } = await import('./audit-file')
   return createFileAuditSink(config.file ?? DEFAULT_AGENT_AUDIT_PATH, config.days)
+}
+
+/**
+ * `c.executionCtx` is a cast, not a check, so a third `app.fetch` argument
+ * without a callable `waitUntil` would throw here — and a trail that cannot
+ * defer may not fail the call it was recording.
+ */
+function deferrer(ctx: ExecutionContext | undefined): ((work: Promise<unknown>) => void) | undefined {
+  return typeof ctx?.waitUntil === 'function' ? ctx.waitUntil.bind(ctx) : undefined
 }
 
 /** Hono throws on `executionCtx` outside Workers; absent is a normal answer here. */
