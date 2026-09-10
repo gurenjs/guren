@@ -84,6 +84,10 @@ const AUTHORIZE_QUERY =
   'client_id=cli_1&redirect_uri=https%3A%2F%2Fclient.test%2Fcb&response_type=code&state=s1'
     + '&scope=tool%3Aposts.index+tool%3Aposts.store'
 
+/** The same request with no `scope` parameter, which is what MCP clients send. */
+const SCOPELESS_QUERY =
+  'client_id=cli_1&redirect_uri=https%3A%2F%2Fclient.test%2Fcb&response_type=code&state=s2'
+
 let app: Application
 let previousTesting: string | undefined
 let previousAppKey: string | undefined
@@ -101,8 +105,8 @@ async function get(query: string, headers: Record<string, string> = {}): Promise
 }
 
 /** The `_token` value and session cookie a real browser would carry back. */
-async function consentSession(): Promise<{ token: string; cookie: string }> {
-  const response = await get(AUTHORIZE_QUERY, asUser(7))
+async function consentSession(query = AUTHORIZE_QUERY): Promise<{ token: string; cookie: string }> {
+  const response = await get(query, asUser(7))
   const html = await response.text()
   const token = /name="_token" value="([^"]+)"/.exec(html)?.[1]
   if (!token) {
@@ -229,6 +233,23 @@ describe('scaffolded McpOAuthController', () => {
       expect(html).toContain('no tools it can be granted')
       expect(html).not.toContain('type="checkbox"')
     })
+
+    /**
+     * The clients measured against a deployed app (Claude's connector, MCP
+     * Inspector) omit `scope` and expose no field to add one, so an offer of
+     * nothing leaves the user no button and the connection unestablishable
+     * (RFC 6749 §3.3). The test above is the other half of the rule: a scope
+     * that *expands* to nothing must stay empty rather than widen to everything.
+     */
+    test('should offer every tool when the request carries no scope at all', async () => {
+      const html = await (await get(SCOPELESS_QUERY, asUser(7))).text()
+
+      expect(html).not.toContain('no tools it can be granted')
+      expect(html).toContain('value="tool:posts.index" checked')
+      // Offered, and still unticked: the default widens the offer, not the grant.
+      expect(html).toContain('value="tool:posts.destroy"')
+      expect(html).not.toContain('value="tool:posts.destroy" checked')
+    })
   })
 
   describe('granting', () => {
@@ -291,6 +312,23 @@ describe('scaffolded McpOAuthController', () => {
       // The provider's own identifier is a string; props keeps the app's type.
       expect(options.userId).toBe('7')
       expect(options.metadata).toHaveProperty('grantedAt')
+    })
+
+    /**
+     * The default has to reach `approve()` too, which is why it lives in
+     * `offeredTools`: defaulting on the GET alone renders checkboxes whose scopes
+     * the intersection then drops, completing the authorization with an empty
+     * grant and no visible failure.
+     */
+    test('should grant a ticked write from a request that carried no scope', async () => {
+      const { token, cookie } = await consentSession(SCOPELESS_QUERY)
+
+      await post(
+        [['_token', token], ['authorize_query', SCOPELESS_QUERY], ['scope', 'tool:posts.store']],
+        { cookie },
+      )
+
+      expect(calls.completeAuthorization[0]?.scope).toEqual(['tool:posts.store'])
     })
 
     test('should grant nothing when nothing was ticked', async () => {

@@ -1310,6 +1310,12 @@ function renderOAuthProvider(mcpPath: string, defaultEntry: string): string {
   // 2026-07-28 line in favour of Client ID Metadata Documents, but it is
   // what shipping MCP SDK 1.x clients use to register themselves today.
   clientRegistrationEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.register)},
+  // Advertised in the authorization server metadata, so a client has something to
+  // discover and request rather than sending no scope at all. Set-level only: the
+  // build has no route graph to name \`tool:<name>\` scopes from. A grant records
+  // those \`tool:<name>\` entries, so a refresh must echo the token response's own
+  // scope and never this list, which the provider downscopes to nothing.
+  scopesSupported: ['tools:*', 'tools:read'],
 })`
 }
 

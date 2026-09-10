@@ -39,6 +39,15 @@ import {
  */
 const LOGIN_PATH = '/login'
 
+/**
+ * What a client that sent no `scope` is offered. RFC 6749 §3.3 requires a default
+ * or a refusal, and the MCP clients measured (Claude's connector, MCP Inspector)
+ * send none with no field to add one. It widens the *offer*, not the grant: the
+ * screen leaves write tools unticked, so approving it untouched still grants only
+ * the read-only set. Narrow it to `tools:read` to offer reads alone.
+ */
+const DEFAULT_SCOPE = 'tools:*'
+
 interface WorkerEnvWithProvider {
   OAUTH_PROVIDER: OAuthHelpers
 }
@@ -181,14 +190,20 @@ export default class McpOAuthController extends Controller {
     return env.OAUTH_PROVIDER
   }
 
-  /** Every MCP-exposed tool the requested scopes expand to, in router order. */
+  /**
+   * Every MCP-exposed tool the requested scopes expand to, in router order; a
+   * request carrying no scope at all is offered {@link DEFAULT_SCOPE}. Only an
+   * *absent* scope defaults — a scope that expands to nothing stays empty, or a
+   * client naming one tool this app does not have would be offered every tool.
+   * Both callers go through here, so `approve()` intersects against the same set.
+   */
   private offeredTools(requested: string[]): DerivedAgentTool[] {
     const { tools } = deriveAgentTools(this.make<Application>('app').router.definitions())
     const exposed = tools.filter((tool) => tool.expose.mcp)
 
     const allowed = new Set(
       expandToolScopes(
-        requested,
+        requested.length > 0 ? requested : [DEFAULT_SCOPE],
         exposed.map((tool) => ({ name: tool.toolName, readOnly: tool.annotations.readOnlyHint })),
       ),
     )
