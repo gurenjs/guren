@@ -110,24 +110,26 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
     expect(titles()).toEqual(['original', 'kept'])
   })
 
-  it('should refuse a nested transaction without disturbing the open one', async () => {
-    await expect(
-      Post.transaction(async (_trx, txPost) => {
-        await txPost.create({ title: 'outer' })
-        await Post.transaction(async (_inner, innerPost) => {
-          await innerPost.create({ title: 'nested' })
-        })
-      }),
-    ).rejects.toThrow('cannot begin a transaction inside another one')
+  it('should run a nested transaction inside the open one and commit both', async () => {
+    // Raced rather than left to the suite timeout: a nested call that opened its
+    // own transaction would queue behind the one it runs inside and hang.
+    const deadlock = new Promise((_resolve, reject) => {
+      setTimeout(() => reject(new Error('queued behind its own transaction')), 2000)
+    })
 
-    // The outer transaction saw the nested call's error and rolled back with it.
-    expect(titles()).toEqual(['original'])
+    const nested = Post.transaction(async (outerTrx, txPost) => {
+      await txPost.create({ title: 'outer' })
+      return Post.transaction(async (innerTrx, innerPost) => {
+        await innerPost.create({ title: 'nested' })
+        return innerTrx === outerTrx
+      })
+    })
+
+    await expect(Promise.race([nested, deadlock])).resolves.toBe(true)
+    expect(titles()).toEqual(['original', 'outer', 'nested'])
   })
 
-  it('should refuse a nested transaction opened before the outer callback awaits anything', async () => {
-    // Raced rather than left to the suite timeout: were the async context entered
-    // any later than the callback it wraps, this call would queue behind the
-    // transaction it runs inside and hang, reading as a neighbouring test failing.
+  it('should reuse the open transaction for a nested one opened before the outer callback awaits anything', async () => {
     const deadlock = new Promise((_resolve, reject) => {
       setTimeout(() => reject(new Error('queued behind its own transaction')), 2000)
     })
@@ -138,9 +140,21 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
       })
     })
 
-    await expect(Promise.race([nested, deadlock])).rejects.toThrow(
-      'cannot begin a transaction inside another one',
-    )
+    await expect(Promise.race([nested, deadlock])).resolves.toBeUndefined()
+    expect(titles()).toEqual(['original', 'nested'])
+  })
+
+  it('should roll back the outer transaction when the nested one throws', async () => {
+    await expect(
+      Post.transaction(async (_trx, txPost) => {
+        await txPost.create({ title: 'outer' })
+        await Post.transaction(async (_inner, innerPost) => {
+          await innerPost.create({ title: 'nested' })
+          throw new Error('boom')
+        })
+      }),
+    ).rejects.toThrow('boom')
+
     expect(titles()).toEqual(['original'])
   })
 
@@ -167,18 +181,27 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
     expect(titles()).toEqual(['original', 'open-a', 'open-b', 'arriving'])
   })
 
-  it('should refuse a nested transaction opened after the outer callback awaits non-database work', async () => {
+  it('should reuse the open transaction for a nested one opened after the outer callback awaits non-database work', async () => {
     // Nesting is an async-context fact, not a timing one: the outer callback has
     // crossed a timer here, which is exactly where an arrival-order rule loses it.
+    await Post.transaction(async (_trx, txPost) => {
+      await txPost.create({ title: 'outer' })
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      await Post.transaction(async (_inner, innerPost) => {
+        await innerPost.create({ title: 'nested' })
+      })
+    })
+
+    expect(titles()).toEqual(['original', 'outer', 'nested'])
+  })
+
+  it('should route a model call without { trx } to the open transaction', async () => {
     await expect(
-      Post.transaction(async (_trx, txPost) => {
-        await txPost.create({ title: 'outer' })
-        await new Promise((resolve) => setTimeout(resolve, 5))
-        await Post.transaction(async (_inner, innerPost) => {
-          await innerPost.create({ title: 'nested' })
-        })
+      Post.transaction(async () => {
+        await Post.create({ title: 'ambient' })
+        throw new Error('boom')
       }),
-    ).rejects.toThrow('cannot begin a transaction inside another one')
+    ).rejects.toThrow('boom')
 
     expect(titles()).toEqual(['original'])
   })

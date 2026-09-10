@@ -637,6 +637,58 @@ describe('DrizzleAdapter', () => {
       await expect(runTransaction(async () => 'ok')).resolves.toBe('ok')
     })
 
+    it('reuses the open transaction for a nested call on a driver that awaits its callback', async () => {
+      // The pooled shape (postgres.js, mysql2 with max: 1): a second top-level
+      // transaction would wait on the connection the first one holds.
+      const { db } = createMockDatabase()
+      const trxHandle = { ...db, isTrx: true }
+      let opened = 0
+      DrizzleAdapter.configure({
+        ...db,
+        transaction: async (callback: (trx: unknown) => unknown) => {
+          opened += 1
+          return callback(trxHandle)
+        },
+      } as never)
+
+      const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
+      const seen = await runTransaction(async (outer) => runTransaction(async (inner) => [outer, inner]))
+
+      expect(seen).toEqual([trxHandle, trxHandle])
+      // One for the probe, one for the outer call; the nested call opened none.
+      expect(opened).toBe(2)
+    })
+
+    it('routes a query without an explicit trx to the open transaction', async () => {
+      const { db } = createMockDatabase({ records: [{ id: 1, name: 'Alice', email: null }] })
+      const selectedOn: string[] = []
+      const trxHandle = {
+        ...db,
+        select: () => {
+          selectedOn.push('trx')
+          return db.select()
+        },
+      }
+      DrizzleAdapter.configure({
+        ...db,
+        select: () => {
+          selectedOn.push('root')
+          return db.select()
+        },
+        transaction: async (callback: (trx: unknown) => unknown) => callback(trxHandle),
+      } as never)
+
+      const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
+      const table = createMockTable()
+      await runTransaction(async () => {
+        await DrizzleAdapter.findMany(table)
+        await DrizzleAdapter.findUnique(table, { id: 1 })
+      })
+      await DrizzleAdapter.findMany(table)
+
+      expect(selectedOn).toEqual(['trx', 'trx', 'root'])
+    })
+
     it('throws when a database that commits without awaiting exposes no run()', async () => {
       const { db } = createMockDatabase()
       // The bun-sqlite shape: the callback's promise is committed on, never awaited.
