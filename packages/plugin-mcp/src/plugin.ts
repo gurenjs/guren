@@ -59,8 +59,8 @@ export interface McpPluginConfig {
   /**
    * Audit trail (RFC 0016 §5.2), opt-in because Workers and Lambda filesystems
    * are read-only or ephemeral. `file` is a *base* path: the trail lands in
-   * `agent-audit-YYYY-MM-DD.log` beside it, rotated daily. A `sink` is not
-   * awaited (write synchronously, or hand it to `waitUntil`); a throw warns.
+   * `agent-audit-YYYY-MM-DD.log` beside it, rotated daily. A `sink` is never
+   * awaited — handed to `waitUntil` on Workers so a slow write lands; a throw warns.
    * @default undefined — no sink; events are emitted, nothing is written
    */
   audit?: { file?: string; days?: number } | { sink: (record: AgentAuditRecord) => void | Promise<void> }
@@ -179,13 +179,23 @@ const factory = definePlugin<McpPluginConfig>({
       const approvals = createAgentApprovalContext(config.approvals, principal)
 
       const executionCtx = executionContext(c)
+      // The boot-time `emit` is unawaited, which on workerd means abandoned the
+      // moment this request's context closes — silently, so a slow D1 write
+      // just leaves no row. Rebuilt per request because `waitUntil` is: the
+      // container binding stays the boot-time one, which is what a surface
+      // holding no request (`guren tool:call`) resolves.
+      const record = executionCtx
+        ? createAuditEmitter(sink, events, undefined, {
+            defer: executionCtx.waitUntil.bind(executionCtx),
+          })
+        : emit
 
       const pipeline = createAgentInvocationPipeline({
         app,
         principal,
         abilities,
         surface: 'mcp',
-        audit: emit,
+        audit: record,
         ...(approvals ? { approvals } : {}),
         // The pipeline is protocol-neutral, so both the configuration line in
         // a fail-closed refusal and the subject of a scope refusal have to
@@ -225,7 +235,7 @@ const factory = definePlugin<McpPluginConfig>({
         limiter,
         rateKey,
         onInvoked: (tool, args, status, durationMs) => {
-          emit(
+          record(
             new AgentToolInvoked(
               principal,
               tool.toolName,
@@ -237,7 +247,7 @@ const factory = definePlugin<McpPluginConfig>({
           )
         },
         onDenied: (tool, args, reason: AgentToolDenialReason) => {
-          emit(
+          record(
             new AgentToolDenied(
               principal,
               tool.toolName,

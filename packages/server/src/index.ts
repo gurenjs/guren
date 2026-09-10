@@ -114,7 +114,7 @@ export type {
 // `@guren/plugin-mcp` binds one as `'agent.audit'`, `guren tool:call` resolves
 // that binding to record the `'cli'` surface.
 export { AGENT_AUDIT_BINDING, createAuditEmitter } from './agent/audit-emitter'
-export type { AgentAuditEmitter, AgentAuditSink } from './agent/audit-emitter'
+export type { AgentAuditEmitter, AgentAuditSink, AuditEmitterOptions } from './agent/audit-emitter'
 // The approval queue (RFC 0016 §5.4 item 4): the store an application
 // implements, plus the pure rules deciding whether a record authorizes a call.
 // Here so `guren check` and the plugin read one configuration key, and the
