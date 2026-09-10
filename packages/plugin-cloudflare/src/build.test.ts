@@ -879,3 +879,55 @@ describe('buildCloudflareOutput deploy-runtime warnings (RFC 0020 Part 0)', () =
     expect(warnings).not.toContain('shares no memory')
   })
 })
+
+describe('buildCloudflareOutput database factory warning', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-cf-db-factory-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  function writeDatabaseConfig(source: string): void {
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/database.ts'), source)
+  }
+
+  test('should warn when the database config never calls createD1Database', async () => {
+    scaffoldApp(root)
+    writeDatabaseConfig(
+      "import { createSqliteDatabase } from '@guren/core'\nexport const { getDatabase } = createSqliteDatabase({ filename: './data/app.db' })\n",
+    )
+
+    const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(warnings).toContain('Cloudflare build: config/database.ts calls createSqliteDatabase() and never createD1Database()')
+    expect(warnings).toContain('throw at its first database call')
+    // Advice, not a gate: the worker is still assembled.
+    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
+  })
+
+  test('should stay quiet for a config that switches to createD1Database at runtime', async () => {
+    scaffoldApp(root)
+    writeDatabaseConfig(
+      "import { createD1Database, createSqliteDatabase } from '@guren/core'\n"
+        + "import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'\n"
+        + 'export const { getDatabase } = isWorkersRuntime() ? createD1Database({ binding: () => ({}) }) : createSqliteDatabase({ filename: \'./data/app.db\' })\n',
+    )
+
+    const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(warnings).not.toContain('never createD1Database()')
+  })
+
+  test('should stay quiet when there is no database config to read', async () => {
+    scaffoldApp(root)
+
+    const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(warnings).not.toContain('never createD1Database()')
+  })
+})
