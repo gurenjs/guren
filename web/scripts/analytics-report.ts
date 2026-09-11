@@ -89,6 +89,14 @@ const queries: Array<{ title: string; sql: string }> = [
           FROM ${DATASET} WHERE ${WINDOW} AND ${AGENT_OK} AND blob2 IN ('docs', 'markdown', 'llms')
           GROUP BY path ORDER BY requests DESC LIMIT 15`,
   },
+  {
+    // A token whose requests are mostly errors is an alternative scanners match.
+    title: 'AI agent matches by user-agent token',
+    sql: `SELECT blob9 AS token, SUM(_sample_interval) AS requests,
+                 SUM(IF(double1 >= 400, _sample_interval, 0)) AS errors
+          FROM ${DATASET} WHERE ${WINDOW} AND blob3 = 'ai-agent'
+          GROUP BY token ORDER BY requests DESC LIMIT 20`,
+  },
 ]
 
 async function runQuery(sql: string): Promise<Array<Record<string, unknown>>> {

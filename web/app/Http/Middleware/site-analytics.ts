@@ -2,11 +2,11 @@ import { defineMiddleware } from '@guren/core'
 import { getWorkersEnv } from '@guren/plugin-cloudflare'
 
 /**
- * Cookie-less, server-side request analytics into Workers Analytics Engine: this
- * audience blocks client beacons and AI agents run no JavaScript. No cookies, IPs
- * or full referrers are stored, so no consent banner. SQL API positions: index1 ua
- * class; blob1..8 pathname, content class, ua class, referrer host ('' = direct or
- * same-site), Accept-Language, country, method, initial|inertia; double1..2 status, ms.
+ * Cookie-less, server-side analytics into Workers Analytics Engine: this audience
+ * blocks client beacons and AI agents run no JavaScript. No cookies, IPs, full
+ * referrers or full user agents are stored, so no consent banner. SQL API: index1 ua
+ * class; blob1..9 path, content, ua class, referrer host ('' = direct/same-site),
+ * Accept-Language, country, method, initial|inertia, UA token; double1..2 status, ms.
  */
 
 interface AnalyticsEngineDataset {
@@ -33,6 +33,14 @@ export function classifyUserAgent(userAgent: string): UserAgentClass {
   if (AI_AGENT_PATTERN.test(userAgent)) return 'ai-agent'
   if (BOT_PATTERN.test(userAgent)) return 'bot'
   return 'human'
+}
+
+// The alternative that matched, so an over-broad one shows up in the data. Every
+// alternative is a literal, which keeps this to a fixed vocabulary rather than
+// arbitrary user-agent text.
+export function userAgentToken(userAgent: string): string {
+  const match = AI_AGENT_PATTERN.exec(userAgent) ?? BOT_PATTERN.exec(userAgent)
+  return match ? match[0].toLowerCase() : ''
 }
 
 export function classifyContent(pathname: string): string {
@@ -92,7 +100,8 @@ export function createSiteAnalyticsMiddleware(
         const dataset = resolveDataset()
         if (dataset) {
           const url = new URL(c.req.url)
-          const uaClass = classifyUserAgent(c.req.header('user-agent') ?? '')
+          const userAgent = c.req.header('user-agent') ?? ''
+          const uaClass = classifyUserAgent(userAgent)
           const cf = (c.req.raw as { cf?: { country?: string } }).cf
           dataset.writeDataPoint({
             indexes: [uaClass],
@@ -105,6 +114,7 @@ export function createSiteAnalyticsMiddleware(
               cf?.country ?? '',
               c.req.method,
               c.req.header('x-inertia') ? 'inertia' : 'initial',
+              userAgentToken(userAgent),
             ],
             doubles: [c.res?.status ?? 0, Date.now() - startedAt],
           })
