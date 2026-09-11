@@ -1,17 +1,16 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
-import { MemorySchedulerLock, ScheduledTask, Scheduler, type SchedulerLock } from '../../src/scheduling'
+import {
+  MemorySchedulerLock,
+  ScheduledTask,
+  Scheduler,
+  type SchedulerLock,
+  type SchedulerOptions,
+} from '../../src/scheduling'
 import { RedisSchedulerLock } from '../../src/redis/RedisSchedulerLock'
 import { resetWarnOnce } from '../../src/support/warn-once'
+import { captureWarnings } from '../support/warnings'
 
 const MINUTE = 60_000
-
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve!: () => void
-  const promise = new Promise<void>((r) => {
-    resolve = r
-  })
-  return { promise, resolve }
-}
 
 /** Every task is due every minute; `at` is fixed so two ticks in a row land on distinct keys. */
 function tick(minutes: number): Date {
@@ -20,7 +19,7 @@ function tick(minutes: number): Date {
 
 describe('ScheduledTask overlap guard', () => {
   it('skips a run while the previous one is still running', async () => {
-    const gate = deferred()
+    const gate = Promise.withResolvers<void>()
     let runs = 0
     const task = new ScheduledTask({
       expression: '* * * * *',
@@ -42,7 +41,7 @@ describe('ScheduledTask overlap guard', () => {
   })
 
   it('lets the next run through once overlapExpiresAt has passed', async () => {
-    const hung = deferred()
+    const hung = Promise.withResolvers<void>()
     let runs = 0
     const task = new ScheduledTask({
       expression: '* * * * *',
@@ -63,8 +62,8 @@ describe('ScheduledTask overlap guard', () => {
   })
 
   it('keeps the successor guarded when the run it replaced finally finishes', async () => {
-    const staleGate = deferred()
-    const successorGate = deferred()
+    const staleGate = Promise.withResolvers<void>()
+    const successorGate = Promise.withResolvers<void>()
     const pending = [staleGate, successorGate]
     const task = new ScheduledTask({
       expression: '* * * * *',
@@ -122,14 +121,37 @@ describe('ScheduledTask overlap guard', () => {
   })
 })
 
+interface ReportSchedulerOptions extends SchedulerOptions {
+  callback?: () => Promise<void>
+  skip?: () => boolean
+  /** @default true */
+  onOneServer?: boolean
+}
+
+/** The fixture these tests share: one task named `report`, due every minute. */
+function reportScheduler({
+  callback = async () => {},
+  skip,
+  onOneServer = true,
+  ...options
+}: ReportSchedulerOptions = {}): Scheduler {
+  const scheduler = new Scheduler(options)
+  scheduler.schedule((schedule) => {
+    const task = schedule.call(callback).everyMinute().name('report')
+    if (onOneServer) task.runOnOneServer()
+    if (skip) task.skip(skip)
+  })
+  return scheduler
+}
+
 describe('Scheduler.runDueTasks', () => {
   beforeEach(() => {
     resetWarnOnce()
   })
 
   it('runs due tasks concurrently, so a slow task does not hold back the rest', async () => {
-    const slow = deferred()
-    const fastDone = deferred()
+    const slow = Promise.withResolvers<void>()
+    const fastDone = Promise.withResolvers<void>()
     const order: string[] = []
     const scheduler = new Scheduler()
     scheduler.schedule((schedule) => {
@@ -160,28 +182,13 @@ describe('Scheduler.runDueTasks', () => {
   })
 
   it('runs a runOnOneServer() task on the default in-process lock, warning that it spans one process', async () => {
-    const warnings: string[] = []
-    const warn = console.warn
-    console.warn = (message: string) => warnings.push(message)
     let runs = 0
 
-    try {
-      const scheduler = new Scheduler()
-      scheduler.schedule((schedule) => {
-        schedule
-          .call(async () => {
-            runs += 1
-          })
-          .everyMinute()
-          .name('report')
-          .runOnOneServer()
-      })
-
+    const warnings = await captureWarnings(async () => {
+      const scheduler = reportScheduler({ callback: async () => { runs += 1 } })
       await scheduler.runDueTasks(tick(0))
       await scheduler.runDueTasks(tick(0))
-    } finally {
-      console.warn = warn
-    }
+    })
 
     expect(runs).toBe(1)
     expect(warnings).toHaveLength(1)
@@ -225,15 +232,10 @@ describe('Scheduler.runDueTasks', () => {
       },
       release: async () => {},
     }
-    const scheduler = new Scheduler({ lock, logger: (message) => log.push(message) })
-    scheduler.schedule((schedule) => {
-      schedule
-        .call(async () => {
-          runs += 1
-        })
-        .everyMinute()
-        .name('report')
-        .runOnOneServer()
+    const scheduler = reportScheduler({
+      lock,
+      logger: (message) => log.push(message),
+      callback: async () => { runs += 1 },
     })
 
     await scheduler.runDueTasks(tick(0))
@@ -250,10 +252,7 @@ describe('Scheduler.runDueTasks', () => {
         throw new Error('redis down')
       },
     }
-    const scheduler = new Scheduler({ lock, logger: (message) => log.push(message) })
-    scheduler.schedule((schedule) => {
-      schedule.call(async () => {}).everyMinute().name('report').runOnOneServer().skip(() => true)
-    })
+    const scheduler = reportScheduler({ lock, logger: (message) => log.push(message), skip: () => true })
 
     await scheduler.runDueTasks(tick(0))
 
@@ -263,14 +262,10 @@ describe('Scheduler.runDueTasks', () => {
 
   it('reports a task whose callback throws instead of swallowing it in allSettled', async () => {
     const log: string[] = []
-    const scheduler = new Scheduler({ logger: (message) => log.push(message) })
-    scheduler.schedule((schedule) => {
-      schedule
-        .call(async () => {
-          throw new Error('boom')
-        })
-        .everyMinute()
-        .name('report')
+    const scheduler = reportScheduler({
+      logger: (message) => log.push(message),
+      onOneServer: false,
+      callback: async () => { throw new Error('boom') },
     })
 
     await scheduler.runDueTasks(tick(0))
@@ -287,10 +282,7 @@ describe('Scheduler.runDueTasks', () => {
       },
       release: async () => {},
     }
-    const scheduler = new Scheduler({ lock, lockPrefix: 'billing:' })
-    scheduler.schedule((schedule) => {
-      schedule.call(async () => {}).everyMinute().name('report').runOnOneServer()
-    })
+    const scheduler = reportScheduler({ lock, lockPrefix: 'billing:' })
 
     await scheduler.runDueTasks(tick(0))
 
@@ -300,19 +292,7 @@ describe('Scheduler.runDueTasks', () => {
   it('runs a runOnOneServer() task on the one server that wins the tick', async () => {
     const lock = new MemorySchedulerLock()
     const runs: string[] = []
-    const server = (id: string): Scheduler => {
-      const scheduler = new Scheduler({ lock })
-      scheduler.schedule((schedule) => {
-        schedule
-          .call(async () => {
-            runs.push(id)
-          })
-          .everyMinute()
-          .name('report')
-          .runOnOneServer()
-      })
-      return scheduler
-    }
+    const server = (id: string): Scheduler => reportScheduler({ lock, callback: async () => { runs.push(id) } })
 
     const a = server('a')
     const b = server('b')
@@ -335,7 +315,7 @@ describe('Scheduler.runDueTasks', () => {
       },
       release: async () => {},
     }
-    const gate = deferred()
+    const gate = Promise.withResolvers<void>()
     const task = new ScheduledTask({
       expression: '* * * * *',
       name: 'report',
@@ -365,15 +345,7 @@ describe('Scheduler.runDueTasks', () => {
         released.push(key)
       },
     }
-    const scheduler = new Scheduler({ lock })
-    scheduler.schedule((schedule) => {
-      schedule
-        .call(async () => {})
-        .everyMinute()
-        .name('report')
-        .runOnOneServer()
-        .skip(() => true)
-    })
+    const scheduler = reportScheduler({ lock, skip: () => true })
 
     await scheduler.runDueTasks(tick(0))
     expect(released).toEqual([`schedule:report:${tick(0).getTime() / MINUTE}`])

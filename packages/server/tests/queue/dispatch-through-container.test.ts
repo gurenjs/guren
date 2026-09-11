@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { Application } from '../../src/http/Application'
-import { createContainer, setContainer } from '../../src/container'
 import { QueueServiceProvider } from '../../src/providers/QueueServiceProvider'
 import { Job, MemoryDriver, clearQueueDriver, getQueueDriver, setQueueDriver } from '../../src/queue'
 import { mail, createMailManager } from '../../src/mail'
+import { bootWithMemoryQueue, resetQueueState } from './helpers'
 
 class ReportJob extends Job<{ id: number }> {
   static queue = 'reports'
@@ -21,15 +21,11 @@ describe('Job.dispatch() with only the container wired', () => {
   })
 
   afterEach(() => {
-    clearQueueDriver()
-    setContainer(createContainer())
+    resetQueueState()
   })
 
-  async function bootWithQueue(): Promise<Application> {
-    const app = new Application({ providers: [QueueServiceProvider] })
-    await app.boot()
-    app.container.make('queue').registerDriver('memory', () => driver)
-    return app
+  function bootWithQueue(): Promise<Application> {
+    return bootWithMemoryQueue(driver)
   }
 
   it('sends through the queue manager bound as "queue" without a prior manager.driver() call', async () => {
@@ -84,14 +80,10 @@ describe('Job.dispatch() with only the container wired', () => {
     const first = new MemoryDriver()
     const second = new MemoryDriver()
 
-    const firstApp = new Application({ providers: [QueueServiceProvider] })
-    await firstApp.boot()
-    firstApp.container.make('queue').registerDriver('memory', () => first)
+    await bootWithMemoryQueue(first)
     await ReportJob.dispatch({ id: 5 })
 
-    const secondApp = new Application({ providers: [QueueServiceProvider] })
-    await secondApp.boot()
-    secondApp.container.make('queue').registerDriver('memory', () => second)
+    await bootWithMemoryQueue(second)
     await ReportJob.dispatch({ id: 6 })
 
     expect(await first.size('reports')).toBe(1)

@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { Application } from '../../src/http/Application'
-import { createContainer, setContainer } from '../../src/container'
 import { ServiceProvider } from '../../src/container/ServiceProvider'
 import { EventServiceProvider } from '../../src/providers/EventServiceProvider'
-import { QueueServiceProvider } from '../../src/providers/QueueServiceProvider'
 import { Event, EventManager, Listener, createEventManager, createQueueEventDispatcher } from '../../src/events'
 import { MemoryDriver, Worker, clearQueueDriver, getJob, setQueueDriver, createQueueManager } from '../../src/queue'
+import { bootWithMemoryQueue, resetQueueState } from '../queue/helpers'
+import { captureWarnings } from '../support/warnings'
 import { resetWarnOnce } from '../../src/support/warn-once'
 
 class OrderPlaced extends Event {
@@ -28,15 +28,11 @@ describe('queued listeners through the providers', () => {
   })
 
   afterEach(() => {
-    clearQueueDriver()
-    setContainer(createContainer())
+    resetQueueState()
   })
 
-  async function bootWithQueue(): Promise<Application> {
-    const app = new Application({ providers: [EventServiceProvider, QueueServiceProvider] })
-    await app.boot()
-    app.container.make('queue').registerDriver('memory', () => driver)
-    return app
+  function bootWithQueue(): Promise<Application> {
+    return bootWithMemoryQueue(driver, [EventServiceProvider])
   }
 
   it('pushes the emit onto the queue and runs the listener when a worker drains it', async () => {
@@ -69,20 +65,15 @@ describe('queued listeners through the providers', () => {
   it('runs the listener inline, warning once, when the app binds no queue', async () => {
     const app = new Application({ providers: [EventServiceProvider] })
     await app.boot()
-    const warnings: string[] = []
-    const warn = console.warn
-    console.warn = (message: string) => warnings.push(message)
 
     const events = app.container.make('events')
     const handled: string[] = []
     events.on(OrderPlaced, (event) => { handled.push(event.orderId) }, { queue: 'emails' })
 
-    try {
+    const warnings = await captureWarnings(async () => {
       await events.emit(new OrderPlaced('o-2'))
       await events.emit(new OrderPlaced('o-3'))
-    } finally {
-      console.warn = warn
-    }
+    })
 
     expect(handled).toEqual(['o-2', 'o-3'])
     expect(warnings).toHaveLength(1)
