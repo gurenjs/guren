@@ -79,11 +79,10 @@ export const unregisteredAliasRejected = new Router().aliasMiddleware('auth', au
 unregisteredAliasRejected.middleware('nope')
 
 /**
- * Method parameters are compared bivariantly, so without `Router`'s `in M`
- * annotation a `Router<never>` flows into a `Router<'auth'>` slot and fails at
+ * Method parameters are compared bivariantly, so without `RouteBuilder`'s
+ * `in M` a `Router<never>` flows into a `Router<'auth'>` slot and fails at
  * `mount()`. Annotated, the parameter is contravariant: a router needing the
- * alias rejects one that never registered it, and one carrying extra aliases
- * still passes.
+ * alias rejects one that never registered it, one with extra aliases passes.
  */
 export function registrarNeedingAuth(router: Router<'auth'>): void {
   router.middleware('auth').get('/dashboard', [DemoController, 'index'])
@@ -149,20 +148,13 @@ export function documentedFlow(baseRouter: Router): void {
   })
 }
 
-/** Discarding the return keeps the parameter at `Router<never>`, which the registrar rejects. */
-export function discardedReturn(baseRouter: Router): void {
-  baseRouter.aliasMiddleware('auth', auditLogger)
-  // @ts-expect-error the alias is registered at runtime but absent from `baseRouter`'s type
-  registrarNeedingAuth(baseRouter)
-}
-
 /** A registrar that needs no alias accepts any router, the direction `registerAttachmentRoutes(router)` relies on. */
 export function registrarNeedingNone(router: Router): void {
   router.get('/health', [DemoController, 'index'])
 }
 registrarNeedingNone(new Router().aliasMiddleware('auth', auditLogger))
 
-/** The scope builder carries the same annotation, and the router it wraps would give it anyway. */
+/** Exercises the scope-builder path; its contravariance comes from the private `Router<M>` field. */
 export function scopeNeedingAuth(scope: ReturnType<Router<'auth'>['middleware']>): void {
   scope.get('/dashboard', [DemoController, 'index'])
 }

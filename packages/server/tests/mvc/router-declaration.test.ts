@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 describe('the built declaration', () => {
-  // `in M` is what rejects a router missing an alias a registrar reads. The
-  // source fixture cannot see it lost in emit, and an app only ever reads the
-  // built .d.ts, so a bundler dropping the annotation would go unnoticed.
+  // `in M` is what rejects a router missing an alias a registrar reads, and an
+  // app only ever reads the built .d.ts. tsc emits these declarations unbundled
+  // today and preserves it; this guards a future switch to bundled dts.
   test('should carry the contravariance annotation on Router and RouteBuilder', () => {
     const declaration = join(import.meta.dir, '../../dist/mvc/Router.d.ts')
     if (!existsSync(declaration)) {
