@@ -11,7 +11,7 @@
 import type { AgentToolDenied, AgentToolInvoked } from './events'
 import type { EventManager } from '../events'
 import { toAuditRecord, type AgentAuditRecord } from './audit'
-import { keepAlive, type AgentDeferrer } from './keep-alive'
+import { keepAlive, type Deferrer } from '../support/keep-alive'
 
 /**
  * The container service an application's audit emitter is published under
@@ -38,7 +38,7 @@ export interface AuditEmitterOptions {
    * response: `ExecutionContext.waitUntil` on Workers, where an undeferred one
    * is abandoned with the request context, silently. See {@link keepAlive}.
    */
-  defer?: AgentDeferrer
+  defer?: Deferrer
 }
 
 /**

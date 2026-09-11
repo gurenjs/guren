@@ -39,7 +39,7 @@ import {
   type GateVerdict,
   type ScopeGateOptions,
 } from './gate'
-import type { AgentDeferrer } from './keep-alive'
+import type { Deferrer } from '../support/keep-alive'
 import { redactAgentArguments } from './redact'
 import { installAgentPrincipal } from '../internal/agent-principal'
 
@@ -205,7 +205,7 @@ export function createAgentApprovalContext(
       }
     | undefined,
   principal: AgentPrincipal | null,
-  defer?: AgentDeferrer,
+  defer?: Deferrer,
 ): NonNullable<AgentInvocationOptions['approvals']> | undefined {
   if (!config) return undefined
 

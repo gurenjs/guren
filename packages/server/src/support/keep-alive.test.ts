@@ -1,12 +1,13 @@
 /**
- * The three orderings directly, rather than only through the two callers that
- * rely on them. Each is wrong in a way a long-lived runtime cannot show: a
+ * The three orderings directly, rather than only through the callers that rely
+ * on them. Each is wrong in a way a long-lived runtime cannot show: a
  * deferred rejection is an unhandled rejection in workerd, and a `defer` that
  * throws there would otherwise fail the call the channel was only recording.
  */
 import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test'
 
 import { keepAlive } from './keep-alive'
+import { runInRequestScope } from './request-deferrer'
 
 describe('keepAlive', () => {
   let warn: Mock<typeof console.warn>
@@ -83,6 +84,28 @@ describe('keepAlive', () => {
     // says the record was dropped — must not be the one to report it.
     expect(failures).toEqual([])
     expect(warnings()).toContain('the trail could not be deferred')
+  })
+
+  test('should fall back to the waitUntil of the request being served', () => {
+    const deferred: Promise<unknown>[] = []
+
+    runInRequestScope({ waitUntil: (work: Promise<unknown>) => void deferred.push(work) }, () =>
+      keepAlive(channel(() => {}), undefined),
+    )
+
+    expect(deferred).toHaveLength(1)
+  })
+
+  test('should prefer an explicit defer over the request\'s', () => {
+    const fromRequest: Promise<unknown>[] = []
+    const explicit: Promise<unknown>[] = []
+
+    runInRequestScope({ waitUntil: (work: Promise<unknown>) => void fromRequest.push(work) }, () =>
+      keepAlive(channel(() => {}), (work) => void explicit.push(work)),
+    )
+
+    expect(explicit).toHaveLength(1)
+    expect(fromRequest).toEqual([])
   })
 
   test('should run the channel with no deferrer, as off Workers', async () => {

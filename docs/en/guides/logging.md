@@ -306,6 +306,9 @@ log.registerDriver('slack', (config) => {
 })
 ```
 
+> [!NOTE]
+> On Cloudflare Workers, work still pending when a response is sent is dropped. When `log()` runs while the app is serving a request, an async channel's write (the `fetch` above) is handed to that request's `waitUntil`, so the entry still arrives after the response. A log call outside a request, such as one made during boot, is written without it. Other runtimes are unaffected, because their process outlives the request.
+
 ## Request Logging
 
 ### Middleware Example

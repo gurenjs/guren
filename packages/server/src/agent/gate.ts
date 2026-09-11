@@ -20,7 +20,7 @@ import {
 } from './approval'
 import type { DerivedAgentTool } from './derive'
 import type { AgentPrincipal, AgentToolDenialReason } from './events'
-import { keepAlive, type AgentDeferrer } from './keep-alive'
+import { keepAlive, type Deferrer } from '../support/keep-alive'
 import { APPROVAL_STATUS_TOOL_NAME } from './meta-tools'
 import { scopesAllowTool } from './scopes'
 
@@ -108,7 +108,7 @@ export interface ApprovalGateContext {
  */
 export function notifyApprovers(
   notify: (request: AgentApprovalRequest) => void | Promise<void>,
-  defer?: AgentDeferrer,
+  defer?: Deferrer,
 ): (request: AgentApprovalRequest) => void {
   return (request) => {
     keepAlive(
