@@ -1,5 +1,11 @@
 # @guren/inertia-client
 
+## 1.2.1
+
+### Patch Changes
+
+- b357564: `renderInertiaServer()` reports `pageEmbedded: true`: Inertia's `createInertiaApp` writes the page into the body's `data-page` element itself, and saying so lets `@guren/server` skip appending a second copy.
+
 ## 1.2.0
 
 ### Minor Changes

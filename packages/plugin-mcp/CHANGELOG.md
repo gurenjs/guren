@@ -1,5 +1,95 @@
 # @guren/plugin-mcp
 
+## 0.5.0
+
+### Minor Changes
+
+- 30a26e9: Keep an approval notification alive past the response on Workers
+
+  `notifyApprovers` issued the application's `notify` fire-and-forget, which
+  reads as "a dead channel must not fail the call it announces" everywhere the
+  process outlives the request. On workerd it means something else: a promise the
+  request context does not know about is abandoned when that context closes. An
+  app whose `notify` posts to Slack or sends mail had the approval record
+  persisted and nobody paged — and the warning that says exactly that ("the
+  request is recorded and pending, but nobody was told") lives inside the
+  abandoned `.catch`, so it never printed either. A human waited on an approval
+  nobody was told about, and nothing anywhere said so.
+
+  `notifyApprovers` and `createAgentApprovalContext` now take an optional
+  `defer`, and the App MCP endpoint supplies the request's
+  `ExecutionContext.waitUntil` — the same one it already hands the audit emitter.
+
+  How a best-effort side channel is invoked now lives in one place both use,
+  `keepAlive`: a synchronous throw and a rejection both reach the channel's own
+  warner, the `.catch` is attached _before_ deferring (`waitUntil` on a rejecting
+  promise raises an unhandled rejection in workerd), and `defer` itself throws
+  there once the response has settled. Each of those is wrong in a way tests off
+  Workers cannot see, which is why they are one function rather than a comment
+  repeated at every site. Off Workers there is no execution context and the
+  behaviour is what it was.
+
+  The durable-agents surface (`@guren/plugin-agents`) is unchanged: it builds its
+  approval context with no execution context to pass. Whether a Durable Object
+  drops an undeferred promise the way a fetch handler does is an open question,
+  not one this change judged.
+
+- 64903e6: Keep an agent audit write alive past the response on Workers
+
+  The audit emitter issued its sink fire-and-forget, which reads as "do not fail
+  the call this records" everywhere the process outlives the request. On workerd
+  it means something else: a promise the request context does not know about is
+  abandoned when that context closes. An app whose sink writes to D1 — the only
+  durable option there — had a best-effort trail, and the missing rows looked
+  exactly like tool calls that never happened, because nothing throws and nothing
+  warns.
+
+  `createAuditEmitter` now takes an optional `defer`, and the App MCP endpoint
+  supplies the request's `ExecutionContext.waitUntil`, so a slow sink still lands.
+  `AgentAuditEmitter` is unchanged — it is a public binding applications
+  implement — and the container binding stays the boot-time emitter that a surface
+  holding no request (`guren tool:call`) resolves. The event listeners are
+  deferred on the same terms. Off Workers there is no execution context and the
+  behaviour is what it was.
+
+  The durable-agents surface (`@guren/plugin-agents`) is unchanged: it resolves
+  that same boot-time emitter and its pipeline carries no execution context.
+  Whether a Durable Object drops an undeferred promise the way a fetch handler
+  does is an open question, not one this change judged.
+
+- c6717fa: Rename the meta-tools to `guren_preflight` / `guren_approval_status`, and warn on a tool name some clients drop
+
+  Claude Managed Agents restricts MCP tool names to `[a-zA-Z0-9_-]` and silently
+  skips every tool outside it: the server answers `tools/list` correctly, the
+  client discards the entries, and the agent runs with an empty catalogue while
+  the app's own logs show nothing (#787). Guren derives a tool name from the
+  route name verbatim, and route names conventionally carry dots, so an
+  idiomatically named app hit this on every tool. Routes already had an escape
+  hatch, `agent: { toolName: 'posts_index' }`. The framework's own meta-tool
+  `guren.preflight` had none.
+
+  - `PREFLIGHT_TOOL_NAME` is now `guren_preflight` and `APPROVAL_STATUS_TOOL_NAME`
+    is `guren_approval_status`. An MCP client that hard-coded the dotted spelling
+    must switch; code reading the constants is unchanged. Audit records written
+    from now on carry the new names (a rehearsal, whether over MCP or
+    `guren tool:call --preflight`, is recorded as `guren_preflight`), and the
+    approval gate's `pollWith` answers the new name.
+  - `PORTABLE_AGENT_TOOL_NAME_PATTERN` (`^[A-Za-z0-9_-]{1,64}$`) is exported
+    beside `AGENT_TOOL_NAME_PATTERN`: the grammar the Claude and OpenAI tool APIs
+    enforce, a strict subset of MCP's. The reserved names are pinned to it.
+  - `guren check` gains `agent-route-portable-name:*`, a **warn** on a tool name
+    that is legal MCP but falls outside the portable grammar, proposing the
+    `toolName` spelling (`posts.index` → `posts_index`). Advisory, like the
+    test-coverage nudges: the name is legal, so `check --ci` and `guren gate` do
+    not fail on it, and an app whose clients accept dots has nothing to fix. The derivation itself is unchanged, since a dot-to-underscore default
+    would rename every existing tool, token scope and audit record.
+
+### Patch Changes
+
+- Updated dependencies [30a26e9]
+- Updated dependencies [64903e6]
+  - @guren/core@1.17.0
+
 ## 0.4.1
 
 ### Patch Changes
