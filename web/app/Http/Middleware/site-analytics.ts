@@ -37,6 +37,8 @@ export function classifyUserAgent(userAgent: string): UserAgentClass {
 
 export function classifyContent(pathname: string): string {
   if (pathname === '/llms.txt' || pathname === '/llms-full.txt') return 'llms'
+  // Feed clients poll it on a timer; under `blog` it would count as reading.
+  if (pathname === '/blog/rss.xml') return 'feed'
   if (pathname.endsWith('.md')) return 'markdown'
   if (pathname === '/' || pathname === '') return 'home'
   if (pathname === '/docs' || pathname.startsWith('/docs/')) return 'docs'

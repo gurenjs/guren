@@ -24,42 +24,70 @@ if (!Number.isSafeInteger(days) || days < 1 || days > 90) {
 // Data point layout: see web/app/Http/Middleware/site-analytics.ts.
 const WINDOW = `timestamp > NOW() - INTERVAL '${days}' DAY`
 
+// A browser-like user agent is classed `human`, so scanners land there: in the
+// 30 days to 2026-09-11, 63% of `human` requests were 404s. A reader is a
+// successful GET from a client that sends Accept-Language.
+const READER = `blob3 = 'human' AND blob7 = 'GET' AND double1 >= 200 AND double1 < 300 AND blob5 != ''`
+// `/` is fetched by clients that never open a page, so it is not reading. Older
+// points class the feed as `blog`, and Analytics Engine keeps them ~90 days.
+const READING = `blob2 IN ('docs', 'blog', 'markdown') AND blob1 != '/blog/rss.xml'`
+// www.guren.dev 301s to the apex, so no page there can send this referrer; only
+// clients that forge it do.
+const FORGED_REFERRER = 'www.guren.dev'
+const AGENT_OK = `blob3 = 'ai-agent' AND double1 >= 200 AND double1 < 300`
+
 const queries: Array<{ title: string; sql: string }> = [
   {
     title: 'Requests by visitor class',
-    sql: `SELECT blob3 AS visitor, SUM(_sample_interval) AS requests
+    sql: `SELECT blob3 AS visitor, SUM(_sample_interval) AS requests,
+                 SUM(IF(double1 >= 400, _sample_interval, 0)) AS errors
           FROM ${DATASET} WHERE ${WINDOW}
           GROUP BY visitor ORDER BY requests DESC`,
   },
   {
-    title: 'Top pages (humans)',
+    title: 'Readers by content class',
+    sql: `SELECT blob2 AS content, SUM(_sample_interval) AS requests
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND ${READING}
+          GROUP BY content ORDER BY requests DESC`,
+  },
+  {
+    title: 'Top pages (readers)',
     sql: `SELECT blob1 AS path, SUM(_sample_interval) AS requests
-          FROM ${DATASET} WHERE ${WINDOW} AND blob3 = 'human' AND blob7 = 'GET'
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND ${READING}
           GROUP BY path ORDER BY requests DESC LIMIT 15`,
   },
   {
-    title: 'Top referrers (humans)',
+    title: 'Top referrers (readers)',
     sql: `SELECT blob4 AS referrer, SUM(_sample_interval) AS requests
-          FROM ${DATASET} WHERE ${WINDOW} AND blob3 = 'human' AND blob4 != ''
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER}
+            AND blob4 != '' AND blob4 != '${FORGED_REFERRER}'
           GROUP BY referrer ORDER BY requests DESC LIMIT 15`,
+  },
+  {
+    title: 'Languages (readers)',
+    sql: `SELECT blob5 AS language, SUM(_sample_interval) AS requests
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND ${READING}
+          GROUP BY language ORDER BY requests DESC LIMIT 10`,
+  },
+  {
+    title: 'Feed polls',
+    sql: `SELECT blob3 AS visitor, SUM(_sample_interval) AS requests
+          FROM ${DATASET} WHERE ${WINDOW} AND blob1 = '/blog/rss.xml'
+            AND double1 >= 200 AND double1 < 300
+          GROUP BY visitor ORDER BY requests DESC`,
   },
   {
     title: 'Agent traffic: markdown mirrors and llms.txt',
     sql: `SELECT blob2 AS content, blob3 AS visitor, SUM(_sample_interval) AS requests
           FROM ${DATASET} WHERE ${WINDOW} AND blob2 IN ('markdown', 'llms')
+            AND double1 >= 200 AND double1 < 300
           GROUP BY content, visitor ORDER BY requests DESC LIMIT 15`,
   },
   {
     title: 'Top docs pages fetched by AI agents',
     sql: `SELECT blob1 AS path, SUM(_sample_interval) AS requests
-          FROM ${DATASET} WHERE ${WINDOW} AND blob3 = 'ai-agent'
+          FROM ${DATASET} WHERE ${WINDOW} AND ${AGENT_OK} AND blob2 IN ('docs', 'markdown', 'llms')
           GROUP BY path ORDER BY requests DESC LIMIT 15`,
-  },
-  {
-    title: 'Languages (humans)',
-    sql: `SELECT blob5 AS language, SUM(_sample_interval) AS requests
-          FROM ${DATASET} WHERE ${WINDOW} AND blob3 = 'human' AND blob5 != ''
-          GROUP BY language ORDER BY requests DESC LIMIT 10`,
   },
 ]
 

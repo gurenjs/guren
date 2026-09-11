@@ -87,6 +87,11 @@ describe('classifyContent', () => {
     expect(classifyContent('/')).toBe('home')
     expect(classifyContent('/login')).toBe('other')
   })
+
+  it('should keep the feed out of the blog bucket', () => {
+    expect(classifyContent('/blog/rss.xml')).toBe('feed')
+    expect(classifyContent('/blog/rss')).toBe('blog')
+  })
 })
 
 describe('referrerHost', () => {
