@@ -189,19 +189,31 @@ describe('Scheduler.runDueTasks', () => {
     expect(warnings[0]).toContain('RedisSchedulerLock')
   })
 
-  it('refuses an unnamed or empty-named runOnOneServer() task, since the lock is keyed on the name', async () => {
+  it('refuses an unnamed or empty-named runOnOneServer() task, since the lock is keyed on the name', () => {
     const unnamed = new Scheduler({ lock: new MemorySchedulerLock() })
-    unnamed.schedule((schedule) => {
-      schedule.call(async () => {}).everyMinute().runOnOneServer()
-    })
-    await expect(unnamed.runDueTasks(tick(0))).rejects.toThrow('without a name')
+    expect(() =>
+      unnamed.schedule((schedule) => {
+        schedule.call(async () => {}).everyMinute().runOnOneServer()
+      }),
+    ).toThrow('without a name')
 
+    // Refused where it is registered, so a tick never pays for the check. The
+    // definer has run by then, so the task is on the list either way.
     const blank = new Scheduler({ lock: new MemorySchedulerLock() })
-    blank.schedule((schedule) => {
-      schedule.call(async () => {}).everyMinute().name('').runOnOneServer()
-    })
-    await expect(blank.runDueTasks(tick(0))).rejects.toThrow('without a name')
+    expect(() =>
+      blank.schedule((schedule) => {
+        schedule.call(async () => {}).everyMinute().name('').runOnOneServer()
+      }),
+    ).toThrow('without a name')
     expect(() => blank.start()).toThrow('without a name')
+  })
+
+  it('refuses an unnamed runOnOneServer() task handed to addTask()', () => {
+    const scheduler = new Scheduler({ lock: new MemorySchedulerLock() })
+
+    expect(() =>
+      scheduler.addTask(new ScheduledTask({ expression: '* * * * *', onOneServer: true, callback: async () => {} })),
+    ).toThrow('without a name')
   })
 
   it('reports a rejecting acquire as a lock failure and does not run the task', async () => {
@@ -314,6 +326,37 @@ describe('Scheduler.runDueTasks', () => {
     expect(runs).toEqual(['a', 'b'])
   })
 
+  it('does not claim the tick for a task its own overlap guard already refuses', async () => {
+    const claimed: string[] = []
+    const lock: SchedulerLock = {
+      acquire: async (key) => {
+        claimed.push(key)
+        return true
+      },
+      release: async () => {},
+    }
+    const gate = deferred()
+    const task = new ScheduledTask({
+      expression: '* * * * *',
+      name: 'report',
+      onOneServer: true,
+      withoutOverlapping: true,
+      callback: async () => {
+        await gate.promise
+      },
+    })
+    const running = task.tryRun(tick(0))
+
+    const scheduler = new Scheduler({ lock })
+    scheduler.addTask(task)
+    await scheduler.runDueTasks(tick(1))
+
+    expect(claimed).toEqual([])
+
+    gate.resolve()
+    expect(await running).toBe(true)
+  })
+
   it('gives the tick back when the winning server declines to run it', async () => {
     const released: string[] = []
     const lock: SchedulerLock = {
@@ -355,18 +398,20 @@ describe('MemorySchedulerLock', () => {
     expect(await lock.acquire('b', 60)).toBe(true)
   })
 
-  it('drops expired keys on acquire, so a per-minute key does not grow the map forever', async () => {
+  it('drops expired keys once the map grows, so a per-minute key does not grow it forever', async () => {
     let now = 0
     const lock = new MemorySchedulerLock(() => now)
     const held = (lock as unknown as { held: Map<string, number> }).held
 
-    for (let minute = 0; minute < 10; minute += 1) {
+    for (let minute = 0; minute < 200; minute += 1) {
       now = minute * 60_000
       expect(await lock.acquire(`schedule:report:${minute}`, 60)).toBe(true)
     }
 
-    // Without the sweep this is 10: one key per minute, none of them released.
-    expect(held.size).toBe(1)
+    // Without the sweep this is 200: one key per minute, none of them released.
+    expect(held.size).toBeLessThanOrEqual(64)
+    // And above 1, or the sweep is running on every acquire rather than on growth.
+    expect(held.size).toBeGreaterThan(1)
   })
 })
 

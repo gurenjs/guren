@@ -60,7 +60,7 @@ export class ScheduledTask {
   /** {@link run}, resolving false when the overlap guard or `when`/`skip` declined. */
   async tryRun(now: Date = new Date()): Promise<boolean> {
     // Judged before the first await, so two runs started in one tick cannot both pass.
-    if (this.definition.withoutOverlapping && this.isRunningAt(now.getTime())) {
+    if (this.isOverlapBlockedAt(now)) {
       return false
     }
 
@@ -115,6 +115,15 @@ export class ScheduledTask {
       throw error
     }
     return true
+  }
+
+  /**
+   * Whether `withoutOverlapping` would refuse a run starting at `now`. The
+   * scheduler asks before claiming the one-server lock, so a task its own
+   * guard declines costs no round trip to the lock store.
+   */
+  isOverlapBlockedAt(now: Date = new Date()): boolean {
+    return this.definition.withoutOverlapping === true && this.isRunningAt(now.getTime())
   }
 
   /** The guard stops blocking once `overlapExpiresAt` milliseconds have elapsed, not after. */

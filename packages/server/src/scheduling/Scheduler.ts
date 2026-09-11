@@ -10,10 +10,10 @@ import { claimHotDisposable, isHotReloadRuntime, type HotDisposableClaim } from 
  * after a completed run: a release would let a server whose clock reaches the
  * same minute later re-run the tick. An hour outlives any realistic clock skew.
  */
-export const ONE_SERVER_LOCK_TTL_SECONDS = 3600
+const ONE_SERVER_LOCK_TTL_SECONDS = 3600
 
 /** Prefixes every `runOnOneServer()` key; two apps sharing one store must not share it. */
-export const DEFAULT_ONE_SERVER_LOCK_PREFIX = 'schedule:'
+const DEFAULT_ONE_SERVER_LOCK_PREFIX = 'schedule:'
 
 export class Scheduler {
   private tasks: ScheduledTask[] = []
@@ -38,14 +38,18 @@ export class Scheduler {
     this.lock = options.lock ?? new MemorySchedulerLock()
   }
 
+  /** @throws When a task calls `runOnOneServer()` without a name to key the lock on. */
   schedule(definer: (schedule: Schedule) => void): void {
     const schedule = new Schedule()
     definer(schedule)
     this.tasks.push(...schedule.buildTasks())
+    this.checkOneServerTasks()
   }
 
+  /** @throws When the task calls `runOnOneServer()` without a name to key the lock on. */
   addTask(task: ScheduledTask): void {
     this.tasks.push(task)
+    this.checkOneServerTasks()
   }
 
   getTasks(): ScheduledTask[] {
@@ -60,12 +64,8 @@ export class Scheduler {
    * Due tasks run concurrently: awaited one by one, a slow task pushed the rest
    * past their minute, where the tick's once-per-minute check dropped them.
    * Each task's own overlap guard still serialises that task with itself.
-   * @throws When a task calls `runOnOneServer()` without a name to key the lock on.
    */
   async runDueTasks(date: Date = new Date()): Promise<void> {
-    this.assertOneServerTasksAreNamed(date)
-    this.warnIfOneServerTasksShareTheDefaultLock()
-
     const results = await Promise.allSettled(this.getDueTasks(date).map((task) => this.runTask(task, date)))
     for (const result of results) {
       // runTask() reports its own failures; a rejection here is the reporting
@@ -75,7 +75,14 @@ export class Scheduler {
   }
 
   private async runTask(task: ScheduledTask, date: Date): Promise<void> {
-    const lockKey = task.getDefinition().onOneServer ? this.oneServerLockKey(task, date) : null
+    // Asked before the lock: a task its own guard refuses would otherwise spend
+    // one round trip claiming the tick and another giving it back.
+    if (task.isOverlapBlockedAt(date)) {
+      this.options.logger(`Task skipped: ${task.getName()}`)
+      return
+    }
+
+    const lockKey = this.lockKeyFor(task, date)
 
     if (lockKey !== null) {
       let acquired: boolean
@@ -107,8 +114,8 @@ export class Scheduler {
       return
     }
 
-    // This server declined (overlap guard, `when`/`skip`); give the tick back
-    // so another server may still run it.
+    // This server's `when`/`skip` declined; give the tick back so another
+    // server may still run it.
     this.options.logger(`Task skipped: ${task.getName()}`)
     if (lockKey !== null) await this.releaseLock(lockKey, task)
   }
@@ -121,20 +128,32 @@ export class Scheduler {
     }
   }
 
+  /** The name the task's claim is keyed on; null when it has none to key on. */
+  private lockName(task: ScheduledTask): string | null {
+    const { name } = task.getDefinition()
+    return name === undefined || name === '' ? null : name
+  }
+
   /**
    * Same on every server for the same task and minute; the minute is UTC epoch,
-   * so timezones cannot split it. Null when the task has no name to key on.
+   * so timezones cannot split it. Null when the task claims no tick.
    */
-  private oneServerLockKey(task: ScheduledTask, date: Date): string | null {
-    const { name } = task.getDefinition()
-    if (name === undefined || name === '') return null
+  private lockKeyFor(task: ScheduledTask, date: Date): string | null {
+    const name = task.getDefinition().onOneServer ? this.lockName(task) : null
+    if (name === null) return null
     return `${this.options.lockPrefix}${name}:${Math.floor(date.getTime() / 60000)}`
   }
 
-  /** Judged through {@link oneServerLockKey}, so the refusal and the key cannot disagree. */
-  private assertOneServerTasksAreNamed(date: Date): void {
+  /** Registration-time facts, so they are judged when the task arrives rather than every tick. */
+  private checkOneServerTasks(): void {
+    this.assertOneServerTasksAreNamed()
+    this.warnIfOneServerTasksShareTheDefaultLock()
+  }
+
+  /** Judged through {@link lockName}, so the refusal and the key cannot disagree. */
+  private assertOneServerTasksAreNamed(): void {
     const unnamed = this.tasks.filter(
-      (task) => task.getDefinition().onOneServer && this.oneServerLockKey(task, date) === null,
+      (task) => task.getDefinition().onOneServer && this.lockName(task) === null,
     )
     if (unnamed.length === 0) return
 
@@ -163,8 +182,7 @@ export class Scheduler {
       return
     }
 
-    this.assertOneServerTasksAreNamed(new Date())
-    this.warnIfOneServerTasksShareTheDefaultLock()
+    this.checkOneServerTasks()
 
     this.isRunning = true
     this.options.logger('Scheduler started')
