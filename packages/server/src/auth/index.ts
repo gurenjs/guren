@@ -5,7 +5,12 @@ export { TokenGuard } from './TokenGuard'
 export type { TokenGuardOptions } from './TokenGuard'
 export { BaseUserProvider } from './providers/UserProvider'
 export { ModelUserProvider } from './providers/ModelUserProvider'
-export { ScryptHasher, ScryptHasher as Argon2Hasher } from './password/ScryptHasher'
+export { ScryptHasher as Argon2Hasher } from './password/ScryptHasher'
+/**
+ * @deprecated Renamed to `Argon2Hasher`, which is what it writes: `Bun.password`'s
+ * Argon2id, never scrypt. The name predates the implementation. Removed in 3.0.0.
+ */
+export { ScryptHasher } from './password/ScryptHasher'
 export { NodeHasher } from './password/NodeHasher'
 export { AuthenticatableModel } from './AuthenticatableModel'
 export {

@@ -86,6 +86,30 @@ async function detectSeederClassImports(cwd: string): Promise<string[]> {
   return affected.filter((file): file is string => file !== null)
 }
 
+/** Files importing the `ScryptHasher` name for the class now exported as `Argon2Hasher`. */
+async function detectScryptHasherImports(cwd: string): Promise<string[]> {
+  const files = [
+    ...(await discoverAppSourceFiles(cwd)),
+    ...(await discoverDbArtifactFiles(cwd, 'Seeder')),
+  ]
+  const affected = await Promise.all(
+    files.map(async (filePath) => {
+      const source = await readFile(filePath, 'utf-8')
+      for (const match of source.matchAll(GUREN_IMPORT)) {
+        const specifiers = match[1]
+          .split(',')
+          .map((part) => part.split(/\bas\b/)[0].replace(/^\s*type\s+/, '').trim())
+          .filter(Boolean)
+        if (specifiers.includes('ScryptHasher')) {
+          return relative(cwd, filePath)
+        }
+      }
+      return null
+    }),
+  )
+  return affected.filter((file): file is string => file !== null)
+}
+
 export const deprecations: Deprecation[] = [
   {
     id: 'model-guarded',
@@ -128,6 +152,17 @@ export const deprecations: Deprecation[] = [
       + 'that BaseSeeder.run() is declared not to take, and `db:seed` runs every seeder in the folder, '
       + 'so the SeederRunner orchestration (which no Guren command reaches) is not needed.',
     detect: detectSeederClassImports,
+  },
+  {
+    id: 'scrypt-hasher-name',
+    what: "The 'ScryptHasher' export name",
+    since: '2.22.0',
+    removedIn: '3.0.0',
+    replacement:
+      "Import 'Argon2Hasher' instead: it is the same class, under the name of what it writes "
+      + "(Bun.password's Argon2id, never scrypt). For a hash every runtime can verify, use 'Hash', "
+      + 'whose default is node:crypto scrypt.',
+    detect: detectScryptHasherImports,
   },
 ]
 

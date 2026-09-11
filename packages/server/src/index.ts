@@ -220,6 +220,8 @@ export {
 } from './providers'
 // FormRequest
 export { FormRequest } from './http/FormRequest'
+/** @deprecated Renamed to `Argon2Hasher`: it writes `Bun.password`'s Argon2id, never scrypt. Removed in 3.0.0. */
+export { ScryptHasher } from './auth'
 export {
   AuthManager,
   SessionGuard,
@@ -227,7 +229,6 @@ export {
   ModelUserProvider,
   BaseUserProvider,
   AuthenticatableModel,
-  ScryptHasher,
   Argon2Hasher,
   createPasswordResetToken,
   verifyPasswordResetToken,
