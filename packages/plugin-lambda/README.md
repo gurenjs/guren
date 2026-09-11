@@ -15,7 +15,7 @@ Installing registers a `lambda:build` command and scaffolds `src/lambda.ts` — 
 bunx guren lambda:build
 ```
 
-`lambda:build` runs the deploy-runtime checks `guren doctor` reports (a warning, never a failure, on an in-memory session or OAuth store, a `ScryptHasher`, or filesystem provider discovery), then your app's `build` script, then assembles a `.lambda/` directory:
+`lambda:build` runs the deploy-runtime checks `guren doctor` reports (a warning, never a failure, on an in-memory session or OAuth store, a Bun-only password hasher (`Argon2Hasher`, `hasher: 'argon2'`, or `new Hash({ algorithm: 'argon2' })`), or filesystem provider discovery), then your app's `build` script, then assembles a `.lambda/` directory:
 
 | Path | Contents |
 |------|----------|
@@ -61,7 +61,7 @@ HTTP API, queue worker with partial batch failures, EventBridge scheduling, and 
 
 - **Bundle time is production.** `bun build` inlines `process.env.NODE_ENV` when bundling; the build pins it to `"production"` so runtime configuration cannot accidentally ship a development bundle.
 - **The filesystem is read-only** except `/tmp`. Sessions and cache need a store that survives invocations — `DatabaseSessionStore`, or Redis via `@guren/core/redis`.
-- **Passwords hash with Node's scrypt.** The default hasher detects the runtime and uses `NodeHasher` off Bun; hashes are not interchangeable with Bun's `ScryptHasher`.
+- **Passwords hash with Node's scrypt.** The default hasher writes `node:crypto` scrypt on every runtime, so a column seeded under Bun verifies here. Argon2id rows, written by `hasher: 'argon2'` or by a release before scrypt became the default, do not.
 - **Static assets belong on S3 + CloudFront**, not in the function. Point real asset URLs at the function's environment (`GUREN_INERTIA_ENTRY`, `GUREN_INERTIA_STYLES`) to override the baked same-origin defaults.
 - **The database wants the RDS Data API.** `createAwsDataApiDatabase` from `@guren/core` connects to Aurora Serverless v2 over HTTP — no pool, no RDS Proxy, no VPC. Classic RDS works too with `createPostgresDatabase` plus RDS Proxy (`clientOptions: { prepare: false, max: 1 }`).
 

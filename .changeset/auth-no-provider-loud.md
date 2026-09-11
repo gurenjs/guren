@@ -1,5 +1,6 @@
 ---
-"@guren/server": patch
+"@guren/server": minor
+"@guren/core": minor
 ---
 
 Fail a login attempt loudly when no user provider is registered
@@ -16,6 +17,14 @@ anonymous request on such an app stays a 401 or a redirect rather than a 500.
 The app also warns at boot when `createApp()` received `auth`, every provider
 has booted, and the default guard still has no `users` provider behind it.
 
-`AuthManager` gains `hasProvider(name)`. The default `web` guard is registered
-by the `Application` constructor alone; `AuthServiceProvider` no longer carries
-a second registration that could never run.
+`AuthManager` gains `hasProvider(name)` and `getTokenGuard()`. The default
+`web` guard is registered by the `Application` constructor alone;
+`AuthServiceProvider` no longer carries a second registration that could never
+run.
+
+The boot warning is silent for an app that authenticates through bearer tokens
+(`useTokens()`) and for one that mounts its own sessions (`autoSession: false`):
+neither reaches the default session guard. `auth.login(user)` works without a
+provider, which is what an OAuth or passwordless callback does; the placeholder
+answers `getId()` from the record, and only the credential methods throw. Such
+an app still registers a provider to load that user back on the next request.

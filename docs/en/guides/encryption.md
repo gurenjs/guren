@@ -118,12 +118,12 @@ Password hashing goes through a `PasswordHasher`. Three implementations ship:
 | Class | Algorithm | Runtime |
 | --- | --- | --- |
 | `Hash` (alias of `DefaultHasher`) | Writes scrypt (Argon2id under `algorithm: 'argon2'`); verifies whichever format the stored hash carries | Both |
-| `ScryptHasher` (also exported as `Argon2Hasher`) | `Bun.password` — Argon2id by default, bcrypt on request | Bun only |
+| `Argon2Hasher` | `Bun.password`, Argon2id by default and bcrypt on request | Bun only |
 | `NodeHasher` | `crypto.scrypt` | Any |
 
-Reach for `Hash` unless you have a reason not to: it is what `AuthenticatableModel` and `ModelUserProvider` use by default, and the only one that verifies both formats. `NodeHasher` also runs on both (Bun implements `node:crypto`); `ScryptHasher` is the Bun-only one. Applications select the hasher once through `createApp({ auth: { hasher } })` rather than constructing it (see [Authentication](/docs/guides/authentication#password-hasher)).
+Reach for `Hash` unless you have a reason not to: it is what `AuthenticatableModel` and `ModelUserProvider` use by default, and the only one that verifies both formats. `NodeHasher` also runs on both, since Bun implements `node:crypto`. `Argon2Hasher` is the Bun-only one. Applications select the hasher once through `createApp({ auth: { hasher } })` rather than constructing it (see [Authentication](/docs/guides/authentication#password-hasher)).
 
-> `ScryptHasher` produces Argon2id, not scrypt. The name predates the implementation; only `NodeHasher` uses scrypt.
+> `Argon2Hasher` was called `ScryptHasher` until 2.22.0, which is not what it writes. The old name still resolves to the same class and is deprecated.
 
 The two formats are not interchangeable: a `$scrypt$` hash verifies anywhere, an Argon2id one only where `Bun.password` exists. `Hash` writes scrypt for that reason, and reports a hash in the other format through `needsRehash()`.
 
@@ -139,7 +139,7 @@ const hash = new Hash()
 const argon2 = new Hash({ algorithm: 'argon2' })
 ```
 
-To pin an algorithm or its cost parameters, construct `ScryptHasher` or `NodeHasher` directly (see [Algorithm Options](#algorithm-options)).
+To pin an algorithm or its cost parameters, construct `Argon2Hasher` or `NodeHasher` directly (see [Algorithm Options](#algorithm-options)).
 
 ### Hashing Passwords
 
@@ -186,7 +186,7 @@ if (hash.needsRehash(user.passwordHash)) {
 ### Argon2 (Bun only)
 
 ```typescript
-const hash = new ScryptHasher({
+const hash = new Argon2Hasher({
   algorithm: 'argon2id', // 'argon2i', 'argon2d', or 'argon2id' (default)
   memoryCost: 65536,     // Memory usage in KiB
   timeCost: 3,           // Iterations
@@ -196,7 +196,7 @@ const hash = new ScryptHasher({
 ### Bcrypt
 
 ```typescript
-const hash = new ScryptHasher({
+const hash = new Argon2Hasher({
   algorithm: 'bcrypt',
   cost: 12, // Log rounds
 })

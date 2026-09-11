@@ -321,7 +321,9 @@ const app = createApp({
 - `'argon2'` writes Argon2id through `Bun.password`. Pick it only for a deployment that stays on Bun; `createApp()` throws on a runtime without `Bun.password`.
 - A `PasswordHasher` object replaces the built-in one entirely.
 
-Verification is routed by the stored hash's format rather than by this setting, so a column holding both formats keeps working. A row in the other format (an Argon2id hash written under Bun by a release before scrypt became the default, say) is rehashed on that user's next successful login. Rows that never log in again keep their format, and on a runtime without `Bun.password` an Argon2id row cannot be verified at all: migrate such a column while the app still runs on Bun, or reset those passwords, before moving to Node or Workers.
+Verification is routed by the stored hash's format rather than by this setting, so a column holding both formats keeps working. A row in the other format, such as an Argon2id hash written under Bun before scrypt became the default, is rehashed on that user's next successful login. A row that never logs in again keeps its format.
+
+On a runtime without `Bun.password` an Argon2id row cannot be verified at all. Migrate such a column while the app still runs on Bun, by having those users log in or by resetting their passwords, before moving to Node, Lambda or Workers.
 
 ### Manual Configuration (Advanced)
 

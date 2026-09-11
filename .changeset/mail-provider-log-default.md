@@ -1,5 +1,5 @@
 ---
-"@guren/server": patch
+"@guren/server": minor
 ---
 
 Default the built-in mail provider to the log transport

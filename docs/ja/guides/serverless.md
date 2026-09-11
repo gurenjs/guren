@@ -34,7 +34,7 @@ export const queue = createSqsHandler()
 bunx guren lambda:build
 ```
 
-このコマンドはまず `guren doctor` と同じデプロイランタイムチェックを走らせます(インメモリのセッション/OAuth ストア、`ScryptHasher`、ファイルシステムからのプロバイダ探索に当たると警告します。ビルドは止めません。どれもローカルでは動き、Lambda では壊れるものです)。そのあとアプリの `build` スクリプトを実行し、`.lambda/` ディレクトリを組み立てます:
+このコマンドはまず `guren doctor` と同じデプロイランタイムチェックを走らせます(インメモリのセッション/OAuth ストア、Bun でしか読めないパスワードハッシャー(`Argon2Hasher`、`hasher: 'argon2'`、`new Hash({ algorithm: 'argon2' })`)、ファイルシステムからのプロバイダ探索に当たると警告します。ビルドは止めません。どれもローカルでは動き、Lambda では壊れるものです)。そのあとアプリの `build` スクリプトを実行し、`.lambda/` ディレクトリを組み立てます:
 
 | パス | 内容 |
 |------|------|
@@ -195,7 +195,7 @@ if (isLambda()) {
 デフォルトのハッシャーはどのランタイムでも `node:crypto` の scrypt を書きます。ローカルの Bun で投入したカラムは Lambda でもそのまま検証できます。新規アプリでは設定不要です。
 
 > [!WARNING]
-> `hasher: 'argon2'` を選んだアプリや、scrypt が既定になる前のリリースが書いた Argon2id の行は、`Bun.password` のある環境でしか検証できません。各行は次のログイン成功時に再ハッシュされるので、Lambda へ移す前に、アプリが Bun で動いているうちに該当ユーザーにログインしてもらうか、パスワードをリセットしてください。
+> Argon2id で書かれた行は `Bun.password` のある環境でしか検証できません。`hasher: 'argon2'` を選んだアプリと、scrypt が既定になる前のリリースが投入したカラムが該当します。移行の手順は[パスワードハッシャー](/docs/guides/authentication#パスワードハッシャー)にあります。Lambda へ移す前に済ませてください。
 
 ## ロギング
 
