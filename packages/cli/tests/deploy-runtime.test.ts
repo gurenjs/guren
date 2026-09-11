@@ -348,8 +348,9 @@ describe('deploy-password-hashing check', () => {
     })
   })
 
-  it('reports a createApp() config it cannot read', async () => {
+  it('reports a createApp() config it cannot read where the app hashes passwords', async () => {
     const files = {
+      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
       'src/app.ts': `import { createApp } from '@guren/core'\nimport { config } from './config'\nexport const app = createApp(config)\n`,
     }
 
@@ -358,6 +359,21 @@ describe('deploy-password-hashing check', () => {
 
       expect(check.status).toBe('warn')
       expect(check.message).toContain('createApp(<config>) (src/app.ts:3)')
+    })
+  })
+
+  // An opaque config says nothing about hashing. Warning on one an app that
+  // verifies no password wrote is a warning with no remediation to take.
+  it('passes a createApp() config it cannot read when no password authentication was found', async () => {
+    const files = {
+      'src/app.ts': `import { createApp } from '@guren/core'\nimport { config } from './config'\nexport const app = createApp(config)\n`,
+    }
+
+    await withApp('guren-hash-cf-unreadable-config-no-auth-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-password-hashing']
+
+      expect(check.status).toBe('pass')
+      expect(check.message).toContain('no password authentication was found')
     })
   })
 

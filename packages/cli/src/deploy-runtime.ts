@@ -89,6 +89,8 @@ export interface DeployRuntimeAnalysis {
   nodeHasherSignals: SourceSignal[]
   /** Hasher selections this scan could not read, so neither format can be claimed. */
   unreadableHasherSignals: SourceSignal[]
+  /** `createApp()` calls whose whole config is an expression, which may or may not select a hasher. */
+  unreadableConfigSignals: SourceSignal[]
   sessionSignals: SourceSignal[]
   /** `autoSession: false` anywhere in the app — an explicit opt-out. */
   sessionDisabledSignals: SourceSignal[]
@@ -132,6 +134,8 @@ type SignalKind =
   | 'nodeHasher'
   /** A hasher selection written as something other than a literal this scan can read. */
   | 'unreadableHasher'
+  /** A `createApp()` config this scan cannot read, which says nothing about whether it selects one. */
+  | 'unreadableConfig'
   | 'session'
   | 'sessionDisabled'
   | 'oauth'
@@ -424,7 +428,9 @@ function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSig
             const options = objectLiteral(config)
             if (!options) {
               // No argument at all selects nothing; one this scan cannot read might.
-              if (config) emit('unreadableHasher', 'createApp(<config>)', lineOf(node))
+              // Its own kind: unlike an `auth: { hasher }` key, an opaque config is
+              // no evidence that the app hashes a password at all.
+              if (config) emit('unreadableConfig', 'createApp(<config>)', lineOf(node))
             } else {
               for (const property of options.properties as unknown as BabelNode[]) {
                 if (property.type === 'ObjectProperty' && propertyKeyName(property) === 'auth') {
@@ -631,6 +637,7 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
     bunOnlyHasherSignals: collect('bunOnlyHasher'),
     nodeHasherSignals: collect('nodeHasher'),
     unreadableHasherSignals: collect('unreadableHasher'),
+    unreadableConfigSignals: collect('unreadableConfig'),
     sessionSignals: collect('session'),
     sessionDisabledSignals: collect('sessionDisabled'),
     oauthSignals: collect('oauth'),
@@ -746,12 +753,19 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
 
   // Before the "no password authentication" pass: an unreadable hasher selection
   // is evidence of password authentication this scan could not follow either.
-  if (analysis.unreadableHasherSignals.length > 0) {
+  // An unreadable whole config is not, so it only speaks where something else
+  // found password hashing — otherwise every app that builds its options
+  // elsewhere is warned about a hasher it may never select.
+  const unreadable = [
+    ...analysis.unreadableHasherSignals,
+    ...(analysis.passwordAuthSignals.length > 0 ? analysis.unreadableConfigSignals : []),
+  ]
+  if (unreadable.length > 0) {
     return verdict(
       key,
       title,
       'warn',
-      `${labels} detected, and the hasher is selected by an expression this check cannot read (${formatSignals(analysis.unreadableHasherSignals)}). Whether it writes node:crypto scrypt or Bun-only Argon2id is unknown, so this is not a pass.${caveat}`,
+      `${labels} detected, and the hasher is selected by an expression this check cannot read (${formatSignals(unreadable)}). Whether it writes node:crypto scrypt or Bun-only Argon2id is unknown, so this is not a pass.${caveat}`,
       UNREADABLE_HASHER_FIX,
     )
   }
