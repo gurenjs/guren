@@ -102,8 +102,6 @@ export interface PaginatedResult<TRecord extends PlainObject = PlainObject> {
 export interface ORMAdapter {
   /** Must not commit before the callback's promise settles: drizzle's bun-sqlite does. */
   transaction?<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult>
-  /** Runs the callback with no ambient transaction, so calls inside it reach the pool. */
-  outsideTransaction?<TResult>(callback: () => Promise<TResult>): Promise<TResult>
   findMany<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     options?: FindManyOptions<TRecord>,
@@ -243,17 +241,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       throw new Error('Configured adapter does not support transactions.')
     }
     return adapter.transaction((trx) => callback(trx as TransactionHandle, this.inTransaction(trx as TransactionHandle)))
-  }
-
-  /**
-   * Reads committed state while a transaction is open: a call inside the
-   * callback goes to the pool instead of joining the ambient transaction. An
-   * explicit `{ trx }` inside it still wins. On the single-connection drivers
-   * the pool *is* the transaction's connection, so uncommitted writes stay visible.
-   */
-  static async outsideTransaction<TResult>(callback: () => Promise<TResult>): Promise<TResult> {
-    const adapter = this.getAdapter()
-    return typeof adapter.outsideTransaction === 'function' ? adapter.outsideTransaction(callback) : callback()
   }
 
   /** A model scope that forwards `trx` to every query and write on it. */

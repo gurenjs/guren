@@ -2,8 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { integer, pgTable, serial, timestamp, varchar } from 'drizzle-orm/pg-core'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { createPostgresDatabase, type PostgresDatabase } from '../src/postgres'
 import { Model, type PaginatedResult, type TransactionHandle } from '../src/Model'
 import { SoftDeletes } from '../src/SoftDeletes'
@@ -38,6 +39,24 @@ async function ensureTestDatabase(url: string, database: string = TEST_DATABASE)
   } finally {
     await admin.end({ timeout: 0 })
   }
+}
+
+interface OutsideClient {
+  db: PostgresJsDatabase<Record<string, never>>
+  close: () => Promise<void>
+}
+
+/**
+ * A connection of its own, outside every transaction this file opens: a model
+ * call inside a callback joins the ambient transaction, so a premise about what
+ * other connections can see has to be read through a second client. Selected
+ * through drizzle, not the raw driver, so the column mapping still applies.
+ */
+async function openOutsideClient(url: string, database: string): Promise<OutsideClient> {
+  const { default: postgres } = await import('postgres')
+  const { drizzle } = await import('drizzle-orm/postgres-js')
+  const client = postgres(databaseUrl(url, database), { max: 1 })
+  return { db: drizzle({ client }), close: () => client.end({ timeout: 0 }) }
 }
 
 function createMigrationsFolder(): string {
@@ -175,6 +194,7 @@ type ArticleRecord = typeof articlesTable.$inferSelect
 // query that ignores `trx` still reads as correct.
 describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', () => {
   let database: PostgresDatabase
+  let outside: OutsideClient
 
   class Author extends Model<AuthorRecord> {
     static override table = authorsTable
@@ -200,9 +220,11 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
     })
     await database.resetDatabase()
     DrizzleAdapter.configure((await database.getDatabase()) as never)
+    outside = await openOutsideClient(url, RELATIONS_DATABASE)
   })
 
   afterAll(async () => {
+    await outside?.close()
     await database?.closeDatabase()
   })
 
@@ -231,11 +253,10 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
       )) as ArticleRecord
 
       // The premise: nothing outside the transaction can see either row yet, so a
-      // relation query on the pool finds no author. If that stops holding, the
-      // assertion below passes for free. A bare call here would join the ambient
-      // transaction, which is why the read steps outside it explicitly.
-      const fromPool = await Author.outsideTransaction(() => Author.find(author.id))
-      expect(fromPool).toBeNull()
+      // relation query on another connection finds no author. If that stops
+      // holding, the assertion below passes for free.
+      const fromPool = await outside.db.select().from(authorsTable).where(eq(authorsTable.id, author.id))
+      expect(fromPool).toEqual([])
 
       const [loaded] = (await Article.newQuery({ trx })
         .where('id', article.id)
@@ -340,6 +361,7 @@ type NoteRecord = typeof notesTable.$inferSelect
 // pooled driver makes an escaped write observable.
 describePostgres('SoftDeletes inside a transaction (requires POSTGRES_URL)', () => {
   let database: PostgresDatabase
+  let outside: OutsideClient
 
   class Note extends SoftDeletes(Model<NoteRecord>) {
     static override table = notesTable
@@ -357,9 +379,11 @@ describePostgres('SoftDeletes inside a transaction (requires POSTGRES_URL)', () 
     })
     await database.resetDatabase()
     DrizzleAdapter.configure((await database.getDatabase()) as never)
+    outside = await openOutsideClient(url, SOFT_DELETE_DATABASE)
   })
 
   afterAll(async () => {
+    await outside?.close()
     await database?.closeDatabase()
   })
 
@@ -382,13 +406,11 @@ describePostgres('SoftDeletes inside a transaction (requires POSTGRES_URL)', () 
   }
 
   /**
-   * Reads on the pool, past the softDelete scope that would otherwise hide the
-   * row, and outside the ambient transaction a bare call would otherwise join.
+   * Reads on the second connection, which is both outside the open transaction
+   * and past the softDelete scope that would otherwise hide the row.
    */
   async function fromPool(id: number): Promise<NoteRecord | null> {
-    const [row] = await Note.outsideTransaction(
-      () => Note.withoutGlobalScopes().where('id', id).get() as Promise<NoteRecord[]>,
-    )
+    const [row] = await outside.db.select().from(notesTable).where(eq(notesTable.id, id))
     return row ?? null
   }
 
@@ -452,8 +474,8 @@ describePostgres('SoftDeletes inside a transaction (requires POSTGRES_URL)', () 
       expect(await Note.onlyTrashed({ trx }).where('id', note.id).get()).toHaveLength(1)
       expect(await Note.withTrashed({ trx }).where('id', note.id).get()).toHaveLength(1)
 
-      // Outside the transaction the read hits the pool, where the row does not exist yet.
-      expect(await Note.outsideTransaction(() => Note.onlyTrashed().where('id', note.id).get())).toHaveLength(0)
+      // On another connection the row does not exist yet, trashed or not.
+      expect(await fromPool(note.id)).toBeNull()
     })
   })
 })

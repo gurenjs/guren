@@ -638,12 +638,4 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
 
     return runOwnTransaction(db, scope, callback)
   },
-
-  async outsideTransaction<TResult>(callback: () => Promise<TResult>): Promise<TResult> {
-    // Nothing to leave when no transaction has ever loaded the scope.
-    if (loadedTransactionScope?.current() === undefined) {
-      return callback()
-    }
-    return loadedTransactionScope.run(undefined, callback)
-  },
 }
