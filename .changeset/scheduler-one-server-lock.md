@@ -22,7 +22,7 @@ passed.
   `RedisSchedulerLock` (`@guren/core/redis`) for a multi-server deploy. The
   claim is per task per minute and stays held for an hour, so a server whose
   clock reaches the minute later does not re-run it. A task with no `.name()`,
-  or an empty one, is refused where it is scheduled and again at `start()` --
+  or an empty one, is refused when it is registered and again at `start()` --
   there is nothing to key the claim on. `createScheduler({ lockPrefix })` namespaces the
   keys for two apps sharing one store.
 - A lock that rejects is reported as a lock failure rather than a task failure,

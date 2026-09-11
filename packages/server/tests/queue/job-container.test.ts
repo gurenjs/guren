@@ -13,7 +13,6 @@ import {
   clearQueueDriver,
   type QueueDriver,
 } from '../../src/queue'
-import { resetQueueState } from './helpers'
 
 interface Mailer {
   send: (subject: string) => void
@@ -47,7 +46,7 @@ describe('the container an Application publishes', () => {
   })
 
   afterEach(() => {
-    resetQueueState()
+    clearQueueDriver()
   })
 
   it('lets a job resolve bindings on the sync driver', async () => {
