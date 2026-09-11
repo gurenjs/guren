@@ -371,7 +371,7 @@ export const handler = createLambdaHandler(app)
 
 **Key points:**
 - `app.boot()` runs once at cold start; the handler reuses the booted app
-- `Hash` (`DefaultHasher`) is the default hasher and already falls back to `node:crypto` scrypt off Bun; reach for `NodeHasher` explicitly only to pin the format. Never construct `ScryptHasher` in code a Node runtime will run
+- `Hash` (`DefaultHasher`) is the default hasher and writes `node:crypto` scrypt on every runtime; Argon2id rows are verified by prefix where `Bun.password` exists and rehashed to scrypt at the next login. `createApp({ auth: { hasher: 'argon2' } })` opts into Bun.password for Bun-only deployments. Never construct `ScryptHasher` or select `'argon2'` in code a Node runtime will run
 - Static assets should be served via CloudFront/S3, not Lambda
 - Use Redis-backed session/cache/queue stores (not in-memory)
 - List providers explicitly in `createApp()` (auto-discovery requires Bun)

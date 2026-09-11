@@ -303,7 +303,27 @@ This single method call:
 - Registers a `ModelUserProvider` with the specified columns
 - Creates a `SessionGuard` with proper session handling
 - Sets up the default guard as 'web'
-- Uses `Hash` (`DefaultHasher`) by default, which hashes with `Bun.password` on Bun and `node:crypto` scrypt elsewhere
+- Uses the hasher `createApp({ auth: { hasher } })` selected, scrypt by default (see [Password hasher](#password-hasher))
+
+### Password hasher
+
+Every password the app writes goes through one hasher, whether `AuthenticatableModel` hashes it on `create()` or the session guard rehashes it at login. It is selected once, in `createApp()`:
+
+```ts
+const app = createApp({
+  auth: {
+    hasher: 'scrypt', // the default
+  },
+})
+```
+
+- `'scrypt'` (the default) writes `$scrypt$` hashes through `node:crypto`, which every runtime reads back: Bun, Node, Lambda, Workers.
+- `'argon2'` writes Argon2id through `Bun.password`. Pick it only for a deployment that stays on Bun; `createApp()` throws on a runtime without `Bun.password`.
+- A `PasswordHasher` object replaces the built-in one entirely.
+
+Verification is routed by the stored hash's format rather than by this setting, so a column holding both formats keeps working. A row in the other format, such as an Argon2id hash written under Bun before scrypt became the default, is rehashed on that user's next successful login. A row that never logs in again keeps its format.
+
+On a runtime without `Bun.password` an Argon2id row cannot be verified at all. Migrate such a column while the app still runs on Bun, by having those users log in or by resetting their passwords, before moving to Node, Lambda or Workers.
 
 ### Manual Configuration (Advanced)
 

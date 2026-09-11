@@ -4,23 +4,19 @@ import { attachAuthContext } from '../http/middleware/auth'
 import { createSessionMiddleware, type CreateSessionMiddlewareOptions } from '../http/middleware/session'
 import type { SessionManager } from '../http/middleware/session-manager'
 import { createCsrfMiddleware } from '../http/middleware/csrf'
-import { SessionGuard } from '../auth/SessionGuard'
-import type { GuardFactory } from '../auth/types'
 import type { Application, AuthPluginOptions } from '../http/Application'
 import type { AuthManager } from '../auth'
-
-const DEFAULT_GUARD = 'web'
-const DEFAULT_PROVIDER = 'users'
 
 const DOUBLE_SESSION_CONFIG =
   'Sessions are configured twice: `auth.sessionOptions.store` in createApp() and a "session" '
   + 'container binding (SessionProvider). Keep one — the manager, or the explicit store.'
 
 /**
- * Sets up authentication guards, session middleware, and auth context. The
- * session store may come from a `session` container binding (RFC 0020 §1),
- * which an app's SessionProvider must make in `register()`: the middleware is
- * built in `boot()`, before any user provider's own boot runs.
+ * Sets up session middleware, CSRF, and the auth context. The default guard is
+ * the `Application` constructor's, registered before this provider. The session
+ * store may come from a `session` container binding (RFC 0020 §1), which an
+ * app's SessionProvider must make in `register()`: the middleware is built in
+ * `boot()`, before any user provider's own boot runs.
  */
 export class AuthServiceProvider extends ServiceProvider {
   private app!: Application
@@ -31,11 +27,6 @@ export class AuthServiceProvider extends ServiceProvider {
     const app = this.container.make<Application>('app')
     this.app = app
     const auth = this.container.make<AuthManager>('auth')
-
-    if (!auth.guardNames().length) {
-      auth.registerGuard(DEFAULT_GUARD, createDefaultGuardFactory(DEFAULT_PROVIDER))
-      auth.setDefaultGuard(DEFAULT_GUARD)
-    }
 
     const authOptions: AuthPluginOptions = app.authOptions ?? {}
     const shouldAttachSession = authOptions.autoSession !== false && !app.hasAutoSessionAttached()
@@ -92,16 +83,6 @@ export class AuthServiceProvider extends ServiceProvider {
       ...manager?.options,
       ...explicit,
       ...(manager && { store: () => manager.store() }),
-    })
-  }
-}
-
-function createDefaultGuardFactory(providerName: string): GuardFactory {
-  return ({ session, manager }) => {
-    const provider = manager.getProvider(providerName)
-    return new SessionGuard({
-      provider,
-      session,
     })
   }
 }

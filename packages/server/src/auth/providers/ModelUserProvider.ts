@@ -1,7 +1,8 @@
 import type { Model, PlainObject } from '@guren/orm'
 import type { PasswordHasher } from '../password/PasswordHasher'
-import { DefaultHasher } from '../password/DefaultHasher'
+import { resolveModelHasher } from '../password/configured-hasher'
 import { looksLikePasswordHash } from '../password/hash-format'
+import { capabilityOf } from '../model-capability'
 import type { AuthCredentials, Authenticatable } from '../types'
 import { BaseUserProvider } from './UserProvider'
 
@@ -10,19 +11,16 @@ interface CredentialColumnSource {
   resolveRememberTokenField(): string
 }
 
-/**
- * Capability check, not `instanceof AuthenticatableModel`: a nominal check
- * silently fails when two copies of @guren/server are loaded (src and dist
- * coexist through workspace symlinks), which would ignore a renamed
- * passwordHashField without any signal. Same duck-typing idiom as
- * BaseUserProvider's remember-token support.
- */
+interface PasswordHashWriter {
+  storePasswordHash(where: PlainObject, column: string, hash: string): Promise<void>
+}
+
+function passwordHashWriter(model: typeof Model): PasswordHashWriter | null {
+  return capabilityOf<PasswordHashWriter>(model, 'storePasswordHash')
+}
+
 function credentialColumnSource(model: typeof Model): CredentialColumnSource | null {
-  const candidate = model as Partial<CredentialColumnSource>
-  return typeof candidate.resolvePasswordHashField === 'function' &&
-    typeof candidate.resolveRememberTokenField === 'function'
-    ? (candidate as CredentialColumnSource)
-    : null
+  return capabilityOf<CredentialColumnSource>(model, 'resolvePasswordHashField', 'resolveRememberTokenField')
 }
 
 export interface ModelUserProviderOptions {
@@ -53,7 +51,7 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     this.usernameColumn = options.usernameColumn ?? 'email'
     this.passwordColumn = options.passwordColumn ?? authModel?.resolvePasswordHashField() ?? 'passwordHash'
     this.rememberTokenColumn = options.rememberTokenColumn ?? authModel?.resolveRememberTokenField() ?? 'rememberToken'
-    this.hasher = options.hasher ?? new DefaultHasher()
+    this.hasher = resolveModelHasher(model, options.hasher)
     this.credentialsPasswordField = options.credentialsPasswordField ?? 'password'
   }
 
@@ -111,6 +109,32 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     return (user as PlainObject)[this.idColumn]
   }
 
+  async rehashPasswordIfRequired(user: User, credentials: AuthCredentials): Promise<void> {
+    const plain = credentials[this.credentialsPasswordField]
+    const hashed = (user as PlainObject)[this.passwordColumn]
+    if (typeof plain !== 'string' || typeof hashed !== 'string' || !this.hasher.needsRehash?.(hashed)) {
+      return
+    }
+
+    const rehashed = await this.hasher.hash(plain)
+    ;(user as PlainObject)[this.passwordColumn] = rehashed
+    // storePasswordHash where the model offers it: a model that hashes in place
+    // (passwordField === passwordHashField) hashes this value a second time if it
+    // goes through update(). A plain Model has no such preparation, so the
+    // column write is the equivalent.
+    const writer = passwordHashWriter(this.model)
+    if (writer) {
+      await writer.storePasswordHash({ [this.idColumn]: this.getId(user) }, this.passwordColumn, rehashed)
+    } else {
+      await this.writeColumn(user, this.passwordColumn, rehashed)
+    }
+  }
+
+  /** forceUpdate keyed on the id column: both credential columns are denied to mass assignment. */
+  private async writeColumn(user: User, column: string, value: string | null): Promise<void> {
+    await (this.model as typeof Model).forceUpdate({ [this.idColumn]: this.getId(user) }, { [column]: value })
+  }
+
   /**
    * Strip the password hash, remember token, and the model's `hidden` fields
    * before the record leaves the auth layer. Credential validation runs on the
@@ -142,9 +166,7 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
   override async setRememberToken(user: User, token: string | null): Promise<void> {
     if (typeof (user as PlainObject)[this.rememberTokenColumn] !== 'undefined') {
       ;(user as PlainObject)[this.rememberTokenColumn] = token
-      // forceUpdate: the remember-token column is a trusted server-side
-      // write and is typically not in the model's fillable allowlist.
-      await (this.model as typeof Model).forceUpdate({ [this.idColumn]: this.getId(user) }, { [this.rememberTokenColumn]: token })
+      await this.writeColumn(user, this.rememberTokenColumn, token)
     }
   }
 

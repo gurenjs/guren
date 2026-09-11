@@ -16,7 +16,7 @@ bun run vercel:build
 vercel deploy --prebuilt
 ```
 
-Before writing any output, `vercel:build` runs the deploy-runtime checks `guren doctor` reports and warns, without failing, on an in-memory session or OAuth store, a `ScryptHasher`, or filesystem provider discovery — each works locally and breaks across function invocations.
+Before writing any output, `vercel:build` runs the deploy-runtime checks `guren doctor` reports and warns, without failing, on an in-memory session or OAuth store, a Bun-only password hasher (`Argon2Hasher`, `hasher: 'argon2'`, or `new Hash({ algorithm: 'argon2' })`), or filesystem provider discovery — each works locally and breaks across function invocations.
 
 ## API
 

@@ -10,7 +10,8 @@ import { sanitizeUser } from './providers/UserProvider'
 import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
 import { hasBearerHeader, type ApiTokenStore } from './api-token'
-import { DefaultHasher } from './password/DefaultHasher'
+import { bindPasswordHasher, createPasswordHasher } from './password/configured-hasher'
+import type { PasswordHasher } from './password/PasswordHasher'
 import type {
   AttachContextOptions,
   AuthContext,
@@ -24,7 +25,9 @@ import type {
   UserProvider,
 } from './types'
 
-const DEFAULT_GUARD = 'web'
+/** The guard and provider names an app gets without naming either: `createApp()` registers them, `useModel()` fills them. */
+export const DEFAULT_GUARD = 'web'
+export const DEFAULT_PROVIDER = 'users'
 
 /**
  * The guard name an unqualified lookup resolves to on a request the pipeline
@@ -61,9 +64,23 @@ export class AuthManager implements AuthManagerContract {
   private tokenGuard: string | null = null
   private apiTokenStore: ApiTokenStore | null = null
   private apiTokenOptions: ApiTokenGuardOptions = {}
+  private readonly passwordHasher: PasswordHasher
 
   constructor(options: AuthManagerOptions = {}) {
     this.defaultGuard = options.defaultGuard ?? DEFAULT_GUARD
+    // Resolved here, not on first use: `hasher: 'argon2'` on a runtime without
+    // `Bun.password` fails the `createApp()` call, before any user is written.
+    this.passwordHasher = createPasswordHasher(options.hasher)
+  }
+
+  /**
+   * The one password hasher this app writes with: `AuthPluginOptions.hasher`
+   * resolved, scrypt by default. `useModel()` hands it to the provider, and
+   * `AuthenticatableModel` reads it through the container, so a row the model
+   * hashes and a login the provider verifies never disagree on the format.
+   */
+  hasher(): PasswordHasher {
+    return this.passwordHasher
   }
 
   registerGuard<User>(name: string, factory: GuardFactory<User>): void {
@@ -72,6 +89,16 @@ export class AuthManager implements AuthManagerContract {
 
   registerProvider<User>(name: string, factory: ProviderFactory<User>): void {
     this.providers.set(name, { factory: factory as ProviderFactory<any> })
+  }
+
+  /** The guard `useTokens()` registered, or null. On this class rather than the contract, like `getApiTokenOptions()`. */
+  getTokenGuard(): string | null {
+    return this.tokenGuard
+  }
+
+  /** Whether a provider factory is registered under `name`; `getProvider()` throws where this is false. */
+  hasProvider(name: string): boolean {
+    return this.providers.has(name)
   }
 
   getProvider<User>(name: string): UserProvider<User> {
@@ -213,18 +240,23 @@ export class AuthManager implements AuthManagerContract {
   useModel(
     model: typeof Model<PlainObject>,
     options: Partial<ModelUserProviderOptions> = {},
-    providerName = 'users',
-    guardName = 'web',
+    providerName = DEFAULT_PROVIDER,
+    guardName = DEFAULT_GUARD,
   ): void {
-    // Credential columns are not defaulted here: ModelUserProvider reads
-    // them from the model contract (resolvePasswordHashField /
-    // resolveRememberTokenField) so a renamed column needs no repeating.
+    // Credential columns are not defaulted here: ModelUserProvider reads them
+    // from the model contract, so a renamed column needs no repeating.
+    // The hasher is resolved once and assigned after the spread: `{ hasher:
+    // undefined }` must not erase it, and a provider on one hasher while the
+    // model class carries another is the disagreement useModel exists to prevent.
+    const hasher = options.hasher ?? this.hasher()
     const defaultOptions: ModelUserProviderOptions = {
       usernameColumn: 'email',
       credentialsPasswordField: 'password',
-      hasher: new DefaultHasher(),
       ...options,
+      hasher,
     }
+
+    bindPasswordHasher(model, hasher)
 
     this.registerProvider(providerName, () => new ModelUserProvider(model, defaultOptions))
 

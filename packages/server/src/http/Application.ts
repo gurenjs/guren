@@ -4,7 +4,8 @@ import { Router, type RouteDefinition } from '../mvc/Router'
 import { loadPrototypeFixture, PROTOTYPE_FIXTURE_BINDING, type PrototypeFixtureLoader } from '../mvc/prototype'
 import { Container, mountModuleRoutes, setContainer, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
-import { AuthManager } from '../auth/AuthManager'
+import { AuthManager, DEFAULT_GUARD, DEFAULT_PROVIDER } from '../auth/AuthManager'
+import type { PasswordHasherOption } from '../auth/password/configured-hasher'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
 import { AuthorizationServiceProvider } from '../providers/AuthorizationServiceProvider'
 import { ErrorServiceProvider } from '../providers/ErrorServiceProvider'
@@ -12,6 +13,8 @@ import { I18nServiceProvider } from '../providers/I18nServiceProvider'
 import { InertiaServiceProvider } from '../providers/InertiaServiceProvider'
 import { attachAuthContext } from './middleware/auth'
 import { SessionGuard } from '../auth/SessionGuard'
+import { REGISTER_USER_PROVIDER_HINT, unconfiguredUserProvider } from '../auth/providers/unconfigured-user-provider'
+import type { Authenticatable } from '../auth/types'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import type { DetectLocaleOptions } from './middleware/detect-locale'
 import type { TranslationLoader } from '../i18n'
@@ -441,6 +444,13 @@ export interface I18nPluginOptions {
 }
 
 export interface AuthPluginOptions {
+  /**
+   * The format new password hashes are written in. `'scrypt'` (the default)
+   * verifies on every runtime; `'argon2'` uses `Bun.password` and is for
+   * Bun-only deployments. Rows in the other format still verify and are
+   * rehashed on their next login. A `PasswordHasher` replaces both.
+   */
+  hasher?: PasswordHasherOption
   autoSession?: boolean
   sessionOptions?: CreateSessionMiddlewareOptions
   /** Defaults to `true` when session is enabled. */
@@ -506,7 +516,7 @@ export class Application {
     this.hono = new Hono()
     this.container = new Container()
     this.router = new Router()
-    this.authManager = new AuthManager()
+    this.authManager = new AuthManager({ hasher: options.auth?.hasher })
     this.providerManager = new ProviderManager(this.container)
 
     // Not in boot(): Hono composes matched handlers in registration order, and
@@ -520,19 +530,16 @@ export class Application {
     this.container.instance('auth', this.authManager)
     this.container.instance('router', this.router)
 
-    // So requireAuthenticated/requireGuest work for apps that wire sessions
-    // manually, without the auth option.
-    if (!this.authManager.guardNames().length) {
-      this.authManager.registerGuard('web', ({ session, manager }) => {
-        // Without a 'users' provider this guard always answers unauthenticated.
-        let provider: any
-        try { provider = manager.getProvider('users') } catch {
-          provider = { retrieveById: async () => null, retrieveByCredentials: async () => null, validateCredentials: async () => false }
-        }
-        return new SessionGuard({ provider, session })
-      })
-      this.authManager.setDefaultGuard('web')
-    }
+    // Registered here, before any provider, so requireAuthenticated/requireGuest
+    // work for apps that wire sessions manually and for middleware added through
+    // app.use() ahead of boot() (#13). `useModel()` replaces it under the same name.
+    this.authManager.registerGuard(DEFAULT_GUARD, ({ session }) => {
+      const provider = this.authManager.hasProvider(DEFAULT_PROVIDER)
+        ? this.authManager.getProvider<Authenticatable>(DEFAULT_PROVIDER)
+        : unconfiguredUserProvider
+      return new SessionGuard({ provider, session })
+    })
+    this.authManager.setDefaultGuard(DEFAULT_GUARD)
 
     // The fallback is attached in the constructor so middleware registered via
     // app.use() before boot() finds it. The context resolves its session
@@ -758,6 +765,25 @@ export class Application {
       'GUREN_DOCS=1 but the docs viewer could not load — is @guren/cli resolvable from this app?',
     )
     await this.providerManager.bootAll()
+    this.warnOnUnconfiguredAuth()
+  }
+
+  /**
+   * After every provider has booted: `auth` was asked for, yet the default
+   * guard still runs against the placeholder provider, so a session login
+   * attempt would throw. Silent for an app that authenticates through tokens,
+   * or that mounts its own sessions, since neither reaches that guard.
+   */
+  private warnOnUnconfiguredAuth(): void {
+    if (!this.options.auth) return
+    if (this.options.auth.autoSession === false) return
+    if (this.authManager.getTokenGuard()) return
+    if (this.authManager.getDefaultGuard() !== DEFAULT_GUARD) return
+    if (this.authManager.hasProvider(DEFAULT_PROVIDER)) return
+    console.warn(
+      `[guren] createApp() received \`auth\`, but no "${DEFAULT_PROVIDER}" user provider was registered by the time the app booted. ` +
+        `Sessions and CSRF are mounted, and any login attempt will throw. ${REGISTER_USER_PROVIDER_HINT}`,
+    )
   }
 
   /** Called once, from the constructor — see the note there for why. */

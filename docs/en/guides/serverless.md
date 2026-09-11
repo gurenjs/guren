@@ -34,7 +34,7 @@ Uncomment the `schedule` and `console` exports in the scaffold once your app def
 bunx guren lambda:build
 ```
 
-The command runs the deploy-runtime checks `guren doctor` reports (a warning, never a failure, on an in-memory session or OAuth store, a `ScryptHasher`, or filesystem provider discovery, each of which works locally and breaks on Lambda), then your app's `build` script, then assembles a `.lambda/` directory:
+The command runs the deploy-runtime checks `guren doctor` reports (a warning, never a failure, on an in-memory session or OAuth store, a [Bun-only password hasher](/docs/guides/authentication#password-hasher), or filesystem provider discovery, each of which works locally and breaks on Lambda), then your app's `build` script, then assembles a `.lambda/` directory:
 
 | Path | Contents |
 |------|----------|
@@ -193,10 +193,10 @@ if (isLambda()) {
 
 ## Password Hashing
 
-The default hasher detects the runtime: Bun's scrypt locally, Node's `crypto.scrypt` (`NodeHasher`) on Lambda. No configuration is needed for new apps.
+The default hasher writes `node:crypto` scrypt on every runtime, so a column seeded locally under Bun verifies on Lambda. No configuration is needed for new apps.
 
 > [!WARNING]
-> The two implementations produce incompatible hash formats. Migrating an existing Bun-hosted app with stored password hashes to Lambda requires rehashing passwords or a multi-format verifier.
+> Rows written as Argon2id verify only where `Bun.password` exists: an app that selected `hasher: 'argon2'`, or a column seeded by a release before scrypt became the default. Migrate them before moving to Lambda, as [Password hasher](/docs/guides/authentication#password-hasher) describes.
 
 ## Logging
 

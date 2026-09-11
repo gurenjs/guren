@@ -3,6 +3,8 @@ import { AuthManager } from '../../src/auth/AuthManager'
 import type { Guard, GuardContext, UserProvider } from '../../src/auth/types'
 import { createApiToken, MemoryApiTokenStore } from '../../src/auth/api-token'
 import { TokenGuard } from '../../src/auth/TokenGuard'
+import { DefaultHasher } from '../../src/auth/password/DefaultHasher'
+import type { PasswordHasher } from '../../src/auth/password/PasswordHasher'
 import { fakeContext } from '../support/fake-context'
 import { fakeGuard, fakeUserProvider } from '../support/fake-auth'
 
@@ -253,5 +255,45 @@ describe('AuthManager.getApiTokenStore', () => {
     // A refused call registered no guard, so an issuer must not find a store
     // it could write tokens into that nothing would ever read.
     expect(manager.getApiTokenStore()).toBeUndefined()
+  })
+})
+
+describe('AuthManager.hasher', () => {
+  test('resolves to a scrypt DefaultHasher when nothing is configured', () => {
+    const manager = new AuthManager()
+    const hasher = manager.hasher()
+    expect(hasher).toBeInstanceOf(DefaultHasher)
+    expect((hasher as DefaultHasher).algorithm).toBe('scrypt')
+    expect(manager.hasher()).toBe(hasher)
+  })
+
+  test("'argon2' selects the Bun.password writer", () => {
+    const hasher = new AuthManager({ hasher: 'argon2' }).hasher()
+    expect(hasher).toBeInstanceOf(DefaultHasher)
+    expect((hasher as DefaultHasher).algorithm).toBe('argon2')
+  })
+
+  test('a PasswordHasher object is used as given, and useModel() hands it to the provider', async () => {
+    const verified: string[] = []
+    const custom: PasswordHasher = {
+      async hash(plain) {
+        return `$argon2id$custom:${plain}`
+      },
+      async verify(hashed, plain) {
+        verified.push(hashed)
+        return hashed === `$argon2id$custom:${plain}`
+      },
+    }
+    const manager = new AuthManager({ hasher: custom })
+    expect(manager.hasher()).toBe(custom)
+
+    const model = {
+      where: async () => [{ id: 1, email: 'a@example.com', passwordHash: '$argon2id$custom:pw' }],
+    }
+    manager.useModel(model as never)
+    const provider = manager.getProvider<{ id: number; email: string; passwordHash: string }>('users')
+    const user = await provider.retrieveByCredentials({ email: 'a@example.com' })
+    expect(await provider.validateCredentials(user!, { password: 'pw' })).toBe(true)
+    expect(verified).toEqual(['$argon2id$custom:pw'])
   })
 })

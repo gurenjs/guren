@@ -184,7 +184,26 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return null
     }
 
+    // The one moment the plaintext is in hand next to a stored hash the
+    // configured hasher would not write (an Argon2id row under the scrypt
+    // default, a testing-cost hash in production). Best effort: the credentials
+    // were correct and the stored hash still verifies, so a failed write is a
+    // stale row to fix later, never a refused login.
+    try {
+      await this.provider.rehashPasswordIfRequired?.(user, credentials)
+    } catch (error) {
+      console.warn(`[guren] Rehashing the password for user ${this.describeUser(user)} failed; the login continues.`, error)
+    }
     return user
+  }
+
+  /** Never the plaintext or the hash: a warning is a log line, and both belong in neither. */
+  private describeUser(user: User): string {
+    try {
+      return String(this.provider.getId(user))
+    } catch {
+      return 'unknown'
+    }
   }
 
   session<T extends Session = Session>(): T | undefined {
