@@ -87,6 +87,42 @@ describe('a login attempt with no user provider registered', () => {
   })
 })
 
+describe('login() on an app with no user provider', () => {
+  it('puts the record\'s own identifier in the session', async () => {
+    const app = new Application({ auth: {} })
+    const session = fakeSession()
+    const guard = app.auth.createGuard('web', { ctx: {} as Context, session, manager: app.auth })
+
+    // The OAuth shape: the callback already holds the user, so nothing has to
+    // look it up by credentials.
+    await guard.login({ id: 42, email: 'a@example.com' })
+
+    expect(session.get('auth:user_id')).toBe(42)
+    expect(await guard.user()).toMatchObject({ id: 42 })
+  })
+
+  it('reads an Authenticatable through getAuthIdentifier()', async () => {
+    const app = new Application({ auth: {} })
+    const session = fakeSession()
+    const guard = app.auth.createGuard('web', { ctx: {} as Context, session, manager: app.auth })
+
+    await guard.login({ id: 'ignored', getAuthIdentifier: () => 'uuid-1', getAuthPassword: () => null })
+
+    expect(session.get('auth:user_id')).toBe('uuid-1')
+  })
+
+  it('still cannot load that user back on the next request', async () => {
+    // retrieveById answers null with nothing to load from, so an OAuth-only app
+    // still registers a provider for the session to resolve after the redirect.
+    const app = new Application({ auth: {} })
+    const session = fakeSession()
+    await app.auth.createGuard('web', { ctx: {} as Context, session, manager: app.auth }).login({ id: 42 })
+
+    const next = app.auth.createGuard('web', { ctx: {} as Context, session, manager: app.auth })
+    expect(await next.user()).toBeNull()
+  })
+})
+
 describe('the boot-time warning for auth without a user provider', () => {
   const warnSpy = spyOn(console, 'warn')
   afterEach(() => warnSpy.mockClear())

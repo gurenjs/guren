@@ -1,9 +1,11 @@
-import type { UserProvider } from '../types'
+import type { Authenticatable, UserProvider } from '../types'
 
 export const NO_USER_PROVIDER_MESSAGE =
   'AuthManager: a login was attempted, but no user provider is registered, so there is ' +
   'nothing to check the credentials against. Register one with `auth.useModel(User)` in a ' +
-  "service provider (what `guren add auth` scaffolds), or `auth.registerProvider('users', ...)`."
+  "service provider (what `guren add auth` scaffolds), or `auth.registerProvider('users', ...)`. " +
+  'An OAuth or passwordless app that only calls `auth.login(user)` needs no provider for that ' +
+  'call, but does need one to load the user back on the next request.'
 
 function noProvider(): never {
   throw new Error(NO_USER_PROVIDER_MESSAGE)
@@ -21,6 +23,14 @@ export function createUnconfiguredUserProvider(): UserProvider {
     retrieveById: async () => null,
     retrieveByCredentials: async () => noProvider(),
     validateCredentials: async () => noProvider(),
-    getId: () => noProvider(),
+    // Read off the record, not thrown: `auth.login(user)` after an OAuth
+    // callback hands the guard a user it already has, and only needs an
+    // identifier to put in the session.
+    getId: (user) => identifierOf(user),
   }
+}
+
+function identifierOf(user: Authenticatable): unknown {
+  const record = user as { getAuthIdentifier?: () => unknown; id?: unknown }
+  return typeof record?.getAuthIdentifier === 'function' ? record.getAuthIdentifier() : record?.id
 }
