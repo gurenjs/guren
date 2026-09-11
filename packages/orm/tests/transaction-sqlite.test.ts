@@ -1,15 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { Database } from 'bun:sqlite'
-import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { describe, expect, it } from 'bun:test'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { Model } from '../src/Model'
-import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
+import { useSqlite } from './sqlite-fixture'
 
 // Integration test against the real bun:sqlite driver, whose drizzle
 // `transaction()` COMMITs on whatever the callback returns without awaiting it.
 // Only a real driver can show whether a write survived a throw, which is why the
 // SQL-shape tests next door pass whether or not the transaction is atomic. The
-// adapter's queue is module-level; `beforeEach`'s `configure()` is what resets it.
+// adapter's queue is module-level; the fixture's per-test `configure()` resets it.
 
 const postsTable = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -19,26 +17,16 @@ const postsTable = sqliteTable('posts', {
 type PostRecord = typeof postsTable.$inferSelect
 
 describe('Model.transaction on the real bun:sqlite driver', () => {
-  let sqlite: Database
+  const sqlite = useSqlite(`
+    CREATE TABLE posts (id integer primary key autoincrement, title text not null);
+    INSERT INTO posts (title) VALUES ('original');
+  `)
 
   class Post extends Model<PostRecord> {
     static override table = postsTable
   }
 
-  const titles = () => (sqlite.query('SELECT title FROM posts ORDER BY id').all() as PostRecord[]).map((r) => r.title)
-
-  beforeEach(() => {
-    sqlite = new Database(':memory:')
-    sqlite.exec(`
-      CREATE TABLE posts (id integer primary key autoincrement, title text not null);
-      INSERT INTO posts (title) VALUES ('original');
-    `)
-    DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
-  })
-
-  afterEach(() => {
-    sqlite.close()
-  })
+  const titles = () => (sqlite().query('SELECT title FROM posts ORDER BY id').all() as PostRecord[]).map((r) => r.title)
 
   it('should roll back a write when the async callback throws', async () => {
     await expect(

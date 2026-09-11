@@ -1,11 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { Database } from 'bun:sqlite'
-import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { describe, expect, it } from 'bun:test'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { Model } from '../src/Model'
 import type { PlainObject } from '../src/Model'
 import { SoftDeletes } from '../src/SoftDeletes'
-import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
+import { useSqlite } from './sqlite-fixture'
 
 // The invariant, against the real bun:sqlite driver: every read path hands back
 // a record carrying the model's casts and accessors, whichever way the rows were
@@ -35,7 +33,15 @@ type UserRow = Omit<UserRecord, 'prefs'> & { upperName: string; prefs: { theme: 
 type PostRow = Omit<PostRecord, 'meta'> & { shout: string; meta: { tags: string[] } | null }
 
 describe('read transforms on every query path (bun:sqlite)', () => {
-  let sqlite: Database
+  useSqlite(`
+    CREATE TABLE users (id integer primary key autoincrement, name text not null, prefs text, secret text);
+    CREATE TABLE posts (id integer primary key autoincrement, title text not null, meta text, author_id integer not null, deleted_at text);
+    INSERT INTO users (name, prefs, secret) VALUES ('alice', '{"theme":"dark"}', 'hunter2'), ('bob', NULL, 'swordfish');
+    INSERT INTO posts (title, meta, author_id, deleted_at) VALUES
+      ('a1', '{"tags":["x"]}', 1, NULL),
+      ('a2', '{"tags":["y","z"]}', 1, '2020-01-01'),
+      ('b1', NULL, 2, NULL);
+  `)
 
   class User extends Model<UserRecord> {
     static override table = usersTable
@@ -66,24 +72,6 @@ describe('read transforms on every query path (bun:sqlite)', () => {
 
   User.hasMany('posts', Post, 'authorId', 'id')
   Post.belongsTo('author', User, 'authorId', 'id')
-
-  beforeEach(() => {
-    sqlite = new Database(':memory:')
-    sqlite.exec(`
-      CREATE TABLE users (id integer primary key autoincrement, name text not null, prefs text, secret text);
-      CREATE TABLE posts (id integer primary key autoincrement, title text not null, meta text, author_id integer not null, deleted_at text);
-      INSERT INTO users (name, prefs, secret) VALUES ('alice', '{"theme":"dark"}', 'hunter2'), ('bob', NULL, 'swordfish');
-      INSERT INTO posts (title, meta, author_id, deleted_at) VALUES
-        ('a1', '{"tags":["x"]}', 1, NULL),
-        ('a2', '{"tags":["y","z"]}', 1, '2020-01-01'),
-        ('b1', NULL, 2, NULL);
-    `)
-    DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
-  })
-
-  afterEach(() => {
-    sqlite.close()
-  })
 
   it('applies casts and accessors on where().get()', async () => {
     const posts = (await Post.where('authorId', 1).get()) as PostRow[]
@@ -186,7 +174,18 @@ type ImageRecord = typeof imagesTable.$inferSelect
 // them before the join": a loader matches child rows to parents by value, so a
 // cast applied on either side first leaves every relation empty.
 describe('relations keyed on a cast column (bun:sqlite)', () => {
-  let sqlite: Database
+  useSqlite(`
+    CREATE TABLE users (id integer primary key autoincrement, name text not null, prefs text, secret text);
+    CREATE TABLE posts (id integer primary key autoincrement, title text not null, meta text, author_id integer not null, deleted_at text);
+    CREATE TABLE tags (id integer primary key autoincrement, label text not null);
+    CREATE TABLE post_tags (post_id integer not null, tag_id integer not null);
+    CREATE TABLE images (id integer primary key autoincrement, url text not null, imageable_type text not null, imageable_id integer not null);
+    INSERT INTO users (name) VALUES ('alice'), ('bob');
+    INSERT INTO posts (title, author_id) VALUES ('a1', 1), ('a2', 1), ('b1', 2);
+    INSERT INTO tags (label) VALUES ('news'), ('draft');
+    INSERT INTO post_tags (post_id, tag_id) VALUES (1, 1), (1, 2);
+    INSERT INTO images (url, imageable_type, imageable_id) VALUES ('a.png', 'CastUser', 1);
+  `)
 
   class CastUser extends Model<UserRecord> {
     static override table = usersTable
@@ -213,27 +212,6 @@ describe('relations keyed on a cast column (bun:sqlite)', () => {
   CastPost.belongsTo('author', CastUser, 'authorId', 'id')
   CastPost.belongsToMany('tags', CastTag, postTagsTable, 'postId', 'tagId', 'id', 'id')
   CastUser.morphMany('images', CastImage, 'imageable', 'id')
-
-  beforeEach(() => {
-    sqlite = new Database(':memory:')
-    sqlite.exec(`
-      CREATE TABLE users (id integer primary key autoincrement, name text not null, prefs text, secret text);
-      CREATE TABLE posts (id integer primary key autoincrement, title text not null, meta text, author_id integer not null, deleted_at text);
-      CREATE TABLE tags (id integer primary key autoincrement, label text not null);
-      CREATE TABLE post_tags (post_id integer not null, tag_id integer not null);
-      CREATE TABLE images (id integer primary key autoincrement, url text not null, imageable_type text not null, imageable_id integer not null);
-      INSERT INTO users (name) VALUES ('alice'), ('bob');
-      INSERT INTO posts (title, author_id) VALUES ('a1', 1), ('a2', 1), ('b1', 2);
-      INSERT INTO tags (label) VALUES ('news'), ('draft');
-      INSERT INTO post_tags (post_id, tag_id) VALUES (1, 1), (1, 2);
-      INSERT INTO images (url, imageable_type, imageable_id) VALUES ('a.png', 'CastUser', 1);
-    `)
-    DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
-  })
-
-  afterEach(() => {
-    sqlite.close()
-  })
 
   it('loads a hasMany relation when both sides cast the key', async () => {
     const users = (await CastUser.with('posts')) as Array<UserRecord & { posts: PostRecord[] }>

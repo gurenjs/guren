@@ -636,6 +636,31 @@ describe('DrizzleAdapter', () => {
   })
 
   describe('transaction', () => {
+    /**
+     * Root and transaction handles that record which one a `select()` reached,
+     * with the adapter configured to hand the second to a transaction callback.
+     */
+    const configureTrxProbe = (records: UserRecord[]) => {
+      const { db } = createMockDatabase({ records })
+      const selectedOn: string[] = []
+      const trxHandle = {
+        ...db,
+        select: () => {
+          selectedOn.push('trx')
+          return db.select()
+        },
+      }
+      DrizzleAdapter.configure({
+        ...db,
+        select: () => {
+          selectedOn.push('root')
+          return db.select()
+        },
+        transaction: async (callback: (trx: unknown) => unknown) => callback(trxHandle),
+      } as never)
+      return selectedOn
+    }
+
     it('delegates transaction callback to database transaction', async () => {
       const { db } = createMockDatabase()
       DrizzleAdapter.configure(db as never)
@@ -710,23 +735,7 @@ describe('DrizzleAdapter', () => {
     })
 
     it('routes a query without an explicit trx to the open transaction', async () => {
-      const { db } = createMockDatabase({ records: [{ id: 1, name: 'Alice', email: null }] })
-      const selectedOn: string[] = []
-      const trxHandle = {
-        ...db,
-        select: () => {
-          selectedOn.push('trx')
-          return db.select()
-        },
-      }
-      DrizzleAdapter.configure({
-        ...db,
-        select: () => {
-          selectedOn.push('root')
-          return db.select()
-        },
-        transaction: async (callback: (trx: unknown) => unknown) => callback(trxHandle),
-      } as never)
+      const selectedOn = configureTrxProbe([{ id: 1, name: 'Alice', email: null }])
 
       const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
       const table = createMockTable()
@@ -740,23 +749,7 @@ describe('DrizzleAdapter', () => {
     })
 
     it('routes a query started inside the transaction but run after it to the root database', async () => {
-      const { db } = createMockDatabase({ records: [{ id: 1, name: 'Alice', email: null }] })
-      const selectedOn: string[] = []
-      const trxHandle = {
-        ...db,
-        select: () => {
-          selectedOn.push('trx')
-          return db.select()
-        },
-      }
-      DrizzleAdapter.configure({
-        ...db,
-        select: () => {
-          selectedOn.push('root')
-          return db.select()
-        },
-        transaction: async (callback: (trx: unknown) => unknown) => callback(trxHandle),
-      } as never)
+      const selectedOn = configureTrxProbe([{ id: 1, name: 'Alice', email: null }])
 
       const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
       const table = createMockTable()
