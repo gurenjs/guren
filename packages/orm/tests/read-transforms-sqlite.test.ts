@@ -7,10 +7,11 @@ import type { PlainObject } from '../src/Model'
 import { SoftDeletes } from '../src/SoftDeletes'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
-// Casts and accessors on every read path, against the real bun:sqlite driver.
-// The adapter-direct fast paths (`all()`, `find()`) applied them and the
-// QueryBuilder did not, so a model gained a global scope, or a caller added a
-// `where()`, and its `json` column came back as a string.
+// The invariant, against the real bun:sqlite driver: every read path hands back
+// a record carrying the model's casts and accessors, whichever way the rows were
+// fetched — adapter-direct, through a builder, past a global scope, or as an
+// eager-loaded relation, where the *related* model's transforms are the ones
+// that apply.
 
 const usersTable = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -150,5 +151,126 @@ describe('read transforms on every query path (bun:sqlite)', () => {
     const trashed = (await TrashablePost.onlyTrashed().get()) as PostRow[]
     expect(trashed.map((p) => p.title)).toEqual(['a2'])
     expect(trashed[0].meta).toEqual({ tags: ['y', 'z'] })
+  })
+})
+
+const tagsTable = sqliteTable('tags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  label: text('label').notNull(),
+})
+
+const postTagsTable = sqliteTable('post_tags', {
+  postId: integer('post_id').notNull(),
+  tagId: integer('tag_id').notNull(),
+})
+
+const imagesTable = sqliteTable('images', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  url: text('url').notNull(),
+  imageableType: text('imageable_type').notNull(),
+  imageableId: integer('imageable_id').notNull(),
+})
+
+type TagRecord = typeof tagsTable.$inferSelect
+type ImageRecord = typeof imagesTable.$inferSelect
+
+// A cast on a key column is what separates "transform the rows" from "transform
+// them before the join": a loader matches child rows to parents by value, so a
+// cast applied on either side first leaves every relation empty.
+describe('relations keyed on a cast column (bun:sqlite)', () => {
+  let sqlite: Database
+
+  class CastUser extends Model<UserRecord> {
+    static override table = usersTable
+    static override casts = { id: 'string' } as const
+    static override accessors = { upperName: (r: PlainObject) => String(r.name).toUpperCase() }
+  }
+
+  class CastPost extends Model<PostRecord> {
+    static override table = postsTable
+    static override casts = { authorId: 'string' } as const
+  }
+
+  class CastTag extends Model<TagRecord> {
+    static override table = tagsTable
+    static override casts = { id: 'string' } as const
+  }
+
+  class CastImage extends Model<ImageRecord> {
+    static override table = imagesTable
+    static override casts = { imageableId: 'string' } as const
+  }
+
+  CastUser.hasMany('posts', CastPost, 'authorId', 'id')
+  CastPost.belongsTo('author', CastUser, 'authorId', 'id')
+  CastPost.belongsToMany('tags', CastTag, postTagsTable, 'postId', 'tagId', 'id', 'id')
+  CastUser.morphMany('images', CastImage, 'imageable', 'id')
+
+  beforeEach(() => {
+    sqlite = new Database(':memory:')
+    sqlite.exec(`
+      CREATE TABLE users (id integer primary key autoincrement, name text not null, prefs text, secret text);
+      CREATE TABLE posts (id integer primary key autoincrement, title text not null, meta text, author_id integer not null, deleted_at text);
+      CREATE TABLE tags (id integer primary key autoincrement, label text not null);
+      CREATE TABLE post_tags (post_id integer not null, tag_id integer not null);
+      CREATE TABLE images (id integer primary key autoincrement, url text not null, imageable_type text not null, imageable_id integer not null);
+      INSERT INTO users (name) VALUES ('alice'), ('bob');
+      INSERT INTO posts (title, author_id) VALUES ('a1', 1), ('a2', 1), ('b1', 2);
+      INSERT INTO tags (label) VALUES ('news'), ('draft');
+      INSERT INTO post_tags (post_id, tag_id) VALUES (1, 1), (1, 2);
+      INSERT INTO images (url, imageable_type, imageable_id) VALUES ('a.png', 'CastUser', 1);
+    `)
+    DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
+  })
+
+  afterEach(() => {
+    sqlite.close()
+  })
+
+  it('loads a hasMany relation when both sides cast the key', async () => {
+    const users = (await CastUser.with('posts')) as Array<UserRecord & { posts: PostRecord[] }>
+
+    expect(users.map((u) => u.posts.map((p) => p.title))).toEqual([['a1', 'a2'], ['b1']])
+    expect(users[0].id).toBe('1' as never)
+    expect(users[0].posts[0].authorId).toBe('1' as never)
+  })
+
+  it('loads a belongsTo relation when both sides cast the key', async () => {
+    const posts = (await CastPost.newQuery().with('author').get()) as Array<
+      PostRecord & { author: (UserRecord & { upperName: string }) | null }
+    >
+
+    expect(posts.map((p) => p.author?.name)).toEqual(['alice', 'alice', 'bob'])
+    expect(posts[0].author?.upperName).toBe('ALICE')
+    expect(posts[0].author?.id).toBe('1' as never)
+  })
+
+  it('loads a belongsToMany relation when the related key is cast', async () => {
+    const [post] = (await CastPost.newQuery().where('id', 1).with('tags').get()) as Array<
+      PostRecord & { tags: TagRecord[] }
+    >
+
+    expect(post.tags.map((t) => t.label)).toEqual(['news', 'draft'])
+    expect(post.tags[0].id).toBe('1' as never)
+  })
+
+  it('loads a morphMany relation when both sides cast the key', async () => {
+    const users = (await CastUser.with('images')) as Array<UserRecord & { images: ImageRecord[] }>
+
+    expect(users.map((u) => u.images.map((i) => i.url))).toEqual([['a.png'], []])
+    expect(users[0].images[0].imageableId).toBe('1' as never)
+  })
+
+  it('counts a relation keyed on a cast column', async () => {
+    const users = (await CastUser.withCount('posts')) as Array<UserRecord & { postsCount: number }>
+
+    expect(users.map((u) => u.postsCount)).toEqual([2, 1])
+    expect(users[0].id).toBe('1' as never)
+  })
+
+  it('leaves accessors off a row select() narrowed', async () => {
+    const rows = await CastUser.newQuery().select('id').get()
+
+    expect(rows).toEqual([{ id: '1' }, { id: '2' }] as never)
   })
 })

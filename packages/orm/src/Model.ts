@@ -9,7 +9,8 @@ import { executeObservers } from './ModelObserver'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { everyFilterDropped } from './where-conditions'
-import { QueryBuilder, PREPARED_UPDATE, SEAL_SCOPES } from './QueryBuilder'
+import { PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
+import { QueryBuilder } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
   EagerLoadConstraints,
@@ -440,12 +441,15 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * @internal The one read-transform pass for a result set. QueryBuilder calls
-   * it on every materialised row, which is what makes a relation loader's rows
-   * carry the *related* model's casts, since each loader queries through
-   * `related.newQuery()`.
+   * The one read-transform pass for a result set. Symbol-keyed for `QueryBuilder`
+   * across the module boundary, and kept out of the package entry point.
+   * `projected` marks a row `select()` narrowed: an accessor there would read
+   * columns that are not on it, while `applyCasts` already skips an absent one.
    */
-  static applyReadTransformsMany<T extends PlainObject>(records: T[]): T[] {
+  static [READ_TRANSFORMS]<T extends PlainObject>(records: T[], projected = false): T[] {
+    if (projected) {
+      return this.casts ? records.map((record) => this.applyCasts(record)) : records
+    }
     if (!this.casts && !this.accessors) return records
     return records.map((record) => this.applyReadTransforms(record))
   }
@@ -558,12 +562,32 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   static async all<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): Promise<Array<TRecordFor<T>>> {
+    return this[READ_TRANSFORMS](await this.allRaw(queryOptions))
+  }
+
+  /**
+   * The rows a relation load joins against, as the adapter read them: a cast on
+   * the parent's key column would stop the child rows from matching it.
+   */
+  protected static async rawRecords<T extends typeof Model>(
+    this: T,
+    where: WhereClauseFor<T> | undefined,
+    queryOptions?: ModelQueryOptions,
+  ): Promise<Array<TRecordFor<T>>> {
+    if (!where) return this.allRaw(queryOptions)
+    return this.newQuery(queryOptions).where(where as Partial<Record<string, unknown>>)[RAW_RESULTS]().get()
+  }
+
+  /** `all()` as the adapter read it, for the callers that key a join on these rows. */
+  protected static async allRaw<T extends typeof Model>(
+    this: T,
+    queryOptions?: ModelQueryOptions,
+  ): Promise<Array<TRecordFor<T>>> {
     if (this.hasScopes()) {
-      return this.newQuery(queryOptions).get()
+      return this.newQuery(queryOptions)[RAW_RESULTS]().get()
     }
     const table = this.resolveTable()
-    const records = await this.getAdapter().findMany(table, undefined, queryOptions) as Array<TRecordFor<T>>
-    return this.applyReadTransformsMany(records)
+    return await this.getAdapter().findMany(table, undefined, queryOptions) as Array<TRecordFor<T>>
   }
 
   static async find<T extends typeof Model>(
@@ -1037,7 +1061,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const records = await this.getAdapter().findMany(table, options, queryOptions) as TRecordFor<T>[]
-    return this.applyReadTransformsMany(records)
+    return this[READ_TRANSFORMS](records)
   }
 
   /**
@@ -1343,22 +1367,16 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     where?: WhereClauseFor<T>,
     queryOptions?: ModelQueryOptions,
   ): Promise<Array<TRecordFor<T> & RelationTypePick<T, Names>>> {
-    const records = where
-      ? await this.newQuery(queryOptions).where(where as Partial<Record<string, unknown>>).get()
-      : await this.all(queryOptions)
-    if (!records.length) {
-      return records as Array<TRecordFor<T> & RelationTypePick<T, Names>>
-    }
-
+    const records = await this.rawRecords(where, queryOptions)
     const relationList = normalizeRelations(relations)
-    if (relationList.length === 0) {
-      return records as Array<TRecordFor<T> & RelationTypePick<T, Names>>
+    if (records.length === 0 || relationList.length === 0) {
+      return this[READ_TRANSFORMS](records) as Array<TRecordFor<T> & RelationTypePick<T, Names>>
     }
 
     const copies = records.map((record) => ({ ...record }))
     await this.loadRelationsInto(copies, relationList, queryOptions)
 
-    return copies as Array<TRecordFor<T> & RelationTypePick<T, Names>>
+    return this[READ_TRANSFORMS](copies) as Array<TRecordFor<T> & RelationTypePick<T, Names>>
   }
 
   /**
@@ -1378,11 +1396,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     where?: WhereClauseFor<T>,
     queryOptions?: ModelQueryOptions,
   ): Promise<Array<TRecordFor<T> & RelationCountPick<Names>>> {
-    const records = where
-      ? await this.newQuery(queryOptions).where(where as Partial<Record<string, unknown>>).get()
-      : await this.all(queryOptions)
-    if (!records.length) {
-      return records as Array<TRecordFor<T> & RelationCountPick<Names>>
+    const records = await this.rawRecords(where, queryOptions)
+    if (records.length === 0) {
+      return this[READ_TRANSFORMS](records) as Array<TRecordFor<T> & RelationCountPick<Names>>
     }
 
     const relationList = normalizeRelations(relations)
@@ -1391,7 +1407,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       await this.loadRelationCountInto(copies, relationName, queryOptions)
     }
 
-    return copies as Array<TRecordFor<T> & RelationCountPick<Names>>
+    return this[READ_TRANSFORMS](copies) as Array<TRecordFor<T> & RelationCountPick<Names>>
   }
 
   /** @internal Attaches a `${name}Count` field for one relation. */
@@ -1568,18 +1584,20 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         break
     }
 
-    if (tails.length === 0) {
-      return
-    }
-
-    if (definition.type === 'morphTo') {
+    if (tails.length > 0 && definition.type === 'morphTo') {
       throw new Error(
         `${this.name}: nested eager loading through morphTo relation "${head}" is not supported.`,
       )
     }
 
-    // Collect the loaded child records (deduplicated — belongsTo parents can
-    // share one child copy) and recurse on the related model class.
+    // morphTo rows come from several models at once, so its own loader is what
+    // applies each row's transforms.
+    if (definition.type === 'morphTo') {
+      return
+    }
+
+    // Deduplicated on identity: belongsTo and belongsToMany hand several
+    // parents the same child object, which must not be transformed twice.
     const children: PlainObject[] = []
     const seen = new Set<PlainObject>()
     for (const record of records) {
@@ -1598,7 +1616,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const related = await resolveModelReference(definition.related)
-    await related.loadRelationsInto(children, tails, queryOptions, constraints, currentPath)
+    if (tails.length > 0) {
+      await related.loadRelationsInto(children, tails, queryOptions, constraints, currentPath)
+    }
+    // After the recursion: the grandchildren were keyed on these rows' raw values.
+    applyRelatedReadTransforms(related, children)
   }
 
   protected static async loadHasMany(
@@ -1718,7 +1740,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     const throughRecords = await loadByChunks(
       localValues,
-      (chunk) => through.newQuery(queryOptions).where({ [firstKey]: chunk } as WhereClause).get() as Promise<PlainObject[]>,
+      (chunk) => through.newQuery(queryOptions).where({ [firstKey]: chunk } as WhereClause)[RAW_RESULTS]().get() as Promise<PlainObject[]>,
     )
 
     const throughMap = new Map<unknown, unknown[]>()
@@ -1840,6 +1862,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       )
       const idMap = new Map<unknown, PlainObject>()
       for (const r of results) idMap.set(r.id, { ...r })
+      applyRelatedReadTransforms(modelClass, Array.from(idMap.values()))
       resolved.set(type, idMap)
     }
 
@@ -1866,7 +1889,21 @@ async function applyEagerConstraint(
   constraint?: EagerLoadConstraint,
 ): Promise<PlainObject[]> {
   constraint?.(query)
-  return (await query) as PlainObject[]
+  // Raw: the caller groups these rows on a key column the related model may
+  // cast, and the parent values it matches them against are raw.
+  return (await query[RAW_RESULTS]()) as PlainObject[]
+}
+
+/**
+ * Written onto the records rather than onto copies: the parent rows hold them
+ * by reference, and a nested loader has already keyed its own rows on them.
+ */
+function applyRelatedReadTransforms(related: typeof Model, records: PlainObject[]): void {
+  const transformed = related[READ_TRANSFORMS](records)
+  for (const [index, record] of records.entries()) {
+    const result = transformed[index]
+    if (result && result !== record) Object.assign(record, result)
+  }
 }
 
 async function loadRelationData(

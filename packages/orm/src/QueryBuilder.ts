@@ -1,3 +1,4 @@
+import { PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
 import { DEFAULT_PAGINATION_SIZE } from './Model'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { groupConditionSequence } from './where-conditions'
@@ -14,18 +15,6 @@ import type {
 } from './Model'
 
 type FieldKey<TRecord extends PlainObject> = keyof TRecord & string
-
-/**
- * Key for the prepared-payload update terminal. Exported for `Model` across
- * the module boundary, but kept out of the package entry point.
- */
-export const PREPARED_UPDATE = Symbol('guren.orm.preparedUpdate')
-
-/**
- * Key for the global-scope seal. Exported for `Model` across the module
- * boundary, but kept out of the package entry point.
- */
-export const SEAL_SCOPES = Symbol('guren.orm.sealScopes')
 
 export type WhereOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'not in' | 'is null' | 'is not null'
 
@@ -94,6 +83,7 @@ export class QueryBuilder<
   private adapter: ORMAdapter
   private eagerLoad: string[] = []
   private eagerLoadConstraints: Map<string, EagerLoadConstraint> = new Map()
+  private rawResults = false
 
   constructor(modelClass: typeof Model, options: { trx?: unknown } = {}) {
     this.modelClass = modelClass
@@ -216,6 +206,11 @@ export class QueryBuilder<
     return this
   }
 
+  /**
+   * Narrows the row to these columns. The model's accessors are then skipped:
+   * one reading a column `fields` left out would fabricate a value from
+   * `undefined`. Casts still apply to the columns that are there.
+   */
   select<TKey extends FieldKey<TRecord>>(...fields: readonly TKey[]): QueryBuilder<TRecord, Pick<TRecord, TKey>> {
     this.options.selectFields = [...fields]
     return this as unknown as QueryBuilder<TRecord, Pick<TRecord, TKey>>
@@ -236,7 +231,10 @@ export class QueryBuilder<
    * callbacks, each run after the foreign-key filter on exactly the level its key
    * names. Pitfalls: a top-level `orWhere()` ORs against the foreign-key filter
    * (group it); `select()` must keep the relation's key column or the relation is
-   * empty; `limit()` applies to the batched query (one per 500 parent keys), not per parent record.
+   * empty; `limit()` applies to the batched query, not per parent record.
+   *
+   * A `select()` on *this* builder narrows the row, so the model's accessors
+   * are skipped rather than run against columns that are not there.
    */
   with(...relations: (string | Record<string, EagerLoadConstraint>)[]): this {
     for (const rel of relations) {
@@ -253,8 +251,21 @@ export class QueryBuilder<
   }
 
   async get(): Promise<TResult[]> {
-    const results = this.modelClass.applyReadTransformsMany(await this.executeQuery())
-    return this.loadEagerRelations(results)
+    // Eager loads first: a loader matches child rows to their parents on the raw
+    // key values, and a cast on either side would stop the two from matching.
+    const results = await this.loadEagerRelations(await this.executeQuery())
+    if (this.rawResults) return results
+    const projected = (this.options.selectFields?.length ?? 0) > 0
+    return this.modelClass[READ_TRANSFORMS](results, projected)
+  }
+
+  /**
+   * Rows as the adapter read them. Symbol-keyed and never re-exported: a named
+   * public method here would be a supported way to read past a model's casts.
+   */
+  [RAW_RESULTS](): this {
+    this.rawResults = true
+    return this
   }
 
   async first(): Promise<TResult | null> {
