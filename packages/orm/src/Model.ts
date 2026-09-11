@@ -433,8 +433,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return result
   }
 
-  /** Read-time transforms, in order: casts then accessors. */
+  /** The one read-transform pass for a record, in order: casts then accessors. */
   protected static applyReadTransforms<T extends PlainObject>(record: T): T {
+    if (!this.casts && !this.accessors) return record
     let result = record
     if (this.casts) result = this.applyCasts(result)
     if (this.accessors) result = applyAccessors(result, this.accessors)
@@ -442,10 +443,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * The one read-transform pass for a result set. Symbol-keyed for `QueryBuilder`
-   * across the module boundary, and kept out of the package entry point.
-   * `projected` marks a row `select()` narrowed: an accessor there would read
-   * columns that are not on it, while `applyCasts` already skips an absent one.
+   * The same pass over a result set. Symbol-keyed for `QueryBuilder` across the
+   * module boundary, and kept out of the package entry point. `projected` marks
+   * a row `select()` narrowed: an accessor there would read columns that are not
+   * on it, while `applyCasts` already skips an absent one.
    */
   static [READ_TRANSFORMS]<T extends PlainObject>(records: T[], projected = false): T[] {
     if (projected) {
@@ -563,7 +564,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   static async all<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): Promise<Array<TRecordFor<T>>> {
-    return this[READ_TRANSFORMS](await this.allRaw(queryOptions))
+    return this.newQuery(queryOptions).get()
   }
 
   /**
@@ -575,20 +576,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     where: WhereClauseFor<T> | undefined,
     queryOptions?: ModelQueryOptions,
   ): Promise<Array<TRecordFor<T>>> {
-    if (!where) return this.allRaw(queryOptions)
-    return this.newQuery(queryOptions).where(where as Partial<Record<string, unknown>>)[RAW_RESULTS]().get()
-  }
-
-  /** `all()` as the adapter read it, for the callers that key a join on these rows. */
-  protected static async allRaw<T extends typeof Model>(
-    this: T,
-    queryOptions?: ModelQueryOptions,
-  ): Promise<Array<TRecordFor<T>>> {
-    if (this.hasScopes()) {
-      return this.newQuery(queryOptions)[RAW_RESULTS]().get()
-    }
-    const table = this.resolveTable()
-    return await this.getAdapter().findMany(table, undefined, queryOptions) as Array<TRecordFor<T>>
+    return this.newQuery(queryOptions).where((where ?? {}) as Partial<Record<string, unknown>>)[RAW_RESULTS]()
   }
 
   static async find<T extends typeof Model>(
@@ -608,10 +596,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const table = this.resolveTable()
     const where = { [key]: id } as WhereClauseFor<T>
     const record = await this.getAdapter().findUnique(table, where, queryOptions) as TRecordFor<T> | null
-    if (record && (this.casts || this.accessors)) {
-      return this.applyReadTransforms(record)
-    }
-    return record
+    return record && this.applyReadTransforms(record)
   }
 
   /** @throws ModelNotFoundException (404) when no record matches. */
@@ -708,10 +693,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const table = this.resolveTable()
     const results = await this.getAdapter().findMany(table, { where, limit: 1 }, queryOptions)
     const record = (results[0] ?? null) as TRecordFor<T> | null
-    if (record && (this.casts || this.accessors)) {
-      return this.applyReadTransforms(record)
-    }
-    return record
+    return record && this.applyReadTransforms(record)
   }
 
   /**
@@ -1186,10 +1168,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       await executeObservers(observers, 'saved', resultData)
     }
 
-    if (this.casts || this.accessors) {
-      return this.applyReadTransforms(result)
-    }
-    return result
+    return this.applyReadTransforms(result)
   }
 
   static async update<T extends typeof Model>(
@@ -1271,10 +1250,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       await executeObservers(observers, 'saved', resultData)
     }
 
-    if (this.casts || this.accessors) {
-      return this.applyReadTransforms(result)
-    }
-    return result
+    return this.applyReadTransforms(result)
   }
 
   static async delete<T extends typeof Model>(
@@ -1374,10 +1350,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return this[READ_TRANSFORMS](records) as Array<TRecordFor<T> & RelationTypePick<T, Names>>
     }
 
-    const copies = records.map((record) => ({ ...record }))
-    await this.loadRelationsInto(copies, relationList, queryOptions)
+    await this.loadRelationsInto(records, relationList, queryOptions)
 
-    return this[READ_TRANSFORMS](copies) as Array<TRecordFor<T> & RelationTypePick<T, Names>>
+    return this[READ_TRANSFORMS](records) as Array<TRecordFor<T> & RelationTypePick<T, Names>>
   }
 
   /**
@@ -1403,12 +1378,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const relationList = normalizeRelations(relations)
-    const copies = records.map((record) => ({ ...record })) as Array<PlainObject>
     for (const relationName of relationList) {
-      await this.loadRelationCountInto(copies, relationName, queryOptions)
+      await this.loadRelationCountInto(records as Array<PlainObject>, relationName, queryOptions)
     }
 
-    return this[READ_TRANSFORMS](copies) as Array<TRecordFor<T> & RelationCountPick<Names>>
+    return this[READ_TRANSFORMS](records) as Array<TRecordFor<T> & RelationCountPick<Names>>
   }
 
   /** @internal Attaches a `${name}Count` field for one relation. */
@@ -1715,7 +1689,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const throughRecords = await loadByChunks(
       localValues,
       maxInListSize(through.getAdapter()),
-      (chunk) => through.newQuery(queryOptions).where({ [firstKey]: chunk } as WhereClause)[RAW_RESULTS]().get() as Promise<PlainObject[]>,
+      (chunk) => through.newQuery(queryOptions).where({ [firstKey]: chunk } as WhereClause)[RAW_RESULTS]() as Promise<PlainObject[]>,
     )
 
     const throughMap = new Map<unknown, unknown[]>()
@@ -2022,8 +1996,7 @@ async function countOwnersPresent(
     const rows = await related
       .newQuery(queryOptions)
       .where({ [ownerKey]: chunk } as WhereClause)
-      .select(ownerKey)[RAW_RESULTS]()
-      .get() as PlainObject[]
+      .select(ownerKey)[RAW_RESULTS]() as PlainObject[]
     for (const row of rows) present.set(row[ownerKey], 1)
   }
   return present

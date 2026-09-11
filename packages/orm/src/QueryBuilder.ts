@@ -51,6 +51,17 @@ export interface QueryBuilderOptions {
 }
 
 /**
+ * What one execution narrows, without writing it onto the builder: a `first()`
+ * or a `paginate()` that mutated `options` would leave the builder describing
+ * its own last page.
+ */
+export interface QueryOverrides {
+  limit?: number
+  offset?: number
+  select?: readonly string[]
+}
+
+/**
  * A callback that further constrains the query that fetches an eager-loaded
  * relation. Registered through the object form of {@link QueryBuilder.with}.
  */
@@ -83,7 +94,6 @@ export class QueryBuilder<
   private adapter: ORMAdapter
   private eagerLoad: string[] = []
   private eagerLoadConstraints: Map<string, EagerLoadConstraint> = new Map()
-  private rawResults = false
 
   constructor(modelClass: typeof Model, options: { trx?: unknown } = {}) {
     this.modelClass = modelClass
@@ -248,35 +258,33 @@ export class QueryBuilder<
   }
 
   async get(): Promise<TResult[]> {
-    // Eager loads first: a loader matches child rows to their parents on the raw
-    // key values, and a cast on either side would stop the two from matching.
-    const results = await this.loadEagerRelations(await this.executeQuery())
-    if (this.rawResults) return results
-    const projected = (this.options.selectFields?.length ?? 0) > 0
-    return this.modelClass[READ_TRANSFORMS](results, projected)
+    return this.fetch()
   }
 
   /**
-   * Rows as the adapter read them. Symbol-keyed and never re-exported: a named
-   * public method here would be a supported way to read past a model's casts.
+   * Runs the query and hands back the rows as the adapter read them. Symbol-keyed
+   * and never re-exported: a named public method here would be a supported way to
+   * read past a model's casts.
    */
-  [RAW_RESULTS](): this {
-    this.rawResults = true
-    return this
+  async [RAW_RESULTS](overrides?: QueryOverrides): Promise<TResult[]> {
+    // Eager loads first: a loader matches child rows to their parents on the raw
+    // key values, and a cast on either side would stop the two from matching.
+    return this.loadEagerRelations(await this.executeQuery(overrides))
+  }
+
+  /** The one read pipeline: rows, then eager loads, then the model's transforms. */
+  private async fetch(overrides?: QueryOverrides): Promise<TResult[]> {
+    const results = await this[RAW_RESULTS](overrides)
+    const projected = (this.options.selectFields?.length ?? 0) > 0
+    return this.modelClass[READ_TRANSFORMS](results, projected)
   }
 
   async first(): Promise<TResult | null> {
     // Same contract as Model.find(): an evaporated filter would hand back an
     // arbitrary row rather than the "no match" the caller asked about.
     if (this.filtersEvaporated()) return null
-    const prev = this.options.limitValue
-    this.options.limitValue = 1
-    try {
-      const results = await this.get()
-      return results[0] ?? null
-    } finally {
-      this.options.limitValue = prev
-    }
+    const results = await this.fetch({ limit: 1 })
+    return results[0] ?? null
   }
 
   /** @throws ModelNotFoundException (404) if no record matches. */
@@ -318,15 +326,9 @@ export class QueryBuilder<
       return counts
     }
 
-    const prev = this.options.selectFields
-    if (typeof advancedAdapter.findManyAdvanced === 'function') this.options.selectFields = [field]
-    try {
-      for (const row of await this.executeQuery()) {
-        const key = (row as PlainObject)[field]
-        counts.set(key, (counts.get(key) ?? 0) + 1)
-      }
-    } finally {
-      this.options.selectFields = prev
+    for (const row of await this.executeQuery({ select: [field] })) {
+      const key = (row as PlainObject)[field]
+      counts.set(key, (counts.get(key) ?? 0) + 1)
     }
     return counts
   }
@@ -351,19 +353,7 @@ export class QueryBuilder<
     const currentPage = Math.min(sanitizedPage, totalPages)
     const offset = (currentPage - 1) * sanitizedPerPage
 
-    const prevLimit = this.options.limitValue
-    const prevOffset = this.options.offsetValue
-    this.options.limitValue = sanitizedPerPage
-    this.options.offsetValue = offset
-
-    // get() is the one path that also attaches `.with()` relations.
-    let data: TResult[]
-    try {
-      data = await this.get()
-    } finally {
-      this.options.limitValue = prevLimit
-      this.options.offsetValue = prevOffset
-    }
+    const data = await this.fetch({ limit: sanitizedPerPage, offset })
 
     const from = total === 0 ? 0 : offset + 1
     const to = total === 0 ? 0 : offset + data.length
@@ -553,15 +543,17 @@ export class QueryBuilder<
     })
   }
 
-  private async executeQuery(): Promise<TResult[]> {
+  private async executeQuery(overrides: QueryOverrides = {}): Promise<TResult[]> {
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
+    const limit = overrides.limit ?? this.options.limitValue
+    const offset = overrides.offset ?? this.options.offsetValue
 
     if (typeof advancedAdapter.findManyAdvanced === 'function') {
       return advancedAdapter.findManyAdvanced<TResult>(this.table, this.effectiveConditions(), {
         orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
-        limit: this.options.limitValue,
-        offset: this.options.offsetValue,
-        select: this.options.selectFields,
+        limit,
+        offset,
+        select: overrides.select ?? this.options.selectFields,
       }, { trx: this.options.trx })
     }
 
@@ -578,8 +570,8 @@ export class QueryBuilder<
     return this.adapter.findMany<TResult>(this.table, {
       where: (simpleWhere ?? undefined) as FindManyOptions<TResult>['where'],
       orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
-      limit: this.options.limitValue,
-      offset: this.options.offsetValue,
+      limit,
+      offset,
     }, { trx: this.options.trx })
   }
 
