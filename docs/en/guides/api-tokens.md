@@ -136,11 +136,19 @@ router.get('/api/me', (ctx) => {
 })
 ```
 
-The loaded user also becomes the request's auth context, so `this.auth.user()`
-in a controller, `requireAuthenticated()`, and the Gate (policies,
-`this.authorize()`, `authorizeMiddleware()`) all see it. A `loadUser` that
-returns `null` leaves the request unauthenticated rather than falling back to
-a session user.
+The loaded user becomes the request's principal, so `this.auth.user()` in a
+controller, `requireAuthenticated()`, and the Gate (policies,
+`this.authorize()`, `authorizeMiddleware()`) all answer with it. The principal
+is recorded on the request rather than on the auth context, so it is read
+whether the middleware is mounted before or after `boot()`.
+
+`auth.logout()` on such a request revokes the token it presented and leaves a
+co-present session alone. A `loadUser` that returns `null` leaves the request
+unauthenticated: the token verified, so that request belongs to the token, and
+a logged-in session does not stand in for the user it names. A request the
+middleware never ran for keeps its session user. Where `useTokens({ provider })`
+is configured, the loaded user is sanitized through that provider, so password
+hashes and the model's `hidden` fields never leave the auth layer.
 
 ### Custom Error Handlers
 

@@ -136,7 +136,9 @@ router.get('/api/me', (ctx) => {
 })
 ```
 
-読み込んだユーザーはそのリクエストの auth context にもなります。コントローラの `this.auth.user()`、`requireAuthenticated()`、Gate（Policy、`this.authorize()`、`authorizeMiddleware()`）はすべてこのユーザーを見ます。`loadUser` が `null` を返した場合、リクエストは未認証のままです。セッションのユーザーへは戻りません。
+読み込んだユーザーはそのリクエストの principal になります。コントローラの `this.auth.user()`、`requireAuthenticated()`、Gate（Policy、`this.authorize()`、`authorizeMiddleware()`）はいずれもこのユーザーを参照します。principal は auth context ではなくリクエスト側に記録されるため、ミドルウェアを `boot()` の前にマウントしても後にマウントしても読まれます。
+
+このリクエストで `auth.logout()` を呼ぶと、提示されたトークンを失効させ、同時に存在するセッションはそのまま残します。`loadUser` が `null` を返した場合、そのリクエストは未認証になります。トークンの検証自体は成功しており、そのリクエストはトークンのものなので、ログイン済みセッションが代わりに使われることはありません。ミドルウェアが実行されなかったリクエストは、セッションのユーザーをそのまま保ちます。`useTokens({ provider })` を設定している場合、読み込んだユーザーはその provider で sanitize されるため、パスワードハッシュやモデルの `hidden` フィールドが auth 層の外に出ることはありません。
 
 ### カスタムエラーハンドラー
 
