@@ -283,8 +283,14 @@ export interface RouteDefinition {
   deprecated?: boolean
 }
 
-/** Chainable builder for configuring a registered route. */
-export interface RouteBuilder<M extends string = never> {
+/**
+ * Chainable builder for configuring a registered route.
+ *
+ * `in M`: `M`'s only independent occurrence is a method parameter (the
+ * `RouteBuilder<M>` returns restate it), compared bivariantly. Without the
+ * annotation a `Router<never>` passes as a `Router<'auth'>`, failing at `mount()`.
+ */
+export interface RouteBuilder<in M extends string = never> {
   name(routeName: string): RouteBuilder<M>
   /** Attach middleware to this specific route. See {@link RouteMiddlewareInput}. */
   middleware(...items: RouteMiddlewareInput<M>[]): RouteBuilder<M>
@@ -364,8 +370,13 @@ export interface ResourceRouteOptions {
   agent?: Partial<Record<ResourceAction, AgentRouteMetadata>>
 }
 
-/** Instance-based router for app-local route registration and mounting. */
-export class Router<M extends string = never> {
+/**
+ * Instance-based router for app-local route registration and mounting.
+ *
+ * `in M` is an explicit pin, not the source of the contravariance: the
+ * `RouteBuilder<M>` return positions already force it (measured).
+ */
+export class Router<in M extends string = never> {
   private readonly registry: RegisteredRoute[] = []
   private readonly prefixStack: string[] = []
   private readonly namedRoutes: Map<string, RegisteredRoute> = new Map()
@@ -900,7 +911,7 @@ function applyRouteContract(route: RegisteredRoute, options: RouteContractOption
   }
 }
 
-class RouterMiddlewareGroupBuilder<M extends string = never> {
+class RouterMiddlewareGroupBuilder<in M extends string = never> {
   constructor(
     private readonly router: Router<M>,
     private readonly items: readonly MiddlewareScopeEntry[],

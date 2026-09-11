@@ -61,10 +61,6 @@ vi.mock('../../app/Services/PostCacheService.js', () => ({
   PostCacheService: MockPostCacheService,
 }))
 
-vi.mock('guren', async (importOriginal) => ({
-  ...((await importOriginal()) as object),
-  ...createControllerModuleMock(),
-}))
 vi.mock('@guren/core', async () => {
   const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
   return {

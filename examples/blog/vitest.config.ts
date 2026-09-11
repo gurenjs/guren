@@ -102,14 +102,6 @@ export default defineConfig({
         find: /^bun:sqlite$/,
         replacement: resolve(rootDir, './tests/support/bun-sqlite.ts'),
       },
-      {
-        find: /^guren$/,
-        replacement: resolve(rootDir, '../../packages/core/src/index.ts'),
-      },
-      {
-        find: /^guren\/(.+)$/,
-        replacement: `${resolve(rootDir, '../../packages/core/src')}/$1`,
-      },
     ],
     dedupe: ['react', 'react-dom'],
   },

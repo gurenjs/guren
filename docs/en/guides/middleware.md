@@ -83,6 +83,8 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 > [!IMPORTANT]
 > `aliasMiddleware()` returns a **new `Router` type** carrying the alias name it just registered. Call it without capturing the result and the name never reaches the type, so a later `.middleware('auth')` fails to compile. Always chain and assign, as above.
+>
+> The type also travels across functions. See [Registering Aliases](./routing.md#registering-aliases).
 
 Once registered, use the alias string anywhere middleware is accepted:
 
