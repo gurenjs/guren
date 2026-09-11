@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { MassAssignmentException, defineModel } from '@guren/orm'
 import type { FindManyOptions, Model, ORMAdapter, PlainObject, WhereClause } from '@guren/orm'
 import { AuthenticatableModel } from '../../src/auth/AuthenticatableModel'
 import { ModelUserProvider } from '../../src/auth/providers/ModelUserProvider'
+import { AuthManager } from '../../src/auth/AuthManager'
+import { NodeHasher } from '../../src/auth/password/NodeHasher'
+import type { PasswordHasher } from '../../src/auth/password/PasswordHasher'
+import { Container, getContainer, setContainer } from '../../src/container/Container'
 
 function createAdapter(store: PlainObject[] = []): ORMAdapter {
   return {
@@ -273,5 +277,69 @@ describe('ModelUserProvider reads credential columns from the model contract', (
     // An override must not reopen a leak through auth.user(): the model's own resolved
     // credential columns stay blocked alongside it.
     expect(clean).toEqual({ id: 1 } as never)
+  })
+})
+
+describe('AuthenticatableModel password hasher', () => {
+  const custom: PasswordHasher = {
+    async hash(plain) {
+      return `$argon2id$custom:${plain}`
+    },
+    async verify(hashed, plain) {
+      return hashed === `$argon2id$custom:${plain}`
+    },
+  }
+
+  let previous: Container | undefined
+  beforeEach(() => {
+    try {
+      previous = getContainer()
+    } catch {
+      previous = undefined
+    }
+  })
+  afterEach(() => {
+    if (previous) setContainer(previous)
+  })
+
+  it('hashes with the hasher createApp({ auth: { hasher } }) selected, read through the container', async () => {
+    type UserRecord = { id?: number; email: string; passwordHash?: string }
+    class User extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+      declare static readonly createType: Partial<UserRecord> & { password?: string }
+    }
+    User.useAdapter(createAdapter())
+
+    const container = new Container()
+    container.instance('auth', new AuthManager({ hasher: custom }))
+    setContainer(container)
+
+    const created = await User.create({ email: 'demo@guren.dev', password: 'secret' })
+    expect(created.passwordHash).toBe('$argon2id$custom:secret')
+  })
+
+  it('falls back to scrypt with no app constructed, and an explicit static wins over the app', async () => {
+    type UserRecord = { id?: number; email: string; passwordHash?: string }
+    class Fallback extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+      declare static readonly createType: Partial<UserRecord> & { password?: string }
+    }
+    class Pinned extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+      declare static readonly createType: Partial<UserRecord> & { password?: string }
+      protected static override passwordHasher: PasswordHasher | null = new NodeHasher({ cost: 1024 })
+    }
+    Fallback.useAdapter(createAdapter())
+    Pinned.useAdapter(createAdapter())
+
+    setContainer(new Container())
+    const fallback = await Fallback.create({ email: 'demo@guren.dev', password: 'secret' })
+    expect(String(fallback.passwordHash).startsWith('$scrypt$')).toBe(true)
+
+    const container = new Container()
+    container.instance('auth', new AuthManager({ hasher: custom }))
+    setContainer(container)
+    const pinned = await Pinned.create({ email: 'demo@guren.dev', password: 'secret' })
+    expect(String(pinned.passwordHash).startsWith('$scrypt$N=1024,')).toBe(true)
   })
 })

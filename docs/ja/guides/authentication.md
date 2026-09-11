@@ -302,7 +302,25 @@ export default class AuthProvider extends ServiceProvider {
 - 指定されたカラムで `ModelUserProvider` を登録
 - 適切なセッション処理を備えた `SessionGuard` を作成
 - デフォルトガードを 'web' に設定
-- `Hash`(`DefaultHasher`)をデフォルトで使用。Bun 上では `Bun.password`、それ以外では `node:crypto` の scrypt でハッシュ化します
+- `createApp({ auth: { hasher } })` で選んだハッシャーを使用。既定は scrypt です（[パスワードハッシャー](#パスワードハッシャー)を参照）
+
+### パスワードハッシャー
+
+アプリが書き込むパスワードは、`AuthenticatableModel` が `create()` でハッシュ化する場合も、セッションガードがログイン時に再ハッシュする場合も、同じひとつのハッシャーを通ります。選ぶ場所は `createApp()` の 1 か所です。
+
+```ts
+const app = createApp({
+  auth: {
+    hasher: 'scrypt', // 既定値
+  },
+})
+```
+
+- `'scrypt'`（既定）は `node:crypto` で `$scrypt$` 形式のハッシュを書きます。Bun、Node、Lambda、Workers のどのランタイムでも検証できます。
+- `'argon2'` は `Bun.password` で Argon2id を書きます。Bun で動かし続けるデプロイにだけ選んでください。`Bun.password` のないランタイムでは `createApp()` が例外を投げます。
+- `PasswordHasher` オブジェクトを渡すと、組み込みのハッシャーを丸ごと置き換えます。
+
+検証はこの設定ではなく、保存されたハッシュの形式で振り分けます。両方の形式が混在したカラムもそのまま動きます。別形式の行（scrypt が既定になる前のリリースが Bun で書いた Argon2id など）は、そのユーザーが次にログインに成功したときに再ハッシュされます。ログインしない行は形式がそのまま残り、`Bun.password` のないランタイムでは Argon2id の行を検証できません。Node や Workers へ移す前に、アプリが Bun で動いているうちにカラムを移行するか、該当ユーザーのパスワードをリセットしてください。
 
 ### 手動設定（上級者向け）
 

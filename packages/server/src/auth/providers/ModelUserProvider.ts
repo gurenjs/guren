@@ -1,6 +1,6 @@
 import type { Model, PlainObject } from '@guren/orm'
 import type { PasswordHasher } from '../password/PasswordHasher'
-import { DefaultHasher } from '../password/DefaultHasher'
+import { configuredPasswordHasher } from '../password/configured-hasher'
 import { looksLikePasswordHash } from '../password/hash-format'
 import type { AuthCredentials, Authenticatable } from '../types'
 import { BaseUserProvider } from './UserProvider'
@@ -53,7 +53,7 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     this.usernameColumn = options.usernameColumn ?? 'email'
     this.passwordColumn = options.passwordColumn ?? authModel?.resolvePasswordHashField() ?? 'passwordHash'
     this.rememberTokenColumn = options.rememberTokenColumn ?? authModel?.resolveRememberTokenField() ?? 'rememberToken'
-    this.hasher = options.hasher ?? new DefaultHasher()
+    this.hasher = options.hasher ?? configuredPasswordHasher()
     this.credentialsPasswordField = options.credentialsPasswordField ?? 'password'
   }
 
@@ -109,6 +109,24 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
 
   override getId(user: User): unknown {
     return (user as PlainObject)[this.idColumn]
+  }
+
+  async rehashPasswordIfRequired(user: User, credentials: AuthCredentials): Promise<void> {
+    const plain = credentials[this.credentialsPasswordField]
+    const hashed = (user as PlainObject)[this.passwordColumn]
+    if (typeof plain !== 'string' || typeof hashed !== 'string' || !this.hasher.needsRehash?.(hashed)) {
+      return
+    }
+
+    const rehashed = await this.hasher.hash(plain)
+    ;(user as PlainObject)[this.passwordColumn] = rehashed
+    // forceUpdate, like the remember token: the hash column is denied to mass
+    // assignment. A model hashing in place (passwordField === passwordHashField)
+    // would hash this value a second time, so it is written as a raw column.
+    await (this.model as typeof Model).forceUpdate(
+      { [this.idColumn]: this.getId(user) },
+      { [this.passwordColumn]: rehashed },
+    )
   }
 
   /**

@@ -193,10 +193,10 @@ if (isLambda()) {
 
 ## Password Hashing
 
-The default hasher detects the runtime: Bun's scrypt locally, Node's `crypto.scrypt` (`NodeHasher`) on Lambda. No configuration is needed for new apps.
+The default hasher writes `node:crypto` scrypt on every runtime, so a column seeded locally under Bun verifies on Lambda. No configuration is needed for new apps.
 
 > [!WARNING]
-> The two implementations produce incompatible hash formats. Migrating an existing Bun-hosted app with stored password hashes to Lambda requires rehashing passwords or a multi-format verifier.
+> Rows written as Argon2id, by an app that selected `hasher: 'argon2'` or by a release before scrypt became the default, verify only where `Bun.password` exists. Each is rehashed on its next successful login, so let those users log in while the app still runs on Bun, or reset their passwords, before moving to Lambda.
 
 ## Logging
 

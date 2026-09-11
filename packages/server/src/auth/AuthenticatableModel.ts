@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { PasswordHasher } from './password/PasswordHasher'
-import { DefaultHasher } from './password/DefaultHasher'
+import { configuredPasswordHasher } from './password/configured-hasher'
 
 export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
   static override readonly createType: {
@@ -44,14 +44,14 @@ export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainOb
     return denied
   }
 
+  /**
+   * An explicit static `passwordHasher` wins; otherwise the hasher the app's
+   * `AuthManager` resolved, read per call through the process-wide container
+   * (a model class has no other path to the app). Not cached, so the class
+   * evaluating before `createApp()` cannot pin the fallback.
+   */
   protected static resolvePasswordHasher(): PasswordHasher {
-    if (this.passwordHasher) {
-      return this.passwordHasher
-    }
-
-    const hasher = new DefaultHasher()
-    this.passwordHasher = hasher
-    return hasher
+    return this.passwordHasher ?? configuredPasswordHasher()
   }
 
   protected static override async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {

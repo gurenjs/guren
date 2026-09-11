@@ -228,6 +228,7 @@ export {
   BaseUserProvider,
   AuthenticatableModel,
   ScryptHasher,
+  Argon2Hasher,
   createPasswordResetToken,
   verifyPasswordResetToken,
   completePasswordReset,
@@ -1017,11 +1018,13 @@ export type { DiscoveryOptions, DiscoveryResult } from './discovery'
 export { renderDebugPage, debugErrorMiddleware } from './errors/debug-page'
 // Production Error Page
 export { renderErrorPage } from './errors/error-page'
-// Auth: Node.js-compatible hasher (for Lambda / non-Bun runtimes)
+// Auth: the scrypt hasher, the format every runtime can read back
 export { NodeHasher } from './auth/password/NodeHasher'
-// Hash: convenience alias for DefaultHasher, the runtime-detecting hasher
+// Hash: convenience alias for DefaultHasher, the format-routing hasher
 // that AuthenticatableModel and ModelUserProvider default to
 export { DefaultHasher, DefaultHasher as Hash } from './auth/password/DefaultHasher'
+export type { PasswordHashAlgorithm, DefaultHasherOptions } from './auth/password/DefaultHasher'
+export type { PasswordHasherOption } from './auth/password/configured-hasher'
 export type { ApplicationOptions, AuthPluginOptions, I18nPluginOptions } from './http/Application'
 export type { InertiaI18nProps } from './providers/I18nServiceProvider'
 // Queue: SQS adapter

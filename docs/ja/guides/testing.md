@@ -135,7 +135,7 @@ await app.get('/dashboard').assertUnauthorized()
 
 ### テストでのパスワードハッシュ
 
-パスワードのテストを速く保つための設定は要りません。`TestApp` が `GUREN_TESTING=1` を設定し、この変数がある間、既定のハッシャーは軽量なパラメータを使います(Bun では Argon2id を 1 MiB・1 反復、それ以外では scrypt を N=1024)。本番強度のハッシュは 1 回 100ms 以上かかるため、次のようなテストでは実行時間の大半をそこで使ってしまいます。
+パスワードのテストを速く保つための設定は要りません。`TestApp` が `GUREN_TESTING=1` を設定し、この変数がある間、既定のハッシャーは軽量なパラメータを使います(scrypt を N=1024、`hasher: 'argon2'` なら Argon2id を 1 MiB・1 反復)。本番強度のハッシュは 1 回 100ms 以上かかるため、次のようなテストでは実行時間の大半をそこで使ってしまいます。
 
 ```ts
 const user = await User.create({ email: 'ada@example.com', name: 'Ada', password: 'correct horse battery' })

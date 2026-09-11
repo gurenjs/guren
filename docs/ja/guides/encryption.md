@@ -117,23 +117,26 @@ try {
 
 | クラス | アルゴリズム | ランタイム |
 | --- | --- | --- |
-| `Hash`（`DefaultHasher` のエイリアス） | Bun では `ScryptHasher`、それ以外では `NodeHasher` に委譲 | 両方 |
-| `ScryptHasher` | `Bun.password`。既定は Argon2id、指定で bcrypt | Bun のみ |
+| `Hash`（`DefaultHasher` のエイリアス） | scrypt を書く（`algorithm: 'argon2'` なら Argon2id）。検証は保存されたハッシュの形式に従う | 両方 |
+| `ScryptHasher`（`Argon2Hasher` としてもエクスポート） | `Bun.password`。既定は Argon2id、指定で bcrypt | Bun のみ |
 | `NodeHasher` | `crypto.scrypt` | すべて |
 
-特別な理由がなければ `Hash` を使ってください。`AuthenticatableModel` と `ModelUserProvider` の既定値であり、動作環境に合わせて自分で切り替わる唯一の実装です。`NodeHasher` も両方で動きます（Bun は `node:crypto` を実装しているため）。Bun 専用なのは `ScryptHasher` だけです。
+特別な理由がなければ `Hash` を使ってください。`AuthenticatableModel` と `ModelUserProvider` の既定値であり、両方の形式を検証できる唯一の実装です。`NodeHasher` も両方で動きます（Bun は `node:crypto` を実装しているため）。Bun 専用なのは `ScryptHasher` だけです。アプリケーションでは直接構築せず、`createApp({ auth: { hasher } })` で 1 回だけ選びます（[認証](/docs/guides/authentication#パスワードハッシャー)を参照）。
 
 > `ScryptHasher` が生成するのは scrypt ではなく Argon2id です。名前が実装より古いだけで、scrypt を使うのは `NodeHasher` だけです。
 
-2 つのランタイムはハッシュ形式が異なるため、一方で書いたハッシュをもう一方で検証することはできません。既存のパスワードカラムをランタイム間で移す場合にだけ問題になります。
+2 つの形式に互換性はありません。`$scrypt$` のハッシュはどこでも検証できますが、Argon2id は `Bun.password` のある環境でしか検証できません。`Hash` が scrypt を書くのはそのためで、別形式のハッシュは `needsRehash()` で報告します。
 
 ### ハッシャーの作成
 
 ```typescript
 import { Hash } from '@guren/core'
 
-// ランタイムを自動判定する。オプションは取らない
+// scrypt を書く。検証は保存されたプレフィックスに従い、scrypt・Argon2id・bcrypt を受け付ける
 const hash = new Hash()
+
+// Bun.password で Argon2id を書く。Bun.password のないランタイムでは例外になる
+const argon2 = new Hash({ algorithm: 'argon2' })
 ```
 
 アルゴリズムやコストパラメータを固定したい場合は `ScryptHasher` / `NodeHasher` を直接構築してください。[アルゴリズムオプション](#アルゴリズムオプション)を参照。
@@ -142,8 +145,7 @@ const hash = new Hash()
 
 ```typescript
 const hashedPassword = await hash.hash('user-password')
-// Bun上:  $argon2id$v=19$m=65536,t=2,p=1$...
-// Node上: $scrypt$N=16384,r=8,p=1$...
+// $scrypt$N=16384,r=8,p=1$...
 ```
 
 `AuthenticatableModel` を継承したモデルは、これを自動で行います。`create()` に平文の `password` を渡すと、モデルがハッシュ化して `passwordHash` カラムへ格納します。[認証](/docs/guides/authentication)を参照してください。
@@ -177,11 +179,11 @@ if (hash.needsRehash(user.passwordHash)) {
 }
 ```
 
-`needsRehash()` はハッシュに埋め込まれたパラメータとハッシャーの設定値を比較するので、コストファクタを上げたあとに `true` を返します。フレームワークが自動で呼ぶことはありません。
+`needsRehash()` はハッシュに埋め込まれたパラメータとハッシャーの設定値を比較するので、コストファクタを上げたあとに `true` を返します。`Hash` は自分が書かない形式のハッシュにも `true` を返します。セッションガードはログイン成功のたびにこれを呼び、必要ならその場でパスワードを再ハッシュします。
 
 ## アルゴリズムオプション
 
-### Argon2（Bunの既定）
+### Argon2（Bun のみ）
 
 ```typescript
 const hash = new ScryptHasher({
@@ -262,7 +264,7 @@ export default class AuthController extends Controller {
 2. **強度のある APP_KEY を使う**: `bunx guren key:generate --write` で生成します。バージョン管理にはコミットしないでください。
 3. **独自の暗号化を作らない**: 用意されているユーティリティを使います。
 4. **キーを定期的にローテーションする**: ダウンタイムなしで入れ替えるには `APP_PREVIOUS_KEYS` を使います（[キーローテーション](#キーローテーション)を参照）。
-5. **アルゴリズムの選択は `Hash` に任せる**: Bun では Argon2id、Node では scrypt になります。両方で動く唯一のハッシャーです。
+5. **形式の選択は `Hash` に任せる**: どこでも scrypt なので、ローカルの Bun で書いたカラムがデプロイ先でもそのまま検証できます。
 
 ## テスト
 

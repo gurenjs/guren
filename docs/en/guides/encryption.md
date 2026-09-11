@@ -117,23 +117,26 @@ Password hashing goes through a `PasswordHasher`. Three implementations ship:
 
 | Class | Algorithm | Runtime |
 | --- | --- | --- |
-| `Hash` (alias of `DefaultHasher`) | Delegates to `ScryptHasher` on Bun, `NodeHasher` elsewhere | Both |
-| `ScryptHasher` | `Bun.password` — Argon2id by default, bcrypt on request | Bun only |
+| `Hash` (alias of `DefaultHasher`) | Writes scrypt (Argon2id under `algorithm: 'argon2'`); verifies whichever format the stored hash carries | Both |
+| `ScryptHasher` (also exported as `Argon2Hasher`) | `Bun.password` — Argon2id by default, bcrypt on request | Bun only |
 | `NodeHasher` | `crypto.scrypt` | Any |
 
-Reach for `Hash` unless you have a reason not to: it is what `AuthenticatableModel` and `ModelUserProvider` use by default, and the only one that adapts to wherever it runs. `NodeHasher` also runs on both (Bun implements `node:crypto`); `ScryptHasher` is the Bun-only one.
+Reach for `Hash` unless you have a reason not to: it is what `AuthenticatableModel` and `ModelUserProvider` use by default, and the only one that verifies both formats. `NodeHasher` also runs on both (Bun implements `node:crypto`); `ScryptHasher` is the Bun-only one. Applications select the hasher once through `createApp({ auth: { hasher } })` rather than constructing it (see [Authentication](/docs/guides/authentication#password-hasher)).
 
 > `ScryptHasher` produces Argon2id, not scrypt. The name predates the implementation; only `NodeHasher` uses scrypt.
 
-The two runtimes produce different hash formats, so a hash written under one cannot be verified under the other. That only matters for an app that moves an existing password column between runtimes.
+The two formats are not interchangeable: a `$scrypt$` hash verifies anywhere, an Argon2id one only where `Bun.password` exists. `Hash` writes scrypt for that reason, and reports a hash in the other format through `needsRehash()`.
 
 ### Creating a Hasher
 
 ```typescript
 import { Hash } from '@guren/core'
 
-// Runtime-detecting. Takes no options.
+// Writes scrypt. Verifies scrypt, Argon2id and bcrypt by the stored prefix.
 const hash = new Hash()
+
+// Writes Argon2id through Bun.password; throws on a runtime without it.
+const argon2 = new Hash({ algorithm: 'argon2' })
 ```
 
 To pin an algorithm or its cost parameters, construct `ScryptHasher` or `NodeHasher` directly (see [Algorithm Options](#algorithm-options)).
@@ -142,8 +145,7 @@ To pin an algorithm or its cost parameters, construct `ScryptHasher` or `NodeHas
 
 ```typescript
 const hashedPassword = await hash.hash('user-password')
-// On Bun:  $argon2id$v=19$m=65536,t=2,p=1$...
-// On Node: $scrypt$N=16384,r=8,p=1$...
+// $scrypt$N=16384,r=8,p=1$...
 ```
 
 Models extending `AuthenticatableModel` do this for you: pass a plain `password` on `create()` and the model hashes it into the `passwordHash` column. See [Authentication](/docs/guides/authentication).
@@ -177,11 +179,11 @@ if (hash.needsRehash(user.passwordHash)) {
 }
 ```
 
-`needsRehash()` compares the parameters encoded in the hash against the ones the hasher is configured with, so it reports `true` after you raise a cost factor. Nothing in the framework calls it for you.
+`needsRehash()` compares the parameters encoded in the hash against the ones the hasher is configured with, so it reports `true` after you raise a cost factor; `Hash` also reports it for a hash in the format it does not write. The session guard calls it after every successful login and rehashes the password in place.
 
 ## Algorithm Options
 
-### Argon2 (Bun default)
+### Argon2 (Bun only)
 
 ```typescript
 const hash = new ScryptHasher({
@@ -262,7 +264,7 @@ export default class AuthController extends Controller {
 2. **Use a strong APP_KEY**: run `bunx guren key:generate --write` to generate one. Never commit it to version control.
 3. **Don't roll your own crypto**: use the provided utilities.
 4. **Rotate keys periodically**: use `APP_PREVIOUS_KEYS` to rotate without downtime (see [Key Rotation](#key-rotation)).
-5. **Let `Hash` pick the algorithm**: it is Argon2id on Bun and scrypt on Node, and it is the only hasher that runs on both.
+5. **Let `Hash` pick the format**: scrypt everywhere, so a column written locally under Bun verifies wherever the app is deployed.
 
 ## Testing
 

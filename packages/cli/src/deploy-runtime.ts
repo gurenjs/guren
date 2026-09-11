@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import type { File, Node, ObjectExpression } from '@babel/types'
-import { memberKeyName, objectLiteral, walk, type BabelNode } from './ast-walk'
+import { memberKeyName, objectLiteral, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { DEFAULT_SESSION_STORE_NAME, readSessionConfig, sessionConfigsIn } from './session-config'
 import { resolveSessionDrivers, type SessionDriverRegistry } from './session-drivers'
 import {
@@ -28,8 +28,9 @@ export interface DeployTargetProfile {
   /**
    * Whether `Bun.password` exists at runtime: only Workers (workerd) and
    * Lambda (Node.js) lose it, since Vercel functions run `runtime: 'bun1.x'`.
-   * `DefaultHasher` does not depend on it (RFC 0003 §4); what breaks is an
-   * explicit `new ScryptHasher()`, whose Argon2id cannot be read back.
+   * `DefaultHasher` writes scrypt everywhere (RFC 0003 §4); what breaks is an
+   * explicit `new ScryptHasher()` or `hasher: 'argon2'`, whose Argon2id
+   * cannot be read back.
    */
   hasBunRuntime: boolean
   /** Why filesystem-scanning provider discovery cannot work on this target. */
@@ -82,7 +83,7 @@ export interface SourceSignal {
 export interface DeployRuntimeAnalysis {
   targets: DeployTargetDetection[]
   passwordAuthSignals: SourceSignal[]
-  /** `ScryptHasher` constructions — a hash format only Bun can read back. */
+  /** `ScryptHasher` constructions and `auth.hasher: 'argon2'` — a hash format only Bun can read back. */
   bunOnlyHasherSignals: SourceSignal[]
   /** Hashers that work without `Bun.password`: `NodeHasher`, `Hash`. */
   nodeHasherSignals: SourceSignal[]
@@ -150,11 +151,12 @@ interface ExtractedSignal {
  * Classes whose *construction* is a signal. A bare import never counts: it survives long
  * after the app stops using the thing it names, and must neither satisfy a remediation nor
  * raise a warning. ScryptHasher is `bunOnlyHasher` because it pins the app to a format only
- * `Bun.password` can read; `DefaultHasher`/`Hash` are remediation because they pick their
- * delegate from the runtime and the stored hash. `discover: true` in `createApp()` is inert, so not a signal.
+ * `Bun.password` can read; `DefaultHasher`/`Hash` are remediation because they write scrypt and
+ * verify by the stored hash's format. `discover: true` in `createApp()` is inert, so not a signal.
  */
 const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
   ScryptHasher: 'bunOnlyHasher',
+  Argon2Hasher: 'bunOnlyHasher',
   NodeHasher: 'nodeHasher',
   DefaultHasher: 'nodeHasher',
   Hash: 'nodeHasher',
@@ -393,6 +395,15 @@ function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSig
               for (const property of options.properties as unknown as BabelNode[]) {
                 if (property.type === 'ObjectProperty' && propertyKeyName(property) === 'auth') {
                   emit('session', 'auth', lineOf(property))
+                  // `hasher: 'argon2'` selects Bun.password without constructing anything.
+                  const authEntries = (objectLiteral(property.value as Node)?.properties ?? []) as unknown as BabelNode[]
+                  const hasher = authEntries.find(
+                    (entry) => entry.type === 'ObjectProperty' && propertyKeyName(entry) === 'hasher',
+                  )
+                  const selected = hasher ? unwrapTypeAssertion(hasher.value as BabelNode) : undefined
+                  if (selected?.type === 'StringLiteral' && selected.value === 'argon2') {
+                    emit('bunOnlyHasher', "auth.hasher: 'argon2'", lineOf(hasher!))
+                  }
                 }
               }
             }
@@ -649,14 +660,14 @@ function verdict(
   return status === 'pass' ? { key, title, status, message } : { key, title, status, message, fix }
 }
 
-const BUN_ONLY_HASHER_FIX = 'Replace `new ScryptHasher()` with `new Hash()`, which hashes with `node:crypto` scrypt off Bun. Rows already written under Bun stay unreadable on this runtime, so existing passwords must still be rehashed.'
+const BUN_ONLY_HASHER_FIX = "Drop `hasher: 'argon2'`, or replace `new ScryptHasher()` with `new Hash()`: the default writes `node:crypto` scrypt, which every runtime reads back. Rows already written as Argon2id are rehashed on their next successful login under Bun, so have them log in there first (or reset those passwords) before this runtime has to verify them."
 
 /**
- * `DefaultHasher` falls back to `node:crypto` scrypt off Bun, which workerd's
- * `nodejs_compat` implements in full (RFC 0003 §4), so password auth alone no
- * longer breaks on a Bun-less target. What breaks is an *explicit*
- * `new ScryptHasher()`, whose Argon2id/bcrypt cannot be read back without
- * `Bun.password` — usually written by a seeder that ran under Bun locally.
+ * `DefaultHasher` writes `node:crypto` scrypt on every runtime, which workerd's
+ * `nodejs_compat` implements in full (RFC 0003 §4), so password auth alone does
+ * not break on a Bun-less target. What breaks is an explicit Bun.password
+ * selection (`new ScryptHasher()`, `hasher: 'argon2'`), whose Argon2id/bcrypt
+ * cannot be read back without `Bun.password`.
  */
 function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
   const key = 'deploy-password-hashing'
@@ -686,7 +697,7 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
       key,
       title,
       'warn',
-      `${labels} detected, but ScryptHasher is constructed directly (${formatSignals(analysis.bunOnlyHasherSignals)}). It hashes through Bun.password, so the rows it writes cannot be verified on this runtime.${caveat}`,
+      `${labels} detected, but a Bun-only hasher is selected (${formatSignals(analysis.bunOnlyHasherSignals)}). It hashes through Bun.password, so the rows it writes cannot be verified on this runtime.${caveat}`,
       BUN_ONLY_HASHER_FIX,
     )
   }
@@ -699,7 +710,7 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
     key,
     title,
     'pass',
-    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), and no Bun-only hasher is constructed. The default hasher uses node:crypto scrypt here.${caveat}`,
+    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), and no Bun-only hasher is selected. The default hasher writes node:crypto scrypt on every runtime.${caveat}`,
   )
 }
 

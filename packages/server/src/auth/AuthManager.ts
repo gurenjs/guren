@@ -8,7 +8,8 @@ import { ModelUserProvider, type ModelUserProviderOptions } from './providers/Mo
 import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
 import { hasBearerHeader, type ApiTokenStore } from './api-token'
-import { DefaultHasher } from './password/DefaultHasher'
+import { createPasswordHasher } from './password/configured-hasher'
+import type { PasswordHasher } from './password/PasswordHasher'
 import type {
   AttachContextOptions,
   AuthContext,
@@ -59,9 +60,23 @@ export class AuthManager implements AuthManagerContract {
   private tokenGuard: string | null = null
   private apiTokenStore: ApiTokenStore | null = null
   private apiTokenOptions: ApiTokenGuardOptions = {}
+  private readonly passwordHasher: PasswordHasher
 
   constructor(options: AuthManagerOptions = {}) {
     this.defaultGuard = options.defaultGuard ?? DEFAULT_GUARD
+    // Resolved here, not on first use: `hasher: 'argon2'` on a runtime without
+    // `Bun.password` fails the `createApp()` call, before any user is written.
+    this.passwordHasher = createPasswordHasher(options.hasher)
+  }
+
+  /**
+   * The one password hasher this app writes with: `AuthPluginOptions.hasher`
+   * resolved, scrypt by default. `useModel()` hands it to the provider, and
+   * `AuthenticatableModel` reads it through the container, so a row the model
+   * hashes and a login the provider verifies never disagree on the format.
+   */
+  hasher(): PasswordHasher {
+    return this.passwordHasher
   }
 
   registerGuard<User>(name: string, factory: GuardFactory<User>): void {
@@ -195,7 +210,7 @@ export class AuthManager implements AuthManagerContract {
     const defaultOptions: ModelUserProviderOptions = {
       usernameColumn: 'email',
       credentialsPasswordField: 'password',
-      hasher: new DefaultHasher(),
+      hasher: this.hasher(),
       ...options,
     }
 

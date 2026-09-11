@@ -103,8 +103,7 @@ describe('NodeHasher', () => {
   })
 })
 
-describe('DefaultHasher under GUREN_TESTING', () => {
-  const hasher = new DefaultHasher()
+describe('DefaultHasher', () => {
   const saved = process.env.GUREN_TESTING
 
   afterEach(() => {
@@ -112,55 +111,121 @@ describe('DefaultHasher under GUREN_TESTING', () => {
     else process.env.GUREN_TESTING = saved
   })
 
+  function scryptParams(hashed: string): Record<string, string> {
+    const [, algorithm, parameters] = hashed.split('$')
+    expect(algorithm).toBe('scrypt')
+    return Object.fromEntries(parameters.split(',').map((pair) => pair.split('=')))
+  }
+
   function argon2Params(hashed: string): Record<string, string> {
     const [, algorithm, , parameters] = hashed.split('$')
     expect(algorithm).toBe('argon2id')
     return Object.fromEntries(parameters.split(',').map((pair) => pair.split('=')))
   }
 
-  test('hashes with the cheap parameters while the variable is set, and verifies them', async () => {
-    process.env.GUREN_TESTING = '1'
-    const hashed = await hasher.hash('correct horse battery')
+  describe('format selection', () => {
+    test('writes scrypt by default, even though Bun.password is available', async () => {
+      delete process.env.GUREN_TESTING
+      const hashed = await new DefaultHasher().hash('correct horse battery')
+      expect(hashed.startsWith('$scrypt$')).toBe(true)
+      expect(new DefaultHasher().algorithm).toBe('scrypt')
+    })
 
-    expect(argon2Params(hashed)).toMatchObject({ m: '1024', t: '1' })
-    expect(await hasher.verify(hashed, 'correct horse battery')).toBe(true)
-    expect(await hasher.verify(hashed, 'wrong')).toBe(false)
+    test("writes Argon2id under algorithm: 'argon2'", async () => {
+      delete process.env.GUREN_TESTING
+      const hasher = new DefaultHasher({ algorithm: 'argon2' })
+      const hashed = await hasher.hash('correct horse battery')
+      expect(hashed.startsWith('$argon2id$')).toBe(true)
+      expect(await hasher.verify(hashed, 'correct horse battery')).toBe(true)
+    })
+
+    test('verifies a row in the other format and reports it for a rehash', async () => {
+      process.env.GUREN_TESTING = '1'
+      const scrypt = new DefaultHasher()
+      const argon2 = new DefaultHasher({ algorithm: 'argon2' })
+      const argonRow = await argon2.hash('correct horse battery')
+      const scryptRow = await scrypt.hash('correct horse battery')
+
+      expect(await scrypt.verify(argonRow, 'correct horse battery')).toBe(true)
+      expect(await scrypt.verify(argonRow, 'wrong')).toBe(false)
+      expect(scrypt.needsRehash(argonRow)).toBe(true)
+      expect(scrypt.needsRehash(scryptRow)).toBe(false)
+
+      expect(await argon2.verify(scryptRow, 'correct horse battery')).toBe(true)
+      expect(argon2.needsRehash(scryptRow)).toBe(true)
+      expect(argon2.needsRehash(argonRow)).toBe(false)
+    })
+
+    test('a bcrypt row verifies through Bun.password and needs a rehash under either writer', async () => {
+      const bcryptRow = await new ScryptHasher({ algorithm: 'bcrypt', cost: 4 }).hash('pw')
+      const scrypt = new DefaultHasher()
+      expect(await scrypt.verify(bcryptRow, 'pw')).toBe(true)
+      expect(scrypt.needsRehash(bcryptRow)).toBe(true)
+      expect(new DefaultHasher({ algorithm: 'argon2' }).needsRehash(bcryptRow)).toBe(true)
+    })
+
+    test('Argon2Hasher is the Bun.password hasher under its real name', async () => {
+      const { Argon2Hasher } = await import('../../src/auth')
+      expect(Argon2Hasher).toBe(ScryptHasher)
+    })
   })
 
-  test('hashes with the production parameters when the variable is absent', async () => {
-    delete process.env.GUREN_TESTING
-    const hashed = await hasher.hash('correct horse battery')
+  describe('under GUREN_TESTING', () => {
+    test('hashes with the cheap parameters while the variable is set, and verifies them', async () => {
+      process.env.GUREN_TESTING = '1'
+      const hasher = new DefaultHasher()
+      const hashed = await hasher.hash('correct horse battery')
 
-    // Bun.password's Argon2id defaults; the exact numbers are Bun's to choose,
-    // the cheap ones are not among them.
-    const params = argon2Params(hashed)
-    expect(Number(params.m)).toBeGreaterThan(1024)
-    expect(Number(params.t)).toBeGreaterThan(1)
-  })
+      expect(scryptParams(hashed)).toMatchObject({ N: '1024' })
+      expect(await hasher.verify(hashed, 'correct horse battery')).toBe(true)
+      expect(await hasher.verify(hashed, 'wrong')).toBe(false)
+    })
 
-  test('reads the variable per call, so a hasher built before TestApp set it still hashes cheaply', async () => {
-    delete process.env.GUREN_TESTING
-    const builtEarly = new DefaultHasher()
-    process.env.GUREN_TESTING = '1'
+    test("hashes Argon2id cheaply too under algorithm: 'argon2'", async () => {
+      process.env.GUREN_TESTING = '1'
+      const hasher = new DefaultHasher({ algorithm: 'argon2' })
+      const hashed = await hasher.hash('correct horse battery')
 
-    expect(argon2Params(await builtEarly.hash('x'))).toMatchObject({ m: '1024', t: '1' })
-  })
+      expect(argon2Params(hashed)).toMatchObject({ m: '1024', t: '1' })
+      expect(await hasher.verify(hashed, 'correct horse battery')).toBe(true)
+      expect(hasher.needsRehash(hashed)).toBe(false)
+      delete process.env.GUREN_TESTING
+      expect(hasher.needsRehash(hashed)).toBe(true)
+    })
 
-  test('a hash written at the testing cost needs a rehash outside tests, and not inside them', async () => {
-    process.env.GUREN_TESTING = '1'
-    const cheap = await hasher.hash('correct horse battery')
-    expect(hasher.needsRehash(cheap)).toBe(false)
+    test('hashes with the production parameters when the variable is absent', async () => {
+      delete process.env.GUREN_TESTING
+      const hashed = await new DefaultHasher().hash('correct horse battery')
 
-    delete process.env.GUREN_TESTING
-    expect(hasher.needsRehash(cheap)).toBe(true)
-  })
+      expect(Number(scryptParams(hashed).N)).toBeGreaterThan(1024)
+    })
 
-  test('a production-strength hash never needs a rehash for its cost, in tests or out', async () => {
-    delete process.env.GUREN_TESTING
-    const strong = await hasher.hash('correct horse battery')
-    expect(hasher.needsRehash(strong)).toBe(false)
+    test('reads the variable per call, so a hasher built before TestApp set it still hashes cheaply', async () => {
+      delete process.env.GUREN_TESTING
+      const builtEarly = new DefaultHasher()
+      process.env.GUREN_TESTING = '1'
 
-    process.env.GUREN_TESTING = '1'
-    expect(hasher.needsRehash(strong)).toBe(false)
+      expect(scryptParams(await builtEarly.hash('x'))).toMatchObject({ N: '1024' })
+    })
+
+    test('a hash written at the testing cost needs a rehash outside tests, and not inside them', async () => {
+      const hasher = new DefaultHasher()
+      process.env.GUREN_TESTING = '1'
+      const cheap = await hasher.hash('correct horse battery')
+      expect(hasher.needsRehash(cheap)).toBe(false)
+
+      delete process.env.GUREN_TESTING
+      expect(hasher.needsRehash(cheap)).toBe(true)
+    })
+
+    test('a production-strength hash never needs a rehash for its cost, in tests or out', async () => {
+      const hasher = new DefaultHasher()
+      delete process.env.GUREN_TESTING
+      const strong = await hasher.hash('correct horse battery')
+      expect(hasher.needsRehash(strong)).toBe(false)
+
+      process.env.GUREN_TESTING = '1'
+      expect(hasher.needsRehash(strong)).toBe(false)
+    })
   })
 })

@@ -5,7 +5,7 @@ export { TokenGuard } from './TokenGuard'
 export type { TokenGuardOptions } from './TokenGuard'
 export { BaseUserProvider } from './providers/UserProvider'
 export { ModelUserProvider } from './providers/ModelUserProvider'
-export { ScryptHasher } from './password/ScryptHasher'
+export { ScryptHasher, ScryptHasher as Argon2Hasher } from './password/ScryptHasher'
 export { NodeHasher } from './password/NodeHasher'
 export { AuthenticatableModel } from './AuthenticatableModel'
 export {
@@ -27,6 +27,8 @@ export {
   MemoryEmailVerificationStore,
 } from './email-verification'
 export type { PasswordHasher } from './password/PasswordHasher'
+export type { PasswordHasherOption } from './password/configured-hasher'
+export type { PasswordHashAlgorithm, DefaultHasherOptions } from './password/DefaultHasher'
 export type {
   PasswordResetConfig,
   PasswordResetTokenStore,

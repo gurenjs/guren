@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
 import type { Session } from '../http/middleware'
+import type { PasswordHasherOption } from './password/configured-hasher'
 
 export type AuthCredentials = Record<string, unknown>
 
@@ -34,6 +35,12 @@ export interface UserProvider<User = Authenticatable> {
    * remember tokens, model `hidden` fields) before caching or exposing a user.
    */
   sanitize?(user: User): User
+  /**
+   * Called by a guard after `validateCredentials()` succeeded, never after it
+   * failed: re-hash the password in the current format and cost when the stored
+   * hash needs it, and persist the new value.
+   */
+  rehashPasswordIfRequired?(user: User, credentials: AuthCredentials): Promise<void> | void
 }
 
 /** The conventional credential column names `ModelUserProvider.sanitize()` strips. */
@@ -69,6 +76,8 @@ export interface ProviderFactory<User = Authenticatable> {
 
 export interface AuthManagerOptions {
   defaultGuard?: string
+  /** See `AuthPluginOptions.hasher`. Defaults to `'scrypt'`. */
+  hasher?: PasswordHasherOption
 }
 
 export interface AttachContextOptions {

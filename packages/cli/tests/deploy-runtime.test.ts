@@ -275,6 +275,47 @@ describe('deploy-password-hashing check', () => {
     })
   })
 
+  // The option selects Bun.password without constructing anything, so a
+  // construction-only scan would pass an app that cannot verify a single login.
+  it("warns when a Workers app selects hasher: 'argon2' in createApp()", async () => {
+    const files = {
+      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
+      'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({\n  auth: { hasher: 'argon2' },\n})\n`,
+    }
+
+    await withApp('guren-hash-cf-option-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-password-hashing']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain("auth.hasher: 'argon2' (src/app.ts:3)")
+      expect(check.fix).toContain("hasher: 'argon2'")
+    })
+  })
+
+  it("passes when createApp() selects hasher: 'scrypt' explicitly", async () => {
+    const files = {
+      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
+      'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({ auth: { hasher: 'scrypt' } })\n`,
+    }
+
+    await withApp('guren-hash-cf-scrypt-option-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-password-hashing'].status).toBe('pass')
+    })
+  })
+
+  it('warns on the Argon2Hasher alias like on ScryptHasher', async () => {
+    const files = {
+      'db/seeders/001_UsersSeeder.ts': `import { Argon2Hasher } from '@guren/core'\nconst hasher = new Argon2Hasher()\n`,
+    }
+
+    await withApp('guren-hash-cf-alias-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-password-hashing']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('Argon2Hasher (db/seeders/001_UsersSeeder.ts:2)')
+    })
+  })
+
   // A bare import is not usage: the check must see the hasher actually
   // constructed, or a leftover `import { ScryptHasher }` would raise a warning
   // for a call site that does not exist.

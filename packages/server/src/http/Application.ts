@@ -5,6 +5,7 @@ import { loadPrototypeFixture, PROTOTYPE_FIXTURE_BINDING, type PrototypeFixtureL
 import { Container, mountModuleRoutes, setContainer, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
+import type { PasswordHasherOption } from '../auth/password/configured-hasher'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
 import { AuthorizationServiceProvider } from '../providers/AuthorizationServiceProvider'
 import { ErrorServiceProvider } from '../providers/ErrorServiceProvider'
@@ -441,6 +442,13 @@ export interface I18nPluginOptions {
 }
 
 export interface AuthPluginOptions {
+  /**
+   * The format new password hashes are written in. `'scrypt'` (the default)
+   * verifies on every runtime; `'argon2'` uses `Bun.password` and is for
+   * Bun-only deployments. Rows in the other format still verify and are
+   * rehashed on their next login. A `PasswordHasher` replaces both.
+   */
+  hasher?: PasswordHasherOption
   autoSession?: boolean
   sessionOptions?: CreateSessionMiddlewareOptions
   /** Defaults to `true` when session is enabled. */
@@ -506,7 +514,7 @@ export class Application {
     this.hono = new Hono()
     this.container = new Container()
     this.router = new Router()
-    this.authManager = new AuthManager()
+    this.authManager = new AuthManager({ hasher: options.auth?.hasher })
     this.providerManager = new ProviderManager(this.container)
 
     // Not in boot(): Hono composes matched handlers in registration order, and

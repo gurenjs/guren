@@ -184,6 +184,10 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return null
     }
 
+    // The one moment the plaintext is in hand next to a stored hash the
+    // configured hasher would not write (an Argon2id row under the scrypt
+    // default, a testing-cost hash in production).
+    await this.provider.rehashPasswordIfRequired?.(user, credentials)
     return user
   }
 
