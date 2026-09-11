@@ -1,5 +1,6 @@
 // Weekly read-only report over the site's Workers Analytics Engine dataset.
-// The token needs the "Account Analytics: Read" permission.
+// The token needs the "Account Analytics: Read" permission. Tag outbound links
+// with `?ref=<channel>` (a lowercase slug) so their landings show up by channel.
 //
 //   CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... bun scripts/analytics-report.ts [--days 7]
 
@@ -24,12 +25,11 @@ if (!Number.isSafeInteger(days) || days < 1 || days > 90) {
 // Data point layout: see web/app/Http/Middleware/site-analytics.ts.
 const WINDOW = `timestamp > NOW() - INTERVAL '${days}' DAY`
 
-// A browser-like user agent is classed `human`, so scanners land there: in the
-// 30 days to 2026-09-11, 63% of `human` requests were 404s. A reader is a
-// successful GET from a client that sends Accept-Language.
+// A browser-like user agent is classed `human`, so scanners land there. A reader
+// is a successful GET from a client that sends Accept-Language.
 const READER = `blob3 = 'human' AND blob7 = 'GET' AND double1 >= 200 AND double1 < 300 AND blob5 != ''`
-// `/` is fetched by clients that never open a page, so it is not reading. Older
-// points class the feed as `blog`, and Analytics Engine keeps them ~90 days.
+// `/` is fetched by clients that never open a page, so it is not reading. The feed
+// is matched by path too, since retained points may predate its class.
 const READING = `blob2 IN ('docs', 'blog', 'markdown') AND blob1 != '/blog/rss.xml'`
 // www.guren.dev 301s to the apex, so no page there can send this referrer; only
 // clients that forge it do.
@@ -62,6 +62,12 @@ const queries: Array<{ title: string; sql: string }> = [
           FROM ${DATASET} WHERE ${WINDOW} AND ${READER}
             AND blob4 != '' AND blob4 != '${FORGED_REFERRER}'
           GROUP BY referrer ORDER BY requests DESC LIMIT 15`,
+  },
+  {
+    title: 'Landings by ref tag (readers)',
+    sql: `SELECT blob10 AS ref, blob1 AS path, SUM(_sample_interval) AS requests
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND blob10 != ''
+          GROUP BY ref, path ORDER BY requests DESC LIMIT 20`,
   },
   {
     title: 'Languages (readers)',
