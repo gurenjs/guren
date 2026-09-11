@@ -22,12 +22,8 @@ interface TaskInfo {
   expression: string
   timezone?: string
   nextRun?: Date
-  /**
-   * Execute the task (bound to `ScheduledTask.tryRun()` when available).
-   * Resolves false when the task's own guards declined it; a plain definition
-   * has no guards to decline with, so it resolves undefined.
-   */
-  run?: () => Promise<boolean | undefined>
+  /** Execute the task, resolving whether its callback ran; see {@link runnerFor}. */
+  run?: () => Promise<boolean>
   /** Whether the cron expression matches the given time. */
   isDue?: (date: Date) => boolean
   withoutOverlapping: boolean
@@ -76,16 +72,16 @@ function normalizeTask(raw: ScheduledTaskLike): TaskInfo {
     name: task.name || 'unnamed',
     expression: task.expression || '* * * * *',
     timezone: task.timezone,
-    run: typeof task.callback === 'function' ? async () => { await task.callback!() } : undefined,
+    run: typeof task.callback === 'function' ? async () => { await task.callback!(); return true } : undefined,
     withoutOverlapping: task.withoutOverlapping === true,
     onOneServer: task.onOneServer === true,
   }
 }
 
-/** `tryRun()` when the task has one; a scheduler built before it reports nothing either way. */
-function runnerFor(task: ScheduledTaskLike): (() => Promise<boolean | undefined>) | undefined {
+/** `tryRun()` reports a decline; a scheduler built before it has no way to, so a completed run reads as ran. */
+function runnerFor(task: ScheduledTaskLike): (() => Promise<boolean>) | undefined {
   if (typeof task.tryRun === 'function') return () => task.tryRun!()
-  if (typeof task.run === 'function') return async () => { await task.run!(); return undefined }
+  if (typeof task.run === 'function') return async () => { await task.run!(); return true }
   return undefined
 }
 
@@ -471,11 +467,10 @@ export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promi
     try {
       const startedAt = Date.now()
       const ran = await task.run()
-      const elapsed = `${Date.now() - startedAt}ms`
-      if (ran === false) {
-        consola.info(`  Skipped: ${task.name} (when()/skip() or the overlap guard declined it)`)
+      if (ran) {
+        consola.success(`  Ran: ${task.name} (${Date.now() - startedAt}ms)`)
       } else {
-        consola.success(`  Ran: ${task.name} (${elapsed})`)
+        consola.info(`  Skipped: ${task.name} (when()/skip() or the overlap guard declined it)`)
       }
     } catch (error) {
       failures += 1
