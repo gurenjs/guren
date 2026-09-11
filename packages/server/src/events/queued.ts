@@ -41,12 +41,9 @@ class QueuedEventJob extends Job<QueuedEventPayload> {
 
 /**
  * The dispatcher `EventServiceProvider` installs at boot. Registers the carrier
- * job as well, which is what lets a worker booting the same app resolve the
- * message back.
- *
- * Resolves false when no driver is reachable rather than letting
- * `Job.dispatch()` throw: it is installed before the app's queue is bound, and
- * an emit it cannot queue runs the listener inline.
+ * job too, which is what lets a worker booting the same app resolve the message.
+ * Resolves false rather than letting `Job.dispatch()` throw: it is installed
+ * before the app's queue is bound, and an emit it cannot queue runs inline.
  */
 export function createQueueEventDispatcher(): QueueEventDispatcher {
   registerJob(QueuedEventJob)

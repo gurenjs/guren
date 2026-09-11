@@ -80,11 +80,9 @@ export class EventManager {
   /**
    * Registers a `Listener` subclass under its own statics: `event`, `priority`,
    * and `queue` when `shouldQueue`. The instance is built per invocation, so
-   * two events cannot share one listener's state.
-   *
-   * `failed()` is a terminal hook either way: inline it runs on the throw that
-   * then propagates, queued it runs once the carrier job's retries are
-   * exhausted, which is when `Job.failed` runs.
+   * two events cannot share one listener's state. `failed()` is terminal either
+   * way: inline on the throw that then propagates, queued once the carrier
+   * job's retries are exhausted, where `Job.failed` runs.
    */
   listen<T extends Event>(listenerClass: ListenerClass<T>): EventSubscription {
     const queue = listenerClass.shouldQueue ? listenerClass.queue : undefined
@@ -267,9 +265,9 @@ export class EventManager {
 
   /**
    * The worker side of a queued listener's failure, once the carrier job has
-   * run out of retries. Total by contract: a listener this process no longer
-   * has, one whose class defines no `failed()`, and an event class it cannot
-   * rebuild are all no-ops, since throwing here only buries the real error.
+   * run out of retries. Total by contract: an unknown listener, a class with no
+   * `failed()`, and an event it cannot rebuild are no-ops, since a throw here
+   * only buries the error that caused it.
    */
   async failedQueued(
     queueName: string,

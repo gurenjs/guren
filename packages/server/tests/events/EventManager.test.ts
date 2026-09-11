@@ -413,7 +413,7 @@ describe('EventManager', () => {
     })
 
     it('handleQueued() runs the listener the message names, with the event rebuilt as an instance', async () => {
-      events.setQueueDispatcher(async () => {})
+      events.setQueueDispatcher(async () => true)
       const seen: TestEvent[] = []
       const second = vi.fn()
       const otherQueue = vi.fn()
