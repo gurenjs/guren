@@ -156,7 +156,7 @@ const driver = Queue.driver()
 
 ### Manual Setup
 
-A manager that is not bound in the container works too. Call `driver()` once: it publishes the default driver for `dispatch()`, which otherwise has no way to find a manager nothing binds.
+A manager that is not bound in the container works too. Hand its driver to `setQueueDriver()` once: `dispatch()` has no way to find a manager nothing binds.
 
 ```ts
 import { createQueueManager, MemoryDriver } from '@guren/core'
@@ -288,8 +288,9 @@ const queueManager = createQueueManager({
   },
 })
 
-// Resolve the default driver; a manager not bound as `queue` in the
-// container needs this call before dispatch() can find it
+// Resolve the default driver. A manager not bound as `queue` in the
+// container has to pin it before dispatch() can find it:
+// setQueueDriver(driver)
 const driver = queueManager.driver()
 
 // Get a specific driver

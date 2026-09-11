@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { Application } from '../../src/http/Application'
 import { createContainer, setContainer } from '../../src/container'
 import { QueueServiceProvider } from '../../src/providers/QueueServiceProvider'
-import { Job, MemoryDriver, getQueueDriver, setQueueDriver } from '../../src/queue'
+import { Job, MemoryDriver, clearQueueDriver, getQueueDriver, setQueueDriver } from '../../src/queue'
 import { mail, createMailManager } from '../../src/mail'
 
 class ReportJob extends Job<{ id: number }> {
@@ -17,11 +17,11 @@ describe('Job.dispatch() with only the container wired', () => {
     driver = new MemoryDriver()
     // The global slot is what QueueManager.driver() would have filled; the
     // point here is that nothing ever called it.
-    setQueueDriver(null as never)
+    clearQueueDriver()
   })
 
   afterEach(() => {
-    setQueueDriver(null as never)
+    clearQueueDriver()
     setContainer(createContainer())
   })
 
@@ -68,5 +68,33 @@ describe('Job.dispatch() with only the container wired', () => {
     await expect(ReportJob.dispatch({ id: 3 })).rejects.toThrow(
       'Queue driver not configured. Register a provider that binds a QueueManager as "queue"',
     )
+  })
+
+  it('reads a manager with no factory for its default as absent, and says so', async () => {
+    const app = new Application({ providers: [QueueServiceProvider] })
+    await app.boot()
+
+    expect(getQueueDriver()).toBeNull()
+    await expect(ReportJob.dispatch({ id: 4 })).rejects.toThrow(
+      'the "queue" manager has no driver named "memory"',
+    )
+  })
+
+  it('sends each application through its own driver rather than the first one booted', async () => {
+    const first = new MemoryDriver()
+    const second = new MemoryDriver()
+
+    const firstApp = new Application({ providers: [QueueServiceProvider] })
+    await firstApp.boot()
+    firstApp.container.make('queue').registerDriver('memory', () => first)
+    await ReportJob.dispatch({ id: 5 })
+
+    const secondApp = new Application({ providers: [QueueServiceProvider] })
+    await secondApp.boot()
+    secondApp.container.make('queue').registerDriver('memory', () => second)
+    await ReportJob.dispatch({ id: 6 })
+
+    expect(await first.size('reports')).toBe(1)
+    expect(await second.size('reports')).toBe(1)
   })
 })

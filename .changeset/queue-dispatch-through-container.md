@@ -1,5 +1,5 @@
 ---
-"@guren/server": patch
+"@guren/server": minor
 ---
 
 Resolve the queue driver for `Job.dispatch()` through the container
@@ -10,8 +10,15 @@ nobody resolved. An app that registered the provider and a driver, and never
 happened to call `manager.driver()` itself, got "Queue driver not configured"
 on its first dispatch.
 
-`getQueueDriver()` now falls back to the default driver of the `QueueManager`
-bound as `queue` in the container when the global slot is empty, so
-`Job.dispatch()` and `Mail.queue()` work off the provider alone. The global
-set by `setQueueDriver()` (and by `manager.driver()`) still wins when present.
-The error for an app with neither names the provider to register.
+- `getQueueDriver()` falls back to the default driver of the `QueueManager`
+  bound as `queue` in the container when nothing is pinned, so
+  `Job.dispatch()` and `Mail.queue()` work off the provider alone. A manager
+  bound with no factory for its default reads as absent rather than throwing,
+  and the dispatch error says which of the two cases it is.
+- `QueueManager.driver()` and `setDefaultDriver()` no longer publish the
+  module-level driver; `setQueueDriver()` is its only writer. Resolving a
+  driver used to pin the first booted app's queue for every later
+  `Application` in the process, which sent a second app's jobs to the first
+  app's driver. An app that relied on `manager.driver()` publishing, and binds
+  no `queue` in the container, now calls `setQueueDriver()` itself.
+- `clearQueueDriver()` drops the pin.

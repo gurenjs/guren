@@ -156,7 +156,7 @@ const driver = Queue.driver()
 
 ### 直接セットアップ
 
-コンテナにバインドしないマネージャーも使えます。その場合は `driver()` を一度呼びます。この呼び出しがデフォルトドライバを `dispatch()` に公開します。どこにもバインドされていないマネージャーを `dispatch()` が見つける手段は他にありません。
+コンテナにバインドしないマネージャーも使えます。その場合はドライバを一度 `setQueueDriver()` に渡します。どこにもバインドされていないマネージャーを `dispatch()` が見つける手段は他にありません。
 
 ```ts
 import { createQueueManager, MemoryDriver } from '@guren/core'
@@ -289,7 +289,7 @@ const queueManager = createQueueManager({
 })
 
 // デフォルトドライバを解決する。コンテナに `queue` としてバインドしない
-// マネージャーは、この呼び出しが無いと dispatch() から見つからない
+// マネージャーは、setQueueDriver(driver) で固定しないと dispatch() から見つからない
 const driver = queueManager.driver()
 
 // 特定のドライバを取得

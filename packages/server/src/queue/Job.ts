@@ -4,29 +4,59 @@ import type { QueueManager } from './QueueManager'
 import type { ServiceBindings } from '../container/bindings'
 import { getContainer } from '../container/Container'
 
+/**
+ * The pin `setQueueDriver()` writes, and nothing else does. A manager that
+ * published its own driver here pinned the first booted app's queue for every
+ * later `Application` in the process.
+ */
 let globalDriver: QueueDriver | null = null
 
-/** Overrides the container's `queue` manager for `Job.dispatch()`; `QueueManager.driver()` sets it as a side effect. */
+/** Pins the driver `Job.dispatch()` sends through, ahead of the container's `queue` manager. */
 export function setQueueDriver(driver: QueueDriver): void {
   globalDriver = driver
 }
 
+/** Drops the pin, so `getQueueDriver()` falls back to the container again. */
+export function clearQueueDriver(): void {
+  globalDriver = null
+}
+
+/** The `queue` manager bound in the current container, or null when there is neither. */
+function boundQueueManager(): QueueManager | null {
+  try {
+    return getContainer().makeOptional<QueueManager>('queue') ?? null
+  } catch {
+    return null
+  }
+}
+
 /**
- * The driver `Job.dispatch()` sends through: the global override when set,
- * else the default driver of the `queue` manager bound in the container, else
- * null. Resolving through the manager publishes its driver as the global.
+ * The driver `Job.dispatch()` sends through: the pin when set, else the default
+ * driver of the `queue` manager bound in the container, else null. Total by
+ * contract — every caller treats it as `QueueDriver | null`, so a manager bound
+ * with no factory for its default must read as absent rather than throw.
  */
 export function getQueueDriver(): QueueDriver | null {
   if (globalDriver) return globalDriver
 
-  let container: ReturnType<typeof getContainer>
-  try {
-    container = getContainer()
-  } catch {
-    return null
+  const manager = boundQueueManager()
+  if (!manager || !manager.hasDriver(manager.getDefaultDriverName())) return null
+  return manager.driver()
+}
+
+/** Why `getQueueDriver()` came back null: a manager bound with no driver reads differently from no manager at all. */
+function missingQueueDriverMessage(): string {
+  const manager = boundQueueManager()
+  if (manager) {
+    return (
+      `Queue driver not configured: the "queue" manager has no driver named "${manager.getDefaultDriverName()}". ` +
+      'Register one with manager.registerDriver(name, factory), or pass createQueueManager({ drivers }) a factory for it.'
+    )
   }
-  const manager = container.makeOptional<QueueManager>('queue')
-  return manager ? manager.driver() : null
+  return (
+    'Queue driver not configured. Register a provider that binds a QueueManager as "queue" ' +
+    '(QueueServiceProvider, or your own), or call setQueueDriver() first.'
+  )
 }
 
 function generateJobId(): string {
@@ -73,10 +103,7 @@ export abstract class Job<T = unknown> {
   ): Promise<string> {
     const driver = getQueueDriver()
     if (!driver) {
-      throw new Error(
-        'Queue driver not configured. Register a provider that binds a QueueManager as "queue" ' +
-          '(QueueServiceProvider, or your own), or call setQueueDriver() first.',
-      )
+      throw new Error(missingQueueDriverMessage())
     }
 
     const jobId = generateJobId()

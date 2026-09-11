@@ -4,7 +4,7 @@ import { createContainer, setContainer } from '../../src/container'
 import { EventServiceProvider } from '../../src/providers/EventServiceProvider'
 import { QueueServiceProvider } from '../../src/providers/QueueServiceProvider'
 import { Event } from '../../src/events'
-import { MemoryDriver, Worker, setQueueDriver } from '../../src/queue'
+import { MemoryDriver, Worker, clearQueueDriver } from '../../src/queue'
 
 class OrderPlaced extends Event {
   constructor(public readonly orderId: string) {
@@ -17,11 +17,11 @@ describe('queued listeners through the providers', () => {
 
   beforeEach(() => {
     driver = new MemoryDriver()
-    setQueueDriver(null as never)
+    clearQueueDriver()
   })
 
   afterEach(() => {
-    setQueueDriver(null as never)
+    clearQueueDriver()
     setContainer(createContainer())
   })
 

@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import {
   Attachable,
+  clearQueueDriver,
   configureAttachments,
   defineModel,
   DrizzleAdapter,
@@ -12,7 +13,6 @@ import {
   MemoryQueueDriver,
   processJob,
   QueueManager,
-  setQueueDriver,
   StorageManager,
   SyncQueueDriver,
   type ConfigureAttachmentsOptions,
@@ -114,7 +114,7 @@ describe('attachments queued generation', () => {
     configure({ queue: undefined })
     // Earlier tests installed a global driver; clear it so the fallback
     // genuinely has nothing to dispatch through.
-    setQueueDriver(null as unknown as Parameters<typeof setQueueDriver>[0])
+    clearQueueDriver()
     await expect(Post.attach(1, 'cover', PNG_1X1, { queued: true })).rejects.toThrow(
       'queued: true requires a queue',
     )

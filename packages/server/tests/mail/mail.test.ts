@@ -9,6 +9,7 @@ import {
 } from '../../src/mail'
 import {
   setQueueDriver,
+  clearQueueDriver,
   MemoryDriver,
   clearJobRegistry,
 } from '../../src/queue'
@@ -407,7 +408,7 @@ describe('Mail with Queue', () => {
   })
 
   it('throws when queue driver not configured', async () => {
-    setQueueDriver(null as any)
+    clearQueueDriver()
 
     await expect(
       mail(manager)

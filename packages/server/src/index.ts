@@ -527,6 +527,7 @@ export {
   SyncDriver as SyncQueueDriver,
   RedisDriver as RedisQueueDriver,
   setQueueDriver,
+  clearQueueDriver,
   getQueueDriver,
   registerJob,
   getJob,

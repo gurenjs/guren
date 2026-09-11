@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'bun:test'
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { Application } from '../../src/http/Application'
 import { resolve } from '../../src/container'
 import {
@@ -9,6 +9,9 @@ import {
   createQueueManager,
   registerJob,
   clearJobRegistry,
+  setQueueDriver,
+  clearQueueDriver,
+  type QueueDriver,
 } from '../../src/queue'
 
 interface Mailer {
@@ -28,14 +31,26 @@ function appWithMailer(): { app: Application; sent: string[] } {
   return { app, sent }
 }
 
+/** These apps bind no `queue`, so the dispatch pin is what `Job.dispatch()` reads. */
+function publishDriver(driver: QueueDriver): QueueDriver {
+  const manager = createQueueManager({ default: 'only', drivers: { only: () => driver } })
+  setQueueDriver(manager.driver())
+  return driver
+}
+
 describe('the container an Application publishes', () => {
   beforeEach(() => {
     clearJobRegistry()
+    clearQueueDriver()
     registerJob(ResolvingJob)
   })
 
+  afterEach(() => {
+    clearQueueDriver()
+  })
+
   it('lets a job resolve bindings on the sync driver', async () => {
-    createQueueManager({ default: 'sync', drivers: { sync: () => new SyncDriver() } }).driver()
+    publishDriver(new SyncDriver())
     const { app, sent } = appWithMailer()
     await app.boot()
 
@@ -47,7 +62,7 @@ describe('the container an Application publishes', () => {
   it('lets a job resolve bindings before the application is booted', async () => {
     // `guren queue:work` bootstraps only far enough to read the queue driver.
     // Moving the setContainer() call into boot() fails this test, not the one above.
-    createQueueManager({ default: 'sync', drivers: { sync: () => new SyncDriver() } }).driver()
+    publishDriver(new SyncDriver())
     const { sent } = appWithMailer()
 
     await ResolvingJob.dispatch({ subject: 'Unbooted' })
@@ -59,7 +74,7 @@ describe('the container an Application publishes', () => {
     // The shape `queue:work` actually runs: dispatch only enqueues, and the job
     // is constructed and handled later by the Worker.
     const driver = new MemoryDriver()
-    createQueueManager({ default: 'memory', drivers: { memory: () => driver } }).driver()
+    publishDriver(driver)
     const { app, sent } = appWithMailer()
     await app.boot()
 
