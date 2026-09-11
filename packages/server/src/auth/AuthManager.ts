@@ -87,6 +87,11 @@ export class AuthManager implements AuthManagerContract {
     this.providers.set(name, { factory: factory as ProviderFactory<any> })
   }
 
+  /** The guard `useTokens()` registered, or null. On this class rather than the contract, like `getApiTokenOptions()`. */
+  getTokenGuard(): string | null {
+    return this.tokenGuard
+  }
+
   /** Whether a provider factory is registered under `name`; `getProvider()` throws where this is false. */
   hasProvider(name: string): boolean {
     return this.providers.has(name)

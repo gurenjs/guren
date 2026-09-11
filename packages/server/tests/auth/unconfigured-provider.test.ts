@@ -118,6 +118,21 @@ describe('the boot-time warning for auth without a user provider', () => {
     expect(warnings()).toHaveLength(0)
   })
 
+  it('stays quiet for a token-only app', async () => {
+    const app = new Application({ auth: {} })
+    app.auth.useTokens({ verify: async () => null } as never, { provider: 'accounts' })
+    await app.boot()
+
+    expect(warnings()).toHaveLength(0)
+  })
+
+  it('stays quiet when the app mounts its own sessions', async () => {
+    const app = new Application({ auth: { autoSession: false } })
+    await app.boot()
+
+    expect(warnings()).toHaveLength(0)
+  })
+
   it('stays quiet for an app that never asked for auth', async () => {
     const app = new Application()
     await app.boot()

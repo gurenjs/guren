@@ -773,12 +773,14 @@ export class Application {
 
   /**
    * After every provider has booted: `auth` was asked for, yet the default
-   * guard still runs against the placeholder provider, so every login attempt
-   * will throw. Warned rather than thrown, since the app may authenticate only
-   * through tokens or a guard of its own.
+   * guard still runs against the placeholder provider, so a session login
+   * attempt would throw. Silent for an app that authenticates through tokens,
+   * or that mounts its own sessions, since neither reaches that guard.
    */
   private warnOnUnconfiguredAuth(): void {
     if (!this.options.auth) return
+    if (this.options.auth.autoSession === false) return
+    if (this.authManager.getTokenGuard()) return
     if (this.authManager.getDefaultGuard() !== DEFAULT_GUARD) return
     if (this.authManager.hasProvider(DEFAULT_PROVIDER)) return
     console.warn(
