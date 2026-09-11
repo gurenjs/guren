@@ -1,3 +1,4 @@
+import { keepAlive } from '../support/keep-alive'
 import type { LogChannel, LogLevel, LogContext, LogEntry } from './types'
 
 export interface LoggerOptions {
@@ -140,8 +141,10 @@ export class Logger {
     for (const channel of this.channels) {
       try {
         const pending = channel.log(entry)
+        // Gated on the result: a sync channel has nothing left to keep alive, and
+        // deferring it would hand `waitUntil` a settled promise for every line.
         if (isPromiseLike(pending)) {
-          Promise.resolve(pending).catch(reportLoggingError)
+          keepAlive({ run: () => pending, onFailure: reportLoggingError, label: 'a log entry' })
         }
       } catch (error) {
         reportLoggingError(error)

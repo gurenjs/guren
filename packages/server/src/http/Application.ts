@@ -26,6 +26,7 @@ import {
   type DevBannerOptions,
 } from './dev-banner'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
+import { runInRequestScope } from '../support/request-deferrer'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
 // still allowing consumers to stub or polyfill it when running elsewhere.
@@ -803,7 +804,9 @@ export class Application {
   }
 
   async fetch(request: Request, env?: unknown, executionCtx?: ExecutionContext): Promise<Response> {
-    return this.hono.fetch(request, env, executionCtx)
+    // A scope only on Workers, where a singleton's unfinished write (an async
+    // log channel) is abandoned with the request unless it reaches `waitUntil`.
+    return runInRequestScope(executionCtx, () => this.hono.fetch(request, env, executionCtx))
   }
 
   async listen(options: ApplicationListenOptions = {}): Promise<ListenAddress> {

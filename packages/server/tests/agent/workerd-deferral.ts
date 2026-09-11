@@ -31,8 +31,10 @@ export async function runDeferralCase(
     target: 'browser',
     format: 'esm',
     minify: false,
-    // Supplied by workerd at run time; there is nothing on disk to bundle.
-    external: ['cloudflare:workers'],
+    // Supplied by workerd at run time, as under a wrangler deploy: there is
+    // nothing on disk to bundle, and the browser target would otherwise stub
+    // `node:async_hooks` to `{}`.
+    external: ['cloudflare:workers', 'node:*'],
   })
   if (!build.success) {
     throw new Error(build.logs.map((log) => String(log)).join('\n'))
@@ -64,7 +66,8 @@ export async function runDeferralCase(
     await new Promise((done) => setTimeout(done, 1500))
 
     const rows = (await db.prepare(`SELECT tool FROM ${table}`).all()) as { results: { tool: string }[] }
-    // Sorted because an alarm or a socket message lands in no dispatch order.
+    // Sorted because a deferred write, an alarm or a socket message lands in no
+    // dispatch order.
     return rows.results.map((row) => row.tool).sort()
   } finally {
     await mf.dispose()
