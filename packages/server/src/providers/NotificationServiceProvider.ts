@@ -1,17 +1,24 @@
 import { ServiceProvider } from '../container/ServiceProvider'
-import { createNotificationManager, type NotificationManager } from '../notifications'
+import {
+  createNotificationManager,
+  setNotificationManager,
+  type NotificationManager,
+} from '../notifications'
 
-/** Binds the NotificationManager as a singleton in the container. */
+/**
+ * Binds the NotificationManager as a singleton in the container and, at boot,
+ * makes it the global one behind `getNotificationManager()`.
+ */
 export class NotificationServiceProvider extends ServiceProvider {
   register(): void {
     this.container.singleton('notifications', () => createNotificationManager())
   }
 
   boot(): void {
-    // Register the queued-notification job in every booted process, including
-    // a worker that never sends a notification itself.
-    this.container
-      .make<NotificationManager>('notifications')
-      .registerQueueJob()
+    const manager = this.container.make<NotificationManager>('notifications')
+    setNotificationManager(manager)
+    // Registered in every booted process, including a worker that never sends
+    // a notification itself.
+    manager.registerQueueJob()
   }
 }
