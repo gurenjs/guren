@@ -90,6 +90,8 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 > [!IMPORTANT]
 > `aliasMiddleware()` は登録済みのエイリアス名を型に載せた**新しい `Router` 型**を返します。戻り値を受け取らずに呼び出すと登録名が型に伝わらず、後続の `.middleware('auth')` が型エラーになります。上記のように必ずチェーンして受け取ってください。
+>
+> この型は関数をまたいでも効きます。`Router<'auth' | 'guest'>` と書いた登録関数には、その2つをエイリアス登録して戻り値を受け取った `router` を渡してください。`baseRouter` のままでは型が合いません。エントリの登録関数は素の `Router` を受け取ります。エイリアスを登録するのはその関数自身で、`createApp({ routes })` が渡すルーターにはまだ何も載っていないからです。
 
 エイリアスを登録すれば、ミドルウェアが受け入れられる場所ならどこでも文字列名で使えます。
 
