@@ -1102,7 +1102,8 @@ middleware chain carries no authorization capability and whose action never
 calls `this.authorize(...)`.
 
 `check` **warns** on a tool name some clients drop (a dot, or more than 64
-characters, which is where `agent.toolName` comes in), a missing output shape,
+characters, which is where `agent.toolName` comes in; advisory, so `check --ci`
+and `guren gate` stay green), a missing output shape,
 an Inertia response, a body-carrying route with no `body` schema, a read-only
 tool whose action mutates, and any verdict it could not reach (an inline
 handler, an unreadable controller file, two controller classes sharing a name).

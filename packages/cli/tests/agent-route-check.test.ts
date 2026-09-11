@@ -95,6 +95,8 @@ describe('checkAgentRoutes', () => {
 
       expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe('warn')
+      // Advisory: the name is legal, so `check --ci` and `guren gate` must not fail on it.
+      expect(results[0]?.advisory).toBe(true)
       expect(results[0]?.key).toBe('agent-route-portable-name:GET:/posts')
       expect(results[0]?.message).toContain("'posts.index'")
       expect(results[0]?.message).toContain('route name')

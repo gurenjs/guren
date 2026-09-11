@@ -219,7 +219,7 @@ MCP サーバは `guren_gate` ツールとして公開します。それ以外�
 | `agent-route-name:*` | agent メタデータを宣言しているのに `.name()` がない。ツール名はツールの識別子そのものなので、名前のないルートはツールになれません。 |
 | `agent-route-tool-name:*` | ツール名(`agent.toolName` またはルート名)が MCP の文法 `^[A-Za-z0-9._-]{1,128}$` から外れている。クライアントは該当ツールだけでなくツール一覧全体を拒否します。 |
 | `agent-route-reserved-name:*` | フレームワークが予約しているツール名を使っている。`guren_preflight` は MCP エンドポイントが自分で追加するメタツールです。この名前を取ったルートはまったく公開されません。 |
-| `agent-route-portable-name:*` | (warn) MCP としては正当なツール名だが、Claude と OpenAI のツール API が課し、Claude Managed Agents が MCP ツールにも適用する文法 `^[A-Za-z0-9_-]{1,64}$` から外れている。そのクライアントはツールを黙って読み飛ばします。`agent.toolName` にどのクライアントも受け付ける綴り(`posts_index`)を設定してください。 |
+| `agent-route-portable-name:*` | (warn、advisory) MCP としては正当なツール名だが、Claude と OpenAI のツール API が課し、Claude Managed Agents が MCP ツールにも適用する文法 `^[A-Za-z0-9_-]{1,64}$` から外れている。そのクライアントはツールを黙って読み飛ばします。`agent.toolName` にどのクライアントも受け付ける綴り(`posts_index`)を設定してください。advisory なので `check --ci` と `guren gate` はこれで失敗しません。 |
 | `agent-route-duplicate:*` | 2つ以上のルートが同じツール名に解決される。 |
 | `agent-route-authorization:*` | read-only でないツールなのに、ミドルウェアチェーンに認可 capability がなく、コントローラアクションでも `this.authorize(...)` を呼んでいない。**認証は認可ではありません**。`this.auth.userOrFail()` や APIトークンの確認はどちらも認可の代わりにならず、その場合は専用のメッセージで報告されます。 |
 

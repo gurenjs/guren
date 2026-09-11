@@ -26,7 +26,7 @@ hatch, `agent: { toolName: 'posts_index' }`. The framework's own meta-tool
   enforce, a strict subset of MCP's. The reserved names are pinned to it.
 - `guren check` gains `agent-route-portable-name:*`, a **warn** on a tool name
   that is legal MCP but falls outside the portable grammar, proposing the
-  `toolName` spelling (`posts.index` → `posts_index`). A warn rather than a
-  fail: the name is legal, and an app whose clients accept dots has nothing to
-  fix. The derivation itself is unchanged, since a dot-to-underscore default
+  `toolName` spelling (`posts.index` → `posts_index`). Advisory, like the
+  test-coverage nudges: the name is legal, so `check --ci` and `guren gate` do
+  not fail on it, and an app whose clients accept dots has nothing to fix. The derivation itself is unchanged, since a dot-to-underscore default
   would rename every existing tool, token scope and audit record.

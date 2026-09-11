@@ -100,8 +100,8 @@ function toolNameFinding(route: AgentRoute): CheckResult | undefined {
  * A name MCP admits but some clients drop (#787): the Claude and OpenAI tool
  * APIs enforce `PORTABLE_AGENT_TOOL_NAME_PATTERN`, and Claude Managed Agents
  * skips an MCP tool outside it with no error the application can see, since
- * `tools/list` was answered correctly. A warn, never a fail: the name is legal,
- * and an app whose clients all accept dots has nothing to fix.
+ * `tools/list` was answered correctly. Advisory, so `check --ci` and `guren
+ * gate` stay green: the name is legal, and clients that accept dots need no fix.
  */
 function portableNameFinding(route: AgentRoute): CheckResult | undefined {
   const { toolName } = route
@@ -114,16 +114,19 @@ function portableNameFinding(route: AgentRoute): CheckResult | undefined {
       + 'HTTP path stay as they are; only the name the tool is advertised under changes.'
     : 'Set agent.toolName to a name of at most 64 characters from [A-Za-z0-9_-]. The route name, '
       + 'route() helpers and the HTTP path stay as they are; only the name the tool is advertised under changes.'
-  return check(
-    `agent-route-portable-name:${route.keySuffix}`,
-    `${route.label} agent tool`,
-    'warn',
-    `The tool name '${toolName}' (from the ${source}) is a legal MCP name but falls outside `
-    + `${PORTABLE_AGENT_TOOL_NAME_PATTERN.source}, the grammar the Claude and OpenAI tool APIs enforce and `
-    + 'Claude Managed Agents applies to MCP tools. Such a client skips the tool silently: tools/list is '
-    + 'answered correctly, the client drops the entry, and the agent runs without it.',
-    suggestion,
-  )
+  return {
+    ...check(
+      `agent-route-portable-name:${route.keySuffix}`,
+      `${route.label} agent tool`,
+      'warn',
+      `The tool name '${toolName}' (from the ${source}) is a legal MCP name but falls outside `
+      + `${PORTABLE_AGENT_TOOL_NAME_PATTERN.source}, the grammar the Claude and OpenAI tool APIs enforce and `
+      + 'Claude Managed Agents applies to MCP tools. Such a client skips the tool silently: tools/list is '
+      + 'answered correctly, the client drops the entry, and the agent runs without it.',
+      suggestion,
+    ),
+    advisory: true,
+  }
 }
 
 /**
