@@ -158,7 +158,7 @@ export interface AgentToolClient {
   /**
    * What became of an approval request this agent created (RFC 0016 §5.4).
    *
-   * The same answer `guren.approval_status` gives an MCP client, derived by the
+   * The same answer `guren_approval_status` gives an MCP client, derived by the
    * same rule and audited under the same tool name: a status check reaches the
    * application's storage, so it spends the budget and leaves a record.
    */
@@ -311,7 +311,7 @@ export function createAgentToolClient(options: AgentToolClientOptions): AgentToo
     const audited = { toolName: APPROVAL_STATUS_TOOL_NAME }
     const args = { requestId }
 
-    // Metered as a read, the way `guren.approval_status` is: a status check
+    // Metered as a read, the way `guren_approval_status` is: a status check
     // reaches the application's storage, so an unmetered one is a hole in the
     // per-instance budget an agent can poll through.
     const overBudget = budget.consume()

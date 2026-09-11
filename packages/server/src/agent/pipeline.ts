@@ -46,7 +46,7 @@ import { installAgentPrincipal } from '../internal/agent-principal'
 /**
  * What the audit hooks need from a tool: its name, and the redaction rules its
  * arguments are recorded under. Narrower than {@link DerivedAgentTool} because
- * one audited call has no route behind it: a `guren.preflight` invocation is
+ * one audited call has no route behind it: a `guren_preflight` invocation is
  * recorded under the meta-tool's name with the *checked* tool's `redact` list,
  * the meta-tool's own being empty.
  */
@@ -95,7 +95,7 @@ export type AgentInvocationResult =
 export interface InterposedAgentCall {
   tool: DerivedAgentTool
   args: Record<string, unknown>
-  /** True for a rehearsal (`guren.preflight`), which executes nothing. */
+  /** True for a rehearsal (`guren_preflight`), which executes nothing. */
   preflight: boolean
 }
 
@@ -294,7 +294,7 @@ export interface AgentInvocation {
   preflight?: boolean
   /**
    * The identity the record is written under, when it is not the dispatched
-   * tool's own — see {@link AuditedTool}. `guren.preflight` is the one caller:
+   * tool's own — see {@link AuditedTool}. `guren_preflight` is the one caller:
    * the meta-tool's name, the checked tool's redaction rules.
    */
   audited?: AuditedTool

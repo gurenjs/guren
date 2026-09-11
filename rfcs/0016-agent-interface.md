@@ -108,6 +108,15 @@ Implementation notes (the non-obvious parts):
   identity. Tool names use the route name verbatim — the MCP name grammar
   (`^[A-Za-z0-9._-]{1,128}$`, SEP-986) permits dots, so `posts.store` needs no
   transformation. `guren check` validates charset and length only.
+  **Amended (#787):** legal is not the same as accepted. The Claude and OpenAI
+  tool APIs enforce `^[A-Za-z0-9_-]{1,64}$`, and Claude Managed Agents applies
+  that grammar to MCP tools and silently skips every tool outside it, so a
+  catalogue of idiomatic dotted names reaches such a client empty. The
+  derivation is unchanged (the tool name is still the route name, and a
+  dot-to-underscore default would rename every existing tool, scope and audit
+  record), but `guren check` now *warns* on a name outside the portable grammar
+  and names `agent.toolName` as the fix, and the framework's own meta-tools are
+  spelled `guren_preflight` / `guren_approval_status` for the same reason.
 - Annotation defaults follow the MCP spec's semantics, not HTTP intuition:
   GET/QUERY → `readOnlyHint: true`; for everything else `destructiveHint` stays at
   the spec default **true** (declaring `false` is the strong claim "additive only",
@@ -304,7 +313,7 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    format, as an MCP call. An application that configured no sink publishes none, and
    the command records nothing — the same absence the endpoint has, not a second sink
    writing somewhere the operator does not look.
-   A `--preflight` is recorded as `guren.preflight`, never under the tool it rehearsed,
+   A `--preflight` is recorded as `guren_preflight`, never under the tool it rehearsed,
    which is the rule the App MCP endpoint already follows: the handler did not run, so a
    record naming `posts.destroy` with a success status would be indistinguishable from a
    destroy that happened. The probed tool rides in the record's arguments, in the same
@@ -360,8 +369,10 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
 
    **Amended in implementation (Phase 2.5a):** the preflight half of that
    companion shipped as **one meta-tool for the whole catalogue**,
-   `guren.preflight`, taking `{ tool, input }` and answering with a verdict
-   under its own output schema. Per-tool companions (`posts.store.preflight`
+   `guren_preflight` (first shipped as `guren.preflight`; renamed in #787
+   because an application cannot `toolName` a meta-tool, and the dotted
+   spelling was skipped by Claude Managed Agents), taking `{ tool, input }` and
+   answering with a verdict under its own output schema. Per-tool companions (`posts.store.preflight`
    beside `posts.store`) were the obvious alternative and were rejected: they
    double the tool count, which collides with this RFC's own catalogue-quality
    rule in §5.5 — clients reward small, curated catalogues, and doubling one to
@@ -430,14 +441,14 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
      awaited: a channel that is down costs an approver an email, never the
      request or the tool call, and the failure is warned about with the request
      id in it.
-   - **`guren.approval_status`** is a second reserved meta-tool,
+   - **`guren_approval_status`** is a second reserved meta-tool,
      `{ requestId }` in, its own output schema out. A caller may read only the
      status of a request it created: an id belonging to someone else answers
      *exactly* as an unknown id does, converged on one branch in code rather
      than left to two call sites to agree, because any difference between the
      two answers enumerates other principals' pending actions. The audit trail
      is where the distinction is kept (200 vs 404 under
-     `tool: 'guren.approval_status'`); the caller is told the same thing either
+     `tool: 'guren_approval_status'`); the caller is told the same thing either
      way.
    - **Deviation, chosen: the status tool is listed only when a queue exists**,
      as well as when the token grants at least one tool. The design gave only
@@ -467,12 +478,12 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    authorization surface of tools the token cannot call. A tool declaring
    `approval: 'required'` **is** checkable even though it is not callable —
    "would this be accepted if it were approved?" is exactly the question an
-   approval gate creates, and the rehearsal executes nothing. `guren.preflight`
+   approval gate creates, and the rehearsal executes nothing. `guren_preflight`
    is listed only for a token that grants at least one tool, since a token that
    can call nothing has nothing to rehearse and listing it would map the
    surface. Rehearsing is not requesting: preflight of an approval-gated tool
    creates no pending record and notifies nobody. And the invocation is audited as `AgentToolInvoked` with
-   `tool: 'guren.preflight'` — an agent probing what it may do is what an audit
+   `tool: 'guren_preflight'` — an agent probing what it may do is what an audit
    trail wants to show — while the checked tool gets no record, because nothing
    was invoked. The name is reserved: an application route whose `.agent()`
    tool name claims it **fails** `guren check`, and the endpoint drops it
@@ -559,7 +570,7 @@ and the fail-closed refusal remains exactly what an unconfigured server
 answers, naming the configuration line (see §5.4)**; ~~`_preflight` is deferred to a
 follow-up (it needs a server-side seam to stop the chain before the
 controller)~~ **— shipped since, as a router seam reached from the
-`guren.preflight` meta-tool; see §5.4**; and bearer auth
+`guren_preflight` meta-tool; see §5.4**; and bearer auth
 answers 401 + `WWW-Authenticate: Bearer` at the
 transport boundary, before any MCP framing. Mounts per-request stateless
 server + `WebStandardStreamableHTTPServerTransport`
@@ -747,8 +758,8 @@ catalog and `agent:sync`.
   PR-1b derivation + codegen + `tool:list`/`tool:inspect` + artifact lifecycle;
   PR-1c checks + audits + entity-context + harness.
 - **Phase 2**: `@guren/plugin-mcp` with the Security Layer items (scopes, `token:issue`,
-  audit log, rate limits, preflight); the `guren.preflight` companion tool in 2.5a,
-  the approval queue and `guren.approval_status` in 2.5b.
+  audit log, rate limits, preflight); the `guren_preflight` companion tool in 2.5a,
+  the approval queue and `guren_approval_status` in 2.5b.
 - **Phase 3**: WebMCP (experimental). **Phase 4a**: Workers support. **Phase 4b**: separate RFC.
 
 The first PR is PR-1a alone: the contract types, the builder, serialization, and their

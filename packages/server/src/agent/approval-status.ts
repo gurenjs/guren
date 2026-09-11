@@ -4,7 +4,7 @@
  * clock, no protocol.
  *
  * Here rather than in an adapter because two surfaces answer this question —
- * `guren.approval_status` over MCP and a durable agent's own status check
+ * `guren_approval_status` over MCP and a durable agent's own status check
  * (RFC 0017 §5) — and a record one of them calls "approved" must not be one
  * the other hides.
  */

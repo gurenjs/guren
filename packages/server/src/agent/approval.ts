@@ -93,7 +93,7 @@ export interface AgentApprovalStore {
   create(request: AgentApprovalRequest): Promise<void>
 
   /**
-   * The request with this id, or `null`. Backs `guren.approval_status`. Takes
+   * The request with this id, or `null`. Backs `guren_approval_status`. Takes
    * no principal: the caller-scoping rule is applied by the framework (see
    * {@link agentApprovalVisibleTo}), because a store that forgot to filter
    * would leak other principals' pending actions and nothing would fail.
@@ -267,7 +267,7 @@ export function agentApprovalUsableAt(request: AgentApprovalRequest, now: Date):
 
 /**
  * Whether `principal` may be told anything at all about `request` — the scope
- * rule of `guren.approval_status` (RFC 0016 §5.4): a caller reads only the
+ * rule of `guren_approval_status` (RFC 0016 §5.4): a caller reads only the
  * status of a request it created, or an agent could walk ids and enumerate
  * other principals' pending actions. A `false` here must be answered *exactly*
  * as an unknown id is: any difference in message, shape or timing reintroduces it.

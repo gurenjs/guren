@@ -204,7 +204,7 @@ const result = await this.tools.call('tickets.close', { id })
 
 **`ok` is not success.** It says the request reached your application; the application's own verdict is `result.outcome.isError`, with the HTTP status in `result.outcome.status`. A 403 from a policy and a 422 from a schema both arrive as `ok`. The other three discriminants are declared as absent on each variant, so `if (result.pending) return` narrows without a type guard.
 
-`this.tools.preflight(name, args)` asks the same route for a verdict instead of an execution (the same seam [`--preflight` and `guren.preflight`](./agent-interface.md#rehearsing-a-call-over-mcp) reach). The scope gate runs and the budget is spent; the approval gate is skipped, because rehearsing an approval-gated tool is exactly when the question is worth asking and a rehearsal executes nothing.
+`this.tools.preflight(name, args)` asks the same route for a verdict instead of an execution (the same seam [`--preflight` and `guren_preflight`](./agent-interface.md#rehearsing-a-call-over-mcp) reach). The scope gate runs and the budget is spent; the approval gate is skipped, because rehearsing an approval-gated tool is exactly when the question is worth asking and a rehearsal executes nothing.
 
 ### Two rules about state
 
@@ -274,7 +274,7 @@ Four things those operator surfaces taught, worth repeating in yours:
 
 A browser console alongside the bearer API needs less wiring than it looks. CSRF is mounted over the whole app by `createApp({ auth })`, and the tool routes stay exempt on their own terms (a bearer request that carries no cookies, and a request carrying the principal the pipeline installed, are both skipped), so nothing has to be excluded by hand. Two things do need care: the session store must be database-backed, since on Workers the login redirect and the page it lands on are answered by different isolates, and the routes carrying `.agent()` metadata must keep returning JSON. `guren check` warns about an agent route that answers with an Inertia response, because a rendered page is not a tool result.
 
-A durable agent's own status check gets exactly the answer `guren.approval_status` gives an MCP client, by the same rule and audited under the same tool name, including the part that is a refusal to distinguish: an unknown id and another principal's id are one message, so neither surface can be used to enumerate what your colleagues are waiting on.
+A durable agent's own status check gets exactly the answer `guren_approval_status` gives an MCP client, by the same rule and audited under the same tool name, including the part that is a refusal to distinguish: an unknown id and another principal's id are one message, so neither surface can be used to enumerate what your colleagues are waiting on.
 
 ## Deploying to Workers
 

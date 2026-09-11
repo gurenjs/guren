@@ -2,7 +2,9 @@ import { relative, resolve } from 'node:path'
 import type { CallExpression } from '@babel/types'
 import {
   AGENT_APPROVAL_CONFIG_KEY,
+  AGENT_TOOL_NAME_PATTERN,
   isReservedAgentToolName,
+  PORTABLE_AGENT_TOOL_NAME_PATTERN,
   RESERVED_AGENT_TOOL_NAMES,
 } from '@guren/core'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
@@ -31,13 +33,6 @@ export interface AgentRouteCheckOptions {
   /** Parse cache to read controller sources through, shared so files are not parsed twice. */
   cache?: ParseCache
 }
-
-/**
- * The MCP tool-name grammar (SEP-986, RFC 0016 §1). `deriveAgentTools` knows it
- * too; RFC 0016 §1 is the shared source until one side can import the other, so
- * do not fork the pattern.
- */
-const TOOL_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
 
 /**
  * Methods whose tools default to `readOnlyHint: true` (RFC 0016 §1). Narrower
@@ -88,7 +83,7 @@ function nameFinding(route: AgentRoute): CheckResult | undefined {
 
 function toolNameFinding(route: AgentRoute): CheckResult | undefined {
   const { toolName } = route
-  if (toolName === undefined || TOOL_NAME_PATTERN.test(toolName)) return undefined
+  if (toolName === undefined || AGENT_TOOL_NAME_PATTERN.test(toolName)) return undefined
 
   const source = route.agent.toolName !== undefined ? 'agent toolName override' : 'route name'
   return check(
@@ -96,10 +91,42 @@ function toolNameFinding(route: AgentRoute): CheckResult | undefined {
     `${route.label} agent tool`,
     'fail',
     `The tool name '${toolName}' (from the ${source}) is not a legal MCP tool name: the grammar is `
-    + '^[A-Za-z0-9._-]{1,128}$. A client rejects the whole tool list rather than the one tool.',
-    'Rename the route, or set agent.toolName to a name matching that grammar (dots are allowed, so '
-    + '\'posts.store\' needs no transformation).',
+    + `${AGENT_TOOL_NAME_PATTERN.source}. A client rejects the whole tool list rather than the one tool.`,
+    'Rename the route, or set agent.toolName to a name matching that grammar.',
   )
+}
+
+/**
+ * A name MCP admits but some clients drop (#787): the Claude and OpenAI tool
+ * APIs enforce `PORTABLE_AGENT_TOOL_NAME_PATTERN`, and Claude Managed Agents
+ * skips an MCP tool outside it with no error the application can see, since
+ * `tools/list` was answered correctly. Advisory, so `check --ci` and `guren
+ * gate` stay green: the name is legal, and clients that accept dots need no fix.
+ */
+function portableNameFinding(route: AgentRoute): CheckResult | undefined {
+  const { toolName } = route
+  if (toolName === undefined || PORTABLE_AGENT_TOOL_NAME_PATTERN.test(toolName)) return undefined
+
+  const source = route.agent.toolName !== undefined ? 'agent toolName override' : 'route name'
+  const portable = toolName.replace(/[^A-Za-z0-9_-]/g, '_')
+  const suggestion = PORTABLE_AGENT_TOOL_NAME_PATTERN.test(portable)
+    ? `Set agent: { toolName: '${portable}' } on the route. The route name, route() helpers and the `
+      + 'HTTP path stay as they are; only the name the tool is advertised under changes.'
+    : 'Set agent.toolName to a name of at most 64 characters from [A-Za-z0-9_-]. The route name, '
+      + 'route() helpers and the HTTP path stay as they are; only the name the tool is advertised under changes.'
+  return {
+    ...check(
+      `agent-route-portable-name:${route.keySuffix}`,
+      `${route.label} agent tool`,
+      'warn',
+      `The tool name '${toolName}' (from the ${source}) is a legal MCP name but falls outside `
+      + `${PORTABLE_AGENT_TOOL_NAME_PATTERN.source}, the grammar the Claude and OpenAI tool APIs enforce and `
+      + 'Claude Managed Agents applies to MCP tools. Such a client skips the tool silently: tools/list is '
+      + 'answered correctly, the client drops the entry, and the agent runs without it.',
+      suggestion,
+    ),
+    advisory: true,
+  }
 }
 
 /**
@@ -130,7 +157,7 @@ function reservedNameFinding(route: AgentRoute): CheckResult | undefined {
 function duplicateFindings(routes: AgentRoute[]): CheckResult[] {
   const byToolName = new Map<string, AgentRoute[]>()
   for (const route of routes) {
-    if (route.toolName === undefined || !TOOL_NAME_PATTERN.test(route.toolName)) continue
+    if (route.toolName === undefined || !AGENT_TOOL_NAME_PATTERN.test(route.toolName)) continue
     const group = byToolName.get(route.toolName)
     if (group) group.push(route)
     else byToolName.set(route.toolName, [route])
@@ -582,9 +609,10 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   }
 
   for (const route of routes) {
-    // At most one naming finding per route, first applicable wins: the three
-    // rules describe one defect with one fix, renaming the route.
-    const nameResult = nameFinding(route) ?? toolNameFinding(route) ?? reservedNameFinding(route)
+    // At most one naming finding per route, first applicable wins: the four
+    // rules describe one defect with one fix, renaming the tool.
+    const nameResult =
+      nameFinding(route) ?? toolNameFinding(route) ?? reservedNameFinding(route) ?? portableNameFinding(route)
     if (nameResult) results.push(nameResult)
 
     const authorization = authorizationFinding(route)
@@ -608,7 +636,8 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
       'Agent routes',
       'pass',
       `${routes.length} agent-exposed route${routes.length === 1 ? '' : 's'} checked: every tool name is `
-      + 'legal, unreserved and unique, every non-read-only tool carries authorization evidence, every declared '
+      + 'legal, portable across clients, unreserved and unique, every non-read-only tool carries '
+      + 'authorization evidence, every declared '
       + 'readOnlyHint holds against the action, every approval-gated tool has a queue to record into, and '
       + 'every route declares the schemas a tool is derived from. Nothing here validates the derived tools '
       + 'themselves, or any behaviour outside the controller bodies this check reads.',

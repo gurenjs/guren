@@ -420,7 +420,7 @@ describe('createAgentToolClient: the approval status check', () => {
 
     const invoked = records.filter((event): event is AgentToolInvoked => event instanceof AgentToolInvoked)
     expect(invoked).toHaveLength(1)
-    expect(invoked[0]!.tool).toBe('guren.approval_status')
+    expect(invoked[0]!.tool).toBe('guren_approval_status')
     expect(invoked[0]!.status).toBe(200)
     expect(invoked[0]!.surface).toBe('durable')
     expect(invoked[0]!.principal?.id).toBe('agent:triager:status-2')

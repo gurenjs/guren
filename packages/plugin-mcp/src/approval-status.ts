@@ -1,8 +1,8 @@
 /**
- * `guren.approval_status` — the approval-status companion tool (RFC 0016 §5.4
+ * `guren_approval_status` — the approval-status companion tool (RFC 0016 §5.4
  * item 4). A call to an `approval: 'required'` tool comes back refused carrying
  * a request id; this is what the id is for. A meta-tool for the same protocol
- * reason `guren.preflight` is one: a status is not the gated route's output, and
+ * reason `guren_preflight` is one: a status is not the gated route's output, and
  * MCP forbids a schema-declaring tool from answering with a different shape of
  * success. It owns no rule — the answer itself is `toApprovalStatusReport` in
  * `@guren/core`, shared with the durable surface, so a record this tool calls

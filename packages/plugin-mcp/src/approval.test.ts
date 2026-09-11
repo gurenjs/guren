@@ -259,7 +259,7 @@ describe('the approval gate with no queue configured', () => {
     const { client } = await connect({ store: null })
     const names = (await client.listTools()).tools.map((tool) => tool.name)
     expect(names).not.toContain('posts.destroy')
-    expect(names).not.toContain('guren.approval_status')
+    expect(names).not.toContain('guren_approval_status')
   })
 })
 
@@ -268,7 +268,7 @@ describe('the approval gate with a queue', () => {
     const { client } = await connect()
     const names = (await client.listTools()).tools.map((tool) => tool.name)
     expect(names).toContain('posts.destroy')
-    expect(names).toContain('guren.approval_status')
+    expect(names).toContain('guren_approval_status')
   })
 
   test('should create no record and notify nobody for tools/list', async () => {
@@ -297,7 +297,7 @@ describe('the approval gate with a queue', () => {
     expect(body.requestId).toBe(record.id)
     expect(body.tool).toBe('posts.destroy')
     expect(body.executed).toBe(false)
-    expect(body.pollWith).toBe('guren.approval_status')
+    expect(body.pollWith).toBe('guren_approval_status')
     expect((result.content as Array<{ text: string }>)[0]!.text).toContain('Nothing was executed')
   })
 
@@ -342,7 +342,7 @@ describe('the approval gate with a queue', () => {
     // A rejection blocks while its record is live, which is what stops a retry
     // from costing a human's "no" nothing. Blocking *forever* would denylist
     // that exact call for that principal permanently, with no remedy short of
-    // deleting the row. `guren.approval_status` still reports it as rejected,
+    // deleting the row. `guren_approval_status` still reports it as rejected,
     // but the gate stops holding it against a new request once it expires.
     const store = new MemoryApprovalStore()
     await seedApproved(store, { id: 5 }, {
@@ -510,7 +510,7 @@ describe('the approval gate with a queue', () => {
   test('should create no record when a gated tool is only rehearsed', async () => {
     const { client, store, notified, dispatched } = await connect()
     const result = await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'posts.destroy', input: { id: 5 } },
     })
 
@@ -524,14 +524,14 @@ describe('the approval gate with a queue', () => {
   })
 })
 
-describe('guren.approval_status', () => {
+describe('guren_approval_status', () => {
   test('should report a pending request to the caller that created it', async () => {
     const { client, store } = await connect()
     await client.callTool({ name: 'posts.destroy', arguments: { id: 5 } })
     const record = store.records[0]!
 
     const result = await client.callTool({
-      name: 'guren.approval_status',
+      name: 'guren_approval_status',
       arguments: { requestId: record.id },
     })
 
@@ -552,7 +552,7 @@ describe('guren.approval_status', () => {
     const { client } = await connect({ store })
 
     const result = await client.callTool({
-      name: 'guren.approval_status',
+      name: 'guren_approval_status',
       arguments: { requestId: spent.id },
     })
 
@@ -571,7 +571,7 @@ describe('guren.approval_status', () => {
     const { client } = await connect({ store })
 
     const result = await client.callTool({
-      name: 'guren.approval_status',
+      name: 'guren_approval_status',
       arguments: { requestId: approved.id },
     })
 
@@ -584,7 +584,7 @@ describe('guren.approval_status', () => {
     const { client } = await connect({ store })
 
     const result = await client.callTool({
-      name: 'guren.approval_status',
+      name: 'guren_approval_status',
       arguments: { requestId: approved.id },
     })
     expect(result.structuredContent).toMatchObject({
@@ -601,7 +601,7 @@ describe('guren.approval_status', () => {
 
     const later = await connect({ store, now: () => new Date(Date.parse(record.expiresAt) + 1) })
     const result = await later.client.callTool({
-      name: 'guren.approval_status',
+      name: 'guren_approval_status',
       arguments: { requestId: record.id },
     })
     expect((result.structuredContent as { status: string }).status).toBe('expired')
@@ -618,12 +618,12 @@ describe('guren.approval_status', () => {
 
     const foreignHarness = await connect({ store: owning, principal: OTHER })
     const foreign = await foreignHarness.client.callTool({
-      name: 'guren.approval_status',
+      name: 'guren_approval_status',
       arguments: { requestId: owned.id },
     })
     const unknownHarness = await connect({ store: empty, principal: OTHER })
     const unknown = await unknownHarness.client.callTool({
-      name: 'guren.approval_status',
+      name: 'guren_approval_status',
       arguments: { requestId: owned.id },
     })
 
@@ -646,12 +646,12 @@ describe('guren.approval_status', () => {
     const approved = await seedApproved(store, { id: 5 })
     const { client, invoked } = await connect({ store })
 
-    await client.callTool({ name: 'guren.approval_status', arguments: { requestId: approved.id } })
-    await client.callTool({ name: 'guren.approval_status', arguments: { requestId: 'nope' } })
+    await client.callTool({ name: 'guren_approval_status', arguments: { requestId: approved.id } })
+    await client.callTool({ name: 'guren_approval_status', arguments: { requestId: 'nope' } })
 
     expect(invoked).toEqual([
-      { tool: 'guren.approval_status', status: 200 },
-      { tool: 'guren.approval_status', status: 404 },
+      { tool: 'guren_approval_status', status: 200 },
+      { tool: 'guren_approval_status', status: 404 },
     ])
   })
 
@@ -660,19 +660,19 @@ describe('guren.approval_status', () => {
       overrides: { limiter: new AgentRateLimiter({ max: 1, writeMax: 1, windowMs: 60_000 }) },
     })
 
-    await client.callTool({ name: 'guren.approval_status', arguments: { requestId: 'x' } })
+    await client.callTool({ name: 'guren_approval_status', arguments: { requestId: 'x' } })
     const throttled = await client.callTool({
-      name: 'guren.approval_status',
+      name: 'guren_approval_status',
       arguments: { requestId: 'x' },
     })
 
     expect(throttled.isError).toBe(true)
-    expect(denied).toEqual([{ tool: 'guren.approval_status', reason: 'rate-limit' }])
+    expect(denied).toEqual([{ tool: 'guren_approval_status', reason: 'rate-limit' }])
   })
 
   test('should refuse arguments that name no request', async () => {
     const { client } = await connect()
-    const result = await client.callTool({ name: 'guren.approval_status', arguments: {} })
+    const result = await client.callTool({ name: 'guren_approval_status', arguments: {} })
     expect(result.isError).toBe(true)
     expect((result.content as Array<{ text: string }>)[0]!.text).toContain('"requestId" argument')
   })

@@ -51,7 +51,7 @@ export interface AppMcpServerOptions {
   pipeline: AgentInvocationPipeline
   /**
    * Undefined disables rate limiting (config `rateLimit: false`). Consulted
-   * here only for `guren.approval_status`, which reads the store rather than a
+   * here only for `guren_approval_status`, which reads the store rather than a
    * route and therefore never enters the pipeline; every other path is metered
    * by the pipeline's hook.
    */
@@ -62,7 +62,7 @@ export interface AppMcpServerOptions {
    * The approval queue, when the application configured one (RFC 0016 §5.4
    * item 4). Absent, an `approval: 'required'` tool is refused fail-closed by
    * the pipeline and unlisted here. Narrower than the gate's own context: this
-   * module only reports on records (`guren.approval_status`) and decides the
+   * module only reports on records (`guren_approval_status`) and decides the
    * catalogue; creating them is configured on the pipeline, from one object.
    */
   approvals?: {
@@ -72,7 +72,7 @@ export interface AppMcpServerOptions {
   }
   /**
    * Audit hooks for the one path that does not go through the pipeline —
-   * `guren.approval_status`. The emitter owns redaction and event
+   * `guren_approval_status`. The emitter owns redaction and event
    * construction; every other record on this surface is written by the
    * pipeline.
    */
@@ -113,7 +113,7 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
     const preflightable = tools.some((tool) => gatePreflight(tool, options.abilities).allowed)
     if (!preflightable) return { tools: listed }
 
-    // `guren.approval_status` rides that same condition — a token that can call
+    // `guren_approval_status` rides that same condition — a token that can call
     // nothing has no request of its own to ask after — plus one: a server with
     // no queue holds no record any id could name, so advertising it there would
     // be the unconfigured queue looking like a working one. `preflightable` is
@@ -164,7 +164,7 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
 }
 
 /**
- * `guren.preflight`: check whether a call to another tool would be allowed,
+ * `guren_preflight`: check whether a call to another tool would be allowed,
  * without performing it (RFC 0016 §5.4). Every check is the one a real call
  * would face, reached the same way and re-implemented nowhere, so a verdict
  * cannot disagree with the call it describes. A refusal is still a *successful*
@@ -211,7 +211,7 @@ async function handlePreflight(
 }
 
 /**
- * `guren.approval_status`: what became of one approval request (RFC 0016 §5.4
+ * `guren_approval_status`: what became of one approval request (RFC 0016 §5.4
  * item 4). Audited under the meta-tool's own name with the status the answer
  * corresponds to: 200 for a report, 404 for a request this caller has none of.
  * The found/not-found distinction lives only in the trail — the caller is told
@@ -292,7 +292,7 @@ function errorResult(text: string): CallToolResult {
 
 /**
  * A meta-tool's successful answer in both halves: `structuredContent` because
- * `guren.preflight` and `guren.approval_status` advertise an output schema and
+ * `guren_preflight` and `guren_approval_status` advertise an output schema and
  * MCP requires a conforming one on success, and the same value as text beside
  * it for a client that ignores structured results.
  */

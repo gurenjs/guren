@@ -1,5 +1,5 @@
 /**
- * `guren.preflight` — the preflight companion tool (RFC 0016 §5.4).
+ * `guren_preflight` — the preflight companion tool (RFC 0016 §5.4).
  *
  * Preflight cannot be an argument of the tool being checked: MCP forbids a tool
  * from returning a different *shape* of success (the SDK client throws `-32600`

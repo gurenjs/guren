@@ -199,7 +199,7 @@ describe('gateApproval', () => {
   test('should refuse to bind an approval to a call with no identified caller', async () => {
     // `agentApprovalPrincipalKey` answers 'anonymous' for every principal-less
     // caller, so a record filed for one is spendable — and readable through
-    // guren.approval_status — by any other. No surface reaches the gate without
+    // guren_approval_status — by any other. No surface reaches the gate without
     // a verified caller, so this is driven directly: the first adapter to pass
     // null gets a refusal rather than a shared bucket.
     const store = new MemoryApprovalStore()

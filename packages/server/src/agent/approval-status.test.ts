@@ -5,7 +5,7 @@ import { agentApprovalPrincipalKey, type AgentApprovalRequest } from './approval
 import type { AgentPrincipal } from './events'
 
 /**
- * The rule two surfaces share (RFC 0016 §5.4): `guren.approval_status` over MCP
+ * The rule two surfaces share (RFC 0016 §5.4): `guren_approval_status` over MCP
  * and a durable agent's own check. Its own file because the answer is read by
  * both, and one of its branches is a deliberate refusal to distinguish.
  */

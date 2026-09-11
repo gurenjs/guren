@@ -389,7 +389,7 @@ describe('tool:call', () => {
       expect(record).toMatchObject({ outcome: 'invoked', surface: 'cli', tool: 'notes.store', status: 422 })
     })
 
-    it('records a rehearsal as guren.preflight, not as the tool it rehearsed', async () => {
+    it('records a rehearsal as guren_preflight, not as the tool it rehearsed', async () => {
       // `--preflight` stops before the handler, so a record naming `notes.store`
       // with a success status would be indistinguishable from a write that
       // happened. The probed tool rides in the arguments instead.
@@ -402,7 +402,7 @@ describe('tool:call', () => {
       })
 
       const [record] = await records()
-      expect(record).toMatchObject({ outcome: 'invoked', surface: 'cli', tool: 'guren.preflight' })
+      expect(record).toMatchObject({ outcome: 'invoked', surface: 'cli', tool: 'guren_preflight' })
       // The checked tool's own `redact` list still masks, one level down.
       expect(record!.arguments).toEqual({
         tool: 'notes.store',

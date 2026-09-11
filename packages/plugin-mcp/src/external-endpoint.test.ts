@@ -97,7 +97,7 @@ describe('mcpPlugin external auth (no token store configured)', () => {
     const { tools } = await client.listTools()
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       'echo.auth',
-      'guren.preflight',
+      'guren_preflight',
       'posts.index',
       'posts.store',
     ])
