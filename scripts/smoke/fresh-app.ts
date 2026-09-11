@@ -5,6 +5,7 @@ import process from 'node:process'
 import { FIELD_TYPES } from '../../packages/cli/src/fields'
 import { DATABASE_DRIVERS } from '../../packages/create-app/src/blueprints'
 import { fileExists } from '../../packages/create-app/src/utils'
+import { inheritedEnv } from './inherited-env'
 import { assertSessionDrivers } from './session-drivers'
 import { runPrototypeScaffold } from './prototype-scaffold'
 import { auditBlueprintTemplates, auditConsoleWiring, auditStarterTemplate } from './starter-template-audit'
@@ -127,7 +128,7 @@ async function run(cmd: string[], cwd: string, envOverrides?: Record<string, str
     stdout: 'inherit',
     stderr: 'inherit',
     env: {
-      ...process.env,
+      ...inheritedEnv(),
       ...envOverrides,
     },
   })
@@ -145,7 +146,7 @@ async function runCapture(cmd: string[], cwd: string, envOverrides?: Record<stri
     stdout: 'pipe',
     stderr: 'inherit',
     env: {
-      ...process.env,
+      ...inheritedEnv(),
       ...envOverrides,
     },
   })
