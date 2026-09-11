@@ -13,6 +13,8 @@ import { I18nServiceProvider } from '../providers/I18nServiceProvider'
 import { InertiaServiceProvider } from '../providers/InertiaServiceProvider'
 import { attachAuthContext } from './middleware/auth'
 import { SessionGuard } from '../auth/SessionGuard'
+import { createUnconfiguredUserProvider } from '../auth/providers/unconfigured-user-provider'
+import type { Authenticatable } from '../auth/types'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import type { DetectLocaleOptions } from './middleware/detect-locale'
 import type { TranslationLoader } from '../i18n'
@@ -441,6 +443,9 @@ export interface I18nPluginOptions {
   readonly share?: boolean
 }
 
+const DEFAULT_GUARD = 'web'
+const DEFAULT_PROVIDER = 'users'
+
 export interface AuthPluginOptions {
   /**
    * The format new password hashes are written in. `'scrypt'` (the default)
@@ -528,19 +533,16 @@ export class Application {
     this.container.instance('auth', this.authManager)
     this.container.instance('router', this.router)
 
-    // So requireAuthenticated/requireGuest work for apps that wire sessions
-    // manually, without the auth option.
-    if (!this.authManager.guardNames().length) {
-      this.authManager.registerGuard('web', ({ session, manager }) => {
-        // Without a 'users' provider this guard always answers unauthenticated.
-        let provider: any
-        try { provider = manager.getProvider('users') } catch {
-          provider = { retrieveById: async () => null, retrieveByCredentials: async () => null, validateCredentials: async () => false }
-        }
-        return new SessionGuard({ provider, session })
-      })
-      this.authManager.setDefaultGuard('web')
-    }
+    // Registered here, before any provider, so requireAuthenticated/requireGuest
+    // work for apps that wire sessions manually and for middleware added through
+    // app.use() ahead of boot() (#13). `useModel()` replaces it under the same name.
+    this.authManager.registerGuard(DEFAULT_GUARD, ({ session }) => {
+      const provider = this.authManager.hasProvider(DEFAULT_PROVIDER)
+        ? this.authManager.getProvider<Authenticatable>(DEFAULT_PROVIDER)
+        : createUnconfiguredUserProvider()
+      return new SessionGuard({ provider, session })
+    })
+    this.authManager.setDefaultGuard(DEFAULT_GUARD)
 
     // The fallback is attached in the constructor so middleware registered via
     // app.use() before boot() finds it. The context resolves its session
@@ -766,6 +768,24 @@ export class Application {
       'GUREN_DOCS=1 but the docs viewer could not load — is @guren/cli resolvable from this app?',
     )
     await this.providerManager.bootAll()
+    this.warnOnUnconfiguredAuth()
+  }
+
+  /**
+   * After every provider has booted: `auth` was asked for, yet the default
+   * guard still runs against the placeholder provider, so every login attempt
+   * will throw. Warned rather than thrown, since the app may authenticate only
+   * through tokens or a guard of its own.
+   */
+  private warnOnUnconfiguredAuth(): void {
+    if (!this.options.auth) return
+    if (this.authManager.getDefaultGuard() !== DEFAULT_GUARD) return
+    if (this.authManager.hasProvider(DEFAULT_PROVIDER)) return
+    console.warn(
+      `[guren] createApp() received \`auth\`, but no "${DEFAULT_PROVIDER}" user provider was registered by the time the app booted. ` +
+        'Sessions and CSRF are mounted, and any login attempt will throw. Register one with `auth.useModel(User)` in a ' +
+        "service provider (what `guren add auth` scaffolds), or `auth.registerProvider('users', ...)`.",
+    )
   }
 
   /** Called once, from the constructor — see the note there for why. */

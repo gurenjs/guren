@@ -87,6 +87,11 @@ export class AuthManager implements AuthManagerContract {
     this.providers.set(name, { factory: factory as ProviderFactory<any> })
   }
 
+  /** Whether a provider factory is registered under `name`; `getProvider()` throws where this is false. */
+  hasProvider(name: string): boolean {
+    return this.providers.has(name)
+  }
+
   getProvider<User>(name: string): UserProvider<User> {
     const entry = this.providers.get(name)
 
