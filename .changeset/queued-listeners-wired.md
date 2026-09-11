@@ -32,5 +32,6 @@ and `priority` statics that nothing read either.
   rebuilds the event as an instance of a registered class and refuses a name it
   has none for; `events.registerEvent(EventClass)` registers one explicitly,
   and an own `static eventName` pins the wire name the way `jobName` does.
-- `EventManager.handleQueued()` and `registerEvent()` are new;
-  `setQueueDispatcher()` takes an optional readiness predicate.
+- `EventManager.handleQueued()` and `registerEvent()` are new; a
+  `QueueEventDispatcher` resolves whether it queued the emit, and only an
+  explicit `false` sends the listener down the inline path.

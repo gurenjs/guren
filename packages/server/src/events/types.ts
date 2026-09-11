@@ -32,13 +32,16 @@ export interface ListenerOptions {
  * Sends one queued listener's emit; `event` is the live instance, serialized by
  * the dispatcher. `listenerSeq` identifies the listener among those on that
  * queue — a dispatcher that drops it makes the worker run all of them.
+ * Resolving `false` means no queue was reachable, and the manager runs the
+ * listener inline instead; only `false` does, so a dispatcher written against
+ * the earlier `Promise<void>` signature still reads as having queued.
  */
 export type QueueEventDispatcher = (
   queueName: string,
   eventName: string,
   event: Event,
   listenerSeq?: number,
-) => Promise<void>
+) => Promise<boolean>
 
 export interface RegisteredListener<T extends Event = Event> {
   listener: EventListener<T>

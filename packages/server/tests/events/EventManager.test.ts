@@ -356,11 +356,11 @@ describe('EventManager', () => {
     })
 
     it('runs the listener inline when the dispatcher reports no queue is reachable', async () => {
-      const dispatcher = vi.fn()
+      const dispatcher = vi.fn(async () => false)
       const listener = vi.fn()
       const warn = console.warn
       console.warn = () => {}
-      events.setQueueDispatcher(dispatcher, () => false)
+      events.setQueueDispatcher(dispatcher)
       events.on(TestEvent, listener, { queue: 'emails' })
 
       try {
@@ -369,8 +369,18 @@ describe('EventManager', () => {
         console.warn = warn
       }
 
-      expect(dispatcher).not.toHaveBeenCalled()
+      expect(dispatcher).toHaveBeenCalledTimes(1)
       expect(listener).toHaveBeenCalledTimes(1)
+    })
+
+    it('treats a dispatcher resolving nothing as having queued the listener', async () => {
+      const listener = vi.fn()
+      events.setQueueDispatcher(async () => undefined as unknown as boolean)
+      events.on(TestEvent, listener, { queue: 'emails' })
+
+      await events.emit(new TestEvent('test'))
+
+      expect(listener).not.toHaveBeenCalled()
     })
 
     it('sends one message per queued listener, indexed within its own queue', async () => {

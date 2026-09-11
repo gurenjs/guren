@@ -11,9 +11,6 @@ import type {
   EventSubscription,
 } from './types'
 
-/** Whether the installed dispatcher can reach a queue right now; see {@link EventManager.setQueueDispatcher}. */
-type QueueReadiness = () => boolean
-
 /** Registers listeners and emits events. */
 export class EventManager {
   private readonly listeners = new Map<string, RegisteredListener[]>()
@@ -24,7 +21,6 @@ export class EventManager {
   private readonly listenerSeqCounters = new Map<string, number>()
 
   private queueDispatcher?: QueueEventDispatcher
-  private queueReadiness?: QueueReadiness
 
   on<T extends Event>(
     event: EventClass<T> | string,
@@ -171,7 +167,9 @@ export class EventManager {
     }
 
     const dispatcher = this.queueDispatcher
-    if (!dispatcher || (this.queueReadiness && !this.queueReadiness())) {
+    // Only an explicit false is a refusal: a dispatcher written against the
+    // earlier Promise<void> signature resolves undefined after queueing.
+    if (!dispatcher || (await dispatcher(queue, eventName, event, registered.listenerSeq)) === false) {
       warnOnce(
         `event-queue-unwired:${eventName}:${queue}`,
         `[guren] A listener for "${eventName}" is registered with queue "${queue}", but no queue is reachable ` +
@@ -183,7 +181,6 @@ export class EventManager {
       return false
     }
 
-    await dispatcher(queue, eventName, event, registered.listenerSeq)
     return true
   }
 
@@ -296,14 +293,13 @@ export class EventManager {
   }
 
   /**
-   * `EventServiceProvider` installs `createQueueEventDispatcher()` at boot.
-   * `canQueue` is asked per emit: the dispatcher is installed before the app's
-   * queue driver necessarily exists, and a listener whose queue is unreachable
-   * runs inline rather than failing the emit.
+   * `EventServiceProvider` installs `createQueueEventDispatcher()` at boot,
+   * before the app's queue driver necessarily exists. A dispatcher that finds
+   * no queue at emit time resolves false, and the listener runs inline rather
+   * than failing the emit.
    */
-  setQueueDispatcher(dispatcher: QueueEventDispatcher, canQueue?: QueueReadiness): void {
+  setQueueDispatcher(dispatcher: QueueEventDispatcher): void {
     this.queueDispatcher = dispatcher
-    this.queueReadiness = canQueue
   }
 
   private nameOf(event: EventClass | string): string {
