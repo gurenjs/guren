@@ -55,7 +55,7 @@ export interface QueryBuilderOptions {
  * or a `paginate()` that mutated `options` would leave the builder describing
  * its own last page.
  */
-export interface QueryOverrides {
+interface QueryOverrides {
   limit?: number
   offset?: number
   select?: readonly string[]
@@ -266,17 +266,21 @@ export class QueryBuilder<
    * and never re-exported: a named public method here would be a supported way to
    * read past a model's casts.
    */
-  async [RAW_RESULTS](overrides?: QueryOverrides): Promise<TResult[]> {
-    // Eager loads first: a loader matches child rows to their parents on the raw
-    // key values, and a cast on either side would stop the two from matching.
-    return this.loadEagerRelations(await this.executeQuery(overrides))
+  async [RAW_RESULTS](): Promise<TResult[]> {
+    return this.fetchRaw()
   }
 
   /** The one read pipeline: rows, then eager loads, then the model's transforms. */
   private async fetch(overrides?: QueryOverrides): Promise<TResult[]> {
-    const results = await this[RAW_RESULTS](overrides)
+    const results = await this.fetchRaw(overrides)
     const projected = (this.options.selectFields?.length ?? 0) > 0
     return this.modelClass[READ_TRANSFORMS](results, projected)
+  }
+
+  private async fetchRaw(overrides?: QueryOverrides): Promise<TResult[]> {
+    // Eager loads first: a loader matches child rows to their parents on the raw
+    // key values, and a cast on either side would stop the two from matching.
+    return this.loadEagerRelations(await this.executeQuery(overrides))
   }
 
   async first(): Promise<TResult | null> {

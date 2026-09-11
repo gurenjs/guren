@@ -1855,8 +1855,9 @@ function castInPlace(target: PlainObject, castDefs: Record<string, CastType>): v
 /**
  * Written onto the records rather than onto copies: the parent rows hold them
  * by reference, and a nested loader has already keyed its own rows on them.
- * `projected` marks rows a constraint's `select()` narrowed, where an accessor
- * would read a column that is not on them.
+ * Keep in step with `[READ_TRANSFORMS]`: same casts-then-accessors order, and
+ * the same rule that `projected` rows (a constraint's `select()` narrowed them)
+ * skip the accessors, which would read a column that is not on them.
  */
 function applyRelatedReadTransforms(related: typeof Model, records: PlainObject[], projected: boolean): void {
   const casts = related.casts
