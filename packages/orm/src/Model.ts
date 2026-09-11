@@ -9,7 +9,7 @@ import { executeObservers } from './ModelObserver'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { everyFilterDropped } from './where-conditions'
-import { PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
+import { DEFAULT_IN_LIST_SIZE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
 import { QueryBuilder } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
@@ -1918,13 +1918,6 @@ async function loadRelationData(
 
   return projected
 }
-
-/**
- * Keys per IN list where the adapter names no figure of its own. A relation
- * load binds one variable per key, against a limit the driver sets, and 500 is
- * under every one of them — SQLite's 999 on a build older than 3.32 included.
- */
-const DEFAULT_IN_LIST_SIZE = 500
 
 function maxInListSize(adapter: ORMAdapter): number {
   const size = (adapter as ORMAdapterAdvanced).maxInListSize?.()
