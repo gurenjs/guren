@@ -183,7 +183,7 @@ describe('rehash on login', () => {
   })
 
   test('a rehash that cannot be written still logs the user in', async () => {
-    const row = { id: 7, email: 'a@example.com' }
+    const row = { id: 7, email: 'a@example.com', getAuthIdentifier: () => 7, getAuthPassword: () => null }
     const provider: UserProvider<typeof row> = {
       retrieveById: async () => row,
       retrieveByCredentials: async () => row,

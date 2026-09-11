@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'bun:test'
 import { MassAssignmentException, defineModel } from '@guren/orm'
 import type { FindManyOptions, Model, ORMAdapter, PlainObject, WhereClause } from '@guren/orm'
 import { AuthenticatableModel } from '../../src/auth/AuthenticatableModel'
