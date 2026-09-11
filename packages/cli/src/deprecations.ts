@@ -53,17 +53,14 @@ async function detectLocalVisibilityCalls(cwd: string): Promise<string[]> {
   return affected.filter((file): file is string => file !== null)
 }
 
-/**
- * Files that import the class-based seeder API rather than `defineSeeder`.
- * `@guren/server` is matched alongside `@guren/core`: an app importing from it
- * despite the core-first rule is exactly the one this needs to reach.
- * `defineSeeder` ends in the same six letters as `Seeder`, so specifiers are
- * matched on their own word boundaries.
- */
-const SEEDER_CLASS_SPECIFIERS = /\b(?:BaseSeeder|SeederRunner|createSeederRunner|resetCalledSeeders|Seeder|SeederClass|SeederInterface|SeederRunnerOptions)\b/
 const GUREN_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/(?:core|server)['"]/g
 
-async function detectSeederClassImports(cwd: string): Promise<string[]> {
+/**
+ * Files importing a specifier `matches` accepts from a Guren package.
+ * `@guren/server` is matched alongside `@guren/core`: an app importing from it
+ * despite the core-first rule is exactly the one this needs to reach.
+ */
+async function detectGurenImports(cwd: string, matches: (specifier: string) => boolean): Promise<string[]> {
   const files = [
     ...(await discoverAppSourceFiles(cwd)),
     ...(await discoverDbArtifactFiles(cwd, 'Seeder')),
@@ -76,7 +73,7 @@ async function detectSeederClassImports(cwd: string): Promise<string[]> {
           .split(',')
           .map((part) => part.split(/\bas\b/)[0].replace(/^\s*type\s+/, '').trim())
           .filter(Boolean)
-        if (specifiers.some((name) => SEEDER_CLASS_SPECIFIERS.test(name))) {
+        if (specifiers.some(matches)) {
           return relative(cwd, filePath)
         }
       }
@@ -86,29 +83,16 @@ async function detectSeederClassImports(cwd: string): Promise<string[]> {
   return affected.filter((file): file is string => file !== null)
 }
 
+/** `defineSeeder` ends in the same six letters as `Seeder`, so a specifier is matched on its own word boundaries. */
+const SEEDER_CLASS_SPECIFIERS = /\b(?:BaseSeeder|SeederRunner|createSeederRunner|resetCalledSeeders|Seeder|SeederClass|SeederInterface|SeederRunnerOptions)\b/
+
+/** Files that import the class-based seeder API rather than `defineSeeder`. */
+const detectSeederClassImports = (cwd: string): Promise<string[]> =>
+  detectGurenImports(cwd, (specifier) => SEEDER_CLASS_SPECIFIERS.test(specifier))
+
 /** Files importing the `ScryptHasher` name for the class now exported as `Argon2Hasher`. */
-async function detectScryptHasherImports(cwd: string): Promise<string[]> {
-  const files = [
-    ...(await discoverAppSourceFiles(cwd)),
-    ...(await discoverDbArtifactFiles(cwd, 'Seeder')),
-  ]
-  const affected = await Promise.all(
-    files.map(async (filePath) => {
-      const source = await readFile(filePath, 'utf-8')
-      for (const match of source.matchAll(GUREN_IMPORT)) {
-        const specifiers = match[1]
-          .split(',')
-          .map((part) => part.split(/\bas\b/)[0].replace(/^\s*type\s+/, '').trim())
-          .filter(Boolean)
-        if (specifiers.includes('ScryptHasher')) {
-          return relative(cwd, filePath)
-        }
-      }
-      return null
-    }),
-  )
-  return affected.filter((file): file is string => file !== null)
-}
+const detectScryptHasherImports = (cwd: string): Promise<string[]> =>
+  detectGurenImports(cwd, (specifier) => specifier === 'ScryptHasher')
 
 export const deprecations: Deprecation[] = [
   {
