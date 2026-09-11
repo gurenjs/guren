@@ -14,6 +14,7 @@ import { QueryBuilder } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
   EagerLoadConstraints,
+  ORMAdapterAdvanced,
   WhereGroupCallback,
   WhereOperator,
 } from './QueryBuilder'
@@ -1435,6 +1436,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         const { foreignKey, localKey } = definition
         const counts = await countByChunks(
           distinctKeys(records, localKey),
+          maxInListSize(related.getAdapter()),
           (chunk) => related.newQuery(queryOptions).where({ [foreignKey]: chunk } as WhereClause).countBy(foreignKey),
         )
 
@@ -1449,8 +1451,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         const typeColumn = `${morphName}Type`
         const idColumn = `${morphName}Id`
         const parentType = this.name
-        const counts = await countByChunks(distinctKeys(records, localKey), (chunk) =>
-          related
+        const counts = await countByChunks(
+          distinctKeys(records, localKey),
+          maxInListSize(related.getAdapter()),
+          (chunk) => related
             .newQuery(queryOptions)
             .where({ [typeColumn]: parentType, [idColumn]: chunk } as WhereClause)
             .countBy(idColumn),
@@ -1466,6 +1470,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         const { foreignKey, ownerKey } = definition
         const owners = await countByChunks(
           distinctKeys(records, foreignKey),
+          maxInListSize(related.getAdapter()),
           (chunk) => related.newQuery(queryOptions).where({ [ownerKey]: chunk } as WhereClause).countBy(ownerKey),
         )
 
@@ -1675,7 +1680,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const adapter = this.getAdapter()
-    const pivotRows = await loadByChunks(parentValues, (chunk) =>
+    const pivotRows = await loadByChunks(parentValues, maxInListSize(adapter), (chunk) =>
       adapter.findMany<PlainObject>(pivotTable, { where: { [foreignPivotKey]: chunk } as WhereClause }, queryOptions),
     )
 
@@ -1696,9 +1701,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    // The constraint filters the related rows, not the pivot lookup.
-    const relatedRecords = await loadByChunks(Array.from(allRelatedIds), (chunk) =>
-      applyEagerConstraint(related.newQuery(queryOptions).where({ [relatedKey]: chunk } as WhereClause), constraint),
+    // The constraint filters the related rows, not the pivot lookup, and the
+    // keys batched below are theirs rather than the parents'.
+    const relatedRecords = await loadRelatedRecords(
+      related,
+      Array.from(allRelatedIds),
+      (chunk) => ({ [relatedKey]: chunk }),
+      queryOptions,
+      constraint,
     )
 
     const relatedMap = new Map<unknown, PlainObject>()
@@ -1740,6 +1750,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     const throughRecords = await loadByChunks(
       localValues,
+      maxInListSize(through.getAdapter()),
       (chunk) => through.newQuery(queryOptions).where({ [firstKey]: chunk } as WhereClause)[RAW_RESULTS]().get() as Promise<PlainObject[]>,
     )
 
@@ -1760,9 +1771,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    // The constraint filters the related rows, not the intermediate lookup.
-    const relatedRecords = await loadByChunks(Array.from(allThroughIds), (chunk) =>
-      applyEagerConstraint(related.newQuery(queryOptions).where({ [secondKey]: chunk } as WhereClause), constraint),
+    // The constraint filters the related rows, not the intermediate lookup, and
+    // the keys batched below are theirs rather than the parents'.
+    const relatedRecords = await loadRelatedRecords(
+      related,
+      Array.from(allThroughIds),
+      (chunk) => ({ [secondKey]: chunk }),
+      queryOptions,
+      constraint,
     )
 
     const relatedByKey = new Map<unknown, PlainObject[]>()
@@ -1807,11 +1823,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    const allRelated = await loadByChunks(localValues, (chunk) =>
-      applyEagerConstraint(
-        related.newQuery(queryOptions).where({ [typeColumn]: parentType, [idColumn]: chunk } as WhereClause),
-        constraint,
-      ),
+    const allRelated = await loadRelatedRecords(
+      related,
+      localValues,
+      (chunk) => ({ [typeColumn]: parentType, [idColumn]: chunk }),
+      queryOptions,
+      constraint,
     )
 
     const map = new Map<unknown, PlainObject[]>()
@@ -1857,8 +1874,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       const uniqueIds = Array.from(new Set(ids))
       // Runs once per morph target, so a constraint here may only reference
       // columns every target shares.
-      const results = await loadByChunks(uniqueIds, (chunk) =>
-        applyEagerConstraint(modelClass.newQuery(queryOptions).where({ id: chunk } as WhereClause), constraint),
+      const results = await loadRelatedRecords(
+        modelClass,
+        uniqueIds,
+        (chunk) => ({ id: chunk }),
+        queryOptions,
+        constraint,
       )
       const idMap = new Map<unknown, PlainObject>()
       for (const r of results) idMap.set(r.id, { ...r })
@@ -1925,8 +1946,12 @@ async function loadRelationData(
     return
   }
 
-  const relatedRecords = await loadByChunks(values, (chunk) =>
-    applyEagerConstraint(related.newQuery(queryOptions).where({ [relatedKey]: chunk } as WhereClause), constraint),
+  const relatedRecords = await loadRelatedRecords(
+    related,
+    values,
+    (chunk) => ({ [relatedKey]: chunk }),
+    queryOptions,
+    constraint,
   )
   const map = new Map<unknown, PlainObject | PlainObject[]>()
 
@@ -1951,44 +1976,89 @@ async function loadRelationData(
 }
 
 /**
- * Keys per IN list. SQLite's compile-time default caps bound variables at 999,
- * and a relation load binds one per parent key, so a page of parents that
- * happens to exceed it fails only in production data.
+ * Keys per IN list where the adapter names no figure of its own. A relation
+ * load binds one variable per key, against a limit the driver sets, and 500 is
+ * under every one of them — SQLite's 999 on a build older than 3.32 included.
  */
-const IN_CHUNK_SIZE = 500
+const DEFAULT_IN_LIST_SIZE = 500
+
+function maxInListSize(adapter: ORMAdapter): number {
+  const size = (adapter as ORMAdapterAdvanced).maxInListSize?.()
+  return typeof size === 'number' && size >= 1 ? Math.floor(size) : DEFAULT_IN_LIST_SIZE
+}
 
 function distinctKeys(records: readonly PlainObject[], key: string): unknown[] {
   return Array.from(new Set(records.map((r) => r[key]).filter((v) => v != null)))
 }
 
-function chunkKeys(values: readonly unknown[]): unknown[][] {
+function chunkKeys(values: readonly unknown[], size: number): Array<readonly unknown[]> {
+  if (values.length <= size) return [values]
   const chunks: unknown[][] = []
-  for (let i = 0; i < values.length; i += IN_CHUNK_SIZE) {
-    chunks.push(values.slice(i, i + IN_CHUNK_SIZE))
+  for (let i = 0; i < values.length; i += size) {
+    chunks.push(values.slice(i, i + size))
   }
   return chunks
 }
 
-/**
- * A constraint's `limit()` or `offset()` applies to each chunk's query, not to
- * the union; only a parent set past IN_CHUNK_SIZE keys can tell the difference.
- */
-async function loadByChunks<T>(values: readonly unknown[], load: (chunk: unknown[]) => Promise<T[]>): Promise<T[]> {
+async function loadByChunks<T>(
+  values: readonly unknown[],
+  size: number,
+  load: (chunk: readonly unknown[]) => Promise<T[]>,
+): Promise<T[]> {
   const results: T[] = []
-  for (const chunk of chunkKeys(values)) {
-    results.push(...(await load(chunk)))
+  for (const chunk of chunkKeys(values, size)) {
+    for (const record of await load(chunk)) {
+      results.push(record)
+    }
   }
   return results
 }
 
+/**
+ * The related rows behind one eager load. A constraint carrying `limit`,
+ * `offset` or `orderBy` describes the whole result set, so the load issues a
+ * single query rather than answering a different question per chunk — and a
+ * parent set large enough can push that one IN list past the driver's limit.
+ */
+async function loadRelatedRecords(
+  related: typeof Model,
+  keys: readonly unknown[],
+  clause: (chunk: readonly unknown[]) => Record<string, unknown>,
+  queryOptions?: ModelQueryOptions,
+  constraint?: EagerLoadConstraint,
+): Promise<PlainObject[]> {
+  const query = (chunk: readonly unknown[]): QueryBuilder =>
+    related.newQuery(queryOptions).where(clause(chunk) as WhereClause)
+
+  const chunks = chunkKeys(keys, maxInListSize(related.getAdapter()))
+  if (chunks.length > 1) {
+    const whole = query(keys)
+    constraint?.(whole)
+    const options = whole.getOptions()
+    if (options.limitValue !== undefined || options.offsetValue !== undefined || options.orderBy.length > 0) {
+      return (await whole[RAW_RESULTS]()) as PlainObject[]
+    }
+  }
+
+  const records: PlainObject[] = []
+  for (const chunk of chunks) {
+    for (const record of await applyEagerConstraint(query(chunk), constraint)) {
+      records.push(record)
+    }
+  }
+  return records
+}
+
 async function countByChunks(
   values: readonly unknown[],
-  count: (chunk: unknown[]) => Promise<Map<unknown, number>>,
+  size: number,
+  count: (chunk: readonly unknown[]) => Promise<Map<unknown, number>>,
 ): Promise<Map<unknown, number>> {
   const counts = new Map<unknown, number>()
-  for (const chunk of chunkKeys(values)) {
+  // Chunks hold disjoint key sets, so no key is counted twice.
+  for (const chunk of chunkKeys(values, size)) {
     for (const [key, n] of await count(chunk)) {
-      counts.set(key, (counts.get(key) ?? 0) + n)
+      counts.set(key, n)
     }
   }
   return counts

@@ -453,10 +453,14 @@ await User.newQuery()
 > loader cannot match rows back to their parent and the relation loads empty.
 
 > [!NOTE]
-> Relations are loaded with one batched query for all parent records, so
-> `limit()` inside a constraint caps that whole query rather than applying per
-> parent. For `morphTo`, the callback runs once per morph target, so it may only
-> reference columns every target shares.
+> Relations are loaded in batches rather than one query per parent, so `limit()`
+> inside a constraint caps the whole result set, not each parent's share. A
+> constraint carrying `limit()`, `offset()` or `orderBy()` is answered by one
+> query over every key at once; without one, the keys are split into batches the
+> driver's parameter limit admits. For `belongsToMany` and `hasManyThrough` the
+> keys split that way are the related rows', not the parents'. For `morphTo`, the
+> callback runs once per morph target, so it may only reference columns every
+> target shares.
 
 For `belongsToMany` and `hasManyThrough`, the callback constrains the query for
 the **related** model, not the pivot or through-table lookup that finds which

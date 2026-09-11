@@ -595,6 +595,46 @@ describe('DrizzleAdapter', () => {
     })
   })
 
+  describe('maxInListSize', () => {
+    it('keeps the conservative figure for a dialect it cannot place', () => {
+      const { db } = createMockDatabase()
+      DrizzleAdapter.configure(db as never)
+
+      expect(DrizzleAdapter.maxInListSize?.()).toBe(500)
+    })
+
+    it('raises it for a dialect that numbers its parameters, as Postgres does', () => {
+      const { db } = createMockDatabase()
+      DrizzleAdapter.configure({ ...db, dialect: { escapeParam: (i: number) => `$${i + 1}` } } as never)
+
+      expect(DrizzleAdapter.maxInListSize?.()).toBe(5000)
+    })
+
+    it('raises it for a dialect that backticks its names, as MySQL does', () => {
+      const { db } = createMockDatabase()
+      DrizzleAdapter.configure({
+        ...db,
+        dialect: { escapeParam: () => '?', escapeName: (name: string) => `\`${name}\`` },
+      } as never)
+
+      expect(DrizzleAdapter.maxInListSize?.()).toBe(5000)
+    })
+
+    it('keeps the conservative figure when the dialect throws', () => {
+      const { db } = createMockDatabase()
+      DrizzleAdapter.configure({
+        ...db,
+        dialect: {
+          escapeParam: () => {
+            throw new Error('not this shape')
+          },
+        },
+      } as never)
+
+      expect(DrizzleAdapter.maxInListSize?.()).toBe(500)
+    })
+  })
+
   describe('transaction', () => {
     it('delegates transaction callback to database transaction', async () => {
       const { db } = createMockDatabase()

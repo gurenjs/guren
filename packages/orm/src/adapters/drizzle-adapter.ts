@@ -61,6 +61,27 @@ let loadedTransactionScope: TransactionScope | undefined
 // Savepoint names are generated, never taken from a caller.
 let savepointSequence = 0
 
+// Under SQLite's 999, the bound-variable limit of a build older than 3.32.
+const CONSERVATIVE_IN_LIST_SIZE = 500
+// Under the 65535 parameters Postgres and MySQL take per statement.
+const POOLED_IN_LIST_SIZE = 5000
+
+/**
+ * Read from how the dialect escapes a parameter and a name, since this adapter
+ * takes any drizzle-shaped handle and a driver list would name one it has never
+ * heard of. A shape it cannot place keeps the conservative figure.
+ */
+function dialectInListSize(db: DrizzleDatabase): number {
+  const dialect = (db as { dialect?: { escapeParam?(index: number): string; escapeName?(name: string): string } }).dialect
+  try {
+    if (dialect?.escapeParam?.(0) === '$1') return POOLED_IN_LIST_SIZE
+    if (dialect?.escapeName?.('x') === '`x`') return POOLED_IN_LIST_SIZE
+  } catch {
+    /* empty */
+  }
+  return CONSERVATIVE_IN_LIST_SIZE
+}
+
 function ensureDatabase(): DrizzleDatabase {
   if (!database) {
     throw new Error('DrizzleAdapter: database has not been configured. Call DrizzleAdapter.configure(db).')
@@ -425,6 +446,10 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
 
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase {
     return ensureDatabase() as unknown as TDatabase
+  },
+
+  maxInListSize(): number {
+    return database ? dialectInListSize(database) : CONSERVATIVE_IN_LIST_SIZE
   },
 
   async findMany<TRecord extends PlainObject = PlainObject>(

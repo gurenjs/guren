@@ -231,10 +231,7 @@ export class QueryBuilder<
    * callbacks, each run after the foreign-key filter on exactly the level its key
    * names. Pitfalls: a top-level `orWhere()` ORs against the foreign-key filter
    * (group it); `select()` must keep the relation's key column or the relation is
-   * empty; `limit()` applies to the batched query, not per parent record.
-   *
-   * A `select()` on *this* builder narrows the row, so the model's accessors
-   * are skipped rather than run against columns that are not there.
+   * empty; `limit()` caps the whole result set, not each parent's share.
    */
   with(...relations: (string | Record<string, EagerLoadConstraint>)[]): this {
     for (const rel of relations) {
@@ -663,6 +660,12 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
     conditions: WhereCondition[],
     queryOptions?: AdapterQueryOptions,
   ): Promise<number>
+  /**
+   * Keys the adapter admits in one IN list, from the bound-variable limit the
+   * driver it holds sets. Without it, the ORM uses the figure every dialect it
+   * supports admits.
+   */
+  maxInListSize?(): number
   /** `SELECT field, COUNT(*) ... GROUP BY field` under `conditions`. */
   countByAdvanced?(
     table: unknown,

@@ -112,9 +112,14 @@ describe('withCount on the real bun:sqlite driver', () => {
     expect(query).not.toContain('"name"')
   })
 
-  it('splits the IN list into chunks of at most 500 keys', async () => {
-    const rows = Array.from({ length: 1197 }, (_, i) => `('u${i}')`).join(',')
+  // The adapter reports 500 for SQLite; the pooled dialects admit far more.
+  const seedUsers = (count: number) => {
+    const rows = Array.from({ length: count }, (_, i) => `('u${i}')`).join(',')
     sqlite.exec(`INSERT INTO users (name) VALUES ${rows}`)
+  }
+
+  it('splits the IN list into chunks of at most 500 keys', async () => {
+    seedUsers(1197)
 
     const users = (await User.withCount('posts')) as Array<UserRecord & { postsCount: number }>
 
@@ -124,13 +129,37 @@ describe('withCount on the real bun:sqlite driver', () => {
   })
 
   it('chunks an eager load the same way', async () => {
-    const rows = Array.from({ length: 1197 }, (_, i) => `('u${i}')`).join(',')
-    sqlite.exec(`INSERT INTO users (name) VALUES ${rows}`)
+    seedUsers(1197)
 
     const users = (await User.with('posts')) as Array<UserRecord & { posts: PostRecord[] }>
 
     expect(users).toHaveLength(1200)
     expect(users.slice(0, 3).map((u) => u.posts.length)).toEqual([2, 1, 0])
     expect(queriesOn('posts')).toHaveLength(3)
+  })
+
+  it('still chunks when the constraint only filters', async () => {
+    seedUsers(1197)
+
+    const users = (await User.newQuery()
+      .with({ posts: (q) => q.where('title', '!=', 'nothing') })
+      .get()) as Array<UserRecord & { posts: PostRecord[] }>
+
+    expect(users.slice(0, 3).map((u) => u.posts.length)).toEqual([2, 1, 0])
+    expect(queriesOn('posts')).toHaveLength(3)
+  })
+
+  it('issues one query when the constraint limits the result set', async () => {
+    seedUsers(1197)
+
+    const users = (await User.newQuery()
+      .with({ posts: (q) => q.orderBy('id', 'desc').limit(3) })
+      .get()) as Array<UserRecord & { posts: PostRecord[] }>
+
+    // `limit` describes the whole result set, so splitting the IN list would
+    // answer a different question: three rows per chunk rather than three in all.
+    expect(queriesOn('posts')).toHaveLength(1)
+    // Three rows in all, grouped back under the parents they belong to.
+    expect(users.flatMap((user) => user.posts).map((post) => post.title)).toEqual(['A2', 'A1', 'B1'])
   })
 })
