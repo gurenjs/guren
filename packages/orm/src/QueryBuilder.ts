@@ -304,7 +304,9 @@ export class QueryBuilder<
 
   /**
    * @internal Row count per distinct value of `field`, as one grouped COUNT
-   * where the adapter can issue it. The fallback reads only that column.
+   * where the adapter issues it. Without `countByAdvanced` the rows are loaded
+   * and counted here, narrowed to that one column where the adapter can project
+   * and whole where it cannot.
    */
   async countBy(field: FieldKey<TRecord>): Promise<Map<unknown, number>> {
     const advancedAdapter = this.adapter as ORMAdapterAdvanced

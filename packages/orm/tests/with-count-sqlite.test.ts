@@ -106,9 +106,11 @@ describe('withCount on the real bun:sqlite driver', () => {
 
     expect(posts.map((p) => [p.title, p.authorCount])).toEqual([['A1', 1], ['A2', 1], ['B1', 1], ['orphan', 0]])
 
+    // 0 or 1, so the owner rows only have to be shown to exist: the key column
+    // alone, never a grouped COUNT over rows nothing else reads.
     const [query, ...rest] = queriesOn('users')
     expect(rest).toEqual([])
-    expect(query).toContain('count(*)')
+    expect(query).toContain('select "id" from "users"')
     expect(query).not.toContain('"name"')
   })
 

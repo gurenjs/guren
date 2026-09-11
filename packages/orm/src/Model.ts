@@ -1427,63 +1427,27 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       throw new Error(`${this.name}: unknown relation "${relationName}".`)
     }
 
+    const plan = relationCountPlan(definition, this.name)
+    if (!plan) {
+      throw new Error(
+        `${this.name}: withCount does not support ${definition.type} relation "${relationName}".`,
+      )
+    }
+
+    const related = await resolveModelReference(plan.related)
+    const keys = distinctKeys(records, plan.parentKey)
+    const size = maxInListSize(related.getAdapter())
+
+    const counts = plan.presenceOnly
+      ? await countOwnersPresent(related, plan.childKey, keys, size, queryOptions)
+      : await countByChunks(keys, size, (chunk) => related
+          .newQuery(queryOptions)
+          .where({ ...plan.where, [plan.childKey]: chunk } as WhereClause)
+          .countBy(plan.childKey))
+
     const countField = `${relationName}Count`
-
-    switch (definition.type) {
-      case 'hasMany':
-      case 'hasOne': {
-        const related = await resolveModelReference(definition.related)
-        const { foreignKey, localKey } = definition
-        const counts = await countByChunks(
-          distinctKeys(records, localKey),
-          maxInListSize(related.getAdapter()),
-          (chunk) => related.newQuery(queryOptions).where({ [foreignKey]: chunk } as WhereClause).countBy(foreignKey),
-        )
-
-        for (const record of records) {
-          record[countField] = counts.get(record[localKey]) ?? 0
-        }
-        return
-      }
-      case 'morphMany': {
-        const related = await resolveModelReference(definition.related)
-        const { morphName, localKey } = definition
-        const typeColumn = `${morphName}Type`
-        const idColumn = `${morphName}Id`
-        const parentType = this.name
-        const counts = await countByChunks(
-          distinctKeys(records, localKey),
-          maxInListSize(related.getAdapter()),
-          (chunk) => related
-            .newQuery(queryOptions)
-            .where({ [typeColumn]: parentType, [idColumn]: chunk } as WhereClause)
-            .countBy(idColumn),
-        )
-
-        for (const record of records) {
-          record[countField] = counts.get(record[localKey]) ?? 0
-        }
-        return
-      }
-      case 'belongsTo': {
-        const related = await resolveModelReference(definition.related)
-        const { foreignKey, ownerKey } = definition
-        const owners = await countByChunks(
-          distinctKeys(records, foreignKey),
-          maxInListSize(related.getAdapter()),
-          (chunk) => related.newQuery(queryOptions).where({ [ownerKey]: chunk } as WhereClause).countBy(ownerKey),
-        )
-
-        for (const record of records) {
-          const key = record[foreignKey]
-          record[countField] = key != null && owners.has(key) ? 1 : 0
-        }
-        return
-      }
-      default:
-        throw new Error(
-          `${this.name}: withCount does not support ${definition.type} relation "${relationName}".`,
-        )
+    for (const record of records) {
+      record[countField] = counts.get(record[plan.parentKey]) ?? 0
     }
   }
 
@@ -1985,6 +1949,70 @@ const DEFAULT_IN_LIST_SIZE = 500
 function maxInListSize(adapter: ORMAdapter): number {
   const size = (adapter as ORMAdapterAdvanced).maxInListSize?.()
   return typeof size === 'number' && size >= 1 ? Math.floor(size) : DEFAULT_IN_LIST_SIZE
+}
+
+interface RelationCountPlan {
+  related: Parameters<typeof resolveModelReference>[0]
+  parentKey: string
+  childKey: string
+  where: Record<string, unknown>
+  /** belongsTo yields 0 or 1, so the owner row only has to be shown to exist. */
+  presenceOnly: boolean
+}
+
+function relationCountPlan(definition: RelationDefinition, parentType: string): RelationCountPlan | undefined {
+  switch (definition.type) {
+    case 'hasMany':
+    case 'hasOne':
+      return {
+        related: definition.related,
+        parentKey: definition.localKey,
+        childKey: definition.foreignKey,
+        where: {},
+        presenceOnly: false,
+      }
+    case 'morphMany':
+      return {
+        related: definition.related,
+        parentKey: definition.localKey,
+        childKey: `${definition.morphName}Id`,
+        where: { [`${definition.morphName}Type`]: parentType },
+        presenceOnly: false,
+      }
+    case 'belongsTo':
+      return {
+        related: definition.related,
+        parentKey: definition.foreignKey,
+        childKey: definition.ownerKey,
+        where: {},
+        presenceOnly: true,
+      }
+    default:
+      return undefined
+  }
+}
+
+/**
+ * One row per owner key that exists, never a grouped COUNT: the answer is 0 or
+ * 1, and the key column alone is all of the owner row anything here reads.
+ */
+async function countOwnersPresent(
+  related: typeof Model,
+  ownerKey: string,
+  keys: readonly unknown[],
+  size: number,
+  queryOptions?: ModelQueryOptions,
+): Promise<Map<unknown, number>> {
+  const present = new Map<unknown, number>()
+  for (const chunk of chunkKeys(keys, size)) {
+    const rows = await related
+      .newQuery(queryOptions)
+      .where({ [ownerKey]: chunk } as WhereClause)
+      .select(ownerKey)[RAW_RESULTS]()
+      .get() as PlainObject[]
+    for (const row of rows) present.set(row[ownerKey], 1)
+  }
+  return present
 }
 
 function distinctKeys(records: readonly PlainObject[], key: string): unknown[] {
