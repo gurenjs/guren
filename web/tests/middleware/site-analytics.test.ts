@@ -14,6 +14,7 @@ import {
   createSiteAnalyticsMiddleware,
   primaryLanguage,
   referrerHost,
+  userAgentToken,
 } from '../../app/Http/Middleware/site-analytics.js'
 
 type Middleware = ReturnType<typeof createSiteAnalyticsMiddleware>
@@ -78,6 +79,21 @@ describe('classifyUserAgent', () => {
   })
 })
 
+describe('userAgentToken', () => {
+  it('should record which pattern alternative matched', () => {
+    expect(userAgentToken('Mozilla/5.0 (compatible; ClaudeBot/1.0)')).toBe('claudebot')
+    expect(userAgentToken('Mozilla/5.0 Chrome/128.0 Cursor/1.4')).toBe('cursor')
+    expect(userAgentToken('curl/8.4.0')).toBe('curl')
+  })
+
+  it('should leave browsers and empty agents without a token', () => {
+    expect(
+      userAgentToken('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1'),
+    ).toBe('')
+    expect(userAgentToken('')).toBe('')
+  })
+})
+
 describe('classifyContent', () => {
   it('should bucket the agent-facing mirrors separately from pages', () => {
     expect(classifyContent('/llms.txt')).toBe('llms')
@@ -86,6 +102,11 @@ describe('classifyContent', () => {
     expect(classifyContent('/blog/some-post')).toBe('blog')
     expect(classifyContent('/')).toBe('home')
     expect(classifyContent('/login')).toBe('other')
+  })
+
+  it('should keep the feed out of the blog bucket', () => {
+    expect(classifyContent('/blog/rss.xml')).toBe('feed')
+    expect(classifyContent('/blog/rss')).toBe('blog')
   })
 })
 
@@ -123,7 +144,7 @@ describe('createSiteAnalyticsMiddleware', () => {
     expect(points).toHaveLength(1)
     const point = points[0]!
     expect(point.indexes).toEqual(['human'])
-    expect(point.blobs?.slice(0, 8)).toEqual([
+    expect(point.blobs?.slice(0, 9)).toEqual([
       '/docs/guides/getting-started',
       'docs',
       'human',
@@ -132,6 +153,7 @@ describe('createSiteAnalyticsMiddleware', () => {
       'JP',
       'GET',
       'initial',
+      '',
     ])
     expect(point.doubles?.[0]).toBe(200)
     expect(point.doubles?.[1]).toBeGreaterThanOrEqual(0)
@@ -148,6 +170,7 @@ describe('createSiteAnalyticsMiddleware', () => {
     })
     expect(agent?.indexes).toEqual(['ai-agent'])
     expect(agent?.blobs?.[1]).toBe('markdown')
+    expect(agent?.blobs?.[8]).toBe('claude-user')
   })
 
   it('should cap oversized paths so the data point stays writable', async () => {
