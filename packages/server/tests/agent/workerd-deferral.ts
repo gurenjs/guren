@@ -6,16 +6,14 @@
  * moves fails nowhere and is found by whoever next runs the suite locally.
  */
 
-/** One dispatch, sent as `?tool=<tool>&defer=<defer>`. */
-export type DeferralCase = readonly [tool: string, defer: '0' | '1']
-
 export interface DeferralOptions {
-  cases?: readonly DeferralCase[]
+  /** Query strings, each dispatched once as `/?<case>`. */
+  cases?: readonly string[]
   /** Binding name → the Durable Object class the fixture exports. */
   durableObjects?: Record<string, string>
 }
 
-const UNDEFERRED_THEN_DEFERRED: readonly DeferralCase[] = [['undeferred', '0'], ['deferred', '1']]
+const UNDEFERRED_THEN_DEFERRED = ['tool=undeferred&defer=0', 'tool=deferred&defer=1']
 
 /**
  * Bundle `entry`, dispatch each case once inside workerd, and answer which
@@ -46,7 +44,7 @@ export async function runDeferralCase(
     // import graph itself, which is stricter than what wrangler ships to workerd.
     modules: [{ type: 'ESModule', path: 'worker.js', contents: await build.outputs[0]!.text() }],
     d1Databases: ['DB'],
-    ...(options.durableObjects ? { durableObjects: options.durableObjects } : {}),
+    durableObjects: options.durableObjects,
     compatibilityDate: '2026-07-01',
     compatibilityFlags: ['nodejs_compat'],
   })
@@ -55,9 +53,9 @@ export async function runDeferralCase(
     const db = await mf.getD1Database('DB')
     await db.prepare(`CREATE TABLE ${table} (tool TEXT)`).run()
 
-    for (const [tool, defer] of options.cases ?? UNDEFERRED_THEN_DEFERRED) {
-      const response = await mf.dispatchFetch(`http://localhost/?tool=${tool}&defer=${defer}`)
-      if (response.status !== 200) throw new Error(`worker answered ${response.status} for ${tool}`)
+    for (const query of options.cases ?? UNDEFERRED_THEN_DEFERRED) {
+      const response = await mf.dispatchFetch(`http://localhost/?${query}`)
+      if (response.status !== 200) throw new Error(`worker answered ${response.status} for ?${query}`)
       await response.arrayBuffer()
     }
 

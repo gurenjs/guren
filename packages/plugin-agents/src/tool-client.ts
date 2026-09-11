@@ -186,8 +186,9 @@ export interface AgentToolClientOptions {
 }
 
 /**
- * Build the tool client for one agent instance.
- *
+ * Build the tool client for one agent instance, inside a Durable Object: the
+ * audit record and approval notification are not handed to `waitUntil`, so a
+ * Worker's fetch handler would lose both.
  * @throws When `agentName` names no registration — a wiring bug, not a scope
  *   denial, and a denial would send the author to the wrong file.
  */
@@ -230,7 +231,6 @@ export function createAgentToolClient(options: AgentToolClientOptions): AgentToo
   // approval is bound to who asked for it. No deferrer, here or on the audit
   // emitter below: a Durable Object finishes work its handler left running, which
   // a fetch handler drops (@guren/server tests/agent/durable-object.workerd.test.ts).
-  // Called from a Worker's fetch handler instead, both would be lost.
   const approvals = createAgentApprovalContext(runtime.approvals, principal)
 
   // Forwarded per event, not resolved here: the binding behind

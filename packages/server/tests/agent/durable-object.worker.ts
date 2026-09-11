@@ -24,19 +24,14 @@ interface WorkerdSocket extends WebSocket {
 declare const WebSocketPair: new () => { 0: WorkerdSocket; 1: WorkerdSocket }
 
 interface ProbeState {
-  storage: {
-    put(key: string, value: string): Promise<void>
-    get(key: string): Promise<string | undefined>
-    setAlarm(at: number): Promise<void>
-  }
-  acceptWebSocket(socket: WorkerdSocket, tags: string[]): void
-  getTags(socket: WorkerdSocket): string[]
+  storage: { setAlarm(at: number): Promise<void> }
+  acceptWebSocket(socket: WorkerdSocket): void
 }
 
 interface ProbeStub {
   fetch(input: string, init?: RequestInit): Promise<Response>
-  enter(via: string): Promise<void>
-  arm(via: string): Promise<void>
+  enter(): Promise<void>
+  arm(): Promise<void>
 }
 
 interface Env {
@@ -74,31 +69,29 @@ export class ProbeObject extends DurableObject {
   declare readonly env: Env
 
   async fetch(request: Request): Promise<Response> {
-    const via = new URL(request.url).searchParams.get('tool') ?? 'unknown'
     if (request.headers.get('Upgrade') === 'websocket') {
       const pair = new WebSocketPair()
-      this.ctx.acceptWebSocket(pair[1], [via])
+      this.ctx.acceptWebSocket(pair[1])
       return new Response(null, { status: 101, webSocket: pair[0] } as ResponseInit)
     }
-    startChannels(this.env.DB, via)
+    startChannels(this.env.DB, 'fetch')
     return new Response('ok')
   }
 
-  async enter(via: string): Promise<void> {
-    startChannels(this.env.DB, via)
+  async enter(): Promise<void> {
+    startChannels(this.env.DB, 'rpc')
   }
 
-  async arm(via: string): Promise<void> {
-    await this.ctx.storage.put('via', via)
+  async arm(): Promise<void> {
     await this.ctx.storage.setAlarm(Date.now())
   }
 
   async alarm(): Promise<void> {
-    startChannels(this.env.DB, (await this.ctx.storage.get('via')) ?? 'unknown')
+    startChannels(this.env.DB, 'alarm')
   }
 
   async webSocketMessage(socket: WorkerdSocket): Promise<void> {
-    startChannels(this.env.DB, this.ctx.getTags(socket)[0] ?? 'unknown')
+    startChannels(this.env.DB, 'websocket')
     socket.send('started')
   }
 }
@@ -117,10 +110,10 @@ export default {
         await (await stub.fetch(request.url)).arrayBuffer()
         break
       case 'rpc':
-        await stub.enter(via)
+        await stub.enter()
         break
       case 'alarm':
-        await stub.arm(via)
+        await stub.arm()
         break
       case 'websocket':
         await converse(stub, request.url)
