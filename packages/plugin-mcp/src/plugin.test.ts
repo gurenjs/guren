@@ -113,7 +113,7 @@ describe('mcpPlugin (integration)', () => {
     // The preflight companion rides alongside the app's own tools for any
     // token that grants at least one of them (RFC 0016 §5.4).
     expect(tools.map((tool) => tool.name).sort()).toEqual([
-      'guren.preflight',
+      'guren_preflight',
       'posts.index',
       'posts.store',
       'profiles.store',
@@ -157,7 +157,7 @@ describe('mcpPlugin (integration)', () => {
   })
 
   test('should redact a preflight through the checked tool\'s own redact list', async () => {
-    // The record is a `guren.preflight` invocation, but the redaction rules that
+    // The record is a `guren_preflight` invocation, but the redaction rules that
     // apply are the *checked* tool's: the meta-tool declares none, and its empty
     // list would write a route's declared-secret field into the trail in clear.
     const seen: AgentToolInvoked[] = []
@@ -168,13 +168,13 @@ describe('mcpPlugin (integration)', () => {
     const client = await connectClient(token)
     await client.listTools()
     const result = await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'profiles.store', input: { ssn: '123-45-6789', title: 'ok' } },
     })
     expect(result.isError).toBeUndefined()
 
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const invoked = seen.find((event) => event.tool === 'guren.preflight')
+    const invoked = seen.find((event) => event.tool === 'guren_preflight')
     expect(invoked).toBeDefined()
     const input = invoked!.arguments.input as Record<string, unknown>
     expect(input.ssn).toBe('[REDACTED]')
@@ -192,7 +192,7 @@ describe('mcpPlugin (integration)', () => {
     const client = await connectClient(readOnly.plainTextToken)
 
     const { tools } = await client.listTools()
-    expect(tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren.preflight'])
+    expect(tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren_preflight'])
 
     const result = await client.callTool({ name: 'posts.store', arguments: { title: 'x', password: 'y' } })
     expect(result.isError).toBe(true)
@@ -397,10 +397,10 @@ describe('mcpPlugin with an approval queue (integration)', () => {
   test('should list the gated tool and its status companion', async () => {
     // With a queue the tool *is* callable — the call becomes a pending
     // request, which is the interaction the queue exists to offer — so it
-    // belongs in the catalogue, and `guren.approval_status` beside it.
+    // belongs in the catalogue, and `guren_approval_status` beside it.
     const names = (await (await connectClient()).listTools()).tools.map((tool) => tool.name)
     expect(names).toContain('wires.store')
-    expect(names).toContain('guren.approval_status')
+    expect(names).toContain('guren_approval_status')
   })
 
   test('should turn the first call into a pending request and execute nothing', async () => {

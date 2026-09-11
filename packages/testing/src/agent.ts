@@ -86,7 +86,7 @@ export interface AgentCallOptions {
   /**
    * Ask for a verdict instead of an execution (RFC 0016 §5.4): the request runs the
    * route's middleware and validates the contract, then stops before the handler.
-   * MCP reaches the same seam through the `guren.preflight` companion tool instead.
+   * MCP reaches the same seam through the `guren_preflight` companion tool instead.
    */
   preflight?: boolean
 }

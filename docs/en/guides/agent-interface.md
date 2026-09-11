@@ -289,10 +289,19 @@ Two rules the router enforces at registration:
   (`approval`, `redact`) from whichever declaration lost.
 
 **The tool name is the route name, verbatim.** The MCP name grammar
-(`^[A-Za-z0-9._-]{1,128}$`) permits dots, so `posts.store` needs no
-transformation. `agent: { toolName: 'blog.createPost' }` overrides the
-spelling, not the requirement: a route with no `.name()` cannot become a tool,
-because the name is the tool's identity. `guren check` fails on one.
+(`^[A-Za-z0-9._-]{1,128}$`) permits dots, so `posts.store` is a legal tool
+name. Not every client accepts one, though: the Claude and OpenAI tool APIs
+restrict names to `^[A-Za-z0-9_-]{1,64}$`, and Claude Managed Agents applies
+that grammar to MCP tools and skips every tool outside it. The skip is silent
+on your side: `tools/list` is answered correctly and the client drops the
+entry. Give such a route a portable spelling with
+`agent: { toolName: 'posts_store' }`. The route name, `route()` helpers and
+the HTTP path stay as they are; only the advertised tool name changes.
+`guren check` warns on a tool name that a client would drop.
+
+`toolName` overrides the spelling, not the requirement: a route with no
+`.name()` cannot become a tool, because the name is the tool's identity.
+`guren check` fails on one.
 
 ### Resource routes
 
@@ -322,7 +331,7 @@ mistake, not a no-op.
 | Field | Meaning |
 |-------|---------|
 | `description` | What the tool does. Falls back to the route's OpenAPI `description`, then its `summary`. Write it for an agent that has never seen your app. |
-| `toolName` | Overrides the route name as the tool name. |
+| `toolName` | Overrides the route name as the tool name. Use it to give a dotted route name a spelling every client accepts (`posts_store`). |
 | `expose` | `{ mcp?, webMcp? }` — which protocol surfaces the tool appears on. Both default to true; `expose: { mcp: false }` keeps a tool out of the MCP endpoint, and `expose: { webMcp: false }` out of the in-browser surface `@guren/plugin-webmcp` registers (experimental). |
 | `readOnlyHint` | The tool changes nothing. See [Annotations](#annotations). |
 | `destructiveHint` | `false` is the strong claim "additive updates only". |
@@ -552,12 +561,12 @@ per instance. A global budget still needs a shared store and your app's own
 
 ### Rehearsing a call over MCP
 
-The endpoint adds one tool of its own, `guren.preflight`. It answers whether a
+The endpoint adds one tool of its own, `guren_preflight`. It answers whether a
 call to another tool would be allowed, and never performs it:
 
 ```json
 {
-  "name": "guren.preflight",
+  "name": "guren_preflight",
   "arguments": { "tool": "posts.store", "input": { "title": "Rehearsal" } }
 }
 ```
@@ -605,7 +614,7 @@ Four rules worth knowing:
 - **A tool that requires approval can still be checked.** It is not callable
   and not listed, which is precisely when "would this be accepted?" is worth
   asking, and the rehearsal executes nothing.
-- **`guren.preflight` is listed only for a token that grants at least one
+- **`guren_preflight` is listed only for a token that grants at least one
   tool.** A token that can call nothing has nothing to rehearse.
 - **The name is reserved.** A route whose `.agent()` tool name claims it fails
   `bunx guren check`, and the endpoint refuses to serve it. Two tools under
@@ -637,7 +646,7 @@ approvers are notified, and the agent is handed the request id:
   "requestedAt": "2026-09-01T12:00:00.000Z",
   "expiresAt": "2026-09-01T13:00:00.000Z",
   "executed": false,
-  "pollWith": "guren.approval_status"
+  "pollWith": "guren_approval_status"
 }
 ```
 
@@ -722,13 +731,13 @@ through an interface it cannot see.
   so an agent can tell it from a wait worth polling. After the record expires,
   asking again is a new question.
 
-### `guren.approval_status`
+### `guren_approval_status`
 
 The endpoint adds a second tool of its own when a queue is configured. Pass the
 `requestId` from a refusal:
 
 ```json
-{ "name": "guren.approval_status", "arguments": { "requestId": "8f0c…" } }
+{ "name": "guren_approval_status", "arguments": { "requestId": "8f0c…" } }
 ```
 
 ```json
@@ -745,14 +754,14 @@ The endpoint adds a second tool of its own when a queue is configured. Pass the
 ```
 
 Reading a status performs nothing: `"approved"` means "call it again now". It
-counts against the token's read budget, like `guren.preflight`, so polling in a
+counts against the token's read budget, like `guren_preflight`, so polling in a
 tight loop throttles.
 
 A caller may read only the status of a request **it** created. Another
 principal's id answers exactly as an unknown id does. Otherwise the tool would
 be a way to enumerate what your colleagues are waiting to have approved. Your
 audit trail keeps the distinction the caller does not get; a status check is an
-ordinary invocation recorded under `guren.approval_status`.
+ordinary invocation recorded under `guren_approval_status`.
 
 `bunx guren check` fails a route declaring `approval: 'required'` when it can
 see your `mcpPlugin({ … })` call and finds no `approvals` in it: without a
@@ -800,7 +809,7 @@ A client that ignores all of it and still sends nothing reaches the consent
 screen with a default applied, so it is never offered an empty page. Widening
 to a write tool needs that tool's exact name, and a read grant cannot reveal
 one: a tool outside the grant is absent from `tools/list`, and
-`guren.preflight` refuses it too. Read the name from `bunx guren tool:list` and
+`guren_preflight` refuses it too. Read the name from `bunx guren tool:list` and
 re-authorize with `tool:<name>`.
 
 ### Issuing a token
@@ -883,11 +892,11 @@ policies evaluate inside the dispatched request, so it arrives as an
 `AgentToolInvoked` with status `403`. A denial carries no status or duration
 because nothing ran.
 
-A `guren.preflight` call is recorded like any other invocation, under
-`tool: 'guren.preflight'`. An agent probing what it is allowed to do is
+A `guren_preflight` call is recorded like any other invocation, under
+`tool: 'guren_preflight'`. An agent probing what it is allowed to do is
 exactly what a trail wants to show. The tool it checked gets no record of its
 own, because nothing was invoked. A refusal is recorded the same way, as an
-`AgentToolDenied` for `guren.preflight`: naming the checked tool instead would
+`AgentToolDenied` for `guren_preflight`: naming the checked tool instead would
 make a refused rehearsal indistinguishable from a refused real call to a
 mutating tool. The tool that was probed is in the record's arguments.
 
@@ -965,7 +974,7 @@ file). It is worth having: a call from a terminal runs as whoever `--as` names,
 with no credential to verify, which is exactly the kind of write an audit trail
 is for.
 
-A `bunx guren tool:call --preflight` is recorded as `guren.preflight`, exactly
+A `bunx guren tool:call --preflight` is recorded as `guren_preflight`, exactly
 as a rehearsal over MCP is, with the tool it checked in the arguments. The
 handler did not run, so a record naming that tool would read as a call that
 completed. If your application's `@guren/core` predates the preflight seam it
@@ -1087,15 +1096,16 @@ content-activated: an app with no agent routes produces no findings and has no
 controller scanned.
 
 `check` **fails** on a nameless agent route, a tool name outside the MCP
-grammar, a tool name reserved by the framework (`guren.preflight`), two routes
+grammar, a tool name reserved by the framework (`guren_preflight`), two routes
 resolving to one tool name, and a non-read-only tool whose
 middleware chain carries no authorization capability and whose action never
 calls `this.authorize(...)`.
 
-`check` **warns** on a missing output shape, an Inertia response, a
-body-carrying route with no `body` schema, a read-only tool whose action
-mutates, and any verdict it could not reach (an inline handler, an unreadable
-controller file, two controller classes sharing a name).
+`check` **warns** on a tool name some clients drop (a dot, or more than 64
+characters, which is where `agent.toolName` comes in), a missing output shape,
+an Inertia response, a body-carrying route with no `body` schema, a read-only
+tool whose action mutates, and any verdict it could not reach (an inline
+handler, an unreadable controller file, two controller classes sharing a name).
 
 `bunx guren audit` treats the same routes more strictly: a body-validation
 finding that is a warning for an ordinary route becomes a **failure** for an

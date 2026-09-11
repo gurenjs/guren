@@ -77,11 +77,13 @@ export type {
   ToolRequestBuildFailure,
 } from './agent/dispatch'
 // Meta-tool names an adapter adds to the catalogue and an application route
-// may not claim (RFC 0016 §5.4). Exported so `@guren/plugin-mcp` and
-// `guren check` read one list instead of restating the string.
+// may not claim (RFC 0016 §5.4), and the client-portable name grammar they
+// satisfy. Exported so `@guren/plugin-mcp` and `guren check` read one list and
+// one pattern instead of restating the string.
 export {
   APPROVAL_STATUS_TOOL_NAME,
   isReservedAgentToolName,
+  PORTABLE_AGENT_TOOL_NAME_PATTERN,
   PREFLIGHT_TOOL_NAME,
   RESERVED_AGENT_TOOL_NAMES,
 } from './agent/meta-tools'
@@ -173,7 +175,7 @@ export type {
   InterposedAgentCall,
 } from './agent/pipeline'
 // Reading one approval record as an answer for the caller that asked. Shared by
-// `guren.approval_status` over MCP and the durable surface's own status check
+// `guren_approval_status` over MCP and the durable surface's own status check
 // (RFC 0017 §5): two readers, one rule for what a caller may be told.
 export { approvalStatusNotFoundMessage, toApprovalStatusReport } from './agent/approval-status'
 export type { ApprovalStatusOutcome, ApprovalStatusReport } from './agent/approval-status'

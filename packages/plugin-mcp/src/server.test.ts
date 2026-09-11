@@ -153,7 +153,7 @@ describe('createAppMcpServer', () => {
     const { client } = await connect({ abilities: ['tools:read'] })
     const { tools } = await client.listTools()
     // Plus the preflight companion, which any token granting a tool can use.
-    expect(tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren.preflight'])
+    expect(tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren_preflight'])
   })
 
   test('should advertise schema and annotations on listed tools', async () => {
@@ -227,7 +227,7 @@ describe('createAppMcpServer', () => {
  * check, and what it records. The verdict is whatever the seam answered, stubbed
  * here — `preflight.test.ts` drives the real one.
  */
-describe('createAppMcpServer: guren.preflight', () => {
+describe('createAppMcpServer: guren_preflight', () => {
   async function connectPreflight(overrides: HarnessOptions = {}) {
     return connect({
       respond: (tool, _args, preflight) =>
@@ -239,7 +239,7 @@ describe('createAppMcpServer: guren.preflight', () => {
   test('should advertise itself as read-only and non-destructive', async () => {
     const { client } = await connectPreflight()
     const { tools } = await client.listTools()
-    const preflight = tools.find((tool) => tool.name === 'guren.preflight')!
+    const preflight = tools.find((tool) => tool.name === 'guren_preflight')!
 
     expect(preflight.annotations).toEqual({
       readOnlyHint: true,
@@ -263,7 +263,7 @@ describe('createAppMcpServer: guren.preflight', () => {
     const { client, dispatched } = await connectPreflight()
     await client.listTools()
     const result = await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'posts.store', input: { title: 'Hello' } },
     })
 
@@ -291,7 +291,7 @@ describe('createAppMcpServer: guren.preflight', () => {
       respond: () => seamVerdict({ unverified: [], validated: [] }),
     })
     const result = await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'posts.index' },
     })
     expect((result.structuredContent as { unverified: string[] }).unverified).toEqual([])
@@ -305,7 +305,7 @@ describe('createAppMcpServer: guren.preflight', () => {
           { status: 422 },
         ),
     })
-    const result = await client.callTool({ name: 'guren.preflight', arguments: { tool: 'posts.store' } })
+    const result = await client.callTool({ name: 'guren_preflight', arguments: { tool: 'posts.store' } })
 
     // The *call to the companion* succeeded; what it reports is a refusal.
     expect(result.isError).toBeUndefined()
@@ -321,7 +321,7 @@ describe('createAppMcpServer: guren.preflight', () => {
   test('should deny a check of a tool the scopes do not grant', async () => {
     const { client, recorded, dispatched } = await connectPreflight({ abilities: ['tools:read'] })
     const result = await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'posts.store', input: { title: 'Hello' } },
     })
 
@@ -331,7 +331,7 @@ describe('createAppMcpServer: guren.preflight', () => {
     // check where a refused write would be.
     expect(recorded.denied).toEqual([
       {
-        tool: 'guren.preflight',
+        tool: 'guren_preflight',
         reason: 'scope',
         args: { tool: 'posts.store', input: { title: 'Hello' } },
       },
@@ -347,23 +347,23 @@ describe('createAppMcpServer: guren.preflight', () => {
     // filter could be deleted with every test still green.
     const router = new Router()
     router.get('/posts', () => new Response('ok')).name('posts.index').agent({})
-    router.post('/impostor', () => new Response('ok')).name('guren.preflight').agent({})
+    router.post('/impostor', () => new Response('ok')).name('guren_preflight').agent({})
     const tools = deriveAgentTools(router.definitions()).tools.filter((tool) => tool.expose.mcp)
 
     const { client } = await connectPreflight({ tools })
     const listed = await client.listTools()
 
-    const claimed = listed.tools.filter((tool) => tool.name === 'guren.preflight')
+    const claimed = listed.tools.filter((tool) => tool.name === 'guren_preflight')
     expect(claimed).toHaveLength(1)
     // The companion's schema, not the route's: the survivor has to be the one
     // that answers preflight calls.
     expect(claimed[0]!.inputSchema.required).toEqual(['tool'])
-    expect(listed.tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren.preflight'])
+    expect(listed.tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren_preflight'])
   })
 
   test('should refuse an unknown tool name and name it', async () => {
     const { client, recorded } = await connectPreflight()
-    const result = await client.callTool({ name: 'guren.preflight', arguments: { tool: 'nope' } })
+    const result = await client.callTool({ name: 'guren_preflight', arguments: { tool: 'nope' } })
 
     expect(result.isError).toBe(true)
     expect((result.content as Array<{ text: string }>)[0]!.text).toContain('"nope"')
@@ -373,7 +373,7 @@ describe('createAppMcpServer: guren.preflight', () => {
 
   test('should refuse arguments that name no tool', async () => {
     const { client } = await connectPreflight()
-    const result = await client.callTool({ name: 'guren.preflight', arguments: {} })
+    const result = await client.callTool({ name: 'guren_preflight', arguments: {} })
     expect(result.isError).toBe(true)
     expect((result.content as Array<{ text: string }>)[0]!.text).toContain('"tool" argument')
   })
@@ -386,7 +386,7 @@ describe('createAppMcpServer: guren.preflight', () => {
     expect(tools.map((tool) => tool.name)).not.toContain('approvals.store')
 
     const result = await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'approvals.store' },
     })
     expect(result.isError).toBeUndefined()
@@ -397,13 +397,13 @@ describe('createAppMcpServer: guren.preflight', () => {
   test('should record the invocation under the meta-tool name only', async () => {
     const { client, recorded } = await connectPreflight()
     await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'posts.store', input: { title: 'Hello' } },
     })
 
     expect(recorded.invoked).toEqual([
       {
-        tool: 'guren.preflight',
+        tool: 'guren_preflight',
         status: 200,
         args: { tool: 'posts.store', input: { title: 'Hello' } },
       },
@@ -416,7 +416,7 @@ describe('createAppMcpServer: guren.preflight', () => {
     const { client } = await connectPreflight({
       respond: () => Response.json({ created: 1 }, { status: 201 }),
     })
-    const result = await client.callTool({ name: 'guren.preflight', arguments: { tool: 'posts.store' } })
+    const result = await client.callTool({ name: 'guren_preflight', arguments: { tool: 'posts.store' } })
 
     expect(result.isError).toBe(true)
     expect((result.content as Array<{ text: string }>)[0]!.text).toContain('its handler ran')

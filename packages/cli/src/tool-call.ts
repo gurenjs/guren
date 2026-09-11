@@ -374,7 +374,7 @@ export async function dispatchToolCall(
   const verdict = options.preflight ? readVerdict(outcome) : undefined
 
   // Recorded *after* the verdict is read: the verdict decides which tool the record
-  // names. An answered rehearsal goes down as `guren.preflight`, anything else as the
+  // names. An answered rehearsal goes down as `guren_preflight`, anything else as the
   // tool that actually executed. See `record`.
   record(tool, options, outcome.status, startedAt, verdict !== undefined)
 
@@ -392,7 +392,7 @@ export async function dispatchToolCall(
  * Record one invocation, if the application configured somewhere to record it. **This
  * surface emits no `AgentToolDenied`, ever** — the four denial reasons each name an
  * adapter check it does not run. Arguments go through the called tool's
- * `.agent({ redact })` list. **A rehearsal is recorded under `guren.preflight`, never the
+ * `.agent({ redact })` list. **A rehearsal is recorded under `guren_preflight`, never the
  * tool it rehearsed**, decided by the seam's response marker, not the flag ({@link readVerdict}).
  */
 function record(
@@ -405,7 +405,7 @@ function record(
   rehearsed: boolean,
 ): void {
   // The meta-tool's argument shape on MCP — `{ tool, input }` — so one reader
-  // parses `guren.preflight` records from either surface.
+  // parses `guren_preflight` records from either surface.
   const args = rehearsed ? { tool: tool.toolName, input: options.args } : options.args
 
   // Guarded at the call, not only at the resolution: `agent.audit` is a public binding an

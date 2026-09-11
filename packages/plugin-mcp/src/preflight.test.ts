@@ -14,13 +14,13 @@ import {
 import { mcpPlugin } from './plugin'
 
 /**
- * `guren.preflight` against a real application (RFC 0016 §5.4): the SDK's own
+ * `guren_preflight` against a real application (RFC 0016 §5.4): the SDK's own
  * client, the endpoint, the dispatch re-entry and the router's preflight seam,
  * with no stub in the path. `server.test.ts` pins the companion tool's own
  * rules; what only this can show is that the verdict describes what the
  * application would really have done.
  */
-describe('guren.preflight (integration)', () => {
+describe('guren_preflight (integration)', () => {
   const store = new MemoryApiTokenStore()
   /** Written by the handler, and by nothing else — the evidence of execution. */
   let written: string[] = []
@@ -76,7 +76,7 @@ describe('guren.preflight (integration)', () => {
   test('should answer an allowed verdict and leave no write behind', async () => {
     const client = await connectClient()
     const result = await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'posts.store', input: { title: 'Hello' } },
     })
 
@@ -114,7 +114,7 @@ describe('guren.preflight (integration)', () => {
   test('should report a validation failure as a success result carrying the errors', async () => {
     const client = await connectClient()
     const result = await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'posts.store', input: { title: '' } },
     })
 
@@ -136,7 +136,7 @@ describe('guren.preflight (integration)', () => {
   test('should refuse a tool this app does not expose', async () => {
     const client = await connectClient()
     const result = await client.callTool({
-      name: 'guren.preflight',
+      name: 'guren_preflight',
       arguments: { tool: 'posts.destroy' },
     })
 

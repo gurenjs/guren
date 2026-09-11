@@ -31,7 +31,7 @@ router
 
 **One declaration per route.** Declaring `agent` in the route options *and* chaining `.agent()` throws at registration ("already carries agent metadata"). It is a refusal rather than a merge on purpose: a silent overwrite would drop security-relevant fields (`approval`, `redact`) the first declaration carried.
 
-The tool name is the route name, used verbatim — the MCP name grammar allows dots, so `posts.store` needs no transformation. **A route with no `.name()` cannot be a tool** (the name is the tool's identity); `guren check` fails on it.
+The tool name is the route name, used verbatim — the MCP name grammar allows dots, so `posts.store` is a legal tool name. Not every client accepts one: the Claude and OpenAI tool APIs restrict names to `[A-Za-z0-9_-]{1,64}`, and Claude Managed Agents applies that grammar to MCP tools and *silently skips* every tool outside it. Give such a route a portable spelling with `agent: { toolName: 'posts_store' }` (route name, `route()` helpers and path stay unchanged); `guren check` warns (`agent-route-portable-name`) on a name a client would drop. **A route with no `.name()` cannot be a tool** (the name is the tool's identity); `guren check` fails on it.
 
 ## Exposing resource() actions
 

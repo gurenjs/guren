@@ -1,13 +1,22 @@
 /**
  * The names a protocol adapter may add to an application's tool catalogue on
  * its own, and which an application route therefore may not claim (RFC 0016
- * §5.4). One rule, two readers: `@guren/plugin-mcp` adds `guren.preflight` to
+ * §5.4). One rule, two readers: `@guren/plugin-mcp` adds `guren_preflight` to
  * the catalogue it serves, `guren check` fails a route whose tool name
  * collides; the CLI cannot import the plugin, hence beside the derivation. A
  * `tools/list` carrying two tools with one name is rejected wholesale by an MCP
- * client, so a collision costs the *entire* catalogue. The `guren.` prefix is
+ * client, so a collision costs the *entire* catalogue. The `guren_` prefix is
  * not reserved wholesale: that would fail routes over collisions that do not exist.
  */
+
+/**
+ * The grammar every known client accepts: a strict subset of MCP's own
+ * (`AGENT_TOOL_NAME_PATTERN`, which admits `.` and 128 characters). The Claude and
+ * OpenAI tool APIs enforce it; Claude Managed Agents silently skips an MCP tool
+ * outside it (#787). Meta-tools have no `toolName` escape hatch, so the names
+ * below must match; `guren check` warns on a route name that does not.
+ */
+export const PORTABLE_AGENT_TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 
 /**
  * The preflight companion tool (RFC 0016 §5.4). Preflight cannot be an
@@ -16,7 +25,7 @@
  * error, and a verdict conforms to no route's output. One meta-tool for the
  * whole catalogue, not one companion per tool (§5.5).
  */
-export const PREFLIGHT_TOOL_NAME = 'guren.preflight'
+export const PREFLIGHT_TOOL_NAME = 'guren_preflight'
 
 /**
  * The approval-status companion tool (RFC 0016 §5.4 item 4). A caller handed a
@@ -25,7 +34,7 @@ export const PREFLIGHT_TOOL_NAME = 'guren.preflight'
  * mode of the first, so neither output schema is the union of two unrelated
  * shapes.
  */
-export const APPROVAL_STATUS_TOOL_NAME = 'guren.approval_status'
+export const APPROVAL_STATUS_TOOL_NAME = 'guren_approval_status'
 
 /** Every meta-tool name an adapter may occupy. */
 export const RESERVED_AGENT_TOOL_NAMES: readonly string[] = [
@@ -35,7 +44,7 @@ export const RESERVED_AGENT_TOOL_NAMES: readonly string[] = [
 
 /**
  * Whether a tool name belongs to the framework rather than the application.
- * Case-sensitive: MCP tool names are matched literally, so `Guren.Preflight` is
+ * Case-sensitive: MCP tool names are matched literally, so `Guren_Preflight` is
  * a different tool and reserving it would take a name away for nothing.
  */
 export function isReservedAgentToolName(name: string): boolean {

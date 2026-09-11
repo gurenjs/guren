@@ -605,7 +605,7 @@ stand-in (§7). Decisions, in the order §6 lists them:
   reader.** `toApprovalStatusReport` / `approvalStatusNotFoundMessage` were
   `@guren/plugin-mcp`'s; they are now `@guren/core`'s, and the plugin imports
   them while keeping its MCP schema and description. A durable agent asking
-  "what became of this request" must get the answer `guren.approval_status`
+  "what became of this request" must get the answer `guren_approval_status`
   gives, including the part that is a *refusal to distinguish*: an unknown id
   and another principal's id are one message, and a second copy of that rule is
   how one surface comes to leak what the other hides. `createAgentAuditRecorder`

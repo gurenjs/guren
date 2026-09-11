@@ -28,12 +28,12 @@ const keys = (results: Awaited<ReturnType<typeof run>>) => results.map((r) => r.
 
 describe('checkAgentRoutes', () => {
   it('contributes nothing when no route declares agent metadata', async () => {
-    expect(await run([route({ path: '/posts', name: 'posts.index' })])).toEqual([])
+    expect(await run([route({ path: '/posts', name: 'posts_index' })])).toEqual([])
   })
 
   it('reports a single pass when every agent route is wired correctly', async () => {
     const results = await run([
-      route({ path: '/posts', name: 'posts.index', agent: { description: 'List posts.' }, schemas: OUTPUT }),
+      route({ path: '/posts', name: 'posts_index', agent: { description: 'List posts.' }, schemas: OUTPUT }),
     ])
 
     expect(results).toHaveLength(1)
@@ -44,7 +44,7 @@ describe('checkAgentRoutes', () => {
   // The pass message may not claim more than the check looked at.
   it('scopes the pass message to what was actually checked', async () => {
     const [result] = await run([
-      route({ path: '/posts', name: 'posts.index', agent: {}, schemas: OUTPUT }),
+      route({ path: '/posts', name: 'posts_index', agent: {}, schemas: OUTPUT }),
     ])
 
     expect(result?.message).toContain('Nothing here validates the derived tools themselves')
@@ -80,40 +80,88 @@ describe('checkAgentRoutes', () => {
 
     it('names the override as the source when toolName is the illegal one', async () => {
       const results = await run([
-        route({ path: '/posts', name: 'posts.index', agent: { toolName: 'posts/index' }, schemas: OUTPUT }),
+        route({ path: '/posts', name: 'posts_index', agent: { toolName: 'posts/index' }, schemas: OUTPUT }),
       ])
 
       expect(results[0]?.message).toContain('agent toolName override')
     })
 
-    it('accepts a dotted route name verbatim', async () => {
+    // #787: legal to MCP, but Claude Managed Agents drops a dotted name without any
+    // error the app can see. A warn, since a client that accepts dots has nothing to fix.
+    it('warns on a dotted route name and proposes the underscore spelling', async () => {
       const results = await run([
         route({ path: '/posts', name: 'posts.index', agent: {}, schemas: OUTPUT }),
       ])
 
+      expect(results).toHaveLength(1)
+      expect(results[0]?.status).toBe('warn')
+      expect(results[0]?.key).toBe('agent-route-portable-name:GET:/posts')
+      expect(results[0]?.message).toContain("'posts.index'")
+      expect(results[0]?.message).toContain('route name')
+      expect(results[0]?.suggestion).toContain("toolName: 'posts_index'")
+    })
+
+    it('passes a dotted route name whose toolName override is portable', async () => {
+      const results = await run([
+        route({ path: '/posts', name: 'posts.index', agent: { toolName: 'posts_index' }, schemas: OUTPUT }),
+      ])
+
+      expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe('pass')
     })
 
-    // The endpoint adds `guren.preflight` itself and drops any route claiming it: two tools
+    it('names the override as the source when toolName is the unportable one', async () => {
+      const results = await run([
+        route({ path: '/posts', name: 'posts_index', agent: { toolName: 'posts.index' }, schemas: OUTPUT }),
+      ])
+
+      expect(results[0]?.key).toBe('agent-route-portable-name:GET:/posts')
+      expect(results[0]?.message).toContain('agent toolName override')
+    })
+
+    // The 64-character ceiling is the Claude/OpenAI one; substitution cannot fix length.
+    it('warns on a name longer than 64 characters without proposing a substitution', async () => {
+      const results = await run([
+        route({ path: '/posts', name: 'p'.repeat(65), agent: {}, schemas: OUTPUT }),
+      ])
+
+      expect(results[0]?.status).toBe('warn')
+      expect(results[0]?.key).toBe('agent-route-portable-name:GET:/posts')
+      expect(results[0]?.suggestion).not.toContain('toolName: \'')
+      expect(results[0]?.suggestion).toContain('64')
+    })
+
+    // The grammar rule and the reserved rule already own their names; a second
+    // finding on the same route would double-report one defect.
+    it('does not also warn about portability on an illegal or reserved name', async () => {
+      const results = await run([
+        route({ path: '/a', name: 'posts index', agent: {}, schemas: OUTPUT }),
+        route({ path: '/b', name: 'guren_preflight', agent: {}, schemas: OUTPUT }),
+      ])
+
+      expect(keys(results).some((key) => key.startsWith('agent-route-portable-name:'))).toBe(false)
+    })
+
+    // The endpoint adds `guren_preflight` itself and drops any route claiming it: two tools
     // with one name makes an MCP client reject the whole list.
     it('fails a route claiming a reserved meta-tool name', async () => {
       const results = await run([
-        route({ path: '/preflight', name: 'guren.preflight', agent: {}, schemas: OUTPUT }),
+        route({ path: '/preflight', name: 'guren_preflight', agent: {}, schemas: OUTPUT }),
       ])
 
       expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe('fail')
       expect(results[0]?.key).toBe('agent-route-reserved-name:GET:/preflight')
       expect(results[0]?.message).toContain('reserved')
-      expect(results[0]?.message).toContain('guren.preflight')
+      expect(results[0]?.message).toContain('guren_preflight')
     })
 
     it('fails a reserved name that arrived through the toolName override', async () => {
       const results = await run([
         route({
           path: '/checks',
-          name: 'checks.index',
-          agent: { toolName: 'guren.preflight' },
+          name: 'checks_index',
+          agent: { toolName: 'guren_preflight' },
           schemas: OUTPUT,
         }),
       ])
@@ -125,7 +173,7 @@ describe('checkAgentRoutes', () => {
     // The reservation is one name, not the `guren.` namespace.
     it('accepts a name that merely resembles a reserved one', async () => {
       const results = await run([
-        route({ path: '/preflight', name: 'guren.preflights', agent: {}, schemas: OUTPUT }),
+        route({ path: '/preflight', name: 'guren_preflights', agent: {}, schemas: OUTPUT }),
       ])
 
       expect(results).toHaveLength(1)
@@ -134,17 +182,17 @@ describe('checkAgentRoutes', () => {
 
     it('fails once per collision group, naming both routes', async () => {
       const results = await run([
-        route({ path: '/posts', name: 'posts.index', agent: {}, schemas: OUTPUT }),
+        route({ path: '/posts', name: 'posts_index', agent: {}, schemas: OUTPUT }),
         route({
           path: '/articles',
-          name: 'articles.index',
-          agent: { toolName: 'posts.index' },
+          name: 'articles_index',
+          agent: { toolName: 'posts_index' },
           schemas: OUTPUT,
         }),
       ])
 
       expect(results).toHaveLength(1)
-      expect(results[0]?.key).toBe('agent-route-duplicate:posts.index')
+      expect(results[0]?.key).toBe('agent-route-duplicate:posts_index')
       expect(results[0]?.status).toBe('fail')
       expect(results[0]?.message).toContain('GET /posts')
       expect(results[0]?.message).toContain('GET /articles')
@@ -154,7 +202,7 @@ describe('checkAgentRoutes', () => {
     it('does not also report a collision between illegally-named tools', async () => {
       const results = await run([
         route({ path: '/posts', name: 'posts index', agent: {}, schemas: OUTPUT }),
-        route({ path: '/articles', name: 'articles.index', agent: { toolName: 'posts index' }, schemas: OUTPUT }),
+        route({ path: '/articles', name: 'articles_index', agent: { toolName: 'posts index' }, schemas: OUTPUT }),
       ])
 
       expect(keys(results).every((key) => key.startsWith('agent-route-tool-name:'))).toBe(true)
@@ -168,7 +216,7 @@ describe('checkAgentRoutes', () => {
       route({
         method: 'DELETE',
         path: '/posts/:id',
-        name: 'posts.destroy',
+        name: 'posts_destroy',
         agent: {},
         controller: { name: 'PostController', action: 'destroy' },
         schemas: OUTPUT,
@@ -177,7 +225,7 @@ describe('checkAgentRoutes', () => {
 
     it('passes when the chain carries an authorization capability', async () => {
       const results = await run([
-        destroyRoute({ capabilities: { authorization: { abilities: ['posts.destroy'], mode: 'all' } } }),
+        destroyRoute({ capabilities: { authorization: { abilities: ['posts_destroy'], mode: 'all' } } }),
       ])
 
       expect(results[0]?.status).toBe('pass')
@@ -198,7 +246,7 @@ describe('checkAgentRoutes', () => {
 
     it('does not require authorization on a read-only tool', async () => {
       const results = await run([
-        route({ path: '/posts', name: 'posts.index', agent: {}, schemas: OUTPUT }),
+        route({ path: '/posts', name: 'posts_index', agent: {}, schemas: OUTPUT }),
       ])
 
       expect(results[0]?.status).toBe('pass')
@@ -208,7 +256,7 @@ describe('checkAgentRoutes', () => {
       const results = await run([
         route({
           path: '/posts/export',
-          name: 'posts.export',
+          name: 'posts_export',
           agent: { readOnlyHint: false },
           controller: { name: 'PostController', action: 'export' },
           schemas: OUTPUT,
@@ -223,7 +271,7 @@ describe('checkAgentRoutes', () => {
         route({
           method: 'POST',
           path: '/posts/search',
-          name: 'posts.search',
+          name: 'posts_search',
           agent: { readOnlyHint: true },
           controller: { name: 'PostController', action: 'search' },
           schemas: { body: z.object({ q: z.string() }), ...OUTPUT },
@@ -238,7 +286,7 @@ describe('checkAgentRoutes', () => {
     // An inline handler's body is a closure this check never reads, so a fail would describe unopened source.
     it('warns rather than fails for an inline handler with no authorization', async () => {
       const results = await run([
-        route({ method: 'DELETE', path: '/posts/:id', name: 'posts.destroy', agent: {}, schemas: OUTPUT }),
+        route({ method: 'DELETE', path: '/posts/:id', name: 'posts_destroy', agent: {}, schemas: OUTPUT }),
       ])
 
       expect(results[0]?.status).toBe('warn')
@@ -257,7 +305,7 @@ describe('checkAgentRoutes', () => {
 
   describe('advertised schemas', () => {
     it('warns when a read-only tool describes no output', async () => {
-      const results = await run([route({ path: '/posts', name: 'posts.index', agent: {} })])
+      const results = await run([route({ path: '/posts', name: 'posts_index', agent: {} })])
 
       expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe('warn')
@@ -270,10 +318,10 @@ describe('checkAgentRoutes', () => {
         route({
           method: 'POST',
           path: '/posts',
-          name: 'posts.store',
+          name: 'posts_store',
           agent: {},
           schemas: { body: z.object({ title: z.string() }) },
-          capabilities: { authorization: { abilities: ['posts.store'], mode: 'all' } },
+          capabilities: { authorization: { abilities: ['posts_store'], mode: 'all' } },
         }),
       ])
 
@@ -284,7 +332,7 @@ describe('checkAgentRoutes', () => {
       const results = await run([
         route({
           path: '/posts',
-          name: 'posts.index',
+          name: 'posts_index',
           agent: {},
           resource: { kind: 'collection', resource: 'PostResource' },
         }),
@@ -298,11 +346,11 @@ describe('checkAgentRoutes', () => {
         route({
           method: 'POST',
           path: '/posts',
-          name: 'posts.store',
+          name: 'posts_store',
           agent: {},
           controller: { name: 'PostController', action: 'store' },
           schemas: OUTPUT,
-          capabilities: { authorization: { abilities: ['posts.store'], mode: 'all' } },
+          capabilities: { authorization: { abilities: ['posts_store'], mode: 'all' } },
         }),
       ])
 
@@ -318,10 +366,10 @@ describe('checkAgentRoutes', () => {
         route({
           method: 'POST',
           path: '/posts',
-          name: 'posts.store',
+          name: 'posts_store',
           agent: {},
           schemas: OUTPUT,
-          capabilities: { authorization: { abilities: ['posts.store'], mode: 'all' } },
+          capabilities: { authorization: { abilities: ['posts_store'], mode: 'all' } },
         }),
       ])
 
@@ -336,11 +384,11 @@ describe('checkAgentRoutes', () => {
         route({
           method: 'DELETE',
           path: '/posts/:id',
-          name: 'posts.destroy',
+          name: 'posts_destroy',
           agent: {},
           controller: { name: 'PostController', action: 'destroy' },
           schemas: OUTPUT,
-          capabilities: { authorization: { abilities: ['posts.destroy'], mode: 'all' } },
+          capabilities: { authorization: { abilities: ['posts_destroy'], mode: 'all' } },
         }),
       ])
 
@@ -353,7 +401,7 @@ describe('checkAgentRoutes', () => {
         route({
           method: 'QUERY',
           path: '/posts',
-          name: 'posts.search',
+          name: 'posts_search',
           agent: {},
           controller: { name: 'PostController', action: 'search' },
           schemas: OUTPUT,
@@ -416,7 +464,7 @@ ${member}
           route({
             method: 'DELETE',
             path: '/posts/:id',
-            name: 'posts.destroy',
+            name: 'posts_destroy',
             agent,
             controller: { name: 'PostController', action: 'destroy' },
             schemas,
@@ -437,7 +485,7 @@ ${member}
         [
           route({
             path: '/posts',
-            name: 'posts.index',
+            name: 'posts_index',
             agent,
             controller: { name: 'PostController', action: 'index' },
             schemas,
@@ -554,7 +602,7 @@ ${member}
         const results = await run([
           route({
             path: '/posts',
-            name: 'posts.index',
+            name: 'posts_index',
             agent: {},
             controller: { name: 'MissingController', action: 'index' },
             schemas: OUTPUT,
@@ -623,7 +671,7 @@ export class InvoiceController extends Controller {
           route({
             method: 'DELETE',
             path: '/posts/:id',
-            name: 'posts.destroy',
+            name: 'posts_destroy',
             agent: {},
             controller: { name: 'PostController', action: 'destroy' },
             schemas: OUTPUT,
@@ -654,7 +702,7 @@ export class InvoiceController extends Controller {
 
     it('reads metadata declared through route options', async () => {
       const router = new Router()
-      router.get('/posts', { name: 'posts.index', agent: { description: 'List posts.' } }, handler)
+      router.get('/posts', { name: 'posts_index', agent: { description: 'List posts.' } }, handler)
 
       const results = await run(router.definitions())
 
@@ -664,7 +712,7 @@ export class InvoiceController extends Controller {
 
     it('reads metadata chained after .name()', async () => {
       const router = new Router()
-      router.delete('/posts/:id', { output: z.object({}) }, typedHandler).name('posts.destroy').agent({})
+      router.delete('/posts/:id', { output: z.object({}) }, typedHandler).name('posts_destroy').agent({})
 
       const results = await run(router.definitions())
 
@@ -674,7 +722,7 @@ export class InvoiceController extends Controller {
     it('counts a group prefix as part of the path it reports', async () => {
       const router = new Router()
       router.group('/api', (grouped) => {
-        grouped.delete('/posts/:id', { name: 'posts.destroy', agent: {}, output: z.object({}) }, typedHandler)
+        grouped.delete('/posts/:id', { name: 'posts_destroy', agent: {}, output: z.object({}) }, typedHandler)
       })
 
       const results = await run(router.definitions())
@@ -698,8 +746,8 @@ export class InvoiceController extends Controller {
     it('accepts authorization stamped by authorizeMiddleware on the chain', async () => {
       const router = new Router()
       router
-        .delete('/posts/:id', { name: 'posts.destroy', agent: {}, output: z.object({}) }, typedHandler)
-        .middleware(authorizeMiddleware('posts.destroy'))
+        .delete('/posts/:id', { name: 'posts_destroy', agent: {}, output: z.object({}) }, typedHandler)
+        .middleware(authorizeMiddleware('posts_destroy'))
 
       const results = await run(router.definitions())
 
@@ -723,7 +771,7 @@ export class InvoiceController extends Controller {
       route({
         method: 'DELETE',
         path: '/posts/:id',
-        name: 'posts.destroy',
+        name: 'posts_destroy',
         agent: { approval: 'required', readOnlyHint: true },
         schemas: OUTPUT,
       })
@@ -743,7 +791,7 @@ export const providers = [mcpPlugin({ path: '/mcp' })]
       const finding = results.find((result) => result.key === 'agent-route-approval-store')
 
       expect(finding?.status).toBe('fail')
-      expect(finding?.message).toContain('posts.destroy')
+      expect(finding?.message).toContain('posts_destroy')
       expect(finding?.message).toContain('approvals')
       expect(finding?.filePath).toBe('src/app.ts')
     })
@@ -871,7 +919,7 @@ export const providers = [mcpPlugin({})]
           route({
             method: 'POST',
             path: '/payouts',
-            name: 'payouts.store',
+            name: 'payouts_store',
             agent: { approval: 'required', readOnlyHint: true },
             schemas: OUTPUT,
           }),
@@ -880,8 +928,8 @@ export const providers = [mcpPlugin({})]
 
       const findings = results.filter((result) => result.key === 'agent-route-approval-store')
       expect(findings).toHaveLength(1)
-      expect(findings[0]?.message).toContain('posts.destroy')
-      expect(findings[0]?.message).toContain('payouts.store')
+      expect(findings[0]?.message).toContain('posts_destroy')
+      expect(findings[0]?.message).toContain('payouts_store')
     })
 
     it('says nothing about the queue when no route declares approval', async () => {
@@ -893,7 +941,7 @@ export const providers = [mcpPlugin({ path: '/mcp' })]
 
       const results = await checkAgentRoutes({
         cwd: tempDir,
-        definitions: [route({ path: '/posts', name: 'posts.index', agent: {}, schemas: OUTPUT })],
+        definitions: [route({ path: '/posts', name: 'posts_index', agent: {}, schemas: OUTPUT })],
       })
 
       expect(keys(results)).not.toContain('agent-route-approval-store')

@@ -178,7 +178,7 @@ export async function gateApproval(
     // An approval is granted to *someone* and spent by matching that someone.
     // `agentApprovalPrincipalKey` answers `'anonymous'` for every unidentified
     // caller, so one could spend an approval granted to another and read their
-    // pending actions through `guren.approval_status`.
+    // pending actions through `guren_approval_status`.
     return {
       allowed: false,
       reason: 'approval',
@@ -210,7 +210,7 @@ export async function gateApproval(
     const status = agentApprovalStatusAt(existing, now)
     if (status === 'pending') return pendingVerdict(tool, existing, 'pending')
     // Expiry is asked separately, and only here. `agentApprovalStatusAt` reports
-    // a rejection forever, which is right for `guren.approval_status` but as a
+    // a rejection forever, which is right for `guren_approval_status` but as a
     // *block* would denylist that exact call for that principal permanently,
     // with no remedy short of deleting the row.
     if (status === 'rejected' && !agentApprovalExpiredAt(existing, now)) {
@@ -313,7 +313,7 @@ function spentVerdict(tool: DerivedAgentTool, request: AgentApprovalRequest): Ga
 }
 
 /**
- * The scope half alone — what `guren.preflight` checks before rehearsing a call
+ * The scope half alone — what `guren_preflight` checks before rehearsing a call
  * (RFC 0016 §5.4). Checking requires the *same* scope as calling, or the
  * companion becomes a probe of tools the token cannot call. Approval is not
  * applied: a rehearsal executes nothing, and approval gates an ability rather

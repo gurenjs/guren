@@ -437,12 +437,12 @@ describe('the invocation pipeline: audit', () => {
       tool: fixtureTools().store,
       args: outer.input,
       preflight: true,
-      audited: { toolName: 'guren.preflight', redact: fixtureTools().store.redact },
+      audited: { toolName: 'guren_preflight', redact: fixtureTools().store.redact },
       auditedArguments: outer,
     })
 
     expect(h.invoked.length).toBe(1)
-    expect(h.invoked[0]!.tool).toBe('guren.preflight')
+    expect(h.invoked[0]!.tool).toBe('guren_preflight')
     const recorded = h.invoked[0]!.args.input as Record<string, unknown>
     expect(recorded.title).toBe('x')
     expect(recorded.secret).not.toBe('hunter2')
