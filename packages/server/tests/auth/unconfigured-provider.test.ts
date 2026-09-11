@@ -4,29 +4,9 @@ import { Application } from '../../src/http/Application'
 import { Controller } from '../../src/mvc/Controller'
 import { requireAuthenticated } from '../../src/http/middleware/auth'
 import { NO_USER_PROVIDER_MESSAGE } from '../../src/auth/providers/unconfigured-user-provider'
-import type { Session } from '../../src/http/middleware'
+import { fakeSession } from '../support/session'
 
 process.env.APP_KEY ??= 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
-
-function fakeSession(): Session {
-  const data = new Map<string, unknown>()
-  return {
-    id: 'sid',
-    isNew: false,
-    get: (key: string) => data.get(key),
-    set: (key: string, value: unknown) => data.set(key, value),
-    forget: (key: string) => data.delete(key),
-    has: (key: string) => data.has(key),
-    all: () => Object.fromEntries(data),
-    flush: () => data.clear(),
-    regenerate: () => {},
-    invalidate: () => {},
-    flash: () => {},
-    getFlash: () => undefined,
-    reflash: () => {},
-    keep: () => {},
-  } as unknown as Session
-}
 
 class LoginController extends Controller {
   async store() {

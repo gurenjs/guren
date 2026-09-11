@@ -7,7 +7,7 @@ import { SessionGuard } from '../../src/auth/SessionGuard'
 import { ScryptHasher } from '../../src/auth/password/ScryptHasher'
 import { NodeHasher } from '../../src/auth/password/NodeHasher'
 import type { PasswordHasher } from '../../src/auth/password/PasswordHasher'
-import type { Session } from '../../src/http/middleware'
+import { fakeSession } from '../support/session'
 import type { Guard, UserProvider } from '../../src/auth/types'
 
 type Row = { id: number; email: string; passwordHash: string }
@@ -51,26 +51,6 @@ function storeAdapter(rows: PlainObject[]): ORMAdapter {
       return { ...row } as T
     },
   } as unknown as ORMAdapter
-}
-
-function fakeSession(): Session {
-  const data = new Map<string, unknown>()
-  return {
-    id: 'sid',
-    isNew: false,
-    get: (key: string) => data.get(key),
-    set: (key: string, value: unknown) => data.set(key, value),
-    forget: (key: string) => data.delete(key),
-    has: (key: string) => data.has(key),
-    all: () => Object.fromEntries(data),
-    flush: () => data.clear(),
-    regenerate: () => {},
-    invalidate: () => {},
-    flash: () => {},
-    getFlash: () => undefined,
-    reflash: () => {},
-    keep: () => {},
-  } as unknown as Session
 }
 
 function webGuard(manager: AuthManager): Guard<Row> {
