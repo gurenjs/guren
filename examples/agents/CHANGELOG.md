@@ -1,5 +1,27 @@
 # @guren/example-agents
 
+## 0.1.6
+
+### Patch Changes
+
+- Updated dependencies [30a26e9]
+- Updated dependencies [64903e6]
+- Updated dependencies [8d26949]
+- Updated dependencies [64831a4]
+- Updated dependencies [4dade2b]
+- Updated dependencies [3f5fd64]
+- Updated dependencies [b357564]
+- Updated dependencies [75be9e0]
+- Updated dependencies [56ab9c8]
+- Updated dependencies [c6717fa]
+- Updated dependencies [3a2acde]
+  - @guren/core@1.17.0
+  - @guren/plugin-cloudflare@0.10.0
+  - @guren/plugin-agents@0.2.3
+  - @guren/cli@2.21.0
+  - @guren/inertia-client@1.2.1
+  - @guren/orm@2.8.0
+
 ## 0.1.5
 
 ### Patch Changes

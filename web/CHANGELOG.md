@@ -1,5 +1,26 @@
 # web
 
+## 0.1.38
+
+### Patch Changes
+
+- 64831a4: The deploy-time bundle size check now prints the plugin's attribution report (largest sources by package) before judging the budget, so a regression names its cause in the deploy log.
+- Updated dependencies [30a26e9]
+- Updated dependencies [64903e6]
+- Updated dependencies [8d26949]
+- Updated dependencies [64831a4]
+- Updated dependencies [3f5fd64]
+- Updated dependencies [b357564]
+- Updated dependencies [75be9e0]
+- Updated dependencies [56ab9c8]
+- Updated dependencies [c6717fa]
+- Updated dependencies [3a2acde]
+  - @guren/core@1.17.0
+  - @guren/plugin-cloudflare@0.10.0
+  - @guren/cli@2.21.0
+  - @guren/inertia-client@1.2.1
+  - @guren/orm@2.8.0
+
 ## 0.1.37
 
 ### Patch Changes

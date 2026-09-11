@@ -1,5 +1,20 @@
 # create-guren-app
 
+## 1.14.1
+
+### Patch Changes
+
+- Ship template dependency ranges for this release
+
+  The scaffold's `@guren/*` ranges are generated from the workspace versions,
+  and this release moves `@guren/core`, `@guren/cli`, `@guren/inertia-client`, `@guren/orm`.
+  `changeset publish` only uploads packages whose own version moved, so
+  without this bump the updated ranges would sit in the repo and never reach
+  anyone running `create-guren-app`.
+
+  No behaviour change; the scaffolded app just resolves the versions released
+  alongside it.
+
 ## 1.14.0
 
 ### Minor Changes
