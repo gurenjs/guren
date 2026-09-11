@@ -9,6 +9,12 @@ import { resolveModelHasher } from './password/configured-hasher'
  */
 const PRECOMPUTED_HASH = Symbol('guren.auth.precomputedPasswordHash')
 
+function withoutMarker(data: PlainObject): PlainObject {
+  const copy = { ...data }
+  Reflect.deleteProperty(copy, PRECOMPUTED_HASH)
+  return copy
+}
+
 export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
   static override readonly createType: {
     password?: string
@@ -82,9 +88,8 @@ export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainOb
 
   protected static override async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {
     const precomputed = Reflect.get(data, PRECOMPUTED_HASH) === true
-    const incoming = { ...data }
-    Reflect.deleteProperty(incoming, PRECOMPUTED_HASH)
-    const basePayload = await super.preparePersistencePayload(incoming)
+    // Only the storePasswordHash path carries the marker, so only it copies.
+    const basePayload = await super.preparePersistencePayload(precomputed ? withoutMarker(data) : data)
     const passwordField = this.resolvePasswordField()
 
     if (precomputed || !(passwordField in basePayload)) {

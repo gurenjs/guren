@@ -118,17 +118,21 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
 
     const rehashed = await this.hasher.hash(plain)
     ;(user as PlainObject)[this.passwordColumn] = rehashed
-    const where = { [this.idColumn]: this.getId(user) }
     // storePasswordHash where the model offers it: a model that hashes in place
     // (passwordField === passwordHashField) hashes this value a second time if it
-    // goes through update(). A plain Model has no such preparation, so forceUpdate
-    // is the equivalent write; the hash column is denied to mass assignment either way.
+    // goes through update(). A plain Model has no such preparation, so the
+    // column write is the equivalent.
     const writer = passwordHashWriter(this.model)
     if (writer) {
-      await writer.storePasswordHash(where, this.passwordColumn, rehashed)
+      await writer.storePasswordHash({ [this.idColumn]: this.getId(user) }, this.passwordColumn, rehashed)
     } else {
-      await (this.model as typeof Model).forceUpdate(where, { [this.passwordColumn]: rehashed })
+      await this.writeColumn(user, this.passwordColumn, rehashed)
     }
+  }
+
+  /** forceUpdate keyed on the id column: both credential columns are denied to mass assignment. */
+  private async writeColumn(user: User, column: string, value: string | null): Promise<void> {
+    await (this.model as typeof Model).forceUpdate({ [this.idColumn]: this.getId(user) }, { [column]: value })
   }
 
   /**
@@ -162,9 +166,7 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
   override async setRememberToken(user: User, token: string | null): Promise<void> {
     if (typeof (user as PlainObject)[this.rememberTokenColumn] !== 'undefined') {
       ;(user as PlainObject)[this.rememberTokenColumn] = token
-      // forceUpdate: the remember-token column is a trusted server-side
-      // write and is typically not in the model's fillable allowlist.
-      await (this.model as typeof Model).forceUpdate({ [this.idColumn]: this.getId(user) }, { [this.rememberTokenColumn]: token })
+      await this.writeColumn(user, this.rememberTokenColumn, token)
     }
   }
 
