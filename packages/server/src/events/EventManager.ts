@@ -20,6 +20,9 @@ export class EventManager {
   /** Classes seen by `on()` or `registerEvent()`, so a queued event can be rebuilt as an instance on the worker. */
   private readonly eventClasses = new Map<string, EventClass>()
 
+  /** Next `queueSeq` per "<event>\u0000<queue>", never reset; see {@link RegisteredListener.queueSeq}. */
+  private readonly queueSeqCounters = new Map<string, number>()
+
   private queueDispatcher?: QueueEventDispatcher
   private queueReadiness?: QueueReadiness
 
@@ -37,6 +40,7 @@ export class EventManager {
     const registered: RegisteredListener<T> = {
       listener: listener as EventListener,
       options: { once: false, priority: 0, ...options },
+      queueSeq: options.queue === undefined ? undefined : this.nextQueueSeq(eventName, options.queue),
     }
 
     registeredListeners.push(registered as RegisteredListener)
@@ -179,18 +183,20 @@ export class EventManager {
       return false
     }
 
-    await dispatcher(queue, eventName, event, this.queueIndexOf(registered, eventName, queue))
+    await dispatcher(queue, eventName, event, registered.queueSeq)
     return true
   }
 
   /**
-   * The listener's position among those registered for this event *on this
-   * queue*. Scoped that way so an inline listener added beside them does not
-   * shift it; the worker resolves the same position from its own registration,
-   * so both processes must register the queued listeners in the same order.
+   * Counted per event and queue, so an inline listener registered beside them
+   * does not move the numbers. The worker counts its own the same way, which is
+   * why both processes must register the queued listeners in the same order.
    */
-  private queueIndexOf(registered: RegisteredListener, eventName: string, queue: string): number {
-    return this.onQueue(eventName, queue).indexOf(registered)
+  private nextQueueSeq(eventName: string, queue: string): number {
+    const key = `${eventName}\u0000${queue}`
+    const next = this.queueSeqCounters.get(key) ?? 0
+    this.queueSeqCounters.set(key, next + 1)
+    return next
   }
 
   private onQueue(eventName: string, queue: string): RegisteredListener[] {
@@ -213,27 +219,28 @@ export class EventManager {
   /**
    * The worker side of a queued emit: runs the listener the message names,
    * with the event rebuilt as an instance of the registered class. An absent
-   * `listenerIndex` — a dispatcher of your own that does not send one — runs
+   * `listenerSeq` — a dispatcher of your own that does not send one — runs
    * every listener for that event on that queue.
    */
   async handleQueued(
     queueName: string,
     eventName: string,
     data: Record<string, unknown>,
-    listenerIndex?: number,
+    listenerSeq?: number,
   ): Promise<void> {
     const onQueue = this.onQueue(eventName, queueName)
+    const named = listenerSeq === undefined ? undefined : onQueue.find((r) => r.queueSeq === listenerSeq)
 
-    if (listenerIndex !== undefined && onQueue[listenerIndex] === undefined) {
+    if (listenerSeq !== undefined && named === undefined) {
       throw new Error(
-        `Queued event "${eventName}" names listener ${listenerIndex} on queue "${queueName}", but this process ` +
-          `registered ${onQueue.length} listener(s) there. The worker must register the same queued listeners, ` +
-          'in the same order, as the process that emitted.',
+        `Queued event "${eventName}" names listener ${listenerSeq} on queue "${queueName}", but this process has ` +
+          `no listener registered under that number (${onQueue.length} on that queue). The worker must register ` +
+          'the same queued listeners, in the same order, as the process that emitted.',
       )
     }
 
     const event = this.rehydrate(eventName, data)
-    const toRun = listenerIndex === undefined ? onQueue : [onQueue[listenerIndex]!]
+    const toRun = named === undefined ? onQueue : [named]
 
     for (const registered of toRun) {
       await registered.listener(event)
@@ -283,6 +290,9 @@ export class EventManager {
   removeAllListeners(): void {
     this.listeners.clear()
     this.eventClasses.clear()
+    // The queue counters deliberately survive: resetting them would renumber
+    // re-registered listeners onto numbers messages already in flight carry,
+    // so one of those would run the wrong listener instead of being refused.
   }
 
   /**

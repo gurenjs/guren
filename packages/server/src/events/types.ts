@@ -30,19 +30,27 @@ export interface ListenerOptions {
 
 /**
  * Sends one queued listener's emit; `event` is the live instance, serialized by
- * the dispatcher. `listenerIndex` identifies the listener among those on that
+ * the dispatcher. `listenerSeq` identifies the listener among those on that
  * queue — a dispatcher that drops it makes the worker run all of them.
  */
 export type QueueEventDispatcher = (
   queueName: string,
   eventName: string,
   event: Event,
-  listenerIndex?: number,
+  listenerSeq?: number,
 ) => Promise<void>
 
 export interface RegisteredListener<T extends Event = Event> {
   listener: EventListener<T>
   options: ListenerOptions
+
+  /**
+   * Registration order among the listeners for this event on this queue, which
+   * a queued message addresses instead of an array position: a `once` listener
+   * removed after its own message renumbers every position behind it, and the
+   * message still in flight would then name the wrong listener or none.
+   */
+  queueSeq?: number
 }
 
 export interface EventSubscription {

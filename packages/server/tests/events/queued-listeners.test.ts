@@ -177,6 +177,24 @@ describe('queued listeners through the providers', () => {
     expect(handled).toEqual(['o-7'])
   })
 
+  it('runs both of two queued once listeners on one queue, though the first removes itself', async () => {
+    const app = await bootWithQueue()
+
+    const events = app.container.make('events')
+    const handled: string[] = []
+    events.once(OrderPlaced, () => { handled.push('first') }, { queue: 'emails' })
+    events.once(OrderPlaced, () => { handled.push('second') }, { queue: 'emails' })
+
+    await events.emit(new OrderPlaced('o-11'))
+    expect(await driver.size('emails')).toBe(2)
+
+    await drain(driver, 'emails')
+
+    expect(handled).toEqual(['first', 'second'])
+    expect(events.listenerCount(OrderPlaced)).toBe(0)
+    expect(await driver.getFailedJobs()).toEqual([])
+  })
+
   it('removes a queued once listener on the worker process that ran it', async () => {
     const worker = createEventManager()
     const handled: string[] = []

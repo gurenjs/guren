@@ -390,6 +390,7 @@ describe('EventManager', () => {
         ['emails', 1],
         ['audit', 0],
       ])
+      // Numbered per queue at registration, so a removal does not renumber the rest.
       expect(inline).toHaveBeenCalledTimes(1)
 
       dispatcher.mockClear()
@@ -425,12 +426,30 @@ describe('EventManager', () => {
       expect(inline).not.toHaveBeenCalled()
     })
 
-    it('handleQueued() refuses a listener index this process did not register', async () => {
+    it('handleQueued() refuses a listener number this process did not register', async () => {
       events.on(TestEvent, vi.fn(), { queue: 'emails' })
 
       await expect(events.handleQueued('emails', 'TestEvent', { message: 'x' }, 3)).rejects.toThrow(
-        'registered 1 listener(s) there',
+        'no listener registered under that number (1 on that queue)',
       )
+    })
+
+    it('does not renumber re-registered listeners after removeAllListeners()', async () => {
+      const dispatcher = vi.fn()
+      events.setQueueDispatcher(dispatcher)
+      const late = vi.fn()
+
+      events.on(TestEvent, vi.fn(), { queue: 'emails' })
+      events.removeAllListeners()
+      events.on(TestEvent, late, { queue: 'emails' })
+      await events.emit(new TestEvent('x'))
+
+      expect(dispatcher.mock.calls[0][3]).toBe(1)
+      // A message minted before the reset names 0, which nothing answers to now.
+      await expect(events.handleQueued('emails', 'TestEvent', { message: 'x' }, 0)).rejects.toThrow(
+        'no listener registered under that number',
+      )
+      expect(late).not.toHaveBeenCalled()
     })
 
     it('handleQueued() refuses an event name no class is registered for', async () => {
