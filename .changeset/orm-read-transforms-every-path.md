@@ -28,3 +28,9 @@ implementation rather than two that agreed by inspection. One consequence for a
 custom adapter: a filtered page used to count through `ORMAdapter.count()`, and
 now counts through `countAdvanced()`, falling back to loading rows where the
 adapter implements neither. `DrizzleAdapter` implements it.
+
+Serialization no longer recomputes an appended accessor the read path already
+ran, so each one is computed once per row. It still computes an append missing
+from the record: a row `select()` narrowed, or a record built by hand. That last
+case is the one behavior change — an appended name shadowing a real column on
+such a record now keeps the column's value.
