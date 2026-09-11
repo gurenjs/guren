@@ -87,6 +87,8 @@ export interface DeployRuntimeAnalysis {
   bunOnlyHasherSignals: SourceSignal[]
   /** Hashers that work without `Bun.password`: `NodeHasher`, `Hash`. */
   nodeHasherSignals: SourceSignal[]
+  /** Hasher selections this scan could not read, so neither format can be claimed. */
+  unreadableHasherSignals: SourceSignal[]
   sessionSignals: SourceSignal[]
   /** `autoSession: false` anywhere in the app — an explicit opt-out. */
   sessionDisabledSignals: SourceSignal[]
@@ -128,6 +130,8 @@ type SignalKind =
   | 'passwordAuth'
   | 'bunOnlyHasher'
   | 'nodeHasher'
+  /** A hasher selection written as something other than a literal this scan can read. */
+  | 'unreadableHasher'
   | 'session'
   | 'sessionDisabled'
   | 'oauth'
@@ -237,6 +241,35 @@ function propertyKeyName(property: BabelNode): string | null {
   const key = property.key as BabelNode | undefined
   if (!key) return null
   return memberKeyName({ computed: Boolean(property.computed), key }) ?? null
+}
+
+/** `Hash` / `DefaultHasher`, whose constructor argument decides which format they write. */
+const ALGORITHM_SELECTING_HASHERS = new Set(['Hash', 'DefaultHasher'])
+
+/** The value of one property of an object literal, type wrappers removed. */
+function propertyValue(options: ObjectExpression, name: string): BabelNode | undefined {
+  for (const property of options.properties as unknown as BabelNode[]) {
+    if (property.type === 'ObjectProperty' && propertyKeyName(property) === name) {
+      return unwrapTypeAssertion(property.value as BabelNode)
+    }
+  }
+  return undefined
+}
+
+/**
+ * Which signal `new Hash(...)` is. Bare it writes scrypt, so it is remediation;
+ * `{ algorithm: 'argon2' }` makes it `new Argon2Hasher()` under another name.
+ * An argument this scan cannot read is neither, and must not pass as scrypt.
+ */
+function judgeDefaultHasherConstruction(node: BabelNode): SignalKind {
+  const argument = (node.arguments as BabelNode[])[0]
+  if (argument === undefined) return 'nodeHasher'
+  const options = objectLiteral(argument as Node)
+  if (!options) return 'unreadableHasher'
+  const algorithm = propertyValue(options, 'algorithm')
+  if (algorithm === undefined) return 'nodeHasher'
+  if (algorithm.type !== 'StringLiteral') return 'unreadableHasher'
+  return algorithm.value === 'argon2' ? 'bunOnlyHasher' : 'nodeHasher'
 }
 
 function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSignal[] {
@@ -368,8 +401,16 @@ function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSig
       case 'NewExpression': {
         const name = resolve(node.callee as BabelNode)
         if (name) {
-          const kind = CONSTRUCTED_SIGNALS[name]
-          if (kind) emit(kind, name, lineOf(node))
+          const kind = ALGORITHM_SELECTING_HASHERS.has(name)
+            ? judgeDefaultHasherConstruction(node)
+            : CONSTRUCTED_SIGNALS[name]
+          if (kind === 'bunOnlyHasher' && ALGORITHM_SELECTING_HASHERS.has(name)) {
+            emit(kind, `new ${name}({ algorithm: 'argon2' })`, lineOf(node))
+          } else if (kind === 'unreadableHasher') {
+            emit(kind, `new ${name}(...)`, lineOf(node))
+          } else if (kind) {
+            emit(kind, name, lineOf(node))
+          }
         }
         return
       }
@@ -390,19 +431,27 @@ function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSig
           if (name === 'createApp') {
             // Unlike the generic identifier scan, this positional read has to
             // unwrap `satisfies`/`as const` itself.
-            const options = objectLiteral((node.arguments as Node[])[0])
-            if (options) {
+            const config = (node.arguments as Node[])[0]
+            const options = objectLiteral(config)
+            if (!options) {
+              // No argument at all selects nothing; one this scan cannot read might.
+              if (config) emit('unreadableHasher', 'createApp(<config>)', lineOf(node))
+            } else {
               for (const property of options.properties as unknown as BabelNode[]) {
                 if (property.type === 'ObjectProperty' && propertyKeyName(property) === 'auth') {
                   emit('session', 'auth', lineOf(property))
                   // `hasher: 'argon2'` selects Bun.password without constructing anything.
-                  const authEntries = (objectLiteral(property.value as Node)?.properties ?? []) as unknown as BabelNode[]
-                  const hasher = authEntries.find(
-                    (entry) => entry.type === 'ObjectProperty' && propertyKeyName(entry) === 'hasher',
-                  )
-                  const selected = hasher ? unwrapTypeAssertion(hasher.value as BabelNode) : undefined
-                  if (selected?.type === 'StringLiteral' && selected.value === 'argon2') {
-                    emit('bunOnlyHasher', "auth.hasher: 'argon2'", lineOf(hasher!))
+                  const auth = objectLiteral(property.value as Node)
+                  if (!auth) {
+                    emit('unreadableHasher', 'createApp({ auth: <config> })', lineOf(property))
+                    continue
+                  }
+                  const selected = propertyValue(auth, 'hasher')
+                  if (selected === undefined) continue
+                  if (selected.type !== 'StringLiteral') {
+                    emit('unreadableHasher', 'auth.hasher: <expression>', lineOf(selected))
+                  } else if (selected.value === 'argon2') {
+                    emit('bunOnlyHasher', "auth.hasher: 'argon2'", lineOf(selected))
                   }
                 }
               }
@@ -591,6 +640,7 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
     passwordAuthSignals: collect('passwordAuth'),
     bunOnlyHasherSignals: collect('bunOnlyHasher'),
     nodeHasherSignals: collect('nodeHasher'),
+    unreadableHasherSignals: collect('unreadableHasher'),
     sessionSignals: collect('session'),
     sessionDisabledSignals: collect('sessionDisabled'),
     oauthSignals: collect('oauth'),
@@ -662,6 +712,8 @@ function verdict(
 
 const BUN_ONLY_HASHER_FIX = "Drop `hasher: 'argon2'`, or replace `new ScryptHasher()` with `new Hash()`: the default writes `node:crypto` scrypt, which every runtime reads back. Rows already written as Argon2id are rehashed on their next successful login under Bun, so have them log in there first (or reset those passwords) before this runtime has to verify them."
 
+const UNREADABLE_HASHER_FIX = "Read the expression yourself and confirm it is not `'argon2'`, `new Argon2Hasher()`, or `new Hash({ algorithm: 'argon2' })`. Spelling the selection as a literal in the `createApp()` call is what makes it checkable. This check never fails a build, so an app whose hasher is correct can leave it."
+
 /**
  * `DefaultHasher` writes `node:crypto` scrypt on every runtime, which workerd's
  * `nodejs_compat` implements in full (RFC 0003 §4), so password auth alone does
@@ -699,6 +751,18 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
       'warn',
       `${labels} detected, but a Bun-only hasher is selected (${formatSignals(analysis.bunOnlyHasherSignals)}). It hashes through Bun.password, so the rows it writes cannot be verified on this runtime.${caveat}`,
       BUN_ONLY_HASHER_FIX,
+    )
+  }
+
+  // Before the "no password authentication" pass: an unreadable hasher selection
+  // is evidence of password authentication this scan could not follow either.
+  if (analysis.unreadableHasherSignals.length > 0) {
+    return verdict(
+      key,
+      title,
+      'warn',
+      `${labels} detected, and the hasher is selected by an expression this check cannot read (${formatSignals(analysis.unreadableHasherSignals)}). Whether it writes node:crypto scrypt or Bun-only Argon2id is unknown, so this is not a pass.${caveat}`,
+      UNREADABLE_HASHER_FIX,
     )
   }
 

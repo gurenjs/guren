@@ -303,6 +303,64 @@ describe('deploy-password-hashing check', () => {
     })
   })
 
+  // `new Hash({ algorithm: 'argon2' })` is `new Argon2Hasher()` under the name the
+  // docs call remediation, so reading the construction bare would pass it.
+  it("warns when Hash is constructed with algorithm: 'argon2'", async () => {
+    const files = {
+      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
+      'db/seeders/001_UsersSeeder.ts': `import { Hash } from '@guren/core'\nconst hasher = new Hash({ algorithm: 'argon2' })\n`,
+    }
+
+    await withApp('guren-hash-cf-hash-argon2-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-password-hashing']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain("new Hash({ algorithm: 'argon2' })")
+    })
+  })
+
+  it("warns when DefaultHasher is constructed with algorithm: 'argon2'", async () => {
+    const files = {
+      'db/seeders/001_UsersSeeder.ts': `import { DefaultHasher } from '@guren/core'\nconst hasher = new DefaultHasher({ algorithm: 'argon2' })\n`,
+    }
+
+    await withApp('guren-hash-cf-default-argon2-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-password-hashing']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain("new DefaultHasher({ algorithm: 'argon2' })")
+    })
+  })
+
+  it('reports a hasher selected by an expression rather than passing it as scrypt', async () => {
+    const files = {
+      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
+      'src/app.ts':
+        `import { createApp } from '@guren/core'\nimport { hasher } from './hasher'\nexport const app = createApp({\n  auth: { hasher },\n})\n`,
+    }
+
+    await withApp('guren-hash-cf-unreadable-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-password-hashing']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('auth.hasher: <expression> (src/app.ts:4)')
+      expect(check.message).toContain('cannot read')
+    })
+  })
+
+  it('reports a createApp() config it cannot read', async () => {
+    const files = {
+      'src/app.ts': `import { createApp } from '@guren/core'\nimport { config } from './config'\nexport const app = createApp(config)\n`,
+    }
+
+    await withApp('guren-hash-cf-unreadable-config-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-password-hashing']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('createApp(<config>) (src/app.ts:3)')
+    })
+  })
+
   it('warns on the Argon2Hasher alias like on ScryptHasher', async () => {
     const files = {
       'db/seeders/001_UsersSeeder.ts': `import { Argon2Hasher } from '@guren/core'\nconst hasher = new Argon2Hasher()\n`,
