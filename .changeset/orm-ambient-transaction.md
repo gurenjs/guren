@@ -1,5 +1,5 @@
 ---
-"@guren/orm": patch
+"@guren/orm": minor
 ---
 
 `Model.transaction()` now tracks the open transaction in async context. A
