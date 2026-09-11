@@ -70,8 +70,8 @@ export function referrerHost(referrer: string | undefined, ownHost: string): str
   }
 }
 
-// No Zenn, dev.to or Bluesky referrer was recorded in the 30 days to 2026-09-11,
-// so outbound links name their channel instead. Only a short slug is kept.
+// The channel an outbound link names itself, for hosts that send no Referer.
+// Only a short slug is kept.
 const REF_TAG_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/
 
 export function refTag(searchParams: URLSearchParams): string {

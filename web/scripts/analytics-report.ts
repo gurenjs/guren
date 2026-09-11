@@ -25,12 +25,11 @@ if (!Number.isSafeInteger(days) || days < 1 || days > 90) {
 // Data point layout: see web/app/Http/Middleware/site-analytics.ts.
 const WINDOW = `timestamp > NOW() - INTERVAL '${days}' DAY`
 
-// A browser-like user agent is classed `human`, so scanners land there: in the
-// 30 days to 2026-09-11, 63% of `human` requests were 404s. A reader is a
-// successful GET from a client that sends Accept-Language.
+// A browser-like user agent is classed `human`, so scanners land there. A reader
+// is a successful GET from a client that sends Accept-Language.
 const READER = `blob3 = 'human' AND blob7 = 'GET' AND double1 >= 200 AND double1 < 300 AND blob5 != ''`
-// `/` is fetched by clients that never open a page, so it is not reading. Older
-// points class the feed as `blog`, and Analytics Engine keeps them ~90 days.
+// `/` is fetched by clients that never open a page, so it is not reading. The feed
+// is matched by path too, since retained points may predate its class.
 const READING = `blob2 IN ('docs', 'blog', 'markdown') AND blob1 != '/blog/rss.xml'`
 // www.guren.dev 301s to the apex, so no page there can send this referrer; only
 // clients that forge it do.
