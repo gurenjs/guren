@@ -3,11 +3,12 @@ import type { Context } from 'hono'
 import type { FindManyOptions, Model, ORMAdapter, PlainObject, WhereClause } from '@guren/orm'
 import { AuthManager } from '../../src/auth/AuthManager'
 import { AuthenticatableModel } from '../../src/auth/AuthenticatableModel'
+import { SessionGuard } from '../../src/auth/SessionGuard'
 import { ScryptHasher } from '../../src/auth/password/ScryptHasher'
 import { NodeHasher } from '../../src/auth/password/NodeHasher'
 import type { PasswordHasher } from '../../src/auth/password/PasswordHasher'
 import type { Session } from '../../src/http/middleware'
-import type { Guard } from '../../src/auth/types'
+import type { Guard, UserProvider } from '../../src/auth/types'
 
 type Row = { id: number; email: string; passwordHash: string }
 
@@ -161,6 +162,32 @@ describe('rehash on login', () => {
     // leaves a row nothing can log into again.
     expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
     expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'wrong' })).toBe(false)
+  })
+
+  test('a rehash that cannot be written still logs the user in', async () => {
+    const row = { id: 7, email: 'a@example.com' }
+    const provider: UserProvider<typeof row> = {
+      retrieveById: async () => row,
+      retrieveByCredentials: async () => row,
+      validateCredentials: async () => true,
+      getId: (user) => user.id,
+      rehashPasswordIfRequired: async () => {
+        throw new Error('database is read-only')
+      },
+    }
+    const warnings: unknown[][] = []
+    const warn = console.warn
+    console.warn = (...args: unknown[]) => warnings.push(args)
+    try {
+      const guard = new SessionGuard<typeof row>({ provider, session: fakeSession() })
+      expect(await guard.attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
+    } finally {
+      console.warn = warn
+    }
+
+    expect(warnings).toHaveLength(1)
+    expect(String(warnings[0][0])).toContain('user 7')
+    expect(String(warnings[0][0])).not.toContain('secret')
   })
 
   test('a custom hasher without needsRehash() is never asked to rehash', async () => {
