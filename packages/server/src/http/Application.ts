@@ -4,7 +4,7 @@ import { Router, type RouteDefinition } from '../mvc/Router'
 import { loadPrototypeFixture, PROTOTYPE_FIXTURE_BINDING, type PrototypeFixtureLoader } from '../mvc/prototype'
 import { Container, mountModuleRoutes, setContainer, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
-import { AuthManager } from '../auth/AuthManager'
+import { AuthManager, DEFAULT_GUARD, DEFAULT_PROVIDER } from '../auth/AuthManager'
 import type { PasswordHasherOption } from '../auth/password/configured-hasher'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
 import { AuthorizationServiceProvider } from '../providers/AuthorizationServiceProvider'
@@ -13,7 +13,7 @@ import { I18nServiceProvider } from '../providers/I18nServiceProvider'
 import { InertiaServiceProvider } from '../providers/InertiaServiceProvider'
 import { attachAuthContext } from './middleware/auth'
 import { SessionGuard } from '../auth/SessionGuard'
-import { createUnconfiguredUserProvider } from '../auth/providers/unconfigured-user-provider'
+import { REGISTER_USER_PROVIDER_HINT, unconfiguredUserProvider } from '../auth/providers/unconfigured-user-provider'
 import type { Authenticatable } from '../auth/types'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import type { DetectLocaleOptions } from './middleware/detect-locale'
@@ -443,9 +443,6 @@ export interface I18nPluginOptions {
   readonly share?: boolean
 }
 
-const DEFAULT_GUARD = 'web'
-const DEFAULT_PROVIDER = 'users'
-
 export interface AuthPluginOptions {
   /**
    * The format new password hashes are written in. `'scrypt'` (the default)
@@ -539,7 +536,7 @@ export class Application {
     this.authManager.registerGuard(DEFAULT_GUARD, ({ session }) => {
       const provider = this.authManager.hasProvider(DEFAULT_PROVIDER)
         ? this.authManager.getProvider<Authenticatable>(DEFAULT_PROVIDER)
-        : createUnconfiguredUserProvider()
+        : unconfiguredUserProvider
       return new SessionGuard({ provider, session })
     })
     this.authManager.setDefaultGuard(DEFAULT_GUARD)
@@ -785,8 +782,7 @@ export class Application {
     if (this.authManager.hasProvider(DEFAULT_PROVIDER)) return
     console.warn(
       `[guren] createApp() received \`auth\`, but no "${DEFAULT_PROVIDER}" user provider was registered by the time the app booted. ` +
-        'Sessions and CSRF are mounted, and any login attempt will throw. Register one with `auth.useModel(User)` in a ' +
-        "service provider (what `guren add auth` scaffolds), or `auth.registerProvider('users', ...)`.",
+        `Sessions and CSRF are mounted, and any login attempt will throw. ${REGISTER_USER_PROVIDER_HINT}`,
     )
   }
 
