@@ -1,5 +1,6 @@
 import { ServiceProvider } from '../container/ServiceProvider'
 import { createEventManager, createQueueEventDispatcher } from '../events'
+import { getQueueDriver } from '../queue'
 
 /** Binds the EventManager as a singleton in the container. */
 export class EventServiceProvider extends ServiceProvider {
@@ -7,14 +8,13 @@ export class EventServiceProvider extends ServiceProvider {
     this.container.singleton('events', () => createEventManager())
   }
 
-  /**
-   * In boot() rather than register(): the `queue` binding may come from a
-   * provider registered after this one. Without it, a `queue:` listener makes
-   * emit() throw rather than run inline.
-   */
   boot(): void {
-    if (this.container.makeOptional('queue')) {
-      this.container.make('events').setQueueDispatcher(createQueueEventDispatcher())
-    }
+    // Register the queued-event job in every booted process, including a worker
+    // that never emits itself. Installed unconditionally: the dispatcher looks
+    // the driver up per emit, so a `queue` bound by a provider registered after
+    // this one — or resolved lazily — is still reached.
+    this.container
+      .make('events')
+      .setQueueDispatcher(createQueueEventDispatcher(), () => getQueueDriver() !== null)
   }
 }

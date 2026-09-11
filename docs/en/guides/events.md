@@ -198,7 +198,7 @@ export class SendWelcomeEmail extends Listener<UserRegistered> {
 
 ### Registering Class Listeners
 
-`events.listen()` reads the class statics: `event` picks the event, `priority` orders it, and `shouldQueue` with `queue` sends it to a queue (see [Queued Listeners](#queued-listeners)). `shouldHandle()` runs first when defined; a `handle()` that throws reaches `failed()` when the class defines it, and propagates to the emitter otherwise.
+`events.listen()` reads the class statics: `event` picks the event, `priority` orders it, and `shouldQueue` with `queue` sends it to a queue (see [Queued Listeners](#queued-listeners)). `shouldHandle()` runs first when defined. A `handle()` that throws reaches `failed()` when the class defines it, and propagates either way: `failed()` reports, it does not catch, so a queued listener's job still retries.
 
 ```ts
 import { SendWelcomeEmail } from '@/app/Listeners/SendWelcomeEmail'
@@ -312,7 +312,19 @@ events.on(
 )
 ```
 
-An emit pushes one job per queue per event, carrying the event's fields. The worker for that queue rebuilds the event as an instance of its class and runs every listener registered for it on that queue, so the worker process registers listeners the same way the web process does: the same provider boots in both. A listener registered with `queue` on a manager with no queue wired makes `emit()` throw and name the missing wiring, rather than run the listener inline.
+An emit pushes one job per queued listener, carrying the event's fields. Each listener therefore retries on its own: one that throws does not re-run the ones beside it. The worker rebuilds the event as an instance of its class and runs the listener the message names, so the worker process registers the queued listeners the same way, and **in the same order**, as the process that emits: the same provider boots in both. A message naming a listener the worker does not have fails rather than running the wrong one.
+
+Two names have to survive the round trip. The worker resolves the event class by name, so pin it against a rename or identifier mangling the way a job pins `jobName`:
+
+```ts
+export class UserRegistered extends Event {
+  static override eventName = 'UserRegistered'
+}
+```
+
+Only an *own* `eventName` counts, so a subclass does not inherit its parent's pin. A worker that emits nothing and only drains the queue registers the class with `events.registerEvent(UserRegistered)`; `events.on(UserRegistered, ...)` already does.
+
+A listener registered with `queue` on a manager that cannot reach a queue warns once and runs inline. A future major will throw there instead.
 
 An app that builds its own `EventManager` wires it in one line:
 
@@ -323,7 +335,7 @@ const events = createEventManager()
 events.setQueueDispatcher(createQueueEventDispatcher())
 ```
 
-The dispatcher sends through the queue driver `Job.dispatch()` resolves, so the app still needs a `QueueManager` bound as `queue` or a driver published with `queue.driver()`.
+The dispatcher sends through the queue driver `Job.dispatch()` resolves, so the app still needs a `QueueManager` bound as `queue` or a driver pinned with `setQueueDriver()`.
 
 ## Event Manager Utilities
 

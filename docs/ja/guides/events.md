@@ -196,7 +196,7 @@ export class SendWelcomeEmail extends Listener<UserRegistered> {
 
 ### クラスリスナーの登録
 
-`events.listen()` はクラスの static プロパティを読みます。`event` がイベントを、`priority` が順序を決め、`shouldQueue` と `queue` はキューへ送る先を決めます（[キュー対応リスナー](#キュー対応リスナー)を参照）。`shouldHandle()` があれば先に評価します。`handle()` が例外を投げた場合、クラスに `failed()` があればそこへ渡し、無ければ発行元へそのまま伝播します。
+`events.listen()` はクラスの static プロパティを読みます。`event` がイベントを、`priority` が順序を決め、`shouldQueue` と `queue` はキューへ送る先を決めます（[キュー対応リスナー](#キュー対応リスナー)を参照）。`shouldHandle()` があれば先に評価します。`handle()` が例外を投げた場合、クラスに `failed()` があればそこへ渡したうえで、いずれにせよ発行元へ伝播します。`failed()` は報告用で、例外を握りつぶしません。キュー対応リスナーのジョブはそのままリトライされます。
 
 ```ts
 import { SendWelcomeEmail } from '@/app/Listeners/SendWelcomeEmail'
@@ -310,7 +310,19 @@ events.on(
 )
 ```
 
-1 回の発行は、イベントのフィールドを載せたジョブをキューごとに 1 つ積みます。そのキューのワーカーはイベントをクラスのインスタンスとして組み立て直し、そのイベントとキューに登録されたリスナーをすべて実行します。そのためワーカープロセスも web プロセスと同じ方法でリスナーを登録しておきます。同じプロバイダが両方で boot するので、通常は何もしなくて済みます。キューが接続されていないマネージャーに `queue` 付きのリスナーがあると、`emit()` はリスナーをインラインで実行せず、足りない配線を示して例外を投げます。
+1 回の発行は、イベントのフィールドを載せたジョブをキュー対応リスナーごとに 1 つ積みます。そのためリスナーは個別にリトライされ、1 つが失敗しても隣のリスナーは再実行されません。ワーカーはイベントをクラスのインスタンスとして組み立て直し、メッセージが指すリスナーを実行します。ワーカープロセスは、発行側と同じ方法で、かつ**同じ順序で**キュー対応リスナーを登録しておきます。同じプロバイダが両方で boot するので、通常は何もしなくて済みます。ワーカーに存在しないリスナーを指すメッセージは、別のリスナーを実行せずに失敗します。
+
+往復で保たれる必要がある名前が 2 つあります。ワーカーはイベントクラスを名前で解決するので、ジョブの `jobName` と同じように、リネームや識別子の mangling に備えて名前を固定します。
+
+```ts
+export class UserRegistered extends Event {
+  static override eventName = 'UserRegistered'
+}
+```
+
+有効なのはクラス自身が持つ `eventName` だけです。サブクラスが親の固定名を引き継ぐことはありません。発行せずキューを読むだけのワーカーは `events.registerEvent(UserRegistered)` でクラスを登録します。`events.on(UserRegistered, ...)` は登録まで済ませます。
+
+キューに到達できないマネージャーに `queue` 付きのリスナーがあると、警告を 1 度出したうえでインラインで実行します。次のメジャーでは例外を投げます。
 
 `EventManager` を自前で組み立てるアプリは、1 行で接続できます。
 
@@ -321,7 +333,7 @@ const events = createEventManager()
 events.setQueueDispatcher(createQueueEventDispatcher())
 ```
 
-ディスパッチャは `Job.dispatch()` が解決するキュードライバを使って送るので、`queue` としてバインドした `QueueManager` か、`queue.driver()` で公開したドライバがアプリに必要です。
+ディスパッチャは `Job.dispatch()` が解決するキュードライバを使って送るので、`queue` としてバインドした `QueueManager` か、`setQueueDriver()` で固定したドライバがアプリに必要です。
 
 ## EventManagerユーティリティ
 

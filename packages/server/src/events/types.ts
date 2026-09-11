@@ -22,14 +22,23 @@ export interface ListenerOptions {
   priority?: number
 
   /**
-   * Dispatch to this queue instead of running inline. `emit()` throws when the
-   * manager has no queue dispatcher rather than run the listener inline.
+   * Dispatch to this queue instead of running inline. A manager that cannot
+   * reach a queue warns once and runs the listener inline.
    */
   queue?: string
 }
 
-/** Sends a queued emit; `event` is the live instance, serialized by the dispatcher. */
-export type QueueEventDispatcher = (queueName: string, eventName: string, event: Event) => Promise<void>
+/**
+ * Sends one queued listener's emit; `event` is the live instance, serialized by
+ * the dispatcher. `listenerIndex` identifies the listener among those on that
+ * queue — a dispatcher that drops it makes the worker run all of them.
+ */
+export type QueueEventDispatcher = (
+  queueName: string,
+  eventName: string,
+  event: Event,
+  listenerIndex?: number,
+) => Promise<void>
 
 export interface RegisteredListener<T extends Event = Event> {
   listener: EventListener<T>

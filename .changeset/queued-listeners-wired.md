@@ -9,16 +9,28 @@ to a queue once `setQueueDispatcher()` had been called, and nothing in the
 framework called it. The `Listener` base class carried `shouldQueue`, `queue`
 and `priority` statics that nothing read either.
 
-- `EventServiceProvider` now installs a queue dispatcher in `boot()` when the
-  app binds a `QueueManager` as `queue`. An emit sends one `QueuedEventJob`
-  per queue per event; the worker runs every listener registered for that
-  event on that queue through the app's `events` binding, so the worker
-  process registers listeners the same way the web process does. An app that
-  builds its own manager wires it with
-  `events.setQueueDispatcher(createQueueEventDispatcher())`.
-- A `{ queue }` listener with no dispatcher makes `emit()` throw, naming the
-  wiring, rather than run inline.
+- `EventServiceProvider` installs a queue dispatcher in `boot()`, whether or
+  not a `queue` is bound yet: the dispatcher resolves the driver per emit, so a
+  queue provider registered after this one, or resolved lazily, is still
+  reached. The carrier job is registered in every booted process, including a
+  worker that never emits.
+- An emit sends one message per *queued listener*, not one per queue, so a
+  listener that throws retries on its own rather than re-running the ones
+  beside it. The worker runs the listener the message names; a message naming a
+  listener it did not register fails rather than running a different one.
+- A `{ queue }` listener with no queue reachable warns once, naming the wiring,
+  and runs inline. A future major will throw there.
 - `events.listen(ListenerClass)` registers a `Listener` subclass under its own
-  statics, calls `shouldHandle()` first, and routes a throwing `handle()` to
-  `failed()` when the class defines it.
-- `EventManager.handleQueued()` and `hasQueueDispatcher()` are new.
+  statics and calls `shouldHandle()` first. A throwing `handle()` reaches
+  `failed()` when the class defines it and then propagates: `failed()` reports,
+  it does not swallow, so a queued listener's job still retries and is recorded
+  as failed.
+- A `once` listener with a queue is removed when it has run, on the worker,
+  rather than when it was dispatched.
+- A queued event carries its `Date` fields as a tagged value, so they come back
+  as Dates rather than strings through a driver that serializes. The worker
+  rebuilds the event as an instance of a registered class and refuses a name it
+  has none for; `events.registerEvent(EventClass)` registers one explicitly,
+  and an own `static eventName` pins the wire name the way `jobName` does.
+- `EventManager.handleQueued()` and `registerEvent()` are new;
+  `setQueueDispatcher()` takes an optional readiness predicate.

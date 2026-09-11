@@ -10,7 +10,7 @@ const {
   setMailManager,
   registerJob,
 } = vi.hoisted(() => {
-  const eventManager = { on: vi.fn() }
+  const eventManager = { on: vi.fn(), listen: vi.fn() }
   const queueManager = { driver: vi.fn() }
   return {
     eventManager,
@@ -58,8 +58,8 @@ describe('EventServiceProvider', () => {
     expect(createEventManager).toHaveBeenCalledTimes(1)
     expect(setMailManager).toHaveBeenCalled()
     expect(createQueueManager).toHaveBeenCalled()
-    expect(queueManager.driver).toHaveBeenCalled()
     expect(registerJob).toHaveBeenCalled()
+    expect(eventManager.listen).toHaveBeenCalled()
     expect(eventManager.on).toHaveBeenCalled()
   })
 })

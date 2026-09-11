@@ -15,7 +15,6 @@ import {
 } from '@guren/core'
 import { LogUserLogin } from '../Listeners/LogUserLogin.js'
 import { SendNewPostNotification } from '../Listeners/SendNewPostNotification.js'
-import { UserLoggedIn } from '../Events/UserLoggedIn.js'
 import { PostCreated } from '../Events/PostCreated.js'
 import { SendWelcomeEmailJob } from '../Jobs/SendWelcomeEmailJob.js'
 import { ProcessNewPostJob } from '../Jobs/ProcessNewPostJob.js'
@@ -57,7 +56,6 @@ export function initializeEventSystem(): EventManager {
       memory: () => new MemoryDriver(),
     },
   })
-  queueManager.driver()
 
   registerJob(SendWelcomeEmailJob)
   registerJob(ProcessNewPostJob)
@@ -69,10 +67,7 @@ export function initializeEventSystem(): EventManager {
 }
 
 function registerListeners(events: EventManager): void {
-  const logUserLogin = new LogUserLogin()
-  events.on(UserLoggedIn, (event) => logUserLogin.handle(event), {
-    priority: LogUserLogin.priority,
-  })
+  events.listen(LogUserLogin)
 
   if (!containerRef) {
     throw new Error('EventServiceProvider container has not been registered.')

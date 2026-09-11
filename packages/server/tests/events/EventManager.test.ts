@@ -5,6 +5,7 @@ import {
   createEventManager,
   Listener,
 } from '../../src/events'
+import { resetWarnOnce } from '../../src/support/warn-once'
 
 class TestEvent extends Event {
   constructor(public readonly message: string) {
@@ -22,6 +23,17 @@ describe('Event', () => {
   it('has a timestamp', () => {
     const event = new TestEvent('hello')
     expect(event.timestamp).toBeInstanceOf(Date)
+  })
+
+  it('lets a subclass pin its wire name, without its own subclasses inheriting the pin', () => {
+    class Pinned extends Event {
+      static override eventName = 'order.placed'
+    }
+    class Derived extends Pinned {}
+
+    expect(Pinned.eventName).toBe('order.placed')
+    expect(new Pinned().eventName).toBe('order.placed')
+    expect(new Derived().eventName).toBe('Derived')
   })
 
   it('has an event name from class name', () => {
@@ -297,6 +309,10 @@ describe('EventManager', () => {
   })
 
   describe('queue integration', () => {
+    beforeEach(() => {
+      resetWarnOnce()
+    })
+
     it('dispatches to queue when dispatcher is set', async () => {
       const dispatcher = vi.fn()
       events.setQueueDispatcher(dispatcher)
@@ -305,7 +321,7 @@ describe('EventManager', () => {
       const event = new TestEvent('test')
       await events.emit(event)
 
-      expect(dispatcher).toHaveBeenCalledWith('emails', 'TestEvent', event)
+      expect(dispatcher).toHaveBeenCalledWith('emails', 'TestEvent', event, 0)
     })
 
     it('calls listener directly when no queue specified', async () => {
@@ -320,17 +336,44 @@ describe('EventManager', () => {
       expect(listener).toHaveBeenCalled()
     })
 
-    it('throws rather than run a queued listener inline when no dispatcher is set', async () => {
+    it('warns once and runs the listener inline when no dispatcher is set', async () => {
       const listener = vi.fn()
+      const warnings: string[] = []
+      const warn = console.warn
+      console.warn = (message: string) => warnings.push(message)
       events.on(TestEvent, listener, { queue: 'emails' })
 
-      await expect(events.emit(new TestEvent('test'))).rejects.toThrow(
-        'registered with queue "emails", but this EventManager has no queue dispatcher',
-      )
-      expect(listener).not.toHaveBeenCalled()
+      try {
+        await events.emit(new TestEvent('test'))
+        await events.emit(new TestEvent('test'))
+      } finally {
+        console.warn = warn
+      }
+
+      expect(listener).toHaveBeenCalledTimes(2)
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain('setQueueDispatcher(createQueueEventDispatcher())')
     })
 
-    it('sends one message per queue per emit, however many listeners share the queue', async () => {
+    it('runs the listener inline when the dispatcher reports no queue is reachable', async () => {
+      const dispatcher = vi.fn()
+      const listener = vi.fn()
+      const warn = console.warn
+      console.warn = () => {}
+      events.setQueueDispatcher(dispatcher, () => false)
+      events.on(TestEvent, listener, { queue: 'emails' })
+
+      try {
+        await events.emit(new TestEvent('test'))
+      } finally {
+        console.warn = warn
+      }
+
+      expect(dispatcher).not.toHaveBeenCalled()
+      expect(listener).toHaveBeenCalledTimes(1)
+    })
+
+    it('sends one message per queued listener, indexed within its own queue', async () => {
       const dispatcher = vi.fn()
       events.setQueueDispatcher(dispatcher)
       const inline = vi.fn()
@@ -342,33 +385,60 @@ describe('EventManager', () => {
       const event = new TestEvent('test')
 
       await events.emit(event)
-      expect(dispatcher.mock.calls.map((call) => call[0])).toEqual(['emails', 'audit'])
+      expect(dispatcher.mock.calls.map((call) => [call[0], call[3]])).toEqual([
+        ['emails', 0],
+        ['emails', 1],
+        ['audit', 0],
+      ])
       expect(inline).toHaveBeenCalledTimes(1)
 
       dispatcher.mockClear()
       await events.emitParallel(event)
-      expect(dispatcher.mock.calls.map((call) => call[0]).sort()).toEqual(['audit', 'emails'])
+      expect(dispatcher.mock.calls.map((call) => [call[0], call[3]]).sort()).toEqual([
+        ['audit', 0],
+        ['emails', 0],
+        ['emails', 1],
+      ])
     })
 
-    it('handleQueued() runs the listeners on that queue with the event rebuilt as an instance', async () => {
+    it('handleQueued() runs the listener the message names, with the event rebuilt as an instance', async () => {
       events.setQueueDispatcher(async () => {})
       const seen: TestEvent[] = []
+      const second = vi.fn()
       const otherQueue = vi.fn()
       const inline = vi.fn()
       events.on(TestEvent, (event) => { seen.push(event) }, { queue: 'emails' })
+      events.on(TestEvent, second, { queue: 'emails' })
       events.on(TestEvent, otherQueue, { queue: 'audit' })
       events.on(TestEvent, inline)
 
       // The shape a JSON-serializing driver hands back: own fields, Date as ISO.
-      await events.handleQueued('emails', 'TestEvent', { message: 'hello', timestamp: '2026-01-01T00:00:00.000Z' })
+      await events.handleQueued('emails', 'TestEvent', { message: 'hello', timestamp: '2026-01-01T00:00:00.000Z' }, 0)
 
       expect(seen).toHaveLength(1)
       expect(seen[0]).toBeInstanceOf(TestEvent)
       expect(seen[0].message).toBe('hello')
       expect(seen[0].eventName).toBe('TestEvent')
       expect(seen[0].timestamp).toEqual(new Date('2026-01-01T00:00:00.000Z'))
+      expect(second).not.toHaveBeenCalled()
       expect(otherQueue).not.toHaveBeenCalled()
       expect(inline).not.toHaveBeenCalled()
+    })
+
+    it('handleQueued() refuses a listener index this process did not register', async () => {
+      events.on(TestEvent, vi.fn(), { queue: 'emails' })
+
+      await expect(events.handleQueued('emails', 'TestEvent', { message: 'x' }, 3)).rejects.toThrow(
+        'registered 1 listener(s) there',
+      )
+    })
+
+    it('handleQueued() refuses an event name no class is registered for', async () => {
+      events.on('LooselyNamed', vi.fn(), { queue: 'emails' })
+
+      await expect(events.handleQueued('emails', 'LooselyNamed', {}, 0)).rejects.toThrow(
+        'No event class is registered for "LooselyNamed"',
+      )
     })
   })
 
@@ -408,8 +478,9 @@ describe('EventManager', () => {
       events.listen(First)
       events.listen(Failing)
 
-      await events.emit(new TestEvent('go'))
-      await events.emit(new TestEvent('skip'))
+      // Failing rethrows after failed(), so emit() rejects once it is reached.
+      await expect(events.emit(new TestEvent('go'))).rejects.toThrow('boom')
+      await expect(events.emit(new TestEvent('skip'))).rejects.toThrow('boom')
 
       expect(order).toEqual(['first:go', 'second:go', 'first:skip'])
       expect(failures.map((error) => error.message)).toEqual(['boom', 'boom'])
@@ -445,10 +516,10 @@ describe('EventManager', () => {
       const event = new TestEvent('x')
       await events.emit(event)
 
-      expect(dispatcher).toHaveBeenCalledWith('emails', 'TestEvent', event)
+      expect(dispatcher).toHaveBeenCalledWith('emails', 'TestEvent', event, 0)
       expect(handled).not.toHaveBeenCalled()
 
-      await events.handleQueued('emails', 'TestEvent', { message: 'x' })
+      await events.handleQueued('emails', 'TestEvent', { message: 'x' }, 0)
       expect(handled).toHaveBeenCalledTimes(1)
     })
   })
