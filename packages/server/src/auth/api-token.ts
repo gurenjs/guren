@@ -1,5 +1,11 @@
 import type { MiddlewareHandler, Context } from 'hono'
 import { hashToken, generateToken, generateId, secureCompare } from './utils'
+import {
+  AUTH_CONTEXT_KEY,
+  createPrincipalAuthContext,
+  getAuthContext,
+  setResolvedPrincipal,
+} from './context'
 import { isOptionalExpiryPast } from '../support/expiry'
 import { AuthenticationException } from '../errors/exceptions/AuthenticationException'
 
@@ -324,6 +330,20 @@ export async function getUserApiTokens(
 export const API_TOKEN_KEY = 'guren:api-token'
 
 /**
+ * Revoke the token a request presented, and clear it from the request context
+ * so `getApiToken()` / `getApiTokenOrFail()` cannot succeed after a logout on
+ * the same request. The slot is cleared whether or not a token still verified.
+ */
+export async function revokePresentedToken(
+  ctx: Context,
+  tokenId: string | undefined,
+  store: ApiTokenStore,
+): Promise<void> {
+  if (tokenId) await revokeApiToken(tokenId, store)
+  ctx.set(API_TOKEN_KEY, undefined)
+}
+
+/**
  * Options for the bearer token middleware.
  */
 export interface BearerTokenMiddlewareOptions {
@@ -399,6 +419,20 @@ export function createBearerTokenMiddleware(
     if (loadUser) {
       const user = await loadUser(result.userId)
       ctx.set('guren:user', user)
+      // The framework auth context reads this slot before it reaches a guard,
+      // so the loaded user reaches the Gate whether this middleware runs
+      // before or after the one that attaches the context. A verified token
+      // whose user does not load stores `null`, which makes the request
+      // unauthenticated rather than falling back to a session user.
+      setResolvedPrincipal(ctx, {
+        user,
+        id: result.userId,
+        revoke: () => revokePresentedToken(ctx, result.token.id, store),
+      })
+
+      if (!getAuthContext(ctx)) {
+        ctx.set(AUTH_CONTEXT_KEY, createPrincipalAuthContext(ctx))
+      }
     }
 
     return next()

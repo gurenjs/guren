@@ -5,7 +5,7 @@ import {
   API_TOKEN_KEY,
   parseApiToken,
   readBearerToken,
-  revokeApiToken,
+  revokePresentedToken,
   verifyApiToken,
   type ApiTokenStore,
   type VerifiedApiToken,
@@ -118,14 +118,9 @@ export class TokenGuard<User = unknown> implements Guard<User> {
   /** Revokes the presented token. Subsequent requests with it fail verification. */
   async logout(): Promise<void> {
     const result = await this.verify()
-    if (result) {
-      await revokeApiToken(result.token.id, this.store)
-    }
+    await revokePresentedToken(this.ctx, result?.token.id, this.store)
     this.verification = Promise.resolve(null)
     this.resolvedUser = Promise.resolve(null)
-    // So getApiToken()/getApiTokenOrFail() cannot succeed after logout on the
-    // same request.
-    this.ctx.set(API_TOKEN_KEY, undefined)
   }
 
   session<T extends Session = Session>(): T | undefined {

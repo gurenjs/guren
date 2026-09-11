@@ -4,7 +4,9 @@ import { getSessionFromContext } from '../http/middleware/session'
 import { readAgentPrincipal } from '../internal/agent-principal'
 import { AgentPrincipalGuard } from './AgentPrincipalGuard'
 import { RequestAuthContext } from './RequestAuthContext'
+import { getResolvedPrincipal, type ResolvedPrincipal } from './context'
 import { ModelUserProvider, type ModelUserProviderOptions } from './providers/ModelUserProvider'
+import { sanitizeUser } from './providers/UserProvider'
 import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
 import { hasBearerHeader, type ApiTokenStore } from './api-token'
@@ -96,17 +98,10 @@ export class AuthManager implements AuthManagerContract {
       // the ordinary "has not been registered" error.
       const installed = readAgentPrincipal(context.ctx.req.raw)
       if (installed) {
-        return new AgentPrincipalGuard<User>({
-          installed,
-          // The same provider rule `useTokens({ provider })` configures for
-          // the token guard: with one, the principal's id resolves to the real
-          // user record; without one, a minimal `{ id }`. Two rules here would
-          // mean a policy reading a user field behaved differently depending
-          // on which surface the call arrived on.
-          ...(this.apiTokenOptions.provider
-            ? { provider: this.getProvider<User>(this.apiTokenOptions.provider) }
-            : {}),
-        })
+        const provider = this.tokenUserProvider<User>()
+        // With a provider the principal's id resolves to the real user record;
+        // without one, a minimal `{ id }`.
+        return new AgentPrincipalGuard<User>({ installed, ...(provider ? { provider } : {}) })
       }
     }
 
@@ -168,7 +163,39 @@ export class AuthManager implements AuthManagerContract {
       })
     }
 
-    return new RequestAuthContext(resolveName, ctx, resolveSession, guardFactory)
+    return new RequestAuthContext(resolveName, ctx, resolveSession, guardFactory, () =>
+      this.resolvePrincipal(ctx),
+    )
+  }
+
+  /**
+   * The user provider `useTokens({ provider })` configured, and no other.
+   * Every surface that turns a token's or a principal's id into a user record
+   * reads this one: a second rule would mean a policy reading a user field
+   * behaved differently depending on which surface the call arrived on.
+   */
+  private tokenUserProvider<User>(): UserProvider<User> | undefined {
+    const name = this.apiTokenOptions.provider
+    return name ? this.getProvider<User>(name) : undefined
+  }
+
+  /**
+   * The principal a middleware resolved for this request, sanitized the way the
+   * token guard sanitizes its own. Read at call time, so a context built before
+   * the authenticating middleware ran still answers with it.
+   */
+  private resolvePrincipal(ctx: Context): ResolvedPrincipal | undefined {
+    // An identity the pipeline installed outranks one a header produced
+    // (RFC 0017 §2), so the principal guard answers this request instead.
+    if (readAgentPrincipal(ctx.req.raw)) return undefined
+
+    const principal = getResolvedPrincipal(ctx)
+    if (!principal || principal.user == null) return principal
+
+    const provider = this.tokenUserProvider<unknown>()
+    if (!provider) return principal
+
+    return { ...principal, user: sanitizeUser(provider, principal.user) }
   }
 
   async attempt(name: string, ctx: Context, credentials: AuthCredentials, remember?: boolean): Promise<boolean> {

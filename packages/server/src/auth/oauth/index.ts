@@ -132,6 +132,11 @@ const MAX_PENDING_SESSION_BINDINGS = 5
 export interface OAuthAuthorizeOptions {
   scope?: string[]
   redirectTo?: string
+  /**
+   * Use this value rather than a minted one. A bound flow returns it carrying
+   * the boundness marker, so send the `state` `authorize()` returns, not the
+   * one passed in.
+   */
   state?: string
   extraParams?: Record<string, string>
   /**
@@ -192,20 +197,18 @@ function warnOnceAboutUnboundState(): void {
   )
 }
 
-let warnedAboutDroppedBinding = false
-
 /**
- * The flow was bound at authorize time but the state came back without one,
- * so the configured `OAuthStateStore` is not persisting `binding` — which
- * silently reverts the protection to the transferable state it replaced.
+ * The state came back without the binding the flow was created with, so the
+ * configured `OAuthStateStore` is not persisting `binding`. This names the
+ * cause, since "Invalid or expired OAuth state" reads as a user problem.
+ * Printed per rejected login, each of which a store author has to trace;
+ * reaching the branch costs a caller a state the store already consumed.
  */
-function warnOnceAboutDroppedBinding(): void {
-  if (warnedAboutDroppedBinding) return
-  warnedAboutDroppedBinding = true
+function warnAboutDroppedBinding(): void {
   console.warn(
-    '[guren] An OAuth state was created with `bindTo` but came back from the state store '
-    + 'without its binding, so the callback could not be tied to the browser that started the '
-    + 'flow. The configured OAuthStateStore is dropping `OAuthStatePayload.binding` — for '
+    '[guren] A bound OAuth state came back from the state store without its binding, so the '
+    + 'callback was rejected: it cannot be tied to the browser that started the flow. The '
+    + 'configured OAuthStateStore is dropping `OAuthStatePayload.binding` — for '
     + 'DatabaseOAuthStateStore this usually means the `oauth_states` table has no `binding` '
     + 'column. See: https://guren.dev/docs/guides/oauth',
   )
@@ -281,6 +284,15 @@ function consumeSessionBinding(
   session.set(OAUTH_SESSION_BINDING_KEY, pending.filter((entry) => entry.stateHash !== stateHash))
   return match?.binding
 }
+
+/**
+ * Prefix a bound state carries. `verifyOAuthState` reads boundness off the
+ * state itself, so a store that drops `binding` cannot turn a bound flow back
+ * into a transferable one. The store key is the hash of the whole state, so
+ * adding or stripping the prefix changes the key and the lookup misses: the
+ * marker needs no signature of its own.
+ */
+const BOUND_STATE_PREFIX = 'gb1~'
 
 const DEFAULT_STATE_EXPIRES_IN = 10 * 60 * 1000
 const DEFAULT_STATE_LENGTH = 24
@@ -462,7 +474,9 @@ export async function createOAuthState(
   fixedState?: string,
   bindTo?: string,
 ): Promise<{ state: string; expiresAt: Date }> {
-  const state = fixedState ?? generateToken(config.stateLength ?? DEFAULT_STATE_LENGTH)
+  const minted = fixedState ?? generateToken(config.stateLength ?? DEFAULT_STATE_LENGTH)
+  // Marked before hashing, so the mark is part of what the store is keyed on.
+  const state = bindTo ? `${BOUND_STATE_PREFIX}${minted}` : minted
   const hashAlgorithm = config.hashAlgorithm ?? DEFAULT_STATE_HASH_ALGORITHM
   const expiresAt = new Date(Date.now() + (config.expiresIn ?? DEFAULT_STATE_EXPIRES_IN))
   const stateHash = hashToken(state, hashAlgorithm)
@@ -491,7 +505,9 @@ export async function verifyOAuthState(
     : await findAndDeleteState(store, stateHash)
   if (!payload) return null
   if (payload.provider !== provider) return null
-  if (!bindingMatches(payload.binding, bindTo, hashAlgorithm)) return null
+  if (!bindingMatches(payload.binding, bindTo, hashAlgorithm, state.startsWith(BOUND_STATE_PREFIX))) {
+    return null
+  }
   // Re-sanitize on the way out so custom stores and states persisted before
   // an allowlist change cannot smuggle an unsafe target through.
   return { ...payload, redirectTo: sanitizeOAuthRedirect(payload.redirectTo, config.allowedRedirectHosts) }
@@ -499,23 +515,25 @@ export async function verifyOAuthState(
 
 /**
  * Whether the presented value matches the binding recorded at authorize time.
- * A state created without a binding still verifies, so an app that has not
- * adopted `bindTo` keeps working; a state created *with* one is useless to a
- * browser that cannot present it, so a missing or wrong value fails.
+ * A flow bound on neither side verifies, so an app that has not adopted
+ * `bindTo` keeps working. A bound flow fails on a missing value on either side:
+ * a browser that cannot present the binding, or a store that did not keep it.
  */
 function bindingMatches(
   stored: string | undefined,
   presented: string | undefined,
   hashAlgorithm: 'sha256' | 'sha512',
+  stateWasBound: boolean,
 ): boolean {
   if (!stored) {
-    // The caller bound this flow, so a payload coming back without one means
-    // the store dropped the field rather than that the state was never bound.
-    // Verification cannot tell the two apart, so it stays permissive — but a
-    // store that silently discards the binding turns the protection off, and
-    // nothing else would say so.
-    if (presented) warnOnceAboutDroppedBinding()
-    return true
+    if (!stateWasBound && !presented) return true
+    // The flow was bound but the payload came back unbound, so the store
+    // dropped the field. Accepting it would hand the protection back to the
+    // transferable state it replaced — and a victim's browser presents nothing
+    // either, so trusting the store alone accepts exactly the fixation the
+    // binding exists to stop. The callback fails; the warning says why.
+    warnAboutDroppedBinding()
+    return false
   }
   if (!presented) return false
   // Both sides are hex digests, so this takes the hex-decoding comparator —

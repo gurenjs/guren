@@ -13,6 +13,7 @@ import {
   setLogManager,
   getLogManager,
 } from '../../src/logging'
+import { clearGlobalManager } from '../support/globals'
 
 describe('LOG_LEVEL_PRIORITY', () => {
   it('has correct priority order', () => {
@@ -690,6 +691,8 @@ describe('createLogManager', () => {
 
 describe('Global log manager', () => {
   it('throws when not initialized', () => {
+    clearGlobalManager(setLogManager)
+
     expect(() => getLogManager()).toThrow(
       'Log manager has not been initialized. Call setLogManager() first.'
     )

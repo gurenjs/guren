@@ -13,6 +13,8 @@ import {
   customCheck,
 } from '../../src/health'
 import type { CacheStoreInterface, CheckResult, HealthStatus } from '../../src/health'
+import { MemoryStore } from '../../src/cache'
+import { MemoryDriver } from '../../src/storage'
 
 describe('HealthCheck', () => {
   class TestCheck extends HealthCheck {
@@ -439,34 +441,23 @@ describe('RedisCheck', () => {
 })
 
 describe('CacheCheck', () => {
-  it('should return healthy when cache operations succeed', async () => {
-    let stored: unknown = null
-    const cache = {
-      get: mock(() => Promise.resolve(stored)),
-      put: mock((key: string, value: unknown) => {
-        stored = value
-        return Promise.resolve()
-      }),
-      forget: mock(() => Promise.resolve(true)),
-    }
-
-    const check = new CacheCheck(cache as unknown as CacheStoreInterface)
+  it('should accept the built-in cache store and leave no key behind', async () => {
+    const store = new MemoryStore()
+    const check = new CacheCheck(store)
     const result = await check.check()
 
     expect(result.status).toBe('healthy')
-    expect(cache.put).toHaveBeenCalled()
-    expect(cache.get).toHaveBeenCalled()
-    expect(cache.forget).toHaveBeenCalled()
+    expect(await store.has('__health_check__')).toBe(false)
   })
 
   it('should return degraded when read/write mismatch', async () => {
-    const cache = {
-      get: mock(() => Promise.resolve('wrong_value')),
-      put: mock(() => Promise.resolve()),
-      forget: mock(() => Promise.resolve(true)),
+    const cache: CacheStoreInterface = {
+      get: <T>() => Promise.resolve('wrong_value' as T | null),
+      set: mock(() => Promise.resolve()),
+      delete: mock(() => Promise.resolve(true)),
     }
 
-    const check = new CacheCheck(cache as unknown as CacheStoreInterface)
+    const check = new CacheCheck(cache)
     const result = await check.check()
 
     expect(result.status).toBe('degraded')
@@ -474,13 +465,13 @@ describe('CacheCheck', () => {
   })
 
   it('should return unhealthy when operation fails', async () => {
-    const cache = {
+    const cache: CacheStoreInterface = {
       get: mock(() => Promise.reject(new Error('Cache error'))),
-      put: mock(() => Promise.resolve()),
-      forget: mock(() => Promise.resolve(true)),
+      set: mock(() => Promise.resolve()),
+      delete: mock(() => Promise.resolve(true)),
     }
 
-    const check = new CacheCheck(cache as unknown as CacheStoreInterface)
+    const check = new CacheCheck(cache)
     const result = await check.check()
 
     expect(result.status).toBe('unhealthy')
@@ -489,19 +480,19 @@ describe('CacheCheck', () => {
 
   it('should use custom test key', async () => {
     let usedKey: string | null = null
-    const cache = {
-      get: mock((key: string) => {
+    const cache: CacheStoreInterface = {
+      get: <T>(key: string) => {
         usedKey = key
-        return Promise.resolve('test')
-      }),
-      put: mock((key: string, _value: unknown) => {
+        return Promise.resolve('test' as T | null)
+      },
+      set: mock((key: string, _value: unknown) => {
         usedKey = key
         return Promise.resolve()
       }),
-      forget: mock(() => Promise.resolve(true)),
+      delete: mock(() => Promise.resolve(true)),
     }
 
-    const check = new CacheCheck(cache as unknown as CacheStoreInterface, { testKey: 'custom_key' })
+    const check = new CacheCheck(cache, { testKey: 'custom_key' })
     await check.check()
 
     expect(usedKey ?? '').toBe('custom_key')
@@ -509,12 +500,21 @@ describe('CacheCheck', () => {
 })
 
 describe('StorageCheck', () => {
+  it('should accept the built-in storage driver and leave no file behind', async () => {
+    const disk = new MemoryDriver()
+    const check = new StorageCheck(disk)
+    const result = await check.check()
+
+    expect(result.status).toBe('healthy')
+    expect(await disk.exists('__health_check__.txt')).toBe(false)
+  })
+
   it('should return healthy when storage operations succeed', async () => {
     let stored: string | null = null
     const storage = {
       put: mock((path: string, contents: string) => {
         stored = contents
-        return Promise.resolve()
+        return Promise.resolve(path)
       }),
       get: mock(() => Promise.resolve(stored ? Buffer.from(stored) : null)),
       delete: mock(() => Promise.resolve(true)),
@@ -531,7 +531,7 @@ describe('StorageCheck', () => {
 
   it('should return degraded when read/write mismatch', async () => {
     const storage = {
-      put: mock(() => Promise.resolve()),
+      put: mock(() => Promise.resolve('path')),
       get: mock(() => Promise.resolve(Buffer.from('wrong'))),
       delete: mock(() => Promise.resolve(true)),
     }

@@ -144,6 +144,11 @@ a native app's secure storage), manage the value yourself with `bindTo`: pass a
 value only this browser can present back to `authorize()`, and hand the same
 value to `handleCallback()`. `bindTo` wins when both options are given.
 
+A bound state carries a short marker, so boundness travels with the state rather
+than only in the store: a store that cannot keep `binding` then rejects the
+callback instead of quietly accepting a transferable state. Send the `state` that
+`authorize()` returns, including when you supplied one of your own.
+
 > [!WARNING]
 > `authorize()` without `session` or `bindTo` still works, so apps written
 > against the earlier API keep running, and it logs a warning once per process.
@@ -299,9 +304,10 @@ export const oauthStates = sqliteTable('oauth_states', {
 
 The `binding` column holds the hashed browser binding from
 [Binding State to the Browser](#binding-state-to-the-browser). Without it the
-store cannot persist a binding, and every bound state comes back unbound, which
-silently reverts the protection. Add the column before binding flows via
-`session` or `bindTo`.
+store cannot persist a binding, so every bound state comes back unbound and
+`handleCallback` rejects it with "Invalid or expired OAuth state" (a warning on
+the console names the store as the cause). Add the column before binding flows
+via `session` or `bindTo`.
 
 Expired state rows are removed as they are encountered; call `store.deleteExpired()` from a scheduled job for bulk cleanup. Redis remains available for apps that already run it:
 

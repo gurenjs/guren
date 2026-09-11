@@ -20,6 +20,14 @@ import { hashToken } from '../../src/auth/utils'
 // unrestored replacement answers other files' `fetch()` calls: restore it here explicitly.
 const realFetch = globalThis.fetch
 
+/** An `oauth_states` table with no `binding` column: the payload comes back stripped. */
+function bindingDroppingStore(): MemoryOAuthStateStore {
+  const store = new MemoryOAuthStateStore()
+  const inner = store.store.bind(store)
+  store.store = async (stateHash, payload) => inner(stateHash, { ...payload, binding: undefined })
+  return store
+}
+
 afterEach(() => {
   globalThis.fetch = realFetch
 })
@@ -86,15 +94,33 @@ describe('oauth helpers', () => {
     const store = new MemoryOAuthStateStore()
     const { state } = await createOAuthState('github', store, {}, undefined, 'fixed-state', 'session-abc')
 
-    const stored = await store.find(hashToken('fixed-state'))
+    // A bound state carries the boundness marker, and is keyed on all of it.
+    expect(state).toBe('gb1~fixed-state')
+    const stored = await store.find(hashToken(state))
     expect(stored?.binding).toBe(hashToken('session-abc'))
     expect(stored?.binding).not.toBe('session-abc')
+  })
+
+  it('leaves an unbound state unmarked', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, undefined, 'fixed-state')
+
     expect(state).toBe('fixed-state')
   })
 
-  // A store that drops `binding` reverts the protection with no other signal, so the
-  // mismatch between "bound at authorize" and "unbound at callback" must be reported.
-  it('warns when a bound flow comes back from the store unbound', async () => {
+  // Stripping the marker to make a bound flow read as unbound changes the key
+  // the store was written under, so the lookup misses.
+  it('does not find a state whose boundness marker was tampered with', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, undefined, 'fixed-state', 'session-abc')
+
+    expect(await verifyOAuthState(state.replace('gb1~', ''), 'github', store, {})).toBeNull()
+  })
+
+  // A store that drops `binding` would otherwise revert the protection to the
+  // transferable state it replaced, with no other signal. So the callback fails,
+  // and the warning is what names the store as the cause.
+  it('rejects, and warns, when a bound flow comes back from the store unbound', async () => {
     const store = new MemoryOAuthStateStore()
     const original = console.warn
     const warnings: string[] = []
@@ -103,12 +129,65 @@ describe('oauth helpers', () => {
     try {
       const { state } = await createOAuthState('github', store, {}, undefined, 'dropped-state')
       // Minted unbound but presented with a binding: the shape a dropping store produces.
-      expect(await verifyOAuthState(state, 'github', store, {}, 'session-abc')).not.toBeNull()
+      expect(await verifyOAuthState(state, 'github', store, {}, 'session-abc')).toBeNull()
     } finally {
       console.warn = original
     }
 
     expect(warnings.some((line) => line.includes('without its binding'))).toBe(true)
+  })
+
+  // The fixation the binding exists to stop: the attacker's own flow, walked
+  // through a victim's browser, which holds no binding to present. Nothing in
+  // the stored payload distinguishes it from an unbound flow, so the state
+  // itself is what has to say the flow was bound.
+  it('rejects, and warns, when a dropping store loses the binding on both sides', async () => {
+    const droppingStore = bindingDroppingStore()
+    const original = console.warn
+    const warnings: string[] = []
+    console.warn = (message: unknown) => { warnings.push(String(message)) }
+
+    try {
+      const { state } = await createOAuthState('github', droppingStore, {}, undefined, undefined, 'attacker-session')
+      expect(await verifyOAuthState(state, 'github', droppingStore, {})).toBeNull()
+    } finally {
+      console.warn = original
+    }
+
+    expect(warnings.some((line) => line.includes('without its binding'))).toBe(true)
+  })
+
+  it('warns on every dropped binding, not only the first', async () => {
+    const droppingStore = bindingDroppingStore()
+    const original = console.warn
+    const warnings: string[] = []
+    console.warn = (message: unknown) => { warnings.push(String(message)) }
+
+    try {
+      for (const session of ['one', 'two']) {
+        const { state } = await createOAuthState('github', droppingStore, {}, undefined, undefined, session)
+        await verifyOAuthState(state, 'github', droppingStore, {}, session)
+      }
+    } finally {
+      console.warn = original
+    }
+
+    expect(warnings.filter((line) => line.includes('without its binding'))).toHaveLength(2)
+  })
+
+  // States minted before the marker existed keep verifying: an unmarked state
+  // whose store kept the binding compares stored against presented as before.
+  it('verifies a bound state minted before the marker existed', async () => {
+    const store = new MemoryOAuthStateStore()
+    await store.store(hashToken('legacy-state'), {
+      provider: 'github',
+      redirectTo: '/dashboard',
+      expiresAt: new Date(Date.now() + 60_000),
+      binding: hashToken('starting-session'),
+    })
+
+    const payload = await verifyOAuthState('legacy-state', 'github', store, {}, 'starting-session')
+    expect(payload?.redirectTo).toBe('/dashboard')
   })
 
   it('still verifies a state created without a binding', async () => {

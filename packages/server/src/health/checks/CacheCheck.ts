@@ -1,11 +1,9 @@
 import type { CheckResult } from '../types'
+import type { CacheStore } from '../../cache/types'
 import { HealthCheck } from '../HealthCheck'
 
-export interface CacheStoreInterface {
-  get<T>(key: string): Promise<T | null>
-  put<T>(key: string, value: T, ttl?: number): Promise<void>
-  forget(key: string): Promise<boolean>
-}
+/** The slice of `CacheStore` the check exercises; `cache.store()` satisfies it. */
+export type CacheStoreInterface = Pick<CacheStore, 'get' | 'set' | 'delete'>
 
 export interface CacheCheckOptions {
   /** @default 'cache' */
@@ -32,11 +30,11 @@ export class CacheCheck extends HealthCheck {
     const testValue = `health_check_${Date.now()}`
 
     try {
-      await this.cache.put(this.testKey, testValue, 60)
+      await this.cache.set(this.testKey, testValue, 60)
 
       const retrieved = await this.cache.get<string>(this.testKey)
 
-      await this.cache.forget(this.testKey)
+      await this.cache.delete(this.testKey)
 
       if (retrieved === testValue) {
         return this.healthy('Cache is functioning correctly')

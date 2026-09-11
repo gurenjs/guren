@@ -1,11 +1,9 @@
 import type { CheckResult } from '../types'
+import type { StorageDriver } from '../../storage/types'
 import { HealthCheck } from '../HealthCheck'
 
-export interface StorageDriverInterface {
-  put(path: string, contents: string | Buffer): Promise<void>
-  get(path: string): Promise<Buffer | null>
-  delete(path: string): Promise<boolean>
-}
+/** The slice of `StorageDriver` the check exercises; `storage.disk()` satisfies it. */
+export type StorageDriverInterface = Pick<StorageDriver, 'put' | 'get' | 'delete'>
 
 export interface StorageCheckOptions {
   /** @default 'storage' */

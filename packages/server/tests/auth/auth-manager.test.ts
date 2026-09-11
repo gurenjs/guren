@@ -4,28 +4,14 @@ import type { Guard, GuardContext, UserProvider } from '../../src/auth/types'
 import { createApiToken, MemoryApiTokenStore } from '../../src/auth/api-token'
 import { TokenGuard } from '../../src/auth/TokenGuard'
 import { fakeContext } from '../support/fake-context'
+import { fakeGuard, fakeUserProvider } from '../support/fake-auth'
 
 function createMockGuardFactory(): (ctx: GuardContext) => Guard {
-  return () => ({
-    async check() { return false },
-    async guest() { return true },
-    async user() { return null },
-    async id() { return null },
-    async login() {},
-    async logout() {},
-    async attempt() { return false },
-    async validate() { return null },
-    session() { return undefined },
-  })
+  return () => fakeGuard()
 }
 
-function createMockProviderFactory(): (manager: any) => UserProvider {
-  return () => ({
-    async retrieveById() { return null },
-    async retrieveByCredentials() { return null },
-    async validateCredentials() { return false },
-    getId() { return null },
-  })
+function createMockProviderFactory(): (manager: unknown) => UserProvider {
+  return () => fakeUserProvider()
 }
 
 describe('AuthManager', () => {
@@ -204,12 +190,10 @@ describe('AuthManager.useTokens', () => {
     const manager = new AuthManager()
     manager.registerGuard('web', createMockGuardFactory())
     manager.setDefaultGuard('web')
-    manager.registerProvider('users', () => ({
+    manager.registerProvider('users', () => fakeUserProvider({
       async retrieveById(id: unknown) { return { id, name: 'Alice' } as never },
-      async retrieveByCredentials() { return null },
-      async validateCredentials() { return false },
-      getId(user: { id: unknown }) { return user.id },
-    }) as never)
+      getId(user: unknown) { return (user as { id: unknown }).id },
+    }))
     manager.useTokens(store, { provider: 'users' })
 
     const { plainTextToken } = await createApiToken(store, { name: 't', userId: 42 })

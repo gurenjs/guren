@@ -133,6 +133,8 @@ await oauth.handleCallback('github', { code, state, session: this.auth.session()
 
 束縛をセッション以外の場所に置きたい場合（暗号化Cookie、ネイティブアプリのセキュアストレージなど）は、`bindTo` で自分で管理します。そのブラウザだけが提示できる値を `authorize()` に渡し、同じ値を `handleCallback()` にも渡してください。両方指定した場合は `bindTo` が優先されます。
 
+束縛済みのstateには短いマーカーが付きます。束縛されているという事実がストアだけでなくstate自体にも乗るため、`binding` を保存できないストアでは、転送可能なstateを黙って受け入れるのではなくコールバックを拒否します。自分でstateを指定した場合も含めて、`authorize()` が返した `state` をそのまま使ってください。
+
 > [!WARNING]
 > `session` も `bindTo` も渡さない `authorize()` は従来どおり動くので、以前のAPIで書かれたアプリは壊れません。ただしプロセスごとに一度警告を出しますし、束縛を使い始めるまでは上記の攻撃に晒されたままです。`make:auth` と `oauth` ブループリントは束縛版を生成します。
 
@@ -283,7 +285,7 @@ export const oauthStates = sqliteTable('oauth_states', {
 })
 ```
 
-`binding` 列は[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュを保持します。この列が無いとストアは束縛を保存できません。束縛済みのstateがすべて未束縛で戻ってくるため、保護が黙って無効になります。`session` / `bindTo` を使う前に列を追加してください。
+`binding` 列は[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュを保持します。この列が無いとストアは束縛を保存できません。束縛済みのstateがすべて未束縛で戻ってくるため、`handleCallback` は「Invalid or expired OAuth state」として拒否します。原因のストアはコンソールの警告が示します。`session` / `bindTo` を使う前に列を追加してください。
 
 期限切れのstate行は参照時に削除されます。まとめて掃除したい場合は、スケジュールジョブから `store.deleteExpired()` を呼んでください。既にRedisを運用しているアプリなら、Redisも引き続き使えます:
 
