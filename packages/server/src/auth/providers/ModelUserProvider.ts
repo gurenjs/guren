@@ -10,6 +10,16 @@ interface CredentialColumnSource {
   resolveRememberTokenField(): string
 }
 
+interface PasswordHashWriter {
+  storePasswordHash(where: PlainObject, column: string, hash: string): Promise<void>
+}
+
+/** Same duck-typing reason as `credentialColumnSource`. */
+function passwordHashWriter(model: typeof Model): PasswordHashWriter | null {
+  const candidate = model as Partial<PasswordHashWriter>
+  return typeof candidate.storePasswordHash === 'function' ? (candidate as PasswordHashWriter) : null
+}
+
 /**
  * Capability check, not `instanceof AuthenticatableModel`: a nominal check
  * silently fails when two copies of @guren/server are loaded (src and dist
@@ -120,13 +130,17 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
 
     const rehashed = await this.hasher.hash(plain)
     ;(user as PlainObject)[this.passwordColumn] = rehashed
-    // forceUpdate, like the remember token: the hash column is denied to mass
-    // assignment. A model hashing in place (passwordField === passwordHashField)
-    // would hash this value a second time, so it is written as a raw column.
-    await (this.model as typeof Model).forceUpdate(
-      { [this.idColumn]: this.getId(user) },
-      { [this.passwordColumn]: rehashed },
-    )
+    const where = { [this.idColumn]: this.getId(user) }
+    // storePasswordHash where the model offers it: a model that hashes in place
+    // (passwordField === passwordHashField) hashes this value a second time if it
+    // goes through update(). A plain Model has no such preparation, so forceUpdate
+    // is the equivalent write; the hash column is denied to mass assignment either way.
+    const writer = passwordHashWriter(this.model)
+    if (writer) {
+      await writer.storePasswordHash(where, this.passwordColumn, rehashed)
+    } else {
+      await (this.model as typeof Model).forceUpdate(where, { [this.passwordColumn]: rehashed })
+    }
   }
 
   /**

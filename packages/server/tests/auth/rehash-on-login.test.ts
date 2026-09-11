@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import type { Context } from 'hono'
-import type { Model, PlainObject } from '@guren/orm'
+import type { FindManyOptions, Model, ORMAdapter, PlainObject, WhereClause } from '@guren/orm'
 import { AuthManager } from '../../src/auth/AuthManager'
+import { AuthenticatableModel } from '../../src/auth/AuthenticatableModel'
 import { ScryptHasher } from '../../src/auth/password/ScryptHasher'
 import { NodeHasher } from '../../src/auth/password/NodeHasher'
 import type { PasswordHasher } from '../../src/auth/password/PasswordHasher'
@@ -24,6 +25,31 @@ function fakeModel(rows: Row[]) {
     },
   }
   return { model: model as unknown as typeof Model<PlainObject>, writes }
+}
+
+/** Rows a real model reads and writes, so `preparePersistencePayload` runs for real. */
+function storeAdapter(rows: PlainObject[]): ORMAdapter {
+  const matches = (row: PlainObject, where: PlainObject) =>
+    Object.entries(where).every(([key, value]) => row[key] === value)
+  return {
+    async findMany<T extends PlainObject = PlainObject>(_table: unknown, options?: FindManyOptions<T>): Promise<T[]> {
+      const where = (options?.where ?? {}) as PlainObject
+      return rows.filter((row) => matches(row, where)).map((row) => ({ ...row })) as T[]
+    },
+    async findUnique<T extends PlainObject = PlainObject>(_table: unknown, where: WhereClause<T>): Promise<T | null> {
+      const row = rows.find((candidate) => matches(candidate, where as PlainObject))
+      return (row ? { ...row } : null) as T | null
+    },
+    async update<T extends PlainObject = PlainObject>(
+      _table: unknown,
+      where: WhereClause<T>,
+      data: PlainObject,
+    ): Promise<T> {
+      const row = rows.find((candidate) => matches(candidate, where as PlainObject))
+      if (row) Object.assign(row, data)
+      return { ...row } as T
+    },
+  } as unknown as ORMAdapter
 }
 
 function fakeSession(): Session {
@@ -115,6 +141,26 @@ describe('rehash on login', () => {
 
     expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
     expect(writes).toHaveLength(0)
+  })
+
+  test('a model that hashes in place stores the rehash without hashing it again', async () => {
+    class InPlace extends AuthenticatableModel<PlainObject> {
+      static override table = 'users'
+      static override passwordField = 'passwordHash'
+    }
+    const argonRow = await new ScryptHasher({ memoryCost: 1024, timeCost: 1 }).hash('secret')
+    const rows: PlainObject[] = [{ id: 1, email: 'a@example.com', passwordHash: argonRow }]
+    InPlace.useAdapter(storeAdapter(rows))
+    const manager = new AuthManager()
+    manager.useModel(InPlace as unknown as typeof Model<PlainObject>)
+
+    expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
+    expect(String(rows[0].passwordHash).startsWith('$scrypt$')).toBe(true)
+
+    // The written value is the hash, not a hash of the hash: hashing it twice
+    // leaves a row nothing can log into again.
+    expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
+    expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'wrong' })).toBe(false)
   })
 
   test('a custom hasher without needsRehash() is never asked to rehash', async () => {

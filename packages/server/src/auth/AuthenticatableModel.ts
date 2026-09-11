@@ -2,6 +2,13 @@ import { Model, type PlainObject } from '@guren/orm'
 import type { PasswordHasher } from './password/PasswordHasher'
 import { configuredPasswordHasher } from './password/configured-hasher'
 
+/**
+ * Marks a payload whose password value is already hashed, out of band because
+ * an in-place model has only one column to read. Stripped before the payload
+ * reaches the database; `storePasswordHash()` is the only writer.
+ */
+const PRECOMPUTED_HASH = Symbol('guren.auth.precomputedPasswordHash')
+
 export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
   static override readonly createType: {
     password?: string
@@ -54,11 +61,27 @@ export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainOb
     return this.passwordHasher ?? configuredPasswordHasher()
   }
 
+  /**
+   * Persist an already-hashed password without hashing it again. A model that
+   * hashes in place (`passwordField === passwordHashField`) cannot tell a hash
+   * from a plaintext by column name, so a rehash written through `update()`
+   * would be hashed a second time and lock the account out.
+   */
+  static async storePasswordHash(where: PlainObject, column: string, hash: string): Promise<void> {
+    await (this as unknown as typeof Model).forceUpdate(where, {
+      [column]: hash,
+      [PRECOMPUTED_HASH]: true,
+    } as PlainObject)
+  }
+
   protected static override async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {
-    const basePayload = await super.preparePersistencePayload(data)
+    const precomputed = Reflect.get(data, PRECOMPUTED_HASH) === true
+    const incoming = { ...data }
+    Reflect.deleteProperty(incoming, PRECOMPUTED_HASH)
+    const basePayload = await super.preparePersistencePayload(incoming)
     const passwordField = this.resolvePasswordField()
 
-    if (!(passwordField in basePayload)) {
+    if (precomputed || !(passwordField in basePayload)) {
       return basePayload
     }
 
