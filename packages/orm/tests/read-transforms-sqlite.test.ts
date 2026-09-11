@@ -268,6 +268,15 @@ describe('relations keyed on a cast column (bun:sqlite)', () => {
     expect(users[0].id).toBe('1' as never)
   })
 
+  it('leaves accessors off a relation the constraint narrowed', async () => {
+    const posts = (await CastPost.newQuery()
+      .where('id', 1)
+      .with({ author: (q) => q.select('id') })
+      .get()) as Array<PostRecord & { author: UserRecord | null }>
+
+    expect(posts[0].author).toEqual({ id: '1' } as never)
+  })
+
   it('leaves accessors off a row select() narrowed', async () => {
     const rows = await CastUser.newQuery().select('id').get()
 

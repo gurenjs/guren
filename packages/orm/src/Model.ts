@@ -1589,7 +1589,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       await related.loadRelationsInto(children, tails, queryOptions, constraints, currentPath)
     }
     // After the recursion: the grandchildren were keyed on these rows' raw values.
-    applyRelatedReadTransforms(related, children)
+    applyRelatedReadTransforms(related, children, constraintProjects(related, constraint))
   }
 
   protected static async loadHasMany(
@@ -1847,7 +1847,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       )
       const idMap = new Map<unknown, PlainObject>()
       for (const r of results) idMap.set(r.id, { ...r })
-      applyRelatedReadTransforms(modelClass, Array.from(idMap.values()))
+      applyRelatedReadTransforms(modelClass, Array.from(idMap.values()), constraintProjects(modelClass, constraint))
       resolved.set(type, idMap)
     }
 
@@ -1883,12 +1883,26 @@ async function applyEagerConstraint(
  * Written onto the records rather than onto copies: the parent rows hold them
  * by reference, and a nested loader has already keyed its own rows on them.
  */
-function applyRelatedReadTransforms(related: typeof Model, records: PlainObject[]): void {
-  const transformed = related[READ_TRANSFORMS](records)
+function applyRelatedReadTransforms(related: typeof Model, records: PlainObject[], projected: boolean): void {
+  const transformed = related[READ_TRANSFORMS](records, projected)
   for (const [index, record] of records.entries()) {
     const result = transformed[index]
     if (result && result !== record) Object.assign(record, result)
   }
+}
+
+/**
+ * A constraint's `select()` narrows the child rows, so the related model's
+ * accessors are skipped there for the reason `QueryBuilder.select()` skips
+ * them. Read off a builder that is never executed, which is the one place this
+ * is knowable: the loader groups the rows itself and applies the transforms
+ * after, long past the builder that fetched them.
+ */
+function constraintProjects(related: typeof Model, constraint?: EagerLoadConstraint): boolean {
+  if (!constraint) return false
+  const probe = related.newQueryWithoutScopes()
+  constraint(probe)
+  return (probe.getOptions().selectFields?.length ?? 0) > 0
 }
 
 async function loadRelationData(
