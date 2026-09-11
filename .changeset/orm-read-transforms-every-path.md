@@ -24,4 +24,7 @@ the columns that are there.
 
 `Model.paginate()` and `Model.withPaginate()` are the query builder's
 `paginate()` on both arms now, so page sanitising, the count and `meta` have one
-implementation rather than two that agreed by inspection.
+implementation rather than two that agreed by inspection. One consequence for a
+custom adapter: a filtered page used to count through `ORMAdapter.count()`, and
+now counts through `countAdvanced()`, falling back to loading rows where the
+adapter implements neither. `DrizzleAdapter` implements it.

@@ -1,9 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { sql } from 'drizzle-orm'
+import { int, mysqlTable, varchar } from 'drizzle-orm/mysql-core'
 import { createMySqlDatabase, type MySqlDatabase } from '../src/mysql'
+import { Model } from '../src/Model'
+import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
 // The unit tests mock `drizzle-orm/mysql2` away, so they cannot see driver-level
 // breakage. CI supplies MYSQL_URL from a mysql service container; locally, start
@@ -22,11 +25,11 @@ function databaseUrl(url: string, database: string): string {
   return target.toString()
 }
 
-async function ensureTestDatabase(url: string): Promise<void> {
+async function ensureTestDatabase(url: string, database: string = TEST_DATABASE): Promise<void> {
   const { createPool } = await import('mysql2/promise')
   const pool = createPool({ uri: databaseUrl(url, 'mysql') })
   try {
-    await pool.query(`CREATE DATABASE IF NOT EXISTS \`${TEST_DATABASE}\``)
+    await pool.query(`CREATE DATABASE IF NOT EXISTS \`${database}\``)
   } finally {
     await pool.end()
   }
@@ -136,5 +139,105 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
     )) as unknown as [Array<{ name: string }>]
     expect(remaining.map((row) => row.name)).not.toContain('widget_names')
     expect(remaining.map((row) => row.name)).toContain('widgets')
+  })
+})
+
+// Its own database: the suite above drops every table in the one it runs against.
+const TRANSACTION_DATABASE = 'guren_orm_mysql_transaction_test'
+
+function createNotesMigrationsFolder(): string {
+  const migrationsFolder = mkdtempSync(join(tmpdir(), 'guren-orm-mysql-transaction-'))
+  const migrationDir = join(migrationsFolder, '20240101000000_init')
+  mkdirSync(migrationDir, { recursive: true })
+  writeFileSync(
+    join(migrationDir, 'migration.sql'),
+    'CREATE TABLE `notes` (`id` int AUTO_INCREMENT PRIMARY KEY NOT NULL, `title` varchar(255) NOT NULL);',
+  )
+  return migrationsFolder
+}
+
+const notesTable = mysqlTable('notes', {
+  id: int('id').autoincrement().primaryKey(),
+  title: varchar('title', { length: 255 }).notNull(),
+})
+
+type NoteRecord = typeof notesTable.$inferSelect
+
+// A nested transaction on mysql2 takes drizzle's own transaction() on the open
+// handle, which emits SAVEPOINT — a path neither the SQLite driver (manual
+// BEGIN/COMMIT) nor a mocked adapter can show.
+describeMySql('nested Model.transaction against a real MySQL server (requires MYSQL_URL)', () => {
+  let database: MySqlDatabase
+
+  class Note extends Model<NoteRecord> {
+    static override table = notesTable
+  }
+
+  async function titles(): Promise<string[]> {
+    const db = await database.getDatabase()
+    const [rows] = (await db.execute(sql`SELECT \`title\` FROM \`notes\` ORDER BY \`id\``)) as unknown as [
+      Array<{ title: string }>,
+    ]
+    return rows.map((row) => row.title)
+  }
+
+  beforeAll(async () => {
+    const url = MYSQL_URL as string
+    await ensureTestDatabase(url, TRANSACTION_DATABASE)
+    database = createMySqlDatabase({
+      migrationsFolder: createNotesMigrationsFolder(),
+      connectionString: () => databaseUrl(url, TRANSACTION_DATABASE),
+    })
+    await database.resetDatabase()
+    DrizzleAdapter.configure((await database.getDatabase()) as never)
+  })
+
+  afterAll(async () => {
+    await database?.closeDatabase()
+  })
+
+  beforeEach(async () => {
+    const db = await database.getDatabase()
+    await db.execute(sql`DELETE FROM \`notes\``)
+  })
+
+  it('discards only the inner writes when the outer callback catches the nested error', async () => {
+    await Note.transaction(async (trx, txNote) => {
+      await txNote.create({ title: 'outer' })
+
+      await Note.transaction(async (_inner, innerNote) => {
+        await innerNote.create({ title: 'nested' })
+        throw new Error('boom')
+      }).catch(() => undefined)
+
+      await Note.create({ title: 'after' }, { trx })
+    })
+
+    expect(await titles()).toEqual(['outer', 'after'])
+  })
+
+  it('rolls the whole transaction back when the nested error reaches the outer callback', async () => {
+    await expect(
+      Note.transaction(async (_trx, txNote) => {
+        await txNote.create({ title: 'outer' })
+        await Note.transaction(async (_inner, innerNote) => {
+          await innerNote.create({ title: 'nested' })
+          throw new Error('boom')
+        })
+      }),
+    ).rejects.toThrow('boom')
+
+    expect(await titles()).toEqual([])
+  })
+
+  it('commits both when the nested transaction returns', async () => {
+    await Note.transaction(async (_trx, txNote) => {
+      await txNote.create({ title: 'outer' })
+      await Note.transaction(async (_inner, innerNote) => {
+        await innerNote.create({ title: 'nested' })
+      })
+    })
+
+    expect(await titles()).toEqual(['outer', 'nested'])
   })
 })
