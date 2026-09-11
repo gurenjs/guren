@@ -4,7 +4,9 @@ import { getSessionFromContext } from '../http/middleware/session'
 import { readAgentPrincipal } from '../internal/agent-principal'
 import { AgentPrincipalGuard } from './AgentPrincipalGuard'
 import { RequestAuthContext } from './RequestAuthContext'
+import { getResolvedPrincipal, type ResolvedPrincipal } from './context'
 import { ModelUserProvider, type ModelUserProviderOptions } from './providers/ModelUserProvider'
+import { sanitizeUser } from './providers/UserProvider'
 import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
 import { hasBearerHeader, type ApiTokenStore } from './api-token'
@@ -168,7 +170,32 @@ export class AuthManager implements AuthManagerContract {
       })
     }
 
-    return new RequestAuthContext(resolveName, ctx, resolveSession, guardFactory)
+    return new RequestAuthContext(resolveName, ctx, resolveSession, guardFactory, () =>
+      this.resolvePrincipal(ctx),
+    )
+  }
+
+  /**
+   * The principal a middleware resolved for this request, sanitized the way the
+   * token guard sanitizes its own. Read at call time, so a context built before
+   * the authenticating middleware ran still answers with it.
+   */
+  private resolvePrincipal(ctx: Context): ResolvedPrincipal | undefined {
+    // An identity the pipeline installed outranks one a header produced
+    // (RFC 0017 §2), so the principal guard answers this request instead.
+    if (readAgentPrincipal(ctx.req.raw)) return undefined
+
+    const principal = getResolvedPrincipal(ctx)
+    if (!principal || principal.user == null) return principal
+
+    // The provider `useTokens({ provider })` configured, and no other: a second
+    // rule here would sanitize a user differently depending on which surface
+    // the call arrived on.
+    const providerName = this.apiTokenOptions.provider
+    if (!providerName) return principal
+
+    const provider = this.getProvider<unknown>(providerName)
+    return { ...principal, user: sanitizeUser(provider, principal.user) }
   }
 
   async attempt(name: string, ctx: Context, credentials: AuthCredentials, remember?: boolean): Promise<boolean> {

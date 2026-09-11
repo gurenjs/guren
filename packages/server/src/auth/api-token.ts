@@ -1,7 +1,11 @@
 import type { MiddlewareHandler, Context } from 'hono'
 import { hashToken, generateToken, generateId, secureCompare } from './utils'
-import { AUTH_CONTEXT_KEY, getAuthContext } from './context'
-import type { AuthContext } from './types'
+import {
+  AUTH_CONTEXT_KEY,
+  createPrincipalAuthContext,
+  getAuthContext,
+  setResolvedPrincipal,
+} from './context'
 import { isOptionalExpiryPast } from '../support/expiry'
 import { AuthenticationException } from '../errors/exceptions/AuthenticationException'
 
@@ -401,42 +405,29 @@ export function createBearerTokenMiddleware(
     if (loadUser) {
       const user = await loadUser(result.userId)
       ctx.set('guren:user', user)
-      ctx.set(AUTH_CONTEXT_KEY, withBearerUser(getAuthContext(ctx), user, result.userId))
+      // The framework auth context reads this slot before it reaches a guard,
+      // so the loaded user reaches the Gate whether this middleware runs
+      // before or after the one that attaches the context. A verified token
+      // whose user does not load stores `null`, which makes the request
+      // unauthenticated rather than falling back to a session user.
+      setResolvedPrincipal(ctx, {
+        user,
+        id: result.userId,
+        source: 'bearer',
+        revoke: async () => {
+          await revokeApiToken(result.token.id, store)
+          // So getApiToken()/getApiTokenOrFail() cannot succeed after logout
+          // on the same request, as with TokenGuard.
+          ctx.set(API_TOKEN_KEY, undefined)
+        },
+      })
+
+      if (!getAuthContext(ctx)) {
+        ctx.set(AUTH_CONTEXT_KEY, createPrincipalAuthContext(ctx))
+      }
     }
 
     return next()
-  }
-}
-
-/**
- * The auth context a bearer request carries once `loadUser` resolved. Its
- * answer under `AUTH_CONTEXT_KEY` is what `Gate.resolveUser` reads, and that
- * answer is final: a user stored under any other key is invisible to
- * authorization. Identity comes from the loaded user; session and guard
- * lookups go to the context the app attached, when there is one.
- */
-function withBearerUser(base: AuthContext | undefined, user: unknown, userId: string | number): AuthContext {
-  const attached = base && typeof base.user === 'function' ? base : undefined
-  const unsupported = (method: string) => async (): Promise<never> => {
-    throw new Error(`${method}() is not available on a bearer-token request with no auth context attached.`)
-  }
-
-  return {
-    check: async () => user != null,
-    guest: async () => user == null,
-    user: async <T>() => (user ?? null) as T | null,
-    userOrFail: async <T>() => {
-      if (user == null) throw new AuthenticationException()
-      return user as T
-    },
-    id: async () => (user == null ? null : userId),
-    login: attached ? attached.login.bind(attached) : unsupported('login'),
-    attempt: attached ? attached.attempt.bind(attached) : unsupported('attempt'),
-    logout: attached ? attached.logout.bind(attached) : async () => {},
-    guard: attached ? attached.guard.bind(attached) : () => {
-      throw new Error('guard() is not available on a bearer-token request with no auth context attached.')
-    },
-    session: attached ? attached.session.bind(attached) : () => undefined,
   }
 }
 

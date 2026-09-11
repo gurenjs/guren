@@ -1,54 +1,130 @@
+/**
+ * The bearer middleware's user has to reach authorization at every mounting
+ * order the docs allow, so the cases that can drive a real `Application` do,
+ * rather than asserting against a context built here.
+ */
+process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
-import { createApiToken, createBearerTokenMiddleware, MemoryApiTokenStore } from '../../src/auth/api-token'
+import {
+  createApiToken,
+  createBearerTokenMiddleware,
+  getApiToken,
+  MemoryApiTokenStore,
+  verifyApiToken,
+} from '../../src/auth/api-token'
+import { AuthManager } from '../../src/auth/AuthManager'
 import { getAuthContext } from '../../src/auth/context'
-import type { AuthContext } from '../../src/auth/types'
+import type { AuthContext, Guard, UserProvider } from '../../src/auth/types'
 import { Gate } from '../../src/authorization'
+import { Application } from '../../src/http/Application'
 import { attachAuthContext } from '../../src/http/middleware/auth'
+import { installAgentPrincipal } from '../../src/internal/agent-principal'
 
 interface ProfileUser {
   id: number
   name: string
 }
 
-/** The context an app with cookie sessions attaches: no session, so no user. */
-function sessionlessContext(): AuthContext {
-  return {
-    check: async () => false,
-    guest: async () => true,
-    user: async () => null,
-    userOrFail: async () => { throw new Error('unauthenticated') },
-    id: async () => null,
-    login: async () => {},
-    attempt: async () => false,
-    logout: async () => {},
-    guard: () => { throw new Error('no guard') },
-    session: () => undefined,
-  }
-}
+const SESSION_USER = { id: 7, name: 'Session' }
+
+const loadUser = async (userId: string | number): Promise<ProfileUser> => ({
+  id: Number(userId),
+  name: 'John',
+})
 
 async function bearerFor(store: MemoryApiTokenStore): Promise<string> {
   const { plainTextToken } = await createApiToken(store, { name: 'cli', userId: 1 })
   return `Bearer ${plainTextToken}`
 }
 
-function profileRoute(app: Hono, gate: Gate): void {
-  app.get('/me', async (c) => {
+/** The Gate's answer beside the context's, so a divergence between them shows. */
+function profileHandler(): (c: any) => Promise<Response> {
+  const gate = new Gate().define('read-profile', (user) => (user as ProfileUser | null)?.id === 1)
+  return async (c) => {
     const user = await gate.resolveUser(c)
     await gate.forUser(user).authorize('read-profile')
     return c.json({ id: (user as ProfileUser).id, viaContext: await getAuthContext(c)?.user<ProfileUser>() })
-  })
+  }
+}
+
+/** A guard that answers the way a logged-in session guard does. */
+function guardFor(user: unknown): Guard<unknown> {
+  return {
+    check: async () => user !== null,
+    guest: async () => user === null,
+    user: async <T>() => user as T,
+    id: async () => (user as { id: unknown } | null)?.id ?? null,
+    login: async () => {},
+    logout: async () => {},
+    attempt: async () => true,
+    validate: async () => null,
+    session: () => undefined,
+  }
+}
+
+/** The framework context an app with a logged-in session carries. */
+function sessionUserContext(ctx: Parameters<AuthManager['createAuthContext']>[0]): AuthContext {
+  const auth = new AuthManager()
+  auth.registerGuard('web', () => guardFor(SESSION_USER))
+  auth.setDefaultGuard('web')
+  return auth.createAuthContext(ctx)
 }
 
 describe('createBearerTokenMiddleware with the Gate', () => {
-  const loadUser = async (userId: string | number): Promise<ProfileUser> => ({ id: Number(userId), name: 'John' })
-
-  it('should resolve the loaded user through Gate.resolveUser when no auth context is attached', async () => {
+  // The documented mounting order: the middleware goes on before boot(), and
+  // AuthServiceProvider then attaches its own context behind it.
+  it('should resolve the loaded user when the middleware is mounted before boot', async () => {
     const store = new MemoryApiTokenStore()
-    const gate = new Gate().define('read-profile', (user) => (user as ProfileUser | null)?.id === 1)
+    const app = new Application({ auth: {} })
+    app.use('/api/*', createBearerTokenMiddleware({ store, loadUser }))
+    await app.boot()
+    app.hono.get('/api/me', profileHandler())
+
+    const res = await app.fetch(
+      new Request('http://example.com/api/me', { headers: { Authorization: await bearerFor(store) } }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ id: 1, viaContext: { id: 1, name: 'John' } })
+  })
+
+  it('should resolve the loaded user when the middleware is mounted after boot', async () => {
+    const store = new MemoryApiTokenStore()
+    const app = new Application({ auth: {} })
+    await app.boot()
+    app.hono.use('/api/*', createBearerTokenMiddleware({ store, loadUser }))
+    app.hono.get('/api/me', profileHandler())
+
+    const res = await app.fetch(
+      new Request('http://example.com/api/me', { headers: { Authorization: await bearerFor(store) } }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ id: 1, viaContext: { id: 1, name: 'John' } })
+  })
+
+  it('should resolve the loaded user in an app configured without auth options', async () => {
+    const store = new MemoryApiTokenStore()
+    const app = new Application()
+    app.use('/api/*', createBearerTokenMiddleware({ store, loadUser }))
+    await app.boot()
+    app.hono.get('/api/me', profileHandler())
+
+    const res = await app.fetch(
+      new Request('http://example.com/api/me', { headers: { Authorization: await bearerFor(store) } }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ id: 1, viaContext: { id: 1, name: 'John' } })
+  })
+
+  it('should resolve the loaded user on a plain Hono app with no auth context', async () => {
+    const store = new MemoryApiTokenStore()
     const app = new Hono()
     app.use('*', createBearerTokenMiddleware({ store, loadUser }))
-    profileRoute(app, gate)
+    app.get('/me', profileHandler())
 
     const res = await app.request('/me', { headers: { Authorization: await bearerFor(store) } })
 
@@ -56,24 +132,31 @@ describe('createBearerTokenMiddleware with the Gate', () => {
     expect(await res.json()).toEqual({ id: 1, viaContext: { id: 1, name: 'John' } })
   })
 
-  it('should let the bearer user win over an attached context that has no session user', async () => {
+  it('should revoke the presented token on logout', async () => {
     const store = new MemoryApiTokenStore()
-    const gate = new Gate().define('read-profile', (user) => (user as ProfileUser | null)?.id === 1)
     const app = new Hono()
-    app.use('*', attachAuthContext(() => sessionlessContext()))
     app.use('*', createBearerTokenMiddleware({ store, loadUser }))
-    profileRoute(app, gate)
+    app.post('/logout', async (c) => {
+      await getAuthContext(c)!.logout()
+      return c.json({ tokenAfter: getApiToken(c) ?? null })
+    })
 
-    const res = await app.request('/me', { headers: { Authorization: await bearerFor(store) } })
+    const { plainTextToken } = await createApiToken(store, { name: 'cli', userId: 1 })
+    const res = await app.request('/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${plainTextToken}` },
+    })
 
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ id: 1, viaContext: { id: 1, name: 'John' } })
+    expect(await res.json()).toEqual({ tokenAfter: null })
+    expect(await verifyApiToken(plainTextToken, store)).toBeNull()
   })
 
-  it('should report an unresolvable user as unauthenticated rather than falling back', async () => {
+  // The token verified, so the request is bearer-authenticated and the session
+  // user does not stand in for the user the token names.
+  it('should report a verified token whose user does not load as unauthenticated', async () => {
     const store = new MemoryApiTokenStore()
     const app = new Hono()
-    app.use('*', attachAuthContext(() => sessionlessContext()))
+    app.use('*', attachAuthContext(sessionUserContext))
     app.use('*', createBearerTokenMiddleware({ store, loadUser: async () => null }))
     app.get('/me', async (c) => {
       const auth = getAuthContext(c)!
@@ -83,5 +166,79 @@ describe('createBearerTokenMiddleware with the Gate', () => {
     const res = await app.request('/me', { headers: { Authorization: await bearerFor(store) } })
 
     expect(await res.json()).toEqual({ check: false, user: null, id: null })
+  })
+
+  it('should leave the session user alone on a request the middleware never ran for', async () => {
+    const store = new MemoryApiTokenStore()
+    const app = new Hono()
+    app.use('*', attachAuthContext(sessionUserContext))
+    app.use('/api/*', createBearerTokenMiddleware({ store, loadUser: async () => null }))
+    app.get('/me', async (c) => c.json({ user: await getAuthContext(c)!.user() }))
+
+    const res = await app.request('/me')
+
+    expect(await res.json()).toEqual({ user: SESSION_USER })
+  })
+
+  it('should sanitize the loaded user through the provider useTokens configured', async () => {
+    const store = new MemoryApiTokenStore()
+    const provider = {
+      retrieveById: async () => null,
+      retrieveByCredentials: async () => null,
+      validateCredentials: async () => false,
+      getId: (user: unknown) => (user as ProfileUser).id,
+      sanitize: (user: unknown) => {
+        const { password: _password, ...rest } = user as ProfileUser & { password: string }
+        return rest
+      },
+    } as unknown as UserProvider<unknown>
+
+    const auth = new AuthManager()
+    auth.registerProvider('users', () => provider)
+    auth.registerGuard('web', () => guardFor(null))
+    auth.setDefaultGuard('web')
+    auth.useTokens(store, { provider: 'users' })
+
+    const app = new Hono()
+    app.use('*', attachAuthContext((ctx) => auth.createAuthContext(ctx)))
+    app.use('*', createBearerTokenMiddleware({
+      store,
+      loadUser: async (userId) => ({ id: Number(userId), name: 'John', password: 'hash' }),
+    }))
+    app.get('/me', async (c) => c.json({ user: await getAuthContext(c)!.user() }))
+
+    const res = await app.request('/me', { headers: { Authorization: await bearerFor(store) } })
+
+    expect(await res.json()).toEqual({ user: { id: 1, name: 'John' } })
+  })
+
+  // RFC 0017 §2: a header must not win over an identity the pipeline itself
+  // established, and the slot is written from a header.
+  it('should let an installed agent principal outrank the bearer token', async () => {
+    const store = new MemoryApiTokenStore()
+    const app = new Application()
+    app.use('/api/*', createBearerTokenMiddleware({ store, loadUser }))
+    await app.boot()
+    app.hono.get('/api/me', async (c) => c.json({ user: await getAuthContext(c)!.user() }))
+
+    const request = installAgentPrincipal(new Request('http://example.com/api/me', {
+      headers: { Authorization: await bearerFor(store) },
+    }), { principal: { kind: 'service', id: 'agent:triager:1' }, abilities: ['tools:*'] })
+    const res = await app.fetch(request)
+
+    expect(await res.json()).toEqual({ user: { id: 'agent:triager:1' } })
+  })
+
+  it('should not throw when the attached context implements only part of AuthContext', async () => {
+    const store = new MemoryApiTokenStore()
+    const app = new Hono()
+    const partial = { check: async () => false, user: async () => null } as unknown as AuthContext
+    app.use('*', attachAuthContext(() => partial))
+    app.use('*', createBearerTokenMiddleware({ store, loadUser }))
+    app.get('/me', async (c) => c.json({ user: await getAuthContext(c)!.user() }))
+
+    const res = await app.request('/me', { headers: { Authorization: await bearerFor(store) } })
+
+    expect(res.status).toBe(200)
   })
 })
