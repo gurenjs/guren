@@ -73,14 +73,6 @@ export default defineConfig({
         find: /^bun:sqlite$/,
         replacement: resolveFromRoot('./tests/support/bun-sqlite.ts'),
       },
-      {
-        find: /^guren$/,
-        replacement: resolveFromRoot('../../packages/core/src/index.ts'),
-      },
-      {
-        find: /^guren\/(.+)$/,
-        replacement: `${resolveFromRoot('../../packages/core/src')}/$1`,
-      },
     ],
   },
   test: {

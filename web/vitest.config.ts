@@ -21,8 +21,6 @@ export default defineConfig({
       { find: /^@guren\/orm$/, replacement: resolveFromRoot('../packages/orm/src/index.ts') },
       { find: /^@guren\/orm\/(.+)$/, replacement: resolveFromRoot('../packages/orm/src') + '/$1' },
       { find: /^@guren\/plugin-cloudflare$/, replacement: resolveFromRoot('../packages/plugin-cloudflare/src/index.ts') },
-      { find: /^guren$/, replacement: resolveFromRoot('../packages/core/src/index.ts') },
-      { find: /^guren\/(.+)$/, replacement: resolveFromRoot('../packages/core/src') + '/$1' },
     ],
   },
   test: {
