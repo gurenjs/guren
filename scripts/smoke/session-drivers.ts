@@ -6,9 +6,11 @@
  * store declares has to fail the boot with the message that says so.
  */
 import { Database } from 'bun:sqlite'
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import process from 'node:process'
+
+import { inheritedEnv } from './inherited-env'
 
 /** The scaffold's cookie name (`DEFAULT_COOKIE_NAME`) and the CSRF cookie the middleware issues. */
 const SESSION_COOKIE = 'guren.session'
@@ -166,7 +168,7 @@ function startApp(options: SessionDriverProbeOptions, driver: string, port: numb
     stdout: 'pipe',
     stderr: 'pipe',
     env: {
-      ...process.env,
+      ...inheritedEnv(),
       ...options.env,
       SESSION_DRIVER: driver,
       PORT: String(port),
@@ -430,6 +432,12 @@ export async function assertSessionDrivers(options: SessionDriverProbeOptions): 
   // without this migration the `database` driver has no table to write to.
   await run(['bun', cliBin, 'db:migrate'], appDir, { ...env, ...DEVELOPMENT_ENV })
   const databaseFile = await developmentDatabaseFile(appDir)
+  assert(
+    existsSync(databaseFile),
+    `db:migrate left no database at ${databaseFile}, so the scaffold generated no migration to apply `
+      + '(look above for "Could not generate the ... migration automatically"). drizzle-kit reads '
+      + 'DATABASE_URL from the environment before the app\'s .env, so check what the smoke passes it.',
+  )
 
   const refusal = await assertBootRefused(
     options,
