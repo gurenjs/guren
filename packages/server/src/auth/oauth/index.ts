@@ -198,12 +198,11 @@ function warnOnceAboutUnboundState(): void {
 }
 
 /**
- * The flow was bound at authorize time but the state came back without one,
- * so the configured `OAuthStateStore` is not persisting `binding`. The
- * callback is rejected; this names the cause, since "Invalid or expired OAuth
- * state" alone reads as a user problem. Printed per occurrence: each rejected
- * login is one a store author has to be able to trace, and reaching this
- * branch costs a caller a state the store has already consumed.
+ * The state came back without the binding the flow was created with, so the
+ * configured `OAuthStateStore` is not persisting `binding`. This names the
+ * cause, since "Invalid or expired OAuth state" reads as a user problem.
+ * Printed per rejected login, each of which a store author has to trace;
+ * reaching the branch costs a caller a state the store already consumed.
  */
 function warnAboutDroppedBinding(): void {
   console.warn(

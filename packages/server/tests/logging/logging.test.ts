@@ -690,6 +690,10 @@ describe('createLogManager', () => {
 
 describe('Global log manager', () => {
   it('throws when not initialized', () => {
+    // The global is per process and every test file shares it, so this clears
+    // it rather than assuming no other file booted a LogServiceProvider.
+    setLogManager(undefined as unknown as LogManager)
+
     expect(() => getLogManager()).toThrow(
       'Log manager has not been initialized. Call setLogManager() first.'
     )
