@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { PasswordHasher } from './password/PasswordHasher'
-import { DefaultHasher } from './password/DefaultHasher'
+import { resolveModelHasher } from './password/configured-hasher'
 
 /**
  * Marks a payload whose password value is already hashed, out of band because
@@ -64,7 +64,7 @@ export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainOb
   static configuredPasswordHasher: PasswordHasher | null = null
 
   protected static resolvePasswordHasher(): PasswordHasher {
-    return this.passwordHasher ?? this.configuredPasswordHasher ?? new DefaultHasher()
+    return resolveModelHasher(this)
   }
 
   /**

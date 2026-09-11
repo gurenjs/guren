@@ -23,7 +23,9 @@ import type {
   UserProvider,
 } from './types'
 
-const DEFAULT_GUARD = 'web'
+/** The guard and provider names an app gets without naming either: `createApp()` registers them, `useModel()` fills them. */
+export const DEFAULT_GUARD = 'web'
+export const DEFAULT_PROVIDER = 'users'
 
 /**
  * The guard name an unqualified lookup resolves to on a request the pipeline
@@ -211,24 +213,23 @@ export class AuthManager implements AuthManagerContract {
   useModel(
     model: typeof Model<PlainObject>,
     options: Partial<ModelUserProviderOptions> = {},
-    providerName = 'users',
-    guardName = 'web',
+    providerName = DEFAULT_PROVIDER,
+    guardName = DEFAULT_GUARD,
   ): void {
-    // Credential columns are not defaulted here: ModelUserProvider reads
-    // them from the model contract (resolvePasswordHashField /
-    // resolveRememberTokenField) so a renamed column needs no repeating.
+    // Credential columns are not defaulted here: ModelUserProvider reads them
+    // from the model contract, so a renamed column needs no repeating.
+    // The hasher is resolved once and assigned after the spread: `{ hasher:
+    // undefined }` must not erase it, and a provider on one hasher while the
+    // model class carries another is the disagreement useModel exists to prevent.
+    const hasher = options.hasher ?? this.hasher()
     const defaultOptions: ModelUserProviderOptions = {
       usernameColumn: 'email',
       credentialsPasswordField: 'password',
       ...options,
-      // After the spread: `{ hasher: undefined }` from a caller spreading its
-      // own options must not erase the app's hasher.
-      hasher: options.hasher ?? this.hasher(),
+      hasher,
     }
 
-    // The model reaches the app's hasher through this assignment, not through a
-    // container read per hash. A model declaring `static passwordHasher` keeps it.
-    bindPasswordHasher(model, this.hasher())
+    bindPasswordHasher(model, hasher)
 
     this.registerProvider(providerName, () => new ModelUserProvider(model, defaultOptions))
 

@@ -1,4 +1,5 @@
 import { DefaultHasher, type PasswordHashAlgorithm } from './DefaultHasher'
+import { capabilityOf } from '../model-capability'
 import type { PasswordHasher } from './PasswordHasher'
 
 /**
@@ -8,9 +9,20 @@ import type { PasswordHasher } from './PasswordHasher'
 export type PasswordHasherOption = PasswordHashAlgorithm | PasswordHasher
 
 export function createPasswordHasher(option: PasswordHasherOption | undefined): PasswordHasher {
-  if (option === undefined || option === 'scrypt') return new DefaultHasher()
-  if (option === 'argon2') return new DefaultHasher({ algorithm: 'argon2' })
-  return option
+  if (option === undefined) return defaultPasswordHasher()
+  return typeof option === 'string' ? new DefaultHasher({ algorithm: option }) : option
+}
+
+let sharedDefaultHasher: PasswordHasher | null = null
+
+/**
+ * The scrypt default, constructed once. `DefaultHasher` holds no per-instance
+ * state (the testing cost is read per call), and each one allocates three
+ * hashers, which an unbound model write would otherwise pay per row.
+ */
+function defaultPasswordHasher(): PasswordHasher {
+  sharedDefaultHasher ??= new DefaultHasher()
+  return sharedDefaultHasher
 }
 
 interface PasswordHasherSlot {
@@ -18,14 +30,8 @@ interface PasswordHasherSlot {
   configuredPasswordHasher: PasswordHasher | null
 }
 
-/**
- * Duck-typed for the same reason `ModelUserProvider` duck-types its credential
- * columns: two copies of @guren/server coexist through workspace symlinks, and
- * a nominal check would silently skip the assignment.
- */
 function passwordHasherSlot(model: unknown): PasswordHasherSlot | null {
-  const candidate = model as Partial<PasswordHasherSlot>
-  return typeof candidate?.explicitPasswordHasher === 'function' ? (candidate as PasswordHasherSlot) : null
+  return capabilityOf<PasswordHasherSlot>(model, 'explicitPasswordHasher')
 }
 
 /**
@@ -40,12 +46,14 @@ export function bindPasswordHasher(model: unknown, hasher: PasswordHasher): void
   slot.configuredPasswordHasher = hasher
 }
 
-/** The model author's own `static passwordHasher`, which outranks anything an app configures. */
-export function declaredPasswordHasher(model: unknown): PasswordHasher | null {
-  return passwordHasherSlot(model)?.explicitPasswordHasher() ?? null
-}
-
-/** What {@link bindPasswordHasher} left on the class, for a provider built without one. */
-export function boundPasswordHasher(model: unknown): PasswordHasher | null {
-  return passwordHasherSlot(model)?.configuredPasswordHasher ?? null
+/**
+ * The one hasher precedence, read by the model class and by its provider: the
+ * author's `static passwordHasher`, then the caller's override, then what
+ * `useModel()` bound, then scrypt. A second spelling of this order is how a
+ * model and its provider come to write at different parameters, and every
+ * login then asks for a rehash the previous one already made.
+ */
+export function resolveModelHasher(model: unknown, override?: PasswordHasher): PasswordHasher {
+  const slot = passwordHasherSlot(model)
+  return slot?.explicitPasswordHasher() ?? override ?? slot?.configuredPasswordHasher ?? defaultPasswordHasher()
 }

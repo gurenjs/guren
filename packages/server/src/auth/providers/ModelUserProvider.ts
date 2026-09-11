@@ -1,8 +1,8 @@
 import type { Model, PlainObject } from '@guren/orm'
 import type { PasswordHasher } from '../password/PasswordHasher'
-import { boundPasswordHasher, declaredPasswordHasher } from '../password/configured-hasher'
-import { DefaultHasher } from '../password/DefaultHasher'
+import { resolveModelHasher } from '../password/configured-hasher'
 import { looksLikePasswordHash } from '../password/hash-format'
+import { capabilityOf } from '../model-capability'
 import type { AuthCredentials, Authenticatable } from '../types'
 import { BaseUserProvider } from './UserProvider'
 
@@ -15,25 +15,12 @@ interface PasswordHashWriter {
   storePasswordHash(where: PlainObject, column: string, hash: string): Promise<void>
 }
 
-/** Same duck-typing reason as `credentialColumnSource`. */
 function passwordHashWriter(model: typeof Model): PasswordHashWriter | null {
-  const candidate = model as Partial<PasswordHashWriter>
-  return typeof candidate.storePasswordHash === 'function' ? (candidate as PasswordHashWriter) : null
+  return capabilityOf<PasswordHashWriter>(model, 'storePasswordHash')
 }
 
-/**
- * Capability check, not `instanceof AuthenticatableModel`: a nominal check
- * silently fails when two copies of @guren/server are loaded (src and dist
- * coexist through workspace symlinks), which would ignore a renamed
- * passwordHashField without any signal. Same duck-typing idiom as
- * BaseUserProvider's remember-token support.
- */
 function credentialColumnSource(model: typeof Model): CredentialColumnSource | null {
-  const candidate = model as Partial<CredentialColumnSource>
-  return typeof candidate.resolvePasswordHashField === 'function' &&
-    typeof candidate.resolveRememberTokenField === 'function'
-    ? (candidate as CredentialColumnSource)
-    : null
+  return capabilityOf<CredentialColumnSource>(model, 'resolvePasswordHashField', 'resolveRememberTokenField')
 }
 
 export interface ModelUserProviderOptions {
@@ -64,10 +51,7 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     this.usernameColumn = options.usernameColumn ?? 'email'
     this.passwordColumn = options.passwordColumn ?? authModel?.resolvePasswordHashField() ?? 'passwordHash'
     this.rememberTokenColumn = options.rememberTokenColumn ?? authModel?.resolveRememberTokenField() ?? 'rememberToken'
-    // One hasher per model. A `static passwordHasher` the model's author pinned
-    // outranks the app's: rewriting its rows at the app default on every login
-    // is what `needsRehash()` would otherwise ask for, forever.
-    this.hasher = declaredPasswordHasher(model) ?? options.hasher ?? boundPasswordHasher(model) ?? new DefaultHasher()
+    this.hasher = resolveModelHasher(model, options.hasher)
     this.credentialsPasswordField = options.credentialsPasswordField ?? 'password'
   }
 
