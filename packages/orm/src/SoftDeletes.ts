@@ -1,5 +1,6 @@
 import type { Model, ModelQueryOptions, ModelWriteOptions, PlainObject } from './Model'
-import { PREPARED_UPDATE, type QueryBuilder } from './QueryBuilder'
+import { PREPARED_UPDATE } from './internal-keys'
+import type { QueryBuilder } from './QueryBuilder'
 
 /** The static methods the SoftDeletes mixin adds. */
 export interface SoftDeletesStatic {

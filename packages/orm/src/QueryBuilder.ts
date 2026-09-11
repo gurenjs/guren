@@ -1,3 +1,4 @@
+import { PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
 import { DEFAULT_PAGINATION_SIZE } from './Model'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { groupConditionSequence } from './where-conditions'
@@ -14,18 +15,6 @@ import type {
 } from './Model'
 
 type FieldKey<TRecord extends PlainObject> = keyof TRecord & string
-
-/**
- * Key for the prepared-payload update terminal. Exported for `Model` across
- * the module boundary, but kept out of the package entry point.
- */
-export const PREPARED_UPDATE = Symbol('guren.orm.preparedUpdate')
-
-/**
- * Key for the global-scope seal. Exported for `Model` across the module
- * boundary, but kept out of the package entry point.
- */
-export const SEAL_SCOPES = Symbol('guren.orm.sealScopes')
 
 export type WhereOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'not in' | 'is null' | 'is not null'
 
@@ -59,6 +48,17 @@ export interface QueryBuilderOptions {
   offsetValue?: number
   selectFields?: readonly string[]
   trx?: unknown
+}
+
+/**
+ * What one execution narrows, without writing it onto the builder: a `first()`
+ * or a `paginate()` that mutated `options` would leave the builder describing
+ * its own last page.
+ */
+interface QueryOverrides {
+  limit?: number
+  offset?: number
+  select?: readonly string[]
 }
 
 /**
@@ -216,6 +216,11 @@ export class QueryBuilder<
     return this
   }
 
+  /**
+   * Narrows the row to these columns. The model's accessors are then skipped:
+   * one reading a column `fields` left out would fabricate a value from
+   * `undefined`. Casts still apply to the columns that are there.
+   */
   select<TKey extends FieldKey<TRecord>>(...fields: readonly TKey[]): QueryBuilder<TRecord, Pick<TRecord, TKey>> {
     this.options.selectFields = [...fields]
     return this as unknown as QueryBuilder<TRecord, Pick<TRecord, TKey>>
@@ -236,7 +241,7 @@ export class QueryBuilder<
    * callbacks, each run after the foreign-key filter on exactly the level its key
    * names. Pitfalls: a top-level `orWhere()` ORs against the foreign-key filter
    * (group it); `select()` must keep the relation's key column or the relation is
-   * empty; `limit()` applies to the one batched query, not per parent record.
+   * empty; `limit()` caps the whole result set, not each parent's share.
    */
   with(...relations: (string | Record<string, EagerLoadConstraint>)[]): this {
     for (const rel of relations) {
@@ -253,22 +258,37 @@ export class QueryBuilder<
   }
 
   async get(): Promise<TResult[]> {
-    const results = await this.executeQuery()
-    return this.loadEagerRelations(results)
+    return this.fetch()
+  }
+
+  /**
+   * Runs the query and hands back the rows as the adapter read them. Symbol-keyed
+   * and never re-exported: a named public method here would be a supported way to
+   * read past a model's casts.
+   */
+  async [RAW_RESULTS](): Promise<TResult[]> {
+    return this.fetchRaw()
+  }
+
+  /** The one read pipeline: rows, then eager loads, then the model's transforms. */
+  private async fetch(overrides?: QueryOverrides): Promise<TResult[]> {
+    const results = await this.fetchRaw(overrides)
+    const projected = (this.options.selectFields?.length ?? 0) > 0
+    return this.modelClass[READ_TRANSFORMS](results, projected)
+  }
+
+  private async fetchRaw(overrides?: QueryOverrides): Promise<TResult[]> {
+    // Eager loads first: a loader matches child rows to their parents on the raw
+    // key values, and a cast on either side would stop the two from matching.
+    return this.loadEagerRelations(await this.executeQuery(overrides))
   }
 
   async first(): Promise<TResult | null> {
     // Same contract as Model.find(): an evaporated filter would hand back an
     // arbitrary row rather than the "no match" the caller asked about.
     if (this.filtersEvaporated()) return null
-    const prev = this.options.limitValue
-    this.options.limitValue = 1
-    try {
-      const results = await this.get()
-      return results[0] ?? null
-    } finally {
-      this.options.limitValue = prev
-    }
+    const results = await this.fetch({ limit: 1 })
+    return results[0] ?? null
   }
 
   /** @throws ModelNotFoundException (404) if no record matches. */
@@ -295,6 +315,29 @@ export class QueryBuilder<
   }
 
   /**
+   * @internal Row count per distinct value of `field`, as one grouped COUNT
+   * where the adapter issues it. Without `countByAdvanced` the rows are loaded
+   * and counted here, narrowed to that one column where the adapter can project
+   * and whole where it cannot.
+   */
+  async countBy(field: FieldKey<TRecord>): Promise<Map<unknown, number>> {
+    const advancedAdapter = this.adapter as ORMAdapterAdvanced
+    const counts = new Map<unknown, number>()
+
+    if (typeof advancedAdapter.countByAdvanced === 'function') {
+      const rows = await advancedAdapter.countByAdvanced(this.table, field, this.effectiveConditions(), { trx: this.options.trx })
+      for (const { key, count } of rows) counts.set(key, count)
+      return counts
+    }
+
+    for (const row of await this.executeQuery({ select: [field] })) {
+      const key = (row as PlainObject)[field]
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return counts
+  }
+
+  /**
    * Takes positional arguments or the same options object as
    * `Model.paginate()`, so the two APIs stay interchangeable.
    */
@@ -314,19 +357,7 @@ export class QueryBuilder<
     const currentPage = Math.min(sanitizedPage, totalPages)
     const offset = (currentPage - 1) * sanitizedPerPage
 
-    const prevLimit = this.options.limitValue
-    const prevOffset = this.options.offsetValue
-    this.options.limitValue = sanitizedPerPage
-    this.options.offsetValue = offset
-
-    // get() is the one path that also attaches `.with()` relations.
-    let data: TResult[]
-    try {
-      data = await this.get()
-    } finally {
-      this.options.limitValue = prevLimit
-      this.options.offsetValue = prevOffset
-    }
+    const data = await this.fetch({ limit: sanitizedPerPage, offset })
 
     const from = total === 0 ? 0 : offset + 1
     const to = total === 0 ? 0 : offset + data.length
@@ -516,15 +547,17 @@ export class QueryBuilder<
     })
   }
 
-  private async executeQuery(): Promise<TResult[]> {
+  private async executeQuery(overrides: QueryOverrides = {}): Promise<TResult[]> {
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
+    const limit = overrides.limit ?? this.options.limitValue
+    const offset = overrides.offset ?? this.options.offsetValue
 
     if (typeof advancedAdapter.findManyAdvanced === 'function') {
       return advancedAdapter.findManyAdvanced<TResult>(this.table, this.effectiveConditions(), {
         orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
-        limit: this.options.limitValue,
-        offset: this.options.offsetValue,
-        select: this.options.selectFields,
+        limit,
+        offset,
+        select: overrides.select ?? this.options.selectFields,
       }, { trx: this.options.trx })
     }
 
@@ -541,8 +574,8 @@ export class QueryBuilder<
     return this.adapter.findMany<TResult>(this.table, {
       where: (simpleWhere ?? undefined) as FindManyOptions<TResult>['where'],
       orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
-      limit: this.options.limitValue,
-      offset: this.options.offsetValue,
+      limit,
+      offset,
     }, { trx: this.options.trx })
   }
 
@@ -625,6 +658,19 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
     conditions: WhereCondition[],
     queryOptions?: AdapterQueryOptions,
   ): Promise<number>
+  /**
+   * Keys the adapter admits in one IN list, from the bound-variable limit the
+   * driver it holds sets. Without it, the ORM uses the figure every dialect it
+   * supports admits.
+   */
+  maxInListSize?(): number
+  /** `SELECT field, COUNT(*) ... GROUP BY field` under `conditions`. */
+  countByAdvanced?(
+    table: unknown,
+    field: string,
+    conditions: WhereCondition[],
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<Array<{ key: unknown; count: number }>>
   updateAdvanced?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],

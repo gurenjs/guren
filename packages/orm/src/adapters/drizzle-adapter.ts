@@ -1,5 +1,7 @@
 import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
+import type { AsyncLocalStorage } from 'node:async_hooks'
+import { DEFAULT_IN_LIST_SIZE } from '../internal-keys'
 import type { AdapterQueryOptions, FindManyOptions, OrderByClause, PlainObject, WhereClause } from '../Model'
 import type { ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
 import { buildDrizzleConditions } from './drizzle-conditions'
@@ -9,6 +11,7 @@ type DrizzleLikeSelect = {
   orderBy?: (...clauses: unknown[]) => DrizzleLikeSelect
   limit?: (value: number) => DrizzleLikeSelect
   offset?: (value: number) => DrizzleLikeSelect
+  groupBy?: (...columns: unknown[]) => DrizzleLikeSelect
   all?: () => Promise<unknown[]>
   get?: () => Promise<unknown>
 }
@@ -46,14 +49,51 @@ type DrizzleDatabase = {
 }
 
 let database: DrizzleDatabase | undefined
-// Memo for the configured `database` only; `configure()` clears it. Module state
-// outlives a test file, and `bun test packages/orm` runs them in one process.
+// Memos for the configured `database` only; `configure()` clears them. Module
+// state outlives a test file, and `bun test packages/orm` runs them in one process.
 let transactionAwaitsCallback: boolean | undefined
+let inListSize: number | undefined
 // Only for a database whose own transaction() does not await: one connection
 // takes one transaction, so this serializes the ones this adapter drives.
 let transactionQueue: Promise<unknown> = Promise.resolve()
 // Outlives configure(): a new storage would lose the context of an open transaction.
-let transactionScope: Promise<TransactionScope> | undefined
+let transactionStore: Promise<TransactionStore> | undefined
+// The same storage once loaded, for the synchronous executor lookup: a callback
+// only runs after transaction() awaited the load, so it is set whenever it matters.
+let loadedStore: TransactionStore | undefined
+// Savepoint names are generated, never taken from a caller.
+let savepointSequence = 0
+
+// Under the 65535 parameters Postgres and MySQL take per statement.
+const POOLED_IN_LIST_SIZE = 5000
+
+/**
+ * Read from how the dialect escapes a parameter and a name, since this adapter
+ * takes any drizzle-shaped handle and a driver list would name one it has never
+ * heard of. A shape it cannot place keeps the conservative figure.
+ */
+function dialectInListSize(db: DrizzleDatabase): number {
+  const dialect = (db as { dialect?: { escapeParam?(index: number): string; escapeName?(name: string): string } }).dialect
+  try {
+    if (dialect?.escapeParam?.(0) === '$1') return POOLED_IN_LIST_SIZE
+    if (dialect?.escapeName?.('x') === '`x`') return POOLED_IN_LIST_SIZE
+  } catch {
+    /* empty */
+  }
+  return DEFAULT_IN_LIST_SIZE
+}
+
+function withConditions(query: DrizzleLikeSelect, table: unknown, conditions: WhereCondition[]): DrizzleLikeSelect {
+  if (typeof query.where !== 'function') return query
+  const clause = buildDrizzleConditions(table, conditions)
+  return clause ? (query.where(clause) as DrizzleLikeSelect) : query
+}
+
+/** Drivers report a count as a number, a bigint or a decimal string. */
+function toCount(value: unknown): number {
+  const total = Number(value ?? 0)
+  return Number.isNaN(total) ? 0 : total
+}
 
 function ensureDatabase(): DrizzleDatabase {
   if (!database) {
@@ -63,9 +103,21 @@ function ensureDatabase(): DrizzleDatabase {
   return database
 }
 
+/**
+ * An explicit `trx` wins; without one, a call made inside a `transaction()`
+ * callback runs on that transaction. Off the pool, on a driver whose pool is
+ * `max: 1`, it would wait on the connection the open transaction holds. A
+ * settled ambient is ignored: a continuation nobody awaited outlives the
+ * transaction it was started in, and its handle is finalised by then.
+ */
 function resolveExecutor(options?: AdapterQueryOptions): DrizzleDatabase {
   if (options?.trx && typeof options.trx === 'object') {
     return options.trx as DrizzleDatabase
+  }
+
+  const ambient = loadedStore?.getStore()
+  if (ambient && !ambient.settled && typeof ambient.handle === 'object' && ambient.handle !== null) {
+    return ambient.handle as DrizzleDatabase
   }
 
   return ensureDatabase()
@@ -223,36 +275,140 @@ async function awaitsItsCallback(db: DrizzleDatabase): Promise<boolean> {
   return transactionAwaitsCallback
 }
 
-interface TransactionScope {
-  /** Runs `fn` in a context every transaction started under it can be recognised by. */
-  run<TResult>(fn: () => TResult): TResult
-  isInside(): boolean
+/**
+ * The open transaction, as the async context carries it. `settled` is what tells
+ * a live handle from one whose transaction has already committed or rolled back;
+ * `nest` opens a scope inside it, a savepoint wherever the driver has one.
+ */
+interface AmbientTransaction {
+  handle: unknown
+  settled: boolean
+  nest<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult>
+}
+
+type TransactionStore = AsyncLocalStorage<AmbientTransaction>
+
+/**
+ * Imported on demand so `node:async_hooks` stays off the module graph until a
+ * transaction is opened (Workers needs `nodejs_compat` for it, as for
+ * `node:crypto`). The promise is what is memoized, not the storage: two
+ * concurrent first callers must not end up asking different instances.
+ */
+function loadTransactionStore(): Promise<TransactionStore> {
+  transactionStore ??= import('node:async_hooks').then(({ AsyncLocalStorage }) => {
+    loadedStore = new AsyncLocalStorage<AmbientTransaction>()
+    return loadedStore
+  })
+
+  return transactionStore
+}
+
+type OpenTransaction = NonNullable<DrizzleDatabase['transaction']>
+type RunStatement = NonNullable<DrizzleDatabase['run']>
+
+/**
+ * Opened on the root database for a top-level call and on the open
+ * transaction's own handle for a nested one, which is what makes drizzle emit
+ * SAVEPOINT for the second. `settled` is set once the transaction itself has
+ * finished, not once its callback has.
+ */
+async function runDriverTransaction<TResult>(
+  open: OpenTransaction,
+  store: TransactionStore,
+  callback: (trx: unknown) => Promise<TResult>,
+): Promise<TResult> {
+  let entry: AmbientTransaction | undefined
+  try {
+    return await open((trx) => {
+      entry = driverEntry(trx, store)
+      return store.run(entry, () => callback(trx))
+    })
+  } finally {
+    if (entry) entry.settled = true
+  }
+}
+
+function driverEntry(handle: unknown, store: TransactionStore): AmbientTransaction {
+  const open = (handle as DrizzleDatabase).transaction
+  return {
+    handle,
+    settled: false,
+    nest: (callback) =>
+      typeof open === 'function'
+        ? runDriverTransaction(open.bind(handle as DrizzleDatabase), store, callback)
+        : callback(handle),
+  }
+}
+
+function manualEntry(db: DrizzleDatabase, run: RunStatement, store: TransactionStore): AmbientTransaction {
+  return { handle: db, settled: false, nest: (callback) => runSavepoint(db, run, store, callback) }
 }
 
 /**
- * Imported on demand so `node:async_hooks` stays off the module graph of a
- * Workers or Lambda bundle, whose drivers all await their callback and never
- * reach this branch. The promise is what is memoized, not the storage: two
- * concurrent first callers must not end up asking different instances.
+ * The savepoint the manual BEGIN/COMMIT path drives itself: this driver's own
+ * `transaction()` commits before awaiting, so a nested call cannot go through
+ * it. Savepoints do not pass through `transactionQueue`, so nested
+ * transactions have to be awaited one at a time — two released out of order
+ * discard each other's frames.
  */
-function loadTransactionScope(): Promise<TransactionScope> {
-  transactionScope ??= import('node:async_hooks').then(({ AsyncLocalStorage }) => {
-    const store = new AsyncLocalStorage<true>()
-    return { run: (fn) => store.run(true, fn), isInside: () => store.getStore() === true }
-  })
+async function runSavepoint<TResult>(
+  db: DrizzleDatabase,
+  run: RunStatement,
+  store: TransactionStore,
+  callback: (trx: unknown) => Promise<TResult>,
+): Promise<TResult> {
+  const name = `guren_sp_${(savepointSequence += 1)}`
+  // Outside enterTransaction: a SAVEPOINT that failed opened nothing to unwind.
+  await run(sql.raw(`savepoint ${name}`))
 
-  return transactionScope
+  return enterTransaction(db, run, store, callback, {
+    commit: [`release savepoint ${name}`],
+    rollback: [`rollback to savepoint ${name}`, `release savepoint ${name}`],
+  })
+}
+
+/**
+ * The lifecycle both hand-driven paths share, from the statement that opened the
+ * transaction to the one that settles it. The entry is entered synchronously,
+ * which is what puts every await inside the callback — and so any transaction it
+ * starts — in this transaction's async context.
+ */
+async function enterTransaction<TResult>(
+  db: DrizzleDatabase,
+  run: RunStatement,
+  store: TransactionStore,
+  callback: (trx: unknown) => Promise<TResult>,
+  settle: { commit: readonly string[]; rollback: readonly string[] },
+): Promise<TResult> {
+  const entry = manualEntry(db, run, store)
+  try {
+    const result = await store.run(entry, () => callback(db))
+    for (const statement of settle.commit) await run(sql.raw(statement))
+    return result
+  } catch (error) {
+    // Reached by a refused COMMIT too, which leaves the transaction open. The
+    // caller's error is what they have to see, so a failing ROLLBACK must not
+    // replace it.
+    try {
+      for (const statement of settle.rollback) await run(sql.raw(statement))
+    } catch {
+      /* empty */
+    }
+    throw error
+  } finally {
+    entry.settled = true
+  }
 }
 
 /**
  * Serializes what `runExclusively` drives, since one connection takes one
- * transaction. Waiting is only safe for a caller that is not already inside one:
- * that caller would be queued behind itself. Async context is what separates the
- * two, and it is the only thing that can — arrival order cannot tell a nested
- * call from an unrelated concurrent one, and refusing both punishes the second.
+ * transaction. Only a caller outside every transaction may wait here: a nested
+ * one would queue behind itself, which is why `transaction()` settles nesting
+ * from the async context before reaching this queue.
  */
 async function runOwnTransaction<TResult>(
   db: DrizzleDatabase,
+  store: TransactionStore,
   callback: (trx: unknown) => Promise<TResult>,
 ): Promise<TResult> {
   if (typeof db.run !== 'function') {
@@ -262,18 +418,9 @@ async function runOwnTransaction<TResult>(
     )
   }
 
-  const scope = await loadTransactionScope()
-  if (scope.isInside()) {
-    throw new Error(
-      'DrizzleAdapter: cannot begin a transaction inside another one. This driver holds a single connection, ' +
-        'which takes one transaction at a time, so the inner transaction would wait on the outer one to ' +
-        'finish and the outer on the inner.',
-    )
-  }
-
   // Bound: these are methods, and a detached one loses the dialect it reads.
   const run = db.run.bind(db)
-  const slot = transactionQueue.then(() => runExclusively(db, run, scope, callback))
+  const slot = transactionQueue.then(() => runExclusively(db, run, store, callback))
   // The queue only orders: a settled slot must neither reject the next one nor,
   // via a value-preserving `.catch`, pin its result until the next transaction.
   transactionQueue = slot.then(NOOP, NOOP)
@@ -288,30 +435,14 @@ async function runOwnTransaction<TResult>(
  */
 async function runExclusively<TResult>(
   db: DrizzleDatabase,
-  run: NonNullable<DrizzleDatabase['run']>,
-  scope: TransactionScope,
+  run: RunStatement,
+  store: TransactionStore,
   callback: (trx: unknown) => Promise<TResult>,
 ): Promise<TResult> {
-  // Outside the try: a BEGIN that failed opened nothing to unwind.
+  // Outside enterTransaction: a BEGIN that failed opened nothing to unwind.
   await run(sql.raw('begin'))
 
-  try {
-    // Entered synchronously, which is what puts every await inside the callback
-    // — and so any transaction it starts — in this transaction's async context.
-    const result = await scope.run(() => callback(db))
-    await run(sql.raw('commit'))
-    return result
-  } catch (error) {
-    // Reached by a refused COMMIT too, which leaves the transaction open. The
-    // caller's error is what they have to see, so a failing ROLLBACK must not
-    // replace it.
-    try {
-      await run(sql.raw('rollback'))
-    } catch {
-      /* empty */
-    }
-    throw error
-  }
+  return enterTransaction(db, run, store, callback, { commit: ['commit'], rollback: ['rollback'] })
 }
 
 export const DrizzleAdapter: ORMAdapterAdvanced & {
@@ -321,11 +452,18 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
   configure(db: DrizzleDatabase) {
     database = db
     transactionAwaitsCallback = undefined
+    inListSize = undefined
     transactionQueue = Promise.resolve()
   },
 
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase {
     return ensureDatabase() as unknown as TDatabase
+  },
+
+  maxInListSize(): number {
+    if (!database) return DEFAULT_IN_LIST_SIZE
+    inListSize ??= dialectInListSize(database)
+    return inListSize
   },
 
   async findMany<TRecord extends PlainObject = PlainObject>(
@@ -379,10 +517,7 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     }
 
     const rows = await resolveList(query)
-    const first = rows[0] as { value?: unknown } | undefined
-    const raw = first?.value ?? 0
-    const total = typeof raw === 'bigint' ? Number(raw) : Number(raw)
-    return Number.isNaN(total) ? 0 : total
+    return toCount((rows[0] as { value?: unknown } | undefined)?.value)
   },
 
   async findUnique<TRecord extends PlainObject = PlainObject>(
@@ -487,12 +622,7 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
       query = db.select().from(table)
     }
 
-    if (typeof query.where === 'function') {
-      const clause = buildDrizzleConditions(table, conditions)
-      if (clause) {
-        query = query.where(clause) as DrizzleLikeSelect
-      }
-    }
+    query = withConditions(query, table, conditions)
 
     if (typeof query.orderBy === 'function') {
       const clauses = resolveOrder(table, options.orderBy)
@@ -520,20 +650,32 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     queryOptions?: AdapterQueryOptions,
   ): Promise<number> {
     const db = resolveExecutor(queryOptions)
-    let query = db.select({ value: count() }).from(table)
+    const query = withConditions(db.select({ value: count() }).from(table), table, conditions)
+    const rows = await resolveList(query)
+    return toCount((rows[0] as { value?: unknown } | undefined)?.value)
+  },
 
-    if (typeof query.where === 'function') {
-      const clause = buildDrizzleConditions(table, conditions)
-      if (clause) {
-        query = query.where(clause) as DrizzleLikeSelect
-      }
+  async countByAdvanced(
+    table: unknown,
+    field: string,
+    conditions: WhereCondition[],
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<Array<{ key: unknown; count: number }>> {
+    const db = resolveExecutor(queryOptions)
+    const column = (table as DrizzleTableLike)[field]
+    if (!column) {
+      throw new Error(`DrizzleAdapter: unknown column "${field}" on provided table.`)
     }
 
-    const rows = await resolveList(query)
-    const first = rows[0] as { value?: unknown } | undefined
-    const raw = first?.value ?? 0
-    const total = typeof raw === 'bigint' ? Number(raw) : Number(raw)
-    return Number.isNaN(total) ? 0 : total
+    let query = withConditions(db.select({ key: column, value: count() }).from(table), table, conditions)
+
+    if (typeof query.groupBy !== 'function') {
+      throw new Error('DrizzleAdapter: configured database does not support groupBy().')
+    }
+    query = query.groupBy(column)
+
+    const rows = (await resolveList(query)) as Array<{ key: unknown; value?: unknown }>
+    return rows.map(({ key, value }) => ({ key, count: toCount(value) }))
   },
 
   async updateAdvanced<TRecord extends PlainObject = PlainObject>(
@@ -574,16 +716,29 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     return result as number | PlainObject | void
   },
 
+  /**
+   * A nested call opens a savepoint inside the transaction already running
+   * rather than a second top-level one: on a `max: 1` pool that second one
+   * would wait on the connection the first holds, and on the single-connection
+   * drivers it would queue behind itself. An inner throw the outer callback
+   * catches therefore discards only the inner writes.
+   */
   async transaction<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult> {
     const db = ensureDatabase()
     if (typeof db.transaction !== 'function') {
       throw new Error('DrizzleAdapter: configured database does not support transactions.')
     }
 
-    if (await awaitsItsCallback(db)) {
-      return db.transaction(callback)
+    const store = await loadTransactionStore()
+    const ambient = store.getStore()
+    if (ambient && !ambient.settled) {
+      return ambient.nest(callback)
     }
 
-    return runOwnTransaction(db, callback)
+    if (await awaitsItsCallback(db)) {
+      return runDriverTransaction(db.transaction.bind(db), store, callback)
+    }
+
+    return runOwnTransaction(db, store, callback)
   },
 }

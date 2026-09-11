@@ -68,9 +68,9 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
     await this.model.where('expiresAt', '<', now).delete()
   }
 
-  // Not replaceable with `static casts`: QueryBuilder reads (`where().first()/.get()`)
-  // bypass model casts, and cast-based writes would fight drizzle column modes
-  // (Date → ISO string breaks timestamp columns; json-stringify double-encodes jsonb).
+  // Not replaceable with `static casts`: cast-based writes would fight drizzle
+  // column modes (Date → ISO string breaks timestamp columns; json-stringify
+  // double-encodes jsonb).
   private deserialize(record: PlainObject): ApiToken {
     const abilities = decodeJsonColumn<unknown>(record.abilities, [])
     return {

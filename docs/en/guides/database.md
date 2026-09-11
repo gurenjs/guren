@@ -232,9 +232,11 @@ await Post.transaction(async (trx) => {
 
 If an error is thrown in the callback, Guren rolls back the transaction.
 
-SQLite holds a single connection, which takes one transaction at a time, so concurrent transactions are queued and run one after another, each committing or rolling back on its own. Awaiting non-database work inside the callback is fine; it only makes the next transaction wait.
+Inside the callback, a model call with no `{ trx }` runs on the open transaction as well. Passing the handle is still correct, and the transaction-bound scope below does it for you. A call that leaves it off also stays inside the transaction instead of going to the pool, where a single-connection pool would make it wait on the transaction that owns the connection.
 
-The one thing it cannot do is nest. A `Model.transaction()` opened inside another one would be queued behind the transaction it is running inside, so it is refused with an error instead. Pooled databases such as PostgreSQL and MySQL are unaffected.
+A `Model.transaction()` opened inside another one runs as a savepoint on the transaction already open, not as a second top-level one. Its writes commit or roll back with the outer transaction, and an inner error the outer callback catches discards only the inner writes. Await each nested transaction before starting the next: savepoints on one connection are released in the order they were taken, so two running at once discard each other's frames.
+
+SQLite holds a single connection, which takes one transaction at a time, so concurrent transactions are queued and run one after another, each committing or rolling back on its own. Awaiting non-database work inside the callback is fine; it only makes the next transaction wait.
 
 You can also use the transaction-bound scope for cleaner type-safe writes:
 
@@ -451,10 +453,14 @@ await User.newQuery()
 > loader cannot match rows back to their parent and the relation loads empty.
 
 > [!NOTE]
-> Relations are loaded with one batched query for all parent records, so
-> `limit()` inside a constraint caps that whole query rather than applying per
-> parent. For `morphTo`, the callback runs once per morph target, so it may only
-> reference columns every target shares.
+> Relations are loaded in batches rather than one query per parent, so `limit()`
+> inside a constraint caps the whole result set, not each parent's share. A
+> constraint carrying `limit()`, `offset()` or `orderBy()` is answered by one
+> query over every key at once; without one, the keys are split into batches the
+> driver's parameter limit admits. For `belongsToMany` and `hasManyThrough` the
+> keys split that way are the related rows', not the parents'. For `morphTo`, the
+> callback runs once per morph target, so it may only reference columns every
+> target shares.
 
 For `belongsToMany` and `hasManyThrough`, the callback constrains the query for
 the **related** model, not the pivot or through-table lookup that finds which

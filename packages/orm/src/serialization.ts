@@ -14,10 +14,13 @@ export function serializeRecord(
   let result = { ...record }
 
   if (options.appends && options.accessors) {
+    // The read path runs every accessor, so an appended key is usually already
+    // on the record. The loop still serves a row `select()` narrowed, where the
+    // accessors were skipped, and a record that never came from a read.
     for (const key of options.appends) {
-      if (options.accessors[key]) {
-        result[key] = options.accessors[key](result)
-      }
+      if (key in result) continue
+      const accessor = options.accessors[key]
+      if (accessor) result[key] = accessor(result)
     }
   }
 

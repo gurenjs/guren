@@ -10,16 +10,35 @@ export type AccessorDefinitions = Record<string, AccessorFn>
 
 export type MutatorDefinitions = Record<string, MutatorFn>
 
+const PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+/**
+ * A computed field is written with `record[key] = …`, and `__proto__` as a key
+ * would rewrite the record's prototype rather than a column. The names come
+ * from a model's static definitions, so refusing them is a boot-time mistake
+ * surfacing at first use, not a runtime input check.
+ */
+function assertWritableKey(key: string, kind: 'accessor' | 'mutator'): void {
+  if (PROTOTYPE_KEYS.has(key)) {
+    throw new Error(`An ${kind} cannot be named "${key}": that key would alter the record's prototype.`)
+  }
+}
+
+/** Writes the computed values onto `record`; each accessor sees the ones before it. */
+export function applyAccessorsInPlace(record: PlainObject, accessors: AccessorDefinitions): void {
+  for (const key of Object.keys(accessors)) {
+    assertWritableKey(key, 'accessor')
+    record[key] = accessors[key](record)
+  }
+}
+
 /** Apply accessors to a record, returning a new record with computed values. */
 export function applyAccessors<T extends PlainObject>(record: T, accessors?: AccessorDefinitions): T {
   if (!accessors) return record
-  const keys = Object.keys(accessors)
-  if (keys.length === 0) return record
+  if (Object.keys(accessors).length === 0) return record
 
   const result = { ...record }
-  for (const key of keys) {
-    result[key as keyof T] = accessors[key](result) as T[keyof T]
-  }
+  applyAccessorsInPlace(result, accessors)
   return result
 }
 
@@ -31,7 +50,8 @@ export function applyMutators(data: PlainObject, mutators?: MutatorDefinitions):
 
   const result = { ...data }
   for (const key of keys) {
-    if (key in result) {
+    assertWritableKey(key, 'mutator')
+    if (Object.hasOwn(result, key)) {
       result[key] = mutators[key](result[key], result)
     }
   }
