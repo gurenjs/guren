@@ -11,6 +11,7 @@ export type {
 export {
   Job,
   setQueueDriver,
+  clearQueueDriver,
   getQueueDriver,
   registerJob,
   getJob,

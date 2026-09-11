@@ -435,7 +435,7 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   const eventProvider = await readFile(join(appDir, 'app/Providers/EventProvider.ts'), 'utf8')
   assert(eventProvider.includes("from '@guren/core'"), 'Events blueprint must import from @guren/core.')
   assert(eventProvider.includes("this.container.make<EventManager>('events')"), 'Events blueprint must resolve the event manager from the container.')
-  assert(eventProvider.includes('events.on(OrderPlaced'), 'Events blueprint must register listeners through the event manager.')
+  assert(eventProvider.includes('events.listen(SendOrderReceiptListener)'), 'Events blueprint must register listeners through the event manager.')
   assert(!eventProvider.includes('@guren/server'), 'Events blueprint must not import from @guren/server.')
 
   const mailProvider = await readFile(join(appDir, 'app/Providers/MailProvider.ts'), 'utf8')

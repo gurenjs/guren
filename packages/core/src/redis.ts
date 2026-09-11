@@ -8,6 +8,7 @@ export {
   RedisPasswordResetStore,
   RedisEmailVerificationStore,
   RedisOAuthStateStore,
+  RedisSchedulerLock,
 } from '@guren/server/redis'
 export type {
   RedisClientOptions,
@@ -18,4 +19,5 @@ export type {
   RedisPasswordResetStoreOptions,
   RedisEmailVerificationStoreOptions,
   RedisOAuthStateStoreOptions,
+  RedisSchedulerLockOptions,
 } from '@guren/server/redis'

@@ -4,7 +4,12 @@ import { isDue, isDueInTimezone } from './CronParser'
 export class ScheduledTask {
   private readonly definition: TaskDefinition
   private lastRun: Date | null = null
-  private isRunning = false
+  /**
+   * The invocation holding the overlap guard; null when idle. The token is an
+   * object rather than `startedAt`: two runs handed the same fixed clock share
+   * a millisecond, and the later one would then release the earlier one's guard.
+   */
+  private running: { token: object; startedAt: number } | null = null
 
   constructor(definition: TaskDefinition) {
     this.definition = definition
@@ -47,25 +52,38 @@ export class ScheduledTask {
     return true
   }
 
-  async run(): Promise<void> {
-    // Check overlapping first (synchronously) to prevent race conditions
-    if (this.definition.withoutOverlapping) {
-      if (this.isRunning) {
-        return
-      }
-      this.isRunning = true
+  /** `now` is the instant the overlap guard is judged against; a fixed clock can be handed in. */
+  async run(now: Date = new Date()): Promise<void> {
+    await this.tryRun(now)
+  }
+
+  /** {@link run}, resolving false when the overlap guard or `when`/`skip` declined. */
+  async tryRun(now: Date = new Date()): Promise<boolean> {
+    // Judged before the first await, so two runs started in one tick cannot both pass.
+    if (this.isOverlapBlockedAt(now)) {
+      return false
     }
 
-    if (!(await this.shouldRun())) {
-      if (this.definition.withoutOverlapping) {
-        this.isRunning = false
-      }
-      return
+    // Only the start that claimed the guard releases it: a run that outlived
+    // `overlapExpiresAt` must not clear the flag of its successor.
+    const token = {}
+    this.running = { token, startedAt: now.getTime() }
+
+    let shouldRun: boolean
+    try {
+      shouldRun = await this.shouldRun()
+    } catch (error) {
+      // A rejecting when()/skip() would otherwise leave the guard held, so the
+      // task never runs again under preventOverlapping().
+      this.releaseIfOwner(token)
+      throw error
     }
 
-    if (!this.definition.withoutOverlapping) {
-      this.isRunning = true
+    if (!shouldRun) {
+      this.releaseIfOwner(token)
+      return false
     }
+
     let error: Error | null = null
 
     try {
@@ -86,7 +104,7 @@ export class ScheduledTask {
         await this.definition.onFailure(error)
       }
     } finally {
-      this.isRunning = false
+      this.releaseIfOwner(token)
 
       if (this.definition.after) {
         await this.definition.after()
@@ -96,6 +114,30 @@ export class ScheduledTask {
     if (error) {
       throw error
     }
+    return true
+  }
+
+  /**
+   * Whether `withoutOverlapping` would refuse a run starting at `now`. The
+   * scheduler asks before claiming the one-server lock, so a task its own
+   * guard declines costs no round trip to the lock store.
+   */
+  isOverlapBlockedAt(now: Date = new Date()): boolean {
+    return this.definition.withoutOverlapping === true && this.isRunningAt(now.getTime())
+  }
+
+  /** The guard stops blocking once `overlapExpiresAt` milliseconds have elapsed, not after. */
+  private isRunningAt(now: number): boolean {
+    if (this.running === null) return false
+    const expiresAt = this.definition.overlapExpiresAt
+    if (expiresAt === undefined) return true
+    return now - this.running.startedAt < expiresAt
+  }
+
+  private releaseIfOwner(token: object): void {
+    if (this.running?.token === token) {
+      this.running = null
+    }
   }
 
   getLastRun(): Date | null {
@@ -103,7 +145,7 @@ export class ScheduledTask {
   }
 
   isCurrentlyRunning(): boolean {
-    return this.isRunning
+    return this.running !== null
   }
 
   getDefinition(): TaskDefinition {

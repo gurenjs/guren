@@ -196,29 +196,12 @@ export class SendWelcomeEmail extends Listener<UserRegistered> {
 
 ### クラスリスナーの登録
 
+`events.listen()` はクラスの static プロパティを読みます。`event` がイベントを、`priority` が順序を決め、`shouldQueue` と `queue` はキューへ送る先を決めます（[キュー対応リスナー](#キュー対応リスナー)を参照）。`shouldHandle()` があれば先に評価し、リスナーはイベントごとに生成します。`handle()` の例外は必ず発行元へ伝播し、クラスに `failed()` があればそこへ報告します。インラインでは例外が出た時点で、キューではジョブがリトライを使い切った時点で呼ばれます。呼ばれる場面は `Job.failed` と同じです。
+
 ```ts
 import { SendWelcomeEmail } from '@/app/Listeners/SendWelcomeEmail'
 
-// リスナークラスを登録
-const listenerClass = SendWelcomeEmail
-const instance = new listenerClass()
-
-events.on(
-  listenerClass.event,
-  async (event) => {
-    if (instance.shouldHandle?.(event) ?? true) {
-      try {
-        await instance.handle(event)
-      } catch (error) {
-        await instance.failed?.(event, error as Error)
-      }
-    }
-  },
-  {
-    priority: listenerClass.priority,
-    queue: listenerClass.shouldQueue ? listenerClass.queue : undefined,
-  }
-)
+events.listen(SendWelcomeEmail)
 ```
 
 ## イベントの発行
@@ -305,21 +288,17 @@ events.on(ApplicationShutdown, (event) => {
 
 ## キュー対応リスナー
 
-リスナーをキューにディスパッチして、非同期に処理させることもできます。
+`queue` を付けて登録したリスナーは、インラインではなくキューワーカーで実行されます。アプリが `QueueManager` を `queue` としてバインドしている（`QueueServiceProvider` か自前のプロバイダ）とき、`EventServiceProvider` がイベントとキューを接続します。
 
 ```ts
-// キュー統合を設定
-import { createQueueManager, MemoryDriver } from '@guren/core'
+import { createApp, EventServiceProvider, QueueServiceProvider } from '@guren/core'
 
-const queue = createQueueManager({
-  default: 'memory',
-  drivers: {
-    memory: () => new MemoryDriver(),
-  },
+const app = createApp({
+  providers: [EventServiceProvider, QueueServiceProvider],
 })
+```
 
-queue.driver()
-
+```ts
 // キュー対応リスナーを登録
 events.on(
   UserRegistered,
@@ -330,6 +309,31 @@ events.on(
   { queue: 'emails' }
 )
 ```
+
+1 回の発行は、イベントのフィールドを載せたジョブをキュー対応リスナーごとに 1 つ積みます。そのためリスナーは個別にリトライされ、1 つが失敗しても隣のリスナーは再実行されません。ワーカーはイベントをクラスのインスタンスとして組み立て直し、メッセージが指すリスナーを実行します。ワーカープロセスは、発行側と同じ方法で、かつ**同じ順序で**キュー対応リスナーを登録しておきます。同じプロバイダが両方で boot するので、通常は何もしなくて済みます。ワーカーに存在しないリスナーを指すメッセージは、別のリスナーを実行せずに失敗します。
+
+往復で保たれる必要がある名前が 2 つあります。ワーカーはイベントクラスを名前で解決するので、ジョブの `jobName` と同じように、リネームや識別子の mangling に備えて名前を固定します。
+
+```ts
+export class UserRegistered extends Event {
+  static override eventName = 'UserRegistered'
+}
+```
+
+有効なのはクラス自身が持つ `eventName` だけです。サブクラスが親の固定名を引き継ぐことはありません。発行せずキューを読むだけのワーカーは `events.registerEvent(UserRegistered)` でクラスを登録します。`events.on(UserRegistered, ...)` は登録まで済ませます。
+
+キューに到達できないマネージャーに `queue` 付きのリスナーがあると、警告を 1 度出したうえでインラインで実行します。次のメジャーでは例外を投げます。
+
+`EventManager` を自前で組み立てるアプリは、1 行で接続できます。
+
+```ts
+import { createEventManager, createQueueEventDispatcher } from '@guren/core'
+
+const events = createEventManager()
+events.setQueueDispatcher(createQueueEventDispatcher())
+```
+
+ディスパッチャは `Job.dispatch()` が解決するキュードライバを使って送るので、`queue` としてバインドした `QueueManager` か、`setQueueDriver()` で固定したドライバがアプリに必要です。
 
 ## EventManagerユーティリティ
 

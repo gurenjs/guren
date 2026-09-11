@@ -1,4 +1,4 @@
-import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob, type QueueManager } from '@guren/core'
+import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob } from '@guren/core'
 import { ProcessWelcomeSequenceJob } from '../Jobs/ProcessWelcomeSequenceJob.js'
 
 export default class QueueProvider extends ServiceProvider {
@@ -17,9 +17,8 @@ export default class QueueProvider extends ServiceProvider {
   }
 
   boot(): void {
-    // Register job classes before the driver so sync dispatches can resolve them.
+    // Every booted process registers them, including a worker that dispatches
+    // nothing itself: a queued message carries the job's name, not its class.
     registerJob(ProcessWelcomeSequenceJob)
-    const queue = this.container.make<QueueManager>('queue')
-    queue.driver()
   }
 }

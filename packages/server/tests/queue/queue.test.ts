@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   Job,
   setQueueDriver,
+  clearQueueDriver,
   getQueueDriver,
   registerJob,
   getJob,
@@ -91,7 +92,7 @@ describe('Job', () => {
     })
 
     it('throws if no driver is configured', async () => {
-      setQueueDriver(null as any)
+      clearQueueDriver()
 
       class TestJob extends Job<void> {
         handle() {}
@@ -757,20 +758,6 @@ describe('QueueManager', () => {
     expect(names).toContain('test')
   })
 
-  it('sets default driver and updates global', () => {
-    const manager = new QueueManager({
-      drivers: {
-        memory: () => new MemoryDriver(),
-        other: () => new MemoryDriver(),
-      },
-    })
-
-    manager.setDefaultDriver('other')
-    const globalDriver = getQueueDriver()
-
-    expect(globalDriver).toBe(manager.driver('other'))
-  })
-
   it('resolves the new default from driver() after setDefaultDriver', () => {
     const memoryDriver = new MemoryDriver()
     const otherDriver = new MemoryDriver()
@@ -790,27 +777,19 @@ describe('QueueManager', () => {
 
     expect(manager.getDefaultDriverName()).toBe('other')
     expect(manager.driver()).toBe(otherDriver)
-    expect(getQueueDriver()).toBe(otherDriver)
   })
 
-  it('publishes an already-resolved driver as the global when it becomes the default', () => {
-    const memoryDriver = new MemoryDriver()
-    const otherDriver = new MemoryDriver()
+  it('leaves the dispatch pin alone: resolving a driver is not publishing one', () => {
+    clearQueueDriver()
     const manager = new QueueManager({
       default: 'memory',
-      drivers: {
-        memory: () => memoryDriver,
-        other: () => otherDriver,
-      },
+      drivers: { memory: () => new MemoryDriver(), other: () => new MemoryDriver() },
     })
 
     manager.driver()
-    manager.driver('other') // cached under its name, not yet the global
-    expect(getQueueDriver()).toBe(memoryDriver)
-
     manager.setDefaultDriver('other')
 
-    expect(getQueueDriver()).toBe(otherDriver)
+    expect(getQueueDriver()).toBeNull()
   })
 
   it('rejects an unknown driver without changing the default', () => {

@@ -1,5 +1,4 @@
 import type { QueueDriver } from './types'
-import { setQueueDriver } from './Job'
 
 export type QueueDriverFactory = () => QueueDriver
 
@@ -11,8 +10,10 @@ export interface QueueConfig {
 }
 
 /**
- * Resolves queue drivers by name from the configured factories; `driver()` with
- * no name returns the default and publishes it as the global driver.
+ * Resolves queue drivers by name from the configured factories, memoized per
+ * name. Nothing here writes the `Job.dispatch()` pin: `getQueueDriver()` reads
+ * the manager the container holds, so a second app's manager is not shadowed by
+ * the first one's driver.
  */
 export class QueueManager {
   private defaultDriver: string
@@ -45,10 +46,6 @@ export class QueueManager {
     const driver = factory()
     this.resolvedDrivers.set(driverName, driver)
 
-    if (driverName === this.defaultDriver) {
-      setQueueDriver(driver)
-    }
-
     return driver
   }
 
@@ -70,8 +67,9 @@ export class QueueManager {
   }
 
   /**
-   * After this, `driver()` with no name, `getDefaultDriverName()`, and
-   * `Job.dispatch()` all use the new driver.
+   * After this, `driver()` with no name, `getDefaultDriverName()`, and — for a
+   * manager bound as `queue` — `Job.dispatch()` all use the new driver.
+   * `setQueueDriver()` still overrides it.
    */
   setDefaultDriver(name: string): void {
     if (!this.driverFactories.has(name)) {
@@ -79,9 +77,6 @@ export class QueueManager {
     }
 
     this.defaultDriver = name
-    // driver() only publishes the global on first resolution; a driver that was
-    // already resolved by name would otherwise stay off the global slot.
-    setQueueDriver(this.driver(name))
   }
 }
 

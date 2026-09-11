@@ -1,8 +1,12 @@
-import type { Event } from './Event'
+import { resolveEventName, type Event } from './Event'
+import type { ListenerClass } from './Listener'
+import { decodeEventData } from './serialize'
+import { warnOnce } from '../support/warn-once'
 import type {
   EventClass,
   EventListener,
   ListenerOptions,
+  QueueEventDispatcher,
   RegisteredListener,
   EventSubscription,
 } from './types'
@@ -10,20 +14,39 @@ import type {
 /** Registers listeners and emits events. */
 export class EventManager {
   private readonly listeners = new Map<string, RegisteredListener[]>()
+  /** Classes seen by `on()` or `registerEvent()`, so a queued event can be rebuilt as an instance on the worker. */
+  private readonly eventClasses = new Map<string, EventClass>()
 
-  private queueDispatcher?: (queueName: string, eventName: string, event: Event) => Promise<void>
+  /** Next `listenerSeq` per "<event>\u0000<queue>", never reset; see {@link RegisteredListener.listenerSeq}. */
+  private readonly listenerSeqCounters = new Map<string, number>()
+
+  private queueDispatcher?: QueueEventDispatcher
 
   on<T extends Event>(
     event: EventClass<T> | string,
     listener: EventListener<T>,
     options: ListenerOptions = {}
   ): EventSubscription {
-    const eventName = typeof event === 'string' ? event : event.eventName
+    return this.register(event, listener, options)
+  }
+
+  private register<T extends Event>(
+    event: EventClass<T> | string,
+    listener: EventListener<T>,
+    options: ListenerOptions,
+    failed?: RegisteredListener<T>['failed'],
+  ): EventSubscription {
+    const eventName = this.nameOf(event)
+    if (typeof event !== 'string') {
+      this.eventClasses.set(eventName, event)
+    }
     const registeredListeners = this.listeners.get(eventName) ?? []
 
     const registered: RegisteredListener<T> = {
       listener: listener as EventListener,
       options: { once: false, priority: 0, ...options },
+      listenerSeq: options.queue === undefined ? undefined : this.nextListenerSeq(eventName, options.queue),
+      failed,
     }
 
     registeredListeners.push(registered as RegisteredListener)
@@ -45,9 +68,54 @@ export class EventManager {
     return this.on(event, listener, { ...options, once: true })
   }
 
+  /**
+   * Makes the class resolvable by name when a queued emit reaches a worker.
+   * `on()` registers it too; a worker that only drains the queue registers the
+   * listeners anyway, so this is for a process that emits and never listens.
+   */
+  registerEvent(eventClass: EventClass): void {
+    this.eventClasses.set(resolveEventName(eventClass), eventClass)
+  }
+
+  /**
+   * Registers a `Listener` subclass under its own statics: `event`, `priority`,
+   * and `queue` when `shouldQueue`. The instance is built per invocation, so
+   * two events cannot share one listener's state. `failed()` is terminal either
+   * way: inline on the throw that then propagates, queued once the carrier
+   * job's retries are exhausted, where `Job.failed` runs.
+   */
+  listen<T extends Event>(listenerClass: ListenerClass<T>): EventSubscription {
+    const queue = listenerClass.shouldQueue ? listenerClass.queue : undefined
+
+    const listener: EventListener<T> = async (event) => {
+      const instance = new listenerClass()
+      if (instance.shouldHandle && !instance.shouldHandle(event)) return
+      if (queue !== undefined) {
+        await instance.handle(event)
+        return
+      }
+
+      try {
+        await instance.handle(event)
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error))
+        if (instance.failed) await instance.failed(event, failure)
+        throw failure
+      }
+    }
+
+    const failed = queue === undefined
+      ? undefined
+      : async (event: T, error: Error) => {
+          await new listenerClass().failed?.(event, error)
+        }
+
+    return this.register(listenerClass.event, listener, { priority: listenerClass.priority, queue }, failed)
+  }
+
   /** Omitting `listener` removes every listener for the event. */
   off<T extends Event>(event: EventClass<T> | string, listener?: EventListener<T>): void {
-    const eventName = typeof event === 'string' ? event : event.eventName
+    const eventName = this.nameOf(event)
     const registeredListeners = this.listeners.get(eventName)
 
     if (!registeredListeners) return
@@ -68,42 +136,15 @@ export class EventManager {
 
   /** Highest priority first, awaited one at a time. */
   async emit<T extends Event>(event: T): Promise<void> {
-    const eventName = event.eventName
-    const registeredListeners = this.listeners.get(eventName)
-
-    if (!registeredListeners || registeredListeners.length === 0) {
-      return
-    }
-
-    const listenersToCall = [...registeredListeners]
-    const toRemove: RegisteredListener[] = []
-
-    for (const registered of listenersToCall) {
-      if (registered.options.queue && this.queueDispatcher) {
-        await this.queueDispatcher(registered.options.queue, eventName, event)
-      } else {
-        await registered.listener(event)
-      }
-
-      if (registered.options.once) {
-        toRemove.push(registered)
-      }
-    }
-
-    for (const registered of toRemove) {
-      const index = registeredListeners.indexOf(registered)
-      if (index !== -1) {
-        registeredListeners.splice(index, 1)
-      }
-    }
-
-    if (registeredListeners.length === 0) {
-      this.listeners.delete(eventName)
-    }
+    await this.dispatch(event, false)
   }
 
   /** {@link emit} without the ordering guarantee. */
   async emitParallel<T extends Event>(event: T): Promise<void> {
+    await this.dispatch(event, true)
+  }
+
+  private async dispatch<T extends Event>(event: T, parallel: boolean): Promise<void> {
     const eventName = event.eventName
     const registeredListeners = this.listeners.get(eventName)
 
@@ -114,20 +155,69 @@ export class EventManager {
     const listenersToCall = [...registeredListeners]
     const toRemove: RegisteredListener[] = []
 
-    await Promise.all(
-      listenersToCall.map(async (registered) => {
-        if (registered.options.queue && this.queueDispatcher) {
-          await this.queueDispatcher(registered.options.queue, eventName, event)
-        } else {
-          await registered.listener(event)
-        }
+    const call = async (registered: RegisteredListener): Promise<void> => {
+      const queued = await this.invoke(registered, event, eventName)
+      // A queued `once` listener is removed once it has *run*, which is on the
+      // worker; removing it here would drop it before the job is drained.
+      if (registered.options.once && !queued) {
+        toRemove.push(registered)
+      }
+    }
 
-        if (registered.options.once) {
-          toRemove.push(registered)
-        }
-      })
-    )
+    if (parallel) {
+      await Promise.all(listenersToCall.map(call))
+    } else {
+      for (const registered of listenersToCall) {
+        await call(registered)
+      }
+    }
 
+    this.forget(eventName, registeredListeners, toRemove)
+  }
+
+  /** Resolves whether the listener was sent to a queue rather than run here. */
+  private async invoke(registered: RegisteredListener, event: Event, eventName: string): Promise<boolean> {
+    const queue = registered.options.queue
+    if (!queue) {
+      await registered.listener(event)
+      return false
+    }
+
+    const dispatcher = this.queueDispatcher
+    // Only an explicit false is a refusal: a dispatcher written against the
+    // earlier Promise<void> signature resolves undefined after queueing.
+    if (!dispatcher || (await dispatcher(queue, eventName, event, registered.listenerSeq)) === false) {
+      warnOnce(
+        `event-queue-unwired:${eventName}:${queue}`,
+        `[guren] A listener for "${eventName}" is registered with queue "${queue}", but no queue is reachable ` +
+          'from this EventManager, so it ran inline. Bind a QueueManager as "queue" (QueueServiceProvider) and ' +
+          'register a driver, or call setQueueDispatcher(createQueueEventDispatcher()) on a manager you build ' +
+          'yourself. A future major will throw here instead of running the listener inline.',
+      )
+      await registered.listener(event)
+      return false
+    }
+
+    return true
+  }
+
+  /**
+   * Counted per event and queue, so an inline listener registered beside them
+   * does not move the numbers. The worker counts its own the same way, which is
+   * why both processes must register the queued listeners in the same order.
+   */
+  private nextListenerSeq(eventName: string, queue: string): number {
+    const key = `${eventName}\u0000${queue}`
+    const next = this.listenerSeqCounters.get(key) ?? 0
+    this.listenerSeqCounters.set(key, next + 1)
+    return next
+  }
+
+  private onQueue(eventName: string, queue: string): RegisteredListener[] {
+    return (this.listeners.get(eventName) ?? []).filter((r) => r.options.queue === queue)
+  }
+
+  private forget(eventName: string, registeredListeners: RegisteredListener[], toRemove: RegisteredListener[]): void {
     for (const registered of toRemove) {
       const index = registeredListeners.indexOf(registered)
       if (index !== -1) {
@@ -140,22 +230,92 @@ export class EventManager {
     }
   }
 
+  /**
+   * The worker side of a queued emit: runs the listener the message names,
+   * with the event rebuilt as an instance of the registered class. An absent
+   * `listenerSeq` — a dispatcher of your own that does not send one — runs
+   * every listener for that event on that queue.
+   */
+  async handleQueued(
+    queueName: string,
+    eventName: string,
+    data: Record<string, unknown>,
+    listenerSeq?: number,
+  ): Promise<void> {
+    const onQueue = this.onQueue(eventName, queueName)
+    const named = listenerSeq === undefined ? undefined : onQueue.find((r) => r.listenerSeq === listenerSeq)
+
+    if (listenerSeq !== undefined && named === undefined) {
+      throw new Error(
+        `Queued event "${eventName}" names listener ${listenerSeq} on queue "${queueName}", but this process has ` +
+          `no listener registered under that number (${onQueue.length} on that queue). The worker must register ` +
+          'the same queued listeners, in the same order, as the process that emitted.',
+      )
+    }
+
+    const event = this.rehydrate(eventName, data)
+    const toRun = named === undefined ? onQueue : [named]
+
+    for (const registered of toRun) {
+      await registered.listener(event)
+      // Removed now rather than at dispatch: a `once` listener has run only here.
+      if (registered.options.once) this.off(eventName, registered.listener)
+    }
+  }
+
+  /**
+   * The worker side of a queued listener's failure, once the carrier job has
+   * run out of retries. Total by contract: an unknown listener, a class with no
+   * `failed()`, and an event it cannot rebuild are no-ops, since a throw here
+   * only buries the error that caused it.
+   */
+  async failedQueued(
+    queueName: string,
+    eventName: string,
+    data: Record<string, unknown>,
+    listenerSeq: number | undefined,
+    error: Error,
+  ): Promise<void> {
+    if (listenerSeq === undefined || !this.eventClasses.has(eventName)) return
+
+    const registered = this.onQueue(eventName, queueName).find((r) => r.listenerSeq === listenerSeq)
+    if (!registered?.failed) return
+
+    await registered.failed(this.rehydrate(eventName, data), error)
+  }
+
+  private rehydrate(eventName: string, data: Record<string, unknown>): Event {
+    const eventClass = this.eventClasses.get(eventName)
+    if (!eventClass) {
+      throw new Error(
+        `No event class is registered for "${eventName}", so the queued message cannot be rebuilt. ` +
+          'Register it with events.registerEvent(EventClass) in the worker process, or listen for the class ' +
+          'itself rather than the name. Pin the name with `static eventName` if the class may be renamed.',
+      )
+    }
+
+    const event = Object.create(eventClass.prototype) as Record<string, unknown>
+    Object.assign(event, decodeEventData(data))
+    // A message written before the tagged encoding, or by a dispatcher of your own.
+    if (typeof event.timestamp === 'string') {
+      event.timestamp = new Date(event.timestamp)
+    }
+    return event as unknown as Event
+  }
+
   hasListeners(event: EventClass | string): boolean {
-    const eventName = typeof event === 'string' ? event : event.eventName
-    const listeners = this.listeners.get(eventName)
+    const listeners = this.listeners.get(this.nameOf(event))
     return listeners !== undefined && listeners.length > 0
   }
 
   getListeners<T extends Event>(event: EventClass<T> | string): EventListener<T>[] {
-    const eventName = typeof event === 'string' ? event : event.eventName
-    const registeredListeners = this.listeners.get(eventName)
+    const registeredListeners = this.listeners.get(this.nameOf(event))
     if (!registeredListeners) return []
     return registeredListeners.map((r) => r.listener) as EventListener<T>[]
   }
 
   listenerCount(event: EventClass | string): number {
-    const eventName = typeof event === 'string' ? event : event.eventName
-    return this.listeners.get(eventName)?.length ?? 0
+    return this.listeners.get(this.nameOf(event))?.length ?? 0
   }
 
   eventNames(): string[] {
@@ -164,13 +324,24 @@ export class EventManager {
 
   removeAllListeners(): void {
     this.listeners.clear()
+    this.eventClasses.clear()
+    // The queue counters deliberately survive: resetting them would renumber
+    // re-registered listeners onto numbers messages already in flight carry,
+    // so one of those would run the wrong listener instead of being refused.
   }
 
-  /** Called by the Queue system when it is integrated. */
-  setQueueDispatcher(
-    dispatcher: (queueName: string, eventName: string, event: Event) => Promise<void>
-  ): void {
+  /**
+   * `EventServiceProvider` installs `createQueueEventDispatcher()` at boot,
+   * before the app's queue driver necessarily exists. A dispatcher that finds
+   * no queue at emit time resolves false, and the listener runs inline rather
+   * than failing the emit.
+   */
+  setQueueDispatcher(dispatcher: QueueEventDispatcher): void {
     this.queueDispatcher = dispatcher
+  }
+
+  private nameOf(event: EventClass | string): string {
+    return typeof event === 'string' ? event : resolveEventName(event)
   }
 }
 

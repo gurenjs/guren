@@ -494,6 +494,7 @@ export {
   Event,
   EventManager,
   createEventManager,
+  createQueueEventDispatcher,
   Listener,
   // Built-in events
   RequestReceived,
@@ -509,6 +510,7 @@ export type {
   EventClass,
   EventListener,
   ListenerOptions,
+  QueueEventDispatcher,
   RegisteredListener,
   EventSubscription,
   ListenerClass,
@@ -525,6 +527,7 @@ export {
   SyncDriver as SyncQueueDriver,
   RedisDriver as RedisQueueDriver,
   setQueueDriver,
+  clearQueueDriver,
   getQueueDriver,
   registerJob,
   getJob,
@@ -624,11 +627,13 @@ export {
   isDueInTimezone,
   toTimezone,
   createScheduler,
+  MemorySchedulerLock,
 } from './scheduling'
 export type {
   TaskCallback,
   TaskDefinition,
   SchedulerOptions,
+  SchedulerLock,
   ParsedCron,
   JobClass as ScheduledJobClass,
 } from './scheduling'

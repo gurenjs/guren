@@ -3,18 +3,16 @@ import { Container } from '@guren/core'
 
 const {
   eventManager,
-  queueManager,
   createEventManager,
   createMailManager,
   createQueueManager,
   setMailManager,
   registerJob,
 } = vi.hoisted(() => {
-  const eventManager = { on: vi.fn() }
+  const eventManager = { on: vi.fn(), listen: vi.fn() }
   const queueManager = { driver: vi.fn() }
   return {
     eventManager,
-    queueManager,
     createEventManager: vi.fn(() => eventManager),
     createMailManager: vi.fn(() => ({ id: 'mail' })),
     createQueueManager: vi.fn(() => queueManager),
@@ -59,8 +57,8 @@ describe('API EventServiceProvider', () => {
     expect(createMailManager).toHaveBeenCalledTimes(1)
     expect(setMailManager).toHaveBeenCalledTimes(1)
     expect(createQueueManager).toHaveBeenCalledTimes(1)
-    expect(queueManager.driver).toHaveBeenCalledTimes(1)
     expect(registerJob).toHaveBeenCalled()
+    expect(eventManager.listen).toHaveBeenCalled()
     expect(eventManager.on).toHaveBeenCalled()
   })
 })

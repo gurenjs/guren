@@ -593,6 +593,7 @@ export const app = createApp({ providers: [OAuthServiceProvider] })
     'MemoryPasswordResetStore',
     'MemoryEmailVerificationStore',
     'MemoryRateLimitStore',
+    'MemorySchedulerLock',
     'MemoryStore',
     'MemoryDriver',
   ] as const

@@ -2,9 +2,12 @@ export type {
   TaskCallback,
   TaskDefinition,
   SchedulerOptions,
+  SchedulerLock,
   ParsedCron,
   JobClass,
 } from './types'
+
+export { MemorySchedulerLock } from './MemorySchedulerLock'
 
 export {
   parseCron,

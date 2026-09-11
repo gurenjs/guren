@@ -22,15 +22,40 @@ export interface ListenerOptions {
   priority?: number
 
   /**
-   * Dispatch to this queue instead of running inline. Requires the Queue
-   * system to be configured.
+   * Dispatch to this queue instead of running inline. A manager that cannot
+   * reach a queue warns once and runs the listener inline.
    */
   queue?: string
 }
 
+/**
+ * Sends one queued listener's emit; `event` is the live instance, serialized by
+ * the dispatcher. `listenerSeq` identifies the listener among those on that
+ * queue — a dispatcher that drops it makes the worker run all of them.
+ * Only an explicit `false` means no queue was reachable, which runs the
+ * listener inline; a dispatcher resolving nothing reads as having queued.
+ */
+export type QueueEventDispatcher = (
+  queueName: string,
+  eventName: string,
+  event: Event,
+  listenerSeq?: number,
+) => Promise<boolean>
+
 export interface RegisteredListener<T extends Event = Event> {
   listener: EventListener<T>
   options: ListenerOptions
+
+  /**
+   * Registration order among the listeners for this event on this queue, which
+   * a queued message addresses instead of an array position: a `once` listener
+   * removed after its own message renumbers every position behind it, and the
+   * message still in flight would then name the wrong listener or none.
+   */
+  listenerSeq?: number
+
+  /** A queued listener class's `failed()`, run by the carrier job once its retries are exhausted. */
+  failed?: (event: T, error: Error) => void | Promise<void>
 }
 
 export interface EventSubscription {
