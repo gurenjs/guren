@@ -268,6 +268,24 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
     })
   })
 
+  it('discards only the inner writes when the outer callback catches the nested error', async () => {
+    await inRolledBackTransaction(async (trx) => {
+      const author = (await Author.create({ name: 'Barbara' }, { trx })) as AuthorRecord
+
+      await Article.transaction(async (_inner, innerArticle) => {
+        await innerArticle.create({ title: 'On Maize', authorId: author.id })
+        throw new Error('boom')
+      }).catch(() => undefined)
+
+      await Article.create({ title: 'On Transposons', authorId: author.id }, { trx })
+
+      // The nested call ran in a savepoint, so its insert is gone and the
+      // outer transaction is still usable.
+      const articles = (await Article.newQuery({ trx }).where('authorId', author.id).get()) as ArticleRecord[]
+      expect(articles.map((article) => article.title)).toEqual(['On Transposons'])
+    })
+  })
+
   it('loads relations through paginate() on the transaction', async () => {
     await inRolledBackTransaction(async (trx) => {
       const author = (await Author.create({ name: 'Grace' }, { trx })) as AuthorRecord

@@ -110,6 +110,19 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
     expect(titles()).toEqual(['original', 'kept'])
   })
 
+  it('should discard only the inner writes when the outer callback catches the nested error', async () => {
+    await Post.transaction(async (_trx, txPost) => {
+      await txPost.create({ title: 'outer' })
+      await Post.transaction(async (_inner, innerPost) => {
+        await innerPost.create({ title: 'nested' })
+        throw new Error('boom')
+      }).catch(() => undefined)
+      await txPost.create({ title: 'after' })
+    })
+
+    expect(titles()).toEqual(['original', 'outer', 'after'])
+  })
+
   it('should run a nested transaction inside the open one and commit both', async () => {
     // Raced rather than left to the suite timeout: a nested call that opened its
     // own transaction would queue behind the one it runs inside and hang.
@@ -121,6 +134,7 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
       await txPost.create({ title: 'outer' })
       return Post.transaction(async (innerTrx, innerPost) => {
         await innerPost.create({ title: 'nested' })
+        // The savepoint runs on the same connection, so the handle is the same one.
         return innerTrx === outerTrx
       })
     })

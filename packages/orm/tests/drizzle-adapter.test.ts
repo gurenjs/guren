@@ -637,16 +637,25 @@ describe('DrizzleAdapter', () => {
       await expect(runTransaction(async () => 'ok')).resolves.toBe('ok')
     })
 
-    it('reuses the open transaction for a nested call on a driver that awaits its callback', async () => {
-      // The pooled shape (postgres.js, mysql2 with max: 1): a second top-level
-      // transaction would wait on the connection the first one holds.
+    it('opens a nested transaction on the open handle, which the driver makes a savepoint', async () => {
+      // The pooled shape (postgres.js, mysql2): a second top-level transaction
+      // would wait on the connection the first one holds, while drizzle turns
+      // one opened on the handle into SAVEPOINT.
       const { db } = createMockDatabase()
-      const trxHandle = { ...db, isTrx: true }
-      let opened = 0
+      const openedOn: string[] = []
+      const savepointHandle = { ...db, label: 'savepoint' }
+      const trxHandle = {
+        ...db,
+        label: 'trx',
+        transaction: async (callback: (trx: unknown) => unknown) => {
+          openedOn.push('trx')
+          return callback(savepointHandle)
+        },
+      }
       DrizzleAdapter.configure({
         ...db,
         transaction: async (callback: (trx: unknown) => unknown) => {
-          opened += 1
+          openedOn.push('root')
           return callback(trxHandle)
         },
       } as never)
@@ -654,9 +663,10 @@ describe('DrizzleAdapter', () => {
       const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
       const seen = await runTransaction(async (outer) => runTransaction(async (inner) => [outer, inner]))
 
-      expect(seen).toEqual([trxHandle, trxHandle])
-      // One for the probe, one for the outer call; the nested call opened none.
-      expect(opened).toBe(2)
+      expect(seen).toEqual([trxHandle, savepointHandle])
+      // The probe and the outer call reached the root; only the nested one
+      // reached the open handle.
+      expect(openedOn).toEqual(['root', 'root', 'trx'])
     })
 
     it('routes a query without an explicit trx to the open transaction', async () => {
@@ -687,6 +697,46 @@ describe('DrizzleAdapter', () => {
       await DrizzleAdapter.findMany(table)
 
       expect(selectedOn).toEqual(['trx', 'trx', 'root'])
+    })
+
+    it('routes a query started inside the transaction but run after it to the root database', async () => {
+      const { db } = createMockDatabase({ records: [{ id: 1, name: 'Alice', email: null }] })
+      const selectedOn: string[] = []
+      const trxHandle = {
+        ...db,
+        select: () => {
+          selectedOn.push('trx')
+          return db.select()
+        },
+      }
+      DrizzleAdapter.configure({
+        ...db,
+        select: () => {
+          selectedOn.push('root')
+          return db.select()
+        },
+        transaction: async (callback: (trx: unknown) => unknown) => callback(trxHandle),
+      } as never)
+
+      const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
+      const table = createMockTable()
+      let release = (): void => undefined
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let continuation: Promise<unknown> | undefined
+
+      await runTransaction(async () => {
+        await DrizzleAdapter.findMany(table)
+        // Started inside the callback and never awaited by it: it keeps the
+        // async context, and its query runs once the transaction has settled.
+        continuation = gate.then(() => DrizzleAdapter.findMany(table))
+      })
+
+      release()
+      await continuation
+
+      expect(selectedOn).toEqual(['trx', 'root'])
     })
 
     it('throws when a database that commits without awaiting exposes no run()', async () => {
