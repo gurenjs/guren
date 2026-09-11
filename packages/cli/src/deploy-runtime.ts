@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import type { File, Node, ObjectExpression } from '@babel/types'
-import { memberKeyName, objectLiteral, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
+import { literalString, memberKeyName, objectLiteral, propertyValue, walk, type BabelNode } from './ast-walk'
 import { DEFAULT_SESSION_STORE_NAME, readSessionConfig, sessionConfigsIn } from './session-config'
 import { resolveSessionDrivers, type SessionDriverRegistry } from './session-drivers'
 import {
@@ -246,30 +246,25 @@ function propertyKeyName(property: BabelNode): string | null {
 /** `Hash` / `DefaultHasher`, whose constructor argument decides which format they write. */
 const ALGORITHM_SELECTING_HASHERS = new Set(['Hash', 'DefaultHasher'])
 
-/** The value of one property of an object literal, type wrappers removed. */
-function propertyValue(options: ObjectExpression, name: string): BabelNode | undefined {
-  for (const property of options.properties as unknown as BabelNode[]) {
-    if (property.type === 'ObjectProperty' && propertyKeyName(property) === name) {
-      return unwrapTypeAssertion(property.value as BabelNode)
-    }
-  }
-  return undefined
-}
-
 /**
- * Which signal `new Hash(...)` is. Bare it writes scrypt, so it is remediation;
- * `{ algorithm: 'argon2' }` makes it `new Argon2Hasher()` under another name.
- * An argument this scan cannot read is neither, and must not pass as scrypt.
+ * Which signal `new Hash(...)` is, with the symbol to report it under. Bare it
+ * writes scrypt, so it is remediation; `{ algorithm: 'argon2' }` makes it
+ * `new Argon2Hasher()` under another name. An argument this scan cannot read is
+ * neither, and must not pass as scrypt.
  */
-function judgeDefaultHasherConstruction(node: BabelNode): SignalKind {
+function judgeDefaultHasherConstruction(name: string, node: BabelNode): { kind: SignalKind; symbol: string } {
+  const unreadable = { kind: 'unreadableHasher' as const, symbol: `new ${name}(...)` }
   const argument = (node.arguments as BabelNode[])[0]
-  if (argument === undefined) return 'nodeHasher'
+  if (argument === undefined) return { kind: 'nodeHasher', symbol: name }
   const options = objectLiteral(argument as Node)
-  if (!options) return 'unreadableHasher'
+  if (!options) return unreadable
   const algorithm = propertyValue(options, 'algorithm')
-  if (algorithm === undefined) return 'nodeHasher'
-  if (algorithm.type !== 'StringLiteral') return 'unreadableHasher'
-  return algorithm.value === 'argon2' ? 'bunOnlyHasher' : 'nodeHasher'
+  if (algorithm === undefined) return { kind: 'nodeHasher', symbol: name }
+  const selected = literalString(algorithm)
+  if (selected === null) return unreadable
+  return selected === 'argon2'
+    ? { kind: 'bunOnlyHasher', symbol: `new ${name}({ algorithm: 'argon2' })` }
+    : { kind: 'nodeHasher', symbol: name }
 }
 
 function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSignal[] {
@@ -401,16 +396,10 @@ function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSig
       case 'NewExpression': {
         const name = resolve(node.callee as BabelNode)
         if (name) {
-          const kind = ALGORITHM_SELECTING_HASHERS.has(name)
-            ? judgeDefaultHasherConstruction(node)
-            : CONSTRUCTED_SIGNALS[name]
-          if (kind === 'bunOnlyHasher' && ALGORITHM_SELECTING_HASHERS.has(name)) {
-            emit(kind, `new ${name}({ algorithm: 'argon2' })`, lineOf(node))
-          } else if (kind === 'unreadableHasher') {
-            emit(kind, `new ${name}(...)`, lineOf(node))
-          } else if (kind) {
-            emit(kind, name, lineOf(node))
-          }
+          const judged = ALGORITHM_SELECTING_HASHERS.has(name)
+            ? judgeDefaultHasherConstruction(name, node)
+            : { kind: CONSTRUCTED_SIGNALS[name], symbol: name }
+          if (judged.kind) emit(judged.kind, judged.symbol, lineOf(node))
         }
         return
       }
@@ -448,10 +437,11 @@ function extractSignals(ast: File, drivers: SessionDriverRegistry): ExtractedSig
                   }
                   const selected = propertyValue(auth, 'hasher')
                   if (selected === undefined) continue
-                  if (selected.type !== 'StringLiteral') {
-                    emit('unreadableHasher', 'auth.hasher: <expression>', lineOf(selected))
-                  } else if (selected.value === 'argon2') {
-                    emit('bunOnlyHasher', "auth.hasher: 'argon2'", lineOf(selected))
+                  const algorithm = literalString(selected)
+                  if (algorithm === null) {
+                    emit('unreadableHasher', 'auth.hasher: <expression>', lineOf(selected as BabelNode))
+                  } else if (algorithm === 'argon2') {
+                    emit('bunOnlyHasher', "auth.hasher: 'argon2'", lineOf(selected as BabelNode))
                   }
                 }
               }
