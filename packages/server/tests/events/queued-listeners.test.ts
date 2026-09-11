@@ -5,7 +5,7 @@ import { ServiceProvider } from '../../src/container/ServiceProvider'
 import { EventServiceProvider } from '../../src/providers/EventServiceProvider'
 import { QueueServiceProvider } from '../../src/providers/QueueServiceProvider'
 import { Event, EventManager, Listener, createEventManager, createQueueEventDispatcher } from '../../src/events'
-import { MemoryDriver, Worker, clearQueueDriver, setQueueDriver, createQueueManager } from '../../src/queue'
+import { MemoryDriver, Worker, clearQueueDriver, getJob, setQueueDriver, createQueueManager } from '../../src/queue'
 import { resetWarnOnce } from '../../src/support/warn-once'
 
 class OrderPlaced extends Event {
@@ -155,6 +155,43 @@ describe('queued listeners through the providers', () => {
     expect(ran).toEqual(['steady', 'flaky'])
     expect(await driver.size('emails')).toBe(1)
     expect(await driver.getFailedJobs()).toEqual([])
+  })
+
+  it('calls a queued listener failed() once the job has run out of retries', async () => {
+    const app = await bootWithQueue()
+
+    const events = app.container.make('events')
+    const attempts: string[] = []
+    const failures: string[] = []
+    class Flaky extends Listener<OrderPlaced> {
+      static override event = OrderPlaced
+      static override shouldQueue = true
+      static override queue = 'emails'
+      handle(event: OrderPlaced): void {
+        attempts.push(event.orderId)
+        throw new Error('smtp down')
+      }
+      override failed(event: OrderPlaced, error: Error): void {
+        failures.push(`${event.orderId}:${error.message}`)
+      }
+    }
+    events.listen(Flaky)
+
+    // One attempt, so the run below reaches the exhausted branch without
+    // waiting out the carrier job's exponential backoff.
+    const carrier = getJob('QueuedEventJob')!
+    const maxAttempts = carrier.maxAttempts
+    carrier.maxAttempts = 1
+    try {
+      await events.emit(new OrderPlaced('o-12'))
+      await drain(driver, 'emails')
+    } finally {
+      carrier.maxAttempts = maxAttempts
+    }
+
+    expect(attempts).toEqual(['o-12'])
+    expect(failures).toEqual(['o-12:smtp down'])
+    expect(await driver.getFailedJobs()).toHaveLength(1)
   })
 
   it('removes a queued once listener when it has run, not when it was dispatched', async () => {

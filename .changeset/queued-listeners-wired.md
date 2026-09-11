@@ -21,10 +21,10 @@ and `priority` statics that nothing read either.
 - A `{ queue }` listener with no queue reachable warns once, naming the wiring,
   and runs inline. A future major will throw there.
 - `events.listen(ListenerClass)` registers a `Listener` subclass under its own
-  statics and calls `shouldHandle()` first. A throwing `handle()` reaches
-  `failed()` when the class defines it and then propagates: `failed()` reports,
-  it does not swallow, so a queued listener's job still retries and is recorded
-  as failed.
+  statics, builds the instance per event, and calls `shouldHandle()` first. A
+  throwing `handle()` propagates, and `failed()` reports it: inline on the
+  throw, and on a queue once the carrier job has used its retries, the point
+  `Job.failed` describes.
 - A `once` listener with a queue is removed when it has run, on the worker,
   rather than when it was dispatched.
 - A queued event carries its `Date` fields as a tagged value, so they come back

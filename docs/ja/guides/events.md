@@ -196,7 +196,7 @@ export class SendWelcomeEmail extends Listener<UserRegistered> {
 
 ### クラスリスナーの登録
 
-`events.listen()` はクラスの static プロパティを読みます。`event` がイベントを、`priority` が順序を決め、`shouldQueue` と `queue` はキューへ送る先を決めます（[キュー対応リスナー](#キュー対応リスナー)を参照）。`shouldHandle()` があれば先に評価します。`handle()` が例外を投げた場合、クラスに `failed()` があればそこへ渡したうえで、いずれにせよ発行元へ伝播します。`failed()` は報告用で、例外を握りつぶしません。キュー対応リスナーのジョブはそのままリトライされます。
+`events.listen()` はクラスの static プロパティを読みます。`event` がイベントを、`priority` が順序を決め、`shouldQueue` と `queue` はキューへ送る先を決めます（[キュー対応リスナー](#キュー対応リスナー)を参照）。`shouldHandle()` があれば先に評価し、リスナーはイベントごとに生成します。`handle()` の例外は必ず発行元へ伝播し、クラスに `failed()` があればそこへ報告します。インラインでは例外が出た時点で、キューではジョブがリトライを使い切った時点で呼ばれます。呼ばれる場面は `Job.failed` と同じです。
 
 ```ts
 import { SendWelcomeEmail } from '@/app/Listeners/SendWelcomeEmail'

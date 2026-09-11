@@ -198,7 +198,7 @@ export class SendWelcomeEmail extends Listener<UserRegistered> {
 
 ### Registering Class Listeners
 
-`events.listen()` reads the class statics: `event` picks the event, `priority` orders it, and `shouldQueue` with `queue` sends it to a queue (see [Queued Listeners](#queued-listeners)). `shouldHandle()` runs first when defined. A `handle()` that throws reaches `failed()` when the class defines it, and propagates either way: `failed()` reports, it does not catch, so a queued listener's job still retries.
+`events.listen()` reads the class statics: `event` picks the event, `priority` orders it, and `shouldQueue` with `queue` sends it to a queue (see [Queued Listeners](#queued-listeners)). `shouldHandle()` runs first when defined, and the listener is built once per event. A `handle()` that throws always propagates; `failed()` reports it when the class defines one. Inline that happens on the throw itself, and on a queue once the job has used its retries, which is when `Job.failed` runs.
 
 ```ts
 import { SendWelcomeEmail } from '@/app/Listeners/SendWelcomeEmail'

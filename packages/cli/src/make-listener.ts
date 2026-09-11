@@ -24,8 +24,8 @@ export class ${className} extends Listener${listenerGeneric} {${staticEvent}
 
   static override shouldQueue = false
 
-  // Reporting hook, not a catch: the error still propagates, so a queued
-  // listener's job retries and is recorded as failed.
+  // Reporting hook, not a catch. Inline, the error still propagates once
+  // this has run; queued, it runs when the job has run out of retries.
   async failed(event: ${eventType}, error: Error): Promise<void> {
     console.error('${className} failed:', error.message)
   }

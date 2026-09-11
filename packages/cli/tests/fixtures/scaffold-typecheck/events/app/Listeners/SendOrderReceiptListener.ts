@@ -14,8 +14,8 @@ export class SendOrderReceiptListener extends Listener<OrderPlaced> {
 
   static override shouldQueue = false
 
-  // Reporting hook, not a catch: the error still propagates, so a queued
-  // listener's job retries and is recorded as failed.
+  // Reporting hook, not a catch. Inline, the error still propagates once
+  // this has run; queued, it runs when the job has run out of retries.
   async failed(event: OrderPlaced, error: Error): Promise<void> {
     console.error('SendOrderReceiptListener failed:', error.message)
   }

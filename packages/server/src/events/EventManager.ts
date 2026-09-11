@@ -27,6 +27,15 @@ export class EventManager {
     listener: EventListener<T>,
     options: ListenerOptions = {}
   ): EventSubscription {
+    return this.register(event, listener, options)
+  }
+
+  private register<T extends Event>(
+    event: EventClass<T> | string,
+    listener: EventListener<T>,
+    options: ListenerOptions,
+    failed?: RegisteredListener<T>['failed'],
+  ): EventSubscription {
     const eventName = this.nameOf(event)
     if (typeof event !== 'string') {
       this.eventClasses.set(eventName, event)
@@ -37,6 +46,7 @@ export class EventManager {
       listener: listener as EventListener,
       options: { once: false, priority: 0, ...options },
       listenerSeq: options.queue === undefined ? undefined : this.nextListenerSeq(eventName, options.queue),
+      failed,
     }
 
     registeredListeners.push(registered as RegisteredListener)
@@ -69,31 +79,40 @@ export class EventManager {
 
   /**
    * Registers a `Listener` subclass under its own statics: `event`, `priority`,
-   * and `queue` when `shouldQueue`. A `handle()` that throws reaches `failed()`
-   * when the class defines it, and propagates either way.
+   * and `queue` when `shouldQueue`. The instance is built per invocation, so
+   * two events cannot share one listener's state.
+   *
+   * `failed()` is a terminal hook either way: inline it runs on the throw that
+   * then propagates, queued it runs once the carrier job's retries are
+   * exhausted, which is when `Job.failed` runs.
    */
   listen<T extends Event>(listenerClass: ListenerClass<T>): EventSubscription {
-    const instance = new listenerClass()
+    const queue = listenerClass.shouldQueue ? listenerClass.queue : undefined
 
-    return this.on(
-      listenerClass.event,
-      async (event) => {
-        if (instance.shouldHandle && !instance.shouldHandle(event)) return
-        try {
-          await instance.handle(event)
-        } catch (error) {
-          const failure = error instanceof Error ? error : new Error(String(error))
-          // failed() is a terminal hook, not a swallow: the queue reads the
-          // throw to retry the job and record it as failed.
-          if (instance.failed) await instance.failed(event, failure)
-          throw failure
+    const listener: EventListener<T> = async (event) => {
+      const instance = new listenerClass()
+      if (instance.shouldHandle && !instance.shouldHandle(event)) return
+      if (queue !== undefined) {
+        await instance.handle(event)
+        return
+      }
+
+      try {
+        await instance.handle(event)
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error))
+        if (instance.failed) await instance.failed(event, failure)
+        throw failure
+      }
+    }
+
+    const failed = queue === undefined
+      ? undefined
+      : async (event: T, error: Error) => {
+          await new listenerClass().failed?.(event, error)
         }
-      },
-      {
-        priority: listenerClass.priority,
-        queue: listenerClass.shouldQueue ? listenerClass.queue : undefined,
-      },
-    )
+
+    return this.register(listenerClass.event, listener, { priority: listenerClass.priority, queue }, failed)
   }
 
   /** Omitting `listener` removes every listener for the event. */
@@ -244,6 +263,27 @@ export class EventManager {
       // Removed now rather than at dispatch: a `once` listener has run only here.
       if (registered.options.once) this.off(eventName, registered.listener)
     }
+  }
+
+  /**
+   * The worker side of a queued listener's failure, once the carrier job has
+   * run out of retries. Total by contract: a listener this process no longer
+   * has, one whose class defines no `failed()`, and an event class it cannot
+   * rebuild are all no-ops, since throwing here only buries the real error.
+   */
+  async failedQueued(
+    queueName: string,
+    eventName: string,
+    data: Record<string, unknown>,
+    listenerSeq: number | undefined,
+    error: Error,
+  ): Promise<void> {
+    if (listenerSeq === undefined || !this.eventClasses.has(eventName)) return
+
+    const registered = this.onQueue(eventName, queueName).find((r) => r.listenerSeq === listenerSeq)
+    if (!registered?.failed) return
+
+    await registered.failed(this.rehydrate(eventName, data), error)
   }
 
   private rehydrate(eventName: string, data: Record<string, unknown>): Event {

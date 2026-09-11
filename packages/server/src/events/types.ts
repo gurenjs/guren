@@ -54,6 +54,9 @@ export interface RegisteredListener<T extends Event = Event> {
    * message still in flight would then name the wrong listener or none.
    */
   listenerSeq?: number
+
+  /** A queued listener class's `failed()`, run by the carrier job once its retries are exhausted. */
+  failed?: (event: T, error: Error) => void | Promise<void>
 }
 
 export interface EventSubscription {

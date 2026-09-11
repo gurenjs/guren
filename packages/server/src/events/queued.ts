@@ -27,6 +27,16 @@ class QueuedEventJob extends Job<QueuedEventPayload> {
       payload.listenerSeq,
     )
   }
+
+  async failed(payload: QueuedEventPayload, error: Error): Promise<void> {
+    await this.make('events').failedQueued(
+      payload.queue,
+      payload.eventName,
+      payload.event,
+      payload.listenerSeq,
+      error,
+    )
+  }
 }
 
 /**
