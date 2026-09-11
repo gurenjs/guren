@@ -29,7 +29,6 @@ export const RESOLVED_PRINCIPAL_KEY = 'guren:resolved-principal'
 export interface ResolvedPrincipal {
   user: unknown
   id: unknown
-  source: string
   /** Invalidate the presented credential. `logout()` calls it. */
   revoke?: () => Promise<void>
 }
@@ -64,15 +63,16 @@ export function createPrincipalAuthContext(ctx: Context): AuthContext {
     throw new Error(`${method}() is not available on a request with no auth context attached.`)
   }
   const principal = () => getResolvedPrincipal(ctx)
+  const user = async <T>(): Promise<T | null> => (principal()?.user ?? null) as T | null
 
   return {
     check: async () => principal()?.user != null,
     guest: async () => principal()?.user == null,
-    user: async <T>() => (principal()?.user ?? null) as T | null,
+    user,
     userOrFail: async <T>() => {
-      const user = principal()?.user
-      if (user == null) throw new AuthenticationException()
-      return user as T
+      const resolved = await user<T>()
+      if (resolved == null) throw new AuthenticationException()
+      return resolved
     },
     id: async () => {
       const resolved = principal()

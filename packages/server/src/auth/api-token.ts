@@ -330,6 +330,20 @@ export async function getUserApiTokens(
 export const API_TOKEN_KEY = 'guren:api-token'
 
 /**
+ * Revoke the token a request presented, and clear it from the request context
+ * so `getApiToken()` / `getApiTokenOrFail()` cannot succeed after a logout on
+ * the same request. The slot is cleared whether or not a token still verified.
+ */
+export async function revokePresentedToken(
+  ctx: Context,
+  tokenId: string | undefined,
+  store: ApiTokenStore,
+): Promise<void> {
+  if (tokenId) await revokeApiToken(tokenId, store)
+  ctx.set(API_TOKEN_KEY, undefined)
+}
+
+/**
  * Options for the bearer token middleware.
  */
 export interface BearerTokenMiddlewareOptions {
@@ -413,13 +427,7 @@ export function createBearerTokenMiddleware(
       setResolvedPrincipal(ctx, {
         user,
         id: result.userId,
-        source: 'bearer',
-        revoke: async () => {
-          await revokeApiToken(result.token.id, store)
-          // So getApiToken()/getApiTokenOrFail() cannot succeed after logout
-          // on the same request, as with TokenGuard.
-          ctx.set(API_TOKEN_KEY, undefined)
-        },
+        revoke: () => revokePresentedToken(ctx, result.token.id, store),
       })
 
       if (!getAuthContext(ctx)) {

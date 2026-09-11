@@ -98,17 +98,10 @@ export class AuthManager implements AuthManagerContract {
       // the ordinary "has not been registered" error.
       const installed = readAgentPrincipal(context.ctx.req.raw)
       if (installed) {
-        return new AgentPrincipalGuard<User>({
-          installed,
-          // The same provider rule `useTokens({ provider })` configures for
-          // the token guard: with one, the principal's id resolves to the real
-          // user record; without one, a minimal `{ id }`. Two rules here would
-          // mean a policy reading a user field behaved differently depending
-          // on which surface the call arrived on.
-          ...(this.apiTokenOptions.provider
-            ? { provider: this.getProvider<User>(this.apiTokenOptions.provider) }
-            : {}),
-        })
+        const provider = this.tokenUserProvider<User>()
+        // With a provider the principal's id resolves to the real user record;
+        // without one, a minimal `{ id }`.
+        return new AgentPrincipalGuard<User>({ installed, ...(provider ? { provider } : {}) })
       }
     }
 
@@ -176,6 +169,17 @@ export class AuthManager implements AuthManagerContract {
   }
 
   /**
+   * The user provider `useTokens({ provider })` configured, and no other.
+   * Every surface that turns a token's or a principal's id into a user record
+   * reads this one: a second rule would mean a policy reading a user field
+   * behaved differently depending on which surface the call arrived on.
+   */
+  private tokenUserProvider<User>(): UserProvider<User> | undefined {
+    const name = this.apiTokenOptions.provider
+    return name ? this.getProvider<User>(name) : undefined
+  }
+
+  /**
    * The principal a middleware resolved for this request, sanitized the way the
    * token guard sanitizes its own. Read at call time, so a context built before
    * the authenticating middleware ran still answers with it.
@@ -188,13 +192,9 @@ export class AuthManager implements AuthManagerContract {
     const principal = getResolvedPrincipal(ctx)
     if (!principal || principal.user == null) return principal
 
-    // The provider `useTokens({ provider })` configured, and no other: a second
-    // rule here would sanitize a user differently depending on which surface
-    // the call arrived on.
-    const providerName = this.apiTokenOptions.provider
-    if (!providerName) return principal
+    const provider = this.tokenUserProvider<unknown>()
+    if (!provider) return principal
 
-    const provider = this.getProvider<unknown>(providerName)
     return { ...principal, user: sanitizeUser(provider, principal.user) }
   }
 

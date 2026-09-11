@@ -96,7 +96,6 @@ export class RequestAuthContext implements AuthContext {
    * new session rather than revoking the credential the request arrived with.
    */
   private forgetPrincipal(): void {
-    if (!this.resolvePrincipal()) return
     setResolvedPrincipal(this.ctx, undefined)
   }
 }

@@ -3,30 +3,17 @@ import { RequestAuthContext } from '../../src/auth/RequestAuthContext'
 import { AuthenticationException } from '../../src/errors/exceptions/AuthenticationException'
 import type { Guard } from '../../src/auth/types'
 import type { Session } from '../../src/http/middleware'
-
-function createMockGuard(overrides: Partial<Guard> = {}): Guard {
-  return {
-    async check() { return false },
-    async guest() { return true },
-    async user() { return null },
-    async id() { return null },
-    async login() {},
-    async logout() {},
-    async attempt() { return false },
-    async validate() { return null },
-    session() { return undefined },
-    ...overrides,
-  } as Guard
-}
+import { fakeContext } from '../support/fake-context'
+import { fakeGuard } from '../support/fake-auth'
 
 function createContext(
   guardOverrides: Partial<Guard> = {},
   session?: Session,
 ) {
-  const guard = createMockGuard(guardOverrides)
+  const guard = fakeGuard(guardOverrides)
   const resolveName = (name?: string) => name ?? 'web'
   const resolveGuard = () => guard
-  return new RequestAuthContext(resolveName, {} as any, () => session, resolveGuard)
+  return new RequestAuthContext(resolveName, fakeContext(), () => session, resolveGuard)
 }
 
 describe('RequestAuthContext', () => {
