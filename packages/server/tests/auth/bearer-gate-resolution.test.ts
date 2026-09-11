@@ -6,7 +6,7 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, expect, it } from 'bun:test'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import {
   createApiToken,
   createBearerTokenMiddleware,
@@ -16,11 +16,12 @@ import {
 } from '../../src/auth/api-token'
 import { AuthManager } from '../../src/auth/AuthManager'
 import { getAuthContext } from '../../src/auth/context'
-import type { AuthContext, Guard, UserProvider } from '../../src/auth/types'
+import type { AuthContext, Guard } from '../../src/auth/types'
 import { Gate } from '../../src/authorization'
 import { Application } from '../../src/http/Application'
 import { attachAuthContext } from '../../src/http/middleware/auth'
 import { installAgentPrincipal } from '../../src/internal/agent-principal'
+import { fakeGuard, fakeUserProvider } from '../support/fake-auth'
 
 interface ProfileUser {
   id: number
@@ -40,7 +41,7 @@ async function bearerFor(store: MemoryApiTokenStore): Promise<string> {
 }
 
 /** The Gate's answer beside the context's, so a divergence between them shows. */
-function profileHandler(): (c: any) => Promise<Response> {
+function profileHandler(): (c: Context) => Promise<Response> {
   const gate = new Gate().define('read-profile', (user) => (user as ProfileUser | null)?.id === 1)
   return async (c) => {
     const user = await gate.resolveUser(c)
@@ -51,17 +52,13 @@ function profileHandler(): (c: any) => Promise<Response> {
 
 /** A guard that answers the way a logged-in session guard does. */
 function guardFor(user: unknown): Guard<unknown> {
-  return {
+  return fakeGuard({
     check: async () => user !== null,
     guest: async () => user === null,
     user: async <T>() => user as T,
     id: async () => (user as { id: unknown } | null)?.id ?? null,
-    login: async () => {},
-    logout: async () => {},
     attempt: async () => true,
-    validate: async () => null,
-    session: () => undefined,
-  }
+  })
 }
 
 /** The framework context an app with a logged-in session carries. */
@@ -72,61 +69,48 @@ function sessionUserContext(ctx: Parameters<AuthManager['createAuthContext']>[0]
   return auth.createAuthContext(ctx)
 }
 
-describe('createBearerTokenMiddleware with the Gate', () => {
-  // The documented mounting order: the middleware goes on before boot(), and
-  // AuthServiceProvider then attaches its own context behind it.
-  it('should resolve the loaded user when the middleware is mounted before boot', async () => {
-    const store = new MemoryApiTokenStore()
+/** Mounts the middleware, and answers a request for the protected route. */
+type Wiring = (store: MemoryApiTokenStore) => Promise<(headers: Record<string, string>) => Promise<Response> | Response>
+
+// The documented order is the middleware before boot(), with AuthServiceProvider
+// attaching its own context behind it; the rest are orders an app may mount them
+// in, and the plain Hono app has no framework context to attach at all.
+const WIRINGS: Array<[name: string, mount: Wiring]> = [
+  ['a Guren app with auth options, mounted before boot', async (store) => {
     const app = new Application({ auth: {} })
     app.use('/api/*', createBearerTokenMiddleware({ store, loadUser }))
     await app.boot()
     app.hono.get('/api/me', profileHandler())
-
-    const res = await app.fetch(
-      new Request('http://example.com/api/me', { headers: { Authorization: await bearerFor(store) } }),
-    )
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ id: 1, viaContext: { id: 1, name: 'John' } })
-  })
-
-  it('should resolve the loaded user when the middleware is mounted after boot', async () => {
-    const store = new MemoryApiTokenStore()
+    return (headers) => app.fetch(new Request('http://example.com/api/me', { headers }))
+  }],
+  ['a Guren app with auth options, mounted after boot', async (store) => {
     const app = new Application({ auth: {} })
     await app.boot()
     app.hono.use('/api/*', createBearerTokenMiddleware({ store, loadUser }))
     app.hono.get('/api/me', profileHandler())
-
-    const res = await app.fetch(
-      new Request('http://example.com/api/me', { headers: { Authorization: await bearerFor(store) } }),
-    )
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ id: 1, viaContext: { id: 1, name: 'John' } })
-  })
-
-  it('should resolve the loaded user in an app configured without auth options', async () => {
-    const store = new MemoryApiTokenStore()
+    return (headers) => app.fetch(new Request('http://example.com/api/me', { headers }))
+  }],
+  ['a Guren app configured without auth options', async (store) => {
     const app = new Application()
     app.use('/api/*', createBearerTokenMiddleware({ store, loadUser }))
     await app.boot()
     app.hono.get('/api/me', profileHandler())
-
-    const res = await app.fetch(
-      new Request('http://example.com/api/me', { headers: { Authorization: await bearerFor(store) } }),
-    )
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ id: 1, viaContext: { id: 1, name: 'John' } })
-  })
-
-  it('should resolve the loaded user on a plain Hono app with no auth context', async () => {
-    const store = new MemoryApiTokenStore()
+    return (headers) => app.fetch(new Request('http://example.com/api/me', { headers }))
+  }],
+  ['a plain Hono app with no auth context', async (store) => {
     const app = new Hono()
     app.use('*', createBearerTokenMiddleware({ store, loadUser }))
     app.get('/me', profileHandler())
+    return (headers) => app.request('/me', { headers })
+  }],
+]
 
-    const res = await app.request('/me', { headers: { Authorization: await bearerFor(store) } })
+describe('createBearerTokenMiddleware with the Gate', () => {
+  it.each(WIRINGS)('should resolve the loaded user on %s', async (_name, mount) => {
+    const store = new MemoryApiTokenStore()
+    const request = await mount(store)
+
+    const res = await request({ Authorization: await bearerFor(store) })
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ id: 1, viaContext: { id: 1, name: 'John' } })
@@ -182,16 +166,13 @@ describe('createBearerTokenMiddleware with the Gate', () => {
 
   it('should sanitize the loaded user through the provider useTokens configured', async () => {
     const store = new MemoryApiTokenStore()
-    const provider = {
-      retrieveById: async () => null,
-      retrieveByCredentials: async () => null,
-      validateCredentials: async () => false,
+    const provider = fakeUserProvider({
       getId: (user: unknown) => (user as ProfileUser).id,
       sanitize: (user: unknown) => {
         const { password: _password, ...rest } = user as ProfileUser & { password: string }
         return rest
       },
-    } as unknown as UserProvider<unknown>
+    })
 
     const auth = new AuthManager()
     auth.registerProvider('users', () => provider)

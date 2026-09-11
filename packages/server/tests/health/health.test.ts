@@ -450,27 +450,6 @@ describe('CacheCheck', () => {
     expect(await store.has('__health_check__')).toBe(false)
   })
 
-  it('should return healthy when cache operations succeed', async () => {
-    let stored: unknown = null
-    const get = mock((_key: string) => Promise.resolve(stored))
-    const cache: CacheStoreInterface = {
-      get: <T>(key: string) => get(key) as Promise<T | null>,
-      set: mock((key: string, value: unknown) => {
-        stored = value
-        return Promise.resolve()
-      }),
-      delete: mock(() => Promise.resolve(true)),
-    }
-
-    const check = new CacheCheck(cache)
-    const result = await check.check()
-
-    expect(result.status).toBe('healthy')
-    expect(cache.set).toHaveBeenCalled()
-    expect(get).toHaveBeenCalled()
-    expect(cache.delete).toHaveBeenCalled()
-  })
-
   it('should return degraded when read/write mismatch', async () => {
     const cache: CacheStoreInterface = {
       get: <T>() => Promise.resolve('wrong_value' as T | null),

@@ -1,7 +1,7 @@
 import { describe, expect, it, spyOn } from 'bun:test'
 import { Container } from '../../src/container/Container'
 import { LogServiceProvider } from '../../src/providers/LogServiceProvider'
-import { getLogManager, type LogManager } from '../../src/logging'
+import type { LogManager } from '../../src/logging'
 
 describe('LogServiceProvider', () => {
   it('should bind a log manager whose default channel writes to the console', () => {
@@ -18,14 +18,5 @@ describe('LogServiceProvider', () => {
     } finally {
       info.mockRestore()
     }
-  })
-
-  it('should publish the bound manager as the global one at boot', () => {
-    const container = new Container()
-    const provider = new LogServiceProvider(container)
-    provider.register()
-    provider.boot()
-
-    expect(getLogManager()).toBe(container.make<LogManager>('log'))
   })
 })

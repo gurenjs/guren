@@ -13,6 +13,7 @@ import {
   setLogManager,
   getLogManager,
 } from '../../src/logging'
+import { clearGlobalManager } from '../support/globals'
 
 describe('LOG_LEVEL_PRIORITY', () => {
   it('has correct priority order', () => {
@@ -690,9 +691,7 @@ describe('createLogManager', () => {
 
 describe('Global log manager', () => {
   it('throws when not initialized', () => {
-    // The global is per process and every test file shares it, so this clears
-    // it rather than assuming no other file booted a LogServiceProvider.
-    setLogManager(undefined as unknown as LogManager)
+    clearGlobalManager(setLogManager)
 
     expect(() => getLogManager()).toThrow(
       'Log manager has not been initialized. Call setLogManager() first.'
