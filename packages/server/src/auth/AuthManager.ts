@@ -8,7 +8,7 @@ import { ModelUserProvider, type ModelUserProviderOptions } from './providers/Mo
 import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
 import { hasBearerHeader, type ApiTokenStore } from './api-token'
-import { createPasswordHasher } from './password/configured-hasher'
+import { bindPasswordHasher, createPasswordHasher } from './password/configured-hasher'
 import type { PasswordHasher } from './password/PasswordHasher'
 import type {
   AttachContextOptions,
@@ -215,9 +215,15 @@ export class AuthManager implements AuthManagerContract {
     const defaultOptions: ModelUserProviderOptions = {
       usernameColumn: 'email',
       credentialsPasswordField: 'password',
-      hasher: this.hasher(),
       ...options,
+      // After the spread: `{ hasher: undefined }` from a caller spreading its
+      // own options must not erase the app's hasher.
+      hasher: options.hasher ?? this.hasher(),
     }
+
+    // The model reaches the app's hasher through this assignment, not through a
+    // container read per hash. A model declaring `static passwordHasher` keeps it.
+    bindPasswordHasher(model, this.hasher())
 
     this.registerProvider(providerName, () => new ModelUserProvider(model, defaultOptions))
 

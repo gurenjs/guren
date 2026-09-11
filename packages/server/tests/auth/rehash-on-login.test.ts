@@ -164,6 +164,24 @@ describe('rehash on login', () => {
     expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'wrong' })).toBe(false)
   })
 
+  test('a model pinned to its own hasher is not rewritten at the app default', async () => {
+    const pinned = new NodeHasher({ cost: 2048 })
+    class Pinned extends AuthenticatableModel<PlainObject> {
+      static override table = 'users'
+      protected static override passwordHasher: PasswordHasher | null = pinned
+    }
+    const stored = await pinned.hash('secret')
+    const rows: PlainObject[] = [{ id: 1, email: 'a@example.com', passwordHash: stored }]
+    Pinned.useAdapter(storeAdapter(rows))
+    const manager = new AuthManager({ hasher: new NodeHasher({ cost: 1024 }) })
+    manager.useModel(Pinned as unknown as typeof Model<PlainObject>)
+
+    expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
+    expect(await webGuard(manager).attempt({ email: 'a@example.com', password: 'secret' })).toBe(true)
+
+    expect(rows[0].passwordHash).toBe(stored)
+  })
+
   test('a rehash that cannot be written still logs the user in', async () => {
     const row = { id: 7, email: 'a@example.com' }
     const provider: UserProvider<typeof row> = {

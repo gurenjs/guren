@@ -1,4 +1,3 @@
-import { getContainer } from '../../container/Container'
 import { DefaultHasher, type PasswordHashAlgorithm } from './DefaultHasher'
 import type { PasswordHasher } from './PasswordHasher'
 
@@ -14,24 +13,39 @@ export function createPasswordHasher(option: PasswordHasherOption | undefined): 
   return option
 }
 
-let fallback: PasswordHasher | undefined
+interface PasswordHasherSlot {
+  explicitPasswordHasher(): PasswordHasher | null
+  configuredPasswordHasher: PasswordHasher | null
+}
 
 /**
- * The hasher the current app's `AuthManager` resolved, read through the
- * process-wide container, else a scrypt `DefaultHasher` (a seeder run bare, a
- * unit test). Per call, not memoized: a model module evaluates before
- * `createApp()` runs. Duck-typed on `hasher()`, so a bare container's `auth`
- * binding, or a second copy of this package's, is a fallback rather than a crash.
+ * Duck-typed for the same reason `ModelUserProvider` duck-types its credential
+ * columns: two copies of @guren/server coexist through workspace symlinks, and
+ * a nominal check would silently skip the assignment.
  */
-export function configuredPasswordHasher(): PasswordHasher {
-  let auth: { hasher?: unknown } | undefined
-  try {
-    auth = getContainer().makeOptional<{ hasher?: unknown }>('auth')
-  } catch {
-    auth = undefined
-  }
-  if (typeof auth?.hasher === 'function') {
-    return (auth.hasher as () => PasswordHasher).call(auth)
-  }
-  return (fallback ??= new DefaultHasher())
+function passwordHasherSlot(model: unknown): PasswordHasherSlot | null {
+  const candidate = model as Partial<PasswordHasherSlot>
+  return typeof candidate?.explicitPasswordHasher === 'function' ? (candidate as PasswordHasherSlot) : null
+}
+
+/**
+ * Hand the app's hasher to a model class at bind time, rather than letting the
+ * class read a process-wide container per hash. A model that declares `static
+ * passwordHasher` keeps the author's choice. The slot is a static, so a model
+ * class shared by two Applications carries the last binding.
+ */
+export function bindPasswordHasher(model: unknown, hasher: PasswordHasher): void {
+  const slot = passwordHasherSlot(model)
+  if (!slot || slot.explicitPasswordHasher()) return
+  slot.configuredPasswordHasher = hasher
+}
+
+/** The model author's own `static passwordHasher`, which outranks anything an app configures. */
+export function declaredPasswordHasher(model: unknown): PasswordHasher | null {
+  return passwordHasherSlot(model)?.explicitPasswordHasher() ?? null
+}
+
+/** What {@link bindPasswordHasher} left on the class, for a provider built without one. */
+export function boundPasswordHasher(model: unknown): PasswordHasher | null {
+  return passwordHasherSlot(model)?.configuredPasswordHasher ?? null
 }

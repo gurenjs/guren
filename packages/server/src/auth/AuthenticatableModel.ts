@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { PasswordHasher } from './password/PasswordHasher'
-import { configuredPasswordHasher } from './password/configured-hasher'
+import { DefaultHasher } from './password/DefaultHasher'
 
 /**
  * Marks a payload whose password value is already hashed, out of band because
@@ -51,14 +51,20 @@ export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainOb
     return denied
   }
 
+  /** The model author's own choice, read by `ModelUserProvider` so one model and its provider cannot write at different parameters. */
+  static explicitPasswordHasher(): PasswordHasher | null {
+    return this.passwordHasher ?? null
+  }
+
   /**
-   * An explicit static `passwordHasher` wins; otherwise the hasher the app's
-   * `AuthManager` resolved, read per call through the process-wide container
-   * (a model class has no other path to the app). Not cached, so the class
-   * evaluating before `createApp()` cannot pin the fallback.
+   * Assigned by `AuthManager.useModel()` at bind time, never by the model's
+   * author. A class evaluating before `createApp()` therefore pins nothing, and
+   * a model no app ever bound falls through to scrypt (a seeder run bare, a unit test).
    */
+  static configuredPasswordHasher: PasswordHasher | null = null
+
   protected static resolvePasswordHasher(): PasswordHasher {
-    return this.passwordHasher ?? configuredPasswordHasher()
+    return this.passwordHasher ?? this.configuredPasswordHasher ?? new DefaultHasher()
   }
 
   /**

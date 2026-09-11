@@ -1,6 +1,7 @@
 import type { Model, PlainObject } from '@guren/orm'
 import type { PasswordHasher } from '../password/PasswordHasher'
-import { configuredPasswordHasher } from '../password/configured-hasher'
+import { boundPasswordHasher, declaredPasswordHasher } from '../password/configured-hasher'
+import { DefaultHasher } from '../password/DefaultHasher'
 import { looksLikePasswordHash } from '../password/hash-format'
 import type { AuthCredentials, Authenticatable } from '../types'
 import { BaseUserProvider } from './UserProvider'
@@ -63,7 +64,10 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     this.usernameColumn = options.usernameColumn ?? 'email'
     this.passwordColumn = options.passwordColumn ?? authModel?.resolvePasswordHashField() ?? 'passwordHash'
     this.rememberTokenColumn = options.rememberTokenColumn ?? authModel?.resolveRememberTokenField() ?? 'rememberToken'
-    this.hasher = options.hasher ?? configuredPasswordHasher()
+    // One hasher per model. A `static passwordHasher` the model's author pinned
+    // outranks the app's: rewriting its rows at the app default on every login
+    // is what `needsRehash()` would otherwise ask for, forever.
+    this.hasher = declaredPasswordHasher(model) ?? options.hasher ?? boundPasswordHasher(model) ?? new DefaultHasher()
     this.credentialsPasswordField = options.credentialsPasswordField ?? 'password'
   }
 
