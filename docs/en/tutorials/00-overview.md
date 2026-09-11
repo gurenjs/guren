@@ -76,7 +76,7 @@ Each chapter starts where the previous one ended. Follow them in order.
 
 Every command and file in these chapters is executed by the framework's own CI against the current release, in order, chapter by chapter, with each chapter's gate and build at the end. A framework change that would break a step fails the framework's build, not your afternoon. The Japanese translation is checked against the English text the same way: prose is translated, code is byte-identical.
 
-This edition is verified against `create-guren-app` 1.14 and Guren 2.21. If your scaffold prints a newer version, the chapters most likely still hold; if a step disagrees with what you see, the [CLI reference](../guides/cli.md) has the current command surface.
+This edition is verified against `create-guren-app` 1.14 and Guren 2.22. If your scaffold prints a newer version, the chapters most likely still hold; if a step disagrees with what you see, the [CLI reference](../guides/cli.md) has the current command surface.
 
 > [!TIP]
 > Want the ten-minute version first? [Getting Started](../guides/getting-started.md) scaffolds an app and shows one request end to end. Come back here when you want the whole thing.
