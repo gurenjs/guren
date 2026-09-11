@@ -1,4 +1,4 @@
-export { Event, resolveEventName } from './Event'
+export { Event } from './Event'
 export { EventManager, createEventManager } from './EventManager'
 export { Listener } from './Listener'
 export type { ListenerClass } from './Listener'

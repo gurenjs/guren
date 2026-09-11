@@ -50,7 +50,7 @@ export interface RegisteredListener<T extends Event = Event> {
    * removed after its own message renumbers every position behind it, and the
    * message still in flight would then name the wrong listener or none.
    */
-  queueSeq?: number
+  listenerSeq?: number
 }
 
 export interface EventSubscription {

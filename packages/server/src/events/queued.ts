@@ -8,7 +8,7 @@ interface QueuedEventPayload {
   /** The event's own enumerable fields; `EventManager.handleQueued()` rebuilds the instance. */
   event: Record<string, unknown>
   /** Which listener on that queue this message is for; see `EventManager.handleQueued()`. */
-  listenerIndex?: number
+  listenerSeq?: number
 }
 
 /**
@@ -24,7 +24,7 @@ class QueuedEventJob extends Job<QueuedEventPayload> {
       payload.queue,
       payload.eventName,
       payload.event,
-      payload.listenerIndex,
+      payload.listenerSeq,
     )
   }
 }
@@ -36,9 +36,9 @@ class QueuedEventJob extends Job<QueuedEventPayload> {
  */
 export function createQueueEventDispatcher(): QueueEventDispatcher {
   registerJob(QueuedEventJob)
-  return async (queue, eventName, event, listenerIndex) => {
+  return async (queue, eventName, event, listenerSeq) => {
     await QueuedEventJob.dispatch(
-      { queue, eventName, event: encodeEventData(event), listenerIndex },
+      { queue, eventName, event: encodeEventData(event), listenerSeq },
       { queue },
     )
   }

@@ -20,8 +20,8 @@ export class EventManager {
   /** Classes seen by `on()` or `registerEvent()`, so a queued event can be rebuilt as an instance on the worker. */
   private readonly eventClasses = new Map<string, EventClass>()
 
-  /** Next `queueSeq` per "<event>\u0000<queue>", never reset; see {@link RegisteredListener.queueSeq}. */
-  private readonly queueSeqCounters = new Map<string, number>()
+  /** Next `listenerSeq` per "<event>\u0000<queue>", never reset; see {@link RegisteredListener.listenerSeq}. */
+  private readonly listenerSeqCounters = new Map<string, number>()
 
   private queueDispatcher?: QueueEventDispatcher
   private queueReadiness?: QueueReadiness
@@ -40,7 +40,7 @@ export class EventManager {
     const registered: RegisteredListener<T> = {
       listener: listener as EventListener,
       options: { once: false, priority: 0, ...options },
-      queueSeq: options.queue === undefined ? undefined : this.nextQueueSeq(eventName, options.queue),
+      listenerSeq: options.queue === undefined ? undefined : this.nextListenerSeq(eventName, options.queue),
     }
 
     registeredListeners.push(registered as RegisteredListener)
@@ -183,7 +183,7 @@ export class EventManager {
       return false
     }
 
-    await dispatcher(queue, eventName, event, registered.queueSeq)
+    await dispatcher(queue, eventName, event, registered.listenerSeq)
     return true
   }
 
@@ -192,10 +192,10 @@ export class EventManager {
    * does not move the numbers. The worker counts its own the same way, which is
    * why both processes must register the queued listeners in the same order.
    */
-  private nextQueueSeq(eventName: string, queue: string): number {
+  private nextListenerSeq(eventName: string, queue: string): number {
     const key = `${eventName}\u0000${queue}`
-    const next = this.queueSeqCounters.get(key) ?? 0
-    this.queueSeqCounters.set(key, next + 1)
+    const next = this.listenerSeqCounters.get(key) ?? 0
+    this.listenerSeqCounters.set(key, next + 1)
     return next
   }
 
@@ -229,7 +229,7 @@ export class EventManager {
     listenerSeq?: number,
   ): Promise<void> {
     const onQueue = this.onQueue(eventName, queueName)
-    const named = listenerSeq === undefined ? undefined : onQueue.find((r) => r.queueSeq === listenerSeq)
+    const named = listenerSeq === undefined ? undefined : onQueue.find((r) => r.listenerSeq === listenerSeq)
 
     if (listenerSeq !== undefined && named === undefined) {
       throw new Error(
