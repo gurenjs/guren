@@ -1049,70 +1049,29 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     options: PaginateOptions<TRecordFor<T>> = {},
     queryOptions?: ModelQueryOptions,
   ): Promise<PaginatedResult<TRecordFor<T>>> {
-    // The count matters as much as the rows: an unscoped `meta.total` reports
-    // how many records the filter was meant to hide.
-    if (this.hasScopes()) {
-      const builder = this.newQuery(queryOptions)
-      if (options.where && Object.keys(options.where).length > 0) {
-        builder.where(options.where as Partial<Record<string, unknown>>)
+    return this.paginationQuery(options, queryOptions).paginate({ page: options.page, perPage: options.perPage })
+  }
+
+  /**
+   * The builder owns pagination: the count matters as much as the rows, and a
+   * second sanitise-count-slice here would agree with the builder's by
+   * inspection rather than by construction.
+   */
+  private static paginationQuery<T extends typeof Model>(
+    this: T,
+    options: PaginateOptions<TRecordFor<T>>,
+    queryOptions?: ModelQueryOptions,
+  ): QueryBuilder<TRecordFor<T>> {
+    const builder = this.newQuery(queryOptions)
+    if (options.where && Object.keys(options.where).length > 0) {
+      builder.where(options.where as Partial<Record<string, unknown>>)
+    }
+    if (options.orderBy) {
+      for (const clause of normalizeOrderBy(options.orderBy)) {
+        builder.orderBy(clause.column as keyof TRecordFor<T> & string, clause.direction)
       }
-      if (options.orderBy) {
-        for (const clause of normalizeOrderBy(options.orderBy)) {
-          builder.orderBy(clause.column as keyof TRecordFor<T> & string, clause.direction)
-        }
-      }
-      return builder.paginate({ page: options.page, perPage: options.perPage })
     }
-
-    const table = this.resolveTable()
-    const adapter = this.getAdapter()
-
-    const requestedPage = typeof options.page === 'number' ? options.page : 1
-    const sanitizedPage = Number.isFinite(requestedPage) && requestedPage >= 1 ? Math.floor(requestedPage) : 1
-
-    const requestedPerPage = typeof options.perPage === 'number' ? options.perPage : DEFAULT_PAGINATION_SIZE
-    const perPage = Number.isFinite(requestedPerPage) && requestedPerPage >= 1 ? Math.floor(requestedPerPage) : DEFAULT_PAGINATION_SIZE
-
-    let total = 0
-    if (typeof adapter.count === 'function') {
-      total = await adapter.count(table, options.where as WhereClauseFor<T>, queryOptions)
-    } else {
-      const records = options.where
-        ? await this.newQuery(queryOptions).where(options.where as Partial<Record<string, unknown>>).get()
-        : await this.all(queryOptions)
-      total = records.length
-    }
-
-    const totalPages = total === 0 ? 1 : Math.max(1, Math.ceil(total / perPage))
-    const currentPage = Math.min(sanitizedPage, totalPages)
-    const offset = (currentPage - 1) * perPage
-
-    const orderByClause = options.orderBy ? normalizeOrderBy(options.orderBy) : undefined
-    const findOptions: FindManyOptions<TRecordFor<T>> = {
-      where: options.where as WhereClauseFor<T> | undefined,
-      orderBy: orderByClause,
-      limit: perPage,
-      offset,
-    }
-
-    const data = this.applyReadTransformsMany(
-      await adapter.findMany(table, findOptions, queryOptions) as Array<TRecordFor<T>>,
-    )
-
-    const from = total === 0 ? 0 : offset + 1
-    const to = total === 0 ? 0 : offset + data.length
-
-    const meta: ModelPaginationMeta = {
-      total,
-      perPage,
-      currentPage,
-      totalPages,
-      hasMore: currentPage < totalPages,
-      from,
-      to: Math.min(to, total),
-    }
-
-    return { data, meta }
+    return builder
   }
 
   static async withPaginate<T extends typeof Model, K extends RelationPath<T>>(
@@ -1128,21 +1087,15 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     options: PaginateOptions<TRecordFor<T>> = {},
     queryOptions?: ModelQueryOptions,
   ): Promise<PaginatedResult<TRecordFor<T> & RelationTypePick<T, Names>>> {
-    const result = await this.paginate(options, queryOptions)
+    const builder = this.paginationQuery(options, queryOptions)
     const relationList = normalizeRelations(relations)
-
-    if (relationList.length === 0 || result.data.length === 0) {
-      return result as PaginatedResult<TRecordFor<T> & RelationTypePick<T, Names>>
+    if (relationList.length > 0) {
+      builder.with(...relationList)
     }
 
-    const records = result.data.map((record) => ({ ...record }))
-
-    await this.loadRelationsInto(records, relationList, queryOptions)
-
-    return {
-      data: records as Array<TRecordFor<T> & RelationTypePick<T, Names>>,
-      meta: result.meta,
-    }
+    return builder.paginate({ page: options.page, perPage: options.perPage }) as Promise<
+      PaginatedResult<TRecordFor<T> & RelationTypePick<T, Names>>
+    >
   }
 
   static async create<T extends typeof Model>(
