@@ -39,28 +39,26 @@ export class DefaultHasher implements PasswordHasher {
   readonly algorithm: PasswordHashAlgorithm
   private readonly bun: ScryptHasher | null
   private readonly node: NodeHasher
-  private readonly writer: ScryptHasher | NodeHasher
   private readonly testing: ScryptHasher | NodeHasher
 
   constructor(options: DefaultHasherOptions = {}) {
     this.algorithm = options.algorithm ?? 'scrypt'
-    const onBun = typeof Bun !== 'undefined'
-    this.bun = onBun ? new ScryptHasher() : null
+    this.bun = typeof Bun !== 'undefined' ? new ScryptHasher() : null
     this.node = new NodeHasher()
 
-    if (this.algorithm === 'argon2') {
-      if (!this.bun) {
-        throw new Error(
-          "The 'argon2' password hasher hashes through Bun.password, which this " +
-            "runtime does not have. Use the default ('scrypt'), which works everywhere.",
-        )
-      }
-      this.writer = this.bun
-      this.testing = new ScryptHasher(TESTING_ARGON2_OPTIONS)
-    } else {
-      this.writer = this.node
-      this.testing = new NodeHasher({ cost: TESTING_SCRYPT_COST })
+    if (this.algorithm === 'argon2' && !this.bun) {
+      throw new Error(
+        "The 'argon2' password hasher hashes through Bun.password, which this " +
+          "runtime does not have. Use the default ('scrypt'), which works everywhere.",
+      )
     }
+    this.testing =
+      this.algorithm === 'argon2' ? new ScryptHasher(TESTING_ARGON2_OPTIONS) : new NodeHasher({ cost: TESTING_SCRYPT_COST })
+  }
+
+  /** The constructor refuses `argon2` on a runtime without `Bun.password`, so `bun` is present here. */
+  private get writer(): ScryptHasher | NodeHasher {
+    return this.algorithm === 'argon2' ? this.bun! : this.node
   }
 
   hash(plain: string): Promise<string> {
