@@ -3,7 +3,6 @@ import { Container } from '@guren/core'
 
 const {
   eventManager,
-  queueManager,
   createEventManager,
   createMailManager,
   createQueueManager,
@@ -14,7 +13,6 @@ const {
   const queueManager = { driver: vi.fn() }
   return {
     eventManager,
-    queueManager,
     createEventManager: vi.fn(() => eventManager),
     createMailManager: vi.fn(() => ({ id: 'mail' })),
     createQueueManager: vi.fn(() => queueManager),
