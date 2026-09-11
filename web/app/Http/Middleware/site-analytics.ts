@@ -3,10 +3,10 @@ import { getWorkersEnv } from '@guren/plugin-cloudflare'
 
 /**
  * Cookie-less, server-side analytics into Workers Analytics Engine: this audience
- * blocks client beacons and AI agents run no JavaScript. No cookies, IPs, full
- * referrers or full user agents are stored, so no consent banner. SQL API: index1 ua
- * class; blob1..9 path, content, ua class, referrer host ('' = direct/same-site),
- * Accept-Language, country, method, initial|inertia, UA token; double1..2 status, ms.
+ * blocks beacons and agents run no JavaScript. No cookies, IPs, full referrers or
+ * full user agents are stored, so no consent banner. SQL API: index1 ua class;
+ * blob1..10 path, content, ua class, referrer host ('' = direct/same-site), language,
+ * country, method, initial|inertia, UA token, ref tag; double1..2 status, ms.
  */
 
 interface AnalyticsEngineDataset {
@@ -70,6 +70,15 @@ export function referrerHost(referrer: string | undefined, ownHost: string): str
   }
 }
 
+// No Zenn, dev.to or Bluesky referrer was recorded in the 30 days to 2026-09-11,
+// so outbound links name their channel instead. Only a short slug is kept.
+const REF_TAG_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/
+
+export function refTag(searchParams: URLSearchParams): string {
+  const raw = (searchParams.get('ref') || searchParams.get('utm_source') || '').trim().toLowerCase()
+  return REF_TAG_PATTERN.test(raw) ? raw : ''
+}
+
 export function primaryLanguage(acceptLanguage: string | undefined): string {
   if (!acceptLanguage) return ''
   const first = acceptLanguage.split(',', 1)[0] ?? ''
@@ -115,6 +124,7 @@ export function createSiteAnalyticsMiddleware(
               c.req.method,
               c.req.header('x-inertia') ? 'inertia' : 'initial',
               userAgentToken(userAgent),
+              refTag(url.searchParams),
             ],
             doubles: [c.res?.status ?? 0, Date.now() - startedAt],
           })

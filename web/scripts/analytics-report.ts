@@ -1,5 +1,6 @@
 // Weekly read-only report over the site's Workers Analytics Engine dataset.
-// The token needs the "Account Analytics: Read" permission.
+// The token needs the "Account Analytics: Read" permission. Tag outbound links
+// with `?ref=<channel>` (a lowercase slug) so their landings show up by channel.
 //
 //   CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... bun scripts/analytics-report.ts [--days 7]
 
@@ -62,6 +63,12 @@ const queries: Array<{ title: string; sql: string }> = [
           FROM ${DATASET} WHERE ${WINDOW} AND ${READER}
             AND blob4 != '' AND blob4 != '${FORGED_REFERRER}'
           GROUP BY referrer ORDER BY requests DESC LIMIT 15`,
+  },
+  {
+    title: 'Landings by ref tag (readers)',
+    sql: `SELECT blob10 AS ref, blob1 AS path, SUM(_sample_interval) AS requests
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND blob10 != ''
+          GROUP BY ref, path ORDER BY requests DESC LIMIT 20`,
   },
   {
     title: 'Languages (readers)',

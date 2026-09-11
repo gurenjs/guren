@@ -14,6 +14,7 @@ import {
   createSiteAnalyticsMiddleware,
   primaryLanguage,
   referrerHost,
+  refTag,
   userAgentToken,
 } from '../../app/Http/Middleware/site-analytics.js'
 
@@ -130,6 +131,22 @@ describe('primaryLanguage', () => {
   })
 })
 
+describe('refTag', () => {
+  it('should read the channel from ref, falling back to utm_source', () => {
+    expect(refTag(new URLSearchParams('ref=zenn'))).toBe('zenn')
+    expect(refTag(new URLSearchParams('utm_source=Newsletter'))).toBe('newsletter')
+    expect(refTag(new URLSearchParams('ref=x&utm_source=other'))).toBe('x')
+    expect(refTag(new URLSearchParams('ref=&utm_source=devto'))).toBe('devto')
+  })
+
+  it('should drop anything that is not a short slug', () => {
+    expect(refTag(new URLSearchParams(`ref=${encodeURIComponent('<script>')}`))).toBe('')
+    expect(refTag(new URLSearchParams('ref=someone@example.com'))).toBe('')
+    expect(refTag(new URLSearchParams(`ref=${'a'.repeat(33)}`))).toBe('')
+    expect(refTag(new URLSearchParams(''))).toBe('')
+  })
+})
+
 describe('createSiteAnalyticsMiddleware', () => {
   it('should write one data point with the documented layout', async () => {
     const points = await record('https://guren.dev/docs/guides/getting-started', {
@@ -144,7 +161,7 @@ describe('createSiteAnalyticsMiddleware', () => {
     expect(points).toHaveLength(1)
     const point = points[0]!
     expect(point.indexes).toEqual(['human'])
-    expect(point.blobs?.slice(0, 9)).toEqual([
+    expect(point.blobs?.slice(0, 10)).toEqual([
       '/docs/guides/getting-started',
       'docs',
       'human',
@@ -153,6 +170,7 @@ describe('createSiteAnalyticsMiddleware', () => {
       'JP',
       'GET',
       'initial',
+      '',
       '',
     ])
     expect(point.doubles?.[0]).toBe(200)
@@ -171,6 +189,14 @@ describe('createSiteAnalyticsMiddleware', () => {
     expect(agent?.indexes).toEqual(['ai-agent'])
     expect(agent?.blobs?.[1]).toBe('markdown')
     expect(agent?.blobs?.[8]).toBe('claude-user')
+  })
+
+  it('should record the ref tag while keeping the query out of the path', async () => {
+    const [point] = await record('https://guren.dev/docs/guides/cloudflare?ref=zenn', {
+      headers: { 'user-agent': 'Mozilla/5.0' },
+    })
+    expect(point?.blobs?.[0]).toBe('/docs/guides/cloudflare')
+    expect(point?.blobs?.[9]).toBe('zenn')
   })
 
   it('should cap oversized paths so the data point stays writable', async () => {
