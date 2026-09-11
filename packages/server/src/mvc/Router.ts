@@ -284,7 +284,7 @@ export interface RouteDefinition {
 }
 
 /** Chainable builder for configuring a registered route. */
-export interface RouteBuilder<M extends string = never> {
+export interface RouteBuilder<in M extends string = never> {
   name(routeName: string): RouteBuilder<M>
   /** Attach middleware to this specific route. See {@link RouteMiddlewareInput}. */
   middleware(...items: RouteMiddlewareInput<M>[]): RouteBuilder<M>
@@ -364,15 +364,14 @@ export interface ResourceRouteOptions {
   agent?: Partial<Record<ResourceAction, AgentRouteMetadata>>
 }
 
-/** Instance-based router for app-local route registration and mounting. */
-export class Router<M extends string = never> {
-  /**
-   * Without this, `M` appears only in method parameters, which TypeScript
-   * compares bivariantly, so a `Router<never>` passes as a `Router<'auth'>` and
-   * fails at `mount()`. A function-typed property is checked contravariantly:
-   * a router carrying more aliases still substitutes for one needing fewer.
-   */
-  declare readonly __middlewareAliases?: (name: M) => void
+/**
+ * Instance-based router for app-local route registration and mounting.
+ *
+ * `in M`: `M` appears only in method parameters, which TypeScript compares
+ * bivariantly, so without the annotation a `Router<never>` passes as a
+ * `Router<'auth'>` and the missing alias only surfaces at `mount()`.
+ */
+export class Router<in M extends string = never> {
   private readonly registry: RegisteredRoute[] = []
   private readonly prefixStack: string[] = []
   private readonly namedRoutes: Map<string, RegisteredRoute> = new Map()
@@ -907,7 +906,7 @@ function applyRouteContract(route: RegisteredRoute, options: RouteContractOption
   }
 }
 
-class RouterMiddlewareGroupBuilder<M extends string = never> {
+class RouterMiddlewareGroupBuilder<in M extends string = never> {
   constructor(
     private readonly router: Router<M>,
     private readonly items: readonly MiddlewareScopeEntry[],

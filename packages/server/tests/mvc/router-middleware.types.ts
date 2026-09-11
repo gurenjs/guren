@@ -1,7 +1,8 @@
 import type { MiddlewareHandler } from 'hono'
 import { requireVerifiedEmail } from '../../src/auth/email-verification'
+import type { RouteRegistration } from '../../src/http/Application'
 import { Controller } from '../../src/mvc/Controller'
-import { Router } from '../../src/mvc/Router'
+import { Router, type RouteBuilder } from '../../src/mvc/Router'
 
 /**
  * A type-only fixture: nothing here is mounted and `bun run typecheck` is the
@@ -78,9 +79,9 @@ export const unregisteredAliasRejected = new Router().aliasMiddleware('auth', au
 unregisteredAliasRejected.middleware('nope')
 
 /**
- * Method parameters are compared bivariantly, so without `Router`'s phantom
- * property a `Router<never>` flows into a `Router<'auth'>` slot and fails at
- * `mount()`. With it the parameter is contravariant: a router needing the
+ * Method parameters are compared bivariantly, so without `Router`'s `in M`
+ * annotation a `Router<never>` flows into a `Router<'auth'>` slot and fails at
+ * `mount()`. Annotated, the parameter is contravariant: a router needing the
  * alias rejects one that never registered it, and one carrying extra aliases
  * still passes.
  */
@@ -93,11 +94,51 @@ const plainRouter = new Router()
 // @ts-expect-error a router that never aliased 'auth' cannot satisfy a registrar that reads it
 registrarNeedingAuth(plainRouter)
 
-// @ts-expect-error nor can one that registered a different alias
+/**
+ * The residual hole, pinned as compiling: an inline `new Router()` has no
+ * annotation to fix `M`, so it is inferred from the parameter and the missing
+ * alias still reaches `mount()`. Contravariance cannot close this; only a
+ * router whose `M` is already fixed is checked.
+ */
+registrarNeedingAuth(new Router())
+
+// @ts-expect-error 'guest' and 'auth' are disjoint literals, rejected either way round — not a variance case
 registrarNeedingAuth(new Router().aliasMiddleware('guest', auditLogger))
 
 registrarNeedingAuth(new Router().aliasMiddleware('auth', auditLogger))
 registrarNeedingAuth(new Router().aliasMiddleware('auth', auditLogger).aliasMiddleware('guest', rateLimiter))
+
+/** A `RouteBuilder` carries the same alias set, and the same annotation. */
+export function builderNeedingAuth(builder: RouteBuilder<'auth'>): void {
+  builder.middleware('auth')
+}
+const plainBuilder = new Router().get('/health', [DemoController, 'index'])
+// @ts-expect-error a builder from a router without 'auth' cannot satisfy one that reads it
+builderNeedingAuth(plainBuilder)
+builderNeedingAuth(new Router().aliasMiddleware('auth', auditLogger).get('/dashboard', [DemoController, 'index']))
+
+/**
+ * `RouteRegistration` names `Router`: an entry registrar is handed a bare one
+ * and registers the aliases itself, so a registrar that annotates aliases does
+ * not fit that slot. `createApp({ routes })` takes the outer one.
+ */
+// @ts-expect-error a registrar reading 'auth' cannot be the app's entry registrar
+export const authRegistrarAsEntry: RouteRegistration = registrarNeedingAuth
+
+/** `Router<string>` asks for every possible alias, so nothing satisfies it. Spell "any aliases" `Router`. */
+export function registrarNeedingEveryAlias(router: Router<string>): void {
+  router.get('/health', [DemoController, 'index'])
+}
+// @ts-expect-error a router carrying one alias does not carry all of them
+registrarNeedingEveryAlias(new Router().aliasMiddleware('auth', auditLogger))
+
+/** A `group()` callback cannot annotate aliases the router it is opened on lacks. */
+export function groupCallbackWideningAliases(router: Router<'auth'>): void {
+  // @ts-expect-error the callback reads 'guest', which this router never registered
+  router.middleware('auth').group((inner: Router<'auth' | 'guest'>) => {
+    inner.get('/dashboard', [DemoController, 'index'])
+  })
+}
 
 /** The documented flow: capture the return, which carries the alias in its type. */
 export function documentedFlow(baseRouter: Router): void {
@@ -121,7 +162,7 @@ export function registrarNeedingNone(router: Router): void {
 }
 registrarNeedingNone(new Router().aliasMiddleware('auth', auditLogger))
 
-/** The scope builder inherits the variance through the router it wraps. */
+/** The scope builder carries the same annotation, and the router it wraps would give it anyway. */
 export function scopeNeedingAuth(scope: ReturnType<Router<'auth'>['middleware']>): void {
   scope.get('/dashboard', [DemoController, 'index'])
 }
