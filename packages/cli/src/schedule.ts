@@ -22,8 +22,12 @@ interface TaskInfo {
   expression: string
   timezone?: string
   nextRun?: Date
-  /** Execute the task (bound to ScheduledTask.run() when available). */
-  run?: () => Promise<unknown>
+  /**
+   * Execute the task (bound to `ScheduledTask.tryRun()` when available).
+   * Resolves false when the task's own guards declined it; a plain definition
+   * has no guards to decline with, so it resolves undefined.
+   */
+  run?: () => Promise<boolean | undefined>
   /** Whether the cron expression matches the given time. */
   isDue?: (date: Date) => boolean
   withoutOverlapping: boolean
@@ -40,7 +44,8 @@ type ScheduledTaskLike = TaskFlags & {
   getExpression?: () => string
   getTimezone?: () => string | undefined
   getDefinition?: () => TaskFlags
-  run?: () => Promise<unknown>
+  run?: () => Promise<void>
+  tryRun?: () => Promise<boolean>
   isDue?: (date?: Date) => boolean
   toTask?: () => ScheduledTaskLike
   name?: string
@@ -59,7 +64,7 @@ function normalizeTask(raw: ScheduledTaskLike): TaskInfo {
       name: task.getName(),
       expression: task.getExpression(),
       timezone: task.getTimezone?.(),
-      run: typeof task.run === 'function' ? () => task.run!() : undefined,
+      run: runnerFor(task),
       isDue: typeof task.isDue === 'function' ? (date) => task.isDue!(date) : undefined,
       withoutOverlapping: definition.withoutOverlapping === true,
       onOneServer: definition.onOneServer === true,
@@ -75,6 +80,13 @@ function normalizeTask(raw: ScheduledTaskLike): TaskInfo {
     withoutOverlapping: task.withoutOverlapping === true,
     onOneServer: task.onOneServer === true,
   }
+}
+
+/** `tryRun()` when the task has one; a scheduler built before it reports nothing either way. */
+function runnerFor(task: ScheduledTaskLike): (() => Promise<boolean | undefined>) | undefined {
+  if (typeof task.tryRun === 'function') return () => task.tryRun!()
+  if (typeof task.run === 'function') return async () => { await task.run!(); return undefined }
+  return undefined
 }
 
 /** The listing's Flags cell: "-" when neither guard is set. */
@@ -458,8 +470,13 @@ export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promi
 
     try {
       const startedAt = Date.now()
-      await task.run()
-      consola.success(`  Ran: ${task.name} (${Date.now() - startedAt}ms)`)
+      const ran = await task.run()
+      const elapsed = `${Date.now() - startedAt}ms`
+      if (ran === false) {
+        consola.info(`  Skipped: ${task.name} (when()/skip() or the overlap guard declined it)`)
+      } else {
+        consola.success(`  Ran: ${task.name} (${elapsed})`)
+      }
     } catch (error) {
       failures += 1
       consola.error(`  Failed: ${task.name} — ${describeError(error)}`)

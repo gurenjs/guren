@@ -17,7 +17,7 @@ export interface TaskDefinition {
    */
   overlapExpiresAt?: number
 
-  /** Runs only on the server that wins the tick's `SchedulerLock`; needs `SchedulerOptions.lock`. */
+  /** Runs only on the server that wins the tick's `SchedulerLock`; needs a name to key it on. */
   onOneServer?: boolean
 
   when?: () => boolean | Promise<boolean>
@@ -53,10 +53,18 @@ export interface SchedulerOptions {
   logger?: (message: string) => void
 
   /**
-   * Required once any task calls `runOnOneServer()`: `start()` and
-   * `runDueTasks()` refuse such a task without one rather than run it everywhere.
+   * Backs `runOnOneServer()`. Defaults to a `MemorySchedulerLock`, which holds
+   * for one process only; a multi-server deploy needs a shared one
+   * (`RedisSchedulerLock`) or the task runs on every server.
    */
   lock?: SchedulerLock
+
+  /**
+   * Prefixes every `runOnOneServer()` key. Two apps sharing one lock store must
+   * set distinct prefixes, or a task name they have in common claims one tick
+   * between them. @default 'schedule:'
+   */
+  lockPrefix?: string
 }
 
 export interface ParsedCron {

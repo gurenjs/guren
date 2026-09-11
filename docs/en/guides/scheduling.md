@@ -65,7 +65,7 @@ process.on('SIGTERM', () => {
 - **Cloudflare Workers**: the worker `guren cloudflare:build` generates exports a `scheduled` handler; a `triggers.crons` entry in `wrangler.jsonc` drives it. See [Cloudflare Workers Deployment](./cloudflare.md#scheduled-tasks).
 - **AWS Lambda**: `createScheduleHandler(scheduler)` from `@guren/core/lambda`, wired to an EventBridge rule. See [Serverless](./serverless.md).
 
-Each firing runs only the tasks due at that moment, so the platform trigger must be at least as frequent as your finest task. `preventOverlapping()` is an in-memory flag on the task, so it does not carry across firings on a runtime that does not keep the process alive. `runOnOneServer()` keeps its claim in the scheduler's `lock`, which outlives the firing when the lock's store does. `schedule.command()` shells out through `node:child_process` and does not work on Workers, so use `schedule.call()` or `schedule.job()` there.
+Each firing runs only the tasks due at that moment, so the platform trigger must be at least as frequent as your finest task. `preventOverlapping()` is an in-memory flag on the task, so it does not carry across firings on a runtime that does not keep the process alive. `runOnOneServer()` keeps its claim in the scheduler's `lock`, which outlives the firing when the lock's store does; the default in-process lock does not. `schedule.command()` shells out through `node:child_process` and does not work on Workers, so use `schedule.call()` or `schedule.job()` there.
 
 ## Defining Schedules
 
@@ -244,7 +244,9 @@ scheduler.schedule((schedule) => {
 
 The claim is keyed on the task name and the due minute, so the task needs a `.name()`. It is held for an hour and is not released when the run finishes: a release would let a server whose clock reaches that minute a few seconds later run the task again. A server that wins the claim but declines the run (its own overlap guard, or `when()` / `skip()`) gives the claim back, so another server can still take that minute.
 
-`MemorySchedulerLock` is the single-process lock, for one server or for tests. A scheduler holding a `runOnOneServer()` task with no `lock` throws at `start()` and `runDueTasks()` rather than run it everywhere. For a store other than Redis, implement `SchedulerLock` yourself: `acquire(key, ttlSeconds)` has to be an atomic set-if-absent with expiry, and `release(key)` deletes the key.
+`MemorySchedulerLock` is the single-process lock, for one server or for tests, and it is what a scheduler given no `lock` uses. On a second server that guards nothing, so the first `runOnOneServer()` task on an implicit lock prints a warning naming `createScheduler({ lock })` and `RedisSchedulerLock`. A task with no `.name()`, or an empty one, is refused at `start()` and `runDueTasks()`: there is nothing to key the claim on. For a store other than Redis, implement `SchedulerLock` yourself: `acquire(key, ttlSeconds)` has to be an atomic set-if-absent with expiry, and `release(key)` deletes the key.
+
+Every key carries the scheduler's `lockPrefix` (`'schedule:'` by default). Two apps sharing one lock store must set distinct prefixes, or a task name they have in common claims one tick between the two of them.
 
 ### Conditional Execution
 

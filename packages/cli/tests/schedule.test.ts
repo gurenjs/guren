@@ -322,6 +322,20 @@ export function registerAppSchedules(scheduler) {
     expect(listed()).toContain('Ran: app:report')
   })
 
+  test('reports a task its own guards declined as skipped, not as run', async () => {
+    writeFileSync(kernelPath, `
+export function registerAppSchedules(scheduler) {
+  scheduler.schedule((schedule) => {
+    schedule.call(() => {}).hourly().name('app:report').skip(() => true)
+  })
+}
+`)
+
+    await runScheduledTasks({ appRoot: testDir, force: true })
+    expect(listed()).toContain('Skipped: app:report')
+    expect(listed()).not.toContain('Ran: app:report')
+  })
+
   test('counts a registrar exported twice once', async () => {
     writeFileSync(kernelPath, `
 export function registerAppSchedules(scheduler) {

@@ -168,6 +168,7 @@ const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
   MemoryPasswordResetStore: 'memoryStore',
   MemoryEmailVerificationStore: 'memoryStore',
   MemoryRateLimitStore: 'memoryStore',
+  MemorySchedulerLock: 'memoryStore',
   MemoryStore: 'memoryStore',
   MemoryDriver: 'memoryStore',
   AutoDiscovery: 'discovery',

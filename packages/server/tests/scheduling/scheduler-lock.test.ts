@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, beforeEach } from 'bun:test'
 import { MemorySchedulerLock, ScheduledTask, Scheduler, type SchedulerLock } from '../../src/scheduling'
 import { RedisSchedulerLock } from '../../src/redis/RedisSchedulerLock'
+import { resetWarnOnce } from '../../src/support/warn-once'
 
 const MINUTE = 60_000
 
@@ -30,13 +31,13 @@ describe('ScheduledTask overlap guard', () => {
       },
     })
 
-    const first = task.run(tick(0))
-    expect(await task.run(tick(1))).toBe(false)
+    const first = task.tryRun(tick(0))
+    expect(await task.tryRun(tick(1))).toBe(false)
     expect(runs).toBe(1)
 
     gate.resolve()
     expect(await first).toBe(true)
-    expect(await task.run(tick(2))).toBe(true)
+    expect(await task.tryRun(tick(2))).toBe(true)
     expect(runs).toBe(2)
   })
 
@@ -53,9 +54,9 @@ describe('ScheduledTask overlap guard', () => {
       },
     })
 
-    void task.run(tick(0))
-    expect(await task.run(tick(9))).toBe(false)
-    expect(await task.run(tick(10))).toBe(true)
+    void task.tryRun(tick(0))
+    expect(await task.tryRun(tick(9))).toBe(false)
+    expect(await task.tryRun(tick(10))).toBe(true)
     expect(runs).toBe(2)
 
     hung.resolve()
@@ -74,21 +75,58 @@ describe('ScheduledTask overlap guard', () => {
       },
     })
 
-    const stale = task.run(tick(0))
-    const successor = task.run(tick(10))
-    expect(await task.run(tick(11))).toBe(false)
+    const stale = task.tryRun(tick(0))
+    const successor = task.tryRun(tick(10))
+    expect(await task.tryRun(tick(11))).toBe(false)
 
     staleGate.resolve()
     expect(await stale).toBe(true)
-    expect(await task.run(tick(12))).toBe(false)
+    expect(await task.tryRun(tick(12))).toBe(false)
 
     successorGate.resolve()
     expect(await successor).toBe(true)
     expect(task.isCurrentlyRunning()).toBe(false)
   })
+
+  it('releases the guard when when() rejects, rather than pinning the task forever', async () => {
+    let failNext = true
+    let runs = 0
+    const task = new ScheduledTask({
+      expression: '* * * * *',
+      withoutOverlapping: true,
+      when: () => {
+        if (failNext) throw new Error('probe unavailable')
+        return true
+      },
+      callback: async () => {
+        runs += 1
+      },
+    })
+
+    await expect(task.tryRun(tick(0))).rejects.toThrow('probe unavailable')
+    expect(task.isCurrentlyRunning()).toBe(false)
+
+    failNext = false
+    expect(await task.tryRun(tick(1))).toBe(true)
+    expect(runs).toBe(1)
+  })
+
+  it('run() resolves to undefined whether or not the callback ran', async () => {
+    const task = new ScheduledTask({
+      expression: '* * * * *',
+      skip: () => true,
+      callback: async () => {},
+    })
+
+    expect(await task.run(tick(0))).toBeUndefined()
+  })
 })
 
 describe('Scheduler.runDueTasks', () => {
+  beforeEach(() => {
+    resetWarnOnce()
+  })
+
   it('runs due tasks concurrently, so a slow task does not hold back the rest', async () => {
     const slow = deferred()
     const fastDone = deferred()
@@ -121,24 +159,130 @@ describe('Scheduler.runDueTasks', () => {
     expect(order).toEqual(['slow:start', 'fast', 'slow:end'])
   })
 
-  it('refuses a runOnOneServer() task without a lock, at start() and at runDueTasks()', async () => {
-    const scheduler = new Scheduler()
+  it('runs a runOnOneServer() task on the default in-process lock, warning that it spans one process', async () => {
+    const warnings: string[] = []
+    const warn = console.warn
+    console.warn = (message: string) => warnings.push(message)
+    let runs = 0
+
+    try {
+      const scheduler = new Scheduler()
+      scheduler.schedule((schedule) => {
+        schedule
+          .call(async () => {
+            runs += 1
+          })
+          .everyMinute()
+          .name('report')
+          .runOnOneServer()
+      })
+
+      await scheduler.runDueTasks(tick(0))
+      await scheduler.runDueTasks(tick(0))
+    } finally {
+      console.warn = warn
+    }
+
+    expect(runs).toBe(1)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('createScheduler({ lock })')
+    expect(warnings[0]).toContain('RedisSchedulerLock')
+  })
+
+  it('refuses an unnamed or empty-named runOnOneServer() task, since the lock is keyed on the name', async () => {
+    const unnamed = new Scheduler({ lock: new MemorySchedulerLock() })
+    unnamed.schedule((schedule) => {
+      schedule.call(async () => {}).everyMinute().runOnOneServer()
+    })
+    await expect(unnamed.runDueTasks(tick(0))).rejects.toThrow('without a name')
+
+    const blank = new Scheduler({ lock: new MemorySchedulerLock() })
+    blank.schedule((schedule) => {
+      schedule.call(async () => {}).everyMinute().name('').runOnOneServer()
+    })
+    await expect(blank.runDueTasks(tick(0))).rejects.toThrow('without a name')
+    expect(() => blank.start()).toThrow('without a name')
+  })
+
+  it('reports a rejecting acquire as a lock failure and does not run the task', async () => {
+    const log: string[] = []
+    let runs = 0
+    const lock: SchedulerLock = {
+      acquire: async () => {
+        throw new Error('redis down')
+      },
+      release: async () => {},
+    }
+    const scheduler = new Scheduler({ lock, logger: (message) => log.push(message) })
+    scheduler.schedule((schedule) => {
+      schedule
+        .call(async () => {
+          runs += 1
+        })
+        .everyMinute()
+        .name('report')
+        .runOnOneServer()
+    })
+
+    await scheduler.runDueTasks(tick(0))
+
+    expect(runs).toBe(0)
+    expect(log).toEqual(['Lock failed: report - redis down'])
+  })
+
+  it('reports a rejecting release without calling it a task failure', async () => {
+    const log: string[] = []
+    const lock: SchedulerLock = {
+      acquire: async () => true,
+      release: async () => {
+        throw new Error('redis down')
+      },
+    }
+    const scheduler = new Scheduler({ lock, logger: (message) => log.push(message) })
+    scheduler.schedule((schedule) => {
+      schedule.call(async () => {}).everyMinute().name('report').runOnOneServer().skip(() => true)
+    })
+
+    await scheduler.runDueTasks(tick(0))
+
+    expect(log).toContain('Lock release failed: report - redis down')
+    expect(log.some((line) => line.startsWith('Task failed'))).toBe(false)
+  })
+
+  it('reports a task whose callback throws instead of swallowing it in allSettled', async () => {
+    const log: string[] = []
+    const scheduler = new Scheduler({ logger: (message) => log.push(message) })
+    scheduler.schedule((schedule) => {
+      schedule
+        .call(async () => {
+          throw new Error('boom')
+        })
+        .everyMinute()
+        .name('report')
+    })
+
+    await scheduler.runDueTasks(tick(0))
+
+    expect(log).toContain('Task failed: report - boom')
+  })
+
+  it('namespaces the lock key with lockPrefix, so two apps on one store do not collide', async () => {
+    const claimed: string[] = []
+    const lock: SchedulerLock = {
+      acquire: async (key) => {
+        claimed.push(key)
+        return true
+      },
+      release: async () => {},
+    }
+    const scheduler = new Scheduler({ lock, lockPrefix: 'billing:' })
     scheduler.schedule((schedule) => {
       schedule.call(async () => {}).everyMinute().name('report').runOnOneServer()
     })
 
-    expect(() => scheduler.start()).toThrow(/runOnOneServer\(\).*report.*createScheduler\(\{ lock \}\)/s)
-    expect(scheduler.getIsRunning()).toBe(false)
-    await expect(scheduler.runDueTasks(tick(0))).rejects.toThrow('runOnOneServer()')
-  })
+    await scheduler.runDueTasks(tick(0))
 
-  it('refuses an unnamed runOnOneServer() task, since the lock is keyed on the name', async () => {
-    const scheduler = new Scheduler({ lock: new MemorySchedulerLock() })
-    scheduler.schedule((schedule) => {
-      schedule.call(async () => {}).everyMinute().runOnOneServer()
-    })
-
-    await expect(scheduler.runDueTasks(tick(0))).rejects.toThrow('without a name')
+    expect(claimed).toEqual([`billing:report:${tick(0).getTime() / MINUTE}`])
   })
 
   it('runs a runOnOneServer() task on the one server that wins the tick', async () => {
@@ -209,6 +353,20 @@ describe('MemorySchedulerLock', () => {
 
     await lock.release('b')
     expect(await lock.acquire('b', 60)).toBe(true)
+  })
+
+  it('drops expired keys on acquire, so a per-minute key does not grow the map forever', async () => {
+    let now = 0
+    const lock = new MemorySchedulerLock(() => now)
+    const held = (lock as unknown as { held: Map<string, number> }).held
+
+    for (let minute = 0; minute < 10; minute += 1) {
+      now = minute * 60_000
+      expect(await lock.acquire(`schedule:report:${minute}`, 60)).toBe(true)
+    }
+
+    // Without the sweep this is 10: one key per minute, none of them released.
+    expect(held.size).toBe(1)
   })
 })
 
