@@ -91,17 +91,25 @@ health.register(new CacheCheck(cache.store(), {
 }))
 ```
 
+An object written against the old `get` / `put` / `forget` shape no longer
+compiles against the constructor, and the check reports it unhealthy: the
+methods it calls are not there. `StorageCheck` takes a `StorageDriver` the same
+way, and its `put` must resolve the stored path.
+
 ### Storage Check
 
-Verifies storage driver connectivity:
+Writes, reads back, and deletes one file on a `StorageDriver`. Pass the disk
+itself (`storage.disk()` from the `StorageManager`, or any driver you built),
+not the manager:
 
 ```typescript
 import { StorageCheck } from '@guren/core'
 
-health.register(new StorageCheck(storage, {
-  name: 'storage',        // Custom name (default: 'storage')
-  disk: 'local',          // Disk to check (default: default disk)
-  testPath: '.health',    // Test file path (default: '.health')
+const storage = app.container.make('storage') // StorageManager
+
+health.register(new StorageCheck(storage.disk(), {
+  name: 'storage',                    // Custom name (default: 'storage')
+  testPath: '__health_check__.txt',   // Test file path (default: '__health_check__.txt')
 }))
 ```
 

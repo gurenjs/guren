@@ -89,17 +89,20 @@ health.register(new CacheCheck(cache.store(), {
 }))
 ```
 
+旧来の `get` / `put` / `forget` を持つオブジェクトはコンストラクタの型に合わなくなり、実行時にはチェックが unhealthy を返します。呼び出すメソッドがそこに無いためです。`StorageCheck` も同様に `StorageDriver` を受け取り、その `put` は保存先のパスを返す必要があります。
+
 ### ストレージチェック
 
-ストレージドライバーへの接続を確かめます。
+`StorageDriver` にファイルをひとつ書き込み、読み戻して削除します。渡すのはマネージャではなくディスク本体です（`StorageManager` の `storage.disk()`、または自作のドライバ）。
 
 ```typescript
 import { StorageCheck } from '@guren/core'
 
-health.register(new StorageCheck(storage, {
-  name: 'storage',        // カスタム名（デフォルト: 'storage'）
-  disk: 'local',          // チェックするディスク（デフォルト: デフォルトディスク）
-  testPath: '.health',    // テストファイルパス（デフォルト: '.health'）
+const storage = app.container.make('storage') // StorageManager
+
+health.register(new StorageCheck(storage.disk(), {
+  name: 'storage',                    // カスタム名（デフォルト: 'storage'）
+  testPath: '__health_check__.txt',   // テストファイルパス（デフォルト: '__health_check__.txt'）
 }))
 ```
 

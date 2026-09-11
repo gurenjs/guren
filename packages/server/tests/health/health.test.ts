@@ -14,6 +14,7 @@ import {
 } from '../../src/health'
 import type { CacheStoreInterface, CheckResult, HealthStatus } from '../../src/health'
 import { MemoryStore } from '../../src/cache'
+import { MemoryDriver } from '../../src/storage'
 
 describe('HealthCheck', () => {
   class TestCheck extends HealthCheck {
@@ -520,12 +521,21 @@ describe('CacheCheck', () => {
 })
 
 describe('StorageCheck', () => {
+  it('should accept the built-in storage driver and leave no file behind', async () => {
+    const disk = new MemoryDriver()
+    const check = new StorageCheck(disk)
+    const result = await check.check()
+
+    expect(result.status).toBe('healthy')
+    expect(await disk.exists('__health_check__.txt')).toBe(false)
+  })
+
   it('should return healthy when storage operations succeed', async () => {
     let stored: string | null = null
     const storage = {
       put: mock((path: string, contents: string) => {
         stored = contents
-        return Promise.resolve()
+        return Promise.resolve(path)
       }),
       get: mock(() => Promise.resolve(stored ? Buffer.from(stored) : null)),
       delete: mock(() => Promise.resolve(true)),
@@ -542,7 +552,7 @@ describe('StorageCheck', () => {
 
   it('should return degraded when read/write mismatch', async () => {
     const storage = {
-      put: mock(() => Promise.resolve()),
+      put: mock(() => Promise.resolve('path')),
       get: mock(() => Promise.resolve(Buffer.from('wrong'))),
       delete: mock(() => Promise.resolve(true)),
     }
