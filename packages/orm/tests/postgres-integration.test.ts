@@ -232,8 +232,9 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
 
       // The premise: nothing outside the transaction can see either row yet, so a
       // relation query on the pool finds no author. If that stops holding, the
-      // assertion below passes for free.
-      const fromPool = await Author.find(author.id)
+      // assertion below passes for free. A bare call here would join the ambient
+      // transaction, which is why the read steps outside it explicitly.
+      const fromPool = await Author.outsideTransaction(() => Author.find(author.id))
       expect(fromPool).toBeNull()
 
       const [loaded] = (await Article.newQuery({ trx })
@@ -380,9 +381,14 @@ describePostgres('SoftDeletes inside a transaction (requires POSTGRES_URL)', () 
     })
   }
 
-  /** Reads on the pool, past the softDelete scope that would otherwise hide the row. */
+  /**
+   * Reads on the pool, past the softDelete scope that would otherwise hide the
+   * row, and outside the ambient transaction a bare call would otherwise join.
+   */
   async function fromPool(id: number): Promise<NoteRecord | null> {
-    const [row] = (await Note.withoutGlobalScopes().where('id', id).get()) as NoteRecord[]
+    const [row] = await Note.outsideTransaction(
+      () => Note.withoutGlobalScopes().where('id', id).get() as Promise<NoteRecord[]>,
+    )
     return row ?? null
   }
 
@@ -446,8 +452,8 @@ describePostgres('SoftDeletes inside a transaction (requires POSTGRES_URL)', () 
       expect(await Note.onlyTrashed({ trx }).where('id', note.id).get()).toHaveLength(1)
       expect(await Note.withTrashed({ trx }).where('id', note.id).get()).toHaveLength(1)
 
-      // Without the handle these read the pool, where the row does not exist yet.
-      expect(await Note.onlyTrashed().where('id', note.id).get()).toHaveLength(0)
+      // Outside the transaction the read hits the pool, where the row does not exist yet.
+      expect(await Note.outsideTransaction(() => Note.onlyTrashed().where('id', note.id).get())).toHaveLength(0)
     })
   })
 })

@@ -234,6 +234,8 @@ If an error is thrown in the callback, Guren rolls back the transaction.
 
 Inside the callback, a model call with no `{ trx }` runs on the open transaction as well. Passing the handle is still correct, and the transaction-bound scope below does it for you. A call that leaves it off also stays inside the transaction instead of going to the pool, where a single-connection pool would make it wait on the transaction that owns the connection.
 
+To read committed state from inside the callback, wrap the read in `Model.outsideTransaction()`: calls inside it go to the pool instead of joining the open transaction, which is how an idempotency check or a test premise sees what other connections see. On SQLite the pool is the transaction's own connection, so the read still sees the uncommitted writes.
+
 A `Model.transaction()` opened inside another one joins it rather than opening a second one: the inner callback receives the same handle, and its writes commit or roll back with the outer transaction. There is no savepoint, so an inner error the outer callback catches leaves the inner writes in place until the outer transaction settles.
 
 SQLite holds a single connection, which takes one transaction at a time, so concurrent transactions are queued and run one after another, each committing or rolling back on its own. Awaiting non-database work inside the callback is fine; it only makes the next transaction wait.

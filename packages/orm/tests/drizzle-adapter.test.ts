@@ -689,6 +689,41 @@ describe('DrizzleAdapter', () => {
       expect(selectedOn).toEqual(['trx', 'trx', 'root'])
     })
 
+    it('routes a query inside outsideTransaction() to the root database', async () => {
+      const { db } = createMockDatabase({ records: [{ id: 1, name: 'Alice', email: null }] })
+      const selectedOn: string[] = []
+      const trxHandle = {
+        ...db,
+        select: () => {
+          selectedOn.push('trx')
+          return db.select()
+        },
+      }
+      DrizzleAdapter.configure({
+        ...db,
+        select: () => {
+          selectedOn.push('root')
+          return db.select()
+        },
+        transaction: async (callback: (trx: unknown) => unknown) => callback(trxHandle),
+      } as never)
+
+      const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
+      const runOutside = DrizzleAdapter.outsideTransaction as NonNullable<typeof DrizzleAdapter.outsideTransaction>
+      const table = createMockTable()
+      await runTransaction(async () => {
+        await DrizzleAdapter.findMany(table)
+        await runOutside(async () => {
+          await DrizzleAdapter.findMany(table)
+          // An explicit handle still wins over the cleared ambient scope.
+          await DrizzleAdapter.findMany(table, undefined, { trx: trxHandle })
+        })
+        await DrizzleAdapter.findMany(table)
+      })
+
+      expect(selectedOn).toEqual(['trx', 'root', 'trx', 'trx'])
+    })
+
     it('throws when a database that commits without awaiting exposes no run()', async () => {
       const { db } = createMockDatabase()
       // The bun-sqlite shape: the callback's promise is committed on, never awaited.
