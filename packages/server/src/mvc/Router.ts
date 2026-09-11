@@ -283,7 +283,13 @@ export interface RouteDefinition {
   deprecated?: boolean
 }
 
-/** Chainable builder for configuring a registered route. */
+/**
+ * Chainable builder for configuring a registered route.
+ *
+ * `in M`: `M`'s only independent occurrence is a method parameter (the
+ * `RouteBuilder<M>` returns restate it), compared bivariantly. Without the
+ * annotation a `Router<never>` passes as a `Router<'auth'>`, failing at `mount()`.
+ */
 export interface RouteBuilder<in M extends string = never> {
   name(routeName: string): RouteBuilder<M>
   /** Attach middleware to this specific route. See {@link RouteMiddlewareInput}. */
@@ -367,9 +373,9 @@ export interface ResourceRouteOptions {
 /**
  * Instance-based router for app-local route registration and mounting.
  *
- * `in M`: `M` appears only in method parameters, which TypeScript compares
- * bivariantly, so without the annotation a `Router<never>` passes as a
- * `Router<'auth'>` and the missing alias only surfaces at `mount()`.
+ * `in M` is an explicit pin, not the source of the contravariance: the
+ * `RouteBuilder<M>` return positions already force it (measured). TypeScript
+ * checks the annotation against the inferred variance, so it cannot go stale.
  */
 export class Router<in M extends string = never> {
   private readonly registry: RegisteredRoute[] = []

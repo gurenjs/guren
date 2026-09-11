@@ -5,7 +5,7 @@
 
 Make `Router<M>`, `RouteBuilder<M>` and the `middleware()` scope builder contravariant in the middleware-alias parameter, with TypeScript's `in` variance annotation.
 
-`M` sat only in method parameters, which TypeScript compares bivariantly, so a router that never registered an alias could be passed where a `Router<'auth'>` was required; the mismatch surfaced at `mount()` as `Middleware "auth" is not registered`. A router carrying more aliases than the parameter names still passes.
+`M`'s only independent occurrence was a method parameter, which TypeScript compares bivariantly, so a router that never registered an alias could be passed where a `Router<'auth'>` was required; the mismatch surfaced at `mount()` as `Middleware "auth" is not registered`. A router carrying more aliases than the parameter names still passes.
 
 The tightening rejects three shapes that used to compile. None is a runtime behaviour change; each was already broken at `mount()` or was never satisfiable.
 
