@@ -142,6 +142,14 @@ describe('read transforms on every query path (bun:sqlite)', () => {
     expect(json).toEqual({ id: 1, name: 'alice', prefs: { theme: 'dark' }, upperName: 'ALICE' })
   })
 
+  it('computes an append on a row the read path left it off', async () => {
+    // `select()` skips accessors, so serialization is where this row's append
+    // is computed rather than read back.
+    const rows = await User.newQuery().where('id', 1).select('id', 'name').get()
+    const [json] = User.serializeMany(rows as never)
+    expect(json).toEqual({ id: 1, name: 'alice', upperName: 'ALICE' })
+  })
+
   it('keeps the SoftDeletes scope and applies transforms through it', async () => {
     const live = (await TrashablePost.all()) as PostRow[]
     expect(live.map((p) => p.title)).toEqual(['a1', 'b1'])
