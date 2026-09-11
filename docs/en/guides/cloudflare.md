@@ -34,7 +34,7 @@ bunx wrangler deploy
 > [!IMPORTANT]
 > `.cloudflare/` is generated output, so add it to `.gitignore` and rebuild before every deploy. Nothing else reads from it, so a stale directory silently ships old code.
 
-Before the app build it runs the deploy-runtime checks `guren doctor` reports and warns, without failing, when sessions or OAuth state would sit in process memory, a Bun-only password hasher (`Argon2Hasher`, `hasher: 'argon2'`, or `new Hash({ algorithm: 'argon2' })`) is selected, or providers are discovered from the filesystem. Each works locally and breaks on Workers, and the warning prints where you are still reading rather than after the Vite output.
+Before the app build it runs the deploy-runtime checks `guren doctor` reports and warns, without failing, when sessions or OAuth state would sit in process memory, a [Bun-only password hasher](/docs/guides/authentication#password-hasher) is selected, or providers are discovered from the filesystem. Each works locally and breaks on Workers, and the warning prints where you are still reading rather than after the Vite output.
 
 ## Database (D1)
 

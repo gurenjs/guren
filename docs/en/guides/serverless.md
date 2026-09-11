@@ -34,7 +34,7 @@ Uncomment the `schedule` and `console` exports in the scaffold once your app def
 bunx guren lambda:build
 ```
 
-The command runs the deploy-runtime checks `guren doctor` reports (a warning, never a failure, on an in-memory session or OAuth store, a Bun-only password hasher (`Argon2Hasher`, `hasher: 'argon2'`, or `new Hash({ algorithm: 'argon2' })`), or filesystem provider discovery, each of which works locally and breaks on Lambda), then your app's `build` script, then assembles a `.lambda/` directory:
+The command runs the deploy-runtime checks `guren doctor` reports (a warning, never a failure, on an in-memory session or OAuth store, a [Bun-only password hasher](/docs/guides/authentication#password-hasher), or filesystem provider discovery, each of which works locally and breaks on Lambda), then your app's `build` script, then assembles a `.lambda/` directory:
 
 | Path | Contents |
 |------|----------|

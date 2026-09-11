@@ -34,7 +34,7 @@ export const queue = createSqsHandler()
 bunx guren lambda:build
 ```
 
-このコマンドはまず `guren doctor` と同じデプロイランタイムチェックを走らせます(インメモリのセッション/OAuth ストア、Bun でしか読めないパスワードハッシャー(`Argon2Hasher`、`hasher: 'argon2'`、`new Hash({ algorithm: 'argon2' })`)、ファイルシステムからのプロバイダ探索に当たると警告します。ビルドは止めません。どれもローカルでは動き、Lambda では壊れるものです)。そのあとアプリの `build` スクリプトを実行し、`.lambda/` ディレクトリを組み立てます:
+このコマンドはまず `guren doctor` と同じデプロイランタイムチェックを走らせます(インメモリのセッション/OAuth ストア、[Bun でしか読めないパスワードハッシャー](/docs/guides/authentication#パスワードハッシャー)、ファイルシステムからのプロバイダ探索に当たると警告します。ビルドは止めません。どれもローカルでは動き、Lambda では壊れるものです)。そのあとアプリの `build` スクリプトを実行し、`.lambda/` ディレクトリを組み立てます:
 
 | パス | 内容 |
 |------|------|
