@@ -144,6 +144,11 @@ a native app's secure storage), manage the value yourself with `bindTo`: pass a
 value only this browser can present back to `authorize()`, and hand the same
 value to `handleCallback()`. `bindTo` wins when both options are given.
 
+A bound state carries a short marker, so boundness travels with the state rather
+than only in the store: a store that cannot keep `binding` then rejects the
+callback instead of quietly accepting a transferable state. Send the `state` that
+`authorize()` returns, including when you supplied one of your own.
+
 > [!WARNING]
 > `authorize()` without `session` or `bindTo` still works, so apps written
 > against the earlier API keep running, and it logs a warning once per process.
