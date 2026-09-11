@@ -374,8 +374,7 @@ export interface ResourceRouteOptions {
  * Instance-based router for app-local route registration and mounting.
  *
  * `in M` is an explicit pin, not the source of the contravariance: the
- * `RouteBuilder<M>` return positions already force it (measured). TypeScript
- * checks the annotation against the inferred variance, so it cannot go stale.
+ * `RouteBuilder<M>` return positions already force it (measured).
  */
 export class Router<in M extends string = never> {
   private readonly registry: RegisteredRoute[] = []
