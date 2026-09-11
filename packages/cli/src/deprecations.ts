@@ -156,7 +156,7 @@ export const deprecations: Deprecation[] = [
   {
     id: 'scrypt-hasher-name',
     what: "The 'ScryptHasher' export name",
-    since: '2.22.0',
+    since: '2.23.0',
     removedIn: '3.0.0',
     replacement:
       "Import 'Argon2Hasher' instead: it is the same class, under the name of what it writes "

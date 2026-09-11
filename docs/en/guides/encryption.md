@@ -123,7 +123,7 @@ Password hashing goes through a `PasswordHasher`. Three implementations ship:
 
 Reach for `Hash` unless you have a reason not to: it is what `AuthenticatableModel` and `ModelUserProvider` use by default, and the only one that verifies both formats. `NodeHasher` also runs on both, since Bun implements `node:crypto`. `Argon2Hasher` is the Bun-only one. Applications select the hasher once through `createApp({ auth: { hasher } })` rather than constructing it (see [Authentication](/docs/guides/authentication#password-hasher)).
 
-> `Argon2Hasher` was called `ScryptHasher` until 2.22.0, which is not what it writes. The old name still resolves to the same class and is deprecated.
+> `Argon2Hasher` was called `ScryptHasher` until 2.23.0, which is not what it writes. The old name still resolves to the same class and is deprecated.
 
 The two formats are not interchangeable: a `$scrypt$` hash verifies anywhere, an Argon2id one only where `Bun.password` exists. `Hash` writes scrypt for that reason, and reports a hash in the other format through `needsRehash()`.
 

@@ -123,7 +123,7 @@ try {
 
 特別な理由がなければ `Hash` を使ってください。`AuthenticatableModel` と `ModelUserProvider` の既定値であり、両方の形式を検証できる唯一の実装です。`NodeHasher` も両方で動きます。Bun が `node:crypto` を実装しているためです。Bun 専用なのは `Argon2Hasher` だけです。アプリケーションでは直接構築せず、`createApp({ auth: { hasher } })` で 1 回だけ選びます（[認証](/docs/guides/authentication#パスワードハッシャー)を参照）。
 
-> `Argon2Hasher` は 2.22.0 まで `ScryptHasher` という名前でした。書き出すのは scrypt ではないので改名しています。旧名も同じクラスを指しますが、非推奨です。
+> `Argon2Hasher` は 2.23.0 まで `ScryptHasher` という名前でした。書き出すのは scrypt ではないので改名しています。旧名も同じクラスを指しますが、非推奨です。
 
 2 つの形式に互換性はありません。`$scrypt$` のハッシュはどこでも検証できますが、Argon2id は `Bun.password` のある環境でしか検証できません。`Hash` が scrypt を書くのはそのためで、別形式のハッシュは `needsRehash()` で報告します。
 
