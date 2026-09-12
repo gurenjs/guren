@@ -103,7 +103,7 @@ const benchmarks: Benchmark[] = [
 // gurenjs/agents-on-guren; the third counts all 180 runs per condition.
 const agentBenchmarkStats = [
   { value: '−28%', label: 'turns with the harness (Sonnet 5, 60 runs each)' },
-  { value: '−25%', label: 'cost, at 60/60 vs 58/60 tasks passed' },
+  { value: '−25%', label: 'cost, at 60/60 vs 58/60 runs passed' },
   { value: '119 vs 15', label: 'runs that ran guren check, harness vs bare (180 each)' },
 ]
 
@@ -298,7 +298,7 @@ export default function Home({ codeExamples }: Props) {
                 None of this is aspirational: it is measured. <em>Agents on Guren</em> runs 20
                 bug, security and feature tasks with hidden acceptance tests across three models,
                 with and without the harness <code className="text-white/70">agent:init</code>{' '}
-                installs — 360 runs, every event stream published.
+                installs — 360 runs, each one's patch, logs and verdict published.
               </p>
               <dl className="mt-4 grid grid-cols-3 gap-3">
                 {agentBenchmarkStats.map((s) => (
