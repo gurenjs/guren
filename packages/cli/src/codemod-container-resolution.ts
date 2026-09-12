@@ -81,13 +81,14 @@ function superClassName(node: BabelNode): string | undefined {
   return superClass?.type === 'Identifier' ? (superClass.name as string) : undefined
 }
 
-/** A call of `name` with no arguments. */
-function isPlainCall(node: BabelNode, name: string): boolean {
+/** A call of `name`, imported from Guren, with no arguments. */
+function isPlainCall(node: BabelNode, name: string, guren: Set<string>): boolean {
   const callee = node.callee as BabelNode | undefined
   return (
     node.type === 'CallExpression'
     && callee?.type === 'Identifier'
     && callee.name === name
+    && guren.has(name)
     && (node.arguments as unknown[]).length === 0
   )
 }
@@ -126,9 +127,18 @@ function statementSpan(source: string, range: Range): Range {
   return { start, end }
 }
 
-function applyEdits(source: string, edits: Edit[]): string {
+/**
+ * Back to front, so one splice never invalidates another's offsets. Two spans
+ * that overlap cannot both be applied that way — the second would write into
+ * the middle of the first's replacement — and this file is a user's source, so
+ * the answer there is to change nothing.
+ */
+function applyEdits(source: string, edits: Edit[]): string | null {
   let result = source
+  let lowest = source.length
   for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
+    if (edit.end > lowest) return null
+    lowest = edit.start
     result = result.slice(0, edit.start) + edit.text + result.slice(edit.end)
   }
   return result
@@ -144,9 +154,18 @@ export function transformSource(source: string, filePath: string): string | null
   const ast = parseSourceFile(source, filePath)
   if (!ast) return null
 
+  // Every rule is keyed on a name, and the name means what this codemod thinks
+  // only when the file imported it from Guren: an app's own `getContainer`
+  // helper is a different object.
+  const imports = gurenImports(ast.program)
+  const guren = new Set(imports.flatMap((declaration) => declaration.specifiers.map((s) => s.name)))
+  if (guren.size === 0) return null
+
   const providers: Range[] = []
   const jobs: Range[] = []
-  const rebound: Range[] = []
+  // Where a getter must not be rewritten: `this` is not the instance there, or
+  // another rule has already claimed the call.
+  const skip: Range[] = []
   walk(ast.program, (node) => {
     if (node.type !== 'ClassDeclaration' && node.type !== 'ClassExpression') return
     const range = nodeRange(node)
@@ -155,18 +174,18 @@ export function transformSource(source: string, filePath: string): string | null
     if (parent === 'ServiceProvider') providers.push(range)
     else if (parent === 'Job') jobs.push(range)
     else return
-    rebound.push(...reboundRanges(node))
+    skip.push(...reboundRanges(node))
   })
 
   const edits: Edit[] = [
-    ...getterEdits(ast.program, providers, jobs, rebound),
-    ...setterEdits(ast.program, source, providers, rebound),
-    ...storageFactoryEdits(ast.program, source),
-    ...inertiaDocumentEdits(ast.program, source),
+    ...storageFactoryEdits(ast.program, source, guren, skip),
+    ...getterEdits(ast.program, guren, providers, jobs, skip),
+    ...setterEdits(ast.program, source, guren, providers, skip),
+    ...inertiaDocumentEdits(ast.program, source, guren),
   ]
   if (edits.length === 0) return null
 
-  edits.push(...unusedImportEdits(ast.program, source, edits))
+  edits.push(...unusedImportEdits(imports, ast.program, source, edits))
   return applyEdits(source, edits)
 }
 
@@ -191,23 +210,23 @@ function reboundRanges(classNode: BabelNode): Range[] {
 }
 
 /** Rows 1 and 6: a deprecated getter inside a provider or a job. */
-function getterEdits(program: unknown, providers: Range[], jobs: Range[], rebound: Range[]): Edit[] {
+function getterEdits(program: unknown, guren: Set<string>, providers: Range[], jobs: Range[], skip: Range[]): Edit[] {
   const edits: Edit[] = []
   walk(program, (node) => {
     if (node.type !== 'CallExpression') return
     const range = nodeRange(node)
     const callee = nodeRange(node.callee as BabelNode)
-    if (!range || !callee || enclosing(rebound, range)) return
+    if (!range || !callee || enclosing(skip, range)) return
 
     for (const [name, key] of Object.entries(GETTER_KEYS)) {
-      if (!isPlainCall(node, name)) continue
+      if (!isPlainCall(node, name, guren)) continue
       if (enclosing(providers, range)) {
         edits.push({ ...range, text: `this.container.make('${key}')`, consumes: callee })
       }
       return
     }
 
-    if (!isPlainCall(node, 'getContainer')) return
+    if (!isPlainCall(node, 'getContainer', guren)) return
     if (enclosing(providers, range)) {
       edits.push({ ...range, text: 'this.container', consumes: callee })
       return
@@ -223,7 +242,7 @@ function getterEdits(program: unknown, providers: Range[], jobs: Range[], reboun
 }
 
 /** Rows 2 and 3: a deprecated setter inside a provider. */
-function setterEdits(program: unknown, source: string, providers: Range[], rebound: Range[]): Edit[] {
+function setterEdits(program: unknown, source: string, guren: Set<string>, providers: Range[], skip: Range[]): Edit[] {
   const edits: Edit[] = []
   walk(program, (node) => {
     if (node.type !== 'ExpressionStatement') return
@@ -231,7 +250,7 @@ function setterEdits(program: unknown, source: string, providers: Range[], rebou
     const callee = call?.type === 'CallExpression' ? (call.callee as BabelNode) : undefined
     if (callee?.type !== 'Identifier') return
     const key = SETTER_KEYS[callee.name as string]
-    if (!key) return
+    if (!key || !guren.has(callee.name as string)) return
 
     const statement = nodeRange(node)
     const callRange = nodeRange(call)
@@ -249,7 +268,7 @@ function setterEdits(program: unknown, source: string, providers: Range[], rebou
       return
     }
 
-    if (!enclosing(providers, callRange) || enclosing(rebound, callRange)) return
+    if (!enclosing(providers, callRange) || enclosing(skip, callRange)) return
 
     edits.push({
       ...callRange,
@@ -273,12 +292,12 @@ function classBinds(program: unknown, range: Range, key: string): boolean {
 }
 
 /** Row 5: `configureAttachments({ storage: () => getContainer().make('storage') })`. */
-function storageFactoryEdits(program: unknown, source: string): Edit[] {
+function storageFactoryEdits(program: unknown, source: string, guren: Set<string>, claimed: Range[]): Edit[] {
   const edits: Edit[] = []
   walk(program, (node) => {
     if (node.type !== 'CallExpression') return
     const callee = node.callee as BabelNode | undefined
-    if (callee?.type !== 'Identifier' || callee.name !== 'configureAttachments') return
+    if (callee?.type !== 'Identifier' || callee.name !== 'configureAttachments' || !guren.has(callee.name)) return
     const options = unwrapTypeAssertion((node.arguments as Node[])[0]) as BabelNode | undefined
     if (options?.type !== 'ObjectExpression') return
 
@@ -291,7 +310,7 @@ function storageFactoryEdits(program: unknown, source: string): Edit[] {
 
       const inner: Edit[] = []
       walk(arrow.body, (child) => {
-        if (!isPlainCall(child, 'getContainer')) return
+        if (!isPlainCall(child, 'getContainer', guren)) return
         const range = nodeRange(child)
         if (range) inner.push({ ...range, text: 'container', consumes: nodeRange(child.callee as BabelNode) ?? undefined })
       })
@@ -301,13 +320,17 @@ function storageFactoryEdits(program: unknown, source: string): Edit[] {
       const open = source.indexOf('(', arrowRange.start)
       if (open < 0 || open >= arrowRange.end || source.slice(open, open + 2) !== '()') continue
       edits.push({ start: open, end: open + 2, text: '(container)' }, ...inner)
+      // The getter rule would otherwise claim the same call and emit a second
+      // edit over the span this one just rewrote.
+      claimed.push(arrowRange)
     }
   })
   return edits
 }
 
 /** Row 4: `setInertiaDocument({…})` at module scope beside a `createApp({…})`. */
-function inertiaDocumentEdits(program: unknown, source: string): Edit[] {
+function inertiaDocumentEdits(program: unknown, source: string, guren: Set<string>): Edit[] {
+  if (!guren.has('setInertiaDocument') || !guren.has('createApp')) return []
   const body = (program as { body?: BabelNode[] }).body ?? []
 
   const options = createAppOptions(program)
@@ -377,36 +400,53 @@ function indentLiteral(literal: string): string {
   return [first, ...rest.map((line) => (line.trim().length === 0 ? line : `    ${line}`))].join('\n')
 }
 
+interface ImportedName {
+  name: string
+  range: Range
+}
+
+interface GurenImport {
+  range: Range
+  specifiers: ImportedName[]
+}
+
 /**
- * Import specifiers whose every reference this pass removed. Judged on the
- * offsets the edits consume rather than on the rewritten text, so a name the
- * file still uses elsewhere keeps its import.
+ * The file's `@guren/core` / `@guren/server` named imports. A declaration
+ * carrying anything else (a default or namespace specifier) is skipped: nothing
+ * in an app writes one, and rebuilding its specifier list is the one way this
+ * codemod could delete an import it does not understand.
  */
-function unusedImportEdits(program: unknown, source: string, edits: Edit[]): Edit[] {
+function gurenImports(program: unknown): GurenImport[] {
+  const declarations: GurenImport[] = []
+  for (const statement of (program as { body?: BabelNode[] }).body ?? []) {
+    if (statement.type !== 'ImportDeclaration') continue
+    const from = (statement.source as BabelNode).value
+    if (from !== '@guren/core' && from !== '@guren/server') continue
+    const range = nodeRange(statement)
+    const nodes = statement.specifiers as BabelNode[]
+    if (!range || nodes.length === 0 || nodes.some((node) => node.type !== 'ImportSpecifier')) continue
+
+    const specifiers = nodes
+      .map((node) => ({ name: (node.local as BabelNode).name as string, range: nodeRange(node) }))
+      .filter((specifier): specifier is ImportedName => specifier.range !== null)
+    if (specifiers.length === nodes.length) declarations.push({ range, specifiers })
+  }
+  return declarations
+}
+
+/**
+ * Import specifiers this pass left with no reference. A name is dropped only
+ * when it had references and every one of them sits inside an edit: a name with
+ * no reference at all is an import the codemod never touched, and one whose
+ * references it cannot see (a JSX tag is a `JSXIdentifier`, not an `Identifier`)
+ * has to read the same way.
+ */
+function unusedImportEdits(imports: GurenImport[], program: unknown, source: string, edits: Edit[]): Edit[] {
   const consumed = edits.map((edit) => edit.consumes).filter((range): range is Range => Boolean(range))
   if (consumed.length === 0) return []
 
   const references = new Map<string, Range[]>()
-  const declarations: { range: Range; specifiers: { name: string; range: Range }[] }[] = []
-
-  for (const statement of (program as { body?: BabelNode[] }).body ?? []) {
-    if (statement.type !== 'ImportDeclaration') continue
-    const sourceValue = (statement.source as BabelNode).value
-    if (sourceValue !== '@guren/core' && sourceValue !== '@guren/server') continue
-    const range = nodeRange(statement)
-    if (!range) continue
-    const specifiers = (statement.specifiers as BabelNode[])
-      .filter((specifier) => specifier.type === 'ImportSpecifier')
-      .map((specifier) => ({
-        name: ((specifier.local as BabelNode).name as string),
-        range: nodeRange(specifier) as Range,
-      }))
-      .filter((specifier) => specifier.range)
-    if (specifiers.length > 0) declarations.push({ range, specifiers })
-  }
-  if (declarations.length === 0) return []
-
-  const importRanges = declarations.map((declaration) => declaration.range)
+  const importRanges = imports.map((declaration) => declaration.range)
   walk(program, (node) => {
     if (node.type !== 'Identifier') return
     const range = nodeRange(node)
@@ -416,48 +456,39 @@ function unusedImportEdits(program: unknown, source: string, edits: Edit[]): Edi
   })
 
   const removals: Edit[] = []
-  for (const declaration of declarations) {
-    const dropped = declaration.specifiers.filter((specifier) =>
-      (references.get(specifier.name) ?? []).every((reference) =>
-        consumed.some((range) => contains(range, reference)),
-      ),
-    )
-    if (dropped.length === 0) continue
+  for (const declaration of imports) {
+    const kept = declaration.specifiers.filter((specifier) => {
+      const found = references.get(specifier.name) ?? []
+      return found.length === 0 || !found.every((reference) => consumed.some((range) => contains(range, reference)))
+    })
+    if (kept.length === declaration.specifiers.length) continue
 
-    if (dropped.length === declaration.specifiers.length) {
-      removals.push({ ...statementSpan(source, declaration.range), text: '' })
-      continue
-    }
-    for (const specifier of dropped) {
-      removals.push({ ...widenSpecifier(source, specifier.range), text: '' })
-    }
+    removals.push(
+      kept.length === 0
+        ? { ...statementSpan(source, declaration.range), text: '' }
+        : specifierListEdit(source, declaration, kept),
+    )
   }
   return removals
 }
 
-/** A specifier's span plus the separator that joined it to its neighbour. */
-function widenSpecifier(source: string, range: Range): Range {
-  const lineStart = lineStartAt(source, range.start)
-  const lineEnd = source.indexOf('\n', range.end)
-  const rest = source.slice(range.end, lineEnd < 0 ? source.length : lineEnd)
-  // One specifier per line takes its whole line; anything else on the line
-  // means the comma, not the newline, is what joined it to its neighbour.
-  if (source.slice(lineStart, range.start).trim() === '' && rest.trim().replace(',', '') === '') {
-    return { start: lineStart, end: lineEnd < 0 ? source.length : lineEnd + 1 }
-  }
+/**
+ * The whole `{ … }` rewritten from the specifiers that stay. One edit rather
+ * than one per dropped name, because two removals in a single-line list share
+ * the comma between them and splicing both leaves the import unparseable.
+ */
+function specifierListEdit(source: string, declaration: GurenImport, kept: ImportedName[]): Edit {
+  const { specifiers } = declaration
+  const open = source.lastIndexOf('{', specifiers[0].range.start)
+  const close = source.indexOf('}', specifiers[specifiers.length - 1].range.end)
+  const names = kept.map((specifier) => source.slice(specifier.range.start, specifier.range.end))
+  const multiline = source.slice(open, close).includes('\n')
 
-  let end = range.end
-  while (/[ \t]/.test(source[end] ?? '')) end += 1
-  if (source[end] === ',') {
-    end += 1
-    while (/[ \t]/.test(source[end] ?? '')) end += 1
-    return { start: range.start, end }
+  return {
+    start: open + 1,
+    end: close,
+    text: multiline ? `\n  ${names.join(',\n  ')},\n` : ` ${names.join(', ')} `,
   }
-
-  let start = range.start
-  while (start > 0 && /[ \t]/.test(source[start - 1])) start -= 1
-  if (source[start - 1] === ',') start -= 1
-  return { start, end: range.end }
 }
 
 /** Files the codemod would rewrite, relative to `cwd`. */

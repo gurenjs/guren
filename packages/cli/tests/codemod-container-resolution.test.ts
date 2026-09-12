@@ -8,6 +8,7 @@ import {
   transformSource,
 } from '../src/codemod-container-resolution'
 import { codemods, findApplicableCodemods, runCodemods } from '../src/codemods'
+import { parseSourceFile } from '../src/parse-cache'
 import { writeWorkspaceFiles } from './helpers'
 
 const REPO_ROOT = join(import.meta.dir, '../../..')
@@ -200,6 +201,78 @@ describe('the RFC 0023 codemod', () => {
     ].join('\n')
 
     expect(transformSource(source, 'app/Jobs/ReportJob.ts')).toBeNull()
+  })
+
+  test('keeps a single-line import parseable when two specifiers go', () => {
+    const source = [
+      "import { ServiceProvider, getGate, getContainer } from '@guren/core'",
+      '',
+      'export default class P extends ServiceProvider {',
+      '  boot(): void {',
+      '    getGate().policy(A, B)',
+      "    getContainer().make('x')",
+      '  }',
+      '}',
+      '',
+    ].join('\n')
+
+    const output = transformSource(source, 'app/Providers/P.ts')
+
+    expect(output).toContain("import { ServiceProvider } from '@guren/core'")
+    // The two removals share the comma between them, so a per-specifier splice
+    // leaves `import { ServiceProvider,  from …`.
+    expect(parseSourceFile(output ?? '', 'app/Providers/P.ts')).not.toBeNull()
+  })
+
+  test('keeps an import specifier it did not rewrite', () => {
+    const source = [
+      "import { ServiceProvider, getGate, createEventManager } from '@guren/core'",
+      '',
+      'export default class P extends ServiceProvider {',
+      '  boot(): void {',
+      '    getGate().policy(A, B)',
+      '  }',
+      '}',
+      '',
+    ].join('\n')
+
+    expect(transformSource(source, 'app/Providers/P.ts')).toContain(
+      "import { ServiceProvider, createEventManager } from '@guren/core'",
+    )
+  })
+
+  test('leaves a same-named symbol imported from elsewhere alone', () => {
+    const source = [
+      "import { ServiceProvider } from '@guren/core'",
+      "import { getContainer } from '../support/di.js'",
+      '',
+      'export default class P extends ServiceProvider {',
+      '  register(): void {',
+      "    getContainer().make('thing')",
+      '  }',
+      '}',
+      '',
+    ].join('\n')
+
+    expect(transformSource(source, 'app/Providers/P.ts')).toBeNull()
+  })
+
+  test('lets one rule claim a call the other would also rewrite', () => {
+    const source = [
+      "import { ServiceProvider, configureAttachments, getContainer } from '@guren/core'",
+      '',
+      'export default class AttachmentsProvider extends ServiceProvider {',
+      '  register(): void {',
+      "    configureAttachments({ table, storage: () => getContainer().make('storage'), disk: 'media' })",
+      '  }',
+      '}',
+      '',
+    ].join('\n')
+
+    const output = transformSource(source, 'app/Providers/AttachmentsProvider.ts')
+
+    expect(output).toContain("storage: (container) => container.make('storage')")
+    expect(output).not.toContain('this.container')
   })
 
   test('reports rather than rewrites a test injecting a fake', () => {
