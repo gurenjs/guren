@@ -1,12 +1,13 @@
 import { ServiceProvider } from '../container/ServiceProvider'
-import { createEncrypter, setEncrypter, type Encrypter } from '../encryption'
+import { createEncrypter } from '../encryption'
 import { deriveAppKeyring, encodeDerivedKey, getAppKeyringFromEnv } from '../encryption/app-key'
 
 /**
- * Binds the Encrypter as a singleton in the container and, at boot, makes it
- * the global one behind `encrypt()` / `decrypt()` / `getEncrypter()`. The
- * global is set in `boot()` rather than `register()` so a provider registering
- * later can still replace `app.keyring` before the encrypter is built.
+ * Binds the Encrypter as a singleton. `encrypt()` / `decrypt()` /
+ * `getEncrypter()` resolve it from the default application's container
+ * (RFC 0023 §4), so no global is written. The keyring is read lazily, so a
+ * provider registering later can still replace `app.keyring` before the
+ * encrypter is built.
  */
 export class EncryptionServiceProvider extends ServiceProvider {
   register(): void {
@@ -21,9 +22,5 @@ export class EncryptionServiceProvider extends ServiceProvider {
         previousKeys: keyring.previous.map((key) => encodeDerivedKey(key)),
       })
     })
-  }
-
-  boot(): void {
-    setEncrypter(this.container.make<Encrypter>('encrypter'))
   }
 }

@@ -3,8 +3,8 @@ import { Model, type PlainObject } from '@guren/orm'
 import {
   deriveAppKeyring,
   getAppKeyringFromEnv,
+  ambientContainer,
   getQueueDriver,
-  setQueueDriver,
   signUrl,
   verifySignedUrl,
   HttpException,
@@ -13,6 +13,7 @@ import {
   type StorageDriver,
   type StorageManager,
 } from '@guren/server'
+import type { Container, QueueManager } from '@guren/server'
 import { decodeJsonColumn, toDate } from '../store-utils.js'
 import { resolveDefaultImageProcessor } from './bun-image-processor.js'
 import type { AttachmentCollectionSpec, AttachmentsDeclaration, HeicPolicy } from './declaration.js'
@@ -57,8 +58,18 @@ export interface ConfigureAttachmentsOptions {
    * `variants` (JSON-capable), `placeholder`, `createdAt`, `updatedAt`.
    */
   table: unknown
-  /** The app's StorageManager, resolved lazily (e.g. `() => container.make('storage')`). */
-  storage: () => StorageManager
+  /**
+   * The app's StorageManager, resolved lazily: `(container) => container.make('storage')`.
+   * The container is `app`'s when given, else the default application's (RFC 0023 §4).
+   */
+  storage: (container: Container) => StorageManager
+  /**
+   * The Application this engine belongs to. Binds the engine as `attachments`
+   * on its container, so the delivery route resolves it per request rather
+   * than through the process-wide active engine; without it the default
+   * application's container backs `storage`.
+   */
+  app?: { container: Container }
   /** Default disk name for new attachments. */
   disk: string
   /**
@@ -284,9 +295,29 @@ interface ImageInspection {
   name: string
 }
 
+/**
+ * What a storage factory receives when no Application exists at all: a
+ * factory that ignores its argument (`() => storage`) keeps working, and one
+ * that reads it gets the error `getContainer()` would have thrown.
+ */
+function unavailableContainer(): Container {
+  return new Proxy({} as Container, {
+    get() {
+      throw new Error('Container not initialized. Construct the app with createApp(), or pass configureAttachments({ app }).')
+    },
+  })
+}
+
+/** What `configureAttachments({ queue })` must resolve to: the `QueueManager` surface the engine dispatches through. */
+export type QueueDispatcher = Pick<QueueManager, 'driver' | 'dispatch'>
+
+/** Installed by `configureAttachments()`; `queue` is the engine's own manager when it has one. */
+export type JobDispatcher = (payload: GenerateVariantsPayload, queue: QueueDispatcher | undefined) => Promise<unknown>
+
 export class AttachmentEngine {
   readonly model: typeof Model
-  private readonly storage: () => StorageManager
+  private readonly storageFactory: (container: Container) => StorageManager
+  private readonly container?: Container
   private readonly defaultDisk: string
   private readonly diskDelivery: Record<string, ResolvedDiskDelivery>
   private readonly delivery: { prefix: string; routeName: string } | null
@@ -296,7 +327,7 @@ export class AttachmentEngine {
   private readonly processor: ImageProcessor | null
   private readonly urlExpiresIn: number
   private readonly queue?: () => unknown
-  private dispatchJob: ((payload: GenerateVariantsPayload) => Promise<unknown>) | null = null
+  private dispatchJob: JobDispatcher | null = null
 
   constructor(options: ConfigureAttachmentsOptions) {
     const table = options.table
@@ -305,7 +336,8 @@ export class AttachmentEngine {
     }
     this.model.morphTo('attachable', 'attachable')
 
-    this.storage = options.storage
+    this.storageFactory = options.storage
+    this.container = options.app?.container
     this.defaultDisk = options.disk
     this.diskDelivery = normalizeDiskDelivery(options.disks ?? {})
     this.delivery = options.delivery
@@ -323,8 +355,12 @@ export class AttachmentEngine {
   }
 
   /** Wired by `configureAttachments()`, so this module never imports the job. */
-  setJobDispatcher(dispatch: (payload: GenerateVariantsPayload) => Promise<unknown>): void {
+  setJobDispatcher(dispatch: JobDispatcher): void {
     this.dispatchJob = dispatch
+  }
+
+  private storage(): StorageManager {
+    return this.storageFactory(this.container ?? ambientContainer() ?? unavailableContainer())
   }
 
   async attach(
@@ -342,7 +378,7 @@ export class AttachmentEngine {
     if (queued) {
       // Before any byte is written: a missing queue must not leave a stored
       // original whose variants nobody will ever generate.
-      this.ensureQueueDispatchable()
+      this.queueManager()
     }
 
     const inspection = await this.inspectImage(spec, collection, normalized, queued)
@@ -857,37 +893,35 @@ export class AttachmentEngine {
   }
 
   /**
-   * The configured QueueManager's default driver, or with no `queue` option
-   * whatever driver the app has already booted globally.
+   * The manager `configureAttachments({ queue })` resolves, validated, or
+   * undefined without the option (the default application's queue then
+   * carries the job). Dispatching through the manager itself keeps the job on
+   * this engine's driver whatever another manager in the process resolved.
    */
-  private ensureQueueDispatchable(): void {
+  private queueManager(): QueueDispatcher | undefined {
     if (!this.dispatchJob) {
       throw new Error('Attachments queue dispatch is not wired. Call configureAttachments() before attaching.')
     }
     if (this.queue) {
-      const manager = this.queue() as { driver?: () => unknown } | null | undefined
-      if (typeof manager?.driver !== 'function') {
+      const manager = this.queue() as Partial<QueueDispatcher> | null | undefined
+      if (typeof manager?.driver !== 'function' || typeof manager.dispatch !== 'function') {
         throw new Error(
           'configureAttachments({ queue }) must resolve to a QueueManager (an object with a driver() method).',
         )
       }
-      // Job.dispatch() sends through the module-global driver, which
-      // QueueManager.driver() installs only on *first* resolution. Reassert on
-      // every dispatch, or a job lands on whichever driver another manager
-      // installed since, where no worker of ours ever pops.
-      setQueueDriver(manager.driver() as Parameters<typeof setQueueDriver>[0])
-      return
+      return manager as QueueDispatcher
     }
     if (!getQueueDriver()) {
       throw new Error(
         "attach() with queued: true requires a queue. Pass configureAttachments({ queue: () => queueManager }) or boot the app's queue before attaching.",
       )
     }
+    return undefined
   }
 
   private async dispatchGeneration(payload: GenerateVariantsPayload): Promise<void> {
-    this.ensureQueueDispatchable()
-    await this.dispatchJob!(payload)
+    const queue = this.queueManager()
+    await this.dispatchJob!(payload, queue)
   }
 
   /**

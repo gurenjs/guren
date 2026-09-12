@@ -140,7 +140,11 @@ import, so core declares the key by augmenting `ServiceBindings` from
 The rate-limit default store becomes one `MemoryRateLimitStore` per
 middleware instance (constructed inside `createRateLimitMiddleware`), which is
 what the `store` option already does; a process-wide bucket shared by every
-limiter that omitted `store` was never intended. `vite-assets` memoizes
+limiter that omitted `store` was never intended. **Amended in
+implementation:** not in Part 1. Every `MemoryRateLimitStore` starts a cleanup
+interval that is deliberately not `unref()`ed, so one store per limiter
+multiplies timers that keep the process alive; the change needs its own look
+at that interval first. `vite-assets` memoizes
 filesystem reads, not a service, and stays as is.
 
 ### 2. How a consumer gets its container
@@ -237,6 +241,12 @@ class QueueManager {
 }
 // Job.dispatch(payload, options) === defaultContainer().make('queue').dispatch(this, payload, options)
 ```
+
+**Amended in implementation:** through Parts 1 and 2 a `setQueueDriver()` pin
+still overrides the bound manager, as it did before. `@guren/testing`'s
+`fakeQueue()` and the tutorial's queue chapter inject a fake through the pin
+and nothing else, and the Migration Path already lists that usage as reported
+rather than rewritten; the pin goes with the setter in Part 3.
 
 `QueueManager.driver()` stops publishing a global (`QueueManager.ts:48-50`,
 `:84`); `guren queue:work` resolves `container.make('queue').driver()` from the

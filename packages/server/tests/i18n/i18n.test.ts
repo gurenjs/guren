@@ -16,6 +16,7 @@ import {
   t,
   tc,
 } from '../../src/i18n'
+import { resetDefaultApplication } from '../../src/http/default-application'
 
 describe('Pluralization', () => {
   describe('pluralizationRules', () => {
@@ -488,6 +489,8 @@ describe('I18nManager', () => {
 
 describe('Global functions', () => {
   beforeEach(() => {
+    // A default application from another file would shadow the hand-set manager.
+    resetDefaultApplication()
     const i18n = createI18n({
       locale: 'en',
       messages: {

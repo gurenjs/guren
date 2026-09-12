@@ -43,7 +43,7 @@ printf 'storage/app/\npublic/storage/\n' >> .gitignore
 もうひとつ、config にはジェネレーターが代わりに書けない行が 1 行加わります。どのモデルが attachments を持つことになるかまでは、ジェネレーターには分からないからです。prune コマンドは、attachment の持ち主がまだ存在するかを確かめるのにこのマップを使います。
 
 ```ts file=config/attachments.ts
-import { Model, configureAttachments, getContainer } from '@guren/core'
+import { Model, configureAttachments } from '@guren/core'
 import { attachments } from '../db/schema'
 import { Post } from '../app/Models/Post.js'
 
@@ -53,7 +53,7 @@ import { Post } from '../app/Models/Post.js'
  */
 export const { Attachment } = configureAttachments({
   table: attachments,
-  storage: () => getContainer().make('storage'),
+  storage: (container) => container.make('storage'),
   // Uploads are bytes a stranger chose, so they live on a disk rooted outside
   // public/ and are handed out only through the signed delivery route that
   // registerAttachmentRoutes(router) mounts. Rooting this disk inside public/

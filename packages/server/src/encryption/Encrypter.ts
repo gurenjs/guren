@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHmac } from 'crypto'
 import type { EncrypterConfig, EncryptOptions, DecryptOptions, EncryptedPayload } from './types'
 import { generateAppKey, normalizeAppKey } from './app-key'
+import { ambientBinding } from '../http/default-application'
 
 /**
  * GCM authentication tag length, in bytes, pinned on both sides: Node and Bun
@@ -214,11 +215,13 @@ export function setEncrypter(encrypter: Encrypter): void {
   globalEncrypter = encrypter
 }
 
+/** The default application's `encrypter`, else the one `setEncrypter()` installed. */
 export function getEncrypter(): Encrypter {
-  if (!globalEncrypter) {
-    throw new Error('Encrypter not initialized. Call setEncrypter() first.')
+  const encrypter = ambientBinding('encrypter') ?? globalEncrypter
+  if (!encrypter) {
+    throw new Error('Encrypter not initialized. Register EncryptionServiceProvider, or call setEncrypter() first.')
   }
-  return globalEncrypter
+  return encrypter
 }
 
 /** Encrypt with the global encrypter. */

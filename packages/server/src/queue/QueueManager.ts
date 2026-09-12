@@ -79,7 +79,6 @@ export class QueueManager {
   /**
    * After this, `driver()` with no name, `getDefaultDriverName()`, and — for a
    * manager bound as `queue` — `Job.dispatch()` all use the new driver.
-   * `setQueueDriver()` still overrides it.
    */
   setDefaultDriver(name: string): void {
     if (!this.driverFactories.has(name)) {

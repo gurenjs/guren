@@ -266,24 +266,24 @@ await mail(mailManager)
 
 ## Queued Emails
 
-Send emails asynchronously using the queue system. In a real app, configure the mail manager in a provider and expose it through the container. `setMailManager()` is only the queue-worker bridge that lets queued mail jobs resolve the same manager instance:
+Send emails asynchronously using the queue system. The queued job resolves the mail manager from the container of the app the worker runs (`mail`), and `queue()` dispatches through the `queue` manager bound beside it, so a provider that binds both is all the wiring there is. Pass the provider's container to `createMailManager()` so the manager knows which app it belongs to:
 
 ```ts
-import { mail, setMailManager, createQueueManager, MemoryDriver } from '@guren/core'
+import { ServiceProvider, createMailManager, createQueueManager, MemoryDriver } from '@guren/core'
 
-// Configure queue manager
-const queue = createQueueManager({
-  default: 'memory',
-  drivers: {
-    memory: () => new MemoryDriver(),
-  },
-})
+export default class MailProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('queue', () =>
+      createQueueManager({ default: 'memory', drivers: { memory: () => new MemoryDriver() } }),
+    )
+    this.container.singleton('mail', (container) => createMailManager(mailConfig, container))
+  }
+}
+```
 
-queue.driver()
+A mail manager created without a container queues through the default application's `queue` binding instead. `setMailManager()` still installs a process-wide fallback for a job that finds no `mail` binding.
 
-// Bridge the provider-managed mail manager into queued jobs
-setMailManager(mailManager)
-
+```ts
 // Queue the email instead of sending immediately
 await mail(mailManager)
   .to('user@example.com')

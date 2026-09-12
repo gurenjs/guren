@@ -56,6 +56,17 @@ describe('Job.dispatch() with only the container wired', () => {
     expect(await driver.size('reports')).toBe(0)
   })
 
+  it('falls back to the global driver when the bound manager has no default driver', async () => {
+    const app = new Application({ providers: [QueueServiceProvider] })
+    await app.boot()
+    const pinned = new MemoryDriver()
+    setQueueDriver(pinned)
+
+    await ReportJob.dispatch({ id: 2 })
+
+    expect(await pinned.size('reports')).toBe(1)
+  })
+
   it('names the provider to register when neither the global nor the container has a driver', async () => {
     const app = new Application()
     await app.boot()

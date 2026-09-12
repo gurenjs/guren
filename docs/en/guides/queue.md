@@ -152,6 +152,10 @@ const Queue = app.container.make('queue')
 
 // Access the default driver
 const driver = Queue.driver()
+
+// The explicit form of SendWelcomeEmailJob.dispatch(payload): the same
+// message, pushed through this manager rather than the default application's
+await Queue.dispatch(SendWelcomeEmailJob, { userId: 1 })
 ```
 
 ### Manual Setup
@@ -245,13 +249,15 @@ const driver = queue.driver()
 // Register job classes (required for worker to find them)
 registerJob(SendWelcomeEmailJob)
 
-// Create and start worker
+// Create and start worker. `container` is what each job's this.make()
+// resolves from; `guren queue:work` passes the container of the app it boots
 const worker = new Worker(driver, {
   queues: ['high-priority', 'default', 'emails'],
   sleep: 1000,
   timeout: 60000,
   maxJobs: 0,        // 0 = unlimited
   stopWhenEmpty: false,
+  container: app.container,
 }, {
   // Optional event handlers
   jobProcessed: (job) => console.log(`Processed: ${job.name}`),

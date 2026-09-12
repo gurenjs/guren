@@ -1,4 +1,4 @@
-import { configureAttachments, getContainer } from '@guren/core'
+import { configureAttachments } from '@guren/core'
 import { attachments } from '../db/schema'
 
 // Wires the attachments layer once at boot (AttachmentsProvider imports this
@@ -10,7 +10,7 @@ import { attachments } from '../db/schema'
 // queued generation.
 export const { Attachment } = configureAttachments({
   table: attachments,
-  storage: () => getContainer().make('storage'),
+  storage: (container) => container.make('storage'),
   // Uploads are bytes a stranger chose, so they are stored on a disk that
   // nothing serves statically — `local` is rooted at ./storage/app, outside
   // public/ — and handed out through the signed delivery route that

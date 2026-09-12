@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
 
 let workerOptions: Record<string, unknown> | undefined
+let workerDriver: unknown
 let fakeDriver: {
   getFailedJobs: ReturnType<typeof mock>
   retryFailedJob: ReturnType<typeof mock>
@@ -15,10 +16,11 @@ await mock.module('../src/queue-deps', () => ({
     options: Record<string, unknown>
     events: Record<string, (...args: any[]) => void>
 
-    constructor(_driver: unknown, options: Record<string, unknown>, events: Record<string, (...args: any[]) => void>) {
+    constructor(driver: unknown, options: Record<string, unknown>, events: Record<string, (...args: any[]) => void>) {
       this.options = options
       this.events = events
       workerOptions = options
+      workerDriver = driver
     }
 
     async start() {
@@ -46,6 +48,7 @@ beforeEach(() => {
     deleteFailedJob: mock(async () => {}),
   }
   workerOptions = undefined
+  workerDriver = undefined
 })
 
 describe('queue helpers', () => {
@@ -68,6 +71,34 @@ describe('queue helpers', () => {
         timeout: 5000,
         stopWhenEmpty: true,
       })
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('hands the worker the driver and container of the booted app (RFC 0023)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-queue-container-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/main.ts'),
+        [
+          "const driver = { name: 'bound' }",
+          "const manager = { driver: () => driver, hasDriver: () => true, getDefaultDriverName: () => 'memory' }",
+          "const bindings = { queue: manager, mail: { name: 'mailer' } }",
+          'export default {',
+          '  listen() {},',
+          '  container: { has: (key) => key in bindings, make: (key) => bindings[key] },',
+          '}',
+        ].join('\n'),
+        'utf8',
+      )
+
+      await runQueueWorker({ once: true })
+
+      const container = workerOptions?.container as { make: (key: string) => unknown } | undefined
+      expect(workerDriver).toEqual({ name: 'bound' })
+      expect(container?.make('mail')).toEqual({ name: 'mailer' })
     } finally {
       await workspace.cleanup()
     }

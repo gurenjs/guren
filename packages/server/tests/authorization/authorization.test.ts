@@ -15,6 +15,7 @@ import {
 } from '../../src/authorization'
 import type { AuthorizeResourceOptions } from '../../src/authorization'
 import { AuthorizationException } from '../../src/errors'
+import { resetDefaultApplication } from '../../src/http/default-application'
 import type { Context } from '../../src/http/Application'
 import type { Middleware } from '../../src/http/middleware'
 
@@ -571,6 +572,8 @@ describe('Response', () => {
 
 describe('Global Gate', () => {
   beforeEach(() => {
+    // A default application from another file would shadow the hand-set gate.
+    resetDefaultApplication()
     const gate = new Gate()
     gate.define('test-ability', () => true)
     setGate(gate)
@@ -675,6 +678,7 @@ describe('authorizeResourceMiddleware', () => {
   let checkedAbilities: string[]
 
   beforeEach(() => {
+    resetDefaultApplication()
     checkedAbilities = []
     const gate = new Gate()
     for (const ability of ['view', 'create', 'update', 'delete', 'purge']) {
@@ -752,6 +756,7 @@ describe('authorize middleware ability snapshots', () => {
   let checkedAbilities: string[]
 
   beforeEach(() => {
+    resetDefaultApplication()
     checkedAbilities = []
     const gate = new Gate()
     for (const ability of ['admin', 'moderator', 'billing']) {

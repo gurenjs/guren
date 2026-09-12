@@ -1,4 +1,5 @@
 import type { Application } from './Application'
+import type { ServiceBindings } from '../container/bindings'
 import { type Container, clearContainer, getContainer, peekContainer, setContainer } from '../container/Container'
 import { warnOnce } from '../support/warn-once'
 
@@ -57,6 +58,21 @@ export function defaultApplication(): Application | null {
 export function defaultContainer(): Container {
   warnIfAmbiguous()
   return getContainer()
+}
+
+/** `defaultContainer()` for a caller with a fallback of its own: null instead of the throw. */
+export function ambientContainer(): Container | null {
+  warnIfAmbiguous()
+  return peekContainer()
+}
+
+/**
+ * The binding the default application holds under `key`, or undefined when
+ * there is no default application or it binds nothing there. Every functional
+ * helper reads through this before its module slot (RFC 0023 §3).
+ */
+export function ambientBinding<K extends keyof ServiceBindings>(key: K): ServiceBindings[K] | undefined {
+  return ambientContainer()?.makeOptional(key)
 }
 
 function warnIfAmbiguous(): void {

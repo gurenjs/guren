@@ -1,4 +1,4 @@
-import { Controller, type Router } from '@guren/server'
+import { Controller, tryGetRequestContainer, type Router } from '@guren/server'
 import { resolveAttachmentEngine, resolveDeliveryRoute } from './engine.js'
 
 /**
@@ -10,9 +10,12 @@ import { resolveAttachmentEngine, resolveDeliveryRoute } from './engine.js'
  */
 export class AttachmentDeliveryController extends Controller {
   async show(): Promise<Response> {
-    // A mounted route without a configured engine is a server misconfiguration;
-    // the resolver's throw becomes a reported 500.
-    const engine = resolveAttachmentEngine('The attachments delivery route')
+    // The serving app's engine first (RFC 0023 §4). A mounted route without
+    // one anywhere is a server misconfiguration; the resolver's throw becomes
+    // a reported 500.
+    const engine =
+      tryGetRequestContainer(this.ctx)?.makeOptional('attachments') ??
+      resolveAttachmentEngine('The attachments delivery route')
     return engine.handleDeliveryRequest(this.ctx.req.raw)
   }
 }

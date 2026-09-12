@@ -6,6 +6,7 @@ import type {
 } from './types'
 import { Translator } from './Translator'
 import { JsonLoader } from './loaders/JsonLoader'
+import { ambientBinding } from '../http/default-application'
 
 export class I18nManager {
   private config: I18nConfig
@@ -152,17 +153,18 @@ export function setI18n(i18n: I18nManager): void {
   globalI18n = i18n
 }
 
-/** Get the global I18n manager. */
+/** The default application's `i18n`, else the one `setI18n()` installed. */
 export function getI18n(): I18nManager {
-  if (!globalI18n) {
-    throw new Error('I18n manager not initialized. Call setI18n() first.')
+  const i18n = tryGetI18n()
+  if (!i18n) {
+    throw new Error('I18n manager not initialized. Pass createApp({ i18n }), or call setI18n() first.')
   }
-  return globalI18n
+  return i18n
 }
 
-/** Get the global I18n manager, or `undefined` when none was registered. */
+/** `getI18n()` without the throw: `undefined` when no app binds one and none was set. */
 export function tryGetI18n(): I18nManager | undefined {
-  return globalI18n ?? undefined
+  return ambientBinding('i18n') ?? globalI18n ?? undefined
 }
 
 /** Translate a key using the global I18n manager. */

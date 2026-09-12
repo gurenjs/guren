@@ -3,6 +3,7 @@ import { Logger, isPromiseLike, type LoggerOptions } from './Logger'
 import { ConsoleChannel } from './channels/ConsoleChannel'
 import { FileChannel } from './channels/FileChannel'
 import { DailyFileChannel } from './channels/DailyFileChannel'
+import { ambientBinding } from '../http/default-application'
 
 /** Log manager for managing multiple logging channels. */
 export class LogManager {
@@ -195,9 +196,11 @@ export function setLogManager(manager: LogManager): void {
   globalLogManager = manager
 }
 
+/** The default application's `log`, else the one `setLogManager()` installed. */
 export function getLogManager(): LogManager {
-  if (!globalLogManager) {
-    throw new Error('Log manager has not been initialized. Call setLogManager() first.')
+  const manager = ambientBinding('log') ?? globalLogManager
+  if (!manager) {
+    throw new Error('Log manager has not been initialized. Register LogServiceProvider, or call setLogManager() first.')
   }
-  return globalLogManager
+  return manager
 }

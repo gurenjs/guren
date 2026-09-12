@@ -11,6 +11,7 @@ import { SmtpTransport } from './transports/SmtpTransport'
 import { ResendTransport } from './transports/ResendTransport'
 import { MemoryTransport } from './transports/MemoryTransport'
 import { LogTransport, type LogTransportOptions } from './transports/LogTransport'
+import type { ContainerLike } from '../container/types'
 
 /** Mail manager for handling multiple transports. */
 export class MailManager {
@@ -19,7 +20,15 @@ export class MailManager {
   private readonly transportFactories: Map<string, MailTransportFactory> = new Map()
   private readonly resolvedTransports: Map<string, MailTransport> = new Map()
 
-  constructor(config: MailConfig = {}) {
+  /**
+   * The container this manager is bound in, when its provider passed one:
+   * `mail(manager).queue()` dispatches through that container's `queue`
+   * (RFC 0023 §4) rather than the default application's.
+   */
+  readonly container?: ContainerLike
+
+  constructor(config: MailConfig = {}, container?: ContainerLike) {
+    this.container = container
     this.defaultTransportName = config.default ?? 'smtp'
     this.defaultFrom = config.from
 
@@ -115,6 +124,7 @@ export class MailManager {
   }
 }
 
-export function createMailManager(config?: MailConfig): MailManager {
-  return new MailManager(config)
+/** `container` is the one the manager is bound in, so queued mail stays with that app. */
+export function createMailManager(config?: MailConfig, container?: ContainerLike): MailManager {
+  return new MailManager(config, container)
 }

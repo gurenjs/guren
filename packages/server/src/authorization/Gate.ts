@@ -12,6 +12,7 @@ import type {
 } from './types'
 import { AuthorizationException, HttpException } from '../errors'
 import { getAuthContext } from '../auth/context'
+import { ambientBinding } from '../http/default-application'
 
 /** Response builder for authorization checks. */
 export const Response: ResponseBuilder = {
@@ -341,11 +342,13 @@ export function setGate(gate: Gate): void {
   globalGate = gate
 }
 
+/** The default application's `gate`, else the one `setGate()` installed. */
 export function getGate(): Gate {
-  if (!globalGate) {
-    throw new Error('Gate not initialized. Call setGate() first.')
+  const gate = ambientBinding('gate') ?? globalGate
+  if (!gate) {
+    throw new Error('Gate not initialized. Construct the app with createApp(), or call setGate() first.')
   }
-  return globalGate
+  return gate
 }
 
 /** Define a gate on the global instance. */

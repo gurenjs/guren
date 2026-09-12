@@ -263,24 +263,24 @@ await mail(mailManager)
 
 ## キューによるメール送信
 
-キューを使うとメールを非同期に送信できます。実アプリでは mail manager を provider で構成し、container から取り出して使います。`setMailManager()` は、queued mail job から同じ manager を参照するための bridge です。
+キューを使うとメールを非同期に送信できます。queued job はワーカーが動かすアプリの container から mail manager（`mail`）を取り出し、`queue()` はその隣にバインドされた `queue` manager へディスパッチします。両方をバインドする provider があれば配線は完了です。manager がどのアプリのものか分かるよう、`createMailManager()` には provider の container を渡します。
 
 ```ts
-import { mail, setMailManager, createQueueManager, MemoryDriver } from '@guren/core'
+import { ServiceProvider, createMailManager, createQueueManager, MemoryDriver } from '@guren/core'
 
-// キューマネージャーを設定
-const queue = createQueueManager({
-  default: 'memory',
-  drivers: {
-    memory: () => new MemoryDriver(),
-  },
-})
+export default class MailProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('queue', () =>
+      createQueueManager({ default: 'memory', drivers: { memory: () => new MemoryDriver() } }),
+    )
+    this.container.singleton('mail', (container) => createMailManager(mailConfig, container))
+  }
+}
+```
 
-queue.driver()
+container を渡さずに作った mail manager は、既定アプリケーションの `queue` バインディングへキューします。`setMailManager()` は、`mail` バインディングを見つけられない job のためのプロセス全体のフォールバックとして残っています。
 
-// provider で構成した mail manager を queued job へ bridge する
-setMailManager(mailManager)
-
+```ts
 // 即座に送信せずキューに入れる
 await mail(mailManager)
   .to('user@example.com')

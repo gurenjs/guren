@@ -1,4 +1,5 @@
 export type {
+  ContainerLike,
   ServiceFactory,
   ServiceClass,
   ServiceBinding,
