@@ -73,7 +73,7 @@ A scaffolded app installs the harness those commands feed: `CLAUDE.md`, glob-sco
 claude plugin marketplace add gurenjs/agent-skills   # or: npx skills add gurenjs/agent-skills
 ```
 
-The effect is measured. [Agents on Guren](https://github.com/gurenjs/agents-on-guren) runs 20 bug, security and feature tasks with hidden acceptance tests across three models, with and without the harness the scaffold ships: 360 runs, each one's patch, logs and verdict published. On Sonnet 5 the harness passed 60 of 60 tasks against 58 of 60 bare, at 28% fewer turns and 25% lower cost. Opus 5 went 60 of 60 either way, at 26% fewer turns. On Haiku 4.5 the pass rate itself moved, 51 of 60 to 54. Agents that had the harness ran `guren check` in 119 of their 180 runs; bare, 15.
+The effect is measured. [Agents on Guren](https://github.com/gurenjs/agents-on-guren) runs 20 bug, security and feature tasks with hidden acceptance tests across three models, with and without the harness the scaffold ships: 360 runs, each one's patch, logs and verdict published. On Sonnet 5 the harness passed 60 of 60 runs against 58 of 60 bare, at 28% fewer turns and 25% lower cost. Opus 5 went 60 of 60 either way, at 26% fewer turns and 12% lower cost. On Haiku 4.5 the pass rate itself moved, 51 of 60 to 54, at 6% higher cost. Agents that had the harness ran `guren check` in 119 of their 180 runs; bare, 15.
 
 ---
 
