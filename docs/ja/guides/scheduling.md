@@ -386,7 +386,7 @@ for (const task of scheduleTasksKernel().buildTasks()) scheduler.addTask(task)
 参照には解決先がありません。
 
 ```ts
-schedule.call(() => getContainer().make<SessionManager>('session').pruneExpired()).hourly()
+schedule.call(() => defaultContainer().make<SessionManager>('session').pruneExpired()).hourly()
 ```
 
 カーネルがあるのにどちらの形にも一致しない場合、あるいは読み込み中に例外を投げた

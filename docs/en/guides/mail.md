@@ -281,7 +281,7 @@ export default class MailProvider extends ServiceProvider {
 }
 ```
 
-A mail manager created without a container queues through the default application's `queue` binding instead. `setMailManager()` still installs a process-wide fallback for a job that finds no `mail` binding.
+A mail manager created without a container queues through the default application's `queue` binding instead. A job that finds no `mail` binding falls back to whatever `setMailManager()` installed, but that setter is deprecated as of 2.23.0: bind the manager on the app's container, as the provider above does.
 
 ```ts
 // Queue the email instead of sending immediately

@@ -10,7 +10,7 @@ import { SITE_NAME, absoluteUrl } from '../../config/site.js'
 
 /**
  * Document skeleton for server-rendered content pages, from the same `config/`
- * modules as `setInertiaDocument()` so the two cannot drift. The `<head>`
+ * modules as `createApp({ inertia })` so the two cannot drift. The `<head>`
  * carries only what pages never restate, since hono's metadata hoisting appends
  * rather than replaces; page metadata arrives through the `head` slot, whose
  * tags skip the hoisting pass (measured quadratic in tag count, ~1 ms per view).

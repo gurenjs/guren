@@ -143,6 +143,8 @@ describe('the deprecated service accessors', () => {
     getLogManager()
     setContainer(createContainer())
     getContainer()
+    setInertiaDocument({ head: '<meta name="x" content="y">' })
+    setInertiaSsrRenderer(undefined)
 
     const symbols = warned()
       .filter((message: string) => message.includes('Deprecation'))
@@ -159,15 +161,10 @@ describe('the deprecated service accessors', () => {
         'getLogManager',
         'setContainer',
         'getContainer',
+        'setInertiaDocument',
+        'setInertiaSsrRenderer',
       ]),
     )
     expect(app.container.has('encrypter')).toBe(true)
-  })
-
-  it('leaves the two Inertia setters silent while Open Question 4 is open', () => {
-    setInertiaDocument({ head: '<meta name="x" content="y">' })
-    setInertiaSsrRenderer(undefined)
-
-    expect(warn).not.toHaveBeenCalled()
   })
 })

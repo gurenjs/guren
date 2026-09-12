@@ -2,7 +2,7 @@
 
 認可は、認証済みユーザーが実行できる操作を制御する仕組みです。Guren の認可は、Laravel に着想を得たポリシーベースの設計になっています。
 
-認可ゲートはアプリの起動時に自動で作られます。起動後はどこからでも `getGate()` を呼び出して、アビリティの定義やポリシーの登録ができます。手動のセットアップは要りません。
+認可ゲートはアプリの起動時に自動で作られ、コンテナに `gate` として束縛されます。サービスプロバイダからは `this.container.make('gate')` で取得し、アビリティの定義やポリシーの登録を行います。手動のセットアップは要りません。
 
 ## ゲート
 
@@ -10,38 +10,52 @@
 
 ### ゲートの定義
 
-`src/app.ts`(boot コールバック内)またはサービスプロバイダでゲートを定義します:
+サービスプロバイダの `boot()` でゲートを定義します。ゲートを作るのはフレームワーク側のプロバイダの登録処理なので、それより前に `make('gate')` を呼ぶと例外になります:
 
 ```typescript
-import { getGate } from '@guren/core'
+import { ServiceProvider } from '@guren/core'
 
-const gate = getGate()
+export default class AuthorizationProvider extends ServiceProvider {
+  boot(): void {
+    const gate = this.container.make('gate')
 
-// シンプルなゲート
-gate.define('view-dashboard', (user) => {
-  return user?.isAdmin === true
-})
+    // シンプルなゲート
+    gate.define('view-dashboard', (user) => {
+      return user?.isAdmin === true
+    })
 
-// リソースを伴うゲート
-gate.define('update-post', (user, post) => {
-  return user?.id === post.userId
-})
+    // リソースを伴うゲート
+    gate.define('update-post', (user, post) => {
+      return user?.id === post.userId
+    })
 
-// データベースチェックを伴う非同期ゲート
-gate.define('delete-comment', async (user, comment) => {
-  const post = await Post.find(comment.postId)
-  return user?.id === post?.userId
-})
+    // データベースチェックを伴う非同期ゲート
+    gate.define('delete-comment', async (user, comment) => {
+      const post = await Post.find(comment.postId)
+      return user?.id === post?.userId
+    })
+  }
+}
 ```
+
+このプロバイダは `createApp({ providers })` に登録してください。
 
 ### ゲートの使用
 
-`forUser()` でユーザーを束縛してから認可をチェックします:
+コントローラには `this.authorize()` と `this.can()` があり、現在のユーザーの束縛まで済ませてくれます:
 
 ```typescript
-import { getGate } from '@guren/core'
+// 拒否時は AuthorizationException (403) をスロー
+await this.authorize('update-post', post)
 
-const gate = getGate().forUser(user)
+// 例外を投げずにチェック
+const canView = await this.can('view-dashboard')
+```
+
+それ以外の場所では、呼び出し元が持つコンテナからゲートを解決します。ジョブやコマンドなら `this.make('gate')`、プロバイダなら `this.container.make('gate')`、ミドルウェアなら `getRequestContainer(ctx).make('gate')` です。そのうえで `forUser()` でユーザーを束縛します:
+
+```typescript
+const gate = this.make('gate').forUser(user)
 
 // 許可されているか
 const canView = await gate.allows('view-dashboard')
@@ -59,10 +73,10 @@ await gate.authorize('update-post', post)
 
 ### Beforeコールバック
 
-すべてのゲートチェックの前に実行されるコールバックを登録します:
+すべてのゲートチェックの前に実行されるコールバックを、同じ `boot()` で登録します:
 
 ```typescript
-getGate().before((user, ability) => {
+gate.before((user, ability) => {
   // スーパー管理者はすべての操作が可能
   if (user?.isSuperAdmin) {
     return true
@@ -76,7 +90,7 @@ getGate().before((user, ability) => {
 すべてのゲートチェックの後に実行されるコールバックを登録します:
 
 ```typescript
-getGate().after((user, ability, result) => {
+gate.after((user, ability, result) => {
   // 認可の試行をログに記録
   logger.info(`User ${user?.id} ${result ? 'allowed' : 'denied'} for ${ability}`)
 })
@@ -140,18 +154,14 @@ export class PostPolicy extends Policy {
 
 ### ポリシーの登録
 
-`src/app.ts`(boot コールバック内)またはサービスプロバイダでゲートにポリシーを登録します:
+同じ `boot()` でゲートにポリシーを登録します:
 
 ```typescript
-import { getGate } from '@guren/core'
-import { PostPolicy } from '../app/Policies/PostPolicy'
-import { Post } from '../app/Models/Post'
-
 // モデルクラスで登録
-getGate().policy(Post, PostPolicy)
+gate.policy(Post, PostPolicy)
 
 // 文字列キーでも登録可能
-getGate().policy('post', PostPolicy)
+gate.policy('post', PostPolicy)
 ```
 
 ### ポリシーの使用
@@ -159,9 +169,7 @@ getGate().policy('post', PostPolicy)
 ORM のクエリはコンストラクタ情報を持たないプレーンなオブジェクトを返すため、ポリシーを解決するにはモデルクラスをレコードと一緒に渡します:
 
 ```typescript
-import { getGate } from '@guren/core'
-
-const gate = getGate().forUser(user)
+const gate = this.make('gate').forUser(user)
 const post = await Post.findOrFail(id)
 
 // ORM レコードには [モデルクラス, レコード] を渡す
@@ -255,13 +263,14 @@ export default class PostController extends Controller {
 ルートレベルのチェック用に認可ミドルウェアを作成できます:
 
 ```typescript
-import { type Router, getGate, AuthorizationException, defineMiddleware } from '@guren/core'
+import { type Router, getRequestContainer, AuthorizationException, defineMiddleware } from '@guren/core'
 
 export function authorizeAbility(ability: string) {
   return defineMiddleware(async (ctx, next) => {
     const user = ctx.get('user') ?? null
+    const gate = getRequestContainer(ctx).make('gate')
 
-    if (await getGate().forUser(user).denies(ability)) {
+    if (await gate.forUser(user).denies(ability)) {
       throw new AuthorizationException()
     }
 

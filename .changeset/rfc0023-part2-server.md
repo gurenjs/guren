@@ -17,18 +17,15 @@ hand-written `setMailManager(m)` silently shadowed by the binding a provider
 had already made. The shim binds the key on the ambient container instead, and
 clears its own slot so no value outlives the app that received it. Two
 applications in one process therefore no longer inherit each other's
-hand-installed services. Where no `Application` has been constructed yet — both
-scaffold templates call `setInertiaDocument()` at module scope above
-`createApp()` — the slot is still where the value lands, and the getters keep
-reading it second.
+hand-installed services. Where no `Application` has been constructed yet — a
+`setInertiaDocument()` at module scope above `createApp()`, for one — the slot
+is still where the value lands, and the getters keep reading it second.
 
-`setInertiaDocument` and `setInertiaSsrRenderer` are tagged and reported but do
-not warn at runtime. RFC 0023 Open Question 4 has not settled whether
-`createApp({ inertia })` or the setter is the endpoint, the Workers entry
-`@guren/plugin-cloudflare` generates still calls `setInertiaSsrRenderer()`, and
-both scaffold templates still write `setInertiaDocument()`; a warning naming
-code the framework itself emits is not something an app author can act on. The
-codemod rewrites both for an app that wants to move now.
+`setInertiaDocument` and `setInertiaSsrRenderer` warn like the rest once the
+code the framework itself emits stops calling them: the generated Workers entry
+binds `inertia.ssrRenderer` on the app, and both scaffold templates pass
+`createApp({ inertia: { document } })`. Both changes are in this release. The
+codemod rewrites an app's own calls.
 
 `setQueueDriver()` keeps its override: through this release the pin still wins
 over the bound `queue` manager, because `@guren/testing`'s `fakeQueue()` and the

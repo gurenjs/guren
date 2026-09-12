@@ -6,10 +6,14 @@ import { createTempWorkspace } from './helpers'
 
 /**
  * The scaffolded document is built by InertiaEngine, which never reads
- * public/index.html — only a `setInertiaDocument({ head })` registration reaches
- * a browser tab, and a blueprint may register it from either file.
+ * public/index.html — only a `createApp({ inertia: { document } })` registration
+ * reaches a browser tab. Both frontend blueprints pass it from src/app.ts;
+ * config/inertia.ts is read too, for a blueprint that moves it back out.
  */
 const REGISTRATION_FILES = ['src/app.ts', 'config/inertia.ts']
+
+/** The option, anchored on `inertia:` so an unrelated `document:` cannot stand in. */
+const REGISTRATION = /inertia:\s*\{\s*document:\s*\{/u
 
 async function findFaviconHref(appRoot: string): Promise<string | undefined> {
   for (const file of REGISTRATION_FILES) {
@@ -20,7 +24,7 @@ async function findFaviconHref(appRoot: string): Promise<string | undefined> {
       continue
     }
 
-    if (!source.includes('setInertiaDocument(')) {
+    if (!REGISTRATION.test(source)) {
       continue
     }
 

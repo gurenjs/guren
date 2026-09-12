@@ -116,7 +116,7 @@ export default class AppServiceProvider extends ServiceProvider {
 >   async register(): Promise<void> {
 >     const i18n = createI18n({ locale: 'ja', fallbackLocale: 'en', path: './lang' })
 >     await i18n.loadLocales(['en', 'ja'])
->     setI18n(i18n)
+>     this.container.instance('i18n', i18n)
 >
 >     const app = this.container.make<Application>('app')
 >     app.use('*', localeMiddleware) // register(), not boot()

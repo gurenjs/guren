@@ -359,11 +359,10 @@ async function assertBlogScaffold(appDir: string): Promise<void> {
   assert(appBootstrap.includes('AuthProvider'), 'Blog blueprint must register AuthProvider.')
   assert(appBootstrap.includes('AuthorizationProvider'), 'Blog blueprint must register AuthorizationProvider.')
 
-  // getGate() throws until the framework's own provider has registered, so the
-  // policy has to be bound from a provider's boot(), not at module scope.
+  // The gate is bound during registration, so make('gate') throws before boot.
   const authorizationProvider = await readFile(join(appDir, 'app/Providers/AuthorizationProvider.ts'), 'utf8')
   assert(
-    /boot\(\)[^{]*\{[^}]*getGate\(\)\.policy\(Post,\s*PostPolicy\)/su.test(authorizationProvider),
+    /boot\(\)[^{]*\{[^}]*this\.container\.make\('gate'\)\.policy\(Post,\s*PostPolicy\)/su.test(authorizationProvider),
     'Blog blueprint must bind PostPolicy to the Post model from boot(), not at module scope.',
   )
 

@@ -25,10 +25,14 @@ describe('buildCloudflareOutput', () => {
 
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
     expect(worker).toContain("import { createWorkersHandler } from '@guren/plugin-cloudflare'")
-    expect(worker).toContain("import { setInertiaSsrRenderer } from '@guren/core'")
     expect(worker).toContain('import * as ssrModule from "../.guren/ssr/ssr-Xyz789.js"')
     expect(worker).toContain('import app from "../src/app.ts"')
-    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render)')
+    // One toContain, so a guard that drifts away from the bind it protects fails here.
+    expect(worker).toContain(
+      "if (!app.container.has('inertia.ssrRenderer')) {\n"
+        + "  app.container.instance('inertia.ssrRenderer', ssrModule.render)\n}",
+    )
+    expect(worker).not.toContain('setInertiaSsrRenderer')
     expect(worker).toContain('const handler = createWorkersHandler(app)')
     expect(worker).toContain('fetch: (request, env, ctx) => handler.fetch(request, env, ctx)')
 
@@ -224,6 +228,7 @@ describe('buildCloudflareOutput', () => {
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
+    expect(worker).not.toContain('inertia.ssrRenderer')
     expect(worker).not.toContain('setInertiaSsrRenderer')
     expect(worker).toContain('const handler = createWorkersHandler(app)')
     expect(worker).toContain('fetch: (request, env, ctx) => handler.fetch(request, env, ctx)')
@@ -235,7 +240,7 @@ describe('buildCloudflareOutput', () => {
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
-    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.default)')
+    expect(worker).toContain("app.container.instance('inertia.ssrRenderer', ssrModule.default)")
     expect(worker).not.toContain('ssrModule.render')
   })
 
@@ -249,7 +254,7 @@ describe('buildCloudflareOutput', () => {
     // What the runtime loader would pick: each candidate is tested for being a
     // function, so a non-callable `render` does not shadow a valid default.
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
-    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.default)')
+    expect(worker).toContain("app.container.instance('inertia.ssrRenderer', ssrModule.default)")
   })
 
   test('should throw when the SSR entry exports no renderer', async () => {
