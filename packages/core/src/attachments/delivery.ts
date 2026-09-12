@@ -1,5 +1,5 @@
 import { Controller, tryGetRequestContainer, type Router } from '@guren/server'
-import { ATTACHMENTS_SERVICE_KEY, resolveAttachmentEngine, resolveDeliveryRoute } from './engine.js'
+import { ATTACHMENTS_BINDING, resolveAttachmentEngine, resolveDeliveryRoute } from './engine.js'
 
 /**
  * The signed attachment delivery route's controller (RFC 0015 §1). It hands the
@@ -14,7 +14,7 @@ export class AttachmentDeliveryController extends Controller {
     // one anywhere is a server misconfiguration; the resolver's throw becomes
     // a reported 500.
     const engine =
-      tryGetRequestContainer(this.ctx)?.makeOptional(ATTACHMENTS_SERVICE_KEY) ??
+      tryGetRequestContainer(this.ctx)?.makeOptional(ATTACHMENTS_BINDING) ??
       resolveAttachmentEngine('The attachments delivery route')
     return engine.handleDeliveryRequest(this.ctx.req.raw)
   }

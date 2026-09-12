@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import * as core from '../src/index'
-import { ATTACHMENT_OBJECT_PREFIX, ATTACHMENTS_SERVICE_KEY } from '../src/attachments/engine'
+import { ATTACHMENT_OBJECT_PREFIX, ATTACHMENTS_BINDING } from '../src/attachments/engine'
 import { blankComments } from './source-scan'
 
 /**
@@ -32,7 +32,7 @@ describe('attachment object key prefix', () => {
     const declaration = `export const ATTACHMENT_OBJECT_PREFIX = '${ATTACHMENT_OBJECT_PREFIX}'`
     // The container key spells the same word for an unrelated contract, so it
     // has its own constant and is stripped alongside the prefix's.
-    const serviceKey = `export const ATTACHMENTS_SERVICE_KEY = '${ATTACHMENTS_SERVICE_KEY}'`
+    const serviceKey = `export const ATTACHMENTS_BINDING = '${ATTACHMENTS_BINDING}'`
     expect(code).toContain(declaration)
     expect(code).toContain(serviceKey)
     // `'attachments.show'` and `'/attachments'` stay out: a route name and a URL

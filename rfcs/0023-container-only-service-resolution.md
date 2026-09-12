@@ -291,8 +291,10 @@ app it boots (`cli/src/queue.ts:155-176`) and passes that container to the
   the engine beside `Attachment` instead, and the provider binds it with the
   container it already holds: `attachmentEngine.bindTo(this.container)`, which
   binds `attachments` *and* becomes the container the `storage` factory
-  receives. The active engine stays the fallback for the `Attachable` statics,
-  the queued job and the prune command, which hold no container. Still
+  receives. `GenerateVariantsJob` and `AttachmentsPruneCommand` read the key
+  from the container they already hold, the worker's and the console kernel's,
+  before falling back; the active engine is the last resort, and all the
+  `Attachable` statics have. Still
   process-wide: `resolveDeliveryRoute()`, which `registerAttachmentRoutes()`
   reads for the route's prefix and name. Route registration runs against a bare
   `Router` with no container, so two apps that configure *different* prefixes

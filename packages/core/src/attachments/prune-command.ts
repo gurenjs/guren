@@ -1,5 +1,5 @@
 import { Command } from '@guren/server'
-import { resolveAttachmentEngine } from './engine.js'
+import { ATTACHMENTS_BINDING, resolveAttachmentEngine, type AttachmentEngine } from './engine.js'
 
 /**
  * Console sweeper for the attachments layer (RFC 0013 §8): the polymorphic
@@ -15,7 +15,12 @@ export class AttachmentsPruneCommand extends Command {
   static override description = 'Remove attachment rows whose owning record no longer exists'
 
   async handle(): Promise<void> {
-    const engine = resolveAttachmentEngine('attachments:prune')
+    // The console kernel's app, not the process-wide engine (RFC 0023 §4):
+    // with --objects this sweep deletes storage objects, so pruning through
+    // another app's engine would delete under another app's disks.
+    const engine =
+      this.resolveOptional<AttachmentEngine>(ATTACHMENTS_BINDING) ??
+      resolveAttachmentEngine('attachments:prune')
     const dryRun = this.hasOption('dry-run')
     const objects = this.hasOption('objects')
     const report = await engine.pruneOrphans({ objects, dryRun })

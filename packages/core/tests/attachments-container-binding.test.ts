@@ -7,11 +7,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   Attachable,
+  AttachmentsPruneCommand,
   configureAttachments,
   createApp,
   defineModel,
   DrizzleAdapter,
   generateAppKey,
+  BufferedOutput,
+  GenerateVariantsJob,
   hasOneAttached,
   registerAttachmentRoutes,
   resetDefaultApplication,
@@ -42,6 +45,38 @@ function storageIn(root: string): StorageManager {
   })
 }
 
+/** An engine stand-in that records which of the two resolutions reached it. */
+function recordingEngine(calls: string[], label: string): AttachmentEngine {
+  return {
+    generateVariants: async () => {
+      calls.push(`generateVariants:${label}`)
+    },
+    pruneOrphans: async () => {
+      calls.push(`pruneOrphans:${label}`)
+      return {
+        scannedRows: 0,
+        orphanRows: [],
+        skippedTypes: [],
+        orphanObjectPrefixes: [],
+        skippedDisks: [],
+      }
+    },
+  } as unknown as AttachmentEngine
+}
+
+/**
+ * A container whose engine differs from the one every fallback reaches, so the
+ * choice is visible. The binding must not sit on the *ambient* app, or
+ * `resolveAttachmentEngine()` finds it too and the fallback path looks correct.
+ */
+function twoEngines(calls: string[]): Container {
+  setActiveAttachmentEngine(recordingEngine(calls, 'active'))
+  const app = createApp()
+  app.container.instance('attachments', recordingEngine(calls, 'bound'))
+  createApp()
+  return app.container
+}
+
 /** The scaffolded `AttachmentsProvider`, over an engine the test configured. */
 function providerFor(engine: AttachmentEngine): ServiceProviderConstructor {
   return class AttachmentsProvider extends ServiceProvider {
@@ -54,6 +89,7 @@ function providerFor(engine: AttachmentEngine): ServiceProviderConstructor {
 describe('AttachmentEngine.bindTo() (RFC 0023 §4)', () => {
   let sqlite: Database
   let tmpDir: string
+  let tmpRoots: string[]
   let previousAppKey: string | undefined
 
   beforeEach(() => {
@@ -65,7 +101,8 @@ describe('AttachmentEngine.bindTo() (RFC 0023 §4)', () => {
       CREATE TABLE posts (id integer primary key, title text not null);
     `)
     DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
-    tmpDir = mkdtempSync(join(tmpdir(), 'guren-attachments-app-'))
+    tmpRoots = []
+    tmpDir = storageRoot()
     resetDefaultApplication()
   })
 
@@ -73,10 +110,16 @@ describe('AttachmentEngine.bindTo() (RFC 0023 §4)', () => {
     sqlite.close()
     setActiveAttachmentEngine(null)
     resetDefaultApplication()
-    rmSync(tmpDir, { recursive: true, force: true })
+    for (const root of tmpRoots) rmSync(root, { recursive: true, force: true })
     if (previousAppKey === undefined) delete process.env.APP_KEY
     else process.env.APP_KEY = previousAppKey
   })
+
+  function storageRoot(): string {
+    const root = mkdtempSync(join(tmpdir(), 'guren-attachments-'))
+    tmpRoots.push(root)
+    return root
+  }
 
   function appWith(root: string, providers: ServiceProviderConstructor[] = []): Application {
     const app = createApp({ routes: (router) => registerAttachmentRoutes(router), providers })
@@ -105,7 +148,7 @@ describe('AttachmentEngine.bindTo() (RFC 0023 §4)', () => {
     await app.boot()
     // Last construction wins the ambient slot, so a storage factory reading the
     // ambient container gets this app rather than the one that bound the engine.
-    const later = appWith(mkdtempSync(join(tmpdir(), 'guren-attachments-later-')))
+    const later = appWith(storageRoot())
 
     await Post.attach(1, 'cover', new File([PNG_1X1], 'cover.png', { type: 'image/png' }))
 
@@ -136,14 +179,32 @@ describe('AttachmentEngine.bindTo() (RFC 0023 §4)', () => {
     // A second app in the same process, wired exactly as the scaffold wires
     // one: its configure() call replaces the active engine, its provider binds
     // that engine on its own container only.
-    const otherRoot = mkdtempSync(join(tmpdir(), 'guren-attachments-other-'))
-    const other = appWith(otherRoot, [providerFor(configure())])
+    const other = appWith(storageRoot(), [providerFor(configure())])
     await other.boot()
 
     const response = await own.fetch(new Request(new URL(url!, 'http://app.test')))
 
     expect(response.status).toBe(200)
     expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(PNG_1X1))
-    rmSync(otherRoot, { recursive: true, force: true })
+  })
+  test('the queued job resolves the engine from the container the worker handed it', async () => {
+    const calls: string[] = []
+    const job = new GenerateVariantsJob()
+    job.setContainer(twoEngines(calls))
+
+    await job.handle({ attachmentId: 'whatever' })
+
+    expect(calls).toEqual(['generateVariants:bound'])
+  })
+
+  test('attachments:prune resolves the engine from the console kernel\'s container', async () => {
+    const calls: string[] = []
+    const command = new AttachmentsPruneCommand(twoEngines(calls))
+    command.setInput(['--dry-run'])
+    command.setOutput(new BufferedOutput())
+
+    await command.handle()
+
+    expect(calls).toEqual(['pruneOrphans:bound'])
   })
 })

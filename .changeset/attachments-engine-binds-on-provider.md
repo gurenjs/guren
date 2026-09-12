@@ -25,8 +25,11 @@ export default class AttachmentsProvider extends ServiceProvider {
 }
 ```
 
-The active engine stays the fallback for the `Attachable` statics, the queued
-variants job and `attachments:prune`, none of which hold a container.
+`GenerateVariantsJob` and `attachments:prune` read `attachments` from the
+container they already hold (the worker's app, the console kernel's app) before
+falling back, so a process that boots more than one app's config no longer
+generates variants or deletes objects through whichever configured last. The
+active engine remains the fallback, and is all the `Attachable` statics have.
 
 **Removed:** the unreleased `configureAttachments({ app })` option (RFC 0023
 §4, amended). No shipped release carried it.

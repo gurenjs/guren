@@ -157,18 +157,20 @@ export default class AttachmentsProvider extends ServiceProvider {
 }
 ```
 
-Register it in `createApp({ providers })`. The provider does two things at
-once. Importing the config module runs `configureAttachments()` at boot, in web
-and worker processes alike, before the first `attach()`. `bindTo()` then hands
-the app's container to the engine: the signed delivery route serves from the
-engine of the app that received the request, and the `storage` factory above
-receives that same container.
+Register it in `createApp({ providers })`. Importing the config module runs
+`configureAttachments()` at boot, in web and worker processes alike, before the
+first `attach()`. `bindTo()` hands the app's container to the engine: the
+signed delivery route serves from the engine of the app that received the
+request, and the `storage` factory above receives that same container.
 
-`configureAttachments()` runs at module scope, where no `Application` exists
-yet, which is why the binding is the provider's job rather than an option on
-the call. A process that serves one app never notices the difference: without
-a binding, both the route and the storage factory fall back to the app that
-configured attachments last. A process that serves two does.
+A process that serves one app never notices the difference: without a binding,
+both the route and the storage factory fall back to the app that configured
+attachments last. A process that serves two does.
+
+The unit is the `configureAttachments()` call, not the `Application`. Two apps
+built from the same config module share one engine, so the last `bindTo()`
+wins its storage container; give each app its own config module to keep them
+apart.
 
 Additional options:
 

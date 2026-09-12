@@ -1,5 +1,10 @@
 import { Job } from '@guren/server'
-import { resolveAttachmentEngine, type GenerateVariantsPayload } from './engine.js'
+import {
+  ATTACHMENTS_BINDING,
+  resolveAttachmentEngine,
+  type AttachmentEngine,
+  type GenerateVariantsPayload,
+} from './engine.js'
 
 export type { GenerateVariantsPayload } from './engine.js'
 
@@ -14,14 +19,19 @@ export class GenerateVariantsJob extends Job<GenerateVariantsPayload> {
   /** Pinned: queued messages must survive identifier mangling and renames. */
   static override jobName = 'GenerateVariantsJob'
 
+  /** The app whose queue the worker drains, which a worker serving two is not free to guess. */
+  private engine(): AttachmentEngine {
+    return this.makeOptional(ATTACHMENTS_BINDING) ?? resolveAttachmentEngine('GenerateVariantsJob')
+  }
+
   async handle(payload: GenerateVariantsPayload): Promise<void> {
-    await resolveAttachmentEngine('GenerateVariantsJob').generateVariants(payload)
+    await this.engine().generateVariants(payload)
   }
 
   /** After the last retry, stop `pending` variants looking in-flight forever. */
   async failed(payload: GenerateVariantsPayload, _error: Error): Promise<void> {
     try {
-      await resolveAttachmentEngine('GenerateVariantsJob').markDeferredFailed(payload.attachmentId)
+      await this.engine().markDeferredFailed(payload.attachmentId)
     } catch {
       // Unconfigured or unreachable here means there is nothing to settle.
     }

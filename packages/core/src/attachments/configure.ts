@@ -42,8 +42,8 @@ export function configureAttachments(options: ConfigureAttachmentsOptions): Conf
   // At configure time, so any worker booting the app's config can resolve
   // queued GenerateVariantsJob messages.
   registerJob(GenerateVariantsJob)
-  // The fallback for the statics and the queued job, which hold no container;
-  // a provider's engine.bindTo() gives the serving app its own (RFC 0023 §4).
+  // The last resort behind ATTACHMENTS_SERVICE_KEY, and all the `Attachable`
+  // statics have: they take no container to read the key from (RFC 0023 §4).
   setActiveAttachmentEngine(engine)
   return { Attachment: engine.model, engine }
 }
