@@ -52,10 +52,10 @@ await this.authorize('update-post', post)
 const canView = await this.can('view-dashboard')
 ```
 
-それ以外の場所では、呼び出し元が持つコンテナからゲートを解決し、`forUser()` でユーザーを束縛します:
+それ以外の場所では、呼び出し元が持つコンテナからゲートを解決します。ジョブやコマンドなら `this.make('gate')`、プロバイダなら `this.container.make('gate')`、ミドルウェアなら `getRequestContainer(ctx).make('gate')` です。そのうえで `forUser()` でユーザーを束縛します:
 
 ```typescript
-const gate = this.container.make('gate').forUser(user)
+const gate = this.make('gate').forUser(user)
 
 // 許可されているか
 const canView = await gate.allows('view-dashboard')
@@ -73,10 +73,10 @@ await gate.authorize('update-post', post)
 
 ### Beforeコールバック
 
-すべてのゲートチェックの前に実行されるコールバックを登録します:
+すべてのゲートチェックの前に実行されるコールバックを、同じ `boot()` で登録します:
 
 ```typescript
-this.container.make('gate').before((user, ability) => {
+gate.before((user, ability) => {
   // スーパー管理者はすべての操作が可能
   if (user?.isSuperAdmin) {
     return true
@@ -90,7 +90,7 @@ this.container.make('gate').before((user, ability) => {
 すべてのゲートチェックの後に実行されるコールバックを登録します:
 
 ```typescript
-this.container.make('gate').after((user, ability, result) => {
+gate.after((user, ability, result) => {
   // 認可の試行をログに記録
   logger.info(`User ${user?.id} ${result ? 'allowed' : 'denied'} for ${ability}`)
 })
@@ -154,24 +154,14 @@ export class PostPolicy extends Policy {
 
 ### ポリシーの登録
 
-サービスプロバイダの `boot()` でゲートにポリシーを登録します:
+同じ `boot()` でゲートにポリシーを登録します:
 
 ```typescript
-import { ServiceProvider } from '@guren/core'
-import { PostPolicy } from '../Policies/PostPolicy'
-import { Post } from '../Models/Post'
+// モデルクラスで登録
+gate.policy(Post, PostPolicy)
 
-export default class AuthorizationProvider extends ServiceProvider {
-  boot(): void {
-    const gate = this.container.make('gate')
-
-    // モデルクラスで登録
-    gate.policy(Post, PostPolicy)
-
-    // 文字列キーでも登録可能
-    gate.policy('post', PostPolicy)
-  }
-}
+// 文字列キーでも登録可能
+gate.policy('post', PostPolicy)
 ```
 
 ### ポリシーの使用
@@ -179,7 +169,7 @@ export default class AuthorizationProvider extends ServiceProvider {
 ORM のクエリはコンストラクタ情報を持たないプレーンなオブジェクトを返すため、ポリシーを解決するにはモデルクラスをレコードと一緒に渡します:
 
 ```typescript
-const gate = this.container.make('gate').forUser(user)
+const gate = this.make('gate').forUser(user)
 const post = await Post.findOrFail(id)
 
 // ORM レコードには [モデルクラス, レコード] を渡す

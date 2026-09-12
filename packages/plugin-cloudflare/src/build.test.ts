@@ -27,10 +27,11 @@ describe('buildCloudflareOutput', () => {
     expect(worker).toContain("import { createWorkersHandler } from '@guren/plugin-cloudflare'")
     expect(worker).toContain('import * as ssrModule from "../.guren/ssr/ssr-Xyz789.js"')
     expect(worker).toContain('import app from "../src/app.ts"')
-    expect(worker).toContain("app.container.instance('inertia.ssrRenderer', ssrModule.render)")
-    expect(worker).toContain("if (!app.container.has('inertia.ssrRenderer'))")
-    // The deprecated setter is what this bind replaced (RFC 0023 Open Question 4);
-    // nothing else would notice it coming back.
+    // One toContain, so a guard that drifts away from the bind it protects fails here.
+    expect(worker).toContain(
+      "if (!app.container.has('inertia.ssrRenderer')) {\n"
+        + "  app.container.instance('inertia.ssrRenderer', ssrModule.render)\n}",
+    )
     expect(worker).not.toContain('setInertiaSsrRenderer')
     expect(worker).toContain('const handler = createWorkersHandler(app)')
     expect(worker).toContain('fetch: (request, env, ctx) => handler.fetch(request, env, ctx)')
@@ -228,6 +229,7 @@ describe('buildCloudflareOutput', () => {
 
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
     expect(worker).not.toContain('inertia.ssrRenderer')
+    expect(worker).not.toContain('setInertiaSsrRenderer')
     expect(worker).toContain('const handler = createWorkersHandler(app)')
     expect(worker).toContain('fetch: (request, env, ctx) => handler.fetch(request, env, ctx)')
   })

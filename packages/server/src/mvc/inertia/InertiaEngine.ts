@@ -106,8 +106,7 @@ export interface InertiaDocumentOptions {
 let documentOptions: InertiaDocumentOptions | undefined;
 
 /**
- * Register app-wide document defaults for server-rendered Inertia responses;
- * call it at module scope in the app entry so every runtime picks it up.
+ * Register app-wide document defaults for server-rendered Inertia responses.
  * Process-wide, not request-scoped: calling it mid-flight leaks the policy into
  * in-flight requests — use the {@link InertiaOptions} fields per response.
  * Values are emitted verbatim, so never pass user input. `undefined` clears.
@@ -133,8 +132,7 @@ let defaultSsrRenderer: InertiaSsrRenderer | undefined;
  *
  * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Pass
  * `createApp({ inertia: { ssrRenderer } })`, or bind `inertia.ssrRenderer` on
- * the app when the renderer only exists after `createApp()` has run, as the
- * Workers entry `@guren/plugin-cloudflare` generates does.
+ * the app when the renderer only exists after `createApp()` has run.
  */
 export function setInertiaSsrRenderer(
   renderer: InertiaSsrRenderer | undefined

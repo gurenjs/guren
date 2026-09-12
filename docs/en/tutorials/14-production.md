@@ -140,7 +140,6 @@ import QueueProvider from '../app/Providers/QueueProvider.js'
 import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'
 import MailProvider from '../app/Providers/MailProvider.js'
 
-
 // The Host header is client-controlled, so production should answer only to the
 // host this app is deployed as, which APP_URL carries. Emailed links do not
 // depend on this — app/Auth/AppUrl.ts resolves those per request and fails

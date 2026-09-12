@@ -143,6 +143,8 @@ describe('the deprecated service accessors', () => {
     getLogManager()
     setContainer(createContainer())
     getContainer()
+    setInertiaDocument({ head: '<meta name="x" content="y">' })
+    setInertiaSsrRenderer(undefined)
 
     const symbols = warned()
       .filter((message: string) => message.includes('Deprecation'))
@@ -159,24 +161,10 @@ describe('the deprecated service accessors', () => {
         'getLogManager',
         'setContainer',
         'getContainer',
+        'setInertiaDocument',
+        'setInertiaSsrRenderer',
       ]),
     )
     expect(app.container.has('encrypter')).toBe(true)
-  })
-
-  it('warns from setInertiaSsrRenderer, whose generated caller Open Question 4 removed', () => {
-    setInertiaSsrRenderer(undefined)
-
-    const messages = warned()
-    expect(messages.filter((message) => message.includes('setInertiaSsrRenderer()'))).toHaveLength(1)
-    expect(messages[0]).toContain('createApp({ inertia })')
-  })
-
-  it('warns from setInertiaDocument, whose scaffold callers moved to the option', () => {
-    setInertiaDocument({ head: '<meta name="x" content="y">' })
-
-    const messages = warned()
-    expect(messages.filter((message) => message.includes('setInertiaDocument()'))).toHaveLength(1)
-    expect(messages[0]).toContain('createApp({ inertia })')
   })
 })

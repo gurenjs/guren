@@ -17,3 +17,8 @@ if (!app.container.has('inertia.ssrRenderer')) {
 The `has()` guard keeps the precedence the setter had: an app that passed
 `createApp({ inertia: { ssrRenderer } })` keeps its own renderer. Regenerate
 with `guren cloudflare:build`; no app source changes.
+
+The generated entry now reaches into the app's container, so an SSR build whose
+entry default-exports a hand-written `WorkersAppLike` rather than an
+`Application` has to expose `container` on it. The setter needed nothing from
+the app.

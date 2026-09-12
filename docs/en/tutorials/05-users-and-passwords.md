@@ -127,7 +127,6 @@ import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import AuthProvider from '../app/Providers/AuthProvider.js'
 import { registerWebRoutes } from '../routes/web.js'
 
-
 // The Host header is client-controlled, so production should answer only to the
 // host this app is deployed as, which APP_URL carries. Emailed links do not
 // depend on this — app/Auth/AppUrl.ts resolves those per request and fails

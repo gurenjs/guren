@@ -52,10 +52,10 @@ await this.authorize('update-post', post)
 const canView = await this.can('view-dashboard')
 ```
 
-Elsewhere, resolve the gate from the container that owns the call and bind a user with `forUser()`:
+Elsewhere, resolve the gate from the container that owns the call — `this.make('gate')` in a job or command, `this.container.make('gate')` in a provider, `getRequestContainer(ctx).make('gate')` in middleware — and bind a user with `forUser()`:
 
 ```typescript
-const gate = this.container.make('gate').forUser(user)
+const gate = this.make('gate').forUser(user)
 
 // Check if allowed
 const canView = await gate.allows('view-dashboard')
@@ -72,10 +72,10 @@ await gate.authorize('update-post', post)
 
 ### Before Callbacks
 
-Register a callback that runs before all gate checks:
+Register a callback that runs before all gate checks, in the same `boot()`:
 
 ```typescript
-this.container.make('gate').before((user, ability) => {
+gate.before((user, ability) => {
   // Super admins can do everything
   if (user?.isSuperAdmin) {
     return true
@@ -89,7 +89,7 @@ this.container.make('gate').before((user, ability) => {
 Register a callback that runs after all gate checks:
 
 ```typescript
-this.container.make('gate').after((user, ability, result) => {
+gate.after((user, ability, result) => {
   // Log authorization attempts
   logger.info(`User ${user?.id} ${result ? 'allowed' : 'denied'} for ${ability}`)
 })
@@ -153,24 +153,14 @@ export class PostPolicy extends Policy {
 
 ### Registering Policies
 
-Register policies on the gate in a service provider's `boot()`:
+Register policies on the gate in the same `boot()`:
 
 ```typescript
-import { ServiceProvider } from '@guren/core'
-import { PostPolicy } from '../Policies/PostPolicy'
-import { Post } from '../Models/Post'
+// Register by model class
+gate.policy(Post, PostPolicy)
 
-export default class AuthorizationProvider extends ServiceProvider {
-  boot(): void {
-    const gate = this.container.make('gate')
-
-    // Register by model class
-    gate.policy(Post, PostPolicy)
-
-    // Or by string key
-    gate.policy('post', PostPolicy)
-  }
-}
+// Or by string key
+gate.policy('post', PostPolicy)
 ```
 
 ### Using Policies
@@ -178,7 +168,7 @@ export default class AuthorizationProvider extends ServiceProvider {
 ORM queries return plain records without constructor information, so pass the model class alongside the record to resolve the policy:
 
 ```typescript
-const gate = this.container.make('gate').forUser(user)
+const gate = this.make('gate').forUser(user)
 const post = await Post.findOrFail(id)
 
 // Pass [ModelClass, record] for ORM records

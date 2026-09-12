@@ -1123,14 +1123,16 @@ function renderWorkerModule(input: {
 
   lines.push(`import app from ${quotedImport(input.out, input.appEntry)}`, '')
 
+  // The option cannot carry this renderer: it exists only once the SSR module is
+  // imported, which is after createApp() ran (RFC 0023, Open Question 4). The
+  // guard leaves an app that passed createApp({ inertia: { ssrRenderer } }) its
+  // own. An SSR build therefore needs an entry whose default export carries a
+  // real container, which `WorkersAppLike` does not require of boot/fetch.
   if (input.ssrImport) {
     lines.push(
-      "// The renderer only exists once the SSR module is imported, which is after",
-      "// createApp() ran, so it is bound here rather than passed as an option. An app",
-      "// that passed createApp({ inertia: { ssrRenderer } }) keeps its own (RFC 0023).",
-      "if (!app.container.has('inertia.ssrRenderer')) {",
-      `  app.container.instance('inertia.ssrRenderer', ssrModule.${input.ssrImport.rendererExport})`,
-      '}',
+      `if (!app.container.has('inertia.ssrRenderer')) {
+  app.container.instance('inertia.ssrRenderer', ssrModule.${input.ssrImport.rendererExport})
+}`,
       '',
     )
   }

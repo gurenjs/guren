@@ -276,12 +276,9 @@ app it boots (`cli/src/queue.ts:155-176`) and passes that container to the
   `setInertiaDocument()`/`setInertiaSsrRenderer()`
   become shims that bind on the default application. The Workers entry
   `plugin-cloudflare` generates ~~switches to the option in the same PR~~
-  **Amended in implementation:** binds the key on the app it already imported,
-  `app.container.instance('inertia.ssrRenderer', ssrModule.<export>)`, under a
-  `container.has()` guard so an app that passed the option keeps its own
-  renderer. The option cannot express that entry (Open Question 4): the renderer
-  exists only after the SSR module is imported, which is after `createApp()`
-  ran. Both setters keep writing their slot, which the engine reads second.
+  **Amended in implementation:** binds `inertia.ssrRenderer` on the app it
+  already imported, for the reason and in the form Open Question 4's decision
+  records. Both setters keep writing their slot, which the engine reads second.
 - ~~`configureAttachments({ app })` binds `attachments` on that app~~; the
   delivery route resolves it from the request container. The scaffold's
   `storage: () => getContainer().make('storage')` becomes
@@ -343,13 +340,11 @@ app now *replaces* that app's binding rather than being silently shadowed by it.
 ~~Two setters are tagged and registered but do not warn at runtime.~~
 **Amended in implementation:** both shipped in Part 2 tagged, registered and
 silent, because a warning naming code the framework itself emits is not
-actionable. Each starts warning with the change that removes its last such
-caller: `setInertiaSsrRenderer` with Open Question 4's decision, which drops it
-from the generated Workers entry, and `setInertiaDocument` with the scaffold
-pass that moves both templates to the option. Neither binds the ambient
-container, unlike its siblings: the engine reads the container first and the
-slot second either way, and a template calling `setInertiaDocument()` at module
-scope above `createApp()` has no ambient app to bind.
+actionable. Both warn once Open Question 4's decision and the scaffold pass
+beside it have removed every such caller. Neither binds the ambient container,
+unlike its siblings: the engine reads the container first and the slot second
+either way, and a template calling `setInertiaDocument()` at module scope above
+`createApp()` has no ambient app to bind.
 
 | Deprecation id | Symbols | Replacement |
 |---|---|---|

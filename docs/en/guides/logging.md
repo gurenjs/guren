@@ -251,10 +251,8 @@ export default class LoggingProvider extends ServiceProvider {
 }
 ```
 
-Everything that logs resolves `log` from the container it runs under, so the manager reaches controllers, jobs and commands without a second registration.
-
 > [!NOTE]
-> `setLogManager()` and `getLogManager()` are deprecated as of 2.23.0 and removed in 3.0.0. They wrote and read one manager per process, which two applications in one process shared. `bunx guren upgrade` rewrites them.
+> `setLogManager()` and `getLogManager()` are deprecated as of 2.23.0 and removed in 3.0.0. They wrote and read one manager per process, which two applications in one process shared. `bunx guren upgrade` rewrites a call inside a provider or a job; one at module scope is reported instead, and the binding above is what replaces it.
 
 ## Custom Channels
 
