@@ -459,6 +459,13 @@ keep raw `temporaryUrl()` URLs). `guren check` verifies the route is
 mounted whenever `delivery` is configured, and flags `serve: 'redirect'`
 on a disk whose driver cannot presign.
 
+**One delivery prefix per process.** The mounted route takes its `prefix` and
+`routeName` from the last `configureAttachments()` call to run in the process,
+not from the app whose registrar mounts it. Two `Application`s in one process
+that configure different prefixes both mount under the same one, decided by
+module load order. One app per process, the normal deployment, is unaffected,
+as are two apps that share a prefix.
+
 Two things the route does not do: it is a capability URL, not per-request
 authorization (anyone holding an unexpired URL can read the bytes, so wrap
 `attachmentUrl()` in your own controller for revocable access), and it
