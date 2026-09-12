@@ -11,7 +11,8 @@ import type {
 } from './types'
 import { HttpException } from './HttpException'
 import { renderErrorPage } from './error-page'
-import { ambientBinding } from '../http/default-application'
+import { ambientBinding, bindAmbient } from '../http/default-application'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
 /** Centralized error handling: reporting, per-class renderers, middleware. */
 export class ExceptionHandler {
@@ -195,12 +196,23 @@ export function createExceptionHandler(
 
 let globalExceptionHandler: ExceptionHandler | null = null
 
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Bind the handler on the
+ * app's container instead — `ErrorServiceProvider` already does, and a provider
+ * of your own reaches it as `this.container.instance('exception.handler', h)`.
+ */
 export function setExceptionHandler(handler: ExceptionHandler): void {
-  globalExceptionHandler = handler
+  warnDeprecatedSetter('setExceptionHandler')
+  globalExceptionHandler = bindAmbient('exception.handler', handler) ? null : handler
 }
 
-/** The default application's `exception.handler`, else the one `setExceptionHandler()` installed. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use
+ * `this.make('exception.handler')` in a controller, job or command, or
+ * `defaultContainer().make('exception.handler')`.
+ */
 export function getExceptionHandler(): ExceptionHandler {
+  warnDeprecatedGetter('getExceptionHandler')
   const handler = ambientBinding('exception.handler') ?? globalExceptionHandler
   if (!handler) {
     throw new Error(

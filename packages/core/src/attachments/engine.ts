@@ -5,7 +5,7 @@ import {
   getAppKeyringFromEnv,
   ambientBinding,
   ambientContainer,
-  getQueueDriver,
+  resolveQueueDriver,
   signUrl,
   verifySignedUrl,
   HttpException,
@@ -923,7 +923,7 @@ export class AttachmentEngine {
       }
       return manager as QueueDispatcher
     }
-    if (!getQueueDriver()) {
+    if (!resolveQueueDriver()) {
       throw new Error(
         "attach() with queued: true requires a queue. Pass configureAttachments({ queue: () => queueManager }) or boot the app's queue before attaching.",
       )
@@ -1410,7 +1410,12 @@ export class AttachmentEngine {
 
 let activeEngine: AttachmentEngine | null = null
 
-/** Install the engine `configureAttachments()` built. Last call wins; `null` unconfigures (tests). */
+/**
+ * Install the engine `configureAttachments()` built. Last call wins; `null`
+ * unconfigures (tests). Neither this nor its getter is exported from
+ * `@guren/core`, so RFC 0023's deprecation window does not reach them: they go
+ * with the slot in Part 3.
+ */
 export function setActiveAttachmentEngine(engine: AttachmentEngine | null): void {
   activeEngine = engine
 }

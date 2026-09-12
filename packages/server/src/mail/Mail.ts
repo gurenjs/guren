@@ -6,9 +6,10 @@ import type {
 } from './types'
 import type { MailManager } from './MailManager'
 import { Job, registerJob, type QueueDriver, type QueueManager } from '../queue'
-import { enqueueJob, getQueueDriver, pinnedQueueDriver } from '../queue/Job'
+import { enqueueJob, pinnedQueueDriver, resolveQueueDriver } from '../queue/Job'
 import { resolveOptional } from '../container/resolve-optional'
-import { ambientBinding } from '../http/default-application'
+import { ambientBinding, bindAmbient } from '../http/default-application'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 import { parseMailAddress as parseAddress } from './address'
 
 /**
@@ -219,7 +220,7 @@ export class Mail {
       return bound.driver()
     }
 
-    return getQueueDriver()
+    return resolveQueueDriver()
   }
 }
 
@@ -230,13 +231,22 @@ interface SendMailJobPayload {
 
 let globalMailManager: MailManager | null = null
 
-/** Set the global mail manager used by queue jobs. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Bind the manager on the
+ * app's container instead — `MailServiceProvider` already does, and a provider of
+ * your own reaches it as `this.container.instance('mail', manager)`.
+ */
 export function setMailManager(manager: MailManager): void {
-  globalMailManager = manager
+  warnDeprecatedSetter('setMailManager')
+  globalMailManager = bindAmbient('mail', manager) ? null : manager
 }
 
-/** The default application's `mail`, else the manager `setMailManager()` installed. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use `this.make('mail')`
+ * in a controller, job or command, or `defaultContainer().makeOptional('mail')`.
+ */
 export function getMailManager(): MailManager | null {
+  warnDeprecatedGetter('getMailManager')
   return ambientBinding('mail') ?? globalMailManager
 }
 

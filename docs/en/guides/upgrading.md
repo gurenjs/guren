@@ -33,6 +33,32 @@ bun run test
 
 ## Migration Notes
 
+### 2.22.x → 2.23.0
+
+#### Module-level service setters and getters are deprecated
+
+- **What changed**: `setGate`/`getGate`, `setEncrypter`/`getEncrypter`, `setMailManager`/`getMailManager`, `setQueueDriver`/`getQueueDriver`, `setI18n`/`getI18n`/`tryGetI18n`, `setLogManager`/`getLogManager`, `setNotificationManager`/`getNotificationManager`, `setBroadcastManager`/`getBroadcastManager`, `setExceptionHandler`/`getExceptionHandler`, `setContainer`/`getContainer`, `setInertiaDocument`, `setInertiaSsrRenderer`, and `setInertiaSharedProps`/`getInertiaSharedPropsResolver` carry `@deprecated` and warn once per symbol. They keep working until 3.0.0. A setter now binds the value on the container of the application that is live, so two applications in one process no longer overwrite each other's services.
+- **Who is affected**: Providers that call a setter after binding the same key, code that reads a service through a getter, and tests that inject a fake through `setGate()` or `setQueueDriver()`.
+- **How to migrate**: Run `bunx guren upgrade --check-only` for the list of files, then `bunx guren upgrade` to apply the rewrites. The codemod turns a getter inside a provider into `this.container.make(key)`, binds a setter's value with `this.container.instance(key, value)` (or deletes the call when the same file already binds that key), moves an inline `setInertiaDocument({ ... })` into `createApp({ inertia: { document } })`, gives the attachments `storage` factory the container it is bound with, and rewrites `getContainer().make(key)` inside a `Job` to `this.make(key)`. Test injections are reported, not rewritten: bind the fake with `app.container.fake(key, fake)` instead. `setQueueDriver()` is the exception, because its pin still overrides the bound manager through 2.23.0.
+
+```ts
+// Before
+export default class AuthorizationProvider extends ServiceProvider {
+  boot(): void {
+    getGate().policy(Post, PostPolicy)
+  }
+}
+
+// After
+export default class AuthorizationProvider extends ServiceProvider {
+  boot(): void {
+    this.container.make('gate').policy(Post, PostPolicy)
+  }
+}
+```
+
+The functional helpers built on these accessors are not deprecated and keep their signatures: `encrypt`, `decrypt`, `t`, `tc`, `can`, `cannot`, `defineGate`, `authorizeAbility`, `resolve`, `Job.dispatch` and `Job.make` all resolve from the container of the application they run under.
+
 ### 1.x → 2.0.0
 
 #### Structural mass assignment

@@ -1,14 +1,14 @@
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import type { AuthorizeOptions, AuthorizeResourceOptions } from './types'
-import { Gate, getGate, denialToException } from './Gate'
+import { Gate, resolveGate, denialToException } from './Gate'
 import { tryGetRequestContainer } from '../http/request-container'
 import { AuthorizationException } from '../errors'
 import { stampCapabilities } from '../http/middleware/capabilities'
 
 /** The gate of the app serving `ctx` (RFC 0023 §2); the ambient one on a bare Hono app. */
 function gateFor(ctx: Context): Gate {
-  return tryGetRequestContainer(ctx)?.makeOptional('gate') ?? getGate()
+  return tryGetRequestContainer(ctx)?.makeOptional('gate') ?? resolveGate()
 }
 
 /**

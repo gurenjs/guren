@@ -4,7 +4,7 @@ import { renderDocument, type ViewOptions } from './view'
 import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { getRequestLocale, getRequestTranslator, type TranslatorBinding } from '../http/middleware/detect-locale'
-import { tryGetI18n, type I18nManager, type RegisteredTranslationKey, type ReplacementValues } from '../i18n'
+import { resolveI18n, type I18nManager, type RegisteredTranslationKey, type ReplacementValues } from '../i18n'
 import { asRecord, flattenRequestQueries, parseRequestBody, parseRequestUploads } from '../http/request'
 import { getAuthContext } from '../auth/context'
 import type { AuthContext } from '../auth/types'
@@ -12,7 +12,7 @@ import type { ServiceBindings } from '../container/bindings'
 import type { ContainerLike } from '../container/types'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
-import { getGate, type Gate } from '../authorization/Gate'
+import { resolveGate, type Gate } from '../authorization/Gate'
 import { resolveOptional } from '../container/resolve-optional'
 import type { AuthUser } from '../authorization/types'
 
@@ -223,7 +223,7 @@ export class Controller {
 
   /** This app's `gate` (RFC 0023 §2); the ambient one only off a container, as on a bare Hono app. */
   #resolveGate(): Gate {
-    return resolveOptional<Gate>(this._container, 'gate') ?? getGate()
+    return resolveOptional<Gate>(this._container, 'gate') ?? resolveGate()
   }
 
   private async gateUser(): Promise<AuthUser | null> {
@@ -339,7 +339,7 @@ export class Controller {
   }
 
   #resolveI18n(): I18nManager | undefined {
-    return resolveOptional<I18nManager>(this._container, 'i18n') ?? tryGetI18n()
+    return resolveOptional<I18nManager>(this._container, 'i18n') ?? resolveI18n()
   }
 
   protected json<T>(data: T, init: ResponseInit = {}): Response {

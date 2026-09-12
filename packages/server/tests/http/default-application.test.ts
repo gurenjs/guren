@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { Application } from '../../src/http/Application'
-import { createContainer, getContainer, setContainer } from '../../src/container/Container'
+import { createContainer, installContainer, requireContainer } from '../../src/container/Container'
 import {
   defaultApplication,
   defaultContainer,
@@ -34,7 +34,7 @@ describe('the default application', () => {
 
     expect(defaultApplication()).toBe(app)
     expect(defaultContainer()).toBe(app.container)
-    expect(getContainer()).toBe(app.container)
+    expect(requireContainer()).toBe(app.container)
     expect(warn).not.toHaveBeenCalled()
   })
 
@@ -65,7 +65,7 @@ describe('the default application', () => {
     const app = new Application()
     const bare = createContainer()
 
-    setContainer(bare)
+    installContainer(bare)
 
     expect(defaultApplication()).toBeNull()
     expect(defaultContainer()).toBe(bare)
@@ -74,7 +74,7 @@ describe('the default application', () => {
 
   it('does not count a construction that replaces a displaced default as ambiguous', () => {
     new Application()
-    setContainer(createContainer())
+    installContainer(createContainer())
 
     new Application()
     defaultContainer()

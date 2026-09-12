@@ -109,6 +109,14 @@ let documentOptions: InertiaDocumentOptions | undefined;
  * Process-wide, not request-scoped: calling it mid-flight leaks the policy into
  * in-flight requests — use the {@link InertiaOptions} fields per response.
  * Values are emitted verbatim, so never pass user input. `undefined` clears.
+ *
+ * Tagged but silent, as {@link setInertiaSsrRenderer} is: RFC 0023 Open
+ * Question 4 has not settled whether the option or this setter is the endpoint,
+ * and both scaffold templates still write it. `guren upgrade --check-only`
+ * reports it either way.
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Pass
+ * `createApp({ inertia: { document } })`, which binds it on the app rather than
+ * the process. The slot stays the engine's second read.
  */
 export function setInertiaDocument(
   options: InertiaDocumentOptions | undefined
@@ -123,6 +131,13 @@ let defaultSsrRenderer: InertiaSsrRenderer | undefined;
  * cannot resolve a runtime path (Workers has no filesystem for
  * `GUREN_INERTIA_SSR_ENTRY`'s dynamic import). Per-call `ssr.render` still
  * wins; `undefined` clears (test isolation).
+ *
+ * Tagged but silent: the Workers entry `@guren/plugin-cloudflare` generates is
+ * its only known caller, and it stays on this setter until RFC 0023 Open
+ * Question 4 is decided, so a runtime warning would name code no app author
+ * wrote or can change. `guren upgrade --check-only` reports it either way.
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Pass
+ * `createApp({ inertia: { ssrRenderer } })`.
  */
 export function setInertiaSsrRenderer(
   renderer: InertiaSsrRenderer | undefined

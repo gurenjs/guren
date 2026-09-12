@@ -1,6 +1,6 @@
 import type { Application } from './Application'
 import type { ServiceBindings } from '../container/bindings'
-import { type Container, clearContainer, getContainer, peekContainer, setContainer } from '../container/Container'
+import { type Container, clearContainer, installContainer, peekContainer, requireContainer } from '../container/Container'
 import { warnOnce } from '../support/warn-once'
 
 /**
@@ -39,7 +39,7 @@ export function resetDefaultApplication(): void {
 function setDefault(app: Application, nextAmbiguous: boolean): void {
   current = app
   ambiguous = nextAmbiguous
-  setContainer(app.container)
+  installContainer(app.container)
 }
 
 /**
@@ -58,7 +58,7 @@ export function defaultApplication(): Application | null {
 /** The default application's container; throws the same "not initialized" error the getters throw. */
 export function defaultContainer(): Container {
   warnIfAmbiguous()
-  return getContainer()
+  return requireContainer()
 }
 
 /** `defaultContainer()` for a caller with a fallback of its own: null instead of the throw. */
@@ -74,6 +74,17 @@ export function ambientContainer(): Container | null {
  */
 export function ambientBinding<K extends keyof ServiceBindings>(key: K): ServiceBindings[K] | undefined {
   return ambientContainer()?.makeOptional(key)
+}
+
+/**
+ * @internal A deprecated setter's write (RFC 0023 §5): the ambient container
+ * when one exists, else nothing. Answers whether it landed, so the caller can
+ * drop its module slot rather than leave a copy that outlives the app.
+ */
+export function bindAmbient<K extends keyof ServiceBindings>(key: K, value: ServiceBindings[K]): boolean {
+  const container = ambientContainer()
+  container?.instance(key, value)
+  return container !== null
 }
 
 /** Resolve `key` from the default application's container. */

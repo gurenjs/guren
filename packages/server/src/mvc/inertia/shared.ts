@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
 import type { ContainerLike } from '../../container/types'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../../support/deprecate'
 
 /**
  * Application-level shared props shape for Inertia responses. Extend it in your
@@ -136,10 +137,15 @@ export function ensureSharedInertiaPropsRegistry(container: SharedPropsContainer
 /**
  * Replace the module-global shared props resolver. Props registered on an
  * application's container (see {@link shareInertiaProps}) are unaffected.
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use
+ * `shareInertiaProps(fn, container)`, which scopes the registration to one app.
+ * It composes rather than replaces, so a wholesale reset becomes one
+ * registration on a fresh container.
  */
 export function setInertiaSharedProps<Props extends Record<string, unknown> = ResolvedSharedInertiaProps>(
   resolverFn: SharedInertiaPropsResolver<Props> | null,
 ): void {
+  warnDeprecatedSetter('setInertiaSharedProps')
   globalRegistry.set(resolverFn)
 }
 
@@ -147,8 +153,12 @@ export function setInertiaSharedProps<Props extends Record<string, unknown> = Re
  * The module-global registrations composed into one resolver, for manual
  * composition. Container-scoped props are not included — get those from
  * `ensureSharedInertiaPropsRegistry(container).get()`.
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use
+ * `ensureSharedInertiaPropsRegistry(container).get()` on the container that owns
+ * the call.
  */
 export function getInertiaSharedPropsResolver(): SharedInertiaPropsResolver<ResolvedSharedInertiaProps> | null {
+  warnDeprecatedGetter('getInertiaSharedPropsResolver')
   return globalRegistry.get()
 }
 

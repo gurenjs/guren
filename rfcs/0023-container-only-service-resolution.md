@@ -312,7 +312,7 @@ Every exported setter and getter keeps its signature and forwards:
 /** @deprecated since 2.23.0, removed in 3.0.0. Bind `gate` on the app's container; providers already do. */
 export function setGate(gate: Gate): void {
   warnDeprecated('global-service-setters', 'setGate')
-  defaultContainer().instance('gate', gate)
+  globalGate = bindAmbient('gate', gate) ? null : gate // amended, see below
 }
 /** @deprecated since 2.23.0, removed in 3.0.0. Use `this.make('gate')`, `getRequestContainer(ctx)`, or `defaultContainer()`. */
 export function getGate(): Gate {
@@ -322,15 +322,40 @@ export function getGate(): Gate {
 ```
 
 `warnDeprecated(id, symbol)` is `warnOnce` keyed per symbol in the policy's
-message format (`Seeder.ts:27-33` is the existing shape). The module-private
-`let global*` declarations go in Part 2; only the exported functions are
+message format (`Seeder.ts:27-33` is the existing shape). ~~The module-private
+`let global*` declarations go in Part 2~~; only the exported functions are
 under the policy's window.
+
+**Amended in implementation:** the slots stay through Part 2 and a setter can
+still write one. Both scaffold templates call `setInertiaDocument()` at module
+scope in `src/app.ts` *above* `createApp()`, so a shim that could only write
+`defaultContainer()` would throw at import in every scaffolded app. A setter
+therefore binds the ambient container when one exists — clearing its own slot,
+so a value cannot outlive the app that received it — and writes the slot only
+when no `Application` has been constructed yet; the getters keep reading the
+slot second. The visible change is that a hand-written `setX()` beside a live
+app now *replaces* that app's binding rather than being silently shadowed by it.
+
+Two setters are tagged and registered but do not warn at runtime.
+`setInertiaSsrRenderer` is called by the Workers entry `@guren/plugin-cloudflare`
+generates, which stays on it until Open Question 4 is decided, and
+`setInertiaDocument` is what both scaffold templates and four guides still
+write; a warning naming code the framework itself emits is not actionable. Both
+are reported by `guren upgrade --check-only` and rewritten by the codemod, and
+the warning lands with Open Question 4.
 
 | Deprecation id | Symbols | Replacement |
 |---|---|---|
 | `global-service-setters` | `setGate`, `setEncrypter`, `setMailManager`, `setQueueDriver`, `setI18n`, `setLogManager`, `setNotificationManager`, `setBroadcastManager`, `setExceptionHandler`, `setContainer`, `setInertiaDocument`, `setInertiaSsrRenderer`, `setInertiaSharedProps` | `container.instance(key, value)` in a provider; `createApp({ inertia })` for the two Inertia options; `shareInertiaProps(fn, container)` |
 | `global-service-getters` | `getGate`, `getEncrypter`, `getMailManager`, `getQueueDriver`, `getI18n`, `tryGetI18n`, `getLogManager`, `getNotificationManager`, `getBroadcastManager`, `getExceptionHandler`, `getContainer`, `getInertiaSharedPropsResolver` | `this.make(key)`, `getRequestContainer(ctx).make(key)`, `defaultContainer().make(key)` |
-| `attachments-active-engine` (`@guren/core`) | `setActiveAttachmentEngine`, `getActiveAttachmentEngine` | ~~`configureAttachments({ app })`~~ `engine.bindTo(container)` from a provider (amended, see §4), `container.make('attachments')` |
+| ~~`attachments-active-engine` (`@guren/core`)~~ | ~~`setActiveAttachmentEngine`, `getActiveAttachmentEngine`~~ | ~~`configureAttachments({ app })`~~ `engine.bindTo(container)` from a provider (amended, see §4), `container.make('attachments')` |
+
+**Amended in implementation:** there is no `attachments-active-engine`
+deprecation. Neither symbol is exported from `@guren/core` — the barrel
+(`attachments/index.ts`) publishes `configureAttachments`, the engine *type* and
+the delivery pieces, and nothing else — so no app can call one, a `detect()`
+scanning import specifiers can never match, and a runtime warning would only
+fire from core's own tests. Both go with the slot in Part 3.
 
 Not deprecated: `encrypt`, `decrypt`, `t`, `tc`, `can`, `cannot`,
 `defineGate`, `authorizeAbility`, `resolve`, `Job.dispatch`, `Job.make`. Same
@@ -357,10 +382,13 @@ Referencing `RFC 0023` in each PR:
 2. **Deprecate** (server + cli, minor, target `2.23.0`): stages 1 to 5 of
    `contributing/deprecation-policy.md`. JSDoc `@deprecated` on the 25
    symbols; `warnDeprecated` on first call; the three
-   `packages/cli/src/deprecations.ts` entries above, `detect()` scanning
+   `packages/cli/src/deprecations.ts` entries above (amended to two, §5),
+   `detect()` scanning
    import specifiers from `@guren/core` and `@guren/server`; CHANGELOG
-   `### Deprecated`; the codemod (Migration Path). Part 1's fallback reads
-   go here: the shims now write to the container, so no slot is left to read.
+   `### Deprecated`; the codemod (Migration Path). ~~Part 1's fallback reads
+   go here: the shims now write to the container, so no slot is left to read.~~
+   **Amended in implementation:** the shims write the container when there is
+   one and their slot when there is not, so the fallback reads stay (§5).
 3. **Remove** (server `3.0.0` and core `2.0.0`, same release): delete the
    shims, `let global*`, `SendNotificationJob.notificationManager`, and the
    `clear*`/`reset*` seams that existed only for them. Core majors with
@@ -403,7 +431,7 @@ deprecations (`bunx guren upgrade --check-only` lists affected files) and
 | App code today | After | Codemod |
 |---|---|---|
 | `getGate().policy(Post, PostPolicy)` in a provider `boot()` (blog template) | `this.container.make('gate').policy(Post, PostPolicy)` | Yes: inside a class extending `ServiceProvider`, `getGate()` → `this.container.make('gate')`; same for the other getters by key |
-| `setMailManager(manager)` in a provider that also binds `mail` (scaffold) | delete the call | Yes, when the same class binds the key; otherwise reported |
+| `setMailManager(manager)` in a provider that also binds `mail` (scaffold) | delete the call | Yes, when ~~the same class~~ a provider in the same file binds the key (amended, below); otherwise reported |
 | `setMailManager(m)` in a provider that binds nothing (`examples/blog`) | `this.container.instance('mail', m)` | Yes |
 | `setInertiaDocument({...})` at module scope with an inline literal | `createApp({ inertia: { document: {...} } })` | Yes, when `createApp(` is in the same file; otherwise reported |
 | `getContainer().make('storage')` in `config/attachments.ts` | `(container) => container.make('storage')` | Yes, inside a `configureAttachments()` factory; elsewhere reported |
@@ -414,6 +442,18 @@ The codemod is idempotent, AST-based (`@babel/parser`, as `deprecations.ts`
 already uses) and tested against `examples/blog`. Timeline: deprecated in the
 Part 2 minor, removed at server `3.0.0` / core `2.0.0`, two minors later at
 the earliest.
+
+**Amended in implementation:** the deletion rule reads the file, not the class.
+The blog example's `setMailManager(mailManager)` sits in a module-scope helper
+its provider invokes (`EventServiceProvider.ts:51`), which is the common shape
+and the one the policy names as the codemod's test target; a rule keyed on the
+class reaches neither. The residual risk is a file whose provider binds the key
+to something other than what the setter passes, where deletion loses a
+meaningful call, so this is the one rewrite that cannot be read back off the
+result. A `this.…` rewrite is additionally skipped where `this` is not the
+instance — inside a `static` member, or a non-arrow function nested in the class
+— because a rewrite that compiles and then throws is worse than the warning it
+replaces.
 
 ## Open Questions
 

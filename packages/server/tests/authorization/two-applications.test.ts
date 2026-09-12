@@ -99,7 +99,10 @@ describe('two Applications in one process (RFC 0023)', () => {
 
     expect(getGate()).toBe(closed.container.make('gate'))
     expect(await can('enter')).toBe(false)
-    expect(warn).toHaveBeenCalledTimes(1)
+    // getGate() itself is deprecated in 2.23.0 and warns too, so the ambiguity
+    // warning is counted by its own text rather than by call count.
+    const ambiguity = (warn.mock.calls as unknown[][]).filter((call) => String(call[0]).includes('Two Applications'))
+    expect(ambiguity).toHaveLength(1)
 
     useAsDefaultApplication(open)
     expect(getGate()).toBe(open.container.make('gate'))

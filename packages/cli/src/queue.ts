@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import {
   Worker,
-  getQueueDriver,
+  resolveQueueDriver,
   type ContainerLike,
   type QueueDriver,
   type QueueManager,
@@ -158,7 +158,7 @@ type BoundQueueManager = Pick<QueueManager, 'driver' | 'hasDriver' | 'getDefault
 
 /**
  * Boots the app and resolves its queue driver: the `queue` manager its own
- * container binds (RFC 0023 §3), else the driver `getQueueDriver()` reads
+ * container binds (RFC 0023 §3), else the driver `resolveQueueDriver()` reads
  * from the default application. The container rides along so the worker can
  * hand it to each job.
  */
@@ -182,7 +182,7 @@ async function getConfiguredQueue(): Promise<{ driver: QueueDriver; container: C
 
   const container = appContainer(app)
   const manager = container?.has?.('queue') ? (container.make('queue') as BoundQueueManager) : undefined
-  const driver = manager?.hasDriver(manager.getDefaultDriverName()) ? manager.driver() : getQueueDriver()
+  const driver = manager?.hasDriver(manager.getDefaultDriverName()) ? manager.driver() : resolveQueueDriver()
   if (!driver) {
     consola.error('Queue driver not configured. Make sure your application boots a queue manager and activates a driver.')
     process.exit(1)

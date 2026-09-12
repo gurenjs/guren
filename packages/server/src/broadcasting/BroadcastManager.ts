@@ -18,7 +18,8 @@ import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import { parseRequestPayload } from '../http/request'
 import { randomHex } from '../encryption/Random'
-import { ambientBinding } from '../http/default-application'
+import { ambientBinding, bindAmbient } from '../http/default-application'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
 /**
  * Best-effort identity for the user behind a connection: `getUser` is
@@ -521,12 +522,23 @@ export class BroadcastManager {
 
 let globalBroadcastManager: BroadcastManager | null = null
 
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Bind the manager on the
+ * app's container instead — `BroadcastServiceProvider` already does, and a
+ * provider of your own reaches it as `this.container.instance('broadcast', m)`.
+ */
 export function setBroadcastManager(manager: BroadcastManager): void {
-  globalBroadcastManager = manager
+  warnDeprecatedSetter('setBroadcastManager')
+  globalBroadcastManager = bindAmbient('broadcast', manager) ? null : manager
 }
 
-/** The default application's `broadcast`, else the one `setBroadcastManager()` installed. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use
+ * `this.make('broadcast')` in a controller, job or command, or
+ * `defaultContainer().make('broadcast')`.
+ */
 export function getBroadcastManager(): BroadcastManager {
+  warnDeprecatedGetter('getBroadcastManager')
   const manager = ambientBinding('broadcast') ?? globalBroadcastManager
   if (!manager) {
     throw new Error('BroadcastManager not initialized. Register BroadcastServiceProvider, or call setBroadcastManager() first.')
