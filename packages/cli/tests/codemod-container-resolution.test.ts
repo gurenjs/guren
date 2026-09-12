@@ -275,6 +275,27 @@ describe('the RFC 0023 codemod', () => {
     expect(output).not.toContain('this.container')
   })
 
+  test('changes nothing when two rules claim overlapping spans', () => {
+    // The setter statement is deleted whole and the getter inside it rewritten;
+    // splicing both would write into the middle of the other's replacement.
+    const source = [
+      "import { ServiceProvider, setMailManager, getMailManager } from '@guren/core'",
+      '',
+      'export default class MailProvider extends ServiceProvider {',
+      '  register(): void {',
+      "    this.container.singleton('mail', () => manager)",
+      '  }',
+      '',
+      '  boot(): void {',
+      '    setMailManager(getMailManager() ?? manager)',
+      '  }',
+      '}',
+      '',
+    ].join('\n')
+
+    expect(transformSource(source, 'app/Providers/MailProvider.ts')).toBeNull()
+  })
+
   test('reports rather than rewrites a test injecting a fake', () => {
     const source = [
       "import { setGate, setQueueDriver } from '@guren/core'",

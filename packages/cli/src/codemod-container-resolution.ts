@@ -163,6 +163,8 @@ export function transformSource(source: string, filePath: string): string | null
 
   const providers: Range[] = []
   const jobs: Range[] = []
+  /** Service keys a provider in this file binds on a container of its own. */
+  const bound = new Set<string>()
   // Where a getter must not be rewritten: `this` is not the instance there, or
   // another rule has already claimed the call.
   const skip: Range[] = []
@@ -175,12 +177,13 @@ export function transformSource(source: string, filePath: string): string | null
     else if (parent === 'Job') jobs.push(range)
     else return
     skip.push(...reboundRanges(node))
+    if (parent === 'ServiceProvider') collectBoundKeys(node, bound)
   })
 
   const edits: Edit[] = [
     ...storageFactoryEdits(ast.program, source, guren, skip),
     ...getterEdits(ast.program, guren, providers, jobs, skip),
-    ...setterEdits(ast.program, source, guren, providers, skip),
+    ...setterEdits(ast.program, source, guren, providers, skip, bound),
     ...inertiaDocumentEdits(ast.program, source, guren),
   ]
   if (edits.length === 0) return null
@@ -242,7 +245,14 @@ function getterEdits(program: unknown, guren: Set<string>, providers: Range[], j
 }
 
 /** Rows 2 and 3: a deprecated setter inside a provider. */
-function setterEdits(program: unknown, source: string, guren: Set<string>, providers: Range[], skip: Range[]): Edit[] {
+function setterEdits(
+  program: unknown,
+  source: string,
+  guren: Set<string>,
+  providers: Range[],
+  skip: Range[],
+  bound: Set<string>,
+): Edit[] {
   const edits: Edit[] = []
   walk(program, (node) => {
     if (node.type !== 'ExpressionStatement') return
@@ -263,7 +273,7 @@ function setterEdits(program: unknown, source: string, guren: Set<string>, provi
     // same value twice and the container half is the one that survives. Judged
     // per file rather than per class: the blog example's call sits in a
     // module-scope helper its provider invokes, which is the common shape.
-    if (providers.some((provider) => classBinds(program, provider, key))) {
+    if (bound.has(key)) {
       edits.push({ ...statementSpan(source, statement), text: '', consumes: calleeRange })
       return
     }
@@ -279,16 +289,12 @@ function setterEdits(program: unknown, source: string, guren: Set<string>, provi
   return edits
 }
 
-/** Whether the class at `range` binds `key` on a container of its own. */
-function classBinds(program: unknown, range: Range, key: string): boolean {
-  let found = false
-  walk(program, (node) => {
-    if (found) return false
-    const nodeAt = nodeRange(node)
-    if (!nodeAt || !contains(range, nodeAt)) return
-    if (boundKey(node) === key) found = true
+/** Every service key this provider class binds on a container of its own. */
+function collectBoundKeys(classNode: BabelNode, into: Set<string>): void {
+  walk(classNode.body, (node) => {
+    const key = boundKey(node)
+    if (key) into.add(key)
   })
-  return found
 }
 
 /** Row 5: `configureAttachments({ storage: () => getContainer().make('storage') })`. */
