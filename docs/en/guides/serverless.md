@@ -58,20 +58,32 @@ Wraps the app's fetch handler for API Gateway v1/v2 and ALB. Routes, controllers
 
 Processes SQS messages as Guren jobs. Supports **partial batch failure**: only failed messages are returned to SQS for retry.
 
-Configure the SQS driver in your queue provider:
+Configure the SQS driver in the queue provider `guren add queue` scaffolds at `app/Providers/QueueProvider.ts`:
 
 ```typescript
 import { SQSClient } from '@aws-sdk/client-sqs'
-import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/core'
+import { ServiceProvider, createQueueManager, createSqsAdapter, SqsDriver } from '@guren/core'
 
-const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
-setQueueDriver(new SqsDriver(adapter, {
-  queueUrl: process.env.SQS_QUEUE_URL!,
-  // Optional: map logical queue names to separate SQS URLs
-  queueUrls: {
-    emails: process.env.SQS_EMAILS_QUEUE_URL!,
-  },
-}))
+export default class QueueProvider extends ServiceProvider {
+  register(): void {
+    const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
+    const queue = createQueueManager({
+      default: 'sqs',
+      drivers: {
+        sqs: () =>
+          new SqsDriver(adapter, {
+            queueUrl: process.env.SQS_QUEUE_URL!,
+            // Optional: map logical queue names to separate SQS URLs
+            queueUrls: {
+              emails: process.env.SQS_EMAILS_QUEUE_URL!,
+            },
+          }),
+      },
+    })
+
+    this.container.instance('queue', queue)
+  }
+}
 ```
 
 Jobs are dispatched the same way as on the server: `await SendEmailJob.dispatch({ to: 'user@example.com' })`. The `SqsDriver` serializes the job to SQS, and the Lambda handler deserializes and executes it.
