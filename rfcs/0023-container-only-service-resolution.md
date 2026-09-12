@@ -2,7 +2,8 @@
 
 **Author:** 7nohe
 **Date:** 2026-09-11
-**Status:** Draft
+**Status:** Accepted (2026-09-12 — the standard two-week discussion window
+was shortened by the deciding maintainer for this solo-driven change)
 
 ## Problem
 
@@ -380,13 +381,20 @@ the earliest.
    `CONTAINER_CONTEXT_KEY`) so a request translator or the auth context can
    be bindings rather than context keys. Leaning: this RFC defines only the
    stamp; the scope is its own RFC once one service needs it.
+   **Decision:** this RFC defines only the stamp. A per-request child
+   container is its own RFC, once one service needs it.
 2. **`Container.scoped()` / `scopedAsync()`.** Stack-based, unsafe under
    concurrent requests, zero callers outside their test. Remove in Part 3, or
    reimplement over question 1's child container? Leaning: remove.
+   **Decision:** remove in Part 3.
 3. **Default application: last-constructed or first?** Last matches
    sequential tests and today's `:585`; first would protect a long-lived
    server from a stray `new Application()` in a plugin. Is the warn-once on
    a second construction enough?
+   **Decision:** last-constructed wins, as today. Constructing a second
+   `Application` while one exists marks the ambient choice ambiguous, and
+   the first ambient call after that warns once, naming
+   `useAsDefaultApplication()`.
 4. **`inertia.document` as a `createApp()` option versus a provider
    binding.** The option reads well in a scaffold; the generated Workers entry
    (`build.ts:1130`) calls the setter after importing the app, which the
@@ -398,3 +406,5 @@ the earliest.
 6. **`getContainer()` after removal.** `defaultContainer()` is the successor.
    Keep `getContainer` as an alias for the three guides and the attachments
    scaffold, or remove it? Leaning: remove; the codemod covers the scaffold.
+   **Decision:** remove in Part 3; `defaultContainer()` succeeds it and
+   the codemod covers the scaffold.
