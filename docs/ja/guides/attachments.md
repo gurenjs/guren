@@ -117,16 +117,35 @@ export const attachments = sqliteTable('attachments', {
 // config/attachments.ts
 import { configureAttachments } from '@guren/core'
 import { attachments } from '@/db/schema'
-import { storage } from './storage'
 
-export const { Attachment } = configureAttachments({
+export const { Attachment, engine: attachmentEngine } = configureAttachments({
   table: attachments,
-  storage: () => storage,   // アプリの StorageManager を遅延解決で渡す
+  storage: (container) => container.make('storage'),
   disk: 'media',            // 新規アタッチメントのデフォルトディスク
 })
 ```
 
-このモジュールを起動時に一度インポートしてください(たとえば `src/app.ts` から、他の config と同じように)。戻り値の `Attachment` はテーブルに束縛された既製のモデルで、`morphTo('attachable', 'attachable')` が宣言済みです。morph リレーションや高度なクエリに使えます。フレームワーク自身は意図的に `Attachment` クラスをエクスポートしません。アプリローカルの名前はこの呼び出しから得ます。
+戻り値の `Attachment` はテーブルに束縛された既製のモデルで、`morphTo('attachable', 'attachable')` が宣言済みです。morph リレーションや高度なクエリに使えます。フレームワーク自身は意図的に `Attachment` クラスをエクスポートしません。アプリローカルの名前はこの呼び出しから得ます。
+
+### 3. エンジンをアプリに束縛する
+
+```ts
+// app/Providers/AttachmentsProvider.ts
+import { ServiceProvider } from '@guren/core'
+import { attachmentEngine } from '../../config/attachments'
+
+export default class AttachmentsProvider extends ServiceProvider {
+  register(): void {
+    attachmentEngine.bindTo(this.container)
+  }
+}
+```
+
+このプロバイダを `createApp({ providers })` に登録します。config モジュールの import が、起動時に `configureAttachments()` を走らせます。web プロセスでもワーカープロセスでも、最初の `attach()` より前に実行されます。`bindTo()` はアプリのコンテナをエンジンに渡します。署名配信ルートはリクエストを受け取ったアプリのエンジンから配信し、上の `storage` ファクトリも同じコンテナを受け取ります。
+
+アプリを1つだけ動かすプロセスでは、違いは表に出ません。束縛が無ければ、ルートも storage ファクトリも最後に設定したアプリへフォールバックするからです。2つ動かすプロセスでは違いが出ます。
+
+単位は `configureAttachments()` の呼び出しであって、`Application` ではありません。同じ config モジュールから作った2つのアプリは1つのエンジンを共有するので、storage のコンテナは最後の `bindTo()` が勝ちます。分けたい場合は、アプリごとに config モジュールを用意してください。
 
 その他のオプション:
 
@@ -264,9 +283,9 @@ cover: hasOneAttached({
 
 ```ts
 // config/attachments.ts
-export const { Attachment } = configureAttachments({
+export const { Attachment, engine: attachmentEngine } = configureAttachments({
   table: attachments,
-  storage: () => storage,
+  storage: (container) => container.make('storage'),
   disk: 'media',
   queue: () => queueManager,   // アプリの QueueManager を遅延解決で渡す
 })

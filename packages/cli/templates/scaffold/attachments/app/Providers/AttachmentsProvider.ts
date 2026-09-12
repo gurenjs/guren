@@ -1,11 +1,12 @@
 import { ServiceProvider } from '@guren/core'
-// The import is the wiring: config/attachments.ts calls configureAttachments()
-// at module scope, and loading it from a provider guarantees that happens at
-// boot — before the first attach(), in web and worker processes alike.
-import '../../config/attachments'
+// Loading this module is what runs configureAttachments(), at boot, in web and
+// worker processes alike.
+import { attachmentEngine } from '../../config/attachments'
 
 export default class AttachmentsProvider extends ServiceProvider {
+  // Without this app's container, the delivery route and the storage factory
+  // both resolve on whichever app configured attachments last in the process.
   register(): void {
-    // Everything is wired by the config import above.
+    attachmentEngine.bindTo(this.container)
   }
 }

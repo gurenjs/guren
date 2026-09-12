@@ -17,6 +17,12 @@ export interface ConfiguredAttachments {
    * attachment vocabulary.
    */
   Attachment: typeof Model
+  /**
+   * The engine this call built. Hand it to the app's container from a service
+   * provider (`engine.bindTo(this.container)`): this function runs at module
+   * scope, where no `Application` exists yet (RFC 0023 §4).
+   */
+  engine: AttachmentEngine
 }
 
 /**
@@ -24,7 +30,7 @@ export interface ConfiguredAttachments {
  * framework returns the model. `Attachable` statics resolve this lazily and
  * throw a clear error when it was never called.
  * @example
- * export const { Attachment } = configureAttachments({ table: attachments, storage: (container) => container.make('storage'), disk: 'media' })
+ * export const { Attachment, engine } = configureAttachments({ table: attachments, storage: (container) => container.make('storage'), disk: 'media' })
  */
 export function configureAttachments(options: ConfigureAttachmentsOptions): ConfiguredAttachments {
   const engine = new AttachmentEngine(options)
@@ -36,9 +42,8 @@ export function configureAttachments(options: ConfigureAttachmentsOptions): Conf
   // At configure time, so any worker booting the app's config can resolve
   // queued GenerateVariantsJob messages.
   registerJob(GenerateVariantsJob)
+  // The last resort behind ATTACHMENTS_SERVICE_KEY, and all the `Attachable`
+  // statics have: they take no container to read the key from (RFC 0023 §4).
   setActiveAttachmentEngine(engine)
-  // The request-scoped handle (RFC 0023 §4); the active engine stays the
-  // fallback for the statics, which hold no container.
-  options.app?.container.instance('attachments', engine)
-  return { Attachment: engine.model }
+  return { Attachment: engine.model, engine }
 }

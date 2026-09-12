@@ -3,6 +3,7 @@ import { Model, type PlainObject } from '@guren/orm'
 import {
   deriveAppKeyring,
   getAppKeyringFromEnv,
+  ambientBinding,
   ambientContainer,
   getQueueDriver,
   signUrl,
@@ -46,7 +47,7 @@ export interface AttachOptions {
 
 declare module '@guren/server' {
   interface ServiceBindings {
-    /** Bound by `configureAttachments({ app })` (RFC 0023 §4); absent until then. */
+    /** Bound by `AttachmentEngine.bindTo()` (RFC 0023 §4); absent until then. The runtime spelling lives in `ATTACHMENTS_BINDING` — rename here and there together. */
     attachments: AttachmentEngine
   }
 }
@@ -61,16 +62,10 @@ export interface ConfigureAttachmentsOptions {
   table: unknown
   /**
    * The app's StorageManager, resolved lazily: `(container) => container.make('storage')`.
-   * The container is `app`'s when given, else the default application's (RFC 0023 §4).
+   * The container is the one `bindTo()` was given, else the default
+   * application's (RFC 0023 §4).
    */
   storage: (container: Container) => StorageManager
-  /**
-   * The Application this engine belongs to. Binds the engine as `attachments`
-   * on its container, so the delivery route resolves it per request rather
-   * than through the process-wide active engine; without it the default
-   * application's container backs `storage`.
-   */
-  app?: { container: Container }
   /** Default disk name for new attachments. */
   disk: string
   /**
@@ -190,6 +185,15 @@ export interface DeliveryOptions {
  */
 export const ATTACHMENT_OBJECT_PREFIX = 'attachments'
 
+/**
+ * The key the engine binds under, and the one every consumer holding a
+ * container reads before falling back (RFC 0023 §4). Its own constant because
+ * the word means three unrelated things here (this key, the object-key prefix
+ * above, the route's URL prefix), and because `Container.instance()` is
+ * unkeyed: a typo would compile and read back as an absent binding.
+ */
+export const ATTACHMENTS_BINDING = 'attachments'
+
 export const DEFAULT_DELIVERY_PREFIX = '/attachments'
 export const DEFAULT_DELIVERY_ROUTE_NAME = 'attachments.show'
 
@@ -302,7 +306,7 @@ interface ImageInspection {
  */
 function unavailableContainer(): Container {
   const unavailable = (): never => {
-    throw new Error('Container not initialized. Construct the app with createApp(), or pass configureAttachments({ app }).')
+    throw new Error('Container not initialized. Construct the app with createApp(), or bind the engine on one from a provider (attachmentEngine.bindTo(this.container)).')
   }
   return { make: unavailable, makeOptional: unavailable, has: unavailable } as unknown as Container
 }
@@ -316,7 +320,7 @@ export type JobDispatcher = (payload: GenerateVariantsPayload, queue: QueueDispa
 export class AttachmentEngine {
   readonly model: typeof Model
   private readonly storageFactory: (container: Container) => StorageManager
-  private readonly container?: Container
+  private container?: Container
   private readonly defaultDisk: string
   private readonly diskDelivery: Record<string, ResolvedDiskDelivery>
   private readonly delivery: { prefix: string; routeName: string } | null
@@ -336,7 +340,6 @@ export class AttachmentEngine {
     this.model.morphTo('attachable', 'attachable')
 
     this.storageFactory = options.storage
-    this.container = options.app?.container
     this.defaultDisk = options.disk
     this.diskDelivery = normalizeDiskDelivery(options.disks ?? {})
     this.delivery = options.delivery
@@ -351,6 +354,16 @@ export class AttachmentEngine {
       options.processor !== undefined ? options.processor : resolveDefaultImageProcessor(this.maxPixels)
     this.urlExpiresIn = options.urlExpiresIn ?? DEFAULT_URL_EXPIRES_IN
     this.queue = options.queue
+  }
+
+  /**
+   * Bind this engine on `container` as `attachments` *and* resolve its storage
+   * there. One call rather than two: an app that bound the instance alone would
+   * still read storage from whichever app is the default (RFC 0023 §4).
+   */
+  bindTo(container: Container): void {
+    this.container = container
+    container.instance(ATTACHMENTS_BINDING, this)
   }
 
   /** Wired by `configureAttachments()`, so this module never imports the job. */
@@ -1426,12 +1439,16 @@ export function resolveDeliveryRoute(): { prefix: string; routeName: string } {
 }
 
 export function resolveAttachmentEngine(caller: string): AttachmentEngine {
-  if (!activeEngine) {
+  // The default application's binding before the module slot (RFC 0023 §3), so
+  // `useAsDefaultApplication()` steers the `Attachable` statics too; without it
+  // they silently follow whichever app configured attachments last.
+  const engine = ambientBinding(ATTACHMENTS_BINDING) ?? activeEngine
+  if (!engine) {
     throw new Error(
       `${caller} requires attachments to be configured. Call configureAttachments({ table, storage, disk }) once at boot (e.g. in config/attachments.ts) before using the attachment statics.`,
     )
   }
-  return activeEngine
+  return engine
 }
 
 async function normalizeSource(source: AttachmentSource, nameOverride?: string): Promise<NormalizedSource> {
