@@ -431,7 +431,7 @@ deprecations (`bunx guren upgrade --check-only` lists affected files) and
 | App code today | After | Codemod |
 |---|---|---|
 | `getGate().policy(Post, PostPolicy)` in a provider `boot()` (blog template) | `this.container.make('gate').policy(Post, PostPolicy)` | Yes: inside a class extending `ServiceProvider`, `getGate()` → `this.container.make('gate')`; same for the other getters by key |
-| `setMailManager(manager)` in a provider that also binds `mail` (scaffold) | delete the call | Yes, when the same class binds the key; otherwise reported |
+| `setMailManager(manager)` in a provider that also binds `mail` (scaffold) | delete the call | Yes, when ~~the same class~~ a provider in the same file binds the key (amended, below); otherwise reported |
 | `setMailManager(m)` in a provider that binds nothing (`examples/blog`) | `this.container.instance('mail', m)` | Yes |
 | `setInertiaDocument({...})` at module scope with an inline literal | `createApp({ inertia: { document: {...} } })` | Yes, when `createApp(` is in the same file; otherwise reported |
 | `getContainer().make('storage')` in `config/attachments.ts` | `(container) => container.make('storage')` | Yes, inside a `configureAttachments()` factory; elsewhere reported |
@@ -442,6 +442,18 @@ The codemod is idempotent, AST-based (`@babel/parser`, as `deprecations.ts`
 already uses) and tested against `examples/blog`. Timeline: deprecated in the
 Part 2 minor, removed at server `3.0.0` / core `2.0.0`, two minors later at
 the earliest.
+
+**Amended in implementation:** the deletion rule reads the file, not the class.
+The blog example's `setMailManager(mailManager)` sits in a module-scope helper
+its provider invokes (`EventServiceProvider.ts:51`), which is the common shape
+and the one the policy names as the codemod's test target; a rule keyed on the
+class reaches neither. The residual risk is a file whose provider binds the key
+to something other than what the setter passes, where deletion loses a
+meaningful call, so this is the one rewrite that cannot be read back off the
+result. A `this.…` rewrite is additionally skipped where `this` is not the
+instance — inside a `static` member, or a non-arrow function nested in the class
+— because a rewrite that compiles and then throws is worse than the warning it
+replaces.
 
 ## Open Questions
 

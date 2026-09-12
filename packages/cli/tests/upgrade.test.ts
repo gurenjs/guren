@@ -699,4 +699,61 @@ describe('checkDeprecations', () => {
       expect(seederWarning(await checkDeprecations(workspace.dir))).toBeUndefined()
     })
   })
+
+  describe('the RFC 0023 service accessors', () => {
+    async function writeFileIn(relativePath: string, contents: string): Promise<void> {
+      const target = join(workspace.dir, relativePath)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, contents)
+    }
+
+    function filesFor(warnings: Awaited<ReturnType<typeof checkDeprecations>>, id: string) {
+      return (warnings.find((warning) => warning.id === id)?.affectedFiles ?? []).sort()
+    }
+
+    // The setters live outside `app/`, the only directory the other entries
+    // scan, and the test-injection row of the migration table is reported
+    // rather than rewritten, so a test file has to be reached too.
+    it('reports setters and getters across config, src, app and tests', async () => {
+      await writeFileIn(
+        'src/app.ts',
+        "import { createApp, setInertiaDocument } from '@guren/core'\nsetInertiaDocument({ head: '' })\nexport default createApp({})\n",
+      )
+      await writeFileIn(
+        'config/inertia.ts',
+        "import { setInertiaSharedProps } from '@guren/core'\nsetInertiaSharedProps(null)\n",
+      )
+      await writeFileIn(
+        'app/Providers/AuthorizationProvider.ts',
+        "import { getGate } from '@guren/server'\nexport const gate = () => getGate()\n",
+      )
+      await writeFileIn(
+        'tests/posts.test.ts',
+        "import { setQueueDriver } from '@guren/core'\nsetQueueDriver(fake)\n",
+      )
+
+      const warnings = await checkDeprecations(workspace.dir)
+
+      expect(filesFor(warnings, 'global-service-setters')).toEqual([
+        join('config', 'inertia.ts'),
+        join('src', 'app.ts'),
+        join('tests', 'posts.test.ts'),
+      ])
+      expect(filesFor(warnings, 'global-service-getters')).toEqual([
+        join('app', 'Providers', 'AuthorizationProvider.ts'),
+      ])
+    })
+
+    it('does not report an app that resolves from its container', async () => {
+      await writeFileIn(
+        'app/Providers/AuthorizationProvider.ts',
+        "import { ServiceProvider } from '@guren/core'\nexport default class P extends ServiceProvider {\n  boot(): void {\n    this.container.make('gate')\n  }\n}\n",
+      )
+
+      const warnings = await checkDeprecations(workspace.dir)
+
+      expect(filesFor(warnings, 'global-service-setters')).toEqual([])
+      expect(filesFor(warnings, 'global-service-getters')).toEqual([])
+    })
+  })
 })

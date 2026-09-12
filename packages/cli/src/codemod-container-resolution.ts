@@ -146,6 +146,7 @@ export function transformSource(source: string, filePath: string): string | null
 
   const providers: Range[] = []
   const jobs: Range[] = []
+  const rebound: Range[] = []
   walk(ast.program, (node) => {
     if (node.type !== 'ClassDeclaration' && node.type !== 'ClassExpression') return
     const range = nodeRange(node)
@@ -153,11 +154,13 @@ export function transformSource(source: string, filePath: string): string | null
     const parent = superClassName(node)
     if (parent === 'ServiceProvider') providers.push(range)
     else if (parent === 'Job') jobs.push(range)
+    else return
+    rebound.push(...reboundRanges(node))
   })
 
   const edits: Edit[] = [
-    ...getterEdits(ast.program, providers, jobs),
-    ...setterEdits(ast.program, source, providers),
+    ...getterEdits(ast.program, providers, jobs, rebound),
+    ...setterEdits(ast.program, source, providers, rebound),
     ...storageFactoryEdits(ast.program, source),
     ...inertiaDocumentEdits(ast.program, source),
   ]
@@ -167,14 +170,34 @@ export function transformSource(source: string, filePath: string): string | null
   return applyEdits(source, edits)
 }
 
+/**
+ * Spans inside a class where `this` is not the instance: a static member, and
+ * any non-arrow function body. A rewrite to `this.…` there compiles and then
+ * throws at runtime, which is strictly worse than the warning it replaces.
+ */
+function reboundRanges(classNode: BabelNode): Range[] {
+  const ranges: Range[] = []
+  const body = (classNode.body as BabelNode | undefined)?.body as BabelNode[] | undefined
+  for (const member of body ?? []) {
+    const range = nodeRange(member)
+    if (range && member.static === true) ranges.push(range)
+  }
+  walk(classNode.body, (node) => {
+    if (node.type !== 'FunctionExpression' && node.type !== 'FunctionDeclaration' && node.type !== 'ObjectMethod') return
+    const range = nodeRange(node)
+    if (range) ranges.push(range)
+  })
+  return ranges
+}
+
 /** Rows 1 and 6: a deprecated getter inside a provider or a job. */
-function getterEdits(program: unknown, providers: Range[], jobs: Range[]): Edit[] {
+function getterEdits(program: unknown, providers: Range[], jobs: Range[], rebound: Range[]): Edit[] {
   const edits: Edit[] = []
   walk(program, (node) => {
     if (node.type !== 'CallExpression') return
     const range = nodeRange(node)
     const callee = nodeRange(node.callee as BabelNode)
-    if (!range || !callee) return
+    if (!range || !callee || enclosing(rebound, range)) return
 
     for (const [name, key] of Object.entries(GETTER_KEYS)) {
       if (!isPlainCall(node, name)) continue
@@ -200,7 +223,7 @@ function getterEdits(program: unknown, providers: Range[], jobs: Range[]): Edit[
 }
 
 /** Rows 2 and 3: a deprecated setter inside a provider. */
-function setterEdits(program: unknown, source: string, providers: Range[]): Edit[] {
+function setterEdits(program: unknown, source: string, providers: Range[], rebound: Range[]): Edit[] {
   const edits: Edit[] = []
   walk(program, (node) => {
     if (node.type !== 'ExpressionStatement') return
@@ -226,7 +249,7 @@ function setterEdits(program: unknown, source: string, providers: Range[]): Edit
       return
     }
 
-    if (!enclosing(providers, callRange)) return
+    if (!enclosing(providers, callRange) || enclosing(rebound, callRange)) return
 
     edits.push({
       ...callRange,

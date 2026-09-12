@@ -156,6 +156,52 @@ describe('the RFC 0023 codemod', () => {
     expect(output).toContain("import { Job, type StorageManager } from '@guren/core'")
   })
 
+  test('leaves a getter alone where `this` is not the instance', () => {
+    const nested = [
+      "import { ServiceProvider, getGate } from '@guren/core'",
+      '',
+      'export default class AuthorizationProvider extends ServiceProvider {',
+      '  register(): void {',
+      "    this.container.singleton('policies', function () {",
+      '      return getGate()',
+      '    })',
+      '  }',
+      '}',
+      '',
+    ].join('\n')
+
+    const staticMember = [
+      "import { ServiceProvider, getContainer } from '@guren/core'",
+      '',
+      'export default class AuthorizationProvider extends ServiceProvider {',
+      '  static boot(): void {',
+      "    getContainer().make('gate')",
+      '  }',
+      '}',
+      '',
+    ].join('\n')
+
+    expect(transformSource(nested, 'app/Providers/AuthorizationProvider.ts')).toBeNull()
+    expect(transformSource(staticMember, 'app/Providers/AuthorizationProvider.ts')).toBeNull()
+  })
+
+  test('leaves a job getter alone inside a non-arrow callback', () => {
+    const source = [
+      "import { Job, getContainer } from '@guren/core'",
+      '',
+      'export class ReportJob extends Job<{ id: number }> {',
+      '  async handle(): Promise<void> {',
+      '    run(function () {',
+      "      return getContainer().make('storage')",
+      '    })',
+      '  }',
+      '}',
+      '',
+    ].join('\n')
+
+    expect(transformSource(source, 'app/Jobs/ReportJob.ts')).toBeNull()
+  })
+
   test('reports rather than rewrites a test injecting a fake', () => {
     const source = [
       "import { setGate, setQueueDriver } from '@guren/core'",
