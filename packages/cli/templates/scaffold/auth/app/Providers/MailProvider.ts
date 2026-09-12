@@ -3,6 +3,7 @@ import { mailConfig } from '../../config/mail.js'
 
 export default class MailProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('mail', () => createMailManager(mailConfig))
+    // The container is passed so queued mail stays on this app's queue.
+    this.container.singleton('mail', (container) => createMailManager(mailConfig, container))
   }
 }

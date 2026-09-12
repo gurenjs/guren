@@ -3,10 +3,12 @@ import { consola } from 'consola'
 import {
   Worker,
   getQueueDriver,
+  type ContainerLike,
   type QueueDriver,
+  type QueueManager,
   type WorkerEvents,
 } from './queue-deps'
-import { bootstrapApplication, resolveMainEntry } from './runtime'
+import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from './runtime'
 
 export interface QueueWorkOptions {
   /** Queues to process (comma-separated). @default 'default' */
@@ -26,7 +28,7 @@ export interface QueueWorkOptions {
 }
 
 export async function runQueueWorker(options: QueueWorkOptions = {}): Promise<void> {
-  const driver = await getConfiguredDriver()
+  const { driver, container } = await getConfiguredQueue()
 
   const queues = (options.queue ?? 'default').split(',').map((q) => q.trim())
   const sleep = options.sleep ?? 1000
@@ -57,7 +59,7 @@ export async function runQueueWorker(options: QueueWorkOptions = {}): Promise<vo
     },
   }
 
-  const worker = new Worker(driver, { queues, sleep, maxJobs, timeout, stopWhenEmpty }, events)
+  const worker = new Worker(driver, { queues, sleep, maxJobs, timeout, stopWhenEmpty, container }, events)
 
   const shutdown = async () => {
     consola.info('Shutting down worker...')
@@ -151,8 +153,16 @@ export async function flushFailedJobs(queue?: string): Promise<void> {
   await processFailedJobs('flush', queue)
 }
 
-/** Boots the app so its queue manager can register a driver, then returns it. */
-async function getConfiguredDriver(): Promise<QueueDriver> {
+/** The `queue` manager surface the worker needs from the app's container. */
+type BoundQueueManager = Pick<QueueManager, 'driver' | 'hasDriver' | 'getDefaultDriverName'>
+
+/**
+ * Boots the app and resolves its queue driver: the `queue` manager its own
+ * container binds (RFC 0023 §3), else the driver `getQueueDriver()` reads
+ * from the default application. The container rides along so the worker can
+ * hand it to each job.
+ */
+async function getConfiguredQueue(): Promise<{ driver: QueueDriver; container: ContainerLike | undefined }> {
   let entry: string
   try {
     entry = await resolveMainEntry()
@@ -161,19 +171,36 @@ async function getConfiguredDriver(): Promise<QueueDriver> {
     process.exit(1)
   }
 
+  let app: MaybeApplication
   try {
     const mod = await import(pathToFileURL(entry).href)
-    await bootstrapApplication(mod)
+    app = await bootstrapApplication(mod)
   } catch (error) {
     consola.error(`Failed to bootstrap application:`, error)
     process.exit(1)
   }
 
-  const driver = getQueueDriver()
+  const container = appContainer(app)
+  const manager = container?.has?.('queue') ? (container.make('queue') as BoundQueueManager) : undefined
+  const driver = manager?.hasDriver(manager.getDefaultDriverName()) ? manager.driver() : getQueueDriver()
   if (!driver) {
     consola.error('Queue driver not configured. Make sure your application boots a queue manager and activates a driver.')
     process.exit(1)
   }
 
-  return driver
+  return { driver, container }
+}
+
+/**
+ * The app's container, or undefined for an app whose container is some other
+ * object. Handed over as it is: re-wrapping `make`/`has` in a fresh object
+ * calls them with the wrong `this` and every resolution throws.
+ */
+function appContainer(app: MaybeApplication): ContainerLike | undefined {
+  const container = app.container
+  return typeof container?.make === 'function' ? (container as ContainerLike) : undefined
+}
+
+async function getConfiguredDriver(): Promise<QueueDriver> {
+  return (await getConfiguredQueue()).driver
 }

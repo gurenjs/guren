@@ -1,5 +1,5 @@
 import { Application } from '../../src/http/Application'
-import { createContainer, setContainer } from '../../src/container'
+import { resetDefaultApplication } from '../../src/http/default-application'
 import type { ServiceProviderConstructor } from '../../src/container/ServiceProvider'
 import { QueueServiceProvider } from '../../src/providers/QueueServiceProvider'
 import type { MemoryDriver } from '../../src/queue'
@@ -18,10 +18,10 @@ export async function bootWithMemoryQueue(
 
 /**
  * The process-wide state a queue test leaves behind: the `Job.dispatch()` pin
- * and the published container. A test that keeps either hands the next file an
+ * and the ambient application. A test that keeps either hands the next file an
  * app it never booted.
  */
 export function resetQueueState(): void {
   clearQueueDriver()
-  setContainer(createContainer())
+  resetDefaultApplication()
 }

@@ -18,6 +18,7 @@ import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import { parseRequestPayload } from '../http/request'
 import { randomHex } from '../encryption/Random'
+import { ambientBinding } from '../http/default-application'
 
 /**
  * Best-effort identity for the user behind a connection: `getUser` is
@@ -524,11 +525,13 @@ export function setBroadcastManager(manager: BroadcastManager): void {
   globalBroadcastManager = manager
 }
 
+/** The default application's `broadcast`, else the one `setBroadcastManager()` installed. */
 export function getBroadcastManager(): BroadcastManager {
-  if (!globalBroadcastManager) {
-    throw new Error('BroadcastManager not initialized. Call setBroadcastManager() first.')
+  const manager = ambientBinding('broadcast') ?? globalBroadcastManager
+  if (!manager) {
+    throw new Error('BroadcastManager not initialized. Register BroadcastServiceProvider, or call setBroadcastManager() first.')
   }
-  return globalBroadcastManager
+  return manager
 }
 
 /**

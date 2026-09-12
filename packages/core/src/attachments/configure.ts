@@ -24,16 +24,21 @@ export interface ConfiguredAttachments {
  * framework returns the model. `Attachable` statics resolve this lazily and
  * throw a clear error when it was never called.
  * @example
- * export const { Attachment } = configureAttachments({ table: attachments, storage: () => container.make('storage'), disk: 'media' })
+ * export const { Attachment } = configureAttachments({ table: attachments, storage: (container) => container.make('storage'), disk: 'media' })
  */
 export function configureAttachments(options: ConfigureAttachmentsOptions): ConfiguredAttachments {
   const engine = new AttachmentEngine(options)
   // Wired here rather than inside the engine so engine.ts never imports the
   // job module (which imports engine.ts for the active-engine lookup).
-  engine.setJobDispatcher((payload) => GenerateVariantsJob.dispatch(payload))
+  engine.setJobDispatcher((payload, queue) =>
+    queue ? queue.dispatch(GenerateVariantsJob, payload) : GenerateVariantsJob.dispatch(payload),
+  )
   // At configure time, so any worker booting the app's config can resolve
   // queued GenerateVariantsJob messages.
   registerJob(GenerateVariantsJob)
   setActiveAttachmentEngine(engine)
+  // The request-scoped handle (RFC 0023 §4); the active engine stays the
+  // fallback for the statics, which hold no container.
+  options.app?.container.instance('attachments', engine)
   return { Attachment: engine.model }
 }

@@ -4,6 +4,7 @@ import { ensureErrorStackTracePolyfill } from "../../support/error-polyfill";
 import { parseImportMap } from "../../support/import-map";
 import { DEFAULT_DEV_STYLES_ENTRY } from "../../support/inertia-defaults";
 import type { ContainerLike } from "../../container/types";
+import { resolveOptional } from "../../container/resolve-optional";
 
 ensureErrorStackTracePolyfill();
 
@@ -127,11 +128,6 @@ export function setInertiaSsrRenderer(
   renderer: InertiaSsrRenderer | undefined
 ): void {
   defaultSsrRenderer = renderer;
-}
-
-/** A binding `container` holds, without throwing on a container that has none. */
-function bound<T>(container: ContainerLike | undefined, key: string): T | undefined {
-  return container?.has?.(key) ? (container.make(key) as T) : undefined;
 }
 
 const DEFAULT_TITLE = "Guren";
@@ -344,7 +340,7 @@ async function tryRenderSsr(
 
   const renderer =
     ssrOptions?.render ??
-    bound<InertiaSsrRenderer>(options.container, "inertia.ssrRenderer") ??
+    resolveOptional<InertiaSsrRenderer>(options.container, "inertia.ssrRenderer") ??
     defaultSsrRenderer ??
     (await loadSsrRenderer(
       ssrOptions?.entry ?? process.env.GUREN_INERTIA_SSR_ENTRY
@@ -489,7 +485,7 @@ function resolveDocumentValue(
   }
 
   const document =
-    bound<InertiaDocumentOptions>(options.container, "inertia.document") ??
+    resolveOptional<InertiaDocumentOptions>(options.container, "inertia.document") ??
     documentOptions;
   const value = document?.[key];
 

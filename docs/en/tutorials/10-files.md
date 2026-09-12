@@ -43,7 +43,7 @@ printf 'storage/app/\npublic/storage/\n' >> .gitignore
 And the config gets one line the generator cannot write for you, because it does not know which of your models will carry attachments. The prune command needs the map to check that an attachment's owner still exists:
 
 ```ts file=config/attachments.ts
-import { Model, configureAttachments, getContainer } from '@guren/core'
+import { Model, configureAttachments } from '@guren/core'
 import { attachments } from '../db/schema'
 import { Post } from '../app/Models/Post.js'
 
@@ -53,7 +53,7 @@ import { Post } from '../app/Models/Post.js'
  */
 export const { Attachment } = configureAttachments({
   table: attachments,
-  storage: () => getContainer().make('storage'),
+  storage: (container) => container.make('storage'),
   // Uploads are bytes a stranger chose, so they live on a disk rooted outside
   // public/ and are handed out only through the signed delivery route that
   // registerAttachmentRoutes(router) mounts. Rooting this disk inside public/

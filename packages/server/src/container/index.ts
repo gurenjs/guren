@@ -1,4 +1,5 @@
 export type {
+  ContainerLike,
   ServiceFactory,
   ServiceClass,
   ServiceBinding,
@@ -17,8 +18,13 @@ export {
   createContainer,
   setContainer,
   getContainer,
-  resolve,
 } from './Container'
+
+// From the default application, not the raw slot, so every ambient resolution
+// answers by one rule (RFC 0023 §3).
+export { resolve } from '../http/default-application'
+
+export { resolveOptional } from './resolve-optional'
 
 export { ServiceProvider, ProviderManager } from './ServiceProvider'
 

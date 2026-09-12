@@ -99,6 +99,23 @@ describe('prototype routes (RFC 0021 Part 2)', () => {
     expect(real.controller).toEqual({ name: 'RealController', action: 'index' })
   })
 
+  it('renders a full page with the document defaults bound by createApp({ inertia })', async () => {
+    const app = new Application({
+      routes: registerRoutes,
+      prototype: async () => ({ default: fixture() }),
+      inertia: { document: { head: '<meta name="app" content="bound">' } },
+    })
+    await app.boot()
+
+    const response = await app.fetch(
+      new Request('http://example.com/posts', { headers: { Accept: 'text/html' } }),
+    )
+    const html = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(html).toContain('<meta name="app" content="bound">')
+  })
+
   it('answers a page from the fixture with the fixture shared props under the real ones', async () => {
     setInertiaSharedProps(async () => ({ auth: { user: null }, fromServer: 1 }))
     const app = await bootApp()

@@ -11,6 +11,7 @@ import type {
 } from './types'
 import { HttpException } from './HttpException'
 import { renderErrorPage } from './error-page'
+import { ambientBinding } from '../http/default-application'
 
 /** Centralized error handling: reporting, per-class renderers, middleware. */
 export class ExceptionHandler {
@@ -198,13 +199,15 @@ export function setExceptionHandler(handler: ExceptionHandler): void {
   globalExceptionHandler = handler
 }
 
+/** The default application's `exception.handler`, else the one `setExceptionHandler()` installed. */
 export function getExceptionHandler(): ExceptionHandler {
-  if (!globalExceptionHandler) {
+  const handler = ambientBinding('exception.handler') ?? globalExceptionHandler
+  if (!handler) {
     throw new Error(
-      'ExceptionHandler not initialized. Call setExceptionHandler() first.'
+      'ExceptionHandler not initialized. Construct the app with createApp(), or call setExceptionHandler() first.'
     )
   }
-  return globalExceptionHandler
+  return handler
 }
 
 export function abort(

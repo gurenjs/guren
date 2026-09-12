@@ -13,6 +13,7 @@ import {
 } from './registry'
 import { resolveNotifiableType } from './notifiable-type'
 import { Job, registerJob } from '../queue'
+import { ambientBinding } from '../http/default-application'
 
 /** Sends notifications through multiple registered channels. */
 export class NotificationManager {
@@ -253,7 +254,9 @@ class SendNotificationJob extends Job<SendNotificationPayload> {
   static notificationManager: NotificationManager | null = null
 
   async handle(payload: SendNotificationPayload): Promise<void> {
-    const manager = (this.constructor as typeof SendNotificationJob).notificationManager
+    // The worker's app first (RFC 0023 §4); the static is what registerQueueJob() left.
+    const manager =
+      this.makeOptional('notifications') ?? (this.constructor as typeof SendNotificationJob).notificationManager
     if (!manager) {
       throw new Error('NotificationManager not set on SendNotificationJob')
     }
@@ -325,11 +328,13 @@ export function setNotificationManager(manager: NotificationManager): void {
   globalNotificationManager = manager
 }
 
+/** The default application's `notifications`, else the one `setNotificationManager()` installed. */
 export function getNotificationManager(): NotificationManager {
-  if (!globalNotificationManager) {
-    throw new Error('NotificationManager not initialized. Call setNotificationManager() first.')
+  const manager = ambientBinding('notifications') ?? globalNotificationManager
+  if (!manager) {
+    throw new Error('NotificationManager not initialized. Register NotificationServiceProvider, or call setNotificationManager() first.')
   }
-  return globalNotificationManager
+  return manager
 }
 
 export function createNotificationManager(

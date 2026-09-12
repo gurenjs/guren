@@ -12,7 +12,8 @@ import type { ServiceBindings } from '../container/bindings'
 import type { ContainerLike } from '../container/types'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
-import { getGate } from '../authorization/Gate'
+import { getGate, type Gate } from '../authorization/Gate'
+import { resolveOptional } from '../container/resolve-optional'
 import type { AuthUser } from '../authorization/types'
 
 /** Duck-typed Zod-like schema, so validation needs no direct Zod dependency. */
@@ -212,12 +213,17 @@ export class Controller {
    * record: `await this.authorize('update', [Post, post])`.
    */
   protected async authorize(ability: string, ...args: unknown[]): Promise<void> {
-    await getGate().forUser(await this.gateUser()).authorize(ability, ...args)
+    await this.#resolveGate().forUser(await this.gateUser()).authorize(ability, ...args)
   }
 
   /** Check an ability without throwing: `await this.can('update', [Post, post])`. */
   protected async can(ability: string, ...args: unknown[]): Promise<boolean> {
-    return getGate().forUser(await this.gateUser()).allows(ability, ...args)
+    return this.#resolveGate().forUser(await this.gateUser()).allows(ability, ...args)
+  }
+
+  /** This app's `gate` (RFC 0023 §2); the ambient one only off a container, as on a bare Hono app. */
+  #resolveGate(): Gate {
+    return resolveOptional<Gate>(this._container, 'gate') ?? getGate()
   }
 
   private async gateUser(): Promise<AuthUser | null> {
@@ -333,11 +339,7 @@ export class Controller {
   }
 
   #resolveI18n(): I18nManager | undefined {
-    if (this._container?.has?.('i18n')) {
-      return this._container.make('i18n') as I18nManager
-    }
-
-    return tryGetI18n()
+    return resolveOptional<I18nManager>(this._container, 'i18n') ?? tryGetI18n()
   }
 
   protected json<T>(data: T, init: ResponseInit = {}): Response {

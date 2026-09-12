@@ -1,4 +1,4 @@
-import { Model, configureAttachments, getContainer } from '@guren/core'
+import { Model, configureAttachments } from '@guren/core'
 import { attachments } from '../db/schema'
 import { Post } from '../app/Models/Post.js'
 
@@ -9,7 +9,7 @@ import { Post } from '../app/Models/Post.js'
  */
 export const { Attachment } = configureAttachments({
   table: attachments,
-  storage: () => getContainer().make('storage'),
+  storage: (container) => container.make('storage'),
   // Uploads are bytes a stranger chose, so `local` is rooted outside public/
   // and served only through the signed delivery route registerAttachmentRoutes()
   // mounts, which inlines an allowlist of types, forces a download for the rest,

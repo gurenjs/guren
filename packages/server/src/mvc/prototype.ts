@@ -223,7 +223,7 @@ async function answer(
 ): Promise<Response> {
   switch (result.kind) {
     case 'page':
-      return inertia(result.component, { ...shared, ...result.props }, { request: c.req.raw })
+      return inertia(result.component, { ...shared, ...result.props }, { request: c.req.raw, container: deps.container })
     case 'redirect':
       return c.redirect(deps.routeUrl(result.to, result.params), 303)
     case 'location':
@@ -240,7 +240,7 @@ async function answer(
         return inertia(
           componentOf(fixture.notFoundPage),
           { ...shared, status: 404, message: 'Not Found' },
-          { request: c.req.raw, status: 404 },
+          { request: c.req.raw, status: 404, container: deps.container },
         )
       }
       throw HttpException.notFound()

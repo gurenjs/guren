@@ -3,7 +3,8 @@ import type { QueueDriver, QueuedJob, JobOptions } from './types'
 import type { QueueManager } from './QueueManager'
 import type { ServiceBindings } from '../container/bindings'
 import type { ContainerLike } from '../container/types'
-import { getContainer } from '../container/Container'
+import { resolveOptional } from '../container/resolve-optional'
+import { ambientBinding, ambientContainer, defaultContainer } from '../http/default-application'
 
 /**
  * The pin `setQueueDriver()` writes, and nothing else does. A manager that
@@ -12,7 +13,11 @@ import { getContainer } from '../container/Container'
  */
 let globalDriver: QueueDriver | null = null
 
-/** Pins the driver `Job.dispatch()` sends through, ahead of the container's `queue` manager. */
+/**
+ * Pins the driver `Job.dispatch()` sends through, ahead of the container's
+ * `queue` manager. An explicit override rather than a fallback: `@guren/testing`'s
+ * `fakeQueue()` and the tutorial's queue test inject through it (RFC 0023 §3).
+ */
 export function setQueueDriver(driver: QueueDriver): void {
   globalDriver = driver
 }
@@ -22,20 +27,22 @@ export function clearQueueDriver(): void {
   globalDriver = null
 }
 
-/** The `queue` manager bound in the current container, or null when there is neither. */
+/** @internal The driver `setQueueDriver()` pinned, for a dispatcher with a container of its own to honour first. */
+export function pinnedQueueDriver(): QueueDriver | null {
+  return globalDriver
+}
+
+/** The `queue` manager bound in the default application, or null when there is neither. */
 function boundQueueManager(): QueueManager | null {
-  try {
-    return getContainer().makeOptional<QueueManager>('queue') ?? null
-  } catch {
-    return null
-  }
+  return ambientBinding('queue') ?? null
 }
 
 /**
  * The driver `Job.dispatch()` sends through: the pin when set, else the default
- * driver of the `queue` manager bound in the container, else null. Total by
- * contract — every caller treats it as `QueueDriver | null`, so a manager bound
- * with no factory for its default must read as absent rather than throw.
+ * driver of the `queue` manager the default application binds, else null.
+ * Total by contract — every caller treats it as `QueueDriver | null`, so a
+ * manager bound with no factory for its default must read as absent rather
+ * than throw.
  */
 export function getQueueDriver(): QueueDriver | null {
   if (globalDriver) return globalDriver
@@ -127,7 +134,14 @@ export abstract class Job<T = unknown> {
   protected make<K extends keyof ServiceBindings>(key: K): ServiceBindings[K]
   protected make<TService>(key: string): TService
   protected make(key: string): unknown {
-    return (this.container ?? getContainer()).make(key)
+    return (this.container ?? defaultContainer()).make(key)
+  }
+
+  /** `make()` for a binding that may be absent: undefined when neither container holds it. */
+  protected makeOptional<K extends keyof ServiceBindings>(key: K): ServiceBindings[K] | undefined
+  protected makeOptional<TService>(key: string): TService | undefined
+  protected makeOptional(key: string): unknown {
+    return resolveOptional(this.container ?? ambientContainer(), key)
   }
 
   abstract handle(payload: T): void | Promise<void>

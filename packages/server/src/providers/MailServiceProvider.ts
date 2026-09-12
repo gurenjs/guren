@@ -10,11 +10,14 @@ import { createMailManager } from '../mail'
  */
 export class MailServiceProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('mail', () =>
-      createMailManager({
-        default: 'log',
-        transports: { log: { driver: 'log' } },
-      }),
+    this.container.singleton('mail', (container) =>
+      createMailManager(
+        {
+          default: 'log',
+          transports: { log: { driver: 'log' } },
+        },
+        container,
+      ),
     )
   }
 }

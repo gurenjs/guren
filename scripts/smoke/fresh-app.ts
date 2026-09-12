@@ -441,8 +441,8 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   const mailProvider = await readFile(join(appDir, 'app/Providers/MailProvider.ts'), 'utf8')
   assert(mailProvider.includes("from '@guren/core'"), 'Mail blueprint must import from @guren/core.')
   assert(mailProvider.includes('createMailManager'), 'Mail blueprint must create a mail manager.')
-  assert(mailProvider.includes("this.container.instance('mail', manager)"), 'Mail blueprint must bind the mail manager into the container.')
-  assert(mailProvider.includes('setMailManager(manager)'), 'Mail blueprint must connect the mail manager to the runtime mail facade.')
+  assert(mailProvider.includes("this.container.singleton('mail', (container) =>"), 'Mail blueprint must bind the mail manager into the container.')
+  assert(!mailProvider.includes('setMailManager('), 'Mail blueprint must not publish the mail manager through the global setter (RFC 0023).')
   assert(!mailProvider.includes('@guren/server'), 'Mail blueprint must not import from @guren/server.')
 
   const welcomeMail = await readFile(join(appDir, 'app/Mail/WelcomeEmailMail.ts'), 'utf8')

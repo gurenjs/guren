@@ -2,8 +2,14 @@ import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import type { AuthorizeOptions, AuthorizeResourceOptions } from './types'
 import { Gate, getGate, denialToException } from './Gate'
+import { tryGetRequestContainer } from '../http/request-container'
 import { AuthorizationException } from '../errors'
 import { stampCapabilities } from '../http/middleware/capabilities'
+
+/** The gate of the app serving `ctx` (RFC 0023 §2); the ambient one on a bare Hono app. */
+function gateFor(ctx: Context): Gate {
+  return tryGetRequestContainer(ctx)?.makeOptional('gate') ?? getGate()
+}
 
 /**
  * Middleware to authorize an ability. An array argument is snapshotted at
@@ -21,7 +27,7 @@ export function authorizeMiddleware(
   const anyOf = abilities.length !== 1
 
   return stampCapabilities(async (ctx, next) => {
-    const gate = getGate()
+    const gate = gateFor(ctx)
     const user = await gate.resolveUser(ctx)
     const gateForUser = gate.forUser(user)
 
@@ -68,7 +74,7 @@ export function authorizeAllMiddleware(
   }
 
   return stampCapabilities(async (ctx, next) => {
-    const gate = getGate()
+    const gate = gateFor(ctx)
     const user = await gate.resolveUser(ctx)
     const gateForUser = gate.forUser(user)
 
@@ -131,7 +137,7 @@ export function authorizeResourceMiddleware(
       throw new AuthorizationException(options.message ?? 'This action is unauthorized.')
     }
 
-    const gate = getGate()
+    const gate = gateFor(ctx)
     const user = await gate.resolveUser(ctx)
     const gateForUser = gate.forUser(user)
 

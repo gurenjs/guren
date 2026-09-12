@@ -1,14 +1,12 @@
 import { ServiceProvider } from '../container/ServiceProvider'
-import { createGate, setGate } from '../authorization'
+import { createGate } from '../authorization'
 
 /**
- * Binds the Gate as a singleton and sets it as the global gate, so `getGate()`,
- * `can()`, and the controller authorization helpers need no manual wiring.
+ * Binds the Gate as a singleton. Controllers, the authorization middleware and
+ * `getGate()` resolve it from there (RFC 0023 §4), so no global is written.
  */
 export class AuthorizationServiceProvider extends ServiceProvider {
   register(): void {
-    const gate = createGate()
-    setGate(gate)
-    this.container.singleton('gate', () => gate)
+    this.container.singleton('gate', () => createGate())
   }
 }

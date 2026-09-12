@@ -152,6 +152,10 @@ const Queue = app.container.make('queue')
 
 // Access the default driver
 const driver = Queue.driver()
+
+// SendWelcomeEmailJob.dispatch(payload) の明示形。同じメッセージを
+// 既定アプリケーションではなくこのマネージャー経由で積む
+await Queue.dispatch(SendWelcomeEmailJob, { userId: 1 })
 ```
 
 ### 直接セットアップ
@@ -245,13 +249,15 @@ const driver = queue.driver()
 // ジョブクラスを登録（ワーカーがジョブを見つけるために必要）
 registerJob(SendWelcomeEmailJob)
 
-// ワーカーを作成して起動
+// ワーカーを作成して起動。`container` は各ジョブの this.make() の解決元で、
+// `guren queue:work` は起動したアプリの container を渡す
 const worker = new Worker(driver, {
   queues: ['high-priority', 'default', 'emails'],
   sleep: 1000,
   timeout: 60000,
   maxJobs: 0,        // 0 = 無制限
   stopWhenEmpty: false,
+  container: app.container,
 }, {
   // オプションのイベントハンドラ
   jobProcessed: (job) => console.log(`処理完了: ${job.name}`),

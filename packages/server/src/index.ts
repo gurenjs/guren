@@ -4,6 +4,8 @@ ensureErrorStackTracePolyfill()
 
 export { Application, createApp } from './http/Application'
 export {
+  ambientBinding,
+  ambientContainer,
   defaultApplication,
   defaultContainer,
   resetDefaultApplication,
@@ -855,6 +857,7 @@ export type {
 export {
   Container,
   createContainer,
+  resolveOptional,
   setContainer,
   getContainer,
   resolve,
@@ -865,6 +868,7 @@ export {
   mountModuleRoutes,
 } from './container'
 export type {
+  ContainerLike,
   PluginDefinition,
   PluginFactory,
   ModuleDefinition,

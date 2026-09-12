@@ -3,6 +3,7 @@ import { createMiddleware } from 'hono/factory'
 import { getCookie } from 'hono/cookie'
 import { parseAccept } from 'hono/utils/accept'
 import { tryGetI18n, type I18nManager, type Translator } from '../../i18n'
+import { tryGetRequestContainer } from '../request-container'
 
 /** Context key for the resolved request locale (read by Inertia for `<html lang>`). */
 export const LOCALE_CONTEXT_KEY = 'locale'
@@ -48,7 +49,8 @@ export interface DetectLocaleOptions {
   cookieName?: string
   /**
    * Manager backing the request-scoped `t`/`tc` helpers. Defaults to the
-   * global one registered via `setI18n()`; `false` skips the binding.
+   * serving app's `i18n` binding, then the one `setI18n()` registered;
+   * `false` skips the binding.
    */
   i18n?: I18nManager | false
 }
@@ -142,7 +144,10 @@ export function detectLocaleMiddleware(options: DetectLocaleOptions) {
 
     c.set(LOCALE_CONTEXT_KEY, resolved)
 
-    const i18n = options.i18n === false ? undefined : options.i18n ?? tryGetI18n()
+    const i18n =
+      options.i18n === false
+        ? undefined
+        : options.i18n ?? tryGetRequestContainer(c)?.makeOptional('i18n') ?? tryGetI18n()
     if (i18n) {
       await i18n.loadLocale(resolved).catch(() => {})
 

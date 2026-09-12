@@ -19,10 +19,14 @@ export interface RequestContextLike {
   get: (key: string) => unknown
 }
 
-/** The container of the Application serving `ctx`, or undefined off an Application (bare Hono). */
+/**
+ * The container of the Application serving `ctx`, or undefined off an
+ * Application (bare Hono). Judged by shape rather than `instanceof`: a test
+ * double answering every key must not pass as a container.
+ */
 export function tryGetRequestContainer(ctx: RequestContextLike): Container | undefined {
-  const container = ctx.get(CONTAINER_CONTEXT_KEY)
-  return container ? (container as Container) : undefined
+  const container = ctx.get(CONTAINER_CONTEXT_KEY) as Container | undefined
+  return typeof container?.makeOptional === 'function' ? container : undefined
 }
 
 /** The container of the Application serving `ctx`; throws off an Application (bare Hono). */
