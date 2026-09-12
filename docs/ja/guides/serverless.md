@@ -58,20 +58,32 @@ bunx guren lambda:build
 
 SQS メッセージを Guren のジョブとして処理します。**部分バッチ失敗**に対応しており、失敗したメッセージだけが SQS に戻されてリトライされます。
 
-キュープロバイダで SQS ドライバを設定します:
+`guren add queue` が `app/Providers/QueueProvider.ts` に置くキュープロバイダで、SQS ドライバを設定します:
 
 ```typescript
 import { SQSClient } from '@aws-sdk/client-sqs'
-import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/core'
+import { ServiceProvider, createQueueManager, createSqsAdapter, SqsDriver } from '@guren/core'
 
-const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
-setQueueDriver(new SqsDriver(adapter, {
-  queueUrl: process.env.SQS_QUEUE_URL!,
-  // オプション: 論理キュー名を別の SQS URL にマッピング
-  queueUrls: {
-    emails: process.env.SQS_EMAILS_QUEUE_URL!,
-  },
-}))
+export default class QueueProvider extends ServiceProvider {
+  register(): void {
+    const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
+    const queue = createQueueManager({
+      default: 'sqs',
+      drivers: {
+        sqs: () =>
+          new SqsDriver(adapter, {
+            queueUrl: process.env.SQS_QUEUE_URL!,
+            // オプション: 論理キュー名を別の SQS URL にマッピング
+            queueUrls: {
+              emails: process.env.SQS_EMAILS_QUEUE_URL!,
+            },
+          }),
+      },
+    })
+
+    this.container.instance('queue', queue)
+  }
+}
 ```
 
 ジョブのディスパッチはサーバー上と同じです（`await SendEmailJob.dispatch({ to: 'user@example.com' })`）。`SqsDriver` がジョブを SQS にシリアライズし、Lambda ハンドラーがデシリアライズして実行します。
