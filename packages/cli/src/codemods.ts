@@ -3,6 +3,8 @@
  * transforms user code to adapt to breaking changes.
  */
 
+import { applyContainerResolution, detectContainerResolution } from './codemod-container-resolution'
+
 export interface Codemod {
   /** Unique identifier, e.g. 'rename-static-route' */
   id: string
@@ -17,8 +19,25 @@ export interface Codemod {
   apply(cwd: string): Promise<number>
 }
 
-/** Registry of all available codemods, ordered by version. */
-export const codemods: Codemod[] = []
+/**
+ * Registry of all available codemods, ordered by version.
+ *
+ * Ranges name the line of the `@guren/*` pin `checkVersionCompatibility()`
+ * anchors on: the first dependency naming an exact release, `@guren/cli` in
+ * every scaffold. A range on another package's line selects for nobody.
+ */
+export const codemods: Codemod[] = [
+  {
+    id: 'container-only-service-resolution',
+    description:
+      'RFC 0023: resolve gate, encrypter, mail, i18n, log, notifications, broadcast and the exception '
+      + 'handler from the container instead of the module-level setters and getters',
+    fromVersion: '2.21.0',
+    toVersion: '2.22.0',
+    detect: detectContainerResolution,
+    apply: applyContainerResolution,
+  },
+]
 
 /** Codemods applicable for upgrading between two versions. */
 export function findApplicableCodemods(from: string, to: string): Codemod[] {

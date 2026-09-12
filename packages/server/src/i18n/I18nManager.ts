@@ -6,7 +6,8 @@ import type {
 } from './types'
 import { Translator } from './Translator'
 import { JsonLoader } from './loaders/JsonLoader'
-import { ambientBinding } from '../http/default-application'
+import { ambientBinding, bindAmbient } from '../http/default-application'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
 export class I18nManager {
   private config: I18nConfig
@@ -148,31 +149,55 @@ export function createI18n(config: I18nConfig): I18nManager {
   return new I18nManager(config)
 }
 
-/** Set the global I18n manager. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Pass
+ * `createApp({ i18n })`, or bind it from a provider as
+ * `this.container.instance('i18n', manager)`.
+ */
 export function setI18n(i18n: I18nManager): void {
-  globalI18n = i18n
+  warnDeprecatedSetter('setI18n')
+  globalI18n = bindAmbient('i18n', i18n) ? null : i18n
 }
 
-/** The default application's `i18n`, else the one `setI18n()` installed. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use `this.t(key)` in a
+ * controller, `getRequestTranslator(ctx)` in middleware, or
+ * `defaultContainer().make('i18n')`. `t()` / `tc()` are unaffected.
+ */
 export function getI18n(): I18nManager {
-  const i18n = tryGetI18n()
+  warnDeprecatedGetter('getI18n')
+  return resolveI18nOrFail()
+}
+
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use
+ * `container.makeOptional('i18n')` on the container that owns the call.
+ */
+export function tryGetI18n(): I18nManager | undefined {
+  warnDeprecatedGetter('tryGetI18n')
+  return resolveI18n()
+}
+
+/** @internal The default application's `i18n`, else the one `setI18n()` installed. */
+export function resolveI18n(): I18nManager | undefined {
+  return ambientBinding('i18n') ?? globalI18n ?? undefined
+}
+
+/** @internal `resolveI18n()` with the message every unconfigured caller should read. */
+function resolveI18nOrFail(): I18nManager {
+  const i18n = resolveI18n()
   if (!i18n) {
     throw new Error('I18n manager not initialized. Pass createApp({ i18n }), or call setI18n() first.')
   }
   return i18n
 }
 
-/** `getI18n()` without the throw: `undefined` when no app binds one and none was set. */
-export function tryGetI18n(): I18nManager | undefined {
-  return ambientBinding('i18n') ?? globalI18n ?? undefined
-}
-
 /** Translate a key using the global I18n manager. */
 export function t(key: string, replacements?: ReplacementValues): string {
-  return getI18n().t(key, replacements)
+  return resolveI18nOrFail().t(key, replacements)
 }
 
 /** Translate a key with count using the global I18n manager. */
 export function tc(key: string, count: number, replacements?: ReplacementValues): string {
-  return getI18n().tc(key, count, replacements)
+  return resolveI18nOrFail().tc(key, count, replacements)
 }

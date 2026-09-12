@@ -13,7 +13,8 @@ import {
 } from './registry'
 import { resolveNotifiableType } from './notifiable-type'
 import { Job, registerJob } from '../queue'
-import { ambientBinding } from '../http/default-application'
+import { ambientBinding, bindAmbient } from '../http/default-application'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
 /** Sends notifications through multiple registered channels. */
 export class NotificationManager {
@@ -251,6 +252,11 @@ class SendNotificationJob extends Job<SendNotificationPayload> {
   static queue = 'notifications'
   static maxAttempts = 3
 
+  /**
+   * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). The job resolves
+   * `notifications` from the worker's container; `registerQueueJob()` writes
+   * this only so a worker booted without one keeps working.
+   */
   static notificationManager: NotificationManager | null = null
 
   async handle(payload: SendNotificationPayload): Promise<void> {
@@ -324,12 +330,23 @@ class SendNotificationJob extends Job<SendNotificationPayload> {
 
 let globalNotificationManager: NotificationManager | null = null
 
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Bind the manager on the
+ * app's container instead — `NotificationServiceProvider` already does, and a
+ * provider of your own reaches it as `this.container.instance('notifications', m)`.
+ */
 export function setNotificationManager(manager: NotificationManager): void {
-  globalNotificationManager = manager
+  warnDeprecatedSetter('setNotificationManager')
+  globalNotificationManager = bindAmbient('notifications', manager) ? null : manager
 }
 
-/** The default application's `notifications`, else the one `setNotificationManager()` installed. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use
+ * `this.make('notifications')` in a controller, job or command, or
+ * `defaultContainer().make('notifications')`.
+ */
 export function getNotificationManager(): NotificationManager {
+  warnDeprecatedGetter('getNotificationManager')
   const manager = ambientBinding('notifications') ?? globalNotificationManager
   if (!manager) {
     throw new Error('NotificationManager not initialized. Register NotificationServiceProvider, or call setNotificationManager() first.')

@@ -3,7 +3,8 @@ import { Logger, isPromiseLike, type LoggerOptions } from './Logger'
 import { ConsoleChannel } from './channels/ConsoleChannel'
 import { FileChannel } from './channels/FileChannel'
 import { DailyFileChannel } from './channels/DailyFileChannel'
-import { ambientBinding } from '../http/default-application'
+import { ambientBinding, bindAmbient } from '../http/default-application'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
 /** Log manager for managing multiple logging channels. */
 export class LogManager {
@@ -192,12 +193,22 @@ export function createLogManager(config: LogConfig): LogManager {
 
 let globalLogManager: LogManager | null = null
 
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Bind the manager on the
+ * app's container instead — `LogServiceProvider` already does, and a provider of
+ * your own reaches it as `this.container.instance('log', manager)`.
+ */
 export function setLogManager(manager: LogManager): void {
-  globalLogManager = manager
+  warnDeprecatedSetter('setLogManager')
+  globalLogManager = bindAmbient('log', manager) ? null : manager
 }
 
-/** The default application's `log`, else the one `setLogManager()` installed. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use `this.make('log')`
+ * in a controller, job or command, or `defaultContainer().make('log')`.
+ */
 export function getLogManager(): LogManager {
+  warnDeprecatedGetter('getLogManager')
   const manager = ambientBinding('log') ?? globalLogManager
   if (!manager) {
     throw new Error('Log manager has not been initialized. Register LogServiceProvider, or call setLogManager() first.')

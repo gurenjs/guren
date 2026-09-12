@@ -40,19 +40,29 @@ describe('queued mail resolved through the container (RFC 0023 §4)', () => {
     expect(ambient.transport.getMessages()).toHaveLength(0)
   })
 
-  it('answers getMailManager() from the default application, with the setter as the fallback', async () => {
+  it('binds setMailManager() on the default application, and its slot only without one', async () => {
     const app = new Application()
     const bound = memoryMailer(app.container)
     app.container.instance('mail', bound.manager)
 
     expect(getMailManager()).toBe(bound.manager)
 
+    // RFC 0023 Part 2: the shim writes the ambient app's container, so the call
+    // now replaces that app's binding instead of being shadowed by it.
     const hand = memoryMailer()
     setMailManager(hand.manager)
-    expect(getMailManager()).toBe(bound.manager)
-
-    resetDefaultApplication()
+    expect(app.container.make('mail')).toBe(hand.manager)
     expect(getMailManager()).toBe(hand.manager)
+
+    // Nothing was left in a module slot for the next app to inherit.
+    resetDefaultApplication()
+    expect(getMailManager()).toBeNull()
+
+    // With no application to bind — every scaffold calls the Inertia setters at
+    // module scope before createApp() — the slot is still where it lands.
+    const early = memoryMailer()
+    setMailManager(early.manager)
+    expect(getMailManager()).toBe(early.manager)
   })
 
   it('dispatches through the queue bound beside the mail manager, not the default application\'s', async () => {

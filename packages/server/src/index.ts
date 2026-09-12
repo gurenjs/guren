@@ -540,6 +540,7 @@ export {
   setQueueDriver,
   clearQueueDriver,
   getQueueDriver,
+  resolveQueueDriver,
   registerJob,
   getJob,
   getRegisteredJobs,

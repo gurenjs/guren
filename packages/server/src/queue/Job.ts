@@ -5,6 +5,7 @@ import type { ServiceBindings } from '../container/bindings'
 import type { ContainerLike } from '../container/types'
 import { resolveOptional } from '../container/resolve-optional'
 import { ambientBinding, ambientContainer, defaultContainer } from '../http/default-application'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
 /**
  * The pin `setQueueDriver()` writes, and nothing else does. A manager that
@@ -17,8 +18,14 @@ let globalDriver: QueueDriver | null = null
  * Pins the driver `Job.dispatch()` sends through, ahead of the container's
  * `queue` manager. An explicit override rather than a fallback: `@guren/testing`'s
  * `fakeQueue()` and the tutorial's queue test inject through it (RFC 0023 §3).
+ * The pin survives its deprecation window because nothing else expresses it; it
+ * goes with this setter in Part 3.
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Bind the manager on the
+ * app's container — `QueueServiceProvider` already does — and inject a fake with
+ * `app.container.fake('queue', manager)`.
  */
 export function setQueueDriver(driver: QueueDriver): void {
+  warnDeprecatedSetter('setQueueDriver')
   globalDriver = driver
 }
 
@@ -43,8 +50,17 @@ function boundQueueManager(): QueueManager | null {
  * Total by contract — every caller treats it as `QueueDriver | null`, so a
  * manager bound with no factory for its default must read as absent rather
  * than throw.
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Resolve the manager
+ * from the container that owns the call — `this.make('queue')` in a controller,
+ * job or command — and take `manager.driver()`.
  */
 export function getQueueDriver(): QueueDriver | null {
+  warnDeprecatedGetter('getQueueDriver')
+  return resolveQueueDriver()
+}
+
+/** @internal `getQueueDriver()` without the warning, for the framework's own dispatch paths. */
+export function resolveQueueDriver(): QueueDriver | null {
   if (globalDriver) return globalDriver
 
   const manager = boundQueueManager()
@@ -154,7 +170,7 @@ export abstract class Job<T = unknown> {
     payload: T,
     options: JobOptions = {}
   ): Promise<string> {
-    const driver = getQueueDriver()
+    const driver = resolveQueueDriver()
     if (!driver) {
       throw new Error(missingQueueDriverMessage())
     }

@@ -1,7 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHmac } from 'crypto'
 import type { EncrypterConfig, EncryptOptions, DecryptOptions, EncryptedPayload } from './types'
 import { generateAppKey, normalizeAppKey } from './app-key'
-import { ambientBinding } from '../http/default-application'
+import { ambientBinding, bindAmbient } from '../http/default-application'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
 /**
  * GCM authentication tag length, in bytes, pinned on both sides: Node and Bun
@@ -211,12 +212,28 @@ export function createEncrypter(config: EncrypterConfig): Encrypter {
   return new Encrypter(config)
 }
 
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Bind the encrypter on
+ * the app's container instead — `EncryptionServiceProvider` already does, and a
+ * provider of your own reaches it as `this.container.instance('encrypter', e)`.
+ */
 export function setEncrypter(encrypter: Encrypter): void {
-  globalEncrypter = encrypter
+  warnDeprecatedSetter('setEncrypter')
+  globalEncrypter = bindAmbient('encrypter', encrypter) ? null : encrypter
 }
 
-/** The default application's `encrypter`, else the one `setEncrypter()` installed. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use
+ * `this.make('encrypter')` in a controller, job or command, or
+ * `defaultContainer().make('encrypter')`. `encrypt()` / `decrypt()` are unaffected.
+ */
 export function getEncrypter(): Encrypter {
+  warnDeprecatedGetter('getEncrypter')
+  return resolveEncrypter()
+}
+
+/** @internal The default application's `encrypter`, else the one `setEncrypter()` installed. */
+function resolveEncrypter(): Encrypter {
   const encrypter = ambientBinding('encrypter') ?? globalEncrypter
   if (!encrypter) {
     throw new Error('Encrypter not initialized. Register EncryptionServiceProvider, or call setEncrypter() first.')
@@ -226,10 +243,10 @@ export function getEncrypter(): Encrypter {
 
 /** Encrypt with the global encrypter. */
 export function encrypt(value: unknown, options?: EncryptOptions): string {
-  return getEncrypter().encrypt(value, options)
+  return resolveEncrypter().encrypt(value, options)
 }
 
 /** Decrypt with the global encrypter. */
 export function decrypt<T = unknown>(payload: string, options?: DecryptOptions): T {
-  return getEncrypter().decrypt<T>(payload, options)
+  return resolveEncrypter().decrypt<T>(payload, options)
 }

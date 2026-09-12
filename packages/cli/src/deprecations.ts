@@ -1,7 +1,13 @@
 /** Framework-level deprecation warnings. */
 import { readFile } from 'node:fs/promises'
 import { relative } from 'node:path'
-import { discoverAppSourceFiles, discoverDbArtifactFiles, discoverModelFiles } from './discovery'
+import {
+  discoverAppConfigFiles,
+  discoverAppSourceFiles,
+  discoverDbArtifactFiles,
+  discoverModelFiles,
+  discoverTestFiles,
+} from './discovery'
 import { extractClassDeclaration, findStaticClassProperty } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 
@@ -60,8 +66,12 @@ const GUREN_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/(?:c
  * `@guren/server` is matched alongside `@guren/core`: an app importing from it
  * despite the core-first rule is exactly the one this needs to reach.
  */
-async function detectGurenImports(cwd: string, matches: (specifier: string) => boolean): Promise<string[]> {
-  const files = [
+async function detectGurenImports(
+  cwd: string,
+  matches: (specifier: string) => boolean,
+  files?: string[],
+): Promise<string[]> {
+  files ??= [
     ...(await discoverAppSourceFiles(cwd)),
     ...(await discoverDbArtifactFiles(cwd, 'Seeder')),
   ]
@@ -93,6 +103,50 @@ const detectSeederClassImports = (cwd: string): Promise<string[]> =>
 /** Files importing the `ScryptHasher` name for the class now exported as `Argon2Hasher`. */
 const detectScryptHasherImports = (cwd: string): Promise<string[]> =>
   detectGurenImports(cwd, (specifier) => specifier === 'ScryptHasher')
+
+const GLOBAL_SERVICE_SETTERS = new Set([
+  'setGate',
+  'setEncrypter',
+  'setMailManager',
+  'setQueueDriver',
+  'setI18n',
+  'setLogManager',
+  'setNotificationManager',
+  'setBroadcastManager',
+  'setExceptionHandler',
+  'setContainer',
+  'setInertiaDocument',
+  'setInertiaSsrRenderer',
+  'setInertiaSharedProps',
+])
+
+const GLOBAL_SERVICE_GETTERS = new Set([
+  'getGate',
+  'getEncrypter',
+  'getMailManager',
+  'getQueueDriver',
+  'getI18n',
+  'tryGetI18n',
+  'getLogManager',
+  'getNotificationManager',
+  'getBroadcastManager',
+  'getExceptionHandler',
+  'getContainer',
+  'getInertiaSharedPropsResolver',
+])
+
+/**
+ * Every source an app can call these from, which is wider than the `app/` scan
+ * the other entries use: the setters live in `src/app.ts` and `config/*.ts`,
+ * and the test-injection row of RFC 0023's Migration Path is reported rather
+ * than rewritten, so a test file has to be reachable too.
+ */
+async function globalServiceFiles(cwd: string): Promise<string[]> {
+  return [...(await discoverAppConfigFiles(cwd)), ...(await discoverTestFiles(cwd))]
+}
+
+const detectGlobalServiceImports = (names: Set<string>) => async (cwd: string): Promise<string[]> =>
+  detectGurenImports(cwd, (specifier) => names.has(specifier), await globalServiceFiles(cwd))
 
 export const deprecations: Deprecation[] = [
   {
@@ -147,6 +201,36 @@ export const deprecations: Deprecation[] = [
       + "(Bun.password's Argon2id, never scrypt). For a hash every runtime can verify, use 'Hash', "
       + 'whose default is node:crypto scrypt.',
     detect: detectScryptHasherImports,
+  },
+  {
+    id: 'global-service-setters',
+    what:
+      'Module-level service setters (setGate, setEncrypter, setMailManager, setQueueDriver, setI18n, '
+      + 'setLogManager, setNotificationManager, setBroadcastManager, setExceptionHandler, setContainer, '
+      + 'setInertiaDocument, setInertiaSsrRenderer, setInertiaSharedProps)',
+    since: '2.23.0',
+    removedIn: '3.0.0',
+    replacement:
+      "Bind the service on the owning app's container instead — container.instance(key, value) from a "
+      + 'service provider. createApp({ inertia }) covers the document and SSR renderer, '
+      + 'shareInertiaProps(fn, container) the shared props, and useAsDefaultApplication(app) the ambient '
+      + 'application setContainer() chose. Run `bunx guren upgrade` for the rewrites that are mechanical.',
+    detect: detectGlobalServiceImports(GLOBAL_SERVICE_SETTERS),
+  },
+  {
+    id: 'global-service-getters',
+    what:
+      'Module-level service getters (getGate, getEncrypter, getMailManager, getQueueDriver, getI18n, '
+      + 'tryGetI18n, getLogManager, getNotificationManager, getBroadcastManager, getExceptionHandler, '
+      + 'getContainer, getInertiaSharedPropsResolver)',
+    since: '2.23.0',
+    removedIn: '3.0.0',
+    replacement:
+      'Resolve from the container that owns the call — this.make(key) in a controller, job or command, '
+      + 'this.container.make(key) in a provider, getRequestContainer(ctx).make(key) in middleware, '
+      + 'defaultContainer().make(key) elsewhere. The functional helpers (encrypt, decrypt, t, tc, can, '
+      + 'cannot, defineGate, resolve, Job.dispatch) are unaffected.',
+    detect: detectGlobalServiceImports(GLOBAL_SERVICE_GETTERS),
   },
 ]
 

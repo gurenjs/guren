@@ -6,6 +6,7 @@ import type {
   ContextualBinding,
 } from './types'
 import type { ServiceBindings } from './bindings'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
 /**
  * Dependency injection container. Keys from `ServiceBindings` type `make()`
@@ -335,7 +336,8 @@ export function createContainer(): Container {
 
 let globalContainer: Container | null = null
 
-export function setContainer(container: Container): void {
+/** @internal The ambient slot's write, without the deprecation warning `setContainer()` carries. */
+export function installContainer(container: Container): void {
   globalContainer = container
 }
 
@@ -349,10 +351,31 @@ export function clearContainer(): void {
   globalContainer = null
 }
 
-export function getContainer(): Container {
+/** @internal The ambient container or the throw, without the deprecation warning `getContainer()` carries. */
+export function requireContainer(): Container {
   if (!globalContainer) {
     throw new Error('Container not initialized. Call setContainer() first.')
   }
   return globalContainer
+}
+
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Choose the ambient
+ * application with `useAsDefaultApplication(app)`; every `Application`
+ * constructor already publishes its own container.
+ */
+export function setContainer(container: Container): void {
+  warnDeprecatedSetter('setContainer')
+  installContainer(container)
+}
+
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use `defaultContainer()`
+ * for the ambient one, `this.make(key)` in a controller, job or command, or
+ * `getRequestContainer(ctx)` in middleware.
+ */
+export function getContainer(): Container {
+  warnDeprecatedGetter('getContainer')
+  return requireContainer()
 }
 

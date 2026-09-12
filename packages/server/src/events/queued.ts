@@ -1,4 +1,4 @@
-import { Job, getQueueDriver, registerJob } from '../queue/Job'
+import { Job, registerJob, resolveQueueDriver } from '../queue/Job'
 import { encodeEventData } from './serialize'
 import type { QueueEventDispatcher } from './types'
 
@@ -48,7 +48,7 @@ class QueuedEventJob extends Job<QueuedEventPayload> {
 export function createQueueEventDispatcher(): QueueEventDispatcher {
   registerJob(QueuedEventJob)
   return async (queue, eventName, event, listenerSeq) => {
-    if (getQueueDriver() === null) return false
+    if (resolveQueueDriver() === null) return false
     await QueuedEventJob.dispatch(
       { queue, eventName, event: encodeEventData(event), listenerSeq },
       { queue },

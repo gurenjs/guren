@@ -24,6 +24,7 @@ export {
   setI18n,
   getI18n,
   tryGetI18n,
+  resolveI18n,
   t,
   tc,
 } from './I18nManager'

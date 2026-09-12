@@ -12,7 +12,8 @@ import type {
 } from './types'
 import { AuthorizationException, HttpException } from '../errors'
 import { getAuthContext } from '../auth/context'
-import { ambientBinding } from '../http/default-application'
+import { ambientBinding, bindAmbient } from '../http/default-application'
+import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
 /** Response builder for authorization checks. */
 export const Response: ResponseBuilder = {
@@ -338,12 +339,28 @@ export function createGate(options?: GateOptions): Gate {
   return new Gate(options)
 }
 
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Bind the gate on the
+ * app's container instead — `AuthorizationServiceProvider` already does, and a
+ * provider of your own reaches it as `this.container.instance('gate', gate)`.
+ */
 export function setGate(gate: Gate): void {
-  globalGate = gate
+  warnDeprecatedSetter('setGate')
+  globalGate = bindAmbient('gate', gate) ? null : gate
 }
 
-/** The default application's `gate`, else the one `setGate()` installed. */
+/**
+ * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Use `this.make('gate')`
+ * in a controller, `getRequestContainer(ctx).make('gate')` in middleware, or
+ * `defaultContainer().make('gate')`.
+ */
 export function getGate(): Gate {
+  warnDeprecatedGetter('getGate')
+  return resolveGate()
+}
+
+/** @internal The default application's `gate`, else the one `setGate()` installed, without the warning. */
+export function resolveGate(): Gate {
   const gate = ambientBinding('gate') ?? globalGate
   if (!gate) {
     throw new Error('Gate not initialized. Construct the app with createApp(), or call setGate() first.')
@@ -353,17 +370,17 @@ export function getGate(): Gate {
 
 /** Define a gate on the global instance. */
 export function defineGate(ability: string, callback: GateCallback): void {
-  getGate().define(ability, callback)
+  resolveGate().define(ability, callback)
 }
 
 export async function can(ability: string, ...args: unknown[]): Promise<boolean> {
-  return getGate().allows(ability, ...args)
+  return resolveGate().allows(ability, ...args)
 }
 
 export async function cannot(ability: string, ...args: unknown[]): Promise<boolean> {
-  return getGate().denies(ability, ...args)
+  return resolveGate().denies(ability, ...args)
 }
 
 export async function authorize(ability: string, ...args: unknown[]): Promise<void> {
-  return getGate().authorize(ability, ...args)
+  return resolveGate().authorize(ability, ...args)
 }

@@ -31,7 +31,7 @@ await mock.module('../src/queue-deps', () => ({
       this.events.workerStopped?.()
     }
   },
-  getQueueDriver: () => fakeDriver,
+  resolveQueueDriver: () => fakeDriver,
 }))
 
 const {

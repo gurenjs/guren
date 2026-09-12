@@ -33,6 +33,32 @@ bun run test
 
 ## 移行メモ
 
+### 2.22.x → 2.23.0
+
+#### モジュールレベルのサービス setter / getter が非推奨に
+
+- **変更点**: `setGate`/`getGate`、`setEncrypter`/`getEncrypter`、`setMailManager`/`getMailManager`、`setQueueDriver`/`getQueueDriver`、`setI18n`/`getI18n`/`tryGetI18n`、`setLogManager`/`getLogManager`、`setNotificationManager`/`getNotificationManager`、`setBroadcastManager`/`getBroadcastManager`、`setExceptionHandler`/`getExceptionHandler`、`setContainer`/`getContainer`、`setInertiaDocument`、`setInertiaSsrRenderer`、`setInertiaSharedProps`/`getInertiaSharedPropsResolver` に `@deprecated` が付き、シンボルごとに一度だけ警告します。3.0.0 までは従来どおり動きます。setter は起動中のアプリケーションのコンテナに値をバインドするようになったので、1 プロセスに 2 つのアプリケーションがあってもサービスを上書きし合いません。
+- **影響範囲**: 同じキーをバインドしたうえで setter も呼んでいる provider、getter 経由でサービスを読むコード、`setGate()` や `setQueueDriver()` でフェイクを注入しているテストです。
+- **移行方法**: まず `bunx guren upgrade --check-only` で対象ファイルを確認し、`bunx guren upgrade` で書き換えを適用します。codemod は provider 内の getter を `this.container.make(key)` にし、setter の値を `this.container.instance(key, value)` でバインドし（同じファイルがそのキーをすでにバインドしている場合は呼び出しを削除）、インラインの `setInertiaDocument({ ... })` を `createApp({ inertia: { document } })` へ移し、attachments の `storage` ファクトリにバインド元のコンテナを渡し、`Job` 内の `getContainer().make(key)` を `this.make(key)` に書き換えます。テストの注入は報告のみで書き換えません。`app.container.fake(key, fake)` でフェイクをバインドしてください。`setQueueDriver()` だけは例外で、2.23.0 の時点ではピンがバインド済みマネージャーより優先されます。
+
+```ts
+// Before
+export default class AuthorizationProvider extends ServiceProvider {
+  boot(): void {
+    getGate().policy(Post, PostPolicy)
+  }
+}
+
+// After
+export default class AuthorizationProvider extends ServiceProvider {
+  boot(): void {
+    this.container.make('gate').policy(Post, PostPolicy)
+  }
+}
+```
+
+これらのアクセサの上に作られた関数ヘルパーは非推奨ではなく、シグネチャも変わりません。`encrypt`、`decrypt`、`t`、`tc`、`can`、`cannot`、`defineGate`、`authorizeAbility`、`resolve`、`Job.dispatch`、`Job.make` はいずれも、実行中のアプリケーションのコンテナから解決します。
+
 ### 1.x → 2.0.0
 
 #### 構造的マスアサインメント保護
