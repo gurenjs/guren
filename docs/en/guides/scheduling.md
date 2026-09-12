@@ -387,7 +387,7 @@ kernel is being built. The CLI reads this file without booting your app, so a
 container lookup at build time has nothing to resolve:
 
 ```ts
-schedule.call(() => getContainer().make<SessionManager>('session').pruneExpired()).hourly()
+schedule.call(() => defaultContainer().make<SessionManager>('session').pruneExpired()).hourly()
 ```
 
 A kernel that exists but matches neither shape, or that throws while loading, is

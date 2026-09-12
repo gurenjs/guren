@@ -234,28 +234,27 @@ const log = container.make('log') // LogManager
 log.info('Using container-resolved logger')
 ```
 
-## Global Logger
+## Binding Your Own LogManager
 
-### Setting Up Global Logger
-
-> [!NOTE]
-> In most applications you should prefer the `LogManager` or `container.make('log')` instead of the global setter. The global functions below are kept for backward compatibility.
+`LogServiceProvider` binds a manager built from `createApp({ logging })`. To build one yourself, bind it from a provider of your own:
 
 ```ts
-import { setLogManager, getLogManager, LogManager } from '@guren/core'
+import { ServiceProvider, LogManager } from '@guren/core'
 
-// In your bootstrap file
-const log = new LogManager({
-  default: 'stack',
-  channels: { /* ... */ },
-})
-
-setLogManager(log)
-
-// Anywhere in your application
-const log = getLogManager()
-log.info('Using global logger')
+export default class LoggingProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('log', new LogManager({
+      default: 'stack',
+      channels: { /* ... */ },
+    }))
+  }
+}
 ```
+
+Everything that logs resolves `log` from the container it runs under, so the manager reaches controllers, jobs and commands without a second registration.
+
+> [!NOTE]
+> `setLogManager()` and `getLogManager()` are deprecated as of 2.23.0 and removed in 3.0.0. They wrote and read one manager per process, which two applications in one process shared. `bunx guren upgrade` rewrites them.
 
 ## Custom Channels
 
@@ -314,11 +313,10 @@ log.registerDriver('slack', (config) => {
 ### Middleware Example
 
 ```ts
-import { defineMiddleware } from '@guren/core'
-import { getLogManager } from '@guren/core'
+import { defineMiddleware, getRequestContainer } from '@guren/core'
 
 export const requestLogging = defineMiddleware(async (c, next) => {
-  const log = getLogManager()
+  const log = getRequestContainer(c).make('log')
   const requestId = crypto.randomUUID()
   const requestLog = log.withContext({
     requestId,

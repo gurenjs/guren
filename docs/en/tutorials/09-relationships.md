@@ -475,7 +475,7 @@ export class CommentPolicy extends Policy {
 ```
 
 ```ts file=app/Providers/AuthProvider.ts
-import { ServiceProvider, shareInertiaProps, getGate, AUTH_CONTEXT_KEY } from '@guren/core'
+import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
 import type { AuthContext, AuthManager } from '@guren/core'
 import { User } from '../Models/User.js'
 import { Post } from '../Models/Post.js'
@@ -497,9 +497,10 @@ export default class AuthProvider extends ServiceProvider {
   }
 
   boot(): void {
-    getGate().policy(Post, PostPolicy)
-    getGate().policy(Link, LinkPolicy)
-    getGate().policy(Comment, CommentPolicy)
+    const gate = this.container.make('gate')
+    gate.policy(Post, PostPolicy)
+    gate.policy(Link, LinkPolicy)
+    gate.policy(Comment, CommentPolicy)
 
     shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined

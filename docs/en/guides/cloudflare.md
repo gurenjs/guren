@@ -280,15 +280,15 @@ Two things you supply. First, the tasks and a provider binding the scheduler, ex
 
 ```ts
 // app/Console/Kernel.ts
-import { Schedule, getContainer, type SessionManager } from '@guren/core'
+import { Schedule, defaultContainer, type SessionManager } from '@guren/core'
 
 export function scheduleTasksKernel(): Schedule {
   const schedule = new Schedule()
 
-  // Resolved when the task runs, not when the kernel is built: the container
-  // is published by app.boot(), which the cron entrypoint awaits first.
+  // Resolved when the task runs, not when the kernel is built: the `session`
+  // binding is made by app.boot(), which the cron entrypoint awaits first.
   schedule
-    .call(() => getContainer().make<SessionManager>('session').pruneExpired())
+    .call(() => defaultContainer().make<SessionManager>('session').pruneExpired())
     .hourly()
     .name('sessions:prune')
 

@@ -172,9 +172,11 @@ describe('the deprecated service accessors', () => {
     expect(messages[0]).toContain('createApp({ inertia })')
   })
 
-  it('leaves setInertiaDocument silent while both scaffold templates call it', () => {
+  it('warns from setInertiaDocument, whose scaffold callers moved to the option', () => {
     setInertiaDocument({ head: '<meta name="x" content="y">' })
 
-    expect(warn).not.toHaveBeenCalled()
+    const messages = warned()
+    expect(messages.filter((message) => message.includes('setInertiaDocument()'))).toHaveLength(1)
+    expect(messages[0]).toContain('createApp({ inertia })')
   })
 })

@@ -112,9 +112,6 @@ let documentOptions: InertiaDocumentOptions | undefined;
  * in-flight requests — use the {@link InertiaOptions} fields per response.
  * Values are emitted verbatim, so never pass user input. `undefined` clears.
  *
- * Tagged but silent: both scaffold templates still call it, and a warning
- * naming code the framework itself emits is not actionable. It warns once the
- * scaffold pass moves them to the option (RFC 0023 §5).
  * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Pass
  * `createApp({ inertia: { document } })`, which binds it on the app rather than
  * the process. The slot stays the engine's second read.
@@ -122,6 +119,7 @@ let documentOptions: InertiaDocumentOptions | undefined;
 export function setInertiaDocument(
   options: InertiaDocumentOptions | undefined
 ): void {
+  warnDeprecatedSetter("setInertiaDocument");
   documentOptions = options;
 }
 

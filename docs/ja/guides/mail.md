@@ -278,7 +278,7 @@ export default class MailProvider extends ServiceProvider {
 }
 ```
 
-container を渡さずに作った mail manager は、既定アプリケーションの `queue` バインディングへキューします。`setMailManager()` は、`mail` バインディングを見つけられない job のためのプロセス全体のフォールバックとして残っています。
+container を渡さずに作った mail manager は、既定アプリケーションの `queue` バインディングへキューします。`mail` バインディングを見つけられない job は `setMailManager()` が入れた値にフォールバックしますが、この setter は 2.23.0 で非推奨です。上のプロバイダのように、アプリのコンテナへ束縛してください。
 
 ```ts
 // 即座に送信せずキューに入れる

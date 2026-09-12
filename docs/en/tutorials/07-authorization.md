@@ -230,7 +230,7 @@ Every method takes the user, or `null` for a guest, and decides. Nothing here kn
 A policy has to be registered against its model. That belongs beside the other auth wiring, in `AuthProvider`:
 
 ```ts file=app/Providers/AuthProvider.ts
-import { ServiceProvider, shareInertiaProps, getGate, AUTH_CONTEXT_KEY } from '@guren/core'
+import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
 import type { AuthContext, AuthManager } from '@guren/core'
 import { User } from '../Models/User.js'
 import { Post } from '../Models/Post.js'
@@ -248,7 +248,7 @@ export default class AuthProvider extends ServiceProvider {
   }
 
   boot(): void {
-    getGate().policy(Post, PostPolicy)
+    this.container.make('gate').policy(Post, PostPolicy)
 
     shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
@@ -927,7 +927,7 @@ git commit -m "feat: let authors publish and unpublish their posts"
 
 - **`this.authorize('update', post)` throws "no policy".** The tuple is missing. A database record has no class; pass `[Post, post]`.
 - **Every request gets 403, including the author's.** `user.id` and `post.authorId` do not match in type or value. Log both in the policy once; a string against a number is the usual cause.
-- **The policy is ignored.** It is not registered. `getGate().policy(Post, PostPolicy)` in a provider's `boot()`, not `register()`; the gate exists only after boot.
+- **The policy is ignored.** It is not registered. `this.container.make('gate').policy(Post, PostPolicy)` in a provider's `boot()`, not `register()`; the gate is bound during registration, so `make('gate')` throws before boot.
 - **The test file will not compile after adding `publishedAt`.** It is meant to, until the column exists. If it still fails after the migration, codegen or the schema import is stale.
 - **`test-writer` wrote a test that a stranger can publish.** It tested the code, and the code allowed it. That is the lesson, not a bug in the subagent.
 

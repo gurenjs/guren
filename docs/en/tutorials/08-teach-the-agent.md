@@ -48,7 +48,7 @@ globs:
 
 A record that belongs to a user carries the owner's id (`authorId` on posts, `userId` on any new table). For every such model:
 
-1. **A policy exists** in `app/Policies/<Model>Policy.ts` and is registered in `app/Providers/AuthProvider.ts` with `getGate().policy(Model, ModelPolicy)`. Its `update` and `delete` (and any other mutating ability) return `user !== null && user.id === record.<ownerColumn>`.
+1. **A policy exists** in `app/Policies/<Model>Policy.ts` and is registered in `app/Providers/AuthProvider.ts` with `this.container.make('gate').policy(Model, ModelPolicy)`. Its `update` and `delete` (and any other mutating ability) return `user !== null && user.id === record.<ownerColumn>`.
 2. **Every action that changes a record** calls `await this.authorize('<ability>', [Model, record])` before doing anything else. Authentication (`requireAuthenticated`, `this.auth.userOrFail()`) is not authorization; a route inside the `auth` group still needs the policy call.
 3. **The owner is set by the server**, never by the request: `Model.forceCreate({ ...validated, userId: user.id })` with `user` from `this.auth.userOrFail()`. The owner column is never in `fillable`.
 4. **Every mutating action has two tests**: the owner succeeds, and another signed-in user gets `assertForbidden()`. A guest test (`assertRedirect('/login')`) covers the wall, not the door; write both.
@@ -76,7 +76,7 @@ Follow these steps in order. Do not skip the tests; the audit cannot see a missi
 2. Add the owner column to the table in `db/schema.ts`: `userId: integer('user_id').notNull().references(() => users.id)`. Then `bun run db:make create_<names>` and `bun run db:migrate`. Never `db:reset` to get there.
 3. In `app/Models/<Name>.ts`, list only the request fields in `fillable`; never the owner column.
 4. In the controller: `store` sets the owner with `forceCreate({ ...data, userId: user.id })` where `user` is `await this.auth.userOrFail<UserRecord>()`; `edit`, `update` and `destroy` resolve the record with route model binding and call `await this.authorize('update' | 'delete', [<Name>, record])` first.
-5. Register the policy in `app/Providers/AuthProvider.ts`: `getGate().policy(<Name>, <Name>Policy)`.
+5. Register the policy in `app/Providers/AuthProvider.ts`: `this.container.make('gate').policy(<Name>, <Name>Policy)`.
 6. Routes: `index` and `show` public; `create`, `store`, `edit`, `update`, `destroy` inside `router.middleware('auth').group(...)`, with `bind: { id: <Name> }` on the record routes.
 7. Tests in `tests/<Name>Controller.test.ts`: the owner can store and update; another user gets 403 on update and destroy; a guest is redirected to `/login` from the form and from store.
 8. `bun run codegen`, `bun test`, `bunx guren gate`.
@@ -359,7 +359,7 @@ export default class LinkController extends Controller {
 ```
 
 ```ts file=app/Providers/AuthProvider.ts fallback
-import { ServiceProvider, shareInertiaProps, getGate, AUTH_CONTEXT_KEY } from '@guren/core'
+import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
 import type { AuthContext, AuthManager } from '@guren/core'
 import { User } from '../Models/User.js'
 import { Post } from '../Models/Post.js'
@@ -379,8 +379,9 @@ export default class AuthProvider extends ServiceProvider {
   }
 
   boot(): void {
-    getGate().policy(Post, PostPolicy)
-    getGate().policy(Link, LinkPolicy)
+    const gate = this.container.make('gate')
+    gate.policy(Post, PostPolicy)
+    gate.policy(Link, LinkPolicy)
 
     shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined

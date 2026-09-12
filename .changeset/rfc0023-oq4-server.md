@@ -24,6 +24,3 @@ and bind the key where it is not:
 ```ts
 app.container.instance('inertia.ssrRenderer', ssrModule.render)
 ```
-
-`setInertiaDocument()` stays silent for now — both scaffold templates still call
-it, and it warns once they move to `createApp({ inertia: { document } })`.

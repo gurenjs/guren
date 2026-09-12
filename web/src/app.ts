@@ -1,7 +1,6 @@
 import {
   createApp,
   AuthServiceProvider as CoreAuthServiceProvider,
-  setInertiaDocument,
 } from '@guren/core'
 import { redirectToCanonicalHost } from '../app/Http/Middleware/canonical-host.js'
 import { recordSiteAnalytics } from '../app/Http/Middleware/site-analytics.js'
@@ -18,17 +17,16 @@ import registerWebRoutes from '../routes/web.js'
 
 const secureCookies = process.env.NODE_ENV === 'production' && !process.env.CI
 
-// Registered at module scope so every entrypoint picks it up — both the Bun
-// server and the generated Workers bundle import this module.
-setInertiaDocument({
-  bodyClass: ({ component }) => (usesLightSurface(component) ? LIGHT_SURFACE_BODY_CLASS : undefined),
-  criticalCss: ({ component }) => (usesLightSurface(component) ? LIGHT_SURFACE_CRITICAL_CSS : undefined),
-  prepaintScript: ({ component }) =>
-    usesLightSurface(component) ? COLOR_MODE_PREPAINT_SCRIPT : undefined,
-  head: FAVICON_HEAD,
-})
-
 const app = createApp({
+  inertia: {
+    document: {
+      bodyClass: ({ component }) => (usesLightSurface(component) ? LIGHT_SURFACE_BODY_CLASS : undefined),
+      criticalCss: ({ component }) => (usesLightSurface(component) ? LIGHT_SURFACE_CRITICAL_CSS : undefined),
+      prepaintScript: ({ component }) =>
+        usesLightSurface(component) ? COLOR_MODE_PREPAINT_SCRIPT : undefined,
+      head: FAVICON_HEAD,
+    },
+  },
   routes: registerWebRoutes,
   providers: [DatabaseProvider, SessionProvider, CoreAuthServiceProvider],
   modules: [blogModule],

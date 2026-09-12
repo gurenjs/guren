@@ -118,8 +118,9 @@ describe('comment mail', () => {
 
   it('hands the mail to the queue instead of sending it in the request', async () => {
     const queue = fakeQueue()
-    // Job.dispatch() reads a module-level driver, not the container, so this
-    // seam is a setter and not a container fake. Put the real one back after.
+    // Job.dispatch() honours the setQueueDriver() pin ahead of the container's
+    // queue manager, and fakeQueue() is a driver rather than a manager to bind.
+    // Put the real one back after.
     const real = getQueueDriver()
     setQueueDriver(queue.getDriver())
     try {
@@ -402,7 +403,7 @@ globs:
 2. **Every listener is wired.** A class in `app/Listeners/` runs only because `app/Providers/EventProvider.ts` calls `events.on(TheEvent, (event) => listener.handle(event), …)`. `shouldQueue`, `queue` and `shouldHandle()` on the class are inert unless that wiring reads them, so do not rely on them: to queue work, dispatch a job from `handle`.
 3. **A job payload is JSON: ids, never records.** The job may run in another process, after the row has changed. Load what you need inside `handle`, and return early when the record is gone.
 4. **Controllers announce, listeners decide.** A controller emits an event and returns. Rules about who gets mail (skip the actor, skip duplicates) live in the job or the listener, not in the action.
-5. **Test the seam, not the plumbing.** Mail is faked by registering a `fakeMail()` transport on a real `MailManager` and binding that with `app.container.fake('mail', manager)`. The queue is faked with `setQueueDriver(fakeQueue().getDriver())`, never through the container, because `Job.dispatch()` reads a module-level driver.
+5. **Test the seam, not the plumbing.** Mail is faked by registering a `fakeMail()` transport on a real `MailManager` and binding that with `app.container.fake('mail', manager)`. The queue is faked with `setQueueDriver(fakeQueue().getDriver())`: `Job.dispatch()` honours that pin ahead of the container's `queue` manager, and `fakeQueue()` is a driver rather than the manager that key holds.
 ```
 
 The `PostToolUse` hook runs `guren check --arch` after every edit, and check will keep quiet about all five of these. The rule is the check.
@@ -811,7 +812,7 @@ git commit -m "feat: mail commenters when a post is published"
 - **`SyncDriver: job class "X" is not registered.`** `registerJob(X)` is missing from `QueueProvider.boot()`. This is the error the rule in section 4 exists to prevent.
 - **`Email must have at least one recipient` (or subject, or body).** `send()` validates the built message. A `to()` that received `undefined`, or a `build()` that returns before setting the subject, both land here.
 - **Nothing arrives and no error appears.** Check the listener is wired in `EventProvider.boot()`. An event with no listeners is a successful `emit`.
-- **`container.fake('queue', …)` changes nothing in a test.** `Job.dispatch()` resolves its driver from a module-level setter, not the container. Use `setQueueDriver()`, and put the previous driver back.
+- **`container.fake('queue', …)` changes nothing in a test.** `Job.dispatch()` honours the `setQueueDriver()` pin ahead of the container, and `fakeQueue()` is a driver rather than the `QueueManager` that key holds. Use `setQueueDriver()`, and put the previous driver back.
 - **A test faking `mail` with `fakeMail()` directly throws.** `Mail.send()` calls `manager.transport(name)`, and the fake is a transport, not a manager. Register it on a real `MailManager` and bind that.
 - **The mail is sent during the request even though there is a queue.** That is `QUEUE_CONNECTION=sync` working as designed. Set it to `memory` and run `bunx guren queue:work` to watch a worker drain the queue instead.
 

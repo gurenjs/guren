@@ -230,7 +230,7 @@ export class PostPolicy extends Policy {
 ポリシーはモデルに対して登録する必要があります。置き場所は認証まわりの配線と同じ `AuthProvider` です。
 
 ```ts file=app/Providers/AuthProvider.ts
-import { ServiceProvider, shareInertiaProps, getGate, AUTH_CONTEXT_KEY } from '@guren/core'
+import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
 import type { AuthContext, AuthManager } from '@guren/core'
 import { User } from '../Models/User.js'
 import { Post } from '../Models/Post.js'
@@ -248,7 +248,7 @@ export default class AuthProvider extends ServiceProvider {
   }
 
   boot(): void {
-    getGate().policy(Post, PostPolicy)
+    this.container.make('gate').policy(Post, PostPolicy)
 
     shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
@@ -927,7 +927,7 @@ git commit -m "feat: let authors publish and unpublish their posts"
 
 - **`this.authorize('update', post)` が「no policy」で throw する。** タプルが抜けています。データベースのレコードにクラスはありません。`[Post, post]` を渡してください。
 - **著者からのリクエストまで 403 になる。** `user.id` と `post.authorId` の型か値が一致していません。ポリシーの中で一度両方をログに出してください。文字列と数値を比べているのがよくある原因です。
-- **ポリシーが無視される。** 登録されていません。プロバイダーの `register()` ではなく `boot()` で `getGate().policy(Post, PostPolicy)` を呼びます。ゲートは boot 以降にしか存在しません。
+- **ポリシーが無視される。** 登録されていません。プロバイダーの `register()` ではなく `boot()` で `this.container.make('gate').policy(Post, PostPolicy)` を呼びます。ゲートを束縛するのは登録処理なので、それより前に `make('gate')` を呼ぶと例外になります。
 - **`publishedAt` を足した後、テストファイルがコンパイルできない。** 列ができるまではそれが正しい状態です。マイグレーション後もまだ失敗するなら、codegen かスキーマの import が古くなっています。
 - **`test-writer` が、他人でも公開できるというテストを書いた。** subagent のバグではありません。目の前のコードをテストした結果で、そのコードが実際に許していたということです。
 

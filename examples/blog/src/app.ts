@@ -55,6 +55,13 @@ function hostAuthorization() {
 }
 
 const app = createApp({
+  // Rendered into every server-rendered document. Replace public/favicon.svg
+  // with your own artwork, or add more tags here (Open Graph, apple-touch-icon).
+  inertia: {
+    document: {
+      head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
+    },
+  },
   routes: registerWebRoutes,
   providers: [
     ErrorServiceProvider,

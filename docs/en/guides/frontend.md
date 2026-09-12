@@ -96,13 +96,16 @@ Handle validation errors by returning them from the controller and reading `form
 The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css` or add custom CSS frameworks as needed. If you introduce additional assets (images, fonts), place them under `public/`.
 
 ## Favicon and Document Head
-The production document is built by the server, not from `public/index.html`, so a `<link>` added to that file never reaches a browser. Register site-wide head markup with `setInertiaDocument()` instead. The scaffold already links the placeholder `public/favicon.svg` from `src/app.ts`:
+The production document is built by the server, not from `public/index.html`, so a `<link>` added to that file never reaches a browser. Register site-wide head markup with the `inertia` option instead. The scaffold already links the placeholder `public/favicon.svg` from `src/app.ts`:
 
 ```typescript
-import { setInertiaDocument } from '@guren/core'
-
-setInertiaDocument({
-  head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
+const app = createApp({
+  inertia: {
+    document: {
+      head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
+    },
+  },
+  // ...
 })
 ```
 

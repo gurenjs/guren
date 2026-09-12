@@ -170,7 +170,7 @@ export default defineConfig({
 
 Or pass `--base /repo/` to the build. Asset URLs, `page.url` and route matching all use the same value, and two prototypes hosted on one origin under different bases keep separate state.
 
-**The shell.** The generated `index.html` is minimal: a `<div id="app">`, the module script, and the `noindex` meta tag, because a prototype is not meant to be indexed. `setInertiaDocument()` is a server-side call and the static build cannot read it, so a favicon, a font link or a theme prepaint script go into `resources/js/prototype/index.html`, which replaces the generated shell when it exists. Keep the `noindex` tag when you write your own.
+**The shell.** The generated `index.html` is minimal: a `<div id="app">`, the module script, and the `noindex` meta tag, because a prototype is not meant to be indexed. `createApp({ inertia: { document } })` is server-side and the static build never constructs the app, so a favicon, a font link or a theme prepaint script go into `resources/js/prototype/index.html`, which replaces the generated shell when it exists. Keep the `noindex` tag when you write your own.
 
 > [!WARNING]
 > **A hosted prototype is public unless you put something in front of it.** The fixture ships a "signed-in" demo user so guarded screens are reachable, and nothing in the build knows who is looking. That is not a leak, there is no real data behind it, but a customer walkthrough URL with a pinned demo account is easy to mistake for one, and your seed data may be more than you want indexed. Use the host's access control: Cloudflare Access, Vercel deployment protection, Netlify password protection, or a basic-auth rule on your own server.

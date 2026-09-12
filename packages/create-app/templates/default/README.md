@@ -40,8 +40,8 @@ bunx guren add schedule       # task scheduling
 ## Favicon
 
 `public/favicon.svg` ships as a placeholder and is linked from `src/app.ts` via
-`setInertiaDocument({ head })`, which is the only path that reaches the
-production document — `public/index.html` is not read by the server. Replace the
+`createApp({ inertia: { document: { head } } })`, which is the only path that
+reaches the production document — `public/index.html` is not read by the server. Replace the
 file to change the icon, or edit the `head` markup to add more tags.
 
 Files at the root of `public/` are served by the Bun runtime. On Node-based

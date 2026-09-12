@@ -2,7 +2,7 @@
 
 Authorization determines what an authenticated user is allowed to do. Guren provides a policy-based authorization system inspired by Laravel.
 
-The authorization gate is created automatically when your app boots — call `getGate()` anywhere after boot to define abilities and register policies. No manual setup is required.
+The authorization gate is created automatically when your app boots and bound on the app's container as `gate`. A service provider reaches it with `this.container.make('gate')` to define abilities and register policies. No manual setup is required.
 
 ## Gates
 
@@ -10,38 +10,52 @@ Gates are simple closures that determine if a user is authorized to perform a gi
 
 ### Defining Gates
 
-Define gates in `src/app.ts` (inside the boot callback) or a service provider:
+Define gates in a service provider's `boot()`. The framework's own provider creates the gate during registration, so `make('gate')` throws before that:
 
 ```typescript
-import { getGate } from '@guren/core'
+import { ServiceProvider } from '@guren/core'
 
-const gate = getGate()
+export default class AuthorizationProvider extends ServiceProvider {
+  boot(): void {
+    const gate = this.container.make('gate')
 
-// Simple gate
-gate.define('view-dashboard', (user) => {
-  return user?.isAdmin === true
-})
+    // Simple gate
+    gate.define('view-dashboard', (user) => {
+      return user?.isAdmin === true
+    })
 
-// Gate with a resource
-gate.define('update-post', (user, post) => {
-  return user?.id === post.userId
-})
+    // Gate with a resource
+    gate.define('update-post', (user, post) => {
+      return user?.id === post.userId
+    })
 
-// Async gate with database check
-gate.define('delete-comment', async (user, comment) => {
-  const post = await Post.find(comment.postId)
-  return user?.id === post?.userId
-})
+    // Async gate with database check
+    gate.define('delete-comment', async (user, comment) => {
+      const post = await Post.find(comment.postId)
+      return user?.id === post?.userId
+    })
+  }
+}
 ```
+
+Register the provider in `createApp({ providers })`.
 
 ### Using Gates
 
-Check authorization with a user bound via `forUser()`:
+A controller has `this.authorize()` and `this.can()`, which bind the current user for you:
 
 ```typescript
-import { getGate } from '@guren/core'
+// Throws AuthorizationException (403) if denied
+await this.authorize('update-post', post)
 
-const gate = getGate().forUser(user)
+// Check without throwing
+const canView = await this.can('view-dashboard')
+```
+
+Elsewhere, resolve the gate from the container that owns the call and bind a user with `forUser()`:
+
+```typescript
+const gate = this.container.make('gate').forUser(user)
 
 // Check if allowed
 const canView = await gate.allows('view-dashboard')
@@ -54,7 +68,6 @@ const canUpdate = await gate.allows('update-post', post)
 
 // Authorize or throw
 await gate.authorize('update-post', post)
-// Throws AuthorizationException (403) if denied
 ```
 
 ### Before Callbacks
@@ -62,7 +75,7 @@ await gate.authorize('update-post', post)
 Register a callback that runs before all gate checks:
 
 ```typescript
-getGate().before((user, ability) => {
+this.container.make('gate').before((user, ability) => {
   // Super admins can do everything
   if (user?.isSuperAdmin) {
     return true
@@ -76,7 +89,7 @@ getGate().before((user, ability) => {
 Register a callback that runs after all gate checks:
 
 ```typescript
-getGate().after((user, ability, result) => {
+this.container.make('gate').after((user, ability, result) => {
   // Log authorization attempts
   logger.info(`User ${user?.id} ${result ? 'allowed' : 'denied'} for ${ability}`)
 })
@@ -140,18 +153,24 @@ export class PostPolicy extends Policy {
 
 ### Registering Policies
 
-Register policies on the gate in `src/app.ts` (inside the boot callback) or a service provider:
+Register policies on the gate in a service provider's `boot()`:
 
 ```typescript
-import { getGate } from '@guren/core'
-import { PostPolicy } from '../app/Policies/PostPolicy'
-import { Post } from '../app/Models/Post'
+import { ServiceProvider } from '@guren/core'
+import { PostPolicy } from '../Policies/PostPolicy'
+import { Post } from '../Models/Post'
 
-// Register by model class
-getGate().policy(Post, PostPolicy)
+export default class AuthorizationProvider extends ServiceProvider {
+  boot(): void {
+    const gate = this.container.make('gate')
 
-// Or by string key
-getGate().policy('post', PostPolicy)
+    // Register by model class
+    gate.policy(Post, PostPolicy)
+
+    // Or by string key
+    gate.policy('post', PostPolicy)
+  }
+}
 ```
 
 ### Using Policies
@@ -159,9 +178,7 @@ getGate().policy('post', PostPolicy)
 ORM queries return plain records without constructor information, so pass the model class alongside the record to resolve the policy:
 
 ```typescript
-import { getGate } from '@guren/core'
-
-const gate = getGate().forUser(user)
+const gate = this.container.make('gate').forUser(user)
 const post = await Post.findOrFail(id)
 
 // Pass [ModelClass, record] for ORM records
@@ -255,13 +272,14 @@ export default class PostController extends Controller {
 Create authorization middleware for route-level checks:
 
 ```typescript
-import { type Router, getGate, AuthorizationException, defineMiddleware } from '@guren/core'
+import { type Router, getRequestContainer, AuthorizationException, defineMiddleware } from '@guren/core'
 
 export function authorizeAbility(ability: string) {
   return defineMiddleware(async (ctx, next) => {
     const user = ctx.get('user') ?? null
+    const gate = getRequestContainer(ctx).make('gate')
 
-    if (await getGate().forUser(user).denies(ability)) {
+    if (await gate.forUser(user).denies(ability)) {
       throw new AuthorizationException()
     }
 

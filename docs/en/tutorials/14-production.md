@@ -125,7 +125,7 @@ Now the wiring, and one more thing while you are in this file. An app that accep
 // fallback), so keep .refine()/.transform() free of side effects.
 import 'zod/compile'
 import { createApp } from '@guren/core'
-import { DatabaseSessionStore, createRateLimitMiddleware, setInertiaDocument } from '@guren/core'
+import { DatabaseSessionStore, createRateLimitMiddleware } from '@guren/core'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import AuthProvider from '../app/Providers/AuthProvider.js'
 import { registerWebRoutes } from '../routes/web.js'
@@ -140,11 +140,6 @@ import QueueProvider from '../app/Providers/QueueProvider.js'
 import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'
 import MailProvider from '../app/Providers/MailProvider.js'
 
-// Rendered into every server-rendered document. Replace public/favicon.svg
-// with your own artwork, or add more tags here (Open Graph, apple-touch-icon).
-setInertiaDocument({
-  head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
-})
 
 // The Host header is client-controlled, so production should answer only to the
 // host this app is deployed as, which APP_URL carries. Emailed links do not
@@ -173,6 +168,13 @@ function hostAuthorization() {
 }
 
 const app = createApp({
+  // Rendered into every server-rendered document. Replace public/favicon.svg
+  // with your own artwork, or add more tags here (Open Graph, apple-touch-icon).
+  inertia: {
+    document: {
+      head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
+    },
+  },
   routes: registerWebRoutes,
   providers: [DatabaseProvider, AuthProvider, CoreStorageServiceProvider, StorageProvider, AttachmentsProvider, CoreEventServiceProvider, EventProvider, CoreQueueServiceProvider, QueueProvider, CoreMailServiceProvider, MailProvider],
   auth: {

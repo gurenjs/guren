@@ -223,25 +223,27 @@ const log = new LogManager({
 })
 ```
 
-## グローバルロガー
+## 独自の LogManager を束縛する
 
-### グローバルロガーのセットアップ
+`LogServiceProvider` は `createApp({ logging })` から組み立てたマネージャを束縛します。自前で組み立てる場合は、独自のプロバイダから束縛してください:
 
 ```ts
-import { setLogManager, getLogManager, LogManager } from '@guren/core'
+import { ServiceProvider, LogManager } from '@guren/core'
 
-// ブートストラップファイルで
-const log = new LogManager({
-  default: 'stack',
-  channels: { /* ... */ },
-})
-
-setLogManager(log)
-
-// アプリケーションのどこでも
-const log = getLogManager()
-log.info('グローバルロガーを使用')
+export default class LoggingProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('log', new LogManager({
+      default: 'stack',
+      channels: { /* ... */ },
+    }))
+  }
+}
 ```
+
+ログを書く側はすべて、自分が動いているコンテナから `log` を解決します。そのためコントローラ・ジョブ・コマンドには登録なしで届きます。
+
+> [!NOTE]
+> `setLogManager()` と `getLogManager()` は 2.23.0 で非推奨になり、3.0.0 で削除されます。プロセスにつき 1 つのマネージャを読み書きするため、1 プロセスに 2 つのアプリがあると共有されてしまいます。`bunx guren upgrade` が書き換えます。
 
 ## カスタムチャンネル
 
@@ -300,11 +302,10 @@ log.registerDriver('slack', (config) => {
 ### ミドルウェアの例
 
 ```ts
-import { defineMiddleware } from '@guren/core'
-import { getLogManager } from '@guren/core'
+import { defineMiddleware, getRequestContainer } from '@guren/core'
 
 export const requestLogging = defineMiddleware(async (c, next) => {
-  const log = getLogManager()
+  const log = getRequestContainer(c).make('log')
   const requestId = crypto.randomUUID()
   const requestLog = log.withContext({
     requestId,

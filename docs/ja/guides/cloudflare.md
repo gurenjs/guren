@@ -280,15 +280,15 @@ APP_KEY=base64:...
 
 ```ts
 // app/Console/Kernel.ts
-import { Schedule, getContainer, type SessionManager } from '@guren/core'
+import { Schedule, defaultContainer, type SessionManager } from '@guren/core'
 
 export function scheduleTasksKernel(): Schedule {
   const schedule = new Schedule()
 
-  // 解決はカーネルの構築時ではなくタスクの実行時です。コンテナを公開するのは
+  // 解決はカーネルの構築時ではなくタスクの実行時です。`session` を束縛するのは
   // app.boot() で、cron のエントリポイントはそれを先に await します。
   schedule
-    .call(() => getContainer().make<SessionManager>('session').pruneExpired())
+    .call(() => defaultContainer().make<SessionManager>('session').pruneExpired())
     .hourly()
     .name('sessions:prune')
 
