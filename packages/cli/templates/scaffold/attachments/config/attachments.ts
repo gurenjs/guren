@@ -1,14 +1,14 @@
 import { configureAttachments } from '@guren/core'
 import { attachments } from '../db/schema'
 
-// Wires the attachments layer once at boot (AttachmentsProvider imports this
-// module). `Attachment` is the app-local model over the attachments table —
-// use it for morph relations and advanced queries; the typed day-to-day API
-// lives on your models via the Attachable mixin.
+// Wires the attachments layer once at boot. `Attachment` is the app-local model
+// over the attachments table — use it for morph relations and advanced queries;
+// the typed day-to-day API lives on your models via the Attachable mixin.
+// `attachmentEngine` is what AttachmentsProvider binds on the app's container.
 
 // See the attachments guide for declarations, image validation, variants, and
 // queued generation.
-export const { Attachment } = configureAttachments({
+export const { Attachment, engine: attachmentEngine } = configureAttachments({
   table: attachments,
   storage: (container) => container.make('storage'),
   // Uploads are bytes a stranger chose, so they are stored on a disk that

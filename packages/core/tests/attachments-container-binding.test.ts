@@ -15,9 +15,12 @@ import {
   hasOneAttached,
   registerAttachmentRoutes,
   resetDefaultApplication,
+  ServiceProvider,
   StorageManager,
+  type AttachmentEngine,
   type Application,
   type Container,
+  type ServiceProviderConstructor,
 } from '../src/index'
 import { setActiveAttachmentEngine } from '../src/attachments/engine'
 import { ATTACHMENTS_DDL, attachmentsTable } from './attachments-table'
@@ -39,7 +42,16 @@ function storageIn(root: string): StorageManager {
   })
 }
 
-describe('configureAttachments({ app }) (RFC 0023 §4)', () => {
+/** The scaffolded `AttachmentsProvider`, over an engine the test configured. */
+function providerFor(engine: AttachmentEngine): ServiceProviderConstructor {
+  return class AttachmentsProvider extends ServiceProvider {
+    register(): void {
+      engine.bindTo(this.container)
+    }
+  }
+}
+
+describe('AttachmentEngine.bindTo() (RFC 0023 §4)', () => {
   let sqlite: Database
   let tmpDir: string
   let previousAppKey: string | undefined
@@ -66,49 +78,49 @@ describe('configureAttachments({ app }) (RFC 0023 §4)', () => {
     else process.env.APP_KEY = previousAppKey
   })
 
-  function appWithStorage(): Application {
-    const app = createApp({ routes: (router) => registerAttachmentRoutes(router) })
-    app.container.instance('storage', storageIn(tmpDir))
+  function appWith(root: string, providers: ServiceProviderConstructor[] = []): Application {
+    const app = createApp({ routes: (router) => registerAttachmentRoutes(router), providers })
+    app.container.instance('storage', storageIn(root))
     return app
   }
 
-  test('binds the engine on the app and hands the storage factory that app\'s container', async () => {
-    const app = appWithStorage()
-    const seen: Container[] = []
-
-    configureAttachments({
+  function configure(seen?: Container[]): AttachmentEngine {
+    return configureAttachments({
       table: attachmentsTable,
       storage: (container) => {
-        seen.push(container)
+        seen?.push(container)
         return container.make('storage')
       },
       disk: 'vault',
       processor: null,
       disks: { vault: 'private' },
       delivery: {},
-      app,
-    })
+    }).engine
+  }
+
+  test('a provider binds the engine and hands the storage factory that app\'s container', async () => {
+    const seen: Container[] = []
+    const engine = configure(seen)
+    const app = appWith(tmpDir, [providerFor(engine)])
+    await app.boot()
+    // Last construction wins the ambient slot, so a storage factory reading the
+    // ambient container gets this app rather than the one that bound the engine.
+    const later = appWith(mkdtempSync(join(tmpdir(), 'guren-attachments-later-')))
+
     await Post.attach(1, 'cover', new File([PNG_1X1], 'cover.png', { type: 'image/png' }))
 
     expect(app.container.has('attachments')).toBe(true)
+    expect(later.container.has('attachments')).toBe(false)
     expect(seen.length).toBeGreaterThan(0)
     expect(seen.every((container) => container === app.container)).toBe(true)
   })
 
-  test('hands the storage factory the default application\'s container without app', async () => {
-    const app = appWithStorage()
+  test('hands the storage factory the default application\'s container until one binds it', async () => {
     const seen: Container[] = []
+    configure(seen)
+    const app = appWith(tmpDir)
+    await app.boot()
 
-    configureAttachments({
-      table: attachmentsTable,
-      storage: (container) => {
-        seen.push(container)
-        return container.make('storage')
-      },
-      disk: 'vault',
-      processor: null,
-      disks: { vault: 'private' },
-    })
     await Post.attach(1, 'cover', new File([PNG_1X1], 'cover.png', { type: 'image/png' }))
 
     expect(app.container.has('attachments')).toBe(false)
@@ -116,37 +128,22 @@ describe('configureAttachments({ app }) (RFC 0023 §4)', () => {
   })
 
   test('serves the delivery route from the app\'s own engine, not the one configured last', async () => {
-    const own = appWithStorage()
-    configureAttachments({
-      table: attachmentsTable,
-      storage: (container) => container.make('storage'),
-      disk: 'vault',
-      processor: null,
-      disks: { vault: 'private' },
-      delivery: {},
-      app: own,
-    })
+    const own = appWith(tmpDir, [providerFor(configure())])
     await own.boot()
     await Post.attach(1, 'cover', new File([PNG_1X1], 'cover.png', { type: 'image/png' }))
     const url = await Post.attachmentUrl(1, 'cover')
 
-    // A later configuration, for another app, replaces the active engine but
-    // not the one bound on `own`.
-    const other = createApp()
-    other.container.instance('storage', storageIn(mkdtempSync(join(tmpdir(), 'guren-attachments-other-'))))
-    configureAttachments({
-      table: attachmentsTable,
-      storage: (container) => container.make('storage'),
-      disk: 'vault',
-      processor: null,
-      disks: { vault: 'private' },
-      delivery: { prefix: '/elsewhere' },
-      app: other,
-    })
+    // A second app in the same process, wired exactly as the scaffold wires
+    // one: its configure() call replaces the active engine, its provider binds
+    // that engine on its own container only.
+    const otherRoot = mkdtempSync(join(tmpdir(), 'guren-attachments-other-'))
+    const other = appWith(otherRoot, [providerFor(configure())])
+    await other.boot()
 
     const response = await own.fetch(new Request(new URL(url!, 'http://app.test')))
 
     expect(response.status).toBe(200)
     expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(PNG_1X1))
+    rmSync(otherRoot, { recursive: true, force: true })
   })
 })

@@ -69,7 +69,12 @@ describe('guren add attachments', () => {
     expect(config).toContain('configureAttachments({')
     expect(config).toContain("import { attachments } from '../db/schema'")
 
-    expect(existsSync(resolve('app/Providers/AttachmentsProvider.ts'))).toBe(true)
+    // The engine reaches the app's container only through the provider: the
+    // config runs at module scope, before any Application exists (RFC 0023 §4).
+    expect(config).toContain('export const { Attachment, engine: attachmentEngine }')
+    const provider = await readFile(resolve('app/Providers/AttachmentsProvider.ts'), 'utf8')
+    expect(provider).toContain("import { attachmentEngine } from '../../config/attachments'")
+    expect(provider).toContain('attachmentEngine.bindTo(this.container)')
     const appFile = await readFile(resolve('src/app.ts'), 'utf8')
     expect(appFile).toContain('AttachmentsProvider')
 

@@ -46,7 +46,7 @@ export interface AttachOptions {
 
 declare module '@guren/server' {
   interface ServiceBindings {
-    /** Bound by `configureAttachments({ app })` (RFC 0023 §4); absent until then. */
+    /** Bound by `AttachmentEngine.bindTo()` (RFC 0023 §4); absent until then. */
     attachments: AttachmentEngine
   }
 }
@@ -61,16 +61,10 @@ export interface ConfigureAttachmentsOptions {
   table: unknown
   /**
    * The app's StorageManager, resolved lazily: `(container) => container.make('storage')`.
-   * The container is `app`'s when given, else the default application's (RFC 0023 §4).
+   * The container is the one `bindTo()` was given, else the default
+   * application's (RFC 0023 §4).
    */
   storage: (container: Container) => StorageManager
-  /**
-   * The Application this engine belongs to. Binds the engine as `attachments`
-   * on its container, so the delivery route resolves it per request rather
-   * than through the process-wide active engine; without it the default
-   * application's container backs `storage`.
-   */
-  app?: { container: Container }
   /** Default disk name for new attachments. */
   disk: string
   /**
@@ -190,6 +184,14 @@ export interface DeliveryOptions {
  */
 export const ATTACHMENT_OBJECT_PREFIX = 'attachments'
 
+/**
+ * The container key the engine binds under (RFC 0023 §4). Its own constant
+ * because the word means three unrelated things here: this service key, the
+ * object-key prefix above, and the delivery route's URL prefix. `delivery.ts`
+ * reads through this one, so writer and reader cannot drift apart.
+ */
+export const ATTACHMENTS_SERVICE_KEY = 'attachments'
+
 export const DEFAULT_DELIVERY_PREFIX = '/attachments'
 export const DEFAULT_DELIVERY_ROUTE_NAME = 'attachments.show'
 
@@ -302,7 +304,7 @@ interface ImageInspection {
  */
 function unavailableContainer(): Container {
   const unavailable = (): never => {
-    throw new Error('Container not initialized. Construct the app with createApp(), or pass configureAttachments({ app }).')
+    throw new Error('Container not initialized. Construct the app with createApp(), or bind the engine on one from a provider (attachmentEngine.bindTo(this.container)).')
   }
   return { make: unavailable, makeOptional: unavailable, has: unavailable } as unknown as Container
 }
@@ -316,7 +318,7 @@ export type JobDispatcher = (payload: GenerateVariantsPayload, queue: QueueDispa
 export class AttachmentEngine {
   readonly model: typeof Model
   private readonly storageFactory: (container: Container) => StorageManager
-  private readonly container?: Container
+  private container?: Container
   private readonly defaultDisk: string
   private readonly diskDelivery: Record<string, ResolvedDiskDelivery>
   private readonly delivery: { prefix: string; routeName: string } | null
@@ -336,7 +338,6 @@ export class AttachmentEngine {
     this.model.morphTo('attachable', 'attachable')
 
     this.storageFactory = options.storage
-    this.container = options.app?.container
     this.defaultDisk = options.disk
     this.diskDelivery = normalizeDiskDelivery(options.disks ?? {})
     this.delivery = options.delivery
@@ -351,6 +352,18 @@ export class AttachmentEngine {
       options.processor !== undefined ? options.processor : resolveDefaultImageProcessor(this.maxPixels)
     this.urlExpiresIn = options.urlExpiresIn ?? DEFAULT_URL_EXPIRES_IN
     this.queue = options.queue
+  }
+
+  /**
+   * Bind this engine on `container` as `attachments` *and* resolve its storage
+   * there. One call rather than two: an app that bound the instance alone would
+   * still read storage from whichever app is the default (RFC 0023 §4).
+   * Scaffolded apps call it from `AttachmentsProvider.register()`, since
+   * `configureAttachments()` runs at module scope with no `Application` yet.
+   */
+  bindTo(container: Container): void {
+    this.container = container
+    container.instance(ATTACHMENTS_SERVICE_KEY, this)
   }
 
   /** Wired by `configureAttachments()`, so this module never imports the job. */

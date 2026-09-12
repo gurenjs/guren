@@ -130,20 +130,45 @@ MySQL, `text(..., { mode: 'json' })` on SQLite). Import the
 // config/attachments.ts
 import { configureAttachments } from '@guren/core'
 import { attachments } from '@/db/schema'
-import { storage } from './storage'
 
-export const { Attachment } = configureAttachments({
+export const { Attachment, engine: attachmentEngine } = configureAttachments({
   table: attachments,
-  storage: () => storage,   // your StorageManager, resolved lazily
+  storage: (container) => container.make('storage'),
   disk: 'media',            // default disk for new attachments
 })
 ```
 
-Import this module once at boot (for example from `src/app.ts`, next to your
-other config). The returned `Attachment` is a ready-made model bound to the
-table with `morphTo('attachable', 'attachable')` pre-declared, useful for
-morph relations and advanced queries. The framework itself deliberately
-exports no `Attachment` class; the app-local name comes from this call.
+The returned `Attachment` is a ready-made model bound to the table with
+`morphTo('attachable', 'attachable')` pre-declared, useful for morph relations
+and advanced queries. The framework itself deliberately exports no
+`Attachment` class; the app-local name comes from this call.
+
+### 3. Bind the engine on the app
+
+```ts
+// app/Providers/AttachmentsProvider.ts
+import { ServiceProvider } from '@guren/core'
+import { attachmentEngine } from '../../config/attachments'
+
+export default class AttachmentsProvider extends ServiceProvider {
+  register(): void {
+    attachmentEngine.bindTo(this.container)
+  }
+}
+```
+
+Register it in `createApp({ providers })`. The provider does two things at
+once. Importing the config module runs `configureAttachments()` at boot, in web
+and worker processes alike, before the first `attach()`. `bindTo()` then hands
+the app's container to the engine: the signed delivery route serves from the
+engine of the app that received the request, and the `storage` factory above
+receives that same container.
+
+`configureAttachments()` runs at module scope, where no `Application` exists
+yet, which is why the binding is the provider's job rather than an option on
+the call. A process that serves one app never notices the difference: without
+a binding, both the route and the storage factory fall back to the app that
+configured attachments last. A process that serves two does.
 
 Additional options:
 
@@ -338,9 +363,9 @@ in, generates the variants, and flips the status records to `ready` (or
 
 ```ts
 // config/attachments.ts
-export const { Attachment } = configureAttachments({
+export const { Attachment, engine: attachmentEngine } = configureAttachments({
   table: attachments,
-  storage: () => storage,
+  storage: (container) => container.make('storage'),
   disk: 'media',
   queue: () => queueManager,   // the app's QueueManager, resolved lazily
 })

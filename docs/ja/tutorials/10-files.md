@@ -51,7 +51,7 @@ import { Post } from '../app/Models/Post.js'
  * Wires the attachments layer once at boot (AttachmentsProvider imports this
  * module). `Attachment` is the app-local model over the attachments table.
  */
-export const { Attachment } = configureAttachments({
+export const { Attachment, engine: attachmentEngine } = configureAttachments({
   table: attachments,
   storage: (container) => container.make('storage'),
   // Uploads are bytes a stranger chose, so they live on a disk rooted outside

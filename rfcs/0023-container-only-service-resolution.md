@@ -125,7 +125,7 @@ export interface ServiceBindings {
   'inertia.document': InertiaDocumentOptions
   /** `createApp({ inertia: { ssrRenderer } })`; per-call `ssr.render` still wins. */
   'inertia.ssrRenderer': InertiaSsrRenderer
-  /** Bound by `configureAttachments()` on the app it is given (see §4). */
+  /** Bound by `AttachmentEngine.bindTo(container)` from the app's provider (see §4). */
   attachments: AttachmentEngine
 }
 ```
@@ -278,11 +278,26 @@ app it boots (`cli/src/queue.ts:155-176`) and passes that container to the
   `plugin-cloudflare` generates ~~switches to the option in the same PR~~ stays
   on the setter until Open Question 4 is decided; the setter remains the
   fallback the engine reads second.
-- `configureAttachments({ app })` binds `attachments` on that app; the
+- ~~`configureAttachments({ app })` binds `attachments` on that app~~; the
   delivery route resolves it from the request container. The scaffold's
   `storage: () => getContainer().make('storage')` becomes
   `storage: (container) => container.make('storage')`: the factory receives
-  the container it is bound on.
+  the container it is bound on. **Amended in implementation:** no app can pass
+  `{ app }`. The scaffold and the blog example both call
+  `configureAttachments()` at module scope in `config/attachments.ts`, which
+  `AttachmentsProvider` imports for its side effect, and no `Application`
+  exists at that point; the option executed only in a unit test, leaving every
+  scaffolded app's delivery route on the process-wide engine. The call returns
+  the engine beside `Attachment` instead, and the provider binds it with the
+  container it already holds: `attachmentEngine.bindTo(this.container)`, which
+  binds `attachments` *and* becomes the container the `storage` factory
+  receives. The active engine stays the fallback for the `Attachable` statics,
+  the queued job and the prune command, which hold no container. Still
+  process-wide: `resolveDeliveryRoute()`, which `registerAttachmentRoutes()`
+  reads for the route's prefix and name. Route registration runs against a bare
+  `Router` with no container, so two apps that configure *different* prefixes
+  in one process both mount whichever configured last, while each mints URLs
+  under its own.
 - `Container.scoped()`/`scopedAsync()` are left alone in Part 1 (Open
   Question 2).
 
@@ -313,7 +328,7 @@ under the policy's window.
 |---|---|---|
 | `global-service-setters` | `setGate`, `setEncrypter`, `setMailManager`, `setQueueDriver`, `setI18n`, `setLogManager`, `setNotificationManager`, `setBroadcastManager`, `setExceptionHandler`, `setContainer`, `setInertiaDocument`, `setInertiaSsrRenderer`, `setInertiaSharedProps` | `container.instance(key, value)` in a provider; `createApp({ inertia })` for the two Inertia options; `shareInertiaProps(fn, container)` |
 | `global-service-getters` | `getGate`, `getEncrypter`, `getMailManager`, `getQueueDriver`, `getI18n`, `tryGetI18n`, `getLogManager`, `getNotificationManager`, `getBroadcastManager`, `getExceptionHandler`, `getContainer`, `getInertiaSharedPropsResolver` | `this.make(key)`, `getRequestContainer(ctx).make(key)`, `defaultContainer().make(key)` |
-| `attachments-active-engine` (`@guren/core`) | `setActiveAttachmentEngine`, `getActiveAttachmentEngine` | `configureAttachments({ app })`, `container.make('attachments')` |
+| `attachments-active-engine` (`@guren/core`) | `setActiveAttachmentEngine`, `getActiveAttachmentEngine` | ~~`configureAttachments({ app })`~~ `engine.bindTo(container)` from a provider (amended, see §4), `container.make('attachments')` |
 
 Not deprecated: `encrypt`, `decrypt`, `t`, `tc`, `can`, `cannot`,
 `defineGate`, `authorizeAbility`, `resolve`, `Job.dispatch`, `Job.make`. Same

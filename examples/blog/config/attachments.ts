@@ -3,11 +3,12 @@ import { attachments } from '../db/schema'
 import { Post } from '../app/Models/Post.js'
 
 /**
- * Wires the attachments layer once at boot (AttachmentsProvider imports this).
- * `Attachment` is the app-local model over the table, for morph relations and
- * advanced queries; the day-to-day API lives on models via the Attachable mixin.
+ * Wires the attachments layer once at boot. `Attachment` is the app-local model
+ * over the table, for morph relations and advanced queries; the day-to-day API
+ * lives on models via the Attachable mixin. `attachmentEngine` is what
+ * AttachmentsProvider binds on the app's container.
  */
-export const { Attachment } = configureAttachments({
+export const { Attachment, engine: attachmentEngine } = configureAttachments({
   table: attachments,
   storage: (container) => container.make('storage'),
   // Uploads are bytes a stranger chose, so `local` is rooted outside public/
