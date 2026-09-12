@@ -5,9 +5,10 @@ import type {
   SendResult,
 } from './types'
 import type { MailManager } from './MailManager'
-import { Job, getQueueDriver, registerJob } from '../queue'
-import type { QueueManager } from '../queue/QueueManager'
-import { hasPinnedQueueDriver } from '../queue/Job'
+import { Job, registerJob, type QueueDriver, type QueueManager } from '../queue'
+import { enqueueJob, getQueueDriver, pinnedQueueDriver } from '../queue/Job'
+import { resolveOptional } from '../container/resolve-optional'
+import { ambientBinding } from '../http/default-application'
 import { parseMailAddress as parseAddress } from './address'
 
 /**
@@ -184,14 +185,10 @@ export class Mail {
     return transport.send(message)
   }
 
-  /**
-   * Queue the email for async sending, through the `queue` manager bound
-   * beside this mail manager (RFC 0023 §4), else the default application's.
-   * A `setQueueDriver()` pin overrides both, as it does for `Job.dispatch()`.
-   */
+  /** Queue the email for async sending. */
   async queue(queueName: string = 'default'): Promise<string> {
-    const queue = hasPinnedQueueDriver() ? undefined : this.boundQueueManager()
-    if (!queue && !getQueueDriver()) {
+    const driver = this.queueDriver()
+    if (!driver) {
       throw new Error('Queue driver not configured. Use send() instead or configure a queue driver.')
     }
 
@@ -199,21 +196,30 @@ export class Mail {
 
     registerJob(SendMailJob)
 
-    const payload: SendMailJobPayload = {
-      message,
-      transport: this.transportName ?? this.manager.getDefaultTransportName(),
-    }
-    return queue
-      ? queue.dispatch(SendMailJob, payload, { queue: queueName })
-      : SendMailJob.dispatch(payload, { queue: queueName })
+    return enqueueJob(
+      driver,
+      SendMailJob,
+      { message, transport: this.transportName ?? this.manager.getDefaultTransportName() },
+      { queue: queueName },
+    )
   }
 
-  /** The `queue` manager of the container the mail manager was bound in, when it has its default driver. */
-  private boundQueueManager(): QueueManager | undefined {
-    const container = this.manager.container
-    if (!container?.has?.('queue')) return undefined
-    const manager = container.make('queue') as QueueManager
-    return manager.hasDriver(manager.getDefaultDriverName()) ? manager : undefined
+  /**
+   * The `setQueueDriver()` pin, else the default driver of the `queue` manager
+   * bound beside this mail manager, else the default application's (RFC 0023 §4).
+   */
+  private queueDriver(): QueueDriver | null {
+    const pinned = pinnedQueueDriver()
+    if (pinned) {
+      return pinned
+    }
+
+    const bound = resolveOptional<QueueManager>(this.manager.container, 'queue')
+    if (bound?.hasDriver(bound.getDefaultDriverName())) {
+      return bound.driver()
+    }
+
+    return getQueueDriver()
   }
 }
 
@@ -229,8 +235,9 @@ export function setMailManager(manager: MailManager): void {
   globalMailManager = manager
 }
 
+/** The default application's `mail`, else the manager `setMailManager()` installed. */
 export function getMailManager(): MailManager | null {
-  return globalMailManager
+  return ambientBinding('mail') ?? globalMailManager
 }
 
 class SendMailJob extends Job<SendMailJobPayload> {
@@ -240,7 +247,7 @@ class SendMailJob extends Job<SendMailJobPayload> {
   static backoff = 'exponential' as const
 
   async handle(payload: SendMailJobPayload): Promise<void> {
-    // The worker's app first (RFC 0023 §4); the slot is what setMailManager() left.
+    // The worker's app first (RFC 0023 §4), then whatever setMailManager() holds.
     const manager = this.makeOptional('mail') ?? globalMailManager
     if (!manager) {
       throw new Error('Mail manager not configured for queue jobs. Bind a MailManager as "mail", or call setMailManager() first.')

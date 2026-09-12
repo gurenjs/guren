@@ -857,6 +857,7 @@ export type {
 export {
   Container,
   createContainer,
+  resolveOptional,
   setContainer,
   getContainer,
   resolve,

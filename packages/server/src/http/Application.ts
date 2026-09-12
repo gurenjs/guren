@@ -812,9 +812,10 @@ export class Application {
   /** Called once, from the constructor — see the note there for why. */
   private mountSecurityDefaults(): void {
     // First of all, so no middleware an app registers runs without it (RFC 0023 §2).
-    this.hono.use('*', async (ctx, next) => {
-      ctx.set(CONTAINER_CONTEXT_KEY, this.container)
-      await next()
+    const container = this.container
+    this.hono.use('*', (ctx, next) => {
+      ctx.set(CONTAINER_CONTEXT_KEY, container)
+      return next()
     })
 
     const { securityHeaders } = this.options

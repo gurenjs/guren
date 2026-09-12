@@ -356,6 +356,3 @@ export function getContainer(): Container {
   return globalContainer
 }
 
-export function resolve<T = unknown>(key: string): T {
-  return getContainer().make<T>(key)
-}

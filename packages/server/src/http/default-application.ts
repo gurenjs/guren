@@ -18,27 +18,28 @@ const AMBIGUOUS_WARNING =
   'the most recently constructed one. Call useAsDefaultApplication(app) to choose, or resolve ' +
   'explicitly: container.make(key), this.make(key) in a controller, job or command, or createFacades(container).'
 
-/** @internal Application constructor only. A second construction beside a live default is what sets the flag. */
+/** @internal Application constructor only. Displacing a still-ambient app is what makes the choice ambiguous. */
 export function adoptDefaultApplication(app: Application): void {
-  if (current && current !== app && peekContainer() === current.container) {
-    ambiguous = true
-  }
-  current = app
-  setContainer(app.container)
+  const displaces = Boolean(current && current !== app && peekContainer() === current.container)
+  setDefault(app, ambiguous || displaces)
 }
 
 /** Opt-in override for a process that constructs several and wants the ambient one chosen, not last. */
 export function useAsDefaultApplication(app: Application): void {
-  current = app
-  ambiguous = false
-  setContainer(app.container)
+  setDefault(app, false)
 }
 
-/** @internal Test seam; replaces every `set*(undefined)` and `clear*()` reset. */
+/** @internal Test seam: empties the ambient slot and the ambiguity flag. */
 export function resetDefaultApplication(): void {
   current = null
   ambiguous = false
   clearContainer()
+}
+
+function setDefault(app: Application, nextAmbiguous: boolean): void {
+  current = app
+  ambiguous = nextAmbiguous
+  setContainer(app.container)
 }
 
 /**
@@ -73,6 +74,11 @@ export function ambientContainer(): Container | null {
  */
 export function ambientBinding<K extends keyof ServiceBindings>(key: K): ServiceBindings[K] | undefined {
   return ambientContainer()?.makeOptional(key)
+}
+
+/** Resolve `key` from the default application's container. */
+export function resolve<T = unknown>(key: string): T {
+  return defaultContainer().make<T>(key)
 }
 
 function warnIfAmbiguous(): void {

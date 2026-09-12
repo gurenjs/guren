@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { Container } from '../../src/container/Container'
 import { Application } from '../../src/http/Application'
 import { resetDefaultApplication } from '../../src/http/default-application'
-import { MemoryTransport, createMailManager, mail, setMailManager, type MailManager } from '../../src/mail'
+import { MemoryTransport, createMailManager, getMailManager, mail, setMailManager, type MailManager } from '../../src/mail'
 import { MemoryDriver, Worker, clearQueueDriver, createQueueManager, setQueueDriver } from '../../src/queue'
 import { clearGlobalManager } from '../support/globals'
 
@@ -38,6 +38,21 @@ describe('queued mail resolved through the container (RFC 0023 §4)', () => {
 
     expect(bound.transport.getMessages()).toHaveLength(1)
     expect(ambient.transport.getMessages()).toHaveLength(0)
+  })
+
+  it('answers getMailManager() from the default application, with the setter as the fallback', async () => {
+    const app = new Application()
+    const bound = memoryMailer(app.container)
+    app.container.instance('mail', bound.manager)
+
+    expect(getMailManager()).toBe(bound.manager)
+
+    const hand = memoryMailer()
+    setMailManager(hand.manager)
+    expect(getMailManager()).toBe(bound.manager)
+
+    resetDefaultApplication()
+    expect(getMailManager()).toBe(hand.manager)
   })
 
   it('dispatches through the queue bound beside the mail manager, not the default application\'s', async () => {

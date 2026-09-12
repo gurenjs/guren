@@ -403,14 +403,22 @@ export class TestApp {
     }
 
     let Application: ApplicationConstructor | undefined
+    // Claims this app as the ambient one (RFC 0023 §3). Without it, the second
+    // TestApp of a run reads as a rival live app and the next ambient helper in
+    // the suite under test warns about an ambiguous choice.
+    let claimAmbient: ((app: unknown) => void) | undefined
 
     try {
-      ;({ Application } = await import('@guren/core'))
+      const core = await import('@guren/core')
+      Application = core.Application as unknown as ApplicationConstructor
+      claimAmbient = core.useAsDefaultApplication as unknown as (app: unknown) => void
     } catch {
       try {
         // @guren/core is not always installed (it aggregates @guren/server);
         // fall back to the peer dependency, which exports the same Application.
-        ;({ Application } = await import('@guren/server'))
+        const server = await import('@guren/server')
+        Application = server.Application as unknown as ApplicationConstructor
+        claimAmbient = server.useAsDefaultApplication as unknown as (app: unknown) => void
       } catch {
         // Fallback: use a plain Hono app when @guren/server is not available.
         const { Hono } = await import('hono')
@@ -434,6 +442,7 @@ export class TestApp {
       auth: options.auth,
       i18n: options.i18n,
     })
+    claimAmbient?.(application)
     await application.boot()
 
     const fetchFn = (request: Request) => Promise.resolve(application.fetch(request))

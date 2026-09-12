@@ -5,6 +5,7 @@ import {
   getQueueDriver,
   type ContainerLike,
   type QueueDriver,
+  type QueueManager,
   type WorkerEvents,
 } from './queue-deps'
 import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from './runtime'
@@ -153,11 +154,7 @@ export async function flushFailedJobs(queue?: string): Promise<void> {
 }
 
 /** The `queue` manager surface the worker needs from the app's container. */
-interface BoundQueueManager {
-  driver: () => QueueDriver
-  hasDriver: (name: string) => boolean
-  getDefaultDriverName: () => string
-}
+type BoundQueueManager = Pick<QueueManager, 'driver' | 'hasDriver' | 'getDefaultDriverName'>
 
 /**
  * Boots the app and resolves its queue driver: the `queue` manager its own
@@ -194,12 +191,14 @@ async function getConfiguredQueue(): Promise<{ driver: QueueDriver; container: C
   return { driver, container }
 }
 
-/** The app's container as a `ContainerLike`, or undefined for an app whose container is some other object. */
+/**
+ * The app's container, or undefined for an app whose container is some other
+ * object. Handed over as it is: re-wrapping `make`/`has` in a fresh object
+ * calls them with the wrong `this` and every resolution throws.
+ */
 function appContainer(app: MaybeApplication): ContainerLike | undefined {
   const container = app.container
-  if (!container || typeof container.make !== 'function') return undefined
-  const make = container.make
-  return { make: (key) => make(key), has: container.has }
+  return typeof container?.make === 'function' ? (container as ContainerLike) : undefined
 }
 
 async function getConfiguredDriver(): Promise<QueueDriver> {

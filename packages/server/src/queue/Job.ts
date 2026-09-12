@@ -3,6 +3,7 @@ import type { QueueDriver, QueuedJob, JobOptions } from './types'
 import type { QueueManager } from './QueueManager'
 import type { ServiceBindings } from '../container/bindings'
 import type { ContainerLike } from '../container/types'
+import { resolveOptional } from '../container/resolve-optional'
 import { ambientBinding, ambientContainer, defaultContainer } from '../http/default-application'
 
 /**
@@ -26,9 +27,9 @@ export function clearQueueDriver(): void {
   globalDriver = null
 }
 
-/** @internal Whether `setQueueDriver()` is in force, for a dispatcher with a container of its own to honour. */
-export function hasPinnedQueueDriver(): boolean {
-  return globalDriver !== null
+/** @internal The driver `setQueueDriver()` pinned, for a dispatcher with a container of its own to honour first. */
+export function pinnedQueueDriver(): QueueDriver | null {
+  return globalDriver
 }
 
 /** The `queue` manager bound in the default application, or null when there is neither. */
@@ -140,8 +141,7 @@ export abstract class Job<T = unknown> {
   protected makeOptional<K extends keyof ServiceBindings>(key: K): ServiceBindings[K] | undefined
   protected makeOptional<TService>(key: string): TService | undefined
   protected makeOptional(key: string): unknown {
-    const container = this.container ?? ambientContainer()
-    return container?.has?.(key) ? container.make(key) : undefined
+    return resolveOptional(this.container ?? ambientContainer(), key)
   }
 
   abstract handle(payload: T): void | Promise<void>

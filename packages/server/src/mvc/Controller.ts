@@ -13,6 +13,7 @@ import type { ContainerLike } from '../container/types'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
 import { getGate, type Gate } from '../authorization/Gate'
+import { resolveOptional } from '../container/resolve-optional'
 import type { AuthUser } from '../authorization/types'
 
 /** Duck-typed Zod-like schema, so validation needs no direct Zod dependency. */
@@ -222,10 +223,7 @@ export class Controller {
 
   /** This app's `gate` (RFC 0023 §2); the ambient one only off a container, as on a bare Hono app. */
   #resolveGate(): Gate {
-    if (this._container?.has?.('gate')) {
-      return this._container.make('gate') as Gate
-    }
-    return getGate()
+    return resolveOptional<Gate>(this._container, 'gate') ?? getGate()
   }
 
   private async gateUser(): Promise<AuthUser | null> {
@@ -341,11 +339,7 @@ export class Controller {
   }
 
   #resolveI18n(): I18nManager | undefined {
-    if (this._container?.has?.('i18n')) {
-      return this._container.make('i18n') as I18nManager
-    }
-
-    return tryGetI18n()
+    return resolveOptional<I18nManager>(this._container, 'i18n') ?? tryGetI18n()
   }
 
   protected json<T>(data: T, init: ResponseInit = {}): Response {

@@ -10,10 +10,11 @@ import {
   HttpException,
   ValidationException,
   type AppKeyring,
+  type Container,
+  type QueueManager,
   type StorageDriver,
   type StorageManager,
 } from '@guren/server'
-import type { Container, QueueManager } from '@guren/server'
 import { decodeJsonColumn, toDate } from '../store-utils.js'
 import { resolveDefaultImageProcessor } from './bun-image-processor.js'
 import type { AttachmentCollectionSpec, AttachmentsDeclaration, HeicPolicy } from './declaration.js'
@@ -105,10 +106,9 @@ export interface ConfigureAttachmentsOptions {
   processor?: ImageProcessor | null
   /**
    * The app's QueueManager, resolved lazily; enables `attach(..., { queued })`.
-   * Materializing its default driver installs that driver process-wide, so pass
-   * the same manager the rest of the app dispatches through — a second one would
-   * redirect every later `Job.dispatch()`. Without this option, `queued: true`
-   * falls back to the globally configured driver.
+   * Variant generation is dispatched through it, so the job lands on its driver
+   * whatever else the process has resolved. Without this option, the default
+   * application's queue carries the job.
    */
   queue?: () => unknown
   /**
@@ -301,11 +301,10 @@ interface ImageInspection {
  * that reads it gets the error `getContainer()` would have thrown.
  */
 function unavailableContainer(): Container {
-  return new Proxy({} as Container, {
-    get() {
-      throw new Error('Container not initialized. Construct the app with createApp(), or pass configureAttachments({ app }).')
-    },
-  })
+  const unavailable = (): never => {
+    throw new Error('Container not initialized. Construct the app with createApp(), or pass configureAttachments({ app }).')
+  }
+  return { make: unavailable, makeOptional: unavailable, has: unavailable } as unknown as Container
 }
 
 /** What `configureAttachments({ queue })` must resolve to: the `QueueManager` surface the engine dispatches through. */
@@ -906,7 +905,7 @@ export class AttachmentEngine {
       const manager = this.queue() as Partial<QueueDispatcher> | null | undefined
       if (typeof manager?.driver !== 'function' || typeof manager.dispatch !== 'function') {
         throw new Error(
-          'configureAttachments({ queue }) must resolve to a QueueManager (an object with a driver() method).',
+          'configureAttachments({ queue }) must resolve to a QueueManager (an object with driver() and dispatch() methods).',
         )
       }
       return manager as QueueDispatcher
