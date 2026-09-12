@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
 import { Router, type RouteDefinition } from '../mvc/Router'
 import { loadPrototypeFixture, PROTOTYPE_FIXTURE_BINDING, type PrototypeFixtureLoader } from '../mvc/prototype'
-import { Container, mountModuleRoutes, setContainer, type ServiceProvider, type GurenModule } from '../container'
+import { Container, mountModuleRoutes, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
 import { AuthManager, DEFAULT_GUARD, DEFAULT_PROVIDER } from '../auth/AuthManager'
 import type { PasswordHasherOption } from '../auth/password/configured-hasher'
@@ -30,6 +30,9 @@ import {
 } from './dev-banner'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 import { runInRequestScope } from '../support/request-deferrer'
+import { adoptDefaultApplication } from './default-application'
+import { CONTAINER_CONTEXT_KEY } from './request-container'
+import type { InertiaDocumentOptions, InertiaSsrRenderer } from '../mvc/inertia/InertiaEngine'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
 // still allowing consumers to stub or polyfill it when running elsewhere.
@@ -422,6 +425,19 @@ export interface ApplicationOptions {
    * Loaded at boot only when such a route exists.
    */
   readonly prototype?: PrototypeFixtureLoader
+  /**
+   * App-wide Inertia rendering defaults, bound as `inertia.document` and
+   * `inertia.ssrRenderer` on this app's container (RFC 0023 §1) and read by
+   * `Controller.inertia()` ahead of the process-wide setters.
+   */
+  readonly inertia?: InertiaApplicationOptions
+}
+
+export interface InertiaApplicationOptions {
+  /** Document defaults for server-rendered responses; each per-response {@link InertiaOptions} field overrides its own. */
+  readonly document?: InertiaDocumentOptions
+  /** Default SSR renderer, for a bundle that cannot resolve a runtime path; per-call `ssr.render` still wins. */
+  readonly ssrRenderer?: InertiaSsrRenderer
 }
 
 export interface I18nPluginOptions {
@@ -530,6 +546,13 @@ export class Application {
     this.container.instance('auth', this.authManager)
     this.container.instance('router', this.router)
 
+    if (options.inertia?.document) {
+      this.container.instance('inertia.document', options.inertia.document)
+    }
+    if (options.inertia?.ssrRenderer) {
+      this.container.instance('inertia.ssrRenderer', options.inertia.ssrRenderer)
+    }
+
     // Registered here, before any provider, so requireAuthenticated/requireGuest
     // work for apps that wire sessions manually and for middleware added through
     // app.use() ahead of boot() (#13). `useModel()` replaces it under the same name.
@@ -585,12 +608,12 @@ export class Application {
       this.providerManager.register(InertiaServiceProvider)
     }
 
-    // Publish as the process-wide container: code outside a request (Job.make(),
-    // the exported resolve()) reaches it only through the global. In the
-    // constructor, because `guren queue:work` and a job dispatched at module
-    // scope never boot the app. Last statement, so a constructor that throws
-    // leaves the previous container in place rather than a half-built one.
-    setContainer(this.container)
+    // Publish as the default application: code outside a request (Job.make(),
+    // the exported resolve()) reaches this app only through the ambient slot.
+    // In the constructor, because `guren queue:work` and a job dispatched at
+    // module scope never boot the app. Last statement, so a constructor that
+    // throws leaves the previous app in place rather than a half-built one.
+    adoptDefaultApplication(this)
   }
 
   get auth(): AuthManager {
@@ -788,6 +811,12 @@ export class Application {
 
   /** Called once, from the constructor — see the note there for why. */
   private mountSecurityDefaults(): void {
+    // First of all, so no middleware an app registers runs without it (RFC 0023 §2).
+    this.hono.use('*', async (ctx, next) => {
+      ctx.set(CONTAINER_CONTEXT_KEY, this.container)
+      await next()
+    })
+
     const { securityHeaders } = this.options
     if (securityHeaders !== false) {
       this.hono.use('*', createSecurityHeaders(securityHeaders ?? {}))

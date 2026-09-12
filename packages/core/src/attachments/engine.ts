@@ -42,6 +42,13 @@ export interface AttachOptions {
   queued?: boolean
 }
 
+declare module '@guren/server' {
+  interface ServiceBindings {
+    /** Bound by `configureAttachments({ app })` (RFC 0023 §4); absent until then. */
+    attachments: AttachmentEngine
+  }
+}
+
 export interface ConfigureAttachmentsOptions {
   /**
    * The app's Drizzle `attachments` table. Column property names must match the

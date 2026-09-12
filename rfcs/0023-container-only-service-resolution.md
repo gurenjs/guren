@@ -130,6 +130,13 @@ export interface ServiceBindings {
 }
 ```
 
+**Amended in implementation:** ~~`attachments` is declared in server's
+`bindings.ts`~~ — the engine type lives in `@guren/core`, which server cannot
+import, so core declares the key by augmenting `ServiceBindings` from
+`attachments/engine.ts`, the same way it adds the `database` session driver to
+`SessionDrivers`. A test pins the augmentation surviving into core's bundled
+`.d.ts`.
+
 The rate-limit default store becomes one `MemoryRateLimitStore` per
 middleware instance (constructed inside `createRateLimitMiddleware`), which is
 what the `store` option already does; a process-wide bucket shared by every
@@ -251,9 +258,16 @@ app it boots (`cli/src/queue.ts:155-176`) and passes that container to the
 - `t()`/`tc()` read `defaultContainer().make('i18n')`; `detectLocaleMiddleware`
   defaults `i18n` to `tryGetRequestContainer(c)?.makeOptional('i18n')`.
 - `InertiaEngine` reads `inertia.document` and `inertia.ssrRenderer` from
-  `getRequestContainer(ctx)`; `setInertiaDocument()`/`setInertiaSsrRenderer()`
+  ~~`getRequestContainer(ctx)`~~ **Amended in implementation:** the engine
+  never sees a context (`inertia(component, props, options)` takes the raw
+  `Request`), so it reads them from `InertiaOptions.container`, which
+  `Controller.inertia()` fills with its own container. Shipped in Part 0, so
+  the `createApp({ inertia })` option it introduces is not inert;
+  `setInertiaDocument()`/`setInertiaSsrRenderer()`
   become shims that bind on the default application. The Workers entry
-  `plugin-cloudflare` generates switches to the option in the same PR.
+  `plugin-cloudflare` generates ~~switches to the option in the same PR~~ stays
+  on the setter until Open Question 4 is decided; the setter remains the
+  fallback the engine reads second.
 - `configureAttachments({ app })` binds `attachments` on that app; the
   delivery route resolves it from the request container. The scaffold's
   `storage: () => getContainer().make('storage')` becomes

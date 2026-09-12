@@ -1,4 +1,5 @@
-import type { QueueDriver } from './types'
+import type { JobOptions, QueueDriver } from './types'
+import { enqueueJob, type JobClass } from './Job'
 
 export type QueueDriverFactory = () => QueueDriver
 
@@ -47,6 +48,15 @@ export class QueueManager {
     this.resolvedDrivers.set(driverName, driver)
 
     return driver
+  }
+
+  /**
+   * Explicit form of `JobClass.dispatch(payload, options)`: the same message,
+   * pushed through this manager's default driver rather than the ambient one
+   * (RFC 0023 §3).
+   */
+  async dispatch<T>(JobClass: JobClass<T>, payload: T, options: JobOptions = {}): Promise<string> {
+    return enqueueJob(this.driver(), JobClass, payload, options)
   }
 
   registerDriver(name: string, factory: QueueDriverFactory): void {

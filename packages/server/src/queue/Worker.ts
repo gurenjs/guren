@@ -1,5 +1,5 @@
 import type { QueueDriver, QueuedJob, WorkerOptions } from './types'
-import { getJob, type JobClass } from './Job'
+import { getJob, type Job, type JobClass } from './Job'
 
 export interface WorkerEvents {
   jobProcessed?: (job: QueuedJob) => void
@@ -112,7 +112,7 @@ export class Worker {
     }
 
     try {
-      const instance = new JobClass()
+      const instance = this.instantiate(JobClass)
 
       await this.executeWithTimeout(
         async () => instance.handle(job.payload),
@@ -145,7 +145,7 @@ export class Worker {
       await this.driver.fail(job, error)
 
       try {
-        const instance = new JobClass()
+        const instance = this.instantiate(JobClass)
         if (instance.failed) {
           await instance.failed(job.payload, error)
         }
@@ -167,6 +167,14 @@ export class Worker {
     }))
 
     this.events.jobFailed?.(job, error, willRetry)
+  }
+
+  private instantiate(JobClass: JobClass): Job {
+    const instance = new JobClass()
+    if (this.options.container) {
+      instance.setContainer(this.options.container)
+    }
+    return instance
   }
 
   private async executeWithTimeout<T>(
@@ -198,9 +206,10 @@ export class Worker {
 /** Process one job without a running worker, for tests and one-off execution. */
 export async function processJob(
   driver: QueueDriver,
-  queue: string = 'default'
+  queue: string = 'default',
+  options: Pick<WorkerOptions, 'container'> = {},
 ): Promise<boolean> {
-  const worker = new Worker(driver, { queues: [queue], maxJobs: 1, stopWhenEmpty: true })
+  const worker = new Worker(driver, { ...options, queues: [queue], maxJobs: 1, stopWhenEmpty: true })
   await worker.start()
   return worker.getProcessedJobsCount() > 0
 }

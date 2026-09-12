@@ -1,3 +1,5 @@
+import type { ContainerLike } from '../container/types'
+
 /** Serialized job data stored in the queue. */
 export interface QueuedJob<T = unknown> {
   id: string
@@ -81,6 +83,13 @@ export interface JobOptions {
 
 /** Worker options. */
 export interface WorkerOptions {
+  /**
+   * The container of the app whose jobs this worker runs; each job receives it
+   * through `setContainer()` before `handle()` (RFC 0023 §2). Without it a job
+   * resolves from the default application.
+   */
+  container?: ContainerLike
+
   /**
    * Queues to process (in priority order).
    * @default ['default']

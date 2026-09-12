@@ -84,7 +84,7 @@ export interface RedirectOptions {
   headers?: HeadersInit
 }
 
-type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request'> & { url?: string }
+type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request' | 'container'> & { url?: string }
 
 type InertiaPageComponent<TPage extends InertiaPageContractLike> = TPage['id']
 type InertiaPageProps<TPage extends InertiaPageContractLike> = NonNullable<TPage['__props']>
@@ -270,6 +270,7 @@ export class Controller {
       // keep the Inertia engine's own default lang.
       lang: options.lang ?? this.#resolveLocale(),
       request: ctx.req.raw,
+      container: this._container,
     })
 
     ;(response as InertiaResponse<Component, typeof propsWithShared>).__gurenInertia = {

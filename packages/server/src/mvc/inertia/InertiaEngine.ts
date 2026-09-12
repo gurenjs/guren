@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { ensureErrorStackTracePolyfill } from "../../support/error-polyfill";
 import { parseImportMap } from "../../support/import-map";
 import { DEFAULT_DEV_STYLES_ENTRY } from "../../support/inertia-defaults";
+import type { ContainerLike } from "../../container/types";
 
 ensureErrorStackTracePolyfill();
 
@@ -15,6 +16,12 @@ type InertiaDocumentOverrides = {
 };
 
 export interface InertiaOptions extends InertiaDocumentOverrides {
+  /**
+   * Where `inertia.document` and `inertia.ssrRenderer` are read from
+   * (`createApp({ inertia })`, RFC 0023 §1); `Controller.inertia()` passes its
+   * app's. The process-wide setters are the fallback.
+   */
+  container?: ContainerLike;
   readonly url?: string;
   readonly version?: string;
   readonly status?: number;
@@ -120,6 +127,11 @@ export function setInertiaSsrRenderer(
   renderer: InertiaSsrRenderer | undefined
 ): void {
   defaultSsrRenderer = renderer;
+}
+
+/** A binding `container` holds, without throwing on a container that has none. */
+function bound<T>(container: ContainerLike | undefined, key: string): T | undefined {
+  return container?.has?.(key) ? (container.make(key) as T) : undefined;
 }
 
 const DEFAULT_TITLE = "Guren";
@@ -332,6 +344,7 @@ async function tryRenderSsr(
 
   const renderer =
     ssrOptions?.render ??
+    bound<InertiaSsrRenderer>(options.container, "inertia.ssrRenderer") ??
     defaultSsrRenderer ??
     (await loadSsrRenderer(
       ssrOptions?.entry ?? process.env.GUREN_INERTIA_SSR_ENTRY
@@ -475,7 +488,10 @@ function resolveDocumentValue(
     return override;
   }
 
-  const value = documentOptions?.[key];
+  const document =
+    bound<InertiaDocumentOptions>(options.container, "inertia.document") ??
+    documentOptions;
+  const value = document?.[key];
 
   return (
     (typeof value === "function" ? value({ component: componentName }) : value) ??

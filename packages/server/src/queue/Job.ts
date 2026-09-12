@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { QueueDriver, QueuedJob, JobOptions } from './types'
 import type { QueueManager } from './QueueManager'
 import type { ServiceBindings } from '../container/bindings'
+import type { ContainerLike } from '../container/types'
 import { getContainer } from '../container/Container'
 
 /**
@@ -63,6 +64,36 @@ function generateJobId(): string {
   return randomBytes(16).toString('hex')
 }
 
+/**
+ * The one enqueue behind `Job.dispatch()` and `QueueManager.dispatch()`, so the
+ * two forms cannot write different messages.
+ */
+export async function enqueueJob<T>(
+  driver: QueueDriver,
+  JobClass: JobClass<T>,
+  payload: T,
+  options: JobOptions = {},
+): Promise<string> {
+  const jobId = generateJobId()
+  const now = new Date()
+  const delay = options.delay ?? 0
+
+  const job: QueuedJob<T> = {
+    id: jobId,
+    name: resolveJobName(JobClass),
+    payload,
+    queue: options.queue ?? JobClass.queue,
+    attempts: 0,
+    maxAttempts: options.maxAttempts ?? JobClass.maxAttempts,
+    availableAt: new Date(now.getTime() + delay),
+    createdAt: now,
+    reservedAt: null,
+  }
+
+  await driver.push(job)
+  return jobId
+}
+
 export abstract class Job<T = unknown> {
   /**
    * Stable wire name: queued messages record it and the worker resolves the
@@ -85,10 +116,18 @@ export abstract class Job<T = unknown> {
    */
   static backoff: 'exponential' | 'linear' | number = 'exponential'
 
+  private container?: ContainerLike
+
+  /** @internal Called by the Worker with the container of the app it drains, before `handle()`. */
+  setContainer(container: ContainerLike): void {
+    this.container = container
+  }
+
+  /** Resolves from the worker's container, else from the default application. */
   protected make<K extends keyof ServiceBindings>(key: K): ServiceBindings[K]
   protected make<TService>(key: string): TService
   protected make(key: string): unknown {
-    return getContainer().make(key)
+    return (this.container ?? getContainer()).make(key)
   }
 
   abstract handle(payload: T): void | Promise<void>
@@ -106,24 +145,7 @@ export abstract class Job<T = unknown> {
       throw new Error(missingQueueDriverMessage())
     }
 
-    const jobId = generateJobId()
-    const now = new Date()
-    const delay = options.delay ?? 0
-
-    const job: QueuedJob<T> = {
-      id: jobId,
-      name: resolveJobName(this),
-      payload,
-      queue: options.queue ?? this.queue,
-      attempts: 0,
-      maxAttempts: options.maxAttempts ?? this.maxAttempts,
-      availableAt: new Date(now.getTime() + delay),
-      createdAt: now,
-      reservedAt: null,
-    }
-
-    await driver.push(job)
-    return jobId
+    return enqueueJob(driver, this, payload, options)
   }
 
   static async dispatchAfter<T>(

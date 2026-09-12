@@ -3,6 +3,14 @@ import { ensureErrorStackTracePolyfill } from './support/error-polyfill'
 ensureErrorStackTracePolyfill()
 
 export { Application, createApp } from './http/Application'
+export {
+  defaultApplication,
+  defaultContainer,
+  resetDefaultApplication,
+  useAsDefaultApplication,
+} from './http/default-application'
+export { CONTAINER_CONTEXT_KEY, getRequestContainer, tryGetRequestContainer } from './http/request-container'
+export type { RequestContextLike } from './http/request-container'
 export type {
   Context,
   ApplicationListenOptions,
@@ -1030,7 +1038,7 @@ export { NodeHasher } from './auth/password/NodeHasher'
 export { DefaultHasher, DefaultHasher as Hash } from './auth/password/DefaultHasher'
 export type { PasswordHashAlgorithm, DefaultHasherOptions } from './auth/password/DefaultHasher'
 export type { PasswordHasherOption } from './auth/password/configured-hasher'
-export type { ApplicationOptions, AuthPluginOptions, I18nPluginOptions } from './http/Application'
+export type { ApplicationOptions, AuthPluginOptions, I18nPluginOptions, InertiaApplicationOptions } from './http/Application'
 export type { InertiaI18nProps } from './providers/I18nServiceProvider'
 // Queue: SQS adapter
 export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'
