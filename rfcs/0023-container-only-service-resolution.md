@@ -2,7 +2,8 @@
 
 **Author:** 7nohe
 **Date:** 2026-09-11
-**Status:** Draft
+**Status:** Accepted (2026-09-12 — the standard two-week discussion window
+was shortened by the deciding maintainer for this solo-driven change)
 
 ## Problem
 
@@ -129,6 +130,13 @@ export interface ServiceBindings {
 }
 ```
 
+**Amended in implementation:** ~~`attachments` is declared in server's
+`bindings.ts`~~ — the engine type lives in `@guren/core`, which server cannot
+import, so core declares the key by augmenting `ServiceBindings` from
+`attachments/engine.ts`, the same way it adds the `database` session driver to
+`SessionDrivers`. A test pins the augmentation surviving into core's bundled
+`.d.ts`.
+
 The rate-limit default store becomes one `MemoryRateLimitStore` per
 middleware instance (constructed inside `createRateLimitMiddleware`), which is
 what the `store` option already does; a process-wide bucket shared by every
@@ -250,9 +258,16 @@ app it boots (`cli/src/queue.ts:155-176`) and passes that container to the
 - `t()`/`tc()` read `defaultContainer().make('i18n')`; `detectLocaleMiddleware`
   defaults `i18n` to `tryGetRequestContainer(c)?.makeOptional('i18n')`.
 - `InertiaEngine` reads `inertia.document` and `inertia.ssrRenderer` from
-  `getRequestContainer(ctx)`; `setInertiaDocument()`/`setInertiaSsrRenderer()`
+  ~~`getRequestContainer(ctx)`~~ **Amended in implementation:** the engine
+  never sees a context (`inertia(component, props, options)` takes the raw
+  `Request`), so it reads them from `InertiaOptions.container`, which
+  `Controller.inertia()` fills with its own container. Shipped in Part 0, so
+  the `createApp({ inertia })` option it introduces is not inert;
+  `setInertiaDocument()`/`setInertiaSsrRenderer()`
   become shims that bind on the default application. The Workers entry
-  `plugin-cloudflare` generates switches to the option in the same PR.
+  `plugin-cloudflare` generates ~~switches to the option in the same PR~~ stays
+  on the setter until Open Question 4 is decided; the setter remains the
+  fallback the engine reads second.
 - `configureAttachments({ app })` binds `attachments` on that app; the
   delivery route resolves it from the request container. The scaffold's
   `storage: () => getContainer().make('storage')` becomes
@@ -380,13 +395,20 @@ the earliest.
    `CONTAINER_CONTEXT_KEY`) so a request translator or the auth context can
    be bindings rather than context keys. Leaning: this RFC defines only the
    stamp; the scope is its own RFC once one service needs it.
+   **Decision:** this RFC defines only the stamp. A per-request child
+   container is its own RFC, once one service needs it.
 2. **`Container.scoped()` / `scopedAsync()`.** Stack-based, unsafe under
    concurrent requests, zero callers outside their test. Remove in Part 3, or
    reimplement over question 1's child container? Leaning: remove.
+   **Decision:** remove in Part 3.
 3. **Default application: last-constructed or first?** Last matches
    sequential tests and today's `:585`; first would protect a long-lived
    server from a stray `new Application()` in a plugin. Is the warn-once on
    a second construction enough?
+   **Decision:** last-constructed wins, as today. Constructing a second
+   `Application` while one exists marks the ambient choice ambiguous, and
+   the first ambient call after that warns once, naming
+   `useAsDefaultApplication()`.
 4. **`inertia.document` as a `createApp()` option versus a provider
    binding.** The option reads well in a scaffold; the generated Workers entry
    (`build.ts:1130`) calls the setter after importing the app, which the
@@ -398,3 +420,5 @@ the earliest.
 6. **`getContainer()` after removal.** `defaultContainer()` is the successor.
    Keep `getContainer` as an alias for the three guides and the attachments
    scaffold, or remove it? Leaning: remove; the codemod covers the scaffold.
+   **Decision:** remove in Part 3; `defaultContainer()` succeeds it and
+   the codemod covers the scaffold.

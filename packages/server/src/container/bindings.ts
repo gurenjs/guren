@@ -18,6 +18,7 @@ import type { Scheduler } from '../scheduling'
 import type { Gate } from '../authorization/Gate'
 import type { ExceptionHandler } from '../errors'
 import type { SharedInertiaPropsRegistry } from '../mvc/inertia/shared'
+import type { InertiaDocumentOptions, InertiaSsrRenderer } from '../mvc/inertia/InertiaEngine'
 import type { AgentAuditEmitter } from '../agent/audit-emitter'
 import type { SessionManager } from '../http/middleware/session-manager'
 
@@ -45,6 +46,10 @@ export interface ServiceBindings {
   gate: Gate
   /** Bound lazily on the first `shareInertiaProps(fn, container)` call. */
   'inertia.sharedProps': SharedInertiaPropsRegistry
+  /** `createApp({ inertia: { document } })`; read by the Inertia engine ahead of `setInertiaDocument()` (RFC 0023 §1). */
+  'inertia.document': InertiaDocumentOptions
+  /** `createApp({ inertia: { ssrRenderer } })`; per-call `ssr.render` still wins. */
+  'inertia.ssrRenderer': InertiaSsrRenderer
   /**
    * How an agent surface records what it did (RFC 0016 §5.2). Bound by
    * `@guren/plugin-mcp` at boot, absent without it; the *emitter*, not the sink,

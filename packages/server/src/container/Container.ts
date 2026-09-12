@@ -339,6 +339,16 @@ export function setContainer(container: Container): void {
   globalContainer = container
 }
 
+/** @internal The ambient container without the throw, for `defaultApplication()`'s ownership check. */
+export function peekContainer(): Container | null {
+  return globalContainer
+}
+
+/** @internal Empties the ambient slot; `resetDefaultApplication()` is the public seam. */
+export function clearContainer(): void {
+  globalContainer = null
+}
+
 export function getContainer(): Container {
   if (!globalContainer) {
     throw new Error('Container not initialized. Call setContainer() first.')
