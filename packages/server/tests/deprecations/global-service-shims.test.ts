@@ -164,9 +164,16 @@ describe('the deprecated service accessors', () => {
     expect(app.container.has('encrypter')).toBe(true)
   })
 
-  it('leaves the two Inertia setters silent while Open Question 4 is open', () => {
-    setInertiaDocument({ head: '<meta name="x" content="y">' })
+  it('warns from setInertiaSsrRenderer, whose generated caller Open Question 4 removed', () => {
     setInertiaSsrRenderer(undefined)
+
+    const messages = warned()
+    expect(messages.filter((message) => message.includes('setInertiaSsrRenderer()'))).toHaveLength(1)
+    expect(messages[0]).toContain('createApp({ inertia })')
+  })
+
+  it('leaves setInertiaDocument silent while both scaffold templates call it', () => {
+    setInertiaDocument({ head: '<meta name="x" content="y">' })
 
     expect(warn).not.toHaveBeenCalled()
   })

@@ -275,9 +275,13 @@ app it boots (`cli/src/queue.ts:155-176`) and passes that container to the
   the `createApp({ inertia })` option it introduces is not inert;
   `setInertiaDocument()`/`setInertiaSsrRenderer()`
   become shims that bind on the default application. The Workers entry
-  `plugin-cloudflare` generates ~~switches to the option in the same PR~~ stays
-  on the setter until Open Question 4 is decided; the setter remains the
-  fallback the engine reads second.
+  `plugin-cloudflare` generates ~~switches to the option in the same PR~~
+  **Amended in implementation:** binds the key on the app it already imported,
+  `app.container.instance('inertia.ssrRenderer', ssrModule.<export>)`, under a
+  `container.has()` guard so an app that passed the option keeps its own
+  renderer. The option cannot express that entry (Open Question 4): the renderer
+  exists only after the SSR module is imported, which is after `createApp()`
+  ran. Both setters keep writing their slot, which the engine reads second.
 - ~~`configureAttachments({ app })` binds `attachments` on that app~~; the
   delivery route resolves it from the request container. The scaffold's
   `storage: () => getContainer().make('storage')` becomes
@@ -336,13 +340,16 @@ when no `Application` has been constructed yet; the getters keep reading the
 slot second. The visible change is that a hand-written `setX()` beside a live
 app now *replaces* that app's binding rather than being silently shadowed by it.
 
-Two setters are tagged and registered but do not warn at runtime.
-`setInertiaSsrRenderer` is called by the Workers entry `@guren/plugin-cloudflare`
-generates, which stays on it until Open Question 4 is decided, and
-`setInertiaDocument` is what both scaffold templates and four guides still
-write; a warning naming code the framework itself emits is not actionable. Both
-are reported by `guren upgrade --check-only` and rewritten by the codemod, and
-the warning lands with Open Question 4.
+~~Two setters are tagged and registered but do not warn at runtime.~~
+**Amended in implementation:** both shipped in Part 2 tagged, registered and
+silent, because a warning naming code the framework itself emits is not
+actionable. Each starts warning with the change that removes its last such
+caller: `setInertiaSsrRenderer` with Open Question 4's decision, which drops it
+from the generated Workers entry, and `setInertiaDocument` with the scaffold
+pass that moves both templates to the option. Neither binds the ambient
+container, unlike its siblings: the engine reads the container first and the
+slot second either way, and a template calling `setInertiaDocument()` at module
+scope above `createApp()` has no ambient app to bind.
 
 | Deprecation id | Symbols | Replacement |
 |---|---|---|
@@ -480,6 +487,14 @@ replaces.
    binding.** The option reads well in a scaffold; the generated Workers entry
    (`build.ts:1130`) calls the setter after importing the app, which the
    option cannot express. Keep both, or have the plugin bind directly?
+   **Decision:** `document` is the `createApp({ inertia })` option, which is
+   where a scaffold wants it. The plugin binds directly —
+   `app.container.instance('inertia.ssrRenderer', ssrModule.<export>)` on the
+   app its generated entry already imported, under a `container.has()` guard so
+   an app that passed `createApp({ inertia: { ssrRenderer } })` keeps it, which
+   is the precedence the setter had. That leaves `setInertiaSsrRenderer` with
+   no caller the framework emits, so it warns; `setInertiaDocument` follows
+   when the scaffold pass moves both templates to the option.
 5. **The class registries.** `jobRegistry` (`Job.ts:129`) and
    `notificationRegistry` (`notifications/registry.ts:13`) map wire names to
    classes and are per process by design. Out of scope unless two apps in one

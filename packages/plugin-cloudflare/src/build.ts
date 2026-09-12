@@ -1118,16 +1118,21 @@ function renderWorkerModule(input: {
   }
 
   if (input.ssrImport) {
-    lines.push(
-      "import { setInertiaSsrRenderer } from '@guren/core'",
-      `import * as ssrModule from ${quotedImport(input.out, input.ssrImport.file)}`,
-    )
+    lines.push(`import * as ssrModule from ${quotedImport(input.out, input.ssrImport.file)}`)
   }
 
   lines.push(`import app from ${quotedImport(input.out, input.appEntry)}`, '')
 
   if (input.ssrImport) {
-    lines.push(`setInertiaSsrRenderer(ssrModule.${input.ssrImport.rendererExport})`, '')
+    lines.push(
+      "// The renderer only exists once the SSR module is imported, which is after",
+      "// createApp() ran, so it is bound here rather than passed as an option. An app",
+      "// that passed createApp({ inertia: { ssrRenderer } }) keeps its own (RFC 0023).",
+      "if (!app.container.has('inertia.ssrRenderer')) {",
+      `  app.container.instance('inertia.ssrRenderer', ssrModule.${input.ssrImport.rendererExport})`,
+      '}',
+      '',
+    )
   }
 
   lines.push('const handler = createWorkersHandler(app)', '')

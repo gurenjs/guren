@@ -5,12 +5,14 @@ import { parseImportMap } from "../../support/import-map";
 import { DEFAULT_DEV_STYLES_ENTRY } from "../../support/inertia-defaults";
 import type { ContainerLike } from "../../container/types";
 import { resolveOptional } from "../../container/resolve-optional";
+import { warnDeprecatedSetter } from "../../support/deprecate";
 
 ensureErrorStackTracePolyfill();
 
 /**
  * Per-response form of {@link InertiaDocumentOptions}, already resolved to
- * strings. Each field overrides the app-wide {@link setInertiaDocument} default.
+ * strings. Each field overrides the app-wide
+ * `createApp({ inertia: { document } })` default.
  */
 type InertiaDocumentOverrides = {
   readonly [K in keyof InertiaDocumentOptions]?: string;
@@ -110,10 +112,9 @@ let documentOptions: InertiaDocumentOptions | undefined;
  * in-flight requests — use the {@link InertiaOptions} fields per response.
  * Values are emitted verbatim, so never pass user input. `undefined` clears.
  *
- * Tagged but silent, as {@link setInertiaSsrRenderer} is: RFC 0023 Open
- * Question 4 has not settled whether the option or this setter is the endpoint,
- * and both scaffold templates still write it. `guren upgrade --check-only`
- * reports it either way.
+ * Tagged but silent: both scaffold templates still call it, and a warning
+ * naming code the framework itself emits is not actionable. It warns once the
+ * scaffold pass moves them to the option (RFC 0023 §5).
  * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Pass
  * `createApp({ inertia: { document } })`, which binds it on the app rather than
  * the process. The slot stays the engine's second read.
@@ -132,16 +133,15 @@ let defaultSsrRenderer: InertiaSsrRenderer | undefined;
  * `GUREN_INERTIA_SSR_ENTRY`'s dynamic import). Per-call `ssr.render` still
  * wins; `undefined` clears (test isolation).
  *
- * Tagged but silent: the Workers entry `@guren/plugin-cloudflare` generates is
- * its only known caller, and it stays on this setter until RFC 0023 Open
- * Question 4 is decided, so a runtime warning would name code no app author
- * wrote or can change. `guren upgrade --check-only` reports it either way.
  * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Pass
- * `createApp({ inertia: { ssrRenderer } })`.
+ * `createApp({ inertia: { ssrRenderer } })`, or bind `inertia.ssrRenderer` on
+ * the app when the renderer only exists after `createApp()` has run, as the
+ * Workers entry `@guren/plugin-cloudflare` generates does.
  */
 export function setInertiaSsrRenderer(
   renderer: InertiaSsrRenderer | undefined
 ): void {
+  warnDeprecatedSetter("setInertiaSsrRenderer");
   defaultSsrRenderer = renderer;
 }
 
