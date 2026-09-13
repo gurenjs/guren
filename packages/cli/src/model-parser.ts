@@ -35,6 +35,18 @@ export interface ModelInfo {
    * collections", and a partial read (rejecting collections the runtime accepts) is unrepresentable.
    */
   attachments: ModelAttachmentCollection[] | 'unreadable' | null
+  /**
+   * Mass-assignment allowlist, from `static fillable` or the defineModel option.
+   * `null` when neither is declared, `'unreadable'` when one is but its value is
+   * not a literal array: the runtime still uses it, so it must not read as absent.
+   */
+  fillable: string[] | 'unreadable' | null
+  /** Serialization denylist, resolved like {@link ModelInfo.fillable}. */
+  hidden: string[] | 'unreadable' | null
+  /** Serialization allowlist (wins over `hidden`), resolved like {@link ModelInfo.fillable}. */
+  visible: string[] | 'unreadable' | null
+  /** `static casts` as attribute → cast type; there is no defineModel option for it. */
+  casts: Record<string, string> | 'unreadable' | null
   /** `@docs <path>` tags in the model source (code-side doc links). */
   docsTags: string[]
 }
@@ -88,8 +100,35 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
     usesAuth,
     hasSoftDeletes,
     attachments: extractModelAttachments(classDecl),
+    fillable: readModelStringArrayConfig(classDecl, 'fillable'),
+    hidden: readModelStringArrayConfig(classDecl, 'hidden'),
+    visible: readModelStringArrayConfig(classDecl, 'visible'),
+    casts: extractModelCasts(classDecl),
     docsTags: extractDocsTags(source),
   }
+}
+
+function readModelStringArrayConfig(classDecl: ClassDeclaration, name: string): string[] | 'unreadable' | null {
+  if (!hasModelConfig(classDecl, name)) return null
+  return resolveModelStringArrayConfig(classDecl, name) ?? 'unreadable'
+}
+
+/** A spread, a computed key or a non-literal cast type makes the whole map unreadable, never partial. */
+function extractModelCasts(classDecl: ClassDeclaration): Record<string, string> | 'unreadable' | null {
+  const property = findStaticClassProperty(classDecl, 'casts')
+  if (!property) return null
+  const declaration = objectLiteral(property.value)
+  if (!declaration) return 'unreadable'
+
+  const casts: Record<string, string> = {}
+  for (const member of declaration.properties) {
+    if (member.type !== 'ObjectProperty') return 'unreadable'
+    const name = memberKeyName(member)
+    const type = literalString(member.value)
+    if (name === undefined || type === null) return 'unreadable'
+    casts[name] = type
+  }
+  return casts
 }
 
 /** The class in a top-level statement: export named, export default, or bare. */

@@ -22,6 +22,8 @@ import { memberKeyName, walk } from './ast-walk'
 export interface ControllerMethodInfo {
   /** Method body source with comments and string contents blanked, offsets preserved. */
   body: string
+  /** Offset of `body` in the file, for reading the unblanked source of the same span. */
+  bodyStart: number
   /** Controller file, relative to the project root. */
   filePath: string
 }
@@ -305,6 +307,7 @@ export async function parseControllerMethods(
       for (const { name, body } of classActionMembers(classDecl)) {
         methods.set(`${className}.${name}`, {
           body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
+          bodyStart: body.start ?? 0,
           filePath: relPath,
         })
       }
