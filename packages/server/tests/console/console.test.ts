@@ -736,6 +736,83 @@ describe('ConsoleKernel', () => {
     expect(output.contains('Usage:')).toBe(true)
   })
 
+  describe('<command> --help', () => {
+    const effects: string[] = []
+
+    class PruneCommand extends Command {
+      static signature =
+        'records:prune {table : Table to prune} {--dry-run : Report without deleting} {--older-than=30 : Age in days}'
+      static description = 'Delete orphaned records'
+
+      constructor(...args: ConstructorParameters<typeof Command>) {
+        super(...args)
+        effects.push('constructed')
+      }
+
+      async handle(): Promise<void> {
+        effects.push('handled')
+      }
+    }
+
+    beforeEach(() => {
+      effects.length = 0
+      kernel.register(PruneCommand)
+    })
+
+    for (const flag of ['--help', '-h']) {
+      test(`${flag} prints the command's help without constructing it`, async () => {
+        const result = await kernel.handle(['records:prune', flag])
+
+        expect(result).toBe(0)
+        expect(effects).toEqual([])
+        expect(helpLines(output)).toEqual([
+          'INFO Command: records:prune',
+          'Delete orphaned records',
+          'Usage: records:prune [options] <table>',
+          'Arguments:',
+          'table Table to prune (required)',
+          'Options:',
+          '--dry-run Report without deleting',
+          '--older-than=<value> Age in days [default: 30]',
+        ])
+      })
+    }
+
+    test('wins wherever it appears among the arguments', async () => {
+      for (const argv of [
+        ['records:prune', 'sessions', '--help'],
+        ['records:prune', '--older-than', '--help'],
+        ['records:prune', 'sessions', '--', '-h'],
+      ]) {
+        output.clear()
+        expect(await kernel.handle(argv)).toBe(0)
+        expect(output.contains('Command: records:prune')).toBe(true)
+      }
+      expect(effects).toEqual([])
+    })
+
+    test('reaches kernel.call() the same way', async () => {
+      expect(await kernel.call('records:prune', ['-h'])).toBe(0)
+      expect(effects).toEqual([])
+    })
+
+    test('leaves -h and --help to a command whose signature declares them', async () => {
+      class ServeCommand extends Command {
+        static signature = 'app:serve {-h|--host=} {--help : Print the upstream help}'
+
+        async handle(): Promise<void> {
+          effects.push(`host=${this.option('host')} help=${this.option('help')}`)
+        }
+      }
+
+      kernel.register(ServeCommand)
+
+      expect(await kernel.handle(['app:serve', '-h', '0.0.0.0', '--help'])).toBe(0)
+      expect(effects).toEqual(['host=0.0.0.0 help=true'])
+      expect(output.contains('Command: app:serve')).toBe(false)
+    })
+  })
+
   test('shows command help with argument and option descriptions', async () => {
     class DescribedCommand extends Command {
       static signature =

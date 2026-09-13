@@ -4,9 +4,21 @@ import type {
   ConsoleKernelOptions,
   OptionDefinition,
   OutputInterface,
+  ParsedSignature,
 } from './types'
 import { Output, BufferedOutput } from './Output'
 import { argumentLabel, formatUsage, optionLabel, parseSignature } from './Input'
+
+/**
+ * `--help` / `-h` anywhere in argv, even where `Input` would read it as an option's
+ * value: a command that ignored the flag would otherwise run for real. `Input` has no
+ * `--` terminator, so neither does this. A signature declaring either name keeps it.
+ */
+function requestsHelp(signature: ParsedSignature, args: string[]): boolean {
+  const claimsLong = signature.options.some((opt) => opt.name === 'help')
+  const claimsShort = signature.options.some((opt) => opt.shortcut === 'h')
+  return args.some((arg) => (arg === '--help' && !claimsLong) || (arg === '-h' && !claimsShort))
+}
 
 /** Past the longest label, but never narrower than `min`. */
 function helpColumn(labels: string[], min: number): number {
@@ -100,6 +112,11 @@ export class ConsoleKernel {
       this.output.line('')
       this.suggestCommands(commandName)
       return 1
+    }
+
+    if (requestsHelp(parseSignature(CommandClass.signature), args)) {
+      this.showCommandHelp(commandName)
+      return 0
     }
 
     return this.runCommand(CommandClass, args)
