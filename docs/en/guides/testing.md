@@ -320,7 +320,7 @@ Each container key holds a manager (`events` an `EventManager`, `mail` a `MailMa
 
 `assertPushed` takes the payload type explicitly. A job class alone does not tell TypeScript its payload, so the predicate would receive `unknown`.
 
-`fake()` returns a disposable, and `using` puts the app's own binding back when the test ends. Every test file that calls `fromApp()` shares one app instance, so a fake bound in `beforeAll` and never restored stays bound for the files that run after it. Bind fakes after the app boots, too: providers call `listen()` and `setQueueDispatcher()` on the `events` manager during boot, and the fake manager has neither.
+`fake()` returns a disposable, and `using` puts the app's own binding back when the test ends. Every test file that calls `fromApp()` shares one app instance, so a fake bound in `beforeAll` and never restored stays bound for the files that run after it. Bind fakes after `fromApp()` has booted the app, too: providers set up the real services during boot, and the fake event manager is not a full `EventManager`.
 
 Binding the fake itself rather than a manager fails on first use, and the request answers 500:
 
