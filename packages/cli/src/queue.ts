@@ -17,6 +17,9 @@ export interface QueueWorkOptions {
   /** Process only one job and exit. */
   once?: boolean
 
+  /** Exit once the queues are empty instead of polling for new jobs. */
+  stopWhenEmpty?: boolean
+
   /** Sleep time between job polling (ms). @default 1000 */
   sleep?: number
 
@@ -34,7 +37,7 @@ export async function runQueueWorker(options: QueueWorkOptions = {}): Promise<vo
   const sleep = options.sleep ?? 1000
   const maxJobs = options.once ? 1 : (options.maxJobs ?? 0)
   const timeout = (options.timeout ?? 60) * 1000
-  const stopWhenEmpty = options.once ?? false
+  const stopWhenEmpty = Boolean(options.once || options.stopWhenEmpty)
 
   const events: WorkerEvents = {
     workerStarted: () => {

@@ -1379,6 +1379,10 @@ const queueWorkCommand = defineCommand({
       type: 'boolean',
       description: 'Process only one job and exit',
     },
+    'stop-when-empty': {
+      type: 'boolean',
+      description: 'Exit once the queues are empty instead of polling for new jobs',
+    },
     sleep: {
       type: 'string',
       description: 'Sleep time between polls (ms)',
@@ -1399,6 +1403,7 @@ const queueWorkCommand = defineCommand({
     await runQueueWorker({
       queue: args.queue,
       once: args.once,
+      stopWhenEmpty: args['stop-when-empty'],
       sleep: parseInt(args.sleep ?? '1000', 10),
       timeout: parseInt(args.timeout ?? '60', 10),
       maxJobs: parseInt(args['max-jobs'] ?? '0', 10),

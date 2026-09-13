@@ -65,3 +65,55 @@ describe('unknownCommandsIn', () => {
     expect(unknownIn('`bunx guren analytics:flush`').map((entry) => entry.command)).toEqual(['analytics:flush'])
   })
 })
+
+describe('flags', () => {
+  function flagsIn(...lines: string[]) {
+    return unknownIn(...lines).map(({ command, flag }) => ({ command, flag }))
+  }
+
+  test('reports a flag the command does not declare', () => {
+    const unknown = unknownIn('bunx guren db:migrate --path db/migrations')
+
+    expect(unknown.map(({ command, flag }) => ({ command, flag }))).toEqual([{ command: 'db:migrate', flag: 'path' }])
+    expect(formatUnknownCliCommand(unknown[0]!)).toContain('declares no such flag')
+  })
+
+  test('accepts declared flags, their negation, and the flags every command takes', () => {
+    expect(
+      flagsIn(
+        'bunx guren db:seed --force --dry-run --json',
+        'bunx guren db:reset --seed',
+        'bunx guren queue:work --queue emails --stop-when-empty',
+        'bunx guren db:seed --no-force',
+        'bunx guren db:status --help',
+      ),
+    ).toEqual([])
+  })
+
+  test('reads a camelCase flag as the kebab-case arg citty resolves it to', () => {
+    expect(flagsIn('bunx guren upgrade --dryRun --checkOnly', 'bunx guren db:seed --dryRun --no-force')).toEqual([])
+    expect(flagsIn('bunx guren db:migrate --migrationsPath db', 'bunx guren db:seed --noForce')).toEqual([
+      { command: 'db:migrate', flag: 'migrationsPath' },
+      { command: 'db:seed', flag: 'noForce' },
+    ])
+  })
+
+  test('leaves flags to commands that parse their own', () => {
+    expect(
+      flagsIn('bunx guren add resource posts --fields "title:string" --public', 'bunx guren cloudflare:build --anything'),
+    ).toEqual([])
+  })
+
+  test('reads a flag only up to the end of its own invocation', () => {
+    expect(
+      flagsIn(
+        'bunx guren check && bunx guren agent:init --target codex',
+        'Run `bunx guren db:status` --with prose after the span.',
+        'bunx guren db:migrate   # --force is not needed',
+      ),
+    ).toEqual([])
+    expect(flagsIn('bunx guren agent:init --target codex && bunx guren check --target codex')).toEqual([
+      { command: 'check', flag: 'target' },
+    ])
+  })
+})
