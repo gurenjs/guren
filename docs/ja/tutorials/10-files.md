@@ -157,7 +157,6 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 ```ts file=tests/PostAttachments.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync } from 'node:fs'
 import { TestApp } from '@guren/testing'
 import app from '../src/app.js'
 import { resetDatabase } from '../config/database.js'
@@ -171,6 +170,10 @@ const PNG = Uint8Array.from(
 
 function image(name: string): File {
   return new File([PNG], name, { type: 'image/png' })
+}
+
+function disk() {
+  return app.container.make('storage').disk('local')
 }
 
 describe('post attachments', () => {
@@ -228,16 +231,16 @@ describe('post attachments', () => {
   it('removes the files when the post is deleted', async () => {
     const post = await Post.forceCreate({ title: 'Doomed', body: 'Body', authorId: ada.id })
     const attachment = await Post.attach(post.id, 'cover', image('cover.png'))
-    expect(existsSync(`storage/app/${attachment.path}`)).toBe(true)
+    expect(await disk().exists(attachment.path)).toBe(true)
 
     await asAda.delete(`/posts/${post.id}`).assertRedirect('/posts')
 
-    expect(existsSync(`storage/app/${attachment.path}`)).toBe(false)
+    expect(await disk().exists(attachment.path)).toBe(false)
   })
 })
 ```
 
-このファイルで読む価値があるのは 3 か所です。1 つ目、アップロードは `File` を含む `FormData` で、`TestApp` はそれを見つけると multipart として送ります。JSON のボディではファイルを運べません。2 つ目、URL については存在するかどうかではなく、署名されているかどうかをアサートしています。署名の無い URL は、ディスクが公開されていることを意味するからです。3 つ目、最後のテストは attachment の行が記録するオブジェクトキーをたどってディスクそのものを検査します。投稿を削除したら、そのファイルを残してはいけません。これはデータベースへのアサーションだけでは分からないことです。
+このファイルで読む価値があるのは 3 か所です。1 つ目、アップロードは `File` を含む `FormData` で、`TestApp` はそれを見つけると multipart として送ります。JSON のボディではファイルを運べません。2 つ目、URL については存在するかどうかではなく、署名されているかどうかをアサートしています。署名の無い URL は、ディスクが公開されていることを意味するからです。3 つ目、最後のテストは attachment の行が記録するオブジェクトキーをたどってディスクそのものを検査します。投稿を削除したら、そのファイルを残してはいけません。これはデータベースへのアサーションだけでは分からないことです。テストは `NODE_ENV=test` で走り、スキャフォールドされた `StorageProvider` はそのとき `local` ディスクを `./storage/app/testing` に置きます。`disk()` がパスを組み立てずにディスクへ問い合わせるのはこのためで、テストのアップロードが開発用データベースの指すファイルに混ざることはありません。
 
 ```bash run expect-fail
 bun test
@@ -756,7 +759,6 @@ git commit -m "feat: give posts a cover image on a private disk"
 
 ```ts file=tests/PostAttachments.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync } from 'node:fs'
 import { TestApp } from '@guren/testing'
 import app from '../src/app.js'
 import { resetDatabase } from '../config/database.js'
@@ -770,6 +772,10 @@ const PNG = Uint8Array.from(
 
 function image(name: string): File {
   return new File([PNG], name, { type: 'image/png' })
+}
+
+function disk() {
+  return app.container.make('storage').disk('local')
 }
 
 describe('post attachments', () => {
@@ -827,11 +833,11 @@ describe('post attachments', () => {
   it('removes the files when the post is deleted', async () => {
     const post = await Post.forceCreate({ title: 'Doomed', body: 'Body', authorId: ada.id })
     const attachment = await Post.attach(post.id, 'cover', image('cover.png'))
-    expect(existsSync(`storage/app/${attachment.path}`)).toBe(true)
+    expect(await disk().exists(attachment.path)).toBe(true)
 
     await asAda.delete(`/posts/${post.id}`).assertRedirect('/posts')
 
-    expect(existsSync(`storage/app/${attachment.path}`)).toBe(false)
+    expect(await disk().exists(attachment.path)).toBe(false)
   })
 
   it('stores gallery images with a post', async () => {
@@ -862,7 +868,7 @@ describe('post attachments', () => {
 
     const [loaded] = await Post.withAttachments([post], ['images'])
     expect(loaded!.images.map((img) => img.name)).toEqual(['two.png'])
-    expect(existsSync(`storage/app/${first.path}`)).toBe(false)
+    expect(await disk().exists(first.path)).toBe(false)
   })
 })
 ```
@@ -1448,7 +1454,7 @@ git commit -m "feat: add a gallery to posts"
 - **ブラウザで画像の URL が 404 になる。** 署名付き URL の期限が切れています(既定では 5 分)。ページを再読み込みすれば新しいものが得られます。レンダリングし直したページでも 404 なら、`registerAttachmentRoutes` がマウントされていません。
 - **編集フォームからアップロードしても何も起きない。** ファイルを伴う `form.put()` にはメソッドの詐称が必要ですが、フレームワークはそれをしません。`posts.cover` と同じように、ファイルには `POST` のルートを使ってください。
 - **「The file must be an image.」** `image: 'require'` は拡張子ではなくバイト列を検査します。名前を変えただけのテキストファイルは拒否され、`.jpg` という名前の本物の PNG は受け入れられます。
-- **投稿を削除しても `storage/app/attachments` にファイルが残る。** `delete` の前に `purgeAttachments` が呼ばれていません。attachments テーブルには、代わりに purge してくれる外部キーがありません。`bun run console attachments:prune` が残り物を見つけます。
+- **`storage/app/attachments` に、どの行も指さないファイルが残る。** 原因は 2 通りあります。1 つは `destroy` が `purgeAttachments` を呼ばずに投稿を削除した場合です。attachments テーブルには、代わりに purge してくれる外部キーがありません。`bun run console attachments:prune` が残り物を見つけます。もう 1 つはテストが開発用のディスクに書いた場合です。`local` ディスクに `NODE_ENV === 'test'` の分岐が入る前にスキャフォールドされた `StorageProvider` では、テストのアップロードがすべて `./storage/app` に入ります。その `root` に同じ分岐を足してから、`bun run console attachments:prune --objects` を一度実行してください。どの行も参照しないプレフィックスを削除します。直近 1 時間以内に作られたものは残ります。テストのアップロードは、テスト用データベースの行と同じく実行をまたいで `./storage/app/testing` に残ります。古いものは `NODE_ENV=test bun run console attachments:prune --objects` で削除できます。直前の実行の行が参照するファイルと直近 1 時間以内のものは残るので、`bun test` の直後に実行しても何も報告されません。
 
 ## 演習
 

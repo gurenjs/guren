@@ -717,6 +717,53 @@ export function register(): unknown {
     }
   })
 
+  // The scaffolded `local` disk picks its root on NODE_ENV. Reading only a plain
+  // literal would drop the disk from this rule without a word.
+  it('judges every branch of a conditional root', async () => {
+    const workspace = await createTempWorkspace('guren-cli-public-disk-conditional-')
+    try {
+      const config = await write(workspace.dir, 'config/attachments.ts', attachmentsConfig('local'))
+      const conditional = (testRoot: string, root: string) =>
+        storageProvider(`local: { driver: 'local', root: process.env.NODE_ENV === 'test' ? ${testRoot} : ${root} }`)
+
+      const outside = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        conditional("'./storage/app/testing'", "'./storage/app'"),
+      )
+      const passing = await run(workspace.dir, [config, outside])
+      expect(passing[0]?.status).toBe('pass')
+      expect(passing[0]?.message).toContain('./storage/app/testing, ./storage/app')
+
+      const testBranchExposed = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        conditional("'./public/testing'", "'./storage/app'"),
+      )
+      const [testBranch] = await run(workspace.dir, [config, testBranchExposed])
+      expect(testBranch?.status).toBe('fail')
+      expect(testBranch?.message).toContain('rooted at ./public/testing')
+
+      const otherBranchExposed = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        conditional("'./storage/app/testing'", "'./public/uploads'"),
+      )
+      const [otherBranch] = await run(workspace.dir, [config, otherBranchExposed])
+      expect(otherBranch?.status).toBe('fail')
+      expect(otherBranch?.message).toContain('rooted at ./public/uploads')
+
+      const computed = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        conditional('process.env.TEST_ROOT', "'./public/uploads'"),
+      )
+      expect(await run(workspace.dir, [config, computed])).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   // The scaffolded StorageProvider ends its map with `as const`, so the scan reads a
   // TSAsExpression. Getting this wrong is silent: "cannot read" and "nothing to flag"
   // are the same empty result, on the scaffold's own shape.

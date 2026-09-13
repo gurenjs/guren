@@ -157,7 +157,6 @@ The tests need an image. A one-pixel PNG is enough, and it is small enough to ke
 
 ```ts file=tests/PostAttachments.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync } from 'node:fs'
 import { TestApp } from '@guren/testing'
 import app from '../src/app.js'
 import { resetDatabase } from '../config/database.js'
@@ -171,6 +170,10 @@ const PNG = Uint8Array.from(
 
 function image(name: string): File {
   return new File([PNG], name, { type: 'image/png' })
+}
+
+function disk() {
+  return app.container.make('storage').disk('local')
 }
 
 describe('post attachments', () => {
@@ -228,16 +231,16 @@ describe('post attachments', () => {
   it('removes the files when the post is deleted', async () => {
     const post = await Post.forceCreate({ title: 'Doomed', body: 'Body', authorId: ada.id })
     const attachment = await Post.attach(post.id, 'cover', image('cover.png'))
-    expect(existsSync(`storage/app/${attachment.path}`)).toBe(true)
+    expect(await disk().exists(attachment.path)).toBe(true)
 
     await asAda.delete(`/posts/${post.id}`).assertRedirect('/posts')
 
-    expect(existsSync(`storage/app/${attachment.path}`)).toBe(false)
+    expect(await disk().exists(attachment.path)).toBe(false)
   })
 })
 ```
 
-Three things worth reading in this file. The upload is a `FormData` with a `File` in it, and `TestApp` sends it as multipart when it sees one; a JSON body could not carry a file. The URL is asserted to be signed, not merely present, because an unsigned URL would mean the disk is public. And the last test checks the disk itself, through the object key the attachment row records: deleting a post must not leave its files behind, and no database assertion can tell you that.
+Three things worth reading in this file. The upload is a `FormData` with a `File` in it, and `TestApp` sends it as multipart when it sees one; a JSON body could not carry a file. The URL is asserted to be signed, not merely present, because an unsigned URL would mean the disk is public. And the last test checks the disk itself, through the object key the attachment row records: deleting a post must not leave its files behind, and no database assertion can tell you that. The suite runs with `NODE_ENV=test`, and the scaffolded `StorageProvider` then roots the `local` disk at `./storage/app/testing`. That is why `disk()` asks the disk instead of building a path, and why test uploads never mix with the files your development database points at.
 
 ```bash run expect-fail
 bun test
@@ -756,7 +759,6 @@ More than one image, and the author can remove any of them. Add to the attachmen
 
 ```ts file=tests/PostAttachments.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
-import { existsSync } from 'node:fs'
 import { TestApp } from '@guren/testing'
 import app from '../src/app.js'
 import { resetDatabase } from '../config/database.js'
@@ -770,6 +772,10 @@ const PNG = Uint8Array.from(
 
 function image(name: string): File {
   return new File([PNG], name, { type: 'image/png' })
+}
+
+function disk() {
+  return app.container.make('storage').disk('local')
 }
 
 describe('post attachments', () => {
@@ -827,11 +833,11 @@ describe('post attachments', () => {
   it('removes the files when the post is deleted', async () => {
     const post = await Post.forceCreate({ title: 'Doomed', body: 'Body', authorId: ada.id })
     const attachment = await Post.attach(post.id, 'cover', image('cover.png'))
-    expect(existsSync(`storage/app/${attachment.path}`)).toBe(true)
+    expect(await disk().exists(attachment.path)).toBe(true)
 
     await asAda.delete(`/posts/${post.id}`).assertRedirect('/posts')
 
-    expect(existsSync(`storage/app/${attachment.path}`)).toBe(false)
+    expect(await disk().exists(attachment.path)).toBe(false)
   })
 
   it('stores gallery images with a post', async () => {
@@ -862,7 +868,7 @@ describe('post attachments', () => {
 
     const [loaded] = await Post.withAttachments([post], ['images'])
     expect(loaded!.images.map((img) => img.name)).toEqual(['two.png'])
-    expect(existsSync(`storage/app/${first.path}`)).toBe(false)
+    expect(await disk().exists(first.path)).toBe(false)
   })
 })
 ```
@@ -1448,7 +1454,7 @@ git commit -m "feat: add a gallery to posts"
 - **The image URL 404s in the browser.** The signed URL expired (five minutes by default); reload the page for a fresh one. If a freshly rendered page also 404s, `registerAttachmentRoutes` is not mounted.
 - **Uploading from the edit form does nothing.** `form.put()` with a file needs method spoofing, which the framework does not do. Use a `POST` route for the file, as `posts.cover` does.
 - **"The file must be an image."** `image: 'require'` checks the bytes, not the extension. A renamed text file is refused; a real PNG with a `.jpg` name is accepted.
-- **Deleting a post leaves files in `storage/app/attachments`.** `purgeAttachments` was not called before `delete`. The attachments table has no foreign key to purge for you; `bun run console attachments:prune` finds the leftovers.
+- **`storage/app/attachments` holds files no row points at.** Either `destroy` deleted a post without calling `purgeAttachments` first (the attachments table has no foreign key to purge for you, and `bun run console attachments:prune` finds the leftovers), or tests wrote to the development disk. A `StorageProvider` scaffolded before the `local` disk had its `NODE_ENV === 'test'` branch sends every test upload to `./storage/app`. Give its `root` the same branch, then run `bun run console attachments:prune --objects` once: it deletes the prefixes no row references, except any created in the last hour. Test uploads stay in `./storage/app/testing` between runs, as the test database keeps its last rows. `NODE_ENV=test bun run console attachments:prune --objects` removes the older ones; it keeps the files the last run's rows still reference and anything from the last hour, so right after `bun test` it reports nothing.
 
 ## Exercises
 
