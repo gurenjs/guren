@@ -1,5 +1,12 @@
 # @guren/server
 
+## 2.23.1
+
+### Patch Changes
+
+- 389e1c3: `bun run console <command> --help` (or `-h`) now prints that command's help and exits 0 instead of running the command. The kernel only recognised `help`/`--help` as the first argument, so the flag after a command name reached the command's input parser, which ignores unknown options, and a command like `attachments:prune` ran for real. The flag is honoured anywhere among the arguments; a command whose signature declares `--help` or `-h` itself still receives it. Arguments passed through `this.call()` or `kernel.call()` are not checked, since code-assembled arguments may carry either token as a value; `kernel.handle()` takes `{ helpFlags: false }` for the same opt-out.
+- d654ad4: `this.inertia(pages.x, props)` with a missing or mistyped prop now fails typechecking with an error that names the prop, such as "Property 'description' is missing in type '{ title: string; }'". TypeScript reports a call that matches no overload against the last overload, and the string-component overload came last, so the error read "Argument of type 'PageContract<…>' is not assignable to parameter of type 'string'" and never named the prop. The page-contract overload is now declared last. Which overload a valid call resolves to is unchanged.
+
 ## 2.23.0
 
 ### Minor Changes
