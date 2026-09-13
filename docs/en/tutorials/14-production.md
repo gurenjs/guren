@@ -290,7 +290,7 @@ Everything below is true of the app you have right now. Some rows are already do
 | Rate limiting | in-memory, per process | fine for one container; `RedisRateLimitStore` for several |
 | Cookies, HSTS, error pages | automatic under `NODE_ENV=production` | done |
 | `APP_KEY` | in `.env`, which is not committed | set it as a platform secret, or the container starts without one |
-| `APP_URL` | unset | set it, or host authorization stays off and warns |
+| `APP_URL` | `http://localhost:3333`, from `.env`: under `NODE_ENV=production` the app answers only to `localhost`, and a request to `127.0.0.1:3333` gets a 403 | the public URL; unset, host authorization stays off and warns |
 | Uploads | on the `local` disk, inside the container | an S3 or R2 disk, or every deploy loses them |
 | Queue | `sync`: jobs run inside the request | a Redis or SQS driver plus `guren queue:work` as a second process |
 | Mail | `log`: printed to the server output | a real transport and its credentials |

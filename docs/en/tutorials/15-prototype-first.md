@@ -18,7 +18,7 @@ The feature is site announcements: a pinned notice the author can post, edit and
 bunx guren add prototype
 ```
 
-It writes one file and patches three:
+It writes one file and patches four:
 
 ```bash run
 git status --short
@@ -322,7 +322,7 @@ Everything the fixture is typed against comes from `.guren/`: rename a route, ch
 bunx guren check --prototype
 ```
 
-The suite checks the wiring the typechecker cannot: every `prototype` route has a name and a fixture entry, every entry names a route that exists, no two routes share a method and path (the browser matcher could not tell them apart), and `createApp()` carries the loader. It also lists, as an advisory warning, the named GET routes with no entry: `home`, `about`, `posts.index` and the rest are not reachable in this prototype. That is the right call for a prototype of one feature; a link from the announcements page to one of them would open the 404 dialog, and the warning is the list of what to add if you wanted the whole blog walkable.
+The suite checks the wiring the typechecker cannot: every `prototype` route has a name and a fixture entry, every entry names a route that exists, no two routes share a method and path (the browser matcher could not tell them apart), and `createApp()` carries the loader. It also lists, as an advisory warning, the named GET routes with no entry: `about`, `login`, `posts.index` and the rest are not reachable in this prototype. The home page is not on the list only because its `/` route has no name. That is the right call for a prototype of one feature; a link from the announcements page to one of them would open the 404 dialog, and the warning is the list of what to add if you wanted the whole blog walkable.
 
 The server side answers from the same fixture. Your existing tests still pass, with seven routes on their fixture and no controller behind them:
 
@@ -363,7 +363,7 @@ git add -A
 git commit -m "feat: prototype the announcements feature"
 ```
 
-`dist/` is ignored, so the commit is the fixture, the pages, the validator, the type, the routes and the wiring. That is the whole prototype, and it is the start of the feature, not a throwaway.
+`dist/` is ignored, so the commit is the fixture, the pages, the validator, the type, the routes and the wiring, plus the regenerated files under `.guren/`, `.guren/prototype/index.html` among them. That is the whole prototype, and it is the start of the feature, not a throwaway.
 
 ## 6. Specify the backend
 
@@ -697,6 +697,8 @@ Four green. The one that was red now reads an empty table; the three that were a
 ```bash run
 bunx guren check --prototype
 ```
+
+It ends on `0 passed, 1 warnings`. With no route on the `prototype` handler there is no loader wiring left to confirm, and the one warning is the section 5 list of named routes without a fixture entry, unchanged. No failure is the confirmation.
 
 No route is on its fixture, so the backlog is empty; `guren context` no longer prints one:
 

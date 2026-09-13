@@ -197,7 +197,7 @@ bunx guren context
 The rest of `.claude/` is read on demand rather than at start:
 
 - **`rules/`** hold verified API rules for one area each (`orm-models.md`, `controllers-http.md`, `routes-codegen.md`, `testing.md`, `docs-and-spec.md`, `comments.md`). Each declares the file globs it applies to, so the agent loads `routes-codegen.md` when it edits a route and not before.
-- **`skills/`** are procedures the agent follows on request: `scaffold` (reach for `bunx guren make:*` instead of typing a file), `feature`, `db-manage`, `guren-api`, `agent-interface`, `plugin-authoring`, `dev-workflow`.
+- **`skills/`** are procedures the agent follows on request: `scaffold` (reach for `bunx guren make:*` instead of typing a file), `feature`, `db-manage`, `guren-api`, `agent-interface`, `plugin-authoring`, `dev-workflow`, `github-projects`.
 - **`agents/`** are two subagents with their own briefs: `code-review` and `test-writer`.
 - **`.mcp.json`** points the agent at the dev MCP endpoint the `dev` script mounted, so it can query the running app.
 
@@ -263,7 +263,7 @@ export default class HomeController extends Controller {
 }
 ```
 
-And replace `resources/js/pages/Home.tsx`. The two changes are the `tagline` field in `Props` and the paragraph that renders it, which takes the place of the scaffold's "Edit `resources/js/pages/Home.tsx` to get started" line; the rest of the page is untouched:
+And replace `resources/js/pages/Home.tsx`. The two changes are the `tagline` field in `Props` and the paragraph that renders it, which takes the place of the scaffold's whole "The Laravel of TypeScript. Edit `resources/js/pages/Home.tsx` to get started." paragraph; the rest of the page is untouched:
 
 ```tsx file=resources/js/pages/Home.tsx
 import { Head } from '@inertiajs/react'
@@ -424,14 +424,14 @@ Guren writes a production Dockerfile for you:
 bunx guren deploy --target docker
 ```
 
-Open the `Dockerfile` it wrote. It is a two-stage build: the first stage installs everything and runs `bun run build`; the second copies only what the server reads at runtime (`tsconfig.json`, which holds the `@/` import alias, and `bin/`, `src/`, `app/`, `config/`, `routes/`, `modules/`, `db/`, `lang/`, `public/`, `.guren/`) into a slim image and starts `bun bin/serve.ts` with `NODE_ENV=production`. If you have Docker installed, build and run the image:
+Open the `Dockerfile` it wrote. It is a two-stage build: the first stage installs everything and runs `bun run build`; the second copies only what the server reads at runtime (`tsconfig.json`, which holds the `@/` import alias, and `bin/`, `src/`, `app/`, `config/`, `routes/`, `modules/`, `db/`, `lang/`, `public/`, `.guren/`) into a slim image and starts `bun bin/serve.ts` with `NODE_ENV=production`. If you have Docker installed, build and run the image. Stop `bun run dev` first: the container publishes port 3333, which the dev server holds.
 
 ```bash manual
 docker build -t guren-blog .
 docker run --rm -p 3333:3333 --env-file .env guren-blog
 ```
 
-Open [http://localhost:3333](http://localhost:3333) again. Same page, but served by the production build of your app from inside a container, on a machine that could be anyone's. Stop it with Ctrl-C. Two caveats, both fixed in chapter 14: the container reads your development `.env`, and its SQLite file lives inside the container, so it forgets everything when it stops.
+The container prints nothing when the server starts, so a silent terminal is not a hang. Open [http://localhost:3333](http://localhost:3333) again. Same page, but served by the production build of your app from inside a container, on a machine that could be anyone's. Stop it with Ctrl-C. Two caveats, both fixed in chapter 14: the container reads your development `.env`, and its SQLite file lives inside the container, so it forgets everything when it stops.
 
 Commit the recipe:
 

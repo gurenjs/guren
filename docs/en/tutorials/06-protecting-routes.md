@@ -409,7 +409,7 @@ Green. Now look at the audit:
 bunx guren audit
 ```
 
-The three authentication warnings are gone, replaced by "Protected by an authentication guard (verified via middleware capabilities)". That last phrase matters. `requireAuthenticated` carries a marker the framework stamps on it; `audit` trusts the marker, not the name. Had you written your own `requireLogin` middleware and aliased it as `auth`, the audit would say the middleware is *named like* a guard but is not one it recognises, and keep warning. That is the right answer: a reviewer, human or machine, cannot tell from a name whether a function checks anything.
+The three authentication warnings are gone. The report prints only what still needs attention, so to see what replaced them run `bunx guren audit --json`: each of those routes now passes with "Protected by an authentication guard (verified via middleware capabilities)". That last phrase matters. `requireAuthenticated` carries a marker the framework stamps on it; `audit` trusts the marker, not the name. Had you written your own `requireLogin` middleware and aliased it as `auth`, the audit would say the middleware is *named like* a guard but is not one it recognises, and keep warning. That is the right answer: a reviewer, human or machine, cannot tell from a name whether a function checks anything.
 
 One warning is left, and it is not a mistake: `[warn] [API3] PostController.store force write`, on a method that validates a body and then calls `forceCreate`. Every action of that shape gets it, here and in the chapters after this one.
 
@@ -890,7 +890,7 @@ You now know what a session, a guard, a hash, a CSRF token and a login wall are,
 ```bash manual
 git switch -c scratch/add-auth
 bunx guren add auth --force
-git diff main --stat
+git status --short
 git switch main
 git reset --hard
 git clean -fdn
@@ -905,7 +905,7 @@ The `reset` and the `clean` are not tidiness either. `git switch main` and `git 
 
 One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appended a block to its end that starts with a comment about `config/session.ts` and sets `SESSION_DRIVER`. Delete that block. `db:status` should then list every migration as applied and none as orphaned. If one is orphaned, the server reloaded before you stopped it; `bun run db:reset` rebuilds the database from the migrations you have and drops every row with it. Start `bun run dev` again.
 
-Most of the diff is what you wrote, in the same shape: the model, the provider, the two controllers, the validators. The rest is what you did not: password reset by email, email verification, a "remember me" token, a seeder with a demo user, a dashboard. From now on, when the course needs one of those, you will reach for the generator, and you will be able to read what it wrote.
+`git status` rather than `git diff`: `add auth` creates files as well as changing them, and a diff against `main` leaves the new, untracked ones out. Most of that list is what you wrote, in the same shape: the model, the provider, the two controllers, the validators. The rest is what you did not: forgot-password and reset-password pages with the email that links them, a "remember me" token, a seeder with a demo user, a dashboard. Email verification is not in it; `bunx guren make:auth --verify` is the generator that adds it. From now on, when the course needs one of those, you will reach for the generator, and you will be able to read what it wrote.
 
 ## Where you are
 

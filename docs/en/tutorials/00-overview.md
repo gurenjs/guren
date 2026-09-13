@@ -23,7 +23,7 @@ flowchart LR
 1. **Build it by hand.** You write the code that carries the chapter's one new idea: a table and a model, a login, a policy, a pivot table. You never write the third CRUD screen by hand; that is what generators and agents are for. Writing the idea once is what lets you judge someone else's version of it in beat 4.
 2. **Specify the next slice.** Before the next piece of the app exists, you write the test that will judge it, and you run it red. This is not a test of your own typing; it is a statement of what you will accept from the agent.
 3. **Delegate that slice.** The chapter gives you the prompt, word for word. Every delegation also names a deterministic fallback, a `bunx guren add …` or `make:*` command or a file to write, so the course is completable without an agent subscription, and so the course can be verified mechanically (see below).
-4. **Verify.** You review the agent's output against a short rubric the chapter gives you, run `bunx guren gate` and `bun run build`, and commit.
+4. **Verify.** You review the agent's output against a short rubric the chapter gives you, run `bunx guren gate`, and commit.
 
 The chapter text never shows you "the code the agent will write". Agents are non-deterministic and models change; the hand-written version in the text is the reference, and the test, the rubric and the gate judge the agent's version. What you take away is not the shape of one agent's output but the criteria for accepting any agent's output.
 

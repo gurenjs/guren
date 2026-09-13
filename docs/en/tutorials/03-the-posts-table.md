@@ -522,12 +522,12 @@ git commit -m "feat: add the new post form"
 
 ## What the generator would have done
 
-Everything in this chapter and the next is what `bunx guren add resource` writes in one command: schema, migration, model, validator, resource, a seven-action controller, routes, and four pages. You built it by hand so that you can read that output, which is how you will use it from chapter 5 on. To see the comparison now, on a branch you will throw away:
+Everything in this chapter and the next is what `bunx guren add resource` writes in one command: the schema entry, model, validator, resource, a seven-action controller, routes, and four pages. The migration is still yours to generate with `bun run db:make`. You built it by hand so that you can read that output, which is how you will use it from chapter 5 on. To see the comparison now, on a branch you will throw away:
 
 ```bash manual
 git switch -c scratch/add-resource
 bunx guren add resource Post --fields "title:string,body:text" --force
-git diff main --stat
+git status --short
 git switch main
 git reset --hard
 git clean -fdn
@@ -535,9 +535,11 @@ git clean -fd
 git branch -D scratch/add-resource
 ```
 
-`git switch main` and `git branch -D` move a reference; neither undoes work you never committed. Without the `reset` and the `clean`, everything the generator wrote is still in your working tree on `main`. The dry run (`-n`) is there so you read that list before deleting it.
+`git switch main` and `git branch -D` move a reference; neither undoes work you never committed. Without the `reset` and the `clean`, everything the generator wrote is still in your working tree on `main`. The dry run (`-n`) is there so you read that list before deleting it. `git status` rather than `git diff`, because the files the generator created are untracked and a diff leaves them out.
 
-The generated controller differs from yours in two ways worth noticing: it validates the `:id` parameter with a schema instead of binding the model, and its `index` paginates. Both are chapter 4.
+Read the list before you read the code. `db/schema.ts` and `routes/web.ts` are not on it: your schema already exports `posts` and your routes already register `/posts`, so the command leaves both alone and there is no migration to generate. Everything else it overwrote, because of `--force`. That includes `app/Models/Post.ts`, and the generated model has no `fillable`; `bunx guren audit` on that branch warns about mass assignment for exactly that reason.
+
+The generated controller differs from yours in three ways worth noticing: it validates the `:id` parameter with a schema instead of binding the model, its `index` paginates, and `store`, `update` and `destroy` start with `this.auth.userOrFail()`. The first two are chapter 4, the third chapter 6. It also has `edit`, `update` and `destroy` actions and an `Edit.tsx` page that nothing can reach on this branch, since the routes file it left alone registers none of them.
 
 ## Where you are
 

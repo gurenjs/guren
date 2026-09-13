@@ -555,7 +555,7 @@ git commit -m "feat: expose reading and publishing as agent tools"
 
 第 7 章は、落ち着かない終わり方をしました。ポリシーを書いたあとで、ポリシーを一度も呼ばないルートでも `guren audit` が緑のままだと分かったからです。audit が問うのは、変更を伴うルートが*ユーザーを*要求するかどうかまでで、*どの*ユーザーかまでは見ません。「誰でも編集できるブログ」になるのを防いでいたのは、テストだけでした。
 
-ルートをツールだと宣言すると、そこが変わります。`publish` から認可を取り除いてください。
+ルートをツールだと宣言すると、そこが変わります。`publish` から認可を取り除いてください。`unpublish` も同じ ability を確かめているので、この `sed` はその行も消します。下のチェックが報告するのは、2 つのうちツールである `publish` だけです。
 
 ```bash run
 sed -i.bak "/this.authorize('publish'/d" app/Http/Controllers/PostController.ts && rm app/Http/Controllers/PostController.ts.bak
@@ -866,7 +866,7 @@ rubric は次のとおりです。
 - コメントのルートは両方とも `toolName`(`comments_store`、`comments_destroy`)、`params` スキーマ、`output` スキーマを持ち、`comments.store` は `body` の契約を保っている。`guren check --ci` が緑、つまり入力や出力の記述を欠いたツールがひとつも無い。
 - どのアクションも `authorize()` の呼び出しを保ち、JSON の分岐はその*あと*にある。ポリシーより前にエージェント向けの応答があると、そのポリシーはブラウザにしか走りません。
 - ブラウザは相変わらずリダイレクトする。ブラウザでコメントを投稿すれば、投稿のページに戻ってくる。
-- エージェントのテスト 5 件が通る。`Say something` を運ぶ 422 も、他人のコメントに対する 403 も含めて。
+- エージェントのテスト 6 件が通る。`Say something` を運ぶ 422 も、他人のコメントに対する 403 も含めて。
 
 ```bash run
 bunx guren tool:list

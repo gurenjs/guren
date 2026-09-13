@@ -55,7 +55,8 @@
 - Every chapter after 1 keeps the four beats of RFC 0019: build the chapter's
   one concept by hand, specify the next slice with a failing test, delegate
   that slice (prompt verbatim, plus a deterministic fallback), verify with a
-  rubric, `bunx guren gate`, `bun run build`, and a commit
+  rubric, `bunx guren gate`, and a commit. `bun run build` is not a reader step
+  outside chapters 1 and 14: `smoke:tutorial` runs it after every chapter's gate
 - Never show "the code the agent will write"; the hand-written version is the
   reference and the test, rubric and gate judge the agent's
 - Fences carry attributes after the language, and `smoke:tutorial` executes

@@ -5,7 +5,7 @@
 **この章で学ぶこと:**
 
 - バリデーションの置き場所と、ひとつの Zod スキーマがルート契約、コントローラー、フォームを型付けする仕組み
-- 422 レスポンスが運ぶ内容と、Inertia がフィールドごとのメッセージを `form.errors` に入れる仕組み
+- バリデーション失敗が JSON リクエストと Inertia のフォームそれぞれに返す応答と、メッセージが `form.errors` に届く仕組み
 - リソースの役割と、ページに生のレコードを渡さない理由
 - 生成マニフェストの `Data.Post` がリソースに追随する仕組み
 - subagent に変更のレビューを頼む方法と、返ってきた指摘の扱い方
@@ -88,7 +88,7 @@ describe('PostController', () => {
 bun test
 ```
 
-落ちているのはメッセージだけで、ステータスはすでに 422 です。Guren のバリデーション失敗はすべてこの形になります。ステータスは 422、ボディはフィールド名をキーにした `errors` を持つ JSON で、各フィールドの値はメッセージの配列です。Inertia のフォームはこれをそのまま読みます。
+落ちているのはメッセージだけで、ステータスはすでに 422 です。このテストのような素の JSON リクエストに対して、Guren のバリデーション失敗はこの形で応えます。ステータスは 422、ボディはフィールド名をキーにした `errors` を持つ JSON で、各フィールドの値はメッセージの配列です。Inertia のフォームからの送信には別の形で応えます。それは第 3 節で確かめます。
 
 ## 2. バリデーター
 
@@ -244,7 +244,7 @@ export default function NewPost() {
 
 `RouteBody<ApiRoutes, 'posts.store'>` は `{ title: string; body: string }` で、ルート契約を経由して `PostPayloadSchema` から導出されています。スキーマにフィールドを足せばフォームの型にもそれが増えますし、ルート名を打ち間違えれば型は `never` になります。形を書いたのはバリデーターの中の一度だけで、それが書き写すことなくブラウザまで届きました。
 
-**チェックポイント:** [http://localhost:3333/posts/create](http://localhost:3333/posts/create) を開いて空のフォームを送信します。タイトルの下に「Title is required」、本文の下に「Body is required」が出ます。Inertia が 422 を受け取り、メッセージを `form.errors` に入れて同じページを再描画しました。エラー処理のコードは 1 行も書いていません。
+**チェックポイント:** [http://localhost:3333/posts/create](http://localhost:3333/posts/create) を開いて空のフォームを送信します。タイトルの下に「Title is required」、本文の下に「Body is required」が出ます。このリクエストへの応答は 422 ではありません。Inertia のリクエストには、フォームに戻る 303 リダイレクトが返り、メッセージは短命な `guren_validation_errors` クッキーで引き継がれます。Inertia はリダイレクトをたどり、メッセージを `form.errors` に入れて同じページを再描画しました。エラー処理のコードは 1 行も書いていません。
 
 ![空のまま送信した新規投稿フォーム。タイトル欄の下に赤字で「Title is required」、本文欄の下に赤字で「Body is required」、その下に Publish ボタン。](../../images/tutorial-validation-errors.png)
 

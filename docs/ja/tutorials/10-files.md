@@ -24,7 +24,7 @@ bun run dev
 bunx guren add attachments
 ```
 
-何が行われたのかを読んでおきましょう。これから保守するのは自分自身です。まずストレージレイヤーが導入されました(`app/Providers/StorageProvider.ts`、ディスクは 2 つ、`./storage/app` を根とする `local` と `./public/storage` を根とする `public`)。続いて `db/schema.ts` に `attachments` テーブルが追加され、`config/attachments.ts` と `app/Providers/AttachmentsProvider.ts` が書かれ、`src/app.ts` にプロバイダーが登録され、ルート registrar の先頭で `registerAttachmentRoutes` を呼ぶことで配信ルートがマウントされ、`attachments:prune` コンソールコマンドが登録されました。テーブルにはマイグレーションが必要です。
+何が行われたのかを読んでおきましょう。これから保守するのは自分自身です。まずストレージレイヤーが導入されました(`app/Providers/StorageProvider.ts` と `app/Services/FileStorage.ts`、ディスクは 2 つ、`./storage/app` を根とする `local` と `./public/storage` を根とする `public`)。続いて `db/schema.ts` に `attachments` テーブルが追加され、`config/attachments.ts` と `app/Providers/AttachmentsProvider.ts` が書かれ、`src/app.ts` にプロバイダーが登録され、ルート registrar の先頭で `registerAttachmentRoutes` を呼ぶことで配信ルートがマウントされ、`attachments:prune` コンソールコマンドが登録されました。テーブルにはマイグレーションが必要です。
 
 ```bash run
 bun run db:make create_attachments
@@ -246,7 +246,7 @@ describe('post attachments', () => {
 bun test
 ```
 
-赤です。しかも 3 つのテストはどれも走る前に落ちます。`Post.withAttachments` が関数ではないからで、`Post` はまだ attachable になっていません。
+3 つとも赤です。1 つは `Post.withAttachments is not a function`、残りの 2 つは `Post.attach is not a function` で落ちます。`Post` がまだ attachable になっていないからです。
 
 ## 3. カバー画像を手で書く
 

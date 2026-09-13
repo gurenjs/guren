@@ -354,7 +354,7 @@ Now the audit:
 bunx guren audit
 ```
 
-Every post route is "Protected by an authentication guard", exactly as it was before you wrote the policy. Run `bunx guren check` and it is equally content, before and after. Neither tool knows that Grace could edit Ada's post an hour ago, because neither tool looks for it. `audit` checks that a mutating route requires *a* user. `check` checks that the wiring is consistent. Whether *this* user may touch *this* record is a rule of your application, and no static tool can know the rule without being told it.
+In `bunx guren audit --json`, every post route is "Protected by an authentication guard", exactly as it was before you wrote the policy. Run `bunx guren check` and it is equally content, before and after. Neither tool knows that Grace could edit Ada's post an hour ago, because neither tool looks for it. `audit` checks that a mutating route requires *a* user. `check` checks that the wiring is consistent. Whether *this* user may touch *this* record is a rule of your application, and no static tool can know the rule without being told it.
 
 Three things follow, and the rest of the course rests on them:
 
