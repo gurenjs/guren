@@ -87,20 +87,13 @@ systemd をリロードし、`sudo systemctl enable --now my-app` で起動し�
 
 ## コンテナでのデプロイ例
 
-```dockerfile
-FROM oven/bun:1 AS base
-WORKDIR /app
+Dockerfile は CLI で生成します。
 
-COPY bun.lock package.json ./
-RUN bun install --production
-
-COPY . .
-RUN NODE_ENV=production bun run build
-
-EXPOSE 3333
-ENV NODE_ENV=production
-CMD ["bun", "run", "bin/serve.ts"]
+```bash
+bunx guren deploy --target docker
 ```
+
+2 段階のビルドです。ビルダー段階では、`bun run build` が使う Vite や TypeScript を含むすべての依存をインストールしてビルドします。本番段階では実行時の依存だけをインストールし、サーバーが実行時に読むものをコピーして、`NODE_ENV=production` で `bun bin/serve.ts` を起動します。環境変数と、更新後にファイルを生成し直す手順は[本番環境にデプロイする](./deploy-production.md)を参照してください。
 
 ビルドと実行は以下のコマンドで行います。
 

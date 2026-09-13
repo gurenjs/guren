@@ -133,7 +133,7 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 | コマンド | 説明 | 例 |
 |----------|------|----|
 | `key:generate` | 新しい `APP_KEY` 値を生成。`--write` で `.env` に保存 | `bunx guren key:generate --write` |
-| `deploy` | Docker/Fly.io/Railway/Vercel 向けデプロイ設定ファイルを生成 | `bunx guren deploy --target all --app my-app --port 3333` |
+| `deploy` | Docker/Fly.io/Railway 向けデプロイ設定ファイルを生成 | `bunx guren deploy --target all --app my-app --port 3333` |
 | `make:controller <Name>` | `app/Http/Controllers` にコントローラーを生成(API専用アプリでは Inertia ページの代わりに JSON を返す) | `bunx guren make:controller PostController` |
 | `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成(`db/schema` から `camelCase(Name)s` を import) | `bunx guren make:model Post` |
 | `make:view <path>` | `resources/js/pages` に React コンポーネントを生成(API専用アプリでは中断) | `bunx guren make:view posts/Index` |
@@ -393,31 +393,13 @@ bunx guren deploy --target fly --app my-app
 # Railway（Dockerfile + railway.json）
 bunx guren deploy --target railway
 
-# Vercel（vercel.json）
-bunx guren deploy --target vercel
-
 # すべてのレシピを一括生成（カスタムポート）
 bunx guren deploy --target all --app my-app --port 4000
 ```
 
-`--target` は `docker` / `fly` / `railway` / `vercel` / `all` をサポートします。
+`--target` は `docker` / `fly` / `railway` / `all` をサポートします。書き出すファイルがすでにあるとコマンドは止まります。上書きするときは `--force` を付けてください。
 
-Vercel と Bun
-Vercel は Bun を用いたデプロイをサポートしています。Bun プロジェクトでは主に次の二択が現実的です。
-
-- `vercel.json` に Bun 用の install/build コマンドを記載してデプロイする(シンプルなアプリ向け推奨)。
-
-  ```json
-  {
-    "installCommand": "bun install",
-    "buildCommand": "NODE_ENV=production bun run build",
-    "devCommand": "bun run dev"
-  }
-  ```
-
-- Docker イメージを使ってデプロイし、実行環境や Bun のバージョンを固定する(ネイティブ依存や長時間実行がある場合に推奨)。
-
-推奨: Bun の特定バージョンに依存する、あるいは長時間実行プロセスが必要な場合は Docker デプロイを選ぶと再現性が高くなります。生成される `vercel.json` は出発点です。プロジェクト構成に合わせてコマンドやルーティングを調整してください。
+Vercel と AWS Lambda にはプラグインを使います。Vercel は `bunx guren plugin @guren/plugin-vercel`、AWS Lambda は `bunx guren plugin @guren/plugin-lambda` で導入します。`--target vercel` はエラーになります。どちらの手順も[デプロイ](./deployment.md)で説明しています。
 
 ## OpenAPI コマンド
 
@@ -654,11 +636,11 @@ bunx guren config:show
 # マイグレーションを実行
 bunx guren db:migrate
 
-# 本番環境でマイグレーションを強制実行
-bunx guren db:migrate --force
+# 実行せずに内容だけを表示
+bunx guren db:migrate --dry-run
 
-# マイグレーションパスを指定
-bunx guren db:migrate --path db/migrations
+# 結果を JSON で出力
+bunx guren db:migrate --json
 ```
 
 ### db:rollback オプション

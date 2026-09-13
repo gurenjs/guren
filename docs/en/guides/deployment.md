@@ -87,20 +87,13 @@ Reload systemd, enable the service, and start it with `sudo systemctl enable --n
 
 ## Container Deployment Example
 
-```dockerfile
-FROM oven/bun:1 AS base
-WORKDIR /app
+Generate the Dockerfile with the CLI:
 
-COPY bun.lock package.json ./
-RUN bun install --production
-
-COPY . .
-RUN NODE_ENV=production bun run build
-
-EXPOSE 3333
-ENV NODE_ENV=production
-CMD ["bun", "run", "bin/serve.ts"]
+```bash
+bunx guren deploy --target docker
 ```
+
+It is a two-stage build. The builder stage installs every dependency, including the Vite and TypeScript tooling `bun run build` needs, and runs the build. The production stage installs only runtime dependencies, copies what the server reads at runtime, and starts `bun bin/serve.ts` with `NODE_ENV=production`. [Deploy to Production](./deploy-production.md) covers the environment variables and regenerating the file after an upgrade.
 
 Build and run:
 
