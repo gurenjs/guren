@@ -1,6 +1,7 @@
 import { consola } from 'consola'
 import { runCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
+import { unknownCommandHint } from './unknown-command'
 
 type AnyCommandDef = CommandDef<any>
 
@@ -25,6 +26,29 @@ async function resolveSubCommand(
     }
   }
   return [cmd, parent]
+}
+
+/** The name citty could not dispatch, and the names at that level it could have. */
+async function findUnknownSubCommand(
+  cmd: AnyCommandDef,
+  rawArgs: string[],
+): Promise<{ name: string; candidates: string[]; atRoot: boolean } | undefined> {
+  let current = cmd
+  let args = rawArgs
+  let atRoot = true
+  for (;;) {
+    const subCommands = await resolveValue(current.subCommands)
+    if (!subCommands || Object.keys(subCommands).length === 0) return undefined
+    const index = args.findIndex((arg) => !arg.startsWith('-'))
+    const name = args[index]
+    if (name === undefined) return undefined
+    if (!Object.prototype.hasOwnProperty.call(subCommands, name)) {
+      return { name, candidates: Object.keys(subCommands), atRoot }
+    }
+    current = await resolveValue(subCommands[name])
+    args = args.slice(index + 1)
+    atRoot = false
+  }
 }
 
 /**
@@ -85,7 +109,10 @@ export async function runCli(cmd: AnyCommandDef, rawArgs: string[]): Promise<num
     return 0
   } catch (error) {
     if (isUsageError(error)) {
-      return failWithUsage(error.message)
+      const unknown =
+        (error as { code?: unknown }).code === 'E_UNKNOWN_COMMAND' ? await findUnknownSubCommand(cmd, rawArgs) : undefined
+      const hint = unknown && unknownCommandHint(unknown.name, unknown.candidates, unknown.atRoot)
+      return failWithUsage(hint ? `${error.message}\n${hint}` : error.message)
     }
     // Non-Error throwables (Bun's ResolveMessage, for one) render as an
     // empty object when handed to consola directly, hiding the message.
