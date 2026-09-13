@@ -1,5 +1,14 @@
 # @guren/testing
 
+## 1.10.1
+
+### Patch Changes
+
+- 292c0e5: `TestApp.create()` claims its application as the ambient one (RFC 0023 §3).
+  Without that, the second `TestApp` of a run read as a rival live application
+  and the next ambient helper in the suite under test warned about an ambiguous
+  default, though only one app was ever under test.
+
 ## 1.10.0
 
 ### Minor Changes

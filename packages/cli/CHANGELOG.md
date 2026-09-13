@@ -1,5 +1,120 @@
 # @guren/cli
 
+## 2.22.0
+
+### Minor Changes
+
+- ad3ff15: Bind the attachment engine from the scaffolded `AttachmentsProvider`
+
+  `guren add attachments` now writes a `config/attachments.ts` that exports the
+  engine (`export const { Attachment, engine: attachmentEngine }`) and an
+  `AttachmentsProvider` whose `register()` calls
+  `attachmentEngine.bindTo(this.container)`. The scaffolded app's signed
+  delivery route then serves from the engine of the app that received the
+  request, and the `storage` factory resolves on that app's container, instead
+  of both falling back to whichever app configured attachments last in the
+  process (RFC 0023 §4).
+
+- 292c0e5: `guren queue:work` resolves the driver from the `queue` manager the booted
+  app's container binds and hands that container to the `Worker`, so each job's
+  `this.make()` resolves from the app it belongs to (RFC 0023 Part 1). The
+  scaffolded `MailProvider` drops its `boot()` and passes the container to
+  `createMailManager()`; the scaffolded `config/attachments.ts` resolves storage
+  through the container the factory receives instead of `getContainer()`.
+
+  The container is handed to the worker as the app exposes it: re-wrapping its
+  `make`/`has` in a fresh object called them with the wrong `this`, so every
+  resolution inside `queue:work` threw.
+
+- 445e34c: Register RFC 0023's deprecations and ship the codemod that migrates them
+
+  `bunx guren upgrade --check-only` reports `global-service-setters` and
+  `global-service-getters`, naming every file that imports one of the module-level
+  service accessors deprecated in `@guren/server` 2.23.0. Detection reads a wider
+  file set than the other entries: `config/`, `src/` and `app/` of the app and its
+  modules, plus test files, because the setters live in `src/app.ts` and
+  `config/*.ts` and the test-injection row of the migration table is reported
+  rather than rewritten.
+
+  `bunx guren upgrade` applies the `container-only-service-resolution` codemod,
+  the first entry in the codemod registry. It is AST-based, idempotent, and
+  covers the Migration Path table:
+
+  - a deprecated getter inside a `ServiceProvider` becomes `this.container.make(key)`, and `getContainer()` there becomes `this.container`
+  - a deprecated setter whose key a provider in the same file binds is deleted; one in a provider that binds nothing becomes `this.container.instance(key, value)`
+  - `setInertiaDocument({ … })` with an inline literal moves into `createApp({ inertia: { document } })` when `createApp` is in the same file, comment included
+  - the attachments `storage` factory becomes `(container) => container.make('storage')`
+  - `getContainer().make(key)` inside a `Job` becomes `this.make(key)`
+  - unused `@guren/core` / `@guren/server` import specifiers left behind are removed
+
+  Test injections through `setGate()` or `setQueueDriver()` are reported only:
+  the replacement depends on which application the fake belongs to.
+
+  `guren queue:work` resolves its fallback driver through the new internal
+  `resolveQueueDriver()`, so booting an app for the worker no longer prints a
+  deprecation warning for a call the CLI made itself.
+
+### Patch Changes
+
+- d375f0f: Honour `runOnOneServer()` and `preventOverlapping(expiresAt)`, and run due tasks concurrently
+
+  Both builder calls were accepted and stored, and nothing read them: a task
+  marked `runOnOneServer()` ran on every server, and a hung run under
+  `preventOverlapping()` blocked its successors forever whatever expiry was
+  passed.
+
+  - `preventOverlapping(expiresAt)`: the in-memory guard now expires after
+    `expiresAt` milliseconds, and a run that outlived it cannot clear the guard
+    of the run that replaced it. A `when()` / `skip()` that rejects releases the
+    guard rather than pinning the task.
+  - `runOnOneServer()`: `createScheduler({ lock })` takes a `SchedulerLock`
+    (`acquire(key, ttlSeconds)`, `release(key)`). It defaults to
+    `MemorySchedulerLock`, which holds for one process; the first such task on
+    the default lock warns once, naming `createScheduler({ lock })` and
+    `RedisSchedulerLock` (`@guren/core/redis`) for a multi-server deploy. The
+    claim is per task per minute and stays held for an hour, so a server whose
+    clock reaches the minute later does not re-run it. A task with no `.name()`,
+    or an empty one, is refused when it is registered and again at `start()` --
+    there is nothing to key the claim on. `createScheduler({ lockPrefix })` namespaces the
+    keys for two apps sharing one store.
+  - A lock that rejects is reported as a lock failure rather than a task failure,
+    and the task does not run.
+  - `runDueTasks()` runs the due tasks concurrently. Awaited one by one, a slow
+    task pushed the rest past their minute, where the once-per-minute tick
+    dropped them. Each task's own overlap guard still serialises it with itself.
+  - `ScheduledTask.tryRun()` is `run()` resolving to whether the callback ran;
+    `run()` still resolves to nothing.
+  - `guren schedule:list` shows the two guards in a Flags column and in `--json`;
+    `guren schedule:run` reports a task its own guards declined as `Skipped:`,
+    and warns that it cannot enforce `runOnOneServer()`.
+
+- Updated dependencies [ad3ff15]
+- Updated dependencies [edaccc6]
+- Updated dependencies [edaccc6]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [edaccc6]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [ccd3d8c]
+- Updated dependencies [ccd3d8c]
+- Updated dependencies [ccd3d8c]
+- Updated dependencies [d375f0f]
+- Updated dependencies [d375f0f]
+- Updated dependencies [fc01a05]
+- Updated dependencies [3146839]
+- Updated dependencies [3146839]
+- Updated dependencies [292c0e5]
+- Updated dependencies [292c0e5]
+- Updated dependencies [445e34c]
+- Updated dependencies [6848e0e]
+- Updated dependencies [d375f0f]
+- Updated dependencies [a2f6f3a]
+  - @guren/core@1.18.0
+  - @guren/server@2.23.0
+  - @guren/orm@2.9.0
+
 ## 2.21.0
 
 ### Minor Changes

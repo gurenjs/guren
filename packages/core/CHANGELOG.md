@@ -1,5 +1,270 @@
 # @guren/core
 
+## 1.18.0
+
+### Minor Changes
+
+- ad3ff15: Return the attachment engine so a provider can bind it on the app
+
+  `configureAttachments()` now returns `engine` beside `Attachment`, and
+  `AttachmentEngine.bindTo(container)` binds it as the `attachments` service
+  _and_ becomes the container its `storage` factory resolves from.
+
+  The per-app binding was unreachable before this. `configureAttachments()` is
+  called at module scope in `config/attachments.ts`, which `AttachmentsProvider`
+  imports for its side effect, and no `Application` exists at that point, so
+  every app's delivery route still resolved the process-wide active engine and
+  two apps in one process shared it. The provider binds instead:
+
+  ```ts
+  // app/Providers/AttachmentsProvider.ts
+  import { attachmentEngine } from "../../config/attachments";
+
+  export default class AttachmentsProvider extends ServiceProvider {
+    register(): void {
+      attachmentEngine.bindTo(this.container);
+    }
+  }
+  ```
+
+  `GenerateVariantsJob` and `attachments:prune` read `attachments` from the
+  container they already hold (the worker's app, the console kernel's app) before
+  falling back, so a process that boots more than one app's config no longer
+  generates variants or deletes objects through whichever configured last. The
+  active engine remains the fallback, and is all the `Attachable` statics have.
+
+  **Removed:** the unreleased `configureAttachments({ app })` option (RFC 0023
+  §4, amended). No shipped release carried it.
+
+- edaccc6: Choose the password hasher once, and default to scrypt on every runtime
+
+  **New hashes written under Bun change format, from Argon2id to `node:crypto`
+  scrypt.** Existing rows are untouched and still verify, because verification
+  routes on the stored hash's own prefix. To keep writing Argon2id on a
+  deployment that stays on Bun, pass `createApp({ auth: { hasher: 'argon2' } })`.
+
+  `createApp({ auth: { hasher } })` selects the one hasher the app writes
+  passwords with: `'scrypt'` (the default), `'argon2'`, or a `PasswordHasher` of
+  your own. `AuthManager.hasher()` resolves it, `useModel()` hands it to both the
+  `ModelUserProvider` and the model class, so a row the model hashes on `create()`
+  and a login the provider verifies can no longer disagree on the format. A model
+  declaring `static passwordHasher` keeps it, and the provider then uses that one
+  rather than the app's.
+
+  An Argon2id hash written under Bun could not be verified anywhere else, which is
+  how a column seeded locally broke the first login after a Workers or Lambda
+  deploy. A `$scrypt$` hash verifies on Bun, Node, Lambda and Workers alike.
+  `createApp()` throws on `'argon2'` where `Bun.password` is missing, rather than
+  failing at the first `create()`.
+
+  `DefaultHasher.needsRehash()` now reports any hash whose format differs from the
+  configured writer, and `SessionGuard` acts on it: after a successful credential
+  check it rehashes the plaintext with the configured hasher and persists it
+  through the new optional `UserProvider.rehashPasswordIfRequired()`, which
+  `ModelUserProvider` implements. A failed attempt never rehashes, and a write
+  that fails is warned rather than refusing the login. Rows that never log in
+  again keep their format; migrate such a column while the app still runs on Bun,
+  or reset those passwords, before moving off it.
+
+  `ScryptHasher` is deprecated in favour of `Argon2Hasher`, the same class under
+  the name that says what it produces: `Bun.password`'s Argon2id, never scrypt.
+  `guren doctor` / `guren check` / the deploy builds flag `hasher: 'argon2'`,
+  `new Argon2Hasher()` and `new Hash({ algorithm: 'argon2' })` on a Workers or
+  Lambda app, and report a hasher named by an expression they cannot read instead
+  of passing it as scrypt.
+
+  This is a minor rather than a major: no stored hash stops verifying, no
+  signature changes, and Argon2id was already unverifiable off Bun. Only the
+  format of new writes moves.
+
+- edaccc6: Fail a login attempt loudly when no user provider is registered
+
+  An app created with `auth` but no `users` provider (no `auth.useModel(User)`,
+  no `registerProvider('users', ...)`) used to answer every `attempt()` with
+  `false`: the default guard fell back to a provider that returned `null` for
+  every lookup and `false` for every credential check, so a misconfigured app
+  looked like one where every password was wrong. The fallback provider now
+  throws from `retrieveByCredentials()` and `validateCredentials()`, naming
+  `auth.useModel(User)` as the fix; `retrieveById()` still answers `null`, so an
+  anonymous request on such an app stays a 401 or a redirect rather than a 500.
+
+  The app also warns at boot when `createApp()` received `auth`, every provider
+  has booted, and the default guard still has no `users` provider behind it.
+
+  `AuthManager` gains `hasProvider(name)` and `getTokenGuard()`. The default
+  `web` guard is registered by the `Application` constructor alone;
+  `AuthServiceProvider` no longer carries a second registration that could never
+  run.
+
+  The boot warning is silent for an app that authenticates through bearer tokens
+  (`useTokens()`) and for one that mounts its own sessions (`autoSession: false`):
+  neither reaches the default session guard. `auth.login(user)` works without a
+  provider, which is what an OAuth or passwordless callback does; the placeholder
+  answers `getId()` from the record, and only the credential methods throw. Such
+  an app still registers a provider to load that user back on the next request.
+
+- fc01a05: Both Inertia setters now warn, and RFC 0023's Open Question 4 is settled
+
+  `document` stays the `createApp({ inertia })` option, and a renderer that only
+  exists after `createApp()` has run is bound on the app rather than pinned to the
+  process — which is what the Workers entry `@guren/plugin-cloudflare` generates
+  now does. With the scaffold templates on the option too, neither
+  `setInertiaDocument()` nor `setInertiaSsrRenderer()` has a caller the framework
+  itself emits, so both join the other deprecated setters in warning once. They
+  keep working until 3.0.0, and the engine still reads their slot behind the
+  container binding.
+
+  Pass the option where the value is available at construction:
+
+  ```ts
+  const app = createApp({
+    inertia: {
+      document: {
+        head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
+      },
+      ssrRenderer,
+    },
+  });
+  ```
+
+  and bind the key where it is not:
+
+  ```ts
+  app.container.instance("inertia.ssrRenderer", ssrModule.render);
+  ```
+
+  `bunx guren upgrade` rewrites an inline `setInertiaDocument({ … })` whose
+  `createApp()` is in the same file.
+
+- 3146839: Re-export the RFC 0023 Part 0 seams from `@guren/server` (`getRequestContainer`,
+  `defaultApplication`, `defaultContainer`, `useAsDefaultApplication`,
+  `QueueManager.dispatch()`, `Worker { container }`, `createApp({ inertia })`),
+  and declare the `attachments` service binding `configureAttachments()` will
+  bind in Part 1.
+- 292c0e5: The attachments delivery route resolves its engine from the request's
+  container ahead of the process-wide active engine (RFC 0023 Part 1). The
+  `storage` factory receives the container it should resolve from: the app's
+  where one is bound, else the default application's, so
+  `storage: (container) => container.make('storage')` replaces
+  `() => getContainer().make('storage')`. Queued variant generation
+  dispatches through the manager `configureAttachments({ queue })` resolves
+  rather than pinning its driver globally. Re-exports the Part 1 server changes.
+- 445e34c: ### Deprecated
+
+  - **Module-level service setters and getters** — `setGate`/`getGate`, `setEncrypter`/`getEncrypter`, `setMailManager`/`getMailManager`, `setQueueDriver`/`getQueueDriver`, `setI18n`/`getI18n`/`tryGetI18n`, `setLogManager`/`getLogManager`, `setNotificationManager`/`getNotificationManager`, `setBroadcastManager`/`getBroadcastManager`, `setExceptionHandler`/`getExceptionHandler`, `setContainer`/`getContainer`, `setInertiaDocument`, `setInertiaSsrRenderer`, `setInertiaSharedProps`/`getInertiaSharedPropsResolver`, and the `SendNotificationJob.notificationManager` static. Resolve services from the container of the application that owns the call instead. Deprecated in 2.23.0, will be removed in 3.0.0. Detected by `bunx guren upgrade --check-only` as `global-service-setters` and `global-service-getters`; codemod available: run `bunx guren upgrade`. (RFC 0023 Part 2)
+
+  Nothing is removed and every call still works. Each accessor now carries
+  `@deprecated` JSDoc naming its replacement and warns once per symbol in the
+  format `contributing/deprecation-policy.md` defines.
+
+  **A setter now writes the live application's container.** Part 1 made every
+  consumer read the container first and the module slot second, which left a
+  hand-written `setMailManager(m)` silently shadowed by the binding a provider
+  had already made. The shim binds the key on the ambient container instead, and
+  clears its own slot so no value outlives the app that received it. Two
+  applications in one process therefore no longer inherit each other's
+  hand-installed services. Where no `Application` has been constructed yet — a
+  `setInertiaDocument()` at module scope above `createApp()`, for one — the slot
+  is still where the value lands, and the getters keep reading it second.
+
+  `setInertiaDocument` and `setInertiaSsrRenderer` warn like the rest once the
+  code the framework itself emits stops calling them: the generated Workers entry
+  binds `inertia.ssrRenderer` on the app, and both scaffold templates pass
+  `createApp({ inertia: { document } })`. Both changes are in this release. The
+  codemod rewrites an app's own calls.
+
+  `setQueueDriver()` keeps its override: through this release the pin still wins
+  over the bound `queue` manager, because `@guren/testing`'s `fakeQueue()` and the
+  tutorial's queue chapter inject through it and nothing else expresses that. The
+  pin goes with the setter in Part 3.
+
+  The functional helpers are not deprecated and do not warn: `encrypt`, `decrypt`,
+  `t`, `tc`, `can`, `cannot`, `defineGate`, `authorizeAbility`, `resolve`,
+  `Job.dispatch` and `Job.make` resolve through internal seams, so an app that
+  never calls an accessor by hand sees no warning at all.
+
+  One new export, `@internal`: `resolveQueueDriver()` is `getQueueDriver()`
+  without the warning, for the framework's own dispatch paths in `@guren/core` and
+  `@guren/cli`.
+
+  These symbols are re-exported from `@guren/core`, which makes them Stable under
+  `contributing/api-stability.md`, so the policy's minimum of two minor versions
+  applies before removal. Deprecated in 2.23.0, that permits removal from 2.25.0
+  onward; `removedIn` targets 3.0.0.
+
+- 6848e0e: Make `Router<M>`, `RouteBuilder<M>` and the `middleware()` scope builder contravariant in the middleware-alias parameter, with TypeScript's `in` variance annotation.
+
+  `M`'s only independent occurrence was a method parameter, which TypeScript compares bivariantly, so a router that never registered an alias could be passed where a `Router<'auth'>` was required; the mismatch surfaced at `mount()` as `Middleware "auth" is not registered`. A router carrying more aliases than the parameter names still passes.
+
+  The tightening rejects three shapes that used to compile. None is a runtime behaviour change; each was already broken at `mount()` or was never satisfiable.
+
+  - A registrar annotated `Router<'auth'>` is no longer assignable to `RouteRegistration`, the type of `createApp({ routes })`. An entry registrar takes `Router` and registers the aliases itself, capturing what `aliasMiddleware()` returns; a registrar that reads an alias is a function the entry one calls.
+  - `Router<string>` is not a valid spelling of "any aliases". It asks for a router carrying every possible alias, which nothing satisfies. Write `Router`, that is `Router<never>`.
+  - A `group()` callback cannot annotate aliases the outer router lacks: `router.middleware('auth').group((inner: Router<'auth' | 'guest'>) => …)` on a `Router<'auth'>` is rejected, because the callback reads a name the router never registered.
+
+  One hole stays open. An inline `registrarNeedingAuth(new Router())` still compiles, because `M` has nothing to fix it and is inferred from the parameter. Only a router whose `M` is already settled, by a variable annotation or by an `aliasMiddleware()` chain, is checked.
+
+- d375f0f: Honour `runOnOneServer()` and `preventOverlapping(expiresAt)`, and run due tasks concurrently
+
+  Both builder calls were accepted and stored, and nothing read them: a task
+  marked `runOnOneServer()` ran on every server, and a hung run under
+  `preventOverlapping()` blocked its successors forever whatever expiry was
+  passed.
+
+  - `preventOverlapping(expiresAt)`: the in-memory guard now expires after
+    `expiresAt` milliseconds, and a run that outlived it cannot clear the guard
+    of the run that replaced it. A `when()` / `skip()` that rejects releases the
+    guard rather than pinning the task.
+  - `runOnOneServer()`: `createScheduler({ lock })` takes a `SchedulerLock`
+    (`acquire(key, ttlSeconds)`, `release(key)`). It defaults to
+    `MemorySchedulerLock`, which holds for one process; the first such task on
+    the default lock warns once, naming `createScheduler({ lock })` and
+    `RedisSchedulerLock` (`@guren/core/redis`) for a multi-server deploy. The
+    claim is per task per minute and stays held for an hour, so a server whose
+    clock reaches the minute later does not re-run it. A task with no `.name()`,
+    or an empty one, is refused when it is registered and again at `start()` --
+    there is nothing to key the claim on. `createScheduler({ lockPrefix })` namespaces the
+    keys for two apps sharing one store.
+  - A lock that rejects is reported as a lock failure rather than a task failure,
+    and the task does not run.
+  - `runDueTasks()` runs the due tasks concurrently. Awaited one by one, a slow
+    task pushed the rest past their minute, where the once-per-minute tick
+    dropped them. Each task's own overlap guard still serialises it with itself.
+  - `ScheduledTask.tryRun()` is `run()` resolving to whether the callback ran;
+    `run()` still resolves to nothing.
+  - `guren schedule:list` shows the two guards in a Flags column and in `--json`;
+    `guren schedule:run` reports a task its own guards declined as `Skipped:`,
+    and warns that it cannot enforce `runOnOneServer()`.
+
+### Patch Changes
+
+- Updated dependencies [ad3ff15]
+- Updated dependencies [edaccc6]
+- Updated dependencies [edaccc6]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [edaccc6]
+- Updated dependencies [a2f6f3a]
+- Updated dependencies [ccd3d8c]
+- Updated dependencies [ccd3d8c]
+- Updated dependencies [ccd3d8c]
+- Updated dependencies [d375f0f]
+- Updated dependencies [d375f0f]
+- Updated dependencies [fc01a05]
+- Updated dependencies [3146839]
+- Updated dependencies [292c0e5]
+- Updated dependencies [292c0e5]
+- Updated dependencies [445e34c]
+- Updated dependencies [445e34c]
+- Updated dependencies [6848e0e]
+- Updated dependencies [d375f0f]
+- Updated dependencies [a2f6f3a]
+  - @guren/cli@2.22.0
+  - @guren/server@2.23.0
+  - @guren/orm@2.9.0
+
 ## 1.17.0
 
 ### Minor Changes
