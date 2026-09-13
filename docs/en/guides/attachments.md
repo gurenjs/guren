@@ -526,9 +526,9 @@ kernel.register(AttachmentsPruneCommand)
 ```
 
 ```bash
-bunx guren attachments:prune             # remove rows whose record no longer exists
-bunx guren attachments:prune --objects   # also remove attachments/ prefixes no row references
-bunx guren attachments:prune --dry-run   # report without deleting
+bun run console attachments:prune             # remove rows whose record no longer exists
+bun run console attachments:prune --objects   # also remove attachments/ prefixes no row references
+bun run console attachments:prune --dry-run   # report without deleting
 ```
 
 Orphan rows are detected by resolving each `attachableType` through

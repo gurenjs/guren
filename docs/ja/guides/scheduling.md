@@ -99,7 +99,7 @@ scheduler.schedule((schedule) => {
 
 ```ts
 scheduler.schedule((schedule) => {
-  schedule.command('bunx guren db:backup')
+  schedule.command('pg_dump "$DATABASE_URL" --file=backup.sql')
     .daily()
     .at('02:00')
     .name('database-backup')

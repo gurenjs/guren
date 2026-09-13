@@ -44,7 +44,7 @@ export const tasks = pgTable('tasks', {
 Generate and run a migration:
 
 ```bash
-bunx guren db:migrate:generate create_tasks
+bunx guren make:migration --name create_tasks
 bunx guren db:migrate
 ```
 

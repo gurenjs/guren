@@ -380,9 +380,9 @@ kernel.register(AttachmentsPruneCommand)
 ```
 
 ```bash
-bunx guren attachments:prune             # レコードが存在しない行を削除
-bunx guren attachments:prune --objects   # どの行からも参照されない attachments/ プレフィックスも削除
-bunx guren attachments:prune --dry-run   # 削除せずに報告のみ
+bun run console attachments:prune             # レコードが存在しない行を削除
+bun run console attachments:prune --objects   # どの行からも参照されない attachments/ プレフィックスも削除
+bun run console attachments:prune --dry-run   # 削除せずに報告のみ
 ```
 
 孤児行は、各 `attachableType` を `Model.morphMap` で解決して所有レコードを問い合わせることで検出します。アタッチメントを宣言するモデルはすべて登録してください:

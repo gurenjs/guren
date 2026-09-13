@@ -208,7 +208,7 @@ bun run codegen --force
 1. マイグレーションの状態を確認する:
 
    ```bash
-   bunx guren db:migrate:status
+   bunx guren db:status
    ```
 
 2. 開発環境でゼロからやり直す場合:

@@ -1448,12 +1448,12 @@ git commit -m "feat: add a gallery to posts"
 - **The image URL 404s in the browser.** The signed URL expired (five minutes by default); reload the page for a fresh one. If a freshly rendered page also 404s, `registerAttachmentRoutes` is not mounted.
 - **Uploading from the edit form does nothing.** `form.put()` with a file needs method spoofing, which the framework does not do. Use a `POST` route for the file, as `posts.cover` does.
 - **"The file must be an image."** `image: 'require'` checks the bytes, not the extension. A renamed text file is refused; a real PNG with a `.jpg` name is accepted.
-- **Deleting a post leaves files in `storage/app/attachments`.** `purgeAttachments` was not called before `delete`. The attachments table has no foreign key to purge for you; `bunx guren attachments:prune` finds the leftovers.
+- **Deleting a post leaves files in `storage/app/attachments`.** `purgeAttachments` was not called before `delete`. The attachments table has no foreign key to purge for you; `bun run console attachments:prune` finds the leftovers.
 
 ## Exercises
 
 1. Rename a text file to `cover.png` and upload it. What does the app answer, and which line of `Post` decided that? Now rename a real PNG to `cover.txt` and upload that. Explain the difference in one sentence.
-2. Delete a post that has a cover, then run `bunx guren attachments:prune --dry-run`. Nothing is reported. What would have to go wrong in `destroy` for that command to have work to do?
+2. Delete a post that has a cover, then run `bun run console attachments:prune --dry-run`. Nothing is reported. What would have to go wrong in `destroy` for that command to have work to do?
 
 ## Next
 
