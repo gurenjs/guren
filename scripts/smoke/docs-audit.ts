@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
+import { auditDocsCliCommands, formatUnknownCliCommand } from './docs-cli-commands'
 import { auditDocsImportSources, formatReport } from './docs-import-sources'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -408,6 +409,11 @@ async function auditImportSources(root: string): Promise<void> {
   )
 }
 
+async function auditCliCommands(root: string): Promise<void> {
+  const unknown = await auditDocsCliCommands(root)
+  assert(unknown.length === 0, unknown.map(formatUnknownCliCommand).join('\n'))
+}
+
 /** `major.minor` of a workspace manifest, the granularity the tutorial claims. */
 async function manifestMajorMinor(root: string, manifestPath: string): Promise<string> {
   const { version } = JSON.parse(await read(root, manifestPath)) as { version?: string }
@@ -448,6 +454,7 @@ async function main(): Promise<void> {
   await auditJapaneseDocs(root)
   await auditTutorialVersionClaim(root)
   await auditDocLineRules(root)
+  await auditCliCommands(root)
   await auditImportSources(root)
   console.log(`Docs audit passed for ${root}`)
 }

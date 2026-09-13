@@ -208,7 +208,7 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
 1. Check migration status:
 
    ```bash
-   bunx guren db:migrate:status
+   bunx guren db:status
    ```
 
 2. If you need to start fresh in development:

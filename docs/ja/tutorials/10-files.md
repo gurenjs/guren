@@ -1448,12 +1448,12 @@ git commit -m "feat: add a gallery to posts"
 - **ブラウザで画像の URL が 404 になる。** 署名付き URL の期限が切れています(既定では 5 分)。ページを再読み込みすれば新しいものが得られます。レンダリングし直したページでも 404 なら、`registerAttachmentRoutes` がマウントされていません。
 - **編集フォームからアップロードしても何も起きない。** ファイルを伴う `form.put()` にはメソッドの詐称が必要ですが、フレームワークはそれをしません。`posts.cover` と同じように、ファイルには `POST` のルートを使ってください。
 - **「The file must be an image.」** `image: 'require'` は拡張子ではなくバイト列を検査します。名前を変えただけのテキストファイルは拒否され、`.jpg` という名前の本物の PNG は受け入れられます。
-- **投稿を削除しても `storage/app/attachments` にファイルが残る。** `delete` の前に `purgeAttachments` が呼ばれていません。attachments テーブルには、代わりに purge してくれる外部キーがありません。`bunx guren attachments:prune` が残り物を見つけます。
+- **投稿を削除しても `storage/app/attachments` にファイルが残る。** `delete` の前に `purgeAttachments` が呼ばれていません。attachments テーブルには、代わりに purge してくれる外部キーがありません。`bun run console attachments:prune` が残り物を見つけます。
 
 ## 演習
 
 1. テキストファイルを `cover.png` に改名してアップロードしてください。アプリは何を返しますか。そう決めたのは `Post` のどの行ですか。次に、本物の PNG を `cover.txt` に改名してアップロードしてください。違いを一文で説明してください。
-2. カバー画像の付いた投稿を削除してから `bunx guren attachments:prune --dry-run` を走らせてください。何も報告されません。このコマンドに仕事が生まれるには、`destroy` で何が起きていなければなりませんか。
+2. カバー画像の付いた投稿を削除してから `bun run console attachments:prune --dry-run` を走らせてください。何も報告されません。このコマンドに仕事が生まれるには、`destroy` で何が起きていなければなりませんか。
 
 ## 次へ
 
