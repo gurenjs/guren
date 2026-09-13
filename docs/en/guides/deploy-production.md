@@ -72,14 +72,14 @@ docker run -p 3333:3333 --env-file .env.production my-app
 
 ## 3. Run Database Migrations
 
-Run migrations as part of your deployment pipeline, not inside the Dockerfile. This avoids running migrations on every container start:
+A scaffolded app applies pending migrations when it first connects to the database, so the container migrates at boot even when the pipeline did not. Running them as a pipeline step before the new image rolls out is still the better order: a failing migration can stop the deploy before a new container starts, and the containers then find nothing pending.
 
 ```bash
 # In your CI/CD pipeline or deployment script
-bunx guren db:migrate --force
+bunx guren db:migrate
 ```
 
-The `--force` flag suppresses the confirmation prompt in production.
+Two adapters differ: the Data API adapter migrates at boot only with `migrateOnStart`, and D1 never does, since `wrangler d1 migrations apply` owns its migrations. See [When migrations run](./database.md#when-migrations-run).
 
 ## 4. Set Up a Health Check
 

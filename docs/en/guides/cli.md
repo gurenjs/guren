@@ -135,7 +135,7 @@ table to.
 | Command | Description | Example |
 |---------|-------------|---------|
 | `key:generate` | Generate a new `APP_KEY` value. Use `--write` to save it to `.env` | `bunx guren key:generate --write` |
-| `deploy` | Generate deployment recipe files for Docker/Fly.io/Railway/Vercel | `bunx guren deploy --target all --app my-app --port 3333` |
+| `deploy` | Generate deployment recipe files for Docker/Fly.io/Railway | `bunx guren deploy --target all --app my-app --port 3333` |
 | `make:controller <Name>` | Generates a controller in `app/Http/Controllers` (returns JSON instead of an Inertia page on an API-only app) | `bunx guren make:controller PostController` |
 | `make:model <Name>` | Generates a minimal model class and type definition in `app/Models` (imports `camelCase(Name)s` from `db/schema`) | `bunx guren make:model Post` |
 | `make:view <path>` | Generates a React component in `resources/js/pages` (refuses on an API-only app) | `bunx guren make:view posts/Index` |
@@ -395,31 +395,13 @@ bunx guren deploy --target fly --app my-app
 # Railway (Dockerfile + railway.json)
 bunx guren deploy --target railway
 
-# Vercel (vercel.json)
-bunx guren deploy --target vercel
-
 # Generate all recipes at once with a custom port
 bunx guren deploy --target all --app my-app --port 4000
 ```
 
-Supported targets are `docker`, `fly`, `railway`, `vercel`, and `all`.
+Supported targets are `docker`, `fly`, `railway`, and `all`. The command stops when a file it would write already exists; pass `--force` to overwrite it.
 
-Vercel and Bun
-Vercel supports deploying Bun applications. For Bun projects consider either:
-
-- Using `vercel.json` with Bun commands (recommended for simple apps):
-
-  ```json
-  {
-    "installCommand": "bun install",
-    "buildCommand": "NODE_ENV=production bun run build",
-    "devCommand": "bun run dev"
-  }
-  ```
-
-- Deploying a Docker image (recommended when you need exact Bun version, native dependencies, or long-running processes).
-
-Recommendation: If your app relies on a specific Bun version or needs long-lived processes, prefer Docker deployment for reproducibility. The generated `vercel.json` is a starting point; adjust commands, routes, and runtime strategy to your project.
+Vercel and AWS Lambda use plugins, installed with `bunx guren plugin @guren/plugin-vercel` and `bunx guren plugin @guren/plugin-lambda`, and `--target vercel` is rejected. [Deployment](./deployment.md) walks through both.
 
 ## OpenAPI Commands
 
@@ -656,11 +638,11 @@ The cache is stored in `bootstrap/cache/config.json`. Configuration files are lo
 # Run migrations
 bunx guren db:migrate
 
-# Force migrations in production
-bunx guren db:migrate --force
+# Show what would happen without executing
+bunx guren db:migrate --dry-run
 
-# Specify migration path
-bunx guren db:migrate --path db/migrations
+# Output the result as JSON
+bunx guren db:migrate --json
 ```
 
 ### db:rollback Options
