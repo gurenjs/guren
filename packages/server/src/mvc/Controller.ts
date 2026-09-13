@@ -244,16 +244,19 @@ export class Controller {
     return renderDocument(component, props, options)
   }
 
-  protected async inertia<TPage extends InertiaPageContractLike>(
-    page: TPage,
-    props: InertiaPageProps<TPage>,
-    options?: InertiaResponseOptions,
-  ): Promise<InertiaResponse<InertiaPageComponent<TPage>, InertiaPageProps<TPage> & ResolvedSharedInertiaProps>>
   protected async inertia<Component extends string, Props extends DefaultInertiaProps>(
     component: Component,
     props: Props,
     options?: InertiaResponseOptions,
   ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>>
+  // The contract overload stays last: TypeScript reports a call no overload
+  // matches against the last one, so a missing page prop is named instead of
+  // "not assignable to parameter of type 'string'".
+  protected async inertia<TPage extends InertiaPageContractLike>(
+    page: TPage,
+    props: InertiaPageProps<TPage>,
+    options?: InertiaResponseOptions,
+  ): Promise<InertiaResponse<InertiaPageComponent<TPage>, InertiaPageProps<TPage> & ResolvedSharedInertiaProps>>
   protected async inertia<Component extends string, Props extends DefaultInertiaProps>(
     componentOrPage: Component | InertiaPageContractLike<Component, Props>,
     props: Props,

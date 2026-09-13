@@ -148,7 +148,7 @@ export default class AboutController extends Controller {
 bun test
 ```
 
-Still green, and now for the reason you wanted: the body contains the title because the controller sent it as a prop. Reload `/about` in the browser: the page, rendered on the server first, then taken over by React in the browser. Try removing `description` from the controller and running `bun run typecheck`: the error names the page and the missing prop. Put it back.
+Still green, and now for the reason you wanted: the body contains the title because the controller sent it as a prop. Reload `/about` in the browser: the page, rendered on the server first, then taken over by React in the browser. Try removing `description` from the controller and running `bun run typecheck`: the error says `description` is missing from the props you passed. Put it back.
 
 Three things to take from this section:
 
