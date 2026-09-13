@@ -121,7 +121,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: PublishPayloadSchema,
         output: PublishResponseSchema,
       }, [PostController, 'publish'])
-      .agent({ description: 'Publish a draft post. Only the post\'s author may call it.' })
+      .agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.' })
     auth.post('/posts/:id/unpublish', { bind: { id: Post }, name: 'posts.unpublish' }, [PostController, 'unpublish'])
     auth.post('/posts/:id/cover', { bind: { id: Post }, name: 'posts.cover' }, [PostController, 'cover'])
     auth.delete('/posts/:id/images/:attachment', { bind: { id: Post }, name: 'posts.images.destroy', params: PostImageParamSchema }, [PostController, 'destroyImage'])
@@ -133,7 +133,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: CommentPayloadSchema,
         output: CommentResponseSchema,
       }, [CommentController, 'store'])
-      .agent({ description: 'Add a comment to a post, as the calling user.' })
+      .agent({ toolName: 'comments_store', description: 'Add a comment to a post, as the calling user.' })
     auth
       .delete('/comments/:id', {
         bind: { id: Comment },
@@ -141,7 +141,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         params: CommentIdParamSchema,
         output: CommentDeletedSchema,
       }, [CommentController, 'destroy'])
-      .agent({ description: 'Delete one comment. Only its author may call it.' })
+      .agent({ toolName: 'comments_destroy', description: 'Delete one comment. Only its author may call it.' })
     auth.get('/links/create', [LinkController, 'create']).name('links.create')
     auth.get('/links/:id/edit', { bind: { id: Link }, name: 'links.edit' }, [LinkController, 'edit'])
     auth.post('/links', { name: 'links.store', body: LinkPayloadSchema }, [LinkController, 'store'])
@@ -158,7 +158,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
   router
     .get('/posts', { name: 'posts.index', query: ListPostsQuerySchema, resource: { data: [PostResource] } }, [PostController, 'index'])
-    .agent({ description: 'List posts, newest first, ten to a page.' })
+    .agent({ toolName: 'posts_index', description: 'List posts, newest first, ten to a page.' })
   router
     .get('/posts/:id', {
       name: 'posts.show',
@@ -168,7 +168,7 @@ export function registerWebRoutes(baseRouter: Router): void {
       // Inertia page working while the tool still advertises a shape.
       resource: { post: PostResource, comments: [CommentResource] },
     }, [PostController, 'show'])
-    .agent({ description: 'Read one post by id, with its author, tags and comments.' })
+    .agent({ toolName: 'posts_show', description: 'Read one post by id, with its author, tags and comments.' })
   router.get('/links', [LinkController, 'index']).name('links.index')
   router.get('/links/:id', { bind: { id: Link }, name: 'links.show' }, [LinkController, 'show'])
   router.get('/announcements', prototype).name('announcements.index')
@@ -620,7 +620,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: PublishPayloadSchema,
         output: PublishResponseSchema,
       }, [PostController, 'publish'])
-      .agent({ description: 'Publish a draft post. Only the post\'s author may call it.' })
+      .agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.' })
     auth.post('/posts/:id/unpublish', { bind: { id: Post }, name: 'posts.unpublish' }, [PostController, 'unpublish'])
     auth.post('/posts/:id/cover', { bind: { id: Post }, name: 'posts.cover' }, [PostController, 'cover'])
     auth.delete('/posts/:id/images/:attachment', { bind: { id: Post }, name: 'posts.images.destroy', params: PostImageParamSchema }, [PostController, 'destroyImage'])
@@ -632,7 +632,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: CommentPayloadSchema,
         output: CommentResponseSchema,
       }, [CommentController, 'store'])
-      .agent({ description: 'Add a comment to a post, as the calling user.' })
+      .agent({ toolName: 'comments_store', description: 'Add a comment to a post, as the calling user.' })
     auth
       .delete('/comments/:id', {
         bind: { id: Comment },
@@ -640,7 +640,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         params: CommentIdParamSchema,
         output: CommentDeletedSchema,
       }, [CommentController, 'destroy'])
-      .agent({ description: 'Delete one comment. Only its author may call it.' })
+      .agent({ toolName: 'comments_destroy', description: 'Delete one comment. Only its author may call it.' })
     auth.get('/links/create', [LinkController, 'create']).name('links.create')
     auth.get('/links/:id/edit', { bind: { id: Link }, name: 'links.edit' }, [LinkController, 'edit'])
     auth.post('/links', { name: 'links.store', body: LinkPayloadSchema }, [LinkController, 'store'])
@@ -655,7 +655,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
   router
     .get('/posts', { name: 'posts.index', query: ListPostsQuerySchema, resource: { data: [PostResource] } }, [PostController, 'index'])
-    .agent({ description: 'List posts, newest first, ten to a page.' })
+    .agent({ toolName: 'posts_index', description: 'List posts, newest first, ten to a page.' })
   router
     .get('/posts/:id', {
       name: 'posts.show',
@@ -665,7 +665,7 @@ export function registerWebRoutes(baseRouter: Router): void {
       // Inertia page working while the tool still advertises a shape.
       resource: { post: PostResource, comments: [CommentResource] },
     }, [PostController, 'show'])
-    .agent({ description: 'Read one post by id, with its author, tags and comments.' })
+    .agent({ toolName: 'posts_show', description: 'Read one post by id, with its author, tags and comments.' })
   router.get('/links', [LinkController, 'index']).name('links.index')
   router.get('/links/:id', { bind: { id: Link }, name: 'links.show' }, [LinkController, 'show'])
   router.get('/announcements', [AnnouncementController, 'index']).name('announcements.index')
