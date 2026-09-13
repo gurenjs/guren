@@ -161,6 +161,7 @@ export default class PostController extends Controller {
 }
 `,
   )
+  await put(dir, 'app/Http/Controllers/GhostController.ts', 'export default class GhostController {\n  index( {\n')
   await put(dir, 'resources/js/pages/profile/Show.tsx', 'export default function Show() { return null }\n')
   await put(dir, 'resources/js/pages/auth/Login.tsx', 'export default function Login() { return null }\n')
   await put(
@@ -174,6 +175,7 @@ class ProfileController { show() {} }
 class AccountController { destroy() {} }
 class PostController { index() {} }
 class GhostController { index() {} }
+class AttachmentDeliveryController { show() {} }
 
 export function registerWebRoutes(router: Router): void {
   router.get('/register', [RegisterController, 'show'] as any).name('register')
@@ -184,6 +186,7 @@ export function registerWebRoutes(router: Router): void {
   router.delete('/account', [AccountController, 'destroy'] as any).name('account.destroy')
   router.get('/posts', [PostController, 'index'] as any).name('posts.index')
   router.get('/ghost', [GhostController, 'index'] as any).name('ghost')
+  router.get('/attachments/:id', [AttachmentDeliveryController, 'show'] as any)
   router.get('/health', () => new Response('ok'))
 }
 `,
@@ -219,16 +222,17 @@ describe('entity context (routes linked by action references)', () => {
     expect(ctx.routes.map((route) => route.name)).not.toContain('login.store')
   })
 
-  it('reports a controller route whose action body was not found instead of dropping it silently', async () => {
+  it('reports an app controller whose action body cannot be read, but not one with no source in the app', async () => {
     const ctx = await generateEntityContext('User', { cwd: workspace.dir })
 
+    // AttachmentDeliveryController stands in for a controller a framework helper registers.
     expect(ctx.unverifiedRoutes).toEqual([
       {
         method: 'GET',
         path: '/ghost',
         name: 'ghost',
         action: 'GhostController.index',
-        reason: 'no GhostController.index action body found under app/Http/Controllers',
+        reason: 'GhostController has a file, but its index action body could not be read',
       },
     ])
   })
@@ -252,7 +256,7 @@ describe('entity context (routes linked by action references)', () => {
     expect(md).toContain('| POST | /register | register.store | RegisterController.store |')
     expect(md).toContain('- profile/Show')
     expect(md).toContain('Not checked for references to User (1):')
-    expect(md).toContain('- GET /ghost → GhostController.index: no GhostController.index action body found')
+    expect(md).toContain('- GET /ghost → GhostController.index: GhostController has a file, but its index action body could not be read')
   })
 
   it('links nothing by reference for an entity no other action names', async () => {

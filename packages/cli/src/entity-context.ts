@@ -302,10 +302,15 @@ function actionReferencesModel(body: string, locals: { classLocals: string[]; ty
 
 /**
  * Why a controller route's action cannot be judged, or undefined when its body
- * was scanned. A name shared by two classes is unverified even when a body was
- * found: the route carries only the class name, so the body may be the other one's.
+ * was scanned or the app has no file for it. A name shared by two classes is
+ * unverified even with a body: the route carries only the class name. A controller
+ * a framework helper registers has no source in the app, so it cannot name the model.
  */
-function unverifiedReason(scan: ControllerMethodScan, controller: { name: string; action: string }): string | undefined {
+function unverifiedReason(
+  scan: ControllerMethodScan,
+  controller: { name: string; action: string },
+  controllerFileNames: ReadonlySet<string>,
+): string | undefined {
   if (scan.collisions.some((collision) => collision.className === controller.name)) {
     return `more than one controller class is named ${controller.name}`
   }
@@ -313,7 +318,10 @@ function unverifiedReason(scan: ControllerMethodScan, controller: { name: string
   if (scan.unreadableFiles.length > 0) {
     return `controller files could not be read: ${scan.unreadableFiles.join(', ')}`
   }
-  return `no ${controller.name}.${controller.action} action body found under app/Http/Controllers`
+  if (controllerFileNames.has(controller.name)) {
+    return `${controller.name} has a file, but its ${controller.action} action body could not be read`
+  }
+  return undefined
 }
 
 export async function generateEntityContext(
@@ -385,6 +393,7 @@ export async function generateEntityContext(
     const needsScan = candidates.some((def) => def.controller && def.controller.name !== controllerName)
     const cache = new ParseCache()
     const scan = needsScan ? await parseControllerMethods(cwd, cache) : undefined
+    const controllerFileNames = new Set(needsScan ? (await discoverControllerFiles(cwd)).map(classNameFromPath) : [])
     const modelFile = resolve(cwd, match.relPath)
     const localsByFile = new Map<string, { classLocals: string[]; typeLocals: string[] }>()
 
@@ -400,17 +409,18 @@ export async function generateEntityContext(
       const parsed = outcome?.status === 'parsed' ? outcome : undefined
 
       if (!linkedBy && controller && scan) {
-        const reason = unverifiedReason(scan, controller)
-        if (reason || !method || !parsed) {
+        const reason = unverifiedReason(scan, controller, controllerFileNames)
+        if (reason) {
           unverifiedRoutes.push({
             method: def.method.toUpperCase(),
             path: def.path,
             name: def.name,
             action: `${controller.name}.${controller.action}`,
-            reason: reason ?? `${method?.filePath ?? controller.name} could not be parsed`,
+            reason,
           })
           continue
         }
+        if (!method || !parsed) continue
         let locals = localsByFile.get(method.filePath)
         if (!locals) {
           locals = modelImportLocals(cwd, resolve(cwd, method.filePath), parsed.ast, entity, modelFile)
