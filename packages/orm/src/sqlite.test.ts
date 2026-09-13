@@ -249,14 +249,14 @@ describe('createSqliteDatabase migration reporting', () => {
     writeFileSync(join(folder, 'migration.sql'), statement)
   }
 
-  async function captureInfo(run: () => Promise<void>): Promise<string[]> {
+  async function captureConsole(method: 'info' | 'warn', run: () => Promise<void>): Promise<string[]> {
     const lines: string[] = []
-    const original = console.info
-    console.info = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
+    const original = console[method]
+    console[method] = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
     try {
       await run()
     } finally {
-      console.info = original
+      console[method] = original
     }
     return lines
   }
@@ -269,12 +269,12 @@ describe('createSqliteDatabase migration reporting', () => {
     }
 
     const first = createSqliteDatabase(options)
-    const applied = await captureInfo(async () => void (await first.getDatabase()))
+    const applied = await captureConsole('info', async () => void (await first.getDatabase()))
     await first.closeDatabase()
     expect(applied.join('\n')).toContain('20260101000000_create_widgets')
 
     const second = createSqliteDatabase(options)
-    const reboot = await captureInfo(async () => void (await second.getDatabase()))
+    const reboot = await captureConsole('info', async () => void (await second.getDatabase()))
     await second.closeDatabase()
     // An up-to-date database boots on every restart; a line there is one nobody reads.
     expect(reboot).toEqual([])
@@ -291,7 +291,7 @@ describe('createSqliteDatabase migration reporting', () => {
     })
     await database.getDatabase()
 
-    const lines = await captureInfo(async () => void (await database.resetDatabase()))
+    const lines = await captureConsole('info', async () => void (await database.resetDatabase()))
     expect(lines).toEqual([])
 
     // The suppression is spent on that one run, not left on for the next boot.
@@ -301,7 +301,7 @@ describe('createSqliteDatabase migration reporting', () => {
       migrationsFolder: join(workDir, 'migrations'),
       filename: join(workDir, 'app.db'),
     })
-    const applied = await captureInfo(async () => void (await next.getDatabase()))
+    const applied = await captureConsole('info', async () => void (await next.getDatabase()))
     await next.closeDatabase()
     expect(applied.join('\n')).toContain('20260102000000_orphan_sessions')
   })
@@ -321,7 +321,7 @@ describe('createSqliteDatabase migration reporting', () => {
 
     writeMigration('20260102000000_orphan_sessions', 'CREATE TABLE sessions (id text primary key);')
     const second = createSqliteDatabase(options)
-    const applied = await captureInfo(async () => void (await second.getDatabase()))
+    const applied = await captureConsole('info', async () => void (await second.getDatabase()))
     await second.closeDatabase()
 
     expect(applied).toHaveLength(1)
@@ -330,9 +330,6 @@ describe('createSqliteDatabase migration reporting', () => {
   })
 
   test('should name a migration whose folder was deleted after a boot applied it', async () => {
-    // A dev server reloads while a generator is still writing, applies its
-    // migration, and `git clean` then removes only the folder. A later
-    // migration creating the same table fails on the one left behind.
     writeMigration('20260101000000_create_widgets', 'CREATE TABLE widgets (id integer primary key);')
     writeMigration('20260102000000_create_sessions_table', 'CREATE TABLE sessions (id text primary key);')
     const options = {
@@ -354,14 +351,14 @@ describe('createSqliteDatabase migration reporting', () => {
     ])
 
     writeMigration('20260301000000_create_sessions', 'CREATE TABLE sessions (id text primary key);')
-    const warnings: string[] = []
-    const originalWarn = console.warn
-    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(' '))
     const next = createSqliteDatabase(options)
+    let warnings: string[]
     try {
-      await expect(next.getDatabase()).rejects.toThrow(/table sessions already exists/)
+      warnings = await captureConsole('warn', async () => {
+        // The warning has to come first: this is the run that fails on the table left behind.
+        await expect(next.getDatabase()).rejects.toThrow(/table sessions already exists/)
+      })
     } finally {
-      console.warn = originalWarn
       await next.closeDatabase()
     }
     expect(warnings).toHaveLength(1)

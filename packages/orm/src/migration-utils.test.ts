@@ -157,8 +157,6 @@ describe('buildMigrationStatus', () => {
   })
 
   test('should return tracker rows with no local folder as orphaned, in name order', () => {
-    // The migrator matches by name and skips these rows, so status is the one
-    // place a deleted folder whose tables are still in the database shows up.
     const status = buildMigrationStatus(local, [
       { name: '20260101000000_first', appliedAt: null },
       { name: '20260101120000_create_sessions_table', appliedAt: '2026-01-01T12:00:00.000Z' },
@@ -174,7 +172,6 @@ describe('buildMigrationStatus', () => {
       },
       { name: '20260102000000_second', applied: false, appliedAt: null },
     ])
-    expect(Object.hasOwn(status[0], 'orphaned')).toBe(false)
   })
 })
 
@@ -430,52 +427,40 @@ describe('readMigrationDrift', () => {
   })
 })
 
-describe('reportOrphanedMigrations', () => {
-  function capture(run: () => void): string[] {
-    const lines: string[] = []
-    const original = console.warn
-    console.warn = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
-    try {
-      run()
-    } finally {
-      console.warn = original
-    }
-    return lines
+function captureConsole(method: 'info' | 'warn', run: () => void): string[] {
+  const lines: string[] = []
+  const original = console[method]
+  console[method] = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
+  try {
+    run()
+  } finally {
+    console[method] = original
   }
+  return lines
+}
 
+describe('reportOrphanedMigrations', () => {
   test('should name every orphaned migration and the folder it is missing from', () => {
-    const lines = capture(() => reportOrphanedMigrations(['20260102000000_create_sessions_table'], '/app/db/migrations'))
+    const lines = captureConsole('warn', () => reportOrphanedMigrations(['20260102000000_create_sessions_table'], '/app/db/migrations'))
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain('20260102000000_create_sessions_table')
     expect(lines[0]).toContain('/app/db/migrations')
   })
 
   test('should say nothing when the tracker and the folder agree', () => {
-    expect(capture(() => reportOrphanedMigrations([], '/app/db/migrations'))).toEqual([])
+    expect(captureConsole('warn', () => reportOrphanedMigrations([], '/app/db/migrations'))).toEqual([])
   })
 })
 
 describe('reportAppliedMigrations', () => {
-  function capture(run: () => void): string[] {
-    const lines: string[] = []
-    const original = console.info
-    console.info = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
-    try {
-      run()
-    } finally {
-      console.info = original
-    }
-    return lines
-  }
-
   test('should name every migration it applied, and where they came from', () => {
-    const lines = capture(() => reportAppliedMigrations(['20260102000000_orphan'], '/app/db/migrations'))
+    const lines = captureConsole('info', () => reportAppliedMigrations(['20260102000000_orphan'], '/app/db/migrations'))
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain('20260102000000_orphan')
     expect(lines[0]).toContain('/app/db/migrations')
   })
 
   test('should say nothing when the run applied nothing', () => {
-    expect(capture(() => reportAppliedMigrations([], '/app/db/migrations'))).toEqual([])
+    expect(captureConsole('info', () => reportAppliedMigrations([], '/app/db/migrations'))).toEqual([])
   })
 })

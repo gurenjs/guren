@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, readMigrationDrift, reportAppliedMigrations, reportOrphanedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -133,14 +133,12 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
 
       try {
         const db = drizzle({ client: migrationClient, ...(relations ? { relations } : {}) } as DrizzleConfig)
-        // Over the migration client, and before the migrator writes: a second
-        // admin connection here would cost a round trip on every cold start.
-        const drift = report
-          ? await readMigrationDrift(resolvedMigrationsFolder, () => readAppliedMigrations(migrationClient))
-          : undefined
-        reportOrphanedMigrations(drift?.orphaned ?? [], resolvedMigrationsFolder)
-        await migrate(db, { migrationsFolder: resolvedMigrationsFolder })
-        reportAppliedMigrations(drift?.pending ?? [], resolvedMigrationsFolder)
+        // Over the migration client: a second admin connection here would cost
+        // a round trip on every cold start.
+        await migrateAndReport(resolvedMigrationsFolder, {
+          readApplied: report ? () => readAppliedMigrations(migrationClient) : undefined,
+          migrate: () => migrate(db, { migrationsFolder: resolvedMigrationsFolder }),
+        })
       } finally {
         await migrationClient.end({ timeout: 0 })
       }

@@ -253,15 +253,16 @@ export function buildMigrationStatus(
   localMigrations: LocalMigrationEntry[],
   appliedRows: AppliedMigrationRow[],
 ): MigrationStatusEntry[] {
-  const appliedByName = new Map<string, AppliedMigrationRow>()
+  const unmatchedRows = new Map<string, AppliedMigrationRow>()
   for (const row of appliedRows) {
     if (row.name) {
-      appliedByName.set(row.name, row)
+      unmatchedRows.set(row.name, row)
     }
   }
 
   const entries: MigrationStatusEntry[] = localMigrations.map((migration) => {
-    const row = appliedByName.get(migration.name)
+    const row = unmatchedRows.get(migration.name)
+    unmatchedRows.delete(migration.name)
     return {
       name: migration.name,
       applied: row !== undefined,
@@ -269,12 +270,11 @@ export function buildMigrationStatus(
     }
   })
 
-  const localNames = new Set(localMigrations.map((migration) => migration.name))
-  const orphaned = [...appliedByName]
-    .filter(([name]) => !localNames.has(name))
-    .map(([name, row]): MigrationStatusEntry => ({ name, applied: true, appliedAt: parseAppliedAt(row), orphaned: true }))
+  if (unmatchedRows.size === 0) return entries
 
-  if (orphaned.length === 0) return entries
+  const orphaned = [...unmatchedRows].map(
+    ([name, row]): MigrationStatusEntry => ({ name, applied: true, appliedAt: parseAppliedAt(row), orphaned: true }),
+  )
   return [...entries, ...orphaned].sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -298,7 +298,7 @@ export async function readMigrationDrift(
     const status = buildMigrationStatus(listLocalMigrations(migrationsFolder), await readApplied())
     return {
       pending: status.filter((entry) => !entry.applied).map((entry) => entry.name),
-      orphaned: status.filter((entry) => entry.orphaned === true).map((entry) => entry.name),
+      orphaned: status.filter((entry) => entry.orphaned).map((entry) => entry.name),
     }
   } catch {
     return { pending: [], orphaned: [] }
@@ -306,10 +306,29 @@ export async function readMigrationDrift(
 }
 
 /**
- * Warns on every boot while the tracker holds rows no folder carries, typically
- * a generator's migration that a dev server applied before `git clean` removed
- * it. Its tables stay behind, and a later migration creating them fails, so
- * drivers call this before the migrator runs rather than after it throws.
+ * One migrator run, reported on both sides. The tracker is read before the
+ * migrator writes (afterwards every row is applied), and orphans are named
+ * before it runs, since they are the likeliest reason it is about to fail.
+ * Without `readApplied` nothing is read or reported: a reset's re-apply.
+ */
+export async function migrateAndReport(
+  migrationsFolder: string,
+  { readApplied, migrate }: {
+    readApplied?: () => Promise<AppliedMigrationRow[]> | AppliedMigrationRow[]
+    /** bun:sqlite's migrator is synchronous; the others return a promise. */
+    migrate: () => unknown
+  },
+): Promise<void> {
+  const drift = readApplied ? await readMigrationDrift(migrationsFolder, readApplied) : { pending: [], orphaned: [] }
+  reportOrphanedMigrations(drift.orphaned, migrationsFolder)
+  await migrate()
+  reportAppliedMigrations(drift.pending, migrationsFolder)
+}
+
+/**
+ * Warns on every boot while the tracker holds rows no folder carries, such as a
+ * generator's migration a dev server applied before `git clean` removed it. Its
+ * tables stay behind, and a later migration creating them again fails.
  */
 export function reportOrphanedMigrations(orphaned: readonly string[], migrationsFolder: string): void {
   if (orphaned.length === 0) return
