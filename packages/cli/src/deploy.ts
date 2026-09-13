@@ -42,8 +42,9 @@ async function inferAppName(): Promise<string> {
 
 /**
  * What `bun bin/serve.ts` reads from the app root, and so what the production
- * image copies. `tests/deploy.test.ts` classifies every top-level entry of the
- * create-app templates against these lists; `modules` comes from `make:module`.
+ * image copies. `tests/deploy.test.ts` fails on a create-app template entry these
+ * lists omit, not on a generator's: `modules` (`make:module`) is added by hand, and
+ * `storage` stays out on purpose, since uploads belong on a volume or object storage.
  */
 export const DOCKER_RUNTIME_DIRECTORIES = ['bin', 'src', 'app', 'config', 'routes', 'modules', 'db', 'lang', 'public', '.guren'] as const
 /** `tsconfig.json` carries the `@/` alias, which Bun resolves from it at runtime. */
