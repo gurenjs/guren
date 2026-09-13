@@ -333,7 +333,7 @@ const events = createEventManager()
 events.setQueueDispatcher(createQueueEventDispatcher())
 ```
 
-ディスパッチャは `Job.dispatch()` が解決するキュードライバを使って送るので、`queue` としてバインドした `QueueManager` か、`setQueueDriver()` で固定したドライバがアプリに必要です。
+ディスパッチャは `Job.dispatch()` が解決するキュードライバを使って送るので、コンテナに `queue` としてバインドした `QueueManager` がアプリに必要です。バインドされていなければ、キューに載せるはずのリスナーは警告を 1 度出してインラインで実行されます。
 
 ## EventManagerユーティリティ
 

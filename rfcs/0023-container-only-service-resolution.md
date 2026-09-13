@@ -243,10 +243,12 @@ class QueueManager {
 ```
 
 **Amended in implementation:** through Parts 1 and 2 a `setQueueDriver()` pin
-still overrides the bound manager, as it did before. `@guren/testing`'s
-`fakeQueue()` and the tutorial's queue chapter inject a fake through the pin
-and nothing else, and the Migration Path already lists that usage as reported
-rather than rewritten; the pin goes with the setter in Part 3.
+still overrides the bound manager, as it did before. The Migration Path lists
+a test that injects `fakeQueue()`'s driver through the pin as reported rather
+than rewritten. No test needs the pin: `container.fake('queue', manager)` with
+a `QueueManager` wrapping that driver intercepts `Job.dispatch()`, and the
+tutorial's queue chapter does exactly that. The pin goes with the setter in
+Part 3.
 
 `QueueManager.driver()` stops publishing a global (`QueueManager.ts:48-50`,
 `:84`); `guren queue:work` resolves `container.make('queue').driver()` from the

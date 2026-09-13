@@ -259,76 +259,123 @@ Guren's SQLite adapter doesn't hand you a ready-made `DatabaseConnection` (`getD
 
 ## Faking Services
 
-Real tests should not send actual emails, dispatch real events, or push jobs to a queue. Replace services with fakes using the container:
+Real tests should not send actual emails, dispatch real events, or push jobs to a queue. `@guren/testing` ships a fake for each: `fakeEvent()`, `fakeMail()` and `fakeQueue()`. Bind them on the app your project exports with `app.container.fake()`, inside the test that needs them:
 
 ```ts
-import { TestApp, FakeEvent, FakeMail, FakeQueue } from '@guren/testing'
+import { beforeAll, test } from 'bun:test'
+import { MailManager, createQueueManager } from '@guren/core'
+import { TestApp, fakeEvent, fakeMail, fakeQueue } from '@guren/testing'
+import app from '../src/app.js'
+import { OrderPlaced } from '../app/Events/OrderPlaced.js'
+import { ProcessOrderJob, type ProcessOrderPayload } from '../app/Jobs/ProcessOrderJob.js'
 
-const app = await TestApp.create()
+let http: TestApp
 
-// Swap real services for fakes
-const fakeEvents = new FakeEvent()
-const fakeMail = new FakeMail()
-const fakeQueue = new FakeQueue()
-app.container.fake('events', fakeEvents)
-app.container.fake('mail', fakeMail)
-app.container.fake('queue', fakeQueue)
-```
-
-Then assert on what happened:
-
-```ts
-test('registration sends welcome email and dispatches event', async () => {
-  await app.post('/register', {
-    email: 'new@example.com',
-    name: 'New User',
-    password: 'secret123',
-  }).assertStatus(201)
-
-  fakeEvents.assertDispatched(UserRegistered)
-  fakeMail.assertSentTo('new@example.com')
-  fakeQueue.assertPushed(SendWelcomeEmailJob)
+beforeAll(async () => {
+  http = await TestApp.fromApp(app)
 })
 
-test('does not send email for invalid registration', async () => {
-  await app.post('/register', { email: '' }).assertStatus(422)
+test('placing an order announces it', async () => {
+  const events = fakeEvent()
+  using _events = app.container.fake('events', events.getManager())
 
-  fakeMail.assertNothingSent()
-  fakeEvents.assertNotDispatched(UserRegistered)
+  const client = await http.withCsrf()
+  await client.post('/orders', { sku: 'book' }).assertRedirect('/orders')
+
+  events.assertDispatched(OrderPlaced, (event) => event.sku === 'book')
+})
+
+test('placing an order mails a receipt', async () => {
+  const mail = fakeMail()
+  const manager = new MailManager({ default: 'fake', from: { email: 'shop@example.com', name: 'Shop' } })
+  manager.registerTransport('fake', () => mail.getTransport())
+  using _mail = app.container.fake('mail', manager)
+
+  const client = await http.withCsrf()
+  await client.post('/orders', { sku: 'book', email: 'ada@example.com' }).assertRedirect('/orders')
+
+  mail.assertSentTo('ada@example.com')
+  mail.assertSentWithSubject('Your order')
+})
+
+test('placing an order queues the processing job', async () => {
+  const queue = fakeQueue()
+  using _queue = app.container.fake(
+    'queue',
+    createQueueManager({ default: 'fake', drivers: { fake: () => queue.getDriver() } }),
+  )
+
+  const client = await http.withCsrf()
+  await client.post('/orders', { sku: 'book' }).assertRedirect('/orders')
+
+  queue.assertPushed<ProcessOrderPayload>(ProcessOrderJob, (payload) => payload.sku === 'book')
 })
 ```
+
+Each container key holds a manager (`events` an `EventManager`, `mail` a `MailManager`, `queue` a `QueueManager`), and each fake is one level below that, so it goes in wrapped:
+
+- `fakeEvent()` records through the manager it holds: bind `events.getManager()`. Nothing listens on that manager, so listeners do not run, and neither do the jobs or mail they would have started.
+- `fakeMail()` is a transport: register it on a real `MailManager` and bind the manager.
+- `fakeQueue()` is a driver: return it from a `createQueueManager()` factory and bind the manager.
+
+`assertPushed` takes the payload type explicitly. A job class alone does not tell TypeScript its payload, so the predicate would receive `unknown`.
+
+`fake()` returns a disposable, and `using` puts the app's own binding back when the test ends. Every test file that calls `fromApp()` shares one app instance, so a fake bound in `beforeAll` and never restored stays bound for the files that run after it. Bind fakes after the app boots, too: providers call `listen()` and `setQueueDispatcher()` on the `events` manager during boot, and the fake manager has neither.
+
+Binding the fake itself rather than a manager fails on first use, and the request answers 500:
+
+| Bound directly | Error |
+|---|---|
+| `fakeEvent()` as `events` | `this.make("events").emit is not a function` |
+| `fakeMail()` as `mail` | `manager.getDefaultFrom is not a function` |
+| `fakeQueue()` as `queue` | `manager.getDefaultDriverName is not a function` |
+
+`setQueueDriver(fakeQueue().getDriver())` also intercepts `Job.dispatch()`, but it is deprecated since 2.23.0 and removed in 3.0.0.
 
 ### Available Fake Assertions
+
+`FakeMail` records the built message, not the `Mail` class that built it, so its assertions read addresses, subject and body.
 
 **FakeMail:**
 
 | Method | Description |
 |--------|-------------|
-| `assertSent(mailable)` | A mailable was sent |
-| `assertSentTo(email)` | Email was sent to address |
-| `assertSentWith(mailable, data)` | Mailable sent with specific data |
-| `assertNotSent(mailable)` | A mailable was not sent |
-| `assertNothingSent()` | No emails sent at all |
+| `assertSent(callback?)` | A mail was sent; with a callback, one of them matches it |
+| `assertSentTimes(count)` | Exactly `count` mails were sent in total |
+| `assertNothingSent()` | No mail was sent |
+| `assertSentTo(email)` | A mail was sent to the address |
+| `assertSentFrom(email)` | A mail was sent from the address |
+| `assertSentWithSubject(subject)` | A mail has exactly this subject |
+| `assertSentWithBodyContaining(text)` | A mail's text or HTML body contains `text` |
+| `assertSentWithCc(email)`, `assertSentWithBcc(email)` | A mail copies the address |
+| `assertSentWithAttachment(filename)` | A mail carries an attachment with this filename |
+| `sent()`, `sentTo(email)` | The recorded mails, all of them or those to one address |
 
 **FakeEvent:**
 
 | Method | Description |
 |--------|-------------|
-| `assertDispatched(event)` | An event was dispatched |
-| `assertDispatchedWith(event, data)` | Event dispatched with specific data |
-| `assertDispatchedInOrder(events)` | Events dispatched in order |
-| `assertNotDispatched(event)` | An event was not dispatched |
-| `assertNothingDispatched()` | No events dispatched |
+| `assertDispatched(event, callback?)` | The event was dispatched; with a callback, one instance matches it |
+| `assertDispatchedTimes(event, count)` | The event was dispatched exactly `count` times |
+| `assertDispatchedWith(event, data)` | One instance has every property in `data`, compared with `===` |
+| `assertDispatchedInOrder(events)` | The events were dispatched in this order, with others allowed between them |
+| `assertNotDispatched(event)` | The event was not dispatched |
+| `assertNothingDispatched()` | No event was dispatched |
+| `dispatched(event)` | The recorded instances of the event |
 
 **FakeQueue:**
 
 | Method | Description |
 |--------|-------------|
-| `assertPushed(job)` | A job was pushed |
-| `assertPushedWith(job, data)` | Job pushed with specific data |
-| `assertPushedOn(queue, job)` | Job pushed to specific queue |
-| `assertNotPushed(job)` | A job was not pushed |
-| `assertNothingPushed()` | No jobs pushed |
+| `assertPushed(job, callback?)` | The job was pushed; with a callback, one payload matches it |
+| `assertPushedTimes(job, count)` | The job was pushed exactly `count` times |
+| `assertPushedOn(queue, job)` | The job was pushed onto the named queue |
+| `assertPushedWithDelay(job, delay)` | The job was pushed with this delay, in milliseconds |
+| `assertNotPushed(job)` | The job was not pushed |
+| `assertNothingPushed()` | No job was pushed |
+| `pushed(job)` | The recorded pushes of the job |
+
+All three also have `clear()`, for a fake kept across tests.
 
 ## Running Tests
 

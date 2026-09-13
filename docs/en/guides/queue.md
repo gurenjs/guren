@@ -160,20 +160,26 @@ await Queue.dispatch(SendWelcomeEmailJob, { userId: 1 })
 
 ### Manual Setup
 
-A manager that is not bound in the container works too. Hand its driver to `setQueueDriver()` once: `dispatch()` has no way to find a manager nothing binds.
+`Job.dispatch()` finds the manager through the container, so a manager you build yourself is bound as `queue` from a provider's `register()`:
 
 ```ts
-import { createQueueManager, MemoryDriver } from '@guren/core'
+import { ServiceProvider, createQueueManager, MemoryDriver } from '@guren/core'
 
-const queue = createQueueManager({
-  default: 'memory',
-  drivers: {
-    memory: () => new MemoryDriver(),
-  },
-})
+export default class QueueProvider extends ServiceProvider {
+  register(): void {
+    const queue = createQueueManager({
+      default: 'memory',
+      drivers: {
+        memory: () => new MemoryDriver(),
+      },
+    })
 
-queue.driver()
+    this.container.instance('queue', queue)
+  }
+}
 ```
+
+`Job.dispatch()` cannot find a manager that nothing binds. Dispatch through that manager explicitly instead: `await queue.dispatch(SendWelcomeEmailJob, payload)`. `setQueueDriver()` can still pin such a manager's driver, but it is deprecated since 2.23.0 and removed in 3.0.0.
 
 Then dispatch jobs from anywhere in your application:
 
@@ -294,9 +300,8 @@ const queueManager = createQueueManager({
   },
 })
 
-// Resolve the default driver. A manager not bound as `queue` in the
-// container has to pin it before dispatch() can find it:
-// setQueueDriver(driver)
+// Resolve the default driver. Job.dispatch() only finds a manager bound as
+// `queue` in the container (see Manual Setup above).
 const driver = queueManager.driver()
 
 // Get a specific driver

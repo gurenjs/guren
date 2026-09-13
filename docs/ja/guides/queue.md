@@ -160,20 +160,26 @@ await Queue.dispatch(SendWelcomeEmailJob, { userId: 1 })
 
 ### 直接セットアップ
 
-コンテナにバインドしないマネージャーも使えます。その場合はドライバを一度 `setQueueDriver()` に渡します。どこにもバインドされていないマネージャーを `dispatch()` が見つける手段は他にありません。
+`Job.dispatch()` はコンテナを通してマネージャーを見つけます。自分で組み立てたマネージャーは、プロバイダの `register()` で `queue` としてバインドします。
 
 ```ts
-import { createQueueManager, MemoryDriver } from '@guren/core'
+import { ServiceProvider, createQueueManager, MemoryDriver } from '@guren/core'
 
-const queue = createQueueManager({
-  default: 'memory',
-  drivers: {
-    memory: () => new MemoryDriver(),
-  },
-})
+export default class QueueProvider extends ServiceProvider {
+  register(): void {
+    const queue = createQueueManager({
+      default: 'memory',
+      drivers: {
+        memory: () => new MemoryDriver(),
+      },
+    })
 
-queue.driver()
+    this.container.instance('queue', queue)
+  }
+}
 ```
+
+どこにもバインドされていないマネージャーは `Job.dispatch()` から見つかりません。その場合は `await queue.dispatch(SendWelcomeEmailJob, payload)` のように、マネージャー経由で明示的にディスパッチします。`setQueueDriver()` でドライバを固定する方法も残っていますが、2.23.0 で非推奨になり、3.0.0 で削除されます。
 
 その後、アプリケーションのどこからでもジョブをディスパッチできます。
 
@@ -294,8 +300,8 @@ const queueManager = createQueueManager({
   },
 })
 
-// デフォルトドライバを解決する。コンテナに `queue` としてバインドしない
-// マネージャーは、setQueueDriver(driver) で固定しないと dispatch() から見つからない
+// デフォルトドライバを解決する。Job.dispatch() が見つけるのは、コンテナに
+// `queue` としてバインドしたマネージャーだけ（上の「直接セットアップ」を参照）
 const driver = queueManager.driver()
 
 // 特定のドライバを取得

@@ -335,7 +335,7 @@ const events = createEventManager()
 events.setQueueDispatcher(createQueueEventDispatcher())
 ```
 
-The dispatcher sends through the queue driver `Job.dispatch()` resolves, so the app still needs a `QueueManager` bound as `queue` or a driver pinned with `setQueueDriver()`.
+The dispatcher sends through the queue driver `Job.dispatch()` resolves, so the app still needs a `QueueManager` bound as `queue` in the container. With none bound, a queued listener warns once and runs inline.
 
 ## Event Manager Utilities
 

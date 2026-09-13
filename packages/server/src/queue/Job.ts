@@ -16,10 +16,10 @@ let globalDriver: QueueDriver | null = null
 
 /**
  * Pins the driver `Job.dispatch()` sends through, ahead of the container's
- * `queue` manager. An explicit override rather than a fallback: `@guren/testing`'s
- * `fakeQueue()` and the tutorial's queue test inject through it (RFC 0023 §3).
- * The pin survives its deprecation window because nothing else expresses it; it
- * goes with this setter in Part 3.
+ * `queue` manager: an override rather than a fallback (RFC 0023 §3). A test
+ * needs no pin: a `QueueManager` wrapping `fakeQueue().getDriver()`, bound with
+ * `app.container.fake('queue', manager)`, is what `Job.dispatch()` resolves.
+ * The pin goes with this setter in Part 3.
  * @deprecated since 2.23.0, removed in 3.0.0 (RFC 0023). Bind the manager on the
  * app's container — `QueueServiceProvider` already does — and inject a fake with
  * `app.container.fake('queue', manager)`.
