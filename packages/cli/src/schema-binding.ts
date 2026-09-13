@@ -22,19 +22,24 @@ export const SCHEMA_SPECIFIER_PATTERN = /(^|\/)db\/schema(\.[jt]s)?$/
  * declares. Undefined for a specifier resolving outside both shapes.
  */
 export function schemaModuleFor(cwd: string, filePath: string, specifier: string): string | null | undefined {
-  let absolute: string
-  if (specifier.startsWith('@/')) {
-    absolute = resolve(cwd, specifier.slice(2))
-  } else if (specifier.startsWith('.')) {
-    absolute = resolve(dirname(filePath), specifier)
-  } else {
-    return undefined
-  }
+  const absolute = specifierBase(cwd, filePath, specifier)
+  if (absolute === null) return undefined
   const rel = relative(cwd, absolute).replace(/\\/g, '/').replace(/\.[jt]s$/, '')
   if (rel === 'db/schema') return null
   const moduleMatch = /^modules\/([^/]+)\/db\/schema$/.exec(rel)
   if (moduleMatch) return moduleMatch[1]!
   return undefined
+}
+
+/**
+ * Absolute path a specifier points at, before extension guessing: relative to the
+ * importing file, or to the app root for the `@/` alias. Package specifiers yield `null`.
+ * Pure string work, so a caller can rule an import out before touching the disk.
+ */
+export function specifierBase(cwd: string, fromFile: string, specifier: string): string | null {
+  if (specifier.startsWith('.')) return resolve(dirname(fromFile), specifier)
+  if (specifier.startsWith('@/')) return resolve(cwd, specifier.slice(2))
+  return null
 }
 
 export interface ImportEntry {

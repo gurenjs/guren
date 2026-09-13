@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises'
-import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { CallExpression, Statement } from '@babel/types'
 import { memberKeyName, objectLiteral, walk } from './ast-walk'
 import {
@@ -12,6 +12,7 @@ import {
   toPosixRelative,
 } from './discovery'
 import type { ParseCache } from './parse-cache'
+import { specifierBase } from './schema-binding'
 import { DEFAULT_ROUTES_FILE, isRegistrarExportName, resolveRoutesEntry, specifierName } from './route-registrar'
 import { pascalCase, referencesIdentifier, relativeImportPath } from './utils'
 import { check, type CheckResult } from './check-result'
@@ -113,18 +114,6 @@ async function isFile(path: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/**
- * Absolute path a specifier points at, before extension guessing: relative to the
- * importing file, or to the app root for the `@/` alias. Package specifiers yield `null`.
- * Pure string work, kept apart from {@link resolveSpecifier} so callers can rule an edge
- * out before touching the disk — 16 of 17 probes in `examples/blog`.
- */
-function specifierBase(cwd: string, fromFile: string, specifier: string): string | null {
-  if (specifier.startsWith('.')) return resolve(dirname(fromFile), specifier)
-  if (specifier.startsWith('@/')) return resolve(cwd, specifier.slice(2))
-  return null
 }
 
 /**

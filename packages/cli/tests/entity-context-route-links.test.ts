@@ -232,7 +232,7 @@ describe('entity context (routes linked by action references)', () => {
         path: '/ghost',
         name: 'ghost',
         action: 'GhostController.index',
-        reason: 'GhostController has a file, but its index action body could not be read',
+        reason: 'app/Http/Controllers/GhostController.ts could not be parsed',
       },
     ])
   })
@@ -256,7 +256,7 @@ describe('entity context (routes linked by action references)', () => {
     expect(md).toContain('| POST | /register | register.store | RegisterController.store |')
     expect(md).toContain('- profile/Show')
     expect(md).toContain('Not checked for references to User (1):')
-    expect(md).toContain('- GET /ghost → GhostController.index: GhostController has a file, but its index action body could not be read')
+    expect(md).toContain('- GET /ghost → GhostController.index: app/Http/Controllers/GhostController.ts could not be parsed')
   })
 
   it('links nothing by reference for an entity no other action names', async () => {

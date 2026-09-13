@@ -11,6 +11,7 @@ import { classNameFromPath, discoverControllerFiles } from './discovery'
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
+import { escapeRegExp } from './utils'
 
 /**
  * Controller action bodies, extracted once and judged by regex afterwards. Lives
@@ -22,8 +23,8 @@ import { memberKeyName, walk } from './ast-walk'
 export interface ControllerMethodInfo {
   /** Method body source with comments and string contents blanked, offsets preserved. */
   body: string
-  /** Offset of `body` in the file, for reading the unblanked source of the same span. */
-  bodyStart: number
+  /** The same span as written, for what blanking removes, such as a page name in a string. */
+  rawBody: string
   /** Controller file, relative to the project root. */
   filePath: string
 }
@@ -48,6 +49,10 @@ export interface ControllerMethodScan {
    * rather than a confident verdict.
    */
   unreadableFiles: string[]
+  /** Controller files that were read but did not parse; like `unreadableFiles`, their actions are absent. */
+  unparsedFiles: string[]
+  /** Class name → the file declaring it, last file scanned winning like `methods`. */
+  classFiles: Map<string, string>
 }
 
 /**
@@ -58,6 +63,8 @@ export const EMPTY_CONTROLLER_SCAN: ControllerMethodScan = {
   methods: new Map(),
   collisions: [],
   unreadableFiles: [],
+  unparsedFiles: [],
+  classFiles: new Map(),
 }
 
 /**
@@ -177,6 +184,13 @@ export const AUTHORIZE_CALL_PATTERN = controllerMemberCall('authorize')
 /** An Inertia page response, which carries no JSON schema an agent could read. */
 export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')
 
+/** `this.auth.<method><…typeName…>(`: a record type passed as a type argument of an auth call. */
+export function authTypeArgumentPattern(typeName: string): RegExp {
+  const member: ControllerMemberName = 'auth'
+  const name = `(?<![\\w$.])${escapeRegExp(typeName)}(?![\\w$])`
+  return new RegExp(`\\bthis\\s*\\.\\s*${member}\\s*\\.\\s*\\w+\\s*<[^()]*${name}[^()]*>\\s*\\(`)
+}
+
 /**
  * A call to one of `names` on a model, in its two shapes: a static on the class
  * (PascalCase receiver) and a terminated query chain (call follows a closing
@@ -273,6 +287,7 @@ export async function parseControllerMethods(
   const methods = new Map<string, ControllerMethodInfo>()
   const collisions: ControllerNameCollision[] = []
   const unreadableFiles: string[] = []
+  const unparsedFiles: string[] = []
   const classFiles = new Map<string, string>()
   const controllerFiles = await discoverControllerFiles(cwd)
 
@@ -288,7 +303,10 @@ export async function parseControllerMethods(
       unreadableFiles.push(relPath)
       continue
     }
-    if (outcome.status !== 'parsed') continue
+    if (outcome.status !== 'parsed') {
+      unparsedFiles.push(relPath)
+      continue
+    }
 
     const { source, ast } = outcome
     const scrubbed = blankCommentsAndStrings(source, ast)
@@ -307,14 +325,14 @@ export async function parseControllerMethods(
       for (const { name, body } of classActionMembers(classDecl)) {
         methods.set(`${className}.${name}`, {
           body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
-          bodyStart: body.start ?? 0,
+          rawBody: source.slice(body.start ?? 0, body.end ?? 0),
           filePath: relPath,
         })
       }
     }
   }
 
-  return { methods, collisions, unreadableFiles }
+  return { methods, collisions, unreadableFiles, unparsedFiles, classFiles }
 }
 
 /**
