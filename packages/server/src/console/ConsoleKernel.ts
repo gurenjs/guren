@@ -16,7 +16,8 @@ import { argumentLabel, formatUsage, optionLabel, parseSignature } from './Input
  */
 function requestsHelp(signature: ParsedSignature, args: string[]): boolean {
   const claimsLong = signature.options.some((opt) => opt.name === 'help')
-  const claimsShort = signature.options.some((opt) => opt.shortcut === 'h')
+  // `{-h}` with no `|` parses to name `h`, which `Input` still binds to `-h`.
+  const claimsShort = signature.options.some((opt) => opt.shortcut === 'h' || opt.name === 'h')
   return args.some((arg) => (arg === '--help' && !claimsLong) || (arg === '-h' && !claimsShort))
 }
 

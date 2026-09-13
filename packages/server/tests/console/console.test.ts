@@ -811,6 +811,21 @@ describe('ConsoleKernel', () => {
       expect(effects).toEqual(['host=0.0.0.0 help=true'])
       expect(output.contains('Command: app:serve')).toBe(false)
     })
+
+    test('leaves -h to a signature declaring it without a long name', async () => {
+      class HostsCommand extends Command {
+        static signature = 'app:hosts {-h : Include hidden hosts}'
+
+        async handle(): Promise<void> {
+          effects.push(`h=${this.option('h')}`)
+        }
+      }
+
+      kernel.register(HostsCommand)
+
+      expect(await kernel.handle(['app:hosts', '-h'])).toBe(0)
+      expect(effects).toEqual(['h=true'])
+    })
   })
 
   test('shows command help with argument and option descriptions', async () => {
