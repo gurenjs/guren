@@ -446,7 +446,7 @@ function orderExporters(specifiers: string[]): string[] {
   })
 }
 
-async function markdownFiles(dir: string): Promise<string[]> {
+export async function markdownFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { recursive: true, withFileTypes: true })
   return entries
     .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))

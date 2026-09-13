@@ -5,16 +5,24 @@
  * through `bun run console`, and `bunx guren` answers `Unknown command`.
  * Flags are not checked here; `add` and friends derive theirs per blueprint.
  */
-import { readdir, readFile } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { join, relative } from 'node:path'
 
 import { builtinSubCommands } from '../../packages/cli/src/commands'
+import type { GurenPluginManifest } from '../../packages/cli/src/plugin-manifest'
+import { collectPackages, repoRoot } from '../workspace-packages'
+import { markdownFiles } from './docs-import-sources'
+
+export interface KnownCliCommands {
+  registered: Set<string>
+  /** Console commands the framework ships, for which `bun run console` is the fix. */
+  consoleCommands: Set<string>
+}
 
 export interface UnknownCliCommand {
   file: string
   line: number
   command: string
-  /** A console command the framework ships, so `bun run console` is the fix. */
   consoleCommand: boolean
 }
 
@@ -24,80 +32,52 @@ const CONSOLE_SIGNATURE_RE = /\bstatic\s+(?:override\s+)?signature\s*=\s*['"`]([
 // A plugin-authoring page declares an example command in a manifest fence.
 const MANIFEST_NAMES_RE = /"names"\s*:\s*\[([^\]]*)\]/gu
 
-async function packageDirs(root: string): Promise<string[]> {
-  const entries = await readdir(join(root, 'packages'), { withFileTypes: true })
-  return entries.filter((entry) => entry.isDirectory()).map((entry) => join(root, 'packages', entry.name))
-}
-
-export async function registeredCliCommands(root: string): Promise<Set<string>> {
-  const names = new Set(Object.keys(builtinSubCommands))
-  for (const dir of await packageDirs(root)) {
-    let manifest: { gurenPlugin?: { commands?: { names?: unknown } } }
-    try {
-      manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
-    } catch {
-      continue
-    }
-    const declared = manifest.gurenPlugin?.commands?.names
-    if (Array.isArray(declared)) {
-      for (const name of declared) if (typeof name === 'string') names.add(name)
-    }
+export async function knownCliCommands(): Promise<KnownCliCommands> {
+  const registered = new Set(Object.keys(builtinSubCommands))
+  const manifests = await Promise.all(
+    (await collectPackages()).map(
+      async (pkg) => JSON.parse(await readFile(join(pkg.dir, 'package.json'), 'utf8')) as { gurenPlugin?: GurenPluginManifest },
+    ),
+  )
+  for (const manifest of manifests) {
+    for (const name of manifest.gurenPlugin?.commands?.names ?? []) registered.add(name)
   }
-  return names
-}
 
-export async function frameworkConsoleCommands(root: string): Promise<Set<string>> {
-  const names = new Set<string>()
-  for (const dir of await packageDirs(root)) {
-    let entries
-    try {
-      entries = await readdir(join(dir, 'src'), { recursive: true, withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) continue
-      const source = await readFile(join(entry.parentPath, entry.name), 'utf8')
-      for (const match of source.matchAll(CONSOLE_SIGNATURE_RE)) names.add(match[1]!)
-    }
+  const sources: string[] = []
+  for await (const path of new Bun.Glob('packages/*/src/**/*.ts').scan({ cwd: repoRoot })) {
+    if (!path.endsWith('.test.ts')) sources.push(join(repoRoot, path))
   }
-  return names
+  const consoleCommands = new Set<string>()
+  await Promise.all(
+    sources.map(async (path) => {
+      for (const match of (await readFile(path, 'utf8')).matchAll(CONSOLE_SIGNATURE_RE)) consoleCommands.add(match[1]!)
+    }),
+  )
+
+  return { registered, consoleCommands }
 }
 
-function manifestDeclaredNames(markdown: string): Set<string> {
-  const names = new Set<string>()
+export function unknownCommandsIn(markdown: string, file: string, known: KnownCliCommands): UnknownCliCommand[] {
+  const declaredHere = new Set<string>()
   for (const match of markdown.matchAll(MANIFEST_NAMES_RE)) {
-    for (const quoted of match[1]!.matchAll(/"([^"]+)"/gu)) names.add(quoted[1]!)
+    for (const quoted of match[1]!.matchAll(/"([^"]+)"/gu)) declaredHere.add(quoted[1]!)
   }
-  return names
+
+  const unknown: UnknownCliCommand[] = []
+  for (const [index, text] of markdown.split('\n').entries()) {
+    for (const [, command, placeholder] of text.matchAll(INVOCATION_RE)) {
+      if (placeholder || known.registered.has(command!) || declaredHere.has(command!)) continue
+      unknown.push({ file, line: index + 1, command: command!, consoleCommand: known.consoleCommands.has(command!) })
+    }
+  }
+  return unknown
 }
 
-export async function auditDocsCliCommands(root: string, docsDir = 'docs'): Promise<UnknownCliCommand[]> {
-  const registered = await registeredCliCommands(root)
-  const consoleCommands = await frameworkConsoleCommands(root)
-  const base = resolve(root, docsDir)
+export async function auditDocsCliCommands(root: string): Promise<UnknownCliCommand[]> {
+  const known = await knownCliCommands()
   const unknown: UnknownCliCommand[] = []
-
-  const entries = await readdir(base, { recursive: true, withFileTypes: true })
-  const files = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-    .map((entry) => join(entry.parentPath, entry.name))
-    .sort()
-
-  for (const path of files) {
-    const markdown = await readFile(path, 'utf8')
-    const declaredHere = manifestDeclaredNames(markdown)
-    for (const [index, text] of markdown.split('\n').entries()) {
-      for (const [, command, placeholder] of text.matchAll(INVOCATION_RE)) {
-        if (placeholder || registered.has(command!) || declaredHere.has(command!)) continue
-        unknown.push({
-          file: relative(root, path),
-          line: index + 1,
-          command: command!,
-          consoleCommand: consoleCommands.has(command!),
-        })
-      }
-    }
+  for (const path of await markdownFiles(join(root, 'docs'))) {
+    unknown.push(...unknownCommandsIn(await readFile(path, 'utf8'), relative(root, path), known))
   }
   return unknown
 }
