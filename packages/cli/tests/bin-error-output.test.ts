@@ -58,6 +58,42 @@ describe('guren CLI error reporting', () => {
     }
   })
 
+  it('adds a close builtin and the app console runner to an unknown namespaced command', async () => {
+    const workspace = await createTempWorkspace('guren-cli-bin-unknown-hint-')
+    try {
+      const [typo, consoleCommand] = await Promise.all([
+        runBin(['db:migrate:status'], workspace.dir),
+        runBin(['attachments:prune', '--dry-run'], workspace.dir),
+      ])
+
+      expect(typo.exitCode).toBe(1)
+      expect(countOccurrences(typo.stderr, 'Unknown command')).toBe(1)
+      expect(plainText(typo.stderr)).toContain('Did you mean db:migrate, db:status?')
+
+      expect(consoleCommand.exitCode).toBe(1)
+      const hint = plainText(consoleCommand.stderr)
+      expect(hint).toContain('run it with bun run console attachments:prune')
+      expect(hint).toContain('bunx guren console opens a REPL')
+      expect(hint).not.toContain('Did you mean')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('suggests a close subcommand without the console runner', async () => {
+    const workspace = await createTempWorkspace('guren-cli-bin-unknown-sub-')
+    try {
+      const { exitCode, stderr } = await runBin(['add', 'attachmentz'], workspace.dir)
+
+      expect(exitCode).toBe(1)
+      expect(countOccurrences(stderr, 'Unknown command')).toBe(1)
+      expect(plainText(stderr)).toContain('Did you mean attachments?')
+      expect(plainText(stderr)).not.toContain('bun run console')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('treats a name inherited from Object.prototype as an unknown command', async () => {
     const workspace = await createTempWorkspace('guren-cli-bin-proto-')
     try {
