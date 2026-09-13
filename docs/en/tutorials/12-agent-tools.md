@@ -931,7 +931,7 @@ Do not confuse it with the endpoint your editor already talks to. `GUREN_MCP=1` 
 ## Exercises
 
 1. Add `agent: { readOnlyHint: true }` to `posts.publish` and run `bunx guren check --ci`. Read the finding, then remove the hint. Why is a wrong annotation treated as seriously as a missing policy?
-2. Call `posts.show` through `TestApp.agent()` with an id no post has. What does the agent receive? Compare it with what a browser gets at the same URL, and say which parts of the difference are the framework's doing and which are yours.
+2. Call `posts_show` through `TestApp.agent()` with an id no post has. What does the agent receive? Compare it with what a browser gets at the same URL, and say which parts of the difference are the framework's doing and which are yours.
 
 ## Next
 
