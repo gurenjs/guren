@@ -27,7 +27,7 @@ flowchart LR
 - Where each of the four is registered, and the one registration nothing checks for you
 - Why a job payload is ids rather than records
 - What `QUEUE_CONNECTION=sync` really does, and what changes when it stops being sync
-- Three fakes for three different seams, and why one of them cannot be a container binding
+- How mail and the queue are faked through the container, and why each fake goes inside a real manager
 
 Start the dev server if it is not running:
 
@@ -53,7 +53,7 @@ Each one wrote a sample of its kind plus a provider, and registered both the fra
 
 The three providers are worth reading, because two of them are files you are about to edit:
 
-- `app/Providers/EventProvider.ts` connects an event class to a listener object. That connection is a line of code, not a convention: nothing scans `app/Listeners/` looking for work.
+- `app/Providers/EventProvider.ts` hands a listener class to `events.listen()`, which subscribes it to the event the class names. That connection is a line of code, not a convention: nothing scans `app/Listeners/` looking for work.
 - `app/Providers/QueueProvider.ts` builds the queue manager and calls `registerJob()` for each job class. Note the driver line: `QUEUE_CONNECTION=sync` runs a dispatched job **inline, in the dispatching process**; `memory` puts it in a queue a worker drains. Your `.env` already says `sync`.
 - `app/Providers/MailProvider.ts` builds the mail manager. `MAIL_MAILER=log`, also already in your `.env`, prints outgoing mail to the server output instead of sending it. Nothing to sign up for, and nothing to accidentally deliver.
 
@@ -61,11 +61,11 @@ The samples (`OrderPlaced`, `SendOrderReceiptListener`, `ProcessWelcomeSequenceJ
 
 ## 2. Specify the mail
 
-Three tests, and each one is fake-shaped differently on purpose. Read the setup before the assertions:
+Three tests. All three fake the mail transport, and the third fakes the queue as well. Read the setup before the assertions:
 
 ```ts file=tests/CommentMail.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
-import { MailManager, getQueueDriver, setQueueDriver } from '@guren/core'
+import { MailManager, createQueueManager } from '@guren/core'
 import { TestApp, fakeMail, fakeQueue } from '@guren/testing'
 import app from '../src/app.js'
 import { resetDatabase } from '../config/database.js'
@@ -118,19 +118,18 @@ describe('comment mail', () => {
 
   it('hands the mail to the queue instead of sending it in the request', async () => {
     const queue = fakeQueue()
-    // Job.dispatch() honours the setQueueDriver() pin ahead of the container's
-    // queue manager, and fakeQueue() is a driver rather than a manager to bind.
-    // Put the real one back after.
-    const real = getQueueDriver()
-    setQueueDriver(queue.getDriver())
-    try {
-      await asBob.post(`/posts/${post.id}/comments`, { body: 'Nice post' }).assertRedirect(`/posts/${post.id}`)
+    // Job.dispatch() sends through the bound queue manager's default driver, so
+    // the fake driver goes inside a real manager too. `using` restores the app's
+    // own manager when the test ends.
+    using _queue = app.container.fake(
+      'queue',
+      createQueueManager({ default: 'fake', drivers: { fake: () => queue.getDriver() } }),
+    )
 
-      queue.assertPushed<SendCommentMailPayload>(SendCommentMailJob, (payload) => payload.commentId > 0)
-      mail.assertNothingSent()
-    } finally {
-      if (real) setQueueDriver(real)
-    }
+    await asBob.post(`/posts/${post.id}/comments`, { body: 'Nice post' }).assertRedirect(`/posts/${post.id}`)
+
+    queue.assertPushed<SendCommentMailPayload>(SendCommentMailJob, (payload) => payload.commentId > 0)
+    mail.assertNothingSent()
   })
 })
 ```
@@ -249,7 +248,6 @@ Now the two registrations. The event provider is where a class becomes a subscri
 
 ```ts file=app/Providers/EventProvider.ts
 import { ServiceProvider, type EventManager } from '@guren/core'
-import { CommentPosted } from '../Events/CommentPosted.js'
 import { SendCommentMailListener } from '../Listeners/SendCommentMailListener.js'
 
 export default class EventProvider extends ServiceProvider {
@@ -257,21 +255,22 @@ export default class EventProvider extends ServiceProvider {
 
   boot(): void {
     const events = this.container.make<EventManager>('events')
-    const listener = new SendCommentMailListener()
 
-    events.on(CommentPosted, (event) => listener.handle(event), {
-      priority: SendCommentMailListener.priority,
-    })
+    events.listen(SendCommentMailListener)
   }
 }
 ```
 
-Read the wiring closely, because it explains a class of bug you will otherwise meet later. The provider passes `priority` and calls `handle`. That is all it reads. The `Listener` base class also declares `shouldQueue`, `queue` and an optional `shouldHandle()`, and this wiring honours none of them: a listener that sets `shouldQueue = true` and expects the framework to queue it will be run inline, silently. Whatever the class declares, the truth is the line in this file.
+`listen()` takes the class and reads its configuration from the class itself. `event` names what it subscribes to. `priority` orders it among the listeners for that event, highest first. `shouldHandle()`, when the class defines one, can skip an event before `handle` runs. `shouldQueue = true` sends the listener to the queue named by `queue` rather than running it during `emit`. A new instance is built for every event, so a listener cannot carry state from one comment to the next.
+
+`SendCommentMailListener` leaves `shouldQueue` at `false` and dispatches a job instead. A queued listener sends the event to the worker; a job sends a payload you chose, with its own `maxAttempts`, and the job is what the third test looks for on the fake queue.
+
+`events.on(CommentPosted, (event) => listener.handle(event))` would also run the listener, and it is the wiring to avoid for a `Listener` class. `on()` takes a function and knows nothing about the class it came from, so `shouldHandle()` and `shouldQueue` would be ignored without a word.
 
 The queue provider is where a job class becomes dispatchable:
 
 ```ts file=app/Providers/QueueProvider.ts
-import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob, type QueueManager } from '@guren/core'
+import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob } from '@guren/core'
 import { SendCommentMailJob } from '../Jobs/SendCommentMailJob.js'
 
 export default class QueueProvider extends ServiceProvider {
@@ -293,8 +292,6 @@ export default class QueueProvider extends ServiceProvider {
     // A queued message carries the job's name, so the driver can only run a job
     // the registry knows. Nothing in `guren check` looks for a missing one.
     registerJob(SendCommentMailJob)
-    const queue = this.container.make<QueueManager>('queue')
-    queue.driver()
   }
 }
 ```
@@ -341,7 +338,7 @@ rm app/Events/OrderPlaced.ts app/Listeners/SendOrderReceiptListener.ts app/Jobs/
 bun test
 ```
 
-Green.
+Green, and no line of the output starts with `[guren] Deprecation`: the queue fake goes through the container, not through a deprecated API.
 
 **Checkpoint:** comment on someone else's post in the browser and look at the terminal running `bun run dev`:
 
@@ -400,10 +397,10 @@ globs:
 # Background work
 
 1. **Every `Job` subclass is registered.** Add `registerJob(TheJob)` to `boot()` in `app/Providers/QueueProvider.ts` in the same change that adds the class. A queued message carries the job's name and the driver resolves it through that registry; an unregistered job throws at dispatch time and `guren check` says nothing about it.
-2. **Every listener is wired.** A class in `app/Listeners/` runs only because `app/Providers/EventProvider.ts` calls `events.on(TheEvent, (event) => listener.handle(event), …)`. `shouldQueue`, `queue` and `shouldHandle()` on the class are inert unless that wiring reads them, so do not rely on them: to queue work, dispatch a job from `handle`.
+2. **Every listener is wired with `listen()`.** A class in `app/Listeners/` runs only because `boot()` in `app/Providers/EventProvider.ts` calls `events.listen(TheListener)`. That call reads the class's `event`, `priority`, `shouldQueue`, `queue` and `shouldHandle()`. Never wire a `Listener` class through `events.on(TheEvent, (event) => listener.handle(event))`: `on()` sees only the function, so `shouldHandle()` and `shouldQueue` are silently ignored. To queue work, dispatch a job from `handle`; set `shouldQueue` only when the listener itself should run on the worker.
 3. **A job payload is JSON: ids, never records.** The job may run in another process, after the row has changed. Load what you need inside `handle`, and return early when the record is gone.
 4. **Controllers announce, listeners decide.** A controller emits an event and returns. Rules about who gets mail (skip the actor, skip duplicates) live in the job or the listener, not in the action.
-5. **Test the seam, not the plumbing.** Mail is faked by registering a `fakeMail()` transport on a real `MailManager` and binding that with `app.container.fake('mail', manager)`. The queue is faked with `setQueueDriver(fakeQueue().getDriver())`: `Job.dispatch()` honours that pin ahead of the container's `queue` manager, and `fakeQueue()` is a driver rather than the manager that key holds.
+5. **Test the seam, not the plumbing.** A fake goes inside a real manager, and the manager is bound with `app.container.fake(key, manager)`. For mail, register a `fakeMail()` transport on a `MailManager` and bind it as `mail`. For the queue, give `createQueueManager()` a driver factory that returns `fakeQueue().getDriver()` and bind it as `queue` with `using`, so the app's own manager comes back when the test ends. Neither fake is a manager, so binding one directly throws. Do not use `setQueueDriver()`: it is deprecated and removed in 3.0.0.
 ```
 
 The `PostToolUse` hook runs `guren check --arch` after every edit, and check will keep quiet about all five of these. The rule is the check.
@@ -583,8 +580,6 @@ export class NotifyCommentersJob extends Job<NotifyCommentersPayload> {
 
 ```ts file=app/Providers/EventProvider.ts fallback
 import { ServiceProvider, type EventManager } from '@guren/core'
-import { CommentPosted } from '../Events/CommentPosted.js'
-import { PostPublished } from '../Events/PostPublished.js'
 import { SendCommentMailListener } from '../Listeners/SendCommentMailListener.js'
 import { NotifyCommentersListener } from '../Listeners/NotifyCommentersListener.js'
 
@@ -593,21 +588,15 @@ export default class EventProvider extends ServiceProvider {
 
   boot(): void {
     const events = this.container.make<EventManager>('events')
-    const commentListener = new SendCommentMailListener()
-    const publishListener = new NotifyCommentersListener()
 
-    events.on(CommentPosted, (event) => commentListener.handle(event), {
-      priority: SendCommentMailListener.priority,
-    })
-    events.on(PostPublished, (event) => publishListener.handle(event), {
-      priority: NotifyCommentersListener.priority,
-    })
+    events.listen(SendCommentMailListener)
+    events.listen(NotifyCommentersListener)
   }
 }
 ```
 
 ```ts file=app/Providers/QueueProvider.ts fallback
-import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob, type QueueManager } from '@guren/core'
+import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob } from '@guren/core'
 import { SendCommentMailJob } from '../Jobs/SendCommentMailJob.js'
 import { NotifyCommentersJob } from '../Jobs/NotifyCommentersJob.js'
 
@@ -631,8 +620,6 @@ export default class QueueProvider extends ServiceProvider {
     // the registry knows. Nothing in `guren check` looks for a missing one.
     registerJob(SendCommentMailJob)
     registerJob(NotifyCommentersJob)
-    const queue = this.container.make<QueueManager>('queue')
-    queue.driver()
   }
 }
 ```
@@ -783,7 +770,7 @@ bun test
 
 The rubric:
 
-- `registerJob(NotifyCommentersJob)` is in `QueueProvider.boot()`, and `events.on(PostPublished, …)` is in `EventProvider.boot()`. Without both, the feature is dead code that compiles.
+- `registerJob(NotifyCommentersJob)` is in `QueueProvider.boot()`, and `events.listen(NotifyCommentersListener)` is in `EventProvider.boot()`. Without both, the feature is dead code that compiles. A listener wired with `events.on(...)` instead also works here, but it breaks rule 2.
 - The payload is `{ postId }`. Recipients are resolved inside `handle`, not passed in.
 - Commenters are de-duplicated by author id and the post's author is removed from the list, in the job. Two comments from Bob are one email to Bob.
 - `publish` emits and returns. It does not query comments and it does not know that mail exists.
@@ -804,7 +791,7 @@ git commit -m "feat: mail commenters when a post is published"
 
 - An event, a listener, a job and a mail, each registered in a place you can point at.
 - A controller that announces and returns, and business rules about recipients that live next to the sending.
-- Three test seams: a mail transport inside a real manager, a queue driver set globally, and a request that proves the two are connected.
+- Three test seams: a mail transport inside a real manager, a queue driver inside another, and a request that proves the two are connected.
 - A project rule carrying the one invariant `guren check` has no opinion about, and an agent that followed it.
 
 ## Common trip-ups
@@ -812,7 +799,8 @@ git commit -m "feat: mail commenters when a post is published"
 - **`SyncDriver: job class "X" is not registered.`** `registerJob(X)` is missing from `QueueProvider.boot()`. This is the error the rule in section 4 exists to prevent.
 - **`Email must have at least one recipient` (or subject, or body).** `send()` validates the built message. A `to()` that received `undefined`, or a `build()` that returns before setting the subject, both land here.
 - **Nothing arrives and no error appears.** Check the listener is wired in `EventProvider.boot()`. An event with no listeners is a successful `emit`.
-- **`container.fake('queue', …)` changes nothing in a test.** `Job.dispatch()` honours the `setQueueDriver()` pin ahead of the container, and `fakeQueue()` is a driver rather than the `QueueManager` that key holds. Use `setQueueDriver()`, and put the previous driver back.
+- **`manager.getDefaultDriverName is not a function`, and the request answers 500, in a test that fakes the queue.** `fakeQueue()` was bound as `queue` directly. That key holds a `QueueManager`, and the fake is a driver, the same mistake as binding `fakeMail()` as `mail`. Return its driver from a `createQueueManager()` factory and bind the manager.
+- **`[guren] Deprecation (global-service-setters): setQueueDriver() is deprecated` in the test output.** A test still pins the driver. Bind a manager with `app.container.fake('queue', …)` as section 2 does; the pin is removed in 3.0.0.
 - **A test faking `mail` with `fakeMail()` directly throws.** `Mail.send()` calls `manager.transport(name)`, and the fake is a transport, not a manager. Register it on a real `MailManager` and bind that.
 - **The mail is sent during the request even though there is a queue.** That is `QUEUE_CONNECTION=sync` working as designed. Set it to `memory` and run `bunx guren queue:work` to watch a worker drain the queue instead.
 
