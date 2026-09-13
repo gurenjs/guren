@@ -584,6 +584,36 @@ async function runPublishedDependencyDrift(
 }
 
 /**
+ * A template's committed `.guren/*.gen.ts` must be exactly what codegen writes
+ * for the untouched scaffold. The app's first `bun run dev` regenerates them, so
+ * any difference (or a file only codegen creates) leaves a fresh app's tree
+ * dirty before its author has edited anything.
+ */
+async function assertCommittedCodegenCurrent(appDir: string, runtimeEnv: Record<string, string>): Promise<void> {
+  const snapshot = async (): Promise<Map<string, string>> => {
+    const names = (await readdir(join(appDir, '.guren')).catch(() => [] as string[]))
+      .filter((name) => name.endsWith('.gen.ts'))
+    return new Map(await Promise.all(
+      names.map(async (name) => [name, await readFile(join(appDir, '.guren', name), 'utf8')] as const),
+    ))
+  }
+
+  const committed = await snapshot()
+  await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir, runtimeEnv)
+  const generated = await snapshot()
+
+  const drifted = [...new Set([...committed.keys(), ...generated.keys()])]
+    .filter((name) => committed.get(name) !== generated.get(name))
+    .sort()
+  assert(
+    drifted.length === 0,
+    `Codegen rewrites ${drifted.map((name) => `.guren/${name}`).join(', ')} in a freshly scaffolded app. ` +
+      'Regenerate them and commit the output into the template layer that ships them ' +
+      '(packages/create-app/templates/<layer>/.guren/).',
+  )
+}
+
+/**
  * Typecheck the app through its own `typecheck` script, and assert tsc actually
  * read the files it was supposed to. `"include": [".guren"]` matches no files:
  * TypeScript expands a bare directory to a wildcard whose matcher skips
@@ -701,6 +731,12 @@ async function main(): Promise<void> {
     await run(['bun', 'install'], appDir, runtimeEnv)
     await assertSingleInstalledCopies(appDir)
 
+    // Before any feature scaffolding below, which legitimately changes the
+    // output. The api template gitignores .guren/ and commits none.
+    if (blueprint !== 'api') {
+      await assertCommittedCodegenCurrent(appDir, runtimeEnv)
+    }
+
     const scaffoldsFeatures = blueprint === 'default'
     if (scaffoldsFeatures) {
       await addDefaultBlueprintFeatures(appDir, runtimeEnv)
@@ -724,8 +760,6 @@ async function main(): Promise<void> {
       assert(routesFile.includes('/api/v1'), 'API blueprint must include /api/v1 prefix.')
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
     } else if (blueprint === 'blog') {
-      // No codegen before the typecheck below: regenerating the .guren/*.gen.ts
-      // the template ships would hide stubs that have fallen behind it.
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       await assertBlogScaffold(appDir)
     } else if (blueprint === 'worker') {

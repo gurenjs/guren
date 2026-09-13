@@ -9,7 +9,11 @@ export default class MailProvider extends ServiceProvider {
           // MAIL_MAILER=log writes messages to the server output (default);
           // 'memory' keeps them inspectable in tests.
           default: process.env.MAIL_MAILER === 'memory' ? 'memory' : 'log',
-          from: { email: 'noreply@example.com', name: 'Guren App' },
+          // `||`, not `??`: a blanked `MAIL_FROM_ADDRESS=` is '', which is no sender.
+          from: {
+            email: process.env.MAIL_FROM_ADDRESS || 'noreply@example.com',
+            name: process.env.MAIL_FROM_NAME || 'Guren App',
+          },
           transports: {
             log: { driver: 'log' },
             memory: { driver: 'memory' },
