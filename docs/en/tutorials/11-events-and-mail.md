@@ -345,7 +345,7 @@ Green, and no line of the output starts with `[guren] Deprecation`: the queue fa
 ```bash manual
 [mail] ------------------------------------------------------------
 [mail] To: ada@example.com
-[mail] From: noreply@example.com
+[mail] From: hello@example.com
 [mail] Subject: New comment on Relativity
 [mail] Bob wrote:
 [mail]

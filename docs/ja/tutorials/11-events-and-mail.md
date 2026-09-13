@@ -345,7 +345,7 @@ bun test
 ```bash manual
 [mail] ------------------------------------------------------------
 [mail] To: ada@example.com
-[mail] From: noreply@example.com
+[mail] From: hello@example.com
 [mail] Subject: New comment on Relativity
 [mail] Bob wrote:
 [mail]
