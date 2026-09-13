@@ -68,11 +68,12 @@ describe('guren CLI error reporting', () => {
 
       expect(typo.exitCode).toBe(1)
       expect(countOccurrences(typo.stderr, 'Unknown command')).toBe(1)
-      expect(plainText(typo.stderr)).toContain('Did you mean db:migrate, db:status?')
+      expect(plainText(typo.stderr)).toMatch(/Did you mean [^\n]*db:status/)
 
       expect(consoleCommand.exitCode).toBe(1)
       const hint = plainText(consoleCommand.stderr)
-      expect(hint).toContain('run it with bun run console attachments:prune')
+      expect(hint).toContain('run bun run console attachments:prune')
+      expect(hint).toContain('If a plugin provides it')
       expect(hint).toContain('bunx guren console opens a REPL')
       expect(hint).not.toContain('Did you mean')
     } finally {

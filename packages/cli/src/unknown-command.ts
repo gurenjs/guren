@@ -35,7 +35,7 @@ export function unknownCommandHint(name: string, candidates: Iterable<string>, a
   }
   if (atRoot && name.includes(':')) {
     lines.push(
-      `If \`${name}\` is a console command your app registers, run it with \`bun run console ${name}\`.`,
+      `If your app registers \`${name}\` as a console command, run \`bun run console ${name}\`. If a plugin provides it, run guren from an app that has the plugin installed.`,
       '`bunx guren console` opens a REPL; it does not run app commands.',
     )
   }

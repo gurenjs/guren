@@ -29,6 +29,7 @@ describe('unknownCommandHint', () => {
     const hint = unknownCommandHint('attachments:prune', builtins, true)
 
     expect(hint).toContain('bun run console attachments:prune')
+    expect(hint).toContain('If a plugin provides it')
     expect(hint).toContain('`bunx guren console` opens a REPL')
     expect(hint).not.toContain('Did you mean')
   })

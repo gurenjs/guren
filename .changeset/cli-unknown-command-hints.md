@@ -11,8 +11,9 @@ The name belongs to a console command the app registers, which runs through
 - the closest builtin or plugin command names, when one is close
   (`db:migrate:status` suggests `db:status`)
 - for a namespaced name at the root, that an app console command runs with
-  `bun run console <name>`, and that `bunx guren console` is the REPL rather
-  than the app command runner
+  `bun run console <name>`, that a plugin command needs an app with the plugin
+  installed, and that `bunx guren console` is the REPL rather than the app
+  command runner
 
 The hint is computed from command names only; the CLI does not boot the app.
 The same suggestion covers subcommands, so `bunx guren add attachmentz` suggests
