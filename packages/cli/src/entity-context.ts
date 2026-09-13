@@ -1,6 +1,5 @@
 import { resolve, basename } from 'node:path'
-import { readFile } from 'node:fs/promises'
-import type { ClassDeclaration } from '@babel/types'
+import type { ClassDeclaration, File } from '@babel/types'
 import { consola } from 'consola'
 import {
   discoverControllerFiles,
@@ -19,12 +18,22 @@ import {
   extractClassDeclaration,
   discoverParsedModels,
   type DiscoveredModel,
+  type ModelInfo,
   type ModelAttachmentCollection,
   type ModelRelationship,
 } from './model-parser'
-import { classActionMembers } from './controller-methods'
+import {
+  authTypeArgumentPattern,
+  classActionMembers,
+  EMPTY_CONTROLLER_SCAN,
+  parseControllerMethods,
+  type ControllerMethodInfo,
+  type ControllerMethodScan,
+} from './controller-methods'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
-import { parseSourceFile } from './parse-cache'
+import { ParseCache } from './parse-cache'
+import { importsByLocal, specifierBase } from './schema-binding'
+import { escapeRegExp } from './utils'
 import {
   routeDefinitionToContextRoute,
   escapeMarkdownTableCell,
@@ -36,6 +45,30 @@ import { describeIssue, isRepoSlug, type IssueLink } from './issue-refs'
 import { fetchLiveIssues, resolveOriginRepo, type LiveIssue } from './github'
 import type { CapturedExec } from './subprocess'
 import { parseSchemaTableColumns } from './schema-parser'
+
+/**
+ * Why a route belongs to the entity: its controller is `<Entity>Controller`, a
+ * `bind` names the model, or its action body references a binding imported
+ * from the model's file (the class itself, or a record type passed to `this.auth`).
+ */
+export type EntityRouteLink = 'controller' | 'binding' | 'reference'
+
+export interface EntityRoute extends ContextRoute {
+  linkedBy: EntityRouteLink
+}
+
+export interface UnverifiedEntityRoute extends Pick<ContextRoute, 'method' | 'path' | 'name'> {
+  action: string
+  reason: string
+}
+
+interface EntityRouteScan {
+  routes: EntityRoute[]
+  unverifiedRoutes: UnverifiedEntityRoute[]
+  /** Pages rendered by linked actions outside `<Entity>Controller`, whose whole file the controller bundle covers. */
+  pageIds: string[]
+  routesError?: string
+}
 
 export interface EntityPage {
   id: string
@@ -106,12 +139,21 @@ export interface EntityContext {
     attachmentsUnreadable: boolean
     usesAuth: boolean
     hasSoftDeletes: boolean
+    fillable: ModelInfo['fillable']
+    hidden: ModelInfo['hidden']
+    visible: ModelInfo['visible']
+    casts: ModelInfo['casts']
   }
   /** Reverse relationship edges: other models whose relationships target this entity. */
   referencedBy: Array<{ model: string; relationship: string; type: string }>
-  routes: ContextRoute[]
+  routes: EntityRoute[]
   /** Why the routes file could not be loaded, when it could not be. */
   routesError?: string
+  /**
+   * Controller routes whose action body could not be read, so whether they use
+   * the entity is unknown. Absent from `routes` without being ruled out.
+   */
+  unverifiedRoutes: UnverifiedEntityRoute[]
   controller?: { className: string; filePath: string; actions: string[] }
   pages: EntityPage[]
   resource?: string
@@ -203,10 +245,7 @@ function publicActionNames(classDecl: ClassDeclaration): string[] {
  * Public method names of the controller class in a source file. Exported
  * classes win over unexported helpers declared alongside them.
  */
-function extractControllerActions(source: string, filePath: string): string[] {
-  const ast = parseSourceFile(source, filePath)
-  if (!ast) return []
-
+function extractControllerActions(ast: File): string[] {
   let unexported: ClassDeclaration | null = null
   for (const node of ast.program.body) {
     const classDecl = extractClassDeclaration(node)
@@ -220,8 +259,60 @@ function extractControllerActions(source: string, filePath: string): string[] {
   return unexported ? publicActionNames(unexported) : []
 }
 
-async function resolvePages(cwd: string, pageIds: string[]): Promise<EntityPage[]> {
-  return Promise.all([...pageIds].sort().map((id) => describeInertiaPage(cwd, id)))
+async function resolvePages(cwd: string, pageIds: Iterable<string>): Promise<EntityPage[]> {
+  return Promise.all([...new Set(pageIds)].sort().map((id) => describeInertiaPage(cwd, id)))
+}
+
+const withoutScriptExtension = (path: string): string => path.replace(/\.[cm]?[jt]sx?$/, '')
+
+/** Locals bound to the model's file: the class (a default or namespace import included), and any other export such as `UserRecord`. */
+interface ModelImportLocals {
+  classLocals: string[]
+  typeLocals: string[]
+}
+
+function modelImportLocals(cwd: string, controllerFile: string, ast: File, entity: string, modelFile: string): ModelImportLocals {
+  const target = withoutScriptExtension(modelFile)
+  const locals: ModelImportLocals = { classLocals: [], typeLocals: [] }
+  for (const [local, entry] of importsByLocal(ast.program.body)) {
+    const base = specifierBase(cwd, controllerFile, entry.source)
+    if (base === null || withoutScriptExtension(base) !== target) continue
+    if (entry.imported === '' || entry.imported === entity) locals.classLocals.push(local)
+    else locals.typeLocals.push(local)
+  }
+  return locals
+}
+
+/**
+ * Whether a blanked action body names the model: the class anywhere it is not a
+ * property (`User.create(`, `this.model(User)`), a record type only as a type
+ * argument of a `this.auth` call. A record type elsewhere (`author: UserRecord`
+ * in a post payload) is another entity's field, not a use of this one.
+ */
+function actionReferencesModel(body: string, locals: ModelImportLocals): boolean {
+  return (
+    locals.classLocals.some((local) => new RegExp(`(?<![\\w$.])${escapeRegExp(local)}(?![\\w$])`).test(body))
+    || locals.typeLocals.some((local) => authTypeArgumentPattern(local).test(body))
+  )
+}
+
+/**
+ * Why a controller route's action cannot be judged, or undefined when its body was
+ * scanned or the app has no source for the class (a controller a framework helper
+ * registers cannot name the model). A shared class name is unverified even with a
+ * body: the route carries only the name. A skipped file is matched by its file name.
+ */
+function unverifiedReason(scan: ControllerMethodScan, controller: { name: string; action: string }): string | undefined {
+  if (scan.collisions.some((collision) => collision.className === controller.name)) {
+    return `more than one controller class is named ${controller.name}`
+  }
+  if (scan.methods.has(`${controller.name}.${controller.action}`)) return undefined
+  const unreadable = scan.unreadableFiles.find((file) => classNameFromPath(file) === controller.name)
+  if (unreadable) return `${unreadable} could not be read`
+  const unparsed = scan.unparsedFiles.find((file) => classNameFromPath(file) === controller.name)
+  if (unparsed) return `${unparsed} could not be parsed`
+  const declared = scan.classFiles.get(controller.name)
+  return declared ? `${declared} declares no ${controller.action} action body (inherited or missing)` : undefined
 }
 
 export async function generateEntityContext(
@@ -268,40 +359,67 @@ export async function generateEntityContext(
       .sort()
   }
 
-  let routesError: string | undefined
-  const loadEntityRoutes = async (): Promise<ContextRoute[]> => {
-    const target = await resolveRoutesFile(cwd, options.routesFile)
-    if (target.silentlyAbsent) return []
+  // Shared by both controller loaders, which run concurrently: `read()` memoizes the pending parse.
+  const cache = new ParseCache()
 
+  const loadEntityRoutes = async (): Promise<EntityRouteScan> => {
+    const scanned: EntityRouteScan = { routes: [], unverifiedRoutes: [], pageIds: [] }
+    const target = await resolveRoutesFile(cwd, options.routesFile)
+    if (target.silentlyAbsent) return scanned
+
+    const provenance: Array<string | null> = []
+    let definitions: Awaited<ReturnType<typeof loadRouteDefinitions>>
     try {
-      const provenance: Array<string | null> = []
-      const definitions = await loadRouteDefinitions(
-        resolve(cwd, target.path),
-        cwd,
-        undefined,
-        provenance,
-      )
-      return definitions
-        .filter((def, index) => {
-          const matchesEntity =
-            def.controller?.name === controllerName
-            || (def.bindings !== undefined && Object.values(def.bindings).includes(entity))
-          if (!matchesEntity) return false
-          return duplicated ? provenance[index] === match.module : true
-        })
-        .map(routeDefinitionToContextRoute)
+      definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd, undefined, provenance)
     } catch (error) {
       // A routes file that cannot be loaded is not a routes file with nothing
       // in it: rendering both as "No routes reference this entity." makes an
       // import failure read as an absence.
-      routesError = error instanceof Error ? error.message : String(error)
-      return []
+      return { ...scanned, routesError: error instanceof Error ? error.message : String(error) }
     }
+
+    const candidates = definitions.filter((_, index) => !duplicated || provenance[index] === match.module)
+    const scan = candidates.some((def) => def.controller && def.controller.name !== controllerName)
+      ? await parseControllerMethods(cwd, cache)
+      : EMPTY_CONTROLLER_SCAN
+    const modelFile = resolve(cwd, match.relPath)
+
+    const referencesModel = async (method: ControllerMethodInfo): Promise<boolean> => {
+      const controllerFile = resolve(cwd, method.filePath)
+      const parsed = await cache.get(controllerFile)
+      return parsed !== null
+        && actionReferencesModel(method.body, modelImportLocals(cwd, controllerFile, parsed.ast, entity, modelFile))
+    }
+
+    for (const def of candidates) {
+      const { controller } = def
+      if (controller?.name === controllerName) {
+        scanned.routes.push({ ...routeDefinitionToContextRoute(def), linkedBy: 'controller' })
+        continue
+      }
+      const bound = def.bindings !== undefined && Object.values(def.bindings).includes(entity)
+      const action = controller && `${controller.name}.${controller.action}`
+      const reason = controller && !bound ? unverifiedReason(scan, controller) : undefined
+      if (action && reason) {
+        const { method, path, name } = routeDefinitionToContextRoute(def)
+        scanned.unverifiedRoutes.push({ method, path, name, action, reason })
+        continue
+      }
+
+      const method = action ? scan.methods.get(action) : undefined
+      const linkedBy: EntityRouteLink | undefined = bound
+        ? 'binding'
+        : method && (await referencesModel(method)) ? 'reference' : undefined
+      if (!linkedBy) continue
+      if (method) scanned.pageIds.push(...extractInertiaPageRefs(method.rawBody).map((ref) => ref.id))
+      scanned.routes.push({ ...routeDefinitionToContextRoute(def), linkedBy })
+    }
+    return scanned
   }
 
   const loadControllerBundle = async (): Promise<{
     controller?: EntityContext['controller']
-    pages: EntityPage[]
+    pageIds: string[]
     docsTags: string[]
   }> => {
     let files = (await discoverControllerFiles(cwd)).filter(
@@ -309,20 +427,18 @@ export async function generateEntityContext(
     )
     if (duplicated) files = files.filter(inLocation)
     const controllerFile = files.find(inLocation) ?? files[0]
-    if (!controllerFile) return { pages: [], docsTags: [] }
+    if (!controllerFile) return { pageIds: [], docsTags: [] }
 
-    const source = await readFile(controllerFile, 'utf-8')
+    const outcome = await cache.read(controllerFile)
+    if (outcome.status === 'unreadable') throw new Error(`Could not read ${toPosixRelative(cwd, controllerFile)}.`)
     return {
       controller: {
         className: controllerName,
         filePath: toPosixRelative(cwd, controllerFile),
-        actions: extractControllerActions(source, controllerFile),
+        actions: outcome.status === 'parsed' ? extractControllerActions(outcome.ast) : [],
       },
-      pages: await resolvePages(
-        cwd,
-        extractInertiaPageRefs(source).map((ref) => ref.id),
-      ),
-      docsTags: extractDocsTags(source),
+      pageIds: extractInertiaPageRefs(outcome.source).map((ref) => ref.id),
+      docsTags: extractDocsTags(outcome.source),
     }
   }
 
@@ -332,7 +448,7 @@ export async function generateEntityContext(
     return tables?.get(match.info.tableName)
   }
 
-  const [columns, routes, controllerBundle, resource, policy, factories, seeders, testFiles, allDocRefs] =
+  const [columns, entityRoutes, controllerBundle, resource, policy, factories, seeders, testFiles, allDocRefs] =
     await Promise.all([
       loadColumns(),
       loadEntityRoutes(),
@@ -388,6 +504,11 @@ export async function generateEntityContext(
       }
     })
 
+  const [pages, issues] = await Promise.all([
+    resolvePages(cwd, [...controllerBundle.pageIds, ...entityRoutes.pageIds]),
+    collectEntityIssues(cwd, docs.flatMap((doc) => docRefByPath.get(doc.path) ?? []), options),
+  ])
+
   return {
     entity,
     module: match.module ?? undefined,
@@ -400,19 +521,24 @@ export async function generateEntityContext(
       attachmentsUnreadable: match.info.attachments === 'unreadable',
       usesAuth: match.info.usesAuth,
       hasSoftDeletes: match.info.hasSoftDeletes,
+      fillable: match.info.fillable,
+      hidden: match.info.hidden,
+      visible: match.info.visible,
+      casts: match.info.casts,
     },
     referencedBy,
-    routes,
-    routesError,
+    routes: entityRoutes.routes,
+    routesError: entityRoutes.routesError,
+    unverifiedRoutes: entityRoutes.unverifiedRoutes,
     controller: controllerBundle.controller,
-    pages: controllerBundle.pages,
+    pages,
     resource,
     policy,
     factories,
     seeders,
     tests,
     docs,
-    ...(await collectEntityIssues(cwd, docs.flatMap((doc) => docRefByPath.get(doc.path) ?? []), options)),
+    ...issues,
   }
 }
 
@@ -545,6 +671,21 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
   if (ctx.model.columns && ctx.model.columns.length > 0) {
     lines.push(`- Columns: ${ctx.model.columns.join(', ')}`)
   }
+  const configs = [
+    ['Fillable', ctx.model.fillable],
+    ['Hidden', ctx.model.hidden],
+    ['Visible', ctx.model.visible],
+    ['Casts', ctx.model.casts],
+  ] as const
+  for (const [label, value] of configs) {
+    if (value === null) continue
+    if (value === 'unreadable') {
+      lines.push(`- ${label}: declared, but not statically readable`)
+      continue
+    }
+    const items = Array.isArray(value) ? value : Object.entries(value).map(([name, type]) => `${name} (${type})`)
+    lines.push(`- ${label}: ${items.length > 0 ? items.join(', ') : '(empty)'}`)
+  }
   for (const rel of ctx.model.relationships) {
     const target = rel.relatedModel ? ` → ${rel.relatedModel}` : ''
     lines.push(`- ${rel.type}: \`${rel.name}\`${target}`)
@@ -581,6 +722,13 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
     lines.push('This is not the same as the entity having no routes — the list above is incomplete.')
   } else {
     lines.push('No routes reference this entity.')
+  }
+  if (ctx.unverifiedRoutes.length > 0) {
+    lines.push('')
+    lines.push(`Not checked for references to ${ctx.entity} (${ctx.unverifiedRoutes.length}):`)
+    for (const route of ctx.unverifiedRoutes) {
+      lines.push(`- ${route.method} ${route.path} → ${route.action}: ${route.reason}`)
+    }
   }
   lines.push('')
 

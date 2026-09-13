@@ -767,7 +767,7 @@ bun test
 bunx guren context User
 ```
 
-モデル、列、それに触れるすべてのルートとページ、それを統べる docs が 1 画面に収まります。雛形の rule はエンティティに手を付ける前にこれを実行するようエージェントへ指示しているので、トランスクリプトの中で探してみてください。バンドルを読んだエージェントは、リソースを書く前から `passwordHash` が hidden であること、`User` が `AuthenticatableModel` であることを知っています。
+モデル、列、`hidden` の一覧、アクションがそのモデルを使うルート、そのアクションが描画するページ、それを統べる docs が 1 画面に収まります。今の時点で該当するルートは `POST /register` だけです。`RegisterController.store` が `User.create()` を呼んでいるためです。ログインとログアウトは `this.auth` 経由でユーザーに触れ、`User` を名指ししないので一覧に出ません。`ProfileController.show` ができると、`userOrFail<UserRecord>()` によって `/profile` とそのページもバンドルに加わります。雛形の rule はエンティティに手を付ける前にこれを実行するようエージェントへ指示しているので、トランスクリプトの中で探してみてください。バンドルを読んだエージェントは、リソースを書く前から `passwordHash` が hidden であること、`User` が `AuthenticatableModel` であることを知っています。
 
 **手元にエージェントが無い場合は、** 4 ファイルです。
 

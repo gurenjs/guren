@@ -10,6 +10,48 @@ import {
 import { parseSourceFile } from '../src/parse-cache'
 
 describe('parseModelSource', () => {
+  it('reads fillable, hidden and visible from either spelling, and casts from the static', () => {
+    const source = `
+import { AuthenticatableModel, defineModel } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  hidden: ['passwordHash', 'rememberToken'] as const,
+}) {
+  static override fillable = ['name', 'email']
+  static override casts = { verified: 'boolean', settings: 'json' } satisfies Record<string, string>
+}
+`
+    const result = parseModelSource(source, 'app/Models/User.ts')!
+
+    expect(result.fillable).toEqual(['name', 'email'])
+    expect(result.hidden).toEqual(['passwordHash', 'rememberToken'])
+    expect(result.visible).toBeNull()
+    expect(result.casts).toEqual({ verified: 'boolean', settings: 'json' })
+  })
+
+  it('marks a declared but non-literal config as unreadable rather than absent', () => {
+    const source = `
+import { defineModel } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+const HIDDEN = ['passwordHash']
+const CASTS = { verified: 'boolean' }
+
+export class User extends defineModel(users, { hidden: ['email'] }) {
+  static override hidden = HIDDEN
+  static override casts = { ...CASTS }
+}
+`
+    const result = parseModelSource(source, 'app/Models/User.ts')!
+
+    // The static shadows the readable option at runtime, so the option must not stand in for it.
+    expect(result.hidden).toBe('unreadable')
+    expect(result.casts).toBe('unreadable')
+    expect(result.fillable).toBeNull()
+  })
+
   it('parses defineModel pattern with belongsTo', () => {
     const source = `
 import { defineModel, type BelongsToRecord } from '@guren/orm'

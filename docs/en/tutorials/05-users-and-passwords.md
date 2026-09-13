@@ -767,7 +767,7 @@ This chapter's harness lever is **`guren context User`**. Chapter 1 showed you t
 bunx guren context User
 ```
 
-Model, columns, every route and page that touches it, and the docs that govern it, in one screen. The scaffold's rules tell the agent to run this before entity work, so watch for it in the transcript. An agent that has read the bundle knows `passwordHash` is hidden and that `User` is an `AuthenticatableModel` before it writes the resource.
+Model, columns, the `hidden` list, the routes whose actions use the model, the pages those actions render, and the docs that govern it, in one screen. Right now the only such route is `POST /register`, because `RegisterController.store` calls `User.create()`. Login and logout reach the user through `this.auth` without naming `User`, so they are not listed; once `ProfileController.show` exists, its `userOrFail<UserRecord>()` puts `/profile` and its page in the bundle. The scaffold's rules tell the agent to run this before entity work, so watch for it in the transcript. An agent that has read the bundle knows `passwordHash` is hidden and that `User` is an `AuthenticatableModel` before it writes the resource.
 
 **No agent handy?** Four files:
 
