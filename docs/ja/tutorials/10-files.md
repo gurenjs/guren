@@ -1454,7 +1454,7 @@ git commit -m "feat: add a gallery to posts"
 - **ブラウザで画像の URL が 404 になる。** 署名付き URL の期限が切れています(既定では 5 分)。ページを再読み込みすれば新しいものが得られます。レンダリングし直したページでも 404 なら、`registerAttachmentRoutes` がマウントされていません。
 - **編集フォームからアップロードしても何も起きない。** ファイルを伴う `form.put()` にはメソッドの詐称が必要ですが、フレームワークはそれをしません。`posts.cover` と同じように、ファイルには `POST` のルートを使ってください。
 - **「The file must be an image.」** `image: 'require'` は拡張子ではなくバイト列を検査します。名前を変えただけのテキストファイルは拒否され、`.jpg` という名前の本物の PNG は受け入れられます。
-- **`storage/app/attachments` に、どの行も指さないファイルが残る。** 原因は 2 通りあります。1 つは `destroy` が `purgeAttachments` を呼ばずに投稿を削除した場合です。attachments テーブルには、代わりに purge してくれる外部キーがありません。`bun run console attachments:prune` が残り物を見つけます。もう 1 つはテストが開発用のディスクに書いた場合です。`local` ディスクに `NODE_ENV === 'test'` の分岐が入る前にスキャフォールドされた `StorageProvider` では、テストのアップロードがすべて `./storage/app` に入ります。その `root` に同じ分岐を足してから、`bun run console attachments:prune --objects` を一度実行してください。どの行も参照しないプレフィックスを削除します。直近 1 時間以内に作られたものは残ります。テストのアップロードは、テスト用データベースの行と同じく実行をまたいで `./storage/app/testing` に残ります。片付けるには `NODE_ENV=test bun run console attachments:prune --objects` を実行します。
+- **`storage/app/attachments` に、どの行も指さないファイルが残る。** 原因は 2 通りあります。1 つは `destroy` が `purgeAttachments` を呼ばずに投稿を削除した場合です。attachments テーブルには、代わりに purge してくれる外部キーがありません。`bun run console attachments:prune` が残り物を見つけます。もう 1 つはテストが開発用のディスクに書いた場合です。`local` ディスクに `NODE_ENV === 'test'` の分岐が入る前にスキャフォールドされた `StorageProvider` では、テストのアップロードがすべて `./storage/app` に入ります。その `root` に同じ分岐を足してから、`bun run console attachments:prune --objects` を一度実行してください。どの行も参照しないプレフィックスを削除します。直近 1 時間以内に作られたものは残ります。テストのアップロードは、テスト用データベースの行と同じく実行をまたいで `./storage/app/testing` に残ります。古いものは `NODE_ENV=test bun run console attachments:prune --objects` で削除できます。直前の実行の行が参照するファイルと直近 1 時間以内のものは残るので、`bun test` の直後に実行しても何も報告されません。
 
 ## 演習
 
