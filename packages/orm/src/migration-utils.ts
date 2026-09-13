@@ -230,11 +230,24 @@ export interface MigrationStatusEntry {
   name: string
   applied: boolean
   appliedAt: Date | null
+  /**
+   * True for a tracker row no local folder carries: applied to this database,
+   * then deleted from disk (or migrated by another checkout). Absent otherwise.
+   */
+  orphaned?: boolean
+}
+
+function parseAppliedAt(row: AppliedMigrationRow | undefined): Date | null {
+  if (!row?.appliedAt) return null
+  const parsed = row.appliedAt instanceof Date ? row.appliedAt : new Date(row.appliedAt)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
 /**
  * Joins local migration folders with the migrator's tracker rows. Drizzle
  * decides pending migrations by name membership, so status uses that rule.
+ * The same rule makes the migrator skip a row with no folder, whatever that
+ * row's migration created, so those rows come back too, marked `orphaned`.
  */
 export function buildMigrationStatus(
   localMigrations: LocalMigrationEntry[],
@@ -247,37 +260,64 @@ export function buildMigrationStatus(
     }
   }
 
-  return localMigrations.map((migration) => {
+  const entries: MigrationStatusEntry[] = localMigrations.map((migration) => {
     const row = appliedByName.get(migration.name)
-    let appliedAt: Date | null = null
-    if (row?.appliedAt) {
-      const parsed = row.appliedAt instanceof Date ? row.appliedAt : new Date(row.appliedAt)
-      appliedAt = Number.isNaN(parsed.getTime()) ? null : parsed
-    }
-
     return {
       name: migration.name,
       applied: row !== undefined,
-      appliedAt,
+      appliedAt: parseAppliedAt(row),
     }
   })
+
+  const localNames = new Set(localMigrations.map((migration) => migration.name))
+  const orphaned = [...appliedByName]
+    .filter(([name]) => !localNames.has(name))
+    .map(([name, row]): MigrationStatusEntry => ({ name, applied: true, appliedAt: parseAppliedAt(row), orphaned: true }))
+
+  if (orphaned.length === 0) return entries
+  return [...entries, ...orphaned].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export interface MigrationDrift {
+  /** Local migrations the tracker has no row for, in the order the migrator will apply them. */
+  pending: string[]
+  /** Tracker rows no local folder carries. */
+  orphaned: string[]
 }
 
 /**
- * Local migrations the tracker has no row for, in the order the migrator will
- * apply them. Best-effort by contract: the names exist to be logged, and a
- * tracker this driver cannot read costs the names, not the boot.
+ * Where the migrations folder and the tracker disagree, in both directions.
+ * Best-effort by contract: the names exist to be logged, and a tracker this
+ * driver cannot read costs the names, not the boot.
  */
-export async function pendingMigrationNames(
+export async function readMigrationDrift(
   migrationsFolder: string,
   readApplied: () => Promise<AppliedMigrationRow[]> | AppliedMigrationRow[],
-): Promise<string[]> {
+): Promise<MigrationDrift> {
   try {
     const status = buildMigrationStatus(listLocalMigrations(migrationsFolder), await readApplied())
-    return status.filter((entry) => !entry.applied).map((entry) => entry.name)
+    return {
+      pending: status.filter((entry) => !entry.applied).map((entry) => entry.name),
+      orphaned: status.filter((entry) => entry.orphaned === true).map((entry) => entry.name),
+    }
   } catch {
-    return []
+    return { pending: [], orphaned: [] }
   }
+}
+
+/**
+ * Warns on every boot while the tracker holds rows no folder carries, typically
+ * a generator's migration that a dev server applied before `git clean` removed
+ * it. Its tables stay behind, and a later migration creating them fails, so
+ * drivers call this before the migrator runs rather than after it throws.
+ */
+export function reportOrphanedMigrations(orphaned: readonly string[], migrationsFolder: string): void {
+  if (orphaned.length === 0) return
+
+  console.warn(
+    `[guren/orm] ${orphaned.length} migration(s) applied to this database have no folder in ${migrationsFolder}: ${orphaned.join(', ')}.\n` +
+    '[guren/orm] Whatever they created is still in the database. `bun run db:status` lists them as orphaned.',
+  )
 }
 
 /**

@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, pendingMigrationNames, reportAppliedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, readMigrationDrift, reportAppliedMigrations, reportOrphanedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -143,13 +143,14 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
         } as DrizzleConfig)
         // Over the migration pool, and before the migrator writes: a second
         // admin pool here would cost a connect on every cold start.
-        const pending = report
-          ? await pendingMigrationNames(resolvedMigrationsFolder, () =>
+        const drift = report
+          ? await readMigrationDrift(resolvedMigrationsFolder, () =>
               readAppliedMigrations(migrationDb as unknown as MySql2Database),
             )
-          : []
+          : undefined
+        reportOrphanedMigrations(drift?.orphaned ?? [], resolvedMigrationsFolder)
         await migrate(migrationDb, { migrationsFolder: resolvedMigrationsFolder })
-        reportAppliedMigrations(pending, resolvedMigrationsFolder)
+        reportAppliedMigrations(drift?.pending ?? [], resolvedMigrationsFolder)
       } finally {
         await closePool(migrationClient)
       }

@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, pendingMigrationNames, reportAppliedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, readMigrationDrift, reportAppliedMigrations, reportOrphanedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -252,10 +252,11 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
       const db = await database.get()
       // Read before the migrator writes: afterwards every row is applied.
-      const pending = report ? await pendingMigrationNames(resolvedMigrationsFolder, readAppliedMigrations) : []
+      const drift = report ? await readMigrationDrift(resolvedMigrationsFolder, readAppliedMigrations) : undefined
+      reportOrphanedMigrations(drift?.orphaned ?? [], resolvedMigrationsFolder)
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrate(db as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
-      reportAppliedMigrations(pending, resolvedMigrationsFolder)
+      reportAppliedMigrations(drift?.pending ?? [], resolvedMigrationsFolder)
 
       return summary
     } catch (error) {

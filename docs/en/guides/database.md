@@ -932,6 +932,12 @@ untracked file, so a migration generated on a branch you threw away is still on
 disk and still pending. Remove it with `git clean -fd` (`git clean -fdn` first
 shows what that would take) rather than expecting the branch to take it with it.
 
+Removing the folder only helps before a boot has applied it, and a dev server
+that reloads while the generator is still editing files can get there first.
+After that, the tracker keeps a row for a migration no folder carries, the
+migrator skips it, and whatever it created stays in the database. `db:status`
+lists such a row as orphaned, and every boot warns about it before migrating.
+
 The two exceptions never migrate at boot, for different reasons. The Data API
 adapter is opt-in (`migrateOnStart`) because the check costs serialized round
 trips on every Lambda cold start. D1 has no runtime path at all: migrations go

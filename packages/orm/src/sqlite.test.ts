@@ -328,6 +328,45 @@ describe('createSqliteDatabase migration reporting', () => {
     expect(applied[0]).toContain('20260102000000_orphan_sessions')
     expect(applied[0]).not.toContain('20260101000000_create_widgets')
   })
+
+  test('should name a migration whose folder was deleted after a boot applied it', async () => {
+    // A dev server reloads while a generator is still writing, applies its
+    // migration, and `git clean` then removes only the folder. A later
+    // migration creating the same table fails on the one left behind.
+    writeMigration('20260101000000_create_widgets', 'CREATE TABLE widgets (id integer primary key);')
+    writeMigration('20260102000000_create_sessions_table', 'CREATE TABLE sessions (id text primary key);')
+    const options = {
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    }
+
+    const scratch = createSqliteDatabase(options)
+    await scratch.getDatabase()
+    await scratch.closeDatabase()
+    rmSync(join(workDir, 'migrations', '20260102000000_create_sessions_table'), { recursive: true })
+
+    const inspect = createSqliteDatabase(options)
+    const status = await inspect.migrationStatus()
+    await inspect.closeDatabase()
+    expect(status.map(({ name, orphaned }) => ({ name, orphaned: orphaned === true }))).toEqual([
+      { name: '20260101000000_create_widgets', orphaned: false },
+      { name: '20260102000000_create_sessions_table', orphaned: true },
+    ])
+
+    writeMigration('20260301000000_create_sessions', 'CREATE TABLE sessions (id text primary key);')
+    const warnings: string[] = []
+    const originalWarn = console.warn
+    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(' '))
+    const next = createSqliteDatabase(options)
+    try {
+      await expect(next.getDatabase()).rejects.toThrow(/table sessions already exists/)
+    } finally {
+      console.warn = originalWarn
+      await next.closeDatabase()
+    }
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('20260102000000_create_sessions_table')
+  })
 })
 
 describe('createSqliteDatabase concurrent getDatabase', () => {
