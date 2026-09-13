@@ -27,7 +27,7 @@ flowchart LR
 - 4 つがそれぞれどこで登録されるのかと、誰も代わりに検査してくれない唯一の登録
 - ジョブのペイロードがレコードではなく id である理由
 - `QUEUE_CONNECTION=sync` が実際にしていることと、sync をやめたときに変わること
-- 3 つの異なる継ぎ目に対する 3 つの fake と、そのうちひとつをコンテナのバインディングにできない理由
+- メールとキューをコンテナ経由で fake にする方法と、どちらの fake も本物のマネージャーの中に入れる理由
 
 開発サーバーが動いていなければ起動します。
 
@@ -53,7 +53,7 @@ bunx guren add mail
 
 この 3 つのプロバイダーは読んでおく価値があります。うち 2 つは、このあと自分で編集するファイルです。
 
-- `app/Providers/EventProvider.ts` はイベントクラスを listener オブジェクトに結び付けます。結び付けているのは規約ではなくコードの 1 行です。`app/Listeners/` を走査して仕事を探すものは何もありません。
+- `app/Providers/EventProvider.ts` は listener クラスを `events.listen()` に渡し、クラスが指定するイベントを購読させます。結び付けているのは規約ではなくコードの 1 行です。`app/Listeners/` を走査して仕事を探すものは何もありません。
 - `app/Providers/QueueProvider.ts` はキューマネージャーを構築し、ジョブクラスごとに `registerJob()` を呼びます。ドライバーの行に注目してください。`QUEUE_CONNECTION=sync` は dispatch されたジョブを**インラインで、dispatch したプロセスの中で**実行します。`memory` はワーカーが処理するキューに載せます。`.env` にはすでに `sync` と書かれています。
 - `app/Providers/MailProvider.ts` はメールマネージャーを構築します。同じく `.env` にある `MAIL_MAILER=log` は、メールを送る代わりに送信予定の内容をサーバーの出力に印字します。サービスの申し込みは要りませんし、うっかり本当に配送してしまうこともありません。
 
@@ -61,11 +61,11 @@ bunx guren add mail
 
 ## 2. メールを仕様化する
 
-テストは 3 つで、それぞれ意図的に違う形の fake を使っています。アサーションより先にセットアップを読んでください。
+テストは 3 つです。3 つともメールのトランスポートを fake にし、3 つ目はキューも fake にします。アサーションより先にセットアップを読んでください。
 
 ```ts file=tests/CommentMail.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
-import { MailManager, getQueueDriver, setQueueDriver } from '@guren/core'
+import { MailManager, createQueueManager } from '@guren/core'
 import { TestApp, fakeMail, fakeQueue } from '@guren/testing'
 import app from '../src/app.js'
 import { resetDatabase } from '../config/database.js'
@@ -118,19 +118,18 @@ describe('comment mail', () => {
 
   it('hands the mail to the queue instead of sending it in the request', async () => {
     const queue = fakeQueue()
-    // Job.dispatch() honours the setQueueDriver() pin ahead of the container's
-    // queue manager, and fakeQueue() is a driver rather than a manager to bind.
-    // Put the real one back after.
-    const real = getQueueDriver()
-    setQueueDriver(queue.getDriver())
-    try {
-      await asBob.post(`/posts/${post.id}/comments`, { body: 'Nice post' }).assertRedirect(`/posts/${post.id}`)
+    // Job.dispatch() sends through the bound queue manager's default driver, so
+    // the fake driver goes inside a real manager too. `using` restores the app's
+    // own manager when the test ends.
+    using _queue = app.container.fake(
+      'queue',
+      createQueueManager({ default: 'fake', drivers: { fake: () => queue.getDriver() } }),
+    )
 
-      queue.assertPushed<SendCommentMailPayload>(SendCommentMailJob, (payload) => payload.commentId > 0)
-      mail.assertNothingSent()
-    } finally {
-      if (real) setQueueDriver(real)
-    }
+    await asBob.post(`/posts/${post.id}/comments`, { body: 'Nice post' }).assertRedirect(`/posts/${post.id}`)
+
+    queue.assertPushed<SendCommentMailPayload>(SendCommentMailJob, (payload) => payload.commentId > 0)
+    mail.assertNothingSent()
   })
 })
 ```
@@ -249,7 +248,6 @@ export class NewCommentMail extends Mail {
 
 ```ts file=app/Providers/EventProvider.ts
 import { ServiceProvider, type EventManager } from '@guren/core'
-import { CommentPosted } from '../Events/CommentPosted.js'
 import { SendCommentMailListener } from '../Listeners/SendCommentMailListener.js'
 
 export default class EventProvider extends ServiceProvider {
@@ -257,21 +255,22 @@ export default class EventProvider extends ServiceProvider {
 
   boot(): void {
     const events = this.container.make<EventManager>('events')
-    const listener = new SendCommentMailListener()
 
-    events.on(CommentPosted, (event) => listener.handle(event), {
-      priority: SendCommentMailListener.priority,
-    })
+    events.listen(SendCommentMailListener)
   }
 }
 ```
 
-この配線はよく読んでください。あとで出くわす一群のバグの原因がここにあります。プロバイダーが渡すのは `priority` で、呼ぶのは `handle` です。読んでいるのはそれだけです。`Listener` 基底クラスは `shouldQueue`、`queue`、省略可能な `shouldHandle()` も宣言していますが、この配線はそのどれも見ていません。`shouldQueue = true` を設定してフレームワークがキューに載せてくれると期待した listener は、黙ってインラインで実行されます。クラスの宣言が何であれ、実際の挙動を決めるのはこのファイルの行です。
+`listen()` はクラスを受け取り、設定をクラス自身から読みます。`event` は購読するイベントです。`priority` は同じイベントの listener 同士の順番で、大きいほうが先に走ります。`shouldHandle()` をクラスが定義していれば、`handle` の前にイベントを見送れます。`shouldQueue = true` にすると、listener は直接呼ばれず、`queue` で指定したキューに渡されます。ただし `sync` のキューはそれをその場で実行するので、リクエストの外に出るのは、本物のキューをワーカーが処理するときだけです。インスタンスはイベントごとに作り直されるので、あるコメントで持った状態が次のコメントに持ち越されることはありません。
+
+`SendCommentMailListener` は `shouldQueue` を `false` のままにして、代わりにジョブを dispatch します。キューに載せた listener がワーカーに送るのはイベントです。ジョブが送るのは自分で決めたペイロードで、ジョブ固有の `maxAttempts` も持ちます。3 つ目のテストが fake のキューで探しているのも、このジョブです。
+
+`events.on(CommentPosted, (event) => listener.handle(event))` でも listener は動きますが、`Listener` クラスにはこの配線を使いません。`on()` が受け取るのは関数だけで、それがどのクラスから来たかを知りません。そのため `shouldHandle()` も `shouldQueue` も、何の警告もなく無視されます。
 
 キュープロバイダーは、ジョブクラスが dispatch 可能になる場所です。
 
 ```ts file=app/Providers/QueueProvider.ts
-import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob, type QueueManager } from '@guren/core'
+import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob } from '@guren/core'
 import { SendCommentMailJob } from '../Jobs/SendCommentMailJob.js'
 
 export default class QueueProvider extends ServiceProvider {
@@ -293,8 +292,6 @@ export default class QueueProvider extends ServiceProvider {
     // A queued message carries the job's name, so the driver can only run a job
     // the registry knows. Nothing in `guren check` looks for a missing one.
     registerJob(SendCommentMailJob)
-    const queue = this.container.make<QueueManager>('queue')
-    queue.driver()
   }
 }
 ```
@@ -341,7 +338,7 @@ rm app/Events/OrderPlaced.ts app/Listeners/SendOrderReceiptListener.ts app/Jobs/
 bun test
 ```
 
-緑です。
+緑です。出力に `[guren] Deprecation` で始まる行がひとつも無いことも確かめてください。キューの fake はコンテナ経由なので、非推奨の API を通っていません。
 
 **チェックポイント:** ブラウザで他人の投稿にコメントし、`bun run dev` が動いているターミナルを見てください。
 
@@ -400,10 +397,10 @@ globs:
 # Background work
 
 1. **Every `Job` subclass is registered.** Add `registerJob(TheJob)` to `boot()` in `app/Providers/QueueProvider.ts` in the same change that adds the class. A queued message carries the job's name and the driver resolves it through that registry; an unregistered job throws at dispatch time and `guren check` says nothing about it.
-2. **Every listener is wired.** A class in `app/Listeners/` runs only because `app/Providers/EventProvider.ts` calls `events.on(TheEvent, (event) => listener.handle(event), …)`. `shouldQueue`, `queue` and `shouldHandle()` on the class are inert unless that wiring reads them, so do not rely on them: to queue work, dispatch a job from `handle`.
+2. **Every listener is wired with `listen()`.** A class in `app/Listeners/` runs only because `boot()` in `app/Providers/EventProvider.ts` calls `events.listen(TheListener)`. That call reads the class's `event`, `priority`, `shouldQueue`, `queue` and `shouldHandle()`. Never wire a `Listener` class through `events.on(TheEvent, (event) => listener.handle(event))`: `on()` sees only the function, so `shouldHandle()` and `shouldQueue` are silently ignored. To queue work, dispatch a job from `handle`; set `shouldQueue` only when the listener itself should run on the worker.
 3. **A job payload is JSON: ids, never records.** The job may run in another process, after the row has changed. Load what you need inside `handle`, and return early when the record is gone.
 4. **Controllers announce, listeners decide.** A controller emits an event and returns. Rules about who gets mail (skip the actor, skip duplicates) live in the job or the listener, not in the action.
-5. **Test the seam, not the plumbing.** Mail is faked by registering a `fakeMail()` transport on a real `MailManager` and binding that with `app.container.fake('mail', manager)`. The queue is faked with `setQueueDriver(fakeQueue().getDriver())`: `Job.dispatch()` honours that pin ahead of the container's `queue` manager, and `fakeQueue()` is a driver rather than the manager that key holds.
+5. **Test the seam, not the plumbing.** A fake goes inside a real manager, and the manager is bound with `app.container.fake(key, manager)`. For mail, register a `fakeMail()` transport on a `MailManager` and bind it as `mail`. For the queue, give `createQueueManager()` a driver factory that returns `fakeQueue().getDriver()` and bind it as `queue` with `using`, so the app's own manager comes back when the test ends. Neither fake is a manager, so binding one directly throws. Do not use `setQueueDriver()`: it is deprecated and removed in 3.0.0.
 ```
 
 `PostToolUse` hook は編集のたびに `guren check --arch` を実行しますが、check はこの 5 つのどれについても何も言いません。ここではこの rule 自体がチェックの役目を果たします。
@@ -583,8 +580,6 @@ export class NotifyCommentersJob extends Job<NotifyCommentersPayload> {
 
 ```ts file=app/Providers/EventProvider.ts fallback
 import { ServiceProvider, type EventManager } from '@guren/core'
-import { CommentPosted } from '../Events/CommentPosted.js'
-import { PostPublished } from '../Events/PostPublished.js'
 import { SendCommentMailListener } from '../Listeners/SendCommentMailListener.js'
 import { NotifyCommentersListener } from '../Listeners/NotifyCommentersListener.js'
 
@@ -593,21 +588,15 @@ export default class EventProvider extends ServiceProvider {
 
   boot(): void {
     const events = this.container.make<EventManager>('events')
-    const commentListener = new SendCommentMailListener()
-    const publishListener = new NotifyCommentersListener()
 
-    events.on(CommentPosted, (event) => commentListener.handle(event), {
-      priority: SendCommentMailListener.priority,
-    })
-    events.on(PostPublished, (event) => publishListener.handle(event), {
-      priority: NotifyCommentersListener.priority,
-    })
+    events.listen(SendCommentMailListener)
+    events.listen(NotifyCommentersListener)
   }
 }
 ```
 
 ```ts file=app/Providers/QueueProvider.ts fallback
-import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob, type QueueManager } from '@guren/core'
+import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob } from '@guren/core'
 import { SendCommentMailJob } from '../Jobs/SendCommentMailJob.js'
 import { NotifyCommentersJob } from '../Jobs/NotifyCommentersJob.js'
 
@@ -631,8 +620,6 @@ export default class QueueProvider extends ServiceProvider {
     // the registry knows. Nothing in `guren check` looks for a missing one.
     registerJob(SendCommentMailJob)
     registerJob(NotifyCommentersJob)
-    const queue = this.container.make<QueueManager>('queue')
-    queue.driver()
   }
 }
 ```
@@ -783,7 +770,7 @@ bun test
 
 rubric は次のとおりです。
 
-- `registerJob(NotifyCommentersJob)` が `QueueProvider.boot()` にあり、`events.on(PostPublished, …)` が `EventProvider.boot()` にある。この 2 つが揃っていなければ、この機能はコンパイルの通る死んだコードです。
+- `registerJob(NotifyCommentersJob)` が `QueueProvider.boot()` にあり、`events.listen(NotifyCommentersListener)` が `EventProvider.boot()` にある。この 2 つが揃っていなければ、この機能はコンパイルの通る死んだコードです。`events.on(...)` で配線した listener もここでは動きますが、rule 2 に反します。
 - ペイロードは `{ postId }`。宛先は渡されるのではなく `handle` の中で解決される。
 - コメントした人が著者 id で重複排除され、投稿の著者がリストから外れる。しかもジョブの中で。Bob からのコメント 2 件に対して、Bob へのメールは 1 通です。
 - `publish` は emit して戻る。コメントを問い合わせもしないし、メールの存在も知らない。
@@ -804,7 +791,7 @@ git commit -m "feat: mail commenters when a post is published"
 
 - イベント、listener、ジョブ、メール。それぞれが、場所を指し示せる形で登録されている。
 - 告知して戻るコントローラーと、送信の隣に置かれた宛先に関する業務ルール。
-- テストの継ぎ目 3 つ: 本物のマネージャーの中のメールトランスポート、グローバルに設定されたキュードライバー、そしてその 2 つがつながっていることを示すリクエスト。
+- テストの継ぎ目 3 つ: 本物のマネージャーの中のメールトランスポート、もうひとつのマネージャーの中のキュードライバー、そしてその 2 つがつながっていることを示すリクエスト。
 - `guren check` が意見を持たない唯一の不変条件を書き留めたプロジェクトの rule と、それに従ったエージェント。
 
 ## よくあるつまずき
@@ -812,7 +799,8 @@ git commit -m "feat: mail commenters when a post is published"
 - **`SyncDriver: job class "X" is not registered.`** `QueueProvider.boot()` に `registerJob(X)` がありません。第 4 節の rule は、まさにこのエラーを防ぐために存在します。
 - **`Email must have at least one recipient`(あるいは subject、body)。** `send()` は組み立てられたメッセージを検証します。`undefined` を受け取った `to()` も、件名を設定する前に return する `build()` も、どちらもここに行き着きます。
 - **何も届かないのにエラーも出ない。** listener が `EventProvider.boot()` で配線されているか確かめてください。listener がひとつも無いイベントは、成功した `emit` です。
-- **テストで `container.fake('queue', …)` をしても何も変わらない。** `Job.dispatch()` はコンテナより先に `setQueueDriver()` のピンを見ますし、`fakeQueue()` はそのキーが保持する `QueueManager` ではなくドライバーです。`setQueueDriver()` を使い、前のドライバーを戻してください。
+- **キューを fake にしたテストで `manager.getDefaultDriverName is not a function` が出て、リクエストが 500 を返す。** `fakeQueue()` を `queue` に直接バインドしています。このキーが保持するのは `QueueManager` で、fake はドライバーです。`fakeMail()` を `mail` にバインドしたときと同じ間違いです。ドライバーを `createQueueManager()` のファクトリーから返し、そのマネージャーをバインドしてください。
+- **テストの出力に `[guren] Deprecation (global-service-setters): setQueueDriver() is deprecated` が出る。** ドライバーをピンで固定しているテストが残っています。第 2 節と同じように `app.container.fake('queue', …)` でマネージャーをバインドしてください。このピンは 3.0.0 で削除されます。
 - **`fakeMail()` で `mail` を直接 fake したテストが throw する。** `Mail.send()` は `manager.transport(name)` を呼びますが、fake はマネージャーではなくトランスポートです。本物の `MailManager` に登録し、それをバインドしてください。
 - **キューがあるのにメールがリクエストの中で送られる。** `QUEUE_CONNECTION=sync` が設計どおりに動いています。`memory` に設定して `bunx guren queue:work` を実行すれば、代わりにワーカーがキューを処理します。
 
