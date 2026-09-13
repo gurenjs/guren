@@ -242,7 +242,7 @@ Among the sections describing the model, its routes, its controller, its policy 
 bunx guren docs:graph --entity Comment
 ```
 
-The graph reads the same links from the other end: documents, entities, code, and the edges between them. Nothing here is a convention you have to remember, because everything in it is either derived from the code or declared in frontmatter the check validates.
+The graph reads the same links from the other end: the documents that govern the entity, and the edges between them. Narrowed by `--entity` it shows no code; `bunx guren docs:graph --path app/Http/Controllers/CommentController.ts` starts from a file instead, and lists the code nodes and the documents that govern them. Nothing here is a convention you have to remember, because everything in it is either derived from the code or declared in frontmatter the check validates.
 
 ```bash run
 bunx guren gate
@@ -389,7 +389,7 @@ The rubric:
 - `docs/context/posts.md` exists, its `type` is `context`, and its `entities` and `related` all resolve. `guren check --docs` reports every link, so a plausible-looking `related:` entry naming a file that does not exist is a failure, not a typo nobody notices.
 - The claims are true of this app: `authorId` is server-set, the policy gates the mutations, `publishedAt` is the state, uploads are private and signed, tags go through the pivot. Read them against the code, because nothing checks prose.
 - The ADR is a decision with consequences, not a description. If it reads like the context document, it is in the wrong file.
-- The two link to each other, and both survive `bunx guren docs:graph --entity Post`.
+- The context document links to the ADR, and both show up in `bunx guren docs:graph --entity Post`.
 
 ```bash run
 bunx guren docs:graph --entity Post

@@ -555,7 +555,7 @@ git commit -m "feat: expose reading and publishing as agent tools"
 
 Chapter 7 ended on an uncomfortable note. You wrote a policy, and then found that `guren audit` stayed green on a route with no policy call at all, because audit asks whether a mutating route requires *a user*, not whether it decides *which* user. The tests were the only thing between you and a blog anyone could edit.
 
-Declaring the route a tool changes that. Take the authorization out of `publish`:
+Declaring the route a tool changes that. Take the authorization out of `publish`. `unpublish` checks the same ability, so this `sed` deletes its line too; the check below reports only `publish`, the one of the two that is a tool:
 
 ```bash run
 sed -i.bak "/this.authorize('publish'/d" app/Http/Controllers/PostController.ts && rm app/Http/Controllers/PostController.ts.bak
@@ -866,7 +866,7 @@ The rubric:
 - Both comment routes carry a `toolName` (`comments_store`, `comments_destroy`), a `params` schema, an `output` schema, and `comments.store` keeps its `body` contract. `guren check --ci` is green, which means no tool is missing an input or output description.
 - Each action keeps its `authorize()` call, and the JSON branch is *after* it. An agent-shaped answer above the policy would be a policy that runs for browsers only.
 - The browser still redirects. Post a comment in the browser and you land back on the post.
-- The five agent tests pass, including the 422 that carries `Say something` and the 403 on someone else's comment.
+- The six agent tests pass, including the 422 that carries `Say something` and the 403 on someone else's comment.
 
 ```bash run
 bunx guren tool:list

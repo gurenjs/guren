@@ -29,7 +29,7 @@ bun run dev
 
 ## 1. リレーションシップとしての著者
 
-この節では、目に見える変化は何もありません。`authorsOf` が消えても、投稿のテスト 14 件はすべて緑のままです。`Post` にリレーションを宣言します。
+この節では、目に見える変化は何もありません。`authorsOf` が消えても、投稿のテスト 20 件はすべて緑のままです。`Post` にリレーションを宣言します。
 
 ```ts file=app/Models/Post.ts
 import { defineModel, type BelongsToRecord } from '@guren/core'

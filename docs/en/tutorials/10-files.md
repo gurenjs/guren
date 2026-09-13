@@ -24,7 +24,7 @@ One command installs it:
 bunx guren add attachments
 ```
 
-Read what it did, because you will be maintaining it. It installed the storage layer first (`app/Providers/StorageProvider.ts`, two disks: `local` rooted at `./storage/app` and `public` rooted at `./public/storage`). Then it added an `attachments` table to `db/schema.ts`, wrote `config/attachments.ts` and `app/Providers/AttachmentsProvider.ts`, registered the provider in `src/app.ts`, mounted the delivery route by calling `registerAttachmentRoutes` at the top of your route registrar, and registered an `attachments:prune` console command. The table needs its migration:
+Read what it did, because you will be maintaining it. It installed the storage layer first (`app/Providers/StorageProvider.ts` and `app/Services/FileStorage.ts`, two disks: `local` rooted at `./storage/app` and `public` rooted at `./public/storage`). Then it added an `attachments` table to `db/schema.ts`, wrote `config/attachments.ts` and `app/Providers/AttachmentsProvider.ts`, registered the provider in `src/app.ts`, mounted the delivery route by calling `registerAttachmentRoutes` at the top of your route registrar, and registered an `attachments:prune` console command. The table needs its migration:
 
 ```bash run
 bun run db:make create_attachments
@@ -246,7 +246,7 @@ Three things worth reading in this file. The upload is a `FormData` with a `File
 bun test
 ```
 
-Red, and before any of the three tests run: `Post.withAttachments` is not a function, because `Post` is not attachable yet.
+Red, all three: `Post.withAttachments is not a function` in one and `Post.attach is not a function` in the other two, because `Post` is not attachable yet.
 
 ## 3. The cover, by hand
 

@@ -197,7 +197,7 @@ bunx guren context
 `.claude/` の残りは、開始時ではなく必要になったときに読まれます。
 
 - **`rules/`** には領域ごとに検証済みの API ルールがあります(`orm-models.md`、`controllers-http.md`、`routes-codegen.md`、`testing.md`、`docs-and-spec.md`、`comments.md`)。それぞれが適用対象のファイル glob を宣言しているので、エージェントはルートを編集するときに `routes-codegen.md` を読み込み、それまでは読みません。
-- **`skills/`** はエージェントが求めに応じて従う手順です。`scaffold`(ファイルを手打ちせず `bunx guren make:*` に手を伸ばす)、`feature`、`db-manage`、`guren-api`、`agent-interface`、`plugin-authoring`、`dev-workflow`。
+- **`skills/`** はエージェントが求めに応じて従う手順です。`scaffold`(ファイルを手打ちせず `bunx guren make:*` に手を伸ばす)、`feature`、`db-manage`、`guren-api`、`agent-interface`、`plugin-authoring`、`dev-workflow`、`github-projects`。
 - **`agents/`** は独自の brief を持つ 2 つの subagent、`code-review` と `test-writer` です。
 - **`.mcp.json`** は `dev` スクリプトがマウントした開発用 MCP エンドポイントをエージェントに指し示し、動いているアプリに問い合わせられるようにします。
 
@@ -263,7 +263,7 @@ export default class HomeController extends Controller {
 }
 ```
 
-そして `resources/js/pages/Home.tsx` を置き換えます。変更点は `Props` の `tagline` フィールドと、それをレンダリングする段落の 2 か所です。この段落は、雛形にある「Edit `resources/js/pages/Home.tsx` to get started」の一文と入れ替わります。ページの残りはそのままです。
+そして `resources/js/pages/Home.tsx` を置き換えます。変更点は `Props` の `tagline` フィールドと、それをレンダリングする段落の 2 か所です。この段落は、雛形にある「The Laravel of TypeScript. Edit `resources/js/pages/Home.tsx` to get started.」の段落全体と入れ替わります。ページの残りはそのままです。
 
 ```tsx file=resources/js/pages/Home.tsx
 import { Head } from '@inertiajs/react'
@@ -424,14 +424,14 @@ Guren は本番用の Dockerfile を書いてくれます。
 bunx guren deploy --target docker
 ```
 
-書き出された `Dockerfile` を開いてください。2 段階のビルドです。第 1 段階ですべてをインストールして `bun run build` を実行します。第 2 段階ではサーバーが実行時に読むもの(`@/` のインポートエイリアスを持つ `tsconfig.json` と、`bin/`、`src/`、`app/`、`config/`、`routes/`、`modules/`、`db/`、`lang/`、`public/`、`.guren/`)だけをスリムなイメージにコピーし、`NODE_ENV=production` で `bun bin/serve.ts` を起動します。Docker が入っていれば、イメージをビルドして動かしてみましょう。
+書き出された `Dockerfile` を開いてください。2 段階のビルドです。第 1 段階ですべてをインストールして `bun run build` を実行します。第 2 段階ではサーバーが実行時に読むもの(`@/` のインポートエイリアスを持つ `tsconfig.json` と、`bin/`、`src/`、`app/`、`config/`、`routes/`、`modules/`、`db/`、`lang/`、`public/`、`.guren/`)だけをスリムなイメージにコピーし、`NODE_ENV=production` で `bun bin/serve.ts` を起動します。Docker が入っていれば、イメージをビルドして動かしてみましょう。先に `bun run dev` を止めておきます。コンテナが公開する 3333 番ポートは、開発サーバーが使っているポートです。
 
 ```bash manual
 docker build -t guren-blog .
 docker run --rm -p 3333:3333 --env-file .env guren-blog
 ```
 
-もう一度 [http://localhost:3333](http://localhost:3333) を開きます。同じページですが、今度はコンテナの中で動くアプリの本番ビルドが返しています。誰のマシンでも同じように動くものです。Ctrl-C で止めてください。注意点が 2 つあり、どちらも第 14 章で解決します。コンテナが開発用の `.env` を読んでいること、そして SQLite ファイルがコンテナの中にあるので、止めると中身がすべて消えることです。
+サーバーが起動してもコンテナは何も出力しないので、ターミナルが静かなままでも止まってはいません。もう一度 [http://localhost:3333](http://localhost:3333) を開きます。同じページですが、今度はコンテナの中で動くアプリの本番ビルドが返しています。誰のマシンでも同じように動くものです。Ctrl-C で止めてください。注意点が 2 つあり、どちらも第 14 章で解決します。コンテナが開発用の `.env` を読んでいること、そして SQLite ファイルがコンテナの中にあるので、止めると中身がすべて消えることです。
 
 レシピをコミットします。
 

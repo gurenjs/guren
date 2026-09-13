@@ -117,7 +117,7 @@ Check that the framework's files are still the framework's:
 bunx guren agent:sync --dry-run
 ```
 
-It reports what it would refresh (nothing, on a current harness) and never mentions the three files you just wrote. That is the claim-by-name rule: the sync owns the names it ships, and `ownership.md`, `owned-resource` and `ownership-review` are not among them.
+It reports what it would refresh (nothing, on a current harness) and never mentions the three files you just wrote. The three files it does name, as "Skipped 3 existing file(s): .claude/settings.json, .mcp.json, CLAUDE.md", are different ones: the scaffold wrote them, and the sync writes them only when they are missing, because they are yours to edit. That is the claim-by-name rule: the sync owns the names it ships, and `ownership.md`, `owned-resource` and `ownership-review` are not among them.
 
 One more piece of the harness you have not used: `.mcp.json` points your agent at the development MCP endpoint that `bun run dev` mounts. Through it the agent can call `guren_check`, `guren_get_context`, `guren_entity_context` and `guren_gate` as tools rather than shelling out, and `guren_make_feature` to run the generator. Nothing in this course depends on it, but if you see `guren_check` in a transcript rather than `bunx guren check`, that is what it is.
 

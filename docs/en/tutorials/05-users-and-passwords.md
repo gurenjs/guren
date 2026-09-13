@@ -52,7 +52,7 @@ bun run db:make add_passwords_to_users
 bun run db:migrate
 ```
 
-Open the new migration. SQLite cannot add a `NOT NULL` column to an existing table or change its constraints in place, so the generated SQL rebuilds the table: create the new shape, copy the rows across, drop the old one, rename. Your `users` table has no rows yet, so this is free; chapter 6 does the same dance on a table that has data.
+Open the new migration. It starts with two `ALTER TABLE users ADD` statements, one per column, and then rebuilds the table anyway: create the new shape, copy the rows across, drop the old one, rename. The first `ALTER` adds a `NOT NULL` column with no default, which SQLite accepts only on a table with no rows. Your `users` table has none yet, so the whole migration applies; chapter 6 changes a table that has data, and there drizzle-kit writes the rebuild alone.
 
 ## 2. The model that hashes
 

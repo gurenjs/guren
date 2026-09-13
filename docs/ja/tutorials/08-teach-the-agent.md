@@ -117,7 +117,7 @@ Report only findings, as a list of `file:line — what is missing`. If there are
 bunx guren agent:sync --dry-run
 ```
 
-更新対象(最新のハーネスなら何もありません)を報告し、自分で書いた 3 ファイルには触れません。これが名前による claim のルールです。sync が所有するのは同梱する名前だけで、`ownership.md`、`owned-resource`、`ownership-review` はその中に含まれません。
+更新対象(最新のハーネスなら何もありません)を報告し、自分で書いた 3 ファイルには触れません。「Skipped 3 existing file(s): .claude/settings.json, .mcp.json, CLAUDE.md」と名前が出る 3 ファイルは別物です。雛形が書いたファイルで、編集してよいものなので、sync は存在しないときにしか書きません。これが名前による claim のルールです。sync が所有するのは同梱する名前だけで、`ownership.md`、`owned-resource`、`ownership-review` はその中に含まれません。
 
 まだ使っていないハーネスの部品がもうひとつあります。`.mcp.json` は、`bun run dev` がマウントする開発用 MCP エンドポイントをエージェントに知らせるファイルです。これを通じてエージェントは、シェルに出る代わりに `guren_check`、`guren_get_context`、`guren_entity_context`、`guren_gate` をツールとして呼び、`guren_make_feature` でジェネレーターを走らせられます。このコースはどれもそれに依存していませんが、トランスクリプトに `bunx guren check` ではなく `guren_check` が出てきたら、これが理由です。
 

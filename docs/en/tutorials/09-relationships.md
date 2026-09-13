@@ -29,7 +29,7 @@ bun run dev
 
 ## 1. The author, as a relationship
 
-Nothing observable changes in this section; all fourteen post tests stay green while `authorsOf` disappears. Declare the relation on `Post`:
+Nothing observable changes in this section; all twenty post tests stay green while `authorsOf` disappears. Declare the relation on `Post`:
 
 ```ts file=app/Models/Post.ts
 import { defineModel, type BelongsToRecord } from '@guren/core'

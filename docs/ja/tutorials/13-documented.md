@@ -242,7 +242,7 @@ bunx guren context Comment
 bunx guren docs:graph --entity Comment
 ```
 
-グラフは、同じリンクを反対の端から読みます。ドキュメント、エンティティ、コード、そしてそのあいだのエッジです。覚えておかなければならない規約はひとつもありません。ここにあるものはどれも、コードから導出されているか、チェックが検証する frontmatter で宣言されているかのどちらかだからです。
+グラフは、同じリンクを反対の端から読みます。エンティティを統べるドキュメントと、そのあいだのエッジです。`--entity` で絞るとコードは出ません。`bunx guren docs:graph --path app/Http/Controllers/CommentController.ts` はファイルを起点にし、コードのノードと、それを統べるドキュメントを一覧します。覚えておかなければならない規約はひとつもありません。ここにあるものはどれも、コードから導出されているか、チェックが検証する frontmatter で宣言されているかのどちらかだからです。
 
 ```bash run
 bunx guren gate
@@ -389,7 +389,7 @@ rubric は次のとおりです。
 - `docs/context/posts.md` が存在し、その `type` が `context` で、`entities` と `related` がすべて解決する。`guren check --docs` はリンクを 1 本残らず報告するので、存在しないファイルを挙げたもっともらしい `related:` の項目も、見過ごされる誤字ではなく失敗になる。
 - 書かれている主張が、このアプリについて正しい。`authorId` はサーバーが設定し、ポリシーが変更を門番し、`publishedAt` が状態そのもので、アップロードは非公開かつ署名付きで、タグは中間テーブルを通る。文章を検査するものは無いので、コードと突き合わせて読むこと。
 - ADR が、記述ではなく、結果を伴う決定になっている。context のドキュメントのように読めるなら、それは置き場所が間違っている。
-- 2 つが互いにリンクし合っており、どちらも `bunx guren docs:graph --entity Post` を生き延びる。
+- コンテキストのドキュメントが ADR にリンクしており、どちらも `bunx guren docs:graph --entity Post` に現れる。
 
 ```bash run
 bunx guren docs:graph --entity Post

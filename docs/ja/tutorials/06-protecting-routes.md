@@ -409,7 +409,7 @@ bun test
 bunx guren audit
 ```
 
-認証についての 3 つの警告が消え、「Protected by an authentication guard (verified via middleware capabilities)」に置き換わっています。この最後の言い回しが重要です。`requireAuthenticated` にはフレームワークが刻印したマーカーが付いていて、`audit` が信頼するのは名前ではなくそのマーカーです。自前の `requireLogin` ミドルウェアを書いて `auth` というエイリアスを付けた場合、audit はそのミドルウェアがガード*のような名前*なだけで認識できるものではないと言い、警告を出し続けます。それが正しい答えです。人間であれ機械であれ、レビュアーは名前を見ただけでは、その関数が何かを検査しているかどうか分かりません。
+認証についての 3 つの警告が消えました。レポートに出るのは対応が必要なものだけなので、何に置き換わったかは `bunx guren audit --json` で確かめます。それらのルートはどれも「Protected by an authentication guard (verified via middleware capabilities)」として合格しています。この最後の言い回しが重要です。`requireAuthenticated` にはフレームワークが刻印したマーカーが付いていて、`audit` が信頼するのは名前ではなくそのマーカーです。自前の `requireLogin` ミドルウェアを書いて `auth` というエイリアスを付けた場合、audit はそのミドルウェアがガード*のような名前*なだけで認識できるものではないと言い、警告を出し続けます。それが正しい答えです。人間であれ機械であれ、レビュアーは名前を見ただけでは、その関数が何かを検査しているかどうか分かりません。
 
 警告はひとつ残りますが、これは間違いではありません。`[warn] [API3] PostController.store force write`、つまりボディをバリデートしたうえで `forceCreate` を呼んでいるメソッドについての警告です。この形のアクションはすべてこの警告を受け取ります。この章でも、これ以降の章でも同じです。
 
@@ -890,7 +890,7 @@ git commit -m "feat: require an author on every post and show it"
 ```bash manual
 git switch -c scratch/add-auth
 bunx guren add auth --force
-git diff main --stat
+git status --short
 git switch main
 git reset --hard
 git clean -fdn
@@ -905,7 +905,7 @@ bun run db:status
 
 `git clean` のあとにも、ファイルがひとつ意図どおり残ります。`.env` は git の管理対象外で、`add auth` はその末尾に、`config/session.ts` についてのコメントで始まり `SESSION_DRIVER` を設定するブロックを追記しています。そのブロックを削除してください。そのうえで `db:status` がすべてのマイグレーションを applied と表示し、orphaned がひとつも無ければ元どおりです。orphaned が出た場合は、止める前にサーバーがリロードしています。`bun run db:reset` で手元のマイグレーションからデータベースを作り直せますが、行はすべて消えます。`bun run dev` をもう一度起動します。
 
-差分の大半は、自分で書いたものと同じ形です。モデル、プロバイダー、2 つのコントローラー、バリデーター。残りは書かなかった部分です。メールによるパスワードリセット、メール確認、「ログイン状態を保持する」トークン、デモユーザーのシーダー、ダッシュボード。これ以降、コースでそのどれかが必要になったらジェネレーターを使います。そのとき生成されたものは、もう読めるはずです。
+`git diff` でなく `git status` を使うのは、`add auth` が書くものの多くが新しいファイルで、`main` との diff には未追跡のファイルが出てこないからです。一覧の大半は、自分で書いたものと同じ形です。モデル、プロバイダー、2 つのコントローラー、バリデーター。残りは書かなかった部分です。パスワードを忘れたとき用のページとリセット用のページ、それをつなぐメール、「ログイン状態を保持する」トークン、デモユーザーのシーダー、ダッシュボード。メールアドレスの確認は含まれません。それを加えるジェネレーターは `bunx guren make:auth --verify` です。これ以降、コースでそのどれかが必要になったらジェネレーターを使います。そのとき生成されたものは、もう読めるはずです。
 
 ## いまいる場所
 

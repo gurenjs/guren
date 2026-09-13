@@ -5,7 +5,7 @@ Chapter 3 put a schema inside the controller and sent raw field maps to the page
 **What you'll learn:**
 
 - Where validation lives, and how one Zod schema types the route contract, the controller, and the form
-- What a 422 response carries, and how Inertia puts field messages into `form.errors`
+- What a failed validation answers to a JSON request and to an Inertia form, and how the messages reach `form.errors`
 - What a resource is for, and why the pages never see a raw record
 - How `Data.Post` in the generated manifests follows the resource
 - How to ask a subagent to review a change, and what to do with its answer
@@ -88,7 +88,7 @@ describe('PostController', () => {
 bun test
 ```
 
-Red on the messages only: the status is already 422. That is the shape every validation failure has in Guren: status 422, a JSON body with `errors` keyed by field, each an array of messages. Inertia forms read exactly that.
+Red on the messages only: the status is already 422. That is what a validation failure answers to a plain JSON request like this test's: status 422, a JSON body with `errors` keyed by field, each an array of messages. A form Inertia submits gets a different answer, which section 3 shows.
 
 ## 2. The validator
 
@@ -244,7 +244,7 @@ export default function NewPost() {
 
 `RouteBody<ApiRoutes, 'posts.store'>` is `{ title: string; body: string }`, derived from `PostPayloadSchema` through the route contract. Add a field to the schema and the form's type gains it; misspell a route name and the type is `never`. You wrote the shape once, in the validator, and it reached the browser without being written again.
 
-**Checkpoint:** open [http://localhost:3333/posts/create](http://localhost:3333/posts/create) and submit the empty form. "Title is required" under the title, "Body is required" under the body. Inertia took the 422, put the messages into `form.errors`, and re-rendered the same page; you wrote no error handling.
+**Checkpoint:** open [http://localhost:3333/posts/create](http://localhost:3333/posts/create) and submit the empty form. "Title is required" under the title, "Body is required" under the body. That request did not get a 422. An Inertia request gets a 303 redirect back to the form, with the messages flashed in a short-lived `guren_validation_errors` cookie; Inertia followed the redirect, found the messages in `form.errors`, and re-rendered the same page. You wrote no error handling.
 
 ![The new-post form after submitting it empty: "Title is required" in red under the title field, "Body is required" in red under the body field, and the Publish button below them.](../../images/tutorial-validation-errors.png)
 
