@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sql } from 'drizzle-orm'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, listLocalMigrations, pendingMigrationNames, reportAppliedMigrations } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, listLocalMigrations, readMigrationDrift, reportAppliedMigrations, reportOrphanedMigrations } from './migration-utils'
 import { createSqliteDatabase } from './sqlite'
 
 function writeDrizzleMigration(migrationsDir: string, name: string, sql: string): void {
@@ -154,6 +154,24 @@ describe('buildMigrationStatus', () => {
     const status = buildMigrationStatus(local, [{ name: '20260101000000_first', appliedAt: null }])
     expect(status[0].applied).toBe(true)
     expect(status[0].appliedAt).toBeNull()
+  })
+
+  test('should return tracker rows with no local folder as orphaned, in name order', () => {
+    const status = buildMigrationStatus(local, [
+      { name: '20260101000000_first', appliedAt: null },
+      { name: '20260101120000_create_sessions_table', appliedAt: '2026-01-01T12:00:00.000Z' },
+    ])
+
+    expect(status).toEqual([
+      { name: '20260101000000_first', applied: true, appliedAt: null },
+      {
+        name: '20260101120000_create_sessions_table',
+        applied: true,
+        appliedAt: new Date('2026-01-01T12:00:00.000Z'),
+        orphaned: true,
+      },
+      { name: '20260102000000_second', applied: false, appliedAt: null },
+    ])
   })
 })
 
@@ -373,7 +391,7 @@ describe('describeDatabaseFailure', () => {
   })
 })
 
-describe('pendingMigrationNames', () => {
+describe('readMigrationDrift', () => {
   let migrationsDir: string
 
   beforeEach(() => {
@@ -387,41 +405,62 @@ describe('pendingMigrationNames', () => {
   })
 
   test('should list the local migrations the tracker has no row for, in apply order', async () => {
-    const pending = await pendingMigrationNames(migrationsDir, () => [{ name: '20260101000000_first', appliedAt: null }])
-    expect(pending).toEqual(['20260102000000_second'])
+    const drift = await readMigrationDrift(migrationsDir, () => [{ name: '20260101000000_first', appliedAt: null }])
+    expect(drift).toEqual({ pending: ['20260102000000_second'], orphaned: [] })
+  })
+
+  test('should list the tracker rows no local folder carries', async () => {
+    const drift = await readMigrationDrift(migrationsDir, () => [
+      { name: '20260101000000_first', appliedAt: null },
+      { name: '20260101120000_create_sessions_table', appliedAt: null },
+    ])
+    expect(drift).toEqual({ pending: ['20260102000000_second'], orphaned: ['20260101120000_create_sessions_table'] })
   })
 
   test('should cost the names, not the boot, when the tracker cannot be read', async () => {
     // The names exist to be logged. A driver that cannot read its tracker must
     // still migrate, so an unreadable one reports nothing rather than throwing.
-    const pending = await pendingMigrationNames(migrationsDir, () => {
+    const drift = await readMigrationDrift(migrationsDir, () => {
       throw new Error('permission denied for schema drizzle')
     })
-    expect(pending).toEqual([])
+    expect(drift).toEqual({ pending: [], orphaned: [] })
+  })
+})
+
+function captureConsole(method: 'info' | 'warn', run: () => void): string[] {
+  const lines: string[] = []
+  const original = console[method]
+  console[method] = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
+  try {
+    run()
+  } finally {
+    console[method] = original
+  }
+  return lines
+}
+
+describe('reportOrphanedMigrations', () => {
+  test('should name every orphaned migration and the folder it is missing from', () => {
+    const lines = captureConsole('warn', () => reportOrphanedMigrations(['20260102000000_create_sessions_table'], '/app/db/migrations'))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('20260102000000_create_sessions_table')
+    expect(lines[0]).toContain('/app/db/migrations')
+  })
+
+  test('should say nothing when the tracker and the folder agree', () => {
+    expect(captureConsole('warn', () => reportOrphanedMigrations([], '/app/db/migrations'))).toEqual([])
   })
 })
 
 describe('reportAppliedMigrations', () => {
-  function capture(run: () => void): string[] {
-    const lines: string[] = []
-    const original = console.info
-    console.info = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
-    try {
-      run()
-    } finally {
-      console.info = original
-    }
-    return lines
-  }
-
   test('should name every migration it applied, and where they came from', () => {
-    const lines = capture(() => reportAppliedMigrations(['20260102000000_orphan'], '/app/db/migrations'))
+    const lines = captureConsole('info', () => reportAppliedMigrations(['20260102000000_orphan'], '/app/db/migrations'))
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain('20260102000000_orphan')
     expect(lines[0]).toContain('/app/db/migrations')
   })
 
   test('should say nothing when the run applied nothing', () => {
-    expect(capture(() => reportAppliedMigrations([], '/app/db/migrations'))).toEqual([])
+    expect(captureConsole('info', () => reportAppliedMigrations([], '/app/db/migrations'))).toEqual([])
   })
 })

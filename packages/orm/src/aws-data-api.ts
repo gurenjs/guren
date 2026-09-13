@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, pendingMigrationNames, reportAppliedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -146,12 +146,10 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
 
       const { migrate } = await loadAwsDataApiModules()
       await withAdminDb(async (db) => {
-        // Read before the migrator writes: afterwards every row is applied.
-        const pending = report
-          ? await pendingMigrationNames(resolvedMigrationsFolder, () => readAppliedMigrations(db))
-          : []
-        await migrate(db, { migrationsFolder: resolvedMigrationsFolder })
-        reportAppliedMigrations(pending, resolvedMigrationsFolder)
+        await migrateAndReport(resolvedMigrationsFolder, {
+          readApplied: report ? () => readAppliedMigrations(db) : undefined,
+          migrate: () => migrate(db, { migrationsFolder: resolvedMigrationsFolder }),
+        })
       })
 
       return summary

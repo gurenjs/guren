@@ -5,9 +5,11 @@ export interface MigrationStatusRow {
   name: string
   applied: boolean
   appliedAt: string | null
+  /** Applied to the database, with no folder on disk. False from an @guren/orm that predates the field. */
+  orphaned: boolean
 }
 
-type StatusFn = () => Promise<Array<{ name: string; applied: boolean; appliedAt: Date | null }>>
+type StatusFn = () => Promise<Array<{ name: string; applied: boolean; appliedAt: Date | null; orphaned?: boolean }>>
 type CloseFn = () => Promise<void>
 
 function pickFunction<T>(module: Record<string, unknown>, name: string): T | undefined {
@@ -46,6 +48,7 @@ export async function getMigrationStatus(): Promise<MigrationStatusRow[]> {
       name: row.name,
       applied: row.applied,
       appliedAt: row.appliedAt ? row.appliedAt.toISOString() : null,
+      orphaned: row.orphaned === true,
     }))
   } finally {
     if (close) {
@@ -68,15 +71,24 @@ export async function showMigrationStatus(options: { json?: boolean } = {}): Pro
   }
 
   const pending = rows.filter((row) => !row.applied).length
+  const orphaned = rows.filter((row) => row.orphaned).length
   for (const row of rows) {
-    const marker = row.applied ? '✓ applied' : '· pending'
+    const marker = row.orphaned ? '! orphaned' : row.applied ? '✓ applied' : '· pending'
     const timestamp = row.appliedAt ? ` (${row.appliedAt})` : ''
     consola.log(`  ${marker}  ${row.name}${timestamp}`)
   }
 
+  if (orphaned > 0) {
+    consola.warn(
+      `${orphaned} migration(s) applied to this database have no folder on disk. ` +
+        'Whatever they created is still there, and a migration that creates it again will fail. ' +
+        'Restore the folder, or rebuild the database from the migrations you have with `bun run db:reset` (it drops every row).',
+    )
+  }
+
   if (pending > 0) {
     consola.info(`${pending} pending migration(s). Run \`bun run db:migrate\` to apply them.`)
-  } else {
+  } else if (orphaned === 0) {
     consola.success('All migrations applied.')
   }
 }

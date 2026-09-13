@@ -885,7 +885,7 @@ git commit -m "feat: require an author on every post and show it"
 
 ## What `add auth` would have given you
 
-You now know what a session, a guard, a hash, a CSRF token and a login wall are, because you built each one. That is the moment to look at the generator. On a branch you will throw away:
+You now know what a session, a guard, a hash, a CSRF token and a login wall are, because you built each one. That is the moment to look at the generator. Stop `bun run dev` first (Ctrl-C in its terminal), then work on a branch you will throw away:
 
 ```bash manual
 git switch -c scratch/add-auth
@@ -896,9 +896,14 @@ git reset --hard
 git clean -fdn
 git clean -fd
 git branch -D scratch/add-auth
+bun run db:status
 ```
 
-The `reset` and the `clean` are not tidiness. `git switch main` and `git branch -D` move a reference; neither undoes work you never committed, so without them everything `add auth` wrote is still in your working tree on `main` — including a migration folder under `db/migrations/`. Nobody applies that folder on purpose. The next `bun run dev` applies it at boot without a word, and eight chapters from here, when chapter 14 creates the `sessions` table itself, the migration fails on a table that is already there.
+Stopping the server comes first because `add auth` edits `src/app.ts`, and a running dev server reloads on that edit. The reload boots the app, which applies the migration `add auth` has just written and runs its demo-user seeder, all before you have read the diff. No git command takes that back out of the database.
+
+The `reset` and the `clean` are not tidiness either. `git switch main` and `git branch -D` move a reference, and neither undoes work you never committed. Without them, everything `add auth` wrote is still in your working tree on `main`, a migration folder under `db/migrations/` included, and the next boot applies it. Eight chapters from here, chapter 14 creates the `sessions` table itself, and its migration fails on a table that is already there.
+
+One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appended a block to its end that starts with a comment about `config/session.ts` and sets `SESSION_DRIVER`. Delete that block. `db:status` should then list every migration as applied and none as orphaned. If one is orphaned, the server reloaded before you stopped it; `bun run db:reset` rebuilds the database from the migrations you have and drops every row with it. Start `bun run dev` again.
 
 Most of the diff is what you wrote, in the same shape: the model, the provider, the two controllers, the validators. The rest is what you did not: password reset by email, email verification, a "remember me" token, a seeder with a demo user, a dashboard. From now on, when the course needs one of those, you will reach for the generator, and you will be able to read what it wrote.
 

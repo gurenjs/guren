@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, pendingMigrationNames, reportAppliedMigrations, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -141,15 +141,12 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
           client: migrationClient,
           ...(relations ? { relations } : {}),
         } as DrizzleConfig)
-        // Over the migration pool, and before the migrator writes: a second
-        // admin pool here would cost a connect on every cold start.
-        const pending = report
-          ? await pendingMigrationNames(resolvedMigrationsFolder, () =>
-              readAppliedMigrations(migrationDb as unknown as MySql2Database),
-            )
-          : []
-        await migrate(migrationDb, { migrationsFolder: resolvedMigrationsFolder })
-        reportAppliedMigrations(pending, resolvedMigrationsFolder)
+        // Over the migration pool: a second admin pool here would cost a
+        // connect on every cold start.
+        await migrateAndReport(resolvedMigrationsFolder, {
+          readApplied: report ? () => readAppliedMigrations(migrationDb as unknown as MySql2Database) : undefined,
+          migrate: () => migrate(migrationDb, { migrationsFolder: resolvedMigrationsFolder }),
+        })
       } finally {
         await closePool(migrationClient)
       }

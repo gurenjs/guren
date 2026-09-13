@@ -355,6 +355,7 @@ More than that, you have a way of working. Every chapter here was the same four 
 
 ## Common trip-ups
 
+- **`db:migrate` fails with `table sessions already exists`.** Chapter 6's `add auth` comparison ran while the dev server was up. Its reload applied that command's own `sessions` migration, and `git clean` then removed the folder but not the table. `bun run db:status` lists that migration as orphaned. `bun run db:reset` rebuilds the database from the migrations you have, this chapter's included, and drops every row on the way.
 - **Everyone is signed out after a deploy.** The session store is still in memory, or the new container has a different `APP_KEY`. Both are in section 1 and section 4.
 - **The rate limiter blocks the wrong thing.** Two limiters are sharing a counter: give each a distinct `keyPrefix`.
 - **Every visitor shares one rate-limit bucket.** The key is the socket address and there is a proxy in front. Set `trustProxy`, but only if the proxy overwrites the client headers.

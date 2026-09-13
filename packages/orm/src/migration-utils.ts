@@ -230,54 +230,113 @@ export interface MigrationStatusEntry {
   name: string
   applied: boolean
   appliedAt: Date | null
+  /**
+   * True for a tracker row no local folder carries: applied to this database,
+   * then deleted from disk (or migrated by another checkout). Absent otherwise.
+   */
+  orphaned?: boolean
+}
+
+function parseAppliedAt(row: AppliedMigrationRow | undefined): Date | null {
+  if (!row?.appliedAt) return null
+  const parsed = row.appliedAt instanceof Date ? row.appliedAt : new Date(row.appliedAt)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
 /**
  * Joins local migration folders with the migrator's tracker rows. Drizzle
  * decides pending migrations by name membership, so status uses that rule.
+ * The same rule makes the migrator skip a row with no folder, whatever that
+ * row's migration created, so those rows come back too, marked `orphaned`.
  */
 export function buildMigrationStatus(
   localMigrations: LocalMigrationEntry[],
   appliedRows: AppliedMigrationRow[],
 ): MigrationStatusEntry[] {
-  const appliedByName = new Map<string, AppliedMigrationRow>()
+  const unmatchedRows = new Map<string, AppliedMigrationRow>()
   for (const row of appliedRows) {
     if (row.name) {
-      appliedByName.set(row.name, row)
+      unmatchedRows.set(row.name, row)
     }
   }
 
-  return localMigrations.map((migration) => {
-    const row = appliedByName.get(migration.name)
-    let appliedAt: Date | null = null
-    if (row?.appliedAt) {
-      const parsed = row.appliedAt instanceof Date ? row.appliedAt : new Date(row.appliedAt)
-      appliedAt = Number.isNaN(parsed.getTime()) ? null : parsed
-    }
-
+  const entries: MigrationStatusEntry[] = localMigrations.map((migration) => {
+    const row = unmatchedRows.get(migration.name)
+    unmatchedRows.delete(migration.name)
     return {
       name: migration.name,
       applied: row !== undefined,
-      appliedAt,
+      appliedAt: parseAppliedAt(row),
     }
   })
+
+  if (unmatchedRows.size === 0) return entries
+
+  const orphaned = [...unmatchedRows].map(
+    ([name, row]): MigrationStatusEntry => ({ name, applied: true, appliedAt: parseAppliedAt(row), orphaned: true }),
+  )
+  return [...entries, ...orphaned].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export interface MigrationDrift {
+  /** Local migrations the tracker has no row for, in the order the migrator will apply them. */
+  pending: string[]
+  /** Tracker rows no local folder carries. */
+  orphaned: string[]
 }
 
 /**
- * Local migrations the tracker has no row for, in the order the migrator will
- * apply them. Best-effort by contract: the names exist to be logged, and a
- * tracker this driver cannot read costs the names, not the boot.
+ * Where the migrations folder and the tracker disagree, in both directions.
+ * Best-effort by contract: the names exist to be logged, and a tracker this
+ * driver cannot read costs the names, not the boot.
  */
-export async function pendingMigrationNames(
+export async function readMigrationDrift(
   migrationsFolder: string,
   readApplied: () => Promise<AppliedMigrationRow[]> | AppliedMigrationRow[],
-): Promise<string[]> {
+): Promise<MigrationDrift> {
   try {
     const status = buildMigrationStatus(listLocalMigrations(migrationsFolder), await readApplied())
-    return status.filter((entry) => !entry.applied).map((entry) => entry.name)
+    return {
+      pending: status.filter((entry) => !entry.applied).map((entry) => entry.name),
+      orphaned: status.filter((entry) => entry.orphaned).map((entry) => entry.name),
+    }
   } catch {
-    return []
+    return { pending: [], orphaned: [] }
   }
+}
+
+/**
+ * One migrator run, reported on both sides. The tracker is read before the
+ * migrator writes (afterwards every row is applied), and orphans are named
+ * before it runs, since they are the likeliest reason it is about to fail.
+ * Without `readApplied` nothing is read or reported: a reset's re-apply.
+ */
+export async function migrateAndReport(
+  migrationsFolder: string,
+  { readApplied, migrate }: {
+    readApplied?: () => Promise<AppliedMigrationRow[]> | AppliedMigrationRow[]
+    /** bun:sqlite's migrator is synchronous; the others return a promise. */
+    migrate: () => unknown
+  },
+): Promise<void> {
+  const drift = readApplied ? await readMigrationDrift(migrationsFolder, readApplied) : { pending: [], orphaned: [] }
+  reportOrphanedMigrations(drift.orphaned, migrationsFolder)
+  await migrate()
+  reportAppliedMigrations(drift.pending, migrationsFolder)
+}
+
+/**
+ * Warns on every boot while the tracker holds rows no folder carries, such as a
+ * generator's migration a dev server applied before `git clean` removed it. Its
+ * tables stay behind, and a later migration creating them again fails.
+ */
+export function reportOrphanedMigrations(orphaned: readonly string[], migrationsFolder: string): void {
+  if (orphaned.length === 0) return
+
+  console.warn(
+    `[guren/orm] ${orphaned.length} migration(s) applied to this database have no folder in ${migrationsFolder}: ${orphaned.join(', ')}.\n` +
+    '[guren/orm] Whatever they created is still in the database. `bun run db:status` lists them as orphaned.',
+  )
 }
 
 /**
