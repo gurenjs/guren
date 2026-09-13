@@ -32,10 +32,11 @@ Your production environment needs these variables at minimum:
 | Variable | Example | Purpose |
 |----------|---------|---------|
 | `APP_URL` | `https://example.com` | Public-facing URL |
-| `NODE_ENV` | `production` | Serves the built assets and sends HSTS; the generated Dockerfile sets it |
 | `PORT` | `3333` | Server listen port |
 | `DATABASE_URL` | `postgres://user:pass@host:5432/db` | Postgres connection string |
 | `APP_KEY` | `base64:...` | Encrypts and signs sessions, cookies, and tokens |
+
+`NODE_ENV=production` is not in the table because the Dockerfile generated in the next step sets it.
 
 > [!WARNING]
 > Never commit secrets to git. Use your platform's secret manager or inject variables at deploy time.
@@ -47,6 +48,8 @@ bunx guren key:generate
 ```
 
 The server refuses a key that is not a base64-encoded 32-byte value, so the output of `openssl rand -hex` will not work. See [Encryption](./encryption.md) for key rotation.
+
+For a local test of the image, put these variables in `.env.production`. The `docker run` command in the next section reads that file, and the image contains no `.env` of its own.
 
 ## 2. Generate a Dockerfile
 

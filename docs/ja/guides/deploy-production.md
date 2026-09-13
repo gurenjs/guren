@@ -32,10 +32,11 @@ bunx guren doctor
 | 変数 | 例 | 用途 |
 |------|-----|------|
 | `APP_URL` | `https://example.com` | 公開 URL |
-| `NODE_ENV` | `production` | ビルド済みアセットの配信と HSTS の送出。生成される Dockerfile が設定します |
 | `PORT` | `3333` | サーバーのリッスンポート |
 | `DATABASE_URL` | `postgres://user:pass@host:5432/db` | Postgres 接続文字列 |
 | `APP_KEY` | `base64:...` | セッション、Cookie、トークンの暗号化と署名 |
+
+`NODE_ENV=production` は次の手順で生成する Dockerfile が設定するので、表には含めていません。
 
 > [!WARNING]
 > シークレットを git にコミットしないでください。プラットフォームのシークレットマネージャーを使うか、デプロイ時に環境変数を注入してください。
@@ -47,6 +48,8 @@ bunx guren key:generate
 ```
 
 サーバーは base64 エンコードされた 32 バイトの値以外をキーとして受け付けません。`openssl rand -hex` の出力は使えません。キーのローテーションは[暗号化](./encryption.md)を参照してください。
+
+イメージをローカルで試すときは、これらの変数を `.env.production` に書いてください。次の節の `docker run` がこのファイルを読みます。イメージ自体には `.env` が含まれません。
 
 ## 2. Dockerfile を生成する
 
