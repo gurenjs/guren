@@ -24,7 +24,13 @@ const NOT_IN_PRODUCTION_IMAGE: Record<string, string> = {
 }
 
 async function templateTopLevelEntries(): Promise<Set<string>> {
-  const roots = ['default', 'default-ssr', 'api-only', 'blog'].map((name) => join(createAppTemplates, name))
+  // `database/` holds one template per driver rather than an app tree.
+  const roots: string[] = []
+  for (const name of await readdir(createAppTemplates)) {
+    if (name !== 'database') {
+      roots.push(join(createAppTemplates, name))
+    }
+  }
   for (const driver of await readdir(join(createAppTemplates, 'database'))) {
     roots.push(join(createAppTemplates, 'database', driver))
   }
