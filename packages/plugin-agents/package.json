@@ -45,7 +45,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.17.0",
+    "@guren/core": "^1.18.0",
     "agents": "^0.22.0"
   },
   "devDependencies": {

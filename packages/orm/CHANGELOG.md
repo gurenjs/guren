@@ -1,5 +1,79 @@
 # @guren/orm
 
+## 2.9.0
+
+### Minor Changes
+
+- ccd3d8c: `Model.transaction()` now tracks the open transaction in async context. A
+  nested call runs as a savepoint on it instead of opening a second top-level
+  transaction, which on the `max: 1` pool the Postgres factory creates waited on
+  the connection the outer one held (a deadlock), and which the
+  single-connection SQLite driver refused with an error. An inner error the outer
+  callback catches therefore discards only the inner writes. Nested transactions
+  have to be awaited one at a time: savepoints on one connection are released in
+  the order they were taken, so two running at once discard each other's frames.
+
+  A model call inside the callback with no `{ trx }` runs on the open transaction
+  too, so a write that forgot the handle is rolled back with the rest rather than
+  committing on the pool. An explicit `{ trx }` keeps working as before. A
+  promise nobody awaited outlives the transaction it was started in, and a query
+  it issues after that runs on the pool rather than on a handle the driver has
+  already finalised.
+
+- ccd3d8c: Casts and accessors now apply on every read path, and an eager load is keyed
+  before they run.
+
+  `Model.all()` and `Model.find()` applied them only when they talked to the
+  adapter directly: a `where().get()`, `paginate()`, `orderBy()`, an eager-loaded
+  relation, or `all()` on a model carrying a global scope (SoftDeletes included)
+  handed back raw rows, so a `json` cast came back as a string and accessor fields
+  were missing. Every terminal that returns rows now runs the model's transforms,
+  and an eager-loaded relation carries the related model's.
+
+  A relation loader matches child rows to their parents by value, so the
+  transforms run after the join rather than before it. A model casting its own
+  `id`, or a child model casting the foreign key, would otherwise get every
+  relation back empty. One consequence to know about: a parent accessor now sees
+  the relations the row was loaded with, where before it saw nothing.
+
+  A row `select()` narrowed skips accessors, since one reading a column the
+  projection left out fabricated a value from `undefined`. Casts still apply to
+  the columns that are there.
+
+  `Model.paginate()` and `Model.withPaginate()` are the query builder's
+  `paginate()` on both arms now, so page sanitising, the count and `meta` have one
+  implementation rather than two that agreed by inspection. One consequence for a
+  custom adapter: a filtered page used to count through `ORMAdapter.count()`, and
+  now counts through `countAdvanced()`, falling back to loading rows where the
+  adapter implements neither. `DrizzleAdapter` implements it.
+
+  Serialization no longer recomputes an appended accessor the read path already
+  ran, so each one is computed once per row. It still computes an append missing
+  from the record: a row `select()` narrowed, or a record built by hand. That last
+  case is the one behavior change — an appended name shadowing a real column on
+  such a record now keeps the column's value.
+
+- ccd3d8c: `withCount()` issues one `SELECT fk, COUNT(*) ... GROUP BY fk` per relation
+  instead of loading every related row and counting in JS (`morphMany` loaded the
+  whole relation). A `belongsTo` count reads the owner key column alone, the
+  answer being 0 or 1. The related model's global scopes still apply, so a
+  soft-deleted child is not counted. An adapter without the grouped-count method
+  falls back to loading rows, narrowed to the key column where it can project and
+  whole where it cannot.
+
+  The IN list behind `withCount()` and every eager load (`hasMany`, `hasOne`,
+  `belongsTo`, `belongsToMany`, `hasManyThrough`, `morphMany`, `morphTo`) is split
+  into batches the adapter says the driver admits. `ORMAdapterAdvanced` gains an
+  optional `maxInListSize()`; `DrizzleAdapter` answers 5000 for the dialects that
+  number their parameters or backtick their names (Postgres, MySQL) and 500 for
+  anything it cannot place. For `belongsToMany` and `hasManyThrough` the keys
+  split that way are the related rows', not the parents'.
+
+  A `with()` constraint carrying `limit()`, `offset()` or `orderBy()` describes
+  the whole result set, so a load carrying one is answered by a single query
+  rather than one per batch. Its IN list is the only one a large enough parent set
+  can push past the driver's own limit.
+
 ## 2.8.0
 
 ### Minor Changes

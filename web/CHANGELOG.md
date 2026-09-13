@@ -1,5 +1,32 @@
 # web
 
+## 0.1.39
+
+### Patch Changes
+
+- Updated dependencies [ad3ff15]
+- Updated dependencies [ad3ff15]
+- Updated dependencies [edaccc6]
+- Updated dependencies [edaccc6]
+- Updated dependencies [ccd3d8c]
+- Updated dependencies [ccd3d8c]
+- Updated dependencies [ccd3d8c]
+- Updated dependencies [fc01a05]
+- Updated dependencies [fc01a05]
+- Updated dependencies [3146839]
+- Updated dependencies [292c0e5]
+- Updated dependencies [292c0e5]
+- Updated dependencies [292c0e5]
+- Updated dependencies [445e34c]
+- Updated dependencies [445e34c]
+- Updated dependencies [6848e0e]
+- Updated dependencies [d375f0f]
+  - @guren/core@1.18.0
+  - @guren/cli@2.22.0
+  - @guren/orm@2.9.0
+  - @guren/plugin-cloudflare@0.10.1
+  - @guren/testing@1.10.1
+
 ## 0.1.38
 
 ### Patch Changes
