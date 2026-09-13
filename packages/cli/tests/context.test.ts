@@ -19,15 +19,22 @@ export class Post extends defineModel(posts) {}`,
         'utf8',
       )
 
+      // core's range is not a Guren version: releases are numbered after @guren/server.
       await writeFile(
         join(workspace.dir, 'package.json'),
-        JSON.stringify({ dependencies: { '@guren/core': '1.0.0' } }),
+        JSON.stringify({ dependencies: { '@guren/core': '^1.18.0' } }),
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'node_modules/@guren/server'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'node_modules/@guren/server/package.json'),
+        JSON.stringify({ name: '@guren/server', version: '2.23.0' }),
         'utf8',
       )
 
       const ctx = await generateContext({ cwd: workspace.dir })
 
-      expect(ctx.framework.version).toBe('1.0.0')
+      expect(ctx.framework.version).toBe('2.23.0')
       expect(ctx.models).toHaveLength(1)
       expect(ctx.models[0].className).toBe('Post')
       expect(ctx.models[0].tableName).toBe('posts')

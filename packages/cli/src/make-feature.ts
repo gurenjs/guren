@@ -3,7 +3,7 @@ import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
 import { appConfiguresAttachments } from './attachments-check'
 import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
-import { pluralize } from './inflect'
+import { pluralize, schemaIdentifierFor } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -11,7 +11,7 @@ import { makeValidator } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
 import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
-import { schemaPathFor } from './schema-parser'
+import { parseSchemaTables, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
 import {
   appendPrototypeEntries,
@@ -132,7 +132,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // controller imports and the ones `make:validator` writes cannot drift. At
   // promotion the prototype run already wrote it, and it is kept as edited.
   const validatorRelPath = `${appPrefix}app/Http/Validators/${singular}Validator.ts`
-  const validatorPath = promoting && !options.force && (await fileExists(appRoot, validatorRelPath))
+  const validatorKept = promoting && !options.force && (await fileExists(appRoot, validatorRelPath))
+  const validatorPath = validatorKept
     ? resolve(appRoot, validatorRelPath)
     : await makeValidator(singular, { ...writerOptions, fields })
 
@@ -190,7 +191,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens(appRoot)
 
-  created.unshift(validatorPath)
+  if (!validatorKept) created.unshift(validatorPath)
 
   const modelPath = await makeModel(singular, { ...writerOptions, attachments })
   created.push(modelPath)
@@ -216,14 +217,22 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   for (const file of created) {
     consola.success(`Created ${file}`)
   }
+  if (validatorKept) {
+    consola.info(`Kept ${validatorPath} (pass --force to regenerate it)`)
+  }
 
   const schemaPath = schemaPathFor(moduleName)
   const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
   const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
   const validatorImportPath = moduleName ? './app/Http/Validators' : '../app/Http/Validators'
+  const tableDeclared = await schemaDeclaresTable(appRoot, singular, moduleName ?? null)
   consola.info('')
   consola.info('Next steps:')
-  consola.info(`  1. Add table definition to ${schemaPath}`)
+  if (tableDeclared) {
+    consola.info(`  1. ${schemaPath} already declares ${schemaIdentifierFor(singular)}: nothing to add`)
+  } else {
+    consola.info(`  1. Add table definition to ${schemaPath}`)
+  }
   consola.info(`  2. Register routes in ${routesPath} with body schemas:`)
   consola.info(`     import ${singular}Controller from '${controllerImportPath}/${singular}Controller.js'`)
   consola.info(`     import { ${singular}PayloadSchema } from '${validatorImportPath}/${singular}Validator.js'`)
@@ -234,7 +243,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.info(`     (promotion: replace each \`prototype\` handler for ${routeName}.* with the [${singular}Controller, '<action>'] above;`)
     consola.info(`      the fixture entries keep serving \`bun run build:prototype\`)`)
   }
-  consola.info(`  3. Run: bunx guren db:migrate`)
+  consola.info(tableDeclared ? '  3. Run: bun run db:make && bun run db:migrate (skip if already applied)' : '  3. Run: bun run db:make && bun run db:migrate')
   consola.info(`  4. Run: bunx guren codegen`)
   if (withPolicy) {
     const modelsBase = moduleName ? `../modules/${moduleName}` : '../app'
@@ -286,7 +295,15 @@ function announcePrototypeFeature(options: { created: string[]; singular: string
   consola.info('  2. Run: bunx guren codegen')
   consola.info('  3. Walk it: bun run dev:prototype (or ship dist/prototype/ with bun run build:prototype)')
   consola.info(`  When the specification settles, run \`bunx guren make:feature ${singular} --fields "…"\` without --prototype:`)
-  consola.info(`  it writes the model, migration, Resource and controller, keeps these pages, and prints the handler replacements.`)
+  consola.info(`  it writes the model, Resource and controller, keeps these pages and the validator, and prints the handler replacements.`)
+  consola.info(`  The table and its migration stay yours: add it to db/schema.ts and run bun run db:make first.`)
+}
+
+/** Whether the schema the feature's model binds already exports its table. */
+async function schemaDeclaresTable(appRoot: string, singular: string, moduleName: string | null): Promise<boolean> {
+  const identifier = schemaIdentifierFor(singular)
+  const tables = await parseSchemaTables(appRoot)
+  return tables.some((table) => table.module === moduleName && table.identifier === identifier)
 }
 
 /**

@@ -47,11 +47,12 @@ export interface ContextOptions {
 export async function generateContext(options: ContextOptions = {}): Promise<ProjectContext> {
   const cwd = resolve(options.cwd ?? process.cwd())
 
+  // Guren releases are numbered after @guren/server; @guren/core, the package an
+  // app declares, sits on its own version line, so its range names no release.
   let version = 'unknown'
-  const pkgRaw = await readIfExists(cwd, 'package.json')
-  if (pkgRaw) {
-    const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
-    version = pkg.dependencies?.['@guren/core'] ?? pkg.devDependencies?.['@guren/core'] ?? 'unknown'
+  const serverManifest = await readIfExists(cwd, 'node_modules/@guren/server/package.json')
+  if (serverManifest) {
+    version = (JSON.parse(serverManifest) as { version?: string }).version ?? 'unknown'
   }
 
   const collectModels = async (): Promise<ModelInfo[]> => {

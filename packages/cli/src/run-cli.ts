@@ -1,6 +1,7 @@
 import { consola } from 'consola'
 import { runCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
+import { CliError } from './cli-error'
 import { unknownCommandHint } from './unknown-command'
 
 type AnyCommandDef = CommandDef<any>
@@ -113,6 +114,10 @@ export async function runCli(cmd: AnyCommandDef, rawArgs: string[]): Promise<num
         (error as { code?: unknown }).code === 'E_UNKNOWN_COMMAND' ? await findUnknownSubCommand(cmd, rawArgs) : undefined
       const hint = unknown && unknownCommandHint(unknown.name, unknown.candidates, unknown.atRoot)
       return failWithUsage(hint ? `${error.message}\n${hint}` : error.message)
+    }
+    if (error instanceof CliError) {
+      consola.error(error.message)
+      return 1
     }
     // Non-Error throwables (Bun's ResolveMessage, for one) render as an
     // empty object when handed to consola directly, hiding the message.

@@ -41,6 +41,8 @@ export interface GateReport {
   ok: boolean
   /** Whether `check` and `lint` were narrowed to changed files. */
   changed: boolean
+  /** Whether the audit stage also scanned dependencies (`--deps`). */
+  deps: boolean
   stages: GateStageResult[]
 }
 
@@ -239,6 +241,7 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
     cwd,
     ok: stages.every((stage) => stage.status !== 'fail'),
     changed: changedFiles !== null,
+    deps: ctx.deps,
     stages,
   }
 }
@@ -282,7 +285,9 @@ export function renderGateReport(report: GateReport): void {
 
   for (const stage of report.stages) {
     const { label, log } = STAGE_STYLE[stage.status]
-    log(`${label} ${stage.name} (${stage.durationMs}ms)${stage.reason ? `: ${stage.reason}` : ''}`)
+    // `--deps` runs inside the audit stage, so the line names it or the scan is invisible.
+    const name = stage.name === 'audit' && report.deps ? 'audit + dependency scan' : stage.name
+    log(`${label} ${name} (${stage.durationMs}ms)${stage.reason ? `: ${stage.reason}` : ''}`)
     for (const finding of stage.findings) {
       consola.info(`       - ${finding}`)
     }

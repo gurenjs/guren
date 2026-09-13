@@ -720,6 +720,8 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       expect(created.some((file) => file.endsWith('app/Http/Controllers/NoteController.ts'))).toBe(true)
       expect(created.some((file) => file.endsWith('app/Models/Note.ts'))).toBe(true)
       expect(created.some((file) => file.endsWith('resources/js/pages/notes/Index.tsx'))).toBe(false)
+      // Kept as the prototype run wrote it, so it is not reported as created.
+      expect(created.some((file) => file.endsWith('app/Http/Validators/NoteValidator.ts'))).toBe(false)
       expect(await readFile(indexPath, 'utf8')).toStartWith('// edited during the walkthrough')
 
       const resource = await readFile(join(workspace.dir, 'app/Http/Resources/NoteResource.ts'), 'utf8')

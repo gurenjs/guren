@@ -14,7 +14,7 @@ import { showUsage } from 'citty'
 import { defineCommand } from './define-command'
 import { UsageError } from './run-cli'
 import { newCommand } from './new-command'
-import { listBlueprints, runBlueprint } from './blueprints'
+import { addResource, listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
@@ -2983,7 +2983,7 @@ const addResourceCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const createdFiles = await runBlueprint('resource', {
+    const { created, schemaUpdated, routesUpdated } = await addResource({
       name: String(args.name),
       fields: typeof args.fields === 'string' ? args.fields : undefined,
       attach: typeof args.attach === 'string' ? args.attach : undefined,
@@ -2991,14 +2991,22 @@ const addResourceCommand = defineCommand({
       force: Boolean(args.force),
     })
 
-    for (const file of createdFiles) {
+    for (const file of created) {
       consola.success(`Created ${file}`)
     }
 
     consola.info('')
-    consola.info('Schema and routes were updated automatically. Next steps:')
-    consola.info('  • Run `bun run db:make` to generate the migration')
-    consola.info('  • Run `bun run db:migrate` to apply it')
+    consola.info(schemaUpdated
+      ? 'Added the table to db/schema.ts.'
+      : 'db/schema.ts already declares this table: left unchanged, so there is no migration to generate.')
+    consola.info(routesUpdated
+      ? 'Registered the route group in routes/web.ts.'
+      : 'routes/web.ts already registers these routes: left unchanged.')
+    consola.info('Next steps:')
+    if (schemaUpdated) {
+      consola.info('  • Run `bun run db:make` to generate the migration')
+      consola.info('  • Run `bun run db:migrate` to apply it')
+    }
     consola.info('  • Run `bun run codegen` (or `bun run dev`) to refresh generated types')
     if (!args.public) {
       consola.info('  • store/update/destroy require a signed-in user — pass --public to opt out')

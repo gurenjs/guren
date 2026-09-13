@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
+import { CliError } from './cli-error'
 
 export interface WriterOptions {
   force?: boolean
@@ -111,7 +112,7 @@ export async function writeFileSafe(relativePath: string, contents: string, opti
     await writeFile(fullPath, contents, { encoding: 'utf8', flag: options.force ? 'w' : 'wx' })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new Error(`${relativePath} already exists. Use --force to overwrite.`)
+      throw new CliError(`${relativePath} already exists. Use --force to overwrite.`)
     }
     throw error
   }
