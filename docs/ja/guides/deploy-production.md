@@ -32,53 +32,33 @@ bunx guren doctor
 | 変数 | 例 | 用途 |
 |------|-----|------|
 | `APP_URL` | `https://example.com` | 公開 URL |
-| `APP_ENV` | `production` | 本番最適化を有効化 |
+| `NODE_ENV` | `production` | ビルド済みアセットの配信と HSTS の送出。生成される Dockerfile が設定します |
 | `PORT` | `3333` | サーバーのリッスンポート |
 | `DATABASE_URL` | `postgres://user:pass@host:5432/db` | Postgres 接続文字列 |
-| `SESSION_SECRET` | *(ランダムな64文字の文字列)* | セッション Cookie の署名 |
+| `APP_KEY` | `base64:...` | セッション、Cookie、トークンの暗号化と署名 |
 
 > [!WARNING]
 > シークレットを git にコミットしないでください。プラットフォームのシークレットマネージャーを使うか、デプロイ時に環境変数を注入してください。
 
-セッションシークレットは以下のコマンドで生成できます:
+本番用の `APP_KEY` は以下のコマンドで生成します:
 
 ```bash
-openssl rand -hex 32
+bunx guren key:generate
 ```
 
-## 2. Dockerfile を作成する
+サーバーは base64 エンコードされた 32 バイトの値以外をキーとして受け付けません。`openssl rand -hex` の出力は使えません。キーのローテーションは[暗号化](./encryption.md)を参照してください。
 
-プロジェクトルートに `Dockerfile` を作成します:
+## 2. Dockerfile を生成する
 
-```dockerfile
-FROM oven/bun:1 AS base
-WORKDIR /app
+`Dockerfile` は CLI に書き出させます:
 
-# 依存関係のインストール
-FROM base AS deps
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
-
-# アプリケーションのビルド
-FROM base AS build
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
-COPY . .
-RUN bun run build
-
-# 本番イメージ
-FROM base AS production
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/public ./public
-COPY --from=build /app/package.json ./
-
-ENV APP_ENV=production
-ENV PORT=3333
-EXPOSE 3333
-
-CMD ["bun", "run", "start"]
+```bash
+bunx guren deploy --target docker
 ```
+
+書き出されるのは 2 段階のビルドです。ビルダー段階ですべての依存をインストールし、`bun run build` を実行します。本番段階では実行時の依存だけをインストールし、サーバーが実行時に読むものだけをコピーして、`NODE_ENV=production` で `bun bin/serve.ts` を起動します。コピーする対象の正確な一覧はファイルを開いて確認してください。
+
+Guren アプリには `dist/` の出力も `start` スクリプトもありません。ほかの Bun プロジェクトの Dockerfile を流用しても起動しないのはこのためです。アプリが 3333 以外のポートで待ち受ける場合は `--port` を渡してください。`Dockerfile` がすでにあるとコマンドは止まります。Guren を更新したら `--force` を付けて再実行し、レシピの変更を取り込んでください。自分で加えた変更はその後で当て直します。
 
 ローカルでビルドしてテストします:
 

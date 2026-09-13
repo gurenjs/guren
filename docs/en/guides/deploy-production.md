@@ -32,53 +32,33 @@ Your production environment needs these variables at minimum:
 | Variable | Example | Purpose |
 |----------|---------|---------|
 | `APP_URL` | `https://example.com` | Public-facing URL |
-| `APP_ENV` | `production` | Enables production optimizations |
+| `NODE_ENV` | `production` | Serves the built assets and sends HSTS; the generated Dockerfile sets it |
 | `PORT` | `3333` | Server listen port |
 | `DATABASE_URL` | `postgres://user:pass@host:5432/db` | Postgres connection string |
-| `SESSION_SECRET` | *(random 64-char string)* | Signs session cookies |
+| `APP_KEY` | `base64:...` | Encrypts and signs sessions, cookies, and tokens |
 
 > [!WARNING]
 > Never commit secrets to git. Use your platform's secret manager or inject variables at deploy time.
 
-Generate a session secret with:
+Generate an `APP_KEY` for production with:
 
 ```bash
-openssl rand -hex 32
+bunx guren key:generate
 ```
 
-## 2. Write a Dockerfile
+The server refuses a key that is not a base64-encoded 32-byte value, so the output of `openssl rand -hex` will not work. See [Encryption](./encryption.md) for key rotation.
 
-Create a `Dockerfile` in your project root:
+## 2. Generate a Dockerfile
 
-```dockerfile
-FROM oven/bun:1 AS base
-WORKDIR /app
+Let the CLI write the `Dockerfile`:
 
-# Install dependencies
-FROM base AS deps
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
-
-# Build the application
-FROM base AS build
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
-COPY . .
-RUN bun run build
-
-# Production image
-FROM base AS production
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/public ./public
-COPY --from=build /app/package.json ./
-
-ENV APP_ENV=production
-ENV PORT=3333
-EXPOSE 3333
-
-CMD ["bun", "run", "start"]
+```bash
+bunx guren deploy --target docker
 ```
+
+The file is a two-stage build. The builder stage installs every dependency and runs `bun run build`. The production stage installs only runtime dependencies, copies only what the server reads at runtime, and runs `bun bin/serve.ts` with `NODE_ENV=production`. Open the file to see the exact list.
+
+A Guren app has no `dist/` output and no `start` script, so a Dockerfile adapted from another Bun project will not start. Pass `--port` if the app listens on a port other than 3333. The command stops when a `Dockerfile` already exists; after upgrading Guren, run it again with `--force` to pick up changes to the recipe, then reapply any edits of your own.
 
 Build and test locally:
 
