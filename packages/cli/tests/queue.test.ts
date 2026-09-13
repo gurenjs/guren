@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { runCommand } from 'citty'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
@@ -40,6 +41,7 @@ const {
   retryAllFailedJobs,
   flushFailedJobs,
 } = await import('../src/queue')
+const { builtinSubCommands } = await import('../src/commands')
 
 beforeEach(() => {
   fakeDriver = {
@@ -71,6 +73,20 @@ describe('queue helpers', () => {
         timeout: 5000,
         stopWhenEmpty: true,
       })
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('queue:work --stop-when-empty exits on empty queues without capping the job count', async () => {
+    const workspace = await createTempWorkspace('guren-cli-queue-stop-when-empty-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'src/main.ts'), 'export default { listen() {} }', 'utf8')
+
+      await runCommand(builtinSubCommands['queue:work'], { rawArgs: ['--stop-when-empty'] })
+
+      expect(workerOptions).toMatchObject({ maxJobs: 0, stopWhenEmpty: true })
     } finally {
       await workspace.cleanup()
     }

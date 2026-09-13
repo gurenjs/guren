@@ -626,11 +626,13 @@ bunx guren config:show
 | コマンド | 説明 | 例 |
 |----------|------|----|
 | `db:migrate` | 保留中のマイグレーションを実行 | `bunx guren db:migrate` |
-| `db:rollback` | 最後のマイグレーションバッチをロールバック | `bunx guren db:rollback` |
+| `db:rollback` | マイグレーションを取り消す方法を表示(マイグレーションは前進のみ) | `bunx guren db:rollback` |
 | `db:reset` | 全テーブルを削除してマイグレーションを再実行 | `bunx guren db:reset` |
 | `db:seed` | データベースシーダーを実行 | `bunx guren db:seed` |
 
 ### db:migrate オプション
+
+`db:migrate` は、`config/database.ts` の `migrationsFolder`(スキャフォールドしたアプリでは `db/migrations`)にある未適用のマイグレーションをすべて適用します。確認を求めないので、デプロイパイプラインから無人で実行できます。
 
 ```bash
 # マイグレーションを実行
@@ -643,18 +645,13 @@ bunx guren db:migrate --dry-run
 bunx guren db:migrate --json
 ```
 
-### db:rollback オプション
+### db:rollback
 
-```bash
-# 最後のバッチをロールバック
-bunx guren db:rollback
+マイグレーションは drizzle-kit が生成する前進専用のもので、ロールバックするバッチはありません。`db:rollback` はオプションを受け付けません。代わりの手順を表示して 0 以外の終了コードで終わるので、呼び出したスクリプトはそこで止まります。
 
-# 指定ステップ数ロールバック
-bunx guren db:rollback --step 3
-
-# 全マイグレーションをロールバック
-bunx guren db:rollback --all
-```
+- 開発環境では `bunx guren db:reset --seed` で全テーブルを削除し、すべてのマイグレーションを適用し直します。
+- まだコミットしていないマイグレーションを捨てる場合は、`db/migrations/` にあるそのフォルダを削除してから `bunx guren db:reset` を実行します。
+- 本番環境では `db/schema.ts` の変更を戻し、`bunx guren make:migration` で新しいマイグレーションを生成します。
 
 ### db:seed オプション
 
