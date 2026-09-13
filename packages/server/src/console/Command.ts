@@ -1,5 +1,5 @@
 import type { Container } from '../container'
-import type { OutputInterface, CommandInstance } from './types'
+import type { OutputInterface, CommandInstance, ConsoleHandleOptions } from './types'
 import { Input } from './Input'
 import { Output } from './Output'
 import * as readline from 'readline'
@@ -254,9 +254,9 @@ export abstract class Command implements CommandInstance {
     this.success(`Processed ${total} items`)
   }
 
-  protected kernel?: { handle(argv: string[]): Promise<number> }
+  protected kernel?: { handle(argv: string[], options?: ConsoleHandleOptions): Promise<number> }
 
-  setKernel(kernel: { handle(argv: string[]): Promise<number> }): void {
+  setKernel(kernel: { handle(argv: string[], options?: ConsoleHandleOptions): Promise<number> }): void {
     this.kernel = kernel
   }
 
@@ -264,7 +264,7 @@ export abstract class Command implements CommandInstance {
     if (!this.kernel) {
       throw new Error('Kernel not set. Cannot call other commands.')
     }
-    return this.kernel.handle([command, ...args])
+    return this.kernel.handle([command, ...args], { helpFlags: false })
   }
 
   protected resolve<T>(key: string): T {

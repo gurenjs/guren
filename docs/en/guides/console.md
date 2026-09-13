@@ -179,6 +179,14 @@ bun run console                   # every registered command, grouped by namespa
 bun run console help users:create # usage, arguments, and options for one command
 ```
 
+`--help` or `-h` after a command name prints the same screen as `help <command>` and exits `0` without running the command, wherever the flag sits among the arguments:
+
+```bash
+bun run console users:create --help
+```
+
+A command whose signature declares `--help` or `-h` itself (`{-h|--host=}`, say) receives that flag instead.
+
 An unrecognised name exits `1` and suggests the closest matches.
 
 Note that `bin/console.ts` boots the application before dispatching, so even
@@ -225,6 +233,8 @@ async handle(): Promise<number | void> {
 ```
 
 This requires the calling command to have been dispatched through a kernel. `this.call()` throws when a command is instantiated directly.
+
+Arguments passed to `this.call()` or `kernel.call()` are never read as a help request, so `this.call('mail:send', ['--subject', subject])` still sends the mail when `subject` is `-h`.
 
 ## Modules
 

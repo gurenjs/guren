@@ -1,12 +1,26 @@
 import type { Container } from '../container'
 import type {
   CommandClass,
+  ConsoleHandleOptions,
   ConsoleKernelOptions,
   OptionDefinition,
   OutputInterface,
+  ParsedSignature,
 } from './types'
 import { Output, BufferedOutput } from './Output'
 import { argumentLabel, formatUsage, optionLabel, parseSignature } from './Input'
+
+/**
+ * `--help` / `-h` anywhere in argv, even where `Input` would read it as an option's
+ * value: a command that ignored the flag would otherwise run for real. `Input` has no
+ * `--` terminator, so neither does this. A signature declaring either name keeps it.
+ */
+function requestsHelp(signature: ParsedSignature, args: string[]): boolean {
+  const claimsLong = signature.options.some((opt) => opt.name === 'help')
+  // `{-h}` with no `|` parses to name `h`, which `Input` still binds to `-h`.
+  const claimsShort = signature.options.some((opt) => opt.shortcut === 'h' || opt.name === 'h')
+  return args.some((arg) => (arg === '--help' && !claimsLong) || (arg === '-h' && !claimsShort))
+}
 
 /** Past the longest label, but never narrower than `min`. */
 function helpColumn(labels: string[], min: number): number {
@@ -72,7 +86,10 @@ export class ConsoleKernel {
     return this.output
   }
 
-  async handle(argv: string[] = process.argv.slice(2)): Promise<number> {
+  async handle(
+    argv: string[] = process.argv.slice(2),
+    options: ConsoleHandleOptions = {}
+  ): Promise<number> {
     const [commandName, ...args] = argv
 
     if (!commandName) {
@@ -100,6 +117,11 @@ export class ConsoleKernel {
       this.output.line('')
       this.suggestCommands(commandName)
       return 1
+    }
+
+    if (options.helpFlags !== false && requestsHelp(parseSignature(CommandClass.signature), args)) {
+      this.showCommandHelp(commandName)
+      return 0
     }
 
     return this.runCommand(CommandClass, args)
@@ -280,7 +302,7 @@ export class ConsoleKernel {
       this.output = new BufferedOutput()
     }
 
-    const result = await this.handle([commandName, ...args])
+    const result = await this.handle([commandName, ...args], { helpFlags: false })
 
     if (silent) {
       this.output = originalOutput

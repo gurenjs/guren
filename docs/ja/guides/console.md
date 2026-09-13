@@ -179,6 +179,14 @@ bun run console                   # 登録済みコマンドを名前空間ご�
 bun run console help users:create # 特定コマンドの使い方・引数・オプション
 ```
 
+コマンド名の後ろに `--help` か `-h` を付けると、`help <command>` と同じ画面を表示して終了コード `0` で終わります。コマンド自体は実行されず、フラグが引数のどの位置にあっても同じ扱いです。
+
+```bash
+bun run console users:create --help
+```
+
+シグネチャで `--help` や `-h` を自分で宣言しているコマンド（`{-h|--host=}` など）には、そのフラグがそのまま渡ります。
+
 未知の名前を渡すと終了コード `1` になり、近い候補を提案します。
 
 なお `bin/console.ts` はディスパッチ前にアプリケーションを起動するため、`list`
@@ -225,6 +233,8 @@ async handle(): Promise<number | void> {
 ```
 
 これは呼び出し元のコマンドがカーネル経由でディスパッチされていることが前提です。直接インスタンス化したコマンドで `this.call()` を呼ぶと例外になります。
+
+`this.call()` や `kernel.call()` に渡した引数は、ヘルプの指定として扱いません。`this.call('mail:send', ['--subject', subject])` は、`subject` が `-h` でもメールを送信します。
 
 ## モジュール
 
