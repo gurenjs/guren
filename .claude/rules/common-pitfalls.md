@@ -74,7 +74,8 @@ Lessons learned from code review cycles. Check these before submitting changes.
 
 - **Use multi-stage builds.** Builder stage needs devDeps for Vite/TypeScript. Production stage uses `--production`.
 - **Entrypoint is `bun bin/serve.ts`**, not `bun run start` (no `start` script exists in templates).
-- **Copy runtime dirs explicitly**: `bin/`, `src/`, `app/`, `config/`, `routes/`, `public/`, `db/`, `.guren/`.
+- **Copy runtime entries explicitly, from the one list.** `DOCKER_RUNTIME_DIRECTORIES` / `DOCKER_RUNTIME_FILES` in `packages/cli/src/deploy.ts` render the production stage: `tsconfig.json`, `bin/`, `src/`, `app/`, `config/`, `routes/`, `modules/`, `db/`, `lang/`, `public/`, `.guren/`. `tests/deploy.test.ts` fails on a create-app template entry that is neither copied nor excluded with a reason. Two entries are easy to miss because nothing imports them by path: `tsconfig.json` carries the `@/` alias Bun resolves at runtime (without it the container exits on `Cannot find module '@/.guren/pages.gen'`), and `lang/` is read from the working directory (without it i18n warns once and renders raw keys).
+- **A COPY of a missing source fails the build.** The API-only app has no `public/`, `lang/` or `.guren/`, so the builder stage `mkdir -p`s every runtime directory before the production stage copies them. No CI job builds the image; after changing either list, run `docker build` and `docker run` against a default and an api scaffold.
 
 ## Serverless Bundling (Vercel / Lambda)
 

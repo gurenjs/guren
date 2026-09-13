@@ -40,7 +40,20 @@ async function inferAppName(): Promise<string> {
   return sanitizeFlyAppName(basename(process.cwd()))
 }
 
+/**
+ * What `bun bin/serve.ts` reads from the app root, and so what the production
+ * image copies. `tests/deploy.test.ts` classifies every top-level entry of the
+ * create-app templates against these lists; `modules` comes from `make:module`.
+ */
+export const DOCKER_RUNTIME_DIRECTORIES = ['bin', 'src', 'app', 'config', 'routes', 'modules', 'db', 'lang', 'public', '.guren'] as const
+/** `tsconfig.json` carries the `@/` alias, which Bun resolves from it at runtime. */
+export const DOCKER_RUNTIME_FILES = ['tsconfig.json'] as const
+
 function dockerfileTemplate(port: number): string {
+  const copies = [...DOCKER_RUNTIME_FILES, ...DOCKER_RUNTIME_DIRECTORIES]
+    .map((entry) => `COPY --from=builder /app/${entry} ./${entry}`)
+    .join('\n')
+
   return `# Build stage — includes devDependencies for Vite/TypeScript
 FROM oven/bun:1 AS builder
 WORKDIR /app
@@ -50,6 +63,9 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 RUN bun run build
+# COPY fails on a missing source, and not every app has every runtime
+# directory (an API-only app has no public/, lang/ or .guren/).
+RUN mkdir -p ${DOCKER_RUNTIME_DIRECTORIES.join(' ')}
 
 # Production stage — runtime only
 FROM oven/bun:1-slim
@@ -58,14 +74,7 @@ WORKDIR /app
 COPY --from=builder /app/package.json /app/bun.lock ./
 RUN bun install --frozen-lockfile --production
 
-COPY --from=builder /app/bin ./bin
-COPY --from=builder /app/src ./src
-COPY --from=builder /app/app ./app
-COPY --from=builder /app/config ./config
-COPY --from=builder /app/routes ./routes
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/db ./db
-COPY --from=builder /app/.guren ./.guren
+${copies}
 
 EXPOSE ${port}
 ENV NODE_ENV=production

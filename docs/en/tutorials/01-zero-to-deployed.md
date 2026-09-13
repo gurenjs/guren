@@ -424,7 +424,7 @@ Guren writes a production Dockerfile for you:
 bunx guren deploy --target docker
 ```
 
-Open the `Dockerfile` it wrote. It is a two-stage build: the first stage installs everything and runs `bun run build`; the second copies only the runtime directories (`bin/`, `src/`, `app/`, `config/`, `routes/`, `public/`, `db/`, `.guren/`) into a slim image and starts `bun bin/serve.ts` with `NODE_ENV=production`. If you have Docker installed, build and run the image:
+Open the `Dockerfile` it wrote. It is a two-stage build: the first stage installs everything and runs `bun run build`; the second copies only what the server reads at runtime (`tsconfig.json`, which holds the `@/` import alias, and `bin/`, `src/`, `app/`, `config/`, `routes/`, `modules/`, `db/`, `lang/`, `public/`, `.guren/`) into a slim image and starts `bun bin/serve.ts` with `NODE_ENV=production`. If you have Docker installed, build and run the image:
 
 ```bash manual
 docker build -t guren-blog .

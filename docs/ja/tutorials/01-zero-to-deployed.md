@@ -424,7 +424,7 @@ Guren は本番用の Dockerfile を書いてくれます。
 bunx guren deploy --target docker
 ```
 
-書き出された `Dockerfile` を開いてください。2 段階のビルドです。第 1 段階ですべてをインストールして `bun run build` を実行します。第 2 段階では実行時に必要なディレクトリ(`bin/`、`src/`、`app/`、`config/`、`routes/`、`public/`、`db/`、`.guren/`)だけをスリムなイメージにコピーし、`NODE_ENV=production` で `bun bin/serve.ts` を起動します。Docker が入っていれば、イメージをビルドして動かしてみましょう。
+書き出された `Dockerfile` を開いてください。2 段階のビルドです。第 1 段階ですべてをインストールして `bun run build` を実行します。第 2 段階ではサーバーが実行時に読むもの(`@/` のインポートエイリアスを持つ `tsconfig.json` と、`bin/`、`src/`、`app/`、`config/`、`routes/`、`modules/`、`db/`、`lang/`、`public/`、`.guren/`)だけをスリムなイメージにコピーし、`NODE_ENV=production` で `bun bin/serve.ts` を起動します。Docker が入っていれば、イメージをビルドして動かしてみましょう。
 
 ```bash manual
 docker build -t guren-blog .
