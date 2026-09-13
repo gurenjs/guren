@@ -90,6 +90,14 @@ describe('flags', () => {
     ).toEqual([])
   })
 
+  test('reads a camelCase flag as the kebab-case arg citty resolves it to', () => {
+    expect(flagsIn('bunx guren upgrade --dryRun --checkOnly', 'bunx guren db:seed --dryRun --no-force')).toEqual([])
+    expect(flagsIn('bunx guren db:migrate --migrationsPath db', 'bunx guren db:seed --noForce')).toEqual([
+      { command: 'db:migrate', flag: 'migrationsPath' },
+      { command: 'db:seed', flag: 'noForce' },
+    ])
+  })
+
   test('leaves flags to commands that parse their own', () => {
     expect(
       flagsIn('bunx guren add resource posts --fields "title:string" --public', 'bunx guren cloudflare:build --anything'),

@@ -47,19 +47,30 @@ interface CommandDef {
 const INVOCATION_RE = /\bbunx\s+guren\s+([a-z][a-z0-9-]*(?::[a-z0-9-]+)*)(:?)/gu
 // Where this invocation's arguments end: inline code, a shell separator, a comment.
 const ARGUMENTS_END_RE = /`|&&|\|\||[;|]|\s#/u
-const FLAG_RE = /(?:^|\s)--([a-z][a-z0-9-]*)/gu
+const FLAG_RE = /(?:^|\s)--([a-zA-Z][a-zA-Z0-9-]*)/gu
 const CONSOLE_SIGNATURE_RE = /\bstatic\s+(?:override\s+)?signature\s*=\s*['"`]([a-z][a-z0-9:-]*)/gu
 // A plugin-authoring page declares an example command in a manifest fence.
 const MANIFEST_NAMES_RE = /"names"\s*:\s*\[([^\]]*)\]/gu
+
+function kebab(flag: string): string {
+  return flag.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`)
+}
+
+// citty resolves `--dryRun` to `dry-run`, but negates only the kebab spelling:
+// `--noForce` leaves `force` unset.
+function isDeclared(flag: string, declared: Set<string>): boolean {
+  const normalized = kebab(flag)
+  return declared.has(flag) || (!normalized.startsWith('no-') && declared.has(normalized))
+}
 
 async function declaredFlags(def: CommandDef): Promise<Set<string>> {
   const args = await (typeof def.args === 'function' ? def.args() : def.args)
   const flags = new Set(['help', 'version'])
   for (const [name, arg] of Object.entries(args ?? {})) {
     if (arg.type === 'positional') continue
-    flags.add(name)
-    if (arg.type === 'boolean') flags.add(`no-${name}`)
-    for (const alias of [arg.alias ?? []].flat()) flags.add(alias)
+    flags.add(kebab(name))
+    if (arg.type === 'boolean') flags.add(`no-${kebab(name)}`)
+    for (const alias of [arg.alias ?? []].flat()) flags.add(kebab(alias))
   }
   return flags
 }
@@ -117,7 +128,7 @@ export function unknownCommandsIn(markdown: string, file: string, known: KnownCl
       const rest = text.slice(match.index + whole.length)
       const args = rest.split(ARGUMENTS_END_RE)[0]!
       for (const [, flag] of args.matchAll(FLAG_RE)) {
-        if (!declared.has(flag!)) unknown.push({ ...entry, flag })
+        if (!isDeclared(flag!, declared)) unknown.push({ ...entry, flag })
       }
     }
   }
