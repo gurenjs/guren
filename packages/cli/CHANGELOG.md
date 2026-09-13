@@ -1,5 +1,66 @@
 # @guren/cli
 
+## 2.23.0
+
+### Minor Changes
+
+- 8a1b8c4: `guren context <Entity>` finds the routes of controllers that are not named after the entity. A route now belongs to the bundle when its action body uses the model class imported from the model's file (`User.create(...)`, an aliased import included) or passes a record type from that file to `this.auth` (`this.auth.userOrFail<UserRecord>()`), in addition to the `<Entity>Controller` name and a `bind` naming the model. Each route in `--json` carries `linkedBy` (`controller`, `binding` or `reference`), and the pages those actions render join the Pages section. A controller route whose action body cannot be read is listed under `unverifiedRoutes` instead of being left out without a word.
+
+  The model section now shows `fillable`, `hidden`, `visible` and `casts`, and `guren model:list --format json` includes the same four fields. Each is `null` when the model does not declare it and `"unreadable"` when it is declared with a value a static read cannot follow, such as a constant defined elsewhere. The four fields are required on the exported `ModelInfo` type, as `attachments` and `docsTags` are, so code that builds a `ModelInfo` literal itself (a stub or test fixture) needs them added.
+
+- f4b5f6b: Report migrations the database applied but no folder on disk carries
+
+  A migration a dev server applied while a generator was still writing files, and
+  whose folder `git clean` removed afterwards, left a row in the tracker, its
+  tables in the database, and nothing on disk to show for either. The drizzle
+  migrator matches migrations by name and skips such a row, `db:status` listed
+  only the folders it found, and the first sign was a later migration failing
+  with `table ... already exists`.
+
+  - `migrationStatus()` now returns those rows too, with `orphaned: true`. Entries
+    for local migrations are unchanged and carry no `orphaned` key. With no
+    migration folder on disk at all it still returns `[]` without connecting, as
+    before, so a tracker whose every folder is gone is not reported there.
+  - `bun run db:status` marks them `! orphaned`, explains what is left behind, and
+    no longer prints "All migrations applied." while one exists. `--json` rows
+    gain an `orphaned` boolean.
+  - A boot that migrates warns once, before the migrator runs, naming every
+    orphaned migration. A database whose tracker matches its folder boots as
+    quietly as before.
+
+- ee1f74f: Add `--stop-when-empty` to `queue:work`
+
+  The CLI guide documented `bunx guren queue:work --stop-when-empty`, but the
+  command never declared the flag. An undeclared flag is ignored without an error,
+  so the worker kept polling. The flag now exits the worker once the queues it
+  watches are empty. Unlike `--once`, it does not stop after the first job.
+
+### Patch Changes
+
+- 478824f: Suggest what to run when `guren` does not know a command
+
+  `bunx guren attachments:prune` answered only `Unknown command attachments:prune`.
+  The name belongs to a console command the app registers, which runs through
+  `bun run console attachments:prune`. The error now adds:
+
+  - the closest builtin or plugin command names, when one is close
+    (`db:migrate:status` suggests `db:status`)
+  - for a namespaced name at the root, that an app console command runs with
+    `bun run console <name>`, that a plugin command needs an app with the plugin
+    installed, and that `bunx guren console` is the REPL rather than the app
+    command runner
+
+  The hint is computed from command names only; the CLI does not boot the app.
+  The same suggestion covers subcommands, so `bunx guren add attachmentz` suggests
+  `attachments`.
+
+- a302da6: `guren deploy --target docker` writes a Dockerfile whose image runs. The production stage now copies `tsconfig.json` and `lang/`: without the first, a scaffolded app exited at startup on `Cannot find module '@/.guren/pages.gen'`, because Bun resolves the `@/` alias from `tsconfig.json`; without the second, i18n rendered raw keys such as `messages.welcome`. It also copies `modules/`, which `make:module` creates.
+
+  The API-only blueprint's image did not build at all: it has no `.guren/`, `public/` or `lang/`, and a `COPY` of a missing source fails. The builder stage now creates every runtime directory before the production stage copies them. Regenerate an existing Dockerfile with `guren deploy --target docker --force`.
+
+- Updated dependencies [f4b5f6b]
+  - @guren/orm@2.10.0
+
 ## 2.22.0
 
 ### Minor Changes
