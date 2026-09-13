@@ -903,7 +903,7 @@ Stopping the server comes first because `add auth` edits `src/app.ts`, and a run
 
 The `reset` and the `clean` are not tidiness either. `git switch main` and `git branch -D` move a reference, and neither undoes work you never committed. Without them, everything `add auth` wrote is still in your working tree on `main`, a migration folder under `db/migrations/` included, and the next boot applies it. Eight chapters from here, chapter 14 creates the `sessions` table itself, and its migration fails on a table that is already there.
 
-One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appended a `SESSION_DRIVER` block to it. Delete those lines. `db:status` should then list every migration as applied and none as orphaned. Start `bun run dev` again.
+One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appended a block to its end that starts with a comment about `config/session.ts` and sets `SESSION_DRIVER`. Delete that block. `db:status` should then list every migration as applied and none as orphaned. If one is orphaned, the server reloaded before you stopped it; `bun run db:reset` rebuilds the database from the migrations you have and drops every row with it. Start `bun run dev` again.
 
 Most of the diff is what you wrote, in the same shape: the model, the provider, the two controllers, the validators. The rest is what you did not: password reset by email, email verification, a "remember me" token, a seeder with a demo user, a dashboard. From now on, when the course needs one of those, you will reach for the generator, and you will be able to read what it wrote.
 

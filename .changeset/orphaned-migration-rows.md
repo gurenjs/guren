@@ -13,7 +13,9 @@ only the folders it found, and the first sign was a later migration failing
 with `table ... already exists`.
 
 - `migrationStatus()` now returns those rows too, with `orphaned: true`. Entries
-  for local migrations are unchanged and carry no `orphaned` key.
+  for local migrations are unchanged and carry no `orphaned` key. With no
+  migration folder on disk at all it still returns `[]` without connecting, as
+  before, so a tracker whose every folder is gone is not reported there.
 - `bun run db:status` marks them `! orphaned`, explains what is left behind, and
   no longer prints "All migrations applied." while one exists. `--json` rows
   gain an `orphaned` boolean.
