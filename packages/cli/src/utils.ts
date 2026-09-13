@@ -188,7 +188,7 @@ export function writerOptionsFrom(options: WriterOptions): WriterOptions {
  */
 export function assertCwdUnsupported(options: WriterOptions, command: string): void {
   if (options.cwd === undefined) return
-  throw new Error(
+  throw new CliError(
     `${command} does not support an explicit cwd yet — it still resolves part of its work against `
     + `the process directory, so honouring cwd here would scaffold into two projects at once. `
     + `Run it with the process working directory set to the target project instead.`,

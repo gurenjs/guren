@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
+import { CliError } from './cli-error'
 import { appConfiguresAttachments } from './attachments-check'
 import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
 import { pluralize, schemaIdentifierFor } from './inflect'
@@ -11,7 +12,7 @@ import { makeValidator } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
 import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
-import { parseSchemaTables, schemaPathFor } from './schema-parser'
+import { schemaDeclaresTable, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
 import {
   appendPrototypeEntries,
@@ -73,7 +74,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const reserved = reservedAttachmentNames(fields, singular, variableName)
   for (const attachment of attachments) {
     if (reserved.has(attachment.name)) {
-      throw new Error(
+      throw new CliError(
         `Attachment collection "${attachment.name}" collides with a column of the ${singular} table `
         + `or an identifier the generated controller already uses. Pick another name.`,
       )
@@ -101,7 +102,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // statics throw at first use, so refusing here beats scaffolding a feature
   // that crashes on its first upload (RFC 0013 Part 4).
   if (attachments.length > 0 && !(await appConfiguresAttachments(appRoot, new ParseCache()))) {
-    throw new Error(
+    throw new CliError(
       'guren make:feature --attach scaffolds a model wired to the attachments layer, but this app has no '
       + 'configureAttachments() call. Run `bunx guren add attachments` first, then re-run this command. '
       + 'If your app wires attachments in a shape this cannot detect (a namespace import, a wrapper), '
@@ -112,13 +113,13 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
   const prototypeFirst = Boolean(options.prototype)
   if (prototypeFirst && !(await appHasPrototypeFixture(appRoot))) {
-    throw new Error(
+    throw new CliError(
       `guren make:feature --prototype appends entries to ${PROTOTYPE_FIXTURE_PATH}, which this app does not have. `
       + 'Run `bunx guren add prototype` first, then re-run this command. Nothing was scaffolded.',
     )
   }
   if (prototypeFirst && moduleName) {
-    throw new Error('guren make:feature --prototype does not support --module yet: the fixture is app-wide. Nothing was scaffolded.')
+    throw new CliError('guren make:feature --prototype does not support --module yet: the fixture is app-wide. Nothing was scaffolded.')
   }
   // A feature scaffolded prototype-first leaves its page-data type behind;
   // finding one is what turns this run into the promotion.
@@ -225,7 +226,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
   const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
   const validatorImportPath = moduleName ? './app/Http/Validators' : '../app/Http/Validators'
-  const tableDeclared = await schemaDeclaresTable(appRoot, singular, moduleName ?? null)
+  const tableDeclared = await schemaDeclaresTable(appRoot, schemaIdentifierFor(singular), moduleName ?? null)
   consola.info('')
   consola.info('Next steps:')
   if (tableDeclared) {
@@ -243,7 +244,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.info(`     (promotion: replace each \`prototype\` handler for ${routeName}.* with the [${singular}Controller, '<action>'] above;`)
     consola.info(`      the fixture entries keep serving \`bun run build:prototype\`)`)
   }
-  consola.info(tableDeclared ? '  3. Run: bun run db:make && bun run db:migrate (skip if already applied)' : '  3. Run: bun run db:make && bun run db:migrate')
+  consola.info(`  3. Run: bun run db:make && bun run db:migrate${tableDeclared ? ' (skip if already applied)' : ''}`)
   consola.info(`  4. Run: bunx guren codegen`)
   if (withPolicy) {
     const modelsBase = moduleName ? `../modules/${moduleName}` : '../app'
@@ -297,13 +298,6 @@ function announcePrototypeFeature(options: { created: string[]; singular: string
   consola.info(`  When the specification settles, run \`bunx guren make:feature ${singular} --fields "…"\` without --prototype:`)
   consola.info(`  it writes the model, Resource and controller, keeps these pages and the validator, and prints the handler replacements.`)
   consola.info(`  The table and its migration stay yours: add it to db/schema.ts and run bun run db:make first.`)
-}
-
-/** Whether the schema the feature's model binds already exports its table. */
-async function schemaDeclaresTable(appRoot: string, singular: string, moduleName: string | null): Promise<boolean> {
-  const identifier = schemaIdentifierFor(singular)
-  const tables = await parseSchemaTables(appRoot)
-  return tables.some((table) => table.module === moduleName && table.identifier === identifier)
 }
 
 /**

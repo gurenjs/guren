@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { GUREN_API_DIGEST } from '../src/api-digest'
 import { generateContext, renderContextMarkdown } from '../src/context'
-import { CORE_RESOLVING_ROUTES_FIXTURE, createTempWorkspace, linkWorkspaceCore } from './helpers'
+import { CORE_RESOLVING_ROUTES_FIXTURE, createTempWorkspace, linkWorkspaceCore, writeInstalledPackage } from './helpers'
 
 describe('generateContext', () => {
   it('discovers models from app/Models', async () => {
@@ -25,12 +25,7 @@ export class Post extends defineModel(posts) {}`,
         JSON.stringify({ dependencies: { '@guren/core': '^1.18.0' } }),
         'utf8',
       )
-      await mkdir(join(workspace.dir, 'node_modules/@guren/server'), { recursive: true })
-      await writeFile(
-        join(workspace.dir, 'node_modules/@guren/server/package.json'),
-        JSON.stringify({ name: '@guren/server', version: '2.23.0' }),
-        'utf8',
-      )
+      await writeInstalledPackage('@guren/server', { version: '2.23.0' }, {}, workspace.dir)
 
       const ctx = await generateContext({ cwd: workspace.dir })
 
@@ -56,12 +51,7 @@ export class Post extends defineModel(posts) {}`,
       expect((await generateContext({ cwd: workspace.dir })).framework).toEqual({ name: '@guren/core', version: '^1.18.0' })
 
       // Installed without a hoisted @guren/server: core's installed version, still named as core's.
-      await mkdir(join(workspace.dir, 'node_modules/@guren/core'), { recursive: true })
-      await writeFile(
-        join(workspace.dir, 'node_modules/@guren/core/package.json'),
-        JSON.stringify({ name: '@guren/core', version: '1.18.0' }),
-        'utf8',
-      )
+      await writeInstalledPackage('@guren/core', { version: '1.18.0' }, {}, workspace.dir)
       expect((await generateContext({ cwd: workspace.dir })).framework).toEqual({ name: '@guren/core', version: '1.18.0' })
     } finally {
       await workspace.cleanup()

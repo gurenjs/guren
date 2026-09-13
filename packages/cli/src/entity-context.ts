@@ -34,6 +34,7 @@ import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { ParseCache } from './parse-cache'
 import { importsByLocal, specifierBase } from './schema-binding'
 import { escapeRegExp } from './utils'
+import { CliError } from './cli-error'
 import {
   routeDefinitionToContextRoute,
   escapeMarkdownTableCell,
@@ -188,7 +189,7 @@ export interface EntityContextOptions {
  * Thrown when the entity argument resolves to no model or to more than one.
  * The CLI and the MCP tool both surface `message` verbatim.
  */
-export class EntityResolutionError extends Error {
+export class EntityResolutionError extends CliError {
   constructor(message: string) {
     super(message)
     this.name = 'EntityResolutionError'

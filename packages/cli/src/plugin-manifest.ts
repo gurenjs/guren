@@ -197,12 +197,17 @@ export async function packageContentRoot(packageDir: string): Promise<string | n
   }
 }
 
-/** The installed `@guren/core` version, or null when not installed. */
-export async function readCoreVersion(cwd: string = process.cwd()): Promise<string | null> {
-  const raw = await readIfExists(cwd, join('node_modules', '@guren/core', 'package.json'))
+/** The version of `pkg` installed in the app's own `node_modules`, or null when not installed. */
+export async function readInstalledVersion(cwd: string, pkg: string): Promise<string | null> {
+  const raw = await readIfExists(cwd, join('node_modules', pkg, 'package.json'))
   if (raw === null) return null
 
   return (JSON.parse(raw) as { version?: string }).version ?? null
+}
+
+/** The installed `@guren/core` version, or null when not installed. */
+export async function readCoreVersion(cwd: string = process.cwd()): Promise<string | null> {
+  return readInstalledVersion(cwd, '@guren/core')
 }
 
 export interface CompatibilityResult {

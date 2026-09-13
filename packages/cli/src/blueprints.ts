@@ -5,13 +5,14 @@ import { addLint } from './add-lint'
 import { addSession } from './add-session'
 import { addPrototype } from './add-prototype'
 import { assertNotApiOnly } from './app-surface'
+import { CliError } from './cli-error'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature } from './make-feature'
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
-import { schemaPathFor } from './schema-parser'
+import { schemaDeclaresTable, schemaPathFor } from './schema-parser'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
 import { makeListener } from './make-listener'
@@ -438,13 +439,15 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
   const schemaIdentifier = schemaIdentifierFor(singular)
   const tableName = tableNameFor(singular)
 
+  // The same reading `make:feature` gives the table, so the two commands cannot
+  // disagree about whether it is already declared.
+  if (await schemaDeclaresTable(process.cwd(), schemaIdentifier)) {
+    return false
+  }
+
   const dialect = detectSchemaDialect(content)
 
   if (dialect === 'sqlite') {
-    if (content.includes(`export const ${schemaIdentifier} = sqliteTable(`)) {
-      return false
-    }
-
     const columns = fields.map((field) => buildColumn(SQLITE_COLUMNS, field))
     const imports = [...new Set(['sqliteTable', 'integer', 'text', ...columns.flatMap((c) => c.imports)])]
     content = ensureSqliteImports(content, imports)
@@ -454,10 +457,6 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
 
     content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
   } else if (dialect === 'mysql') {
-    if (content.includes(`export const ${schemaIdentifier} = mysqlTable(`)) {
-      return false
-    }
-
     const columns = fields.map((field) => buildColumn(MYSQL_COLUMNS, field))
     const imports = [...new Set(['mysqlTable', 'int', 'timestamp', ...columns.flatMap((c) => c.imports)])]
     content = ensureMysqlImports(content, imports)
@@ -467,10 +466,6 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
 
     content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
   } else {
-    if (content.includes(`export const ${schemaIdentifier} = pgTable(`)) {
-      return false
-    }
-
     const columns = fields.map((field) => buildColumn(PG_COLUMNS, field))
     const imports = [...new Set(['pgTable', 'serial', 'text', 'timestamp', ...columns.flatMap((c) => c.imports)])]
     content = ensurePgImports(content, imports)
@@ -511,7 +506,7 @@ async function assertResourceTargetsPatchable(routeName: string): Promise<void> 
   const schemaFile = schemaPathFor(null)
 
   if (!(await fileExists(cwd, schemaFile))) {
-    throw new Error(
+    throw new CliError(
       `guren add resource appends its table to ${schemaFile}, but this app has no ${schemaFile}. `
       + 'Nothing was scaffolded.',
     )
@@ -520,7 +515,7 @@ async function assertResourceTargetsPatchable(routeName: string): Promise<void> 
   const routes = await readIfExists(cwd, DEFAULT_ROUTES_FILE)
 
   if (routes === null) {
-    throw new Error(
+    throw new CliError(
       `guren add resource registers the /${routeName} routes in ${DEFAULT_ROUTES_FILE}, but this app has no `
       + `${DEFAULT_ROUTES_FILE}. Nothing was scaffolded. Add a web routes entry, or scaffold the resource with `
       + '`guren make:feature` and wire it into the routes file you have.',
@@ -532,7 +527,7 @@ async function assertResourceTargetsPatchable(routeName: string): Promise<void> 
   // the same content. Tightening either site alone reintroduces the half-edited
   // app this function exists to prevent.
   if (!routesAlreadyRegister(routes, routeName) && !findRouteRegistrar(routes)) {
-    throw new Error(missingRegistrarMessage(routeName))
+    throw new CliError(missingRegistrarMessage(routeName))
   }
 }
 

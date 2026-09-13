@@ -34,6 +34,8 @@ export interface GateStageResult {
   findings: string[]
   /** Why the stage skipped, or why it could not run. */
   reason?: string
+  /** A step the stage ran beyond its default (`--deps` adds the dependency scan to audit). */
+  detail?: string
 }
 
 export interface GateReport {
@@ -41,8 +43,6 @@ export interface GateReport {
   ok: boolean
   /** Whether `check` and `lint` were narrowed to changed files. */
   changed: boolean
-  /** Whether the audit stage also scanned dependencies (`--deps`). */
-  deps: boolean
   stages: GateStageResult[]
 }
 
@@ -185,16 +185,18 @@ async function auditStage(ctx: StageContext): Promise<StageOutcome> {
   const report = await runAudit({ cwd: ctx.cwd, routesFile: ctx.routesFile, deps: ctx.deps })
   const failing = report.findings.filter((finding) => finding.status === 'fail')
   const findings = capFindings(failing.map(formatFinding))
+  const detail = ctx.deps ? 'dependency scan' : undefined
   // The `audit` command only warns here; a gate that passed with the
   // route-level rules never having run would be a vacuous green.
   if (!report.routesAnalyzed) {
     return {
       status: 'fail',
       findings,
+      detail,
       reason: 'route-level checks did not run (routes could not be loaded; pass --routes if the entry is elsewhere)',
     }
   }
-  return { status: failing.length > 0 ? 'fail' : 'pass', findings }
+  return { status: failing.length > 0 ? 'fail' : 'pass', findings, detail }
 }
 
 const STAGE_RUNNERS: Record<GateStageName, (ctx: StageContext) => Promise<StageOutcome>> = {
@@ -241,7 +243,6 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
     cwd,
     ok: stages.every((stage) => stage.status !== 'fail'),
     changed: changedFiles !== null,
-    deps: ctx.deps,
     stages,
   }
 }
@@ -285,8 +286,7 @@ export function renderGateReport(report: GateReport): void {
 
   for (const stage of report.stages) {
     const { label, log } = STAGE_STYLE[stage.status]
-    // `--deps` runs inside the audit stage, so the line names it or the scan is invisible.
-    const name = stage.name === 'audit' && report.deps ? 'audit + dependency scan' : stage.name
+    const name = stage.detail ? `${stage.name} + ${stage.detail}` : stage.name
     log(`${label} ${name} (${stage.durationMs}ms)${stage.reason ? `: ${stage.reason}` : ''}`)
     for (const finding of stage.findings) {
       consola.info(`       - ${finding}`)

@@ -192,7 +192,7 @@ describe('runGate', () => {
     }, { oxlint: true })
   })
 
-  it('records whether the audit stage scanned dependencies, and names the scan when it did', async () => {
+  it('names a stage detail, such as the dependency scan, in the rendered line', async () => {
     await withApp('deps', gateAppFiles(SCRIPTS), async (dir) => {
       const lines: string[] = []
       const spies = (['success', 'error', 'info', 'box'] as const).map((level) =>
@@ -203,11 +203,12 @@ describe('runGate', () => {
       try {
         const plain = await runGate({ cwd: dir, exec: fakeExec().exec })
         renderGateReport(plain)
-        expect(plain.deps).toBe(false)
+        expect(stage(plain, 'audit').detail).toBeUndefined()
         expect(lines.some((line) => line.includes('dependency scan'))).toBe(false)
 
         // Stubbed so the test stays off the registry; only the label is under test.
-        renderGateReport({ ...plain, deps: true })
+        const stages = plain.stages.map((s) => (s.name === 'audit' ? { ...s, detail: 'dependency scan' } : s))
+        renderGateReport({ ...plain, stages })
         expect(lines.some((line) => line.includes('audit + dependency scan'))).toBe(true)
       } finally {
         for (const spy of spies) spy.mockRestore()

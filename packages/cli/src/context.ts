@@ -19,6 +19,7 @@ import { ParseCache } from './parse-cache'
 import { parseModelFile, type ModelInfo } from './model-parser'
 import { loadContextRoutes, escapeMarkdownTableCell, type ContextRoute } from './context-route'
 import { listInertiaPageIds } from './inertia-pages'
+import { readInstalledVersion } from './plugin-manifest'
 
 export interface ProjectContext {
   framework: { name: string; version: string }
@@ -50,15 +51,10 @@ export interface ContextOptions {
  * server arrives transitively and may not be hoisted, hence the fallbacks.
  */
 async function resolveFrameworkVersion(cwd: string): Promise<{ name: string; version: string }> {
-  const installedVersion = async (pkg: string): Promise<string | undefined> => {
-    const raw = await readIfExists(cwd, `node_modules/${pkg}/package.json`)
-    return raw ? (JSON.parse(raw) as { version?: string }).version : undefined
-  }
-
-  const server = await installedVersion('@guren/server')
+  const server = await readInstalledVersion(cwd, '@guren/server')
   if (server) return { name: 'Guren', version: server }
 
-  const core = await installedVersion('@guren/core')
+  const core = await readInstalledVersion(cwd, '@guren/core')
   if (core) return { name: '@guren/core', version: core }
 
   const pkgRaw = await readIfExists(cwd, 'package.json')
@@ -72,8 +68,6 @@ async function resolveFrameworkVersion(cwd: string): Promise<{ name: string; ver
 
 export async function generateContext(options: ContextOptions = {}): Promise<ProjectContext> {
   const cwd = resolve(options.cwd ?? process.cwd())
-
-  const framework = await resolveFrameworkVersion(cwd)
 
   const collectModels = async (): Promise<ModelInfo[]> => {
     const modelFiles = await discoverModelFiles(cwd)
@@ -94,6 +88,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
   const routeLoadErrors: string[] = []
 
   const [
+    framework,
     models,
     routes,
     pages,
@@ -107,6 +102,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     policies,
     commands,
   ] = await Promise.all([
+    resolveFrameworkVersion(cwd),
     collectModels(),
     loadContextRoutes(cwd, options.routesFile, routeLoadErrors),
     listInertiaPageIds(cwd),

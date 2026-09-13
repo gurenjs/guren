@@ -287,6 +287,23 @@ export default registerWebRoutes
     expect(await readFile('db/schema.ts', 'utf8')).toBe(schemaAfterFirst)
   })
 
+  // A text match on `export const posts = pgTable(` misses this shape; appending a
+  // second `posts` export leaves a schema that does not compile.
+  it('leaves a table alone that the schema declares with different formatting', async () => {
+    await seedResourceWorkspace(`${PG_SCHEMA_FIXTURE}
+export const posts =
+  pgTable('posts', {
+    id: serial('id').primaryKey(),
+  })
+`)
+    const before = await readFile('db/schema.ts', 'utf8')
+
+    const result = await addResource({ name: 'Post' })
+
+    expect(result.schemaUpdated).toBe(false)
+    expect(await readFile('db/schema.ts', 'utf8')).toBe(before)
+  })
+
   it('rejects unknown blueprints', async () => {
     await expect(runBlueprint('unknown')).rejects.toThrow('Unknown blueprint')
   })
