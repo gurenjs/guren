@@ -261,7 +261,7 @@ export default class EventProvider extends ServiceProvider {
 }
 ```
 
-`listen()` takes the class and reads its configuration from the class itself. `event` names what it subscribes to. `priority` orders it among the listeners for that event, highest first. `shouldHandle()`, when the class defines one, can skip an event before `handle` runs. `shouldQueue = true` sends the listener to the queue named by `queue` rather than running it during `emit`. A new instance is built for every event, so a listener cannot carry state from one comment to the next.
+`listen()` takes the class and reads its configuration from the class itself. `event` names what it subscribes to. `priority` orders it among the listeners for that event, highest first. `shouldHandle()`, when the class defines one, can skip an event before `handle` runs. `shouldQueue = true` hands the listener to the queue named by `queue` instead of calling it directly; under `sync` that queue still runs it inline, so it leaves the request only once a worker drains a real queue. A new instance is built for every event, so a listener cannot carry state from one comment to the next.
 
 `SendCommentMailListener` leaves `shouldQueue` at `false` and dispatches a job instead. A queued listener sends the event to the worker; a job sends a payload you chose, with its own `maxAttempts`, and the job is what the third test looks for on the fake queue.
 

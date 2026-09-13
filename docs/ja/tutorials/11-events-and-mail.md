@@ -261,7 +261,7 @@ export default class EventProvider extends ServiceProvider {
 }
 ```
 
-`listen()` はクラスを受け取り、設定をクラス自身から読みます。`event` は購読するイベントです。`priority` は同じイベントの listener 同士の順番で、大きいほうが先に走ります。`shouldHandle()` をクラスが定義していれば、`handle` の前にイベントを見送れます。`shouldQueue = true` にすると、listener は `emit` の中では実行されず、`queue` で指定したキューに送られます。インスタンスはイベントごとに作り直されるので、あるコメントで持った状態が次のコメントに持ち越されることはありません。
+`listen()` はクラスを受け取り、設定をクラス自身から読みます。`event` は購読するイベントです。`priority` は同じイベントの listener 同士の順番で、大きいほうが先に走ります。`shouldHandle()` をクラスが定義していれば、`handle` の前にイベントを見送れます。`shouldQueue = true` にすると、listener は直接呼ばれず、`queue` で指定したキューに渡されます。ただし `sync` のキューはそれをその場で実行するので、リクエストの外に出るのは、本物のキューをワーカーが処理するときだけです。インスタンスはイベントごとに作り直されるので、あるコメントで持った状態が次のコメントに持ち越されることはありません。
 
 `SendCommentMailListener` は `shouldQueue` を `false` のままにして、代わりにジョブを dispatch します。キューに載せた listener がワーカーに送るのはイベントです。ジョブが送るのは自分で決めたペイロードで、ジョブ固有の `maxAttempts` も持ちます。3 つ目のテストが fake のキューで探しているのも、このジョブです。
 
