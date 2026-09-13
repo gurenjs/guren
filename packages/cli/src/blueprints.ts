@@ -5,13 +5,14 @@ import { addLint } from './add-lint'
 import { addSession } from './add-session'
 import { addPrototype } from './add-prototype'
 import { assertNotApiOnly } from './app-surface'
+import { CliError } from './cli-error'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature } from './make-feature'
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
-import { schemaPathFor } from './schema-parser'
+import { schemaDeclaresTable, schemaPathFor } from './schema-parser'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
 import { makeListener } from './make-listener'
@@ -288,41 +289,7 @@ export default registerAdminRoutes
   },
   resource: {
     description: 'Scaffold a model, controller, route group, and page entry for a resource.',
-    run: async (options) => {
-      if (!options.name?.trim()) {
-        throw new Error('The resource blueprint requires a resource name.')
-      }
-
-      const singular = singularize(pascalCase(options.name.trim()))
-      const routeName = collectionSlug(singular)
-      const routeVar = camelCase(routeName)
-      const fields = parseFieldsString(options.fields ?? '')
-
-      // Last of the checks, still before the first write: `updateResourceSchema`
-      // runs before the route wiring can fail, so reaching that failure would
-      // append a table to the app's own `db/schema.ts`.
-      await assertNotApiOnly(process.cwd(), {
-        does: 'guren add resource scaffolds Inertia pages and a controller that returns Inertia responses',
-        instead: API_ONLY_FEATURE_ALTERNATIVE,
-      })
-
-      // Second, so an app the check above recognizes hears about its shape
-      // rather than about a missing file.
-      await assertResourceTargetsPatchable(routeName)
-
-      const created = await makeFeature(singular, {
-        force: Boolean(options.force),
-        fields: options.fields,
-        attach: options.attach,
-        publicAccess: options.publicAccess,
-        announce: false,
-      })
-
-      await updateResourceSchema(singular, fields)
-      await updateResourceRoutes(singular, routeName, routeVar)
-
-      return created
-    },
+    run: async (options) => (await addResource(options)).created,
   },
   schedule: {
     description: 'Install a schedule kernel with a sample recurring task.',
@@ -421,19 +388,66 @@ function snakeCase(value: string): string {
   return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
 }
 
-async function updateResourceSchema(singular: string, fields: FieldDefinition[]): Promise<void> {
+export interface AddResourceResult {
+  created: string[]
+  /** False when `db/schema.ts` already exported the table and was left as it was. */
+  schemaUpdated: boolean
+  /** False when `routes/web.ts` already registered the resource's routes. */
+  routesUpdated: boolean
+}
+
+export async function addResource(options: RunBlueprintOptions): Promise<AddResourceResult> {
+  assertCwdUnsupported(options, 'guren add resource')
+  if (!options.name?.trim()) {
+    throw new Error('The resource blueprint requires a resource name.')
+  }
+
+  const singular = singularize(pascalCase(options.name.trim()))
+  const routeName = collectionSlug(singular)
+  const routeVar = camelCase(routeName)
+  const fields = parseFieldsString(options.fields ?? '')
+
+  // Last of the checks, still before the first write: `updateResourceSchema`
+  // runs before the route wiring can fail, so reaching that failure would
+  // append a table to the app's own `db/schema.ts`.
+  await assertNotApiOnly(process.cwd(), {
+    does: 'guren add resource scaffolds Inertia pages and a controller that returns Inertia responses',
+    instead: API_ONLY_FEATURE_ALTERNATIVE,
+  })
+
+  // Second, so an app the check above recognizes hears about its shape
+  // rather than about a missing file.
+  await assertResourceTargetsPatchable(routeName)
+
+  const created = await makeFeature(singular, {
+    force: Boolean(options.force),
+    fields: options.fields,
+    attach: options.attach,
+    publicAccess: options.publicAccess,
+    announce: false,
+  })
+
+  const schemaUpdated = await updateResourceSchema(singular, fields)
+  const routesUpdated = await updateResourceRoutes(singular, routeName, routeVar)
+
+  return { created, schemaUpdated, routesUpdated }
+}
+
+async function updateResourceSchema(singular: string, fields: FieldDefinition[]): Promise<boolean> {
   const schemaPath = resolve(process.cwd(), schemaPathFor(null))
   let content = await readFile(schemaPath, 'utf8')
   const schemaIdentifier = schemaIdentifierFor(singular)
   const tableName = tableNameFor(singular)
 
+  // The same reading `make:feature` gives the table, so the two commands cannot
+  // disagree about whether it is already declared.
+  if (await schemaDeclaresTable(process.cwd(), schemaIdentifier)) {
+    return false
+  }
+
   const dialect = detectSchemaDialect(content)
 
   if (dialect === 'sqlite') {
-    if (content.includes(`export const ${schemaIdentifier} = sqliteTable(`)) {
-      return
-    }
-
     const columns = fields.map((field) => buildColumn(SQLITE_COLUMNS, field))
     const imports = [...new Set(['sqliteTable', 'integer', 'text', ...columns.flatMap((c) => c.imports)])]
     content = ensureSqliteImports(content, imports)
@@ -443,10 +457,6 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
 
     content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
   } else if (dialect === 'mysql') {
-    if (content.includes(`export const ${schemaIdentifier} = mysqlTable(`)) {
-      return
-    }
-
     const columns = fields.map((field) => buildColumn(MYSQL_COLUMNS, field))
     const imports = [...new Set(['mysqlTable', 'int', 'timestamp', ...columns.flatMap((c) => c.imports)])]
     content = ensureMysqlImports(content, imports)
@@ -456,10 +466,6 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
 
     content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
   } else {
-    if (content.includes(`export const ${schemaIdentifier} = pgTable(`)) {
-      return
-    }
-
     const columns = fields.map((field) => buildColumn(PG_COLUMNS, field))
     const imports = [...new Set(['pgTable', 'serial', 'text', 'timestamp', ...columns.flatMap((c) => c.imports)])]
     content = ensurePgImports(content, imports)
@@ -471,6 +477,7 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
   }
 
   await writeFile(schemaPath, content, 'utf8')
+  return true
 }
 
 /**
@@ -499,7 +506,7 @@ async function assertResourceTargetsPatchable(routeName: string): Promise<void> 
   const schemaFile = schemaPathFor(null)
 
   if (!(await fileExists(cwd, schemaFile))) {
-    throw new Error(
+    throw new CliError(
       `guren add resource appends its table to ${schemaFile}, but this app has no ${schemaFile}. `
       + 'Nothing was scaffolded.',
     )
@@ -508,7 +515,7 @@ async function assertResourceTargetsPatchable(routeName: string): Promise<void> 
   const routes = await readIfExists(cwd, DEFAULT_ROUTES_FILE)
 
   if (routes === null) {
-    throw new Error(
+    throw new CliError(
       `guren add resource registers the /${routeName} routes in ${DEFAULT_ROUTES_FILE}, but this app has no `
       + `${DEFAULT_ROUTES_FILE}. Nothing was scaffolded. Add a web routes entry, or scaffold the resource with `
       + '`guren make:feature` and wire it into the routes file you have.',
@@ -520,47 +527,50 @@ async function assertResourceTargetsPatchable(routeName: string): Promise<void> 
   // the same content. Tightening either site alone reintroduces the half-edited
   // app this function exists to prevent.
   if (!routesAlreadyRegister(routes, routeName) && !findRouteRegistrar(routes)) {
-    throw new Error(missingRegistrarMessage(routeName))
+    throw new CliError(missingRegistrarMessage(routeName))
   }
 }
 
-async function updateResourceRoutes(singular: string, routeName: string, routeVar: string): Promise<void> {
+async function updateResourceRoutes(singular: string, routeName: string, routeVar: string): Promise<boolean> {
   const routesPath = resolve(process.cwd(), DEFAULT_ROUTES_FILE)
   let content = await readFile(routesPath, 'utf8')
 
-  if (!routesAlreadyRegister(content, routeName)) {
-    const registrar = findRouteRegistrar(content)
+  if (routesAlreadyRegister(content, routeName)) {
+    return false
+  }
 
-    // Unreachable via `runBlueprint`, which settles this in the preflight, but
-    // the insertion below dereferences `registrar` either way.
-    if (!registrar) {
-      throw new Error(missingRegistrarMessage(routeName))
-    }
+  const registrar = findRouteRegistrar(content)
 
-    // The same CRUD block `make:feature` prints for hand-wiring, hung off the
-    // registrar's own parameter — whatever it is named.
-    const group = buildRouteRegistrationHint({
-      singular,
-      routeName,
-      routeVar,
-      withAuth: false,
-      receiver: registrar.parameterName,
-    })
+  // Unreachable via `addResource`, which settles this in the preflight, but
+  // the insertion below dereferences `registrar` either way.
+  if (!registrar) {
+    throw new Error(missingRegistrarMessage(routeName))
+  }
 
-    const groupBlock = `\n${group.map((line) => `  ${line}`).join('\n')}\n`
-    content = content.slice(0, registrar.bodyEnd) + groupBlock + content.slice(registrar.bodyEnd)
+  // The same CRUD block `make:feature` prints for hand-wiring, hung off the
+  // registrar's own parameter — whatever it is named.
+  const group = buildRouteRegistrationHint({
+    singular,
+    routeName,
+    routeVar,
+    withAuth: false,
+    receiver: registrar.parameterName,
+  })
 
-    // Inside the guard: appended when the registration is skipped, these are
-    // unused bindings and the app stops compiling under noUnusedLocals.
-    for (const statement of [
-      `import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`,
-      `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`,
-    ]) {
-      content = insertImport(content, statement) ?? content
-    }
+  const groupBlock = `\n${group.map((line) => `  ${line}`).join('\n')}\n`
+  content = content.slice(0, registrar.bodyEnd) + groupBlock + content.slice(registrar.bodyEnd)
+
+  // After the early return: added when the registration is skipped, these are
+  // unused bindings and the app stops compiling under noUnusedLocals.
+  for (const statement of [
+    `import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`,
+    `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`,
+  ]) {
+    content = insertImport(content, statement) ?? content
   }
 
   await writeFile(routesPath, content, 'utf8')
+  return true
 }
 
 export function listBlueprints(): string[] {

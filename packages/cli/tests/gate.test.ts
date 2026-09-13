@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'bun:test'
-import { describeGateFailures, GATE_STAGES, runGate, type GateExec, type GateExecResult, type GateReport } from '../src/gate'
+import { describe, expect, it, spyOn } from 'bun:test'
+import { consola } from 'consola'
+import { describeGateFailures, GATE_STAGES, renderGateReport, runGate, type GateExec, type GateExecResult, type GateReport } from '../src/gate'
 import { createTempWorkspace, gateAppFiles, initGitRepo, linkOxlint, writeWorkspaceFiles } from './helpers'
 
 const SCRIPTS = { codegen: 'guren codegen', typecheck: 'tsc --noEmit', test: 'bun test' }
@@ -189,6 +190,30 @@ describe('runGate', () => {
       expect(linted).not.toContain('README.md')
       expect(stage(report, 'lint').status).toBe('pass')
     }, { oxlint: true })
+  })
+
+  it('names a stage detail, such as the dependency scan, in the rendered line', async () => {
+    await withApp('deps', gateAppFiles(SCRIPTS), async (dir) => {
+      const lines: string[] = []
+      const spies = (['success', 'error', 'info', 'box'] as const).map((level) =>
+        spyOn(consola, level).mockImplementation(((message: unknown) => {
+          lines.push(String(message))
+        }) as never),
+      )
+      try {
+        const plain = await runGate({ cwd: dir, exec: fakeExec().exec })
+        renderGateReport(plain)
+        expect(stage(plain, 'audit').detail).toBeUndefined()
+        expect(lines.some((line) => line.includes('dependency scan'))).toBe(false)
+
+        // Stubbed so the test stays off the registry; only the label is under test.
+        const stages = plain.stages.map((s) => (s.name === 'audit' ? { ...s, detail: 'dependency scan' } : s))
+        renderGateReport({ ...plain, stages })
+        expect(lines.some((line) => line.includes('audit + dependency scan'))).toBe(true)
+      } finally {
+        for (const spy of spies) spy.mockRestore()
+      }
+    })
   })
 
   it('outside a git repository --changed runs the gate in full', async () => {

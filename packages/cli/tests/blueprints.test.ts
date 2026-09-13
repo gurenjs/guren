@@ -21,7 +21,7 @@ import {
   seedShippedApiOnlyApp,
   type TempWorkspace,
 } from './helpers'
-import { listBlueprints, runBlueprint } from '../src/blueprints'
+import { addResource, listBlueprints, runBlueprint } from '../src/blueprints'
 import { runCheck } from '../src/check'
 
 /** Materialize an app file for the provider-wiring patches to target. */
@@ -271,6 +271,37 @@ export default registerWebRoutes
     const routes = await readFile('routes/web.ts', 'utf8')
     expect(routes.match(/\.group\('\/posts'/g)).toHaveLength(1)
     expect(routes.match(/import PostController from/g)).toHaveLength(1)
+  })
+
+  // The command's closing message is built from these flags; a re-run that
+  // reported "schema and routes were updated" sent readers to db:make for nothing.
+  it('reports which of the schema and routes a run actually patched', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+
+    const first = await addResource({ name: 'Post' })
+    const schemaAfterFirst = await readFile('db/schema.ts', 'utf8')
+    const second = await addResource({ name: 'Post', force: true })
+
+    expect(first).toMatchObject({ schemaUpdated: true, routesUpdated: true })
+    expect(second).toMatchObject({ schemaUpdated: false, routesUpdated: false })
+    expect(await readFile('db/schema.ts', 'utf8')).toBe(schemaAfterFirst)
+  })
+
+  // A text match on `export const posts = pgTable(` misses this shape; appending a
+  // second `posts` export leaves a schema that does not compile.
+  it('leaves a table alone that the schema declares with different formatting', async () => {
+    await seedResourceWorkspace(`${PG_SCHEMA_FIXTURE}
+export const posts =
+  pgTable('posts', {
+    id: serial('id').primaryKey(),
+  })
+`)
+    const before = await readFile('db/schema.ts', 'utf8')
+
+    const result = await addResource({ name: 'Post' })
+
+    expect(result.schemaUpdated).toBe(false)
+    expect(await readFile('db/schema.ts', 'utf8')).toBe(before)
   })
 
   it('rejects unknown blueprints', async () => {

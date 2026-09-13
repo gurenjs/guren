@@ -1,9 +1,10 @@
 import { resolve } from 'node:path'
 import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
+import { CliError } from './cli-error'
 import { appConfiguresAttachments } from './attachments-check'
 import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
-import { pluralize } from './inflect'
+import { pluralize, schemaIdentifierFor } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -11,7 +12,7 @@ import { makeValidator } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
 import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
-import { schemaPathFor } from './schema-parser'
+import { schemaDeclaresTable, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
 import {
   appendPrototypeEntries,
@@ -73,7 +74,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const reserved = reservedAttachmentNames(fields, singular, variableName)
   for (const attachment of attachments) {
     if (reserved.has(attachment.name)) {
-      throw new Error(
+      throw new CliError(
         `Attachment collection "${attachment.name}" collides with a column of the ${singular} table `
         + `or an identifier the generated controller already uses. Pick another name.`,
       )
@@ -101,7 +102,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // statics throw at first use, so refusing here beats scaffolding a feature
   // that crashes on its first upload (RFC 0013 Part 4).
   if (attachments.length > 0 && !(await appConfiguresAttachments(appRoot, new ParseCache()))) {
-    throw new Error(
+    throw new CliError(
       'guren make:feature --attach scaffolds a model wired to the attachments layer, but this app has no '
       + 'configureAttachments() call. Run `bunx guren add attachments` first, then re-run this command. '
       + 'If your app wires attachments in a shape this cannot detect (a namespace import, a wrapper), '
@@ -112,13 +113,13 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
   const prototypeFirst = Boolean(options.prototype)
   if (prototypeFirst && !(await appHasPrototypeFixture(appRoot))) {
-    throw new Error(
+    throw new CliError(
       `guren make:feature --prototype appends entries to ${PROTOTYPE_FIXTURE_PATH}, which this app does not have. `
       + 'Run `bunx guren add prototype` first, then re-run this command. Nothing was scaffolded.',
     )
   }
   if (prototypeFirst && moduleName) {
-    throw new Error('guren make:feature --prototype does not support --module yet: the fixture is app-wide. Nothing was scaffolded.')
+    throw new CliError('guren make:feature --prototype does not support --module yet: the fixture is app-wide. Nothing was scaffolded.')
   }
   // A feature scaffolded prototype-first leaves its page-data type behind;
   // finding one is what turns this run into the promotion.
@@ -132,7 +133,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // controller imports and the ones `make:validator` writes cannot drift. At
   // promotion the prototype run already wrote it, and it is kept as edited.
   const validatorRelPath = `${appPrefix}app/Http/Validators/${singular}Validator.ts`
-  const validatorPath = promoting && !options.force && (await fileExists(appRoot, validatorRelPath))
+  const validatorKept = promoting && !options.force && (await fileExists(appRoot, validatorRelPath))
+  const validatorPath = validatorKept
     ? resolve(appRoot, validatorRelPath)
     : await makeValidator(singular, { ...writerOptions, fields })
 
@@ -190,7 +192,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens(appRoot)
 
-  created.unshift(validatorPath)
+  if (!validatorKept) created.unshift(validatorPath)
 
   const modelPath = await makeModel(singular, { ...writerOptions, attachments })
   created.push(modelPath)
@@ -216,14 +218,22 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   for (const file of created) {
     consola.success(`Created ${file}`)
   }
+  if (validatorKept) {
+    consola.info(`Kept ${validatorPath} (pass --force to regenerate it)`)
+  }
 
   const schemaPath = schemaPathFor(moduleName)
   const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
   const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
   const validatorImportPath = moduleName ? './app/Http/Validators' : '../app/Http/Validators'
+  const tableDeclared = await schemaDeclaresTable(appRoot, schemaIdentifierFor(singular), moduleName ?? null)
   consola.info('')
   consola.info('Next steps:')
-  consola.info(`  1. Add table definition to ${schemaPath}`)
+  if (tableDeclared) {
+    consola.info(`  1. ${schemaPath} already declares ${schemaIdentifierFor(singular)}: nothing to add`)
+  } else {
+    consola.info(`  1. Add table definition to ${schemaPath}`)
+  }
   consola.info(`  2. Register routes in ${routesPath} with body schemas:`)
   consola.info(`     import ${singular}Controller from '${controllerImportPath}/${singular}Controller.js'`)
   consola.info(`     import { ${singular}PayloadSchema } from '${validatorImportPath}/${singular}Validator.js'`)
@@ -234,7 +244,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.info(`     (promotion: replace each \`prototype\` handler for ${routeName}.* with the [${singular}Controller, '<action>'] above;`)
     consola.info(`      the fixture entries keep serving \`bun run build:prototype\`)`)
   }
-  consola.info(`  3. Run: bunx guren db:migrate`)
+  consola.info(`  3. Run: bun run db:make && bun run db:migrate${tableDeclared ? ' (skip if already applied)' : ''}`)
   consola.info(`  4. Run: bunx guren codegen`)
   if (withPolicy) {
     const modelsBase = moduleName ? `../modules/${moduleName}` : '../app'
@@ -286,7 +296,8 @@ function announcePrototypeFeature(options: { created: string[]; singular: string
   consola.info('  2. Run: bunx guren codegen')
   consola.info('  3. Walk it: bun run dev:prototype (or ship dist/prototype/ with bun run build:prototype)')
   consola.info(`  When the specification settles, run \`bunx guren make:feature ${singular} --fields "…"\` without --prototype:`)
-  consola.info(`  it writes the model, migration, Resource and controller, keeps these pages, and prints the handler replacements.`)
+  consola.info(`  it writes the model, Resource and controller, keeps these pages and the validator, and prints the handler replacements.`)
+  consola.info(`  The table and its migration stay yours: add it to db/schema.ts and run bun run db:make first.`)
 }
 
 /**

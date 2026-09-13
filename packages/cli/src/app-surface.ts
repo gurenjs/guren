@@ -1,5 +1,6 @@
 import { appDependsOn, fileExists } from './discovery'
 import { DEFAULT_ROUTES_FILE } from './route-registrar'
+import { CliError } from './cli-error'
 
 /**
  * Every filename an app's web routes entry can have. The predicate reads the
@@ -44,7 +45,7 @@ export async function assertNotApiOnly(
 ): Promise<void> {
   if (!(await isConfirmedApiOnlyApp(cwd))) return
 
-  throw new Error(
+  throw new CliError(
     `${does}, but this app has no @guren/inertia-client dependency and no ${DEFAULT_ROUTES_FILE}. `
     + `${instead}, or scaffold a fullstack app.`,
   )

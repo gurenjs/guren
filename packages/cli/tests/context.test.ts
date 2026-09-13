@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { GUREN_API_DIGEST } from '../src/api-digest'
 import { generateContext, renderContextMarkdown } from '../src/context'
-import { CORE_RESOLVING_ROUTES_FIXTURE, createTempWorkspace, linkWorkspaceCore } from './helpers'
+import { CORE_RESOLVING_ROUTES_FIXTURE, createTempWorkspace, linkWorkspaceCore, writeInstalledPackage } from './helpers'
 
 describe('generateContext', () => {
   it('discovers models from app/Models', async () => {
@@ -19,18 +19,40 @@ export class Post extends defineModel(posts) {}`,
         'utf8',
       )
 
+      // core's range is not a Guren version: releases are numbered after @guren/server.
       await writeFile(
         join(workspace.dir, 'package.json'),
-        JSON.stringify({ dependencies: { '@guren/core': '1.0.0' } }),
+        JSON.stringify({ dependencies: { '@guren/core': '^1.18.0' } }),
         'utf8',
       )
+      await writeInstalledPackage('@guren/server', { version: '2.23.0' }, {}, workspace.dir)
 
       const ctx = await generateContext({ cwd: workspace.dir })
 
-      expect(ctx.framework.version).toBe('1.0.0')
+      expect(ctx.framework.version).toBe('2.23.0')
       expect(ctx.models).toHaveLength(1)
       expect(ctx.models[0].className).toBe('Post')
       expect(ctx.models[0].tableName).toBe('posts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('labels the framework line by the package it could read', async () => {
+    const workspace = await createTempWorkspace('guren-cli-context-version-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ dependencies: { '@guren/core': '^1.18.0' } }),
+        'utf8',
+      )
+      // Not installed yet: the declared range, named as core's.
+      expect((await generateContext({ cwd: workspace.dir })).framework).toEqual({ name: '@guren/core', version: '^1.18.0' })
+
+      // Installed without a hoisted @guren/server: core's installed version, still named as core's.
+      await writeInstalledPackage('@guren/core', { version: '1.18.0' }, {}, workspace.dir)
+      expect((await generateContext({ cwd: workspace.dir })).framework).toEqual({ name: '@guren/core', version: '1.18.0' })
     } finally {
       await workspace.cleanup()
     }

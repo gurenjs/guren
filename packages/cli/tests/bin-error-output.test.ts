@@ -111,6 +111,20 @@ describe('guren CLI error reporting', () => {
     }
   })
 
+  it('reports a file the command refuses to overwrite by its message, without a stack trace', async () => {
+    const workspace = await createTempWorkspace('guren-cli-bin-file-exists-')
+    try {
+      expect((await runBin(['deploy', '--target', 'docker'], workspace.dir)).exitCode).toBe(0)
+      const { exitCode, stderr } = await runBin(['deploy', '--target', 'docker'], workspace.dir)
+
+      expect(exitCode).toBe(1)
+      expect(stderr).toContain('Dockerfile already exists. Use --force to overwrite.')
+      expect(stderr).not.toMatch(/^\s+at /m)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('runs the command a stray flag precedes without reporting it as unknown', async () => {
     const workspace = await createTempWorkspace('guren-cli-bin-leading-flag-')
     try {

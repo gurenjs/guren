@@ -29,7 +29,7 @@ bun run db:migrate
 Guren migrations are drizzle-kit generated and forward-only — `db:rollback` is
 not supported and will explain the alternatives:
 - Development: `bunx guren db:reset --seed` (drop everything, re-apply, re-seed)
-- Undo an uncommitted migration: delete its folder + journal entry, then `db:reset`
+- Undo an uncommitted migration: delete its folder under `db/migrations/` (there is no journal to edit), then `db:reset`
 - Production: write a new forward migration that reverses the change
 
 ### Status
