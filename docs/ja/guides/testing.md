@@ -163,30 +163,6 @@ await app
   .assertOk()
 ```
 
-### コンテナフェイクを使ったテスト
-
-コンテナの `fake()` メソッドを使って、サービスをテストダブルに置き換えられます。
-
-```ts
-import { TestApp } from '@guren/testing'
-import { FakeEvent, FakeMail, FakeQueue } from '@guren/testing'
-
-const app = await TestApp.create()
-
-// 実際のサービスをフェイクに置き換える
-const fakeEvents = new FakeEvent()
-const fakeMail = new FakeMail()
-app.container.fake('events', fakeEvents)
-app.container.fake('mail', fakeMail)
-
-// リクエストを送信し、副作用をアサートする
-await app.post('/users', { email: 'new@test.com', name: 'New User' })
-  .assertStatus(201)
-
-fakeEvents.assertDispatched(UserRegistered)
-fakeMail.assertSentTo('new@test.com')
-```
-
 ### `@guren/testing` でコントローラーをテストする
 
 `@guren/testing` パッケージには、コントローラーテスト向けのヘルパーが用意されています。
@@ -205,151 +181,125 @@ fakeMail.assertSentTo('new@test.com')
 
 ランナーを分けることで、フレームワークコードには Bun の高速なフィードバックを、SPA テストにはリアルな DOM 動作を、それぞれ確保できます。
 
-## テスト用フェイク
+## サービスのフェイク
 
-`@guren/testing` パッケージには、サービスのフェイク実装が入っています。実際にメールを送信したり、イベントをディスパッチしたり、ジョブをキューに入れたりせずにコードをテストできます。
+テストで本物のメールを送ったり、本物のイベントをディスパッチしたり、キューにジョブを積んだりするのは避けます。`@guren/testing` にはそれぞれのフェイク `fakeEvent()`、`fakeMail()`、`fakeQueue()` があります。プロジェクトが export するアプリに対し、フェイクが必要なテストの中で `app.container.fake()` を使ってバインドします。
 
-### FakeMail
+```ts
+import { beforeAll, test } from 'bun:test'
+import { MailManager, createQueueManager } from '@guren/core'
+import { TestApp, fakeEvent, fakeMail, fakeQueue } from '@guren/testing'
+import app from '../src/app.js'
+import { OrderPlaced } from '../app/Events/OrderPlaced.js'
+import { ProcessOrderJob, type ProcessOrderPayload } from '../app/Jobs/ProcessOrderJob.js'
 
-実際にメールを送信せずにメール送信をテストします。
+let http: TestApp
 
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test'
-import { FakeMail } from '@guren/testing'
+beforeAll(async () => {
+  http = await TestApp.fromApp(app)
+})
 
-describe('ユーザー登録', () => {
-  let fakeMail: FakeMail
+test('placing an order announces it', async () => {
+  const events = fakeEvent()
+  using _events = app.container.fake('events', events.getManager())
 
-  beforeEach(() => {
-    fakeMail = new FakeMail()
-  })
+  const client = await http.withCsrf()
+  await client.post('/orders', { sku: 'book' }).assertRedirect('/orders')
 
-  it('ウェルカムメールを送信する', async () => {
-    await userService.register({ email: 'user@example.com' })
+  events.assertDispatched(OrderPlaced, (event) => event.sku === 'book')
+})
 
-    fakeMail.assertSent(WelcomeEmail)
-    fakeMail.assertSentTo('user@example.com')
-  })
+test('placing an order mails a receipt', async () => {
+  const mail = fakeMail()
+  const manager = new MailManager({ default: 'fake', from: { email: 'shop@example.com', name: 'Shop' } })
+  manager.registerTransport('fake', () => mail.getTransport())
+  using _mail = app.container.fake('mail', manager)
 
-  it('正しい件名でメールを送信する', async () => {
-    await userService.register({ email: 'user@example.com' })
+  const client = await http.withCsrf()
+  await client.post('/orders', { sku: 'book', email: 'ada@example.com' }).assertRedirect('/orders')
 
-    fakeMail.assertSentWith(WelcomeEmail, {
-      subject: 'Welcome to our app!',
-    })
-  })
+  mail.assertSentTo('ada@example.com')
+  mail.assertSentWithSubject('Your order')
+})
+
+test('placing an order queues the processing job', async () => {
+  const queue = fakeQueue()
+  using _queue = app.container.fake(
+    'queue',
+    createQueueManager({ default: 'fake', drivers: { fake: () => queue.getDriver() } }),
+  )
+
+  const client = await http.withCsrf()
+  await client.post('/orders', { sku: 'book' }).assertRedirect('/orders')
+
+  queue.assertPushed<ProcessOrderPayload>(ProcessOrderJob, (payload) => payload.sku === 'book')
 })
 ```
 
-#### FakeMail メソッド
+コンテナの各キーが保持するのはマネージャーです（`events` は `EventManager`、`mail` は `MailManager`、`queue` は `QueueManager`）。フェイクはその一段下の部品なので、マネージャーに包んでからバインドします。
+
+- `fakeEvent()` は内部に持つマネージャーを通して記録します。`events.getManager()` をバインドしてください。このマネージャーにはリスナーが登録されないので、リスナーは実行されず、リスナーが始めるはずのジョブやメールも動きません。
+- `fakeMail()` はトランスポートです。本物の `MailManager` に登録し、そのマネージャーをバインドします。
+- `fakeQueue()` はドライバーです。`createQueueManager()` のファクトリーから返し、そのマネージャーをバインドします。
+
+`assertPushed` にはペイロードの型を明示的に渡します。ジョブクラスだけでは TypeScript にペイロードの型が伝わらず、述語の引数が `unknown` になります。
+
+`fake()` は disposable を返すので、`using` で受けるとテストの終了時にアプリ本来のバインディングが戻ります。`fromApp()` を呼ぶテストファイルは、すべて同じアプリのインスタンスを共有します。`beforeAll` でバインドしたまま戻さないフェイクは、後に実行されるファイルにも残ります。バインドは `fromApp()` がアプリを起動した後に行ってください。プロバイダは起動中に本物のサービスを組み立てますが、フェイクのイベントマネージャーは `EventManager` のすべてを備えてはいません。
+
+フェイクをマネージャーに包まずに直接バインドすると、最初に使われたところで失敗し、リクエストは 500 を返します。
+
+| 直接バインドしたもの | エラー |
+|---|---|
+| `events` に `fakeEvent()` | `this.make("events").emit is not a function` |
+| `mail` に `fakeMail()` | `manager.getDefaultFrom is not a function` |
+| `queue` に `fakeQueue()` | `manager.getDefaultDriverName is not a function` |
+
+`setQueueDriver(fakeQueue().getDriver())` でも `Job.dispatch()` を横取りできますが、2.23.0 で非推奨になり、3.0.0 で削除されます。
+
+### 使えるアサーション
+
+`FakeMail` が記録するのは組み立て済みのメッセージで、それを作った `Mail` クラスは記録しません。アサーションが見るのは宛先、件名、本文です。
+
+**FakeMail:**
 
 | メソッド | 説明 |
 |--------|-------------|
-| `assertSent(mailable)` | メールが送信されたことをアサート |
-| `assertSentTimes(mailable, count)` | メールが正確な回数送信されたことをアサート |
-| `assertNotSent(mailable)` | メールが送信されなかったことをアサート |
-| `assertNothingSent()` | メールが一切送信されなかったことをアサート |
-| `assertSentTo(email)` | 指定アドレスにメールが送信されたことをアサート |
-| `assertSentWith(mailable, data)` | 特定のデータでメールが送信されたことをアサート |
-| `assertQueuedCount(count)` | キューに入れられたメールの件数をアサート |
-| `sent(mailable)` | 送信されたメールのインスタンスをすべて取得 |
+| `assertSent(callback?)` | メールが送信された。callback を渡すと、いずれかがそれに一致する |
+| `assertSentTimes(count)` | 送信されたメールが全部でちょうど `count` 通 |
+| `assertNothingSent()` | メールが 1 通も送信されていない |
+| `assertSentTo(email)` | そのアドレス宛てにメールが送信された |
+| `assertSentFrom(email)` | そのアドレスからメールが送信された |
+| `assertSentWithSubject(subject)` | 件名がこの文字列と完全に一致するメールがある |
+| `assertSentWithBodyContaining(text)` | テキストか HTML の本文に `text` を含むメールがある |
+| `assertSentWithCc(email)`、`assertSentWithBcc(email)` | そのアドレスを CC または BCC に含むメールがある |
+| `assertSentWithAttachment(filename)` | このファイル名の添付を持つメールがある |
+| `sent()`、`sentTo(email)` | 記録されたメール。すべて、または 1 つのアドレス宛てのもの |
 
-### FakeQueue
-
-ジョブを実際に処理せずにジョブのディスパッチをテストします。
-
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test'
-import { FakeQueue } from '@guren/testing'
-
-describe('注文処理', () => {
-  let fakeQueue: FakeQueue
-
-  beforeEach(() => {
-    fakeQueue = new FakeQueue()
-  })
-
-  it('注文処理ジョブをディスパッチする', async () => {
-    await orderService.create(orderData)
-
-    fakeQueue.assertPushed(ProcessOrderJob)
-    fakeQueue.assertPushedWith(ProcessOrderJob, {
-      orderId: expect.any(Number),
-    })
-  })
-
-  it('無効な注文ではジョブをディスパッチしない', async () => {
-    await orderService.create(invalidData)
-
-    fakeQueue.assertNotPushed(ProcessOrderJob)
-  })
-})
-```
-
-#### FakeQueue メソッド
+**FakeEvent:**
 
 | メソッド | 説明 |
 |--------|-------------|
-| `assertPushed(job)` | ジョブがプッシュされたことをアサート |
-| `assertPushedTimes(job, count)` | ジョブが正確な回数プッシュされたことをアサート |
-| `assertPushedOn(queue, job)` | 特定のキューにジョブがプッシュされたことをアサート |
-| `assertPushedWith(job, data)` | 特定のデータでジョブがプッシュされたことをアサート |
-| `assertNotPushed(job)` | ジョブがプッシュされなかったことをアサート |
-| `assertNothingPushed()` | ジョブが一切プッシュされなかったことをアサート |
-| `pushed(job)` | プッシュされたジョブのインスタンスをすべて取得 |
+| `assertDispatched(event, callback?)` | イベントがディスパッチされた。callback を渡すと、いずれかのインスタンスが一致する |
+| `assertDispatchedTimes(event, count)` | イベントがちょうど `count` 回ディスパッチされた |
+| `assertDispatchedWith(event, data)` | `data` のプロパティをすべて `===` で満たすインスタンスがある |
+| `assertDispatchedInOrder(events)` | この順序でディスパッチされた。間に別のイベントが入ってもよい |
+| `assertNotDispatched(event)` | イベントがディスパッチされていない |
+| `assertNothingDispatched()` | イベントが 1 つもディスパッチされていない |
+| `dispatched(event)` | 記録されたそのイベントのインスタンス |
 
-### FakeEvent
-
-リスナーをトリガーせずにイベントのディスパッチをテストします。
-
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test'
-import { FakeEvent } from '@guren/testing'
-
-describe('ユーザーアクション', () => {
-  let fakeEvent: FakeEvent
-
-  beforeEach(() => {
-    fakeEvent = new FakeEvent()
-  })
-
-  it('ユーザー登録イベントをディスパッチする', async () => {
-    await userService.register(userData)
-
-    fakeEvent.assertDispatched(UserRegistered)
-  })
-
-  it('正しい順序でイベントをディスパッチする', async () => {
-    await userService.register(userData)
-
-    fakeEvent.assertDispatchedInOrder([
-      UserCreated,
-      UserRegistered,
-      WelcomeEmailSent,
-    ])
-  })
-
-  it('正しいデータでイベントをディスパッチする', async () => {
-    await userService.register({ email: 'test@example.com' })
-
-    fakeEvent.assertDispatchedWith(UserRegistered, {
-      email: 'test@example.com',
-    })
-  })
-})
-```
-
-#### FakeEvent メソッド
+**FakeQueue:**
 
 | メソッド | 説明 |
 |--------|-------------|
-| `assertDispatched(event, callback?)` | イベントがディスパッチされたことをアサート |
-| `assertDispatchedTimes(event, count)` | イベントが正確な回数ディスパッチされたことをアサート |
-| `assertNotDispatched(event)` | イベントがディスパッチされなかったことをアサート |
-| `assertNothingDispatched()` | イベントが一切ディスパッチされなかったことをアサート |
-| `assertDispatchedInOrder(events)` | イベントが特定の順序でディスパッチされたことをアサート |
-| `assertDispatchedWith(event, data)` | 特定のデータでイベントがディスパッチされたことをアサート |
-| `dispatched(event)` | ディスパッチされたイベントのインスタンスをすべて取得 |
+| `assertPushed(job, callback?)` | ジョブが積まれた。callback を渡すと、いずれかのペイロードが一致する |
+| `assertPushedTimes(job, count)` | ジョブがちょうど `count` 回積まれた |
+| `assertPushedOn(queue, job)` | ジョブが指定した名前のキューに積まれた |
+| `assertPushedWithDelay(job, delay)` | ジョブがこの遅延（ミリ秒）で積まれた |
+| `assertNotPushed(job)` | ジョブが積まれていない |
+| `assertNothingPushed()` | ジョブが 1 つも積まれていない |
+| `pushed(job)` | 記録されたそのジョブの積み込み |
+
+3 つとも `clear()` を持っています。複数のテストで同じフェイクを使い回すときに記録を消せます。
 
 ### テストデータベースの分離
 
