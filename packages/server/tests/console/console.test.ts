@@ -791,9 +791,29 @@ describe('ConsoleKernel', () => {
       expect(effects).toEqual([])
     })
 
-    test('reaches kernel.call() the same way', async () => {
-      expect(await kernel.call('records:prune', ['-h'])).toBe(0)
-      expect(effects).toEqual([])
+    test('is not read from arguments passed by call()', async () => {
+      class MailCommand extends Command {
+        static signature = 'mail:send {--subject=}'
+
+        async handle(): Promise<void> {
+          effects.push(`subject=${this.option('subject')}`)
+        }
+      }
+
+      class DigestCommand extends Command {
+        static signature = 'mail:digest'
+
+        async handle(): Promise<number> {
+          return this.call('mail:send', ['--subject', '--help'])
+        }
+      }
+
+      kernel.registerMany([MailCommand, DigestCommand])
+
+      expect(await kernel.call('mail:send', ['--subject', '-h'], true)).toBe(0)
+      expect(await kernel.handle(['mail:digest'])).toBe(0)
+      expect(effects).toEqual(['subject=-h', 'subject=--help'])
+      expect(output.contains('Command: mail:send')).toBe(false)
     })
 
     test('leaves -h and --help to a command whose signature declares them', async () => {

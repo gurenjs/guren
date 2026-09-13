@@ -32,8 +32,17 @@ export interface CommandClass {
 export interface CommandInstance {
   setInput(argv: string[]): void
   setOutput(output: OutputInterface): void
-  setKernel(kernel: { handle(argv: string[]): Promise<number> }): void
+  setKernel(kernel: { handle(argv: string[], options?: ConsoleHandleOptions): Promise<number> }): void
   run(): Promise<number>
+}
+
+export interface ConsoleHandleOptions {
+  /**
+   * Whether `--help` / `-h` among the arguments prints the command's help instead of
+   * running it (default `true`). `call()` passes `false`: arguments assembled by code
+   * may carry either token as a value, and a silent call would report the skip as success.
+   */
+  helpFlags?: boolean
 }
 
 export interface OutputInterface {

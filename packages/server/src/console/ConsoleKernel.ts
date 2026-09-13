@@ -1,6 +1,7 @@
 import type { Container } from '../container'
 import type {
   CommandClass,
+  ConsoleHandleOptions,
   ConsoleKernelOptions,
   OptionDefinition,
   OutputInterface,
@@ -85,7 +86,10 @@ export class ConsoleKernel {
     return this.output
   }
 
-  async handle(argv: string[] = process.argv.slice(2)): Promise<number> {
+  async handle(
+    argv: string[] = process.argv.slice(2),
+    options: ConsoleHandleOptions = {}
+  ): Promise<number> {
     const [commandName, ...args] = argv
 
     if (!commandName) {
@@ -115,7 +119,7 @@ export class ConsoleKernel {
       return 1
     }
 
-    if (requestsHelp(parseSignature(CommandClass.signature), args)) {
+    if (options.helpFlags !== false && requestsHelp(parseSignature(CommandClass.signature), args)) {
       this.showCommandHelp(commandName)
       return 0
     }
@@ -298,7 +302,7 @@ export class ConsoleKernel {
       this.output = new BufferedOutput()
     }
 
-    const result = await this.handle([commandName, ...args])
+    const result = await this.handle([commandName, ...args], { helpFlags: false })
 
     if (silent) {
       this.output = originalOutput

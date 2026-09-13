@@ -5,6 +5,7 @@ export type {
   CommandClass,
   CommandInstance,
   ConsoleKernelOptions,
+  ConsoleHandleOptions,
   OutputInterface,
   InputInterface,
   ScheduledCommand,

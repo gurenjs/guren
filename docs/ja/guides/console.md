@@ -234,6 +234,8 @@ async handle(): Promise<number | void> {
 
 これは呼び出し元のコマンドがカーネル経由でディスパッチされていることが前提です。直接インスタンス化したコマンドで `this.call()` を呼ぶと例外になります。
 
+`this.call()` や `kernel.call()` に渡した引数は、ヘルプの指定として扱いません。`this.call('mail:send', ['--subject', subject])` は、`subject` が `-h` でもメールを送信します。
+
 ## モジュール
 
 `--module` を付けて生成したコマンドは `modules/<name>/app/Console/Commands/` に置かれます。モジュールごとのコンソールカーネルは存在しないため、モジュール自身のディスクリプタ経由でルートのカーネルへ渡します。`defineModule()` は `routes` や `providers` と並んで `commands` 配列を持ち、`make:command --module` がここに追記します。

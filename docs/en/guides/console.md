@@ -234,6 +234,8 @@ async handle(): Promise<number | void> {
 
 This requires the calling command to have been dispatched through a kernel. `this.call()` throws when a command is instantiated directly.
 
+Arguments passed to `this.call()` or `kernel.call()` are never read as a help request, so `this.call('mail:send', ['--subject', subject])` still sends the mail when `subject` is `-h`.
+
 ## Modules
 
 Commands scaffolded with `--module` land under `modules/<name>/app/Console/Commands/`. There is no per-module console kernel, so they reach the root kernel through the module's own descriptor: `defineModule()` carries a `commands` array alongside `routes` and `providers`, which `make:command --module` fills in:
