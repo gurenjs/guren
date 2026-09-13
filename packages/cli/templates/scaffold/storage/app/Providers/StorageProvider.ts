@@ -6,7 +6,11 @@ import { ServiceProvider, createStorageManager } from '@guren/core'
 // values below are read when this object is built, so keep anything that can
 // throw (a required-env helper) out of it.
 const disks = {
-  local: { driver: 'local', root: './storage/app' },
+  // `bun test` sets NODE_ENV=test. The test database is reset between runs and
+  // these files are not, so the suite writes under storage/app/testing: in
+  // ./storage/app they would match no row the development database holds.
+  // Keep both roots string literals; `guren check` judges each one.
+  local: { driver: 'local', root: process.env.NODE_ENV === 'test' ? './storage/app/testing' : './storage/app' },
 
   // Declared public because it is: everything under it is served. A local
   // disk has no per-object visibility, so this is where that is decided.

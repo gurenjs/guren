@@ -599,6 +599,10 @@ export const users = pgTable('users', {
     const storageProviderSource = await readFile('app/Providers/StorageProvider.ts', 'utf8')
     expect(storageProviderSource).toContain("process.env.STORAGE_DISK || 'local'")
     expect(storageProviderSource).not.toContain('process.env.STORAGE_DISK ??')
+    // Tests write their uploads beside, not into, the development disk.
+    expect(storageProviderSource).toContain(
+      "root: process.env.NODE_ENV === 'test' ? './storage/app/testing' : './storage/app'",
+    )
     expect(broadcastingFiles.some((file) => file.endsWith('app/Providers/BroadcastProvider.ts'))).toBe(true)
 
     // Registered with the channel's own check, not an allow-all: otherwise

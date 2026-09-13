@@ -99,6 +99,8 @@ describe('guren add attachments', () => {
     // The scaffold's own disk must satisfy the rule it exists to establish: uploads outside the served tree.
     const publicDisk = report.checks.find((c) => c.key.startsWith('attachments-public-disk:'))
     expect(publicDisk?.status).toBe('pass')
+    // Both the test root and the development root were judged, not just one of them.
+    expect(publicDisk?.message).toContain('./storage/app/testing, ./storage/app')
 
     expect(
       report.checks.filter((c) => c.key.startsWith('attachments-') && c.status === 'fail'),

@@ -1,6 +1,6 @@
 import { readdir, readlink, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
-import type { CallExpression, ObjectExpression, ObjectProperty } from '@babel/types'
+import type { CallExpression, ConditionalExpression, ObjectExpression, ObjectProperty } from '@babel/types'
 import { AttachmentDeliveryController, DEFAULT_DELIVERY_ROUTE_NAME, type RouteDefinition } from '@guren/core'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
@@ -371,8 +371,24 @@ async function scanAttachmentsDelivery(
 interface StorageDiskDeclaration {
   /** `driver: 'local' | 's3' | …` */
   driver?: string | null
-  /** `root: './public/storage'` — the local driver's base directory. */
-  root?: string | null
+  /**
+   * `root: './public/storage'`, the local driver's base directory. Several when
+   * the value is a conditional of literals (`NODE_ENV === 'test' ? … : …`), and
+   * the disk is then judged by every one of them.
+   */
+  roots?: readonly string[] | null
+}
+
+/** A string literal, or a conditional whose every branch is one. */
+function literalStringBranches(value: unknown): string[] | null {
+  const node = value && typeof value === 'object' ? unwrapTypeAssertion(value as ConditionalExpression) : null
+  if (node?.type === 'ConditionalExpression') {
+    const consequent = literalStringBranches(node.consequent)
+    const alternate = literalStringBranches(node.alternate)
+    return consequent && alternate ? [...new Set([...consequent, ...alternate])] : null
+  }
+  const single = literalString(value)
+  return single === null ? null : [single]
 }
 
 /**
@@ -384,12 +400,16 @@ interface StorageDiskDeclaration {
  */
 async function scanStorageDisks(cache: ParseCache, files: string[]): Promise<Map<string, StorageDiskDeclaration>> {
   const disks = new Map<string, StorageDiskDeclaration>()
-  const record = (disk: string, field: keyof StorageDiskDeclaration, value: string) => {
+  const record = <F extends keyof StorageDiskDeclaration>(
+    disk: string,
+    field: F,
+    value: NonNullable<StorageDiskDeclaration[F]>,
+  ) => {
     const existing = disks.get(disk) ?? {}
     // A disagreeing second declaration makes the field unreadable, and stays
     // that way: a sticky `null` is never equal to a later value either.
     if (existing[field] === undefined) existing[field] = value
-    else if (existing[field] !== value) existing[field] = null
+    else if (JSON.stringify(existing[field]) !== JSON.stringify(value)) existing[field] = null
     disks.set(disk, existing)
   }
 
@@ -423,8 +443,8 @@ async function scanStorageDisks(cache: ParseCache, files: string[]): Promise<Map
       for (const [disk, config] of diskObjectEntries(value)) {
         const driver = literalString(propertyNamed(config, 'driver')?.value)
         if (driver) record(disk, 'driver', driver)
-        const root = literalString(propertyNamed(config, 'root')?.value)
-        if (root) record(disk, 'root', root)
+        const roots = literalStringBranches(propertyNamed(config, 'root')?.value)
+        if (roots && roots.every(Boolean)) record(disk, 'roots', roots)
       }
     })
   }
@@ -548,21 +568,27 @@ export async function checkAttachmentsPublicDisk(options: {
   for (const { relPath, disk } of defaults) {
     const declaration = declarations.get(disk)
     // Unreadable in either field: skip, never guess.
-    if (!declaration || declaration.root == null) continue
+    if (!declaration || declaration.roots == null) continue
     if (!KNOWN_FILESYSTEM_DRIVERS.has(declaration.driver ?? '')) continue
 
     const key = `attachments-public-disk:${relPath}:${disk}`
     const title = 'Attachments disk outside public/'
-    const root = resolve(cwd, declaration.root)
+    let exposedRoot: string | undefined
+    for (const root of declaration.roots) {
+      if (await isReachableFromPublicDir(publicDir, resolve(cwd, root))) {
+        exposedRoot = root
+        break
+      }
+    }
 
-    if (await isReachableFromPublicDir(publicDir, root)) {
+    if (exposedRoot !== undefined) {
       results.push(
         check(
           key,
           title,
           'fail',
           `configureAttachments() in ${relPath} stores new attachments on disk '${disk}', which is ` +
-            `rooted at ${declaration.root} — reachable through the public directory the app serves ` +
+            `rooted at ${exposedRoot} — reachable through the public directory the app serves ` +
             `statically. Every upload is then fetchable by URL with no signature, no expiry and no ` +
             `authorization check, whatever the delivery route is configured to do, because nothing ` +
             `has to go through it to reach the file. Serving those bytes is only as safe as the ` +
@@ -577,7 +603,7 @@ export async function checkAttachmentsPublicDisk(options: {
       )
     } else {
       results.push(
-        check(key, title, 'pass', `Attachments disk '${disk}' is rooted outside public/ (${declaration.root}).`),
+        check(key, title, 'pass', `Attachments disk '${disk}' is rooted outside public/ (${declaration.roots.join(', ')}).`),
       )
     }
   }
