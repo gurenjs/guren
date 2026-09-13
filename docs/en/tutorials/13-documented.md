@@ -442,7 +442,7 @@ Watch the YAML, because this one bites: `issues: [412, #398]` loses everything a
 - **`check --spec` fails right after `spec:generate`.** Something changed between the two commands, or you edited a view. These files are output; edit the code instead.
 - **A doc link fails after a rename.** That is the feature. Update the `related:` entry or the `@docs` tag in the same commit as the rename; `bunx guren docs:graph --path <file>` tells you what governs a file before you move it.
 - **`check --docs` warns that a doc has no frontmatter.** Any markdown under `docs/` that is not a concept document should say so with at least a `type:`; `index.md` and `log.md` are the two exempt names.
-- **`guren check` printed failures and exited 0.** Plain `check` reports; `check --docs`, `check --spec` and `guren gate` are what set an exit code. The gate is stricter still: it fails on warnings too.
+- **`guren check` printed failures and exited 0.** Plain `check` reports; `check --docs`, `check --spec` and `guren gate` are what set an exit code. The gate is stricter still: it fails on warnings too. The exception is an advisory warning, such as a tool name some clients drop, which `check` prints and no gate counts.
 - **Do not set `stale_after:` in a document you are not going to revisit.** It warns from that date onward, and a warning fails the gate.
 
 ## Exercises

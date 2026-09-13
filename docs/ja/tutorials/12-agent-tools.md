@@ -96,7 +96,7 @@ export function registerWebRoutes(baseRouter: Router): void {
       // Inertia page working while the tool still advertises a shape.
       resource: { post: PostResource, comments: [CommentResource] },
     }, [PostController, 'show'])
-    .agent({ description: 'Read one post by id, with its author, tags and comments.' })
+    .agent({ toolName: 'posts_show', description: 'Read one post by id, with its author, tags and comments.' })
   router.get('/links', [LinkController, 'index']).name('links.index')
   router.get('/links/:id', { bind: { id: Link }, name: 'links.show' }, [LinkController, 'show'])
 
@@ -106,6 +106,8 @@ export function registerWebRoutes(baseRouter: Router): void {
 ```
 
 `.agent()` が受け取るのはツールの説明と注釈だけで、スキーマは受け取りません。エージェントがそのルートを*呼ぶ*ために必要なものは、すべてルートがすでに持っている契約から来ます。`params`、`query`、`body` はひとつのフラットな入力オブジェクトになり、何が返ってくるかは `resource` か `output` が記述します。これがこの設計の狙いで、ツールはルートのビューであって、ルートの 2 つ目の定義ではありません。
+
+自分で書く名前は `toolName` だけです。省くと、ツールはルート名の `posts.show` で公開されます。MCP はドットを許しますが、Claude と OpenAI のツール API が受け付けるのは `^[A-Za-z0-9_-]{1,64}$` だけです。Claude Managed Agents のように、この文法を MCP のツールにも当てはめるクライアントは、ドットを含む名前を何も知らせずに落とします。`posts_show` なら、どのクライアントからも呼べます。ルート名、`route('posts.show')`、URL はそのままです。変わるのはエージェントに見える名前だけで、テストが呼ぶのもこの名前です。
 
 ツールのマニフェストは生成コードなので、生成し直します。
 
@@ -119,14 +121,15 @@ bun run codegen
 bunx guren tool:list
 ```
 
-1 行、7 列です。ツール名、背後にあるメソッドとパス、それぞれのプロトコル面に現れるかどうか、認可に使うアビリティ、そして注釈。`posts.show` が `read-only, idempotent` なのは `GET` だからで、`guren` は書かせる代わりにメソッドから解決しています。
+1 行、7 列です。ツール名、背後にあるメソッドとパス、それぞれのプロトコル面に現れるかどうか、認可に使うアビリティ、そして注釈。`posts_show` が `read-only, idempotent` なのは `GET` だからで、`guren` は書かせる代わりにメソッドから解決しています。
 
 ```bash run
-bunx guren tool:inspect posts.show
+bunx guren tool:inspect posts_show
 ```
 
 ```bash manual
-posts.show     GET /posts/:id
+posts_show     GET /posts/:id
+Route:         posts.show
 Description:   Read one post by id, with its author, tags and comments.
 Exposure:      mcp=yes webMcp=yes
 Annotations:   read-only, idempotent
@@ -139,7 +142,7 @@ Output
   (no output schema; response declared by PostResource, CommentResource)
 ```
 
-`id: string` ではなく `id: integer` になるのは、`PostIdParamSchema` が coerce するからです。このスキーマは第 9 章でコントローラーのために書いたものですが、いまやツールの引数リストも兼ねています。契約をアクションの中だけに置かずルートに置く理由は、これに尽きます。
+`Route` の行が出るのは、ツール名とルート名が別になったからです。`id: string` ではなく `id: integer` になるのは、`PostIdParamSchema` が coerce するからです。このスキーマは第 9 章でコントローラーのために書いたものですが、いまやツールの引数リストも兼ねています。契約をアクションの中だけに置かずルートに置く理由は、これに尽きます。
 
 ## 2. ツールを仕様化する
 
@@ -172,17 +175,17 @@ describe('agent tools', () => {
 
   it('exposes the reading tools to anyone', async () => {
     const names = (await http.agent().tools()).map((tool) => tool.toolName)
-    expect(names).toContain('posts.index')
-    expect(names).toContain('posts.show')
+    expect(names).toContain('posts_index')
+    expect(names).toContain('posts_show')
 
-    const result = await http.agent().call('posts.show', { id: post.id }).assertOk()
+    const result = await http.agent().call('posts_show', { id: post.id }).assertOk()
     expect(result.text).toContain('On tools')
   })
 
   it('publishes through a tool, and answers with the post', async () => {
     const asAda = await http.actingAs(ada).withCsrf()
 
-    const published = await asAda.agent().call('posts.publish', { id: post.id }).assertOk()
+    const published = await asAda.agent().call('posts_publish', { id: post.id }).assertOk()
 
     expect(published.structuredContent?.post).toMatchObject({ id: post.id, title: 'On tools' })
     const fresh = await Post.findOrFail(post.id)
@@ -192,7 +195,7 @@ describe('agent tools', () => {
   it('refuses to publish someone else\'s post', async () => {
     const asGrace = await http.actingAs(grace).withCsrf()
 
-    await asGrace.agent().call('posts.publish', { id: post.id }).assertStatus(403)
+    await asGrace.agent().call('posts_publish', { id: post.id }).assertStatus(403)
 
     const fresh = await Post.findOrFail(post.id)
     expect(fresh.publishedAt).toBeNull()
@@ -485,7 +488,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: PublishPayloadSchema,
         output: PublishResponseSchema,
       }, [PostController, 'publish'])
-      .agent({ description: 'Publish a draft post. Only the post\'s author may call it.' })
+      .agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.' })
     auth.post('/posts/:id/unpublish', { bind: { id: Post }, name: 'posts.unpublish' }, [PostController, 'unpublish'])
     auth.post('/posts/:id/cover', { bind: { id: Post }, name: 'posts.cover' }, [PostController, 'cover'])
     auth.delete('/posts/:id/images/:attachment', { bind: { id: Post }, name: 'posts.images.destroy', params: PostImageParamSchema }, [PostController, 'destroyImage'])
@@ -500,7 +503,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
   router
     .get('/posts', { name: 'posts.index', query: ListPostsQuerySchema, resource: { data: [PostResource] } }, [PostController, 'index'])
-    .agent({ description: 'List posts, newest first, ten to a page.' })
+    .agent({ toolName: 'posts_index', description: 'List posts, newest first, ten to a page.' })
   router
     .get('/posts/:id', {
       name: 'posts.show',
@@ -510,7 +513,7 @@ export function registerWebRoutes(baseRouter: Router): void {
       // Inertia page working while the tool still advertises a shape.
       resource: { post: PostResource, comments: [CommentResource] },
     }, [PostController, 'show'])
-    .agent({ description: 'Read one post by id, with its author, tags and comments.' })
+    .agent({ toolName: 'posts_show', description: 'Read one post by id, with its author, tags and comments.' })
   router.get('/links', [LinkController, 'index']).name('links.index')
   router.get('/links/:id', { bind: { id: Link }, name: 'links.show' }, [LinkController, 'show'])
 
@@ -535,7 +538,7 @@ bun test
 bunx guren tool:list
 ```
 
-ツールは 3 つ。`posts.publish` は `destructive` ですが、その `Auth` 列に `publish` はどこにもありません。アビリティはアクションの中で決まるからです。`-` と表示される列は「静的には導出できない」という意味で、「認可されていない」ではありません。
+ツールは 3 つ。`posts_publish` は `destructive` ですが、その `Auth` 列に `publish` はどこにもありません。アビリティはアクションの中で決まるからです。`-` と表示される列は「静的には導出できない」という意味で、「認可されていない」ではありません。
 
 ## 4. ついに失敗するチェック
 
@@ -622,7 +625,7 @@ describe('comment tools', () => {
   it('writes a comment through a tool and answers with it', async () => {
     const asGrace = await http.actingAs(grace).withCsrf()
 
-    const result = await asGrace.agent().call('comments.store', { id: post.id, body: 'Read it twice' }).assertOk()
+    const result = await asGrace.agent().call('comments_store', { id: post.id, body: 'Read it twice' }).assertOk()
 
     expect(result.structuredContent?.comment).toMatchObject({ body: 'Read it twice' })
     const stored = await Comment.where('postId', post.id).first()
@@ -632,7 +635,7 @@ describe('comment tools', () => {
   it('validates the comment it is given', async () => {
     const asGrace = await http.actingAs(grace).withCsrf()
 
-    const result = await asGrace.agent().call('comments.store', { id: post.id, body: '   ' }).assertStatus(422)
+    const result = await asGrace.agent().call('comments_store', { id: post.id, body: '   ' }).assertStatus(422)
 
     expect(result.isError).toBe(true)
     expect(result.text).toContain('Say something')
@@ -642,7 +645,7 @@ describe('comment tools', () => {
     const comment = await Comment.forceCreate({ body: 'Mine', postId: post.id, authorId: ada.id })
     const asGrace = await http.actingAs(grace).withCsrf()
 
-    await asGrace.agent().call('comments.destroy', { id: comment.id }).assertStatus(403)
+    await asGrace.agent().call('comments_destroy', { id: comment.id }).assertStatus(403)
 
     expect(await Comment.find(comment.id)).not.toBeNull()
   })
@@ -655,11 +658,11 @@ describe('comment tools', () => {
 bun test
 ```
 
-赤が 3 件で、今回はたまたま通るものがありません。その理由は知っておく価値があります。`agent().call()` はリクエストを組み立てる前にツールを名前で引くので、まだ公開されていない名前を渡すと、ステータスを返すのではなく `No agent tool named "comments.destroy"` を throw します。403 を期待している拒否のテストでさえ、存在しないツールからは拒否されようがありません。
+赤が 3 件で、今回はたまたま通るものがありません。その理由は知っておく価値があります。`agent().call()` はリクエストを組み立てる前にツールを名前で引くので、まだ公開されていない名前を渡すと、ステータスを返すのではなく `No agent tool named "comments_destroy"` を throw します。403 を期待している拒否のテストでさえ、存在しないツールからは拒否されようがありません。
 
 ## 6. 委ねる
 
-> Expose the comment routes as agent tools. `comments.store` and `comments.destroy` should be callable by an agent, follow the same pattern `posts.publish` uses (a `params` schema, a `body` schema where the action takes one, an `output` schema, and a JSON answer for a tool call while the browser keeps its redirect), and keep the policies they already have. `tests/AgentComments.test.ts` describes them; make it pass.
+> Expose the comment routes as agent tools. `comments.store` and `comments.destroy` should be callable by an agent as `comments_store` and `comments_destroy`, follow the same pattern `posts.publish` uses (a `toolName`, a `params` schema, a `body` schema where the action takes one, an `output` schema, and a JSON answer for a tool call while the browser keeps its redirect), and keep the policies they already have. `tests/AgentComments.test.ts` describes them; make it pass.
 
 このプロンプトは認可に触れていませんが、その必要もありません。見張るものが 2 つあるからです。第 8 章の所有権の rule と、`guren check --ci` です。後者は、エージェントがポリシーを呼ばずに `comments.destroy` を公開したら、ビルドをきっぱり失敗させます。diff の中の `output` スキーマを確かめてから、チェックを実行してください。
 
@@ -801,7 +804,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: PublishPayloadSchema,
         output: PublishResponseSchema,
       }, [PostController, 'publish'])
-      .agent({ description: 'Publish a draft post. Only the post\'s author may call it.' })
+      .agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.' })
     auth.post('/posts/:id/unpublish', { bind: { id: Post }, name: 'posts.unpublish' }, [PostController, 'unpublish'])
     auth.post('/posts/:id/cover', { bind: { id: Post }, name: 'posts.cover' }, [PostController, 'cover'])
     auth.delete('/posts/:id/images/:attachment', { bind: { id: Post }, name: 'posts.images.destroy', params: PostImageParamSchema }, [PostController, 'destroyImage'])
@@ -813,7 +816,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: CommentPayloadSchema,
         output: CommentResponseSchema,
       }, [CommentController, 'store'])
-      .agent({ description: 'Add a comment to a post, as the calling user.' })
+      .agent({ toolName: 'comments_store', description: 'Add a comment to a post, as the calling user.' })
     auth
       .delete('/comments/:id', {
         bind: { id: Comment },
@@ -821,7 +824,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         params: CommentIdParamSchema,
         output: CommentDeletedSchema,
       }, [CommentController, 'destroy'])
-      .agent({ description: 'Delete one comment. Only its author may call it.' })
+      .agent({ toolName: 'comments_destroy', description: 'Delete one comment. Only its author may call it.' })
     auth.get('/links/create', [LinkController, 'create']).name('links.create')
     auth.get('/links/:id/edit', { bind: { id: Link }, name: 'links.edit' }, [LinkController, 'edit'])
     auth.post('/links', { name: 'links.store', body: LinkPayloadSchema }, [LinkController, 'store'])
@@ -831,7 +834,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
   router
     .get('/posts', { name: 'posts.index', query: ListPostsQuerySchema, resource: { data: [PostResource] } }, [PostController, 'index'])
-    .agent({ description: 'List posts, newest first, ten to a page.' })
+    .agent({ toolName: 'posts_index', description: 'List posts, newest first, ten to a page.' })
   router
     .get('/posts/:id', {
       name: 'posts.show',
@@ -841,7 +844,7 @@ export function registerWebRoutes(baseRouter: Router): void {
       // Inertia page working while the tool still advertises a shape.
       resource: { post: PostResource, comments: [CommentResource] },
     }, [PostController, 'show'])
-    .agent({ description: 'Read one post by id, with its author, tags and comments.' })
+    .agent({ toolName: 'posts_show', description: 'Read one post by id, with its author, tags and comments.' })
   router.get('/links', [LinkController, 'index']).name('links.index')
   router.get('/links/:id', { bind: { id: Link }, name: 'links.show' }, [LinkController, 'show'])
 
@@ -860,7 +863,7 @@ bun test
 
 rubric は次のとおりです。
 
-- コメントのルートは両方とも `params` スキーマと `output` スキーマを持ち、`comments.store` は `body` の契約を保っている。`guren check --ci` が緑、つまり入力や出力の記述を欠いたツールがひとつも無い。
+- コメントのルートは両方とも `toolName`(`comments_store`、`comments_destroy`)、`params` スキーマ、`output` スキーマを持ち、`comments.store` は `body` の契約を保っている。`guren check --ci` が緑、つまり入力や出力の記述を欠いたツールがひとつも無い。
 - どのアクションも `authorize()` の呼び出しを保ち、JSON の分岐はその*あと*にある。ポリシーより前にエージェント向けの応答があると、そのポリシーはブラウザにしか走りません。
 - ブラウザは相変わらずリダイレクトする。ブラウザでコメントを投稿すれば、投稿のページに戻ってくる。
 - エージェントのテスト 5 件が通る。`Say something` を運ぶ 422 も、他人のコメントに対する 403 も含めて。
@@ -918,6 +921,7 @@ app.auth.useTokens(new DatabaseApiTokenStore(apiTokens))
 ## よくあるつまずき
 
 - **`guren check` がマニフェストが無いと言う。** `.agent()` を宣言すると `.guren/agents.gen.ts` がアプリの一部になります。`bun run codegen` を実行してください。
+- **ツール名が `^[A-Za-z0-9_-]{1,64}$` から外れている、と `guren check` が警告する。** ルートに `.agent()` はあっても `toolName` が無いので、ツールはドットを含むルート名で公開されています。この章のツールと同じように、アンダースコアで綴った `toolName` を付けてください。この警告は advisory なので `guren gate` は通ります。ツールを落とすクライアントの側も、何も知らせてくれません。
 - **エージェントには何を送ればよいか見えない、とツールが警告する。** `POST`、`PUT`、`PATCH` のツールにはどれも `body` スキーマが要ります。ペイロードを取らないものでも同じで、`z.object({})` が正直な答えです。
 - **ツール呼び出しで `Response validation failed` の 500。** `output` スキーマと、アクションが返す JSON が食い違っています。スキーマは 2xx のレスポンスに対して強制されます。それがこのスキーマの目的です。間違っているほうを直してください。
 - **ツール呼び出しが `HTTP 302 (Location: …)` を返す。** アクションがリダイレクトしたので、エージェントに読むものがありません。`publish` がそうしているように、JSON の分岐を与えてください。
@@ -927,7 +931,7 @@ app.auth.useTokens(new DatabaseApiTokenStore(apiTokens))
 ## 演習
 
 1. `posts.publish` に `agent: { readOnlyHint: true }` を足して `bunx guren check --ci` を走らせてください。指摘を読んでから、ヒントを消してください。間違った注釈が、ポリシーの欠落と同じくらい重く扱われるのはなぜですか。
-2. どの投稿にも存在しない id で `posts.show` を `TestApp.agent()` から呼んでください。エージェントは何を受け取りますか。同じ URL でブラウザが受け取るものと比べ、その差のどこがフレームワークによるもので、どこが自分の書いたコードによるものかを答えてください。
+2. どの投稿にも存在しない id で `posts_show` を `TestApp.agent()` から呼んでください。エージェントは何を受け取りますか。同じ URL でブラウザが受け取るものと比べ、その差のどこがフレームワークによるもので、どこが自分の書いたコードによるものかを答えてください。
 
 ## 次へ
 

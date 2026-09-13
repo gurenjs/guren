@@ -96,7 +96,7 @@ export function registerWebRoutes(baseRouter: Router): void {
       // Inertia page working while the tool still advertises a shape.
       resource: { post: PostResource, comments: [CommentResource] },
     }, [PostController, 'show'])
-    .agent({ description: 'Read one post by id, with its author, tags and comments.' })
+    .agent({ toolName: 'posts_show', description: 'Read one post by id, with its author, tags and comments.' })
   router.get('/links', [LinkController, 'index']).name('links.index')
   router.get('/links/:id', { bind: { id: Link }, name: 'links.show' }, [LinkController, 'show'])
 
@@ -106,6 +106,8 @@ export function registerWebRoutes(baseRouter: Router): void {
 ```
 
 `.agent()` takes the tool's description and its annotations; it does not take schemas. Everything an agent needs to *call* the route comes from the contract the route already carries: `params`, `query` and `body` become one flat input object, and `resource` or `output` describes what comes back. That is the design: a tool is a view of a route, not a second definition of it.
+
+The one name you do write is `toolName`. Without it the tool is advertised under the route name, `posts.show`, and MCP allows the dot. The Claude and OpenAI tool APIs do not: they accept only `^[A-Za-z0-9_-]{1,64}$`, and a client that applies that grammar to MCP tools, such as Claude Managed Agents, drops a dotted name without telling you. `posts_show` is callable from all of them. The route name, `route('posts.show')` and the URL stay as they were; only the name an agent sees changes, and it is also the name your tests call.
 
 The tool manifest is generated code, so regenerate it:
 
@@ -119,14 +121,15 @@ Now look at what you declared:
 bunx guren tool:list
 ```
 
-One row, seven columns: the tool name, the method and path behind it, whether it appears on each protocol surface, the ability that authorizes it, and its annotations. `posts.show` is `read-only, idempotent` because it is a `GET`, and `guren` resolved those from the method rather than making you write them.
+One row, seven columns: the tool name, the method and path behind it, whether it appears on each protocol surface, the ability that authorizes it, and its annotations. `posts_show` is `read-only, idempotent` because it is a `GET`, and `guren` resolved those from the method rather than making you write them.
 
 ```bash run
-bunx guren tool:inspect posts.show
+bunx guren tool:inspect posts_show
 ```
 
 ```bash manual
-posts.show     GET /posts/:id
+posts_show     GET /posts/:id
+Route:         posts.show
 Description:   Read one post by id, with its author, tags and comments.
 Exposure:      mcp=yes webMcp=yes
 Annotations:   read-only, idempotent
@@ -139,7 +142,7 @@ Output
   (no output schema; response declared by PostResource, CommentResource)
 ```
 
-`id: integer`, not `id: string`, because `PostIdParamSchema` coerces it. That schema was written in chapter 9 for the controller's benefit; it now doubles as the tool's argument list, which is the whole argument for putting contracts on routes rather than only inside actions.
+The `Route` line is there because the tool name and the route name now differ. `id: integer`, not `id: string`, because `PostIdParamSchema` coerces it. That schema was written in chapter 9 for the controller's benefit; it now doubles as the tool's argument list, which is the whole argument for putting contracts on routes rather than only inside actions.
 
 ## 2. Specify the tools
 
@@ -172,17 +175,17 @@ describe('agent tools', () => {
 
   it('exposes the reading tools to anyone', async () => {
     const names = (await http.agent().tools()).map((tool) => tool.toolName)
-    expect(names).toContain('posts.index')
-    expect(names).toContain('posts.show')
+    expect(names).toContain('posts_index')
+    expect(names).toContain('posts_show')
 
-    const result = await http.agent().call('posts.show', { id: post.id }).assertOk()
+    const result = await http.agent().call('posts_show', { id: post.id }).assertOk()
     expect(result.text).toContain('On tools')
   })
 
   it('publishes through a tool, and answers with the post', async () => {
     const asAda = await http.actingAs(ada).withCsrf()
 
-    const published = await asAda.agent().call('posts.publish', { id: post.id }).assertOk()
+    const published = await asAda.agent().call('posts_publish', { id: post.id }).assertOk()
 
     expect(published.structuredContent?.post).toMatchObject({ id: post.id, title: 'On tools' })
     const fresh = await Post.findOrFail(post.id)
@@ -192,7 +195,7 @@ describe('agent tools', () => {
   it('refuses to publish someone else\'s post', async () => {
     const asGrace = await http.actingAs(grace).withCsrf()
 
-    await asGrace.agent().call('posts.publish', { id: post.id }).assertStatus(403)
+    await asGrace.agent().call('posts_publish', { id: post.id }).assertStatus(403)
 
     const fresh = await Post.findOrFail(post.id)
     expect(fresh.publishedAt).toBeNull()
@@ -485,7 +488,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: PublishPayloadSchema,
         output: PublishResponseSchema,
       }, [PostController, 'publish'])
-      .agent({ description: 'Publish a draft post. Only the post\'s author may call it.' })
+      .agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.' })
     auth.post('/posts/:id/unpublish', { bind: { id: Post }, name: 'posts.unpublish' }, [PostController, 'unpublish'])
     auth.post('/posts/:id/cover', { bind: { id: Post }, name: 'posts.cover' }, [PostController, 'cover'])
     auth.delete('/posts/:id/images/:attachment', { bind: { id: Post }, name: 'posts.images.destroy', params: PostImageParamSchema }, [PostController, 'destroyImage'])
@@ -500,7 +503,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
   router
     .get('/posts', { name: 'posts.index', query: ListPostsQuerySchema, resource: { data: [PostResource] } }, [PostController, 'index'])
-    .agent({ description: 'List posts, newest first, ten to a page.' })
+    .agent({ toolName: 'posts_index', description: 'List posts, newest first, ten to a page.' })
   router
     .get('/posts/:id', {
       name: 'posts.show',
@@ -510,7 +513,7 @@ export function registerWebRoutes(baseRouter: Router): void {
       // Inertia page working while the tool still advertises a shape.
       resource: { post: PostResource, comments: [CommentResource] },
     }, [PostController, 'show'])
-    .agent({ description: 'Read one post by id, with its author, tags and comments.' })
+    .agent({ toolName: 'posts_show', description: 'Read one post by id, with its author, tags and comments.' })
   router.get('/links', [LinkController, 'index']).name('links.index')
   router.get('/links/:id', { bind: { id: Link }, name: 'links.show' }, [LinkController, 'show'])
 
@@ -535,7 +538,7 @@ Green.
 bunx guren tool:list
 ```
 
-Three tools. `posts.publish` is `destructive`, with `publish` nowhere in its `Auth` column: the ability is decided inside the action, and a column that reads `-` means "not statically derivable", never "not authorized".
+Three tools. `posts_publish` is `destructive`, with `publish` nowhere in its `Auth` column: the ability is decided inside the action, and a column that reads `-` means "not statically derivable", never "not authorized".
 
 ## 4. The check that finally fails
 
@@ -622,7 +625,7 @@ describe('comment tools', () => {
   it('writes a comment through a tool and answers with it', async () => {
     const asGrace = await http.actingAs(grace).withCsrf()
 
-    const result = await asGrace.agent().call('comments.store', { id: post.id, body: 'Read it twice' }).assertOk()
+    const result = await asGrace.agent().call('comments_store', { id: post.id, body: 'Read it twice' }).assertOk()
 
     expect(result.structuredContent?.comment).toMatchObject({ body: 'Read it twice' })
     const stored = await Comment.where('postId', post.id).first()
@@ -632,7 +635,7 @@ describe('comment tools', () => {
   it('validates the comment it is given', async () => {
     const asGrace = await http.actingAs(grace).withCsrf()
 
-    const result = await asGrace.agent().call('comments.store', { id: post.id, body: '   ' }).assertStatus(422)
+    const result = await asGrace.agent().call('comments_store', { id: post.id, body: '   ' }).assertStatus(422)
 
     expect(result.isError).toBe(true)
     expect(result.text).toContain('Say something')
@@ -642,7 +645,7 @@ describe('comment tools', () => {
     const comment = await Comment.forceCreate({ body: 'Mine', postId: post.id, authorId: ada.id })
     const asGrace = await http.actingAs(grace).withCsrf()
 
-    await asGrace.agent().call('comments.destroy', { id: comment.id }).assertStatus(403)
+    await asGrace.agent().call('comments_destroy', { id: comment.id }).assertStatus(403)
 
     expect(await Comment.find(comment.id)).not.toBeNull()
   })
@@ -655,11 +658,11 @@ The middle test is the one worth keeping. A tool call that sends a bad argument 
 bun test
 ```
 
-Three red, with no accidental green this time, and the reason is worth knowing. `agent().call()` looks the tool up by name before it builds a request, so a name that is not exposed yet throws `No agent tool named "comments.destroy"` instead of answering with a status. Even the refusal test, which wants a 403, cannot be refused by a tool that does not exist.
+Three red, with no accidental green this time, and the reason is worth knowing. `agent().call()` looks the tool up by name before it builds a request, so a name that is not exposed yet throws `No agent tool named "comments_destroy"` instead of answering with a status. Even the refusal test, which wants a 403, cannot be refused by a tool that does not exist.
 
 ## 6. Delegate it
 
-> Expose the comment routes as agent tools. `comments.store` and `comments.destroy` should be callable by an agent, follow the same pattern `posts.publish` uses (a `params` schema, a `body` schema where the action takes one, an `output` schema, and a JSON answer for a tool call while the browser keeps its redirect), and keep the policies they already have. `tests/AgentComments.test.ts` describes them; make it pass.
+> Expose the comment routes as agent tools. `comments.store` and `comments.destroy` should be callable by an agent as `comments_store` and `comments_destroy`, follow the same pattern `posts.publish` uses (a `toolName`, a `params` schema, a `body` schema where the action takes one, an `output` schema, and a JSON answer for a tool call while the browser keeps its redirect), and keep the policies they already have. `tests/AgentComments.test.ts` describes them; make it pass.
 
 The prompt says nothing about authorization, and it does not have to. Two things are watching now: the ownership rule from chapter 8, and `guren check --ci`, which will fail the build outright if the agent exposes `comments.destroy` without a policy call. Read the diff for the `output` schemas, then run the check.
 
@@ -801,7 +804,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: PublishPayloadSchema,
         output: PublishResponseSchema,
       }, [PostController, 'publish'])
-      .agent({ description: 'Publish a draft post. Only the post\'s author may call it.' })
+      .agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.' })
     auth.post('/posts/:id/unpublish', { bind: { id: Post }, name: 'posts.unpublish' }, [PostController, 'unpublish'])
     auth.post('/posts/:id/cover', { bind: { id: Post }, name: 'posts.cover' }, [PostController, 'cover'])
     auth.delete('/posts/:id/images/:attachment', { bind: { id: Post }, name: 'posts.images.destroy', params: PostImageParamSchema }, [PostController, 'destroyImage'])
@@ -813,7 +816,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         body: CommentPayloadSchema,
         output: CommentResponseSchema,
       }, [CommentController, 'store'])
-      .agent({ description: 'Add a comment to a post, as the calling user.' })
+      .agent({ toolName: 'comments_store', description: 'Add a comment to a post, as the calling user.' })
     auth
       .delete('/comments/:id', {
         bind: { id: Comment },
@@ -821,7 +824,7 @@ export function registerWebRoutes(baseRouter: Router): void {
         params: CommentIdParamSchema,
         output: CommentDeletedSchema,
       }, [CommentController, 'destroy'])
-      .agent({ description: 'Delete one comment. Only its author may call it.' })
+      .agent({ toolName: 'comments_destroy', description: 'Delete one comment. Only its author may call it.' })
     auth.get('/links/create', [LinkController, 'create']).name('links.create')
     auth.get('/links/:id/edit', { bind: { id: Link }, name: 'links.edit' }, [LinkController, 'edit'])
     auth.post('/links', { name: 'links.store', body: LinkPayloadSchema }, [LinkController, 'store'])
@@ -831,7 +834,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
   router
     .get('/posts', { name: 'posts.index', query: ListPostsQuerySchema, resource: { data: [PostResource] } }, [PostController, 'index'])
-    .agent({ description: 'List posts, newest first, ten to a page.' })
+    .agent({ toolName: 'posts_index', description: 'List posts, newest first, ten to a page.' })
   router
     .get('/posts/:id', {
       name: 'posts.show',
@@ -841,7 +844,7 @@ export function registerWebRoutes(baseRouter: Router): void {
       // Inertia page working while the tool still advertises a shape.
       resource: { post: PostResource, comments: [CommentResource] },
     }, [PostController, 'show'])
-    .agent({ description: 'Read one post by id, with its author, tags and comments.' })
+    .agent({ toolName: 'posts_show', description: 'Read one post by id, with its author, tags and comments.' })
   router.get('/links', [LinkController, 'index']).name('links.index')
   router.get('/links/:id', { bind: { id: Link }, name: 'links.show' }, [LinkController, 'show'])
 
@@ -860,7 +863,7 @@ bun test
 
 The rubric:
 
-- Both comment routes carry a `params` schema, an `output` schema, and `comments.store` keeps its `body` contract. `guren check --ci` is green, which means no tool is missing an input or output description.
+- Both comment routes carry a `toolName` (`comments_store`, `comments_destroy`), a `params` schema, an `output` schema, and `comments.store` keeps its `body` contract. `guren check --ci` is green, which means no tool is missing an input or output description.
 - Each action keeps its `authorize()` call, and the JSON branch is *after* it. An agent-shaped answer above the policy would be a policy that runs for browsers only.
 - The browser still redirects. Post a comment in the browser and you land back on the post.
 - The five agent tests pass, including the 422 that carries `Say something` and the 403 on someone else's comment.
@@ -918,6 +921,7 @@ Do not confuse it with the endpoint your editor already talks to. `GUREN_MCP=1` 
 ## Common trip-ups
 
 - **`guren check` says the manifest is missing.** Declaring `.agent()` makes `.guren/agents.gen.ts` part of the app. Run `bun run codegen`.
+- **`guren check` warns that a tool name falls outside `^[A-Za-z0-9_-]{1,64}$`.** The route has `.agent()` but no `toolName`, so the tool is advertised under its dotted route name. Give it an underscored `toolName`, as every tool in this chapter has. The warning is advisory, so `guren gate` passes regardless, and the client that drops the tool will not tell you either.
 - **A tool warns that an agent cannot see what to send.** Any `POST`, `PUT` or `PATCH` tool needs a `body` schema, even one that takes no payload. `z.object({})` is the honest answer there.
 - **`Response validation failed`, 500, on a tool call.** The `output` schema and the JSON the action returns disagree. The schema is enforced on 2xx responses, which is the point of it; fix whichever is wrong.
 - **A tool call returns `HTTP 302 (Location: …)`.** The action redirected, so there is nothing for the agent to read. Give it a JSON branch, as `publish` has.
@@ -927,7 +931,7 @@ Do not confuse it with the endpoint your editor already talks to. `GUREN_MCP=1` 
 ## Exercises
 
 1. Add `agent: { readOnlyHint: true }` to `posts.publish` and run `bunx guren check --ci`. Read the finding, then remove the hint. Why is a wrong annotation treated as seriously as a missing policy?
-2. Call `posts.show` through `TestApp.agent()` with an id no post has. What does the agent receive? Compare it with what a browser gets at the same URL, and say which parts of the difference are the framework's doing and which are yours.
+2. Call `posts_show` through `TestApp.agent()` with an id no post has. What does the agent receive? Compare it with what a browser gets at the same URL, and say which parts of the difference are the framework's doing and which are yours.
 
 ## Next
 
