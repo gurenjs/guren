@@ -12,7 +12,8 @@ export default class MailProvider extends ServiceProvider {
           // `||`, not `??`: a blanked `MAIL_FROM_ADDRESS=` is '', which is no sender.
           from: {
             email: process.env.MAIL_FROM_ADDRESS || 'noreply@example.com',
-            name: process.env.MAIL_FROM_NAME || 'Guren App',
+            // oxlint-disable-next-line guren/no-nullish-env-default -- an empty display name is a choice, not a missing value
+            name: process.env.MAIL_FROM_NAME ?? 'Guren App',
           },
           transports: {
             log: { driver: 'log' },
