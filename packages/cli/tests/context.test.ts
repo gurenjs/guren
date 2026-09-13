@@ -43,6 +43,31 @@ export class Post extends defineModel(posts) {}`,
     }
   })
 
+  it('labels the framework line by the package it could read', async () => {
+    const workspace = await createTempWorkspace('guren-cli-context-version-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ dependencies: { '@guren/core': '^1.18.0' } }),
+        'utf8',
+      )
+      // Not installed yet: the declared range, named as core's.
+      expect((await generateContext({ cwd: workspace.dir })).framework).toEqual({ name: '@guren/core', version: '^1.18.0' })
+
+      // Installed without a hoisted @guren/server: core's installed version, still named as core's.
+      await mkdir(join(workspace.dir, 'node_modules/@guren/core'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'node_modules/@guren/core/package.json'),
+        JSON.stringify({ name: '@guren/core', version: '1.18.0' }),
+        'utf8',
+      )
+      expect((await generateContext({ cwd: workspace.dir })).framework).toEqual({ name: '@guren/core', version: '1.18.0' })
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('discovers pages from resources/js/pages', async () => {
     const workspace = await createTempWorkspace('guren-cli-context-pages-')
 

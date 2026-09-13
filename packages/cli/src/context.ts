@@ -44,16 +44,36 @@ export interface ContextOptions {
   routesFile?: string
 }
 
+/**
+ * Guren releases are numbered after @guren/server, and @guren/core sits on its
+ * own version line, so a core version is labelled as core rather than as Guren.
+ * server arrives transitively and may not be hoisted, hence the fallbacks.
+ */
+async function resolveFrameworkVersion(cwd: string): Promise<{ name: string; version: string }> {
+  const installedVersion = async (pkg: string): Promise<string | undefined> => {
+    const raw = await readIfExists(cwd, `node_modules/${pkg}/package.json`)
+    return raw ? (JSON.parse(raw) as { version?: string }).version : undefined
+  }
+
+  const server = await installedVersion('@guren/server')
+  if (server) return { name: 'Guren', version: server }
+
+  const core = await installedVersion('@guren/core')
+  if (core) return { name: '@guren/core', version: core }
+
+  const pkgRaw = await readIfExists(cwd, 'package.json')
+  if (pkgRaw) {
+    const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+    const range = pkg.dependencies?.['@guren/core'] ?? pkg.devDependencies?.['@guren/core']
+    if (range) return { name: '@guren/core', version: range }
+  }
+  return { name: 'Guren', version: 'unknown' }
+}
+
 export async function generateContext(options: ContextOptions = {}): Promise<ProjectContext> {
   const cwd = resolve(options.cwd ?? process.cwd())
 
-  // Guren releases are numbered after @guren/server; @guren/core, the package an
-  // app declares, sits on its own version line, so its range names no release.
-  let version = 'unknown'
-  const serverManifest = await readIfExists(cwd, 'node_modules/@guren/server/package.json')
-  if (serverManifest) {
-    version = (JSON.parse(serverManifest) as { version?: string }).version ?? 'unknown'
-  }
+  const framework = await resolveFrameworkVersion(cwd)
 
   const collectModels = async (): Promise<ModelInfo[]> => {
     const modelFiles = await discoverModelFiles(cwd)
@@ -106,7 +126,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
   ])
 
   return {
-    framework: { name: 'Guren', version },
+    framework,
     models,
     routes,
     routesError: routeLoadErrors[0],
