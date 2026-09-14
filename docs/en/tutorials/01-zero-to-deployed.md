@@ -431,7 +431,7 @@ docker build -t guren-blog .
 docker run --rm -p 3333:3333 --env-file .env guren-blog
 ```
 
-The container prints nothing when the server starts, so a silent terminal is not a hang. Open [http://localhost:3333](http://localhost:3333) again. Same page, but served by the production build of your app from inside a container, on a machine that could be anyone's. Stop it with Ctrl-C. Two caveats, both fixed in chapter 14: the container reads your development `.env`, and its SQLite file lives inside the container, so it forgets everything when it stops.
+A production start has no banner: once the server is up, the container prints one line, `[guren] Listening on http://0.0.0.0:3333`. The address is the container's wildcard bind; from your machine it is still `localhost:3333`. Open [http://localhost:3333](http://localhost:3333) again. Same page, but served by the production build of your app from inside a container, on a machine that could be anyone's. Stop it with Ctrl-C. Two caveats, both fixed in chapter 14: the container reads your development `.env`, and its SQLite file lives inside the container, so it forgets everything when it stops.
 
 Commit the recipe:
 

@@ -864,7 +864,7 @@ bun run codegen
 bun test
 ```
 
-Green. **Checkpoint:** open a post, comment on it, sign in as someone else in a private window and comment again; only your own comment has a delete button, and the other one still answers 403 if you post to its URL.
+Green. **Checkpoint:** open a post, comment on it, sign in as someone else in a private window and comment again; only your own comment has a delete button, and the other one still answers 403 to a DELETE request to its URL.
 
 ```bash run
 bunx guren gate
