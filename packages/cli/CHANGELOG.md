@@ -1,5 +1,17 @@
 # @guren/cli
 
+## 2.23.2
+
+### Patch Changes
+
+- 4af4e3d: The `code-review` subagent the agent harness installs now runs `guren check` and `guren audit` and reviews what they do not settle: validation on every mutating route, a resource in front of every record, route registration order, and authorization through a policy. Its checklist and `test-writer`'s examples are corrected against the current framework — `defineModel(table)`, `events.listen(...)` in the app's event provider, `TestApp.fromApp(app)` with CSRF primed on every mutating request, and `fakeEvent`/`fakeQueue` bound through their managers. The `testing` rule every agent target receives carries the CSRF rule too.
+- 56c38c0: `make:feature --prototype` reports the fixture it appended to as updated rather than created, since `guren add prototype` created it. At promotion, the migration step no longer tells you to run `db:make` when a migration in the drizzle `out` folder already creates the table; it names that migration and points at `db:status` for whether it is applied.
+- Updated dependencies [575edf1]
+- Updated dependencies [cfa12ad]
+- Updated dependencies [db35a83]
+  - @guren/orm@2.10.1
+  - @guren/server@2.23.2
+
 ## 2.23.1
 
 ### Patch Changes
