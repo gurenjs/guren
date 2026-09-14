@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
-import { assertCwdUnsupported, kebabCase, writeScaffoldFiles, type WriterOptions } from './utils'
+import { assertCwdUnsupported, kebabCase, writeScaffoldFilesReport, type ScaffoldWriteReport, type WriterOptions } from './utils'
 
 export type DeployTarget = 'docker' | 'fly' | 'railway' | 'all'
 
@@ -166,10 +166,15 @@ function filesForTarget(target: DeployTarget, appName: string, port: number): De
 }
 
 export async function scaffoldDeploy(options: DeployOptions = {}): Promise<string[]> {
+  return (await scaffoldDeployReport(options)).files
+}
+
+/** `scaffoldDeploy`, also naming the recipes `force` overwrote. */
+export async function scaffoldDeployReport(options: DeployOptions = {}): Promise<ScaffoldWriteReport> {
   assertCwdUnsupported(options, 'guren deploy')
   const target = options.target ?? 'docker'
   const port = normalizePort(options.port)
   const appName = sanitizeFlyAppName(options.appName ?? await inferAppName())
   const files = filesForTarget(target, appName, port)
-  return writeScaffoldFiles(files, { force: Boolean(options.force) })
+  return writeScaffoldFilesReport(files, { force: Boolean(options.force) })
 }
