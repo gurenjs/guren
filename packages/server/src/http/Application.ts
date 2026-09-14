@@ -1029,6 +1029,10 @@ export class Application {
         port: boundPort,
         assetsUrl: resolvedAssetsUrl ?? 'http://localhost:5173',
       })
+    } else if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {
+      // The bound address rather than `address.url`: a container operator needs
+      // to see the wildcard bind, not the loopback URL it maps to.
+      console.info(`[guren] Listening on http://${formatHostPort(boundHostname, boundPort)}`)
     }
 
     return address
