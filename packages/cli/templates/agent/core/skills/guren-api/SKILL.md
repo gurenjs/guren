@@ -287,7 +287,8 @@ Source: `packages/server/src/events/`
 - `Listener.ts` — Base listener class
 - `builtin.ts` — Built-in framework events
 
-Register events in `app/Providers/EventServiceProvider.ts`.
+Register listeners with `events.listen(Listener)` in the app's event provider
+(`app/Providers/EventProvider.ts`), and list that provider in `createApp({ providers })`.
 
 ### Jobs & Queue
 Source: `packages/server/src/queue/`

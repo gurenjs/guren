@@ -447,3 +447,52 @@ describe('template completeness', () => {
     ])
   })
 })
+
+describe('shipped path references', () => {
+  /**
+   * A path under one of the harness's own directories, as a harness file spells it.
+   * Only an extension-bearing path matches: the prose also names bare directories
+   * (`.claude/rules/`, `.agents/skills/`), which no plan entry is, and a root dotfile
+   * from another scaffold (`.oxlintrc.json`) has no directory segment at all.
+   */
+  const HARNESS_PATH_RE =
+    /(?<![\w./-])(\.claude|\.agents|\.cursor|\.codex|\.vscode|\.github)\/[\w./-]*[\w-]\.(?:md|mdc|ts|json|toml|rules)/gu
+
+  it('every harness file that names a harness path names one the plan writes', async () => {
+    const templates = await loadAgentTemplates()
+    const plan = planComponents(ALL_COMPONENTS, templates, 'Demo App')
+    const plannedPaths = new Set(plan.map((file) => file.path))
+
+    const dangling: string[] = []
+    for (const file of plan) {
+      for (const [reference] of file.content.matchAll(HARNESS_PATH_RE)) {
+        if (!plannedPaths.has(reference)) {
+          dangling.push(`${file.path} → ${reference}`)
+        }
+      }
+    }
+
+    // A brief telling the agent to read `.claude/rules/coding-standards.md` costs
+    // the reader a tool call and a guess; the harness never shipped that file.
+    expect(dangling).toEqual([])
+  })
+
+  it('recognizes a reference to a file the harness does not ship', async () => {
+    const templates = await loadAgentTemplates()
+    const plan = planComponents(ALL_COMPONENTS, templates, 'Demo App')
+    const plannedPaths = new Set(plan.map((file) => file.path))
+
+    const invented = [
+      ...'read .claude/rules/coding-standards.md first'.matchAll(HARNESS_PATH_RE),
+    ].map(([reference]) => reference)
+
+    expect(invented).toEqual(['.claude/rules/coding-standards.md'])
+    expect(plannedPaths.has(invented[0] as string)).toBe(false)
+  })
+
+  it('ignores bare directories and root dotfiles from other scaffolds', () => {
+    const prose = 'rules live in `.claude/rules/`; `.oxlintrc.json` drives `bun run lint`'
+
+    expect([...prose.matchAll(HARNESS_PATH_RE)]).toEqual([])
+  })
+})

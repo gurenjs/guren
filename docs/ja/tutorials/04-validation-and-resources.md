@@ -537,7 +537,7 @@ bun test
 
 > Complete the posts CRUD. Add `edit`, `update` and `destroy` actions to `PostController` using route model binding like `show`, and register `GET /posts/:id/edit` (`posts.edit`), `PUT /posts/:id` (`posts.update`, with `body: PostPayloadSchema`) and `DELETE /posts/:id` (`posts.destroy`). Add `resources/js/pages/posts/Edit.tsx` as a form like `New.tsx` that submits with `form.put`, and give `Show.tsx` an Edit link and a Delete button. Paginate `index` at ten posts per page with `Post.paginate` and the `paginate` helper, validating `?page=` with a `ListPostsQuerySchema` in the validator, and render the page links in `Index.tsx`. Use `PostResource` for every post sent to a page. `tests/PostController.test.ts` describes all of it; make it pass.
 
-ここまでで最大のスライスなので、この章のハーネス要素を出す場面です。`.claude/agents/code-review.md` の **`code-review` subagent** です。subagent は独自の brief と独自のコンテキストを持つエージェントで、メインのエージェントから呼び出します。この subagent の brief は Guren のコードレビューで、変更系ルートにバリデーションがあるか、レコードの手前にリソースがあるか、ルートの順序、`audit` と `check` が見るもの、そして両者には見えないいくつかのことを見ます。エージェントが完了を報告したら、自分で rubric を確かめる前にこう頼んでください。
+ここまでで最大のスライスなので、この章のハーネス要素を出す場面です。`.claude/agents/code-review.md` の **`code-review` subagent** です。subagent は独自の brief と独自のコンテキストを持つエージェントで、メインのエージェントから呼び出します。この subagent の brief は Guren のコードレビューです。まず `guren check` と `guren audit` を走らせ、そのうえで両者には見えないところを読みます。変更系ルートのバリデーションが適切か、レコードの手前にリソースがあるか、ルートが登録順で解決するか、失敗する経路までテストが覆っているかです。エージェントが完了を報告したら、自分で rubric を確かめる前にこう頼んでください。
 
 > Use the code-review subagent to review the uncommitted changes.
 
