@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
-import { DOCKER_RUNTIME_DIRECTORIES, DOCKER_RUNTIME_FILES, scaffoldDeploy } from '../src/deploy'
+import { DOCKER_RUNTIME_DIRECTORIES, DOCKER_RUNTIME_FILES, scaffoldDeploy, scaffoldDeployReport } from '../src/deploy'
 
 const createAppTemplates = join(import.meta.dir, '../../create-app/templates')
 
@@ -95,6 +95,24 @@ describe('scaffoldDeploy', () => {
     expect(flyToml).toContain('app = "my-app"')
     expect(flyToml).toContain('internal_port = 4000')
     expect(flyToml).toContain('PORT = "4000"')
+  })
+
+  it('reports no overwrites on a fresh app', async () => {
+    const { files, overwritten } = await scaffoldDeployReport({ target: 'all' })
+
+    expect(files).toHaveLength(3)
+    expect(overwritten).toEqual([])
+  })
+
+  it('names the recipes --force overwrote and not the ones it created', async () => {
+    await writeFile('Dockerfile', 'FROM scratch\n', 'utf8')
+
+    const { files, overwritten } = await scaffoldDeployReport({ target: 'all', force: true })
+
+    expect(files).toHaveLength(3)
+    expect(overwritten).toHaveLength(1)
+    expect(overwritten[0]!.endsWith('Dockerfile')).toBe(true)
+    expect(await readFile('Dockerfile', 'utf8')).toContain('FROM oven/bun:1 AS builder')
   })
 
   it('copies every runtime entry the create-app templates ship into the production image', async () => {

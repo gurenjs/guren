@@ -71,7 +71,7 @@ import { listScheduledTasks, runScheduledTasks } from './schedule'
 import { runHealthCheck } from './health-check'
 import { publishLanguageFiles, makeLanguage, listLocales } from './lang'
 import { upgradeCanary, DEFAULT_UPGRADE_TAG } from './upgrade'
-import { scaffoldDeploy, type DeployTarget } from './deploy'
+import { scaffoldDeployReport, type DeployTarget } from './deploy'
 import { installPlugin } from './plugin'
 import { displayModels } from './model-list'
 import { displayContext } from './context'
@@ -3353,15 +3353,15 @@ const deployCommand = defineCommand({
       throw new Error('The --port option must be an integer.')
     }
 
-    const createdFiles = await scaffoldDeploy({
+    const { files, overwritten } = await scaffoldDeployReport({
       target: rawTarget as DeployTarget,
       appName: args.app ? String(args.app) : undefined,
       port,
       force: Boolean(args.force),
     })
 
-    for (const file of createdFiles) {
-      consola.success(`Created ${file}`)
+    for (const file of files) {
+      consola.success(overwritten.includes(file) ? `Overwrote ${file}` : `Created ${file}`)
     }
   },
 })

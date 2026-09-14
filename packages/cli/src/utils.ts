@@ -201,7 +201,6 @@ export interface ScaffoldFileEntry {
   contents: string
 }
 
-/** `writeScaffoldFile` over a batch — every path is checked before any write. */
 /** Local to avoid a cycle: discovery.ts imports from this module. */
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -212,16 +211,34 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+export type ScaffoldFilesOptions = WriterOptions & {
+  /**
+   * Report and skip a file that exists instead of throwing, so a blueprint
+   * re-run repairs whatever is missing. Ignored under `force`.
+   */
+  skipExisting?: boolean
+}
+
+export interface ScaffoldWriteReport {
+  /** Every path written, in entry order. */
+  files: string[]
+  /** The paths in `files` that already existed and `force` replaced. */
+  overwritten: string[]
+}
+
+/** `writeScaffoldFile` over a batch — every path is checked before any write. */
 export async function writeScaffoldFiles(
   entries: ScaffoldFileEntry[],
-  options: WriterOptions & {
-    /**
-     * Report and skip a file that exists instead of throwing, so a blueprint
-     * re-run repairs whatever is missing. Ignored under `force`.
-     */
-    skipExisting?: boolean
-  } = {},
+  options: ScaffoldFilesOptions = {},
 ): Promise<string[]> {
+  return (await writeScaffoldFilesReport(entries, options)).files
+}
+
+/** `writeScaffoldFiles`, also naming the files it overwrote, for a caller that reports them. */
+export async function writeScaffoldFilesReport(
+  entries: ScaffoldFileEntry[],
+  options: ScaffoldFilesOptions = {},
+): Promise<ScaffoldWriteReport> {
   const cwd = writeRoot(options)
 
   for (const entry of entries) {
@@ -237,13 +254,17 @@ export async function writeScaffoldFiles(
     }
   }
 
-  const created: string[] = []
+  const files: string[] = []
+  const overwritten: string[] = []
 
   for (const entry of pending) {
-    created.push(await writeFileSafe(entry.path, entry.contents, { ...options, cwd }))
+    const existed = Boolean(options.force) && (await pathExists(resolve(cwd, entry.path)))
+    const file = await writeFileSafe(entry.path, entry.contents, { ...options, cwd })
+    files.push(file)
+    if (existed) overwritten.push(file)
   }
 
-  return created
+  return { files, overwritten }
 }
 
 export async function scaffoldFile(name: string, config: ScaffoldConfig, options: WriterOptions = {}): Promise<string> {
