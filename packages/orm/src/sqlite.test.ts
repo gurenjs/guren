@@ -477,17 +477,46 @@ describe('createSqliteDatabase connection-URI filenames', () => {
     expect(existsSync(resolve('postgres:'))).toBe(false)
   })
 
-  test.each([':memory:', '', 'file::memory:', 'file::memory:?cache=shared'])(
-    'should accept %p, which carries a scheme but no authority',
-    async (filename) => {
-      const database = createSqliteDatabase({ migrationsFolder: join(workDir, 'migrations'), filename })
+  describe('in-memory filenames', () => {
+    // What a Linux Bun, whose sqlite ignores URI filenames, opens for these forms.
+    const strayMemoryFiles = ['file::memory:', 'file::memory:#section', 'file::memory:?cache=shared'].map((name) =>
+      resolve(name),
+    )
 
-      const db = await database.getDatabase()
-      expect(isOpen(db)).toBe(true)
+    beforeEach(() => {
+      for (const file of strayMemoryFiles) rmSync(file, { force: true })
+    })
 
-      await database.closeDatabase()
-    },
-  )
+    afterEach(() => {
+      for (const file of strayMemoryFiles) rmSync(file, { force: true })
+    })
+
+    // The filename assertion is the one that fails on macOS too, whose sqlite
+    // honours `file::memory:` and so opens memory whatever the driver passes.
+    test.each([':memory:', '', 'file::memory:', 'file::memory:#section'])(
+      'should open %p in memory without creating a file',
+      async (filename) => {
+        const database = createSqliteDatabase({ migrationsFolder: join(workDir, 'migrations'), filename })
+
+        const db = await database.getDatabase()
+        expect(isOpen(db)).toBe(true)
+        expect((db as { $client: { filename: string } }).$client.filename).toBe(':memory:')
+
+        await database.closeDatabase()
+        for (const file of strayMemoryFiles) expect(existsSync(file)).toBe(false)
+      },
+    )
+
+    test('should reject file::memory: carrying query parameters', async () => {
+      const database = createSqliteDatabase({
+        migrationsFolder: join(workDir, 'migrations'),
+        filename: 'file::memory:?cache=shared',
+      })
+
+      await expect(database.getDatabase()).rejects.toThrow(/cannot honour the URI parameters/)
+      for (const file of strayMemoryFiles) expect(existsSync(file)).toBe(false)
+    })
+  })
 
   // `file:` never addresses a database server, so no form of it is a connection
   // string — including the authority-shaped one, which is sqlite's own spelling

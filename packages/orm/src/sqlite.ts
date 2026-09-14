@@ -39,28 +39,33 @@ export interface SqliteDatabase {
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
 
-function isInMemory(dbPath: string): boolean {
-  return dbPath === ':memory:' || dbPath === '' || dbPath.startsWith('file::memory:')
-}
+type SqliteTarget =
+  | { kind: 'memory' }
+  | { kind: 'file'; path: string }
+  // Left for `new Database()` to refuse, with no directory created.
+  | { kind: 'unresolvable' }
+
+const MEMORY: SqliteTarget = { kind: 'memory' }
+const UNRESOLVABLE: SqliteTarget = { kind: 'unresolvable' }
 
 /**
- * Path to open for `dbPath`; undefined for in-memory forms and unresolvable
- * URIs, which `new Database()` refuses with no directory created. `file:` URI
- * support is compile-time `SQLITE_USE_URI` (measured: on for Bun/macOS via system
- * libsqlite3, off in Bun's Linux build, which opens `file:local.db` literally), so
- * parsing follows https://sqlite.org/uri.html, not WHATWG (`/local.db` vs the cwd).
+ * What `dbPath` opens. `file:` URI support is compile-time `SQLITE_USE_URI`
+ * (measured: on for Bun/macOS via system libsqlite3, off in Bun's Linux build,
+ * which opens `file:local.db` and `file::memory:` as literal files), so only an
+ * unresolvable URI reaches `new Database()`, and parsing follows
+ * https://sqlite.org/uri.html, not WHATWG (`/local.db` vs the cwd).
  */
-function sqliteFilePath(dbPath: string): string | undefined {
-  if (isInMemory(dbPath)) return undefined
+function sqliteTarget(dbPath: string): SqliteTarget {
+  if (dbPath === ':memory:' || dbPath === '') return MEMORY
   // Scheme comparison is case-sensitive here because it is in sqlite: `FILE:x`
   // opens a file whose name literally starts with `FILE:`.
-  if (!dbPath.startsWith('file:')) return resolve(dbPath)
+  if (!dbPath.startsWith('file:')) return { kind: 'file', path: resolve(dbPath) }
 
   let rest = dbPath.slice('file:'.length)
   if (rest.startsWith('//')) {
     const pathStart = rest.indexOf('/', 2)
     const authority = pathStart === -1 ? rest.slice(2) : rest.slice(2, pathStart)
-    if (authority !== '' && authority !== 'localhost') return undefined
+    if (authority !== '' && authority !== 'localhost') return UNRESOLVABLE
     rest = pathStart === -1 ? '' : rest.slice(pathStart)
   }
 
@@ -77,16 +82,19 @@ function sqliteFilePath(dbPath: string): string | undefined {
       `createSqliteDatabase() cannot honour the URI parameters in ${dbPath} (?${query}). ` +
         'They are only read by a sqlite built with SQLITE_USE_URI, which Bun provides on some ' +
         'platforms and not others, so this driver resolves the URI to a path itself. ' +
-        'Pass a plain path, and set the behaviour those parameters asked for in code.',
+        'Pass a plain path or ":memory:", and set the behaviour those parameters asked for in code.',
     )
   }
-  if (encodedPath === '') return undefined
+  if (encodedPath === '') return UNRESOLVABLE
 
   try {
-    return resolve(decodeURIComponent(encodedPath))
+    const path = decodeURIComponent(encodedPath)
+    // Checked after the query refusal, so `file::memory:?cache=shared` is refused
+    // too: shared cache has no spelling that works without SQLITE_USE_URI.
+    return path === ':memory:' ? MEMORY : { kind: 'file', path: resolve(path) }
   } catch {
     // Malformed escape — sqlite reports it far better than a mkdir would.
-    return undefined
+    return UNRESOLVABLE
   }
 }
 
@@ -160,7 +168,8 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     // Resolved once: the mkdir, the open and the hot-reload key all have to
     // name the same file, and `dbPath` may be a `file:` URI that is none of them.
-    const dbFile = sqliteFilePath(dbPath)
+    const target = sqliteTarget(dbPath)
+    const dbFile = target.kind === 'file' ? target.path : undefined
 
     if (dbFile) {
       const { mkdirSync } = await import('node:fs')
@@ -181,9 +190,8 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     type DrizzleConfig = NonNullable<Exclude<Parameters<typeof drizzle>[0], string>>
 
     // The resolved path, which is what the mkdir prepared. `dbPath` survives
-    // only where there is nothing to resolve — the in-memory forms, and a URI
-    // left for `new Database()` to refuse.
-    const sqlite = new Database(dbFile ?? dbPath)
+    // only for a URI left for `new Database()` to refuse.
+    const sqlite = new Database(target.kind === 'memory' ? ':memory:' : (dbFile ?? dbPath))
     sqlite.exec('PRAGMA journal_mode = WAL;')
     sqliteClient = sqlite
     // Returned from this local: a newer evaluation may close this handle while
