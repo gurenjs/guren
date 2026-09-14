@@ -17,6 +17,9 @@ let warnings: string[] = []
 const realWarn = console.warn
 // `process.env` is one object per process, which `--isolate` does not fork.
 const realQuiet = process.env.GUREN_QUIET_DUPLICATE_ORM
+// Tracked so the cleanup removes only what this file pushed, leaving a runner
+// that is itself under `--hot` with its flag.
+let pushedHot = false
 
 beforeEach(() => {
   warnings = []
@@ -29,8 +32,9 @@ beforeEach(() => {
 
 afterEach(() => {
   console.warn = realWarn
-  if (process.execArgv.includes('--hot')) {
-    process.execArgv.splice(process.execArgv.indexOf('--hot'), 1)
+  if (pushedHot) {
+    process.execArgv.splice(process.execArgv.lastIndexOf('--hot'), 1)
+    pushedHot = false
   }
   if (realQuiet === undefined) delete process.env.GUREN_QUIET_DUPLICATE_ORM
   else process.env.GUREN_QUIET_DUPLICATE_ORM = realQuiet
@@ -43,6 +47,7 @@ afterAll(() => {
 
 function underHotReload(): void {
   process.execArgv.push('--hot')
+  pushedHot = true
 }
 
 const INSTALLED = 'file:///app/node_modules/@guren/orm/dist/index.js'

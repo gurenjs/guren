@@ -13,7 +13,8 @@ import { join } from 'node:path'
 const ORM_SRC = join(import.meta.dir, '../src')
 const GUARD = join(ORM_SRC, 'instance-guard.ts')
 const WARNING = '2 copies of @guren/orm'
-const WAIT_TIMEOUT_MS = 20_000
+/** Four waits at this budget stay inside the test timeout below, which skips `finally`. */
+const WAIT_TIMEOUT_MS = 10_000
 
 /** A byte-identical guard at its own path: what a second installed copy looks like. */
 function copyGuardInto(dir: string): string {
@@ -36,11 +37,14 @@ function envWithoutQuiet(): Record<string, string | undefined> {
   return rest
 }
 
+/** Output of a run that reached the end: a crash before the guard is silent too. */
 async function runToCompletion(dir: string, file: string): Promise<string> {
   const proc = Bun.spawn(['bun', file], { cwd: dir, env: envWithoutQuiet(), stdout: 'pipe', stderr: 'pipe' })
   const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-  await proc.exited
-  return stdout + stderr
+  const output = stdout + stderr
+
+  expect(await proc.exited, `${file} exited non-zero:\n${output}`).toBe(0)
+  return output
 }
 
 describe('instance guard in a real process', () => {
