@@ -13,7 +13,7 @@ import { makeValidator } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
 import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
-import { schemaDeclaresTable, schemaPathFor } from './schema-parser'
+import { findDeclaredTable, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
 import {
   appendPrototypeEntries,
@@ -229,10 +229,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
   const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
   const validatorImportPath = moduleName ? './app/Http/Validators' : '../app/Http/Validators'
-  const tableDeclared = await schemaDeclaresTable(appRoot, schemaIdentifierFor(singular), moduleName ?? null)
+  const declaredTable = await findDeclaredTable(appRoot, schemaIdentifierFor(singular), moduleName ?? null)
   consola.info('')
   consola.info('Next steps:')
-  if (tableDeclared) {
+  if (declaredTable) {
     consola.info(`  1. ${schemaPath} already declares ${schemaIdentifierFor(singular)}: nothing to add`)
   } else {
     consola.info(`  1. Add table definition to ${schemaPath}`)
@@ -247,9 +247,11 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.info(`     (promotion: replace each \`prototype\` handler for ${routeName}.* with the [${singular}Controller, '<action>'] above;`)
     consola.info(`      the fixture entries keep serving \`bun run build:prototype\`)`)
   }
-  const migration = tableDeclared ? await findMigrationCreatingTable(appRoot, tableNameFor(singular)) : undefined
+  // The declared name, not the inflected one: `pgTable('app_announcements')` bound as `announcements`.
+  const tableName = declaredTable ? (declaredTable.tableName ?? tableNameFor(singular)) : undefined
+  const migration = tableName ? await findMigrationCreatingTable(appRoot, tableName) : undefined
   if (migration) {
-    consola.info(`  3. ${migration} already creates ${tableNameFor(singular)}: nothing to generate (bun run db:status shows whether it is applied)`)
+    consola.info(`  3. ${migration} already creates ${tableName}: nothing to generate (bun run db:status shows whether it is applied)`)
   } else {
     consola.info('  3. Run: bun run db:make && bun run db:migrate')
   }

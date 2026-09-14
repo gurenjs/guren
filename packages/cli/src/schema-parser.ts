@@ -400,12 +400,16 @@ export async function parseSchemaTables(cwd: string): Promise<SchemaTable[]> {
 }
 
 /**
- * Whether the `db/schema.ts` of `module` (null for the root) exports a table bound
- * as `identifier`. Parses that one file, not every app root.
+ * The table the `db/schema.ts` of `module` (null for the root) exports bound as
+ * `identifier`. Parses that one file, not every app root.
  */
-export async function schemaDeclaresTable(cwd: string, identifier: string, module: string | null = null): Promise<boolean> {
+export async function findDeclaredTable(cwd: string, identifier: string, module: string | null = null): Promise<SchemaTable | undefined> {
   const tables = await parseSchemaFile(resolve(cwd, schemaPathFor(module)), module)
-  return tables.some((table) => table.identifier === identifier)
+  return tables.find((table) => table.identifier === identifier)
+}
+
+export async function schemaDeclaresTable(cwd: string, identifier: string, module: string | null = null): Promise<boolean> {
+  return (await findDeclaredTable(cwd, identifier, module)) !== undefined
 }
 
 /**

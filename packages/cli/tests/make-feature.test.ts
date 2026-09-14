@@ -770,11 +770,11 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
     const NOTES_SCHEMA = "import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'\n\n"
       + "export const notes = sqliteTable('notes', {\n  id: integer('id').primaryKey(),\n  title: text('title').notNull(),\n})\n"
 
-    async function promoteAndCollectInfo(dir: string, migrationSql: string | undefined): Promise<string[]> {
+    async function promoteAndCollectInfo(dir: string, migrationSql: string | undefined, schema = NOTES_SCHEMA): Promise<string[]> {
       await seedPrototypeApp(dir)
       await makeFeature('Note', { fields: 'title:string', prototype: true })
       await mkdir(join(dir, 'db'), { recursive: true })
-      await writeFile(join(dir, 'db/schema.ts'), NOTES_SCHEMA)
+      await writeFile(join(dir, 'db/schema.ts'), schema)
       if (migrationSql) {
         await mkdir(join(dir, 'db/migrations/20260914000000_create_notes'), { recursive: true })
         await writeFile(join(dir, 'db/migrations/20260914000000_create_notes/migration.sql'), migrationSql)
@@ -802,6 +802,21 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
         expect(lines).toContain('  1. db/schema.ts already declares notes: nothing to add')
         expect(lines).toContain('  3. db/migrations/20260914000000_create_notes already creates notes: nothing to generate (bun run db:status shows whether it is applied)')
         expect(lines.some((line) => line.includes('db:make'))).toBe(false)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    it('looks for the SQL table name the schema declares, not the inflected one', async () => {
+      const workspace = await createTempWorkspace('guren-cli-feature-promote-renamed-')
+      try {
+        const lines = await promoteAndCollectInfo(
+          workspace.dir,
+          'CREATE TABLE `app_notes` (\n\t`id` integer PRIMARY KEY NOT NULL\n);\n',
+          NOTES_SCHEMA.replace("sqliteTable('notes'", "sqliteTable('app_notes'"),
+        )
+
+        expect(lines).toContain('  3. db/migrations/20260914000000_create_notes already creates app_notes: nothing to generate (bun run db:status shows whether it is applied)')
       } finally {
         await workspace.cleanup()
       }
