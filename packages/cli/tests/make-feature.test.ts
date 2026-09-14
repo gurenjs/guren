@@ -1,8 +1,10 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
+import { consola } from 'consola'
 import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
+import { findMigrationCreatingTable } from '../src/make-migration'
 import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
 import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig } from './helpers'
@@ -691,6 +693,29 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
     }
   })
 
+  it('reports the fixture it appended to as updated, not created', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-prototype-announce-')
+    const lines: string[] = []
+    const spy = spyOn(consola, 'success').mockImplementation(((message: unknown) => {
+      lines.push(String(message))
+    }) as never)
+    try {
+      await seedPrototypeApp(workspace.dir)
+      lines.length = 0
+
+      await makeFeature('Note', { fields: 'title:string', prototype: true })
+
+      const fixtureLines = lines.filter((line) => line.includes('resources/js/prototype/index.ts'))
+      expect(fixtureLines).toHaveLength(1)
+      expect(fixtureLines[0]).toStartWith('Updated ')
+      expect(fixtureLines[0]).toEndWith('resources/js/prototype/index.ts (appended the notes entries)')
+      expect(lines.some((line) => line.startsWith('Created ') && line.endsWith('resources/js/types/Note.ts'))).toBe(true)
+    } finally {
+      spy.mockRestore()
+      await workspace.cleanup()
+    }
+  })
+
   it('leaves the fixture alone when the feature is already there', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-prototype-twice-')
     try {
@@ -736,6 +761,89 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       expect(generated.definitions.find((d) => d.className === 'NoteResource')?.rawType)
         .toContain('.NoteResourceData')
       expect(await readFile(join(workspace.dir, '.guren/data.gen.ts'), 'utf8')).toContain('Note =')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  describe('the migration step at promotion', () => {
+    const NOTES_SCHEMA = "import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'\n\n"
+      + "export const notes = sqliteTable('notes', {\n  id: integer('id').primaryKey(),\n  title: text('title').notNull(),\n})\n"
+
+    async function promoteAndCollectInfo(dir: string, migrationSql: string | undefined, schema = NOTES_SCHEMA): Promise<string[]> {
+      await seedPrototypeApp(dir)
+      await makeFeature('Note', { fields: 'title:string', prototype: true })
+      await mkdir(join(dir, 'db'), { recursive: true })
+      await writeFile(join(dir, 'db/schema.ts'), schema)
+      if (migrationSql) {
+        await mkdir(join(dir, 'db/migrations/20260914000000_create_notes'), { recursive: true })
+        await writeFile(join(dir, 'db/migrations/20260914000000_create_notes/migration.sql'), migrationSql)
+      }
+
+      const lines: string[] = []
+      const spies = (['info', 'success'] as const).map((level) =>
+        spyOn(consola, level).mockImplementation(((message: unknown) => {
+          lines.push(String(message))
+        }) as never),
+      )
+      try {
+        await makeFeature('Note', { fields: 'title:string' })
+      } finally {
+        for (const spy of spies) spy.mockRestore()
+      }
+      return lines
+    }
+
+    it('says there is nothing to generate when a migration already creates the table', async () => {
+      const workspace = await createTempWorkspace('guren-cli-feature-promote-migrated-')
+      try {
+        const lines = await promoteAndCollectInfo(workspace.dir, 'CREATE TABLE `notes` (\n\t`id` integer PRIMARY KEY NOT NULL\n);\n')
+
+        expect(lines).toContain('  1. db/schema.ts already declares notes: nothing to add')
+        expect(lines).toContain('  3. db/migrations/20260914000000_create_notes already creates notes: nothing to generate (bun run db:status shows whether it is applied)')
+        expect(lines.some((line) => line.includes('db:make'))).toBe(false)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    it('looks for the SQL table name the schema declares, not the inflected one', async () => {
+      const workspace = await createTempWorkspace('guren-cli-feature-promote-renamed-')
+      try {
+        const lines = await promoteAndCollectInfo(
+          workspace.dir,
+          'CREATE TABLE `app_notes` (\n\t`id` integer PRIMARY KEY NOT NULL\n);\n',
+          NOTES_SCHEMA.replace("sqliteTable('notes'", "sqliteTable('app_notes'"),
+        )
+
+        expect(lines).toContain('  3. db/migrations/20260914000000_create_notes already creates app_notes: nothing to generate (bun run db:status shows whether it is applied)')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    it('still asks for db:make when the schema declares the table but no migration creates it', async () => {
+      const workspace = await createTempWorkspace('guren-cli-feature-promote-unmigrated-')
+      try {
+        const lines = await promoteAndCollectInfo(workspace.dir, 'CREATE TABLE `note_tags` (\n\t`id` integer\n);\n')
+
+        expect(lines).toContain('  3. Run: bun run db:make && bun run db:migrate')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  })
+
+  it('finds a creating migration under the drizzle config out folder, in either quote style', async () => {
+    const workspace = await createTempWorkspace('guren-cli-find-migration-')
+    try {
+      await writeFile(join(workspace.dir, 'drizzle.config.ts'), "export default { dialect: 'postgresql', out: './drizzle/' }\n")
+      await mkdir(join(workspace.dir, 'drizzle/0001_posts'), { recursive: true })
+      await writeFile(join(workspace.dir, 'drizzle/0001_posts/migration.sql'), 'CREATE TABLE "post_tags" (\n\t"post_id" integer\n);\n')
+
+      expect(await findMigrationCreatingTable(workspace.dir, 'post_tags')).toBe('drizzle/0001_posts')
+      expect(await findMigrationCreatingTable(workspace.dir, 'posts')).toBeUndefined()
+      expect(await findMigrationCreatingTable(workspace.dir, 'post')).toBeUndefined()
     } finally {
       await workspace.cleanup()
     }

@@ -4,7 +4,8 @@ import { assertNotApiOnly } from './app-surface'
 import { CliError } from './cli-error'
 import { appConfiguresAttachments } from './attachments-check'
 import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
-import { pluralize, schemaIdentifierFor } from './inflect'
+import { pluralize, schemaIdentifierFor, tableNameFor } from './inflect'
+import { findMigrationCreatingTable } from './make-migration'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -12,7 +13,7 @@ import { makeValidator } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
 import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
-import { schemaDeclaresTable, schemaPathFor } from './schema-parser'
+import { findDeclaredTable, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
 import {
   appendPrototypeEntries,
@@ -165,10 +166,12 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     await ensureGurenUiTokens(appRoot)
     created.unshift(validatorPath)
     const appended = await appendPrototypeEntries(appRoot, { singular, collection: routeVar, routeName, variableName, fields })
-    if (appended === 'patched') created.push(resolve(appRoot, PROTOTYPE_FIXTURE_PATH))
+    // `guren add prototype` created the fixture; this run only appended to it.
+    const patchedFixture = appended === 'patched' ? resolve(appRoot, PROTOTYPE_FIXTURE_PATH) : undefined
+    if (patchedFixture) created.push(patchedFixture)
 
     if (options.announce !== false) {
-      announcePrototypeFeature({ created, singular, routeName, routeVar, withAuth })
+      announcePrototypeFeature({ created, patchedFixture, singular, routeName, routeVar, withAuth })
     }
     return created
   }
@@ -226,10 +229,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
   const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
   const validatorImportPath = moduleName ? './app/Http/Validators' : '../app/Http/Validators'
-  const tableDeclared = await schemaDeclaresTable(appRoot, schemaIdentifierFor(singular), moduleName ?? null)
+  const declaredTable = await findDeclaredTable(appRoot, schemaIdentifierFor(singular), moduleName ?? null)
   consola.info('')
   consola.info('Next steps:')
-  if (tableDeclared) {
+  if (declaredTable) {
     consola.info(`  1. ${schemaPath} already declares ${schemaIdentifierFor(singular)}: nothing to add`)
   } else {
     consola.info(`  1. Add table definition to ${schemaPath}`)
@@ -244,7 +247,14 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.info(`     (promotion: replace each \`prototype\` handler for ${routeName}.* with the [${singular}Controller, '<action>'] above;`)
     consola.info(`      the fixture entries keep serving \`bun run build:prototype\`)`)
   }
-  consola.info(`  3. Run: bun run db:make && bun run db:migrate${tableDeclared ? ' (skip if already applied)' : ''}`)
+  // The declared name, not the inflected one: `pgTable('app_announcements')` bound as `announcements`.
+  const tableName = declaredTable ? (declaredTable.tableName ?? tableNameFor(singular)) : undefined
+  const migration = tableName ? await findMigrationCreatingTable(appRoot, tableName) : undefined
+  if (migration) {
+    consola.info(`  3. ${migration} already creates ${tableName}: nothing to generate (bun run db:status shows whether it is applied)`)
+  } else {
+    consola.info('  3. Run: bun run db:make && bun run db:migrate')
+  }
   consola.info(`  4. Run: bunx guren codegen`)
   if (withPolicy) {
     const modelsBase = moduleName ? `../modules/${moduleName}` : '../app'
@@ -280,10 +290,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   return created
 }
 
-function announcePrototypeFeature(options: { created: string[]; singular: string; routeName: string; routeVar: string; withAuth: boolean }): void {
-  const { created, singular, routeName, routeVar, withAuth } = options
+function announcePrototypeFeature(options: { created: string[]; patchedFixture: string | undefined; singular: string; routeName: string; routeVar: string; withAuth: boolean }): void {
+  const { created, patchedFixture, singular, routeName, routeVar, withAuth } = options
   for (const file of created) {
-    consola.success(`Created ${file}`)
+    consola.success(file === patchedFixture ? `Updated ${file} (appended the ${routeName} entries)` : `Created ${file}`)
   }
   consola.info('')
   consola.info('Next steps:')
