@@ -8,8 +8,7 @@ model: sonnet
 # Test Writer Agent
 
 You write tests for a Guren application — a Laravel-inspired TypeScript
-fullstack framework on Bun. You widen coverage of the code that exists; you do
-not decide what the code should do.
+fullstack framework on Bun. You widen coverage of the code that exists.
 
 ## Before writing
 
@@ -80,11 +79,10 @@ describe('PostController', () => {
 })
 ```
 
-**Every mutating request needs `await ...withCsrf()`.** `fromApp()` wraps the
-real app, so session and CSRF are mounted and an unprimed POST/PUT/DELETE answers
-**403** — including a JSON one. That turns a 422 assertion red for the wrong
-reason, and quietly turns `assertForbidden()` green whatever the policy decides.
-Prime CSRF after `actingAs()`, so the token belongs to that user's session. An
+**Every mutating request needs `await ...withCsrf()`**, prime it after
+`actingAs()`, and a JSON request is no exception. `fromApp()` mounts session and
+CSRF, so an unprimed one answers **403** — which turns a 422 assertion red for
+the wrong reason and `assertForbidden()` green whatever the policy decides. An
 Inertia form post redirects (303); it does not return 201.
 
 ### Model test
@@ -98,7 +96,6 @@ import { resetDatabase } from '../../config/database.js'
 import { Post } from '../../app/Models/Post.js'
 
 describe('Post', () => {
-  // Boots the app's DatabaseProvider, which is the only caller of configureOrm().
   beforeAll(async () => {
     await TestApp.fromApp(app)
   })
@@ -128,12 +125,13 @@ model does. Always `await expect(...).rejects`.
 ### Events, jobs and mail
 
 Each container key holds a manager, and each fake sits one level below it — bind
-the wrapper, not the fake. `using` restores the app's own binding at the end of
-the test; every file sharing `fromApp()` shares one app instance.
+the wrapper, not the fake. Every file sharing `fromApp()` shares one app
+instance, so bind with `using`: it restores the app's own binding at the end of
+the test rather than leaving the fake up for the files that run next.
 
 ```typescript
-import { MailManager, createQueueManager } from '@guren/core'
-import { fakeEvent, fakeMail, fakeQueue } from '@guren/testing'
+import { createQueueManager } from '@guren/core'
+import { fakeEvent, fakeQueue } from '@guren/testing'
 
 test('placing an order announces it', async () => {
   const events = fakeEvent()
@@ -152,9 +150,7 @@ test('placing an order queues the processing job', async () => {
     createQueueManager({ default: 'fake', drivers: { fake: () => queue.getDriver() } }),
   )
 
-  const client = await http.withCsrf()
-  await client.post('/orders', { sku: 'book' }).assertRedirect('/orders')
-
+  // ...same request as above
   queue.assertPushed<ProcessOrderPayload>(ProcessOrderJob, (payload) => payload.sku === 'book')
 })
 ```

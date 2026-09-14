@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Expert code reviewer for Guren applications. Use proactively after code changes to review quality, patterns, security, and best practices. Invoked when user says "review", "check my code", or asks for feedback.
+description: Reviews uncommitted changes against a Guren app's conventions — validation on mutating routes, a resource in front of every record, route order, authorization, and what `guren check` and `guren audit` do not settle. Use after any change to a controller, route, model, resource, or test, or when the user says "review" or "check my code".
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
@@ -28,19 +28,17 @@ bunx guren audit --json   # validation and auth on mutating routes, raw SQL, sec
 Every failure they report is a finding. The checklist below is what they do not
 settle: whether the validation that exists is the right validation, whether a
 record reaches the browser through a resource, and whether the tests say what
-the change was supposed to do. Some of it neither checker looks at all.
+the change was supposed to do.
 
 ## 3. Read the conventions
 
-`CLAUDE.md` for the project map, then the rule file for each area the diff
-touches: `.claude/rules/controllers-http.md`, `.claude/rules/orm-models.md`,
-`.claude/rules/routes-codegen.md`, `.claude/rules/testing.md`,
-`.claude/rules/comments.md`, `.claude/rules/docs-and-spec.md`.
+`CLAUDE.md` for the project map, then — from the rule catalog it carries — the
+`.claude/rules/` file covering each area the diff touches.
 
 ## Checklist
 
 ### Validation on every mutating route
-- [ ] Each POST/PUT/PATCH action calls `this.validateBody(schema)`, and the same schema sits on the route as `body:` so codegen types the form. DELETE carries no body — it is covered by the params and authorization items instead
+- [ ] Each POST/PUT/PATCH action calls `this.validateBody(schema)`, and the same schema sits on the route as `body:` so codegen types the form (DELETE carries no body)
 - [ ] Query strings go through `this.validateQuery` (`?page=` included); path parameters through `this.validateParams` or a route `bind:`
 - [ ] The schema lives in `app/Http/Validators/` and is shared by route, controller and page — not re-declared with different messages in two places
 - [ ] Messages are what a user should read, not `Invalid input`
@@ -48,8 +46,7 @@ touches: `.claude/rules/controllers-http.md`, `.claude/rules/orm-models.md`,
 
 ### A resource in front of every record
 - [ ] Records reach an Inertia page or a JSON body through a `Resource` subclass, never as a raw row or a `{ ...record }` spread
-- [ ] `toArray()` names every field it returns, so a column added later does not leak by itself
-- [ ] Password hashes, tokens and internal flags are absent from the payload
+- [ ] `toArray()` names every field, so password hashes, tokens, internal flags and any column added later cannot leak
 - [ ] The page's `interface Props` is typed from the exported `…ResourceData`, not restated by hand
 
 ### Routes
@@ -58,20 +55,17 @@ touches: `.claude/rules/controllers-http.md`, `.claude/rules/orm-models.md`,
 - [ ] Mutating routes sit behind the auth middleware; the alias is captured (`const router = baseRouter.aliasMiddleware('auth', …)`), or `.middleware('auth')` does not compile
 - [ ] `bind:` and `params:` keys name parameters the path actually declares
 - [ ] Routes, pages or resources changed → `bun run codegen` re-run and the `.guren/` manifests committed
+- [ ] Public mutating or expensive routes are rate-limited, with a `keyGenerator` rather than the shared fallback bucket
 
 ### Authorization
 - [ ] Ownership and role decisions go through a policy (`await this.authorize('update', [Post, post])`), not an inline `if` in the action
-- [ ] The owner column is absent from `fillable`, and its value comes from `this.auth.userOrFail()` rather than the request body
 - [ ] The policy is registered with `gate.policy(Model, Policy)` in the app's authorization provider, or the gate denies every action
 
 ### Models and data
-- [ ] `defineModel(table, { fillable: [...] })`; `forceCreate`/`forceUpdate` carry validated fields and server-derived values only, never a raw request body
+- [ ] `defineModel(table, { fillable: [...] })`, with any owner column left out of it; `forceCreate`/`forceUpdate` carry validated fields and server-derived values only, never a raw request body
 - [ ] A `db/schema.ts` change comes with a migration in `db/migrations/`
 - [ ] Relations eager-loaded with `Post.with('author')` rather than queried inside a loop; lists paginated with `Post.paginate` and the `paginate` helper
 - [ ] Slow work (mail, imports, webhooks) dispatched to the queue, not awaited in the request
-
-### Public surface
-- [ ] Public mutating or expensive endpoints are rate-limited, with a `keyGenerator` rather than the shared fallback bucket
 - [ ] Cached reads are invalidated where the data is written, and the keys follow one naming convention
 
 ### Providers, events, jobs
@@ -116,6 +110,4 @@ touches: `.claude/rules/controllers-http.md`, `.claude/rules/orm-models.md`,
 ## Be Constructive
 
 - Say **why** it is a problem and **how** to fix it
-- Give the file and line for every finding
 - Order findings by what would break first
-- If a section has nothing to report, say so in one line rather than padding it

@@ -450,23 +450,33 @@ describe('template completeness', () => {
 
 describe('shipped path references', () => {
   /**
-   * A path under one of the harness's own directories, as a harness file spells it.
-   * Only an extension-bearing path matches: the prose also names bare directories
-   * (`.claude/rules/`, `.agents/skills/`), which no plan entry is, and a root dotfile
-   * from another scaffold (`.oxlintrc.json`) has no directory segment at all.
+   * The dotted directories the plan actually writes into. Derived rather than
+   * listed: a stale list fails *green* — a target adding a native root would drop
+   * out of the scan, and every dangling reference under it would go unreported.
    */
-  const HARNESS_PATH_RE =
-    /(?<![\w./-])(\.claude|\.agents|\.cursor|\.codex|\.vscode|\.github)\/[\w./-]*[\w-]\.(?:md|mdc|ts|json|toml|rules)/gu
+  function harnessPathPattern(paths: Iterable<string>): RegExp {
+    const roots = new Set<string>()
+    for (const path of paths) {
+      const [root, ...rest] = path.split('/')
+      if (rest.length > 0 && root?.startsWith('.')) {
+        roots.add(root.replaceAll('.', String.raw`\.`))
+      }
+    }
+    // Extensionless tails are excluded on purpose: the prose names bare
+    // directories (`.claude/rules/`), which no plan entry is.
+    return new RegExp(String.raw`(?:${[...roots].join('|')})\/[\w/-]+(?:\.\w+)+`, 'gu')
+  }
 
   it('every harness file that names a harness path names one the plan writes', async () => {
-    const templates = await loadAgentTemplates()
-    const plan = planComponents(ALL_COMPONENTS, templates, 'Demo App')
-    const plannedPaths = new Set(plan.map((file) => file.path))
+    const byPath = planByPath(ALL_COMPONENTS, await loadAgentTemplates())
+    const harnessPath = harnessPathPattern(byPath.keys())
 
     const dangling: string[] = []
-    for (const file of plan) {
-      for (const [reference] of file.content.matchAll(HARNESS_PATH_RE)) {
-        if (!plannedPaths.has(reference)) {
+    const found: string[] = []
+    for (const file of byPath.values()) {
+      for (const [reference] of file.content.matchAll(harnessPath)) {
+        found.push(reference)
+        if (!byPath.has(reference)) {
           dangling.push(`${file.path} → ${reference}`)
         }
       }
@@ -475,24 +485,14 @@ describe('shipped path references', () => {
     // A brief telling the agent to read `.claude/rules/coding-standards.md` costs
     // the reader a tool call and a guess; the harness never shipped that file.
     expect(dangling).toEqual([])
-  })
-
-  it('recognizes a reference to a file the harness does not ship', async () => {
-    const templates = await loadAgentTemplates()
-    const plan = planComponents(ALL_COMPONENTS, templates, 'Demo App')
-    const plannedPaths = new Set(plan.map((file) => file.path))
-
-    const invented = [
-      ...'read .claude/rules/coding-standards.md first'.matchAll(HARNESS_PATH_RE),
-    ].map(([reference]) => reference)
-
-    expect(invented).toEqual(['.claude/rules/coding-standards.md'])
-    expect(plannedPaths.has(invented[0] as string)).toBe(false)
+    // Vacuity guard: a pattern matching nothing would pass the assertion above.
+    expect(found).toContain('.claude/rules/testing.md')
   })
 
   it('ignores bare directories and root dotfiles from other scaffolds', () => {
+    const harnessPath = harnessPathPattern(['.claude/rules/testing.md'])
     const prose = 'rules live in `.claude/rules/`; `.oxlintrc.json` drives `bun run lint`'
 
-    expect([...prose.matchAll(HARNESS_PATH_RE)]).toEqual([])
+    expect([...prose.matchAll(harnessPath)]).toEqual([])
   })
 })
