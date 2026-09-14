@@ -447,3 +447,52 @@ describe('template completeness', () => {
     ])
   })
 })
+
+describe('shipped path references', () => {
+  /**
+   * The dotted directories the plan actually writes into. Derived rather than
+   * listed: a stale list fails *green* — a target adding a native root would drop
+   * out of the scan, and every dangling reference under it would go unreported.
+   */
+  function harnessPathPattern(paths: Iterable<string>): RegExp {
+    const roots = new Set<string>()
+    for (const path of paths) {
+      const [root, ...rest] = path.split('/')
+      if (rest.length > 0 && root?.startsWith('.')) {
+        roots.add(root.replaceAll('.', String.raw`\.`))
+      }
+    }
+    // Extensionless tails are excluded on purpose: the prose names bare
+    // directories (`.claude/rules/`), which no plan entry is.
+    return new RegExp(String.raw`(?:${[...roots].join('|')})\/[\w/-]+(?:\.\w+)+`, 'gu')
+  }
+
+  it('every harness file that names a harness path names one the plan writes', async () => {
+    const byPath = planByPath(ALL_COMPONENTS, await loadAgentTemplates())
+    const harnessPath = harnessPathPattern(byPath.keys())
+
+    const dangling: string[] = []
+    const found: string[] = []
+    for (const file of byPath.values()) {
+      for (const [reference] of file.content.matchAll(harnessPath)) {
+        found.push(reference)
+        if (!byPath.has(reference)) {
+          dangling.push(`${file.path} → ${reference}`)
+        }
+      }
+    }
+
+    // A brief telling the agent to read `.claude/rules/coding-standards.md` costs
+    // the reader a tool call and a guess; the harness never shipped that file.
+    expect(dangling).toEqual([])
+    // Vacuity guard: a pattern matching nothing would pass the assertion above.
+    expect(found).toContain('.claude/rules/testing.md')
+  })
+
+  it('ignores bare directories and root dotfiles from other scaffolds', () => {
+    const harnessPath = harnessPathPattern(['.claude/rules/testing.md'])
+    const prose = 'rules live in `.claude/rules/`; `.oxlintrc.json` drives `bun run lint`'
+
+    expect([...prose.matchAll(harnessPath)]).toEqual([])
+  })
+})

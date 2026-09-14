@@ -147,19 +147,27 @@ await res.assertBodyContains('text')
 import { describe, test, expect, beforeAll } from 'bun:test'
 
 describe('PostController', () => {
-  let app: TestApp
-  beforeAll(async () => { app = await TestApp.create() })
+  let http: TestApp
+  beforeAll(async () => { http = await TestApp.fromApp(app) })
 
   test('store validates input', async () => {
-    await app.json().post('/posts', {}).assertUnprocessable()
+    const csrf = await http.withCsrf()
+    await csrf.json().post('/posts', {}).assertUnprocessable()
   })
 
   test('store creates post for authed user', async () => {
-    const csrf = await app.actingAs(user).withCsrf()
+    const csrf = await http.actingAs(user).withCsrf()
     await csrf.post('/posts', { title: 'Hi', body: '...' }).assertRedirect('/posts')
   })
 })
 ```
+
+**Under `fromApp()`, every mutating request needs `withCsrf()`** — a JSON one
+included. The real app mounts session and CSRF, so an unprimed POST/PUT/DELETE
+answers **403**: a 422 assertion goes red for the wrong reason, and an
+`assertForbidden()` passes whatever the policy decides. Prime after `actingAs()`,
+so the token belongs to that user's session. `TestApp.create()` without `auth`
+mounts neither, which is why its examples above need no priming.
 
 Validation failures return 422 with `{ message, errors: Record<string, string[]> }` —
 assert with `assertJsonPath('errors.title.0', 'Title is required')`.
