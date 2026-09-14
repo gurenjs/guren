@@ -236,6 +236,12 @@ git commit -m "feat: database sessions and rate limiting"
 
 ## 2. 本番モード
 
+先に `bun run dev` を止めてください(ターミナルで Ctrl-C)。第 12 章から 3333 番ポートを使ったままです。本番のサーバーは開発サーバーのように次の空きポートへ歩かず、そのまま終了します。
+
+```bash run stop-background
+# Ctrl-C in the terminal running bun run dev
+```
+
 クライアントのアセットをビルドして、サーバーと同じやり方でアプリを動かします。
 
 ```bash run
@@ -311,6 +317,12 @@ bunx guren deploy --target all --app my-blog --force
 
 第 1 章の `Dockerfile` に `fly.toml` と `railway.json` が加わります。`--force` があるのは、そのファイルがすでに存在するからです。これが無いと、コマンドは編集したかもしれないものを上書きせずに止まります。ここにプラットフォームと通信するものはひとつもありません。生成されるのはファイルだけで、アカウントが要るのは `fly deploy` や `railway up` のほうです。
 
+Docker があれば、イメージを手元でも動かせます。先に `bun run preview` を止めてください。コンテナが公開する 3333 番ポートは preview が使っています。
+
+```bash run stop-background
+# Ctrl-C in the terminal running bun run preview
+```
+
 ```bash manual
 docker build -t my-blog .
 docker run --rm -p 3333:3333 -e APP_KEY="$APP_KEY" -e APP_URL=http://localhost:3333 my-blog
@@ -360,7 +372,7 @@ git commit -m "chore: deploy recipes for fly and railway"
 - **レートリミッターが間違ったものをブロックする。** 2 つのリミッターがカウンターを共有しています。それぞれに別々の `keyPrefix` を与えてください。
 - **訪問者全員がひとつのレート制限のバケツを共有している。** キーがソケットのアドレスで、前段にプロキシがいます。`trustProxy` を設定してください。ただし、そのプロキシがクライアントのヘッダーを上書きする場合に限ります。
 - **`bun run preview` が何も出力しない。** それが正しい動きです。バナーは開発時のものなので、起動しているかどうかは `/health` に尋ねてください。
-- **`bun run preview` がポートの使用中で失敗する。** 本番は次のポートへ歩きません。ポートを空けるか、`PORT` を設定してください。
+- **`bun run preview` が `Failed to start server. Is port 3333 in use?` で失敗する。** たいていは `bun run dev` がまだ動いています。本番は次のポートへ歩きません。もう一方のサーバーを止めるか、`PORT` を設定してください。
 - **preview でアセットが 404 になる。** 最後の変更のあとに `bun run build` が走っていません。マニフェストが無いか、古くなっています。
 - **CI が `--deps` でだけ赤い。** 依存関係のどれかにアドバイザリがあります。フラグを外すのではなく、それを上げてください。
 

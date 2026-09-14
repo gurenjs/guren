@@ -236,6 +236,12 @@ git commit -m "feat: database sessions and rate limiting"
 
 ## 2. Production mode
 
+Stop `bun run dev` first (Ctrl-C in its terminal). It still holds port 3333 from chapter 12, and a production server does not walk to the next free port the way the dev server does. It exits instead.
+
+```bash run stop-background
+# Ctrl-C in the terminal running bun run dev
+```
+
 Build the client assets, then run the app the way a server would:
 
 ```bash run
@@ -311,6 +317,12 @@ bunx guren deploy --target all --app my-blog --force
 
 `fly.toml` and `railway.json` join the `Dockerfile` from chapter 1. `--force` is there because that file already exists; without it the command stops rather than overwrite something you may have edited. Nothing here talks to a platform: these are files, and `fly deploy` or `railway up` is the step that needs an account.
 
+If you have Docker, the image runs locally too. Stop `bun run preview` first: the container publishes port 3333, which preview holds.
+
+```bash run stop-background
+# Ctrl-C in the terminal running bun run preview
+```
+
 ```bash manual
 docker build -t my-blog .
 docker run --rm -p 3333:3333 -e APP_KEY="$APP_KEY" -e APP_URL=http://localhost:3333 my-blog
@@ -360,7 +372,7 @@ More than that, you have a way of working. Every chapter here was the same four 
 - **The rate limiter blocks the wrong thing.** Two limiters are sharing a counter: give each a distinct `keyPrefix`.
 - **Every visitor shares one rate-limit bucket.** The key is the socket address and there is a proxy in front. Set `trustProxy`, but only if the proxy overwrites the client headers.
 - **`bun run preview` prints nothing.** That is correct. The banner is a development thing; ask `/health` whether it is up.
-- **`bun run preview` fails on a busy port.** Production does not walk to the next one. Free the port, or set `PORT`.
+- **`bun run preview` fails with `Failed to start server. Is port 3333 in use?`.** Usually `bun run dev` is still running. Production does not walk to the next port: stop the other server, or set `PORT`.
 - **Assets 404 in preview.** `bun run build` has not run since the last change; the manifest is missing or stale.
 - **CI is red on `--deps` only.** A dependency has an advisory. Upgrade it; do not drop the flag.
 

@@ -332,6 +332,11 @@ async function applyBlock(session: Session, block: ExecutableBlock, chapter: str
       await writeFileBlock(session, block.path, block.body)
       return
     case 'run': {
+      if (block.mode === 'stop-background') {
+        console.log(`\n(the reader stops the server) ${block.body.split('\n')[0]}`)
+        await stopBackground(session)
+        return
+      }
       const scaffoldCommand = parseScaffoldCommand(block.body)
       if (scaffoldCommand) {
         await scaffold(session, scaffoldCommand.target, scaffoldCommand.flags)

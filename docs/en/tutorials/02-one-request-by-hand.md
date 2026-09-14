@@ -65,7 +65,7 @@ export function registerWebRoutes(router: Router): void {
 
 Two things are new. `[AboutController, 'index']` names a class and a method rather than a function: Guren instantiates the controller per request, so the method can read the request through `this`. And `.name('about')` gives the route a name. URLs change; names are what pages link to.
 
-Run the test again and it fails differently: the import of `AboutController` cannot be resolved, so the app cannot boot. That is `guren check`'s job too, but the test found it first.
+Run the test again and it fails differently: the import of `AboutController` cannot be resolved, so the app cannot boot. That is `guren check`'s job too, but the test found it first. The terminal running `bun run dev` shows the same error: saving `routes/web.ts` triggered a reload, the reload could not import the controller, and the server kept the routes it had.
 
 ## 3. The controller, plain response first
 
@@ -86,6 +86,16 @@ bun test
 ```
 
 Green. A controller action is a method that returns a `Response`; `this.text()` builds a plain one. That is the whole contract, and it is worth seeing once without a page in the way, because everything else in a controller (`this.inertia()`, `this.json()`, `this.redirect()`, the validators you meet in chapter 4) is a different way of building that same `Response`.
+
+The test boots a fresh app; the dev server does not. It still has the routes from before the failed reload, and creating the controller does not make it try again. Restart it: Ctrl-C in its terminal, then start it again.
+
+```bash run stop-background
+# Ctrl-C in the terminal running bun run dev
+```
+
+```bash run background
+bun run dev
+```
 
 Open [http://localhost:3333/about](http://localhost:3333/about). Plain text, as promised.
 
@@ -317,7 +327,7 @@ git commit -m "feat: add the contact page"
 ## Common trip-ups
 
 - **`pages.about.Index` does not exist.** Codegen has not run since the page was created. `bun run codegen`, or let `bun run dev` do it; the dev server regenerates when a page is added while it is running.
-- **`/about` still answers 404 in the browser once the controller exists.** You saved `routes/web.ts` while `bun run dev` was running, before `AboutController.ts` existed. The reload failed on the missing import and kept the old routes, and creating the file afterwards does not register them. Restart `bun run dev`.
+- **`/about` still answers 404 in the browser once the controller exists.** The dev server was not restarted after section 3. When you saved `routes/web.ts` before `AboutController.ts` existed, the reload failed on the missing import and kept the old routes; creating the file afterwards does not register them. Restart `bun run dev`.
 - **The test passes but the browser shows the old page.** The dev server rendered it before your last save and Inertia kept the old props. Reload with the cache off, or check the terminal running `bun run dev` for a codegen error. If neither helps, restart `bun run dev`.
 - **The agent returned `this.text()` with HTML in it.** It works and the test passes, which is why the rubric says what the controller must do, not only what the test checks. Ask it to render the page instead; that is the fix you will make many times in this course.
 - **`guren check` warns that a controller has no test.** It looks for `tests/<Name>Controller.test.ts`. You wrote both; if the warning names another controller, that is chapter 3's job.
