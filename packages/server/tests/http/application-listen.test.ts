@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
 
 import { createViteDevServerMocks, resetGurenGlobals } from './vite-dev-server-fixture'
 
@@ -79,6 +79,35 @@ describe('Application.listen', () => {
     // proves nothing; only this call's teardown clears these env vars.
     expect(process.env.VITE_DEV_SERVER_URL).toBeUndefined()
     expect(process.env.GUREN_MANAGED_VITE_DEV_SERVER).toBeUndefined()
+  })
+})
+
+describe('Application.listen startup line', () => {
+  it('prints the bound address once in production, where the banner is off', async () => {
+    stubBunServe()
+    process.env.NODE_ENV = 'production'
+    delete process.env.GUREN_DEV_BANNER
+    const info = spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      await new Application().listen({ port: 3333, hostname: '0.0.0.0', vite: false })
+
+      expect(info).toHaveBeenCalledTimes(1)
+      expect(info).toHaveBeenCalledWith('[guren] Listening on http://0.0.0.0:3333')
+    } finally {
+      info.mockRestore()
+    }
+  })
+
+  it('prints nothing outside production when the banner is turned off', async () => {
+    stubBunServe()
+    const info = spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      await new Application().listen({ port: 3333, hostname: '127.0.0.1', vite: false })
+
+      expect(info).not.toHaveBeenCalled()
+    } finally {
+      info.mockRestore()
+    }
   })
 })
 
