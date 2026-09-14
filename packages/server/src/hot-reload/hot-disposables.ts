@@ -34,6 +34,7 @@ function getRegistry(): Map<string, Dispose> {
  * instead, dropping every timer with it, so `--hot` is the only mode that leaks.
  * Exported so callers can skip building the `Error` whose stack identifies them
  * — capturing one formats the whole stack into a string.
+ * Twin of `packages/orm/src/hot-reload-runtime.ts` — keep the two in step.
  */
 export function isHotReloadRuntime(): boolean {
   return typeof process !== 'undefined' && Array.isArray(process.execArgv) && process.execArgv.includes('--hot')
