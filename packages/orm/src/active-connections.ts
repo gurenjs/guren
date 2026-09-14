@@ -8,6 +8,7 @@
  * keyed by caller file + target, not line, so two handles built in one file
  * against one database share a key; give them separate modules.
  */
+import { isHotReloadRuntime } from './hot-reload-runtime'
 
 type Teardown = () => Promise<void> | void
 
@@ -41,11 +42,6 @@ function getRegistry(): Map<string, ActiveConnection> {
   const registry = new Map<string, ActiveConnection>()
   scope[REGISTRY_KEY] = registry
   return registry
-}
-
-/** `bun --watch` restarts the process instead, so `--hot` is the only mode that leaks. */
-function isHotReloadRuntime(): boolean {
-  return typeof process !== 'undefined' && Array.isArray(process.execArgv) && process.execArgv.includes('--hot')
 }
 
 /** Both match one character, so neither can backtrack the way `\s*` in a pattern can. */
