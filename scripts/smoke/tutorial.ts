@@ -188,7 +188,7 @@ async function startBackground(session: Session, block: RunBlock, chapter: strin
   session.background.push({ block, proc, logPath, port })
 
   // The banner and a live /health are raced, not sequenced: a production-mode
-  // server (`bun run preview`) prints no banner at all, so sequencing spent the
+  // server (`bun run preview`) prints only a `Listening on` line, so sequencing spent the
   // whole timeout on every one. GUREN_STRICT_PORT=1 above makes the handed port
   // the only one this app can hold, so a 200 there is this app answering.
   const deadline = Date.now() + BANNER_TIMEOUT_MS

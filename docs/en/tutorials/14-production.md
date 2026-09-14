@@ -236,7 +236,7 @@ git commit -m "feat: database sessions and rate limiting"
 
 ## 2. Production mode
 
-Stop `bun run dev` first (Ctrl-C in its terminal). It still holds port 3333 from chapter 12, and a production server does not walk to the next free port the way the dev server does. It exits instead.
+Stop `bun run dev` first (Ctrl-C in its terminal). The dev server you started in an earlier chapter still holds port 3333, and a production server does not walk to the next free port the way the dev server does. It exits instead.
 
 ```bash run stop-background
 # Ctrl-C in the terminal running bun run dev
@@ -261,7 +261,7 @@ bun run preview
 - **Assets come from `public/assets/`** with the manifest the build wrote, not from Vite.
 - **The port does not walk.** In development a busy port makes the server try the next one; in production it fails instead, because a server that silently moves is a server your load balancer cannot find.
 
-One more thing it changes, which will surprise you: the banner is gone. A production start prints nothing at all. Ask the app instead:
+One more thing it changes, which will surprise you: the banner is gone. A production start prints a single line, `[guren] Listening on http://0.0.0.0:3333`. To confirm it serves requests, ask the app:
 
 ```bash manual
 curl -s localhost:3333/health
@@ -371,7 +371,7 @@ More than that, you have a way of working. Every chapter here was the same four 
 - **Everyone is signed out after a deploy.** The session store is still in memory, or the new container has a different `APP_KEY`. Both are in section 1 and section 4.
 - **The rate limiter blocks the wrong thing.** Two limiters are sharing a counter: give each a distinct `keyPrefix`.
 - **Every visitor shares one rate-limit bucket.** The key is the socket address and there is a proxy in front. Set `trustProxy`, but only if the proxy overwrites the client headers.
-- **`bun run preview` prints nothing.** That is correct. The banner is a development thing; ask `/health` whether it is up.
+- **`bun run preview` prints one `Listening on` line and no banner.** That is correct. The banner is a development thing; ask `/health` whether the app answers.
 - **`bun run preview` fails with `Failed to start server. Is port 3333 in use?`.** Usually `bun run dev` is still running. Production does not walk to the next port: stop the other server, or set `PORT`.
 - **Assets 404 in preview.** `bun run build` has not run since the last change; the manifest is missing or stale.
 - **CI is red on `--deps` only.** A dependency has an advisory. Upgrade it; do not drop the flag.
