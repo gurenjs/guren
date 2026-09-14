@@ -3,10 +3,6 @@
  * DrizzleAdapter keep module-level state, so `configureOrm()` configures one
  * copy while models imported through the other fail with "database has not
  * been configured". The runtime cannot merge them, only make it non-silent.
- *
- * A copy is identified by the module URL it was evaluated from, because
- * `bun --hot` re-evaluates the same file against a surviving `globalThis` and a
- * count alone reads that as a second copy.
  */
 import { isHotReloadRuntime } from './hot-reload-runtime'
 
@@ -23,37 +19,35 @@ type GlobalWithMarker = typeof globalThis & {
   [INSTANCE_KEY]?: InstanceMarker
 }
 
+const globalScope = globalThis as GlobalWithMarker
+
+/** Empty where a bundler shims `import.meta.url` away, which no copy can be told apart by. */
+function moduleIdentity(): string | undefined {
+  return import.meta.url || undefined
+}
+
 /**
- * A bundle inlines both copies at one URL, so a repeated identity there is a
- * duplicate rather than a reload — which is why the identity only excuses a
- * repeat under `--hot`, the one mode that re-evaluates a module at all.
+ * Counts this evaluation as a copy unless the same module URL already
+ * registered under `bun --hot`, which re-evaluates a file against a surviving
+ * `globalThis`. A bundle inlines both copies at one URL, so outside `--hot` a
+ * repeat is a duplicate rather than a reload. Any other in-process
+ * re-evaluator (a Vite SSR runner, `vi.resetModules()`) still counts.
  */
 export function registerOrmInstance(identity: string | undefined): void {
-  const globalScope = globalThis as GlobalWithMarker
-  const marker = globalScope[INSTANCE_KEY]
-
-  if (!marker) {
-    globalScope[INSTANCE_KEY] = {
-      count: 1,
-      warned: false,
-      identities: new Set(identity === undefined ? [] : [identity]),
-    }
-    return
-  }
-
+  const marker = (globalScope[INSTANCE_KEY] ??= { count: 0, warned: false, identities: new Set<string>() })
   const identities = (marker.identities ??= new Set<string>())
 
-  if (identity !== undefined && identities.has(identity) && isHotReloadRuntime()) {
-    return
-  }
-
-  marker.count += 1
   if (identity !== undefined) {
+    if (identities.has(identity) && isHotReloadRuntime()) {
+      return
+    }
     identities.add(identity)
   }
 
+  marker.count += 1
+
   const quiet = typeof process !== 'undefined' && process.env.GUREN_QUIET_DUPLICATE_ORM === '1'
-  if (!marker.warned && !quiet) {
+  if (marker.count > 1 && !marker.warned && !quiet) {
     marker.warned = true
     console.warn(
       `[guren/orm] ${marker.count} copies of @guren/orm are loaded in this process. ` +
@@ -67,4 +61,4 @@ export function registerOrmInstance(identity: string | undefined): void {
   }
 }
 
-registerOrmInstance(typeof import.meta.url === 'string' && import.meta.url !== '' ? import.meta.url : undefined)
+registerOrmInstance(moduleIdentity())
