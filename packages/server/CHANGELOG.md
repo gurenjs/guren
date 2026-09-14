@@ -1,5 +1,14 @@
 # @guren/server
 
+## 2.23.2
+
+### Patch Changes
+
+- cfa12ad: `Application.listen()` prints one `[guren] Listening on http://<host>:<port>` line in production, where the development banner stays off. A production container's log previously said nothing about where the app was answering.
+- Updated dependencies [575edf1]
+- Updated dependencies [db35a83]
+  - @guren/orm@2.10.1
+
 ## 2.23.1
 
 ### Patch Changes
