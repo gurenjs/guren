@@ -1,5 +1,6 @@
 import { consola } from 'consola'
 import { existsSync, readdirSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { findFirstExisting } from './discovery'
@@ -95,8 +96,8 @@ function toSlug(value: string): string {
   return slugifyProse(value, '_', 'migration')
 }
 
-async function resolveDrizzleConfig(): Promise<string | undefined> {
-  return (await findFirstExisting(process.cwd(), DRIZZLE_CONFIG_CANDIDATES)) ?? undefined
+async function resolveDrizzleConfig(root = process.cwd()): Promise<string | undefined> {
+  return (await findFirstExisting(root, DRIZZLE_CONFIG_CANDIDATES)) ?? undefined
 }
 
 /**
@@ -134,9 +135,9 @@ function readVerbatim(value: unknown): string | undefined {
  * "declares no dialect" and "could not be read" send the user to different
  * fixes, and only the first is their config's fault.
  */
-async function readDrizzleConfig(configPath: string): Promise<DrizzleConfig> {
+async function readDrizzleConfig(configPath: string, root = process.cwd()): Promise<DrizzleConfig> {
   try {
-    const module = await import(pathToFileURL(resolve(process.cwd(), configPath)).href)
+    const module = await import(pathToFileURL(resolve(root, configPath)).href)
     // drizzle-kit's loader adopts a promise-exporting config, so awaiting is
     // what keeps this reader on the same object the child process sees.
     const config = ((await module.default) ?? module) as Record<string, unknown>
@@ -192,6 +193,29 @@ function listMigrationNames(folder: string): string[] {
   return readdirSync(folder, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && existsSync(resolve(folder, entry.name, 'migration.sql')))
     .map((entry) => entry.name)
+}
+
+/**
+ * The project-relative folder of a generated migration that creates `tableName`,
+ * read from the drizzle config's `out` (or the default). Static: it cannot tell
+ * whether the database applied it, which only `db:status` can.
+ */
+export async function findMigrationCreatingTable(root: string, tableName: string): Promise<string | undefined> {
+  const configPath = await resolveDrizzleConfig(root)
+  const configured = configPath ? await readDrizzleConfig(configPath, root) : {}
+  const out = configured.out ?? DEFAULT_OUTPUT
+  const name = tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // drizzle-kit quotes with backticks on sqlite/mysql and double quotes on postgres.
+  const creates = new RegExp(`CREATE TABLE\\s+(?:IF NOT EXISTS\\s+)?(?:[\`"][^\`"]+[\`"]\\.)?[\`"]?${name}[\`"]?\\s*\\(`, 'i')
+
+  for (const migration of listMigrationNames(resolve(root, out)).sort()) {
+    const sql = await readFile(resolve(root, out, migration, 'migration.sql'), 'utf8')
+    if (creates.test(sql)) {
+      return `${out.replace(/^\.\//, '').replace(/\/$/, '')}/${migration}`
+    }
+  }
+
+  return undefined
 }
 
 export async function makeMigration(options: MakeMigrationOptions = {}): Promise<MakeMigrationResult> {
