@@ -187,7 +187,7 @@ bunx guren codegen
 
 ## 4. Make the demo real
 
-`make:feature --prototype` seeded the fixture with `Sample title 1`. A customer reads seed data as the product, so this is the one part of the prototype worth writing by hand: what the screens say. The rest of the file is what the generator wrote, and the shape of each entry is the thing to learn here, because it is the shape of the controller you will write later, minus the database.
+`make:feature --prototype` seeded the fixture with `Sample title 1`, and `add prototype` signed the demo in as `Demo User`. A customer reads seed data as the product, so these are the parts of the prototype worth writing by hand: what the screens say, and who is signed in. The block below also sets `shared.auth.user` to Ada. The rest of the file is what the generator wrote, and the shape of each entry is the thing to learn here, because it is the shape of the controller you will write later, minus the database.
 
 ```ts file=resources/js/prototype/index.ts
 /**

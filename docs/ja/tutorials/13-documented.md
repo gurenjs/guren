@@ -34,7 +34,7 @@ bunx guren spec:generate
 | `screens.md` | ルート、コントローラー、ページ: すべてのルート、その背後のアクション、そして渡す props とともにレンダリングするページコンポーネント |
 | `modules.md` | すべてのソースファイルの import: アプリのどの部分がどこに依存しているのか |
 
-`docs/spec/er.md` を開いてください。mermaid の図と、テーブルごとの表でできています。ここに `posts`、`users`、`comments`、`tags`、`post_tags`、`attachments` が載っているのは、それらを自分で書いたからで、誰かが説明を書き足したからではありません。`docs/spec/screens.md` を開いて、第 4 章で作ったページを探してください。その `Props` 型は、自分のソースから引かれています。
+`docs/spec/er.md` を開いてください。mermaid の図と、テーブルごとの表でできています。ここに `posts`、`users`、`comments`、`tags`、`postTags` (`post_tags` テーブル)、`attachments` が載っているのは、それらを自分で書いたからで、誰かが説明を書き足したからではありません。`docs/spec/screens.md` を開いて、第 4 章で作ったページを探してください。その `Props` 型は、自分のソースから引かれています。
 
 どのファイルも、編集しないでくださいという 1 行と、処理が生成したものだと記録する frontmatter で始まります。どちらも本当です。次の節では、その 1 行目を無視すると何が起きるかを見ます。
 

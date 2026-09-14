@@ -34,7 +34,7 @@ Four files under `docs/spec/`, and each is a view of something you already have:
 | `screens.md` | routes, controllers and pages: every route, the action behind it, and the page component it renders with the props it passes |
 | `modules.md` | every source file's imports: which part of the app depends on which |
 
-Open `docs/spec/er.md`. It is a mermaid diagram and a table per table, and it knows about `posts`, `users`, `comments`, `tags`, `post_tags` and `attachments` because you wrote them, not because anyone described them. Open `docs/spec/screens.md` and look for the page you built in chapter 4: its `Props` type is quoted from your own source.
+Open `docs/spec/er.md`. It is a mermaid diagram and a table per table, and it knows about `posts`, `users`, `comments`, `tags`, `postTags` (the `post_tags` table) and `attachments` because you wrote them, not because anyone described them. Open `docs/spec/screens.md` and look for the page you built in chapter 4: its `Props` type is quoted from your own source.
 
 Each file opens with a line telling you not to edit it, and frontmatter recording that a process generated it. Both are true, and the next section is about what happens when you ignore the first one.
 

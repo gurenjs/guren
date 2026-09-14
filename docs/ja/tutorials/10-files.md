@@ -40,7 +40,7 @@ bun run db:migrate
 printf 'storage/app/\npublic/storage/\n' >> .gitignore
 ```
 
-もうひとつ、config にはジェネレーターが代わりに書けない行が 1 行加わります。どのモデルが attachments を持つことになるかまでは、ジェネレーターには分からないからです。prune コマンドは、attachment の持ち主がまだ存在するかを確かめるのにこのマップを使います。
+もうひとつ、config にはジェネレーターが代わりに書けないモデルのマップが要ります。どのモデルが attachments を持つことになるかまでは、ジェネレーターには分からないからです。prune コマンドは、attachment の持ち主がまだ存在するかを確かめるのにこのマップを使います。下のブロックは末尾に `Model.morphMap` を足し、それに要る `Model` と `Post` の import を加えています。ジェネレーターが書いた長めのコメントは、この節で説明する 3 つの判断に絞りました。
 
 ```ts file=config/attachments.ts
 import { Model, configureAttachments } from '@guren/core'
