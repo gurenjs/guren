@@ -15,11 +15,9 @@ const realMarker = globalScope[INSTANCE_KEY]
 
 let warnings: string[] = []
 const realWarn = console.warn
-// `process.env` is one object per process, which `--isolate` does not fork.
+// `process.env` and `process.execArgv` are one per process, which `--isolate` does not fork.
 const realQuiet = process.env.GUREN_QUIET_DUPLICATE_ORM
-// Tracked so the cleanup removes only what this file pushed, leaving a runner
-// that is itself under `--hot` with its flag.
-let pushedHot = false
+const realExecArgv = [...process.execArgv]
 
 beforeEach(() => {
   warnings = []
@@ -32,10 +30,7 @@ beforeEach(() => {
 
 afterEach(() => {
   console.warn = realWarn
-  if (pushedHot) {
-    process.execArgv.splice(process.execArgv.lastIndexOf('--hot'), 1)
-    pushedHot = false
-  }
+  process.execArgv = [...realExecArgv]
   if (realQuiet === undefined) delete process.env.GUREN_QUIET_DUPLICATE_ORM
   else process.env.GUREN_QUIET_DUPLICATE_ORM = realQuiet
 })
@@ -47,7 +42,6 @@ afterAll(() => {
 
 function underHotReload(): void {
   process.execArgv.push('--hot')
-  pushedHot = true
 }
 
 const INSTALLED = 'file:///app/node_modules/@guren/orm/dist/index.js'
@@ -95,8 +89,7 @@ describe('registerOrmInstance', () => {
   })
 
   test('a repeated identity outside --hot is two copies inlined in one bundle', () => {
-    // Nothing re-evaluates a module without --hot, so the same URL twice is a
-    // Workers/Lambda bundle carrying both copies at the bundle's own URL.
+    // Nothing re-evaluates a module without `--hot`.
     registerOrmInstance(INSTALLED)
     registerOrmInstance(INSTALLED)
 

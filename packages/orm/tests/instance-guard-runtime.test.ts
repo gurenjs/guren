@@ -24,8 +24,12 @@ function copyGuardInto(dir: string): string {
   return join(dir, 'instance-guard.ts')
 }
 
+function importLines(paths: string[]): string {
+  return paths.map((path) => `import ${JSON.stringify(path)}`).join('\n')
+}
+
 function entrySource(tag: string, imports: string[]): string {
-  return `${imports.map((path) => `import ${JSON.stringify(path)}`).join('\n')}
+  return `${importLines(imports)}
 console.log('READY:${tag}')
 setInterval(() => {}, 1_000)
 `
@@ -106,13 +110,13 @@ describe('instance guard in a real process', () => {
         ['single', [GUARD]],
         ['double', [GUARD, duplicate]],
       ] as const) {
-        writeFileSync(join(dir, `${name}.ts`), `${imports.map((p) => `import ${JSON.stringify(p)}`).join('\n')}\n`)
+        writeFileSync(join(dir, `${name}.ts`), `${importLines([...imports])}\n`)
         const built = await Bun.build({ entrypoints: [join(dir, `${name}.ts`)], target: 'bun', outdir: dir })
         expect(built.success).toBe(true)
       }
 
-      // Both copies land at the bundle's own import.meta.url, so only the absence of
-      // a reloading runtime tells the repeat apart from one module evaluated twice.
+      // Only the absence of a reloading runtime tells the repeat apart from one
+      // module evaluated twice.
       expect(await runToCompletion(dir, 'single.js')).not.toContain('[guren/orm]')
       expect(await runToCompletion(dir, 'double.js')).toContain(WARNING)
     } finally {
