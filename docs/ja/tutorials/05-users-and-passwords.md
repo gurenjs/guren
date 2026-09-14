@@ -176,7 +176,7 @@ const app = createApp({
 export default app
 ```
 
-変わった行は 2 つ、`providers` の `AuthProvider` と `auth: {}` です。テストを走らせます。
+変わったのは、`AuthProvider` の import、`providers` の `AuthProvider`、それに `auth: {}` とその上のコメントです。テストを走らせます。
 
 ```bash run expect-fail
 bun test

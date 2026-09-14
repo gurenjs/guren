@@ -176,7 +176,7 @@ const app = createApp({
 export default app
 ```
 
-Two lines changed: `AuthProvider` in `providers`, and `auth: {}`. Run the tests:
+What changed: the `AuthProvider` import, `AuthProvider` in `providers`, and `auth: {}` with the comment above it. Run the tests:
 
 ```bash run expect-fail
 bun test

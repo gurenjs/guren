@@ -909,6 +909,8 @@ app.auth.useTokens(new DatabaseApiTokenStore(apiTokens))
 
 That mounts `/mcp`: a real endpoint, in production, that answers `tools/list` with the tools you declared and runs each call as an ordinary request through your middleware. It is gated by a bearer token, per-token tool scopes and a rate limit, and it needs a token store, which needs a table. That is chapter 14's work, alongside the rest of going live.
 
+Until the plugin is installed there is no `/mcp` route, yet a POST to it answers 403 `CSRF token mismatch`, not 404. CSRF verification runs before routing, so every path without a token gets that answer, including ones that do not exist.
+
 Do not confuse it with the endpoint your editor already talks to. `GUREN_MCP=1` mounts `/_guren/mcp` in development only, refuses any caller that is not on the loopback interface, and its tools are `guren_check`, `guren_gate`, `guren_get_context` and friends. Those act on your *project*: they are for the agent writing the app. The plugin's tools are your *application's*: they are for an agent using the app. Same protocol, opposite direction, and the harness in chapter 8 configured the first one for you.
 
 ## Where you are

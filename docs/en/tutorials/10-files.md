@@ -40,7 +40,7 @@ Two hand edits. The disks hold files nothing should commit:
 printf 'storage/app/\npublic/storage/\n' >> .gitignore
 ```
 
-And the config gets one line the generator cannot write for you, because it does not know which of your models will carry attachments. The prune command needs the map to check that an attachment's owner still exists:
+And the config needs a model map the generator cannot write for you, because it does not know which of your models will carry attachments. The prune command needs the map to check that an attachment's owner still exists. The block below adds `Model.morphMap` at the end and the `Model` and `Post` imports it needs, and trims the generator's longer comments down to the three decisions this section explains:
 
 ```ts file=config/attachments.ts
 import { Model, configureAttachments } from '@guren/core'
