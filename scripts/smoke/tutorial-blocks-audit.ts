@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
 import {
+  auditBackgroundLifecycle,
   chapterFiles,
   compareExecutableSequences,
   parseTutorialBlocks,
@@ -38,6 +39,9 @@ export async function auditTutorialBlocks(): Promise<BlockIssue[]> {
     const chapter = await parseChapter(REFERENCE_LOCALE, name)
     issues.push(...chapter.issues)
     reference.set(name, chapter)
+  }
+  if (issues.length === 0) {
+    issues.push(...auditBackgroundLifecycle([...reference.values()]))
   }
 
   for (const locale of MIRROR_LOCALES) {

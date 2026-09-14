@@ -26,7 +26,8 @@ export interface IllustrativeBlock extends BlockBase {
   kind: 'illustrative'
 }
 
-export type RunMode = 'normal' | 'expect-fail' | 'background'
+/** `stop-background` is the reader stopping a server (Ctrl-C); its body is comments and never runs. */
+export type RunMode = 'normal' | 'expect-fail' | 'background' | 'stop-background'
 
 export interface RunBlock extends BlockBase {
   kind: 'run'
@@ -115,13 +116,23 @@ function classify(lang: string, attrs: string[], base: BlockBase, file: string):
     if (lang !== 'bash') return issue(`run blocks are bash, got: ${lang}`)
     const expectFail = set.delete('expect-fail')
     const background = set.delete('background')
-    if (expectFail && background) return issue('run cannot be both expect-fail and background')
+    const stop = set.delete('stop-background')
+    if ([expectFail, background, stop].filter(Boolean).length > 1) {
+      return issue(`run takes one of expect-fail, background, stop-background, got: ${attrs.join(' ')}`)
+    }
     if (set.size > 0) return issue(`unknown run attribute: ${[...set].join(' ')}`)
-    const mode: RunMode = expectFail ? 'expect-fail' : background ? 'background' : 'normal'
+    if (stop) {
+      if (fallback) return issue('run stop-background takes no fallback')
+      // The smoke never executes this body, so a command in it would be a step the reader types and nothing checks.
+      if (base.body.split('\n').some((line) => line.trim() !== '' && !line.trim().startsWith('#'))) {
+        return issue('run stop-background body must be comments only (the reader presses Ctrl-C; nothing runs)')
+      }
+    }
+    const mode: RunMode = expectFail ? 'expect-fail' : background ? 'background' : stop ? 'stop-background' : 'normal'
     return { block: { ...base, kind: 'run', mode, fallback } }
   }
 
-  return issue(`unknown fence attribute(s): ${attrs.join(' ')} (expected run, run expect-fail, run background, file=<path>, manual, with optional fallback)`)
+  return issue(`unknown fence attribute(s): ${attrs.join(' ')} (expected run, run expect-fail, run background, run stop-background, file=<path>, manual, with optional fallback)`)
 }
 
 /**
@@ -218,6 +229,40 @@ export function compareExecutableSequences(
     }
   }
   return []
+}
+
+/**
+ * Servers the reader starts outlive their chapter, unlike the smoke's (each on
+ * its own port, stopped at chapter end), so the course is read in order here.
+ * The same command again is a chapter's "start it if you stopped it"; another
+ * command while one runs takes the reader's port. `manual` blocks are not modelled.
+ */
+export function auditBackgroundLifecycle(chapters: readonly ParsedChapter[]): BlockIssue[] {
+  const issues: BlockIssue[] = []
+  let running: { file: string; line: number; command: string } | null = null
+  for (const chapter of chapters) {
+    for (const block of chapter.blocks) {
+      if (block.kind !== 'run') continue
+      if (block.mode === 'stop-background') {
+        if (!running) {
+          issues.push({ file: chapter.file, line: block.line, message: 'run stop-background with no background server running' })
+        }
+        running = null
+        continue
+      }
+      if (block.mode !== 'background') continue
+      const command = block.body.trim()
+      if (running && running.command !== command) {
+        issues.push({
+          file: chapter.file,
+          line: block.line,
+          message: `\`${command}\` starts while \`${running.command}\` from ${running.file}:${running.line} is still running on the reader's port; add a \`bash run stop-background\` block before it`,
+        })
+      }
+      running = { file: chapter.file, line: block.line, command }
+    }
+  }
+  return issues
 }
 
 /** The directory a `run` block that is exactly `cd <dir>` moves the app root to, or null. */

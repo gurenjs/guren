@@ -4,6 +4,7 @@
 // being run.
 import { describe, expect, test } from 'bun:test'
 import {
+  auditBackgroundLifecycle,
   cdTarget,
   compareExecutableSequences,
   executableBlocks,
@@ -79,6 +80,24 @@ describe('parseTutorialBlocks', () => {
     expect(issues[7].message).toContain('duplicate')
   })
 
+  test('stop-background is its own run mode, with a comment-only body', () => {
+    const ok = parseTutorialBlocks(fence('bash run stop-background', '# Ctrl-C in the terminal running bun run dev\n'), 'ch.md')
+    expect(ok.issues).toEqual([])
+    expect(ok.blocks[0]).toMatchObject({ kind: 'run', mode: 'stop-background', fallback: false })
+
+    const doc = [
+      fence('bash run background stop-background', '# x'),
+      fence('bash run stop-background fallback', '# x'),
+      fence('bash run stop-background', '# stop it\nkill %1'),
+    ].join('\n')
+    const { blocks, issues } = parseTutorialBlocks(doc, 'ch.md')
+    expect(blocks.every((block) => block.kind === 'illustrative')).toBe(true)
+    expect(issues.map((issue) => issue.line)).toEqual([1, 4, 7])
+    expect(issues[0].message).toContain('one of')
+    expect(issues[1].message).toContain('fallback')
+    expect(issues[2].message).toContain('comments only')
+  })
+
   test('an unterminated fence is an issue, not a silent swallow of the rest', () => {
     const { issues } = parseTutorialBlocks('```bash run\nbun test\n', 'ch.md')
     expect(issues).toEqual([{ file: 'ch.md', line: 1, message: 'unterminated fence' }])
@@ -127,6 +146,38 @@ describe('compareExecutableSequences', () => {
     const withExample = parseTutorialBlocks(`${fence('bash', 'ls -la')}\n${fence('bash run', 'bun test')}\n${fence('ts file=a.ts', 'x')}`, 'ja.md')
     expect(executableBlocks(withExample.blocks)).toHaveLength(2)
     expect(compareExecutableSequences(en, withExample)).toEqual([])
+  })
+})
+
+describe('auditBackgroundLifecycle', () => {
+  const dev = fence('bash run background', 'bun run dev')
+  const preview = fence('bash run background', 'bun run preview')
+  const stop = fence('bash run stop-background', '# Ctrl-C')
+
+  test('the same server started again in a later chapter is not a collision', () => {
+    const chapters = [parseTutorialBlocks(dev, '01.md'), parseTutorialBlocks(`${dev}\n${fence('bash run', 'bun test')}`, '02.md')]
+    expect(auditBackgroundLifecycle(chapters)).toEqual([])
+  })
+
+  test('a different server while one from an earlier chapter still runs is reported where it starts', () => {
+    const chapters = [
+      parseTutorialBlocks(dev, '12.md'),
+      parseTutorialBlocks(fence('bash run', 'bun test'), '13.md'),
+      parseTutorialBlocks(`${fence('bash run', 'bun run build')}\n${preview}`, '14.md'),
+    ]
+    const issues = auditBackgroundLifecycle(chapters)
+    expect(issues).toMatchObject([{ file: '14.md', line: 4 }])
+    expect(issues[0].message).toContain('12.md:1')
+  })
+
+  test('a stop before the other server clears the collision; a stop with nothing running is reported', () => {
+    expect(auditBackgroundLifecycle([parseTutorialBlocks(dev, '12.md'), parseTutorialBlocks(`${stop}\n${preview}`, '14.md')])).toEqual([])
+    expect(auditBackgroundLifecycle([parseTutorialBlocks(`${stop}\n${dev}`, '01.md')])).toMatchObject([{ file: '01.md', line: 1 }])
+  })
+
+  test('manual blocks are not modelled', () => {
+    const chapters = [parseTutorialBlocks(`${dev}\n${fence('bash manual', 'bun run preview')}`, '01.md')]
+    expect(auditBackgroundLifecycle(chapters)).toEqual([])
   })
 })
 

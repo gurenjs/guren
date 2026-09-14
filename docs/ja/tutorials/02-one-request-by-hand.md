@@ -65,7 +65,7 @@ export function registerWebRoutes(router: Router): void {
 
 新しい点が 2 つあります。`[AboutController, 'index']` は、ハンドラー関数の代わりにクラスとメソッドを指名しています。Guren はリクエストごとにコントローラーをインスタンス化するので、メソッドは `this` を通してリクエストを読めます。もうひとつは `.name('about')` で、ルートに名前を付けます。URL は変わりますが、ページがリンクに使うのは名前のほうです。
 
-もう一度テストを走らせると、今度は別の理由で失敗します。`AboutController` の import が解決できず、アプリが起動できません。`guren check` も見つける類の問題ですが、ここではテストが先に捕まえました。
+もう一度テストを走らせると、今度は別の理由で失敗します。`AboutController` の import が解決できず、アプリが起動できません。`guren check` も見つける類の問題ですが、ここではテストが先に捕まえました。`bun run dev` を動かしているターミナルにも同じエラーが出ています。`routes/web.ts` の保存でリロードが走り、コントローラーを import できず、サーバーはそれまでのルートのまま動き続けています。
 
 ## 3. コントローラー、まずは素の Response で
 
@@ -86,6 +86,16 @@ bun test
 ```
 
 緑になりました。コントローラーのアクションは `Response` を返すメソッドで、`this.text()` は素の Response を組み立てます。契約はこれだけです。ページを挟まない形で一度見ておく価値があります。コントローラーの他のすべて(`this.inertia()`、`this.json()`、`this.redirect()`、第 4 章で出会うバリデーター)も、同じ `Response` を組み立てる別のやり方だからです。
+
+テストは毎回アプリを起動し直しますが、開発サーバーは違います。失敗したリロードの前のルートを持ったままで、コントローラーを作っても読み込み直しません。ターミナルで Ctrl-C を押して止め、もう一度起動してください。
+
+```bash run stop-background
+# Ctrl-C in the terminal running bun run dev
+```
+
+```bash run background
+bun run dev
+```
 
 [http://localhost:3333/about](http://localhost:3333/about) を開いてください。約束どおり、プレーンテキストです。
 
@@ -317,7 +327,7 @@ git commit -m "feat: add the contact page"
 ## よくあるつまずき
 
 - **`pages.about.Index` が存在しない。** ページを作ってから codegen が走っていません。`bun run codegen` を実行するか、`bun run dev` に任せてください。開発サーバーは、動作中にページが追加されると再生成します。
-- **コントローラーを作ったのに、ブラウザでは `/about` が 404 のまま。** `bun run dev` の動作中に、`AboutController.ts` より先に `routes/web.ts` を保存しています。リロードは存在しない import で失敗して古いルートのまま残り、あとからファイルを作っても登録されません。`bun run dev` を再起動してください。
+- **コントローラーを作ったのに、ブラウザでは `/about` が 404 のまま。** 3 節のあとで `bun run dev` を再起動していません。`AboutController.ts` より先に `routes/web.ts` を保存したときのリロードは存在しない import で失敗して古いルートのまま残り、あとからファイルを作っても登録されません。`bun run dev` を再起動してください。
 - **テストは通るのにブラウザは古いページを表示する。** 最後の保存前に開発サーバーがレンダリングし、Inertia が古い props を保持しています。キャッシュを無効にしてリロードするか、`bun run dev` を動かしているターミナルで codegen のエラーを確認してください。どちらでも直らなければ、`bun run dev` を再起動してください。
 - **エージェントが HTML 入りの `this.text()` を返してきた。** 動きますし、テストも通ります。rubric がテストの検査項目だけでなくコントローラーのあるべき姿まで書いているのは、そのためです。ページをレンダリングするよう頼み直してください。このコースで何度も繰り返すことになる修正です。
 - **`guren check` がコントローラーにテストが無いと警告する。** `tests/<Name>Controller.test.ts` を探しています。両方書きましたね。別のコントローラー名が出ているなら、それは第 3 章の仕事です。
