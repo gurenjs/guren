@@ -25,10 +25,10 @@ bunx guren check --json   # route ↔ controller ↔ page wiring, route contract
 bunx guren audit --json   # validation and auth on mutating routes, raw SQL, secrets, mass assignment, CSRF
 ```
 
-Every failure they report is a finding. The checklist below is the part they
-cannot see: whether the validation that exists is the right validation, whether
-a record reaches the browser through a resource, and whether the tests say what
-the change was supposed to do.
+Every failure they report is a finding. The checklist below is what they do not
+settle: whether the validation that exists is the right validation, whether a
+record reaches the browser through a resource, and whether the tests say what
+the change was supposed to do. Some of it neither checker looks at all.
 
 ## 3. Read the conventions
 
@@ -40,7 +40,7 @@ touches: `.claude/rules/controllers-http.md`, `.claude/rules/orm-models.md`,
 ## Checklist
 
 ### Validation on every mutating route
-- [ ] Each POST/PUT/PATCH/DELETE action calls `this.validateBody(schema)`, and the same schema sits on the route as `body:` so codegen types the form
+- [ ] Each POST/PUT/PATCH action calls `this.validateBody(schema)`, and the same schema sits on the route as `body:` so codegen types the form. DELETE carries no body — it is covered by the params and authorization items instead
 - [ ] Query strings go through `this.validateQuery` (`?page=` included); path parameters through `this.validateParams` or a route `bind:`
 - [ ] The schema lives in `app/Http/Validators/` and is shared by route, controller and page — not re-declared with different messages in two places
 - [ ] Messages are what a user should read, not `Invalid input`
@@ -53,7 +53,7 @@ touches: `.claude/rules/controllers-http.md`, `.claude/rules/orm-models.md`,
 - [ ] The page's `interface Props` is typed from the exported `…ResourceData`, not restated by hand
 
 ### Routes
-- [ ] Registration order: a literal segment before a parameter on the same prefix (`/posts/create` before `/posts/:id`), or the literal path 404s
+- [ ] Registration order: a literal segment before a parameter on the same prefix (`/posts/create` before `/posts/:id`), or the parametric route matches first and the action looks up a record named `create`
 - [ ] Every route the client links to has a `.name()`
 - [ ] Mutating routes sit behind the auth middleware; the alias is captured (`const router = baseRouter.aliasMiddleware('auth', …)`), or `.middleware('auth')` does not compile
 - [ ] `bind:` and `params:` keys name parameters the path actually declares
@@ -61,14 +61,18 @@ touches: `.claude/rules/controllers-http.md`, `.claude/rules/orm-models.md`,
 
 ### Authorization
 - [ ] Ownership and role decisions go through a policy (`await this.authorize('update', [Post, post])`), not an inline `if` in the action
-- [ ] The owner column is set server-side (`forceCreate` / `forceUpdate`) and is absent from `fillable`
+- [ ] The owner column is absent from `fillable`, and its value comes from `this.auth.userOrFail()` rather than the request body
 - [ ] The policy is registered with `gate.policy(Model, Policy)` in the app's authorization provider, or the gate denies every action
 
 ### Models and data
-- [ ] `defineModel(table, { fillable: [...] })`; request data never reaches `forceCreate`/`forceUpdate`
+- [ ] `defineModel(table, { fillable: [...] })`; `forceCreate`/`forceUpdate` carry validated fields and server-derived values only, never a raw request body
 - [ ] A `db/schema.ts` change comes with a migration in `db/migrations/`
 - [ ] Relations eager-loaded with `Post.with('author')` rather than queried inside a loop; lists paginated with `Post.paginate` and the `paginate` helper
 - [ ] Slow work (mail, imports, webhooks) dispatched to the queue, not awaited in the request
+
+### Public surface
+- [ ] Public mutating or expensive endpoints are rate-limited, with a `keyGenerator` rather than the shared fallback bucket
+- [ ] Cached reads are invalidated where the data is written, and the keys follow one naming convention
 
 ### Providers, events, jobs
 - [ ] Listeners registered with `events.listen(Listener)` in the app's event provider, and that provider listed in `createApp({ providers })`

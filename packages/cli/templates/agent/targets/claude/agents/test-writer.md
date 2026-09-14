@@ -60,7 +60,8 @@ describe('PostController', () => {
   })
 
   test('store rejects an empty body per field', async () => {
-    await http
+    const client = await http.withCsrf()
+    await client
       .json()
       .post('/posts', {})
       .assertUnprocessable()
@@ -73,23 +74,35 @@ describe('PostController', () => {
   })
 
   test('update is forbidden for another user', async () => {
-    await http.actingAs(stranger).json().put(`/posts/${post.id}`, { title: 'No' }).assertForbidden()
+    const client = await http.actingAs(stranger).withCsrf()
+    await client.json().put(`/posts/${post.id}`, { title: 'No' }).assertForbidden()
   })
 })
 ```
 
-Mutating requests that go through CSRF need `await http.withCsrf()`; an
-Inertia form post redirects (303), it does not return 201.
+**Every mutating request needs `await ...withCsrf()`.** `fromApp()` wraps the
+real app, so session and CSRF are mounted and an unprimed POST/PUT/DELETE answers
+**403** — including a JSON one. That turns a 422 assertion red for the wrong
+reason, and quietly turns `assertForbidden()` green whatever the policy decides.
+Prime CSRF after `actingAs()`, so the token belongs to that user's session. An
+Inertia form post redirects (303); it does not return 201.
 
 ### Model test
 
 ```typescript
-import { describe, test, expect, beforeEach } from 'bun:test'
+import { describe, test, expect, beforeAll, beforeEach } from 'bun:test'
 import { ModelNotFoundException } from '@guren/core'
+import { TestApp } from '@guren/testing'
+import app from '../../src/app.js'
 import { resetDatabase } from '../../config/database.js'
 import { Post } from '../../app/Models/Post.js'
 
 describe('Post', () => {
+  // Boots the app's DatabaseProvider, which is the only caller of configureOrm().
+  beforeAll(async () => {
+    await TestApp.fromApp(app)
+  })
+
   beforeEach(async () => {
     await resetDatabase()
   })
@@ -104,6 +117,10 @@ describe('Post', () => {
   })
 })
 ```
+
+A model test still has to boot the app: `resetDatabase()` rebuilds the tables but
+does not configure the ORM, and an unconfigured model throws `database has not
+been configured` on its first query.
 
 `findOrFail` is async: `expect(() => ...).toThrow()` never fails, whatever the
 model does. Always `await expect(...).rejects`.
@@ -142,8 +159,10 @@ test('placing an order queues the processing job', async () => {
 })
 ```
 
-For mail, register `mail.getTransport()` on a real `MailManager` and bind that:
-`manager.registerTransport('fake', () => mail.getTransport())`. The assertions
+For mail, register `mail.getTransport()` on a real `MailManager` that already
+selects it: `new MailManager({ default: 'fake', from })`, then
+`manager.registerTransport('fake', () => mail.getTransport())`, then bind the
+manager. Leaving `default` out leaves it at `smtp` and the send throws. The assertions
 take the event or job **class**, never its name as a string; `assertPushed`
 needs the payload type explicitly, or the predicate receives `unknown`.
 

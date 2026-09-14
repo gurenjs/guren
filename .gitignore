@@ -33,3 +33,7 @@ benchmark-history.json
 
 # The worker `tests/workers/build-fixture.ts` generates for the workerd lane.
 packages/plugin-agents/tests/workers/app/.cloudflare/
+
+# An in-memory SQLite URL reaching a driver that opens it as a path: the file
+# lands in the repo root, and the `:` in the name makes the checkout fail on Windows.
+file::memory:*
