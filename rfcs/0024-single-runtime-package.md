@@ -249,9 +249,9 @@ Why core, with one exception:
 
 Enforcement: `audit:core-first` gains a second rule. An import whose specifier
 is exactly `@guren/orm` (a static `import`, `export … from`, or `import()`)
-fails, in TypeScript sources and in the TypeScript fences of markdown, using
-the import extraction `docs-import-sources.ts` already has rather than a third
-scanner. `@guren/orm/drizzle/*` passes, prose naming the package passes, and
+fails. It matches whole files, markdown included, rather than `ts` fences
+only, since a `diff` fence or a blockquoted snippet is copied as readily.
+`@guren/orm/drizzle/*` passes, prose naming the package passes, and
 a `declare module '@guren/orm'` would pass (an augmentation must name the
 declaring package), though none exists. Its targets add every
 `packages/create-app/templates` blueprint (`api-only` and `database/`
