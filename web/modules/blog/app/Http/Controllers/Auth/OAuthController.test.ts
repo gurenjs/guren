@@ -36,8 +36,9 @@ function createCallbackController(profile: FakeProfile): {
 
   const controller = new OAuthController()
   controller.setContext(ctx as unknown as Context)
-  Object.assign(controller, {
-    auth: {
+  // `auth` is a getter on Controller, so a plain assignment throws.
+  Object.defineProperty(controller, 'auth', {
+    value: {
       session: () => undefined,
       login: vi.fn(async () => {}),
       logout: vi.fn(async () => {}),

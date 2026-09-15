@@ -169,7 +169,7 @@ await app
 
 - `createControllerContext(url, init?)`: コントローラー用の Hono コンテキストを構築します。
 - `createGurenControllerModule()`: Vitest 実行時に `guren` パッケージをモックし、コントローラーを分離してテストできるようにします。
-- `createControllerModuleMock()`: `@guren/core` の `Controller`、`json`、`redirect` を Vitest 向けに配線したドロップインモックです。
+- `createControllerModuleMock()`: `vi.mock('@guren/core', …)` に渡すモックです。`Controller` はフレームワーク本体の `Controller` を継承し、起動済みアプリが必要な `inertia()` と `make()` の解決先だけを差し替えます。
 - `readInertiaResponse(response)`: Inertia レスポンスを `{ format, payload, body }` に正規化し、アサーションを簡単にします。
 
 これらのユーティリティを Vitest スイート（例: `examples/blog/tests`）にインポートすれば、Bun 固有の API を避けつつ React/Inertia のコントローラーテストを書けます。
