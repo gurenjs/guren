@@ -10,7 +10,7 @@ describe('ormRootImportLines', () => {
       "export { Model } from '@guren/orm'",
       "import '@guren/orm'",
       "const orm = await import('@guren/orm')",
-      '>  import { createSqliteDatabase } from \'@guren/orm\'',
+      ">  import { createSqliteDatabase } from '@guren/orm'",
     ].join('\n')
 
     expect(ormRootImportLines(source)).toEqual([1, 2, 3, 4, 5, 6])

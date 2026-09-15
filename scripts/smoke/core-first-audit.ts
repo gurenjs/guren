@@ -10,20 +10,14 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { resolve, join, relative } from 'node:path'
 
 const repoRoot = resolve(import.meta.dir, '../..')
-
-const APPLICATION_CODE = [
+const targets = [
   'README.md',
   'docs',
   'examples',
   'web',
   'packages/create-app/templates',
+  'packages/cli/templates',
 ]
-
-/**
- * The harness names a deep `@guren/server/src/...` path as what a plugin must not
- * import, so it is held to the ORM rule only.
- */
-const AGENT_HARNESS = 'packages/cli/templates'
 
 const ignoredFileNames = new Set([
   'bun.lock',
@@ -42,6 +36,9 @@ const ignoredDirNames = new Set([
   '.turbo',
   '.guren',
   '.vercel',
+  '.wrangler',
+  '.cloudflare',
+  '.output',
   'coverage',
 ])
 
@@ -86,17 +83,24 @@ async function collectFiles(entryPath: string): Promise<string[]> {
   return files
 }
 
+function report(heading: string, violations: readonly string[]): boolean {
+  if (violations.length === 0) return false
+  console.error(heading)
+  for (const violation of violations) {
+    console.error(`- ${violation}`)
+  }
+  return true
+}
+
 async function main(): Promise<void> {
   const serverReferences: string[] = []
   const ormRootImports: string[] = []
 
-  for (const target of [...APPLICATION_CODE, AGENT_HARNESS]) {
-    const files = await collectFiles(resolve(repoRoot, target))
-
-    for (const filePath of files) {
+  for (const target of targets) {
+    for (const filePath of await collectFiles(resolve(repoRoot, target))) {
       const source = await readFile(filePath, 'utf8')
       const path = relative(repoRoot, filePath)
-      if (target !== AGENT_HARNESS && source.includes('@guren/server')) {
+      if (source.includes('@guren/server')) {
         serverReferences.push(path)
       }
       for (const line of ormRootImportLines(source)) {
@@ -105,22 +109,16 @@ async function main(): Promise<void> {
     }
   }
 
-  if (serverReferences.length > 0) {
-    console.error('Core-first audit failed. Found stale @guren/server references in:')
-    for (const violation of serverReferences) {
-      console.error(`- ${violation}`)
-    }
-  }
-  if (ormRootImports.length > 0) {
-    console.error(
-      "Core-first audit failed. Import these from '@guren/core' instead of '@guren/orm' " +
-        '(only @guren/orm/drizzle/<dialect> is imported directly, for schema definitions):',
-    )
-    for (const violation of ormRootImports) {
-      console.error(`- ${violation}`)
-    }
-  }
-  if (serverReferences.length > 0 || ormRootImports.length > 0) {
+  const serverFailed = report(
+    'Core-first audit failed. Found stale @guren/server references in:',
+    serverReferences,
+  )
+  const ormFailed = report(
+    "Core-first audit failed. Import these from '@guren/core' instead of '@guren/orm' " +
+      '(only @guren/orm/drizzle/<dialect> is imported directly, for schema definitions):',
+    ormRootImports,
+  )
+  if (serverFailed || ormFailed) {
     process.exit(1)
   }
 
