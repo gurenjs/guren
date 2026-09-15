@@ -372,8 +372,7 @@ describe('createGurenControllerModule', () => {
 
 describe('createControllerModuleMock', () => {
   // The runtime falls back to `{}` for an undecodable body, so a malformed body
-  // is a validation failure rather than a 500. The mock keeps its own copy of
-  // that parser, so the rule is pinned on both sides.
+  // is a validation failure rather than a 500.
   const undecodableForm = {
     method: 'POST',
     body: 'broken',
@@ -387,6 +386,43 @@ describe('createControllerModuleMock', () => {
         : { success: false as const, error: { issues: [{ path: ['title'], message: 'required' }] } },
   }
 
+  interface SafeParseSchema {
+    safeParse(data: unknown):
+      | { success: true; data: unknown }
+      | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } }
+  }
+
+  /** The helpers are protected, as on the runtime class, so they are reached through actions. */
+  function mockController(ctx: ControllerContext) {
+    const { Controller } = createControllerModuleMock()
+
+    class ProbeController extends Controller {
+      validate(schema: SafeParseSchema) {
+        return this.validateBody(schema)
+      }
+
+      read(key: string) {
+        return this.input(key)
+      }
+
+      respond(data: unknown, init?: ResponseInit) {
+        return this.json(data, init)
+      }
+
+      redirectTo(url: string, options?: { status?: number }) {
+        return this.redirect(url, options)
+      }
+
+      requestLine() {
+        return { path: this.request.path, method: this.request.method }
+      }
+    }
+
+    const controller = new ProbeController()
+    controller.setContext(ctx)
+    return controller
+  }
+
   it('parseRequestPayload falls back to {} for a body the form parser cannot decode', async () => {
     const module = createGurenControllerModule()
     const ctx = createControllerContext('http://example.com/posts', undecodableForm)
@@ -395,31 +431,21 @@ describe('createControllerModuleMock', () => {
   })
 
   it('validateBody() fails validation on an undecodable body rather than throwing', async () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/posts', undecodableForm)
-
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
+    const controller = mockController(createControllerContext('http://example.com/posts', undecodableForm))
 
     // The failure must be the validation one, not the parser's TypeError.
-    await expect(controller.validateBody(requireTitle)).rejects.toThrow(/valid/i)
+    await expect(controller.validate(requireTitle)).rejects.toThrow(/valid/i)
   })
 
   // The fallback is `{}`, not `undefined`: an all-optional schema keeps passing.
   it('validateBody() passes an all-optional schema the empty-object fallback', async () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/posts', undecodableForm)
+    const controller = mockController(createControllerContext('http://example.com/posts', undecodableForm))
 
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
-
-    const allOptional = { safeParse: (data: unknown) => ({ success: true as const, data }) }
-
-    expect(await controller.validateBody(allOptional)).toEqual({})
+    expect(await controller.validate(identitySchema)).toEqual({})
   })
 
   // The upload helpers read the multipart body themselves rather than through
-  // the parser above, so they need their own guard on both sides.
+  // the parser above, so they need their own guard.
   it('file() / files() report no upload for a body the parser cannot decode', async () => {
     const { Controller } = createControllerModuleMock()
 
@@ -430,23 +456,17 @@ describe('createControllerModuleMock', () => {
     }
 
     const controller = new UploadController()
-    controller.setContext(
-      createControllerContext('http://example.com/uploads', undecodableForm) as unknown as ControllerContext,
-    )
+    controller.setContext(createControllerContext('http://example.com/uploads', undecodableForm))
 
     expect(await controller.handle()).toEqual({ avatar: null, gallery: [] })
   })
 
   it('validateBody() accepts a non-object body, while input() keeps the record view', async () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/bulk', {
+    const controller = mockController(createControllerContext('http://example.com/bulk', {
       method: 'POST',
       body: JSON.stringify([1, 2, 3]),
       headers: { 'Content-Type': 'application/json' },
-    })
-
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
+    }))
 
     // Hand-rolled rather than a zod import: the mock takes any `safeParse`.
     const numberArray = {
@@ -456,15 +476,13 @@ describe('createControllerModuleMock', () => {
           : { success: false as const, error: { issues: [{ path: [], message: 'expected number[]' }] } },
     }
 
-    expect(await controller.validateBody(numberArray)).toEqual([1, 2, 3])
-    expect(await controller.input('title')).toBeUndefined()
+    expect(await controller.validate(numberArray)).toEqual([1, 2, 3])
+    expect(await controller.read('title')).toBeUndefined()
   })
 
   // `null` is the shape worth naming: a parsed body, not an absent one, so
   // coalescing it to `{}` hands validation something nobody sent.
   it('validateBody() sees the body as sent, whatever its shape', async () => {
-    const { Controller } = createControllerModuleMock()
-
     const seen: unknown[] = []
     const capture = {
       safeParse: (data: unknown) => {
@@ -473,117 +491,61 @@ describe('createControllerModuleMock', () => {
       },
     }
 
-    const validate = async (body: string, contentType = 'application/json') => {
-      const controller = new Controller()
-      controller.setContext(
+    const validate = (body: string, contentType = 'application/json') =>
+      mockController(
         createControllerContext('http://example.com/bulk', {
           method: 'POST',
           body,
           headers: { 'Content-Type': contentType },
-        }) as unknown as ControllerContext,
-      )
-      return controller.validateBody(capture)
-    }
+        }),
+      ).validate(capture)
 
     expect(await validate(JSON.stringify([1, 2, 3]))).toEqual([1, 2, 3])
     expect(await validate(JSON.stringify('hello'))).toBe('hello')
     expect(await validate(JSON.stringify(null))).toBeNull()
-    // Both parsers are covered: JSON by its own catch, form data by the
-    // controller's.
     expect(await validate('{ not json')).toEqual({})
     expect(await validate('broken', 'multipart/form-data')).toEqual({})
     expect(seen).toHaveLength(5)
   })
 
-  it('reads the body once per controller, memoizing the record view', async () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/posts', {
+  // A second read of a consumed stream would find nothing, so both answers
+  // prove the body was read once.
+  it('reads the body once per controller, whichever helper reads it', async () => {
+    const controller = mockController(createControllerContext('http://example.com/posts', {
       method: 'POST',
       body: JSON.stringify({ title: 'Guren' }),
       headers: { 'Content-Type': 'application/json' },
-    })
+    }))
 
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
-
-    expect(await controller.input('title')).toBe('Guren')
-    expect(await controller.input('title')).toBe('Guren')
-    expect(controller.parsedBody).toEqual({ title: 'Guren' })
+    expect(await controller.read('title')).toBe('Guren')
+    expect(await controller.read('title')).toBe('Guren')
+    expect(await controller.validate(identitySchema)).toEqual({ title: 'Guren' })
   })
 
-  it('extends Controller with json method', () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/api')
+  it('json() sets the JSON content type and a custom status', async () => {
+    const controller = mockController(createControllerContext('http://example.com/api'))
 
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
-
-    const response = controller.json({ success: true })
+    const response = controller.respond({ error: 'Not found' }, { status: 404 })
 
     expect(response.headers.get('Content-Type')).toContain('application/json')
-  })
-
-  it('json method includes custom status', async () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/api')
-
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
-
-    const response = controller.json({ error: 'Not found' }, { status: 404 })
-    const body = await response.json()
-
     expect(response.status).toBe(404)
-    expect(body).toEqual({ error: 'Not found' })
+    expect(await response.json()).toEqual({ error: 'Not found' })
   })
 
-  it('redirect method returns 302 for GET requests', () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/', { method: 'GET' })
+  it('redirect() answers 302 for GET, 303 otherwise, and honors a custom status', () => {
+    const get = mockController(createControllerContext('http://example.com/', { method: 'GET' }))
+    const post = mockController(createControllerContext('http://example.com/', { method: 'POST' }))
 
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
-
-    const response = controller.redirect('/dashboard')
-
-    expect(response.status).toBe(302)
-    expect(response.headers.get('Location')).toBe('/dashboard')
+    expect(get.redirectTo('/dashboard').status).toBe(302)
+    expect(get.redirectTo('/dashboard').headers.get('Location')).toBe('/dashboard')
+    expect(post.redirectTo('/success').status).toBe(303)
+    expect(post.redirectTo('/permanent', { status: 301 }).status).toBe(301)
   })
 
-  it('redirect method returns 303 for POST requests', () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/', { method: 'POST' })
+  it('reads the request through this.request', () => {
+    const controller = mockController(createControllerContext('http://example.com/users/1', { method: 'GET' }))
 
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
-
-    const response = controller.redirect('/success')
-
-    expect(response.status).toBe(303)
-    expect(response.headers.get('Location')).toBe('/success')
-  })
-
-  it('redirect method respects custom status', () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/', { method: 'POST' })
-
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
-
-    const response = controller.redirect('/permanent', { status: 301 })
-
-    expect(response.status).toBe(301)
-  })
-
-  it('provides request property on mock controller', () => {
-    const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/users/1', { method: 'GET' })
-
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
-
-    expect(controller.request.path).toBe('/users/1')
-    expect(controller.request.method).toBe('GET')
+    expect(controller.requestLine()).toEqual({ path: '/users/1', method: 'GET' })
   })
 
   it('installs the runtime classes themselves, so instanceof agrees with the framework', async () => {
@@ -602,6 +564,8 @@ describe('createControllerModuleMock', () => {
     const copies = Object.keys(mock).filter((name) => mock[name] !== server[name]).sort()
 
     expect(copies).toEqual(STAND_INS)
+    // The one stand-in that is not a copy: a subclass of the runtime's own.
+    expect(Object.getPrototypeOf(mock.Controller)).toBe(server.Controller)
   })
 
   it('fails validateParams() with the status and errors the runtime answers', async () => {
@@ -647,6 +611,113 @@ describe('createControllerModuleMock', () => {
 
     expect(thrown.statusCode).toBe(response.status)
     expect(thrown.errors).toEqual(body.errors)
+  })
+})
+
+/**
+ * Runtime-versus-mock table for the response and field helpers: each row runs one action
+ * through a booted `Application.fetch()` controller and a mocked one, which must answer the
+ * same. The rows are the helpers a hand-written mock once lacked or restated (`redirect()`
+ * dropped `headers`; `accepted()`, `only()`, `except()`, `has()`, `query()` were missing; an
+ * issue-less schema failure was a 422 where the runtime throws a TypeError).
+ */
+describe('controller helper parity', () => {
+  interface HelperSurface {
+    redirect(url: string, options?: { status?: number; headers?: HeadersInit }): Response
+    accepted(data?: unknown, init?: ResponseInit): Response
+    only(...keys: string[]): Promise<Record<string, unknown>>
+    except(...keys: string[]): Promise<Record<string, unknown>>
+    has(key: string): Promise<boolean>
+    query(key: string, defaultValue?: string): string | undefined
+    validateBody(schema: unknown): Promise<unknown>
+    validateBodySafe(schema: unknown): Promise<unknown>
+    readonly locale: string
+  }
+
+  const jsonBody = (body: unknown): RequestInit => ({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  const issueless = { safeParse: () => ({ success: false as const, error: {} }) }
+
+  const ROWS: Array<{ name: string; query?: string; init?: RequestInit; act: (c: HelperSurface) => unknown }> = [
+    { name: 'redirect() sends extra headers', act: (c) => c.redirect('/to', { headers: { 'X-Trace': '1' } }) },
+    { name: 'redirect() answers 303 after a POST', init: jsonBody({}), act: (c) => c.redirect('/to') },
+    { name: 'accepted() with data', act: (c) => c.accepted({ queued: true }) },
+    { name: 'accepted() without data', act: (c) => c.accepted() },
+    { name: 'only() keeps the named keys', init: jsonBody({ a: 1, b: 2 }), act: (c) => c.only('a', 'missing') },
+    { name: 'except() drops the named keys', init: jsonBody({ a: 1, b: 2 }), act: (c) => c.except('a') },
+    { name: 'has() finds a present key', init: jsonBody({ a: null }), act: (c) => c.has('a') },
+    { name: 'has() misses an absent key', init: jsonBody({ a: 1 }), act: (c) => c.has('b') },
+    { name: 'query() reads a key', query: 'x=1', act: (c) => c.query('x', 'fallback') },
+    { name: 'query() falls back to the default', act: (c) => c.query('x', 'fallback') },
+    { name: 'validateBody() on an issue-less failure', init: jsonBody({}), act: (c) => c.validateBody(issueless) },
+    { name: 'validateBodySafe() on an issue-less failure', init: jsonBody({}), act: (c) => c.validateBodySafe(issueless) },
+    { name: 'locale without i18n', act: (c) => c.locale },
+  ]
+
+  function urlFor(index: number): string {
+    const row = ROWS[index]
+    return `http://example.com/helpers?row=${index}${row.query ? `&${row.query}` : ''}`
+  }
+
+  /** Responses and throws cannot cross the JSON hop, so both sides compare this shape. */
+  async function outcome(run: () => unknown): Promise<unknown> {
+    try {
+      const value = await run()
+      if (value instanceof Response) {
+        return { status: value.status, headers: Object.fromEntries(value.headers), body: await value.text() }
+      }
+      return { value: value ?? null }
+    } catch (error) {
+      return { threw: (error as Error).constructor.name }
+    }
+  }
+
+  async function readThroughMock(index: number): Promise<unknown> {
+    const { Controller } = createControllerModuleMock()
+
+    class HelperController extends Controller {
+      run() {
+        return outcome(() => ROWS[index].act(this as unknown as HelperSurface))
+      }
+    }
+
+    const controller = new HelperController()
+    controller.setContext(createControllerContext(urlFor(index), ROWS[index].init))
+
+    return controller.run()
+  }
+
+  async function readThroughRuntime(index: number): Promise<unknown> {
+    const { Controller, createApp } = await import('@guren/core')
+
+    class HelperController extends Controller {
+      async run() {
+        return this.json(await outcome(() => ROWS[index].act(this as unknown as HelperSurface)))
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.get('/helpers', [HelperController, 'run'])
+        router.post('/helpers', [HelperController, 'run'])
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request(urlFor(index), ROWS[index].init))
+    expect(response.status).toBe(200)
+
+    return response.json()
+  }
+
+  it.each(ROWS.map((row, index) => ({ name: row.name, index })))('agrees on $name', async ({ index }) => {
+    const fromRuntime = await readThroughRuntime(index)
+
+    expect(await readThroughMock(index)).toEqual(fromRuntime)
   })
 })
 
@@ -902,19 +973,6 @@ describe('repeated query parameters', () => {
 
     expect(fromRuntime).toEqual({ validateQuery: EXPECTED, validateQuerySafe: EXPECTED })
     expect(fromMock).toEqual(fromRuntime)
-  })
-
-  it('flattens from req.url when the context has no queries()', () => {
-    // The fallback branch of flattenContextQueries: `queries()` is optional on
-    // ControllerContext, and a hand-rolled context without one must still see
-    // the array — falling back to `query()` would quietly restore the bug.
-    const full = createControllerContext(URL_UNDER_TEST)
-    const withoutQueries = {
-      ...full,
-      req: { ...full.req, queries: undefined },
-    } as unknown as ControllerContext
-
-    expect(readThroughMock(withoutQueries).validateQuery).toEqual(EXPECTED)
   })
 
   /**
@@ -1655,47 +1713,6 @@ describe('request body parity', () => {
 
     return (await response.json()) as { file: string | null; files: string[] }
   }
-
-  /**
-   * The regression test for the delegation itself, and the two cases that do not
-   * need Bun: `readMultipart()` answers with the runtime's `{ all: true }` record
-   * rather than a `FormData`, and has no media-type gate to answer `null` from.
-   * Read directly, deliberately — going through `file()` observes an answer both
-   * implementations agree on.
-   */
-  function mockControllerAt(contentType: string, body: BodyInit) {
-    const { Controller } = createControllerModuleMock()
-    const controller = new Controller()
-    controller.setContext(
-      createControllerContext(
-        UPLOADS_URL_UNDER_TEST,
-        initFor({ contentType, body }),
-      ) as unknown as ControllerContext,
-    )
-    return controller
-  }
-
-  it('reads uploads as the runtime record rather than as FormData', async () => {
-    const controller = mockControllerAt(
-      `multipart/form-data; boundary=${BOUNDARY}`,
-      multipartBody(BOUNDARY, [['doc', 'a', 'a.txt']]),
-    )
-
-    const uploads = await controller.readMultipart()
-
-    expect(uploads).not.toBeInstanceOf(FormData)
-    expect(uploads.doc).toBeInstanceOf(File)
-    expect((uploads.doc as File).name).toBe('a.txt')
-  })
-
-  it('has no media-type gate, so a non-multipart body reads as its fields', async () => {
-    const controller = mockControllerAt('application/x-www-form-urlencoded', 'doc=Guren')
-
-    // With no gate, the shared read parses the body and hands back its fields;
-    // `file()` still says null, because a string is not a File.
-    expect(await controller.readMultipart()).toEqual({ doc: 'Guren' })
-    expect(await controller.file('doc')).toBeNull()
-  })
 
   it.each(UPLOAD_CASES)('agrees on uploads for $name', async (testCase) => {
     const fromRuntime = await readUploadsThroughRuntime(testCase)

@@ -5,6 +5,7 @@
  * the same modules through this deep import; `instanceof` then agrees with the runtime.
  * Internal per `contributing/api-stability.md`: reachable only through this path.
  */
+export { Controller } from '../mvc/Controller'
 export { Resource, JsonResource, collect } from '../http/resources/Resource'
 export { ValidationException } from '../errors/exceptions/ValidationException'
 export { AuthenticationException } from '../errors/exceptions/AuthenticationException'

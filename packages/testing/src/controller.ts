@@ -1,17 +1,15 @@
 import { HonoRequest } from 'hono/request'
+import type { Context, InertiaOptions, InertiaResponse, ResolvedSharedInertiaProps } from '@guren/server'
 import {
   asRecord,
-  flattenRequestQueries as flattenRequestQueriesByRuntimeRules,
-  parseRequestBody as parseRequestBodyByRuntimeRules,
-  parseRequestUploads as parseRequestUploadsByRuntimeRules,
-  type RequestUploads,
-  readValidatedInput,
+  parseRequestBody,
+  type RequestBodyContext,
   VALIDATED_INPUT_CONTEXT_KEY,
-  type UntypedValidatedInput,
   type ValidatedInputRecord,
 } from '@guren/server/internal/request'
 import {
   AuthenticationException,
+  Controller as RuntimeController,
   JsonResource,
   Resource,
   ServiceProvider,
@@ -34,6 +32,7 @@ export interface ControllerContext {
     container?: {
       make: <T = unknown>(key: string) => T
     }
+    [key: string]: unknown
   }
   req: {
     raw: Request
@@ -44,6 +43,9 @@ export interface ControllerContext {
     queries?: () => Record<string, string[]>
     param?: (key?: string) => string | Record<string, string> | undefined
     header: (name: string) => string | undefined
+    // What the runtime's body and upload reads call; a context without them has no body.
+    json?: HonoRequest['json']
+    parseBody?: HonoRequest['parseBody']
   }
   get: (key: string) => unknown
   set: (key: string, value: unknown) => void
@@ -80,12 +82,12 @@ export function createControllerContext(
   const request = new Request(url, init)
   const parsedUrl = new URL(request.url)
   const store = new Map<string, unknown>(Object.entries(contextValues))
+  const container = {
+    make: <T = unknown>(key: string) => store.get(key) as T,
+  }
 
-  // The same class a live request is read through, so both query surfaces below
-  // are Hono's own rather than a restatement that can drift.
-  //
-  // Reading a body is what needs a `clone()` (see parseRequestBody); these two read
-  // only the URL, so this wraps `request` directly and leaves it intact.
+  // One HonoRequest per request, as a live one has: its body cache is what lets
+  // `validateBody()` and `file()` read the same body in one action.
   const honoRequest = new HonoRequest(request)
 
   const req = {
@@ -95,15 +97,17 @@ export function createControllerContext(
     method: request.method,
     query: (key?: string) => (key === undefined ? honoRequest.query() : honoRequest.query(key)),
     queries: () => honoRequest.queries(),
-    param: () => undefined,
+    // Hono answers `{}` on a route with no parameters, and `validateParams()` hands it on as is.
+    param: () => ({}),
     header: (name: string) => request.headers.get(name) ?? undefined,
+    json: (() => honoRequest.json()) as HonoRequest['json'],
+    parseBody: ((options?: Parameters<HonoRequest['parseBody']>[0]) => honoRequest.parseBody(options)) as HonoRequest['parseBody'],
   }
 
   return {
-    var: {
-      container: {
-        make: <T = unknown>(key: string) => store.get(key) as T,
-      },
+    // Hono's `c.var` reads the same store `c.set()` writes.
+    get var() {
+      return { ...Object.fromEntries(store), container }
     },
     req,
     get: (key: string) => store.get(key),
@@ -131,70 +135,69 @@ function loadServer(): Promise<ServerModule> {
   return serverModulePromise
 }
 
-/**
- * The mock's request body: the parsed value as sent, so an array stays an array for
- * `validateBody()` to judge. Nothing about a body is decided here — content types,
- * repeated `field[]`, the undecodable fallback all come from the runtime's parser
- * via `@guren/server/internal/request`. Only the adapter is local ({@link honoRequestFor}).
- */
-async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
-  const req = honoRequestFor(ctx)
-  return req ? parseRequestBodyByRuntimeRules({ req }) : {}
+/** The runtime's body read, over a hand-built context that carries no `json()` of its own. */
+function requestBodyContext(ctx: ControllerContext): RequestBodyContext {
+  return ctx.req.json && ctx.req.parseBody
+    ? (ctx as unknown as RequestBodyContext)
+    : { req: new HonoRequest(ctx.req.raw) }
 }
 
-/**
- * The mock's uploads, behind {@link Controller.file} / {@link Controller.files}: the
- * same delegation as {@link parseRequestBody}, but to `parseRequestUploads`. The two
- * are not interchangeable, and the runtime owns the missing media-type gate.
- */
-async function parseRequestUploads(ctx: ControllerContext): Promise<RequestUploads> {
-  const req = honoRequestFor(ctx)
-  return req ? parseRequestUploadsByRuntimeRules({ req }) : {}
-}
+type InertiaPage = { id: string; component?: string }
+
+type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request' | 'container'> & { url?: string }
 
 /**
- * The local adapter: the runtime is handed a Hono context, the mock holds a `Request`,
- * and a `HonoRequest` bridges them so even the media-type decision inside `parseBody()`
- * is Hono's own. Answers `null` only on the adapter's own failure (`clone()` throws on a
- * body already read, which cannot happen to the runtime); everything else, including the
- * `{}` for an undecodable body, is the shared parser's to answer.
+ * The Inertia protocol without a booted app: no shared props, root document or
+ * asset manifest, which is why the mock keeps it rather than the runtime's engine.
  */
-function honoRequestFor(ctx: ControllerContext): HonoRequest | null {
-  // Read outside the fallback: that is for an unparseable *body*, while a ctx with
-  // no request at all is a broken test setup the runtime does not swallow either.
-  const raw = ctx.req.raw
-
-  try {
-    // Clone so the raw body stays readable: the real runtime caches the parsed body
-    // in Hono, letting validateBody() and file() compose on one request.
-    return new HonoRequest(raw.clone())
-  } catch {
-    return null
+function renderInertia(
+  request: Request,
+  componentOrPage: string | InertiaPage,
+  props: Record<string, unknown>,
+  options: InertiaResponseOptions,
+): Response {
+  const component =
+    typeof componentOrPage === 'string'
+      ? componentOrPage
+      : componentOrPage.component ?? componentOrPage.id
+  let url = options.url
+  if (url === undefined) {
+    const { pathname, search } = new URL(request.url)
+    url = `${pathname}${search}`
   }
-}
+  const status = options.status ?? 200
+  const payload: InertiaPayload = {
+    component,
+    props,
+    url,
+    version: options.version,
+  }
 
-/**
- * Query data as a validation schema sees it: a repeated key as an array, a single
- * occurrence as a string, per the runtime's `flattenRequestQueries`. Only the adapter is
- * local, because `queries()` is optional on {@link ControllerContext}; the fallback
- * re-derives the grouping from `req.url` through a `HonoRequest`, never from `query()`
- * (one value per key). Truthiness, not `in`: a blanked member is an explicit `undefined`.
- */
-function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> {
-  const { req } = ctx
-  return flattenRequestQueriesByRuntimeRules({
-    // Invoked as a method on `ctx.req`, never handed over bare: an override written
-    // as a method reads `this.url`, and `{ queries }` would re-`this` it onto that
-    // fresh literal. The wrapper is what keeps the receiver.
-    req: req.queries ? { queries: () => req.queries!() } : new HonoRequest(new Request(req.url)),
+  const prefersJson =
+    request.headers.get('X-Inertia') === 'true' ||
+    (request.headers.get('Accept') ?? '').toLowerCase().includes('json')
+
+  if (prefersJson) {
+    return new Response(JSON.stringify(payload), {
+      status,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        Vary: 'Accept',
+        'X-Inertia': 'true',
+      },
+    })
+  }
+
+  const serialized = JSON.stringify(payload).replace(/</gu, '\\u003c')
+
+  return new Response(`<script data-page="app" type="application/json">${serialized}</script><div id="app"></div>`, {
+    status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      Vary: 'Accept',
+      'X-Inertia': 'true',
+    },
   })
-}
-
-/** Route parameters as a record: a bare string from a hand-set `param()` is read as `id`. */
-function contextParams(ctx: ControllerContext): object {
-  const rawParams = ctx.req.param?.()
-  if (typeof rawParams === 'string') return { id: rawParams }
-  return rawParams && typeof rawParams === 'object' ? rawParams : {}
 }
 
 export function createGurenControllerModule() {
@@ -232,53 +235,11 @@ export function createGurenControllerModule() {
     }
 
     inertia(
-      componentOrPage: string | { id: string; component?: string },
+      componentOrPage: string | InertiaPage,
       props: Record<string, unknown>,
-      options: Record<string, unknown> = {},
+      options: InertiaResponseOptions = {},
     ): Response {
-      const ctx = this.ctx
-      const request = ctx.req.raw
-      const component =
-        typeof componentOrPage === 'string'
-          ? componentOrPage
-          : componentOrPage.component ?? componentOrPage.id
-      // Per the Inertia protocol: the page url defaults to pathname plus query string.
-      let url = options.url as string | undefined
-      if (url === undefined) {
-        const { pathname, search } = new URL(request.url)
-        url = `${pathname}${search}`
-      }
-      const status = (options.status as number | undefined) ?? 200
-      const payload: InertiaPayload = {
-        component,
-        props,
-        url,
-        version: options.version as string | undefined,
-      }
-
-      const prefersJson =
-        request.headers.get('X-Inertia') === 'true' ||
-        (request.headers.get('Accept') ?? '').toLowerCase().includes('json')
-
-      if (prefersJson) {
-        return new Response(JSON.stringify(payload), {
-          status,
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-            'X-Inertia': 'true',
-          },
-        })
-      }
-
-      const serialized = JSON.stringify(payload).replace(/</gu, '\\u003c')
-
-      return new Response(`<script data-page="app" type="application/json">${serialized}</script><div id="app"></div>`, {
-        status,
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'X-Inertia': 'true',
-        },
-      })
+      return renderInertia(this.ctx.req.raw, componentOrPage, props, options)
     }
 
     /**
@@ -312,222 +273,51 @@ export function createGurenControllerModule() {
       }
       return loadedServer.viteAsset(entry, options)
     },
-    parseRequestPayload: async (ctx: ControllerContext) => asRecord(await parseRequestBody(ctx)),
+    parseRequestPayload: async (ctx: ControllerContext) =>
+      asRecord(await parseRequestBody(requestBodyContext(ctx))),
     formatValidationErrors,
+  }
+}
+
+/**
+ * The runtime's own `Controller`, so every request, validation and response helper is
+ * the one production runs. Overridden only where the runtime needs a booted app.
+ * Top-level rather than inside the factory: the declaration then names the base
+ * class, which is what lets it keep its private members (TS4094).
+ */
+class TestController extends RuntimeController {
+  // Takes the context `createControllerContext()` is typed as, too. `make()` resolves
+  // from its `var.container`; an unbound key is `undefined` rather than the Container's throw.
+  override setContext(context: Context | ControllerContext): void {
+    super.setContext(context as unknown as Context)
+    this.setContainer({
+      make: (key) => (context as unknown as ControllerContext).var?.container?.make(key),
+    })
+  }
+
+  protected override inertia<Component extends string, Props extends Record<string, unknown>>(
+    component: Component,
+    props: Props,
+    options?: InertiaResponseOptions,
+  ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>>
+  protected override inertia<TPage extends InertiaPage & { __props?: Record<string, unknown> }>(
+    page: TPage,
+    props: NonNullable<TPage['__props']>,
+    options?: InertiaResponseOptions,
+  ): Promise<InertiaResponse<TPage['id'], NonNullable<TPage['__props']> & ResolvedSharedInertiaProps>>
+  protected override async inertia(
+    componentOrPage: string | InertiaPage,
+    props: Record<string, unknown>,
+    options: InertiaResponseOptions = {},
+  ): Promise<Response> {
+    const response = renderInertia(this.ctx.req.raw, componentOrPage, props, options)
+    const component = typeof componentOrPage === 'string' ? componentOrPage : componentOrPage.component ?? componentOrPage.id
+    return Object.assign(response, { __gurenInertia: { component, props } })
   }
 }
 
 export function createControllerModuleMock() {
   const module = createGurenControllerModule()
-  class TestController extends module.Controller {
-    public parsedBody?: Record<string, unknown>
-
-    public runValidation<T>(
-      schema: {
-        safeParse: (data: unknown) =>
-          | { success: true; data: T }
-          | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
-      },
-      data: unknown,
-    ): T {
-      const result = schema.safeParse(data)
-      if (result.success) {
-        return result.data
-      }
-
-      throw ValidationException.fromZodError({ issues: result.error.issues ?? [] })
-    }
-
-    public runValidationSafe<T>(schema: {
-      safeParse: (data: unknown) =>
-        | { success: true; data: T }
-        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
-    }, data: unknown): { success: true; data: T } | { success: false; errors: Record<string, string> } {
-      const result = schema.safeParse(data)
-      if (result.success) {
-        return { success: true, data: result.data }
-      }
-
-      const errors: Record<string, string> = {}
-      for (const issue of result.error.issues ?? []) {
-        const key = issue.path.join('.') || issue.message
-        if (!errors[key]) {
-          errors[key] = issue.message
-        }
-      }
-
-      return { success: false, errors }
-    }
-
-    public get request(): ControllerContext['req'] {
-      return this.ctx.req
-    }
-
-    // Mirrors the real Controller's split: validation sees the body as sent, the
-    // field-by-field helpers see the record view.
-    //
-    // Public because TS4094 forbids private members on the exported anonymous class
-    // type this factory returns. Boxed, since `null`/`''`/`0`/`false` are all bodies.
-    public rawBody?: { value: unknown }
-
-    // The local raw parser, not `module.parseRequestPayload`, which narrows and makes
-    // a non-object body unreachable. Memoized for parity, not speed: the real
-    // Controller boxes its parse, so two `validateBody()` calls in one action must be
-    // handed the same object.
-    public async getRawBody(): Promise<unknown> {
-      this.rawBody ??= { value: await parseRequestBody(this.ctx) }
-      return this.rawBody.value
-    }
-
-    public async getBody(): Promise<Record<string, unknown>> {
-      if (this.parsedBody) {
-        return this.parsedBody
-      }
-
-      this.parsedBody = asRecord(await this.getRawBody())
-      return this.parsedBody
-    }
-
-    // Public for the TS4094 reason above. Its type follows the runtime's upload read:
-    // the `{ all: true }` record `parseBody()` answers with, so a non-multipart body
-    // is `{}` rather than `null` (the runtime has no media-type gate).
-    public multipartBody?: Promise<RequestUploads>
-
-    public readMultipart(): Promise<RequestUploads> {
-      // Memoized so repeated file()/files() calls are one parse, mirroring Hono's
-      // cache. The shared read handles an undecodable body, so the memoized promise
-      // is always resolved — never a rejected one both callers would have to guard.
-      return (this.multipartBody ??= parseRequestUploads(this.ctx))
-    }
-
-    public async file(name: string): Promise<File | null> {
-      // Character for character the real Controller.file(): the FIRST part of the
-      // field must itself be a non-empty File — a leading empty part means null.
-      const body = await this.readMultipart()
-      const value = body[name]
-      const candidate = Array.isArray(value) ? value[0] : value
-      return candidate instanceof File && candidate.size > 0 ? candidate : null
-    }
-
-    public async files(name: string): Promise<File[]> {
-      const body = await this.readMultipart()
-      const value = body[name]
-      const values = Array.isArray(value) ? value : value !== undefined ? [value] : []
-      return values.filter((item): item is File => item instanceof File && item.size > 0)
-    }
-
-    public async input<T = unknown>(key: string, defaultValue?: T): Promise<T | undefined> {
-      const body = await this.getBody()
-      if (key in body) {
-        return body[key] as T
-      }
-
-      const queryValue = this.ctx.req.query(key)
-      return (queryValue as T | undefined) ?? defaultValue
-    }
-
-    // Reads what `contractInput()` seeded, as the runtime reads what the route
-    // contract middleware left: no schema runs here.
-    public validated(route?: string | readonly string[]): UntypedValidatedInput {
-      return readValidatedInput(this.ctx, route)
-    }
-
-    public async validateBody<T>(schema: {
-      safeParse: (data: unknown) =>
-        | { success: true; data: T }
-        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
-    }): Promise<T> {
-      return this.runValidation(schema, await this.getRawBody())
-    }
-
-    public async validateBodySafe<T>(schema: {
-      safeParse: (data: unknown) =>
-        | { success: true; data: T }
-        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
-    }): Promise<{ success: true; data: T } | { success: false; errors: Record<string, string> }> {
-      return this.runValidationSafe(schema, await this.getRawBody())
-    }
-
-    public validateQuery<T>(schema: {
-      safeParse: (data: unknown) =>
-        | { success: true; data: T }
-        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
-    }): T {
-      return this.runValidation(schema, flattenContextQueries(this.ctx))
-    }
-
-    public validateQuerySafe<T>(schema: {
-      safeParse: (data: unknown) =>
-        | { success: true; data: T }
-        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
-    }): { success: true; data: T } | { success: false; errors: Record<string, string> } {
-      return this.runValidationSafe(schema, flattenContextQueries(this.ctx))
-    }
-
-    public validateParams<T>(schema: {
-      safeParse: (data: unknown) =>
-        | { success: true; data: T }
-        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
-    }): T {
-      return this.runValidation(schema, contextParams(this.ctx))
-    }
-
-    public validateParamsSafe<T>(schema: {
-      safeParse: (data: unknown) =>
-        | { success: true; data: T }
-        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
-    }): { success: true; data: T } | { success: false; errors: Record<string, string> } {
-      return this.runValidationSafe(schema, contextParams(this.ctx))
-    }
-
-    public apiToken(): { token: unknown; userId: string | number; abilities: string[] } {
-      return getApiTokenOrFail(this.ctx)
-    }
-
-    public apiTokenUserId(): string | number {
-      return this.apiToken().userId
-    }
-
-    public created(data?: unknown, init: ResponseInit = {}): Response {
-      if (data === undefined) {
-        return new Response(null, { status: 201, ...init })
-      }
-      return new Response(JSON.stringify(data), {
-        status: 201,
-        ...init,
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          ...init.headers,
-        },
-      })
-    }
-
-    public noContent(): Response {
-      return new Response(null, { status: 204 })
-    }
-
-    public json(data: unknown, init: ResponseInit = {}): Response {
-      return new Response(JSON.stringify(data), {
-        ...init,
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          ...init.headers,
-        },
-      })
-    }
-
-    public redirect(url: string, options: { status?: number } = {}): Response {
-      const defaultStatus = this.ctx.req.method !== 'GET' ? 303 : 302
-      const status = options.status ?? defaultStatus
-
-      return new Response(null, {
-        status,
-        headers: {
-          Location: url,
-        },
-      })
-    }
-  }
 
   class Event {}
   class Listener {}
