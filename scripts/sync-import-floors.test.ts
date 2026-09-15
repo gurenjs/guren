@@ -189,6 +189,25 @@ describe('sync-import-floors', () => {
     })
   })
 
+  it('counts a committed prerelease as a release, not as the working tree', async () => {
+    const repo = await repository()
+    await put(repo, {
+      'packages/server/package.json': server('1.2.0-next.0'),
+      'packages/server/src/http/request.ts': 'export function parseRequestBody() {}\n',
+    })
+    commit(repo, 'chore: version packages to 1.2.0-next.0')
+    await put(repo, {
+      'packages/server/src/http/request.ts': 'export function parseRequestBody() {}\nexport const flattenRequestQueries = () => {}\n',
+      'packages/testing/package.json': testing('>=1.2.0-next.0'),
+      'packages/testing/src/controller.ts': importBoth,
+    })
+
+    const result = await run({ root: repo, check: true })
+
+    expect(result.code).toBe(1)
+    expect(text(result)).toContain('admits @guren/server 1.2.0-next.0: ./internal/request without flattenRequestQueries')
+  })
+
   it('follows a star re-export into another package at the lowest release its range admits', async () => {
     const repo = await repository()
     await put(repo, {

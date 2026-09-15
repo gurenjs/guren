@@ -11,10 +11,11 @@ import { readFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join, posix } from 'node:path'
 import process from 'node:process'
-import { parse, type ParserPlugin } from '@babel/parser'
 import type * as t from '@babel/types'
+import { walk, type BabelNode } from '../packages/cli/src/ast-walk'
+import { parseSourceFile } from '../packages/cli/src/parse-cache'
 import { readChangesetDirectory } from './smoke/core-semver-audit'
-import { plannedVersions } from './smoke/plugin-compat-audit'
+import { DEPENDENCY_GROUPS, plannedVersions } from './smoke/plugin-compat-audit'
 import {
   collectPackages,
   manifestAtRev,
@@ -24,8 +25,6 @@ import {
   type WorkspacePackage,
 } from './workspace-packages'
 
-/** Only the groups a consumer installs; a stale devDependency pulls no copy. */
-const DEPENDENCY_GROUPS = ['dependencies', 'peerDependencies'] as const
 type DependencyGroup = (typeof DEPENDENCY_GROUPS)[number]
 
 // Resolving a barrel at every admitted release is hundreds of files per version,
@@ -33,10 +32,15 @@ type DependencyGroup = (typeof DEPENDENCY_GROUPS)[number]
 // are a few files each, and are where cross-package internals are shared.
 const ROOT_ENTRY = '.'
 
-const SOURCE_EXTENSIONS = ['.ts', '.tsx', '/index.ts', '/index.tsx']
+const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '/index.ts', '/index.tsx', '/index.js']
 const TEST_FILE = /(\.test|\.spec)\.[cm]?[jt]sx?$|\/(__tests__|tests?|fixtures)\//
 
-export class CannotJudge extends Error {}
+// Not `Bun.semver.satisfies(v, '*')`, which rejects every prerelease and would
+// leave a committed `-next.0` unrecorded, standing in for releases it never was.
+const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+const RANGE = /^(>=|\^|~)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/
+
+class CannotJudge extends Error {}
 
 /** A package as it was published at `version`; `rev: null` reads the working tree. */
 interface Snapshot {
@@ -45,12 +49,9 @@ interface Snapshot {
 }
 
 interface Manifest {
-  version?: string
-  private?: boolean
   exports?: unknown
   dependencies?: Record<string, string>
   peerDependencies?: Record<string, string>
-  devDependencies?: Record<string, string>
 }
 
 /** What one subpath of a snapshot exports. `open`: a star from outside the workspace. */
@@ -61,14 +62,24 @@ interface Surface {
 }
 
 interface ImportSite {
-  file: string
   dependency: string
   subpath: string
   /** Value names bound from the entry; empty when only the subpath must resolve. */
   names: string[]
 }
 
-export interface Raise {
+interface Requirement {
+  subpath: string
+  names: Set<string>
+  files: Set<string>
+}
+
+interface Gap {
+  requirement: Requirement
+  text: string
+}
+
+interface Raise {
   manifestPath: string
   group: DependencyGroup
   dependency: string
@@ -77,15 +88,13 @@ export interface Raise {
   reason: string
 }
 
-export interface Pending {
+interface Pending {
   manifestPath: string
-  group: DependencyGroup
   dependency: string
-  range: string
   reason: string
 }
 
-export interface FloorPlan {
+interface FloorPlan {
   raises: Raise[]
   pending: Pending[]
   drift: string[]
@@ -100,7 +109,9 @@ class Repository {
 
   read(rev: string | null, path: string): string | undefined {
     const key = `${rev ?? ''}:${path}`
-    if (!this.texts.has(key)) this.texts.set(key, rev === null ? this.readWorkingTree(path) : this.readAt(rev, path))
+    if (!this.texts.has(key)) {
+      this.texts.set(key, rev === null ? this.readWorkingTree(path) : manifestAtRev(rev, path, this.root))
+    }
     return this.texts.get(key)
   }
 
@@ -114,9 +125,29 @@ class Repository {
     }
   }
 
-  private readAt(rev: string, path: string): string | undefined {
-    const show = Bun.spawnSync(['git', 'cat-file', 'blob', `${rev}:${path}`], { cwd: this.root })
-    return show.success ? show.stdout.toString() : undefined
+  /** Fills the read cache for many `rev:path` blobs with one process instead of one each. */
+  private readBatch(requests: Array<{ rev: string; path: string }>): void {
+    const batch = Bun.spawnSync(['git', 'cat-file', '--batch'], {
+      cwd: this.root,
+      stdin: Buffer.from(requests.map(({ rev, path }) => `${rev}:${path}\n`).join('')),
+    })
+    if (!batch.success) throw new CannotJudge(`git cat-file --batch failed: ${batch.stderr.toString().trim()}`)
+
+    const out = batch.stdout
+    let offset = 0
+    for (const { rev, path } of requests) {
+      const newline = out.indexOf(0x0a, offset)
+      // `<oid> <type> <size>`, then that many bytes and a newline; `<input> missing` otherwise.
+      const header = /^[0-9a-f]+ (\S+) (\d+)$/.exec(out.subarray(offset, newline).toString())
+      offset = newline + 1
+      if (!header) {
+        this.texts.set(`${rev}:${path}`, undefined)
+        continue
+      }
+      const end = offset + Number(header[2])
+      this.texts.set(`${rev}:${path}`, header[1] === 'blob' ? out.subarray(offset, end).toString() : undefined)
+      offset = end + 1
+    }
   }
 
   /**
@@ -128,18 +159,16 @@ class Repository {
     const cached = this.histories.get(relativeDir)
     if (cached) return cached
 
-    const manifestPath = `${relativeDir}/package.json`
-    const log = Bun.spawnSync(['git', 'log', '--topo-order', '--reverse', '--format=%H', '--', manifestPath], {
-      cwd: this.root,
-    })
-    if (!log.success) throw new CannotJudge(`git log failed for ${manifestPath}: ${log.stderr.toString().trim()}`)
+    const path = `${relativeDir}/package.json`
+    const log = Bun.spawnSync(['git', 'log', '--topo-order', '--reverse', '--format=%H', '--', path], { cwd: this.root })
+    if (!log.success) throw new CannotJudge(`git log failed for ${path}: ${log.stderr.toString().trim()}`)
+    const revs = log.stdout.toString().split('\n').filter(Boolean)
+    this.readBatch(revs.map((rev) => ({ rev, path })))
 
-    const seen = new Set<string>()
     const releases: Snapshot[] = []
-    for (const rev of log.stdout.toString().split('\n').filter(Boolean)) {
-      const version = versionOf(this.read(rev, manifestPath))
-      if (version === undefined || seen.has(version) || !Bun.semver.satisfies(version, '*')) continue
-      seen.add(version)
+    for (const rev of revs) {
+      const version = versionOf(this.read(rev, path))
+      if (version === undefined || !VERSION.test(version) || releases.some((release) => release.version === version)) continue
       releases.push({ version, rev })
     }
     releases.sort((a, b) => Bun.semver.order(a.version, b.version))
@@ -161,14 +190,19 @@ class Repository {
   }
 }
 
+/** Every recorded release, ascending, then the working tree when no commit declared its version yet. */
+function snapshots(repo: Repository, pkg: WorkspacePackage): Snapshot[] {
+  const releases = repo.releases(pkg.relativeDir)
+  const version = pkg.version
+  return version && !releases.some((release) => release.version === version)
+    ? [...releases, { version, rev: null }]
+    : releases
+}
+
 function parseModule(code: string, file: string): t.File {
-  const plugins: ParserPlugin[] = ['typescript', 'decorators', 'decoratorAutoAccessors']
-  if (file.endsWith('x')) plugins.push('jsx')
-  try {
-    return parse(code, { sourceType: 'module', sourceFilename: file, plugins })
-  } catch (cause) {
-    throw new CannotJudge(`Could not parse ${file}: ${cause instanceof Error ? cause.message : String(cause)}`)
-  }
+  const ast = parseSourceFile(code, file)
+  if (!ast) throw new CannotJudge(`Could not parse ${file} under any dialect parseSourceFile tries.`)
+  return ast
 }
 
 function exportedName(node: t.Identifier | t.StringLiteral): string {
@@ -234,9 +268,8 @@ class SurfaceReader {
 
   manifest(pkg: WorkspacePackage, snapshot: Snapshot): Manifest {
     const path = `${pkg.relativeDir}/package.json`
-    const text = this.repo.read(snapshot.rev, path)
     try {
-      return JSON.parse(text ?? '') as Manifest
+      return JSON.parse(this.repo.read(snapshot.rev, path) ?? '') as Manifest
     } catch {
       throw new CannotJudge(`${path} is unreadable at ${snapshot.rev ?? 'the working tree'} (${pkg.name} ${snapshot.version}).`)
     }
@@ -253,8 +286,7 @@ class SurfaceReader {
   }
 
   private readSurface(pkg: WorkspacePackage, snapshot: Snapshot, subpath: string): Surface {
-    const manifest = this.manifest(pkg, snapshot)
-    const target = exportTarget(manifest.exports, subpath)
+    const target = exportTarget(this.manifest(pkg, snapshot).exports, subpath)
     if (target === undefined) return { exists: false, names: new Set(), open: false }
     if (target === 'pattern') return { exists: true, names: new Set(), open: true }
 
@@ -266,20 +298,14 @@ class SurfaceReader {
           `${pkg.relativeDir}/src, so its export names cannot be read.`,
       )
     }
-    return this.moduleExports(pkg, snapshot, manifest, source, new Set())
+    return this.moduleExports(pkg, snapshot, source, new Set())
   }
 
   private resolveFile(rev: string | null, base: string): string | undefined {
     return SOURCE_EXTENSIONS.map((extension) => `${base}${extension}`).find((path) => this.repo.read(rev, path) !== undefined)
   }
 
-  private moduleExports(
-    pkg: WorkspacePackage,
-    snapshot: Snapshot,
-    manifest: Manifest,
-    file: string,
-    visiting: Set<string>,
-  ): Surface {
+  private moduleExports(pkg: WorkspacePackage, snapshot: Snapshot, file: string, visiting: Set<string>): Surface {
     const key = `${snapshot.rev ?? ''}:${file}`
     const cached = this.modules.get(key)
     if (cached) return cached
@@ -290,15 +316,12 @@ class SurfaceReader {
     let open = false
     const program = parseModule(this.repo.read(snapshot.rev, file)!, file).program
 
-    const star = (specifier: string): void => {
-      const reexported = this.starSurface(pkg, snapshot, manifest, file, specifier, visiting)
-      open ||= reexported.open
-      for (const name of reexported.names) if (name !== 'default') names.add(name)
-    }
-
     for (const statement of program.body) {
       if (statement.type === 'ExportAllDeclaration') {
-        if (statement.exportKind !== 'type') star(statement.source.value)
+        if (statement.exportKind === 'type') continue
+        const reexported = this.starSurface(pkg, snapshot, file, statement.source.value, visiting)
+        open ||= reexported.open
+        for (const name of reexported.names) if (name !== 'default') names.add(name)
       } else if (statement.type === 'ExportDefaultDeclaration') {
         names.add('default')
       } else if (statement.type === 'ExportNamedDeclaration' && statement.exportKind !== 'type') {
@@ -330,7 +353,6 @@ class SurfaceReader {
   private starSurface(
     pkg: WorkspacePackage,
     snapshot: Snapshot,
-    manifest: Manifest,
     file: string,
     specifier: string,
     visiting: Set<string>,
@@ -338,7 +360,7 @@ class SurfaceReader {
     if (specifier.startsWith('.')) {
       const target = this.resolveFile(snapshot.rev, withoutScriptExtension(posix.join(posix.dirname(file), specifier)))
       if (!target) throw new CannotJudge(`${file} re-exports ${specifier}, which resolves to no file at ${snapshot.rev ?? 'the working tree'}.`)
-      return this.moduleExports(pkg, snapshot, manifest, target, visiting)
+      return this.moduleExports(pkg, snapshot, target, visiting)
     }
 
     const split = splitSpecifier(specifier)
@@ -347,8 +369,9 @@ class SurfaceReader {
 
     // What this release re-exports depends on which copy the consumer installed;
     // the lowest its own range admits is the one that can lack a name.
+    const manifest = this.manifest(pkg, snapshot)
     const range = manifest.dependencies?.[split[0]] ?? manifest.peerDependencies?.[split[0]]
-    const lowest = range ? admittedSnapshots(this.repo, dependency, range)[0] : undefined
+    const lowest = range ? snapshots(this.repo, dependency).find((candidate) => Bun.semver.satisfies(candidate.version, range)) : undefined
     if (!lowest) {
       throw new CannotJudge(
         `${file} (${pkg.name} ${snapshot.version}) re-exports ${specifier}, but no release of ${split[0]} ` +
@@ -359,24 +382,14 @@ class SurfaceReader {
   }
 }
 
-/** Every release `range` admits, ascending, plus a working tree carrying an unrecorded version. */
-function admittedSnapshots(repo: Repository, pkg: WorkspacePackage, range: string): Snapshot[] {
-  const releases = repo.releases(pkg.relativeDir)
-  const admitted = releases.filter((release) => Bun.semver.satisfies(release.version, range))
-  const workingTree = pkg.version
-  if (workingTree && !releases.some((release) => release.version === workingTree) && Bun.semver.satisfies(workingTree, range)) {
-    admitted.push({ version: workingTree, rev: null })
-  }
-  return admitted
-}
-
-function importSites(file: string, relativeFile: string): ImportSite[] {
-  const program = parseModule(readFileSync(file, 'utf8'), relativeFile).program
+function importSites(source: string, relativeFile: string): ImportSite[] {
+  if (!source.includes('@guren/')) return []
+  const program = parseModule(source, relativeFile).program
   const sites: ImportSite[] = []
 
   const add = (specifier: string, names: string[]): void => {
     const split = splitSpecifier(specifier)
-    if (split) sites.push({ file: relativeFile, dependency: split[0], subpath: split[1], names })
+    if (split) sites.push({ dependency: split[0], subpath: split[1], names })
   }
 
   for (const statement of program.body) {
@@ -398,24 +411,13 @@ function importSites(file: string, relativeFile: string): ImportSite[] {
     }
   }
 
-  const visit = (node: unknown): void => {
-    if (!node || typeof node !== 'object') return
-    if (Array.isArray(node)) {
-      for (const child of node) visit(child)
-      return
-    }
-    const candidate = node as { type?: string; callee?: { type?: string }; arguments?: t.Node[]; source?: t.Node }
-    if (candidate.type === 'CallExpression' && candidate.callee?.type === 'Import') {
-      const argument = candidate.arguments?.[0]
-      if (argument?.type === 'StringLiteral') add(argument.value, [])
-    } else if (candidate.type === 'ImportExpression' && candidate.source?.type === 'StringLiteral') {
-      add(candidate.source.value, [])
-    }
-    for (const [key, value] of Object.entries(node)) {
-      if (key !== 'loc' && key !== 'start' && key !== 'end' && typeof value === 'object') visit(value)
-    }
+  if (source.includes('import(')) {
+    walk(program, (node) => {
+      if (node.type !== 'CallExpression' || (node.callee as BabelNode).type !== 'Import') return
+      const argument = (node.arguments as BabelNode[])[0]
+      if (argument?.type === 'StringLiteral') add(argument.value as string, [])
+    })
   }
-  visit(program)
 
   return sites
 }
@@ -428,19 +430,13 @@ async function sourceFiles(pkg: WorkspacePackage): Promise<string[]> {
   return files.sort()
 }
 
-interface Requirement {
-  subpath: string
-  names: Set<string>
-  files: Set<string>
-}
-
-/** What `snapshot` lacks of `requirements`, as readable fragments; empty when it carries all. */
-function lacking(reader: SurfaceReader, pkg: WorkspacePackage, snapshot: Snapshot, requirements: Requirement[]): string[] {
-  const gaps: string[] = []
+/** What `snapshot` lacks of `requirements`; empty when it carries all. */
+function lacking(reader: SurfaceReader, pkg: WorkspacePackage, snapshot: Snapshot, requirements: Requirement[]): Gap[] {
+  const gaps: Gap[] = []
   for (const requirement of requirements) {
     const surface = reader.surface(pkg, snapshot, requirement.subpath)
     if (!surface.exists) {
-      gaps.push(`no ${requirement.subpath} subpath`)
+      gaps.push({ requirement, text: `no ${requirement.subpath} subpath` })
       continue
     }
     const missing = [...requirement.names].filter((name) => !surface.names.has(name))
@@ -451,19 +447,14 @@ function lacking(reader: SurfaceReader, pkg: WorkspacePackage, snapshot: Snapsho
           `whether it provides ${missing.join(', ')} cannot be read from source.`,
       )
     }
-    gaps.push(`${requirement.subpath} without ${missing.join(', ')}`)
+    gaps.push({ requirement, text: `${requirement.subpath} without ${missing.join(', ')}` })
   }
   return gaps
 }
 
-const RANGE = /^(>=|\^|~)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/
-
-function raisedRange(range: string, to: string, workspaceVersion: string | undefined): string | null {
-  const match = RANGE.exec(range.trim())
-  if (!match) return null
-  const [, operator = '', floor] = match
+function raisedRange(operator: string, floor: string, to: string, workspaceVersion: string | undefined): string | null {
   const next = `${operator}${to}`
-  const [floorMajor, floorMinor] = floor!.split('.')
+  const [floorMajor, floorMinor] = floor.split('.')
   const [toMajor, toMinor] = to.split('.')
   if (operator === '^' && floorMajor !== toMajor) return null
   if (operator === '~' && (floorMajor !== toMajor || floorMinor !== toMinor)) return null
@@ -471,11 +462,10 @@ function raisedRange(range: string, to: string, workspaceVersion: string | undef
   return next
 }
 
-export async function planImportFloors(root: string = repoRoot): Promise<FloorPlan> {
+async function planImportFloors(root: string, workspace: WorkspacePackage[]): Promise<FloorPlan> {
   const repo = new Repository(root)
   repo.assertFullHistory()
 
-  const workspace = await collectPackages(root)
   const byName = new Map(workspace.map((pkg) => [pkg.name, pkg]))
   const reader = new SurfaceReader(repo, byName)
   const plan: FloorPlan = { raises: [], pending: [], drift: [], edgesChecked: 0 }
@@ -483,28 +473,29 @@ export async function planImportFloors(root: string = repoRoot): Promise<FloorPl
   for (const pkg of workspace) {
     if (pkg.private) continue
     const manifestPath = `${pkg.relativeDir}/package.json`
-    const manifest = JSON.parse(await readFile(join(root, manifestPath), 'utf8')) as Manifest
+    const manifest = reader.manifest(pkg, { version: pkg.version ?? '', rev: null })
 
     const byDependency = new Map<string, Map<string, Requirement>>()
     for (const file of await sourceFiles(pkg)) {
-      for (const site of importSites(join(pkg.dir, file), `${pkg.relativeDir}/${file}`)) {
+      const relativeFile = `${pkg.relativeDir}/${file}`
+      for (const site of importSites(readFileSync(join(pkg.dir, file), 'utf8'), relativeFile)) {
         if (site.dependency === pkg.name || site.subpath === ROOT_ENTRY || !byName.has(site.dependency)) continue
         const requirements = byDependency.get(site.dependency) ?? new Map<string, Requirement>()
         byDependency.set(site.dependency, requirements)
         const requirement = requirements.get(site.subpath) ?? { subpath: site.subpath, names: new Set(), files: new Set() }
         requirements.set(site.subpath, requirement)
         for (const name of site.names) requirement.names.add(name)
-        requirement.files.add(site.file)
+        requirement.files.add(relativeFile)
       }
     }
 
     for (const [dependencyName, bySubpath] of byDependency) {
       const dependency = byName.get(dependencyName)!
       const requirements = [...bySubpath.values()]
-      const importedBy = [...new Set(requirements.flatMap((requirement) => [...requirement.files]))].join(', ')
       const groups = DEPENDENCY_GROUPS.filter((group) => manifest[group]?.[dependencyName] !== undefined)
 
       if (groups.length === 0) {
+        const importedBy = [...new Set(requirements.flatMap((requirement) => [...requirement.files]))].join(', ')
         plan.drift.push(
           `${manifestPath}: ${importedBy} import${importedBy.includes(',') ? '' : 's'} ${dependencyName} subpaths at ` +
             `runtime, but ${pkg.name} declares no ${dependencyName} in ${DEPENDENCY_GROUPS.join(' or ')}.`,
@@ -512,40 +503,44 @@ export async function planImportFloors(root: string = repoRoot): Promise<FloorPl
         continue
       }
 
+      const history = snapshots(repo, dependency)
+      const workingTreeRecorded = history.at(-1)?.rev !== null
+
       for (const group of groups) {
         plan.edgesChecked += 1
         const range = manifest[group]![dependencyName]!
         const label = `${group}["${dependencyName}"]`
-        if (!RANGE.test(range.trim())) {
+        const shape = RANGE.exec(range.trim())
+        if (!shape) {
           throw new CannotJudge(
             `${manifestPath}: ${label} is "${range}", a range shape this script cannot take a floor from. ` +
               'Use >=x.y.z, ^x.y.z, ~x.y.z or an exact version, or extend this script.',
           )
         }
 
-        const admitted = admittedSnapshots(repo, dependency, range)
-        const highestLacking = admitted
-          .toReversed()
-          .map((snapshot) => ({ snapshot, gaps: lacking(reader, dependency, snapshot, requirements) }))
-          .find((entry) => entry.gaps.length > 0)
-        if (!highestLacking) continue
+        const admitted = history.filter((snapshot) => Bun.semver.satisfies(snapshot.version, range))
+        let lackingAt: Snapshot | undefined
+        let gaps: Gap[] = []
+        for (const snapshot of admitted.toReversed()) {
+          gaps = lacking(reader, dependency, snapshot, requirements)
+          if (gaps.length > 0) {
+            lackingAt = snapshot
+            break
+          }
+        }
+        if (!lackingAt) continue
 
-        const lackingAt = highestLacking.snapshot
-        const lackingFiles = requirements
-          .filter((requirement) => lacking(reader, dependency, lackingAt, [requirement]).length > 0)
-          .flatMap((requirement) => [...requirement.files])
+        const lackingFiles = [...new Set(gaps.flatMap((gap) => [...gap.requirement.files]))].sort()
         const why =
           `${label} is "${range}", which admits ${dependencyName} ${lackingAt.version}: ` +
-          `${highestLacking.gaps.join('; ')} (imported by ${[...new Set(lackingFiles)].sort().join(', ')}).`
+          `${gaps.map((gap) => gap.text).join('; ')} (imported by ${lackingFiles.join(', ')}).`
 
-        const releases = repo.releases(dependency.relativeDir)
-        const candidates = releases.filter((release) => Bun.semver.order(release.version, lackingAt.version) > 0)
-        const workingTreeRecorded = releases.some((release) => release.version === dependency.version)
-        if (!workingTreeRecorded && dependency.version) candidates.push({ version: dependency.version, rev: null })
-
-        const carrying = candidates.find((candidate) => lacking(reader, dependency, candidate, requirements).length === 0)
+        const floorVersion = lackingAt.version
+        const carrying = history
+          .filter((snapshot) => Bun.semver.order(snapshot.version, floorVersion) > 0)
+          .find((candidate) => lacking(reader, dependency, candidate, requirements).length === 0)
         if (carrying) {
-          const to = raisedRange(range, carrying.version, dependency.version)
+          const to = raisedRange(shape[1] ?? '', shape[2]!, carrying.version, dependency.version)
           if (!to) {
             plan.drift.push(
               `${manifestPath}: ${why} The first release carrying all of it is ${carrying.version}, which "${range}" ` +
@@ -558,7 +553,7 @@ export async function planImportFloors(root: string = repoRoot): Promise<FloorPl
         }
 
         if (workingTreeRecorded && lacking(reader, dependency, { version: dependency.version!, rev: null }, requirements).length === 0) {
-          plan.pending.push({ manifestPath, group, dependency: dependencyName, range, reason: why })
+          plan.pending.push({ manifestPath, dependency: dependencyName, reason: why })
           continue
         }
 
@@ -582,8 +577,8 @@ export async function run(options: { root?: string; check: boolean; release?: bo
   let plan: FloorPlan
   let releasing: Map<string, string>
   try {
-    plan = await planImportFloors(root)
     const workspace = await collectPackages(root)
+    plan = await planImportFloors(root, workspace)
     const versions = new Map(workspace.flatMap((pkg) => (pkg.version ? [[pkg.name, pkg.version] as const] : [])))
     // A plan that cannot be read must not read as "releases nothing": every pending import would fail as unshippable.
     const changesets = await readChangesetDirectory(join(root, '.changeset')).catch((cause: unknown) => {
