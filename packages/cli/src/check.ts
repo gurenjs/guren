@@ -513,9 +513,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
     // 8.6c. Config wiring (RFC 0027 §6): a config/<key>.ts definition the entry's
     // createApp({ config }) array never lists binds nothing, and one it lists that
-    // is not a definition fails the boot. Imports the definitions, as 7.7 imports
-    // the route graph; an app whose config/ holds plain modules contributes nothing.
-    checks.push(...(await checkConfigWiring({ cwd, cache })))
+    // is not a definition fails the boot. Gated like 7.7 and 8.7: it imports the
+    // definitions, so a run that changed no source must not execute them again.
+    if (sourceChanged) {
+      checks.push(...(await checkConfigWiring({ cwd, cache })))
+    }
 
     // 8.65. The attachments disk rooted inside the statically served public/
     // tree, where uploaded bytes are reachable as static assets. Not

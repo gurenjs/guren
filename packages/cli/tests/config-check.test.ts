@@ -1,23 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { checkConfigWiring } from '../src/config-check'
 import { ParseCache } from '../src/parse-cache'
-import { createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles, type TempWorkspace } from './helpers'
-
-const ENV_SCHEMA = `import { defineEnv, Env } from '@guren/core'
-
-export default defineEnv({
-  CACHE_STORE: Env.enum(['memory', 'redis']).default('memory'),
-})
-`
-
-const CACHE_CONFIG = `import { defineConfig } from '@guren/core'
-
-export default defineConfig({
-  key: 'cache',
-  resolve: (env) => ({ default: env.CACHE_STORE }),
-  bind: () => {},
-})
-`
+import {
+  CACHE_CONFIG_FIXTURE,
+  CONFIG_ENV_FIXTURE,
+  createTempWorkspace,
+  linkWorkspaceCore,
+  writeWorkspaceFiles,
+  type TempWorkspace,
+} from './helpers'
 
 function entry(body: string, imports = `import cache from '../config/cache'\n`): string {
   return `import { createApp } from '@guren/core'
@@ -40,19 +31,22 @@ afterEach(async () => {
 })
 
 async function run(files: Record<string, string>) {
-  await writeWorkspaceFiles(workspace.dir, { 'config/env.ts': ENV_SCHEMA, 'config/cache.ts': CACHE_CONFIG, ...files })
+  await writeWorkspaceFiles(workspace.dir, { 'config/env.ts': CONFIG_ENV_FIXTURE, ...files })
   return checkConfigWiring({ cwd: workspace.dir, cache: new ParseCache() })
 }
 
-describe('checkConfigWiring', () => {
-  test('passes a definition the entry lists in createApp({ config })', async () => {
-    const results = await run({ 'src/app.ts': entry('{ config: [cache] }') })
+const WITH_CACHE = { 'config/cache.ts': CACHE_CONFIG_FIXTURE }
 
-    expect(results.map((result) => [result.key, result.status])).toEqual([['config-wired:config/cache.ts', 'pass']])
+describe('checkConfigWiring', () => {
+  test('passes once, naming how many definitions the entry lists', async () => {
+    const results = await run({ ...WITH_CACHE, 'src/app.ts': entry('{ config: [cache] }') })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-wired', 'pass']])
+    expect(results[0].message).toBe('src/app.ts lists 1 config definition(s) in createApp({ config }).')
   })
 
   test('warns about a definition no config array lists, since nothing reads it', async () => {
-    const results = await run({ 'src/app.ts': entry('{ providers: [] }', '') })
+    const results = await run({ ...WITH_CACHE, 'src/app.ts': entry('{ providers: [] }', '') })
 
     expect(results).toEqual([expect.objectContaining({
       key: 'config-unwired:config/cache.ts',
@@ -64,44 +58,66 @@ describe('checkConfigWiring', () => {
 
   test('fails a listed file that is not a definition, which the boot would die on', async () => {
     const results = await run({
-      'config/notes.ts': 'export const note = 1\n',
+      ...WITH_CACHE,
+      'config/notes.ts': 'export default { note: 1 }\n',
       'src/app.ts': entry('{ config: [cache, notes] }', `import cache from '../config/cache'\nimport notes from '../config/notes'\n`),
     })
 
     expect(results.map((result) => [result.key, result.status])).toEqual([
-      ['config-wired:config/cache.ts', 'pass'],
+      ['config-wired', 'pass'],
       ['config-not-a-definition:config/notes.ts', 'fail'],
     ])
     expect(results[1].message).toContain('does not default-export a config definition')
   })
 
-  test('says nothing about a plain module the config array never lists', async () => {
+  test('warns rather than failing when a listed file cannot be imported', async () => {
     const results = await run({
-      'config/database.ts': 'export function configureOrm() {}\n',
+      'config/cache.ts': `throw new Error('boom')\n`,
       'src/app.ts': entry('{ config: [cache] }'),
     })
 
-    expect(results.map((result) => result.key)).toEqual(['config-wired:config/cache.ts'])
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-unreadable:config/cache.ts', 'warn']])
+    expect(results[0].message).toContain('failed to import: boom')
   })
 
-  test('reads the @/ alias and an entry at the project root', async () => {
+  test('says nothing about a plain module the config array never lists, and never imports it', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'config/inertia.ts': `throw new Error('side effect ran')\n`,
+      'src/app.ts': entry('{ config: [cache] }'),
+    })
+
+    expect(results.map((result) => result.key)).toEqual(['config-wired'])
+  })
+
+  test('reads the @/ alias, a directory import and an entry at the project root', async () => {
     await writeWorkspaceFiles(workspace.dir, {
-      'app.ts': `import { createApp } from '@guren/core'\nimport cache from '@/config/cache'\n\nconst app = createApp({ config: [cache] })\n\nexport default app\n`,
+      'config/index.ts': CACHE_CONFIG_FIXTURE,
+      'app.ts': `import { createApp } from '@guren/core'\nimport cache from '@/config'\n\nconst app = createApp({ config: [cache] })\n\nexport default app\n`,
     })
 
     const results = await run({})
 
-    expect(results.map((result) => [result.key, result.status])).toEqual([['config-wired:config/cache.ts', 'pass']])
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-wired', 'pass']])
+  })
+
+  test('judges nothing when an element of the config array is not an identifier', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'src/app.ts': entry('{ config: [cache, ...extra] }', `import cache from '../config/cache'\nimport { extra } from '../config/extra'\n`),
+    })
+
+    expect(results).toEqual([])
   })
 
   test('judges nothing when the config array is not a literal', async () => {
-    const results = await run({ 'src/app.ts': entry('{ config: definitions }', `import { definitions } from '../config/all'\n`) })
+    const results = await run({ ...WITH_CACHE, 'src/app.ts': entry('{ config: definitions }', `import { definitions } from '../config/all'\n`) })
 
     expect(results).toEqual([])
   })
 
   test('contributes nothing to an app with no entry', async () => {
-    const results = await run({})
+    const results = await run(WITH_CACHE)
 
     expect(results).toEqual([])
   })

@@ -1,102 +1,79 @@
 /**
  * Config wiring checks (RFC 0027 §6). A `config/<key>.ts` definition the entry's
  * `createApp({ config: [...] })` never lists binds nothing, which looks exactly
- * like a configured app until the first request; a file the array *does* list
- * that is not a definition fails the boot. Both rules judge only files the array
- * names or definitions the import found, so an app whose `config/` holds plain
- * modules contributes nothing.
+ * like a configured app until the first request; a file the array does list that
+ * is not a definition fails the boot. An array this cannot read whole is no
+ * evidence either way, and reports nothing.
  */
-import { dirname, relative, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import type { Node, ObjectExpression } from '@babel/types'
 import { objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { check, type CheckResult } from './check-result'
+import { toPosixRelative } from './discovery'
 import type { ParseCache } from './parse-cache'
 import { resolveAppEntry } from './provider-registrar'
-import { loadResolvedConfig } from './resolved-config'
+import { loadResolvedConfig, type ResolvedConfigEntry } from './resolved-config'
+import { importsByLocal, specifierBase } from './schema-binding'
 
-/**
- * The module each identifier in `createApp({ config })` comes from, resolved to an
- * app-relative path without its extension. `null` when the array cannot be read:
- * a `config: definitions` naming a variable is not evidence that anything is unwired.
- */
-function wiredConfigModules(ast: { program: unknown }, cwd: string, entryPath: string): Set<string> | null {
+function createAppOptions(program: unknown): ObjectExpression | null {
   let options: ObjectExpression | null = null
-  walk(ast.program, (node) => {
+  walk(program, (node) => {
     if (options) return false
     if (node.type !== 'CallExpression') return
     const callee = node.callee as BabelNode | undefined
-    // Assignment-shape independent: every shipped entry writes `const app = createApp({...})`.
+    // Assignment-shape independent: every shipped entry writes `const app = createApp({…})`.
     if (callee?.type !== 'Identifier' || callee.name !== 'createApp') return
     options = objectLiteral((node.arguments as Node[])[0])
     return false
   })
+  return options
+}
+
+/**
+ * The files `createApp({ config })` lists, app-relative and without extension,
+ * each also spelled as its `index` form. `null` when the array cannot be read
+ * whole: one element this cannot name would make every other verdict a guess.
+ */
+function wiredConfigModules(
+  ast: { program: { body: unknown[] } },
+  cwd: string,
+  entryPath: string,
+): Set<string> | null {
+  const options = createAppOptions(ast.program)
   if (!options) return null
 
-  // No `config` option wires nothing, which is the finding itself; one this scan
-  // cannot read (`config: definitions`) is not evidence either way.
+  // No `config` option wires nothing, which is the finding itself.
   const declared = propertyValue(options, 'config')
   if (declared === undefined) return new Set()
   const array = unwrapTypeAssertion(declared as Node)
   if (array?.type !== 'ArrayExpression') return null
 
-  const names = new Set<string>()
+  const names: string[] = []
   for (const element of array.elements) {
     const value = element ? unwrapTypeAssertion(element as Node) : null
-    if (value?.type === 'Identifier') names.add(value.name)
+    if (value?.type !== 'Identifier') return null
+    names.push(value.name)
   }
 
+  const imports = importsByLocal(ast.program.body as never)
   const modules = new Set<string>()
-  walk(ast.program, (node) => {
-    if (node.type !== 'ImportDeclaration') return
-    const source = (node.source as { value?: unknown }).value
-    if (typeof source !== 'string') return
-    const imported = (node.specifiers as BabelNode[]).some((specifier) => {
-      const local = specifier.local as { name?: string } | undefined
-      return Boolean(local?.name && names.has(local.name))
-    })
-    if (imported) modules.add(moduleTarget(cwd, entryPath, source))
-  })
+  for (const name of names) {
+    const source = imports.get(name)?.source
+    const base = source === undefined ? null : specifierBase(cwd, resolve(cwd, entryPath), source)
+    if (base === null) continue
+    const relative = toPosixRelative(cwd, base).replace(/\.[jt]s$/u, '')
+    modules.add(relative)
+    modules.add(`${relative}/index`)
+  }
   return modules
 }
 
-/** `./config/session`, `../config/session` and `@/config/session` all name one file. */
-function moduleTarget(cwd: string, entryPath: string, specifier: string): string {
-  const absolute = specifier.startsWith('@/')
-    ? resolve(cwd, specifier.slice(2))
-    : resolve(dirname(resolve(cwd, entryPath)), specifier)
-  return relative(cwd, absolute).replace(/\\/gu, '/').replace(/\.[jt]s$/u, '')
-}
-
-export async function checkConfigWiring(options: { cwd: string; cache: ParseCache }): Promise<CheckResult[]> {
-  const { cwd, cache } = options
-  const resolved = await loadResolvedConfig(cwd)
-  if (resolved.entries.length === 0) return []
-
-  const entryPath = await resolveAppEntry(cwd)
-  const parsed = entryPath === null ? null : await cache.get(resolve(cwd, entryPath))
-  const wired = parsed && entryPath ? wiredConfigModules(parsed.ast, cwd, entryPath) : null
-  if (!wired) return []
-
-  const results: CheckResult[] = []
-  for (const entry of resolved.entries) {
-    const listed = wired.has(entry.file.replace(/\.[jt]s$/u, ''))
-    const title = 'Config wiring'
-
-    if (listed && entry.problem !== undefined) {
-      results.push(check(
-        `config-not-a-definition:${entry.file}`,
-        title,
-        'fail',
-        `${entryPath} lists ${entry.file} in createApp({ config }), but it ${entry.problem}. The boot fails on it.`,
-        `Default-export a definition from ${entry.file} (defineSessionConfig, defineCacheConfig, …), or drop it from the array.`,
-        entry.file,
-      ))
-      continue
-    }
-    if (entry.problem !== undefined) continue
-
-    results.push(listed
-      ? check(`config-wired:${entry.file}`, title, 'pass', `${entry.file} is listed in createApp({ config }).`)
+/** Only a file the entry wired can fail; everything else is a warning or nothing at all. */
+function judge(entry: ResolvedConfigEntry, listed: boolean, entryPath: string): CheckResult | null {
+  const title = 'Config wiring'
+  if (!listed) {
+    return entry.problem
+      ? null
       : check(
         `config-unwired:${entry.file}`,
         title,
@@ -104,7 +81,50 @@ export async function checkConfigWiring(options: { cwd: string; cache: ParseCach
         `${entry.file} declares the "${entry.key}" config, but ${entryPath} does not list it in createApp({ config }). Nothing reads it, so the defaults apply instead.`,
         `Add it to createApp({ config: [...] }) in ${entryPath}.`,
         entry.file,
-      ))
+      )
   }
-  return results
+
+  if (entry.problem === 'not-a-definition') {
+    return check(
+      `config-not-a-definition:${entry.file}`,
+      title,
+      'fail',
+      `${entryPath} lists ${entry.file} in createApp({ config }), but it ${entry.detail}. The boot fails on it.`,
+      `Default-export a definition from ${entry.file} (defineSessionConfig, defineCacheConfig, …), or drop it from the array.`,
+      entry.file,
+    )
+  }
+  if (entry.problem === 'import-failed' || entry.problem === 'resolve-threw') {
+    return check(
+      `config-unreadable:${entry.file}`,
+      title,
+      'warn',
+      `${entry.file} ${entry.detail}, so its wiring was not checked. The boot runs the same code.`,
+      undefined,
+      entry.file,
+    )
+  }
+  // `unverified-env` is the machine's environment, not the app's wiring.
+  return null
+}
+
+export async function checkConfigWiring(options: { cwd: string; cache: ParseCache }): Promise<CheckResult[]> {
+  const { cwd, cache } = options
+
+  // Before the import: an app this cannot judge should not have its config/ executed.
+  const entryPath = await resolveAppEntry(cwd)
+  const parsed = entryPath === null ? null : await cache.get(resolve(cwd, entryPath))
+  const wired = parsed && entryPath ? wiredConfigModules(parsed.ast, cwd, entryPath) : null
+  if (!wired || entryPath === null) return []
+
+  const resolved = await loadResolvedConfig(cwd, new Set([...wired].map((file) => `${file}.ts`)))
+  const results = resolved.entries.flatMap((entry) => {
+    const result = judge(entry, wired.has(entry.file.replace(/\.[jt]s$/u, '')), entryPath)
+    return result ? [result] : []
+  })
+
+  const wiredCount = resolved.entries.filter((entry) => wired.has(entry.file.replace(/\.[jt]s$/u, '')) && !entry.problem).length
+  return wiredCount === 0
+    ? results
+    : [check('config-wired', 'Config wiring', 'pass', `${entryPath} lists ${wiredCount} config definition(s) in createApp({ config }).`), ...results]
 }

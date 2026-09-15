@@ -36,14 +36,14 @@ export class ConfigServiceProvider extends ServiceProvider {
       const { env, read } = recordEnvReads(this.env)
       const config = definition.resolve(env)
 
-      // Only reachable under introspection: `throw` mode fails the boot on an
-      // unset key. Binding here would hand the redacted placeholder to a manager
-      // constructor that validates it.
+      // Reachable only where parsing reported rather than threw, which today is
+      // GUREN_INTROSPECT=1. Binding would hand the redacted placeholder to a
+      // manager constructor that validates it; nothing bound answers 503 instead.
       const placeholders = [...read].filter((key) => this.unset.has(key))
       if (placeholders.length > 0) {
         warnOnce(
           `config-unverified:${definition.key}`,
-          `[guren] config/${definition.key}.ts reads ${placeholders.join(', ')}, which the environment does not set; it was left unbound.`,
+          `[guren] the "${definition.key}" config reads ${placeholders.join(', ')}, which the environment does not set; it was left unbound.`,
         )
         continue
       }

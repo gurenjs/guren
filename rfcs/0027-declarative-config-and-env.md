@@ -602,8 +602,16 @@ and each verdict is written once against it:
 - **Both rules judge only what the `config: [...]` array names.** A `config/`
   directory today holds plain modules (`config/database.ts`, `config/inertia.ts`),
   so "not a definition" is a finding only for a file the array lists. An array the
-  scan cannot read (`config: definitions`) is not evidence and reports nothing.
-  `config/env.ts` is the schema the definitions resolve against, never one of them.
+  scan cannot read whole (`config: definitions`, or one holding a spread) is not
+  evidence and reports nothing. `config/env.ts` is the schema the definitions
+  resolve against, never one of them.
+- **Only a definition-looking or wired file is imported.** Those plain modules run
+  code at import (`configureAttachments()`, `setInertiaSharedProps()`), which a
+  check has no business running, so the file is read as text first. A config built
+  from an unset key is marked unverified rather than kept, since it holds the
+  redacted placeholder, and a secret's value is redacted out of any error an
+  import or a `resolve()` raised: unlike `env.parse()`, the CLI resolves against
+  the machine's real environment.
 - **The keys are `config-unwired` and `config-not-a-definition`**, since every
   other check key in the codebase is dash-separated.
 

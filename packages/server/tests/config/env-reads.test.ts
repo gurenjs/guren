@@ -12,19 +12,18 @@ afterEach(() => {
 
 describe('recordEnvReads()', () => {
   test('hands the values through and records the keys that were read', () => {
-    const { env, read } = recordEnvReads({ RFC27_A: 'a', RFC27_B: 'b' } as never)
-    const values = env as unknown as Record<string, string>
+    const { env, read } = recordEnvReads({ RFC27_A: 'a', RFC27_B: 'b' })
 
-    expect(values.RFC27_A).toBe('a')
+    expect(env.RFC27_A).toBe('a')
 
     expect([...read]).toEqual(['RFC27_A'])
   })
 
   test('records reads of a frozen parse() result', () => {
     const parsed = defineEnv({ RFC27_STORE: Env.string().default('memory') }).parse({})
-    const { env, read } = recordEnvReads(parsed.values as never)
+    const { env, read } = recordEnvReads(parsed.values)
 
-    expect((env as unknown as Record<string, string>).RFC27_STORE).toBe('memory')
+    expect(env.RFC27_STORE).toBe('memory')
     expect([...read]).toEqual(['RFC27_STORE'])
   })
 })
