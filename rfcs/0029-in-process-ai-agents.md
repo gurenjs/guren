@@ -111,11 +111,11 @@ const Triage = z.object({
   summary: z.string(),
 })
 
-export class SupportTriager extends Agent<z.infer<typeof Triage>> {
+export class SupportTriager extends Agent {
   /** Stable wire name (queued runs, audit, fakes). Defaults to the class name; see Job.jobName. */
   static override agentName = 'support-triager'
   /** Least privilege for the model, in the RFC 0016 scope grammar: every appTools() name must be granted here. */
-  static override scopes = ['tool:tickets.index', 'tool:tickets.show', 'tool:tickets.update']
+  static override scopes = ['tool:tickets.index', 'tool:tickets.show', 'tool:tickets.update'] as const
 
   instructions = 'You triage support tickets. Read before you write.'
   /** A provider name from config/ai.ts; never a model instance (§3, §7). Defaults to the configured default. */
@@ -141,7 +141,7 @@ export class SupportTriager extends Agent<z.infer<typeof Triage>> {
 // In a controller, job or command: the container-bound form
 const ai = this.make('ai')
 const response = await ai.agent(SupportTriager).as(await this.auth.user()).prompt('Ticket #4812: ...')
-response.output.priority   // typed from the schema
+response.output.priority   // typed from the class's `output` member, no generic to restate (§11)
 response.text
 response.steps             // AI SDK steps, tool calls included
 response.usage
@@ -613,10 +613,14 @@ the tool descriptions get the right answer out of the model is §10's job.
   migration (`--no-conversations` skips them), and `aiPlugin()` into
   `createApp({ providers })`. `.env.test` gets a placeholder key, since
   tests run against the fake.
-- **`make:ai-agent Name`** → `app/Ai/Agents/Name.ts`; `--tools a,b` fills
-  `appTools()` from route names it verifies exist; `--output` adds a Zod
-  schema stub; `--test` writes the fake-driven test. **`make:ai-tool Name`**
-  → `app/Ai/Tools/Name.ts`. The names avoid `make:agent`, which RFC 0017
+- **`make:ai-agent Name`** → `app/Ai/Agents/Name.ts`, appended to the
+  `app/Ai/agents.ts` registry (§11); `--tools a,b` fills `appTools()` from
+  route names it verifies exist; `--output` adds a Zod schema stub; `--test`
+  writes the fake-driven test. **`make:ai-tool Name`** → `app/Ai/Tools/Name.ts`.
+  **`guren codegen`** gains `AgentToolInputTypes` and the `@guren/plugin-ai`
+  augmentation in `.guren/agents.gen.ts` (§11), emitted only for an app that
+  depends on the plugin so an app without it sees no change. The names avoid
+  `make:agent`, which RFC 0017
   owns (`app/Agents`, `config/agents.ts`, a Workers-only class); a durable
   agent and an in-process one are different things and the scaffold should
   not blur them.
@@ -757,6 +761,53 @@ package drift check. It never runs on a PR.
 
 Ships in Part 3, after the fake and `stream()` exist to be measured.
 
+### 11. Type safety
+
+The RFC 0016 surface is stringly typed at its edges by nature (an MCP client
+sends a name), and every string it introduces here is a place a typo grants
+nothing, silently. The rule for this plugin is the one the rest of Guren's
+codegen follows: **a name the compiler can know is a type, a name it cannot
+know is a `guren check` rule, and a runtime error is the last line.** Each
+string in the sections above, and what types it:
+
+| String | Typed by | Mechanism |
+|---|---|---|
+| `appTools(['tickets.index'])` names | `AgentToolName` from `.guren/agents.gen.ts` (exists today) | the generated file augments `interface AppAgentTools` in `@guren/plugin-ai`, as `translations.gen.ts` augments `GurenTranslationKeys` |
+| each tool's input and result | `AgentToolInputTypes` (new) and `AgentToolOutputTypes` (exists) in the same file | `appTools()` returns `{ [K in N]: Tool<AgentToolInputTypes[K], AgentToolOutputTypes[K]> }`, so a local tool that composes a result is typed against the route's contract |
+| `static scopes` entries | `` `tool:${AgentToolName}` \| `tools:${string}.*` \| 'tools:read' \| 'tools:*' `` | a template-literal type; the `tool:` form is exact, the prefix form is checked only for shape (a prefix is not a name) |
+| "every `appTools()` name is granted" | `Granted<typeof Class.scopes, N>` over an `as const` tuple, for `tool:` entries | conditional type on the tuple; a prefix grant is settled at construction (§2.2) and by `guren check` |
+| `provider` and `PromptOptions.provider` | `AiProviderName` | `config/ai.ts` is scaffolded with `declare module '@guren/plugin-ai' { interface AiProviders extends InferProviders<typeof config> {} }`, the `OrmConnectionEnv extends AppEnv` pattern in `@guren/core`; no codegen, the config is the source |
+| `env.ANTHROPIC_API_KEY` in `config/ai.ts` | `AppEnv` (RFC 0027 §1) | already typed; a key absent from `config/env.ts` is a compile error in the resolver |
+| `agentName` in `queue()`, `AgentResponded`, `respond()`, `assertPrompted()` | `AiAgentName` | `app/Ai/agents.ts` is the registry `aiPlugin({ agents })` reads (the `config/agents.ts` shape of RFC 0017), and it augments `interface AiAgents`; `make:ai-agent` appends to it |
+| `response.output` | `InferAgentOutput<this>` | inferred from the class's `output` member through the polymorphic `this` type, so a class declares its schema once and never restates it as a generic |
+| `respond(Class, [...])`, `grade({ response })` | `AgentResponse<InferAgentOutput<Class>>` | a scripted `output` that does not match the schema is a compile error in the test, not a runtime parse failure |
+| conversation ids | `ConversationId`, a branded string | `continue(ticketId)` does not compile; `create()` is the only producer |
+| `route('support.chat')` in `createChatTransport` | the route manifest (`createTypedLink` precedent) | already typed; `ChatTurnSchema` bound on the route contract puts the body in `ApiRoutes['support.chat']['body']`, so the transport's request type and the controller's `validateBody` type are one |
+| `metrics` in `defineEval()` | `keyof ReturnType<typeof grade>` | `metrics` is constrained to the ids `grade()` returns, so a metric that is never scored is a compile error |
+| `this.make('ai')` | `ServiceBindings['ai']` | the augmentation in §3 |
+
+What types cannot reach, and where it goes instead:
+
+- A **computed** `appTools()` argument or scopes list widens to `string`;
+  `guren check` reports the call as unverifiable rather than passed (the
+  RFC 0021 rule), and the construction error of §2.2 stands behind it.
+- The **JSON Schema** a tool advertises is data at runtime. The type twin in
+  `agents.gen.ts` is derived from the same Zod extraction `api-client.gen.ts`
+  uses, so the two cannot disagree about a route, but a schema the extractor
+  cannot render (the unresolved-type warning codegen already prints) types
+  as `unknown` there, never as a guess.
+- The **model's own output** is validated by the AI SDK against the `output`
+  schema at runtime; the type says what a valid response is, and a
+  `finishReason` that is not `'stop'` or a refusal is surfaced on the
+  response, not typed away.
+- **Stored conversations** replay as `ModelMessage[]`, typed by the AI SDK;
+  the agent name recorded on the row is compared at `load` (§5) because a
+  row written by a previous deploy is data, not a type.
+
+The manifest additions land in Part 1 with `appTools()`; nothing in this
+section is a new runtime, only the compile-time twin of names the runtime
+already checks.
+
 ### Package boundaries
 
 | Layer | Package |
@@ -764,14 +815,15 @@ Ships in Part 3, after the fake and `stream()` exist to be measured.
 | `'in-process'` surface member | `@guren/server` (minor) |
 | `Agent`, `agent()`, `appTools`, `defineAiConfig`, `AiManager`, conversation stores, `RunAgentJob`, `AgentResponded`, `stream`, `broadcast`, `/client` transport, `/eval` (`defineEval`, the runner) | `@guren/plugin-ai` (0.x) |
 | `fakeAi()` | `@guren/testing` |
-| `guren add ai` (`--evals`), `make:ai-agent`, `make:ai-tool`, `ai:eval`, checks, audit advisory, context/spec | `@guren/cli` |
+| `guren add ai` (`--evals`), `make:ai-agent`, `make:ai-tool`, `ai:eval`, the `agents.gen.ts` type additions, checks, audit advisory, context/spec | `@guren/cli` |
 | Harness skill | `packages/cli/templates/agent/` |
 
 ### Phasing
 
 1. **Part 1**: `Agent` (§1), `appTools()` and the surface (§2), `config/ai.ts`
-   (§3), `fakeAi()` (§7), `guren add ai` and `make:ai-agent` (§8).
-   Everything a first feature needs, testable without a network.
+   (§3), `fakeAi()` (§7), `guren add ai` and `make:ai-agent` (§8), the typed
+   names of §11. Everything a first feature needs, testable without a
+   network and with every name checked by the compiler.
 2. **Part 2**: `stream()` and the client transport (§4), `database`
    conversations (§5), `queue()` and `AgentResponded` (§6), `broadcast()`.
 3. **Part 3**: `embed()` / `image()` thin wrappers on the configured
