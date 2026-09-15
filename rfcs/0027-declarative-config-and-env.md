@@ -213,7 +213,10 @@ source object in a `WeakMap`~~. **Amended in implementation:** no memo.
 cache keyed on the source object returns stale values; a parse is one lookup and
 one coercion per declared key. In `report` mode an unset required key is
 `AGENT_REDACTED` (`packages/server/src/agent/redact.ts:16`, the placeholder the
-agent audit already prints) and is listed in `unset`. The callers:
+agent audit already prints) and is listed in `unset`. **Amended in
+implementation:** report mode guarantees that the parse reports rather than
+throws; each definition's `resolve` still runs on the placeholder and may throw
+on it. The callers:
 
 | Caller | Source | Mode |
 |---|---|---|
@@ -398,6 +401,15 @@ export const { getDatabase, migrateDatabase, configureOrm, seedDatabase } = data
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
 
+**Amended in implementation:** each factory keeps the context `configureOrm()`
+received rather than passing it through, because the resolver also runs inside
+memoized flights (migrations, the connection) and admin clients that no
+`configureOrm()` argument reaches. When a setting that already resolved
+resolves differently under the new context, the factory closes the open handle
+and drops the migrations memo, so a connection opened before boot cannot keep
+naming the wrong database. Without an env schema, `defineDatabaseConfig` passes
+no context, so the resolver's own fallback runs.
+
 Behaviour stays in providers. Broadcast channel authorization, event listeners,
 schedules, notification channels and `auth.useModel(User, ...)` are closures and
 class references, not configuration, and keep their providers.
@@ -450,6 +462,10 @@ Two mechanism changes keep the ordering from resurfacing:
   keys only, and a rebind keeps the key). The work is the configured keys times
   the providers, and the error names the provider:
   `"session" is configured twice: config/session.ts and SessionProvider.register(). Keep one.`
+  **Amended in implementation:** the comparison covers eager registration only.
+  A deferred provider's `register()`, a provider's `boot()` and `options.boot`
+  are not compared; moving ownership into `Container` would cover them, and is
+  left until an app needs it.
 
 `DOUBLE_SESSION_CONFIG` (`AuthServiceProvider.ts:10-12`, thrown at `:76`) stays
 a separate check. It compares a `createApp()` option (`auth.sessionOptions.store`)
@@ -489,7 +505,7 @@ common case rather than all three:
 
 | App | `bootModels()` behaviour | After |
 |---|---|---|
-| `templates/default` | Always `configureOrm()`; seeds outside production when migrations exist (`config/app.ts:29-38`) | `defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })`. `configureOrm()` always, as `common-pitfalls.md` requires ("models need a DB connection"); seeding still skips when `migrationStatus()` reports no migrations |
+| `templates/default` | Always `configureOrm()`; seeds outside production when migrations exist (`config/app.ts:29-38`) | `defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })`. `configureOrm()` always, as `common-pitfalls.md` requires ("models need a DB connection"); seeding still skips when the folder holds no migrations. **Amended in implementation:** through a new `hasMigrations()` on each factory, which reads files only; `migrationStatus()` opened an admin connection on every boot and throws on D1 |
 | `examples/blog` | Skips `configureOrm()` entirely when no migration folder exists (`:32-35`) | Adopts the template behaviour; the blog always has migrations |
 | `web/` | `isWorkersRuntime()` branch, and swallows a `configureOrm()` failure with a warning (`web/config/app.ts:10-12`, `:43-54`) | Keeps its own `DatabaseProvider`. Swallowing a connection failure is an app decision a config flag should not offer |
 
@@ -521,7 +537,10 @@ reads the `http.hostAuthorization` binding, the same placeholder shape
 (`AuthServiceProvider.ts:35-38`). A request reaching it before boot is refused
 with 503 rather than passed, and giving both forms fails the boot. A future
 env-dependent option (trusted proxies, CSP report URIs) joins `HttpConfig`
-instead of adding a placeholder of its own.
+instead of adding a placeholder of its own. **Amended in implementation:** with
+one option, Part 1 binds only `http.hostAuthorization`. When a second arrives,
+bind the resolved `HttpConfig` whole and have the one placeholder build the
+ordered middleware list.
 
 With `APP_URL` declared `.requiredInProduction()`, a production app with no
 `APP_URL` fails its boot instead of disabling the check, so the template's
@@ -602,7 +621,11 @@ Referencing `RFC 0027` in each PR:
    `Container.singletonIf()` and `bindingOf()`, the twice-configured error, the
    default providers moved to `singletonIf`, the optional context on
    `ConnectionResolver` and `configureOrm()` in every dialect factory. Core gets
-   a changeset (the allowlist rule).
+   a changeset (the allowlist rule). **Amended in implementation:** shipped as
+   three stacked PRs: 1a (`singletonIf` and the default providers, I18n included
+   so the source-level rule has no exception), 1b (definitions, `bindingOf`, the
+   twice-configured error, the placeholder) and 1c (the ORM context,
+   `hasMigrations()` and `defineDatabaseConfig`).
 2. **Scaffolds and CLI** (`@guren/cli` minor, `create-guren-app` minor). Templates
    `default`, `default-ssr`, `api-only`, `blog`; scaffold blueprints `session`,
    `cache`, `mail`, `queue`, `storage`, `oauth`, `auth` (its `config/mail.ts`),
