@@ -22,6 +22,7 @@ import {
   resolveClientAssetEnv,
   resolvePathLike,
   ssrRuntimePaths,
+  stageStaticAssets,
 } from './deploy-build'
 import gurenVitePlugin from '../vite'
 
@@ -187,6 +188,35 @@ describe('resolveClientAssetEnv', () => {
       entry: `${viteConfig.base}app-Abc123.js`,
       styles: `${viteConfig.base}app-Def456.css`,
     })
+  })
+})
+
+describe('stageStaticAssets', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'guren-stage-static-assets-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('should stage the built assets under the client prefix alone and keep every other public entry', () => {
+    const publicDir = join(dir, 'public')
+    const out = join(dir, 'out')
+    mkdirSync(join(publicDir, 'assets/.vite'), { recursive: true })
+    mkdirSync(join(publicDir, 'vendor/assets'), { recursive: true })
+    writeFileSync(join(publicDir, 'assets/app-Abc123.js'), '')
+    writeFileSync(join(publicDir, 'assets-map.json'), '{}')
+    writeFileSync(join(publicDir, 'vendor/assets/logo.png'), '')
+
+    stageStaticAssets(publicDir, out)
+
+    expect(existsSync(join(out, CLIENT_ASSETS_URL_PREFIX, 'app-Abc123.js'))).toBe(true)
+    expect(existsSync(join(out, 'assets'))).toBe(false)
+    expect(existsSync(join(out, 'assets-map.json'))).toBe(true)
+    expect(existsSync(join(out, 'vendor/assets/logo.png'))).toBe(true)
   })
 })
 

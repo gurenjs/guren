@@ -55,7 +55,7 @@ new GurenLambdaApp(stack, 'App', {
 })
 ```
 
-HTTP API, queue worker with partial batch failures, EventBridge scheduling, and asset routing (`/assets/*`, `/public/*`) come wired with the handler names `lambda:build` emits. Every sub-resource is exposed as a property for further customization.
+HTTP API, queue worker with partial batch failures, EventBridge scheduling, and asset routing (`/public/*` and each root-level entry of `public/`) come wired with the handler names `lambda:build` emits. Every sub-resource is exposed as a property for further customization.
 
 ## Things Lambda changes
 
