@@ -168,6 +168,28 @@ describe('defineEnv().parse()', () => {
   })
 })
 
+describe('EnvVar accessors', () => {
+  test('report the builder, presence, default and enum choices a variable was declared with', () => {
+    const driver = Env.enum(['database', 'cookie']).default('database').describe('Session store.')
+    const key = Env.string().secret()
+    const url = Env.url().requiredInProduction()
+    const port = Env.port().optional()
+
+    expect([driver.type, driver.presence, driver.defaultValue, driver.choices, driver.description])
+      .toEqual(['enum', 'defaulted', 'database', ['database', 'cookie'], 'Session store.'])
+    expect([key.type, key.presence, key.defaultValue, key.choices, key.isSecret])
+      .toEqual(['string', 'required', undefined, undefined, true])
+    expect([url.type, url.presence]).toEqual(['url', 'production'])
+    expect([port.type, port.presence]).toEqual(['port', 'optional'])
+  })
+
+  test('keeps the accessors across modifiers, which each return a new variable', () => {
+    const declared = Env.boolean().default(false).allowEmpty().secret()
+
+    expect([declared.type, declared.presence, declared.defaultValue]).toEqual(['boolean', 'defaulted', false])
+  })
+})
+
 describe('defineEnv() declarations', () => {
   test('refuses NODE_ENV and GUREN_* keys, naming the reason', () => {
     expect(() => defineEnv({ NODE_ENV: Env.string() })).toThrow('bundlers can fold production gates')

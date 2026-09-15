@@ -47,11 +47,19 @@ export interface ParsedEnv<Values> {
   readonly unset: ReadonlySet<string>
 }
 
-type Presence = 'required' | 'optional' | 'defaulted' | 'production'
+/** When a variable must be set: `production` is `.requiredInProduction()`. */
+export type EnvPresence = 'required' | 'optional' | 'defaulted' | 'production'
+
+/** The `Env` builder a variable was declared with, as a plugin manifest names it (RFC 0027 §1). */
+export type EnvVarType = 'string' | 'url' | 'number' | 'port' | 'boolean' | 'enum' | 'custom'
+
+type Presence = EnvPresence
 type Coerced<T> = { readonly value: T } | { readonly problem: string }
 
 interface EnvVarState<T> {
+  readonly type: EnvVarType
   readonly coerce: (raw: string) => Coerced<T>
+  readonly choices?: readonly string[]
   readonly presence: Presence
   readonly fallback?: T
   readonly emptyAllowed: boolean
@@ -103,6 +111,24 @@ export class EnvVar<T, P extends Presence = 'required'> {
     return this.state.description
   }
 
+  get type(): EnvVarType {
+    return this.state.type
+  }
+
+  get presence(): EnvPresence {
+    return this.state.presence
+  }
+
+  /** The `.default()` value; `undefined` unless `presence` is `defaulted`. */
+  get defaultValue(): T | undefined {
+    return this.state.fallback
+  }
+
+  /** The values an `Env.enum()` admits; `undefined` for every other builder. */
+  get choices(): readonly string[] | undefined {
+    return this.state.choices
+  }
+
   /** @internal */
   resolve(raw: string | undefined, production: boolean): Coerced<T | undefined> | { readonly unset: true } {
     const { presence } = this.state
@@ -116,16 +142,20 @@ export class EnvVar<T, P extends Presence = 'required'> {
 }
 
 // Builders pass `T` explicitly: inferred from the coerce callback it widens to `T | undefined`.
-function envVar<T>(coerce: (raw: string) => Coerced<T>): EnvVar<T> {
-  return new EnvVar<T>({ coerce, presence: 'required', emptyAllowed: false, isSecret: false })
+function envVar<T>(
+  type: EnvVarType,
+  coerce: (raw: string) => Coerced<T>,
+  choices?: readonly string[],
+): EnvVar<T> {
+  return new EnvVar<T>({ type, coerce, choices, presence: 'required', emptyAllowed: false, isSecret: false })
 }
 
 const PORT_PATTERN = /^\d+$/u
 
 export const Env = {
-  string: (): EnvVar<string> => envVar<string>((raw) => ({ value: raw })),
+  string: (): EnvVar<string> => envVar<string>('string', (raw) => ({ value: raw })),
 
-  url: (): EnvVar<string> => envVar<string>((raw) => {
+  url: (): EnvVar<string> => envVar<string>('url', (raw) => {
     try {
       new URL(raw)
       return { value: raw }
@@ -134,17 +164,17 @@ export const Env = {
     }
   }),
 
-  number: (): EnvVar<number> => envVar<number>((raw) => {
+  number: (): EnvVar<number> => envVar<number>('number', (raw) => {
     const value = Number(raw)
     return raw.trim() !== '' && Number.isFinite(value) ? { value } : { problem: 'is not a number' }
   }),
 
-  port: (): EnvVar<number> => envVar<number>((raw) => {
+  port: (): EnvVar<number> => envVar<number>('port', (raw) => {
     const value = Number(raw)
     return PORT_PATTERN.test(raw) && value >= 1 && value <= 65535 ? { value } : { problem: 'is not a port' }
   }),
 
-  boolean: (): EnvVar<boolean> => envVar<boolean>((raw) => {
+  boolean: (): EnvVar<boolean> => envVar<boolean>('boolean', (raw) => {
     const normalized = raw.toLowerCase()
     if (normalized === 'true' || normalized === '1') return { value: true }
     if (normalized === 'false' || normalized === '0') return { value: false }
@@ -152,15 +182,15 @@ export const Env = {
   }),
 
   enum: <const Values extends readonly [string, ...string[]]>(values: Values): EnvVar<Values[number]> =>
-    envVar<Values[number]>((raw) => (values as readonly string[]).includes(raw)
+    envVar<Values[number]>('enum', (raw) => (values as readonly string[]).includes(raw)
       ? { value: raw as Values[number] }
-      : { problem: `is not one of: ${values.join(', ')}` }),
+      : { problem: `is not one of: ${values.join(', ')}` }, Object.freeze([...values])),
 
   /**
    * Synchronous validators only: `parse()` also runs where nothing can await it
    * (the CLI, a connection thunk), so a Promise result is reported as a problem.
    */
-  custom: <Output>(schema: StandardSchemaV1<Output>): EnvVar<Output> => envVar<Output>((raw) => {
+  custom: <Output>(schema: StandardSchemaV1<Output>): EnvVar<Output> => envVar<Output>('custom', (raw) => {
     const result = schema['~standard'].validate(raw)
     if (result instanceof Promise) {
       return { problem: 'has an asynchronous validator; Env.custom() accepts synchronous validators only' }
