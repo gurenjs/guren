@@ -814,7 +814,7 @@ export class Application {
     await this.mountDevEndpoint(
       isMcpEndpointEnabled(),
       async () => (await import('../mcp/McpServiceProvider')).McpServiceProvider,
-      'GUREN_MCP=1 but the MCP endpoint could not load — is @modelcontextprotocol/sdk installed?',
+      'GUREN_MCP=1 but the MCP endpoint could not load — is @guren/cli installed?',
     )
     // Docs viewer (/_guren/docs): read-only UI over the OKF docs bundle (RFC 0005).
     await this.mountDevEndpoint(

@@ -71,6 +71,13 @@ export {
   type ContextRouteAuthorization,
 } from './context-route'
 export { createFreshContextApi } from './fresh-context'
+// Read by @guren/server's McpServiceProvider (RFC 0028), which resolves this
+// package from the app at runtime and checks the export exists before calling it.
+export {
+  createDevMcpHandler,
+  type CreateDevMcpHandlerOptions,
+  type DevMcpHandler,
+} from './dev-mcp/handler'
 export {
   scanDocs,
   parseDocFrontmatter,
