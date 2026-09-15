@@ -210,7 +210,7 @@ export class Post extends defineModel(posts) {
 - Provides Laravel-style helpers like `Model.all()`, `Model.find(id)`, `Model.findOrFail()`, `Model.first()`, and `Model.create(data)`.
 - Fluent QueryBuilder: `Post.where('status', 'published').orderBy('createdAt', 'desc').limit(10).get()`.
 - Table inference keeps static helpers strongly typed (e.g. `Post.find()` returns `PostRecord | null`).
-- Use a provider such as `DatabaseProvider` (which calls `bootModels()`) to invoke `DrizzleAdapter.configure(db)`, making the adapter available to every model. When you need full control, use `Model.query(db)` or the Drizzle database instance directly.
+- Use a provider such as `DatabaseProvider` (which calls `bootModels()`) to invoke `DrizzleAdapter.configure(db)`, making the adapter available to every model. For joins and other queries the builder cannot express, `Model.newQuery().toDrizzle()` hands the query to Drizzle with the model's scopes applied. The Drizzle database instance itself skips the model entirely.
 
 ## Inertia.js and Views
 - Place React pages under `resources/js/pages/` and reference them by component name.

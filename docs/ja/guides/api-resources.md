@@ -219,23 +219,26 @@ export default class UserController extends Controller {
 無限スクロールやリアルタイムデータに最適です。
 
 ```typescript
-import { cursorPaginate, CursorPaginator } from '@guren/core'
+import { Controller, CursorPaginator, decodeCursor, encodeCursor } from '@guren/core'
 
 export default class PostController extends Controller {
   async index() {
-    const cursor = this.request.query('cursor')
-    const perPage = Number(this.request.query('per_page') ?? 20)
+    const cursor = this.query('cursor') ?? null
+    const perPage = Number(this.query('per_page', '20'))
+    const afterId = cursor ? Number(decodeCursor(cursor)) : 0
 
-    const posts = await Post.query()
-      .where('id', '>', decodeCursor(cursor) ?? 0)
+    // モデルのビルダーを使うので、グローバルスコープ(SoftDeletes やテナント)が掛かったまま
+    const posts = await Post.where('id', '>', afterId)
       .orderBy('id', 'asc')
       .limit(perPage + 1)
-      .all()
+      .get()
 
     const hasMore = posts.length > perPage
-    const items = hasMore ? posts.slice(0, perPage) : posts
-
-    const paginator = CursorPaginator.fromArray(items, cursor, perPage)
+    const items = posts.slice(0, perPage)
+    const paginator = new CursorPaginator(items, perPage, hasMore, {
+      currentCursor: cursor,
+      nextCursor: hasMore ? encodeCursor(items[items.length - 1].id) : null,
+    })
 
     return this.json(paginator.toResource(PostResource))
   }

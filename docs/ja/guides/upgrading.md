@@ -33,6 +33,22 @@ bun run test
 
 ## 移行メモ
 
+### 2.23.x → 2.24.0
+
+#### `Model.query()` が非推奨に
+
+- **変更点**: `Model.query()` に `@deprecated` が付き、モデルごとに一度だけ警告します。`@guren/orm` 3.0.0 までは従来どおり動きます。クエリビルダーには `sum()`、`avg()`、`min()`、`max()`、`exists()`、`toSql()`、`toDrizzle()` が加わり、いずれもモデルのグローバルスコープを適用します。
+- **影響を受けるコード**: `Post.query()` や `Post.query(db)` を呼んでいるコードです。このクエリはグローバルスコープをすべて素通りするので、`SoftDeletes` やテナントのスコープを持つモデルでは、ゴミ箱に入った行や他テナントの行を読んでいました。
+- **移行方法**: `bunx guren upgrade --check-only` で呼び出し箇所を確認してください。置き換え先はクエリの内容で決まるため、codemod はありません。集計はビルダーへ、結合は `toDrizzle()` へ移します。詳しくは[データベース](./database.md)を参照してください。
+
+```ts
+// Before
+const rows = await Post.query(db).where(gt(posts.views, 100)).orderBy(desc(posts.id))
+
+// After
+const rows = await Post.newQuery().toDrizzle().where(gt(posts.views, 100)).orderBy(desc(posts.id))
+```
+
 ### 2.22.x → 2.23.0
 
 #### モジュールレベルのサービス setter / getter が非推奨に

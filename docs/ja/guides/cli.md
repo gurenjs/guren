@@ -709,10 +709,10 @@ bunx guren queue:work --stop-when-empty
 生成物はフレームワークの Laravel 風の設計方針に沿っています。
 
 - コントローラーは `Controller` を継承し、`this.inertia()` などのヘルパーを使用。
-- モデルは `Model<TRecord>` を継承し、`static table` を事前に設定。手早い CRUD にはヘルパーを、複雑なクエリは Drizzle RQB へ直接。`Model.query(db)` でモデル起点の RQB も書けます。
+- モデルは `Model<TRecord>` を継承し、`static table` を事前に設定。手早い CRUD にはヘルパーを、複雑なクエリは Drizzle RQB へ直接。`Model.newQuery().toDrizzle()` を使えば、モデルのスコープを保ったまま Drizzle のクエリを書けます。
 - ビューは React + TypeScript + Tailwind CSS の関数コンポーネント。
 
-生成後はルート配線と Drizzle スキーマへの `static table` 接続を忘れずに。高度なクエリが必要ならモデルを介さず Drizzle の DB(`getDatabase()`)や `Model.query()` を使うと型安全のまま柔軟に書けます。
+生成後はルート配線と Drizzle スキーマへの `static table` 接続を忘れずに。高度なクエリは、モデルのスコープを保つ `toDrizzle()` か、モデルを介さない Drizzle の DB(`getDatabase()`)で書きます。
 
 ## 新規アプリのスキャフォールド
 

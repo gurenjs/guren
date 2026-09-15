@@ -1,10 +1,10 @@
-import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNull, max, min, sql } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
 import type { AsyncLocalStorage } from 'node:async_hooks'
 import { DEFAULT_IN_LIST_SIZE } from '../internal-keys'
 import type { AdapterQueryOptions, FindManyOptions, OrderByClause, PlainObject, WhereClause } from '../Model'
-import type { ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
-import { buildDrizzleConditions } from './drizzle-conditions'
+import type { AggregateFunction, ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
+import { buildDrizzleConditions, resolveColumn } from './drizzle-conditions'
 
 type DrizzleLikeSelect = {
   where?: (clause: unknown) => DrizzleLikeSelect
@@ -93,6 +93,41 @@ function withConditions(query: DrizzleLikeSelect, table: unknown, conditions: Wh
 function toCount(value: unknown): number {
   const total = Number(value ?? 0)
   return Number.isNaN(total) ? 0 : total
+}
+
+/** A drizzle 1.x column's `dataType` leads with its JS kind (`number int32`, `string numeric`); 0.x has only the kind. */
+function columnKind(column: unknown): string {
+  const dataType = (column as { dataType?: unknown }).dataType
+  return typeof dataType === 'string' ? dataType.split(' ')[0] : ''
+}
+
+/**
+ * Drivers disagree on an aggregate's wire type (postgres-js and mysql2 send
+ * `sum(int)` as a decimal string, bun:sqlite as a number), so the column's kind
+ * decides, never the driver.
+ */
+function decodeAggregate(fn: AggregateFunction, column: unknown, field: string, raw: unknown): unknown {
+  const kind = columnKind(column)
+  if (raw === null || raw === undefined) {
+    if (fn !== 'sum') return null
+    return kind === 'bigint' ? 0n : kind === 'string' ? '0' : 0
+  }
+
+  if (kind === 'number') {
+    const value = Number(raw)
+    // Only an integer literal can be rounded by Number(); a float column's large total is a legitimate value.
+    if (typeof raw === 'string' && /^-?\d+$/.test(raw) && !Number.isSafeInteger(value)) {
+      throw new RangeError(
+        `DrizzleAdapter: ${fn}("${field}") is ${String(raw)}, past Number.MAX_SAFE_INTEGER; declare the column with mode: 'bigint'.`,
+      )
+    }
+    return value
+  }
+  if (kind === 'bigint') {
+    return fn === 'avg' ? String(raw) : typeof raw === 'bigint' ? raw : BigInt(String(raw))
+  }
+  if (kind === 'string') return String(raw)
+  return raw
 }
 
 function ensureDatabase(): DrizzleDatabase {
@@ -653,6 +688,25 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     const query = withConditions(db.select({ value: count() }).from(table), table, conditions)
     const rows = await resolveList(query)
     return toCount((rows[0] as { value?: unknown } | undefined)?.value)
+  },
+
+  async aggregateAdvanced(
+    table: unknown,
+    fn: AggregateFunction,
+    field: string,
+    conditions: WhereCondition[],
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<unknown> {
+    const db = resolveExecutor(queryOptions)
+    const column = resolveColumn(table, field)
+    const expression = fn === 'min' ? min(column) : fn === 'max' ? max(column) : sql`${sql.raw(fn)}(${column})`
+    const query = withConditions(db.select({ value: expression }).from(table), table, conditions)
+    const rows = (await resolveList(query)) as Array<{ value?: unknown }>
+    return decodeAggregate(fn, column, field, rows[0]?.value ?? null)
+  },
+
+  executor(queryOptions?: AdapterQueryOptions): unknown {
+    return resolveExecutor(queryOptions)
   },
 
   async countByAdvanced(

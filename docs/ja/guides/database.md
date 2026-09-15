@@ -351,6 +351,27 @@ const users = await User.where({ role: 'admin' })
 | `.get()` | クエリを実行して結果の配列を返す |
 | `.first()` | クエリを実行して最初の結果または null を返す |
 | `.count()` | マッチするレコードの件数を返す |
+| `.sum(column)` / `.avg(column)` | マッチするレコードの列の合計・平均を返す |
+| `.min(column)` / `.max(column)` | 列の最小値・最大値を返す |
+| `.exists()` | マッチするレコードがあるかを返す |
+| `.toDrizzle(query?)` | モデルの条件とスコープを持った Drizzle の select を返す |
+
+### 集計
+
+```ts
+const revenue = await Order.where('status', 'paid').sum('total')
+const averageViews = await Post.where('status', 'published').avg('views')
+const newest = await Post.newQuery().max('createdAt')
+const hasDrafts = await Post.where('status', 'draft').exists()
+```
+
+集計にもモデルのグローバルスコープが掛かります。`SoftDeletes` を持つモデルでは、`get()` と同じくゴミ箱に入った行は合計に含まれません。
+
+戻り値の型は列の型に従います。`integer` や `real` の列の合計は `number`、`bigint({ mode: 'bigint' })` の列は `bigint`、`numeric` や `decimal` の列は `string` です。Drizzle がこれらの列を桁が落ちないよう文字列で扱うのに合わせています。`avg()` は `number` の列なら `number` を、それ以外の列なら小数の文字列を返します。
+
+一致する行が無いとき、`sum()` はその型のゼロ(`0`、`0n`、`'0'`)を返し、ほかの 3 つは `null` を返します。`count()` と同じく `limit()` と `offset()` は無視されます。
+
+`number` の列の合計が `Number.MAX_SAFE_INTEGER` を超えると、丸めずに例外を投げます。その列は `mode: 'bigint'` で宣言してください。
 
 ### クイックテンプレート: モデルファースト vs RQB
 
@@ -367,48 +388,53 @@ const posts = await Post.where('status', 'published')
 ```
 
 ```ts
-// Drizzle RQB（結合・集約向き）
+// Drizzle に渡す（結合など、ビルダーで書けないクエリ向き）
 import { getDatabase } from '@/config/database'
 import { posts, users } from '@/db/schema'
 import { eq, desc } from 'drizzle-orm'
-
-const db = await getDatabase()
-const rows = await db
-  .select({
-    id: posts.id,
-    title: posts.title,
-    author: users.name,
-  })
-  .from(posts)
-  .leftJoin(users, eq(posts.authorId, users.id))
-  .orderBy(desc(posts.id))
-```
-
-### Drizzle 直接利用（RQB）と `Model.query()`
-
-Guren は Drizzle ファーストの設計です。リレーショナルクエリビルダーに直接アクセスしても、モデルを便利なエントリーポイントとして使っても構いません。
-
-```ts
-// Drizzle を直接利用（型安全）
-import { getDatabase } from '@/config/database'
-import { schema } from '@/db/schema'
-import { desc } from 'drizzle-orm'
 import { Post } from '@/app/Models/Post'
 
 const db = await getDatabase()
-const recent = await db
-  .select()
-  .from(schema.posts)
-  .orderBy(desc(schema.posts.createdAt))
-  .limit(5)
-
-// モデルを起点にしつつ RQB のコントロールを維持
-const recentViaModel = await Post.query(db)
-  .orderBy(desc(schema.posts.createdAt))
-  .limit(5)
+const rows = await Post.newQuery()
+  .toDrizzle(
+    db.select({ id: posts.id, title: posts.title, author: users.name })
+      .from(posts)
+      .leftJoin(users, eq(posts.authorId, users.id)),
+  )
+  .orderBy(desc(posts.id))
 ```
 
-素早い CRUD にはモデルヘルパーを使い、複雑な述語・結合・ドライバー固有の API が必要な場合は RQB(`db.select().from(...)` や `Model.query(db)`)に切り替えてください。
+### Drizzle に渡す（`toDrizzle()`）
+
+`toDrizzle()` は、モデルの条件とグローバルスコープを `WHERE` 句に入れた状態でクエリを Drizzle に渡します。結合や独自の select など、ビルダーで書けないクエリに使います。
+
+```ts
+import { getDatabase } from '@/config/database'
+import { posts, users } from '@/db/schema'
+import { desc, eq, gt } from 'drizzle-orm'
+
+const db = await getDatabase()
+const rows = await Post.where('status', 'published')
+  .toDrizzle(
+    db.select({ id: posts.id, title: posts.title, author: users.name })
+      .from(posts)
+      .leftJoin(users, eq(posts.authorId, users.id)),
+  )
+  .where(gt(posts.views, 100))
+  .orderBy(desc(posts.id))
+```
+
+- 引数なしの `toDrizzle()` は `select().from(table)` から始まり、トランザクションが開いていればその中で実行されます。渡したクエリは、それを組み立てたハンドルで実行されます。`Model.transaction()` の中では `trx` から組み立ててください。
+- 戻り値に重ねた `.where()` はモデルの条件と AND で結合されるので、スコープは外れません。すでに `where()` を呼んだクエリを渡すときは、その前に `$dynamic()` を呼んでください。
+- ビルダーの `orderBy()`、`limit()`、`offset()` は引き継がれます。`select()` を引き継ぐのは引数なしの形だけで、渡したクエリは自分の select のままです。
+- 行は Drizzle が読んだ形のまま返ります。キャスト、アクセサ、Eager Loading は適用されません。
+- `toSql()` は同じ条件をひとつの `SQL` 断片として返します。素の Drizzle の select では 2 回目の `.where()` が 1 回目を置き換えるので、自分で組み立てるクエリでは `and()` で結合してください。
+
+```ts
+const popular = await db.select().from(posts).where(and(Post.newQuery().toSql(), gt(posts.views, 100)))
+```
+
+`db` だけで書いたクエリはモデルを通らず、スコープもひとつも掛かりません。`Model.query()` はそうしたクエリを返していたため、非推奨になりました([アップグレード](./upgrading.md)を参照)。
 
 ## クエリスコープ
 

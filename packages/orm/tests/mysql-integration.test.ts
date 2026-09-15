@@ -2,10 +2,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { sql } from 'drizzle-orm'
-import { int, mysqlTable, varchar } from 'drizzle-orm/mysql-core'
+import { gt, sql } from 'drizzle-orm'
+import { bigint, datetime, decimal, int, mysqlTable, varchar } from 'drizzle-orm/mysql-core'
 import { createMySqlDatabase, type MySqlDatabase } from '../src/mysql'
-import { Model } from '../src/Model'
+import { Model, defineModel } from '../src/Model'
+import { SoftDeletes } from '../src/SoftDeletes'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
 // The unit tests mock `drizzle-orm/mysql2` away, so they cannot see driver-level
@@ -239,5 +240,102 @@ describeMySql('nested Model.transaction against a real MySQL server (requires MY
     })
 
     expect(await titles()).toEqual(['outer', 'nested'])
+  })
+})
+
+const AGGREGATES_DATABASE = 'guren_orm_mysql_aggregates_test'
+
+function createLedgerMigrationsFolder(): string {
+  const migrationsFolder = mkdtempSync(join(tmpdir(), 'guren-orm-mysql-aggregates-'))
+  const migrationDir = join(migrationsFolder, '20240101000000_init')
+  mkdirSync(migrationDir, { recursive: true })
+  writeFileSync(
+    join(migrationDir, 'migration.sql'),
+    'CREATE TABLE `ledger` (`id` int AUTO_INCREMENT PRIMARY KEY NOT NULL, `tenant_id` int NOT NULL, `amount` int NOT NULL,'
+      + ' `price` decimal(12,2) NOT NULL, `units` bigint NOT NULL, `placed_at` datetime NOT NULL, `deleted_at` datetime);',
+  )
+  return migrationsFolder
+}
+
+const ledgerTable = mysqlTable('ledger', {
+  id: int('id').autoincrement().primaryKey(),
+  tenantId: int('tenant_id').notNull(),
+  amount: int('amount').notNull(),
+  price: decimal('price', { precision: 12, scale: 2 }).notNull(),
+  units: bigint('units', { mode: 'bigint' }).notNull(),
+  placedAt: datetime('placed_at').notNull(),
+  deletedAt: datetime('deleted_at'),
+})
+
+// mysql2 sends SUM() and AVG() as DECIMAL strings whatever the column; the kinds
+// asserted here are the ORM's decoding, not the wire format.
+describeMySql('QueryBuilder aggregates and toDrizzle against a real MySQL server (requires MYSQL_URL)', () => {
+  let database: MySqlDatabase
+
+  class Entry extends defineModel(ledgerTable) {}
+  class TenantEntry extends SoftDeletes(defineModel(ledgerTable)) {}
+  TenantEntry.addGlobalScope('tenant', (q) => q.where('tenantId', 1))
+
+  const earliest = new Date('2023-11-14T22:13:20Z')
+
+  beforeAll(async () => {
+    const url = MYSQL_URL as string
+    await ensureTestDatabase(url, AGGREGATES_DATABASE)
+    database = createMySqlDatabase({
+      migrationsFolder: createLedgerMigrationsFolder(),
+      connectionString: () => databaseUrl(url, AGGREGATES_DATABASE),
+    })
+    await database.resetDatabase()
+    const db = await database.getDatabase()
+    DrizzleAdapter.configure(db as never)
+    await db.insert(ledgerTable).values([
+      { tenantId: 1, amount: 10, price: '1.25', units: 3n, placedAt: earliest },
+      { tenantId: 1, amount: 20, price: '2.50', units: 4n, placedAt: new Date('2024-01-01T00:00:00Z') },
+      { tenantId: 1, amount: 400, price: '9.00', units: 5n, placedAt: new Date('2024-02-01T00:00:00Z'), deletedAt: new Date('2024-03-01T00:00:00Z') },
+      // Past 2^53, so a bigint sum that went through Number would come back off by one.
+      { tenantId: 2, amount: 1000, price: '100.00', units: 9007199254740993n, placedAt: new Date('2025-01-01T00:00:00Z') },
+    ])
+  })
+
+  afterAll(async () => {
+    await database?.closeDatabase()
+  })
+
+  it('decodes each aggregate in the column kind', async () => {
+    const query = Entry.newQuery()
+
+    expect(await query.sum('amount')).toBe(1430)
+    expect(await query.sum('price')).toBe('112.75')
+    expect(await query.sum('units')).toBe(9007199254741005n)
+    expect(await query.avg('amount')).toBe(357.5)
+    const avgPrice = await query.avg('price')
+    expect(typeof avgPrice).toBe('string')
+    expect(Number(avgPrice)).toBe(28.1875)
+    expect(await query.min('placedAt')).toEqual(earliest)
+    expect(await query.max('price')).toBe('100.00')
+    // mysql2 reads a BIGINT past 2^53 as a double on a plain row too, so max() is held to what first() reads.
+    const largest = await Entry.where('tenantId', 2).first()
+    expect(await query.max('units')).toBe(largest?.units ?? null)
+  })
+
+  it('answers an empty match with the kind zero and null', async () => {
+    const none = () => Entry.where('amount', '<', 0)
+
+    expect(await none().sum('amount')).toBe(0)
+    expect(await none().sum('price')).toBe('0')
+    expect(await none().sum('units')).toBe(0n)
+    expect(await none().avg('price')).toBeNull()
+    expect(await none().min('placedAt')).toBeNull()
+  })
+
+  it('applies the tenant and soft-delete scopes to every aggregate, exists() and toDrizzle()', async () => {
+    const db = await database.getDatabase()
+
+    expect(await TenantEntry.newQuery().sum('amount')).toBe(30)
+    expect(await TenantEntry.withTrashed().sum('amount')).toBe(430)
+    expect(await TenantEntry.where('amount', 1000).exists()).toBe(false)
+
+    const narrowed = await TenantEntry.newQuery().toDrizzle(db.select().from(ledgerTable)).where(gt(ledgerTable.amount, 15))
+    expect(narrowed.map((row) => row.amount)).toEqual([20])
   })
 })

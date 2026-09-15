@@ -33,6 +33,22 @@ bun run test
 
 ## Migration Notes
 
+### 2.23.x → 2.24.0
+
+#### `Model.query()` is deprecated
+
+- **What changed**: `Model.query()` carries `@deprecated` and warns once per model. It keeps working until `@guren/orm` 3.0.0. The query builder gains `sum()`, `avg()`, `min()`, `max()`, `exists()`, `toSql()` and `toDrizzle()`, and every one of them applies the model's global scopes.
+- **Who is affected**: Code that calls `Post.query()` or `Post.query(db)`. That query skips every global scope, so on a model with `SoftDeletes` or a tenant scope it has been reading trashed rows and other tenants' rows.
+- **How to migrate**: Run `bunx guren upgrade --check-only` for the call sites. There is no codemod, because the replacement depends on what the query does: an aggregate moves to the builder, and a join moves to `toDrizzle()`. See [Dropping to Drizzle](./database.md#dropping-to-drizzle).
+
+```ts
+// Before
+const rows = await Post.query(db).where(gt(posts.views, 100)).orderBy(desc(posts.id))
+
+// After
+const rows = await Post.newQuery().toDrizzle().where(gt(posts.views, 100)).orderBy(desc(posts.id))
+```
+
 ### 2.22.x → 2.23.0
 
 #### Module-level service setters and getters are deprecated

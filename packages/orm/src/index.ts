@@ -47,6 +47,10 @@ export type {
   EagerLoadConstraint,
   ORMAdapterAdvanced,
   QueryBuilderOptions,
+  AggregateFunction,
+  SumValue,
+  AvgValue,
+  DrizzleSelectQuery,
 } from './QueryBuilder'
 export { SoftDeletes } from './SoftDeletes'
 export type { SoftDeletesStatic } from './SoftDeletes'

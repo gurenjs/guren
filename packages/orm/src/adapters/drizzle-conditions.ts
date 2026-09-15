@@ -9,7 +9,7 @@ type DrizzleTableLike = Record<string, unknown>
  * Resolves a Drizzle column reference from a table and field name.
  * @throws Error if the column does not exist on the table
  */
-function resolveColumn(table: unknown, field: string): AnyColumn {
+export function resolveColumn(table: unknown, field: string): AnyColumn {
   const tableRecord = table as DrizzleTableLike
   const column = tableRecord[field] as AnyColumn | undefined
 

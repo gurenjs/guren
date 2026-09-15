@@ -181,23 +181,57 @@ const hits = await Post.where((q) => {
 | `.get()` | Execute and return array |
 | `.first()` | Return first result or null |
 | `.count()` | Return count of matching records |
+| `.sum(column)` / `.avg(column)` | Sum or average of a column over matching records |
+| `.min(column)` / `.max(column)` | Smallest or largest value of a column |
+| `.exists()` | Whether any record matches |
+| `.toDrizzle(query?)` | A Drizzle select that carries the model's conditions and scopes |
+
+### Aggregates
+
+```ts
+const revenue = await Order.where('status', 'paid').sum('total')
+const averageViews = await Post.where('status', 'published').avg('views')
+const newest = await Post.newQuery().max('createdAt')
+const hasDrafts = await Post.where('status', 'draft').exists()
+```
+
+Aggregates run through the model's global scopes, so a model with `SoftDeletes` leaves trashed rows out of a sum just as it leaves them out of `get()`.
+
+The result keeps the column's type. An `integer` or `real` column sums to a `number`, a `bigint({ mode: 'bigint' })` column to a `bigint`, and a `numeric` or `decimal` column to a `string`, which is how Drizzle types those columns so that no digit is lost. `avg()` returns a `number` for a `number` column and a decimal string otherwise. When nothing matches, `sum()` returns the zero of that type (`0`, `0n` or `'0'`) and the other three return `null`. Like `count()`, aggregates ignore `limit()` and `offset()`.
+
+A sum of a `number` column past `Number.MAX_SAFE_INTEGER` throws instead of rounding. Declare that column with `mode: 'bigint'`.
 
 ### Dropping to Drizzle
 
-For joins, aggregates, or driver-specific features, use Drizzle directly:
+`toDrizzle()` hands a query to Drizzle with the model's conditions and global scopes already in its `WHERE` clause. Use it for joins, custom selections, and anything else the builder cannot express:
 
 ```ts
 import { getDatabase } from '@/config/database'
 import { posts, users } from '@/db/schema'
-import { eq, desc } from 'drizzle-orm'
+import { desc, eq, gt } from 'drizzle-orm'
 
 const db = await getDatabase()
-const rows = await db
-  .select({ id: posts.id, title: posts.title, author: users.name })
-  .from(posts)
-  .leftJoin(users, eq(posts.authorId, users.id))
+const rows = await Post.where('status', 'published')
+  .toDrizzle(
+    db.select({ id: posts.id, title: posts.title, author: users.name })
+      .from(posts)
+      .leftJoin(users, eq(posts.authorId, users.id)),
+  )
+  .where(gt(posts.views, 100))
   .orderBy(desc(posts.id))
 ```
+
+- Without an argument, `toDrizzle()` starts from `select().from(table)` and runs inside the open transaction when there is one. A query you pass runs on the handle you built it from, so inside `Model.transaction()` build it from `trx`.
+- A `.where()` on the result is AND-ed with the model's conditions and cannot drop a scope. To pass a query that already has a `where()`, call `$dynamic()` before it.
+- The builder's `orderBy()`, `limit()` and `offset()` carry over. `select()` carries over only without an argument, since a query you pass keeps its own selection.
+- Rows come back as Drizzle reads them. Casts, accessors and eager loads do not apply.
+- `toSql()` returns the same conditions as one `SQL` fragment for a query you assemble yourself. On a plain Drizzle select a second `.where()` replaces the first, so combine the fragment with `and()`:
+
+```ts
+const popular = await db.select().from(posts).where(and(Post.newQuery().toSql(), gt(posts.views, 100)))
+```
+
+A query written against `db` alone never goes through the model and applies none of its scopes. `Model.query()` returned exactly that kind of query and is deprecated for this reason (see [Upgrading](./upgrading.md)).
 
 ## Creating and Updating
 
