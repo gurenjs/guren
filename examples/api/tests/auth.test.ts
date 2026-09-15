@@ -10,7 +10,6 @@ vi.mock('@guren/core', async () => {
   return {
     ...actual,
     ...createControllerModuleMock(),
-    ServiceProvider: actual.ServiceProvider,
     // No hasher override, so the real implementation runs. A hand-rolled fake
     // is the hazard: its argument order can drift from `verify(hashed, plain)`
     // with no type error, which let a swapped call site ship green.

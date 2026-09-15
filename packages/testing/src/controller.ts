@@ -15,6 +15,7 @@ import {
   collect,
   defineModule,
   definePlugin,
+  formatValidationErrors,
 } from '@guren/server/internal/testing'
 
 const HTML_DECODE_ENTITIES: Record<string, string> = {
@@ -171,6 +172,13 @@ function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> 
   })
 }
 
+/** Route parameters as a record: a bare string from a hand-set `param()` is read as `id`. */
+function contextParams(ctx: ControllerContext): object {
+  const rawParams = ctx.req.param?.()
+  if (typeof rawParams === 'string') return { id: rawParams }
+  return rawParams && typeof rawParams === 'object' ? rawParams : {}
+}
+
 export function createGurenControllerModule() {
   // Prime the memo now: continuations on one promise run in registration order, so
   // the memo is populated before an awaited view() render reaches the sync viteAsset.
@@ -287,18 +295,7 @@ export function createGurenControllerModule() {
       return loadedServer.viteAsset(entry, options)
     },
     parseRequestPayload: async (ctx: ControllerContext) => asRecord(await parseRequestBody(ctx)),
-    formatValidationErrors: (error: { issues?: Array<{ path: (string | number)[]; message: string }> }) => {
-      const errors: Record<string, string> = {}
-      if (error?.issues) {
-        for (const issue of error.issues) {
-          const key = issue.path.join('.')
-          if (!errors[key]) {
-            errors[key] = issue.message
-          }
-        }
-      }
-      return errors
-    },
+    formatValidationErrors,
   }
 }
 
@@ -448,16 +445,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): T {
-      const paramResolver = (this.ctx.req as { param?: (key?: string) => unknown }).param
-      const rawParams = typeof paramResolver === 'function' ? paramResolver() : {}
-      const params =
-        typeof rawParams === 'string'
-          ? { id: rawParams }
-          : rawParams && typeof rawParams === 'object'
-            ? rawParams
-            : {}
-
-      return this.runValidation(schema, params)
+      return this.runValidation(schema, contextParams(this.ctx))
     }
 
     public validateParamsSafe<T>(schema: {
@@ -465,30 +453,11 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): { success: true; data: T } | { success: false; errors: Record<string, string> } {
-      const paramResolver = (this.ctx.req as { param?: (key?: string) => unknown }).param
-      const rawParams = typeof paramResolver === 'function' ? paramResolver() : {}
-      const params =
-        typeof rawParams === 'string'
-          ? { id: rawParams }
-          : rawParams && typeof rawParams === 'object'
-            ? rawParams
-            : {}
-
-      return this.runValidationSafe(schema, params)
+      return this.runValidationSafe(schema, contextParams(this.ctx))
     }
 
     public apiToken(): { token: unknown; userId: string | number; abilities: string[] } {
-      const result = this.ctx.get('guren:api-token') as {
-        token: unknown
-        userId: string | number
-        abilities: string[]
-      } | undefined
-      if (!result) {
-        const error = new Error('Unauthenticated.') as Error & { statusCode: number }
-        error.statusCode = 401
-        throw error
-      }
-      return result
+      return getApiTokenOrFail(this.ctx)
     }
 
     public apiTokenUserId(): string | number {

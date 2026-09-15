@@ -358,15 +358,15 @@ describe('createGurenControllerModule', () => {
     expect(formatted).toEqual({
       email: 'Invalid email',
       password: 'Too short',
-      'address.city': 'Required',
+      address: 'Required',
     })
   })
 
-  it('formatValidationErrors handles empty error', () => {
+  it('formatValidationErrors falls back to a message for an error with no issues', () => {
     const module = createGurenControllerModule()
-    const formatted = module.formatValidationErrors({})
+    const formatted = module.formatValidationErrors({ issues: [] })
 
-    expect(formatted).toEqual({})
+    expect(formatted).toEqual({ message: 'The provided data is invalid.' })
   })
 })
 
@@ -586,51 +586,29 @@ describe('createControllerModuleMock', () => {
     expect(controller.request.method).toBe('GET')
   })
 
-  it('defines application modules and their providers', () => {
-    const { ServiceProvider, defineModule } = createControllerModuleMock()
-
-    class WidgetProvider extends ServiceProvider {
-      register(): void {}
-    }
-
-    const widgets = defineModule({ name: 'widgets', providers: [WidgetProvider] })
-    const bare = defineModule({ name: 'bare' })
-
-    expect(widgets.providers).toEqual([WidgetProvider])
-    expect(bare.providers).toEqual([])
-    expect(bare.commands).toEqual([])
-  })
-
   it('installs the runtime classes themselves, so instanceof agrees with the framework', async () => {
-    const mock = createControllerModuleMock()
-    const server = await import('@guren/server')
+    const mock: Record<string, unknown> = createControllerModuleMock()
+    const server: Record<string, unknown> = await import('@guren/server')
 
-    for (const name of [
-      'Resource',
-      'JsonResource',
-      'collect',
-      'ValidationException',
-      'AuthenticationException',
-      'ServiceProvider',
-      'defineModule',
-      'definePlugin',
-    ] as const) {
-      expect(mock[name], name).toBe(server[name])
-    }
+    // Deliberate stand-ins: the controller surface, and inert services so an app
+    // module loads without a booted container. Anything else must be the real export.
+    const STAND_INS = [
+      'AuthenticatableModel', 'Controller', 'Event', 'Job', 'Listener', 'MemoryApiTokenStore',
+      'MemoryDriver', 'createApiToken', 'createCacheManager', 'createEventManager',
+      'createMailManager', 'defineModel', 'getApiToken', 'getApiTokenOrFail',
+      'getUserApiTokens', 'parseRequestPayload', 'registerJob', 'revokeApiToken',
+      'setMailManager', 'setQueueDriver', 'viteAsset',
+    ]
+    const copies = Object.keys(mock).filter((name) => mock[name] !== server[name]).sort()
+
+    expect(copies).toEqual(STAND_INS)
   })
 
   it('fails validateParams() with the status and errors the runtime answers', async () => {
-    const failingSchema = {
-      safeParse: () => ({
-        success: false as const,
-        error: { issues: [{ path: ['id'], message: 'Expected a number' }] },
-      }),
-    }
-
     const { Controller } = createControllerModuleMock()
     class MockShowController extends Controller {
       show(): unknown {
-        return this.validateParams(failingSchema)
+        return this.validateParams(requireTitle)
       }
     }
     const ctx = createControllerContext('http://example.com/posts/abc')
@@ -639,17 +617,20 @@ describe('createControllerModuleMock', () => {
     controller.setContext(ctx)
 
     const { ValidationException, Controller: RuntimeController, createApp } = await import('@guren/core')
-    let thrown: unknown
-    try {
-      controller.show()
-    } catch (error) {
-      thrown = error
+    const thrown = (() => {
+      try {
+        controller.show()
+      } catch (error) {
+        return error
+      }
+    })()
+    if (!(thrown instanceof ValidationException)) {
+      throw new Error(`expected a ValidationException, got ${String(thrown)}`)
     }
-    expect(thrown).toBeInstanceOf(ValidationException)
 
     class RuntimeShowController extends RuntimeController {
       show(): Response {
-        this.validateParams(failingSchema)
+        this.validateParams(requireTitle)
         return this.text('unreachable')
       }
     }
@@ -664,8 +645,8 @@ describe('createControllerModuleMock', () => {
     )
     const body = (await response.json()) as { errors?: unknown }
 
-    expect((thrown as { statusCode: number }).statusCode).toBe(response.status)
-    expect((thrown as { errors: unknown }).errors).toEqual(body.errors)
+    expect(thrown.statusCode).toBe(response.status)
+    expect(thrown.errors).toEqual(body.errors)
   })
 })
 

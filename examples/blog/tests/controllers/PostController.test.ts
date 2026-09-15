@@ -66,7 +66,6 @@ vi.mock('@guren/core', async () => {
   return {
     ...actual,
     ...createControllerModuleMock(),
-    ServiceProvider: actual.ServiceProvider,
     collect: vi.fn((resources: unknown[]) => resources),
     paginate: vi.fn((result: { meta: { total: number; perPage: number; currentPage: number } }, options?: { path?: string }) => {
       const lastPage = Math.max(1, Math.ceil(result.meta.total / result.meta.perPage))

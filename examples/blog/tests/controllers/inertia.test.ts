@@ -33,7 +33,6 @@ vi.mock('@guren/core', async () => {
   return {
     ...actual,
     ...createGurenCoreMock(),
-    ServiceProvider: actual.ServiceProvider,
   }
 })
 import DashboardController from '../../app/Http/Controllers/DashboardController.js'
