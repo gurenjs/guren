@@ -1,6 +1,7 @@
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { applyAccessors, applyAccessorsInPlace, applyMutators } from './attributes'
 import type { AccessorDefinitions, MutatorDefinitions } from './attributes'
+import { warnDeprecated } from './deprecate'
 import { GlobalScopeRegistry } from './GlobalScopeRegistry'
 import type { ScopeFunction } from './GlobalScopeRegistry'
 import { executeHook } from './hooks'
@@ -1266,11 +1267,20 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   /**
    * A raw Drizzle builder starting at `select().from(table)`. Carries no model
    * scopes, casts or accessors.
+   *
+   * @deprecated Reads soft-deleted rows and other tenants' rows. Use `Model.newQuery().toDrizzle()`
+   * (or `toDrizzle(db.select().from(table))`), which keeps the scopes, or the builder's `sum`/`avg`/`min`/`max`/`exists`.
    */
   static query<TDatabase extends { select: (...args: any[]) => any } = { select: (...args: any[]) => any }>( // eslint-disable-line @typescript-eslint/no-explicit-any
     this: typeof Model,
     db?: TDatabase,
   ): SelectFrom<TDatabase> {
+    warnDeprecated(
+      'model-query-raw',
+      `${this.name}.query`,
+      'It skips every global scope, SoftDeletes included. Use newQuery().toDrizzle(), or toDrizzle(query) for joins.',
+      { since: '2.11.0', removedIn: '3.0.0' },
+    )
     const table = this.resolveTable()
     if (db) {
       const selectBuilder = db.select()

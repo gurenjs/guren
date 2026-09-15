@@ -711,10 +711,10 @@ These options behave consistently across every `make:*` and `add` command:
 Generated files match the Laravel-inspired ergonomics of the framework:
 
 - Controllers extend `Controller` and use helpers like `this.inertia()`.
-- Models extend `Model<TRecord>` and prefill `static table`. Use the helpers for quick CRUD, or call Drizzle’s RQB directly. `Model.query(db)` lets you start from the model while still writing Drizzle-flavoured queries.
+- Models extend `Model<TRecord>` and prefill `static table`. Use the helpers for quick CRUD, or call Drizzle’s RQB directly. `Model.newQuery().toDrizzle()` lets you start from the model, scopes included, while still writing Drizzle queries.
 - Views are React + TypeScript + Tailwind CSS functional components.
 
-After generation remember to wire up routes and connect `static table` to the proper Drizzle schema. Complex queries can skip the model entirely: use your Drizzle database (`getDatabase()`) or `Model.query()` to stay type-safe.
+After generation remember to wire up routes and connect `static table` to the proper Drizzle schema. Complex queries can go through `toDrizzle()`, which keeps the model's scopes, or skip the model entirely with your Drizzle database (`getDatabase()`).
 
 ## Scaffolding New Apps
 

@@ -1,3 +1,6 @@
+import { and, asc, desc } from 'drizzle-orm'
+import type { SQL } from 'drizzle-orm'
+import { buildDrizzleConditions, resolveColumn } from './adapters/drizzle-conditions'
 import { PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
 import { DEFAULT_PAGINATION_SIZE } from './Model'
 import { ModelNotFoundException } from './ModelNotFoundException'
@@ -15,6 +18,60 @@ import type {
 } from './Model'
 
 type FieldKey<TRecord extends PlainObject> = keyof TRecord & string
+
+export type AggregateFunction = 'sum' | 'avg' | 'min' | 'max'
+
+/**
+ * A sum comes back in the column's own kind: drizzle types `numeric`/`decimal`
+ * as `string` so no digit is lost, and a sum of one stays exact the same way.
+ */
+export type SumValue<TValue> = unknown extends TValue
+  ? number | bigint | string
+  : NonNullable<TValue> extends number
+    ? number
+    : NonNullable<TValue> extends bigint
+      ? bigint
+      : NonNullable<TValue> extends string
+        ? string
+        : never
+
+/** An average is fractional, so only a `number` column's stays a `number`; exact kinds render as a decimal string. */
+export type AvgValue<TValue> = unknown extends TValue
+  ? number | string
+  : NonNullable<TValue> extends number
+    ? number
+    : NonNullable<TValue> extends bigint | string
+      ? string
+      : never
+
+/**
+ * Columns `sum()`/`avg()` accept; any name on an untyped record (`withTrashed()`'s).
+ * A text column is a `string` too, which the type cannot tell from `numeric`.
+ */
+export type NumericFieldKey<TRecord extends PlainObject> = string extends keyof TRecord
+  ? string
+  : {
+      [K in FieldKey<TRecord>]: [SumValue<TRecord[K]>] extends [never] ? never : K
+    }[FieldKey<TRecord>]
+
+type DrizzleSelectable = { select: (...args: any[]) => any } // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/** A Drizzle select builder as `toDrizzle(query)` needs it: something to add a where clause to. */
+export type DrizzleWhereable = { where: (...args: any[]) => unknown } // eslint-disable-line @typescript-eslint/no-explicit-any
+
+type DrizzlePageable = {
+  orderBy: (...columns: SQL[]) => unknown
+  limit: (limit: number) => unknown
+  offset: (offset: number) => unknown
+}
+
+/** What `toDrizzle()` promises of `select().from(table)`; hand it a query of your own for joins. */
+export interface DrizzleSelectQuery<TRow> extends PromiseLike<TRow[]> {
+  where(clause: SQL | undefined): this
+  orderBy(...columns: Array<SQL | SQL.Aliased | object>): this
+  limit(limit: number): this
+  offset(offset: number): this
+}
 
 export type WhereOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'not in' | 'is null' | 'is not null'
 
@@ -59,6 +116,7 @@ interface QueryOverrides {
   limit?: number
   offset?: number
   select?: readonly string[]
+  orderBy?: QueryBuilderOptions['orderBy']
 }
 
 /**
@@ -338,6 +396,118 @@ export class QueryBuilder<
   }
 
   /**
+   * Sum of `field` over the matching rows, in the column's own kind (see
+   * {@link SumValue}); no rows sum to that kind's zero. Like `count()`, it
+   * ignores `limit()`/`offset()`. A throw from an integer column means the
+   * total is past `Number.MAX_SAFE_INTEGER`: declare the column in bigint mode.
+   */
+  async sum<TKey extends NumericFieldKey<TRecord>>(field: TKey): Promise<SumValue<TRecord[TKey]>> {
+    return this.aggregate('sum', field) as Promise<SumValue<TRecord[TKey]>>
+  }
+
+  /** Average of `field` over the matching rows; `null` when none match. */
+  async avg<TKey extends NumericFieldKey<TRecord>>(field: TKey): Promise<AvgValue<TRecord[TKey]> | null> {
+    return this.aggregate('avg', field) as Promise<AvgValue<TRecord[TKey]> | null>
+  }
+
+  /** Smallest `field` over the matching rows, decoded as the column is; `null` when none match. */
+  async min<TKey extends FieldKey<TRecord>>(field: TKey): Promise<NonNullable<TRecord[TKey]> | null> {
+    return this.aggregate('min', field) as Promise<NonNullable<TRecord[TKey]> | null>
+  }
+
+  /** Largest `field` over the matching rows, decoded as the column is; `null` when none match. */
+  async max<TKey extends FieldKey<TRecord>>(field: TKey): Promise<NonNullable<TRecord[TKey]> | null> {
+    return this.aggregate('max', field) as Promise<NonNullable<TRecord[TKey]> | null>
+  }
+
+  /** Whether any row matches. Reads at most one row and runs no casts, accessors or eager loads. */
+  async exists(): Promise<boolean> {
+    if (this.filtersEvaporated()) return false
+    const rows = await this.executeQuery({ limit: 1, orderBy: [] })
+    return rows.length > 0
+  }
+
+  /**
+   * The model's conditions, global scopes included, as one Drizzle `SQL`
+   * fragment for a hand-built query; `undefined` when there are none. Combine
+   * it with `and()`: a second `.where()` on a Drizzle builder replaces the first.
+   * @example db.select().from(posts).where(and(Post.newQuery().toSql(), gt(posts.views, 100)))
+   */
+  toSql(): SQL | undefined {
+    return buildDrizzleConditions(this.table, this.effectiveConditions())
+  }
+
+  /**
+   * A Drizzle select carrying {@link toSql}, `orderBy()`, `limit()` and `offset()`; a later `.where()` is AND-ed with the conditions.
+   * No argument: `select().from(table)` narrowed by `select()`, on this builder's `trx`, else the open transaction, else the database.
+   * With a query (`db.select({ ... }).from(posts).leftJoin(...)`): that query, keeping its Drizzle type and selection.
+   * Rows are Drizzle's either way: no casts, accessors or eager loads.
+   */
+  toDrizzle(): DrizzleSelectQuery<TResult>
+  toDrizzle<TQuery extends DrizzleWhereable>(query: TQuery): TQuery
+  toDrizzle(query?: DrizzleWhereable): unknown {
+    const target = query ?? this.selectFromTable()
+    if (!target || typeof target.where !== 'function') {
+      throw new Error(`${this.modelClass.name}: toDrizzle() needs a Drizzle select; what it reached has no where().`)
+    }
+
+    const scoped = this.toSql()
+    const replaceWhere = target.where.bind(target)
+    // Drizzle keeps one `config.where`: applying the scopes over a where() the caller already made would drop it.
+    const existing = (target as { config?: { where?: SQL } }).config?.where
+    if (scoped) replaceWhere(and(existing, scoped))
+    Object.defineProperty(target, 'where', {
+      configurable: true,
+      writable: true,
+      value: (clause: SQL | undefined | ((fields: unknown) => SQL | undefined)) =>
+        replaceWhere(typeof clause === 'function' ? (fields: unknown) => and(scoped, clause(fields)) : and(scoped, clause)),
+    })
+
+    const { orderBy, limitValue, offsetValue } = this.options
+    const pageable = target as DrizzleWhereable & DrizzlePageable
+    if (orderBy.length > 0) {
+      pageable.orderBy(...orderBy.map(({ column, direction }) => (direction === 'desc' ? desc : asc)(resolveColumn(this.table, column))))
+    }
+    if (limitValue !== undefined) pageable.limit(limitValue)
+    if (offsetValue !== undefined) pageable.offset(offsetValue)
+    return target
+  }
+
+  private selectFromTable(): DrizzleWhereable | undefined {
+    const fields = this.options.selectFields
+    const selection = fields && fields.length > 0
+      ? Object.fromEntries(fields.map((field) => [field, resolveColumn(this.table, field)]))
+      : undefined
+    return this.resolveDrizzleDatabase().select(selection)?.from?.(this.table)
+  }
+
+  private resolveDrizzleDatabase(): DrizzleSelectable {
+    const advancedAdapter = this.adapter as ORMAdapterAdvanced & { getDatabase?: () => DrizzleSelectable }
+    const handle = advancedAdapter.executor?.({ trx: this.options.trx }) ?? advancedAdapter.getDatabase?.()
+    if (!handle || typeof (handle as Partial<DrizzleSelectable>).select !== 'function') {
+      throw new Error(
+        `${this.modelClass.name}: the configured adapter exposes no Drizzle database; pass a query instead: toDrizzle(db.select().from(table)).`,
+      )
+    }
+    return handle as DrizzleSelectable
+  }
+
+  private async aggregate(fn: AggregateFunction, field: string): Promise<unknown> {
+    const advancedAdapter = this.adapter as ORMAdapterAdvanced
+    if (typeof advancedAdapter.aggregateAdvanced !== 'function') {
+      throw new Error(`${this.modelClass.name}: ${fn}() needs an adapter that implements aggregateAdvanced.`)
+    }
+    // As in first(): a filter the caller wrote and lost matches nothing. The
+    // sum still goes to the adapter, which alone knows the zero of the column's kind.
+    const evaporated = this.filtersEvaporated()
+    if (evaporated && fn !== 'sum') return null
+    const conditions: WhereCondition[] = evaporated
+      ? [{ type: 'simple', field, operator: 'in', value: [] }]
+      : this.effectiveConditions()
+    return advancedAdapter.aggregateAdvanced(this.table, fn, field, conditions, { trx: this.options.trx })
+  }
+
+  /**
    * Takes positional arguments or the same options object as
    * `Model.paginate()`, so the two APIs stay interchangeable.
    */
@@ -551,10 +721,11 @@ export class QueryBuilder<
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     const limit = overrides.limit ?? this.options.limitValue
     const offset = overrides.offset ?? this.options.offsetValue
+    const orderBy = overrides.orderBy ?? this.options.orderBy
 
     if (typeof advancedAdapter.findManyAdvanced === 'function') {
       return advancedAdapter.findManyAdvanced<TResult>(this.table, this.effectiveConditions(), {
-        orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
+        orderBy: orderBy.length > 0 ? (orderBy as OrderByClause) : undefined,
         limit,
         offset,
         select: overrides.select ?? this.options.selectFields,
@@ -573,7 +744,7 @@ export class QueryBuilder<
     }
     return this.adapter.findMany<TResult>(this.table, {
       where: (simpleWhere ?? undefined) as FindManyOptions<TResult>['where'],
-      orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
+      orderBy: orderBy.length > 0 ? (orderBy as OrderByClause) : undefined,
       limit,
       offset,
     }, { trx: this.options.trx })
@@ -664,6 +835,20 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
    * supports admits.
    */
   maxInListSize?(): number
+  /**
+   * `SELECT fn(field)` under `conditions`, decoded in the column's own kind
+   * ({@link SumValue}, {@link AvgValue}); a sum over no rows is that kind's
+   * zero, the other functions `null`.
+   */
+  aggregateAdvanced?(
+    table: unknown,
+    fn: AggregateFunction,
+    field: string,
+    conditions: WhereCondition[],
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<unknown>
+  /** The handle a query built outside the ORM runs on: `trx`, else the open transaction, else the database. */
+  executor?(queryOptions?: AdapterQueryOptions): unknown
   /** `SELECT field, COUNT(*) ... GROUP BY field` under `conditions`. */
   countByAdvanced?(
     table: unknown,

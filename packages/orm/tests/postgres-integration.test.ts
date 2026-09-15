@@ -2,11 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { eq, sql } from 'drizzle-orm'
-import { integer, pgTable, serial, timestamp, varchar } from 'drizzle-orm/pg-core'
+import { eq, gt, sql } from 'drizzle-orm'
+import { bigint, integer, numeric, pgTable, serial, timestamp, varchar } from 'drizzle-orm/pg-core'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { createPostgresDatabase, type PostgresDatabase } from '../src/postgres'
-import { Model, type PaginatedResult, type TransactionHandle } from '../src/Model'
+import { Model, defineModel, type PaginatedResult, type TransactionHandle } from '../src/Model'
 import { SoftDeletes } from '../src/SoftDeletes'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
@@ -495,5 +495,129 @@ describePostgres('SoftDeletes inside a transaction (requires POSTGRES_URL)', () 
       // On another connection the row does not exist yet, trashed or not.
       expect(await fromPool(note.id)).toBeNull()
     })
+  })
+})
+
+const AGGREGATES_DATABASE = 'guren_orm_aggregates_test'
+
+function createLedgerMigrationsFolder(): string {
+  const migrationsFolder = mkdtempSync(join(tmpdir(), 'guren-orm-postgres-aggregates-'))
+  const migrationDir = join(migrationsFolder, '20240101000000_init')
+  mkdirSync(migrationDir, { recursive: true })
+  writeFileSync(
+    join(migrationDir, 'migration.sql'),
+    'CREATE TABLE "ledger" ("id" serial PRIMARY KEY NOT NULL, "tenant_id" integer NOT NULL, "amount" integer NOT NULL,'
+      + ' "price" numeric(12, 2) NOT NULL, "units" bigint NOT NULL, "placed_at" timestamp with time zone NOT NULL,'
+      + ' "deleted_at" timestamp with time zone);',
+  )
+  return migrationsFolder
+}
+
+const ledgerTable = pgTable('ledger', {
+  id: serial('id').primaryKey(),
+  tenantId: integer('tenant_id').notNull(),
+  amount: integer('amount').notNull(),
+  price: numeric('price', { precision: 12, scale: 2 }).notNull(),
+  units: bigint('units', { mode: 'bigint' }).notNull(),
+  placedAt: timestamp('placed_at', { withTimezone: true }).notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+})
+
+// postgres-js hands sum(int) back as a bigint string and avg as a numeric
+// string; the kinds asserted here are the ORM's decoding, not the wire format.
+describePostgres('QueryBuilder aggregates and toDrizzle (requires POSTGRES_URL)', () => {
+  let database: PostgresDatabase
+
+  class Entry extends defineModel(ledgerTable) {}
+  class TenantEntry extends SoftDeletes(defineModel(ledgerTable)) {}
+  TenantEntry.addGlobalScope('tenant', (q) => q.where('tenantId', 1))
+
+  const earliest = new Date('2023-11-14T22:13:20Z')
+
+  beforeAll(async () => {
+    const url = POSTGRES_URL as string
+    await ensureTestDatabase(url, AGGREGATES_DATABASE)
+    database = createPostgresDatabase({
+      migrationsFolder: createLedgerMigrationsFolder(),
+      connectionString: () => databaseUrl(url, AGGREGATES_DATABASE),
+      // The transaction test reads the pool while the transaction holds a connection.
+      clientOptions: { max: 5 },
+    })
+    await database.resetDatabase()
+    const db = await database.getDatabase()
+    DrizzleAdapter.configure(db as never)
+    await db.insert(ledgerTable).values([
+      { tenantId: 1, amount: 10, price: '1.25', units: 3n, placedAt: earliest },
+      { tenantId: 1, amount: 20, price: '2.50', units: 4n, placedAt: new Date('2024-01-01T00:00:00Z') },
+      { tenantId: 1, amount: 400, price: '9.00', units: 5n, placedAt: new Date('2024-02-01T00:00:00Z'), deletedAt: new Date('2024-03-01T00:00:00Z') },
+      // Past 2^53, so a bigint sum that went through Number would come back off by one.
+      { tenantId: 2, amount: 1000, price: '100.00', units: 9007199254740993n, placedAt: new Date('2025-01-01T00:00:00Z') },
+    ])
+  })
+
+  afterAll(async () => {
+    await database?.closeDatabase()
+  })
+
+  it('decodes each aggregate in the column kind', async () => {
+    const query = Entry.newQuery()
+
+    expect(await query.sum('amount')).toBe(1430)
+    expect(await query.sum('price')).toBe('112.75')
+    expect(await query.sum('units')).toBe(9007199254741005n)
+    expect(await query.avg('amount')).toBe(357.5)
+    const avgPrice = await query.avg('price')
+    expect(typeof avgPrice).toBe('string')
+    expect(Number(avgPrice)).toBe(28.1875)
+    expect(await query.min('placedAt')).toEqual(earliest)
+    expect(await query.max('price')).toBe('100.00')
+    expect(await query.max('units')).toBe(9007199254740993n)
+  })
+
+  it('answers an empty match with the kind zero and null', async () => {
+    const none = () => Entry.where('amount', '<', 0)
+
+    expect(await none().sum('amount')).toBe(0)
+    expect(await none().sum('price')).toBe('0')
+    expect(await none().sum('units')).toBe(0n)
+    expect(await none().avg('price')).toBeNull()
+    expect(await none().min('placedAt')).toBeNull()
+  })
+
+  it('applies the tenant and soft-delete scopes to every aggregate and to exists()', async () => {
+    expect(await TenantEntry.newQuery().sum('amount')).toBe(30)
+    expect(await TenantEntry.newQuery().max('units')).toBe(4n)
+    expect(await TenantEntry.withTrashed().sum('amount')).toBe(430)
+    expect(await TenantEntry.where('amount', 1000).exists()).toBe(false)
+    expect(await Entry.where('amount', 1000).exists()).toBe(true)
+  })
+
+  it('keeps the scopes on toDrizzle() and ANDs a later where()', async () => {
+    const db = await database.getDatabase()
+
+    const scoped = await TenantEntry.newQuery().toDrizzle(db.select().from(ledgerTable)).orderBy(ledgerTable.id)
+    const narrowed = await TenantEntry.newQuery().toDrizzle(db.select().from(ledgerTable)).where(gt(ledgerTable.amount, 15))
+
+    expect(scoped.map((row) => row.amount)).toEqual([10, 20])
+    expect(narrowed.map((row) => row.amount)).toEqual([20])
+  })
+
+  it('runs toDrizzle() and the aggregates on the open transaction', async () => {
+    const pool = await database.getDatabase()
+
+    await Entry.transaction(async (trx) => {
+      await (trx as PostgresJsDatabase).insert(ledgerTable).values({ tenantId: 1, amount: 7, price: '0.07', units: 1n, placedAt: earliest })
+
+      // The premise: the row is invisible outside the transaction that wrote it.
+      expect(await TenantEntry.where('amount', 7).toDrizzle(pool.select().from(ledgerTable))).toHaveLength(0)
+
+      expect(await TenantEntry.where('amount', 7).toDrizzle()).toHaveLength(1)
+      expect(await TenantEntry.where('amount', 7).sum('amount')).toBe(7)
+      throw new RollbackSignal()
+    }).catch((error: unknown) => {
+      if (!(error instanceof RollbackSignal)) throw error
+    })
+
+    expect(await TenantEntry.where('amount', 7).exists()).toBe(false)
   })
 })

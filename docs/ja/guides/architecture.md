@@ -80,7 +80,7 @@ export class Post extends defineModel(posts) {}
 
 - `Model.all()`, `Model.find(id)`, `Model.findOrFail()`, `Model.first()`, `Model.create(data)` など、Laravel 風のヘルパーが使えます。
 - Drizzle の推論により静的ヘルパーが型安全になります（例: `Post.find()` が `PostRecord | null` を返す）。
-- `DatabaseProvider`（内部で `bootModels()` を呼び、`DrizzleAdapter.configure(db)` を実行）などのプロバイダーを使うと、全モデルでアダプターが使えるようになります。より細かい制御が必要なら `Model.query(db)` や Drizzle の DB インスタンスを直接利用します。
+- `DatabaseProvider`（内部で `bootModels()` を呼び、`DrizzleAdapter.configure(db)` を実行）などのプロバイダーを使うと、全モデルでアダプターが使えるようになります。ビルダーで書けない結合などは、モデルのスコープを保ったまま Drizzle に渡す `Model.newQuery().toDrizzle()` で書きます。Drizzle の DB インスタンスを直接使うと、モデルを経由しません。
 
 ## Inertia.js とビュー
 - React ページは `resources/js/pages/` 配下に置き、コンポーネント名で参照します。

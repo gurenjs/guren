@@ -8,7 +8,7 @@ import {
   discoverModelFiles,
   discoverTestFiles,
 } from './discovery'
-import { extractClassDeclaration, findStaticClassProperty } from './model-parser'
+import { discoverParsedModels, extractClassDeclaration, findStaticClassProperty } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 
 export interface Deprecation {
@@ -55,6 +55,28 @@ async function detectLocalVisibilityCalls(cwd: string): Promise<string[]> {
       const putsWithVisibility = /\.put\([^)]*\bvisibility\s*:/s.test(source)
       return callsSetVisibility || putsWithVisibility ? relative(cwd, filePath) : null
     }),
+  )
+  return affected.filter((file): file is string => file !== null)
+}
+
+/**
+ * `Name.query(` for every class the app's model files declare. Text search on
+ * the receiver: a model reached through a variable is missed and a same-named
+ * non-model is not, so these are candidates for a human to read.
+ */
+async function detectModelQueryCalls(cwd: string): Promise<string[]> {
+  const names = (await discoverParsedModels(cwd)).map(({ info }) => info.className)
+  if (names.length === 0) return []
+
+  const call = new RegExp(`\\b(?:${names.join('|')})\\.query\\(`)
+  const discovered = await Promise.all([
+    discoverAppSourceFiles(cwd),
+    discoverDbArtifactFiles(cwd, 'Seeder'),
+    discoverTestFiles(cwd),
+  ])
+  const affected = await Promise.all(
+    [...new Set(discovered.flat())].map(async (filePath) =>
+      call.test(await readFile(filePath, 'utf-8')) ? relative(cwd, filePath) : null),
   )
   return affected.filter((file): file is string => file !== null)
 }
@@ -168,6 +190,17 @@ export const deprecations: Deprecation[] = [
       'Delete the declaration — fillable is always strict. Each new throw is a field the model was silently '
       + 'dropping: add it to fillable or remove it from the payload.',
     detect: (cwd) => detectModelStatic(cwd, 'strictFillable'),
+  },
+  {
+    id: 'model-query-raw',
+    what: 'Model.query(), the raw Drizzle select that skips every global scope',
+    since: '2.11.0',
+    removedIn: '3.0.0',
+    replacement:
+      'It has been reading soft-deleted rows and other tenants\' rows. Move aggregates to the query builder '
+      + '(sum, avg, min, max, exists) and joins to Model.newQuery().toDrizzle(), or toDrizzle(query) with a '
+      + 'Drizzle select of your own; both keep the scopes.',
+    detect: detectModelQueryCalls,
   },
   {
     id: 'local-disk-per-object-visibility',

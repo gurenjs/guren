@@ -306,6 +306,15 @@ conditions go on the model side or through `toSql()` and `and()`. Like
   on `ORMAdapter`. No major is planned (RFC 0022 says the same); Parts 0 to 2
   stand without it.
 
+## Implementation Notes
+
+§1's aggregates and escapes and §6's deprecation shipped ahead of §2. What shipped differs from the text above in four places:
+
+1. **Aggregate types follow the column.** `sum()` returns the column's own kind (`number`, `bigint`, or `string` for `numeric`/`decimal`), not `number`, and `avg()` returns `number` for a `number` column and a decimal string otherwise. drizzle-orm rc.4 decodes `sum`/`avg` with `String` on every dialect and the drivers disagree on the wire type (postgres-js and mysql2 send `sum(int)` as a decimal string, bun:sqlite as a number), so the adapter decodes by the column's `dataType`. A `number` sum past `Number.MAX_SAFE_INTEGER` throws rather than rounds.
+2. **A lost filter matches nothing.** On a builder whose every `where` value was `undefined`, the aggregates return the empty-set answer (`sum()` zero, the others `null`) and `exists()` returns `false`, as `first()` returns `null`. `count()` is unchanged.
+3. **`toDrizzle()` takes a query, not a selection.** `toDrizzle()` starts from `select().from(table)`; `toDrizzle(query)` applies the conditions to a select the caller built, which keeps Drizzle's row type through joins. A `selection` argument could not: `QueryBuilder` does not carry the table type, and inference over `db.select`'s overloads picks the selection signature with its constraint. The "a further `.where()` replaces the fragment" rule in §6 is removed instead of documented: the returned select's `where` ANDs with the fragment, and a `where()` the passed query already had is kept. The builder's `orderBy()`, `limit()` and `offset()` carry over too (and `select()` in the no-argument form), so a builder chain does not lose them on the way down.
+4. **The no-argument form runs on the open transaction.** It resolves its handle through a new optional `ORMAdapterAdvanced.executor(queryOptions)`, the same `trx`, then ambient transaction, then database order the adapter's reads use, rather than `getDatabase()`.
+
 ## Alternatives Considered
 
 **Keep both paths and document them.** Rejected. The fork *is* the bug class:

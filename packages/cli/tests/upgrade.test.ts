@@ -756,4 +756,37 @@ describe('checkDeprecations', () => {
       expect(filesFor(warnings, 'global-service-getters')).toEqual([])
     })
   })
+
+  describe('model-query-raw', () => {
+    async function writeFileIn(relativePath: string, contents: string): Promise<void> {
+      const target = join(workspace.dir, relativePath)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, contents)
+    }
+
+    function queryWarningFiles(warnings: Awaited<ReturnType<typeof checkDeprecations>>): string[] {
+      return (warnings.find((warning) => warning.id === 'model-query-raw')?.affectedFiles ?? []).sort()
+    }
+
+    it('reports Model.query() on a class the model files declare, and nothing else named query', async () => {
+      await writeFileIn(
+        'app/Models/Post.ts',
+        "import { defineModel } from '@guren/core'\nimport { posts } from '../../db/schema'\nexport class Post extends defineModel(posts) {}\n",
+      )
+      await writeFileIn(
+        'app/Http/Controllers/FeedController.ts',
+        "import { Post } from '../../Models/Post'\nexport const feed = (db: never) => Post.query(db).limit(20)\n",
+      )
+      await writeFileIn(
+        'app/Http/Controllers/PostController.ts',
+        "import { Controller } from '@guren/core'\nimport { Post } from '../../Models/Post'\n"
+          + "export class PostController extends Controller {\n  async index() {\n"
+          + "    const page = this.query('page')\n    return Post.newQuery().toDrizzle()\n  }\n}\n",
+      )
+
+      expect(queryWarningFiles(await checkDeprecations(workspace.dir))).toEqual([
+        join('app', 'Http', 'Controllers', 'FeedController.ts'),
+      ])
+    })
+  })
 })
