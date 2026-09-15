@@ -370,10 +370,11 @@ export function removeShadowingIndex(assetsOut: string): void {
 }
 
 /**
- * Copy `public/` into a platform's static staging directory, mirroring the built
- * assets under `CLIENT_ASSETS_URL_PREFIX`: a host without rewrites has no other
- * way to answer the URLs the HTML and the chunks use. The top-level `assets/` copy
- * rides along with `public/`. Also applies `removeShadowingIndex`.
+ * Copy `public/` into a platform's static staging directory, with the built assets
+ * only under `CLIENT_ASSETS_URL_PREFIX`, the one prefix the HTML and the chunks
+ * address: a second copy at `assets/` would answer, and so hide, a URL that drifted
+ * off it. Vite empties `public/assets/` on every build, so it holds nothing else.
+ * Also applies `removeShadowingIndex`.
  */
 export function stageStaticAssets(publicDir: string, assetsOut: string): void {
   mkdirSync(assetsOut, { recursive: true })
@@ -382,11 +383,14 @@ export function stageStaticAssets(publicDir: string, assetsOut: string): void {
     return
   }
 
-  cpSync(publicDir, assetsOut, { recursive: true })
+  const clientAssetsDir = resolve(publicDir, 'assets')
+  cpSync(publicDir, assetsOut, {
+    recursive: true,
+    filter: (source) => resolve(source) !== clientAssetsDir,
+  })
 
   removeShadowingIndex(assetsOut)
 
-  const clientAssetsDir = resolve(publicDir, 'assets')
   if (existsSync(clientAssetsDir)) {
     cpSync(clientAssetsDir, resolve(assetsOut, 'public/assets'), { recursive: true })
   }

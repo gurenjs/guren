@@ -308,7 +308,7 @@ describe('buildLambdaOutput', () => {
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
     expect(readFileSync(join(root, '.lambda/assets/robots.txt'), 'utf8')).toContain('User-agent')
-    expect(existsSync(join(root, '.lambda/assets/assets/app-Abc123.js'))).toBe(true)
+    expect(existsSync(join(root, '.lambda/assets/assets'))).toBe(false)
     expect(existsSync(join(root, '.lambda/assets/public/assets/app-Abc123.js'))).toBe(true)
     expect(existsSync(join(root, '.lambda/assets/index.html'))).toBe(false)
   })
@@ -326,7 +326,8 @@ describe('buildLambdaOutput', () => {
 
     const env = JSON.parse(readFileSync(join(root, '.lambda/env.json'), 'utf8'))
     expect(env.GUREN_INERTIA_ENTRY).toBe('/public/assets/app-Custom99.js')
-    expect(existsSync(join(root, '.lambda/assets/assets/app-Custom99.js'))).toBe(true)
+    expect(existsSync(join(root, '.lambda/assets/public/assets/app-Custom99.js'))).toBe(true)
+    expect(existsSync(join(root, '.lambda/assets/assets'))).toBe(false)
   })
 
   test('should point the SSR manifest env at the root-level fallback layout', async () => {

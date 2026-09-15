@@ -253,10 +253,11 @@ export class GurenLambdaApp extends Construct {
         ],
       }
 
-      // HTML and built chunks both address /public/assets/*, the mirror
-      // `stageStaticAssets` writes; /assets/* is the same files staged with public/.
+      // HTML and built chunks address /public/assets/*, the mirror `stageStaticAssets`
+      // writes. /assets/* is not routed here on purpose: a directory staged by a
+      // @guren/core whose HTML still used it also has an `assets/` root, which the
+      // loop below routes, so the routing follows the uploaded files either way.
       const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {
-        '/assets/*': assetBehavior,
         '/public/*': assetBehavior,
       }
 
@@ -266,7 +267,7 @@ export class GurenLambdaApp extends Construct {
       // cache behaviors by default; keep public/ roots small.
       if (existsSync(props.assets.dir)) {
         for (const entry of readdirSync(props.assets.dir, { withFileTypes: true })) {
-          if (entry.name === 'assets' || entry.name === 'public') {
+          if (entry.name === 'public') {
             continue
           }
           additionalBehaviors[entry.isDirectory() ? `/${entry.name}/*` : `/${entry.name}`] = assetBehavior

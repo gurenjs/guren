@@ -32,6 +32,14 @@ function synth(build: (stack: Stack) => void): Template {
   return Template.fromStack(stack)
 }
 
+function behaviorPatterns(template: Template): string[] {
+  const distributions = template.findResources('AWS::CloudFront::Distribution')
+  const config = (Object.values(distributions)[0].Properties as {
+    DistributionConfig: { CacheBehaviors: Array<{ PathPattern: string }> }
+  }).DistributionConfig
+  return config.CacheBehaviors.map((behavior) => behavior.PathPattern).sort()
+}
+
 describe('GurenLambdaApp', () => {
   test('should provision an HTTP function behind an HTTP API by default', () => {
     const template = synth((stack) => {
@@ -99,7 +107,7 @@ describe('GurenLambdaApp', () => {
     })
   })
 
-  test('should serve assets from S3 behind CloudFront with both prefixes', () => {
+  test('should serve assets from S3 behind CloudFront under /public and each staged root entry', () => {
     const template = synth((stack) => {
       new GurenLambdaApp(stack, 'App', { functionDir, assets: { dir: assetsDir } })
     })
@@ -107,14 +115,27 @@ describe('GurenLambdaApp', () => {
     template.resourceCountIs('AWS::S3::Bucket', 1)
     template.resourceCountIs('AWS::CloudFront::Distribution', 1)
 
-    const distributions = template.findResources('AWS::CloudFront::Distribution')
-    const config = (Object.values(distributions)[0].Properties as {
-      DistributionConfig: { CacheBehaviors: Array<{ PathPattern: string }> }
-    }).DistributionConfig
-    const patterns = config.CacheBehaviors.map((behavior) => behavior.PathPattern).sort()
     // robots.txt is a root-level staged file — unreachable without its own
     // behavior, because the default origin is the app.
-    expect(patterns).toEqual(['/assets/*', '/public/*', '/robots.txt'])
+    expect(behaviorPatterns(template)).toEqual(['/public/*', '/robots.txt'])
+  })
+
+  test('should route /assets/* when the staged directory still has an assets root', () => {
+    // What an older @guren/core stages, and its HTML addresses the entry there.
+    const legacyDir = mkdtempSync(join(tmpdir(), 'guren-lambda-cdk-legacy-'))
+    try {
+      mkdirSync(join(legacyDir, 'assets'))
+      writeFileSync(join(legacyDir, 'assets/app-Abc123.js'), 'console.log(1)\n')
+      mkdirSync(join(legacyDir, 'public/assets'), { recursive: true })
+
+      const template = synth((stack) => {
+        new GurenLambdaApp(stack, 'App', { functionDir, assets: { dir: legacyDir } })
+      })
+
+      expect(behaviorPatterns(template)).toEqual(['/assets/*', '/public/*'])
+    } finally {
+      rmSync(legacyDir, { recursive: true, force: true })
+    }
   })
 
   test('should give the queue six times the worker timeout of visibility', () => {

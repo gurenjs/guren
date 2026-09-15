@@ -80,7 +80,8 @@ describe('buildCloudflareOutput', () => {
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
     expect(readFileSync(join(root, '.cloudflare/assets/robots.txt'), 'utf8')).toContain('User-agent')
-    expect(existsSync(join(root, '.cloudflare/assets/assets/app-Abc123.js'))).toBe(true)
+    // A copy at /assets/ would still answer an entry URL that drifted off the base.
+    expect(existsSync(join(root, '.cloudflare/assets/assets'))).toBe(false)
   })
 
   test('should drop public/index.html so it cannot shadow the root route', async () => {

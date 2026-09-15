@@ -227,7 +227,7 @@ const log = new LogManager({
 
 ## Static Assets
 
-Lambda is not suited for serving static files. `lambda:build` stages `public/` into `.lambda/assets`, ready for S3, and the CDK construct (below) provisions the bucket and a CloudFront distribution that routes `/assets/*` and `/public/*` to it, with the app as the default origin.
+Lambda is not suited for serving static files. `lambda:build` stages `public/` into `.lambda/assets`, ready for S3, and the CDK construct (below) provisions the bucket and a CloudFront distribution in front of it, with the app as the default origin. The distribution sends `/public/*` to the bucket, which is where the built client assets are served from (`/public/assets/`), plus one behavior per entry at the root of `.lambda/assets`, such as `/robots.txt`.
 
 The distribution answers for those files before the function runs, so the guard the framework applies when it serves `public/` itself never sees them. The construct restores it with a viewer-response CloudFront function on the asset behaviors: the types a browser renders as a document (`.html`, `.htm`, `.svg`, `.xhtml`, `.xml`) come back with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, at any depth and whatever the extension's case. Images, scripts, stylesheets and fonts are untouched, and the default behavior — your app — is left to its own headers.
 
