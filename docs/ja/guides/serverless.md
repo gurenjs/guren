@@ -226,7 +226,7 @@ const log = new LogManager({
 
 ## 静的アセット
 
-Lambda は静的ファイルの配信に向きません。`lambda:build` が `public/` を `.lambda/assets` にステージングし、CDK コンストラクト（後述）が S3 バケットと CloudFront ディストリビューションをプロビジョニングして、`/public/*` と `public/` 直下の各エントリ（`/robots.txt` など）をバケットへルーティングします（デフォルトオリジンはアプリ）。
+Lambda は静的ファイルの配信に向きません。`lambda:build` が `public/` を `.lambda/assets` にステージングし、CDK コンストラクト（後述）が S3 バケットと CloudFront ディストリビューションをプロビジョニングします（デフォルトオリジンはアプリ）。バケットへルーティングされるのは `/public/*` と、`.lambda/assets` 直下の各エントリ（`/robots.txt` など）です。ビルド済みのクライアントアセットは `/public/assets/` から配信されます。
 
 このディストリビューションは関数より先にファイルに応答するため、フレームワーク自身が `public/` を配信するときのガードはここでは動きません。コンストラクトはアセット向けビヘイビアに viewer-response の CloudFront Function を付けてこれを復元します: ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) には、階層の深さや拡張子の大文字小文字によらず `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。画像、スクリプト、スタイルシート、フォントはそのままで、デフォルトビヘイビア (つまりアプリ) も自分のヘッダーのままです。
 
