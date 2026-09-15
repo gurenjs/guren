@@ -1,5 +1,6 @@
 import { consola } from 'consola'
 import { CliError } from './cli-error'
+import { registerConsoleCommand } from './console-registrar'
 import { fileExists, readIfExists } from './discovery'
 import { generateSchemaMigration } from './make-migration'
 import { appendOAuthStateTable } from './oauth-state-table'
@@ -32,6 +33,7 @@ export async function addOAuth(options: WriterOptions = {}): Promise<string[]> {
   const tableAppended = await appendOAuthStateTable()
 
   await wireProviders([{ name: 'OAuthProvider' }])
+  await registerConsoleCommand('OAuthStatesPruneCommand')
   await wireRouteRegistrar('registerOAuthRoutes', "import registerOAuthRoutes from './oauth.js'")
 
   const migrationPending = tableAppended
@@ -47,6 +49,7 @@ export async function addOAuth(options: WriterOptions = {}): Promise<string[]> {
   }
   consola.info('  • Run the migration: bun run db:migrate')
   consola.info('  • Set OAUTH_<PROVIDER>_CLIENT_ID / _CLIENT_SECRET / _REDIRECT_URI in .env for each provider you enable')
+  consola.info('  • Schedule `oauth-states:prune` so abandoned sign-ins do not keep their rows')
   if (staleCoreProvider) {
     consola.info(`  • Remove CoreOAuthServiceProvider from ${appEntry}: an earlier scaffold wired it, and OAuthProvider now binds the manager`)
   }

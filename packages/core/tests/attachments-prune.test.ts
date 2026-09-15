@@ -10,10 +10,10 @@ import {
   DrizzleAdapter,
   hasOneAttached,
   Model,
-  Output,
   StorageManager,
 } from '../src/index'
 import { resolveAttachmentEngine, setActiveAttachmentEngine } from '../src/attachments/engine'
+import { capturingOutput } from './console-output'
 import { ATTACHMENTS_DDL, attachmentsTable } from './attachments-table'
 import { PNG_1X1 } from './image-sniff.test'
 
@@ -298,15 +298,9 @@ describe('attachments prune', () => {
     await Post.attach(99, 'cover', PNG_1X1)
 
     const lines: string[] = []
-    const fakeStream = {
-      write: (chunk: string) => {
-        lines.push(String(chunk))
-        return true
-      },
-    } as unknown as NodeJS.WriteStream
     const command = new AttachmentsPruneCommand()
     command.setInput(['--dry-run'])
-    command.setOutput(new Output({ colors: false, stdout: fakeStream, stderr: fakeStream }))
+    command.setOutput(capturingOutput(lines))
 
     await command.handle()
 

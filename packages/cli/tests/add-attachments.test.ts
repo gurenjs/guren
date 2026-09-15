@@ -6,6 +6,7 @@ import {
   API_ROUTES_FIXTURE,
   APP_FIXTURE,
   BLOG_ROUTES_FIXTURE,
+  CONSOLE_FIXTURE,
   DEFAULT_ROUTES_FIXTURE,
   PG_SCHEMA_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
@@ -16,13 +17,6 @@ import { runBlueprint } from '../src/blueprints'
 import { runCheck } from '../src/check'
 
 const WEB_ROUTES = { file: 'routes/web.ts', source: DEFAULT_ROUTES_FIXTURE }
-
-const CONSOLE_FIXTURE = `import { ConsoleKernel } from '@guren/core'
-import app from './app'
-
-export const kernel = new ConsoleKernel({ container: app.container })
-kernel.registerMany([])
-`
 
 async function seedApp(
   schema: string,

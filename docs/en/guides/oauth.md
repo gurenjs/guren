@@ -309,7 +309,7 @@ store cannot persist a binding, so every bound state comes back unbound and
 the console names the store as the cause). Add the column before binding flows
 via `session` or `bindTo`.
 
-Expired state rows are removed as they are encountered; call `store.deleteExpired()` from a scheduled job for bulk cleanup. Redis remains available for apps that already run it:
+A state row is removed when its callback arrives, so a sign-in abandoned before that keeps its row. Schedule `oauth-states:prune`, the console command `guren add oauth` registers, to sweep the expired ones; it calls `OAuthManager.pruneExpiredStates()` on the store behind your `oauth` binding. Redis remains available for apps that already run it, and expires its own keys:
 
 ```ts
 import { createOAuthManager } from '@guren/core'
