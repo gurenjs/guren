@@ -1,6 +1,7 @@
 import type { WriterOptions } from './utils'
 import { assertCwdUnsupported, runCommand } from './utils'
 import { appDependsOn } from './discovery'
+import { declareEnvEntries, ENV_SCHEMA_FILE } from './app-env'
 import { PATCH_REASONS } from './patch-helpers'
 import { addProviderRegistration, APP_ENTRY_CANDIDATES, resolveAppEntry } from './provider-registrar'
 import {
@@ -193,6 +194,17 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     text: `${text} (already exists, use --force to overwrite)`,
   })))
   messages.push(...toMessages('updated', envModified))
+
+  if (manifest?.env?.length) {
+    const declared = await declareEnvEntries(manifest.env)
+    messages.push(...toMessages('updated', declared.updated ? [ENV_SCHEMA_FILE] : []))
+    if (declared.unpatched.length > 0) {
+      messages.push({
+        kind: 'warning',
+        text: `${ENV_SCHEMA_FILE} has no defineEnv({ ... }) call to add ${declared.unpatched.join(', ')} to. Declare them there by hand.`,
+      })
+    }
+  }
 
   if (!present) {
     messages.push({ kind: 'hint', text: `Run: bun add ${packageName}` })

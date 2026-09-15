@@ -27,5 +27,19 @@ export function unwrap(node, extra) {
   }
 }
 
+/** `process.env.FOO` or `process.env['FOO']`, returning the variable name. */
+export function envKey(node) {
+  const n = unwrap(node)
+  if (n?.type !== 'MemberExpression') return undefined
+  const env = unwrap(n.object)
+  if (env?.type !== 'MemberExpression') return undefined
+  const proc = unwrap(env.object)
+  if (proc?.type !== 'Identifier' || proc.name !== 'process') return undefined
+  const envProp = env.computed ? undefined : env.property?.name
+  if (envProp !== 'env') return undefined
+  if (n.computed) return n.property?.type === 'Literal' ? String(n.property.value) : undefined
+  return n.property?.name
+}
+
 /** `await x` is transparent to what the chain ultimately calls, but only there. */
 export const AWAIT = { type: 'AwaitExpression', key: 'argument' }

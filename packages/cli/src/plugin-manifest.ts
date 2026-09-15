@@ -1,6 +1,7 @@
 import { copyFile, mkdir, realpath, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileExists, readIfExists } from './discovery'
+import { envDeclarationProblem, type GurenPluginEnvType } from './plugin-env'
 
 /**
  * Declarative `gurenPlugin` manifest read from a plugin package's
@@ -36,6 +37,14 @@ export interface GurenPluginEnvEntry {
   key: string
   value?: string
   comment?: string
+  /** The `Env` builder `guren plugin` declares the key with in `config/env.ts` (RFC 0027 §1); `string` when absent. */
+  type?: GurenPluginEnvType
+  /** The values a `type: 'enum'` key admits. */
+  choices?: string[]
+  /** Declared without `.optional()`. A `default` makes the key never unset, so it wins. */
+  required?: boolean
+  default?: string | number | boolean
+  secret?: boolean
 }
 
 export interface GurenPluginPublishEntry {
@@ -256,7 +265,43 @@ export function assertEnvEntriesAllowed(entries: GurenPluginEnvEntry[]): void {
         throw new Error(`Invalid env entry "${entry.key}": ${field} cannot contain a line break.`)
       }
     }
+
+    // `guren plugin` writes these into config/env.ts as source, so a shape the
+    // builder would reject is refused here, before anything is installed.
+    const problem = envDeclarationProblem(entry)
+    if (problem !== undefined) {
+      throw new Error(`Invalid env entry "${entry.key}": ${problem}`)
+    }
   }
+}
+
+/** The entries a plugin install acts on: a malformed key name is skipped, a refused entry throws. */
+export function pluginEnvEntries(entries: GurenPluginEnvEntry[]): GurenPluginEnvEntry[] {
+  const valid = entries.filter((entry) => ENV_KEY_PATTERN.test(entry.key ?? ''))
+  assertEnvEntriesAllowed(valid)
+  return valid
+}
+
+/** The keys a dotenv file assigns, as Bun reads it: `KEY=`, indented or `export`-prefixed. A `# KEY=` line assigns nothing. */
+export function envFileKeys(content: string): Set<string> {
+  return new Set([...content.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=/gmu)].map((match) => match[1]))
+}
+
+/** `content` with a block appended for each entry whose key it does not assign; a comment line per line of `comment`. */
+export function appendEnvEntries(
+  content: string,
+  entries: readonly GurenPluginEnvEntry[],
+): { content: string; added: string[] } {
+  const listed = envFileKeys(content)
+  const missing = entries.filter((entry) => !listed.has(entry.key))
+  if (missing.length === 0) return { content, added: [] }
+
+  const blocks = missing.map((entry) => {
+    const comment = entry.comment ? entry.comment.split(/\r?\n/u).map((line) => `# ${line}\n`).join('') : ''
+    return `${comment}${entry.key}=${entry.value ?? ''}\n`
+  })
+  const separator = content.length > 0 && !content.endsWith('\n') ? '\n' : ''
+  return { content: `${content}${separator}${blocks.join('')}`, added: missing.map((entry) => entry.key) }
 }
 
 /**
@@ -267,8 +312,7 @@ export async function applyEnvEntries(
   entries: GurenPluginEnvEntry[],
   cwd: string = process.cwd(),
 ): Promise<string[]> {
-  const validEntries = entries.filter((entry) => ENV_KEY_PATTERN.test(entry.key ?? ''))
-  assertEnvEntriesAllowed(validEntries)
+  const validEntries = pluginEnvEntries(entries)
   if (validEntries.length === 0) return []
 
   const modified: string[] = []
@@ -277,20 +321,10 @@ export async function applyEnvEntries(
     const existing = await readIfExists(cwd, file)
 
     if (existing === null && file === '.env') continue
-    const content = existing ?? ''
+    const next = appendEnvEntries(existing ?? '', validEntries)
+    if (next.added.length === 0) continue
 
-    const missing = validEntries.filter(
-      (entry) => !new RegExp(`^${entry.key}=`, 'm').test(content),
-    )
-    if (missing.length === 0) continue
-
-    const blocks = missing.map((entry) => {
-      const comment = entry.comment ? `# ${entry.comment}\n` : ''
-      return `${comment}${entry.key}=${entry.value ?? ''}\n`
-    })
-
-    const separator = content.length > 0 && !content.endsWith('\n') ? '\n' : ''
-    await writeFile(resolve(cwd, file), `${content}${separator}${blocks.join('')}`, 'utf8')
+    await writeFile(resolve(cwd, file), next.content, 'utf8')
     modified.push(file)
   }
 

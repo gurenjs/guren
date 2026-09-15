@@ -76,7 +76,8 @@ import { installPlugin } from './plugin'
 import { displayModels } from './model-list'
 import { displayContext } from './context'
 import { displayEntityContext } from './entity-context'
-import { runCheck, renderCheckReport } from './check'
+import { CHECK_SUITES, runCheck, renderCheckReport } from './check'
+import { ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, loadEnvSchema, writeEnvExample } from './app-env'
 import { gatingResults } from './check-result'
 import { runAudit, renderAuditReport } from './audit'
 import { runGate, renderGateReport } from './gate'
@@ -2201,6 +2202,38 @@ const makeLangCommand = defineCommand({
   },
 })
 
+const envExampleCommand = defineCommand({
+  meta: {
+    name: 'env:example',
+    description: 'Append the keys config/env.ts declares to .env.example (RFC 0027). Lines already there are kept.',
+  },
+  args: {
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    const cwd = args.app ?? process.cwd()
+    const schema = await loadEnvSchema(cwd)
+    if (schema.status !== 'loaded') {
+      consola.error(schema.status === 'absent' ? `No ${ENV_SCHEMA_FILE}: declare the environment with defineEnv() first.` : schema.message)
+      process.exitCode = 1
+      return
+    }
+
+    const { added, undeclared } = await writeEnvExample(cwd, schema.vars)
+    if (added.length > 0) {
+      consola.success(`Added ${added.join(', ')} to ${ENV_EXAMPLE_FILE}.`)
+    } else {
+      consola.info(`${ENV_EXAMPLE_FILE} already lists every key ${ENV_SCHEMA_FILE} declares.`)
+    }
+    if (undeclared.length > 0) {
+      consola.warn(`${ENV_EXAMPLE_FILE} also sets ${undeclared.join(', ')}, which ${ENV_SCHEMA_FILE} does not declare. Left in place.`)
+    }
+  },
+})
+
 const langListCommand = defineCommand({
   meta: {
     name: 'lang:list',
@@ -2499,6 +2532,10 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only prototype wiring checks (RFC 0021): fixture entries against the route graph.',
     },
+    env: {
+      type: 'boolean',
+      description: 'Run only the check that .env.example lists the keys config/env.ts declares (RFC 0027).',
+    },
     changed: {
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
@@ -2511,8 +2548,9 @@ const checkCommand = defineCommand({
   async run({ args }) {
     // --ci promises a full-suite gate; letting a suite flag narrow the run
     // underneath it would report success while docs/spec/core went unchecked.
-    if (args.ci && (args.arch || args.docs || args.spec || args.i18n || args.prototype)) {
-      consola.error('check --ci runs the full suite — drop --arch/--docs/--spec/--i18n/--prototype (they gate on their own).')
+    const suiteFlags = CHECK_SUITES.filter((suite) => args[suite])
+    if (args.ci && suiteFlags.length > 0) {
+      consola.error(`check --ci runs the full suite — drop ${CHECK_SUITES.map((suite) => `--${suite}`).join('/')} (they gate on their own).`)
       process.exitCode = 1
       return
     }
@@ -2526,6 +2564,7 @@ const checkCommand = defineCommand({
       spec: Boolean(args.spec),
       i18n: Boolean(args.i18n),
       prototype: Boolean(args.prototype),
+      env: Boolean(args.env),
       changed: Boolean(args.changed),
     })
 
@@ -2538,7 +2577,7 @@ const checkCommand = defineCommand({
     // Only the suite flags and the opt-in `--ci` gate on exit code. Plain
     // `guren check` has never set one, and changing that on a v1.0-stable
     // command is a breaking change reserved for a major release.
-    if ((args.arch || args.docs || args.spec || args.i18n || args.prototype) && report.failCount > 0) {
+    if (suiteFlags.length > 0 && report.failCount > 0) {
       process.exitCode = 1
     }
     if (args.ci && gatingResults(report).length > 0) {
@@ -3411,6 +3450,7 @@ export const builtinSubCommands = {
   'health:check': healthCheckCommand,
   'lang:publish': langPublishCommand,
   'lang:list': langListCommand,
+  'env:example': envExampleCommand,
   'make:lang': makeLangCommand,
   add: addCommand,
   plugin: addPluginCommand,
