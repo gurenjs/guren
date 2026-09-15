@@ -15,7 +15,14 @@ import { parse, type ParserPlugin } from '@babel/parser'
 import type * as t from '@babel/types'
 import { readChangesetDirectory } from './smoke/core-semver-audit'
 import { plannedVersions } from './smoke/plugin-compat-audit'
-import { collectPackages, parseArgs, repoRoot, versionOf, type WorkspacePackage } from './workspace-packages'
+import {
+  collectPackages,
+  manifestAtRev,
+  parseArgs,
+  repoRoot,
+  versionOf,
+  type WorkspacePackage,
+} from './workspace-packages'
 
 /** Only the groups a consumer installs; a stale devDependency pulls no copy. */
 const DEPENDENCY_GROUPS = ['dependencies', 'peerDependencies'] as const
@@ -564,7 +571,8 @@ export interface RunResult {
   messages: string[]
 }
 
-export async function run(options: { root?: string; check: boolean }): Promise<RunResult> {
+/** `release`: refuse a raise in a package whose version `changeset version` did not move. */
+export async function run(options: { root?: string; check: boolean; release?: boolean }): Promise<RunResult> {
   const root = options.root ?? repoRoot
   let plan: FloorPlan
   let releasing: Map<string, string>
@@ -608,12 +616,25 @@ export async function run(options: { root?: string; check: boolean }): Promise<R
     const byManifest = Map.groupBy(plan.raises, (raise) => raise.manifestPath)
     for (const [manifestPath, raises] of byManifest) {
       const path = join(root, manifestPath)
-      const manifest = JSON.parse(await readFile(path, 'utf8')) as Record<string, Record<string, string>>
+      const text = await readFile(path, 'utf8')
+      const manifest = JSON.parse(text) as Record<string, Record<string, string>>
       for (const raise of raises) {
         manifest[raise.group]![raise.dependency] = raise.to
         messages.push(`${manifestPath}: ${raise.group}["${raise.dependency}"] ${raise.from} -> ${raise.to}`)
       }
       await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+
+      // `changeset version` never bumps a package for an in-range peer, and `changeset publish`
+      // skips a version that did not move. An unreadable version is not one that moved.
+      const committed = versionOf(manifestAtRev('HEAD', manifestPath, root))
+      const current = versionOf(text)
+      if (options.release && (committed === undefined || current === undefined || committed === current)) {
+        drift.push(
+          `${manifestPath}: raised a floor, but its version is still ${current ?? 'unreadable'} (HEAD: ` +
+            `${committed ?? 'unreadable'}), so no published tarball carries the raise. Add a changeset ` +
+            'releasing this package, re-run `changeset version`, then this script.',
+        )
+      }
     }
   }
 
@@ -623,8 +644,8 @@ export async function run(options: { root?: string; check: boolean }): Promise<R
 }
 
 if (import.meta.main) {
-  const { flags } = parseArgs(process.argv.slice(2), ['check'])
-  const result = await run({ check: flags.check! })
+  const { flags } = parseArgs(process.argv.slice(2), ['check', 'release'])
+  const result = await run({ check: flags.check!, release: flags.release! })
   const log = result.code === 0 ? console.log : console.error
   for (const message of result.messages) log(message)
   process.exit(result.code)

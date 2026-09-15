@@ -162,15 +162,30 @@ describe('sync-import-floors', () => {
       expect(text(result)).toContain('no pending changeset releases @guren/server')
     })
 
-    it('writes the version `changeset version` just gave the dependency', async () => {
+    async function afterChangesetVersion(testingVersion: string): Promise<string> {
       const repo = await repositoryWithUnreleasedSubpath()
       const manifest = JSON.parse(await readFile(join(repo, 'packages/server/package.json'), 'utf8'))
-      await put(repo, { 'packages/server/package.json': { ...manifest, version: '1.2.0' } })
+      await put(repo, {
+        'packages/server/package.json': { ...manifest, version: '1.2.0' },
+        'packages/testing/package.json': { ...testing('>=1.0.0'), version: testingVersion },
+      })
+      return repo
+    }
 
-      expect((await run({ root: repo, check: false })).code).toBe(0)
+    it('writes the version `changeset version` just gave the dependency', async () => {
+      const repo = await afterChangesetVersion('1.1.0')
+
+      expect((await run({ root: repo, check: false, release: true })).code).toBe(0)
 
       const written = JSON.parse(await readFile(join(repo, 'packages/testing/package.json'), 'utf8'))
       expect(written.peerDependencies['@guren/server']).toBe('>=1.2.0')
+    })
+
+    it('refuses a release raise in a package whose own version did not move', async () => {
+      const result = await run({ root: await afterChangesetVersion('1.0.0'), check: false, release: true })
+
+      expect(result.code).toBe(1)
+      expect(text(result)).toContain('so no published tarball carries the raise')
     })
   })
 
