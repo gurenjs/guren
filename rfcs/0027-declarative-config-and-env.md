@@ -598,9 +598,9 @@ and each verdict is written once against it:
   `@guren/cli/oxlint` like its sibling. The blog's `CI` read carries a disable
   with its reason.
 - **Blueprints** (`add-session.ts:111-117`, `add-cache.ts:25-28`, the `mail`,
-  `queue` and `storage` blueprints in `blueprints.ts`) add their keys to
-  `config/env.ts` through the same `addCreateAppOption(file, key, source,
-  'defineEnv')` call `guren plugin` uses (§1), then run `guren env:example`.
+  `queue` and `storage` blueprints in `packages/cli/src/blueprints.ts`) add their
+  keys to `config/env.ts` through `addCreateAppOption(file, key, source,
+  'defineEnv')`, the call §1 adds to `guren plugin`, then run `guren env:example`.
   `appendEnvEntry()` (`env-registrar.ts:15`) keeps writing `.env`, the local copy
   the generator does not own. An app with no `config/env.ts` gets today's
   behaviour unchanged.
