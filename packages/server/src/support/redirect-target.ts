@@ -4,9 +4,13 @@
  * layers cannot drift.
  */
 
-/** Defuses backslash tricks such as `/\evil.com`. */
+/**
+ * Defuses backslash tricks such as `/\evil.com`, and tab/newline tricks such as
+ * `/<TAB>/evil.com`: the WHATWG URL parser a browser runs on `Location` removes
+ * every ASCII tab and newline, so the `//` check must see the value without them.
+ */
 export function normalizeRedirectTarget(value: string): string {
-  return value.replace(/\\/g, '/')
+  return value.replace(/[\t\n\r]/g, '').replace(/\\/g, '/')
 }
 
 export function isAppRelativePath(value: string): boolean {

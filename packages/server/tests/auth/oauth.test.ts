@@ -342,6 +342,13 @@ describe('sanitizeOAuthRedirect', () => {
     expect(sanitizeOAuthRedirect('\\/evil.example.com')).toBeUndefined()
   })
 
+  it('rejects tab and newline tricks a browser collapses to //', () => {
+    expect(sanitizeOAuthRedirect('/\t/evil.example.com')).toBeUndefined()
+    expect(sanitizeOAuthRedirect('/\t\\evil.example.com')).toBeUndefined()
+    expect(sanitizeOAuthRedirect('/\n/evil.example.com')).toBeUndefined()
+    expect(sanitizeOAuthRedirect('/\r\n/evil.example.com')).toBeUndefined()
+  })
+
   it('rejects absolute URLs and non-http schemes by default', () => {
     expect(sanitizeOAuthRedirect('https://evil.example.com/phish')).toBeUndefined()
     expect(sanitizeOAuthRedirect('javascript:alert(1)')).toBeUndefined()

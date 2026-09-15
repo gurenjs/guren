@@ -26,6 +26,13 @@ describe('isSafeRedirectUrl', () => {
     expect(isSafeRedirectUrl('\\/evil.com', requestUrl)).toBe(false)
   })
 
+  test('should reject tab and newline tricks a browser collapses to //', () => {
+    expect(isSafeRedirectUrl('/\t/evil.com', requestUrl)).toBe(false)
+    expect(isSafeRedirectUrl('/\t\\evil.com', requestUrl)).toBe(false)
+    expect(isSafeRedirectUrl('/\n/evil.com', requestUrl)).toBe(false)
+    expect(isSafeRedirectUrl('/\r\n/evil.com', requestUrl)).toBe(false)
+  })
+
   test('should allow URLs to allowed hosts', () => {
     expect(isSafeRedirectUrl('https://accounts.google.com/auth', requestUrl, ['accounts.google.com'])).toBe(true)
   })
@@ -47,6 +54,17 @@ describe('createRedirectSafetyMiddleware', () => {
     app.get('/redirect', (c) => c.redirect('http://evil.com/phish'))
 
     const res = await app.request('http://example.com/redirect')
+
+    expect(res.status).toBe(302)
+    expect(res.headers.get('Location')).toBe('/')
+  })
+
+  test('should rewrite a query-supplied target hiding // behind a tab', async () => {
+    const app = new Hono()
+    app.use('*', createRedirectSafetyMiddleware())
+    app.get('/redirect', (c) => c.redirect(c.req.query('next') ?? '/'))
+
+    const res = await app.request('http://example.com/redirect?next=%2F%09%2Fevil.com')
 
     expect(res.status).toBe(302)
     expect(res.headers.get('Location')).toBe('/')
