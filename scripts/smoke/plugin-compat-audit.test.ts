@@ -246,7 +246,6 @@ describe('auditPackages with a pending release plan', () => {
 })
 
 describe('auditPackages across the RFC 0024 merge release', () => {
-  // Core on 1.18.0 with a major pending, so the plan publishes 2.0.0.
   const onDisk = new Map([
     [CORE, '1.18.0'],
     ['@guren/plugin-webmcp', '0.1.1'],
@@ -254,16 +253,8 @@ describe('auditPackages across the RFC 0024 merge release', () => {
   const mergePlan = () =>
     plannedVersions(onDisk, [changeset('core.md', `---\n'${CORE}': major\n---\n\nMerge.\n`)])
 
-  test('should plan 2.0.0, not 3.0.0, for a major changeset on core 1.18.0', () => {
-    expect(mergePlan().get(CORE)).toBe('2.0.0')
-  })
-
-  test('should reject every plugin left on its <2.0.0 ceiling', () => {
-    const result = auditPackages(
-      [webmcpPackage('^1.16.0', '>=1.13.0 <2.0.0'), webmcpPackage('^1.18.0', '>=1.0.0 <2.0.0')],
-      onDisk,
-      mergePlan(),
-    )
+  test('should reject a plugin left on its <2.0.0 ceiling', () => {
+    const result = auditPackages([webmcpPackage('^1.18.0', '>=1.0.0 <2.0.0')], onDisk, mergePlan())
 
     expect(result.drift.join('\n')).toContain('excludes @guren/core 2.0.0')
     expect(result.unreasoned).toEqual([])
@@ -271,6 +262,15 @@ describe('auditPackages across the RFC 0024 merge release', () => {
 
   test('should accept a ceiling moved to the planned major in the same PR', () => {
     const result = auditPackages([webmcpPackage('^1.18.0', '>=2.0.0 <3.0.0')], onDisk, mergePlan())
+
+    expect(result.drift).toEqual([])
+    expect(result.unreasoned).toEqual([])
+  })
+
+  test('should pass a widened interval spanning both majors, which the RFC forbids by review', () => {
+    // Both probes of the published ^2.0.0 and the workspace 1.18.0 satisfy it,
+    // so nothing here can tell it from an honest claim.
+    const result = auditPackages([webmcpPackage('^1.18.0', '>=1.0.0 <3.0.0')], onDisk, mergePlan())
 
     expect(result.drift).toEqual([])
     expect(result.unreasoned).toEqual([])

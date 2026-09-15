@@ -207,8 +207,6 @@ the agent harness):
 | `@guren/core` and its subpaths | everything the framework defines: HTTP, auth, models (`defineModel`, `Model`, `SoftDeletes`), the database factories, seeders, attachments |
 | `@guren/orm/drizzle/{pg,mysql,sqlite}` | table definitions in `db/schema.ts`, and nothing else |
 
-The root specifier `@guren/orm` does not appear in application code.
-
 What exists today (at `1884d999`):
 
 - **The generated code already follows it; the hand-written code does not.**
@@ -223,7 +221,7 @@ What exists today (at `1884d999`):
   `create-app/templates/database/*/config/database.ts`, and two harness files
   under `packages/cli/templates/agent/`. A user who copies the database guide
   and then runs `make:model` gets both names for one function.
-- **Core's allowlist already covers them.** Every symbol those 41 imports
+- **Core's allowlist already covers them.** Every symbol those imports
   name is listed in `packages/core/src/index.ts:2-90`.
 - **Nothing gates it.** `audit:core-first` looks for `@guren/server` only.
 
@@ -231,7 +229,7 @@ Why core, with one exception:
 
 - **"Models from `@guren/orm`, HTTP from `@guren/core`" is not a rule a model
   file can satisfy.** `Attachable` and `AuthenticatableModel` are model APIs
-  that need the HTTP stack or storage, and exist only on core, so a model
+  that need the HTTP stack or storage, and `@guren/orm` exports neither, so a model
   using either still names two packages. That rule would also move the
   scaffolders away from where they already are.
 - **The schema DSL stays on `@guren/orm`.** Each dialect barrel re-exports
@@ -249,16 +247,11 @@ Why core, with one exception:
 
 Enforcement: `audit:core-first` gains a second rule. An import whose specifier
 is exactly `@guren/orm` (a static `import`, `export … from`, or `import()`)
-fails. It matches whole files, markdown included, rather than `ts` fences
-only, since a `diff` fence or a blockquoted snippet is copied as readily.
-`@guren/orm/drizzle/*` passes, prose naming the package passes, and
-a `declare module '@guren/orm'` would pass (an augmentation must name the
-declaring package), though none exists. Its targets add every
-`packages/create-app/templates` blueprint (`api-only` and `database/`
-included) and `packages/cli/templates`. The rule does not wait for the merge:
-it holds on today's layout and lands with the import alignment, and it
-outlives the shim, so deleting the "no `@guren/server`" grep at 4.0.0 leaves
-it in place.
+fails; `@guren/orm/drizzle/*`, prose naming the package, and a
+`declare module '@guren/orm'` augmentation pass. Both rules scan every
+`packages/create-app/templates` blueprint and `packages/cli/templates` too.
+The rule holds on today's layout, so it lands with the import alignment
+rather than with the merge.
 
 One boundary gets narrower. `make-agent.ts:168` writes
 `disallowPackages: ['@guren/orm', '@guren/plugin-agents/runtime']` for
@@ -351,7 +344,7 @@ Between merge and release the workspace plugins claim a core the workspace
 does not have yet. Nothing reads that claim against the workspace copy: the
 callers of `checkPluginCompatibility` are `guren plugin`, `guren doctor` and
 the audit, and no smoke runs the first two against a first-party plugin.
-`scripts/smoke/plugin-compat-audit.test.ts` pins all four outcomes above.
+`scripts/smoke/plugin-compat-audit.test.ts` pins each outcome in step 2.
 
 ### What gets deleted
 
@@ -448,12 +441,10 @@ minimum period for a stable API.
    shim on one number. 2.0.0 is the smaller semantic step and matches the
    plugins' existing `<2.0.0` ceilings, but ships a `@guren/core@2.x` that
    is older-looking than the `@guren/server@2.x` it replaces. One fact
-   weighs on it: a `major` changeset on core 1.18.0 publishes 2.0.0, and
-   nothing in changesets publishes 3.0.0 from there. 3.0.0 means editing
-   the version by hand in the version PR, after `changeset version` has
-   written `^2.0.0` into every dependent, and `audit:plugin-compat` cannot
-   model that step: in the merge PR it plans 2.0.0 and reports
-   `compatibility: ">=3.0.0 <4.0.0"` as drift.
+   weighs on it: changesets publishes 2.0.0 from core 1.18.0 (see "Plugin
+   `compatibility`"), so 3.0.0 is a hand edit in the version PR, and a
+   `>=3.0.0` ceiling written in the merge PR reads as drift to
+   `audit:plugin-compat`.
 2. **Does `declare module '@guren/server'` merge through the shim?** The
    shim is `export * from '@guren/core'`. If TypeScript does not merge an
    augmentation through a star re-export, a third-party plugin on the old
