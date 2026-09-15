@@ -207,8 +207,11 @@ env.parse(source?: Record<string, unknown>, options?: { mode?: 'throw' | 'report
 ```
 
 It looks up each *declared* key (`source[key] ?? process.env[key]`, string
-values only) rather than copying `process.env`, and memoizes the result per
-source object in a `WeakMap`. In `report` mode an unset required key is
+values only) rather than copying `process.env`, ~~and memoizes the result per
+source object in a `WeakMap`~~. **Amended in implementation:** no memo.
+`process.env` keeps its identity while tests and platforms change its values, so a
+cache keyed on the source object returns stale values; a parse is one lookup and
+one coercion per declared key. In `report` mode an unset required key is
 `AGENT_REDACTED` (`packages/server/src/agent/redact.ts:16`, the placeholder the
 agent audit already prints) and is listed in `unset`. The callers:
 
@@ -219,7 +222,9 @@ agent audit already prints) and is listed in `unset`. The callers:
 | A connection thunk run outside an application (§2) | `process.env` | `throw` |
 
 Validation runs in `ConfigServiceProvider.register()`, which is the first
-provider `Application` registers, so it is the first thing `boot()` does
+provider `Application` registers (**Amended in implementation:** Part 0 registers
+it only when `createApp()` receives `env`, so an app without a schema keeps its
+provider list unchanged; Part 1 extends the condition to `config`), so it is the first thing `boot()` does
 (`registerAll()` is `Application.ts:773`). Not at import: on Workers,
 `bootWorkersApp()` calls `captureWorkersEnv(env)` and only then `app.boot()`
 (`packages/plugin-cloudflare/src/boot.ts:48-51`), and the scaffold's own
@@ -230,7 +235,11 @@ module evaluates (`templates/scaffold/session/config/session.ts:4-6`).
 the captured env on the app its generated entry already imports, before boot:
 `app.container.instance('env.source', env)` under a `container.has()` guard. This
 is the injection shape RFC 0023's Open Question 4 settled for
-`inertia.ssrRenderer`. `TestApp.create({ env })` binds the same key.
+`inertia.ssrRenderer`. ~~`TestApp.create({ env })` binds the same key.~~
+**Amended in implementation:** `TestApp.create({ env, envSource })`. `env` means
+what it means in `createApp()`, the schema, and `envSource` is what binds
+`env.source`; one name for both would make a test's `env: { APP_URL: ... }`
+type-check against neither.
 
 A `throw` failure lists every problem, secrets redacted:
 
@@ -603,7 +612,10 @@ Referencing `RFC 0027` in each PR:
    fields in `guren plugin`. `examples/blog`, `api`, `agents` (its
    `config/env.ts` bindings interface renames to `config/bindings.ts`) and `web/`
    migrate. `audit:starter-template` and all three starter smokes run, per the
-   pre-PR list.
+   pre-PR list. **Amended in implementation:** the configuration guide
+   (`docs/en` and `docs/ja`) lands here rather than in Part 0, beside the
+   templates it describes; Part 0 documents its API through JSDoc and the
+   changeset.
 
 ## Alternatives Considered
 
