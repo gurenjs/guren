@@ -7,7 +7,7 @@ import { createNotificationManager, type NotificationManager } from '../notifica
  */
 export class NotificationServiceProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('notifications', () => createNotificationManager())
+    this.container.singletonIf('notifications', () => createNotificationManager())
   }
 
   boot(): void {

@@ -7,6 +7,6 @@ import { createGate } from '../authorization'
  */
 export class AuthorizationServiceProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('gate', () => createGate())
+    this.container.singletonIf('gate', () => createGate())
   }
 }

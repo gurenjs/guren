@@ -46,6 +46,33 @@ describe('Container', () => {
     })
   })
 
+  describe('singletonIf', () => {
+    it('binds a singleton when the key is unbound', () => {
+      container.singletonIf('service', () => ({ value: Math.random() }))
+
+      expect(container.make('service')).toBe(container.make('service'))
+    })
+
+    it('leaves an existing binding in place', () => {
+      const own = { own: true }
+      container.instance('service', own)
+
+      container.singletonIf('service', () => ({ own: false }))
+
+      expect(container.make<object>('service')).toBe(own)
+    })
+
+    it('treats a key bound through an alias as bound', () => {
+      const own = { own: true }
+      container.instance('real', own)
+      container.alias('service', 'real')
+
+      container.singletonIf('service', () => ({ own: false }))
+
+      expect(container.make<object>('service')).toBe(own)
+    })
+  })
+
   describe('instance', () => {
     it('should bind an existing instance', () => {
       const obj = { name: 'test' }

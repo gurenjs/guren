@@ -9,7 +9,7 @@ import { createLogManager } from '../logging'
  */
 export class LogServiceProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('log', () => createLogManager({
+    this.container.singletonIf('log', () => createLogManager({
       default: 'console',
       channels: { console: { driver: 'console' } },
     }))

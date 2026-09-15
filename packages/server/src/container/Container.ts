@@ -47,6 +47,15 @@ export class Container {
     return this
   }
 
+  /**
+   * `singleton()` only when `key` is unbound, so a framework default never
+   * replaces what the app or its config bound, whatever the provider order
+   * (RFC 0027 §3). Uses `has()`: a fake or a deferred provider does not count.
+   */
+  singletonIf<T>(key: string, factory: ServiceFactory<T>): this {
+    return this.has(key) ? this : this.singleton(key, factory)
+  }
+
   instance<T>(key: string, value: T): this {
     this.bindings.set(key, {
       factory: () => value,

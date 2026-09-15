@@ -7,6 +7,6 @@ import { createBroadcastManager } from '../broadcasting'
  */
 export class BroadcastServiceProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('broadcast', () => createBroadcastManager())
+    this.container.singletonIf('broadcast', () => createBroadcastManager())
   }
 }

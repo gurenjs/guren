@@ -6,7 +6,7 @@ import type { Hono } from 'hono'
 /** Binds the ExceptionHandler singleton and attaches it as global error middleware. */
 export class ErrorServiceProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('exception.handler', () => createExceptionHandler())
+    this.container.singletonIf('exception.handler', () => createExceptionHandler())
   }
 
   boot(): void {

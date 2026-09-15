@@ -4,6 +4,6 @@ import { createOAuthManager } from '../auth/oauth'
 /** Binds OAuthManager as a singleton in the container. */
 export class OAuthServiceProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('oauth', () => createOAuthManager())
+    this.container.singletonIf('oauth', () => createOAuthManager())
   }
 }
