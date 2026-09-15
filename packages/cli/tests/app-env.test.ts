@@ -14,7 +14,7 @@ export default defineEnv({
   SMTP_PORT: Env.port().default(587),
   MAIL_FROM_NAME: Env.string().allowEmpty().default('Guren App'),
   MAIL_SIGNATURE: Env.string().default('Pay $5 "now"'),
-  LOG_PATH: Env.string().default('C:\\\\logs\\\\n $HOME'),
+  LOG_PATH: Env.string().default('C:\\\\logs\\\\n \\\\$HOME $USER'),
   SIGN_OFF: Env.string().default("It's done"),
 })
 `
@@ -82,7 +82,7 @@ describe('writeEnvExample', () => {
       + 'SESSION_DRIVER=database\n'
       + "MAIL_FROM_NAME='Guren App'\n"
       + 'MAIL_SIGNATURE=\'Pay \\$5 "now"\'\n'
-      + "LOG_PATH='C:\\logs\\n \\$HOME'\n"
+      + "LOG_PATH='C:\\logs\\n \\\\$HOME \\$USER'\n"
       + 'SIGN_OFF="It\'s done"\n',
     )
     expect(await readFile(join(workspace.dir, '.env'), 'utf8')).toBe('APP_URL=http://localhost:3333\n')
@@ -99,7 +99,7 @@ describe('writeEnvExample', () => {
     )
 
     expect(probe.stderr.toString()).toBe('')
-    expect(JSON.parse(probe.stdout.toString())).toEqual(['database', '587', 'Guren App', 'Pay $5 "now"', 'C:\\logs\\n $HOME', "It's done"])
+    expect(JSON.parse(probe.stdout.toString())).toEqual(['database', '587', 'Guren App', 'Pay $5 "now"', 'C:\\logs\\n \\$HOME $USER', "It's done"])
   })
 })
 

@@ -55,7 +55,8 @@ function envFileValue(value: unknown): string {
   if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return ''
   const text = String(value)
   if (/[\r\n]/u.test(text)) return ''
-  const escaped = text.replace(/\$/gu, '\\$')
+  // Not a backslash escape: Bun keeps `\` as itself, so doubling it would change the value.
+  const escaped = [...text].map((char) => (char === '$' ? '\\$' : char)).join('')
   if (/^[\w.:/@+\\$-]*$/u.test(escaped)) return escaped
   if (!text.includes("'") && !text.endsWith('\\')) return `'${escaped}'`
   if (!text.includes('"') && !text.includes('\\')) return `"${escaped}"`
