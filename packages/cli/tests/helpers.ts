@@ -374,24 +374,28 @@ export default app
 `
 
 /**
- * Runs `task` with `consola.warn` collecting into an array instead of
+ * Runs `task` with `consola[level]` collecting into an array instead of
  * printing. Scoped to the call, unlike `createConsolaStub`, which serves the
  * process-wide `mock.module('consola')` path.
  */
-export async function captureSuccesses(task: () => Promise<unknown>): Promise<string[]> {
+async function captureConsola(level: 'info' | 'success', task: () => Promise<unknown>): Promise<string[]> {
   const lines: string[] = []
-  const original = realConsola.success
-  realConsola.success = ((...args: unknown[]) => {
+  const original = realConsola[level]
+  realConsola[level] = ((...args: unknown[]) => {
     lines.push(args.map(String).join(' '))
-  }) as typeof realConsola.success
+  }) as typeof original
 
   try {
     await task()
     return lines
   } finally {
-    realConsola.success = original
+    realConsola[level] = original
   }
 }
+
+export const captureSuccesses = (task: () => Promise<unknown>): Promise<string[]> => captureConsola('success', task)
+
+export const captureInfos = (task: () => Promise<unknown>): Promise<string[]> => captureConsola('info', task)
 
 export async function captureWarnings<T>(task: () => Promise<T>): Promise<{ result: T; warnings: string[] }> {
   const warnings: string[] = []

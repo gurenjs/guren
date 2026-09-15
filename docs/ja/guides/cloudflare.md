@@ -137,7 +137,7 @@ const oauth = createOAuthManager({
 })
 ```
 
-どちらのストアもテーブルを必要とします。スキーマは[認証ガイド](./authentication.md)を参照してください。
+どちらのストアもテーブルを必要とします。`sessions` は `bunx guren add session` が生成し、`oauth_states` のカラムは [Stateストレージ](./oauth.md#stateストレージ) に載っています。`bunx guren make:auth --oauth` は両方のテーブルを生成し、両方のストアを配線します。
 
 ## ストレージ（R2）
 

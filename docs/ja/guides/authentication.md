@@ -67,7 +67,9 @@ bunx guren make:auth --install --oauth github,google
 
 `--verify` を伴わない `--oauth` では、プロフィールのメールアドレスが**読み取り専用**でスキャフォールドされます。`ProfileUpdateSchema` からフィールドが除かれ、`ProfileController.update()` もメールアドレスを受け取らないので、フォームからも、直接組み立てたリクエストからも、プロバイダーが保証したアドレスからアカウントを移すことはできません。`--verify` を併用した場合は編集可能なままです。変更後のアドレスは `emailVerifiedAt` がリセットされ、そのアドレス宛のリンクで確認するまで検証済みになりません。なお、どのモードでもアドレスは「主張」されるだけで、予約されるわけではありません。登録フォームは形式が正しいメールアドレスをすべて受け付け、`users.email` は一意制約を持つので、すでにそのアドレスを保持しているアカウントがあると、本来の持ち主の初回 OAuth サインインは拒否されます。これが問題になるアプリでは、独自の所有確認を追加してください。
 
-`--oauth` は、`OAuthController` / `OAuthProvider` のファイルパスと配線方法を下記の `guren add oauth` と共有しています(違いは、コールバックがスタブではなく完成された実装である点だけです)。同じアプリに対して両方を実行しないでください。2回目の実行は、`--force` なしなら失敗し、`--force` ありなら1回目の生成物を上書きします。
+コールバックを認可リダイレクトと結びつける OAuth state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。`OAuthProvider` は `DatabaseOAuthStateStore` を使う `oauth` マネージャーを自分でコンテナに束縛するので、`--install` は `CoreOAuthServiceProvider` を登録しません。これでリダイレクトとコールバックが別のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれが普通です([Stateストレージ](./oauth.md#stateストレージ)を参照)。`db/schema.ts` が無いアプリでは、これまでどおりメモリ上のストアと `CoreOAuthServiceProvider` を使います。
+
+`--oauth` は、`OAuthController` / `OAuthProvider` のファイルパスを下記の `guren add oauth` と共有しています。違いは、コールバックがスタブではなく完成された実装である点と、state をデータベースに保存する点です。同じアプリに対して両方を実行しないでください。2回目の実行は、`--force` なしなら失敗し、`--force` ありなら1回目の生成物を上書きします。
 
 ### OAuth のみでサインインする
 

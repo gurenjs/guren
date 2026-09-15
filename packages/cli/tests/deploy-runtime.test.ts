@@ -2,7 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
-import { SESSION_PROVIDER, sessionConfigSource, writeInstalledPackage } from './helpers'
+import { APP_FIXTURE, DEFAULT_ROUTES_FIXTURE, SESSION_PROVIDER, SQLITE_SCHEMA_FIXTURE, sessionConfigSource, writeInstalledPackage } from './helpers'
+import { makeAuth } from '../src/make-auth'
 import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { buildJsonOutput, getDoctorRuleEvaluations, runDoctor } from '../src/doctor'
@@ -624,6 +625,26 @@ export const oauth = createOAuthManager({})
       expect(check.status).toBe('warn')
       expect(check.message).toContain('OAuth is configured')
       expect(check.message).toContain('DatabaseOAuthStateStore')
+      expect(check.fix).toContain('DatabaseOAuthStateStore')
+      // Nothing here is about sessions, and an app from `make:auth` already has a store.
+      expect(check.fix).not.toContain('guren add session')
+    })
+  })
+
+  it('passes for the app `make:auth --install --oauth --oauth-only` scaffolds', async () => {
+    const files = {
+      'src/app.ts': APP_FIXTURE,
+      'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+      'db/schema.ts': SQLITE_SCHEMA_FIXTURE,
+    }
+
+    await withApp('guren-stores-make-auth-oauth-', files, { '@guren/plugin-cloudflare': '^0.10.0' }, async (dir) => {
+      await makeAuth({ install: true, force: true, oauth: 'github', oauthOnly: true })
+
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.oauthSignals.map((signal) => signal.symbol)).toEqual(['createOAuthManager'])
+
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
     })
   })
 
@@ -727,6 +748,39 @@ export const app = createApp({ providers: [OAuthServiceProvider] })
       })
     })
   }
+
+  it('gives an explicit MemoryOAuthStateStore the OAuth remedy, not the session one', async () => {
+    const files = {
+      'app/Providers/OAuthProvider.ts': `import { createOAuthManager, MemoryOAuthStateStore } from '@guren/core'
+export const oauth = createOAuthManager({ stateStore: new MemoryOAuthStateStore() })
+`,
+    }
+
+    await withApp('guren-stores-mem-oauth-fix-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('warn')
+      expect(check.fix).toContain('DatabaseOAuthStateStore')
+      expect(check.fix).not.toContain('guren add session')
+    })
+  })
+
+  it('names both remedies when an OAuth state store and another memory store are constructed', async () => {
+    const files = {
+      'config/stores.ts': `import { MemoryOAuthStateStore, MemoryStore } from '@guren/core'
+export const state = new MemoryOAuthStateStore()
+export const cache = new MemoryStore()
+`,
+    }
+
+    await withApp('guren-stores-mem-mixed-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('warn')
+      expect(check.fix).toContain('drop OAuthServiceProvider')
+      expect(check.fix).toContain('Redis-backed cache/queue driver')
+    })
+  })
 
   it('passes for an app with no session, OAuth, or in-memory store signals', async () => {
     const files = { 'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({})\n` }
