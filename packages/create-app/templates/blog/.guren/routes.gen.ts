@@ -143,3 +143,13 @@ function appendQueryString(path: string, query?: RouteQuery): string {
   const serialized = search.toString()
   return serialized ? `${path}?${serialized}` : path
 }
+
+declare module '@guren/core' {
+  interface GurenRouteContracts {
+    routes: {
+      'posts.search': { body: { keywords: string[]; limit: number } }
+      'posts.store': { body: { title: string; excerpt: string; body: string } }
+      'posts.update': { body: { title: string; excerpt: string; body: string } }
+    }
+  }
+}
