@@ -52,6 +52,7 @@ type Coerced<T> = { readonly value: T } | { readonly problem: string }
 
 interface EnvVarState<T> {
   readonly coerce: (raw: string) => Coerced<T>
+  readonly choices?: readonly string[]
   readonly presence: Presence
   readonly fallback?: T
   readonly emptyAllowed: boolean
@@ -103,6 +104,16 @@ export class EnvVar<T, P extends Presence = 'required'> {
     return this.state.description
   }
 
+  /** The `.default()` value; `undefined` unless `presence` is `defaulted`. */
+  get defaultValue(): T | undefined {
+    return this.state.fallback
+  }
+
+  /** The values an `Env.enum()` admits; `undefined` for every other builder. */
+  get choices(): readonly string[] | undefined {
+    return this.state.choices
+  }
+
   /** @internal */
   resolve(raw: string | undefined, production: boolean): Coerced<T | undefined> | { readonly unset: true } {
     const { presence } = this.state
@@ -116,8 +127,8 @@ export class EnvVar<T, P extends Presence = 'required'> {
 }
 
 // Builders pass `T` explicitly: inferred from the coerce callback it widens to `T | undefined`.
-function envVar<T>(coerce: (raw: string) => Coerced<T>): EnvVar<T> {
-  return new EnvVar<T>({ coerce, presence: 'required', emptyAllowed: false, isSecret: false })
+function envVar<T>(coerce: (raw: string) => Coerced<T>, choices?: readonly string[]): EnvVar<T> {
+  return new EnvVar<T>({ coerce, choices, presence: 'required', emptyAllowed: false, isSecret: false })
 }
 
 const PORT_PATTERN = /^\d+$/u
@@ -154,7 +165,7 @@ export const Env = {
   enum: <const Values extends readonly [string, ...string[]]>(values: Values): EnvVar<Values[number]> =>
     envVar<Values[number]>((raw) => (values as readonly string[]).includes(raw)
       ? { value: raw as Values[number] }
-      : { problem: `is not one of: ${values.join(', ')}` }),
+      : { problem: `is not one of: ${values.join(', ')}` }, Object.freeze([...values])),
 
   /**
    * Synchronous validators only: `parse()` also runs where nothing can await it

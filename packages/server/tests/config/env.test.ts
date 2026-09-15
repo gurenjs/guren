@@ -168,6 +168,16 @@ describe('defineEnv().parse()', () => {
   })
 })
 
+describe('EnvVar accessors', () => {
+  test('report the default and enum choices a variable was declared with, across modifiers', () => {
+    const driver = Env.enum(['database', 'cookie']).default('database').allowEmpty().describe('Session store.')
+    const key = Env.string().secret()
+
+    expect([driver.defaultValue, driver.choices, driver.description]).toEqual(['database', ['database', 'cookie'], 'Session store.'])
+    expect([key.defaultValue, key.choices, key.isSecret]).toEqual([undefined, undefined, true])
+  })
+})
+
 describe('defineEnv() declarations', () => {
   test('refuses NODE_ENV and GUREN_* keys, naming the reason', () => {
     expect(() => defineEnv({ NODE_ENV: Env.string() })).toThrow('bundlers can fold production gates')
