@@ -2,6 +2,7 @@ import { consola } from 'consola'
 import { addAttachments, appBindsStorage } from './add-attachments'
 import { addCache } from './add-cache'
 import { addLint } from './add-lint'
+import { addOAuth } from './add-oauth'
 import { addSession } from './add-session'
 import { addPrototype } from './add-prototype'
 import { assertNotApiOnly } from './app-surface'
@@ -162,23 +163,7 @@ export default registerAdminRoutes
     // No API-only guard, on purpose: the controller answers with `this.json(…)`
     // and `wireRouteRegistrar` warns rather than throws when routes/web.ts is
     // absent, so the scaffold genuinely works on an API-only app.
-    run: async (options) => {
-      const writerOptions = blueprintWriterOptions(options)
-      const created = await writeScaffoldFiles([
-        scaffoldTemplateFile('oauth', 'app/Providers/OAuthProvider.ts'),
-        scaffoldTemplateFile('oauth', 'app/Http/Controllers/Auth/OAuthController.ts'),
-        scaffoldTemplateFile('oauth', 'routes/oauth.ts'),
-      ], writerOptions)
-
-      await wireProviders([
-        { name: 'CoreOAuthServiceProvider', importStatement: "import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'" },
-        { name: 'OAuthProvider' },
-      ])
-
-      await wireRouteRegistrar('registerOAuthRoutes', "import registerOAuthRoutes from './oauth.js'")
-
-      return created
-    },
+    run: async (options) => addOAuth(blueprintWriterOptions(options)),
   },
   cache: {
     description: 'Install the default cache provider, an example cache service, and the CACHE_STORE env entry.',

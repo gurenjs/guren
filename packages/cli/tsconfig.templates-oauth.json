@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDirs": [
+      "templates/scaffold/oauth",
+      "tests/fixtures/scaffold-typecheck/oauth"
+    ]
+  },
+  "include": [
+    "templates/scaffold/oauth/**/*",
+    "tests/fixtures/scaffold-typecheck/oauth/**/*"
+  ],
+  "exclude": []
+}
