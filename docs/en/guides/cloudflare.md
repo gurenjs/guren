@@ -137,7 +137,7 @@ const oauth = createOAuthManager({
 })
 ```
 
-Both stores need tables. See [Authentication](./authentication.md) for the schema.
+Both stores need tables: `sessions` comes from `bunx guren add session`, and the `oauth_states` columns are in [State Storage](./oauth.md#state-storage). `bunx guren make:auth --oauth` generates both tables and wires both stores.
 
 ## Storage (R2)
 

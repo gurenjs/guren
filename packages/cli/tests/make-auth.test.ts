@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -621,6 +621,104 @@ export const users = mysqlTable('users', {
     }
   })
 
+  const oauthStateTables = [
+    {
+      dialect: 'pg',
+      schema: PG_SCHEMA_FIXTURE,
+      columns: [
+        "export const oauthStates = pgTable('oauth_states', {",
+        "stateHash: text('state_hash').primaryKey(),",
+        "expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),",
+        "binding: text('binding'),",
+      ],
+      imports: ['index', 'pgTable', 'text', 'timestamp'],
+    },
+    {
+      dialect: 'sqlite',
+      schema: SQLITE_SCHEMA_FIXTURE,
+      columns: [
+        "export const oauthStates = sqliteTable('oauth_states', {",
+        "stateHash: text('state_hash').primaryKey(),",
+        "expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),",
+        "binding: text('binding'),",
+      ],
+      imports: ['index', 'integer', 'sqliteTable', 'text'],
+    },
+    {
+      dialect: 'mysql',
+      schema: MYSQL_SCHEMA_FIXTURE,
+      columns: [
+        "export const oauthStates = mysqlTable('oauth_states', {",
+        // A sha512 hex digest is 128 characters.
+        "stateHash: varchar('state_hash', { length: 128 }).primaryKey(),",
+        "redirectTo: text('redirect_to'),",
+        "binding: varchar('binding', { length: 128 }),",
+      ],
+      imports: ['index', 'mysqlTable', 'text', 'timestamp', 'varchar'],
+    },
+  ]
+
+  for (const { dialect, schema, columns, imports } of oauthStateTables) {
+    it(`adds the ${dialect} oauth_states table beside sessions with --oauth`, async () => {
+      const workspace = await createTempWorkspace(`guren-cli-make-auth-oauth-states-${dialect}-`)
+      try {
+        await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': schema })
+
+        await makeAuth({ force: true, oauth: 'github', oauthOnly: true })
+
+        const written = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+        for (const column of columns) {
+          expect(written).toContain(column)
+        }
+        const importLine = written.split('\n')[0]
+        for (const name of imports) {
+          expect(importLine).toMatch(new RegExp(`[{,]\\s*${name}\\s*[,}]`))
+        }
+        // DatabaseOAuthStateStore writes these property names; one missing is a
+        // callback rejected at runtime, not a type error.
+        for (const property of ['provider:', 'redirectTo:', 'expiresAt:']) {
+          expect(written.slice(written.indexOf('export const oauthStates'))).toContain(property)
+        }
+        expect(written).toContain('export const sessions')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
+
+  it('leaves the OAuth manager on Core\'s provider when there is no db/schema.ts', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-no-schema-')
+    try {
+      await makeAuth({ force: true, oauth: 'github' })
+
+      // An import of a table no schema declares would not compile.
+      const provider = await readFile(join(workspace.dir, 'app/Providers/OAuthProvider.ts'), 'utf8')
+      expect(provider).not.toContain('oauthStates')
+      expect(provider).toContain("this.container.make<OAuthManager>('oauth')")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('lists codegen as the first next step, before which the pages do not typecheck', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-codegen-step-')
+    const infos: string[] = []
+    const info = spyOn(consola, 'info').mockImplementation(((...args: unknown[]) => {
+      infos.push(args.map(String).join(' '))
+    }) as typeof consola.info)
+    try {
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': PG_SCHEMA_FIXTURE })
+
+      await makeAuth({ force: true, oauth: 'github' })
+
+      const steps = infos.slice(infos.lastIndexOf('Next steps:') + 1)
+      expect(steps[0]).toContain('bun run codegen')
+    } finally {
+      info.mockRestore()
+      await workspace.cleanup()
+    }
+  })
+
   // MySQL has no ON CONFLICT: onConflictDoNothing() is undefined on its query
   // builder and throws when the seeder runs.
   const seederUpserts = [
@@ -1076,7 +1174,7 @@ export const posts = pgTable('posts', {
     }
   })
 
-  it('wires CoreOAuthServiceProvider and OAuthProvider into app.ts with --install --oauth', async () => {
+  it('wires only OAuthProvider, which binds a database-backed manager, with --install --oauth', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-install-')
     try {
       await mkdir(join(workspace.dir, 'src'), { recursive: true })
@@ -1115,9 +1213,17 @@ export function registerWebRoutes(router: Router): void {
       await makeAuth({ install: true, force: true, minimal: true, oauth: 'github' })
 
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
-      expect(appContent).toContain("import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'")
       expect(appContent).toContain("import OAuthProvider from '../app/Providers/OAuthProvider.js'")
-      expect(appContent).toContain('providers: [DatabaseProvider, SessionProvider, AuthProvider, CoreOAuthServiceProvider, OAuthProvider]')
+      expect(appContent).toContain('providers: [DatabaseProvider, SessionProvider, AuthProvider, OAuthProvider]')
+      // Core's provider binds a manager over MemoryOAuthStateStore; listed first,
+      // it is what `make('oauth')` would hand the scaffolded provider.
+      expect(appContent).not.toContain('OAuthServiceProvider')
+
+      const provider = await readFile(join(workspace.dir, 'app/Providers/OAuthProvider.ts'), 'utf8')
+      expect(provider).toContain("import { oauthStates } from '../../db/schema.js'")
+      expect(provider).toContain('createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })')
+      expect(provider).toContain("this.container.instance('oauth', oauth)")
+      expect(provider).not.toContain("make<OAuthManager>('oauth')")
     } finally {
       await workspace.cleanup()
     }
@@ -1157,7 +1263,7 @@ export default app
         makeAuth({ install: true, force: true, oauth: 'github' }))
 
       const reported = warnings.join('\n')
-      for (const provider of ['AuthProvider', 'CoreMailServiceProvider', 'MailProvider', 'CoreOAuthServiceProvider', 'OAuthProvider']) {
+      for (const provider of ['AuthProvider', 'CoreMailServiceProvider', 'MailProvider', 'OAuthProvider']) {
         expect(reported).toContain(`Could not register ${provider} in src/app.ts: Could not find providers array.`)
       }
 

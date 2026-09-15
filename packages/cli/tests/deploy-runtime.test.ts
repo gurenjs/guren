@@ -2,7 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
-import { SESSION_PROVIDER, sessionConfigSource, writeInstalledPackage } from './helpers'
+import { DEFAULT_ROUTES_FIXTURE, SESSION_PROVIDER, SQLITE_SCHEMA_FIXTURE, sessionConfigSource, writeInstalledPackage } from './helpers'
+import { makeAuth } from '../src/make-auth'
 import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { buildJsonOutput, getDoctorRuleEvaluations, runDoctor } from '../src/doctor'
@@ -624,6 +625,37 @@ export const oauth = createOAuthManager({})
       expect(check.status).toBe('warn')
       expect(check.message).toContain('OAuth is configured')
       expect(check.message).toContain('DatabaseOAuthStateStore')
+      expect(check.fix).toContain('DatabaseOAuthStateStore')
+      // Nothing here is about sessions, and an app from `make:auth` already has a store.
+      expect(check.fix).not.toContain('guren add session')
+    })
+  })
+
+  it('passes for the app `make:auth --install --oauth --oauth-only` scaffolds', async () => {
+    const files = {
+      'src/app.ts': `import { createApp } from '@guren/core'
+import registerWebRoutes from '../routes/web.js'
+
+const app = createApp({
+  routes: registerWebRoutes,
+  providers: [],
+})
+
+export default app
+`,
+      'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+      'db/schema.ts': SQLITE_SCHEMA_FIXTURE,
+    }
+
+    await withApp('guren-stores-make-auth-oauth-', files, { '@guren/plugin-cloudflare': '^0.10.0' }, async (dir) => {
+      await makeAuth({ install: true, force: true, oauth: 'github', oauthOnly: true })
+
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.oauthSignals.map((signal) => signal.symbol)).toEqual(['createOAuthManager'])
+
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      expect(check.message).not.toContain('OAuth is configured')
+      expect(check.status).toBe('pass')
     })
   })
 
