@@ -258,6 +258,11 @@ jobs:
       - name: Spec drift (blog example)
         run: cd examples/blog && bun ../../packages/cli/src/bin.ts check --spec
 
+      # The full check (arch boundaries, route contracts, console wiring, doc
+      # links, …), not just --spec above. RFC 0002 Part 1 is dogfooded here.
+      - name: Guren integrity check (blog example)
+        run: cd examples/blog && bun ../../packages/cli/src/bin.ts check
+
       - name: Build example apps
         run: |
           bun run --cwd examples/blog build
@@ -518,6 +523,12 @@ jobs:
 
       - name: Type check
         run: bun run --cwd web typecheck
+
+      # web/modules/blog is the framework's actual production dogfood of
+      # RFC 0002 Part 2 (`defineModule`) — examples/blog has no modules/.
+      # This is the one place the module boundary check runs in CI.
+      - name: Guren integrity check
+        run: cd web && bun ../packages/cli/src/bin.ts check
 
       - name: Run tests
         run: bun run --cwd web test
