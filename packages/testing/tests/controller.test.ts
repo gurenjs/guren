@@ -598,12 +598,74 @@ describe('createControllerModuleMock', () => {
 
     expect(widgets.providers).toEqual([WidgetProvider])
     expect(bare.providers).toEqual([])
+    expect(bare.commands).toEqual([])
+  })
 
-    const provider = new WidgetProvider('container')
-    provider.register()
-    provider.boot()
+  it('installs the runtime classes themselves, so instanceof agrees with the framework', async () => {
+    const mock = createControllerModuleMock()
+    const server = await import('@guren/server')
 
-    expect(provider.container).toBe('container')
+    for (const name of [
+      'Resource',
+      'JsonResource',
+      'collect',
+      'ValidationException',
+      'AuthenticationException',
+      'ServiceProvider',
+      'defineModule',
+      'definePlugin',
+    ] as const) {
+      expect(mock[name], name).toBe(server[name])
+    }
+  })
+
+  it('fails validateParams() with the status and errors the runtime answers', async () => {
+    const failingSchema = {
+      safeParse: () => ({
+        success: false as const,
+        error: { issues: [{ path: ['id'], message: 'Expected a number' }] },
+      }),
+    }
+
+    const { Controller } = createControllerModuleMock()
+    class MockShowController extends Controller {
+      show(): unknown {
+        return this.validateParams(failingSchema)
+      }
+    }
+    const ctx = createControllerContext('http://example.com/posts/abc')
+    ctx.req.param = () => ({ id: 'abc' })
+    const controller = new MockShowController()
+    controller.setContext(ctx)
+
+    const { ValidationException, Controller: RuntimeController, createApp } = await import('@guren/core')
+    let thrown: unknown
+    try {
+      controller.show()
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBeInstanceOf(ValidationException)
+
+    class RuntimeShowController extends RuntimeController {
+      show(): Response {
+        this.validateParams(failingSchema)
+        return this.text('unreachable')
+      }
+    }
+    const app = createApp({
+      routes: (router) => {
+        router.get('/posts/:id', [RuntimeShowController, 'show'])
+      },
+    })
+    await app.boot()
+    const response = await app.fetch(
+      new Request('http://example.com/posts/abc', { headers: { Accept: 'application/json' } }),
+    )
+    const body = (await response.json()) as { errors?: unknown }
+
+    expect((thrown as { statusCode: number }).statusCode).toBe(response.status)
+    expect((thrown as { errors: unknown }).errors).toEqual(body.errors)
   })
 })
 
