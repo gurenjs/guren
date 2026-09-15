@@ -14,6 +14,8 @@ export default defineEnv({
   SMTP_PORT: Env.port().default(587),
   MAIL_FROM_NAME: Env.string().allowEmpty().default('Guren App'),
   MAIL_SIGNATURE: Env.string().default('Pay $5 "now"'),
+  LOG_PATH: Env.string().default('C:\\\\logs\\\\n $HOME'),
+  SIGN_OFF: Env.string().default("It's done"),
 })
 `
 
@@ -40,7 +42,7 @@ describe('loadEnvSchema', () => {
 
     const vars = await loadedVars()
 
-    expect(Object.keys(vars)).toEqual(['APP_KEY', 'APP_URL', 'SESSION_DRIVER', 'SMTP_PORT', 'MAIL_FROM_NAME', 'MAIL_SIGNATURE'])
+    expect(Object.keys(vars)).toEqual(['APP_KEY', 'APP_URL', 'SESSION_DRIVER', 'SMTP_PORT', 'MAIL_FROM_NAME', 'MAIL_SIGNATURE', 'LOG_PATH', 'SIGN_OFF'])
     expect([vars.SESSION_DRIVER.choices, vars.SMTP_PORT.defaultValue]).toEqual([['database', 'cookie'], 587])
   })
 
@@ -65,7 +67,10 @@ describe('writeEnvExample', () => {
 
     const result = await writeEnvExample(workspace.dir, await loadedVars())
 
-    expect(result).toEqual({ added: ['APP_KEY', 'APP_URL', 'SESSION_DRIVER', 'MAIL_FROM_NAME', 'MAIL_SIGNATURE'], undeclared: ['LEGACY_FLAG'] })
+    expect(result).toEqual({
+      added: ['APP_KEY', 'APP_URL', 'SESSION_DRIVER', 'MAIL_FROM_NAME', 'MAIL_SIGNATURE', 'LOG_PATH', 'SIGN_OFF'],
+      undeclared: ['LEGACY_FLAG'],
+    })
     expect(await readFile(join(workspace.dir, '.env.example'), 'utf8')).toBe(
       'export LEGACY_FLAG=1\n'
       + 'export SMTP_PORT=2525\n'
@@ -75,8 +80,10 @@ describe('writeEnvExample', () => {
       + 'APP_URL=\n'
       + '# Session store (one of: database, cookie)\n'
       + 'SESSION_DRIVER=database\n'
-      + 'MAIL_FROM_NAME="Guren App"\n'
-      + 'MAIL_SIGNATURE=\'Pay \\$5 "now"\'\n',
+      + "MAIL_FROM_NAME='Guren App'\n"
+      + 'MAIL_SIGNATURE=\'Pay \\$5 "now"\'\n'
+      + "LOG_PATH='C:\\logs\\n \\$HOME'\n"
+      + 'SIGN_OFF="It\'s done"\n',
     )
     expect(await readFile(join(workspace.dir, '.env'), 'utf8')).toBe('APP_URL=http://localhost:3333\n')
   })
@@ -85,14 +92,14 @@ describe('writeEnvExample', () => {
     await writeWorkspaceFiles(workspace.dir, { 'config/env.ts': ENV_SCHEMA })
     await writeEnvExample(workspace.dir, await loadedVars())
 
-    const keys = ['SESSION_DRIVER', 'SMTP_PORT', 'MAIL_FROM_NAME', 'MAIL_SIGNATURE']
+    const keys = ['SESSION_DRIVER', 'SMTP_PORT', 'MAIL_FROM_NAME', 'MAIL_SIGNATURE', 'LOG_PATH', 'SIGN_OFF']
     const probe = Bun.spawnSync(
       ['bun', '--env-file=.env.example', '-e', `console.log(JSON.stringify(${JSON.stringify(keys)}.map((key) => process.env[key])))`],
       { cwd: workspace.dir, env: { PATH: process.env.PATH ?? '' }, stdout: 'pipe', stderr: 'pipe' },
     )
 
     expect(probe.stderr.toString()).toBe('')
-    expect(JSON.parse(probe.stdout.toString())).toEqual(['database', '587', 'Guren App', 'Pay $5 "now"'])
+    expect(JSON.parse(probe.stdout.toString())).toEqual(['database', '587', 'Guren App', 'Pay $5 "now"', 'C:\\logs\\n $HOME', "It's done"])
   })
 })
 
@@ -106,7 +113,7 @@ describe('checkEnvExample', () => {
   test('passes when .env.example assigns exactly the declared keys', async () => {
     await writeWorkspaceFiles(workspace.dir, {
       'config/env.ts': ENV_SCHEMA,
-      '.env.example': 'APP_KEY=\nAPP_URL=\nSESSION_DRIVER=database\n# SMTP_HOST=commented out\nSMTP_PORT=587\nMAIL_FROM_NAME=Guren\nMAIL_SIGNATURE=\n',
+      '.env.example': 'APP_KEY=\nAPP_URL=\nSESSION_DRIVER=database\n# SMTP_HOST=commented out\nSMTP_PORT=587\nMAIL_FROM_NAME=Guren\nMAIL_SIGNATURE=\nLOG_PATH=\nSIGN_OFF=\n',
     })
 
     expect((await checkEnvExample(workspace.dir)).map((result) => result.status)).toEqual(['pass'])
@@ -115,7 +122,7 @@ describe('checkEnvExample', () => {
   test('fails naming the keys each side lacks, and points a missing key at env:example', async () => {
     await writeWorkspaceFiles(workspace.dir, {
       'config/env.ts': ENV_SCHEMA,
-      '.env.example': 'APP_KEY=\nAPP_URL=\nSESSION_DRIVER=database\nSMTP_PORT=587\nMAIL_SIGNATURE=\nLEGACY_FLAG=1\n',
+      '.env.example': 'APP_KEY=\nAPP_URL=\nSESSION_DRIVER=database\nSMTP_PORT=587\nMAIL_SIGNATURE=\nLOG_PATH=\nSIGN_OFF=\nLEGACY_FLAG=1\n',
     })
 
     expect(await checkEnvExample(workspace.dir)).toEqual([expect.objectContaining({

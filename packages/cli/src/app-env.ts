@@ -46,8 +46,10 @@ export async function loadEnvSchema(cwd: string): Promise<EnvSchemaLoad> {
 }
 
 /**
- * A dotenv value Bun reads back verbatim. Bun expands `$NAME` inside either quote
- * style, so `$` is escaped rather than quoted away; a line break has no spelling.
+ * A dotenv value Bun reads back verbatim. Bun expands `$NAME` in every form and
+ * reads `\$` as `$`, keeps every other backslash, except `\n` and `\r` inside double
+ * quotes, and ends a bare value at `#`. So only `$` is escaped, and a value no form
+ * carries (a line break, or `'` together with `\`) is left blank.
  */
 function envFileValue(value: unknown): string {
   if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return ''
@@ -55,7 +57,9 @@ function envFileValue(value: unknown): string {
   if (/[\r\n]/u.test(text)) return ''
   const escaped = text.replace(/\$/gu, '\\$')
   if (/^[\w.:/@+\\$-]*$/u.test(escaped)) return escaped
-  return escaped.includes('"') ? `'${escaped}'` : `"${escaped}"`
+  if (!text.includes("'") && !text.endsWith('\\')) return `'${escaped}'`
+  if (!text.includes('"') && !text.includes('\\')) return `"${escaped}"`
+  return ''
 }
 
 function envExampleEntries(vars: DeclaredEnvVars): GurenPluginEnvEntry[] {
