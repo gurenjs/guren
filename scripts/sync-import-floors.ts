@@ -7,7 +7,7 @@
  * version a release introduces exists; `--check` backs `audit:import-floors`.
  * Exit 1 drift, 2 cannot run. Root entries are out of scope (see `ROOT_ENTRY`).
  */
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join, posix } from 'node:path'
 import process from 'node:process'
@@ -105,8 +105,13 @@ class Repository {
   }
 
   private readWorkingTree(path: string): string | undefined {
-    const full = join(this.root, path)
-    return existsSync(full) && statSync(full).isFile() ? readFileSync(full, 'utf8') : undefined
+    try {
+      return readFileSync(join(this.root, path), 'utf8')
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') return undefined
+      throw error
+    }
   }
 
   private readAt(rev: string, path: string): string | undefined {
