@@ -6,6 +6,7 @@ import {
   clientManifestCandidates,
   loadViteManifest,
   getManifestFile,
+  PUBLIC_ASSETS_URL_PREFIX,
 } from '../../src/http/vite-manifest'
 // The manifest preference order lives on both sides: here as
 // `clientManifestCandidates`, and as `manifestPaths` in core's
@@ -79,8 +80,9 @@ describe('clientManifestCandidates', () => {
     const deploy = resolveClientAssetEnv(join(root, 'public'), ENTRY, 'Test build')
 
     // A disagreement here means an app carrying both layouts serves one asset
-    // version locally and another after a serverless deploy.
+    // version locally and another after a serverless deploy. The prefix is the
+    // runtime's own: a deploy entry under another one loads every lazy chunk twice.
     expect(getManifestFile(runtime?.[ENTRY])).toBe('app-Fresh00.js')
-    expect(deploy.entry).toBe('/assets/app-Fresh00.js')
+    expect(deploy.entry).toBe(`${PUBLIC_ASSETS_URL_PREFIX}app-Fresh00.js`)
   })
 })

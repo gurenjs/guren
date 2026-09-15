@@ -13,7 +13,7 @@ import { trimTrailingSlashes } from '../support/trim-slashes'
 /**
  * Where `configureInertiaAssets` serves hashed build output from. The deploy
  * builds restate it as `CLIENT_ASSETS_URL_PREFIX` in @guren/core's
- * internal/deploy-build.ts; the two must stay equal.
+ * internal/deploy-build.ts; tests/http/vite-manifest.test.ts pins the two equal.
  */
 export const PUBLIC_ASSETS_URL_PREFIX = '/public/assets/'
 
