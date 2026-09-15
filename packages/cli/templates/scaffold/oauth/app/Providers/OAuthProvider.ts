@@ -1,8 +1,12 @@
-import { ServiceProvider, type OAuthManager, createGitHubOAuthProviderConfig, createGoogleOAuthProviderConfig, createDiscordOAuthProviderConfig } from '@guren/core'
+import { createOAuthManager, DatabaseOAuthStateStore, ServiceProvider, createGitHubOAuthProviderConfig, createGoogleOAuthProviderConfig, createDiscordOAuthProviderConfig } from '@guren/core'
+import { oauthStates } from '../../db/schema.js'
 
 export default class OAuthProvider extends ServiceProvider {
   register(): void {
-    const oauth = this.container.make<OAuthManager>('oauth')
+    // The authorize redirect and its callback may reach different processes, so
+    // the state tying them together lives in the database, not in memory.
+    const oauth = createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })
+    this.container.instance('oauth', oauth)
 
     const githubClientId = process.env.OAUTH_GITHUB_CLIENT_ID
     const githubClientSecret = process.env.OAUTH_GITHUB_CLIENT_SECRET
