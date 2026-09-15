@@ -69,7 +69,7 @@ This adds a `githubId` / `googleId` column per provider to the `users` table, an
 
 The OAuth state that ties the callback to its authorize redirect is kept in the database. `--oauth` adds an `oauth_states` table to `db/schema.ts`, covered by the same migration as `users` and `sessions`, and the `OAuthProvider` binds the `oauth` manager itself over `DatabaseOAuthStateStore`, so `--install` does not register `CoreOAuthServiceProvider`. The redirect and the callback can then reach different processes, which on Workers, Lambda and Vercel is the normal case (see [State Storage](./oauth.md#state-storage)). An app with no `db/schema.ts` keeps the in-memory store and `CoreOAuthServiceProvider`.
 
-`--oauth` shares its `OAuthController` / `OAuthProvider` file paths with `guren add oauth` below, with a complete (not stub) callback and the database state store. Don't run both against the same app, since the second run either aborts (no `--force`) or overwrites the first (`--force`).
+`--oauth` shares its `OAuthController` / `OAuthProvider` file paths and the database state store with `guren add oauth` below, with a complete (not stub) callback. Don't run both against the same app, since the second run either aborts (no `--force`) or overwrites the first (`--force`).
 
 ### OAuth as the only sign-in method
 
@@ -103,7 +103,9 @@ This creates:
 - `app/Http/Controllers/Auth/OAuthController.ts`
 - `routes/oauth.ts`
 
-and wires `CoreOAuthServiceProvider` + `OAuthProvider` into `src/app.ts`.
+and wires `OAuthProvider` into `src/app.ts`.
+
+It also adds an `oauth_states` table to `db/schema.ts` and generates its migration (run `bun run db:make` yourself if `drizzle-kit` is not installed yet). `OAuthProvider` binds the `oauth` manager over `DatabaseOAuthStateStore`, so the callback does not need to reach the process that issued the authorize redirect, which on Workers, Lambda and Vercel it usually does not (see [State Storage](./oauth.md#state-storage)). `CoreOAuthServiceProvider` is not registered, because its manager keeps state in process memory. The command refuses to run in an app with no `db/schema.ts`, and writes nothing.
 
 ### Configure provider credentials
 

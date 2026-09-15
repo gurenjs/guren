@@ -69,7 +69,7 @@ bunx guren make:auth --install --oauth github,google
 
 コールバックを認可リダイレクトと結びつける OAuth state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。`OAuthProvider` は `DatabaseOAuthStateStore` を使う `oauth` マネージャーを自分でコンテナに束縛するので、`--install` は `CoreOAuthServiceProvider` を登録しません。これでリダイレクトとコールバックが別のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれが普通です([Stateストレージ](./oauth.md#stateストレージ)を参照)。`db/schema.ts` が無いアプリでは、これまでどおりメモリ上のストアと `CoreOAuthServiceProvider` を使います。
 
-`--oauth` は、`OAuthController` / `OAuthProvider` のファイルパスを下記の `guren add oauth` と共有しています。違いは、コールバックがスタブではなく完成された実装である点と、state をデータベースに保存する点です。同じアプリに対して両方を実行しないでください。2回目の実行は、`--force` なしなら失敗し、`--force` ありなら1回目の生成物を上書きします。
+`--oauth` は、`OAuthController` / `OAuthProvider` のファイルパスと、state をデータベースに保存する仕組みを下記の `guren add oauth` と共有しています。違いは、コールバックがスタブではなく完成された実装である点だけです。同じアプリに対して両方を実行しないでください。2回目の実行は、`--force` なしなら失敗し、`--force` ありなら1回目の生成物を上書きします。
 
 ### OAuth のみでサインインする
 
@@ -103,7 +103,9 @@ bunx guren add oauth
 - `app/Http/Controllers/Auth/OAuthController.ts`
 - `routes/oauth.ts`
 
-あわせて、`src/app.ts` に `CoreOAuthServiceProvider` と `OAuthProvider` が自動登録されます。
+あわせて、`src/app.ts` に `OAuthProvider` が自動登録されます。
+
+`db/schema.ts` には `oauth_states` テーブルが追加され、そのマイグレーションも生成されます。`drizzle-kit` をまだインストールしていない場合は、あとで `bun run db:make` を実行してください。`OAuthProvider` は `DatabaseOAuthStateStore` を使う `oauth` マネージャーをコンテナに束縛します。コールバックが認可リダイレクトを発行したプロセスに届かなくても動き、Workers、Lambda、Vercel ではその状況が普通です([Stateストレージ](./oauth.md#stateストレージ)を参照)。`CoreOAuthServiceProvider` はメモリ上に state を持つので登録しません。`db/schema.ts` が無いアプリでは、何も書き込まずにエラーで終了します。
 
 ### プロバイダー資格情報の設定
 

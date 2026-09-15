@@ -30,6 +30,12 @@ async function seedAppFile(source: string): Promise<void> {
   await writeFile('src/app.ts', source)
 }
 
+/** A schema to append to; every starter ships one, api-only included. */
+async function seedSchema(schema = PG_SCHEMA_FIXTURE): Promise<void> {
+  await mkdir('db', { recursive: true })
+  await writeFile('db/schema.ts', schema)
+}
+
 /** Minimum project shape the resource blueprint patches into. */
 async function seedResourceWorkspace(schema: string, routes = DEFAULT_ROUTES_FIXTURE): Promise<void> {
   await mkdir('resources/js/pages', { recursive: true })
@@ -333,6 +339,7 @@ export const posts =
     })
 
     it('wires each blueprint once, however the argument is spelled', async () => {
+      await seedSchema()
       await runBlueprint('admin')
       await runBlueprint('admin', { force: true })
       await runBlueprint('oauth')
@@ -596,6 +603,7 @@ export const users = pgTable('users', {
     await seedAppFile(APP_FIXTURE)
     await mkdir('routes', { recursive: true })
     await writeFile('routes/web.ts', DEFAULT_ROUTES_FIXTURE)
+    await seedSchema()
 
     const adminFiles = await runBlueprint('admin')
     const queueFiles = await runBlueprint('queue')
@@ -661,7 +669,7 @@ export const users = pgTable('users', {
     expect(appSource).toContain('CoreNotificationServiceProvider')
     expect(appSource).toContain('CoreStorageServiceProvider')
     expect(appSource).toContain('CoreBroadcastServiceProvider')
-    expect(appSource).toContain('CoreOAuthServiceProvider')
+    expect(appSource).not.toContain('OAuthServiceProvider')
     expect(appSource).toContain('QueueProvider')
     expect(appSource).toContain('MailProvider')
     expect(appSource).toContain('EventProvider')
@@ -1100,7 +1108,40 @@ describe('oauth blueprint output', () => {
     await workspace.cleanup()
   })
 
+  it('keeps OAuth state in an oauth_states table the provider binds', async () => {
+    await seedAppFile(APP_FIXTURE)
+    await seedSchema()
+
+    await runBlueprint('oauth')
+
+    const schema = await readFile('db/schema.ts', 'utf8')
+    expect(schema).toContain("export const oauthStates = pgTable('oauth_states', {")
+    expect(schema).toContain("binding: text('binding'),")
+
+    const provider = await readFile('app/Providers/OAuthProvider.ts', 'utf8')
+    expect(provider).toContain("import { oauthStates } from '../../db/schema.js'")
+    expect(provider).toContain('createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })')
+    expect(provider).toContain("this.container.instance('oauth', oauth)")
+
+    const appSource = await readFile('src/app.ts', 'utf8')
+    expect(appSource).toContain('OAuthProvider')
+    expect(appSource).not.toContain('OAuthServiceProvider')
+  })
+
+  it('refuses an app with no db/schema.ts and writes nothing', async () => {
+    await seedAppFile(APP_FIXTURE)
+
+    await expect(runBlueprint('oauth')).rejects.toThrow(
+      /keeps OAuth state in an oauth_states table in db\/schema\.ts, but this app has no db\/schema\.ts/,
+    )
+
+    expect(existsSync(resolve(workspace.dir, 'app/Providers/OAuthProvider.ts'))).toBe(false)
+    expect(existsSync(resolve(workspace.dir, 'routes/oauth.ts'))).toBe(false)
+    expect(await readFile('src/app.ts', 'utf8')).toBe(APP_FIXTURE)
+  })
+
   it('does not shadow the base Controller.redirect() helper', async () => {
+    await seedSchema()
     await runBlueprint('oauth')
 
     const controller = await readFile('app/Http/Controllers/Auth/OAuthController.ts', 'utf8')
