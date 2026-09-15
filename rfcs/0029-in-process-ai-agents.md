@@ -2,7 +2,9 @@
 
 **Author:** Urata Daiki (@7nohe)
 **Date:** 2026-09-16
-**Status:** Draft
+**Status:** Accepted (2026-09-16; the standard two-week discussion window
+was shortened by the deciding maintainer for this solo-driven change, after
+a design review pass recorded in PR #860)
 
 > The model-calling half of Guren's agent story. RFC 0016 made the application
 > a *tool provider*: every `.agent()` route is a tool with a validated schema
