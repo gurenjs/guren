@@ -32,11 +32,25 @@ export interface WorkersScheduledEvent {
 export interface WorkersAppLike {
   boot(): Promise<void>
   fetch(request: Request, env?: unknown, executionCtx?: unknown): Response | Promise<Response>
-  /** Only the cron entrypoint reads it, so an app-like that never receives one still satisfies boot/fetch. */
-  container?: { makeOptional<T>(key: string): T | undefined }
+  /**
+   * Read by the cron entrypoint. `has`/`instance` bind the entrypoint env as
+   * `env.source` before boot (RFC 0027 §1); optional, so an existing app-like still boots.
+   */
+  container?: {
+    makeOptional<T>(key: string): T | undefined
+    has?(key: string): boolean
+    instance?(key: string, value: unknown): unknown
+  }
 }
 
 const latches = new WeakMap<WorkersAppLike, Promise<void>>()
+
+/** Wrangler `vars` may be missing from `process.env`; a value the app or a test bound itself is kept. */
+function bindEnvSource(app: WorkersAppLike, env: unknown): void {
+  const container = app.container
+  if (!container?.has || !container.instance || env === null || typeof env !== 'object') return
+  if (!container.has('env.source')) container.instance('env.source', env)
+}
 
 /**
  * Boot `app` against `env`, once per isolate.
@@ -57,6 +71,7 @@ export async function bootWorkersApp(app: WorkersAppLike, env: unknown): Promise
     // and that throw has to reach the cleanup too.
     attempt = latches.get(app)
     if (!attempt) {
+      bindEnvSource(app, env)
       attempt = app.boot()
       latches.set(app, attempt)
     }

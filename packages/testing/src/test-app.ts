@@ -1,5 +1,6 @@
 import type { Hono } from 'hono'
 import type {
+  EnvSchema,
   I18nPluginOptions,
   RouteDefinition,
   Router,
@@ -42,7 +43,8 @@ type ApplicationConstructor = new (options: {
   routes?: RouteRegistration
   auth?: Record<string, unknown>
   i18n?: I18nPluginOptions
-}) => ApplicationLike
+  env?: EnvSchema
+}) => ApplicationLike & { readonly container: { instance(key: string, value: unknown): unknown } }
 
 /**
  * Options for creating a TestApp instance.
@@ -63,6 +65,14 @@ export interface TestAppOptions {
    * `this.t()`/`this.tc()`. Ignored by the Hono fallback.
    */
   readonly i18n?: I18nPluginOptions
+  /** Mirrors `createApp({ env })`: the schema `config/env.ts` exports, validated when the app boots. */
+  readonly env?: EnvSchema
+  /**
+   * Values the schema reads ahead of `process.env`, bound as `env.source` before
+   * boot, so a test overrides one variable without mutating the process. `''`
+   * makes a variable unset; a missing key falls back to `process.env`.
+   */
+  readonly envSource?: Readonly<Record<string, string>>
 }
 
 /**
@@ -441,7 +451,11 @@ export class TestApp {
       routes: options.routes,
       auth: options.auth,
       i18n: options.i18n,
+      env: options.env,
     })
+    if (options.envSource) {
+      application.container.instance('env.source', options.envSource)
+    }
     claimAmbient?.(application)
     await application.boot()
 
