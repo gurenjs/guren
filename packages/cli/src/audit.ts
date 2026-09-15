@@ -459,9 +459,9 @@ async function auditRoutes(
     // 1. Input validation on body-carrying routes
     if (bodyCarrying) {
       const hasRouteSchema = Boolean(route.schemas?.body)
-      // Route-level body schemas are runtime-enforced only for inline handlers;
-      // for controller actions the schema is type-information only.
-      const routeSchemaEnforced = hasRouteSchema && !route.controller
+      // A server that validates a controller action's body schema says so with
+      // `validatesBody`; without the flag the schema only types the action.
+      const routeSchemaEnforced = hasRouteSchema && (!route.controller || Boolean(route.validatesBody))
       const hasControllerValidation = methodInfo ? VALIDATE_BODY_PATTERN.test(methodInfo.body) : false
       const readsBody = methodInfo ? BODY_ACCESS_PATTERN.test(methodInfo.body) : false
 

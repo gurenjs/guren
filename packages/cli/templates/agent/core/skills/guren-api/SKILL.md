@@ -36,7 +36,8 @@ export default class PostController extends Controller {
   }
 
   async store() {
-    const data = await this.validateBody(PostPayloadSchema)  // throws 422
+    // routes/web.ts: router.post('/posts', { name: 'posts.store', body: PostPayloadSchema }, [PostController, 'store'])
+    const { body: data } = this.validated('posts.store')     // route contract already answered 422
     const user = await this.auth.userOrFail<UserRecord>()    // throws 401 — <T> defaults to Authenticatable, no .id
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts/' + post?.id)
@@ -51,7 +52,11 @@ For public content pages that need no client framework (blog posts, docs),
 `app/View/` to plain SSR HTML — see `rules/controllers-http.md`
 ("Server-rendered content pages") for the conventions.
 
-**Validation helpers** (Zod duck-type — any schema with `safeParse()` works):
+**Route contract input**: a route's `params`/`query`/`body` schemas are validated before the action (422 on failure):
+- `this.validated('route.name')` → `{ params, query, body }` as the schemas parsed them; typed after `bunx guren codegen`,
+  an undeclared segment is `undefined`, and a name other than the served route throws
+
+**Validation helpers** (Zod duck-type — any schema with `safeParse()` works), for routes without a contract:
 - `this.validateBody<T>(schema): Promise<T>` — parse request body
 - `this.validateQuery<T>(schema): T` — parse query parameters
 - `this.validateParams<T>(schema): T` — parse route parameters
@@ -171,7 +176,7 @@ Guren provides bidirectional type safety between frontend forms and backend vali
 
 ```
 Zod schema (Validator) → Route body option → codegen → ApiRoutes → Frontend form type
-                       → Controller.validateBody() → Runtime validation (422 on failure)
+                       → Route contract middleware → Runtime validation (422 on failure) → this.validated()
 ```
 
 `ApiRoutes[...]['body']` is the **request** shape — what the browser sends, before
@@ -205,9 +210,9 @@ form.post(route('posts.store'))
 <Link href={route('posts.show', { id: post.id })}>
 ```
 
-**4. Controller validates at runtime** (same schema):
+**4. Controller reads the validated body** (the route validated it before the action ran):
 ```typescript
-const data = await this.validateBody(PostPayloadSchema)  // throws 422, returns typed data
+const { body: data } = this.validated('posts.store')  // typed from the contract after codegen
 ```
 
 ### Middleware

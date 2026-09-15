@@ -415,7 +415,7 @@ export type AttachmentName<M extends keyof AttachmentsMap> = keyof AttachmentsMa
 
 - `bunx guren check` は、`configureAttachments()` が `db/schema.ts` の実際にエクスポートされたテーブルを束縛していることを検証します。レイヤーはテーブルを型なしで受け取るため、スキーマエクスポートのリネームは本来、最初の attach 時の実行時エラーでしか発覚しません。
 - `bunx guren check` はさらに、アプリに `configureAttachments()` の呼び出しがまったくないのに `Attachable(...)` を mixin するモデルも検出します。mixin はレイヤーを初回利用時に解決するため、設定の欠落も本来は実行時にしか発覚しません。
-- `bunx guren audit` は、型付きの `attach()` に渡されるアップロードを検証済みとして扱います(宣言駆動のパイプラインが検証そのものです)。他のボディ入力を読むアクションには引き続き `validateBody()` が必要です。
+- `bunx guren audit` は、型付きの `attach()` に渡されるアップロードを検証済みとして扱います(宣言駆動のパイプラインが検証そのものです)。他のボディ入力を読むアクションには、引き続きルートの `body` スキーマか `validateBody()` が必要です。
 
 ## テスト
 

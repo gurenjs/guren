@@ -3,6 +3,7 @@
 // holding one stalls undici's formData() forever.
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
+  contractInput,
   createControllerContext,
   createControllerModuleMock,
   readInertiaResponse,
@@ -162,6 +163,9 @@ const paginatedPostsResponse = {
     to: 1,
   },
 }
+
+const storeInput = contractInput({ route: 'posts.store', body: { title: 'New Post', excerpt: 'Excerpt', body: 'Body content' } })
+const updateInput = contractInput({ route: 'posts.update', body: { title: 'Updated Title', excerpt: 'Updated excerpt', body: 'Updated body' } })
 
 describe('PostController', () => {
   beforeEach(() => {
@@ -362,6 +366,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        ...storeInput,
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -396,6 +401,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        ...storeInput,
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -424,6 +430,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        ...storeInput,
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -442,33 +449,11 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        ...storeInput,
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
       await expect(controller.store()).rejects.toMatchObject({ statusCode: 401, message: 'Unauthenticated.' })
-    })
-
-    it('returns validation errors for invalid data', async () => {
-      const mockUser = { id: 1, name: 'John Doe' }
-      const auth = createAuthStub(mockUser)
-      const ctx = createControllerContext('http://blog.test/posts', {
-        method: 'POST',
-        body: JSON.stringify({ title: '', excerpt: '', body: '' }),
-        headers: { 'Content-Type': 'application/json', 'X-Inertia': 'true' },
-      }, {
-        cache: { store: vi.fn() },
-        events: { emit: mockEmit },
-      }) as unknown as Context
-
-      const controller = createControllerWithAuth(PostController, auth, ctx)
-      await expect(controller.store()).rejects.toMatchObject({
-        statusCode: 422,
-        errors: expect.objectContaining({
-          title: expect.any(Array),
-          excerpt: expect.any(Array),
-          body: expect.any(Array),
-        }),
-      })
     })
   })
 
@@ -522,6 +507,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
 
@@ -551,6 +537,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
 
@@ -571,35 +558,12 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
+        ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '999' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
       await expect(controller.update()).rejects.toMatchObject({ statusCode: 404, message: 'Post not found' })
-    })
-
-    it('returns validation errors for invalid data', async () => {
-      mockFindOrFail.mockResolvedValue(samplePost)
-      const auth = createAuthStub()
-      const ctx = createControllerContext('http://blog.test/posts/1', {
-        method: 'PUT',
-        body: JSON.stringify({ title: '', excerpt: '', body: '' }),
-        headers: { 'Content-Type': 'application/json', 'X-Inertia': 'true' },
-      }, {
-        cache: { store: vi.fn() },
-        events: { emit: mockEmit },
-      }) as unknown as Context
-      setRouteParams(ctx, { id: '1' })
-
-      const controller = createControllerWithAuth(PostController, auth, ctx)
-      await expect(controller.update()).rejects.toMatchObject({
-        statusCode: 422,
-        errors: expect.objectContaining({
-          title: expect.any(Array),
-          excerpt: expect.any(Array),
-          body: expect.any(Array),
-        }),
-      })
     })
   })
 

@@ -324,6 +324,27 @@ Available contract fields:
 > [!NOTE]
 > Repeated query keys reach the `query` schema as arrays (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`), while a key that appears once stays a string. See [Array-Style Query Parameters](./validation.md#array-style-query-parameters).
 
+### Reading Validated Input
+
+The `params`, `query` and `body` schemas are checked before the handler runs, for a controller action as much as for an inline handler. A request that fails one gets a 422 and the action never runs; on an Inertia request the errors are flashed back to the form, keyed by field path as `validateBody()` keys them.
+
+The action reads what the schemas parsed with `this.validated()`, passing its own route name:
+
+```ts
+export default class PostsController extends Controller {
+  async store() {
+    const { body } = this.validated('posts.store')
+    const user = await this.auth.userOrFail()
+    const post = await Post.create({ ...body, authorId: user.id })
+    return this.redirect(`/posts/${post.id}`)
+  }
+}
+```
+
+Values arrive after coercion, defaults and transforms, so a `z.coerce.number()` param is a `number`. A segment the route declares no schema for is `undefined`. After `guren codegen`, the route name is checked at compile time and the result is typed from the contract; calling `this.validated()` with a name other than the route being served throws. An action mounted on several routes, such as a PUT and a PATCH, passes every name: `this.validated(['posts.update', 'posts.patch'])`.
+
+Because the contract runs before the action, a check the action makes itself (such as `this.auth.userOrFail()`) only happens once the body is valid, so an invalid body gets its 422 first. Put the check in route middleware when an unauthenticated request must get a 401 first. `validateBody()`, `validateQuery()` and `validateParams()` keep working, and remain the way to validate a route that declares no contract.
+
 ### Resource Response Hints
 
 Routes that answer with [API Resources](./api-resources.md) already have a response type: the one codegen extracts from the Resource class into `.guren/data.gen.ts`. Writing an `output` schema for such a route would restate that shape in Zod and leave two copies to drift. Declare the Resource itself instead:

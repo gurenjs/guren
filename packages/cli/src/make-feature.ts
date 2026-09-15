@@ -502,7 +502,7 @@ function generateController(
 import { pages } from '@/.guren/pages.gen'
 import { ${singular} } from '../../Models/${singular}.js'
 import { ${singular}Resource, type ${singular}ResourceData } from '../Resources/${singular}Resource.js'
-import { ${singular}IdParamSchema, ${singular}PayloadSchema, List${collection}QuerySchema } from '../Validators/${singular}Validator.js'
+import { ${singular}IdParamSchema, List${collection}QuerySchema } from '../Validators/${singular}Validator.js'
 
 type ${collection}IndexProps = PaginatedPageProps<${singular}ResourceData>
 
@@ -535,7 +535,7 @@ export default class ${singular}Controller extends Controller {
   }
 
   async store(): Promise<Response> {
-${authGuard}${createGuard}    const data = await this.validateBody(${singular}PayloadSchema)
+${authGuard}${createGuard}    const { body: data } = this.validated('${routeName}.store')
     const ${variableName} = await ${singular}.create(data)
 ${storeAttach}    return this.redirect('${redirectPrefix}/${routeName}/' + ${variableName}?.id)
   }
@@ -551,7 +551,7 @@ ${storeAttach}    return this.redirect('${redirectPrefix}/${routeName}/' + ${var
 
   async update(): Promise<Response> {
 ${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
-${updateGuard}    const data = await this.validateBody(${singular}PayloadSchema)
+${updateGuard}    const { body: data } = this.validated('${routeName}.update')
     await ${singular}.update({ id }, data)
     return this.redirect('${redirectPrefix}/${routeName}/' + id)
   }

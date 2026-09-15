@@ -581,7 +581,8 @@ partially; keep declarations inline object literals to stay in the map.
   runtime too.
 - `bunx guren audit` treats uploads handed to a typed `attach()` as
   validated (the declaration-driven pipeline is the validation); an action
-  that reads other body input still needs `validateBody()`.
+  that reads other body input still needs a route `body` schema or
+  `validateBody()`.
 
 ## Testing
 

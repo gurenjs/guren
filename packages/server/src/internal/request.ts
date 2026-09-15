@@ -20,3 +20,7 @@ export type {
   RequestUploads,
   RequestUploadsContext,
 } from '../http/request'
+// The record the contract middleware leaves for `Controller.validated()`; the
+// controller mock seeds it under the same key and reads it through the same function.
+export { VALIDATED_INPUT_CONTEXT_KEY, readValidatedInput } from '../mvc/validated-input'
+export type { UntypedValidatedInput, ValidatedInputRecord } from '../mvc/validated-input'

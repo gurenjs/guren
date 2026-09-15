@@ -190,9 +190,29 @@ export default class PostsController extends Controller {
 
 ## バリデーション
 
-### Zod スキーマヘルパー（推奨）
+### ルートコントラクト（推奨）
 
-コントローラー内で `validateBody`、`validateQuery`、`validateParams` を使うのが最もシンプルです。`safeParse()` メソッドを持つ任意のスキーマ（Zod、Valibot など）を受け取り、失敗時に `ValidationException`（422）をスローします。
+ルートが `params`、`query`、`body` のスキーマを宣言していれば、フレームワークがアクションの実行前にリクエストを検証し、失敗時は 422 を返します。アクションは検証をやり直さず、パース済みの値を読みます。
+
+```ts
+// routes/web.ts
+router.post('/posts', { name: 'posts.store', body: StorePostSchema }, [PostsController, 'store'])
+
+// app/Http/Controllers/PostsController.ts
+export default class PostsController extends Controller {
+  async store() {
+    const { body } = this.validated('posts.store') // 検証済み
+    const post = await Post.create(body)
+    return this.redirect(`/posts/${post.id}`)
+  }
+}
+```
+
+`this.validated(routeName)` は、スキーマがパースした `{ params, query, body }` を返します。`guren codegen` の実行後はルートコントラクトから型が付きます。詳しくは[検証済み入力の読み取り](./routing.md#検証済み入力の読み取り)を参照してください。
+
+### Zod スキーマヘルパー
+
+コントラクトを持たないルートでは、コントローラー内で `validateBody`、`validateQuery`、`validateParams` を使うのが最もシンプルです。`safeParse()` メソッドを持つ任意のスキーマ（Zod、Valibot など）を受け取り、失敗時に `ValidationException`（422）をスローします。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -255,7 +275,7 @@ async store() {
 
 バリデーションが失敗すると、エラー詳細を含む 422 レスポンスが自動的に返されます。`authorize()` メソッドが `false` を返した場合は、403 レスポンスが返されます。
 
-FormRequest クラスとバリデーションルールの定義については、[バリデーションガイド](./validation.md)をご覧ください。新規実装では `validateBody()` / `validateQuery()` / `validateParams()` を優先してください。
+FormRequest クラスとバリデーションルールの定義については、[バリデーションガイド](./validation.md)をご覧ください。新規実装ではルートコントラクトと `this.validated()`、コントラクトの無いルートでは `validateBody()` / `validateQuery()` / `validateParams()` を優先してください。
 
 ## メソッド間でのデータ共有
 コントローラーはリクエストごとにインスタンス化されるため、あるメソッドでインスタンスフィールドを設定して、ヘルパーメソッドで再利用できます。全ページ共通のデータ（例: ユーザー情報）については、Inertia の共有プロパティやミドルウェアの利用を検討してください。

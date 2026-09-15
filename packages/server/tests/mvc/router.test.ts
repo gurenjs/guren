@@ -104,6 +104,7 @@ describe('Router route contract metadata', () => {
         hasInlineMiddleware: false,
         capabilities: {},
         controller: undefined,
+        validatesBody: true,
         summary: 'Create post',
         description: 'Creates a post resource.',
         tags: ['Posts'],

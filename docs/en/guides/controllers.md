@@ -131,9 +131,29 @@ async store() {
 
 ## Validation
 
-### Zod Schema Helpers (Recommended)
+### Route Contracts (Recommended)
 
-The simplest approach is to use `validateBody`, `validateQuery`, and `validateParams` with Zod schemas directly in your controller. They accept any object with a `safeParse()` method (Zod, Valibot, etc.) and throw a `ValidationException` (422) on failure:
+When the route declares `params`, `query` or `body` schemas, the framework validates the request before the action runs and answers 422 on failure. The action reads the parsed values instead of validating again:
+
+```ts
+// routes/web.ts
+router.post('/posts', { name: 'posts.store', body: StorePostSchema }, [PostsController, 'store'])
+
+// app/Http/Controllers/PostsController.ts
+export default class PostsController extends Controller {
+  async store() {
+    const { body } = this.validated('posts.store') // already validated
+    const post = await Post.create(body)
+    return this.redirect(`/posts/${post.id}`)
+  }
+}
+```
+
+`this.validated(routeName)` returns `{ params, query, body }` as the schemas parsed them, typed from the route contract once `guren codegen` has run. See [Reading Validated Input](./routing.md#reading-validated-input) for the details.
+
+### Zod Schema Helpers
+
+For a route without a contract, use `validateBody`, `validateQuery`, and `validateParams` with Zod schemas directly in your controller. They accept any object with a `safeParse()` method (Zod, Valibot, etc.) and throw a `ValidationException` (422) on failure:
 
 ```ts
 import { Controller } from '@guren/core'

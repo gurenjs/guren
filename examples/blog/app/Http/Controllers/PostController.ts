@@ -8,7 +8,7 @@ import {
 } from '@guren/core'
 import { Post } from '../../Models/Post.js'
 import type { UserRecord } from '../../Models/User.js'
-import { PostPayloadSchema, PostFormSchema, PageQuerySchema, PostIdParamSchema } from '../Validators/PostValidator.js'
+import { PostFormSchema, PageQuerySchema, PostIdParamSchema } from '../Validators/PostValidator.js'
 import { PostCreated } from '../../Events/PostCreated.js'
 import { PostCacheService, POSTS_PAGE_SIZE } from '../../Services/PostCacheService.js'
 import { pages } from '@/.guren/pages.gen'
@@ -56,7 +56,7 @@ export default class PostController extends Controller {
   }
 
   async store(): Promise<Response> {
-    const data = await this.validateBody(PostPayloadSchema)
+    const { body: data } = this.validated('posts.store')
     const authUser = await this.auth.userOrFail<UserRecord>()
 
     const post = await Post.create({ ...data, authorId: authUser.id })
@@ -95,7 +95,7 @@ export default class PostController extends Controller {
   async update(): Promise<Response> {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id) as BoundPost
-    const data = await this.validateBody(PostPayloadSchema)
+    const { body: data } = this.validated(['posts.update', 'posts.patch'])
 
     await Post.update({ id: post.id }, { ...data, authorId: post.authorId })
 

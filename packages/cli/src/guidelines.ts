@@ -95,7 +95,7 @@ export async function generateGuidelines(options: GuidelinesOptions = {}): Promi
   lines.push('')
 
   lines.push('## Security Rules (checked by `bunx guren audit`)')
-  lines.push('- Validate every mutating route: call `this.validateBody(schema)` in controller actions (route `body` schemas are type-only for controllers; they are runtime-enforced only for inline handlers)')
+  lines.push('- Validate every mutating route: attach a `body` schema to the route (enforced with 422 before the action runs, controller actions included) and read the parsed value with `this.validated(\'route.name\').body`; `this.validateBody(schema)` is for routes without one')
   lines.push("- Protect mutating routes: wrap in `router.middleware('auth').group(...)` or call `this.auth.userOrFail()` (optional reads like `auth.user()` do not enforce)")
   lines.push('- Never interpolate values into raw SQL (`sql.raw`) — drizzle `sql` templates bind values safely')
   lines.push('- Never hardcode credentials — read secrets via `process.env`')

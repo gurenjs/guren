@@ -15,6 +15,13 @@ import { getApiTokenOrFail } from '../auth/api-token'
 import { resolveGate, type Gate } from '../authorization/Gate'
 import { resolveOptional } from '../container/resolve-optional'
 import type { AuthUser } from '../authorization/types'
+import {
+  getValidatedInput,
+  readValidatedInput,
+  type ContractRouteName,
+  type UntypedValidatedInput,
+  type ValidatedInput,
+} from './validated-input'
 
 /** Duck-typed Zod-like schema, so validation needs no direct Zod dependency. */
 interface ZodLikeSchema<T> {
@@ -457,6 +464,19 @@ export class Controller {
     return flattenRequestQueries(this.ctx)
   }
 
+  /**
+   * The input the route contract already validated: `params`, `query` and `body`
+   * as their schemas parsed them, coercions and defaults applied. A segment the
+   * contract does not declare is `undefined`. Pass the route name to type the
+   * result from `guren codegen`, or every name when one action serves several
+   * routes; a name that is not the current route's throws.
+   */
+  protected validated(): UntypedValidatedInput
+  protected validated<TName extends ContractRouteName>(route: TName | readonly TName[]): ValidatedInput<TName>
+  protected validated(route?: string | readonly string[]): UntypedValidatedInput {
+    return readValidatedInput(this.ctx, route)
+  }
+
   /** Validate the request body; throws ValidationException on failure. */
   protected async validateBody<T>(schema: ZodLikeSchema<T>): Promise<T> {
     return this.runValidation(schema, await this.getRawBody())
@@ -523,7 +543,7 @@ export class Controller {
       return this.parsedBody.value
     }
 
-    this.parsedBody = { value: await parseRequestBody(this.ctx) }
+    this.parsedBody = getValidatedInput(this.ctx)?.rawBody ?? { value: await parseRequestBody(this.ctx) }
     return this.parsedBody.value
   }
 

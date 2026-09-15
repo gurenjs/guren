@@ -350,8 +350,8 @@ function inputFinding(route: AgentRoute): CheckResult | undefined {
       : 'The handler is an inline function, for which a route body schema is the validation — so nothing '
         + 'tells the agent what to send, and nothing checks what it sends.'),
     route.controllerKey
-      ? 'Attach the same Zod schema the action validates with as the route\'s `body` option — it is type '
-        + 'information for controller actions, and the one place codegen and the agent surface can read it.'
+      ? 'Attach the same Zod schema the action validates with as the route\'s `body` option — it is enforced '
+        + 'before the action runs, and it is the one place codegen and the agent surface can read it.'
       : 'Attach a Zod schema as the route\'s `body` option — for an inline handler it is enforced at '
         + 'request time as well as advertised to the agent.',
   )
