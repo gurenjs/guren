@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, CONSOLE_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 // Shared with the blog blueprint's AuthProvider, which ports this boot() so
@@ -1201,6 +1201,7 @@ export function registerWebRoutes(router: Router): void {
       )
 
       await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+      await writeFile(join(workspace.dir, 'src/console.ts'), CONSOLE_FIXTURE, 'utf8')
 
       await makeAuth({ install: true, force: true, minimal: true, oauth: 'github' })
 
@@ -1216,6 +1217,13 @@ export function registerWebRoutes(router: Router): void {
       expect(provider).toContain('createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })')
       expect(provider).toContain("this.container.instance('oauth', oauth)")
       expect(provider).not.toContain("make<OAuthManager>('oauth')")
+
+      // The database store is the only one with rows to sweep, so the sweeper
+      // is registered on this path and not on the in-memory fallback.
+      const consoleContent = await readFile(join(workspace.dir, 'src/console.ts'), 'utf8')
+      expect(consoleContent).toContain("import { OAuthStatesPruneCommand } from '@guren/core'")
+      // Beside the sessions sweeper: --oauth runs the session blueprint too.
+      expect(consoleContent).toContain('kernel.registerMany([SessionsPruneCommand, OAuthStatesPruneCommand])')
     } finally {
       await workspace.cleanup()
     }

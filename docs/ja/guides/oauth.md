@@ -287,7 +287,7 @@ export const oauthStates = sqliteTable('oauth_states', {
 
 `binding` 列は[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュを保持します。この列が無いとストアは束縛を保存できません。束縛済みのstateがすべて未束縛で戻ってくるため、`handleCallback` は「Invalid or expired OAuth state」として拒否します。原因のストアはコンソールの警告が示します。`session` / `bindTo` を使う前に列を追加してください。
 
-期限切れのstate行は参照時に削除されます。まとめて掃除したい場合は、スケジュールジョブから `store.deleteExpired()` を呼んでください。既にRedisを運用しているアプリなら、Redisも引き続き使えます:
+state行が消えるのはコールバックが届いたときなので、途中で放棄されたサインインの行はそのまま残ります。`guren add oauth` が登録するコンソールコマンド `oauth-states:prune` をスケジュールすると、期限切れの行をまとめて削除できます。このコマンドは `oauth` に束縛されたストアに対して `OAuthManager.pruneExpiredStates()` を呼びます。既にRedisを運用しているアプリなら、Redisも引き続き使えます。Redisはキーを自分で期限切れにします:
 
 ```ts
 import { createOAuthManager } from '@guren/core'

@@ -94,6 +94,12 @@ export interface OAuthStateStore {
    * callbacks with the same state both pass verification.
    */
   consume?(stateHash: string): Promise<OAuthStatePayload | null>
+  /**
+   * Sweep every state whose expiration has passed. Optional: a store that
+   * expires its own entries (Redis keys, the in-memory map) implements
+   * nothing here and `pruneExpiredStates()` skips it.
+   */
+  deleteExpired?(now: Date): Promise<void>
 }
 
 export interface OAuthStateConfig {
@@ -381,6 +387,10 @@ export class OAuthManager {
 
   providerNames(): string[] {
     return Array.from(this.providers.keys()).sort((a, b) => a.localeCompare(b))
+  }
+
+  async pruneExpiredStates(now: Date = new Date()): Promise<void> {
+    await this.stateStore.deleteExpired?.(now)
   }
 
   getProvider(name: string): OAuthProviderConfig {
