@@ -5,6 +5,8 @@ import {
   parseRequestBody as parseRequestBodyByRuntimeRules,
   parseRequestUploads as parseRequestUploadsByRuntimeRules,
   type RequestUploads,
+  VALIDATED_INPUT_CONTEXT_KEY,
+  type ValidatedInputRecord,
 } from '@guren/server/internal/request'
 import {
   AuthenticationException,
@@ -52,6 +54,26 @@ export interface InertiaPayload {
   props: Record<string, unknown>
   url: string
   version?: string
+}
+
+/**
+ * Context values that stand in for the route contract middleware, for a controller
+ * action reading `this.validated()`: spread into `createControllerContext`'s
+ * `contextValues`. Values are passed through as the schemas would have parsed them.
+ */
+export function contractInput(input: {
+  route?: string
+  params?: Record<string, unknown>
+  query?: Record<string, unknown>
+  body?: unknown
+}): Record<string, unknown> {
+  const record: ValidatedInputRecord = {
+    route: input.route,
+    params: input.params,
+    query: input.query,
+    body: input.body,
+  }
+  return { [VALIDATED_INPUT_CONTEXT_KEY]: record }
 }
 
 export function createControllerContext(

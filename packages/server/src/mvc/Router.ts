@@ -3,6 +3,7 @@ import { Controller } from './Controller'
 import type { Container } from '../container/Container'
 import { mountRoute } from './mount-route'
 import { flattenRequestQueries, formatValidationErrors, parseRequestBody, type ValidationErrorLike } from '../http/request'
+import { setValidatedInput, type ValidatedInputRecord } from './validated-input'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
@@ -272,6 +273,12 @@ export interface RouteDefinition {
   }
   /** Route model bindings: param name → bound model class name (from `bind`) */
   bindings?: Record<string, string>
+  /**
+   * `true` when a request to this route is refused with 422 unless its body
+   * satisfies `schemas.body`, controller actions included. A reader of another
+   * server version's definitions treats an absent flag as not enforced.
+   */
+  validatesBody?: true
   /** Agent metadata as declared (RFC 0016), no defaults applied. Absent: not a tool. */
   agent?: AgentRouteMetadata
   /** Still on its fixture (RFC 0021): registered with the `prototype` handler rather than a controller. */
@@ -735,6 +742,7 @@ export class Router<in M extends string = never> {
         ? { name: handler[0].name, action: String(handler[1]) }
         : undefined,
       bindings: serializeBindings(path, bindings, this.modelBindings),
+      ...(schemas?.body ? { validatesBody: true as const } : {}),
       ...openapi,
     }))
   }
@@ -1266,11 +1274,12 @@ function validationErrorResponse(error: ValidationErrorLike, status: number): Re
  * controller-action path throws rather than responding so `ExceptionHandler`
  * renders it: JSON for API requests, a redirect with the error bag for Inertia.
  */
-function throwOnInvalid(schema: ValidationSchema<unknown>, data: unknown): void {
+function throwOnInvalid<T>(schema: ValidationSchema<T>, data: unknown): T {
   const result = schema.safeParse(data)
   if (!result.success) {
     throw ValidationException.withMessages(formatValidationErrors(result.error))
   }
+  return result.data
 }
 
 /**
@@ -1342,19 +1351,37 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
   }
 
   const schemas = route.schemas
-  if (!schemas || (!schemas.params && !schemas.query && !schemas.output)) {
+  if (!schemas || (!schemas.params && !schemas.query && !schemas.body && !schemas.output)) {
     return null
   }
+  const validatesInput = Boolean(schemas.params || schemas.query || schemas.body)
 
   return async (c, next) => {
-    // Validate params and query in middleware. Body validation is left to the
-    // controller's validateBody() to avoid consuming the request stream twice.
-    if (schemas.params) {
-      throwOnInvalid(schemas.params, c.req.param())
-    }
+    if (validatesInput) {
+      const record: ValidatedInputRecord = { route: route.name }
+      if (schemas.params) {
+        record.params = throwOnInvalid(schemas.params, c.req.param())
+      }
 
-    if (schemas.query) {
-      throwOnInvalid(schemas.query, flattenRequestQueries(c))
+      if (schemas.query) {
+        record.query = throwOnInvalid(schemas.query, flattenRequestQueries(c))
+      }
+
+      if (schemas.body) {
+        // The payload travels with the record, so a later `this.input()` or
+        // `validateBody()` in the action reuses it instead of parsing again.
+        const payload = await parseRequestBody(c)
+        const result = schemas.body.safeParse(payload)
+        if (!result.success) {
+          // Keyed as `Controller.validateBody()` keys it (the full dotted path,
+          // every message): an Inertia form reads its error bag by those keys.
+          throw ValidationException.fromZodError(result.error)
+        }
+        record.body = result.data
+        record.rawBody = { value: payload }
+      }
+
+      setValidatedInput(c, record)
     }
 
     await next()
