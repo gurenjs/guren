@@ -37,7 +37,7 @@ export class I18nServiceProvider extends ServiceProvider {
       }
     }
 
-    this.container.singleton('i18n', () => {
+    this.container.singletonIf('i18n', () => {
       if (!options) {
         return createI18n({ locale: 'en' })
       }

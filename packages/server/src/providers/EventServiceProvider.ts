@@ -4,7 +4,7 @@ import { createEventManager, createQueueEventDispatcher } from '../events'
 /** Binds the EventManager as a singleton in the container. */
 export class EventServiceProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('events', () => createEventManager())
+    this.container.singletonIf('events', () => createEventManager())
   }
 
   boot(): void {

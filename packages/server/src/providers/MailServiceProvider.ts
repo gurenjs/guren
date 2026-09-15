@@ -10,7 +10,7 @@ import { createMailManager } from '../mail'
  */
 export class MailServiceProvider extends ServiceProvider {
   register(): void {
-    this.container.singleton('mail', (container) =>
+    this.container.singletonIf('mail', (container) =>
       createMailManager(
         {
           default: 'log',

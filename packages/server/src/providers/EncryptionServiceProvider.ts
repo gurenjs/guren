@@ -15,7 +15,7 @@ export class EncryptionServiceProvider extends ServiceProvider {
       this.container.instance('app.keyring', getAppKeyringFromEnv())
     }
 
-    this.container.singleton('encrypter', () => {
+    this.container.singletonIf('encrypter', () => {
       const keyring = deriveAppKeyring(this.container.make('app.keyring'), 'data-encryption')
       return createEncrypter({
         key: encodeDerivedKey(keyring.current),
