@@ -789,6 +789,11 @@ const BACKED_STORE_FIX = 'Run `bunx guren add session` for a database-backed ses
 
 const OAUTH_STATE_STORE_FIX = 'Bind the OAuth manager yourself with `createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })` from `@guren/core`, over an `oauth_states` table in db/schema.ts (the columns are in the OAuth guide), or with RedisOAuthStateStore from `@guren/core/redis`, and drop OAuthServiceProvider from the providers, since it binds the in-memory default.'
 
+/** Memory stores whose remedy is narrower than BACKED_STORE_FIX; every other one gets that. */
+const MEMORY_STORE_FIXES: Record<string, string> = {
+  MemoryOAuthStateStore: OAUTH_STATE_STORE_FIX,
+}
+
 /**
  * Serverless targets share no memory between invocations, so in-memory stores
  * drop every session, cache entry, queued job, and OAuth state in production
@@ -815,12 +820,13 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
     if (!fixes.includes(fix)) fixes.push(fix)
   }
 
-  if (analysis.memoryStoreSignals.length > 0) {
-    const onlyOAuthState = analysis.memoryStoreSignals.every((signal) => signal.symbol === 'MemoryOAuthStateStore')
-    raise(
-      `in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`,
-      onlyOAuthState ? OAUTH_STATE_STORE_FIX : BACKED_STORE_FIX,
-    )
+  const memoryStoresByFix = new Map<string, SourceSignal[]>()
+  for (const signal of analysis.memoryStoreSignals) {
+    const fix = MEMORY_STORE_FIXES[signal.symbol] ?? BACKED_STORE_FIX
+    memoryStoresByFix.set(fix, [...(memoryStoresByFix.get(fix) ?? []), signal])
+  }
+  for (const [fix, signals] of memoryStoresByFix) {
+    raise(`in-memory stores are constructed explicitly (${formatSignals(signals)})`, fix)
   }
 
   if (analysis.memorySessionDefaultSignals.length > 0 && analysis.sessionDisabledSignals.length === 0) {

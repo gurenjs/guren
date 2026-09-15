@@ -765,6 +765,23 @@ export const oauth = createOAuthManager({ stateStore: new MemoryOAuthStateStore(
     })
   })
 
+  it('names both remedies when an OAuth state store and another memory store are constructed', async () => {
+    const files = {
+      'config/stores.ts': `import { MemoryOAuthStateStore, MemoryStore } from '@guren/core'
+export const state = new MemoryOAuthStateStore()
+export const cache = new MemoryStore()
+`,
+    }
+
+    await withApp('guren-stores-mem-mixed-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('warn')
+      expect(check.fix).toContain('drop OAuthServiceProvider')
+      expect(check.fix).toContain('Redis-backed cache/queue driver')
+    })
+  })
+
   it('passes for an app with no session, OAuth, or in-memory store signals', async () => {
     const files = { 'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({})\n` }
 

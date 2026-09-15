@@ -16,7 +16,7 @@ import { UsageError } from './run-cli'
 import { newCommand } from './new-command'
 import { addResource, listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
-import { makeAuth } from './make-auth'
+import { CODEGEN_STEP, makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { makeCommand, registerScaffoldedCommand } from './make-command'
 import { makeController } from './make-controller'
@@ -3006,7 +3006,7 @@ const addResourceCommand = defineCommand({
       consola.info('  • Run `bun run db:make` to generate the migration')
       consola.info('  • Run `bun run db:migrate` to apply it')
     }
-    consola.info('  • Run `bun run codegen` (or `bun run dev`) to refresh generated types')
+    consola.info(CODEGEN_STEP)
     if (!args.public) {
       consola.info('  • store/update/destroy require a signed-in user — pass --public to opt out')
     }

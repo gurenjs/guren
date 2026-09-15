@@ -51,7 +51,7 @@ export async function appendOAuthStateTable(): Promise<boolean> {
     name: 'oauthStates',
     blocks: OAUTH_STATES_TABLE_BLOCKS,
     imports: SCHEMA_IMPORTS,
-    manualGuidance: 'OAuth state needs an oauth_states table, so it stays in process memory.',
+    manualGuidance: 'OAuth state needs an oauth_states table.',
   })
   return result === 'appended'
 }

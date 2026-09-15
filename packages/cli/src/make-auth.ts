@@ -176,19 +176,19 @@ function buildOAuthProviderTemplate(providers: string[], databaseStateStore: boo
     })
     .join('\n\n')
 
-  const [imports, bindManager] = databaseStateStore
-    ? [
-      `import { createOAuthManager, DatabaseOAuthStateStore, ServiceProvider, ${factoryImports} } from '@guren/core'
+  const { imports, bindManager } = databaseStateStore
+    ? {
+      imports: `import { createOAuthManager, DatabaseOAuthStateStore, ServiceProvider, ${factoryImports} } from '@guren/core'
 import { oauthStates } from '../../db/schema.js'`,
-      `    // The authorize redirect and its callback may reach different processes, so
+      bindManager: `    // The authorize redirect and its callback may reach different processes, so
     // the state tying them together lives in the database, not in memory.
     const oauth = createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })
     this.container.instance('oauth', oauth)`,
-    ]
-    : [
-      `import { ServiceProvider, type OAuthManager, ${factoryImports} } from '@guren/core'`,
-      `    const oauth = this.container.make<OAuthManager>('oauth')`,
-    ]
+    }
+    : {
+      imports: `import { ServiceProvider, type OAuthManager, ${factoryImports} } from '@guren/core'`,
+      bindManager: `    const oauth = this.container.make<OAuthManager>('oauth')`,
+    }
 
   return `${imports}
 
@@ -1481,7 +1481,7 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
 
 // The scaffolded pages import `pages.auth` & co., which .guren/pages.gen.ts
 // lists only once codegen reruns, so typecheck fails until this step.
-const CODEGEN_STEP = '  • Run `bun run codegen` (or `bun run dev`) to refresh generated types'
+export const CODEGEN_STEP ='  • Run `bun run codegen` (or `bun run dev`) to refresh generated types'
 
 /** `create_users_table`, `create_users_and_sessions_tables`, `create_users_sessions_and_oauth_states_tables`. */
 function createTablesMigrationName(tables: string[]): string {
