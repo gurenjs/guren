@@ -19,6 +19,12 @@ const POST_MODEL: ModelInfo = {
   relationships: [{ name: 'author', type: 'belongsTo', relatedModel: 'User' }],
   usesAuth: false,
   hasSoftDeletes: false,
+  attachments: null,
+  fillable: null,
+  hidden: null,
+  visible: null,
+  casts: null,
+  docsTags: [],
 }
 
 const PROJECT_CONTEXT: ProjectContext = {
@@ -92,6 +98,7 @@ function createMockApi(overrides: Partial<DevMcpApi> = {}): DevMcpApi {
       manualChecks: [],
       hasWarnings: false,
       hasFailures: false,
+      recommendedCommands: [],
     }),
     suggestNextSteps: async () => [],
     makeFeature: async (name) => [`app/Models/${name}.ts`],
