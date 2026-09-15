@@ -1046,7 +1046,7 @@ export type { PasswordHashAlgorithm, DefaultHasherOptions } from './auth/passwor
 export type { PasswordHasherOption } from './auth/password/configured-hasher'
 export type { ApplicationOptions, AuthPluginOptions, I18nPluginOptions, InertiaApplicationOptions } from './http/Application'
 export { defineEnv, Env, EnvSchema, EnvValidationError, EnvVar, isRawEnvKey } from './config/env'
-export type { AppEnv, EnvPresence, EnvProblem, EnvSource, EnvVarType, InferEnv, ParsedEnv } from './config/env'
+export type { AppEnv, EnvProblem, EnvSource, InferEnv, ParsedEnv } from './config/env'
 export {
   defineCacheConfig,
   defineConfig,
