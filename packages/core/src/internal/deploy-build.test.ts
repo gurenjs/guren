@@ -549,6 +549,8 @@ describe('the module graph this list describes', () => {
         '--',
         'packages/server/src',
         'packages/orm/src',
+        // The App MCP transport entry is there for @guren/plugin-mcp's import (RFC 0016 Phase 4a).
+        'packages/plugin-mcp/src',
       ],
       cwd: repoRoot,
       stdout: 'pipe',
