@@ -21,7 +21,7 @@ import { readChangesetDirectory, type Bump, type ParsedChangeset } from './core-
 const CORE = '@guren/core'
 
 /** Only the groups a consumer installs; a stale devDependency pulls no copy. */
-const DEPENDENCY_GROUPS = ['dependencies', 'peerDependencies'] as const
+export const DEPENDENCY_GROUPS = ['dependencies', 'peerDependencies'] as const
 
 export interface Manifest {
   dependencies?: Record<string, string>

@@ -11,7 +11,6 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 export const repoRoot = resolve(import.meta.dir, '..')
-const packagesDir = join(repoRoot, 'packages')
 
 export interface WorkspacePackage {
   name: string
@@ -57,7 +56,8 @@ export function parseArgs(
   return { flags, positionals, forwarded }
 }
 
-export async function collectPackages(): Promise<WorkspacePackage[]> {
+export async function collectPackages(root: string = repoRoot): Promise<WorkspacePackage[]> {
+  const packagesDir = join(root, 'packages')
   const entries = await readdir(packagesDir, { withFileTypes: true })
   const packages: WorkspacePackage[] = []
 
