@@ -64,3 +64,23 @@ describe('GUREN_VITE_MANIFEST read form', () => {
     expect(readers).toEqual(['http/vite-manifest.ts'])
   })
 })
+
+describe('GUREN_TRANSLATIONS read form', () => {
+  // Injected by the same Vercel `define` as the manifest above, so the same one-site,
+  // one-expression rule holds.
+  test('the catalog injection is read once, in injected-translations.ts, as the literal expression', () => {
+    const readers: string[] = []
+
+    for (const [file, source] of sources) {
+      if (file.endsWith('.test.ts')) continue
+
+      const reads = source.match(/process\.env\s*[?.[]+\s*['"]?GUREN_TRANSLATIONS/g) ?? []
+      if (reads.length === 0) continue
+
+      readers.push(file)
+      expect(reads).toEqual(['process.env.GUREN_TRANSLATIONS'])
+    }
+
+    expect(readers).toEqual(['i18n/injected-translations.ts'])
+  })
+})

@@ -2,8 +2,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import { resolve } from 'node:path'
 import {
   appUsesMcpPlugin,
+  bundledRuntimeEnv,
   DEV_ONLY_MODULES,
-  clientManifestJson,
   importSpecifier,
   MCP_SDK_SUBPATH_PREFIX,
   renderDevOnlyStub,
@@ -177,12 +177,9 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   stageStaticAssets(publicDir, resolve(out, 'assets'))
 
   const env = buildLambdaEnvironment(assetEnv, ssrFile, ssrDir)
-  // viteAsset() resolves content-page assets from the client manifest at render
-  // time and the bundle ships no manifest.json, so it is baked into the wrapper
-  // rather than into `env`: Lambda caps function environment configuration at
-  // 4KB total, which a real app's manifest alone can exceed.
-  const viteManifest = clientManifestJson(publicDir)
-  const bakedEnv = viteManifest ? { ...env, GUREN_VITE_MANIFEST: viteManifest } : env
+  // Into the wrapper only, never `env.json`: Lambda caps function environment
+  // configuration at 4KB total, which a real app's manifest alone can exceed.
+  const bakedEnv = { ...env, ...bundledRuntimeEnv(root, publicDir, 'Lambda build') }
   const wrapperPath = resolve(out, `${LAMBDA_HANDLER_MODULE}.ts`)
   writeFileSync(wrapperPath, renderHandlerModule({ out, entrypoint, env: bakedEnv }))
 

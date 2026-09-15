@@ -9,7 +9,7 @@ import {
   MCP_PLUGIN_PACKAGE,
   MCP_TRANSPORT_SPECIFIER,
   SQL_CLIENT_MODULES,
-  clientManifestJson,
+  bundledRuntimeEnv,
   detectDatabaseDialects,
   DOCUMENT_ASSET_EXTENSIONS,
   DOCUMENT_ASSET_HEADERS,
@@ -142,7 +142,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
 
   const ssrImport = await resolveSsrImport(ssrDir, ssrEntryKey)
   const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, 'Cloudflare build')
-  const viteManifest = clientManifestJson(publicDir)
+  const bundledEnv = bundledRuntimeEnv(root, publicDir, 'Cloudflare build')
 
   resetOutputDir(out, root, 'Cloudflare build')
 
@@ -152,7 +152,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   stageStaticAssets(publicDir, resolve(out, 'assets'))
   writeAssetHeaders(resolve(out, 'assets'))
 
-  const workerEnv = renderWorkerEnvModule({ assetEnv, viteManifest })
+  const workerEnv = renderWorkerEnvModule({ assetEnv, bundledEnv })
   if (workerEnv) {
     writeFileSync(resolve(out, 'worker-env.js'), workerEnv)
   }
@@ -1048,7 +1048,7 @@ async function resolveSsrImport(ssrDir: string, ssrEntryKey: string): Promise<Ss
  */
 function renderWorkerEnvModule(input: {
   assetEnv: ClientAssetEnv
-  viteManifest: string | undefined
+  bundledEnv: Record<string, string>
 }): string | undefined {
   const lines: string[] = []
 
@@ -1058,10 +1058,8 @@ function renderWorkerEnvModule(input: {
   if (input.assetEnv.styles) {
     lines.push(`process.env.GUREN_INERTIA_STYLES = ${JSON.stringify(input.assetEnv.styles)}`)
   }
-  if (input.viteManifest) {
-    // viteAsset() reads the client manifest at render time and Workers has no
-    // filesystem, so the manifest JSON travels in the worker itself.
-    lines.push(`process.env.GUREN_VITE_MANIFEST = ${JSON.stringify(input.viteManifest)}`)
+  for (const [key, value] of Object.entries(input.bundledEnv)) {
+    lines.push(`process.env.${key} = ${JSON.stringify(value)}`)
   }
 
   if (lines.length === 0) {

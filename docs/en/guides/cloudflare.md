@@ -272,6 +272,10 @@ Everything under `public/` is staged into `.cloudflare/assets/` and served by Wo
 
 If your app deliberately serves pretty-URL HTML out of `public/`, set `"html_handling"` yourself in `wrangler.jsonc`; the build leaves any value you name alone, and the `.html` rule is weaker for it.
 
+## Translations
+
+Workers has no filesystem to read `lang/` from, so the build bakes every `lang/<locale>/*.json` into the worker and `createApp({ i18n })` serves them from there. Edit the JSON files as usual and rebuild. An app that sets the i18n `path` option is not covered; see [Serverless and Bundled Catalogs](./i18n.md#serverless-and-bundled-catalogs).
+
 ## Scheduled Tasks
 
 The generated worker exports a `scheduled` handler alongside `fetch`, so a Cloudflare cron trigger runs the tasks your app registered with `createScheduler()`. There is no long-lived process on Workers to hold a ticking scheduler, and `scheduler.start()` never runs there: the trigger is what advances the clock.

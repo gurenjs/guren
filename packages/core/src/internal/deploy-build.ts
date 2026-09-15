@@ -7,8 +7,8 @@
  * fatal, SSR renderer verification) stay per-plugin. A helper that *relates* two
  * paths canonicalizes both first; one that reads or writes a single path does not.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export type PathLike = string | URL
@@ -231,6 +231,78 @@ export function clientManifestJson(publicDir: string): string | undefined {
   }
 
   return JSON.stringify(trimmed)
+}
+
+const TRANSLATIONS_DIR = 'lang'
+
+/**
+ * Every `lang/<locale>/<namespace>.json` as `{ locale: { namespace: messages } }`
+ * JSON, for runtime injection (`GUREN_TRANSLATIONS`): no deploy target ships
+ * `lang/`. Same walk and parse tolerance as `JsonLoader` in @guren/server and
+ * `readTranslationCatalogs` in @guren/cli. Undefined when nothing is readable.
+ * @param label Platform name for the warning message, e.g. `'Lambda build'`.
+ */
+export function translationCatalogJson(root: string, label: string): string | undefined {
+  const base = resolve(root, TRANSLATIONS_DIR)
+
+  let locales: string[]
+  try {
+    locales = readdirSync(base, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+  } catch {
+    return undefined
+  }
+
+  const catalog: Record<string, Record<string, unknown>> = {}
+  for (const locale of locales) {
+    const messages: Record<string, unknown> = {}
+    let files: string[]
+    try {
+      files = readdirSync(resolve(base, locale)).filter((file) => extname(file) === '.json').sort()
+    } catch {
+      continue
+    }
+
+    for (const file of files) {
+      try {
+        messages[basename(file, '.json')] = JSON.parse(readFileSync(resolve(base, locale, file), 'utf8'))
+      } catch {
+        console.warn(
+          `${label}: ${TRANSLATIONS_DIR}/${locale}/${file} is not valid JSON and is left out of the deployed translations.`,
+        )
+      }
+    }
+
+    if (Object.keys(messages).length > 0) {
+      catalog[locale] = messages
+    }
+  }
+
+  return Object.keys(catalog).length > 0 ? JSON.stringify(catalog) : undefined
+}
+
+/**
+ * What a deploy build bakes into the bundle, keyed by the `process.env` name
+ * @guren/server reads: the client manifest for viteAsset() and the lang/ catalogs
+ * for createApp({ i18n }). No target ships those files, and platform environment
+ * configuration is size-capped (Lambda: 4KB total), so neither goes there.
+ * @param label Platform name for warning messages, e.g. `'Lambda build'`.
+ */
+export function bundledRuntimeEnv(root: string, publicDir: string, label: string): Record<string, string> {
+  const env: Record<string, string> = {}
+
+  const manifest = clientManifestJson(publicDir)
+  if (manifest) {
+    env.GUREN_VITE_MANIFEST = manifest
+  }
+  const translations = translationCatalogJson(root, label)
+  if (translations) {
+    env.GUREN_TRANSLATIONS = translations
+  }
+
+  return env
 }
 
 /**

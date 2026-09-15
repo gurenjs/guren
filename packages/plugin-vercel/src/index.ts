@@ -4,7 +4,7 @@ import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 import {
   appUsesMcpPlugin,
   assertOutputDirOutsideRoot,
-  clientManifestJson,
+  bundledRuntimeEnv,
   DEV_ONLY_MODULES,
   DOCUMENT_ASSET_EXTENSIONS,
   DOCUMENT_ASSET_HEADERS,
@@ -171,7 +171,7 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
     // Inlined into the bundle rather than added to the function environment:
     // Vercel caps environment configuration size, which a real app's manifest
     // can exceed, and the bundle has no such limit.
-    viteManifest: clientManifestJson(publicDir),
+    bundledEnv: bundledRuntimeEnv(root, publicDir, LABEL),
   })
 
   if (existsSync(ssrDir)) {
@@ -291,7 +291,7 @@ async function bundleFunction(input: {
   funcDir: string
   root: string
   dialects: readonly DatabaseDialect[] | undefined
-  viteManifest: string | undefined
+  bundledEnv: Record<string, string>
 }): Promise<void> {
   // One read of the app's manifest, threaded to both halves of the stub
   // decision: which modules are rendered, and whether unlisted MCP SDK subpaths
@@ -318,14 +318,12 @@ async function bundleFunction(input: {
       // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
       // to "development"), so pin it to "production" for the deployed function.
       'process.env.NODE_ENV': '"production"',
-      // viteAsset() resolves content-page assets from the client manifest at
-      // render time; substituting the read means the function needs neither the
-      // file nor environment configuration. A `define` matches one exact
-      // expression — @guren/server pins the read's form at the source level
-      // (tests/env-gate-form.test.ts).
-      ...(input.viteManifest
-        ? { 'process.env.GUREN_VITE_MANIFEST': JSON.stringify(input.viteManifest) }
-        : {}),
+      // Substituting each read means the function needs neither the files nor
+      // environment configuration. A `define` matches one exact expression, so
+      // @guren/server pins each read's form (tests/env-gate-form.test.ts).
+      ...Object.fromEntries(
+        Object.entries(input.bundledEnv).map(([key, value]) => [`process.env.${key}`, JSON.stringify(value)]),
+      ),
     },
     plugins: [
       {

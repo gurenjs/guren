@@ -173,6 +173,32 @@ describe('@guren/plugin-vercel', () => {
       expect(config.environment.GUREN_VITE_MANIFEST).toBeUndefined()
     })
 
+    it('inlines the lang/ catalogs into the bundle for createApp({ i18n })', async () => {
+      // The function ships no lang/. Read the way @guren/server's
+      // injected-translations.ts does, which is the one form `define` matches.
+      const app = scaffoldApp(root, {
+        entrypoint: 'src/vercel.ts',
+        source:
+          'export const translations = process.env.GUREN_TRANSLATIONS\n' + DEFAULT_ENTRYPOINT_SOURCE,
+      })
+      mkdirSync(join(root, 'lang/en'), { recursive: true })
+      writeFileSync(join(root, 'lang/en/messages.json'), JSON.stringify({ welcome: 'Welcome to Inl1ned!' }))
+
+      await buildVercelOutput(app)
+
+      const bundle = readFileSync(
+        join(app.outputDir, 'functions/index.func/vercel.js'),
+        'utf8',
+      )
+      expect(bundle).toContain('Welcome to Inl1ned!')
+      expect(bundle).not.toContain('process.env.GUREN_TRANSLATIONS')
+
+      const config = JSON.parse(
+        readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
+      ) as { environment: Record<string, string> }
+      expect(config.environment.GUREN_TRANSLATIONS).toBeUndefined()
+    })
+
     it('points GUREN_INERTIA_SSR_MANIFEST at the layout the SSR build produced', async () => {
       // Older Vite configs emit a flat manifest.json; naming the .vite path
       // unconditionally leaves the runtime loading a file that is not there.

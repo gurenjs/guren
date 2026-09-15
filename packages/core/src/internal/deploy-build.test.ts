@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -23,6 +23,7 @@ import {
   resolvePathLike,
   ssrRuntimePaths,
   stageStaticAssets,
+  translationCatalogJson,
 } from './deploy-build'
 import gurenVitePlugin from '../vite'
 
@@ -297,6 +298,57 @@ describe('clientManifestJson', () => {
 
   test('should return undefined when no manifest exists', () => {
     expect(clientManifestJson(dir)).toBeUndefined()
+  })
+})
+
+describe('translationCatalogJson', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-translations-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  function writeCatalog(path: string, contents: string): void {
+    mkdirSync(join(root, 'lang', path, '..'), { recursive: true })
+    writeFileSync(join(root, 'lang', path), contents)
+  }
+
+  test('should key every lang/<locale>/<namespace>.json by locale and namespace', () => {
+    writeCatalog('en/messages.json', JSON.stringify({ welcome: 'Welcome to :name!' }, null, 2))
+    writeCatalog('en/auth.json', JSON.stringify({ failed: 'These credentials do not match.' }))
+    writeCatalog('ja/messages.json', JSON.stringify({ welcome: ':nameへようこそ' }))
+    writeCatalog('en/README.md', '# not a catalog')
+
+    expect(JSON.parse(translationCatalogJson(root, 'Test build')!)).toEqual({
+      en: {
+        auth: { failed: 'These credentials do not match.' },
+        messages: { welcome: 'Welcome to :name!' },
+      },
+      ja: { messages: { welcome: ':nameへようこそ' } },
+    })
+  })
+
+  test('should answer undefined for an app with no lang/ directory', () => {
+    expect(translationCatalogJson(root, 'Test build')).toBeUndefined()
+  })
+
+  test('should leave out a file that does not parse, and say which', () => {
+    writeCatalog('en/messages.json', JSON.stringify({ hello: 'Hello' }))
+    writeCatalog('en/broken.json', '{ "hello": ')
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      expect(JSON.parse(translationCatalogJson(root, 'Test build')!)).toEqual({
+        en: { messages: { hello: 'Hello' } },
+      })
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Test build: lang/en/broken.json is not valid JSON'))
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 

@@ -193,6 +193,24 @@ describe('buildLambdaOutput', () => {
     expect(env.GUREN_VITE_MANIFEST).toBeUndefined()
   })
 
+  test('should bake the lang/ catalogs into the wrapper, never into env.json', async () => {
+    // The function ships no lang/, which createApp({ i18n }) otherwise reads.
+    scaffoldApp(root)
+    mkdirSync(join(root, 'lang/en'), { recursive: true })
+    writeFileSync(join(root, 'lang/en/messages.json'), JSON.stringify({ welcome: 'Welcome to :name!' }))
+
+    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+
+    const wrapper = readFileSync(join(root, '.lambda/handler.ts'), 'utf8')
+    expect(wrapper).toContain(
+      `process.env.GUREN_TRANSLATIONS ??= ${JSON.stringify(JSON.stringify({ en: { messages: { welcome: 'Welcome to :name!' } } }))}`,
+    )
+    expect(wrapper.indexOf('GUREN_TRANSLATIONS')).toBeLessThan(wrapper.indexOf('await import'))
+
+    const env = JSON.parse(readFileSync(join(root, '.lambda/env.json'), 'utf8')) as Record<string, string>
+    expect(env.GUREN_TRANSLATIONS).toBeUndefined()
+  })
+
   test('should bundle an ESM function with NODE_ENV inlined to production', async () => {
     scaffoldApp(root)
 

@@ -59,6 +59,21 @@ describe('buildCloudflareOutput', () => {
     )
   })
 
+  test('should bake the lang/ catalogs into the worker for createApp({ i18n })', async () => {
+    // Workers has no filesystem, so the scaffold's `i18n: { supported: ['en'] }`
+    // rendered raw keys like `messages.welcome` until the build carried lang/.
+    scaffoldApp(root)
+    mkdirSync(join(root, 'lang/en'), { recursive: true })
+    writeFileSync(join(root, 'lang/en/messages.json'), JSON.stringify({ welcome: 'Welcome to :name!' }))
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const workerEnv = readFileSync(join(root, '.cloudflare/worker-env.js'), 'utf8')
+    expect(workerEnv).toContain(
+      `process.env.GUREN_TRANSLATIONS = ${JSON.stringify(JSON.stringify({ en: { messages: { welcome: 'Welcome to :name!' } } }))}`,
+    )
+  })
+
   test('should copy public files into the assets directory', async () => {
     scaffoldApp(root)
 
