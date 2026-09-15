@@ -6,7 +6,7 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
-import type { ConnectionContext, ConnectionResolver } from './connection-context'
+import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
 
 type AwsDataApiDrizzle = typeof import('drizzle-orm/aws-data-api/pg')
 type AwsDataApiPgDatabase = import('drizzle-orm/aws-data-api/pg').AwsDataApiPgDatabase
@@ -72,6 +72,8 @@ export interface AwsDataApiDatabase {
   resetDatabase(): Promise<MigrationRunSummary>
   /** Per-migration applied state derived from the drizzle-kit journal and drizzle.__drizzle_migrations. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
+  /** Whether the migrations folder holds a migration. Reads files only, never the database. */
+  hasMigrations(): boolean
 }
 
 interface ResolvedConnection {
@@ -94,13 +96,11 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
-  // Kept, not passed: the resolver also runs inside a memoized flight and the
-  // reset's admin handle, which no configureOrm() call reaches.
-  let connectionContext: ConnectionContext | undefined
+  const settings = connectionSettings()
 
   function resolveConnection(): ResolvedConnection {
     const resolveValue = (value: ConnectionResolver | undefined, envKey: string): string | undefined => {
-      const resolved = typeof value === 'function' ? value(connectionContext) : value
+      const resolved = settings.resolve(value)
       return resolved ?? process.env[envKey]
     }
 
@@ -201,7 +201,10 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   }
 
   async function configureOrm(context?: ConnectionContext): Promise<void> {
-    if (context) connectionContext = context
+    if (settings.remember(context)) {
+      await closeDatabase()
+      migrations.reset()
+    }
     const db = await databaseHandle.get()
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }
@@ -267,6 +270,10 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     }
   }
 
+  function hasMigrations(): boolean {
+    return listLocalMigrations(resolvedMigrationsFolder).length > 0
+  }
+
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {
     const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
     if (localMigrations.length === 0) return []
@@ -282,6 +289,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     seedDatabase,
     resetDatabase,
     migrationStatus,
+    hasMigrations,
   }
 }
 

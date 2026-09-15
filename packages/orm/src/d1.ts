@@ -36,6 +36,8 @@ export interface D1DatabaseHandle {
   resetDatabase(): Promise<never>
   /** Always throws: wrangler's tracker is authoritative — use `wrangler d1 migrations list`. */
   migrationStatus(): Promise<never>
+  /** Always false: wrangler applies D1 migrations and the factory never seeds, so nothing at boot acts on them. */
+  hasMigrations(): boolean
 }
 
 /**
@@ -107,6 +109,10 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
         'D1 databases are reset with wrangler, not at runtime: delete and recreate the database ' +
           '(`wrangler d1 delete` / `wrangler d1 create`), then re-apply migrations with `wrangler d1 migrations apply`.',
       )
+    },
+
+    hasMigrations() {
+      return false
     },
 
     async migrationStatus() {

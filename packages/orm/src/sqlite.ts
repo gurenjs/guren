@@ -5,7 +5,7 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
-import type { ConnectionContext, ConnectionResolver } from './connection-context'
+import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
 
 export interface SqliteDatabaseOptions {
   migrationsFolder: string | URL
@@ -37,6 +37,8 @@ export interface SqliteDatabase {
   resetDatabase(): Promise<MigrationRunSummary | undefined>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
+  /** Whether the migrations folder holds a migration. Reads files only, never the database. */
+  hasMigrations(): boolean
 }
 
 type SqliteTarget =
@@ -143,12 +145,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
-  // Kept, not passed: the resolver runs inside a memoized flight no
-  // configureOrm() call reaches once another method started it.
-  let connectionContext: ConnectionContext | undefined
+  const settings = connectionSettings()
 
   function resolveFilename(): string {
-    const value = typeof filename === 'function' ? filename(connectionContext) : filename
+    const value = settings.resolve(filename)
     if (value != null) {
       assertNotConnectionUri(value, 'the "filename" option')
       return value
@@ -321,6 +321,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       return migrations.get()
     },
 
+    hasMigrations() {
+      return listLocalMigrations(resolvedMigrationsFolder).length > 0
+    },
+
     async migrationStatus() {
       const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
       if (localMigrations.length === 0) return []
@@ -330,7 +334,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     },
 
     async configureOrm(context?: ConnectionContext) {
-      if (context) connectionContext = context
+      if (settings.remember(context)) {
+        await closeDatabase()
+        migrations.reset()
+      }
       const db = await database.get()
       await migrations.get()
       DrizzleAdapter.configure(db as Parameters<typeof DrizzleAdapter.configure>[0])

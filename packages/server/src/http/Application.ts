@@ -882,17 +882,18 @@ export class Application {
    */
   private mountConfiguredHostAuthorization(): void {
     const container = this.container
-    let middleware: MiddlewareHandler | undefined
+    // `null` once the config turned it off.
+    let middleware: MiddlewareHandler | null | undefined
 
     this.hono.use('*', (ctx, next) => {
-      if (!middleware) {
+      if (middleware === undefined) {
         if (!container.has('http.hostAuthorization')) {
           return Promise.resolve(ctx.text('Service Unavailable: the application has not booted', 503))
         }
         const options = container.make('http.hostAuthorization')
-        middleware = options ? createHostAuthorizationMiddleware(options) : (_ctx, pass) => pass()
+        middleware = options ? createHostAuthorizationMiddleware(options) : null
       }
-      return middleware(ctx, next)
+      return middleware ? middleware(ctx, next) : next()
     })
   }
 

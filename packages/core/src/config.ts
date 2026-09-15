@@ -2,11 +2,11 @@ import { defineConfig, type AppEnv, type ConfigDefinition, type SessionConfig } 
 import type { ConnectionContext } from '@guren/orm'
 import { createSessionManager } from './session-manager.js'
 
-/** What `defineDatabaseConfig()` needs from a dialect factory's result. D1's `seedDatabase`/`migrationStatus` exist and throw. */
+/** What `defineDatabaseConfig()` needs from a dialect factory's result. */
 export interface ConfigurableDatabase {
   configureOrm(context?: ConnectionContext): Promise<void>
   seedDatabase(): Promise<unknown>
-  migrationStatus(): Promise<readonly unknown[]>
+  hasMigrations(): boolean
 }
 
 export interface DatabaseConfig {
@@ -50,8 +50,8 @@ export function defineSessionConfig(resolve: (env: AppEnv) => SessionConfig): Co
 /**
  * `config/database.ts` (RFC 0027 §2). Binds `database`, and at boot connects
  * through `configureOrm({ env })`, so a connection resolver reads the validated
- * env (a test's `envSource` included) rather than `process.env`. Seeds only
- * when asked and when migrations exist, as the template's `bootModels()` did.
+ * env (a test's `envSource` included) rather than `process.env`. Without an env
+ * schema the context is omitted, so a resolver's own fallback runs.
  */
 export function defineDatabaseConfig(
   database: ConfigurableDatabase,
@@ -63,9 +63,9 @@ export function defineDatabaseConfig(
     bind: (container, config) => {
       container.instance('database', config.database)
     },
-    boot: async (_container, config, env) => {
-      await config.database.configureOrm({ env })
-      if (config.seedOnBoot && (await config.database.migrationStatus()).length > 0) {
+    boot: async (container, config, env) => {
+      await config.database.configureOrm(container.has('env') ? { env } : undefined)
+      if (config.seedOnBoot && config.database.hasMigrations()) {
         await config.database.seedDatabase()
       }
     },
