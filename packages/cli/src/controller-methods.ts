@@ -131,6 +131,8 @@ export const CONTROLLER_MEMBER_KINDS = {
   validateParams: 'non-body',
   validateQuerySafe: 'non-body',
   validateParamsSafe: 'non-body',
+  /** Returns what the route contract middleware already validated; reads no body itself. */
+  validated: 'non-body',
 } as const satisfies Readonly<Record<string, ControllerMemberKind>>
 
 /**

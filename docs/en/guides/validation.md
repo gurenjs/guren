@@ -47,6 +47,24 @@ export default class PostsController extends Controller {
 }
 ```
 
+## Route Contract Validation
+
+A route that declares `params`, `query` or `body` schemas is validated before its handler runs, controller actions included. The action then reads the parsed values with `this.validated()` rather than declaring the schema a second time:
+
+```ts
+router.post('/posts', { name: 'posts.store', body: StorePostSchema }, [PostsController, 'store'])
+
+export default class PostsController extends Controller {
+  async store() {
+    const { body } = this.validated('posts.store')
+    const post = await Post.create(body)
+    return this.created({ post })
+  }
+}
+```
+
+A failure throws the same `ValidationException` (422) that `validateBody()` throws, with the same error keys, so Inertia forms display it unchanged. See [Reading Validated Input](./routing.md#reading-validated-input).
+
 ## Controller Validation Helpers
 
 The simplest way to validate in controllers is with `validateBody`, `validateQuery`, and `validateParams`. They accept any Zod-like schema (anything with `safeParse()`) and throw `ValidationException` (422) on failure:

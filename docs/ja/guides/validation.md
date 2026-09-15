@@ -322,6 +322,24 @@ function CreateUser({ errors }: Props) {
 }
 ```
 
+## ルートコントラクトによる検証
+
+`params`、`query`、`body` のスキーマを宣言したルートは、ハンドラーの実行前に検証されます。コントローラーアクションも対象です。アクションはスキーマを二度書かず、パース済みの値を `this.validated()` で読みます。
+
+```ts
+router.post('/posts', { name: 'posts.store', body: StorePostSchema }, [PostsController, 'store'])
+
+export default class PostsController extends Controller {
+  async store() {
+    const { body } = this.validated('posts.store')
+    const post = await Post.create(body)
+    return this.created({ post })
+  }
+}
+```
+
+失敗時には `validateBody()` と同じ `ValidationException`(422)が同じエラーキーで投げられるので、Inertia のフォームはそのまま表示できます。詳しくは[検証済み入力の読み取り](./routing.md#検証済み入力の読み取り)を参照してください。
+
 ## コントローラーバリデーションヘルパー
 
 コントローラーでいちばん手軽なのは `validateBody`、`validateQuery`、`validateParams` です。`safeParse()` を持つ Zod ライクなスキーマを受け取り、失敗すると `ValidationException`（422）をスローします。

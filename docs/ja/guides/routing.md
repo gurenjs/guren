@@ -282,6 +282,27 @@ router.get('/posts/:id', {
 > [!NOTE]
 > 同じクエリキーが繰り返された場合、`query` スキーマには配列として渡されます（`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`）。1 回だけ出現するキーは文字列のままです。詳細は[配列形式のクエリパラメータ](./validation.md#配列形式のクエリパラメータ)を参照してください。
 
+### 検証済み入力の読み取り
+
+`params`、`query`、`body` のスキーマは、ハンドラーより先に検査されます。インラインハンドラーでもコントローラーアクションでも同じです。どれかに違反したリクエストには 422 を返し、アクションは実行しません。Inertia リクエストではエラーがフォームに flash され、キーは `validateBody()` と同じフィールドパスになります。
+
+アクションは、スキーマがパースした値を `this.validated()` で読みます。引数には自分のルート名を渡します。
+
+```ts
+export default class PostsController extends Controller {
+  async store() {
+    const { body } = this.validated('posts.store')
+    const user = await this.auth.userOrFail()
+    const post = await Post.create({ ...body, authorId: user.id })
+    return this.redirect(`/posts/${post.id}`)
+  }
+}
+```
+
+値は coerce、デフォルト値、transform を適用した後の形で届きます。`z.coerce.number()` のパラメータは `number` です。スキーマを宣言していないセグメントは `undefined` になります。`guren codegen` を実行すると、ルート名がコンパイル時に検査され、戻り値もコントラクトから型付けされます。処理中のルートと違う名前を渡した場合は例外になります。
+
+コントラクトはアクションより先に動くので、アクション内の検査(`this.auth.userOrFail()` など)はボディが正しい場合にだけ実行されます。不正なボディには先に 422 が返ります。未認証のリクエストに 401 を先に返したい場合は、その検査をルートのミドルウェアに置いてください。`validateBody()`、`validateQuery()`、`validateParams()` はそのまま使えます。コントラクトを宣言しないルートの検証には、これらを使います。
+
 ### Resource レスポンスヒント
 
 [API リソース](./api-resources.md)で応答するルートには、すでにレスポンス型があります。コード生成が Resource クラスから `.guren/data.gen.ts` に抽出する型です。そうしたルートに `output` スキーマを書くと、同じ形を Zod で二重定義することになり、2 つのコピーが乖離していきます。代わりに Resource そのものを宣言してください:

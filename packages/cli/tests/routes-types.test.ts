@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { checkTypes, TSC_TIMEOUT, GENERATED_MODULE_COMPILER_OPTIONS } from './helpers'
+import { z } from 'zod'
 import {
   buildDeclarationContent,
   buildRouteModuleContent,
@@ -183,6 +184,63 @@ describe('buildDeclarationContent', () => {
   })
 })
 
+describe('route contract registry', () => {
+  it('registers each named route\'s parsed contract segments on GurenRouteContracts', () => {
+    const content = buildRouteModuleContent([
+      {
+        method: 'PUT',
+        path: '/posts/:id',
+        name: 'posts.update',
+        schemas: {
+          params: z.object({ id: z.coerce.number() }),
+          body: z.object({ title: z.string(), draft: z.boolean().default(false) }),
+        },
+      },
+      { method: 'GET', path: '/', name: 'home' },
+      { method: 'POST', path: '/unnamed', schemas: { body: z.object({ title: z.string() }) } },
+    ], { source: 'routes/web.ts' })
+
+    const augmentation = content.slice(content.indexOf("declare module '@guren/core' {"))
+
+    expect(augmentation).toStartWith("declare module '@guren/core' {")
+    expect(augmentation).toContain("'posts.update': { params: { id: number }; body: { title: string; draft: boolean } }")
+    expect(augmentation).not.toContain("'home'")
+    expect(augmentation).not.toContain('unnamed')
+  })
+
+  it('types Controller.validated() from the registry against @guren/core', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'guren-route-contracts-'))
+    try {
+      await writeFile(join(dir, 'routes.gen.ts'), buildRouteModuleContent([
+        {
+          method: 'PUT',
+          path: '/posts/:id',
+          name: 'posts.update',
+          schemas: {
+            params: z.object({ id: z.coerce.number() }),
+            body: z.object({ title: z.string() }),
+          },
+        },
+      ], { source: 'routes/web.ts' }), 'utf8')
+      const probe = join(dir, 'probe.ts')
+      await writeFile(probe, CONTRACT_USAGE_PROBE, 'utf8')
+
+      expect(checkTypes([probe], {
+        ...GENERATED_MODULE_COMPILER_OPTIONS,
+        paths: { '@guren/core': [resolve(import.meta.dir, '../../core/dist/index.d.ts')] },
+      })).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, TSC_TIMEOUT)
+
+  it('emits no augmentation when no named route declares an input schema', () => {
+    const content = buildRouteModuleContent([{ method: 'GET', path: '/', name: 'home' }], { source: 'routes/web.ts' })
+
+    expect(content).not.toContain('GurenRouteContracts')
+  })
+})
+
 describe('buildRouteModuleContent', () => {
   it('generates a runtime manifest and route helpers for named routes', () => {
     const definitions: RouteDefinition[] = [
@@ -348,3 +406,21 @@ void route('items.show')
 `
 
 const routesCompilerOptions = GENERATED_MODULE_COMPILER_OPTIONS
+
+const CONTRACT_USAGE_PROBE = `import './routes.gen'
+import { Controller } from '@guren/core'
+
+export class PostController extends Controller {
+  update() {
+    const { params, query, body } = this.validated('posts.update')
+    const id: number = params.id
+    const title: string = body.title
+    const undeclared: undefined = query
+    // @ts-expect-error the coerced param is a number once parsed
+    const asWire: string = params.id
+    // @ts-expect-error a name the registry does not hold
+    this.validated('posts.missing')
+    return [id, title, undeclared, asWire]
+  }
+}
+`

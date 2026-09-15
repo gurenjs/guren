@@ -7,11 +7,13 @@ import {
   RUNTIME_ROUTE_FUNCTION,
   RUNTIME_UTILITY_FUNCTIONS,
 } from './routes-types-fragments'
+import { schemaToTypeString } from './schema-type-extractor'
 
 export type RouteDefinition = {
   method: string
   path: string
   name?: string
+  schemas?: { params?: unknown; query?: unknown; body?: unknown }
 }
 
 export interface GenerateRouteTypesOptions extends WriterOptions {
@@ -118,7 +120,39 @@ ${RUNTIME_TYPE_DEFINITIONS}
 ${RUNTIME_ROUTE_FUNCTION}
 export const routes = ${helperObject} as const
 
-${RUNTIME_UTILITY_FUNCTIONS}`
+${RUNTIME_UTILITY_FUNCTIONS}${buildContractAugmentation(namedDefinitions)}`
+}
+
+const CONTRACT_SEGMENTS = ['params', 'query', 'body'] as const
+
+/**
+ * The `GurenRouteContracts` registry `Controller.validated()` reads: each named
+ * route's segments as its schemas *parse* them (`io: 'output'`, so a coerced
+ * number is `number`), unlike `ApiRoutes.body`, which is what a client sends.
+ */
+export function buildContractAugmentation(definitions: Array<RouteDefinition & { name: string }>): string {
+  const entries = definitions.flatMap((definition) => {
+    const segments = CONTRACT_SEGMENTS.flatMap((segment) => {
+      const schema = definition.schemas?.[segment]
+      if (!schema) return []
+      // A schema that does not render still validates at runtime, so its segment is not `undefined`.
+      return [`${segment}: ${schemaToTypeString(schema, { io: 'output' }) ?? 'unknown'}`]
+    })
+    return segments.length > 0
+      ? [`      ${quoteObjectKey(definition.name)}: { ${segments.join('; ')} }`]
+      : []
+  })
+  if (entries.length === 0) return ''
+
+  return `
+declare module '@guren/core' {
+  interface GurenRouteContracts {
+    routes: {
+${entries.join('\n')}
+    }
+  }
+}
+`
 }
 
 export function toTypeLiteral(path: string): string {

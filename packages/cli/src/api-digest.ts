@@ -33,7 +33,9 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 - No \`attach/detach/sync\` — create/delete rows on a pivot model. No \`firstOrCreate/updateOrCreate\` — hand-roll with \`first()\` + \`create()\`
 
 ### Controllers (@guren/core)
-- \`await this.validateBody(schema)\` (throws → 422) · \`this.validateQuery(schema)\` · \`this.validateParams(schema)\` — any Zod-like schema
+- Route contract \`{ params, query, body }\` is validated before the action (422); read the parsed values with
+  \`this.validated('posts.store')\` → \`{ params, query, body }\` (typed by \`guren codegen\`, undeclared segments \`undefined\`)
+- \`await this.validateBody(schema)\` (throws → 422) · \`this.validateQuery(schema)\` · \`this.validateParams(schema)\` — any Zod-like schema, for routes without a contract
 - \`this.inertia(pages.posts.Show, props)\` · \`this.redirect(url)\` (302 GET, 303 non-GET) · \`this.json(data)\`
 - \`this.auth\` — every method is async, always \`await\`: \`userOrFail<UserRecord>()\` (throws → 401;
   pass \`<T>\` — the default type has no \`.id\`) · \`user<T>()\` · \`check()\` · \`guest()\` ·

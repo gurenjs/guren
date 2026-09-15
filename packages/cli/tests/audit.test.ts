@@ -224,6 +224,41 @@ export default function registerRoutes(router: any) {
     }
   })
 
+  it('passes a controller route whose server enforces the route body schema', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-enforced-schema-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController {
+  async store() {
+    const { body } = this.validated('posts.store')
+    return body
+  }
+}`,
+      )
+      await writeRoutes(
+        workspace.dir,
+        `class PostController {
+  async store() { return null }
+}
+const schema = { safeParse: (value: unknown) => ({ success: true, data: value }) }
+export default function registerRoutes(router: any) {
+  router.post('/posts', { name: 'posts.store', body: schema }, [PostController, 'store'])
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const validation = report.findings.find(f => f.key === 'validation:POST /posts')
+      expect(validation?.status).toBe('pass')
+      expect(validation?.message).toBe('Body schema validated at route level.')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('fails controller routes that rely on a type-only route body schema', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-typeonly-schema-')
 
@@ -244,8 +279,11 @@ export default function registerRoutes(router: any) {
   async store() { return null }
 }
 const schema = { safeParse: (value: unknown) => ({ success: true, data: value }) }
+// A server predating controller-path body validation emits no validatesBody flag.
 export default function registerRoutes(router: any) {
   router.post('/posts', { name: 'posts.store', body: schema }, [PostController, 'store'])
+  const definitions = router.definitions.bind(router)
+  router.definitions = () => definitions().map(({ validatesBody, ...definition }: any) => definition)
 }`,
       )
 

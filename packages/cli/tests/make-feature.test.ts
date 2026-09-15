@@ -284,7 +284,9 @@ describe('makeFeature', () => {
       )
 
       expect(controller).not.toContain('auth.userOrFail')
-      expect(controller).toContain('validateBody')
+      expect(controller).toContain("this.validated('posts.store')")
+      expect(controller).toContain("this.validated('posts.update')")
+      expect(controller).not.toContain('PayloadSchema')
       expect(controller).toContain('async destroy')
       expect(controller).toContain('await Post.findOrFail(id)')
       expect(controller).toContain('await Post.delete({ id: post.id })')

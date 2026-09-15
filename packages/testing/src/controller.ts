@@ -430,6 +430,19 @@ export function createControllerModuleMock() {
       return (queryValue as T | undefined) ?? defaultValue
     }
 
+    // Reads what `contractInput()` seeded, as the runtime reads what the route
+    // contract middleware left: no schema runs here.
+    public validated(route?: string): { params: unknown; query: unknown; body: unknown } {
+      const record = this.ctx.get(VALIDATED_INPUT_CONTEXT_KEY) as ValidatedInputRecord | undefined
+      if (!record) {
+        throw new Error('Controller.validated() found no contract-validated input. Seed it with contractInput().')
+      }
+      if (route !== undefined && route !== record.route) {
+        throw new Error(`Controller.validated('${route}') was called while serving route '${String(record.route)}'.`)
+      }
+      return { params: record.params, query: record.query, body: record.body }
+    }
+
     public async validateBody<T>(schema: {
       safeParse: (data: unknown) =>
         | { success: true; data: T }
