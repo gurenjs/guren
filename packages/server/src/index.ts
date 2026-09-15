@@ -1047,6 +1047,16 @@ export type { PasswordHasherOption } from './auth/password/configured-hasher'
 export type { ApplicationOptions, AuthPluginOptions, I18nPluginOptions, InertiaApplicationOptions } from './http/Application'
 export { defineEnv, Env, EnvSchema, EnvValidationError, EnvVar, isRawEnvKey } from './config/env'
 export type { AppEnv, EnvProblem, EnvSource, InferEnv, ParsedEnv } from './config/env'
+export {
+  defineCacheConfig,
+  defineConfig,
+  defineHttpConfig,
+  defineMailConfig,
+  defineOAuthConfig,
+  defineQueueConfig,
+  defineStorageConfig,
+} from './config/define'
+export type { ConfigDefinition, ConfigDefinitions, HttpConfig, OAuthConfig } from './config/define'
 export type { InertiaI18nProps } from './providers/I18nServiceProvider'
 // Queue: SQS adapter
 export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'

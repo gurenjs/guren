@@ -22,6 +22,7 @@ import type { InertiaDocumentOptions, InertiaSsrRenderer } from '../mvc/inertia/
 import type { AgentAuditEmitter } from '../agent/audit-emitter'
 import type { SessionManager } from '../http/middleware/session-manager'
 import type { AppEnv, EnvSource } from '../config/env'
+import type { HostAuthorizationOptions } from '../http/middleware/host-authorization'
 
 /** Maps service keys to their concrete types, for `container.make('key')`. */
 export interface ServiceBindings {
@@ -64,4 +65,6 @@ export interface ServiceBindings {
   env: AppEnv
   /** Read ahead of `process.env` when the schema is parsed: the Workers env, a test's `envSource`. */
   'env.source': EnvSource
+  /** `defineHttpConfig()`'s host authorization, read by the placeholder `Application` mounts first (RFC 0027 §5). */
+  'http.hostAuthorization': HostAuthorizationOptions | false
 }

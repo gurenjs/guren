@@ -291,6 +291,14 @@ export class Container {
     return Array.from(this.bindings.keys())
   }
 
+  /**
+   * The binding record behind `key`. Every bind replaces the record, so comparing
+   * two reads by identity tells a rebind apart, which a key list cannot (RFC 0027 §3).
+   */
+  bindingOf(key: string): Readonly<ServiceBinding> | undefined {
+    return this.bindings.get(this.resolveAlias(key))
+  }
+
   getAliases(): Record<string, string> {
     const result: Record<string, string> = {}
     for (const [alias, key] of this.aliases) {

@@ -35,6 +35,21 @@ export abstract class ServiceProvider implements Provider {
   }
 }
 
+/** A binding a provider made and no later provider may replace, with where it was declared. */
+export interface OwnedBinding {
+  readonly binding: unknown
+  readonly source: string
+}
+
+/** Implemented by ConfigServiceProvider: its bindings fail the boot when a later provider replaces one (RFC 0027 §3). */
+interface BindingOwner {
+  ownedBindings(): ReadonlyMap<string, OwnedBinding>
+}
+
+function isBindingOwner(provider: ServiceProvider): provider is ServiceProvider & BindingOwner {
+  return typeof (provider as Partial<BindingOwner>).ownedBindings === 'function'
+}
+
 /**
  * Provider manager for registering and booting providers.
  */
@@ -45,6 +60,7 @@ export class ProviderManager {
   protected deferredProviders: Map<string, ServiceProvider> = new Map()
   /** Per service, the boot of an already-activated deferred provider, so a later loadDeferredProvider() awaits that boot */
   private deferredActivations: Map<string, Promise<void>> = new Map()
+  private bindingOwners: BindingOwner[] = []
   private allBooted = false
 
   constructor(protected container: Container) {}
@@ -96,7 +112,20 @@ export class ProviderManager {
     for (const provider of this.providers) {
       if (!this.registered.has(provider)) {
         await provider.register()
+        // Before marking it registered, so a retried boot runs the check again.
+        this.assertOwnedBindingsKept(provider)
         this.registered.add(provider)
+        if (isBindingOwner(provider)) this.bindingOwners.push(provider)
+      }
+    }
+  }
+
+  private assertOwnedBindingsKept(provider: ServiceProvider): void {
+    for (const owner of this.bindingOwners) {
+      for (const [key, { binding, source }] of owner.ownedBindings()) {
+        if (this.container.bindingOf(key) !== binding) {
+          throw new Error(`[guren] "${key}" is configured twice: ${source} and ${provider.constructor.name}.register(). Keep one.`)
+        }
       }
     }
   }
