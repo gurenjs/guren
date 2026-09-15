@@ -107,6 +107,12 @@ hono.use(MCP_ENDPOINT_PATH, createMcpAccessGuard())
 hono.all(MCP_ENDPOINT_PATH, (c) => handler.fetch(c.req.raw))
 ```
 
+~~A CLI without the factory throws.~~ **Amended in implementation:** the provider
+warns and leaves the endpoint unmounted, both for a CLI that predates the factory and
+for one that cannot be imported. `Application.mountDevEndpoint` only catches failures
+while loading the provider module, so a throw from `boot()` would stop the whole dev
+server over the coding-agent endpoint; the warning names `bunx guren upgrade`.
+
 Why `@guren/cli`:
 
 - `DEV_ONLY_MODULES` lists it unconditionally, so every deploy target stubs it for
@@ -136,9 +142,17 @@ Constraints the implementation has to respect:
 
 Behavior changes on the Dev MCP, all from v2's handler: `GET` and `DELETE` answer
 `405` (v1 stateless opened an SSE stream on `GET` and answered `DELETE` with `200`),
-a `POST` that is not `application/json` answers `415`, and a body the entry reads
+a `POST` that is not `application/json` answers `415`~~, and a body the entry reads
 itself answers `413` above 4 MiB (`maxRequestBodySize`; the bound does not apply to a
-`parsedBody` the caller supplies, and neither endpoint supplies one).
+`parsedBody` the caller supplies, and neither endpoint supplies one)~~.
+
+**Amended in implementation:** the `413` bound is not in the published SDK 2.0.0. The
+SDK source this RFC cited was a checkout one commit past a branch that diverged from
+the release tag, and `maxRequestBodySize` exists only there; the installed
+`@modelcontextprotocol/server@2.0.0` has no body limit (its dist contains neither the
+option nor a `413`). The `405` and `415` answers, the `request.clone()` on the legacy
+leg and `authInfo` reaching every factory call were re-checked against the installed
+dist and hold. Line numbers citing `createMcpHandler.ts` refer to that checkout.
 
 `Application.ts:801` currently names `@modelcontextprotocol/sdk` when the provider
 fails to load. After the move the likely failure is a missing or outdated
@@ -227,8 +241,10 @@ modern list results by default, which is correct here because the tool list depe
 the caller's abilities. `server/discover` is answered by the handler.
 
 **Status codes on a production endpoint.** Unlike the Dev MCP, this endpoint ships.
-The `405`, `415` and `413` changes above apply to it too and are listed in the
-changeset body. Whether the 4 MiB default is right is Open Question 1.
+The `405` and `415` changes above apply to it too and are listed in the
+changeset body. ~~Whether the 4 MiB default is right is Open Question 1.~~
+**Amended in implementation:** SDK 2.0.0 has no body limit (see §1), so the
+endpoint's request size stays whatever the app's own middleware allows.
 
 **Tests.** `seam-tool-call.ts` sends a hand-built `initialize` and `tools/call` and
 discards both responses (`seam-tool-call.ts:31-34`), so it asserts nothing about
@@ -313,7 +329,7 @@ are installed; after the removal PR only v2 is.
 ### 7. Documentation and related RFCs
 
 - `docs/{en,ja}/guides/agent-interface.md`: the App MCP section (`:504`) states the
-  supported protocol revisions and the `405`/`415`/`413` behavior.
+  supported protocol revisions and the `405`/`415` behavior.
 - `docs/{en,ja}/tutorials/12-agent-tools.md` (`:912`): the Dev MCP description.
   Code blocks change identically in both locales (`audit:tutorial-blocks`).
 - RFC 0016 §7: an amendment note where Phase 4a describes the dropped transport entry
@@ -387,14 +403,15 @@ the lookup misses for every 2025-era client.
   is `createDevMcpHandler` from `@guren/cli`. No codemod: the return value changes
   from a server to a fetch handler, so the call site has to be rewritten by hand.
 - **Apps using `@guren/plugin-mcp`:** no configuration change. Clients that sent `GET`
-  or `DELETE`, a non-JSON body, or a body over 4 MiB see the new status codes.
+  or `DELETE`, or a non-JSON body, see the new status codes.
 - **Cloudflare apps:** no `wrangler.jsonc` change. After the removal PR the two
   `@modelcontextprotocol/sdk/...` alias lines are dead and can be deleted.
 
 ## Open Questions
 
-1. **plugin-mcp body limit.** Keep v2's 4 MiB default, or expose
-   `maxRequestBodySize` through `mcpPlugin()` config?
+1. ~~**plugin-mcp body limit.** Keep v2's 4 MiB default, or expose
+   `maxRequestBodySize` through `mcpPlugin()` config?~~ **Closed in implementation:**
+   SDK 2.0.0 has no such option (§1). Revisit when a release ships one.
 2. **Legacy posture.** Both endpoints keep `legacy: 'stateless'`. `'reject'` would cut
    off every current client, including the harness's `.mcp.json`; is there a date
    after which the Dev MCP should go modern-only?

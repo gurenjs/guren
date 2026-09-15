@@ -1,6 +1,8 @@
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
+import { warnDeprecated } from '../support/deprecate'
+
 /**
  * Options the `.guren/*.gen.ts` generators are called with. `cwd` is the project
  * they resolve output paths against; nothing changes `process.cwd()`, which is
@@ -135,6 +137,15 @@ export interface GurenCliApi {
   /** The OKF docs relation graph (RFC 0005). Optional, like the above. */
   buildDocsGraphReport?(options: { cwd?: string; entity?: string; path?: string }): Promise<unknown>
   renderDocsGraphMarkdown?(report: unknown): string
+  /**
+   * The Dev MCP endpoint on the 2026-07-28 protocol (RFC 0028). Spelled here
+   * rather than imported: this package cannot declare @guren/cli, so an imported
+   * type would build as `any`. Optional because an older CLI lacks it.
+   */
+  createDevMcpHandler?(options: { cwd: string; version?: string }): {
+    fetch(request: Request): Promise<Response>
+    close(): Promise<void>
+  }
 }
 
 export interface CreateMcpServerOptions {
@@ -201,7 +212,19 @@ function describeAgentRoute(route: AgentContextRoute) {
   }
 }
 
+/**
+ * @deprecated Serves only the 2025-era MCP protocol. The Dev MCP endpoint is now
+ * built by `createDevMcpHandler` from `@guren/cli` (RFC 0028); this is removed in
+ * the next minor.
+ * @experimental
+ */
 export function createMcpServer(options: CreateMcpServerOptions): McpServer {
+  warnDeprecated(
+    'server-create-mcp-server',
+    'createMcpServer',
+    "Use createDevMcpHandler({ cwd }) from '@guren/cli', which serves the 2026-07-28 MCP protocol as well as 2025-era clients.",
+    { since: '2.24.0', removedIn: '2.25.0' },
+  )
   const { cwd, cli, version = '0.2.0' } = options
 
   const server = new McpServer({
