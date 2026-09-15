@@ -321,8 +321,6 @@ function resolveDatabaseFilename(): string {
 > このブランチが導入される前にスキャフォールドされたプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)へ直接書き込みます。そのため `bun test` が開発サーバーと同じデータベースを汚染してしまいます。後付けする際はヘルパー関数を追加するだけでなく `filename` オプション自体を差し替えてください。ヘルパーを定義しただけでは `createSqliteDatabase()` が古い `filename` を参照したままで、効果がありません:
 >
 > ```diff
->  import { createSqliteDatabase } from '@guren/orm'
->
 > +function resolveDatabaseFilename(): string {
 > +  if (process.env.NODE_ENV === 'test') {
 > +    return process.env.TEST_DATABASE_URL || './data/guren.test.db'

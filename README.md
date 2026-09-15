@@ -137,7 +137,7 @@ export function registerWebRoutes(router: Router): void {
 ### Model
 
 ```typescript
-import { defineModel } from '@guren/orm'
+import { defineModel } from '@guren/core'
 import { posts } from '@/db/schema'
 
 export class Post extends defineModel(posts) {}

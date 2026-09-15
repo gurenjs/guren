@@ -83,8 +83,8 @@ import {
   AuthorizationException,
   ValidationException,
   MethodNotAllowedException,
+  ModelNotFoundException,
 } from '@guren/core'
-import { ModelNotFoundException } from '@guren/orm'
 
 // 404 Not Found
 throw new NotFoundHttpException('Post not found')
@@ -110,7 +110,7 @@ throw new HttpException(429, 'Rate limit exceeded')
 
 ### Duck-typed `statusCode`
 
-The `ExceptionHandler` supports any error with a numeric `statusCode` property, not just `HttpException` subclasses. This means `ModelNotFoundException` (from `@guren/orm`, which has `statusCode: 404`) is automatically rendered as a 404 response without any extra configuration. For errors with `statusCode >= 500`, the message is hidden in production (replaced with "Internal Server Error").
+The `ExceptionHandler` supports any error with a numeric `statusCode` property, not just `HttpException` subclasses. This means `ModelNotFoundException` (exported from `@guren/core`, with `statusCode: 404`) is automatically rendered as a 404 response without any extra configuration. For errors with `statusCode >= 500`, the message is hidden in production (replaced with "Internal Server Error").
 
 ## HTTP Exceptions
 

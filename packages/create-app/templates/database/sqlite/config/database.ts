@@ -1,4 +1,4 @@
-import { createSqliteDatabase, type SqliteSeederContext } from '@guren/orm'
+import { createSqliteDatabase, type SqliteSeederContext } from '@guren/core'
 
 // `bun test` sets NODE_ENV=test automatically, so the test suite reads and
 // writes a separate SQLite file and never touches the development database —

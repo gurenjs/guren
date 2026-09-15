@@ -88,7 +88,7 @@ export const myPlugin = definePlugin<MyConfig>({
 })
 ```
 
-For plugins needing no configuration or full class-based lifecycle control, export a `ServiceProvider` subclass directly instead — that contract is unchanged. **What plugins may touch:** the DI container (`this.container` / the `container` passed to `definePlugin`) and, from `boot()`, the shared Hono instance via `container.make('hono')` for middleware. Never reach into framework internals via deep imports (e.g. `@guren/server/src/http/Application`) — only import from public package entry points.
+For plugins needing no configuration or full class-based lifecycle control, export a `ServiceProvider` subclass directly instead — that contract is unchanged. **What plugins may touch:** the DI container (`this.container` / the `container` passed to `definePlugin`) and, from `boot()`, the shared Hono instance via `container.make('hono')` for middleware. Never reach into framework internals via deep imports (e.g. `@guren/<package>/src/...`) — only import from public package entry points.
 
 Export it: `export { myPlugin } from './plugin'`.
 

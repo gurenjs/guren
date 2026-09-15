@@ -1,4 +1,4 @@
-import { defineModel, type BelongsToRecord } from '@guren/orm'
+import { defineModel, type BelongsToRecord } from '@guren/core'
 import { tasks } from '../../db/schema.js'
 import type { UserRecord } from './User.js'
 

@@ -1,4 +1,4 @@
-import { createMySqlDatabase, type MySqlSeederContext } from '@guren/orm'
+import { createMySqlDatabase, type MySqlSeederContext } from '@guren/core'
 
 const database = createMySqlDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),

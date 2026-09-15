@@ -1,5 +1,4 @@
-import { defineSeeder } from '@guren/orm'
-import { Hash } from '@guren/core'
+import { defineSeeder, Hash } from '@guren/core'
 import { users } from '../schema.js'
 
 export default defineSeeder(async ({ db }) => {

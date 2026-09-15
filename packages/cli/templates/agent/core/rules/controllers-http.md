@@ -162,7 +162,7 @@ NotFoundHttpException.forModel('User', 123)
 
 Use `AuthorizationException.deny(...)` for manual ownership checks that don't go through `this.authorize()`/policies.
 
-**`Model.findOrFail()` throws `ModelNotFoundException` from `@guren/orm`** — a separate class that does *not* extend `HttpException`; the handler picks it up via its duck-typed `statusCode: 404`. `forModel()` exists only on `NotFoundHttpException`.
+**`Model.findOrFail()` throws `ModelNotFoundException` (exported from `@guren/core`)** — a separate class that does *not* extend `HttpException`; the handler picks it up via its duck-typed `statusCode: 404`. `forModel()` exists only on `NotFoundHttpException`.
 
 ## Response helpers
 

@@ -1,5 +1,4 @@
-import { defineModel, type BelongsToRecord } from '@guren/orm'
-import { Attachable, hasOneAttached } from '@guren/core'
+import { Attachable, defineModel, hasOneAttached, type BelongsToRecord } from '@guren/core'
 import { posts } from '../../db/schema.js'
 import type { UserRecord } from './User.js'
 

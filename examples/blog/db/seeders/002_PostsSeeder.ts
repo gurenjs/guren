@@ -1,4 +1,4 @@
-import type { SeederContext } from '@guren/orm'
+import type { SeederContext } from '@guren/core'
 import { sql } from '@guren/orm/drizzle/pg'
 import { posts } from '../../db/schema.js'
 

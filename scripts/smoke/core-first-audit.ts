@@ -1,4 +1,12 @@
-import { readdir, readFile } from 'node:fs/promises'
+/**
+ * Application code imports the framework from `@guren/core` (RFC 0024, "Import
+ * surface for application code"). Two rules over what users read and copy: no
+ * `@guren/server` anywhere, and no import of the root `@guren/orm` specifier.
+ * `@guren/orm/drizzle/<dialect>` is the schema DSL and stays allowed. Whole files
+ * are matched rather than `ts` fences, since a `diff` fence or a blockquoted
+ * snippet is copied as readily.
+ */
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { resolve, join, relative } from 'node:path'
 
 const repoRoot = resolve(import.meta.dir, '../..')
@@ -7,7 +15,8 @@ const targets = [
   'docs',
   'examples',
   'web',
-  'packages/create-app/templates/default',
+  'packages/create-app/templates',
+  'packages/cli/templates',
 ]
 
 const ignoredFileNames = new Set([
@@ -27,16 +36,29 @@ const ignoredDirNames = new Set([
   '.turbo',
   '.guren',
   '.vercel',
+  '.wrangler',
+  '.cloudflare',
+  '.output',
   'coverage',
 ])
 
+/**
+ * `from '@guren/orm'`, `import '@guren/orm'` and `import('@guren/orm')`. A subpath,
+ * a `declare module` augmentation, a manifest key and prose in backticks all miss.
+ */
+const ORM_ROOT_IMPORT = /(?:\bfrom|\bimport)\s*\(?\s*(['"])@guren\/orm\1/g
+
+export function ormRootImportLines(source: string): number[] {
+  const lines: number[] = []
+  for (const match of source.matchAll(ORM_ROOT_IMPORT)) {
+    lines.push(source.slice(0, match.index).split('\n').length)
+  }
+  return lines
+}
+
 async function collectFiles(entryPath: string): Promise<string[]> {
-  const stat = await Bun.file(entryPath)
-  if (await stat.exists() && !entryPath.endsWith('/')) {
-    const fsStat = await import('node:fs/promises').then((fs) => fs.stat(entryPath))
-    if (fsStat.isFile()) {
-      return [entryPath]
-    }
+  if ((await stat(entryPath)).isFile()) {
+    return [entryPath]
   }
 
   const entries = await readdir(entryPath, { withFileTypes: true })
@@ -61,30 +83,48 @@ async function collectFiles(entryPath: string): Promise<string[]> {
   return files
 }
 
+function report(heading: string, violations: readonly string[]): boolean {
+  if (violations.length === 0) return false
+  console.error(heading)
+  for (const violation of violations) {
+    console.error(`- ${violation}`)
+  }
+  return true
+}
+
 async function main(): Promise<void> {
-  const violations: string[] = []
+  const serverReferences: string[] = []
+  const ormRootImports: string[] = []
 
   for (const target of targets) {
-    const absoluteTarget = resolve(repoRoot, target)
-    const files = await collectFiles(absoluteTarget)
-
-    for (const filePath of files) {
+    for (const filePath of await collectFiles(resolve(repoRoot, target))) {
       const source = await readFile(filePath, 'utf8')
+      const path = relative(repoRoot, filePath)
       if (source.includes('@guren/server')) {
-        violations.push(relative(repoRoot, filePath))
+        serverReferences.push(path)
+      }
+      for (const line of ormRootImportLines(source)) {
+        ormRootImports.push(`${path}:${line}`)
       }
     }
   }
 
-  if (violations.length > 0) {
-    console.error('Core-first audit failed. Found stale @guren/server references in:')
-    for (const violation of violations) {
-      console.error(`- ${violation}`)
-    }
+  const serverFailed = report(
+    'Core-first audit failed. Found stale @guren/server references in:',
+    serverReferences,
+  )
+  const ormFailed = report(
+    "Core-first audit failed. Import these from '@guren/core' instead of '@guren/orm' " +
+      '(only @guren/orm/drizzle/<dialect> is imported directly, for schema definitions):',
+    ormRootImports,
+  )
+  if (serverFailed || ormFailed) {
     process.exit(1)
   }
 
   console.log('Core-first audit passed.')
 }
 
-await main()
+if (import.meta.main) {
+  await main()
+}

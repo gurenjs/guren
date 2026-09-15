@@ -44,7 +44,7 @@ UTC として読み戻し、アプリ以外のクライアントには別の ins
 
 ```ts
 // app/Models/Post.ts
-import { defineModel } from '@guren/orm'
+import { defineModel } from '@guren/core'
 import { posts } from '@/db/schema'
 
 export type PostRecord = typeof posts.$inferSelect
@@ -76,7 +76,7 @@ Guren は Bun 組み込みの SQLite ドライバで SQLite に対応してい�
 
 ```ts
 // config/database.ts
-import { createSqliteDatabase } from '@guren/orm'
+import { createSqliteDatabase } from '@guren/core'
 
 const database = createSqliteDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
@@ -98,7 +98,7 @@ MySQL(および互換データベース)を使う場合は `createMySqlDatabase`
 
 ```ts
 // config/database.ts
-import { createMySqlDatabase } from '@guren/orm'
+import { createMySqlDatabase } from '@guren/core'
 
 const database = createMySqlDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
@@ -120,7 +120,7 @@ AWS Lambda 上で RDS Data API を有効にした Aurora Serverless v2 に接続
 
 ```ts
 // config/database.ts
-import { createAwsDataApiDatabase } from '@guren/orm'
+import { createAwsDataApiDatabase } from '@guren/core'
 
 const database = createAwsDataApiDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
@@ -441,7 +441,7 @@ const popular = await db.select().from(posts).where(and(Post.newQuery().toSql(),
 再利用可能なクエリ制約を、モデル上の名前付きスコープとして定義できます。よく使うフィルタに名前が付き、探すのも組み合わせるのも楽になります。
 
 ```ts
-import { defineModel, type QueryBuilder } from '@guren/orm'
+import { defineModel, type QueryBuilder } from '@guren/core'
 import { posts } from '@/db/schema'
 
 export type PostRecord = typeof posts.$inferSelect
@@ -522,7 +522,7 @@ User.removeGlobalScope('active')
 フックを使うと、モデルのライフサイクルの特定のポイントでロジックを実行できます。静的な `hooks` オブジェクトとして定義します。
 
 ```ts
-import { defineModel } from '@guren/orm'
+import { defineModel } from '@guren/core'
 import { posts } from '@/db/schema'
 import { slugify } from '@/app/utils/string'
 
@@ -571,7 +571,7 @@ export class Post extends defineModel(posts) {
 
 ```ts
 // app/Observers/PostObserver.ts
-import type { ModelObserver, PlainObject } from '@guren/orm'
+import type { ModelObserver, PlainObject } from '@guren/core'
 
 export class PostObserver implements ModelObserver {
   creating(data: PlainObject) {
@@ -601,7 +601,7 @@ before イベント(`creating`、`updating`、`deleting`、`saving`)で `false` 
 ソフトデリートは、レコードを実際に削除する代わりに `deletedAt` タイムスタンプを設定して削除済みとしてマークします。`SoftDeletes` をミックスインして有効にします。
 
 ```ts
-import { SoftDeletes, defineModel } from '@guren/orm'
+import { SoftDeletes, defineModel } from '@guren/core'
 import { posts } from '@/db/schema'
 
 export class Post extends SoftDeletes(defineModel(posts)) {}
@@ -839,7 +839,7 @@ ORM には Eloquent スタイルのリレーション層が組み込まれてい
 
 ```ts
 // app/Models/User.ts
-import { defineModel, type HasManyRecord } from '@guren/orm'
+import { defineModel, type HasManyRecord } from '@guren/core'
 import { users } from '@/db/schema'
 import type { PostRecord } from '@/app/Models/Post'
 
@@ -852,7 +852,7 @@ export class User extends defineModel(users) {
 }
 
 // app/Models/Post.ts
-import { defineModel, type BelongsToRecord } from '@guren/orm'
+import { defineModel, type BelongsToRecord } from '@guren/core'
 import { posts } from '@/db/schema'
 import type { UserRecord } from '@/app/Models/User'
 

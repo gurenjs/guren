@@ -1,16 +1,18 @@
 ---
-description: Guren ORM (@guren/orm) — model definition, queries, relations, pagination, mass assignment
+description: Guren ORM models — model definition, queries, relations, pagination, mass assignment
 globs:
   - "app/Models/**"
   - "db/**"
 ---
 
-# ORM Models (@guren/orm)
+# ORM Models
+
+Import models, database factories and seeders from `@guren/core`. The only `@guren/orm` import app code writes is `@guren/orm/drizzle/<dialect>`, in `db/schema.ts`.
 
 ## Defining a model
 
 ```typescript
-import { defineModel, type BelongsToRecord } from '@guren/orm'
+import { defineModel, type BelongsToRecord } from '@guren/core'
 import { posts } from '../../db/schema.js'
 
 export type PostRecord = typeof posts.$inferSelect
