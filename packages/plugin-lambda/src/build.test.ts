@@ -163,8 +163,8 @@ describe('buildLambdaOutput', () => {
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
     const wrapper = readFileSync(join(root, '.lambda/handler.ts'), 'utf8')
-    expect(wrapper).toContain('process.env.GUREN_INERTIA_ENTRY ??= "/assets/app-Abc123.js"')
-    expect(wrapper).toContain('process.env.GUREN_INERTIA_STYLES ??= "/assets/app-Def456.css"')
+    expect(wrapper).toContain('process.env.GUREN_INERTIA_ENTRY ??= "/public/assets/app-Abc123.js"')
+    expect(wrapper).toContain('process.env.GUREN_INERTIA_STYLES ??= "/public/assets/app-Def456.css"')
     expect(wrapper).toContain('process.env.GUREN_INERTIA_SSR_ENTRY ??= "./.guren/ssr/ssr-Xyz789.js"')
     expect(wrapper).toContain('const module = await import("../src/lambda.ts")')
     expect(wrapper).toContain('export const http = module.http')
@@ -233,7 +233,7 @@ describe('buildLambdaOutput', () => {
     // regardless of the invoking process's environment.
     expect(report.nodeEnv).toBe('production')
     // Importing the bundle applied the baked env defaults.
-    expect(report.bakedEntry).toBe('/assets/app-Abc123.js')
+    expect(report.bakedEntry).toBe('/public/assets/app-Abc123.js')
   })
 
   test('should preserve class names through minification', async () => {
@@ -260,7 +260,7 @@ describe('buildLambdaOutput', () => {
 
     const env = JSON.parse(readFileSync(join(root, '.lambda/env.json'), 'utf8'))
     expect(env.NODE_ENV).toBe('production')
-    expect(env.GUREN_INERTIA_ENTRY).toBe('/assets/app-Abc123.js')
+    expect(env.GUREN_INERTIA_ENTRY).toBe('/public/assets/app-Abc123.js')
     expect(env.GUREN_INERTIA_SSR_ENTRY).toBe('./.guren/ssr/ssr-Xyz789.js')
     expect(env.GUREN_INERTIA_SSR_MANIFEST).toBe('./.guren/ssr/.vite/manifest.json')
   })
@@ -307,7 +307,7 @@ describe('buildLambdaOutput', () => {
     await buildLambdaOutput({ rootDir: root, publicDir: customPublic, skipAppBuild: true })
 
     const env = JSON.parse(readFileSync(join(root, '.lambda/env.json'), 'utf8'))
-    expect(env.GUREN_INERTIA_ENTRY).toBe('/assets/app-Custom99.js')
+    expect(env.GUREN_INERTIA_ENTRY).toBe('/public/assets/app-Custom99.js')
     expect(existsSync(join(root, '.lambda/assets/assets/app-Custom99.js'))).toBe(true)
   })
 

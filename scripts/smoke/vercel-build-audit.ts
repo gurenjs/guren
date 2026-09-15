@@ -59,14 +59,14 @@ try {
   const env = config.environment ?? {}
 
   // With the entry empty the page renders without ever loading the client bundle.
-  if (!env.GUREN_INERTIA_ENTRY?.startsWith('/assets/')) {
+  if (!env.GUREN_INERTIA_ENTRY?.startsWith('/public/assets/')) {
     failures.push(
       `GUREN_INERTIA_ENTRY should point at a built asset, got ${JSON.stringify(env.GUREN_INERTIA_ENTRY)}. ` +
         'The client manifest exists, so the plugin failed to read it — check the paths it looks in.',
     )
   }
 
-  const entryFile = env.GUREN_INERTIA_ENTRY?.replace('/assets/', '')
+  const entryFile = env.GUREN_INERTIA_ENTRY?.replace('/public/assets/', '')
   if (entryFile && !existsSync(resolve(appDir, 'public/assets', entryFile))) {
     failures.push(`GUREN_INERTIA_ENTRY names ${entryFile}, which does not exist in the build output.`)
   }

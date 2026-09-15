@@ -40,8 +40,8 @@ describe('buildCloudflareOutput', () => {
     // in worker.js runs after the app's module graph evaluated, so a module-scope
     // viteAsset() call would see no manifest.
     const workerEnv = readFileSync(join(root, '.cloudflare/worker-env.js'), 'utf8')
-    expect(workerEnv).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Abc123.js"')
-    expect(workerEnv).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Def456.css"')
+    expect(workerEnv).toContain('process.env.GUREN_INERTIA_ENTRY = "/public/assets/app-Abc123.js"')
+    expect(workerEnv).toContain('process.env.GUREN_INERTIA_STYLES = "/public/assets/app-Def456.css"')
     expect(worker.indexOf("import './worker-env.js'")).toBeGreaterThanOrEqual(0)
     expect(worker.indexOf("import './worker-env.js'")).toBeLessThan(worker.indexOf('import app'))
   })
@@ -150,8 +150,8 @@ describe('buildCloudflareOutput', () => {
     })
 
     const workerEnv = readFileSync(join(root, '.cloudflare/worker-env.js'), 'utf8')
-    expect(workerEnv).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Custom999.js"')
-    expect(workerEnv).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Custom999.css"')
+    expect(workerEnv).toContain('process.env.GUREN_INERTIA_ENTRY = "/public/assets/app-Custom999.js"')
+    expect(workerEnv).toContain('process.env.GUREN_INERTIA_STYLES = "/public/assets/app-Custom999.css"')
   })
 
   test('should scaffold wrangler.jsonc once and never overwrite it', async () => {

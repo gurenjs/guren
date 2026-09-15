@@ -10,7 +10,11 @@ import { trimTrailingSlashes } from '../support/trim-slashes'
  * on" means.
  */
 
-/** Where `configureInertiaAssets` serves hashed build output from. */
+/**
+ * Where `configureInertiaAssets` serves hashed build output from. The deploy
+ * builds restate it as `CLIENT_ASSETS_URL_PREFIX` in @guren/core's
+ * internal/deploy-build.ts; tests/http/vite-manifest.test.ts pins the two equal.
+ */
 export const PUBLIC_ASSETS_URL_PREFIX = '/public/assets/'
 
 /** The Vite default the framework assumes when no dev-server URL is set. */

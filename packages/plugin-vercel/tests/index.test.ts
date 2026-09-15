@@ -136,8 +136,8 @@ describe('@guren/plugin-vercel', () => {
         readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
       ) as { environment: Record<string, string> }
 
-      expect(config.environment.GUREN_INERTIA_ENTRY).toBe('/assets/app-Custom999.js')
-      expect(config.environment.GUREN_INERTIA_STYLES).toBe('/assets/app-Custom999.css')
+      expect(config.environment.GUREN_INERTIA_ENTRY).toBe('/public/assets/app-Custom999.js')
+      expect(config.environment.GUREN_INERTIA_STYLES).toBe('/public/assets/app-Custom999.css')
     })
 
     it('inlines the client manifest into the bundle for viteAsset()', async () => {
