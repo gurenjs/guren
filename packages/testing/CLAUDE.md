@@ -5,6 +5,7 @@ Testing utilities for `@guren/server` controllers and Inertia page components.
 
 ## Key Helpers
 - `createControllerContext`, `createGurenControllerModule`, and `readInertiaResponse` underpin controller + Inertia testing; extend them before recreating similar utilities downstream
+- `createControllerModuleMock()` installs the framework's own exports, read through `@guren/server/internal/testing` because suites mock `@guren/server` itself; never add a local copy of a framework export (the identity test in `tests/controller.test.ts` lists the deliberate stand-ins)
 - `configureInertiaVitest` stubs Bun globals and Inertia React internals — keep it idempotent and guard against multiple registrations
 - `createInertiaReactMock`, `setInertiaPage`, and `resetInertiaPage` power Vitest DOM expectations; keep overrides minimal to avoid diverging from real behavior
 

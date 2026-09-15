@@ -358,15 +358,15 @@ describe('createGurenControllerModule', () => {
     expect(formatted).toEqual({
       email: 'Invalid email',
       password: 'Too short',
-      'address.city': 'Required',
+      address: 'Required',
     })
   })
 
-  it('formatValidationErrors handles empty error', () => {
+  it('formatValidationErrors falls back to a message for an error with no issues', () => {
     const module = createGurenControllerModule()
-    const formatted = module.formatValidationErrors({})
+    const formatted = module.formatValidationErrors({ issues: [] })
 
-    expect(formatted).toEqual({})
+    expect(formatted).toEqual({ message: 'The provided data is invalid.' })
   })
 })
 
@@ -586,24 +586,67 @@ describe('createControllerModuleMock', () => {
     expect(controller.request.method).toBe('GET')
   })
 
-  it('defines application modules and their providers', () => {
-    const { ServiceProvider, defineModule } = createControllerModuleMock()
+  it('installs the runtime classes themselves, so instanceof agrees with the framework', async () => {
+    const mock: Record<string, unknown> = createControllerModuleMock()
+    const server: Record<string, unknown> = await import('@guren/server')
 
-    class WidgetProvider extends ServiceProvider {
-      register(): void {}
+    // Deliberate stand-ins: the controller surface, and inert services so an app
+    // module loads without a booted container. Anything else must be the real export.
+    const STAND_INS = [
+      'AuthenticatableModel', 'Controller', 'Event', 'Job', 'Listener', 'MemoryApiTokenStore',
+      'MemoryDriver', 'createApiToken', 'createCacheManager', 'createEventManager',
+      'createMailManager', 'defineModel', 'getApiToken', 'getApiTokenOrFail',
+      'getUserApiTokens', 'parseRequestPayload', 'registerJob', 'revokeApiToken',
+      'setMailManager', 'setQueueDriver', 'viteAsset',
+    ]
+    const copies = Object.keys(mock).filter((name) => mock[name] !== server[name]).sort()
+
+    expect(copies).toEqual(STAND_INS)
+  })
+
+  it('fails validateParams() with the status and errors the runtime answers', async () => {
+    const { Controller } = createControllerModuleMock()
+    class MockShowController extends Controller {
+      show(): unknown {
+        return this.validateParams(requireTitle)
+      }
+    }
+    const ctx = createControllerContext('http://example.com/posts/abc')
+    ctx.req.param = () => ({ id: 'abc' })
+    const controller = new MockShowController()
+    controller.setContext(ctx)
+
+    const { ValidationException, Controller: RuntimeController, createApp } = await import('@guren/core')
+    const thrown = (() => {
+      try {
+        controller.show()
+      } catch (error) {
+        return error
+      }
+    })()
+    if (!(thrown instanceof ValidationException)) {
+      throw new Error(`expected a ValidationException, got ${String(thrown)}`)
     }
 
-    const widgets = defineModule({ name: 'widgets', providers: [WidgetProvider] })
-    const bare = defineModule({ name: 'bare' })
+    class RuntimeShowController extends RuntimeController {
+      show(): Response {
+        this.validateParams(requireTitle)
+        return this.text('unreachable')
+      }
+    }
+    const app = createApp({
+      routes: (router) => {
+        router.get('/posts/:id', [RuntimeShowController, 'show'])
+      },
+    })
+    await app.boot()
+    const response = await app.fetch(
+      new Request('http://example.com/posts/abc', { headers: { Accept: 'application/json' } }),
+    )
+    const body = (await response.json()) as { errors?: unknown }
 
-    expect(widgets.providers).toEqual([WidgetProvider])
-    expect(bare.providers).toEqual([])
-
-    const provider = new WidgetProvider('container')
-    provider.register()
-    provider.boot()
-
-    expect(provider.container).toBe('container')
+    expect(thrown.statusCode).toBe(response.status)
+    expect(thrown.errors).toEqual(body.errors)
   })
 })
 

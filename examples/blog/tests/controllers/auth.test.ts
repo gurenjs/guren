@@ -14,7 +14,6 @@ vi.mock('@guren/core', async () => {
   return {
     ...actual,
     ...createControllerModuleMock(),
-    ServiceProvider: actual.ServiceProvider,
   }
 })
 

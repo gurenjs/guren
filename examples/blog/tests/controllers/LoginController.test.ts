@@ -15,7 +15,6 @@ vi.mock('@guren/core', async () => {
   return {
     ...actual,
     ...createControllerModuleMock(),
-    ServiceProvider: actual.ServiceProvider,
   }
 })
 import LoginController from '../../app/Http/Controllers/Auth/LoginController.js'

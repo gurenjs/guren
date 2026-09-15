@@ -30,7 +30,6 @@ vi.mock('@guren/core', async () => {
   return {
     ...actual,
     ...createControllerModuleMock(),
-    ServiceProvider: actual.ServiceProvider,
   }
 })
 import ProfileController from '../../app/Http/Controllers/ProfileController.js'

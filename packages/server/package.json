@@ -114,6 +114,10 @@
       "types": "./dist/internal/request.d.ts",
       "default": "./dist/internal/request.js"
     },
+    "./internal/testing": {
+      "types": "./dist/internal/testing.d.ts",
+      "default": "./dist/internal/testing.js"
+    },
     "./internal/route-path": {
       "types": "./dist/internal/route-path.d.ts",
       "default": "./dist/internal/route-path.js"

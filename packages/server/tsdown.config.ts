@@ -43,6 +43,7 @@ export default defineConfig({
     // a .d.ts with no .js.
     'src/internal/request.ts',
     'src/internal/route-path.ts',
+    'src/internal/testing.ts',
     'src/internal/zod-compat.ts',
     'src/internal/zod-json-schema.ts',
   ],

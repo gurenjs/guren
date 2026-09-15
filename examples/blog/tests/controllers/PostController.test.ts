@@ -66,7 +66,6 @@ vi.mock('@guren/core', async () => {
   return {
     ...actual,
     ...createControllerModuleMock(),
-    ServiceProvider: actual.ServiceProvider,
     collect: vi.fn((resources: unknown[]) => resources),
     paginate: vi.fn((result: { meta: { total: number; perPage: number; currentPage: number } }, options?: { path?: string }) => {
       const lastPage = Math.max(1, Math.ceil(result.meta.total / result.meta.perPage))
@@ -316,7 +315,7 @@ describe('PostController', () => {
       await expect(controller.show()).rejects.toMatchObject({ statusCode: 404, message: 'Post not found' })
     })
 
-    it('returns 400 for invalid post id', async () => {
+    it('returns 422 for invalid post id', async () => {
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/abc', {
         headers: { 'X-Inertia': 'true' },
@@ -327,7 +326,7 @@ describe('PostController', () => {
       setRouteParams(ctx, { id: 'abc' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
-      await expect(controller.show()).rejects.toMatchObject({ statusCode: 400 })
+      await expect(controller.show()).rejects.toMatchObject({ statusCode: 422 })
     })
   })
 

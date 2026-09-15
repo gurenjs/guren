@@ -6,6 +6,17 @@ import {
   parseRequestUploads as parseRequestUploadsByRuntimeRules,
   type RequestUploads,
 } from '@guren/server/internal/request'
+import {
+  AuthenticationException,
+  JsonResource,
+  Resource,
+  ServiceProvider,
+  ValidationException,
+  collect,
+  defineModule,
+  definePlugin,
+  formatValidationErrors,
+} from '@guren/server/internal/testing'
 
 const HTML_DECODE_ENTITIES: Record<string, string> = {
   '&quot;': '"',
@@ -161,6 +172,13 @@ function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> 
   })
 }
 
+/** Route parameters as a record: a bare string from a hand-set `param()` is read as `id`. */
+function contextParams(ctx: ControllerContext): object {
+  const rawParams = ctx.req.param?.()
+  if (typeof rawParams === 'string') return { id: rawParams }
+  return rawParams && typeof rawParams === 'object' ? rawParams : {}
+}
+
 export function createGurenControllerModule() {
   // Prime the memo now: continuations on one promise run in registration order, so
   // the memo is populated before an awaited view() render reaches the sync viteAsset.
@@ -277,41 +295,12 @@ export function createGurenControllerModule() {
       return loadedServer.viteAsset(entry, options)
     },
     parseRequestPayload: async (ctx: ControllerContext) => asRecord(await parseRequestBody(ctx)),
-    formatValidationErrors: (error: { issues?: Array<{ path: (string | number)[]; message: string }> }) => {
-      const errors: Record<string, string> = {}
-      if (error?.issues) {
-        for (const issue of error.issues) {
-          const key = issue.path.join('.')
-          if (!errors[key]) {
-            errors[key] = issue.message
-          }
-        }
-      }
-      return errors
-    },
+    formatValidationErrors,
   }
 }
 
 export function createControllerModuleMock() {
   const module = createGurenControllerModule()
-  const buildValidationErrors = (issues: Array<{ path: (string | number)[]; message: string }> = []) => {
-    const errors: Record<string, string[]> = {}
-
-    for (const issue of issues) {
-      const key = issue.path.join('.') || 'message'
-      if (!errors[key]) {
-        errors[key] = []
-      }
-      errors[key].push(issue.message)
-    }
-
-    if (Object.keys(errors).length === 0) {
-      errors.message = ['The given data was invalid.']
-    }
-
-    return errors
-  }
-
   class TestController extends module.Controller {
     public parsedBody?: Record<string, unknown>
 
@@ -322,16 +311,13 @@ export function createControllerModuleMock() {
           | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
       },
       data: unknown,
-      statusCode: number,
     ): T {
       const result = schema.safeParse(data)
       if (result.success) {
         return result.data
       }
 
-      const error = new ValidationException(buildValidationErrors(result.error.issues))
-      error.statusCode = statusCode
-      throw error
+      throw ValidationException.fromZodError({ issues: result.error.issues ?? [] })
     }
 
     public runValidationSafe<T>(schema: {
@@ -350,10 +336,6 @@ export function createControllerModuleMock() {
         if (!errors[key]) {
           errors[key] = issue.message
         }
-      }
-
-      if (Object.keys(errors).length === 0) {
-        errors.message = 'The given data was invalid.'
       }
 
       return { success: false, errors }
@@ -431,7 +413,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): Promise<T> {
-      return this.runValidation(schema, await this.getRawBody(), 422)
+      return this.runValidation(schema, await this.getRawBody())
     }
 
     public async validateBodySafe<T>(schema: {
@@ -447,7 +429,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): T {
-      return this.runValidation(schema, flattenContextQueries(this.ctx), 422)
+      return this.runValidation(schema, flattenContextQueries(this.ctx))
     }
 
     public validateQuerySafe<T>(schema: {
@@ -463,16 +445,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): T {
-      const paramResolver = (this.ctx.req as { param?: (key?: string) => unknown }).param
-      const rawParams = typeof paramResolver === 'function' ? paramResolver() : {}
-      const params =
-        typeof rawParams === 'string'
-          ? { id: rawParams }
-          : rawParams && typeof rawParams === 'object'
-            ? rawParams
-            : {}
-
-      return this.runValidation(schema, params, 400)
+      return this.runValidation(schema, contextParams(this.ctx))
     }
 
     public validateParamsSafe<T>(schema: {
@@ -480,30 +453,11 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): { success: true; data: T } | { success: false; errors: Record<string, string> } {
-      const paramResolver = (this.ctx.req as { param?: (key?: string) => unknown }).param
-      const rawParams = typeof paramResolver === 'function' ? paramResolver() : {}
-      const params =
-        typeof rawParams === 'string'
-          ? { id: rawParams }
-          : rawParams && typeof rawParams === 'object'
-            ? rawParams
-            : {}
-
-      return this.runValidationSafe(schema, params)
+      return this.runValidationSafe(schema, contextParams(this.ctx))
     }
 
     public apiToken(): { token: unknown; userId: string | number; abilities: string[] } {
-      const result = this.ctx.get('guren:api-token') as {
-        token: unknown
-        userId: string | number
-        abilities: string[]
-      } | undefined
-      if (!result) {
-        const error = new Error('Unauthenticated.') as Error & { statusCode: number }
-        error.statusCode = 401
-        throw error
-      }
-      return result
+      return getApiTokenOrFail(this.ctx)
     }
 
     public apiTokenUserId(): string | number {
@@ -635,120 +589,6 @@ export function createControllerModuleMock() {
     }
   }
 
-  // Second parameter mirrors the real `Resource<T, TData>`: the mock is what a
-  // test file's `extends Resource<PostRecord, PostResourceData>` resolves to,
-  // so a mirror stuck on one parameter rejects the shape the scaffolds emit.
-  class Resource<T = Record<string, unknown>, TData extends Record<string, unknown> = Record<string, unknown>> {
-    public resource: T
-    public additionalData: Record<string, unknown> = {}
-
-    constructor(resource: T) {
-      this.resource = resource
-    }
-
-    toArray(): TData {
-      return { ...(this.resource as Record<string, unknown>) } as TData
-    }
-
-    toJSON(): TData {
-      return {
-        ...this.toArray(),
-        ...this.additionalData,
-      }
-    }
-
-    additional(data: Record<string, unknown>): this {
-      this.additionalData = { ...this.additionalData, ...data }
-      return this
-    }
-
-    when<V>(condition: boolean, value: V | (() => V)): V | undefined {
-      if (!condition) {
-        return undefined
-      }
-      return typeof value === 'function' ? (value as () => V)() : value
-    }
-
-    whenLoaded<V>(relation: string, value: V | (() => V), defaultValue?: V): V | undefined {
-      const resource = this.resource as Record<string, unknown>
-      const isLoaded = relation in resource && resource[relation] !== undefined
-
-      if (!isLoaded) {
-        return defaultValue
-      }
-
-      return typeof value === 'function' ? (value as () => V)() : value
-    }
-
-    static make<TResource, R extends Resource<TResource>>(
-      this: new (resource: TResource) => R,
-      resource: TResource,
-    ): R {
-      return new this(resource)
-    }
-
-    static collection<TResource, R extends Resource<TResource>>(
-      this: new (resource: TResource) => R,
-      resources: TResource[],
-    ): Record<string, unknown>[] {
-      return resources.map((resource) => new this(resource).toJSON())
-    }
-  }
-
-  class JsonResource<T extends Record<string, unknown>> extends Resource<T> {
-    toArray(): Record<string, unknown> {
-      return { ...this.resource }
-    }
-  }
-
-  const collect = <TResource, R extends Resource<TResource>>(
-    resources: TResource[],
-    resourceClass: new (resource: TResource) => R,
-  ): Record<string, unknown>[] => {
-    return resources.map((resource) => new resourceClass(resource).toJSON())
-  }
-  class ValidationException extends Error {
-    statusCode = 422
-    errors: Record<string, string[]>
-
-    constructor(errors: Record<string, string[]>, message = 'The given data was invalid.') {
-      super(message)
-      this.name = 'ValidationException'
-      this.errors = errors
-    }
-
-    static withMessages(messages: Record<string, string | string[]>): ValidationException {
-      const errors: Record<string, string[]> = {}
-      for (const [key, value] of Object.entries(messages)) {
-        errors[key] = Array.isArray(value) ? value : [value]
-      }
-      return new ValidationException(errors)
-    }
-
-    static fromZodError(zodError: { issues?: Array<{ path: (string | number)[]; message: string }> }): ValidationException {
-      const errors: Record<string, string[]> = {}
-      if (zodError?.issues) {
-        for (const issue of zodError.issues) {
-          const key = issue.path.join('.') || 'message'
-          if (!errors[key]) {
-            errors[key] = []
-          }
-          errors[key].push(issue.message)
-        }
-      }
-      return new ValidationException(errors)
-    }
-  }
-
-  class AuthenticationException extends Error {
-    statusCode = 401
-
-    constructor(message = 'Unauthenticated.') {
-      super(message)
-      this.name = 'AuthenticationException'
-    }
-  }
-
   const getApiTokenOrFail = (
     ctx: ControllerContext,
   ): { token: unknown; userId: string | number; abilities: string[] } => {
@@ -817,63 +657,6 @@ export function createControllerModuleMock() {
   const getApiToken = (): { userId: number | string; abilities: string[] } | null => {
     return null
   }
-  /**
-   * A module's `index.ts` calls `defineModule()` at import time, so a controller
-   * reaching the module's surface cannot load under this mock without it. Mirrors
-   * `packages/server/src/container/defineModule.ts`, hand-copied so the mock never
-   * depends on a fresh framework build.
-   */
-  class ServiceProvider {
-    constructor(public container: unknown) {}
-
-    register(): void {}
-
-    boot(): void {}
-  }
-
-  const defineModule = (definition: {
-    name: string
-    prefix?: string
-    routes?: unknown
-    providers?: unknown[]
-  }) => ({
-    name: definition.name,
-    prefix: definition.prefix,
-    routes: definition.routes,
-    providers: definition.providers ?? [],
-  })
-
-  /**
-   * Mirrors `packages/server/src/container/definePlugin.ts`, hand-copied for the same
-   * reason as `defineModule` above: plugin packages call it at import time. Each
-   * factory call yields an independent provider, and `register`'s result is
-   * propagated (the real container awaits an async register).
-   */
-  const definePlugin = <TConfig>(definition: {
-    name: string
-    register: (container: unknown, config: TConfig) => void | Promise<void>
-    boot?: (container: unknown, config: TConfig) => void | Promise<void>
-    deferred?: boolean
-    provides?: string[]
-  }) => {
-    return (config: TConfig) => {
-      class PluginProvider extends ServiceProvider {
-        static deferred = definition.deferred ?? false
-        static provides = definition.provides ?? []
-        override register(): void | Promise<void> {
-          return definition.register(this.container, config)
-        }
-        override boot(): void | Promise<void> {
-          return definition.boot?.(this.container, config)
-        }
-      }
-      Object.defineProperty(PluginProvider, 'name', {
-        value: `${definition.name}PluginProvider`,
-      })
-      return PluginProvider
-    }
-  }
-
   const createEventManager = () => ({
     on: () => {},
     emit: async () => {},
