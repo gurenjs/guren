@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
-import { DOCKER_RUNTIME_DIRECTORIES, DOCKER_RUNTIME_FILES, scaffoldDeploy, scaffoldDeployReport } from '../src/deploy'
+import { DOCKER_RUNTIME_DIRECTORIES, DOCKER_RUNTIME_FILES, scaffoldDeploy } from '../src/deploy'
 
 const createAppTemplates = join(import.meta.dir, '../../create-app/templates')
 
@@ -98,7 +98,8 @@ describe('scaffoldDeploy', () => {
   })
 
   it('reports no overwrites on a fresh app', async () => {
-    const { files, overwritten } = await scaffoldDeployReport({ target: 'all' })
+    const overwritten: string[] = []
+    const files = await scaffoldDeploy({ target: 'all', overwritten })
 
     expect(files).toHaveLength(3)
     expect(overwritten).toEqual([])
@@ -107,7 +108,8 @@ describe('scaffoldDeploy', () => {
   it('names the recipes --force overwrote and not the ones it created', async () => {
     await writeFile('Dockerfile', 'FROM scratch\n', 'utf8')
 
-    const { files, overwritten } = await scaffoldDeployReport({ target: 'all', force: true })
+    const overwritten: string[] = []
+    const files = await scaffoldDeploy({ target: 'all', force: true, overwritten })
 
     expect(files).toHaveLength(3)
     expect(overwritten).toHaveLength(1)

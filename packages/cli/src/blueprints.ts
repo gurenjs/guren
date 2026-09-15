@@ -54,11 +54,16 @@ const SCHEDULE_KERNEL_EXPORT = 'scheduleTasksKernel'
 /** `export` and the name on one line: the function, `const`, and re-export forms. */
 const SCHEDULE_KERNEL_EXPORT_PATTERN = /\bexport\b[^\n]*\bscheduleTasksKernel\b/
 
+/** `root` stays behind: blueprints have always scaffolded into the project root. */
+function blueprintWriterOptions(options: RunBlueprintOptions): WriterOptions {
+  return { force: Boolean(options.force), overwritten: options.overwritten }
+}
+
 const blueprintRegistry: Record<string, BlueprintDefinition> = {
   attachments: {
     description: 'Install the attachments layer: schema table, config, provider, and the prune command.',
     run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       const created: string[] = []
       // Attachments need a 'storage' binding. Judged by looking for one
       // anywhere in the app's sources rather than for a conventional file: a
@@ -74,15 +79,15 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
   },
   session: {
     description: 'Install database-backed sessions: the schema table and migration, config/session.ts, SessionProvider, and sessions:prune.',
-    run: async (options) => (await addSession({ force: Boolean(options.force) })).files,
+    run: async (options) => (await addSession(blueprintWriterOptions(options))).files,
   },
   lint: {
     description: 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.',
-    run: async (options) => addLint({ force: Boolean(options.force) }),
+    run: async (options) => addLint(blueprintWriterOptions(options)),
   },
   prototype: {
     description: 'Install prototype mode (RFC 0021): the fixture module, the dev:prototype/build:prototype scripts, and the client and app wiring.',
-    run: async (options) => addPrototype({ force: Boolean(options.force) }),
+    run: async (options) => addPrototype(blueprintWriterOptions(options)),
   },
   admin: {
     description: 'Install a starter admin dashboard with dedicated routes and controller.',
@@ -94,7 +99,7 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
         instead: 'Scaffold an admin endpoint with guren make:controller and register it in routes/api.ts',
       })
 
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       // Same default as `make:feature`: guarded unless the caller opts out.
       const withAuth = !options.publicAccess
       // Guarded in the action as well as on the route, so re-registering the
@@ -150,7 +155,7 @@ export default registerAdminRoutes
     description: 'Install the default authentication stack for the current app.',
     // The API-only refusal lives inside makeAuth(): `guren make:auth` reaches
     // the same scaffold without passing through this registry.
-    run: async (options) => makeAuth({ force: Boolean(options.force), install: true }),
+    run: async (options) => makeAuth({ ...blueprintWriterOptions(options), install: true }),
   },
   oauth: {
     description: 'Install OAuth scaffolding with GitHub, Google, and Discord provider presets.',
@@ -158,7 +163,7 @@ export default registerAdminRoutes
     // and `wireRouteRegistrar` warns rather than throws when routes/web.ts is
     // absent, so the scaffold genuinely works on an API-only app.
     run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       const created = await writeScaffoldFiles([
         scaffoldTemplateFile('oauth', 'app/Providers/OAuthProvider.ts'),
         scaffoldTemplateFile('oauth', 'app/Http/Controllers/Auth/OAuthController.ts'),
@@ -177,12 +182,12 @@ export default registerAdminRoutes
   },
   cache: {
     description: 'Install the default cache provider, an example cache service, and the CACHE_STORE env entry.',
-    run: async (options) => addCache({ force: Boolean(options.force) }),
+    run: async (options) => addCache(blueprintWriterOptions(options)),
   },
   events: {
     description: 'Install event infrastructure with a sample event and listener.',
     run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       const eventPath = await makeEvent('OrderPlaced', writerOptions)
       const listenerPath = await makeListener('SendOrderReceipt', { ...writerOptions, event: 'OrderPlaced' })
       const created = await writeScaffoldFiles([
@@ -200,7 +205,7 @@ export default registerAdminRoutes
   mail: {
     description: 'Install mail infrastructure with a memory transport and sample mailable.',
     run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       const mailPath = await makeMail('WelcomeEmail', writerOptions)
       const created = await writeScaffoldFiles([
         scaffoldTemplateFile('mail', 'app/Providers/MailProvider.ts'),
@@ -217,7 +222,7 @@ export default registerAdminRoutes
   queue: {
     description: 'Install queue infrastructure with a memory driver and sample job.',
     run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       const jobPath = await makeJob('ProcessWelcomeSequence', writerOptions)
       const created = await writeScaffoldFiles([
         scaffoldTemplateFile('queue', 'app/Providers/QueueProvider.ts'),
@@ -234,7 +239,7 @@ export default registerAdminRoutes
   notifications: {
     description: 'Install notification infrastructure with mail/database channels and a sample notification.',
     run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       const notificationPath = await makeNotification('WelcomeUser', writerOptions)
       const created = await writeScaffoldFiles([
         scaffoldTemplateFile('notifications', 'app/Providers/NotificationProvider.ts'),
@@ -251,7 +256,7 @@ export default registerAdminRoutes
   storage: {
     description: 'Install storage infrastructure with local/public disks (switchable via STORAGE_DISK) and a sample storage service.',
     run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       const created = await writeScaffoldFiles([
         scaffoldTemplateFile('storage', 'app/Providers/StorageProvider.ts'),
         scaffoldTemplateFile('storage', 'app/Services/FileStorage.ts'),
@@ -268,7 +273,7 @@ export default registerAdminRoutes
   broadcasting: {
     description: 'Install broadcasting infrastructure with a memory driver and sample public/private channels.',
     run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       const publicChannelPath = await makeChannel('Orders', { ...writerOptions, channel: 'orders' })
       const privateChannelPath = await makeChannel('UserFeed', {
         ...writerOptions,
@@ -294,7 +299,7 @@ export default registerAdminRoutes
   schedule: {
     description: 'Install a schedule kernel with a sample recurring task.',
     run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const writerOptions = blueprintWriterOptions(options)
       // The provider imports `scheduleTasksKernel`. A kernel already on disk that
       // exports something else — the registrar shape `schedule:list` also reads —
       // makes that provider a file the app cannot boot, so it is not written.
@@ -420,7 +425,7 @@ export async function addResource(options: RunBlueprintOptions): Promise<AddReso
   await assertResourceTargetsPatchable(routeName)
 
   const created = await makeFeature(singular, {
-    force: Boolean(options.force),
+    ...blueprintWriterOptions(options),
     fields: options.fields,
     attach: options.attach,
     publicAccess: options.publicAccess,

@@ -7,7 +7,7 @@ import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
 import { findMigrationCreatingTable } from '../src/make-migration'
 import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureSuccesses, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -695,15 +695,10 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
 
   it('reports the fixture it appended to as updated, not created', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-prototype-announce-')
-    const lines: string[] = []
-    const spy = spyOn(consola, 'success').mockImplementation(((message: unknown) => {
-      lines.push(String(message))
-    }) as never)
     try {
       await seedPrototypeApp(workspace.dir)
-      lines.length = 0
 
-      await makeFeature('Note', { fields: 'title:string', prototype: true })
+      const lines = await captureSuccesses(() => makeFeature('Note', { fields: 'title:string', prototype: true }))
 
       const fixtureLines = lines.filter((line) => line.includes('resources/js/prototype/index.ts'))
       expect(fixtureLines).toHaveLength(1)
@@ -711,7 +706,6 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       expect(fixtureLines[0]).toEndWith('resources/js/prototype/index.ts (appended the notes entries)')
       expect(lines.some((line) => line.startsWith('Created ') && line.endsWith('resources/js/types/Note.ts'))).toBe(true)
     } finally {
-      spy.mockRestore()
       await workspace.cleanup()
     }
   })

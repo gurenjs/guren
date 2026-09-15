@@ -378,6 +378,21 @@ export default app
  * printing. Scoped to the call, unlike `createConsolaStub`, which serves the
  * process-wide `mock.module('consola')` path.
  */
+export async function captureSuccesses(task: () => Promise<unknown>): Promise<string[]> {
+  const lines: string[] = []
+  const original = realConsola.success
+  realConsola.success = ((...args: unknown[]) => {
+    lines.push(args.map(String).join(' '))
+  }) as typeof realConsola.success
+
+  try {
+    await task()
+    return lines
+  } finally {
+    realConsola.success = original
+  }
+}
+
 export async function captureWarnings<T>(task: () => Promise<T>): Promise<{ result: T; warnings: string[] }> {
   const warnings: string[] = []
   const original = realConsola.warn

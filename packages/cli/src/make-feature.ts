@@ -3,7 +3,7 @@ import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
 import { CliError } from './cli-error'
 import { appConfiguresAttachments } from './attachments-check'
-import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
+import { announceWrittenFiles, camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, writtenFileMessage, type WriterOptions } from './utils'
 import { pluralize, schemaIdentifierFor, tableNameFor } from './inflect'
 import { findMigrationCreatingTable } from './make-migration'
 import { makeModel } from './make-model'
@@ -66,7 +66,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
   const withAuth = !options.publicAccess
   const withPolicy = Boolean(options.withPolicy)
-  const writerOptions: WriterOptions = writerOptionsFrom(options)
+  const overwritten = options.overwritten ?? []
+  const writerOptions: WriterOptions = writerOptionsFrom({ ...options, overwritten })
   const appRoot = writeRoot(options)
 
   // A collection named after a column is a compile error in the mixin, and one
@@ -171,7 +172,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     if (patchedFixture) created.push(patchedFixture)
 
     if (options.announce !== false) {
-      announcePrototypeFeature({ created, patchedFixture, singular, routeName, routeVar, withAuth })
+      announcePrototypeFeature({ created, overwritten, patchedFixture, singular, routeName, routeVar, withAuth })
     }
     return created
   }
@@ -218,9 +219,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     return created
   }
 
-  for (const file of created) {
-    consola.success(`Created ${file}`)
-  }
+  announceWrittenFiles(created, overwritten)
   if (validatorKept) {
     consola.info(`Kept ${validatorPath} (pass --force to regenerate it)`)
   }
@@ -290,10 +289,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   return created
 }
 
-function announcePrototypeFeature(options: { created: string[]; patchedFixture: string | undefined; singular: string; routeName: string; routeVar: string; withAuth: boolean }): void {
-  const { created, patchedFixture, singular, routeName, routeVar, withAuth } = options
+function announcePrototypeFeature(options: { created: string[]; overwritten: string[]; patchedFixture: string | undefined; singular: string; routeName: string; routeVar: string; withAuth: boolean }): void {
+  const { created, overwritten, patchedFixture, singular, routeName, routeVar, withAuth } = options
   for (const file of created) {
-    consola.success(file === patchedFixture ? `Updated ${file} (appended the ${routeName} entries)` : `Created ${file}`)
+    consola.success(file === patchedFixture ? `Updated ${file} (appended the ${routeName} entries)` : writtenFileMessage(file, overwritten))
   }
   consola.info('')
   consola.info('Next steps:')
