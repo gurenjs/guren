@@ -244,3 +244,54 @@ describe('auditPackages with a pending release plan', () => {
     expect(result.drift.join('\n')).toContain('declares no "gurenPlugin" manifest')
   })
 })
+
+describe('auditPackages across the RFC 0024 merge release', () => {
+  const onDisk = new Map([
+    [CORE, '1.18.0'],
+    ['@guren/plugin-webmcp', '0.1.1'],
+  ])
+  const mergePlan = () =>
+    plannedVersions(onDisk, [changeset('core.md', `---\n'${CORE}': major\n---\n\nMerge.\n`)])
+
+  test('should reject a plugin left on its <2.0.0 ceiling', () => {
+    const result = auditPackages([webmcpPackage('^1.18.0', '>=1.0.0 <2.0.0')], onDisk, mergePlan())
+
+    expect(result.drift.join('\n')).toContain('excludes @guren/core 2.0.0')
+    expect(result.unreasoned).toEqual([])
+  })
+
+  test('should accept a ceiling moved to the planned major in the same PR', () => {
+    const result = auditPackages([webmcpPackage('^1.18.0', '>=2.0.0 <3.0.0')], onDisk, mergePlan())
+
+    expect(result.drift).toEqual([])
+    expect(result.unreasoned).toEqual([])
+  })
+
+  test('should pass a widened interval spanning both majors, which the RFC forbids by review', () => {
+    // Both probes of the published ^2.0.0 and the workspace 1.18.0 satisfy it,
+    // so nothing here can tell it from an honest claim.
+    const result = auditPackages([webmcpPackage('^1.18.0', '>=1.0.0 <3.0.0')], onDisk, mergePlan())
+
+    expect(result.drift).toEqual([])
+    expect(result.unreasoned).toEqual([])
+  })
+
+  test('should refuse to judge a union bridging the old and new majors', () => {
+    const result = auditPackages(
+      [webmcpPackage('^1.18.0', '>=1.0.0 <2.0.0 || >=2.0.0 <3.0.0')],
+      onDisk,
+      mergePlan(),
+    )
+
+    expect(result.drift).toEqual([])
+    expect(result.unreasoned.join('\n')).toContain('is a union range')
+  })
+
+  test('should reject a 3.0.0 ceiling the plan cannot publish', () => {
+    const result = auditPackages([webmcpPackage('^1.18.0', '>=3.0.0 <4.0.0')], onDisk, mergePlan())
+
+    expect(result.drift.join('\n')).toContain(
+      'excludes the workspace @guren/core 1.18.0 and the 2.0.0 this release plan publishes',
+    )
+  })
+})
