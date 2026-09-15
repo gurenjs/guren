@@ -33,6 +33,9 @@ import { runInRequestScope } from '../support/request-deferrer'
 import { adoptDefaultApplication } from './default-application'
 import { CONTAINER_CONTEXT_KEY } from './request-container'
 import type { InertiaDocumentOptions, InertiaSsrRenderer } from '../mvc/inertia/InertiaEngine'
+import { shareInertiaProps, type SharedInertiaPropsResolver } from '../mvc/inertia/shared'
+import type { EnvSchema } from '../config/env'
+import { ConfigServiceProvider } from '../providers/ConfigServiceProvider'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
 // still allowing consumers to stub or polyfill it when running elsewhere.
@@ -431,6 +434,11 @@ export interface ApplicationOptions {
    * `Controller.inertia()` ahead of the process-wide setters.
    */
   readonly inertia?: InertiaApplicationOptions
+  /**
+   * The schema `config/env.ts` exports (RFC 0027 §1). Validated at the start of
+   * `boot()`, never at import, and bound as `env`; a failure lists every problem.
+   */
+  readonly env?: EnvSchema
 }
 
 export interface InertiaApplicationOptions {
@@ -438,6 +446,8 @@ export interface InertiaApplicationOptions {
   readonly document?: InertiaDocumentOptions
   /** Default SSR renderer, for a bundle that cannot resolve a runtime path; per-call `ssr.render` still wins. */
   readonly ssrRenderer?: InertiaSsrRenderer
+  /** Props merged into every Inertia response, scoped to this app's container: `shareInertiaProps(share, container)`. */
+  readonly share?: SharedInertiaPropsResolver
 }
 
 export interface I18nPluginOptions {
@@ -552,6 +562,15 @@ export class Application {
     if (options.inertia?.ssrRenderer) {
       this.container.instance('inertia.ssrRenderer', options.inertia.ssrRenderer)
     }
+    if (options.inertia?.share) {
+      shareInertiaProps(options.inertia.share, this.container)
+    }
+
+    // First of every provider, so an invalid environment fails the boot before
+    // anything registers, and every later register() can read `env` (RFC 0027 §3).
+    if (options.env) {
+      this.providerManager.register(ConfigServiceProvider)
+    }
 
     // Registered here, before any provider, so requireAuthenticated/requireGuest
     // work for apps that wire sessions manually and for middleware added through
@@ -626,6 +645,10 @@ export class Application {
 
   get i18nOptions(): I18nPluginOptions | undefined {
     return this.options.i18n
+  }
+
+  get envSchema(): EnvSchema | undefined {
+    return this.options.env
   }
 
   markAutoSessionAttached(): void {

@@ -32,11 +32,30 @@ export interface WorkersScheduledEvent {
 export interface WorkersAppLike {
   boot(): Promise<void>
   fetch(request: Request, env?: unknown, executionCtx?: unknown): Response | Promise<Response>
-  /** Only the cron entrypoint reads it, so an app-like that never receives one still satisfies boot/fetch. */
-  container?: { makeOptional<T>(key: string): T | undefined }
+  /**
+   * Read by the cron entrypoint, and written before boot so the app's env schema
+   * sees the request's vars. Optional, so an app-like without one still boots.
+   */
+  container?: {
+    makeOptional<T>(key: string): T | undefined
+    has?(key: string): boolean
+    instance?(key: string, value: unknown): unknown
+  }
 }
 
 const latches = new WeakMap<WorkersAppLike, Promise<void>>()
+
+/**
+ * RFC 0027 §1: wrangler `vars` are not guaranteed to be in `process.env`, so the
+ * app's env schema reads them from the env the entrypoint received. A value an
+ * app or test bound itself is kept.
+ */
+function bindEnvSource(app: WorkersAppLike, env: unknown): void {
+  const container = app.container
+  if (!container?.has || !container.instance) return
+  if (env === null || typeof env !== 'object' || container.has('env.source')) return
+  container.instance('env.source', env)
+}
 
 /**
  * Boot `app` against `env`, once per isolate.
@@ -49,6 +68,7 @@ export async function bootWorkersApp(app: WorkersAppLike, env: unknown): Promise
   // Outside the try: this refusal means another entrypoint captured a *live*
   // env, which the cleanup below must not clear.
   captureWorkersEnv(env)
+  bindEnvSource(app, env)
 
   let attempt: Promise<void> | undefined
 

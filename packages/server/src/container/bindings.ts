@@ -21,6 +21,7 @@ import type { SharedInertiaPropsRegistry } from '../mvc/inertia/shared'
 import type { InertiaDocumentOptions, InertiaSsrRenderer } from '../mvc/inertia/InertiaEngine'
 import type { AgentAuditEmitter } from '../agent/audit-emitter'
 import type { SessionManager } from '../http/middleware/session-manager'
+import type { AppEnv, EnvSource } from '../config/env'
 
 /** Maps service keys to their concrete types, for `container.make('key')`. */
 export interface ServiceBindings {
@@ -59,4 +60,8 @@ export interface ServiceBindings {
    */
   'agent.audit': AgentAuditEmitter
   'exception.handler': ExceptionHandler
+  /** The validated `createApp({ env })` schema, bound by ConfigServiceProvider (RFC 0027 §1). */
+  env: AppEnv
+  /** Read ahead of `process.env` when the schema is parsed: the Workers env, a test's `envSource`. */
+  'env.source': EnvSource
 }
