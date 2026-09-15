@@ -83,6 +83,9 @@ async function detectModelQueryCalls(cwd: string): Promise<string[]> {
 
 const GUREN_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/(?:core|server)['"]/g
 
+/** `@guren/server/mcp` is a subpath, which `GUREN_IMPORT` deliberately does not match. */
+const GUREN_SERVER_MCP_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/server\/mcp['"]/g
+
 /**
  * Files importing a specifier `matches` accepts from a Guren package.
  * `@guren/server` is matched alongside `@guren/core`: an app importing from it
@@ -92,6 +95,7 @@ async function detectGurenImports(
   cwd: string,
   matches: (specifier: string) => boolean,
   files?: string[],
+  pattern: RegExp = GUREN_IMPORT,
 ): Promise<string[]> {
   files ??= [
     ...(await discoverAppSourceFiles(cwd)),
@@ -100,7 +104,7 @@ async function detectGurenImports(
   const affected = await Promise.all(
     files.map(async (filePath) => {
       const source = await readFile(filePath, 'utf-8')
-      for (const match of source.matchAll(GUREN_IMPORT)) {
+      for (const match of source.matchAll(pattern)) {
         const specifiers = match[1]
           .split(',')
           .map((part) => part.split(/\bas\b/)[0].replace(/^\s*type\s+/, '').trim())
@@ -264,6 +268,22 @@ export const deprecations: Deprecation[] = [
       + 'defaultContainer().make(key) elsewhere. The functional helpers (encrypt, decrypt, t, tc, can, '
       + 'cannot, defineGate, resolve, Job.dispatch) are unaffected.',
     detect: detectGlobalServiceImports(GLOBAL_SERVICE_GETTERS),
+  },
+  {
+    id: 'server-create-mcp-server',
+    what: "createMcpServer() from '@guren/server/mcp', which serves only the 2025-era MCP protocol",
+    since: '2.24.0',
+    removedIn: '2.25.0',
+    replacement:
+      "Use createDevMcpHandler({ cwd }) from '@guren/cli' (RFC 0028). It returns a fetch handler "
+      + 'serving the 2026-07-28 MCP protocol and 2025-era clients, rather than a server to connect a transport to.',
+    detect: async (cwd) =>
+      detectGurenImports(
+        cwd,
+        (specifier) => specifier === 'createMcpServer',
+        [...(await discoverAppConfigFiles(cwd)), ...(await discoverTestFiles(cwd))],
+        GUREN_SERVER_MCP_IMPORT,
+      ),
   },
 ]
 

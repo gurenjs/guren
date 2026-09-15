@@ -757,6 +757,45 @@ describe('checkDeprecations', () => {
     })
   })
 
+  describe('server-create-mcp-server', () => {
+    async function writeFileIn(relativePath: string, contents: string): Promise<void> {
+      const target = join(workspace.dir, relativePath)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, contents)
+    }
+
+    function filesFor(warnings: Awaited<ReturnType<typeof checkDeprecations>>) {
+      return (warnings.find((warning) => warning.id === 'server-create-mcp-server')?.affectedFiles ?? []).sort()
+    }
+
+    // The only path createMcpServer was ever exported from is a subpath, which
+    // the root-package import pattern the other entries share does not match.
+    it('reports imports from the @guren/server/mcp subpath', async () => {
+      await writeFileIn(
+        'src/dev-mcp.ts',
+        "import { createMcpServer } from '@guren/server/mcp'\nexport const server = createMcpServer({ cwd: '.', cli })\n",
+      )
+      await writeFileIn(
+        'tests/mcp.test.ts',
+        "import { createMcpServer, type CreateMcpServerOptions } from '@guren/server/mcp'\n",
+      )
+
+      expect(filesFor(await checkDeprecations(workspace.dir))).toEqual([
+        join('src', 'dev-mcp.ts'),
+        join('tests', 'mcp.test.ts'),
+      ])
+    })
+
+    it('does not report the provider, or a same-named import from elsewhere', async () => {
+      await writeFileIn(
+        'src/app.ts',
+        "import { McpServiceProvider } from '@guren/server/mcp'\nimport { createMcpServer } from './local-mcp'\n",
+      )
+
+      expect(filesFor(await checkDeprecations(workspace.dir))).toEqual([])
+    })
+  })
+
   describe('model-query-raw', () => {
     async function writeFileIn(relativePath: string, contents: string): Promise<void> {
       const target = join(workspace.dir, relativePath)
