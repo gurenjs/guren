@@ -1560,7 +1560,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   // Wiring follows `install`, which is this command's own contract.
   const includeSessions = options.session !== false && !(await appConfiguresSessions())
   const sessions = includeSessions
-    ? await addSession({ force: options.force, migration: false, wire: options.install })
+    ? await addSession({ force: options.force, overwritten: options.overwritten, migration: false, wire: options.install })
     : { files: [], schemaChanged: false }
   created.push(...sessions.files)
   if (!includePassword) {

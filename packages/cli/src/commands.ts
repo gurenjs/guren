@@ -46,7 +46,7 @@ import { makeView } from './make-view'
 import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from './db-migrate'
 import type { MigrationRunSummary, SeederRunSummary } from './db-migrate'
 import { showMigrationStatus } from './db-status'
-import type { WriterOptions } from './utils'
+import { announceWrittenFiles, type WriterOptions } from './utils'
 import { generateRouteTypes } from './routes-types'
 import { describePageManifestSuppression, generatePageTypes, type PageManifestPlan } from './pages-types'
 import { generateTranslationTypes } from './i18n-types'
@@ -71,7 +71,7 @@ import { listScheduledTasks, runScheduledTasks } from './schedule'
 import { runHealthCheck } from './health-check'
 import { publishLanguageFiles, makeLanguage, listLocales } from './lang'
 import { upgradeCanary, DEFAULT_UPGRADE_TAG } from './upgrade'
-import { scaffoldDeployReport, type DeployTarget } from './deploy'
+import { scaffoldDeploy, type DeployTarget } from './deploy'
 import { installPlugin } from './plugin'
 import { displayModels } from './model-list'
 import { displayContext } from './context'
@@ -494,8 +494,10 @@ const makeAuthCommand = defineCommand({
     },
   },
   async run({ args }) {
+    const overwritten: string[] = []
     const files = await makeAuth({
       ...toWriterOptions(args),
+      overwritten,
       install: Boolean(args.install),
       session: args.session,
       minimal: Boolean(args.minimal),
@@ -503,9 +505,7 @@ const makeAuthCommand = defineCommand({
       oauth: args.oauth,
       oauthOnly: Boolean(args['oauth-only']),
     })
-    for (const file of files) {
-      consola.success(`Created ${file}`)
-    }
+    announceWrittenFiles(files, overwritten)
   },
 })
 
@@ -527,10 +527,9 @@ const makeModuleCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const { moduleDir, filesCreated } = await makeModule(args.name, toWriterOptions(args))
-    for (const file of filesCreated) {
-      consola.success(`Created ${file}`)
-    }
+    const overwritten: string[] = []
+    const { moduleDir, filesCreated } = await makeModule(args.name, { ...toWriterOptions(args), overwritten })
+    announceWrittenFiles(filesCreated, overwritten)
     consola.info(`Scaffold new components inside it with --module ${args.name}, e.g.:`)
     consola.info(`  bunx guren make:controller Invoice --module ${args.name}`)
     consola.info(`  bunx guren make:model Invoice --module ${args.name}`)
@@ -2913,13 +2912,13 @@ const addAuthCommand = defineCommand({
     },
   },
   async run({ args }) {
+    const overwritten: string[] = []
     const files = await runBlueprint('auth', {
       force: Boolean(args.force),
+      overwritten,
     })
 
-    for (const file of files) {
-      consola.success(`Created ${file}`)
-    }
+    announceWrittenFiles(files, overwritten)
   },
 })
 
@@ -2940,14 +2939,14 @@ const addAdminCommand = defineCommand({
     },
   },
   async run({ args }) {
+    const overwritten: string[] = []
     const createdFiles = await runBlueprint('admin', {
       publicAccess: Boolean(args.public),
       force: Boolean(args.force),
+      overwritten,
     })
 
-    for (const file of createdFiles) {
-      consola.success(`Created ${file}`)
-    }
+    announceWrittenFiles(createdFiles, overwritten)
 
     if (!args.public) {
       // Describes routes/admin.ts, not runtime behaviour — the wiring step
@@ -2983,17 +2982,17 @@ const addResourceCommand = defineCommand({
     },
   },
   async run({ args }) {
+    const overwritten: string[] = []
     const { created, schemaUpdated, routesUpdated } = await addResource({
       name: String(args.name),
       fields: typeof args.fields === 'string' ? args.fields : undefined,
       attach: typeof args.attach === 'string' ? args.attach : undefined,
       publicAccess: Boolean(args.public),
       force: Boolean(args.force),
+      overwritten,
     })
 
-    for (const file of created) {
-      consola.success(`Created ${file}`)
-    }
+    announceWrittenFiles(created, overwritten)
 
     consola.info('')
     consola.info(schemaUpdated
@@ -3041,14 +3040,14 @@ function createAddBlueprintCommand(
       },
     },
     async run({ args }) {
+      const overwritten: string[] = []
       const createdFiles = await runBlueprint(blueprint, {
         name: typeof args.name === 'string' ? args.name : undefined,
         force: Boolean(args.force),
+        overwritten,
       })
 
-      for (const file of createdFiles) {
-        consola.success(`Created ${file}`)
-      }
+      announceWrittenFiles(createdFiles, overwritten)
     },
   })
 }
@@ -3353,16 +3352,16 @@ const deployCommand = defineCommand({
       throw new Error('The --port option must be an integer.')
     }
 
-    const { files, overwritten } = await scaffoldDeployReport({
+    const overwritten: string[] = []
+    const files = await scaffoldDeploy({
+      overwritten,
       target: rawTarget as DeployTarget,
       appName: args.app ? String(args.app) : undefined,
       port,
       force: Boolean(args.force),
     })
 
-    for (const file of files) {
-      consola.success(overwritten.includes(file) ? `Overwrote ${file}` : `Created ${file}`)
-    }
+    announceWrittenFiles(files, overwritten)
   },
 })
 

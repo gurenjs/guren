@@ -19,6 +19,12 @@ export interface WriterOptions {
    * derives its directory name, so both spellings target the same directory.
    */
   root?: string
+  /**
+   * Receives the absolute path of each existing file a `force` write replaced, so the
+   * command can print "Overwrote" for it. A caller that rebuilds its options bag must
+   * carry this across: dropped, every file reads as created again and nothing fails.
+   */
+  overwritten?: string[]
 }
 
 export type ScaffoldNames = {
@@ -104,6 +110,8 @@ export async function writeScaffoldFile(
 
 export async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {
   const fullPath = resolve(options.cwd ?? process.cwd(), relativePath)
+  const sink = options.force ? options.overwritten : undefined
+  const replacing = sink !== undefined && (await pathExists(fullPath))
 
   await mkdir(dirname(fullPath), { recursive: true })
   try {
@@ -116,7 +124,18 @@ export async function writeFileSafe(relativePath: string, contents: string, opti
     }
     throw error
   }
+  if (replacing) sink.push(fullPath)
   return fullPath
+}
+
+export function writtenFileMessage(file: string, overwritten: readonly string[]): string {
+  return overwritten.includes(file) ? `Overwrote ${file}` : `Created ${file}`
+}
+
+export function announceWrittenFiles(files: readonly string[], overwritten: readonly string[]): void {
+  for (const file of files) {
+    consola.success(writtenFileMessage(file, overwritten))
+  }
 }
 
 /**
@@ -177,7 +196,7 @@ export function resolveAppRoot(options: { appRoot?: string } & WriterOptions): s
  * writes to the process directory instead of the requested one.
  */
 export function writerOptionsFrom(options: WriterOptions): WriterOptions {
-  return { force: Boolean(options.force), root: options.root, cwd: options.cwd }
+  return { force: Boolean(options.force), root: options.root, cwd: options.cwd, overwritten: options.overwritten }
 }
 
 /**
@@ -219,26 +238,11 @@ export type ScaffoldFilesOptions = WriterOptions & {
   skipExisting?: boolean
 }
 
-export interface ScaffoldWriteReport {
-  /** Every path written, in entry order. */
-  files: string[]
-  /** The paths in `files` that already existed and `force` replaced. */
-  overwritten: string[]
-}
-
 /** `writeScaffoldFile` over a batch — every path is checked before any write. */
 export async function writeScaffoldFiles(
   entries: ScaffoldFileEntry[],
   options: ScaffoldFilesOptions = {},
 ): Promise<string[]> {
-  return (await writeScaffoldFilesReport(entries, options)).files
-}
-
-/** `writeScaffoldFiles`, also naming the files it overwrote, for a caller that reports them. */
-export async function writeScaffoldFilesReport(
-  entries: ScaffoldFileEntry[],
-  options: ScaffoldFilesOptions = {},
-): Promise<ScaffoldWriteReport> {
   const cwd = writeRoot(options)
 
   for (const entry of entries) {
@@ -254,17 +258,13 @@ export async function writeScaffoldFilesReport(
     }
   }
 
-  const files: string[] = []
-  const overwritten: string[] = []
+  const created: string[] = []
 
   for (const entry of pending) {
-    const existed = Boolean(options.force) && (await pathExists(resolve(cwd, entry.path)))
-    const file = await writeFileSafe(entry.path, entry.contents, { ...options, cwd })
-    files.push(file)
-    if (existed) overwritten.push(file)
+    created.push(await writeFileSafe(entry.path, entry.contents, { ...options, cwd }))
   }
 
-  return { files, overwritten }
+  return created
 }
 
 export async function scaffoldFile(name: string, config: ScaffoldConfig, options: WriterOptions = {}): Promise<string> {
