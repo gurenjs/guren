@@ -278,7 +278,14 @@ also inserts `KEY: Env.<type>()...` into its `defineEnv({...})` object with
 which already takes the call name and skips a key that is present) plus
 `ensureNamedImports` (`:614`). The app's schema is then the complete schema, and
 there is no runtime merge. A `guren plugin` from before Part 2 reads only `key`,
-`value` and `comment`, and behaves as it does today.
+`value` and `comment`, and behaves as it does today. **Amended in
+implementation:** `type` names any builder but `custom`, whose validator is not
+data; `required` and `secret` must be booleans; a `port` default is checked
+against the port rule, since `.default()` stores its value unchecked. Every
+string reaches `config/env.ts` through the codegen emitters' single-quote
+escaping, and the entries are inserted in one write, in manifest order.
+`EnvVar` exposes `defaultValue` and `choices` for `guren env:example`; the
+builder name and presence stay internal, as nothing reads them.
 
 ### 2. `defineConfig()` and the per-concern definitions
 
@@ -588,15 +595,26 @@ and each verdict is written once against it:
   (`plugin-manifest.ts:266`), which gains a `files` option so it can leave `.env`
   alone. Keys the file already has keep their line, and the line-break guard
   (`assertEnvEntriesAllowed`) covers a multi-line `describe()` text as it covers
-  a plugin comment.
+  a plugin comment. **Amended in implementation:** the schema's entries go
+  through the pure append step `applyEnvEntries` now wraps, not through the
+  plugin guard, which would refuse the app's own multi-line `describe()`; each
+  line becomes a comment line. `$` is written `\$`, because Bun expands `$NAME`
+  inside either quote style, and a line counts as assigning its key wherever
+  Bun would read it (`export KEY=`, indented). There is no `files` option.
 - **`guren check --env`** fails when `.env.example` and the schema disagree on
-  the set of keys.
+  the set of keys. **Amended in implementation:** a `config/env.ts` that cannot
+  be imported fails the check too, rather than warning about a comparison it
+  never made.
 - **`guren/no-unvalidated-env-read`**, an oxlint rule beside
   `guren/no-nullish-env-default` that shares its `envKey()` matcher
   (`nullish-env-default.js:12`), reports a `process.env.X` read in `app/`,
   `config/`, `routes/` or `src/` where `X` is not a raw key (§1). It ships through
   `@guren/cli/oxlint` like its sibling. The blog's `CI` read carries a disable
-  with its reason.
+  with its reason. **Amended in implementation:** the rule reports wherever it
+  is enabled, and the scaffolds scope it with `overrides` on `app/**`,
+  `config/**`, `routes/**`, `src/**` and `modules/*/**`. A first-segment test
+  inside the rule missed module code and depended on the directory oxlint ran
+  from; `overrides` globs resolve against the config file.
 - **Blueprints** (`add-session.ts:111-117`, `add-cache.ts:25-28`, the `mail`,
   `queue` and `storage` blueprints in `packages/cli/src/blueprints.ts`) add their
   keys to `config/env.ts` through `addCreateAppOption(file, key, source,
