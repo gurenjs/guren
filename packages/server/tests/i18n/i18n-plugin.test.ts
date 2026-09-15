@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test'
+import { afterEach, describe, test, expect } from 'bun:test'
 import {
   Controller,
   createApp,
@@ -274,5 +274,61 @@ describe('createApp({ i18n })', () => {
     const body = await greet(app, '/greet?locale=ja')
     expect(body.hello).toBe('こんにちは')
     expect(body.fallback).toBe('English only')
+  })
+})
+
+describe('createApp({ i18n }) with catalogs a deploy build injected', () => {
+  const saved = process.env.GUREN_TRANSLATIONS
+
+  afterEach(() => {
+    if (saved === undefined) {
+      delete process.env.GUREN_TRANSLATIONS
+    } else {
+      process.env.GUREN_TRANSLATIONS = saved
+    }
+  })
+
+  // The scaffold's own configuration, on a runtime with no lang/ on disk (the test's
+  // cwd has none, like a Worker): the translations can only come from the injection.
+  function scaffoldedApp(overrides: Partial<I18nPluginOptions> = {}) {
+    const app = createApp({ i18n: { supported: ['en', 'ja'], ...overrides } })
+    app.router.get('/greet', [GreetingController, 'show'])
+    app.router.get('/page', [PageController, 'show'])
+    return app
+  }
+
+  test('translates from GUREN_TRANSLATIONS when no lang/ directory can be read', async () => {
+    process.env.GUREN_TRANSLATIONS = JSON.stringify(MESSAGES)
+    const app = scaffoldedApp()
+    await app.boot()
+
+    const body = await greet(app, '/greet?locale=ja')
+    expect(body.hello).toBe('こんにちは')
+    expect(body.welcome).toBe('ようこそ、Gurenさん！')
+    expect(body.fallback).toBe('English only')
+
+    const props = await inertiaPageProps(app)
+    expect(props._i18n.messages.en.messages.hello).toBe('Hello')
+  })
+
+  test('an explicit loader wins over the injected catalogs', async () => {
+    process.env.GUREN_TRANSLATIONS = JSON.stringify({ en: { messages: { hello: 'Injected' } } })
+    const app = scaffoldedApp({ loader: new MemoryLoader(structuredClone(MESSAGES)) })
+    await app.boot()
+
+    expect((await greet(app)).hello).toBe('Hello')
+  })
+
+  test('a custom path keeps reading the filesystem, which the build never bundled', async () => {
+    process.env.GUREN_TRANSLATIONS = JSON.stringify({ en: { messages: { hello: 'Injected' } } })
+    const app = scaffoldedApp({ path: new URL('./fixtures/lang', import.meta.url).pathname })
+    await app.boot()
+
+    expect((await greet(app)).hello).toBe('Hello')
+  })
+
+  test('fails the boot on an injection that is not a catalog object', async () => {
+    process.env.GUREN_TRANSLATIONS = '["en"]'
+    await expect(scaffoldedApp().boot()).rejects.toThrow('GUREN_TRANSLATIONS')
   })
 })

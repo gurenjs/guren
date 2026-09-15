@@ -5,8 +5,9 @@ import type { TranslationLoader, TranslationMessages } from '../types'
 /**
  * JSON file-based translation loader: `<path>/<locale>/<namespace>.json`.
  * That layout is a contract shared with the CLI — `guren codegen` and
- * `guren check --i18n` re-implement the same walk statically, so a change to
- * the layout or the parse tolerance has to be made in all three.
+ * `guren check --i18n` re-implement the same walk statically, and so does
+ * `translationCatalogJson` in @guren/core's deploy-build, which bundles `lang/`
+ * for deploy targets. A change to the layout or the parse tolerance goes in all.
  */
 export class JsonLoader implements TranslationLoader {
   private basePath: string

@@ -1,9 +1,31 @@
 import type { Context } from 'hono'
 import { ServiceProvider } from '../container/ServiceProvider'
-import { createI18n, type I18nManager, type TranslationMessages } from '../i18n'
+import { createI18n, MemoryLoader, type I18nManager, type TranslationMessages } from '../i18n'
+import { injectedTranslations } from '../i18n/injected-translations'
 import { detectLocaleMiddleware, getRequestLocale } from '../http/middleware/detect-locale'
 import { shareInertiaProps } from '../mvc/inertia/shared'
-import type { Application } from '../http/Application'
+import type { Application, I18nPluginOptions } from '../http/Application'
+
+/**
+ * The catalogs a deploy build injected, for an app reading the default `lang/`.
+ * The build bundles only that directory, so an explicit `loader` or `path` opts out.
+ */
+function injectedCatalogFor(options: I18nPluginOptions): Record<string, TranslationMessages> | undefined {
+  return options.loader || options.path !== undefined ? undefined : injectedTranslations()
+}
+
+function missingCatalogHint(options: I18nPluginOptions, locale: string): string {
+  if (options.loader) {
+    return '.'
+  }
+  if (options.path !== undefined) {
+    return ` — expected ${options.path}/${locale}/*.json.`
+  }
+  if (injectedTranslations()) {
+    return ` — the deploy build found no lang/${locale}/*.json to bundle.`
+  }
+  return ` — expected lang/${locale}/*.json. A deployed app without lang/ on disk needs a Guren deploy build or i18n.loader.`
+}
 
 /**
  * Shape of the `_i18n` Inertia shared prop (unless `i18n.share` is `false`),
@@ -42,12 +64,14 @@ export class I18nServiceProvider extends ServiceProvider {
         return createI18n({ locale: 'en' })
       }
 
+      const injected = injectedCatalogFor(options)
+      const loader = options.loader ?? (injected ? new MemoryLoader(injected) : undefined)
       const fallback = options.fallback ?? options.supported[0]!
       return createI18n({
         locale: fallback,
         fallbackLocale: fallback,
-        path: options.loader ? undefined : options.path ?? 'lang',
-        loader: options.loader,
+        path: loader ? undefined : options.path ?? 'lang',
+        loader,
       })
     })
 
@@ -74,10 +98,7 @@ export class I18nServiceProvider extends ServiceProvider {
     // so a broken path is visible instead of silently untranslated.
     for (const locale of options.supported) {
       if (Object.keys(manager.getMessages(locale)).length === 0) {
-        console.warn(
-          `[guren] i18n: no translations loaded for locale '${locale}'` +
-          (options.loader ? '.' : ` — expected ${options.path ?? 'lang'}/${locale}/*.json.`),
-        )
+        console.warn(`[guren] i18n: no translations loaded for locale '${locale}'${missingCatalogHint(options, locale)}`)
       }
     }
 
