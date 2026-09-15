@@ -4,10 +4,16 @@
 **Date:** 2026-07-23
 **Status:** Accepted (2026-07-24) — the standard two-week discussion window
 was intentionally shortened by the author, who is also the project's
-deciding maintainer. Both parts of the proposal (`guren check --arch` and
-application modules) were fully implemented, dogfooded end-to-end against
-`examples/blog`, and reviewed (including a Codex pass) before acceptance —
-see #140 and #144.
+deciding maintainer. Both parts of the proposal were implemented and
+reviewed (including a Codex pass) before acceptance — see #140 and #144.
+Correction (2026-09-15): Part 1 (`guren check --arch`) was dogfooded
+end-to-end against `examples/blog`, which still carries its `guren.arch.ts`
+and passes the check. Part 2 (`defineModule`) was not — `examples/blog` has
+never had a `modules/` directory. The application that actually dogfoods
+`defineModule` in production is `web/` (guren.dev itself), whose
+`web/modules/blog` shipped the day after acceptance; `guren check` was
+never wired into CI for that app until this correction, so the module
+boundary check it exercises went unverified by CI for nearly two months.
 
 ## Problem
 
