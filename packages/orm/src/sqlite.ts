@@ -5,8 +5,7 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
-
-type ConnectionResolver = string | (() => string | undefined)
+import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
 
 export interface SqliteDatabaseOptions {
   migrationsFolder: string | URL
@@ -26,7 +25,8 @@ export interface SqliteDatabase {
   /** Applies pending drizzle-kit migrations and reports what the folder held. */
   migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
-  configureOrm(): Promise<void>
+  /** `context` reaches `filename` here and in every later resolution. */
+  configureOrm(context?: ConnectionContext): Promise<void>
   /** Runs every seeder in the configured folder and reports what it held. */
   seedDatabase(): Promise<SeederRunSummary>
   /**
@@ -37,6 +37,8 @@ export interface SqliteDatabase {
   resetDatabase(): Promise<MigrationRunSummary | undefined>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
+  /** Whether the migrations folder holds a migration. Reads files only, never the database. */
+  hasMigrations(): boolean
 }
 
 type SqliteTarget =
@@ -143,8 +145,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
+  const settings = connectionSettings()
+
   function resolveFilename(): string {
-    const value = typeof filename === 'function' ? filename() : filename
+    const value = settings.resolve(filename)
     if (value != null) {
       assertNotConnectionUri(value, 'the "filename" option')
       return value
@@ -317,6 +321,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       return migrations.get()
     },
 
+    hasMigrations() {
+      return listLocalMigrations(resolvedMigrationsFolder).length > 0
+    },
+
     async migrationStatus() {
       const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
       if (localMigrations.length === 0) return []
@@ -325,7 +333,11 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       return buildMigrationStatus(localMigrations, readAppliedMigrations())
     },
 
-    async configureOrm() {
+    async configureOrm(context?: ConnectionContext) {
+      if (settings.remember(context)) {
+        await closeDatabase()
+        migrations.reset()
+      }
       const db = await database.get()
       await migrations.get()
       DrizzleAdapter.configure(db as Parameters<typeof DrizzleAdapter.configure>[0])

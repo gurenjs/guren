@@ -6,8 +6,8 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
+import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
 
-type ConnectionResolver = string | (() => string | undefined)
 type MySqlConnectionOptions = Record<string, unknown>
 type MySql2Drizzle = typeof import('drizzle-orm/mysql2')
 type CreatePool = typeof import('mysql2')['createPool']
@@ -57,13 +57,16 @@ export interface MySqlDatabase {
   /** Applies pending drizzle-kit migrations and reports what the folder held. */
   migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
-  configureOrm(): Promise<void>
+  /** `context` reaches `connectionString` here and in every later resolution. */
+  configureOrm(context?: ConnectionContext): Promise<void>
   /** Runs every seeder in the configured folder and reports what it held. */
   seedDatabase(): Promise<SeederRunSummary>
   /** Drops every table and view (including the drizzle migration tracker), then re-applies migrations — same end state as `guren db:reset`. */
   resetDatabase(): Promise<MigrationRunSummary>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
+  /** Whether the migrations folder holds a migration. Reads files only, never the database. */
+  hasMigrations(): boolean
 }
 
 export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabase {
@@ -80,8 +83,10 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
+  const settings = connectionSettings()
+
   function resolveConnectionString(): string {
-    const value = typeof connectionString === 'function' ? connectionString() : connectionString
+    const value = settings.resolve(connectionString)
     const resolved = value ?? process.env.DATABASE_URL
 
     if (!resolved) {
@@ -196,7 +201,11 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     }
   }
 
-  async function configureOrm(): Promise<void> {
+  async function configureOrm(context?: ConnectionContext): Promise<void> {
+    if (settings.remember(context)) {
+      await closeDatabase()
+      migrations.reset()
+    }
     const db = await database.get()
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }
@@ -266,6 +275,10 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     return migrations.get()
   }
 
+  function hasMigrations(): boolean {
+    return listLocalMigrations(resolvedMigrationsFolder).length > 0
+  }
+
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {
     const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
     if (localMigrations.length === 0) return []
@@ -281,6 +294,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     seedDatabase,
     resetDatabase,
     migrationStatus,
+    hasMigrations,
   }
 }
 

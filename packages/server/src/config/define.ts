@@ -26,7 +26,7 @@ export interface OAuthConfig {
   readonly providers?: Readonly<Record<string, OAuthProviderConfig>>
 }
 
-/** What each key configures. Augmentable, like `SessionDrivers`: `@guren/core` adds `session`. */
+/** What each key configures. Augmentable, like `SessionDrivers`: `@guren/core` adds `session` and `database`. */
 export interface ConfigDefinitions {
   cache: CacheConfig
   http: HttpConfig
@@ -61,7 +61,6 @@ export function defineCacheConfig(resolve: Resolve<'cache'>): ConfigDefinition<'
   })
 }
 
-/** Bound as `http.hostAuthorization`, which the placeholder `Application` mounts first reads (RFC 0027 §5). */
 export function defineHttpConfig(resolve: Resolve<'http'>): ConfigDefinition<'http'> {
   return defineConfig({
     key: 'http',

@@ -292,10 +292,10 @@ export class Container {
   }
 
   /**
-   * The binding record behind `key`. Every bind replaces the record, so comparing
-   * two reads by identity tells a rebind apart, which a key list cannot (RFC 0027 §3).
+   * An opaque token for the binding behind `key`, compared by identity: every
+   * bind replaces it, so two reads tell a rebind apart, which a key list cannot (RFC 0027 §3).
    */
-  bindingOf(key: string): Readonly<ServiceBinding> | undefined {
+  bindingOf(key: string): unknown {
     return this.bindings.get(this.resolveAlias(key))
   }
 

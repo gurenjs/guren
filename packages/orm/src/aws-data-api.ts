@@ -6,8 +6,8 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
+import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
 
-type ConnectionResolver = string | (() => string | undefined)
 type AwsDataApiDrizzle = typeof import('drizzle-orm/aws-data-api/pg')
 type AwsDataApiPgDatabase = import('drizzle-orm/aws-data-api/pg').AwsDataApiPgDatabase
 type DrizzleConfig = Parameters<AwsDataApiDrizzle['drizzle']>[0]
@@ -64,13 +64,16 @@ export interface AwsDataApiDatabase {
   /** Applies pending drizzle-kit migrations and reports what the folder held. */
   migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
-  configureOrm(): Promise<void>
+  /** `context` reaches `database`, `resourceArn` and `secretArn` here and in every later resolution. */
+  configureOrm(context?: ConnectionContext): Promise<void>
   /** Runs every seeder in the configured folder and reports what it held. */
   seedDatabase(): Promise<SeederRunSummary>
   /** Drops the public schema (and the drizzle tracker schema), then re-applies migrations — same end state as `guren db:reset`. */
   resetDatabase(): Promise<MigrationRunSummary>
   /** Per-migration applied state derived from the drizzle-kit journal and drizzle.__drizzle_migrations. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
+  /** Whether the migrations folder holds a migration. Reads files only, never the database. */
+  hasMigrations(): boolean
 }
 
 interface ResolvedConnection {
@@ -93,9 +96,11 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
+  const settings = connectionSettings()
+
   function resolveConnection(): ResolvedConnection {
     const resolveValue = (value: ConnectionResolver | undefined, envKey: string): string | undefined => {
-      const resolved = typeof value === 'function' ? value() : value
+      const resolved = settings.resolve(value)
       return resolved ?? process.env[envKey]
     }
 
@@ -195,7 +200,11 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     }
   }
 
-  async function configureOrm(): Promise<void> {
+  async function configureOrm(context?: ConnectionContext): Promise<void> {
+    if (settings.remember(context)) {
+      await closeDatabase()
+      migrations.reset()
+    }
     const db = await databaseHandle.get()
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }
@@ -261,6 +270,10 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     }
   }
 
+  function hasMigrations(): boolean {
+    return listLocalMigrations(resolvedMigrationsFolder).length > 0
+  }
+
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {
     const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
     if (localMigrations.length === 0) return []
@@ -276,6 +289,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     seedDatabase,
     resetDatabase,
     migrationStatus,
+    hasMigrations,
   }
 }
 

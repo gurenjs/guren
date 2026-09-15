@@ -65,6 +65,6 @@ export interface ServiceBindings {
   env: AppEnv
   /** Read ahead of `process.env` when the schema is parsed: the Workers env, a test's `envSource`. */
   'env.source': EnvSource
-  /** `defineHttpConfig()`'s host authorization, read by the placeholder `Application` mounts first (RFC 0027 §5). */
+  /** Bound by `defineHttpConfig()`; read by the host-authorization placeholder mounted ahead of app middleware (RFC 0027 §5). */
   'http.hostAuthorization': HostAuthorizationOptions | false
 }
