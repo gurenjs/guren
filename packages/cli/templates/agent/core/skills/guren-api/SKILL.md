@@ -71,7 +71,7 @@ All throw `ValidationException` (HTTP 422) on failure.
 Source: `packages/orm/src/Model.ts`
 
 ```typescript
-import { defineModel } from '@guren/orm'
+import { defineModel } from '@guren/core'
 import { posts } from '@/db/schema'
 
 export class Post extends defineModel(posts) {}
@@ -436,7 +436,7 @@ new NotFoundHttpException(message?)                                 // 404
 NotFoundHttpException.forModel('User', 123)
 ```
 
-`Model.findOrFail()` throws `ModelNotFoundException` from `@guren/orm` — it does *not* extend `HttpException`; the handler picks it up via its duck-typed `statusCode: 404`.
+`Model.findOrFail()` throws `ModelNotFoundException` (exported from `@guren/core`) — it does *not* extend `HttpException`; the handler picks it up via its duck-typed `statusCode: 404`.
 
 ### Container & Service Providers
 Source: `packages/server/src/container/`

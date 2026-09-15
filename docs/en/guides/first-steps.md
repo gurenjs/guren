@@ -92,7 +92,7 @@ export const ListPostsQuerySchema = z.object({
 `app/Models/Post.ts` binds a class to a Drizzle table from `db/schema.ts`:
 
 ```ts
-import { defineModel } from '@guren/orm'
+import { defineModel } from '@guren/core'
 import { posts } from '@/db/schema'
 
 export class Post extends defineModel(posts) {}

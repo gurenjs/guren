@@ -22,7 +22,7 @@ describe('shipped config/database.ts seeder context', () => {
     it(`re-exports ${EXPECTED_CONTEXT[driver]} as AppSeederContext for --db ${driver}`, async () => {
       const config = await readFile(databaseConfigTemplatePath(driver), 'utf8')
 
-      expect(config).toContain(`type ${EXPECTED_CONTEXT[driver]} } from '@guren/orm'`)
+      expect(config).toContain(`type ${EXPECTED_CONTEXT[driver]} } from '@guren/core'`)
       expect(config).toContain(`export type AppSeederContext = ${EXPECTED_CONTEXT[driver]}`)
     })
   }

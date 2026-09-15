@@ -3,7 +3,7 @@
 
 import type { TaskRecord } from '../app/Models/Task.js'
 import type { UserRecord } from '../app/Models/User.js'
-import type { WithRelations } from '@guren/orm'
+import type { WithRelations } from '@guren/core'
 
 /**
  * Auto-extracted data types from Resource classes.

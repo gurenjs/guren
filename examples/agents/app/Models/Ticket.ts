@@ -1,4 +1,4 @@
-import { defineModel } from '@guren/orm'
+import { defineModel } from '@guren/core'
 
 import { tickets } from '../../db/schema'
 

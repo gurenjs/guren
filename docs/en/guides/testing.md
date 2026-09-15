@@ -201,7 +201,7 @@ Tests read and write `./data/guren.test.db` by default, a separate file from `./
 > Scaffolds created before this branch existed write straight to `DATABASE_URL` (or `./data/guren.db`) regardless of `NODE_ENV`, so `bun test` pollutes the same database your dev server reads from. Retrofit it by replacing the `filename` option, not just adding the helper. The helper alone does nothing until `createSqliteDatabase()` is actually pointed at it:
 >
 > ```diff
->  import { createSqliteDatabase } from '@guren/orm'
+>  import { createSqliteDatabase } from '@guren/core'
 >
 > +function resolveDatabaseFilename(): string {
 > +  if (process.env.NODE_ENV === 'test') {

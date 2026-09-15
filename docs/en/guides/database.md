@@ -31,7 +31,7 @@ what it can see — treat silence as "nothing found", not as a guarantee.
 
 ```ts
 // config/database.ts
-import { DrizzleAdapter } from '@guren/orm'
+import { DrizzleAdapter } from '@guren/core'
 
 DrizzleAdapter.configure({ connectionString: process.env.DATABASE_URL })
 ```
@@ -42,7 +42,7 @@ Use `createMySqlDatabase` when your app runs on MySQL-compatible databases.
 
 ```ts
 // config/database.ts
-import { createMySqlDatabase } from '@guren/orm'
+import { createMySqlDatabase } from '@guren/core'
 
 const database = createMySqlDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
@@ -64,7 +64,7 @@ Use `createAwsDataApiDatabase` when your app runs on AWS Lambda against Aurora S
 
 ```ts
 // config/database.ts
-import { createAwsDataApiDatabase } from '@guren/orm'
+import { createAwsDataApiDatabase } from '@guren/core'
 
 const database = createAwsDataApiDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
@@ -96,7 +96,7 @@ Use `defineModel()` to derive a typed model directly from a Drizzle table:
 
 ```ts
 // app/Models/Post.ts
-import { defineModel } from '@guren/orm'
+import { defineModel } from '@guren/core'
 import { posts } from '@/db/schema'
 
 export type PostRecord = typeof posts.$inferSelect
@@ -659,8 +659,7 @@ When hook logic grows complex, extract it into a dedicated observer class. Obser
 
 ```ts
 // app/Observers/PostObserver.ts
-import type { ModelObserver } from '@guren/orm'
-import type { PlainObject } from '@guren/orm'
+import type { ModelObserver, PlainObject } from '@guren/core'
 
 export class PostObserver implements ModelObserver {
   creating(data: PlainObject) {
@@ -694,7 +693,7 @@ Observers and inline hooks coexist: hooks fire first, then observers.
 Instead of permanently removing records, soft deletes set a `deletedAt` timestamp. Users can recover deleted content, and queries automatically exclude trashed records.
 
 ```ts
-import { SoftDeletes, defineModel } from '@guren/orm'
+import { SoftDeletes, defineModel } from '@guren/core'
 import { posts } from '@/db/schema'
 
 export class Post extends SoftDeletes(defineModel(posts)) {}
@@ -901,7 +900,7 @@ Guren supports SQLite out of the box via Bun's built-in SQLite driver. New proje
 
 ```ts
 // config/database.ts
-import { createSqliteDatabase } from '@guren/orm'
+import { createSqliteDatabase } from '@guren/core'
 
 const database = createSqliteDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),

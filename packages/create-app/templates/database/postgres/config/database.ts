@@ -1,4 +1,4 @@
-import { createPostgresDatabase, type PostgresSeederContext } from '@guren/orm'
+import { createPostgresDatabase, type PostgresSeederContext } from '@guren/core'
 
 const database = createPostgresDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),

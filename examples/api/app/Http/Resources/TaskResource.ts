@@ -1,7 +1,6 @@
-import { Resource } from '@guren/core'
+import { Resource, type WithRelations } from '@guren/core'
 import { Task } from '../../Models/Task.js'
 import type { TaskRecord } from '../../Models/Task.js'
-import type { WithRelations } from '@guren/orm'
 
 type TaskWithOwner = WithRelations<typeof Task, 'owner'>
 

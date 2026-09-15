@@ -273,8 +273,8 @@ import {
   AuthorizationException,
   ValidationException,
   MethodNotAllowedException,
+  ModelNotFoundException,
 } from '@guren/core'
-import { ModelNotFoundException } from '@guren/orm'
 
 // 404 Not Found
 throw new NotFoundHttpException('投稿が見つかりません')
@@ -294,7 +294,7 @@ throw new AuthorizationException('この投稿を編集する権限がありま�
 
 ### Duck-typed `statusCode`
 
-`ExceptionHandler` は `HttpException` のサブクラスに限らず、数値の `statusCode` プロパティを持つエラーであれば扱えます。そのため `@guren/orm` の `ModelNotFoundException`（`statusCode: 404` を持つ）は、追加の設定なしに 404 レスポンスとしてレンダリングされます。`statusCode >= 500` のエラーは、本番環境ではメッセージが隠され、"Internal Server Error" に置き換わります。
+`ExceptionHandler` は `HttpException` のサブクラスに限らず、数値の `statusCode` プロパティを持つエラーであれば扱えます。そのため `@guren/core` から export される `ModelNotFoundException`（`statusCode: 404` を持つ）は、追加の設定なしに 404 レスポンスとしてレンダリングされます。`statusCode >= 500` のエラーは、本番環境ではメッセージが隠され、"Internal Server Error" に置き換わります。
 
 ## 非同期エラーバウンダリ
 

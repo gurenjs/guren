@@ -8,7 +8,7 @@ export const GUREN_API_DIGEST = `## Guren API Signatures (digest)
 
 Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping \`node_modules/@guren/*\`.
 
-### Models (@guren/orm)
+### Models (@guren/core)
 - Statics: \`find(id)\` → record | null · \`findOrFail(id)\` (throws, renders 404) · \`first(where?)\` ·
   \`all()\` · \`create(data)\` · \`update(where, data)\` · \`delete(where)\` · \`paginate(options?)\` ·
   \`transaction(async (trx) => ...)\` · \`forceCreate/forceUpdate\` (bypass fillable — never pass request input)

@@ -1072,7 +1072,7 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
       'No database configuration file found (checked config/database.ts and db/config.ts).',
       {
         fix: 'Create a database configuration file at config/database.ts.',
-        manualFix: 'Add config/database.ts using createPostgresDatabase() from @guren/orm.',
+        manualFix: 'Add config/database.ts using createPostgresDatabase() from @guren/core.',
       },
     )
   }
