@@ -155,7 +155,7 @@ const OAUTH_PROVIDER_FACTORIES: Record<string, string> = {
   discord: 'createDiscordOAuthProviderConfig',
 }
 
-function buildOAuthProviderTemplate(providers: string[], databaseStateStore: boolean): string {
+export function buildOAuthProviderTemplate(providers: string[], databaseStateStore: boolean): string {
   const factoryImports = providers.map((provider) => OAUTH_PROVIDER_FACTORIES[provider]).join(', ')
 
   // Registered only when all three env vars are set, so a half-configured

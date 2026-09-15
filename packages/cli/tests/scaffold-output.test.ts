@@ -14,7 +14,7 @@ import {
 import { parseSourceFile } from '../src/parse-cache'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
-import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
+import { buildOAuthProviderTemplate, makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { runBlueprint } from '../src/blueprints'
 import { makeFeature } from '../src/make-feature'
 import { makeChannel } from '../src/make-channel'
@@ -341,31 +341,42 @@ describe('attachments scaffold-typecheck fixture stays pinned to the builder', (
   })
 })
 
-describe('session scaffold-typecheck fixture stays pinned to the builder', () => {
-  // tests/fixtures/scaffold-typecheck/session/db/schema.ts is a render of the
-  // blueprint's Postgres schema patch, so a change to SESSIONS_TABLE_BLOCKS.pg
-  // has to land in the fixture too.
-  it('sessions table matches what the blueprint appends to a pg schema', async () => {
-    const fixtureSchema = await readFile(join(SCAFFOLD_FIXTURE_ROOT, 'session/db/schema.ts'), 'utf8')
-    const tableStart = fixtureSchema.indexOf('export const sessions')
-    expect(tableStart).toBeGreaterThan(-1)
-    const fixtureTable = fixtureSchema.slice(tableStart)
+describe('schema-table scaffold-typecheck fixtures stay pinned to their blueprints', () => {
+  // tests/fixtures/scaffold-typecheck/<blueprint>/db/schema.ts is a render of
+  // the blueprint's Postgres schema patch, so a change to its table block's pg
+  // entry has to land in the fixture too.
+  for (const [blueprint, table] of [['session', 'sessions'], ['oauth', 'oauthStates']] as const) {
+    it(`${blueprint}: ${table} table matches what the blueprint appends to a pg schema`, async () => {
+      const fixtureSchema = await readFile(join(SCAFFOLD_FIXTURE_ROOT, `${blueprint}/db/schema.ts`), 'utf8')
+      const tableStart = fixtureSchema.indexOf(`export const ${table}`)
+      expect(tableStart).toBeGreaterThan(-1)
+      const fixtureTable = fixtureSchema.slice(tableStart)
 
-    const workspace = await createTempWorkspace('guren-session-fixture-pin-')
-    try {
-      await mkdir(join(workspace.dir, 'db'), { recursive: true })
-      await writeFile(join(workspace.dir, 'db/schema.ts'), PG_SCHEMA_FIXTURE)
-      await runBlueprint('session', {})
+      const workspace = await createTempWorkspace(`guren-${blueprint}-fixture-pin-`)
+      try {
+        await mkdir(join(workspace.dir, 'db'), { recursive: true })
+        await writeFile(join(workspace.dir, 'db/schema.ts'), PG_SCHEMA_FIXTURE)
+        await runBlueprint(blueprint, {})
 
-      const rendered = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
-      // Appended at end of file, so the tails must be *equal*: toContain would
-      // keep passing on a suffix the fixture never learned.
-      const renderedStart = rendered.indexOf('export const sessions')
-      expect(renderedStart).toBeGreaterThan(-1)
-      expect(rendered.slice(renderedStart).trimEnd()).toBe(fixtureTable.trimEnd())
-    } finally {
-      await workspace.cleanup()
-    }
+        const rendered = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+        // Appended at end of file, so the tails must be *equal*: toContain would
+        // keep passing on a suffix the fixture never learned.
+        const renderedStart = rendered.indexOf(`export const ${table}`)
+        expect(renderedStart).toBeGreaterThan(-1)
+        expect(rendered.slice(renderedStart).trimEnd()).toBe(fixtureTable.trimEnd())
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
+})
+
+describe('oauth blueprint provider stays pinned to the make:auth builder', () => {
+  // `guren add oauth` ships a static OAuthProvider.ts; `make:auth --oauth`
+  // renders the same file per provider list. One manager binding, two sources.
+  it('templates/scaffold/oauth OAuthProvider.ts is the builder render for every preset', async () => {
+    const template = await readFile(join(SCAFFOLD_TEMPLATE_ROOT, 'oauth/app/Providers/OAuthProvider.ts'), 'utf8')
+    expect(template).toBe(buildOAuthProviderTemplate(['github', 'google', 'discord'], true))
   })
 })
 
@@ -401,7 +412,8 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
   const PINNED_ELSEWHERE: Record<string, string> = {
     'auth/': 'pinned by the auth fixture pin above, plus real codegen for pages.gen',
     'attachments/db/schema.ts': 'pinned by the attachments fixture pin above',
-    'session/db/schema.ts': 'pinned by the session fixture pin above',
+    'oauth/db/schema.ts': 'pinned by the schema-table fixture pin above',
+    'session/db/schema.ts': 'pinned by the schema-table fixture pin above',
   }
 
   it('every companion fixture is pinned to a builder, or names why not', async () => {
