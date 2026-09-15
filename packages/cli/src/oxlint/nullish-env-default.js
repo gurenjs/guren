@@ -6,21 +6,7 @@
 // Reports only a non-empty string or numeric fallback — `?? ''` is identical under
 // either operator, and a non-literal fallback cannot be judged from syntax.
 // Tests: `tests/oxlint-nullish-env-default.test.ts`.
-import { unwrap } from './ast.js'
-
-/** `process.env.FOO` or `process.env['FOO']`, returning the variable name. */
-function envKey(node) {
-  const n = unwrap(node)
-  if (n?.type !== 'MemberExpression') return undefined
-  const env = unwrap(n.object)
-  if (env?.type !== 'MemberExpression') return undefined
-  const proc = unwrap(env.object)
-  if (proc?.type !== 'Identifier' || proc.name !== 'process') return undefined
-  const envProp = env.computed ? undefined : env.property?.name
-  if (envProp !== 'env') return undefined
-  if (n.computed) return n.property?.type === 'Literal' ? String(n.property.value) : undefined
-  return n.property?.name
-}
+import { envKey, unwrap } from './ast.js'
 
 /** A literal `''` behaves the same under both operators, so it is not reported. */
 function nonEmptyLiteralFallback(node) {

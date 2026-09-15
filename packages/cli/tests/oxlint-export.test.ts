@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { assertWorkspaceBuilt, lintFixture, linkWorkspacePackage } from './helpers'
@@ -16,19 +16,30 @@ describe('@guren/cli/oxlint', () => {
     const dir = mkdtempSync(join(tmpdir(), 'guren-oxlint-export-'))
     try {
       await linkWorkspacePackage('cli', dir)
+      // Under src/, where guren/no-unvalidated-env-read applies.
+      mkdirSync(join(dir, 'src'))
       const output = lintFixture({
         cwd: dir,
-        config: { jsPlugins: ['@guren/cli/oxlint'], rules: { 'guren/comment-banner': 'error', 'guren/await-async-assertion': 'error', 'guren/no-nullish-env-default': 'error' } },
-        file: 'case.ts',
+        config: {
+          jsPlugins: ['@guren/cli/oxlint'],
+          rules: {
+            'guren/comment-banner': 'error',
+            'guren/await-async-assertion': 'error',
+            'guren/no-nullish-env-default': 'error',
+            'guren/no-unvalidated-env-read': 'error',
+          },
+        },
+        file: 'src/case.ts',
         source: `import { expect, test } from 'bun:test'\n// ---- banner ----\ntest('x', async () => {\n  expect(Promise.resolve(1)).resolves.toBe(1)\n})\nconst store = process.env.CACHE_STORE ?? 'memory'\n`,
       })
 
-      expect(output).toContain('case.ts:2:1:')
+      expect(output).toContain('src/case.ts:2:1:')
       expect(output).toContain('guren(comment-banner)')
-      expect(output).toContain('case.ts:4:3:')
+      expect(output).toContain('src/case.ts:4:3:')
       expect(output).toContain('guren(await-async-assertion)')
-      expect(output).toContain('case.ts:6:15:')
+      expect(output).toContain('src/case.ts:6:15:')
       expect(output).toContain('guren(no-nullish-env-default)')
+      expect(output).toContain('guren(no-unvalidated-env-read)')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

@@ -36,7 +36,19 @@ export interface GurenPluginEnvEntry {
   key: string
   value?: string
   comment?: string
+  /** The `Env` builder `guren plugin` declares the key with in `config/env.ts` (RFC 0027 §1); `string` when absent. */
+  type?: GurenPluginEnvType
+  /** The values a `type: 'enum'` key admits. */
+  choices?: string[]
+  /** Declared without `.optional()`. A `default` makes the key never unset, so it wins. */
+  required?: boolean
+  default?: string | number | boolean
+  secret?: boolean
 }
+
+/** The `Env` builders a manifest may name. `custom` takes a validator object, which manifest data cannot carry. */
+export const PLUGIN_ENV_TYPES = ['string', 'url', 'number', 'port', 'boolean', 'enum'] as const
+export type GurenPluginEnvType = (typeof PLUGIN_ENV_TYPES)[number]
 
 export interface GurenPluginPublishEntry {
   from: string
@@ -51,7 +63,7 @@ export interface GurenPluginCommands {
 /** Application directories a plugin is allowed to publish files into. */
 export const PUBLISH_TARGET_ROOTS = ['config/', 'db/migrations/', 'resources/'] as const
 
-const ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]*$/u
+export const ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]*$/u
 
 /**
  * Reserved by the framework: `GUREN_TESTING`, `GUREN_MCP` and
@@ -256,16 +268,57 @@ export function assertEnvEntriesAllowed(entries: GurenPluginEnvEntry[]): void {
         throw new Error(`Invalid env entry "${entry.key}": ${field} cannot contain a line break.`)
       }
     }
+
+    // `guren plugin` writes these into config/env.ts as source, so a shape the
+    // builder would reject is refused here, before anything is installed.
+    const problem = envDeclarationProblem(entry)
+    if (problem !== undefined) {
+      throw new Error(`Invalid env entry "${entry.key}": ${problem}`)
+    }
   }
+}
+
+function envDeclarationProblem(entry: GurenPluginEnvEntry): string | undefined {
+  const type = entry.type ?? 'string'
+  if (!(PLUGIN_ENV_TYPES as readonly string[]).includes(type)) {
+    return `type must be one of ${PLUGIN_ENV_TYPES.join(', ')}.`
+  }
+
+  const { choices } = entry
+  if (type === 'enum') {
+    if (!Array.isArray(choices) || choices.length === 0 || !choices.every((choice) => typeof choice === 'string')) {
+      return 'type "enum" needs a non-empty choices array of strings.'
+    }
+  } else if (choices !== undefined) {
+    return 'choices applies to type "enum" only.'
+  }
+
+  const fallback = entry.default
+  if (fallback === undefined) return undefined
+  const expected = type === 'number' || type === 'port' ? 'number' : type === 'boolean' ? 'boolean' : 'string'
+  if (typeof fallback !== expected || (typeof fallback === 'number' && !Number.isFinite(fallback))) {
+    return `default must be a ${expected} for type "${type}".`
+  }
+  if (type === 'enum' && !choices?.includes(String(fallback))) {
+    return 'default must be one of its choices.'
+  }
+  return undefined
+}
+
+/** The keys a dotenv file assigns, by the rule `applyEnvEntries` skips on: `KEY=` at the start of a line. */
+export function envFileKeys(content: string): Set<string> {
+  return new Set([...content.matchAll(/^([A-Za-z_][A-Za-z0-9_]*)=/gmu)].map((match) => match[1]))
 }
 
 /**
  * Append missing env keys to .env.example (created when absent) and .env
- * (only when it already exists). Returns the files that were modified.
+ * (only when it already exists); `files` narrows which of the two. Returns the
+ * files that were modified.
  */
 export async function applyEnvEntries(
   entries: GurenPluginEnvEntry[],
   cwd: string = process.cwd(),
+  options: { readonly files?: readonly string[] } = {},
 ): Promise<string[]> {
   const validEntries = entries.filter((entry) => ENV_KEY_PATTERN.test(entry.key ?? ''))
   assertEnvEntriesAllowed(validEntries)
@@ -273,15 +326,14 @@ export async function applyEnvEntries(
 
   const modified: string[] = []
 
-  for (const file of ['.env.example', '.env']) {
+  for (const file of options.files ?? ['.env.example', '.env']) {
     const existing = await readIfExists(cwd, file)
 
     if (existing === null && file === '.env') continue
     const content = existing ?? ''
 
-    const missing = validEntries.filter(
-      (entry) => !new RegExp(`^${entry.key}=`, 'm').test(content),
-    )
+    const listed = envFileKeys(content)
+    const missing = validEntries.filter((entry) => !listed.has(entry.key))
     if (missing.length === 0) continue
 
     const blocks = missing.map((entry) => {
