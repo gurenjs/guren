@@ -197,7 +197,7 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
 
   if (manifest?.env?.length) {
     const declared = await declareEnvEntries(manifest.env)
-    if (declared.updated) messages.push({ kind: 'updated', text: ENV_SCHEMA_FILE })
+    messages.push(...toMessages('updated', declared.updated ? [ENV_SCHEMA_FILE] : []))
     if (declared.unpatched.length > 0) {
       messages.push({
         kind: 'warning',

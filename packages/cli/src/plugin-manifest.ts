@@ -1,6 +1,7 @@
 import { copyFile, mkdir, realpath, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileExists, readIfExists } from './discovery'
+import { envDeclarationProblem, type GurenPluginEnvType } from './plugin-env'
 
 /**
  * Declarative `gurenPlugin` manifest read from a plugin package's
@@ -46,10 +47,6 @@ export interface GurenPluginEnvEntry {
   secret?: boolean
 }
 
-/** The `Env` builders a manifest may name. `custom` takes a validator object, which manifest data cannot carry. */
-export const PLUGIN_ENV_TYPES = ['string', 'url', 'number', 'port', 'boolean', 'enum'] as const
-export type GurenPluginEnvType = (typeof PLUGIN_ENV_TYPES)[number]
-
 export interface GurenPluginPublishEntry {
   from: string
   to: string
@@ -63,7 +60,7 @@ export interface GurenPluginCommands {
 /** Application directories a plugin is allowed to publish files into. */
 export const PUBLISH_TARGET_ROOTS = ['config/', 'db/migrations/', 'resources/'] as const
 
-export const ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]*$/u
+const ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]*$/u
 
 /**
  * Reserved by the framework: `GUREN_TESTING`, `GUREN_MCP` and
@@ -278,71 +275,56 @@ export function assertEnvEntriesAllowed(entries: GurenPluginEnvEntry[]): void {
   }
 }
 
-function envDeclarationProblem(entry: GurenPluginEnvEntry): string | undefined {
-  const type = entry.type ?? 'string'
-  if (!(PLUGIN_ENV_TYPES as readonly string[]).includes(type)) {
-    return `type must be one of ${PLUGIN_ENV_TYPES.join(', ')}.`
-  }
-
-  const { choices } = entry
-  if (type === 'enum') {
-    if (!Array.isArray(choices) || choices.length === 0 || !choices.every((choice) => typeof choice === 'string')) {
-      return 'type "enum" needs a non-empty choices array of strings.'
-    }
-  } else if (choices !== undefined) {
-    return 'choices applies to type "enum" only.'
-  }
-
-  const fallback = entry.default
-  if (fallback === undefined) return undefined
-  const expected = type === 'number' || type === 'port' ? 'number' : type === 'boolean' ? 'boolean' : 'string'
-  if (typeof fallback !== expected || (typeof fallback === 'number' && !Number.isFinite(fallback))) {
-    return `default must be a ${expected} for type "${type}".`
-  }
-  if (type === 'enum' && !choices?.includes(String(fallback))) {
-    return 'default must be one of its choices.'
-  }
-  return undefined
+/** The entries a plugin install acts on: a malformed key name is skipped, a refused entry throws. */
+export function pluginEnvEntries(entries: GurenPluginEnvEntry[]): GurenPluginEnvEntry[] {
+  const valid = entries.filter((entry) => ENV_KEY_PATTERN.test(entry.key ?? ''))
+  assertEnvEntriesAllowed(valid)
+  return valid
 }
 
-/** The keys a dotenv file assigns, by the rule `applyEnvEntries` skips on: `KEY=` at the start of a line. */
+/** The keys a dotenv file assigns, as Bun reads it: `KEY=`, indented or `export`-prefixed. A `# KEY=` line assigns nothing. */
 export function envFileKeys(content: string): Set<string> {
-  return new Set([...content.matchAll(/^([A-Za-z_][A-Za-z0-9_]*)=/gmu)].map((match) => match[1]))
+  return new Set([...content.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=/gmu)].map((match) => match[1]))
+}
+
+/** `content` with a block appended for each entry whose key it does not assign; a comment line per line of `comment`. */
+export function appendEnvEntries(
+  content: string,
+  entries: readonly GurenPluginEnvEntry[],
+): { content: string; added: string[] } {
+  const listed = envFileKeys(content)
+  const missing = entries.filter((entry) => !listed.has(entry.key))
+  if (missing.length === 0) return { content, added: [] }
+
+  const blocks = missing.map((entry) => {
+    const comment = entry.comment ? entry.comment.split(/\r?\n/u).map((line) => `# ${line}\n`).join('') : ''
+    return `${comment}${entry.key}=${entry.value ?? ''}\n`
+  })
+  const separator = content.length > 0 && !content.endsWith('\n') ? '\n' : ''
+  return { content: `${content}${separator}${blocks.join('')}`, added: missing.map((entry) => entry.key) }
 }
 
 /**
  * Append missing env keys to .env.example (created when absent) and .env
- * (only when it already exists); `files` narrows which of the two. Returns the
- * files that were modified.
+ * (only when it already exists). Returns the files that were modified.
  */
 export async function applyEnvEntries(
   entries: GurenPluginEnvEntry[],
   cwd: string = process.cwd(),
-  options: { readonly files?: readonly string[] } = {},
 ): Promise<string[]> {
-  const validEntries = entries.filter((entry) => ENV_KEY_PATTERN.test(entry.key ?? ''))
-  assertEnvEntriesAllowed(validEntries)
+  const validEntries = pluginEnvEntries(entries)
   if (validEntries.length === 0) return []
 
   const modified: string[] = []
 
-  for (const file of options.files ?? ['.env.example', '.env']) {
+  for (const file of ['.env.example', '.env']) {
     const existing = await readIfExists(cwd, file)
 
     if (existing === null && file === '.env') continue
-    const content = existing ?? ''
+    const next = appendEnvEntries(existing ?? '', validEntries)
+    if (next.added.length === 0) continue
 
-    const listed = envFileKeys(content)
-    const missing = validEntries.filter((entry) => !listed.has(entry.key))
-    if (missing.length === 0) continue
-
-    const blocks = missing.map((entry) => {
-      const comment = entry.comment ? `# ${entry.comment}\n` : ''
-      return `${comment}${entry.key}=${entry.value ?? ''}\n`
-    })
-
-    const separator = content.length > 0 && !content.endsWith('\n') ? '\n' : ''
-    await writeFile(resolve(cwd, file), `${content}${separator}${blocks.join('')}`, 'utf8')
+    await writeFile(resolve(cwd, file), next.content, 'utf8')
     modified.push(file)
   }
 

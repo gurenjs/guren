@@ -653,6 +653,31 @@ export function ensureMysqlImports(content: string, needed: string[]): string {
 }
 
 /**
+ * `content` with each option inserted at the top of `callName`'s object argument,
+ * in the order given, values verbatim; a key the object already sets is skipped.
+ * The failure reason as a string when the call cannot be located.
+ */
+export function insertCallOptions(
+  content: string,
+  options: ReadonlyArray<{ readonly key: string; readonly source: string }>,
+  callName: string,
+): { content: string; inserted: string[] } | string {
+  const span = findCallOptionsSpan(content, callName)
+  if (typeof span === 'string') return span
+
+  const optionsSource = content.slice(span.start, span.end + 1)
+  const inserted: string[] = []
+  let insertion = ''
+  for (const { key, source } of options) {
+    if (inserted.includes(key) || new RegExp(`(^|[{,]\\s*)${escapeRegExp(key)}\\s*:`, 'm').test(optionsSource)) continue
+    inserted.push(key)
+    insertion += `\n  ${key}: ${source},`
+  }
+
+  return { content: content.slice(0, span.start + 1) + insertion + content.slice(span.start + 1), inserted }
+}
+
+/**
  * Adds a top-level option to a single-object-argument call, its value inserted
  * verbatim. `callName` defaults to `createApp`; `'defineModule'` targets a
  * module's `modules/<name>/index.ts` descriptor.
@@ -663,31 +688,20 @@ export async function addCreateAppOption(
   valueSource: string,
   callName = 'createApp',
 ): Promise<PatchResult> {
-  const absolutePath = resolve(process.cwd(), filePath)
   const content = await readIfExists(process.cwd(), filePath)
-
   if (content === null) {
     return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
-  const span = findCallOptionsSpan(content, callName)
-
-  if (typeof span === 'string') {
-    return { modified: false, reason: span }
+  const patched = insertCallOptions(content, [{ key, source: valueSource }], callName)
+  if (typeof patched === 'string') {
+    return { modified: false, reason: patched }
   }
-
-  const { start: openBraceIndex, end: closeBraceIndex } = span
-  const optionsSource = content.slice(openBraceIndex, closeBraceIndex + 1)
-  const keyPattern = new RegExp(`(^|[{,]\\s*)${escapeRegExp(key)}\\s*:`, 'm')
-  if (keyPattern.test(optionsSource)) {
+  if (patched.inserted.length === 0) {
     return { modified: false, reason: PATCH_REASONS.optionAlreadySet }
   }
 
-  const insertion = `\n  ${key}: ${valueSource},`
-  const updated =
-    content.slice(0, openBraceIndex + 1) + insertion + content.slice(openBraceIndex + 1)
-
-  await writeFile(absolutePath, updated, 'utf8')
+  await writeFile(resolve(process.cwd(), filePath), patched.content, 'utf8')
   return { modified: true }
 }
 

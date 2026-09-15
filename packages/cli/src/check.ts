@@ -59,12 +59,16 @@ import { AGENTS_MANIFEST_FILE, planAgentManifest } from './agents-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
-import { checkEnvExample } from './app-env'
+import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { runSpecCheck } from './spec-check'
 import { getChangedFiles } from './changed-files'
 import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
 export type { CheckStatus, CheckResult, CheckReport }
+
+/** The suites a flag of the same name selects. */
+export const CHECK_SUITES = ['arch', 'docs', 'spec', 'i18n', 'prototype', 'env'] as const
+export type CheckSuite = (typeof CHECK_SUITES)[number]
 
 export interface RunCheckOptions {
   cwd?: string
@@ -297,15 +301,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
   // union (never silently nothing). No flag = every suite.
-  const selected = new Set<'arch' | 'docs' | 'spec' | 'i18n' | 'prototype' | 'env'>([
-    ...(options.arch ? (['arch'] as const) : []),
-    ...(options.docs ? (['docs'] as const) : []),
-    ...(options.spec ? (['spec'] as const) : []),
-    ...(options.i18n ? (['i18n'] as const) : []),
-    ...(options.prototype ? (['prototype'] as const) : []),
-    ...(options.env ? (['env'] as const) : []),
-  ])
-  const runs = (suite: 'core' | 'arch' | 'docs' | 'spec' | 'i18n' | 'prototype' | 'env'): boolean =>
+  const selected = new Set<CheckSuite>(CHECK_SUITES.filter((suite) => options[suite]))
+  const runs = (suite: 'core' | CheckSuite): boolean =>
     selected.size === 0 || (suite !== 'core' && selected.has(suite))
 
   // Undefined until the agent-registry check runs and finds a registry, so a
@@ -566,7 +563,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
   // Environment example (RFC 0027 §7): `.env.example` names the keys `config/env.ts`
   // declares. The schema is imported, so any source change can move it.
-  if (runs('env') && (sourceChanged || changedFiles?.has('.env.example'))) {
+  if (runs('env') && (sourceChanged || changedFiles?.has(ENV_EXAMPLE_FILE))) {
     checks.push(...(await checkEnvExample(cwd)))
   }
 

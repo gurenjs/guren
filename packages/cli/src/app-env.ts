@@ -7,33 +7,26 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import type { EnvVar } from '@guren/core'
 import { check, type CheckResult } from './check-result'
-import { formatTruncatedList, readIfExists } from './discovery'
-import { addCreateAppOption, ensureNamedImports, PATCH_REASONS } from './patch-helpers'
-import { applyEnvEntries, envFileKeys, ENV_KEY_PATTERN, type GurenPluginEnvEntry } from './plugin-manifest'
+import { fileExists, formatTruncatedList, readIfExists } from './discovery'
+import { ensureNamedImports, insertCallOptions } from './patch-helpers'
+import { envEntrySchemaSource } from './plugin-env'
+import { appendEnvEntries, envFileKeys, pluginEnvEntries, type GurenPluginEnvEntry } from './plugin-manifest'
 
 export const ENV_SCHEMA_FILE = 'config/env.ts'
 export const ENV_EXAMPLE_FILE = '.env.example'
 
-/** What the CLI reads off an `EnvVar`. Duck-typed: the app's `@guren/core` is not this process's copy. */
-export interface DeclaredEnvVar {
-  readonly type: string
-  readonly presence: string
-  readonly defaultValue?: unknown
-  readonly choices?: readonly string[]
-  readonly isSecret: boolean
-  readonly description?: string
-}
+/** Read by shape, never `instanceof`: the app's `@guren/core` is not this process's copy. */
+type DeclaredEnvVars = Readonly<Record<string, Pick<EnvVar<unknown>, 'defaultValue' | 'choices' | 'isSecret' | 'description'>>>
 
-export type DeclaredEnvVars = Readonly<Record<string, DeclaredEnvVar>>
-
-export type EnvSchemaLoad =
+type EnvSchemaLoad =
   | { readonly status: 'absent' }
   | { readonly status: 'unreadable'; readonly message: string }
   | { readonly status: 'loaded'; readonly vars: DeclaredEnvVars }
 
 export async function loadEnvSchema(cwd: string): Promise<EnvSchemaLoad> {
-  if ((await readIfExists(cwd, ENV_SCHEMA_FILE)) === null) return { status: 'absent' }
+  if (!(await fileExists(cwd, ENV_SCHEMA_FILE))) return { status: 'absent' }
 
   let exported: unknown
   try {
@@ -46,73 +39,66 @@ export async function loadEnvSchema(cwd: string): Promise<EnvSchemaLoad> {
   if (typeof schema?.parse !== 'function' || typeof schema.vars !== 'object' || schema.vars === null) {
     return { status: 'unreadable', message: `${ENV_SCHEMA_FILE} does not default-export a defineEnv() schema.` }
   }
-  // A @guren/core older than RFC 0027 Part 2a declares variables that do not report how.
-  if (Object.values(schema.vars).some((spec) => typeof (spec as { presence?: unknown }).presence !== 'string')) {
+  if (Object.values(schema.vars).some((spec) => typeof spec !== 'object' || spec === null || !('defaultValue' in spec))) {
     return { status: 'unreadable', message: `${ENV_SCHEMA_FILE} was declared with a @guren/core too old to report its variables. Upgrade @guren/core.` }
   }
   return { status: 'loaded', vars: schema.vars as DeclaredEnvVars }
 }
 
-/** A dotenv value: bare when it survives unquoted, single-quoted so `${...}` is not expanded otherwise. */
+/**
+ * A dotenv value Bun reads back verbatim. Bun expands `$NAME` inside either quote
+ * style, so `$` is escaped rather than quoted away; a line break has no spelling.
+ */
 function envFileValue(value: unknown): string {
   if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return ''
   const text = String(value)
-  if (/^[\w.:/@+-]*$/u.test(text)) return text
-  return text.includes("'") ? JSON.stringify(text) : `'${text}'`
+  if (/[\r\n]/u.test(text)) return ''
+  const escaped = text.replace(/\$/gu, '\\$')
+  if (/^[\w.:/@+\\$-]*$/u.test(escaped)) return escaped
+  return escaped.includes('"') ? `'${escaped}'` : `"${escaped}"`
 }
 
-function envComment(spec: DeclaredEnvVar): string | undefined {
-  const choices = spec.choices?.join(', ')
-  if (choices === undefined) return spec.description
-  return spec.description ? `${spec.description} (one of: ${choices})` : `One of: ${choices}`
-}
-
-/** One `.env.example` entry per declared key, in schema order. A secret's default is never written. */
-export function envExampleEntries(vars: DeclaredEnvVars): GurenPluginEnvEntry[] {
+function envExampleEntries(vars: DeclaredEnvVars): GurenPluginEnvEntry[] {
   return Object.entries(vars).map(([key, spec]) => {
-    const comment = envComment(spec)
-    return {
-      key,
-      value: spec.isSecret ? '' : envFileValue(spec.defaultValue),
-      ...(comment ? { comment } : {}),
-    }
+    const choices = spec.choices?.join(', ')
+    const comment = choices === undefined
+      ? spec.description
+      : spec.description ? `${spec.description} (one of: ${choices})` : `One of: ${choices}`
+    return { key, value: spec.isSecret ? '' : envFileValue(spec.defaultValue), ...(comment ? { comment } : {}) }
   })
 }
 
-export interface EnvExampleWrite {
-  readonly added: string[]
-  /** Keys `.env.example` assigns that the schema does not declare; left in place. */
-  readonly undeclared: string[]
-}
-
-/** Appends the keys `.env.example` lacks. A line it already has is the app's, so it is kept as written. */
-export async function writeEnvExample(cwd: string, vars: DeclaredEnvVars): Promise<EnvExampleWrite> {
-  const listed = envFileKeys((await readIfExists(cwd, ENV_EXAMPLE_FILE)) ?? '')
-  const entries = envExampleEntries(vars)
-  await applyEnvEntries(entries, cwd, { files: [ENV_EXAMPLE_FILE] })
-
+async function compareEnvExample(cwd: string, vars: DeclaredEnvVars) {
+  const content = await readIfExists(cwd, ENV_EXAMPLE_FILE)
+  const listed = envFileKeys(content ?? '')
   return {
-    added: entries.map((entry) => entry.key).filter((key) => !listed.has(key)),
+    content: content ?? '',
+    missing: Object.keys(vars).filter((key) => !listed.has(key)),
     undeclared: [...listed].filter((key) => !Object.hasOwn(vars, key)),
   }
 }
 
-/** `guren check --env`: `.env.example` and `config/env.ts` name the same keys. Content-activated. */
+/** Appends the keys `.env.example` lacks. A line already there is the app's and stays as written. */
+export async function writeEnvExample(cwd: string, vars: DeclaredEnvVars): Promise<{ added: string[]; undeclared: string[] }> {
+  const { content, undeclared } = await compareEnvExample(cwd, vars)
+  const next = appendEnvEntries(content, envExampleEntries(vars))
+  if (next.added.length > 0) await writeFile(resolve(cwd, ENV_EXAMPLE_FILE), next.content, 'utf8')
+  return { added: next.added, undeclared }
+}
+
+/** `guren check --env`: `.env.example` and `config/env.ts` name the same keys. */
 export async function checkEnvExample(cwd: string): Promise<CheckResult[]> {
   const title = 'Environment example'
   const schema = await loadEnvSchema(cwd)
   if (schema.status === 'absent') return []
   if (schema.status === 'unreadable') {
-    return [check('env-example', title, 'warn', `${schema.message} ${ENV_EXAMPLE_FILE} was not compared.`, undefined, ENV_SCHEMA_FILE)]
+    return [check('env-example', title, 'fail', `${schema.message} ${ENV_EXAMPLE_FILE} was not compared.`, undefined, ENV_SCHEMA_FILE)]
   }
 
-  const declared = Object.keys(schema.vars)
-  const listed = envFileKeys((await readIfExists(cwd, ENV_EXAMPLE_FILE)) ?? '')
-  const missing = declared.filter((key) => !listed.has(key))
-  const undeclared = [...listed].filter((key) => !Object.hasOwn(schema.vars, key))
-
+  const { missing, undeclared } = await compareEnvExample(cwd, schema.vars)
   if (missing.length === 0 && undeclared.length === 0) {
-    return [check('env-example', title, 'pass', `${ENV_EXAMPLE_FILE} lists the ${declared.length} keys ${ENV_SCHEMA_FILE} declares.`)]
+    const count = Object.keys(schema.vars).length
+    return [check('env-example', title, 'pass', `${ENV_EXAMPLE_FILE} lists the ${count} keys ${ENV_SCHEMA_FILE} declares.`)]
   }
 
   const disagreements = [
@@ -125,52 +111,22 @@ export async function checkEnvExample(cwd: string): Promise<CheckResult[]> {
   return [check('env-example', title, 'fail', `${disagreements.join('; ')}.`, suggestion, ENV_EXAMPLE_FILE)]
 }
 
-/** A TypeScript string literal in the scaffolds' quote style; manifest text is untrusted, so everything is escaped. */
-function tsString(text: string): string {
-  return `'${JSON.stringify(text).slice(1, -1).replace(/\\"/gu, '"').replace(/'/gu, "\\'")}'`
-}
-
-/** The `defineEnv({...})` value a manifest entry declares; `assertEnvEntriesAllowed` has validated it. */
-export function envEntrySchemaSource(entry: GurenPluginEnvEntry): string {
-  const type = entry.type ?? 'string'
-  let source = type === 'enum' ? `Env.enum([${(entry.choices ?? []).map(tsString).join(', ')}])` : `Env.${type}()`
-  if (entry.default !== undefined) {
-    source += `.default(${typeof entry.default === 'string' ? tsString(entry.default) : String(entry.default)})`
-  } else if (!entry.required) {
-    source += '.optional()'
-  }
-  if (entry.secret) source += '.secret()'
-  if (entry.comment) source += `.describe(${tsString(entry.comment)})`
-  return source
-}
-
-export interface EnvDeclarationResult {
-  readonly updated: boolean
-  /** Keys that could not be inserted: the file has no `defineEnv({...})` call to patch. */
-  readonly unpatched: string[]
-}
-
 /**
  * Declares a plugin's env keys in `config/env.ts` (RFC 0027 §1), so the app's
  * schema stays the complete one. A key already declared keeps its declaration,
- * and an app with no `config/env.ts` is left as it is.
+ * and an app with no `config/env.ts` is left as it is. `unpatched` names the keys
+ * a file with no `defineEnv({ ... })` call could not take.
  */
-export async function declareEnvEntries(entries: GurenPluginEnvEntry[]): Promise<EnvDeclarationResult> {
+export async function declareEnvEntries(entries: GurenPluginEnvEntry[]): Promise<{ updated: boolean; unpatched: string[] }> {
   const cwd = process.cwd()
-  if ((await readIfExists(cwd, ENV_SCHEMA_FILE)) === null) return { updated: false, unpatched: [] }
+  const content = await readIfExists(cwd, ENV_SCHEMA_FILE)
+  if (content === null) return { updated: false, unpatched: [] }
 
-  let updated = false
-  const unpatched: string[] = []
-  // addCreateAppOption inserts at the top of the object, so reversing keeps manifest order.
-  for (const entry of entries.filter((candidate) => ENV_KEY_PATTERN.test(candidate.key ?? '')).reverse()) {
-    const result = await addCreateAppOption(ENV_SCHEMA_FILE, entry.key, envEntrySchemaSource(entry), 'defineEnv')
-    if (result.modified) updated = true
-    else if (result.reason !== PATCH_REASONS.optionAlreadySet) unpatched.unshift(entry.key)
-  }
+  const declarations = pluginEnvEntries(entries).map((entry) => ({ key: entry.key, source: envEntrySchemaSource(entry) }))
+  const patched = insertCallOptions(content, declarations, 'defineEnv')
+  if (typeof patched === 'string') return { updated: false, unpatched: declarations.map((declaration) => declaration.key) }
+  if (patched.inserted.length === 0) return { updated: false, unpatched: [] }
 
-  if (updated) {
-    const content = (await readIfExists(cwd, ENV_SCHEMA_FILE)) ?? ''
-    await writeFile(resolve(cwd, ENV_SCHEMA_FILE), ensureNamedImports(content, '@guren/core', ['Env']), 'utf8')
-  }
-  return { updated, unpatched }
+  await writeFile(resolve(cwd, ENV_SCHEMA_FILE), ensureNamedImports(patched.content, '@guren/core', ['Env']), 'utf8')
+  return { updated: true, unpatched: [] }
 }
