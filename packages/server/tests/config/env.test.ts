@@ -1,21 +1,7 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { AGENT_REDACTED } from '../../src/agent/redact'
 import { defineEnv, Env, EnvValidationError, isRawEnvKey, type InferEnv } from '../../src/config/env'
-
-const touched = new Set<string>()
-const originalNodeEnv = process.env.NODE_ENV
-
-function setEnv(key: string, value: string | undefined): void {
-  touched.add(key)
-  if (value === undefined) delete process.env[key]
-  else process.env[key] = value
-}
-
-afterEach(() => {
-  for (const key of touched) delete process.env[key]
-  touched.clear()
-  process.env.NODE_ENV = originalNodeEnv
-})
+import { withEnv } from '../support/env'
 
 describe('defineEnv().parse()', () => {
   test('treats a blank value as unset, so a default applies to both', () => {
@@ -96,40 +82,44 @@ describe('defineEnv().parse()', () => {
     expect(() => env.parse({ RFC27_SECRET_PORT: 'hunter2' })).not.toThrow('hunter2')
   })
 
-  test('requires a requiredInProduction() variable only when NODE_ENV is production', () => {
+  test('requires a requiredInProduction() variable only when NODE_ENV is production', async () => {
     const env = defineEnv({ RFC27_APP_URL: Env.url().requiredInProduction() })
 
-    process.env.NODE_ENV = 'development'
-    expect(env.parse({}).values.RFC27_APP_URL).toBeUndefined()
-
-    process.env.NODE_ENV = 'production'
-    expect(() => env.parse({})).toThrow('RFC27_APP_URL')
-  })
-
-  test('reads the source first and falls back to process.env for each declared key', () => {
-    setEnv('RFC27_FROM_PROCESS', 'process')
-    setEnv('RFC27_OVERRIDDEN', 'process')
-    const env = defineEnv({ RFC27_FROM_PROCESS: Env.string(), RFC27_OVERRIDDEN: Env.string() })
-
-    expect(env.parse({ RFC27_OVERRIDDEN: 'source' }).values).toEqual({
-      RFC27_FROM_PROCESS: 'process',
-      RFC27_OVERRIDDEN: 'source',
+    await withEnv({ NODE_ENV: 'development' }, async () => {
+      expect(env.parse({}).values.RFC27_APP_URL).toBeUndefined()
+    })
+    await withEnv({ NODE_ENV: 'production' }, async () => {
+      expect(() => env.parse({})).toThrow('RFC27_APP_URL')
     })
   })
 
-  test('ignores a non-string source value, such as a Workers binding object', () => {
-    setEnv('RFC27_BOUND', 'from-process')
-    const env = defineEnv({ RFC27_BOUND: Env.string() })
+  test('reads the source first and falls back to process.env for each declared key', async () => {
+    const env = defineEnv({ RFC27_FROM_PROCESS: Env.string(), RFC27_OVERRIDDEN: Env.string() })
 
-    expect(env.parse({ RFC27_BOUND: { prepare() {} } }).values.RFC27_BOUND).toBe('from-process')
+    await withEnv({ RFC27_FROM_PROCESS: 'process', RFC27_OVERRIDDEN: 'process' }, async () => {
+      expect(env.parse({ RFC27_OVERRIDDEN: 'source' }).values).toEqual({
+        RFC27_FROM_PROCESS: 'process',
+        RFC27_OVERRIDDEN: 'source',
+      })
+    })
   })
 
-  test('re-reads process.env on every call rather than caching per source', () => {
+  test('ignores a non-string source value, such as a Workers binding object', async () => {
+    const env = defineEnv({ RFC27_BOUND: Env.string() })
+
+    await withEnv({ RFC27_BOUND: 'from-process' }, async () => {
+      expect(env.parse({ RFC27_BOUND: { prepare() {} } }).values.RFC27_BOUND).toBe('from-process')
+    })
+  })
+
+  test('re-reads process.env on every call rather than caching per source', async () => {
     const env = defineEnv({ RFC27_MUTATED: Env.string().optional() })
 
-    expect(env.parse().values.RFC27_MUTATED).toBeUndefined()
-    setEnv('RFC27_MUTATED', 'later')
-    expect(env.parse().values.RFC27_MUTATED).toBe('later')
+    await withEnv({ RFC27_MUTATED: undefined }, async () => {
+      expect(env.parse().values.RFC27_MUTATED).toBeUndefined()
+      process.env.RFC27_MUTATED = 'later'
+      expect(env.parse().values.RFC27_MUTATED).toBe('later')
+    })
   })
 
   test('throws one error listing every problem', () => {

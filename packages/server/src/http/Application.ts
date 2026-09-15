@@ -434,10 +434,7 @@ export interface ApplicationOptions {
    * `Controller.inertia()` ahead of the process-wide setters.
    */
   readonly inertia?: InertiaApplicationOptions
-  /**
-   * The schema `config/env.ts` exports (RFC 0027 §1). Validated at the start of
-   * `boot()`, never at import, and bound as `env`; a failure lists every problem.
-   */
+  /** The schema `config/env.ts` exports, validated at boot and bound as `env` (RFC 0027 §1). */
   readonly env?: EnvSchema
 }
 
@@ -566,8 +563,7 @@ export class Application {
       shareInertiaProps(options.inertia.share, this.container)
     }
 
-    // First of every provider, so an invalid environment fails the boot before
-    // anything registers, and every later register() can read `env` (RFC 0027 §3).
+    // Must stay the first provider registered (RFC 0027 §3).
     if (options.env) {
       this.providerManager.register(ConfigServiceProvider)
     }

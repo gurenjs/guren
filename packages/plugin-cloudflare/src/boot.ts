@@ -33,8 +33,8 @@ export interface WorkersAppLike {
   boot(): Promise<void>
   fetch(request: Request, env?: unknown, executionCtx?: unknown): Response | Promise<Response>
   /**
-   * Read by the cron entrypoint, and written before boot so the app's env schema
-   * sees the request's vars. Optional, so an app-like without one still boots.
+   * Read by the cron entrypoint. `has`/`instance` bind the entrypoint env as
+   * `env.source` before boot (RFC 0027 §1); optional, so an existing app-like still boots.
    */
   container?: {
     makeOptional<T>(key: string): T | undefined
@@ -45,16 +45,11 @@ export interface WorkersAppLike {
 
 const latches = new WeakMap<WorkersAppLike, Promise<void>>()
 
-/**
- * RFC 0027 §1: wrangler `vars` are not guaranteed to be in `process.env`, so the
- * app's env schema reads them from the env the entrypoint received. A value an
- * app or test bound itself is kept.
- */
+/** Wrangler `vars` may be missing from `process.env`; a value the app or a test bound itself is kept. */
 function bindEnvSource(app: WorkersAppLike, env: unknown): void {
   const container = app.container
-  if (!container?.has || !container.instance) return
-  if (env === null || typeof env !== 'object' || container.has('env.source')) return
-  container.instance('env.source', env)
+  if (!container?.has || !container.instance || env === null || typeof env !== 'object') return
+  if (!container.has('env.source')) container.instance('env.source', env)
 }
 
 /**
@@ -68,7 +63,6 @@ export async function bootWorkersApp(app: WorkersAppLike, env: unknown): Promise
   // Outside the try: this refusal means another entrypoint captured a *live*
   // env, which the cleanup below must not clear.
   captureWorkersEnv(env)
-  bindEnvSource(app, env)
 
   let attempt: Promise<void> | undefined
 
@@ -77,6 +71,7 @@ export async function bootWorkersApp(app: WorkersAppLike, env: unknown): Promise
     // and that throw has to reach the cleanup too.
     attempt = latches.get(app)
     if (!attempt) {
+      bindEnvSource(app, env)
       attempt = app.boot()
       latches.set(app, attempt)
     }

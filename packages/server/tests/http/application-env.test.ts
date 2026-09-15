@@ -6,6 +6,7 @@ import { createApp } from '../../src/http/Application'
 import { resetDefaultApplication } from '../../src/http/default-application'
 import { Controller } from '../../src/mvc/Controller'
 import { resetWarnOnce } from '../../src/support/warn-once'
+import { withEnv } from '../support/env'
 
 const schema = defineEnv({
   RFC27_APP_KEY: Env.string().secret(),
@@ -22,8 +23,6 @@ class ReadsEnvInRegister extends ServiceProvider {
 
 afterEach(() => {
   seen.length = 0
-  delete process.env.RFC27_APP_KEY
-  delete process.env.GUREN_INTROSPECT
   resetWarnOnce()
   resetDefaultApplication()
 })
@@ -51,21 +50,22 @@ describe('createApp({ env })', () => {
   test('retries validation on the next boot once the value is supplied', async () => {
     const app = createApp({ env: schema })
 
-    await expect(app.boot()).rejects.toBeInstanceOf(EnvValidationError)
-    process.env.RFC27_APP_KEY = 'later'
-    await app.boot()
+    await withEnv({ RFC27_APP_KEY: undefined }, async () => {
+      await expect(app.boot()).rejects.toBeInstanceOf(EnvValidationError)
+      process.env.RFC27_APP_KEY = 'later'
+      await app.boot()
+    })
 
     expect(app.container.make('env')).toEqual({ RFC27_APP_KEY: 'later', RFC27_SESSION_DRIVER: 'database' })
   })
 
   test('reports instead of throwing under GUREN_INTROSPECT=1', async () => {
-    process.env.GUREN_INTROSPECT = '1'
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
     const app = createApp({ env: schema })
 
     let warnings = ''
     try {
-      await app.boot()
+      await withEnv({ GUREN_INTROSPECT: '1' }, () => app.boot())
       warnings = warn.mock.calls.flat().join('\n')
     } finally {
       warn.mockRestore()

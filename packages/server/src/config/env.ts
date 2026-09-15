@@ -43,7 +43,7 @@ export interface EnvParseOptions {
 export interface ParsedEnv<Values> {
   readonly values: Values
   readonly problems: readonly EnvProblem[]
-  /** Keys whose value is the redacted placeholder: unset and required, or invalid. Empty in `throw` mode. */
+  /** Keys whose value is the redacted placeholder: unset and required, or invalid. */
   readonly unset: ReadonlySet<string>
 }
 
@@ -205,7 +205,6 @@ export class EnvSchema<Vars extends EnvVars = EnvVars> {
     const production = typeof process !== 'undefined' && process.env.NODE_ENV === 'production'
     const values: Record<string, unknown> = {}
     const problems: EnvProblem[] = []
-    const unset = new Set<string>()
 
     for (const [key, spec] of Object.entries(this.vars)) {
       const raw = readRaw(source, key)
@@ -218,7 +217,6 @@ export class EnvSchema<Vars extends EnvVars = EnvVars> {
 
       const shown = spec.isSecret || raw === undefined ? 'value' : JSON.stringify(raw)
       problems.push({ key, message: 'unset' in outcome ? 'required, not set' : `${shown} ${outcome.problem}` })
-      unset.add(key)
       values[key] = AGENT_REDACTED
     }
 
@@ -226,6 +224,7 @@ export class EnvSchema<Vars extends EnvVars = EnvVars> {
       throw new EnvValidationError(problems)
     }
 
+    const unset = new Set(problems.map((problem) => problem.key))
     return { values: Object.freeze(values) as InferEnvVars<Vars>, problems, unset }
   }
 }

@@ -69,9 +69,10 @@ export interface TestAppOptions {
   readonly env?: EnvSchema
   /**
    * Values the schema reads ahead of `process.env`, bound as `env.source` before
-   * boot, so a test overrides one variable without mutating the process.
+   * boot, so a test overrides one variable without mutating the process. `''`
+   * makes a variable unset; a missing key falls back to `process.env`.
    */
-  readonly envSource?: Readonly<Record<string, string | undefined>>
+  readonly envSource?: Readonly<Record<string, string>>
 }
 
 /**
