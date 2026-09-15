@@ -587,6 +587,35 @@ and each verdict is written once against it:
 | `sessions-check.ts` table rule | AST reading of `stores.database.table` | resolved `stores[*].table`, checked with drizzle's `getTableName()` against the schema export list |
 | `deploy-runtime.ts` session and cache verdicts | `session-config.ts` AST reading (`:337-376`) | resolved `default` and `stores[*].driver`. When the proxy shows `default` came from an `Env.enum` key, the verdict re-resolves with each value of that key alone, others at their defaults, so it judges every store the schema admits at a cost linear in the enum's size |
 
+**Amended in implementation (Part 2c).** Four corrections, each measured:
+
+- **The read-recording proxy did not exist.** §2 and this section both describe
+  it as if it did. `recordEnvReads()` (`@guren/server`) is it, and
+  `ConfigServiceProvider` now resolves through it: a definition that read a key
+  the environment does not set is left unbound, which is what §2 claimed. Under
+  `throw` mode no declared key can be unset, so it only fires under introspection.
+- **`defaultExportConfigProperty` cannot read an app entry.** It requires the
+  default export to *be* the call, while every shipped entry writes `const app =
+  createApp({ … })` and exports `app` further down. A rule built on it would
+  report every correct app as unwired. The check walks for the `createApp` call
+  instead, as `deploy-runtime.ts` already does.
+- **Both rules judge only what the `config: [...]` array names.** A `config/`
+  directory today holds plain modules (`config/database.ts`, `config/inertia.ts`),
+  so "not a definition" is a finding only for a file the array lists. An array the
+  scan cannot read (`config: definitions`) is not evidence and reports nothing.
+  `config/env.ts` is the schema the definitions resolve against, never one of them.
+- **The keys are `config-unwired` and `config-not-a-definition`**, since every
+  other check key in the codebase is dash-separated.
+
+**Deferred past Part 2c**, because no app has a definition to read until the
+templates migrate in the next part: rewiring `sessions-check.ts` and
+`deploy-runtime.ts` onto the resolved config, with the `getTableName()` table rule
+and the enum re-resolution. `getTableName` needs a packaging change first, since
+`drizzle-orm` is not a `@guren/cli` dependency and `@guren/orm` exposes no subpath
+reaching it, and a resolved table is a live object from the app's own drizzle copy.
+The deploy-runtime *cache* verdict this table implies exists in no form today, so
+it is new work rather than a swap.
+
 ### 7. `.env.example`, drift, and lint
 
 - **`guren env:example`** maps the schema to `GurenPluginEnvEntry` records

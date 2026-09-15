@@ -7,7 +7,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { EnvVar } from '@guren/core'
+import type { EnvSchema, EnvVar } from '@guren/core'
 import { check, type CheckResult } from './check-result'
 import { fileExists, formatTruncatedList, readIfExists } from './discovery'
 import { ensureNamedImports, insertCallOptions } from './patch-helpers'
@@ -18,12 +18,13 @@ export const ENV_SCHEMA_FILE = 'config/env.ts'
 export const ENV_EXAMPLE_FILE = '.env.example'
 
 /** Read by shape, never `instanceof`: the app's `@guren/core` is not this process's copy. */
-type DeclaredEnvVars = Readonly<Record<string, Pick<EnvVar<unknown>, 'defaultValue' | 'choices' | 'isSecret' | 'description'>>>
+export type DeclaredEnvVars = Readonly<Record<string, Pick<EnvVar<unknown>, 'defaultValue' | 'choices' | 'isSecret' | 'description'>>>
 
-type EnvSchemaLoad =
+export type EnvSchemaLoad =
   | { readonly status: 'absent' }
   | { readonly status: 'unreadable'; readonly message: string }
-  | { readonly status: 'loaded'; readonly vars: DeclaredEnvVars }
+  /** `schema` is the app's own, for the callers that parse values rather than read declarations. */
+  | { readonly status: 'loaded'; readonly vars: DeclaredEnvVars; readonly schema: Pick<EnvSchema, 'parse'> }
 
 export async function loadEnvSchema(cwd: string): Promise<EnvSchemaLoad> {
   if (!(await fileExists(cwd, ENV_SCHEMA_FILE))) return { status: 'absent' }
@@ -42,7 +43,7 @@ export async function loadEnvSchema(cwd: string): Promise<EnvSchemaLoad> {
   if (Object.values(schema.vars).some((spec) => typeof spec !== 'object' || spec === null || !('defaultValue' in spec))) {
     return { status: 'unreadable', message: `${ENV_SCHEMA_FILE} was declared with a @guren/core too old to report its variables. Upgrade @guren/core.` }
   }
-  return { status: 'loaded', vars: schema.vars as DeclaredEnvVars }
+  return { status: 'loaded', vars: schema.vars as DeclaredEnvVars, schema: schema as unknown as Pick<EnvSchema, 'parse'> }
 }
 
 /**

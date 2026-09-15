@@ -60,6 +60,7 @@ import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
+import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
 import { getChangedFiles } from './changed-files'
 import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
@@ -509,6 +510,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(
       ...(await checkSessionsConfig({ cwd, cache, files: appConfigFiles, schemaTables })),
     )
+
+    // 8.6c. Config wiring (RFC 0027 §6): a config/<key>.ts definition the entry's
+    // createApp({ config }) array never lists binds nothing, and one it lists that
+    // is not a definition fails the boot. Imports the definitions, as 7.7 imports
+    // the route graph; an app whose config/ holds plain modules contributes nothing.
+    checks.push(...(await checkConfigWiring({ cwd, cache })))
 
     // 8.65. The attachments disk rooted inside the statically served public/
     // tree, where uploaded bytes are reachable as static assets. Not
