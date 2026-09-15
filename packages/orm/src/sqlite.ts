@@ -5,8 +5,7 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
-
-type ConnectionResolver = string | (() => string | undefined)
+import type { ConnectionContext, ConnectionResolver } from './connection-context'
 
 export interface SqliteDatabaseOptions {
   migrationsFolder: string | URL
@@ -26,7 +25,8 @@ export interface SqliteDatabase {
   /** Applies pending drizzle-kit migrations and reports what the folder held. */
   migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
-  configureOrm(): Promise<void>
+  /** `context` reaches `filename` here and in every later resolution. */
+  configureOrm(context?: ConnectionContext): Promise<void>
   /** Runs every seeder in the configured folder and reports what it held. */
   seedDatabase(): Promise<SeederRunSummary>
   /**
@@ -143,8 +143,12 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
+  // Kept, not passed: the resolver runs inside a memoized flight no
+  // configureOrm() call reaches once another method started it.
+  let connectionContext: ConnectionContext | undefined
+
   function resolveFilename(): string {
-    const value = typeof filename === 'function' ? filename() : filename
+    const value = typeof filename === 'function' ? filename(connectionContext) : filename
     if (value != null) {
       assertNotConnectionUri(value, 'the "filename" option')
       return value
@@ -325,7 +329,8 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       return buildMigrationStatus(localMigrations, readAppliedMigrations())
     },
 
-    async configureOrm() {
+    async configureOrm(context?: ConnectionContext) {
+      if (context) connectionContext = context
       const db = await database.get()
       await migrations.get()
       DrizzleAdapter.configure(db as Parameters<typeof DrizzleAdapter.configure>[0])

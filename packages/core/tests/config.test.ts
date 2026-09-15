@@ -1,7 +1,35 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { createApp, resetDefaultApplication, ServiceProvider, type SessionManager } from '@guren/server'
-import { defineSessionConfig } from '../src/config'
+import { createSqliteDatabase } from '@guren/orm'
+import { createApp, defineEnv, Env, resetDefaultApplication, ServiceProvider, type SessionManager } from '@guren/server'
+import { defineDatabaseConfig, defineSessionConfig } from '../src/config'
 import { createSessionManager } from '../src/session-manager'
+
+describe('defineDatabaseConfig() (RFC 0027 §2)', () => {
+  test('connects at boot through the validated env, and seeds nothing without migrations', async () => {
+    const received: unknown[] = []
+    const database = createSqliteDatabase({
+      migrationsFolder: '/nonexistent/rfc27-migrations',
+      filename: (context) => {
+        received.push(context)
+        return ':memory:'
+      },
+    })
+    // seedOnBoot with no seeders folder: seedDatabase() would throw, so a clean boot proves the skip.
+    const app = createApp({
+      env: defineEnv({ RFC27_DB_FILE: Env.string().default(':memory:') }),
+      config: [defineDatabaseConfig(database, { seedOnBoot: true })],
+    })
+
+    try {
+      await app.boot()
+
+      expect(received).toEqual([{ env: { RFC27_DB_FILE: ':memory:' } }])
+      expect(app.container.make('database')).toBe(database)
+    } finally {
+      await database.closeDatabase()
+    }
+  })
+})
 
 afterEach(() => {
   resetDefaultApplication()

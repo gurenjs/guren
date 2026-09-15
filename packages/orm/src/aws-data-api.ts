@@ -6,8 +6,8 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
+import type { ConnectionContext, ConnectionResolver } from './connection-context'
 
-type ConnectionResolver = string | (() => string | undefined)
 type AwsDataApiDrizzle = typeof import('drizzle-orm/aws-data-api/pg')
 type AwsDataApiPgDatabase = import('drizzle-orm/aws-data-api/pg').AwsDataApiPgDatabase
 type DrizzleConfig = Parameters<AwsDataApiDrizzle['drizzle']>[0]
@@ -64,7 +64,8 @@ export interface AwsDataApiDatabase {
   /** Applies pending drizzle-kit migrations and reports what the folder held. */
   migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
-  configureOrm(): Promise<void>
+  /** `context` reaches `database`, `resourceArn` and `secretArn` here and in every later resolution. */
+  configureOrm(context?: ConnectionContext): Promise<void>
   /** Runs every seeder in the configured folder and reports what it held. */
   seedDatabase(): Promise<SeederRunSummary>
   /** Drops the public schema (and the drizzle tracker schema), then re-applies migrations — same end state as `guren db:reset`. */
@@ -93,9 +94,13 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
+  // Kept, not passed: the resolver also runs inside a memoized flight and the
+  // reset's admin handle, which no configureOrm() call reaches.
+  let connectionContext: ConnectionContext | undefined
+
   function resolveConnection(): ResolvedConnection {
     const resolveValue = (value: ConnectionResolver | undefined, envKey: string): string | undefined => {
-      const resolved = typeof value === 'function' ? value() : value
+      const resolved = typeof value === 'function' ? value(connectionContext) : value
       return resolved ?? process.env[envKey]
     }
 
@@ -195,7 +200,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     }
   }
 
-  async function configureOrm(): Promise<void> {
+  async function configureOrm(context?: ConnectionContext): Promise<void> {
+    if (context) connectionContext = context
     const db = await databaseHandle.get()
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }

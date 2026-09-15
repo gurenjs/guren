@@ -7,8 +7,8 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
+import type { ConnectionContext, ConnectionResolver } from './connection-context'
 
-type ConnectionResolver = string | (() => string | undefined)
 type PostgresJsDrizzle = typeof import('drizzle-orm/postgres-js')
 type DrizzleConfig = Exclude<Parameters<PostgresJsDrizzle['drizzle']>[0], string>
 
@@ -52,7 +52,8 @@ export interface PostgresDatabase {
   /** Applies pending drizzle-kit migrations and reports what the folder held. */
   migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
-  configureOrm(): Promise<void>
+  /** `context` reaches `connectionString` here and in every later resolution. */
+  configureOrm(context?: ConnectionContext): Promise<void>
   /** Runs every seeder in the configured folder and reports what it held. */
   seedDatabase(): Promise<SeederRunSummary>
   /** Drops the public schema (and the drizzle tracker schema), then re-applies migrations — same end state as `guren db:reset`. */
@@ -75,8 +76,12 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
   // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
+  // Kept, not passed: the resolver also runs inside memoized flights and the
+  // admin client, which no configureOrm() call reaches.
+  let connectionContext: ConnectionContext | undefined
+
   function resolveConnectionString(): string {
-    const value = typeof connectionString === 'function' ? connectionString() : connectionString
+    const value = typeof connectionString === 'function' ? connectionString(connectionContext) : connectionString
     const resolved = value ?? process.env.DATABASE_URL
 
     if (!resolved) {
@@ -191,7 +196,8 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     }
   }
 
-  async function configureOrm(): Promise<void> {
+  async function configureOrm(context?: ConnectionContext): Promise<void> {
+    if (context) connectionContext = context
     const db = await database.get()
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }
