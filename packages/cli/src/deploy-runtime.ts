@@ -787,8 +787,6 @@ const UNKNOWN_DRIVER_FIX = 'A driver registered in application code cannot be se
 
 const BACKED_STORE_FIX = 'Run `bunx guren add session` for a database-backed session store, use DatabaseOAuthStateStore from `@guren/core` (or the Redis equivalent from `@guren/core/redis`) for OAuth state, and a Redis-backed cache/queue driver.'
 
-// Sessions are a separate question: `guren make:auth` scaffolds their store
-// alongside, so an OAuth-only finding pointing at `add session` misdirects.
 const OAUTH_STATE_STORE_FIX = 'Bind the OAuth manager yourself with `createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })` from `@guren/core`, over an `oauth_states` table in db/schema.ts (the columns are in the OAuth guide), or with RedisOAuthStateStore from `@guren/core/redis`, and drop OAuthServiceProvider from the providers, since it binds the in-memory default.'
 
 /**
@@ -818,7 +816,11 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
   }
 
   if (analysis.memoryStoreSignals.length > 0) {
-    raise(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`, BACKED_STORE_FIX)
+    const onlyOAuthState = analysis.memoryStoreSignals.every((signal) => signal.symbol === 'MemoryOAuthStateStore')
+    raise(
+      `in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`,
+      onlyOAuthState ? OAUTH_STATE_STORE_FIX : BACKED_STORE_FIX,
+    )
   }
 
   if (analysis.memorySessionDefaultSignals.length > 0 && analysis.sessionDisabledSignals.length === 0) {

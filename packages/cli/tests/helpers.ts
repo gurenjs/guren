@@ -393,6 +393,21 @@ export async function captureSuccesses(task: () => Promise<unknown>): Promise<st
   }
 }
 
+export async function captureInfos(task: () => Promise<unknown>): Promise<string[]> {
+  const lines: string[] = []
+  const original = realConsola.info
+  realConsola.info = ((...args: unknown[]) => {
+    lines.push(args.map(String).join(' '))
+  }) as typeof realConsola.info
+
+  try {
+    await task()
+    return lines
+  } finally {
+    realConsola.info = original
+  }
+}
+
 export async function captureWarnings<T>(task: () => Promise<T>): Promise<{ result: T; warnings: string[] }> {
   const warnings: string[] = []
   const original = realConsola.warn

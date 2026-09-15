@@ -5,14 +5,12 @@ import { assertCwdUnsupported, writeScaffoldFiles, type ScaffoldFileEntry, type 
 import { assertNotApiOnly } from './app-surface'
 import {
   addCreateAppOption,
-  appendSchemaTable,
   detectSchemaDialect,
   ensureMysqlImports,
   appendTableToSchema,
   ensurePgImports,
   ensureSqliteImports,
   PATCH_REASONS,
-  readSchemaDialect,
   seederContextTypes,
   type SchemaDialect,
 } from './patch-helpers'
@@ -20,6 +18,7 @@ import { readIfExists } from './discovery'
 import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { addSession, appConfiguresSessions } from './add-session'
+import { appendOAuthStateTable } from './oauth-state-table'
 import { generateSchemaMigration } from './make-migration'
 import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -156,15 +155,11 @@ const OAUTH_PROVIDER_FACTORIES: Record<string, string> = {
   discord: 'createDiscordOAuthProviderConfig',
 }
 
-/**
- * `databaseStateStore` binds the manager here, over the `oauth_states` table,
- * instead of registering against Core's `OAuthServiceProvider` singleton: that
- * one keeps state in process memory, so on Workers, Lambda and Vercel the
- * authorize redirect and the callback land on instances that share none.
- */
 function buildOAuthProviderTemplate(providers: string[], databaseStateStore: boolean): string {
   const factoryImports = providers.map((provider) => OAUTH_PROVIDER_FACTORIES[provider]).join(', ')
 
+  // Registered only when all three env vars are set, so a half-configured
+  // provider fails app-side rather than at the provider with empty credentials.
   const registrations = providers
     .map((provider) => {
       const upper = provider.toUpperCase()
@@ -181,30 +176,25 @@ function buildOAuthProviderTemplate(providers: string[], databaseStateStore: boo
     })
     .join('\n\n')
 
-  // Registered only when all three env vars are set, so a half-configured
-  // provider fails app-side rather than at the provider with empty credentials.
-  if (databaseStateStore) {
-    return `import { createOAuthManager, DatabaseOAuthStateStore, ServiceProvider, ${factoryImports} } from '@guren/core'
-import { oauthStates } from '../../db/schema.js'
-
-export default class OAuthProvider extends ServiceProvider {
-  // The authorize redirect and its callback may reach different processes, so
-  // the state tying them together lives in the database, not in memory.
-  register(): void {
+  const [imports, bindManager] = databaseStateStore
+    ? [
+      `import { createOAuthManager, DatabaseOAuthStateStore, ServiceProvider, ${factoryImports} } from '@guren/core'
+import { oauthStates } from '../../db/schema.js'`,
+      `    // The authorize redirect and its callback may reach different processes, so
+    // the state tying them together lives in the database, not in memory.
     const oauth = createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })
-    this.container.instance('oauth', oauth)
+    this.container.instance('oauth', oauth)`,
+    ]
+    : [
+      `import { ServiceProvider, type OAuthManager, ${factoryImports} } from '@guren/core'`,
+      `    const oauth = this.container.make<OAuthManager>('oauth')`,
+    ]
 
-${registrations}
-  }
-}
-`
-  }
-
-  return `import { ServiceProvider, type OAuthManager, ${factoryImports} } from '@guren/core'
+  return `${imports}
 
 export default class OAuthProvider extends ServiceProvider {
   register(): void {
-    const oauth = this.container.make<OAuthManager>('oauth')
+${bindManager}
 
 ${registrations}
   }
@@ -1173,44 +1163,6 @@ const emailVerifiedAtField: Record<SchemaDialect, string> = {
   mysql: `emailVerifiedAt: timestamp('email_verified_at'),`,
 }
 
-/**
- * The column property names DatabaseOAuthStateStore reads. `binding` is what a
- * session-bound state is verified against; without it every callback is
- * rejected. Both hashes are hex digests, 128 characters under sha512.
- */
-const OAUTH_STATES_TABLE_BLOCKS: Record<SchemaDialect, string> = {
-  pg: `export const oauthStates = pgTable('oauth_states', {
-  stateHash: text('state_hash').primaryKey(),
-  provider: text('provider').notNull(),
-  redirectTo: text('redirect_to'),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  binding: text('binding'),
-}, (t) => [index('oauth_states_expires_at_idx').on(t.expiresAt)])
-`,
-  sqlite: `export const oauthStates = sqliteTable('oauth_states', {
-  stateHash: text('state_hash').primaryKey(),
-  provider: text('provider').notNull(),
-  redirectTo: text('redirect_to'),
-  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
-  binding: text('binding'),
-}, (t) => [index('oauth_states_expires_at_idx').on(t.expiresAt)])
-`,
-  mysql: `export const oauthStates = mysqlTable('oauth_states', {
-  stateHash: varchar('state_hash', { length: 128 }).primaryKey(),
-  provider: varchar('provider', { length: 64 }).notNull(),
-  redirectTo: text('redirect_to'),
-  expiresAt: timestamp('expires_at').notNull(),
-  binding: varchar('binding', { length: 128 }),
-}, (t) => [index('oauth_states_expires_at_idx').on(t.expiresAt)])
-`,
-}
-
-const OAUTH_STATES_SCHEMA_IMPORTS: Record<SchemaDialect, (content: string) => string> = {
-  pg: (content) => ensurePgImports(content, ['pgTable', 'text', 'timestamp', 'index']),
-  sqlite: (content) => ensureSqliteImports(content, ['sqliteTable', 'text', 'integer', 'index']),
-  mysql: (content) => ensureMysqlImports(content, ['mysqlTable', 'varchar', 'text', 'timestamp', 'index']),
-}
-
 function oauthIdFieldLine(provider: string, dialect: SchemaDialect): string {
   const camel = `${provider}Id`
   const snake = `${provider}_id`
@@ -1527,6 +1479,18 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
   }
 }
 
+// The scaffolded pages import `pages.auth` & co., which .guren/pages.gen.ts
+// lists only once codegen reruns, so typecheck fails until this step.
+const CODEGEN_STEP = '  • Run `bun run codegen` (or `bun run dev`) to refresh generated types'
+
+/** `create_users_table`, `create_users_and_sessions_tables`, `create_users_sessions_and_oauth_states_tables`. */
+function createTablesMigrationName(tables: string[]): string {
+  if (tables.length === 1) {
+    return `create_${tables[0]}_table`
+  }
+  return `create_${tables.slice(0, -1).join('_')}_and_${tables.at(-1)}_tables`
+}
+
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
   assertCwdUnsupported(options, 'make:auth')
 
@@ -1541,9 +1505,10 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   const features = resolveAuthFeatures(options)
   const { includeExtras, includeVerify, includePassword, passwordOnlySignUp, oauthProviders } = features
   const includeOAuth = oauthProviders.length > 0
-  // Read before any write: the provider imports `oauthStates`, so without a
-  // schema to append it to, the manager stays on Core's in-memory default.
-  const oauthStateTable = includeOAuth && (await readIfExists(process.cwd(), 'db/schema.ts')) !== null
+  // Read before any write. Without a schema there is nowhere to declare
+  // `oauthStates`, so OAuth state stays on Core's in-memory provider.
+  const schemaSource = await readIfExists(process.cwd(), 'db/schema.ts')
+  const oauthStateTable = includeOAuth && schemaSource !== null
 
   const files = [
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: buildLoginControllerTemplate(includePassword) },
@@ -1568,9 +1533,8 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     files.push(
       authFile('app/Http/Validators/LoginValidator.ts'),
       // Without password login the demo user is an unreachable row, and
-      // seeding it would hash with scrypt — the cost --oauth-only avoids. The
-      // only dialect-sensitive file here, hence the late schema read.
-      { path: 'db/seeders/UsersSeeder.ts', contents: buildSeederTemplate(await readSchemaDialect()) },
+      // seeding it would hash with scrypt — the cost --oauth-only avoids.
+      { path: 'db/seeders/UsersSeeder.ts', contents: buildSeederTemplate(detectSchemaDialect(schemaSource ?? '')) },
     )
   }
 
@@ -1627,34 +1591,24 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     ? await addSession({ force: options.force, overwritten: options.overwritten, migration: false, wire: options.install })
     : { files: [], schemaChanged: false }
   created.push(...sessions.files)
-  const oauthStatesAppended = oauthStateTable && (await appendSchemaTable({
-    name: 'oauthStates',
-    blocks: OAUTH_STATES_TABLE_BLOCKS,
-    imports: OAUTH_STATES_SCHEMA_IMPORTS,
-    manualGuidance: 'OAuth state needs an oauth_states table.',
-  })) === 'appended'
+  const oauthStatesAppended = oauthStateTable && (await appendOAuthStateTable())
   if (!includePassword) {
     await warnAboutStalePasswordScaffold()
   }
-  const createdTables = [
-    'users',
-    ...(sessions.schemaChanged ? ['sessions'] : []),
-    ...(oauthStatesAppended ? ['oauth_states'] : []),
-  ]
   const migrationGenerated = await generateSchemaMigration(
-    createdTables.length === 1
-      ? 'create_users_table'
-      : `create_${createdTables.slice(0, -1).join('_')}_and_${createdTables.at(-1)}_tables`,
+    createTablesMigrationName([
+      'users',
+      ...(sessions.schemaChanged ? ['sessions'] : []),
+      ...(oauthStatesAppended ? ['oauth_states'] : []),
+    ]),
     'users',
   )
 
   if (options.install) {
-    await installAuth(features, migrationGenerated, oauthStateTable)
+    await installAuth(features, { migrationGenerated, oauthStateTable })
   } else {
     consola.info('Next steps:')
-    // The pages import `pages.auth` & co. from .guren/pages.gen.ts, which does
-    // not list them until codegen reruns, so typecheck fails before this.
-    consola.info('  • Run `bun run codegen` (or `bun run dev`) to refresh generated types')
+    consola.info(CODEGEN_STEP)
     consola.info('  • Register AuthProvider in your createApp() providers array')
     consola.info('  • Enable sessions and CSRF by adding `auth: {}` to your createApp() options')
     consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
@@ -1683,8 +1637,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
 async function installAuth(
   { includeExtras, includePassword, oauthProviders }: AuthFeatures,
-  migrationGenerated: boolean,
-  oauthStateTable: boolean,
+  { migrationGenerated, oauthStateTable }: { migrationGenerated: boolean; oauthStateTable: boolean },
 ): Promise<void> {
   consola.info('Installing authentication configuration...')
 
@@ -1713,8 +1666,7 @@ async function installAuth(
   }
 
   if (oauthProviders.length > 0) {
-    // A database-backed OAuthProvider binds `oauth` itself; Core's provider
-    // would only add a second, in-memory manager for the deploy check to flag.
+    // A database-backed OAuthProvider binds `oauth` itself.
     if (!oauthStateTable) {
       await wireProvider(
         'CoreOAuthServiceProvider',
@@ -1742,7 +1694,7 @@ async function installAuth(
   consola.success('Authentication configuration installed!')
   consola.info('Session middleware is auto-configured via AuthServiceProvider (autoSession: true)')
   consola.info('Next steps:')
-  consola.info('  • Run `bun run codegen` (or `bun run dev`) to refresh generated types')
+  consola.info(CODEGEN_STEP)
   if (!migrationGenerated) {
     consola.info('  • Run `bun run db:make` to generate the users migration')
   }

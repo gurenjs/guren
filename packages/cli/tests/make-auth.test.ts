@@ -1,9 +1,9 @@
-import { describe, expect, it, spyOn } from 'bun:test'
+import { describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 // Shared with the blog blueprint's AuthProvider, which ports this boot() so
@@ -628,6 +628,8 @@ export const users = mysqlTable('users', {
       columns: [
         "export const oauthStates = pgTable('oauth_states', {",
         "stateHash: text('state_hash').primaryKey(),",
+        "provider: text('provider').notNull(),",
+        "redirectTo: text('redirect_to'),",
         "expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),",
         "binding: text('binding'),",
       ],
@@ -639,6 +641,8 @@ export const users = mysqlTable('users', {
       columns: [
         "export const oauthStates = sqliteTable('oauth_states', {",
         "stateHash: text('state_hash').primaryKey(),",
+        "provider: text('provider').notNull(),",
+        "redirectTo: text('redirect_to'),",
         "expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),",
         "binding: text('binding'),",
       ],
@@ -649,9 +653,10 @@ export const users = mysqlTable('users', {
       schema: MYSQL_SCHEMA_FIXTURE,
       columns: [
         "export const oauthStates = mysqlTable('oauth_states', {",
-        // A sha512 hex digest is 128 characters.
         "stateHash: varchar('state_hash', { length: 128 }).primaryKey(),",
+        "provider: varchar('provider', { length: 64 }).notNull(),",
         "redirectTo: text('redirect_to'),",
+        "expiresAt: timestamp('expires_at').notNull(),",
         "binding: varchar('binding', { length: 128 }),",
       ],
       imports: ['index', 'mysqlTable', 'text', 'timestamp', 'varchar'],
@@ -673,11 +678,6 @@ export const users = mysqlTable('users', {
         const importLine = written.split('\n')[0]
         for (const name of imports) {
           expect(importLine).toMatch(new RegExp(`[{,]\\s*${name}\\s*[,}]`))
-        }
-        // DatabaseOAuthStateStore writes these property names; one missing is a
-        // callback rejected at runtime, not a type error.
-        for (const property of ['provider:', 'redirectTo:', 'expiresAt:']) {
-          expect(written.slice(written.indexOf('export const oauthStates'))).toContain(property)
         }
         expect(written).toContain('export const sessions')
       } finally {
@@ -702,19 +702,11 @@ export const users = mysqlTable('users', {
 
   it('lists codegen as the first next step, before which the pages do not typecheck', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-codegen-step-')
-    const infos: string[] = []
-    const info = spyOn(consola, 'info').mockImplementation(((...args: unknown[]) => {
-      infos.push(args.map(String).join(' '))
-    }) as typeof consola.info)
     try {
-      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': PG_SCHEMA_FIXTURE })
+      const infos = await captureInfos(() => makeAuth({ force: true, oauth: 'github' }))
 
-      await makeAuth({ force: true, oauth: 'github' })
-
-      const steps = infos.slice(infos.lastIndexOf('Next steps:') + 1)
-      expect(steps[0]).toContain('bun run codegen')
+      expect(infos[infos.lastIndexOf('Next steps:') + 1]).toContain('bun run codegen')
     } finally {
-      info.mockRestore()
       await workspace.cleanup()
     }
   })
