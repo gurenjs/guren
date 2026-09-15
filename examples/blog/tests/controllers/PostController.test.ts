@@ -164,6 +164,9 @@ const paginatedPostsResponse = {
   },
 }
 
+const storeInput = contractInput({ route: 'posts.store', body: { title: 'New Post', excerpt: 'Excerpt', body: 'Body content' } })
+const updateInput = contractInput({ route: 'posts.update', body: { title: 'Updated Title', excerpt: 'Updated excerpt', body: 'Updated body' } })
+
 describe('PostController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -363,7 +366,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
-        ...contractInput({ route: 'posts.store', body: { title: 'New Post', excerpt: 'Excerpt', body: 'Body content' } }),
+        ...storeInput,
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -398,7 +401,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
-        ...contractInput({ route: 'posts.store', body: { title: 'New Post', excerpt: 'Excerpt', body: 'Body content' } }),
+        ...storeInput,
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -427,7 +430,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
-        ...contractInput({ route: 'posts.store', body: { title: 'New Post', excerpt: 'Excerpt', body: 'Body content' } }),
+        ...storeInput,
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -446,7 +449,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
-        ...contractInput({ route: 'posts.store', body: { title: 'New Post', excerpt: 'Excerpt', body: 'Body content' } }),
+        ...storeInput,
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -504,7 +507,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
-        ...contractInput({ route: 'posts.update', body: { title: 'Updated Title', excerpt: 'Updated excerpt', body: 'Updated body' } }),
+        ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
 
@@ -534,7 +537,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
-        ...contractInput({ route: 'posts.update', body: { title: 'Updated Title', excerpt: 'Updated excerpt', body: 'Updated body' } }),
+        ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '1' })
 
@@ -555,7 +558,7 @@ describe('PostController', () => {
       }, {
         cache: { store: vi.fn() },
         events: { emit: mockEmit },
-        ...contractInput({ route: 'posts.update', body: { title: 'Updated Title', excerpt: 'Updated excerpt', body: 'Updated body' } }),
+        ...updateInput,
       }) as unknown as Context
       setRouteParams(ctx, { id: '999' })
 

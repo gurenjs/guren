@@ -3,7 +3,7 @@ import { Controller } from './Controller'
 import type { Container } from '../container/Container'
 import { mountRoute } from './mount-route'
 import { flattenRequestQueries, formatValidationErrors, parseRequestBody, type ValidationErrorLike } from '../http/request'
-import { setValidatedInput, type ValidatedInputRecord } from './validated-input'
+import { getValidatedInput, setValidatedInput, type ValidatedInputRecord } from './validated-input'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
@@ -1285,8 +1285,8 @@ function throwOnInvalid<T>(schema: ValidationSchema<T>, data: unknown): T {
 /**
  * The preflight seam: what a request must pass before the handler, reported
  * instead of executed. Mounted last, so the chain in front really ran; only
- * `.agent()` routes honour the header. Body validation happens here (safe:
- * this branch never calls `next()`), and `unverified` names the checks only
+ * `.agent()` routes honour the header. An inline handler's contract is checked
+ * here (safe: this branch never calls `next()`), and `unverified` names the checks only
  * the action itself would make, such as `await this.authorize(...)`.
  */
 function createAgentPreflightMiddleware(
@@ -1307,19 +1307,14 @@ function createAgentPreflightMiddleware(
       return next()
     }
 
-    const validated: string[] = []
-    if (schemas?.params) {
-      throwOnInvalid(schemas.params, c.req.param())
-      validated.push('params')
+    // A controller route's contract middleware ran in front, refused any invalid
+    // segment and left its record; an inline handler validates only later.
+    if (!getValidatedInput(c)) {
+      if (schemas?.params) throwOnInvalid(schemas.params, c.req.param())
+      if (schemas?.query) throwOnInvalid(schemas.query, flattenRequestQueries(c))
+      if (schemas?.body) throwOnInvalid(schemas.body, await parseRequestBody(c))
     }
-    if (schemas?.query) {
-      throwOnInvalid(schemas.query, flattenRequestQueries(c))
-      validated.push('query')
-    }
-    if (schemas?.body) {
-      throwOnInvalid(schemas.body, await parseRequestBody(c))
-      validated.push('body')
-    }
+    const validated = (['params', 'query', 'body'] as const).filter((segment) => schemas?.[segment])
 
     // Marked as a verdict so nothing downstream mistakes it for the route's own
     // output: it satisfies no `output` schema and is not `structuredContent`.

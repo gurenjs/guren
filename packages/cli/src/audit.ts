@@ -461,7 +461,7 @@ async function auditRoutes(
       const hasRouteSchema = Boolean(route.schemas?.body)
       // A server that validates a controller action's body schema says so with
       // `validatesBody`; without the flag the schema only types the action.
-      const routeSchemaEnforced = hasRouteSchema && (!route.controller || route.validatesBody === true)
+      const routeSchemaEnforced = hasRouteSchema && (!route.controller || Boolean(route.validatesBody))
       const hasControllerValidation = methodInfo ? VALIDATE_BODY_PATTERN.test(methodInfo.body) : false
       const readsBody = methodInfo ? BODY_ACCESS_PATTERN.test(methodInfo.body) : false
 

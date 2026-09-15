@@ -17,6 +17,7 @@ import { resolveOptional } from '../container/resolve-optional'
 import type { AuthUser } from '../authorization/types'
 import {
   getValidatedInput,
+  readValidatedInput,
   type ContractRouteName,
   type UntypedValidatedInput,
   type ValidatedInput,
@@ -467,29 +468,13 @@ export class Controller {
    * The input the route contract already validated: `params`, `query` and `body`
    * as their schemas parsed them, coercions and defaults applied. A segment the
    * contract does not declare is `undefined`. Pass the route name to type the
-   * result from `guren codegen`; a name other than the current route's throws.
+   * result from `guren codegen`, or every name when one action serves several
+   * routes; a name that is not the current route's throws.
    */
   protected validated(): UntypedValidatedInput
-  protected validated<TName extends ContractRouteName>(route: TName): ValidatedInput<TName>
-  protected validated(route?: string): UntypedValidatedInput {
-    const record = getValidatedInput(this.ctx)
-    if (!record) {
-      throw new Error(
-        'Controller.validated() found no contract-validated input: the route declares no `params`, `query` '
-        + 'or `body` schema. Add one to the route options, or use validateBody()/validateQuery()/validateParams().',
-      )
-    }
-    if (route !== undefined && route !== record.route) {
-      throw new Error(
-        `Controller.validated('${route}') was called while serving ${record.route === undefined ? 'an unnamed route' : `route '${record.route}'`}. `
-        + 'Pass the name of the route this action is mounted on.',
-      )
-    }
-    return {
-      params: record.params as Record<string, unknown>,
-      query: record.query as Record<string, unknown>,
-      body: record.body,
-    }
+  protected validated<TName extends ContractRouteName>(route: TName | readonly TName[]): ValidatedInput<TName>
+  protected validated(route?: string | readonly string[]): UntypedValidatedInput {
+    return readValidatedInput(this.ctx, route)
   }
 
   /** Validate the request body; throws ValidationException on failure. */

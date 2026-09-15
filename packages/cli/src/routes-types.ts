@@ -131,7 +131,7 @@ const CONTRACT_SEGMENTS = ['params', 'query', 'body'] as const
  * route's segments as its schemas *parse* them (`io: 'output'`, so a coerced
  * number is `number`), unlike `ApiRoutes.body`, which is what a client sends.
  */
-export function buildContractAugmentation(definitions: Array<RouteDefinition & { name: string }>): string {
+function buildContractAugmentation(definitions: Array<RouteDefinition & { name: string }>): string {
   const entries = definitions.flatMap((definition) => {
     const segments = CONTRACT_SEGMENTS.flatMap((segment) => {
       const schema = definition.schemas?.[segment]

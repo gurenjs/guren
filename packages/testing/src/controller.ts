@@ -5,7 +5,9 @@ import {
   parseRequestBody as parseRequestBodyByRuntimeRules,
   parseRequestUploads as parseRequestUploadsByRuntimeRules,
   type RequestUploads,
+  readValidatedInput,
   VALIDATED_INPUT_CONTEXT_KEY,
+  type UntypedValidatedInput,
   type ValidatedInputRecord,
 } from '@guren/server/internal/request'
 import {
@@ -67,13 +69,7 @@ export function contractInput(input: {
   query?: Record<string, unknown>
   body?: unknown
 }): Record<string, unknown> {
-  const record: ValidatedInputRecord = {
-    route: input.route,
-    params: input.params,
-    query: input.query,
-    body: input.body,
-  }
-  return { [VALIDATED_INPUT_CONTEXT_KEY]: record }
+  return { [VALIDATED_INPUT_CONTEXT_KEY]: { route: undefined, ...input } satisfies ValidatedInputRecord }
 }
 
 export function createControllerContext(
@@ -432,15 +428,8 @@ export function createControllerModuleMock() {
 
     // Reads what `contractInput()` seeded, as the runtime reads what the route
     // contract middleware left: no schema runs here.
-    public validated(route?: string): { params: unknown; query: unknown; body: unknown } {
-      const record = this.ctx.get(VALIDATED_INPUT_CONTEXT_KEY) as ValidatedInputRecord | undefined
-      if (!record) {
-        throw new Error('Controller.validated() found no contract-validated input. Seed it with contractInput().')
-      }
-      if (route !== undefined && route !== record.route) {
-        throw new Error(`Controller.validated('${route}') was called while serving route '${String(record.route)}'.`)
-      }
-      return { params: record.params, query: record.query, body: record.body }
+    public validated(route?: string | readonly string[]): UntypedValidatedInput {
+      return readValidatedInput(this.ctx, route)
     }
 
     public async validateBody<T>(schema: {

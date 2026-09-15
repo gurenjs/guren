@@ -1,4 +1,5 @@
 import type { Context } from 'hono'
+import type { RequestContextLike } from '../http/request-container'
 
 /**
  * Registry for the app's route contracts: `guren codegen` merges a `routes` map
@@ -16,8 +17,8 @@ export type ContractRouteName = [RegisteredRouteContracts] extends [never]
 
 /** What `Controller.validated()` returns when no contract type is registered for the route. */
 export interface UntypedValidatedInput {
-  params: Record<string, any>
-  query: Record<string, any>
+  params: Record<string, any> | undefined
+  query: Record<string, any> | undefined
   body: any
 }
 
@@ -53,13 +54,38 @@ declare module 'hono' {
   }
 }
 
-type ContextReader = { get(key: string): unknown }
-type ContextWriter = { set(key: string, value: unknown): void }
-
-export function getValidatedInput(ctx: Context | ContextReader): ValidatedInputRecord | undefined {
-  return (ctx as ContextReader).get(VALIDATED_INPUT_CONTEXT_KEY) as ValidatedInputRecord | undefined
+export function getValidatedInput(ctx: RequestContextLike): ValidatedInputRecord | undefined {
+  return ctx.get(VALIDATED_INPUT_CONTEXT_KEY) as ValidatedInputRecord | undefined
 }
 
-export function setValidatedInput(ctx: Context | ContextWriter, record: ValidatedInputRecord): void {
-  ;(ctx as ContextWriter).set(VALIDATED_INPUT_CONTEXT_KEY, record)
+export function setValidatedInput(ctx: Context, record: ValidatedInputRecord): void {
+  ctx.set(VALIDATED_INPUT_CONTEXT_KEY, record)
+}
+
+/**
+ * `Controller.validated()`, shared with `@guren/testing`'s controller mock so the
+ * two refuse the same calls. `route` lists every name the action is mounted on.
+ */
+export function readValidatedInput(ctx: RequestContextLike, route?: string | readonly string[]): UntypedValidatedInput {
+  const record = getValidatedInput(ctx)
+  if (!record) {
+    throw new Error(
+      'Controller.validated() found no contract-validated input: the route declares no `params`, `query` '
+      + 'or `body` schema. Add one to the route options, or use validateBody()/validateQuery()/validateParams(). '
+      + 'In a controller unit test, seed it with contractInput().',
+    )
+  }
+  const names: readonly string[] | undefined = typeof route === 'string' ? [route] : route
+  if (names && (record.route === undefined || !names.includes(record.route))) {
+    throw new Error(
+      `Controller.validated(${JSON.stringify(route)}) was called while serving `
+      + `${record.route === undefined ? 'an unnamed route' : `route '${record.route}'`}. `
+      + 'Pass the name of every route this action is mounted on.',
+    )
+  }
+  return {
+    params: record.params as Record<string, unknown> | undefined,
+    query: record.query as Record<string, unknown> | undefined,
+    body: record.body,
+  }
 }

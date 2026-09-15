@@ -299,7 +299,7 @@ export default class PostsController extends Controller {
 }
 ```
 
-値は coerce、デフォルト値、transform を適用した後の形で届きます。`z.coerce.number()` のパラメータは `number` です。スキーマを宣言していないセグメントは `undefined` になります。`guren codegen` を実行すると、ルート名がコンパイル時に検査され、戻り値もコントラクトから型付けされます。処理中のルートと違う名前を渡した場合は例外になります。
+値は coerce、デフォルト値、transform を適用した後の形で届きます。`z.coerce.number()` のパラメータは `number` です。スキーマを宣言していないセグメントは `undefined` になります。`guren codegen` を実行すると、ルート名がコンパイル時に検査され、戻り値もコントラクトから型付けされます。処理中のルートと違う名前を渡した場合は例外になります。PUT と PATCH のように 1 つのアクションを複数のルートに割り当てる場合は、`this.validated(['posts.update', 'posts.patch'])` のようにすべての名前を渡します。
 
 コントラクトはアクションより先に動くので、アクション内の検査(`this.auth.userOrFail()` など)はボディが正しい場合にだけ実行されます。不正なボディには先に 422 が返ります。未認証のリクエストに 401 を先に返したい場合は、その検査をルートのミドルウェアに置いてください。`validateBody()`、`validateQuery()`、`validateParams()` はそのまま使えます。コントラクトを宣言しないルートの検証には、これらを使います。
 

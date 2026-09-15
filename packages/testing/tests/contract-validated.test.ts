@@ -20,9 +20,10 @@ const PostPayload = z.object({
   tags: z.array(z.object({ name: z.string().min(1) })).default([]),
 })
 
+const { Controller } = await import('@guren/core')
+
 describe('route contract body on a controller action', () => {
   it('answers 422 before the action runs when the body breaks the contract', async () => {
-    const { Controller } = await import('@guren/core')
     let ran = false
     class PostController extends Controller {
       async store() {
@@ -41,7 +42,6 @@ describe('route contract body on a controller action', () => {
   })
 
   it('keys the error bag by the full path, as validateBody() does', async () => {
-    const { Controller } = await import('@guren/core')
     class PostController extends Controller {
       async store() {
         return this.json({ ok: true })
@@ -59,7 +59,6 @@ describe('route contract body on a controller action', () => {
   })
 
   it('hands the action the parsed body, params and query through validated()', async () => {
-    const { Controller } = await import('@guren/core')
     class PostController extends Controller {
       async update() {
         const { params, query, body } = this.validated('posts.update')
@@ -86,7 +85,6 @@ describe('route contract body on a controller action', () => {
   })
 
   it('leaves an undeclared segment undefined', async () => {
-    const { Controller } = await import('@guren/core')
     class PostController extends Controller {
       async store() {
         const input = this.validated()
@@ -103,7 +101,6 @@ describe('route contract body on a controller action', () => {
   })
 
   it('refuses a route name other than the one being served', async () => {
-    const { Controller } = await import('@guren/core')
     class PostController extends Controller {
       async store() {
         return this.json(this.validated('posts.update'))
@@ -118,8 +115,24 @@ describe('route contract body on a controller action', () => {
     expect(response.status).toBe(500)
   })
 
+  it('accepts every route name an action mounted on several routes serves', async () => {
+    class PostController extends Controller {
+      async update() {
+        return this.json(this.validated(['posts.update', 'posts.patch']).body)
+      }
+    }
+    const { http } = await bootApp((router) => {
+      router.put('/posts/:id', { name: 'posts.update', body: PostPayload }, [PostController, 'update'])
+      router.patch('/posts/:id', { name: 'posts.patch', body: PostPayload }, [PostController, 'update'])
+    })
+
+    const response = await http.patch('/posts/1', { title: 'hello', priority: 1 })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ title: 'hello', priority: 1, tags: [] })
+  })
+
   it('keeps validateBody() and input() working on a contract-validated route', async () => {
-    const { Controller } = await import('@guren/core')
     class PostController extends Controller {
       async store() {
         const data = await this.validateBody(PostPayload)
@@ -136,7 +149,6 @@ describe('route contract body on a controller action', () => {
   })
 
   it('leaves every value of a repeated multipart field to files()', async () => {
-    const { Controller } = await import('@guren/core')
     class PostController extends Controller {
       async store() {
         const { body } = this.validated('posts.store')
@@ -161,7 +173,6 @@ describe('route contract body on a controller action', () => {
 
 describe('contractInput', () => {
   it('seeds what validated() reads in a controller unit test', async () => {
-    const { Controller } = await import('@guren/core')
     class PostController extends Controller {
       read() {
         return this.validated('posts.store').body

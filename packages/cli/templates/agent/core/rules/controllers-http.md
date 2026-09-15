@@ -16,7 +16,7 @@ instead of validating again:
 
 ```typescript
 protected validated(): { params; query; body }                          // untyped
-protected validated<N extends ContractRouteName>(route: N): ValidatedInput<N>  // typed after codegen
+protected validated<N extends ContractRouteName>(route: N | readonly N[]): ValidatedInput<N>  // typed after codegen
 // const { body } = this.validated('posts.store'); an undeclared segment is undefined
 ```
 

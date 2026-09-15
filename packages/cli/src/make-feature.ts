@@ -535,8 +535,7 @@ export default class ${singular}Controller extends Controller {
   }
 
   async store(): Promise<Response> {
-${authGuard}${createGuard}    // The route's \`body\` contract validated the payload before this action ran.
-    const { body: data } = this.validated('${routeName}.store')
+${authGuard}${createGuard}    const { body: data } = this.validated('${routeName}.store')
     const ${variableName} = await ${singular}.create(data)
 ${storeAttach}    return this.redirect('${redirectPrefix}/${routeName}/' + ${variableName}?.id)
   }

@@ -341,7 +341,7 @@ export default class PostsController extends Controller {
 }
 ```
 
-Values arrive after coercion, defaults and transforms, so a `z.coerce.number()` param is a `number`. A segment the route declares no schema for is `undefined`. After `guren codegen`, the route name is checked at compile time and the result is typed from the contract; calling `this.validated()` with a name other than the route being served throws.
+Values arrive after coercion, defaults and transforms, so a `z.coerce.number()` param is a `number`. A segment the route declares no schema for is `undefined`. After `guren codegen`, the route name is checked at compile time and the result is typed from the contract; calling `this.validated()` with a name other than the route being served throws. An action mounted on several routes, such as a PUT and a PATCH, passes every name: `this.validated(['posts.update', 'posts.patch'])`.
 
 Because the contract runs before the action, a check the action makes itself (such as `this.auth.userOrFail()`) only happens once the body is valid, so an invalid body gets its 422 first. Put the check in route middleware when an unauthenticated request must get a 401 first. `validateBody()`, `validateQuery()` and `validateParams()` keep working, and remain the way to validate a route that declares no contract.
 

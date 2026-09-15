@@ -95,7 +95,7 @@ export default class PostController extends Controller {
   async update(): Promise<Response> {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id) as BoundPost
-    const { body: data } = this.validated('posts.update')
+    const { body: data } = this.validated(['posts.update', 'posts.patch'])
 
     await Post.update({ id: post.id }, { ...data, authorId: post.authorId })
 
