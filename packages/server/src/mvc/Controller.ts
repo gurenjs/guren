@@ -92,7 +92,7 @@ export interface RedirectOptions {
   headers?: HeadersInit
 }
 
-type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request' | 'container'> & { url?: string }
+export type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request' | 'container'> & { url?: string }
 
 type InertiaPageComponent<TPage extends InertiaPageContractLike> = TPage['id']
 type InertiaPageProps<TPage extends InertiaPageContractLike> = NonNullable<TPage['__props']>

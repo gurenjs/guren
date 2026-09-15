@@ -506,7 +506,7 @@ function resolveDocumentValue(
   );
 }
 
-function serializePage(page: InertiaPagePayload): string {
+export function serializePage(page: InertiaPagePayload): string {
   return JSON.stringify(page).replace(/[<\u2028\u2029]/gu, (char) => {
     switch (char) {
       case "<":
@@ -521,7 +521,7 @@ function serializePage(page: InertiaPagePayload): string {
   });
 }
 
-function acceptsJson(request: Request): boolean {
+export function acceptsJson(request: Request): boolean {
   const accept = request.headers.get("accept")?.toLowerCase() ?? "";
 
   if (!accept || accept === "*/*") {

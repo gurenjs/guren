@@ -15,6 +15,29 @@ const identitySchema = {
   safeParse: (data: unknown) => ({ success: true as const, data }),
 }
 
+/** The runtime helpers are protected, as on the framework class; tests call them through this view. */
+interface ControllerSurface {
+  readonly request: { path: string; method: string }
+  readonly locale: string
+  input(key: string): Promise<unknown>
+  query(key: string, defaultValue?: string): string | undefined
+  only(...keys: string[]): Promise<Record<string, unknown>>
+  except(...keys: string[]): Promise<Record<string, unknown>>
+  has(key: string): Promise<boolean>
+  validateBody(schema: unknown): Promise<unknown>
+  validateBodySafe(schema: unknown): Promise<unknown>
+  json(data: unknown, init?: ResponseInit): Response
+  accepted(data?: unknown, init?: ResponseInit): Response
+  redirect(url: string, options?: { status?: number; headers?: HeadersInit }): Response
+}
+
+function mockSurface(ctx: ControllerContext): ControllerSurface {
+  const { Controller } = createControllerModuleMock()
+  const controller = new Controller()
+  controller.setContext(ctx)
+  return controller as unknown as ControllerSurface
+}
+
 /**
  * Hand-built rather than via `new FormData()`: handing `fetch` a FormData body lets it
  * pick the boundary *and* the media-type casing, and the casing is under test here.
@@ -113,7 +136,7 @@ describe('createGurenControllerModule', () => {
     const ctx = createControllerContext('http://example.com/test')
 
     const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
+    controller.setContext(ctx)
 
     expect(controller.ctx.req.path).toBe('/test')
   })
@@ -132,7 +155,7 @@ describe('createGurenControllerModule', () => {
     })
 
     const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
+    controller.setContext(ctx)
 
     const response = controller.inertia('TestComponent', { foo: 'bar' })
     const { format, payload } = await readInertiaResponse(response)
@@ -147,7 +170,7 @@ describe('createGurenControllerModule', () => {
     const ctx = createControllerContext('http://example.com/page')
 
     const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
+    controller.setContext(ctx)
 
     const response = controller.inertia('TestComponent', { data: 123 })
     const { format, payload, body } = await readInertiaResponse(response)
@@ -165,7 +188,7 @@ describe('createGurenControllerModule', () => {
     })
 
     const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
+    controller.setContext(ctx)
 
     const response = controller.inertia('Component', {}, { url: '/custom' })
     const { payload } = await readInertiaResponse(response)
@@ -180,7 +203,7 @@ describe('createGurenControllerModule', () => {
     })
 
     const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
+    controller.setContext(ctx)
 
     const response = controller.inertia('Component', {})
     const { payload } = await readInertiaResponse(response)
@@ -196,7 +219,7 @@ describe('createGurenControllerModule', () => {
       headers: { 'Content-Type': 'application/json' },
     })
 
-    const payload = await module.parseRequestPayload(ctx as unknown as ControllerContext)
+    const payload = await module.parseRequestPayload(ctx)
 
     expect(payload).toEqual({ name: 'Test', value: 42 })
   })
@@ -209,7 +232,7 @@ describe('createGurenControllerModule', () => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
 
-    const payload = await module.parseRequestPayload(ctx as unknown as ControllerContext)
+    const payload = await module.parseRequestPayload(ctx)
 
     expect(payload).toEqual({ name: 'Test', value: '42' })
   })
@@ -222,7 +245,7 @@ describe('createGurenControllerModule', () => {
       headers: { 'Content-Type': 'text/plain' },
     })
 
-    const payload = await module.parseRequestPayload(ctx as unknown as ControllerContext)
+    const payload = await module.parseRequestPayload(ctx)
 
     expect(payload).toEqual({})
   })
@@ -237,7 +260,7 @@ describe('createGurenControllerModule', () => {
       headers: { 'Content-Type': 'application/json' },
     })
 
-    const payload = await module.parseRequestPayload(ctx as unknown as ControllerContext)
+    const payload = await module.parseRequestPayload(ctx)
 
     expect(payload).toEqual({})
   })
@@ -265,7 +288,7 @@ describe('createGurenControllerModule', () => {
     controller.setContext(createControllerContext('http://example.com/posts', {
       method: 'POST',
       body: formData,
-    }) as unknown as ControllerContext)
+    }))
 
     const result = await controller.handle()
 
@@ -293,7 +316,7 @@ describe('createGurenControllerModule', () => {
     controller.setContext(createControllerContext('http://example.com/posts', {
       method: 'POST',
       body: formData,
-    }) as unknown as ControllerContext)
+    }))
 
     const files = await controller.handle()
 
@@ -319,7 +342,7 @@ describe('createGurenControllerModule', () => {
     controller.setContext(createControllerContext('http://example.com/posts', {
       method: 'POST',
       body: formData,
-    }) as unknown as ControllerContext)
+    }))
 
     expect(await controller.handle()).toBeNull()
   })
@@ -338,7 +361,7 @@ describe('createGurenControllerModule', () => {
       method: 'POST',
       body: JSON.stringify({ title: 'Hello' }),
       headers: { 'Content-Type': 'application/json' },
-    }) as unknown as ControllerContext)
+    }))
 
     expect(await controller.handle()).toBeNull()
   })
@@ -386,62 +409,25 @@ describe('createControllerModuleMock', () => {
         : { success: false as const, error: { issues: [{ path: ['title'], message: 'required' }] } },
   }
 
-  interface SafeParseSchema {
-    safeParse(data: unknown):
-      | { success: true; data: unknown }
-      | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } }
-  }
-
-  /** The helpers are protected, as on the runtime class, so they are reached through actions. */
-  function mockController(ctx: ControllerContext) {
-    const { Controller } = createControllerModuleMock()
-
-    class ProbeController extends Controller {
-      validate(schema: SafeParseSchema) {
-        return this.validateBody(schema)
-      }
-
-      read(key: string) {
-        return this.input(key)
-      }
-
-      respond(data: unknown, init?: ResponseInit) {
-        return this.json(data, init)
-      }
-
-      redirectTo(url: string, options?: { status?: number }) {
-        return this.redirect(url, options)
-      }
-
-      requestLine() {
-        return { path: this.request.path, method: this.request.method }
-      }
-    }
-
-    const controller = new ProbeController()
-    controller.setContext(ctx)
-    return controller
-  }
-
   it('parseRequestPayload falls back to {} for a body the form parser cannot decode', async () => {
     const module = createGurenControllerModule()
     const ctx = createControllerContext('http://example.com/posts', undecodableForm)
 
-    expect(await module.parseRequestPayload(ctx as unknown as ControllerContext)).toEqual({})
+    expect(await module.parseRequestPayload(ctx)).toEqual({})
   })
 
   it('validateBody() fails validation on an undecodable body rather than throwing', async () => {
-    const controller = mockController(createControllerContext('http://example.com/posts', undecodableForm))
+    const controller = mockSurface(createControllerContext('http://example.com/posts', undecodableForm))
 
     // The failure must be the validation one, not the parser's TypeError.
-    await expect(controller.validate(requireTitle)).rejects.toThrow(/valid/i)
+    await expect(controller.validateBody(requireTitle)).rejects.toThrow(/valid/i)
   })
 
   // The fallback is `{}`, not `undefined`: an all-optional schema keeps passing.
   it('validateBody() passes an all-optional schema the empty-object fallback', async () => {
-    const controller = mockController(createControllerContext('http://example.com/posts', undecodableForm))
+    const controller = mockSurface(createControllerContext('http://example.com/posts', undecodableForm))
 
-    expect(await controller.validate(identitySchema)).toEqual({})
+    expect(await controller.validateBody(identitySchema)).toEqual({})
   })
 
   // The upload helpers read the multipart body themselves rather than through
@@ -462,7 +448,7 @@ describe('createControllerModuleMock', () => {
   })
 
   it('validateBody() accepts a non-object body, while input() keeps the record view', async () => {
-    const controller = mockController(createControllerContext('http://example.com/bulk', {
+    const controller = mockSurface(createControllerContext('http://example.com/bulk', {
       method: 'POST',
       body: JSON.stringify([1, 2, 3]),
       headers: { 'Content-Type': 'application/json' },
@@ -476,8 +462,8 @@ describe('createControllerModuleMock', () => {
           : { success: false as const, error: { issues: [{ path: [], message: 'expected number[]' }] } },
     }
 
-    expect(await controller.validate(numberArray)).toEqual([1, 2, 3])
-    expect(await controller.read('title')).toBeUndefined()
+    expect(await controller.validateBody(numberArray)).toEqual([1, 2, 3])
+    expect(await controller.input('title')).toBeUndefined()
   })
 
   // `null` is the shape worth naming: a parsed body, not an absent one, so
@@ -492,13 +478,13 @@ describe('createControllerModuleMock', () => {
     }
 
     const validate = (body: string, contentType = 'application/json') =>
-      mockController(
+      mockSurface(
         createControllerContext('http://example.com/bulk', {
           method: 'POST',
           body,
           headers: { 'Content-Type': contentType },
         }),
-      ).validate(capture)
+      ).validateBody(capture)
 
     expect(await validate(JSON.stringify([1, 2, 3]))).toEqual([1, 2, 3])
     expect(await validate(JSON.stringify('hello'))).toBe('hello')
@@ -511,21 +497,21 @@ describe('createControllerModuleMock', () => {
   // A second read of a consumed stream would find nothing, so both answers
   // prove the body was read once.
   it('reads the body once per controller, whichever helper reads it', async () => {
-    const controller = mockController(createControllerContext('http://example.com/posts', {
+    const controller = mockSurface(createControllerContext('http://example.com/posts', {
       method: 'POST',
       body: JSON.stringify({ title: 'Guren' }),
       headers: { 'Content-Type': 'application/json' },
     }))
 
-    expect(await controller.read('title')).toBe('Guren')
-    expect(await controller.read('title')).toBe('Guren')
-    expect(await controller.validate(identitySchema)).toEqual({ title: 'Guren' })
+    expect(await controller.input('title')).toBe('Guren')
+    expect(await controller.input('title')).toBe('Guren')
+    expect(await controller.validateBody(identitySchema)).toEqual({ title: 'Guren' })
   })
 
   it('json() sets the JSON content type and a custom status', async () => {
-    const controller = mockController(createControllerContext('http://example.com/api'))
+    const controller = mockSurface(createControllerContext('http://example.com/api'))
 
-    const response = controller.respond({ error: 'Not found' }, { status: 404 })
+    const response = controller.json({ error: 'Not found' }, { status: 404 })
 
     expect(response.headers.get('Content-Type')).toContain('application/json')
     expect(response.status).toBe(404)
@@ -533,19 +519,19 @@ describe('createControllerModuleMock', () => {
   })
 
   it('redirect() answers 302 for GET, 303 otherwise, and honors a custom status', () => {
-    const get = mockController(createControllerContext('http://example.com/', { method: 'GET' }))
-    const post = mockController(createControllerContext('http://example.com/', { method: 'POST' }))
+    const get = mockSurface(createControllerContext('http://example.com/', { method: 'GET' }))
+    const post = mockSurface(createControllerContext('http://example.com/', { method: 'POST' }))
 
-    expect(get.redirectTo('/dashboard').status).toBe(302)
-    expect(get.redirectTo('/dashboard').headers.get('Location')).toBe('/dashboard')
-    expect(post.redirectTo('/success').status).toBe(303)
-    expect(post.redirectTo('/permanent', { status: 301 }).status).toBe(301)
+    expect(get.redirect('/dashboard').status).toBe(302)
+    expect(get.redirect('/dashboard').headers.get('Location')).toBe('/dashboard')
+    expect(post.redirect('/success').status).toBe(303)
+    expect(post.redirect('/permanent', { status: 301 }).status).toBe(301)
   })
 
   it('reads the request through this.request', () => {
-    const controller = mockController(createControllerContext('http://example.com/users/1', { method: 'GET' }))
+    const controller = mockSurface(createControllerContext('http://example.com/users/1', { method: 'GET' }))
 
-    expect(controller.requestLine()).toEqual({ path: '/users/1', method: 'GET' })
+    expect({ path: controller.request.path, method: controller.request.method }).toEqual({ path: '/users/1', method: 'GET' })
   })
 
   it('installs the runtime classes themselves, so instanceof agrees with the framework', async () => {
@@ -616,24 +602,9 @@ describe('createControllerModuleMock', () => {
 
 /**
  * Runtime-versus-mock table for the response and field helpers: each row runs one action
- * through a booted `Application.fetch()` controller and a mocked one, which must answer the
- * same. The rows are the helpers a hand-written mock once lacked or restated (`redirect()`
- * dropped `headers`; `accepted()`, `only()`, `except()`, `has()`, `query()` were missing; an
- * issue-less schema failure was a 422 where the runtime throws a TypeError).
+ * through a booted `Application.fetch()` controller and a mocked one, which must agree.
  */
 describe('controller helper parity', () => {
-  interface HelperSurface {
-    redirect(url: string, options?: { status?: number; headers?: HeadersInit }): Response
-    accepted(data?: unknown, init?: ResponseInit): Response
-    only(...keys: string[]): Promise<Record<string, unknown>>
-    except(...keys: string[]): Promise<Record<string, unknown>>
-    has(key: string): Promise<boolean>
-    query(key: string, defaultValue?: string): string | undefined
-    validateBody(schema: unknown): Promise<unknown>
-    validateBodySafe(schema: unknown): Promise<unknown>
-    readonly locale: string
-  }
-
   const jsonBody = (body: unknown): RequestInit => ({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -642,7 +613,7 @@ describe('controller helper parity', () => {
 
   const issueless = { safeParse: () => ({ success: false as const, error: {} }) }
 
-  const ROWS: Array<{ name: string; query?: string; init?: RequestInit; act: (c: HelperSurface) => unknown }> = [
+  const ROWS: Array<{ name: string; query?: string; init?: RequestInit; act: (c: ControllerSurface) => unknown }> = [
     { name: 'redirect() sends extra headers', act: (c) => c.redirect('/to', { headers: { 'X-Trace': '1' } }) },
     { name: 'redirect() answers 303 after a POST', init: jsonBody({}), act: (c) => c.redirect('/to') },
     { name: 'accepted() with data', act: (c) => c.accepted({ queued: true }) },
@@ -658,9 +629,10 @@ describe('controller helper parity', () => {
     { name: 'locale without i18n', act: (c) => c.locale },
   ]
 
+  /** The row index travels in the URL, so one booted route serves every row. */
   function urlFor(index: number): string {
-    const row = ROWS[index]
-    return `http://example.com/helpers?row=${index}${row.query ? `&${row.query}` : ''}`
+    const { query } = ROWS[index]
+    return `http://example.com/helpers?row=${index}${query ? `&${query}` : ''}`
   }
 
   /** Responses and throws cannot cross the JSON hop, so both sides compare this shape. */
@@ -676,48 +648,37 @@ describe('controller helper parity', () => {
     }
   }
 
-  async function readThroughMock(index: number): Promise<unknown> {
-    const { Controller } = createControllerModuleMock()
+  let runtimeApp: Promise<{ fetch: (request: Request) => Response | Promise<Response> }> | undefined
 
-    class HelperController extends Controller {
-      run() {
-        return outcome(() => ROWS[index].act(this as unknown as HelperSurface))
+  function bootRuntime() {
+    runtimeApp ??= import('@guren/core').then(async ({ Controller, createApp }) => {
+      class HelperController extends Controller {
+        async run() {
+          const row = ROWS[Number(this.query('row'))]
+          return this.json(await outcome(() => row.act(this as unknown as ControllerSurface)))
+        }
       }
-    }
 
-    const controller = new HelperController()
-    controller.setContext(createControllerContext(urlFor(index), ROWS[index].init))
+      const app = createApp({
+        routes: (router) => {
+          router.get('/helpers', [HelperController, 'run'])
+          router.post('/helpers', [HelperController, 'run'])
+        },
+      })
+      await app.boot()
 
-    return controller.run()
-  }
-
-  async function readThroughRuntime(index: number): Promise<unknown> {
-    const { Controller, createApp } = await import('@guren/core')
-
-    class HelperController extends Controller {
-      async run() {
-        return this.json(await outcome(() => ROWS[index].act(this as unknown as HelperSurface)))
-      }
-    }
-
-    const app = createApp({
-      routes: (router) => {
-        router.get('/helpers', [HelperController, 'run'])
-        router.post('/helpers', [HelperController, 'run'])
-      },
+      return app
     })
-    await app.boot()
 
-    const response = await app.fetch(new Request(urlFor(index), ROWS[index].init))
-    expect(response.status).toBe(200)
-
-    return response.json()
+    return runtimeApp
   }
 
-  it.each(ROWS.map((row, index) => ({ name: row.name, index })))('agrees on $name', async ({ index }) => {
-    const fromRuntime = await readThroughRuntime(index)
+  it.each(ROWS.map((row, index) => ({ ...row, index })))('agrees on $name', async ({ index, init, act }) => {
+    const response = await (await bootRuntime()).fetch(new Request(urlFor(index), init))
+    expect(response.status).toBe(200)
+    const fromRuntime = await response.json()
 
-    expect(await readThroughMock(index)).toEqual(fromRuntime)
+    expect(await outcome(() => act(mockSurface(createControllerContext(urlFor(index), init))))).toEqual(fromRuntime)
   })
 })
 
@@ -838,7 +799,7 @@ describe('repeated form fields', () => {
 
     const controller = new ReadController()
     controller.setContext(
-      createControllerContext('http://example.com/posts', init) as unknown as ControllerContext
+      createControllerContext('http://example.com/posts', init)
     )
 
     return controller.read()
@@ -968,7 +929,7 @@ describe('repeated query parameters', () => {
   it('validateQuery()/validateQuerySafe() see repeated keys as arrays in the mock and the runtime', async () => {
     const fromRuntime = await readThroughRuntime()
     const fromMock = readThroughMock(
-      createControllerContext(URL_UNDER_TEST) as unknown as ControllerContext
+      createControllerContext(URL_UNDER_TEST)
     )
 
     expect(fromRuntime).toEqual({ validateQuery: EXPECTED, validateQuerySafe: EXPECTED })
@@ -986,7 +947,7 @@ describe('repeated query parameters', () => {
 
     const fromRuntime = await readThroughRuntime(url)
     const fromMock = readThroughMock(
-      createControllerContext(url) as unknown as ControllerContext
+      createControllerContext(url)
     )
 
     const expected = Object.fromEntries([
@@ -998,24 +959,6 @@ describe('repeated query parameters', () => {
     expect(Object.getPrototypeOf(fromMock.validateQuery as object)).toBe(Object.prototype)
     expect(fromMock).toEqual({ validateQuery: expected, validateQuerySafe: expected })
     expect(fromMock).toEqual(fromRuntime)
-  })
-
-  it('honors a queries() override that reads `this`', () => {
-    // An override may legitimately read `this.url`, so the receiver has to
-    // survive: passing the bare `ctx.req.queries` reference re-`this`es it.
-    const full = createControllerContext(URL_UNDER_TEST)
-    const withThisOverride = {
-      ...full,
-      req: {
-        ...full.req,
-        queries(this: { url: string }) {
-          const params = new URL(this.url).searchParams
-          return Object.fromEntries([...params.keys()].map((key) => [key, params.getAll(key)]))
-        },
-      },
-    } as unknown as ControllerContext
-
-    expect(readThroughMock(withThisOverride).validateQuery).toEqual(EXPECTED)
   })
 
   it('reads back the first occurrence from the mock context, as Hono does', () => {
@@ -1122,7 +1065,7 @@ describe('body content-type recognition', () => {
 
     const controller = new ReadController()
     controller.setContext(
-      createControllerContext('http://example.com/posts', init) as unknown as ControllerContext
+      createControllerContext('http://example.com/posts', init)
     )
 
     return controller.read()
@@ -1213,7 +1156,7 @@ describe('body content-type recognition', () => {
     const init = urlencoded('Application/X-WWW-Form-Urlencoded')
 
     const fromMock = await createGurenControllerModule().parseRequestPayload(
-      createControllerContext('http://example.com/posts', init) as unknown as ControllerContext
+      createControllerContext('http://example.com/posts', init)
     )
 
     const { Controller, createApp } = await import('@guren/core')
@@ -1266,7 +1209,7 @@ describe('body content-type recognition', () => {
 
     const mockController = new MockUploadController()
     mockController.setContext(
-      createControllerContext('http://example.com/uploads', init) as unknown as ControllerContext
+      createControllerContext('http://example.com/uploads', init)
     )
     const fromMock = await mockController.upload()
 
@@ -1462,8 +1405,7 @@ describe('request body parity', () => {
     },
   ]
 
-  /** Narrowed to the two fields it reads, so `readMultipart()` cases below can
-   * call it without padding out a whole row. */
+  /** Narrowed to the two fields it reads, so body rows and upload rows share it. */
   function initFor(testCase: Pick<BodyCase, 'contentType' | 'body'>): RequestInit {
     return {
       method: 'POST',
@@ -1483,7 +1425,7 @@ describe('request body parity', () => {
 
     const controller = new ReadController()
     controller.setContext(
-      createControllerContext(URL_UNDER_TEST, initFor(testCase)) as unknown as ControllerContext,
+      createControllerContext(URL_UNDER_TEST, initFor(testCase)),
     )
 
     return controller.read()
@@ -1542,9 +1484,8 @@ describe('request body parity', () => {
 
   /**
    * The runtime boxes its parse (`Controller.getRawBody`), so two reads in one
-   * action get the same object; re-parsing hands out two, and a schema that
-   * mutates what it validates then sees a different body on the second read.
-   * Identity is the probe, and every row above reads each request once.
+   * action get the same object, and a schema that mutates what it validates sees
+   * its own change on the second read. Every row above reads each request once.
    */
   it('hands both reads of one body the same object, as the runtime does', async () => {
     const init: RequestInit = {
@@ -1563,7 +1504,7 @@ describe('request body parity', () => {
 
     const controller = new TwiceController()
     controller.setContext(
-      createControllerContext(URL_UNDER_TEST, init) as unknown as ControllerContext,
+      createControllerContext(URL_UNDER_TEST, init),
     )
 
     expect(await controller.read()).toBe(true)
@@ -1698,7 +1639,7 @@ describe('request body parity', () => {
       createControllerContext(
         UPLOADS_URL_UNDER_TEST,
         initFor(testCase),
-      ) as unknown as ControllerContext,
+      ),
     )
 
     return controller.read()

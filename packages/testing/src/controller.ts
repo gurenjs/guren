@@ -1,5 +1,5 @@
 import { HonoRequest } from 'hono/request'
-import type { Context, InertiaOptions, InertiaResponse, ResolvedSharedInertiaProps } from '@guren/server'
+import type { Context, InertiaResponse, ResolvedSharedInertiaProps } from '@guren/server'
 import {
   asRecord,
   parseRequestBody,
@@ -10,14 +10,18 @@ import {
 import {
   AuthenticationException,
   Controller as RuntimeController,
+  type InertiaPageContractLike,
+  type InertiaResponseOptions,
   JsonResource,
   Resource,
   ServiceProvider,
   ValidationException,
+  acceptsJson,
   collect,
   defineModule,
   definePlugin,
   formatValidationErrors,
+  serializePage,
 } from '@guren/server/internal/testing'
 
 const HTML_DECODE_ENTITIES: Record<string, string> = {
@@ -31,6 +35,7 @@ export interface ControllerContext {
   var?: {
     container?: {
       make: <T = unknown>(key: string) => T
+      has?: (key: string) => boolean
     }
     [key: string]: unknown
   }
@@ -40,12 +45,11 @@ export interface ControllerContext {
     url: string
     method: string
     query: (key?: string) => string | undefined | Record<string, string>
-    queries?: () => Record<string, string[]>
-    param?: (key?: string) => string | Record<string, string> | undefined
+    queries: () => Record<string, string[]>
+    param: (key?: string) => string | Record<string, string> | undefined
     header: (name: string) => string | undefined
-    // What the runtime's body and upload reads call; a context without them has no body.
-    json?: HonoRequest['json']
-    parseBody?: HonoRequest['parseBody']
+    json: HonoRequest['json']
+    parseBody: HonoRequest['parseBody']
   }
   get: (key: string) => unknown
   set: (key: string, value: unknown) => void
@@ -82,8 +86,11 @@ export function createControllerContext(
   const request = new Request(url, init)
   const parsedUrl = new URL(request.url)
   const store = new Map<string, unknown>(Object.entries(contextValues))
+  // Context values double as bindings. An unbound key is `undefined` rather than the
+  // Container's throw; `has()` is what lets `gate` or `i18n` seeded here resolve.
   const container = {
     make: <T = unknown>(key: string) => store.get(key) as T,
+    has: (key: string) => store.has(key),
   }
 
   // One HonoRequest per request, as a live one has: its body cache is what lets
@@ -100,8 +107,8 @@ export function createControllerContext(
     // Hono answers `{}` on a route with no parameters, and `validateParams()` hands it on as is.
     param: () => ({}),
     header: (name: string) => request.headers.get(name) ?? undefined,
-    json: (() => honoRequest.json()) as HonoRequest['json'],
-    parseBody: ((options?: Parameters<HonoRequest['parseBody']>[0]) => honoRequest.parseBody(options)) as HonoRequest['parseBody'],
+    json: honoRequest.json.bind(honoRequest),
+    parseBody: honoRequest.parseBody.bind(honoRequest),
   }
 
   return {
@@ -135,27 +142,17 @@ function loadServer(): Promise<ServerModule> {
   return serverModulePromise
 }
 
-/** The runtime's body read, over a hand-built context that carries no `json()` of its own. */
-function requestBodyContext(ctx: ControllerContext): RequestBodyContext {
-  return ctx.req.json && ctx.req.parseBody
-    ? (ctx as unknown as RequestBodyContext)
-    : { req: new HonoRequest(ctx.req.raw) }
-}
-
-type InertiaPage = { id: string; component?: string }
-
-type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request' | 'container'> & { url?: string }
-
 /**
- * The Inertia protocol without a booted app: no shared props, root document or
- * asset manifest, which is why the mock keeps it rather than the runtime's engine.
+ * The Inertia response without a booted app: no shared props, root document, asset
+ * version or SSR, which is why the mock keeps it. The JSON-or-HTML choice and the
+ * payload escaping are the engine's own.
  */
 function renderInertia(
   request: Request,
-  componentOrPage: string | InertiaPage,
+  componentOrPage: string | InertiaPageContractLike,
   props: Record<string, unknown>,
   options: InertiaResponseOptions,
-): Response {
+): InertiaResponse<string, Record<string, unknown>> {
   const component =
     typeof componentOrPage === 'string'
       ? componentOrPage
@@ -165,39 +162,29 @@ function renderInertia(
     const { pathname, search } = new URL(request.url)
     url = `${pathname}${search}`
   }
-  const status = options.status ?? 200
   const payload: InertiaPayload = {
     component,
     props,
     url,
     version: options.version,
   }
+  const serialized = serializePage(payload)
+  const prefersJson = request.headers.has('X-Inertia') || acceptsJson(request)
 
-  const prefersJson =
-    request.headers.get('X-Inertia') === 'true' ||
-    (request.headers.get('Accept') ?? '').toLowerCase().includes('json')
-
-  if (prefersJson) {
-    return new Response(JSON.stringify(payload), {
-      status,
+  const response = new Response(
+    prefersJson ? serialized : `<script data-page="app" type="application/json">${serialized}</script><div id="app"></div>`,
+    {
+      status: options.status ?? 200,
       headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        Vary: 'Accept',
+        'Content-Type': prefersJson ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
         'X-Inertia': 'true',
+        Vary: 'Accept',
+        ...options.headers,
       },
-    })
-  }
-
-  const serialized = JSON.stringify(payload).replace(/</gu, '\\u003c')
-
-  return new Response(`<script data-page="app" type="application/json">${serialized}</script><div id="app"></div>`, {
-    status,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      Vary: 'Accept',
-      'X-Inertia': 'true',
     },
-  })
+  )
+
+  return Object.assign(response, { __gurenInertia: { component, props } })
 }
 
 export function createGurenControllerModule() {
@@ -235,11 +222,11 @@ export function createGurenControllerModule() {
     }
 
     inertia(
-      componentOrPage: string | InertiaPage,
+      componentOrPage: string | { id: string; component?: string },
       props: Record<string, unknown>,
-      options: InertiaResponseOptions = {},
+      options: Record<string, unknown> = {},
     ): Response {
-      return renderInertia(this.ctx.req.raw, componentOrPage, props, options)
+      return renderInertia(this.ctx.req.raw, componentOrPage, props, options as InertiaResponseOptions)
     }
 
     /**
@@ -274,7 +261,7 @@ export function createGurenControllerModule() {
       return loadedServer.viteAsset(entry, options)
     },
     parseRequestPayload: async (ctx: ControllerContext) =>
-      asRecord(await parseRequestBody(requestBodyContext(ctx))),
+      asRecord(await parseRequestBody(ctx as unknown as RequestBodyContext)),
     formatValidationErrors,
   }
 }
@@ -286,13 +273,14 @@ export function createGurenControllerModule() {
  * class, which is what lets it keep its private members (TS4094).
  */
 class TestController extends RuntimeController {
-  // Takes the context `createControllerContext()` is typed as, too. `make()` resolves
-  // from its `var.container`; an unbound key is `undefined` rather than the Container's throw.
+  // Also takes the context `createControllerContext()` is typed as, whose container
+  // stands in for the one the router would pass to `setContainer()`.
   override setContext(context: Context | ControllerContext): void {
     super.setContext(context as unknown as Context)
-    this.setContainer({
-      make: (key) => (context as unknown as ControllerContext).var?.container?.make(key),
-    })
+    const container = (context as ControllerContext).var?.container
+    if (container) {
+      this.setContainer(container)
+    }
   }
 
   protected override inertia<Component extends string, Props extends Record<string, unknown>>(
@@ -300,19 +288,17 @@ class TestController extends RuntimeController {
     props: Props,
     options?: InertiaResponseOptions,
   ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>>
-  protected override inertia<TPage extends InertiaPage & { __props?: Record<string, unknown> }>(
+  protected override inertia<TPage extends InertiaPageContractLike>(
     page: TPage,
     props: NonNullable<TPage['__props']>,
     options?: InertiaResponseOptions,
   ): Promise<InertiaResponse<TPage['id'], NonNullable<TPage['__props']> & ResolvedSharedInertiaProps>>
   protected override async inertia(
-    componentOrPage: string | InertiaPage,
+    componentOrPage: string | InertiaPageContractLike,
     props: Record<string, unknown>,
     options: InertiaResponseOptions = {},
   ): Promise<Response> {
-    const response = renderInertia(this.ctx.req.raw, componentOrPage, props, options)
-    const component = typeof componentOrPage === 'string' ? componentOrPage : componentOrPage.component ?? componentOrPage.id
-    return Object.assign(response, { __gurenInertia: { component, props } })
+    return renderInertia(this.ctx.req.raw, componentOrPage, props, options)
   }
 }
 
