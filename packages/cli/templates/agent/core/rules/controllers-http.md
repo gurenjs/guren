@@ -10,7 +10,17 @@ Controllers extend `Controller` and expose one async method per route action.
 
 ## Validation — exact signatures
 
-Any Zod-like schema (anything with `safeParse`) is accepted:
+A route declaring `params`, `query` or `body` schemas is validated before the
+action runs (422 on failure, same errors shape as below). Read the parsed values
+instead of validating again:
+
+```typescript
+protected validated(): { params; query; body }                          // untyped
+protected validated<N extends ContractRouteName>(route: N): ValidatedInput<N>  // typed after codegen
+// const { body } = this.validated('posts.store'); an undeclared segment is undefined
+```
+
+For a route without a contract, any Zod-like schema (anything with `safeParse`) is accepted:
 
 ```typescript
 protected async validateBody<T>(schema: ZodLikeSchema<T>): Promise<T>   // request body

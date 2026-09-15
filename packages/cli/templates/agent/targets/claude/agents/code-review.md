@@ -38,7 +38,7 @@ the change was supposed to do.
 ## Checklist
 
 ### Validation on every mutating route
-- [ ] Each POST/PUT/PATCH action calls `this.validateBody(schema)`, and the same schema sits on the route as `body:` so codegen types the form (DELETE carries no body)
+- [ ] Each POST/PUT/PATCH route declares its schema as `body:` (validated with 422 before the action runs, and what codegen types the form from), and the action reads it with `this.validated('route.name').body` instead of validating again. A route without a `body:` schema calls `this.validateBody(schema)` (DELETE carries no body)
 - [ ] Query strings go through `this.validateQuery` (`?page=` included); path parameters through `this.validateParams` or a route `bind:`
 - [ ] The schema lives in `app/Http/Validators/` and is shared by route, controller and page — not re-declared with different messages in two places
 - [ ] Messages are what a user should read, not `Invalid input`

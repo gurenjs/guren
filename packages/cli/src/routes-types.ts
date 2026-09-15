@@ -1,4 +1,5 @@
 import { relative, resolve } from 'node:path'
+import type { RouteDefinition as ServerRouteDefinition } from '@guren/core'
 import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import {
@@ -13,7 +14,7 @@ export type RouteDefinition = {
   method: string
   path: string
   name?: string
-  schemas?: { params?: unknown; query?: unknown; body?: unknown }
+  schemas?: ServerRouteDefinition['schemas']
 }
 
 export interface GenerateRouteTypesOptions extends WriterOptions {
