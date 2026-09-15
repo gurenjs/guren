@@ -100,6 +100,8 @@ export type { DatabaseSessionStoreOptions } from './session-store.js'
 export { createSessionManager, registerDatabaseSessionDriver } from './session-manager.js'
 export { SessionsPruneCommand } from './session-prune-command.js'
 export type { DatabaseSessionDriverOptions } from './session-manager.js'
+// Importing this module is what augments `ConfigDefinitions` with `session`.
+export { defineSessionConfig } from './config.js'
 export { DatabaseOAuthStateStore } from './oauth-state-store.js'
 // Attachments (RFC 0013) — core-native exports; no bare `Attachment` (it
 // would collide with the mail/notification/Slack attachment vocabulary).

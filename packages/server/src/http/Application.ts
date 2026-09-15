@@ -35,6 +35,7 @@ import { CONTAINER_CONTEXT_KEY } from './request-container'
 import type { InertiaDocumentOptions, InertiaSsrRenderer } from '../mvc/inertia/InertiaEngine'
 import { shareInertiaProps, type SharedInertiaPropsResolver } from '../mvc/inertia/shared'
 import type { EnvSchema } from '../config/env'
+import type { ConfigDefinition } from '../config/define'
 import { ConfigServiceProvider } from '../providers/ConfigServiceProvider'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
@@ -436,6 +437,11 @@ export interface ApplicationOptions {
   readonly inertia?: InertiaApplicationOptions
   /** The schema `config/env.ts` exports, validated at boot and bound as `env` (RFC 0027 §1). */
   readonly env?: EnvSchema
+  /**
+   * The definitions `config/*.ts` export, resolved against `env` and bound before
+   * any provider registers (RFC 0027 §2). One definition per key.
+   */
+  readonly config?: ReadonlyArray<ConfigDefinition>
 }
 
 export interface InertiaApplicationOptions {
@@ -564,7 +570,7 @@ export class Application {
     }
 
     // Must stay the first provider registered (RFC 0027 §3).
-    if (options.env) {
+    if (options.env || options.config?.length) {
       this.providerManager.register(ConfigServiceProvider)
     }
 
@@ -645,6 +651,10 @@ export class Application {
 
   get envSchema(): EnvSchema | undefined {
     return this.options.env
+  }
+
+  get configDefinitions(): ReadonlyArray<ConfigDefinition> {
+    return this.options.config ?? []
   }
 
   markAutoSessionAttached(): void {
@@ -789,6 +799,12 @@ export class Application {
   }
 
   private async bootOnce(): Promise<void> {
+    if (this.options.hostAuthorization !== undefined && this.hasHttpConfig()) {
+      throw new Error(
+        '[guren] Host authorization is configured twice: createApp({ hostAuthorization }) and config/http.ts. Keep one.',
+      )
+    }
+
     await this.providerManager.registerAll()
 
     await this.options.boot?.(this.hono)
@@ -846,11 +862,42 @@ export class Application {
   }
 
   private mountHostAuthorization(): void {
+    if (this.hasHttpConfig()) {
+      this.mountConfiguredHostAuthorization()
+      return
+    }
+
     const { hostAuthorization } = this.options
 
     if (hostAuthorization === false || !hostAuthorization) return
 
     this.hono.use('*', createHostAuthorizationMiddleware(hostAuthorization))
+  }
+
+  /**
+   * Holds host authorization's place ahead of every app middleware while its
+   * options wait for `defineHttpConfig()` to resolve at boot (RFC 0027 §5), the
+   * placeholder shape AuthServiceProvider uses for sessions. Unbound means not
+   * booted, and an unchecked request is refused rather than passed.
+   */
+  private mountConfiguredHostAuthorization(): void {
+    const container = this.container
+    let middleware: MiddlewareHandler | undefined
+
+    this.hono.use('*', (ctx, next) => {
+      if (!middleware) {
+        if (!container.has('http.hostAuthorization')) {
+          return Promise.resolve(ctx.text('Service Unavailable: the application has not booted', 503))
+        }
+        const options = container.make('http.hostAuthorization')
+        middleware = options ? createHostAuthorizationMiddleware(options) : (_ctx, pass) => pass()
+      }
+      return middleware(ctx, next)
+    })
+  }
+
+  private hasHttpConfig(): boolean {
+    return this.configDefinitions.some((definition) => definition.key === 'http')
   }
 
   /**
