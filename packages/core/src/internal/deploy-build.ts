@@ -149,15 +149,24 @@ export function importSpecifier(fromDir: string, target: string, label: string):
   return specifier.startsWith('.') ? specifier : `./${specifier}`
 }
 
+/**
+ * The URL prefix built client assets are addressed by: the Vite `base` the Guren
+ * plugin derives from `outDir: 'public/assets'`, which its modulepreload helper
+ * prefixes. Must equal `PUBLIC_ASSETS_URL_PREFIX` in @guren/server's
+ * http/vite-manifest.ts; an entry under another prefix loads every lazy chunk
+ * twice, once per URL. `deploy-build.test.ts` pins it against the Vite plugin.
+ */
+export const CLIENT_ASSETS_URL_PREFIX = '/public/assets/'
+
 export interface ClientAssetEnv {
   entry?: string
   styles?: string
 }
 
 /**
- * Locate the built client entry and its CSS in the Vite client manifest, as the
- * `/assets/`-prefixed URLs the Inertia head expects. Takes the public directory so
- * a custom `publicDir` is honoured.
+ * Locate the built client entry and its CSS in the Vite client manifest, as
+ * `CLIENT_ASSETS_URL_PREFIX` URLs for the Inertia head. Takes the public directory
+ * so a custom `publicDir` is honoured.
  * @param label Platform name for the warning message, e.g. `'Lambda build'`.
  */
 export function resolveClientAssetEnv(
@@ -176,8 +185,10 @@ export function resolveClientAssetEnv(
   }
 
   return {
-    entry: `/assets/${entry.file}`,
-    styles: entry.css?.length ? entry.css.map((file) => `/assets/${file}`).join(',') : undefined,
+    entry: `${CLIENT_ASSETS_URL_PREFIX}${entry.file}`,
+    styles: entry.css?.length
+      ? entry.css.map((file) => `${CLIENT_ASSETS_URL_PREFIX}${file}`).join(',')
+      : undefined,
   }
 }
 
@@ -287,10 +298,10 @@ export function removeShadowingIndex(assetsOut: string): void {
 }
 
 /**
- * Copy `public/` into a platform's static staging directory. Built assets
- * self-reference `/public/assets/` while HTML uses `/assets/`, so on a host without
- * rewrites the assets directory must appear under both prefixes. Also applies
- * `removeShadowingIndex`.
+ * Copy `public/` into a platform's static staging directory, mirroring the built
+ * assets under `CLIENT_ASSETS_URL_PREFIX`: a host without rewrites has no other
+ * way to answer the URLs the HTML and the chunks use. The top-level `assets/` copy
+ * rides along with `public/`. Also applies `removeShadowingIndex`.
  */
 export function stageStaticAssets(publicDir: string, assetsOut: string): void {
   mkdirSync(assetsOut, { recursive: true })

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   appUsesMcpPlugin,
   assertOutputDirOutsideRoot,
+  CLIENT_ASSETS_URL_PREFIX,
   clientManifestJson,
   DATABASE_FACTORIES,
   MCP_TRANSPORT_SPECIFIER,
@@ -18,9 +19,11 @@ import {
   importSpecifier,
   MCP_SDK_SUBPATH_PREFIX,
   readManifest,
+  resolveClientAssetEnv,
   resolvePathLike,
   ssrRuntimePaths,
 } from './deploy-build'
+import gurenVitePlugin from '../vite'
 
 describe('assertOutputDirOutsideRoot', () => {
   test('should accept an output directory below the app root', () => {
@@ -154,6 +157,36 @@ describe('readManifest', () => {
 
   test('should return undefined when nothing is found', () => {
     expect(readManifest(join(dir, 'a.json'), join(dir, 'b.json'))).toBeUndefined()
+  })
+})
+
+describe('resolveClientAssetEnv', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'guren-client-asset-env-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('should address the entry and styles under the base the Vite plugin builds chunks with', () => {
+    // The bundled modulepreload helper prefixes this base. An entry under any other
+    // prefix makes the browser fetch every lazily loaded chunk twice, once per URL.
+    const viteConfig: { base?: string } = {}
+    gurenVitePlugin().config(viteConfig, { command: 'build', mode: 'production' })
+    mkdirSync(join(dir, 'assets/.vite'), { recursive: true })
+    writeFileSync(
+      join(dir, 'assets/.vite/manifest.json'),
+      JSON.stringify({ 'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] } }),
+    )
+
+    expect(viteConfig.base).toBe(CLIENT_ASSETS_URL_PREFIX)
+    expect(resolveClientAssetEnv(dir, 'resources/js/app.tsx', 'Test build')).toEqual({
+      entry: `${viteConfig.base}app-Abc123.js`,
+      styles: `${viteConfig.base}app-Def456.css`,
+    })
   })
 })
 

@@ -253,8 +253,8 @@ export class GurenLambdaApp extends Construct {
         ],
       }
 
-      // Both prefixes exist in the staged assets: HTML references /assets/*,
-      // built chunks self-reference /public/assets/*.
+      // HTML and built chunks both address /public/assets/*, the mirror
+      // `stageStaticAssets` writes; /assets/* is the same files staged with public/.
       const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {
         '/assets/*': assetBehavior,
         '/public/*': assetBehavior,
