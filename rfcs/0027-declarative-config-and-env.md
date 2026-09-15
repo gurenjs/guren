@@ -118,6 +118,10 @@ reads the merged result with dot syntax. After `php artisan config:cache`, the
 is how Laravel enforces "env is read in one place". There is no schema: a
 missing variable is `null` and the default argument is the only guard.
 
+Adonis's example schema includes `NODE_ENV`. Guren's cannot: four variable
+families stay raw `process.env` reads because bundle-time `--define` gates depend
+on the exact expression (§1, "Variables that stay raw `process.env` reads").
+
 What Guren takes: Adonis's schema and boot-time validation, Adonis's
 "the owning package defines the config type and its provider reads it", and
 Laravel's rule that env is read by config definitions and nowhere else. What it
@@ -653,14 +657,17 @@ Nothing is removed and nothing is deprecated, so no app has to change.
 1. **`.requiredInProduction()` or a general `.requiredWhen(predicate)`.** The
    predicate form covers staging-only keys, but a predicate over the raw
    environment is exactly the unvalidated read this RFC removes, and it cannot
-   be folded by `--define`. Leaning: ship only the production form; revisit on a
-   concrete second case.
+   be folded by `--define`.
+   **Decision:** ship only `.requiredInProduction()`. A predicate form needs its
+   own proposal, with a concrete second case.
 2. **Regenerating a hand-edited `.env.example`.** §7 keeps existing lines and
    appends, so a comment the app wrote survives and a stale `describe()` text is
    never updated. An ownership marker (`# guren:env-example start`) would let the
-   generator own a block. Leaning: no marker until an app asks for rewritten
-   comments.
+   generator own a block.
+   **Decision:** no marker. `guren env:example` appends and reports, as §7
+   describes; a marker is added only if an app asks for rewritten comments.
 3. **Typed access outside providers.** `this.make('env')` in a controller is
    typed through `AppEnv`, but it returns the whole object. Should `Controller`
-   gain `this.env` as a shorthand? Leaning: no; controllers reading env directly
-   is the pattern §2 moves into config.
+   gain `this.env` as a shorthand?
+   **Decision:** no. A controller reading env directly is the pattern §2 moves
+   into config, and a shorthand would invite it.
