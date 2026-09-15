@@ -341,10 +341,6 @@ export function createControllerModuleMock() {
         }
       }
 
-      if (Object.keys(errors).length === 0) {
-        errors.message = 'The given data was invalid.'
-      }
-
       return { success: false, errors }
     }
 
