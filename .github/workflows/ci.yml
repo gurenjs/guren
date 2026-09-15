@@ -93,8 +93,12 @@ jobs:
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
+      # Full history: the import floor audit reads each release's exports from
+      # the commit that versioned it.
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       # setup-bun + exact-match dist cache + install + build-on-miss.
       # The cache key and its stale-dist rationale live in the action.
@@ -140,6 +144,11 @@ jobs:
       # the core it ships beside while the workspace symlink keeps CI green.
       - name: Plugin compatibility audit
         run: bun run audit:plugin-compat
+
+      # A floor admitting a release whose subpath lacks an imported name breaks
+      # the dependent at link time, and changesets never raises an in-range peer.
+      - name: Import floor audit
+        run: bun run audit:import-floors
 
       # `changeset version` never promotes a dependent bump to match its
       # dependency, and @guren/core re-exports @guren/server wholesale — which is
