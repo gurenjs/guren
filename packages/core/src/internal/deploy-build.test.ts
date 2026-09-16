@@ -427,9 +427,8 @@ describe('DEV_ONLY_MODULES', () => {
     }
   })
 
-  test('should carry the transport entry the App MCP endpoint needs', () => {
-    // Dropped by specifier: an upstream rename would drop nothing and leave the
-    // endpoint stubbed.
+  test('should carry the transport entry committed wrangler configs still alias', () => {
+    // Its stub file must keep being written until RFC 0028's removal PR.
     expect(DEV_ONLY_MODULES.map((module) => module.specifier)).toContain(MCP_TRANSPORT_SPECIFIER)
   })
 })
@@ -548,17 +547,34 @@ describe('the module graph this list describes', () => {
     return sourcesUnder(root).filter((file) => {
       const transpiler = new Bun.Transpiler({ loader: file.endsWith('.tsx') ? 'tsx' : 'ts' })
       return transpiler
-        .scanImports(readFileSync(file, 'utf8'))
+        // A CLI entry's shebang is not TypeScript, and the scan rejects it.
+        .scanImports(readFileSync(file, 'utf8').replace(/^#!.*/, ''))
         .some((entry) => entry.path === specifier)
     })
   }
 
+  const imported = DEV_ONLY_MODULES.flatMap((module) =>
+    module.importedBy === null ? [] : [{ ...module, importedBy: module.importedBy }],
+  )
+
   // Per entry, and only inside the package the entry is listed for: searching every
   // package would let one package's import keep another's stale entry alive.
-  test.each([...DEV_ONLY_MODULES])(
+  test.each(imported)(
     'should still be imported by the package it is listed for: $specifier',
     (module) => {
       expect(importersOf(module.specifier, module.importedBy)).not.toEqual([])
+    },
+  )
+
+  // The other direction for an entry kept with no importer: a package that starts
+  // importing it again must name itself, or the stub would silently govern it.
+  test.each(DEV_ONLY_MODULES.filter((module) => module.importedBy === null))(
+    'should be imported by no package when listed without an importer: $specifier',
+    (module) => {
+      const packages = readdirSync(join(repoRoot, 'packages')).filter((name) =>
+        existsSync(join(repoRoot, 'packages', name, 'src')),
+      )
+      expect(packages.flatMap((name) => importersOf(module.specifier, `packages/${name}/src`))).toEqual([])
     },
   )
 
@@ -569,7 +585,7 @@ describe('the module graph this list describes', () => {
     expect(importersOf('vit', 'packages/server/src')).toEqual([])
   })
 
-  test.each(DEV_ONLY_MODULES.filter((module) => module.exportNames.length > 0))(
+  test.each(imported.filter((module) => module.exportNames.length > 0))(
     'should name exports the importer actually destructures: $specifier',
     (module) => {
       // A wrong name still renders a stub and fails only at bundle time with "no

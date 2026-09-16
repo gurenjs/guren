@@ -10,6 +10,7 @@ const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Respons
 /** Markers the fake SDK exports, so a test can tell "resolved" from "stubbed". */
 const SDK_SERVER_INDEX_MARKER = 'fake-sdk-server-index'
 const SDK_TRANSPORT_MARKER = 'fake-sdk-transport'
+const SDK_V2_SERVER_MARKER = 'fake-sdk-v2-server'
 
 /**
  * An entrypoint importing both SDK subpaths and reporting what it got.
@@ -42,6 +43,16 @@ function installFakeMcpSdk(root: string): void {
     `export const WebStandardStreamableHTTPServerTransport = '${SDK_TRANSPORT_MARKER}'\n`,
     'utf8',
   )
+
+  // SDK v2, the root `@guren/plugin-mcp` imports (RFC 0028 §3).
+  const v2 = join(root, 'node_modules/@modelcontextprotocol/server')
+  mkdirSync(v2, { recursive: true })
+  writeFileSync(
+    join(v2, 'package.json'),
+    JSON.stringify({ name: '@modelcontextprotocol/server', version: '2.0.0', type: 'module', main: 'index.js' }),
+    'utf8',
+  )
+  writeFileSync(join(v2, 'index.js'), `export const createMcpHandler = '${SDK_V2_SERVER_MARKER}'\n`, 'utf8')
 }
 
 /** Writes a minimal buildable app under `root`, as `buildVercelOutput` options. */
@@ -416,10 +427,28 @@ describe('@guren/plugin-vercel', () => {
       // Two mechanisms had to stop firing, and the markers tell them apart from
       // "resolved nothing": `webStandardStreamableHttp.js` is the entry the stub
       // map releases, and `server/index.js` is one only the SDK-prefix catch-all
-      // could have stubbed — @guren/plugin-mcp imports it *statically*.
+      // could have stubbed — @guren/plugin-mcp imported it *statically* on SDK v1.
       const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
       expect(bundle).toContain(SDK_TRANSPORT_MARKER)
       expect(bundle).toContain(SDK_SERVER_INDEX_MARKER)
+      expect(bundle).not.toContain('The MCP endpoint is unavailable on Vercel')
+    })
+
+    it('bundles the SDK v2 root @guren/plugin-mcp imports', async () => {
+      // No alias or filter names `@modelcontextprotocol/server`, so neither the
+      // v1 stub map nor the v1 subpath catch-all may swallow it.
+      const app = scaffoldApp(root, {
+        source:
+          "import { createMcpHandler } from '@modelcontextprotocol/server'\n"
+          + 'export default { fetch() { return new Response(String(createMcpHandler)) } }\n',
+        mcpPlugin: true,
+      })
+      installFakeMcpSdk(root)
+
+      await buildVercelOutput(app)
+
+      const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
+      expect(bundle).toContain(SDK_V2_SERVER_MARKER)
       expect(bundle).not.toContain('The MCP endpoint is unavailable on Vercel')
     })
 

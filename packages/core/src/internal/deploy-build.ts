@@ -430,8 +430,10 @@ export interface DevOnlyModule {
    * The package source that reaches this module, repo-relative. An entry is here
    * because one package imports it, so the module-graph check searches that package
    * alone: a stale entry cannot be kept alive by an unrelated package's import.
+   * `null`: no package imports it any more, and it stays only so the stub file a
+   * committed `wrangler.jsonc` aliases keeps being written (RFC 0028 §4).
    */
-  readonly importedBy: string
+  readonly importedBy: string | null
 }
 
 /**
@@ -455,7 +457,7 @@ export const DEV_ONLY_MODULES = [
     specifier: '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js',
     kind: 'mcp',
     exportNames: ['WebStandardStreamableHTTPServerTransport'],
-    importedBy: 'packages/plugin-mcp/src',
+    importedBy: null,
   },
 ] as const satisfies readonly DevOnlyModule[]
 
@@ -463,8 +465,9 @@ export const DEV_ONLY_MODULES = [
 export type DevOnlyModuleEntry = (typeof DEV_ONLY_MODULES)[number]
 
 /**
- * The specifier `@guren/plugin-mcp` lazily imports for the App MCP endpoint (RFC
- * 0016 §7): the one `DEV_ONLY_MODULES` entry whose stubbing is conditional.
+ * The v1 transport `@guren/plugin-mcp` imported before SDK v2 (RFC 0016 §7): the
+ * one `DEV_ONLY_MODULES` entry whose stubbing is conditional. Nothing imports it
+ * now, so the condition changes no bundle; it goes in RFC 0028's removal PR.
  */
 export const MCP_TRANSPORT_SPECIFIER =
   '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
@@ -736,8 +739,9 @@ export function renderDevOnlyStub(module: DevOnlyModule, message: string): strin
 }
 
 /**
- * The MCP SDK is reached only through subpaths, which a package-name alias does not
- * cover (hence each one in `DEV_ONLY_MODULES`). A platform whose aliasing supports
- * prefixes should route unlisted subpaths under this prefix to a stub too.
+ * The v1 MCP SDK is reached only through subpaths, which a package-name alias does
+ * not cover (hence each one in `DEV_ONLY_MODULES`). A platform whose aliasing supports
+ * prefixes routes unlisted subpaths under this prefix to a stub too. SDK v2 lives
+ * under other package names, so `@guren/plugin-mcp`'s import is never matched.
  */
 export const MCP_SDK_SUBPATH_PREFIX = '@modelcontextprotocol/sdk/'

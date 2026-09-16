@@ -155,8 +155,9 @@ describe('the audit sink through the plugin', () => {
       })
       await app.boot()
 
-      await callToolOverSeam(app, { tool: 'posts.index' })
+      const result = await callToolOverSeam(app, { tool: 'posts.index' })
 
+      expect(result.isError).toBeUndefined()
       expect(records).toEqual(['posts.index'])
       expect(warn.mock.calls.flat().map(String).join('\n')).not.toContain('could not be deferred')
     } finally {

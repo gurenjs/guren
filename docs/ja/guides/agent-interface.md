@@ -371,10 +371,12 @@ app.auth.useTokens(new DatabaseApiTokenStore(apiTokens))
 export default app
 ```
 
-エンドポイントは `/mcp` にマウントされ、ステートレスな streamable HTTP を話します。リクエストごとに MCP サーバーを1つ作るので、保持すべきセッションはありません。**bearer 認証は必須**なので、アプリには [API トークン](./api-tokens.md)ストアの設定が要ります。
+エンドポイントは `/mcp` にマウントされ、ステートレスな streamable HTTP を話します。リクエストごとに MCP サーバーを1つ作るので、保持すべきセッションはありません。MCP 2026-07-28 のクライアントと、2025 年版（2025-11-25 以前）の `initialize` ハンドシェイクで接続するクライアントの両方に、同じパスで応答します。**bearer 認証は必須**なので、アプリには [API トークン](./api-tokens.md)ストアの設定が要ります。
 
 - bearer がない、または無効・期限切れ・失効している場合: MCP のフレーミングに入る前に `401` と `WWW-Authenticate: Bearer` を返します
 - トークンストアがまったく設定されていない場合: `auth.useTokens(store)` を名指しする `500` を返します。トークンを拒否したかのように見えるのではなく、設定ミスとして読めるようにするためです
+- 認証済みの `GET` または `DELETE`: 開閉するセッションのストリームがないので `405` を返します
+- 認証済みの `POST` で `Content-Type` が `application/json` でない場合: `415` を返します
 
 このエンドポイントのために CSRF の例外を書く必要はありません。`Authorization: Bearer` を持ち、`Cookie` ヘッダーをまったく持たないリクエストは、フレームワーク全体で CSRF 検証をスキップします。守るべき ambient authority がないからで、ディスパッチャは構造上 cookie を持たない bearer リクエストを組み立てます。
 
