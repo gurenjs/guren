@@ -99,6 +99,18 @@ describe('guren add cache', () => {
     expect((await checkEnvExample(process.cwd())).filter((result) => result.status === 'fail')).toEqual([])
   })
 
+  it('keeps the provider of an app that installed cache before declaring its environment', async () => {
+    await seedApp('APP_KEY=\n')
+    await runBlueprint('cache', {})
+    await mkdir('config', { recursive: true })
+    await writeFile('config/env.ts', ENV_SCHEMA_FIXTURE)
+
+    await runBlueprint('cache', {})
+
+    expect(await fileExists(process.cwd(), 'config/cache.ts')).toBe(false)
+    expect(await readFile(resolve('src/app.ts'), 'utf8')).not.toMatch(/config: \[/)
+  })
+
   it('leaves CACHE_STORE undeclared when .env.example only comments it out', async () => {
     await seedApp('APP_KEY=\n# CACHE_STORE=redis\n')
     await mkdir('config', { recursive: true })

@@ -12,7 +12,10 @@ import { writeScaffoldFiles, type WriterOptions } from './utils'
  * gets `CacheProvider`, since a definition reads only declared keys.
  */
 export async function addCache(options: WriterOptions): Promise<string[]> {
+  // An app that already has CacheProvider keeps it: a definition beside it binds
+  // 'cache' twice, which fails the boot.
   const declaresEnv = await fileExists(process.cwd(), ENV_SCHEMA_FILE)
+    && !(await fileExists(process.cwd(), 'app/Providers/CacheProvider.ts'))
 
   // Skipped per file rather than thrown, so a re-run repairs whatever is
   // missing instead of aborting on the first file that already exists.
