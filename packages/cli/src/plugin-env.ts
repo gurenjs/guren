@@ -20,6 +20,11 @@ const DEFAULT_KINDS = {
 
 export type GurenPluginEnvType = keyof typeof DEFAULT_KINDS
 
+/** Whether `type`'s builder takes the raw string an env file assigns as its `default`. */
+export function takesStringDefault(type: GurenPluginEnvType = 'string'): boolean {
+  return DEFAULT_KINDS[type] === 'string'
+}
+
 export function envDeclarationProblem(entry: GurenPluginEnvEntry): string | undefined {
   const type = entry.type ?? 'string'
   if (!Object.hasOwn(DEFAULT_KINDS, type)) {

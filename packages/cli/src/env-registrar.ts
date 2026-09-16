@@ -3,14 +3,19 @@ import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { declareEnvEntries, ENV_SCHEMA_FILE } from './app-env'
 import { readIfExists } from './discovery'
+import { takesStringDefault } from './plugin-env'
+import type { GurenPluginEnvEntry } from './plugin-manifest'
 
 const ENV_FILES = ['.env.example', '.env'] as const
 
 export interface AppendEnvEntryOptions {
   /** The value this blueprint made work; an app assigning another keeps it and is told. */
   readonly expected?: string
-  /** Also declare the key in `config/env.ts` (RFC 0027 §1), defaulting to the value `entry` assigns. */
-  readonly declare?: boolean
+  /**
+   * Also declare the key in `config/env.ts` (RFC 0027 §1). `true` declares a string
+   * defaulting to the value `entry` assigns; an object sets the builder instead.
+   */
+  readonly declare?: true | Omit<GurenPluginEnvEntry, 'key' | 'value' | 'comment'>
 }
 
 /**
@@ -59,7 +64,9 @@ export async function appendEnvEntry(key: string, entry: string, options: Append
   // which requires the example to assign every declared key.
   if (!options.declare || exampleCommentsItOut) return
 
-  const { unpatched } = await declareEnvEntries([{ key, ...(value === '' ? {} : { default: value }) }])
+  const declaration = options.declare === true ? {} : options.declare
+  const derived = value !== '' && takesStringDefault(declaration.type) ? { default: value } : {}
+  const { unpatched } = await declareEnvEntries([{ key, ...derived, ...declaration }])
   if (unpatched.length > 0) {
     consola.warn(`Could not declare ${key} in ${ENV_SCHEMA_FILE} — add it to the defineEnv({ ... }) call by hand.`)
   }

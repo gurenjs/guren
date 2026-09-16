@@ -1,9 +1,11 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { APP_FIXTURE, ENV_SCHEMA_FIXTURE, createTempWorkspace, type TempWorkspace } from './helpers'
+import { APP_FIXTURE, ENV_SCHEMA_FIXTURE, createTempWorkspace, linkWorkspaceCore, type TempWorkspace } from './helpers'
+import { checkEnvExample } from '../src/app-env'
 import { fileExists } from '../src/discovery'
 import { runBlueprint } from '../src/blueprints'
+import { loadResolvedConfig } from '../src/resolved-config'
 
 async function seedApp(env?: string): Promise<void> {
   await mkdir('src', { recursive: true })
@@ -69,6 +71,32 @@ describe('guren add cache', () => {
 
     expect(await readFile(resolve('config/env.ts'), 'utf8'))
       .toContain("CACHE_STORE: Env.string().default('memory'),")
+  })
+
+  // RFC 0027 §2: the definition binds 'cache' itself, so neither provider is wired.
+  it('writes a config/cache.ts definition an app with a schema resolves and checks clean', async () => {
+    await seedApp('APP_KEY=\n')
+    await mkdir('config', { recursive: true })
+    await writeFile('config/env.ts', ENV_SCHEMA_FIXTURE)
+    await linkWorkspaceCore(process.cwd())
+
+    const created = await runBlueprint('cache', {})
+
+    expect(created.some((file) => file.endsWith('config/cache.ts'))).toBe(true)
+    expect(await fileExists(process.cwd(), 'app/Providers/CacheProvider.ts')).toBe(false)
+    const app = await readFile(resolve('src/app.ts'), 'utf8')
+    expect(app).toContain("import cache from '../config/cache.js'")
+    expect(app).toMatch(/config: \[cache\]/)
+    expect(app).not.toContain('CacheServiceProvider')
+    expect(app).not.toContain('CacheProvider')
+
+    const resolved = await loadResolvedConfig(process.cwd())
+    expect(resolved.entries).toEqual([{
+      key: 'cache',
+      file: 'config/cache.ts',
+      config: { default: 'memory', stores: { memory: { driver: 'memory' } } },
+    }])
+    expect((await checkEnvExample(process.cwd())).filter((result) => result.status === 'fail')).toEqual([])
   })
 
   it('leaves CACHE_STORE undeclared when .env.example only comments it out', async () => {

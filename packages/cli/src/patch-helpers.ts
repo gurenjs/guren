@@ -317,29 +317,31 @@ export type InsertResult = { content: string; reason?: undefined } | { content?:
 
 /**
  * Pure, and split out for the same reason as `insertImport`: a caller adding
- * the provider's import too applies both here and writes once, so a failure
+ * the entry's import too applies both here and writes once, so a failure
  * cannot leave half the pair on disk. Splices into the array's own span rather
  * than re-joining `parseArrayEntries` output, which writes the mask back and
  * blanked an unrelated `mcpPlugin({ path: '/mcp' })` to `'    '`.
  */
-export function insertProvider(
+export function insertArrayOptionEntry(
   content: string,
-  providerName: string,
+  key: string,
+  entry: string,
   /**
-   * Defaults to exact-match against `providerName`; factory registrations pass
+   * Defaults to exact-match against `entry`; factory registrations pass
    * a prefix check so `vercelPlugin({ ... })` counts as registered. Entries
    * arrive masked, so a predicate must not test text holding a string literal.
    */
   isRegistered?: (entries: string[]) => boolean,
 ): InsertResult {
-  const match = matchInCode(content, /providers:\s*\[/)
+  const notFound = `Could not find ${key} array`
+  const match = matchInCode(content, new RegExp(`(?<![\\w$])${escapeRegExp(key)}\\s*:\\s*\\[`))
 
-  // A createApp() listing no providers gets the option written. One that sets it
-  // to a non-literal (`providers: list`) has no array to append to.
+  // A createApp() without the option gets it written. One that sets it to a
+  // non-literal (`providers: list`) has no array to append to.
   if (!match) {
-    const created = insertCallOptions(content, [{ key: 'providers', source: `[${providerName}]` }], 'createApp')
+    const created = insertCallOptions(content, [{ key, source: `[${entry}]` }], 'createApp')
     if (typeof created === 'string') return { reason: created }
-    return created.inserted.length > 0 ? { content: created.content } : { reason: PATCH_REASONS.providersArrayNotFound }
+    return created.inserted.length > 0 ? { content: created.content } : { reason: notFound }
   }
 
   // Depth-counted rather than matched to the first `]`, which a nested array
@@ -348,22 +350,32 @@ export function insertProvider(
   const close = findClosingDelimiter(content, open, '[', ']')
 
   if (close === -1) {
-    return { reason: PATCH_REASONS.providersArrayNotFound }
+    return { reason: notFound }
   }
 
   const interior = content.slice(open + 1, close)
-  const providers = parseArrayEntries(interior)
+  const entries = parseArrayEntries(interior)
 
   const alreadyRegistered = isRegistered
-    ? isRegistered(providers.map((entry) => entry.code))
-    : providers.some((entry) => entry.source === providerName)
+    ? isRegistered(entries.map((parsed) => parsed.code))
+    : entries.some((parsed) => parsed.source === entry)
   if (alreadyRegistered) {
-    return { reason: PATCH_REASONS.providerAlreadyRegistered }
+    return { reason: PATCH_REASONS.alreadyPresent }
   }
 
   return {
-    content: content.slice(0, open + 1) + appendArrayEntry(interior, providerName) + content.slice(close),
+    content: content.slice(0, open + 1) + appendArrayEntry(interior, entry) + content.slice(close),
   }
+}
+
+/** `insertArrayOptionEntry` for `createApp({ providers })`. */
+export function insertProvider(
+  content: string,
+  providerName: string,
+  isRegistered?: (entries: string[]) => boolean,
+): InsertResult {
+  const inserted = insertArrayOptionEntry(content, 'providers', providerName, isRegistered)
+  return inserted.reason === PATCH_REASONS.alreadyPresent ? { reason: PATCH_REASONS.providerAlreadyRegistered } : inserted
 }
 
 /** Adds a provider to the `providers` array in the app's createApp() call. */

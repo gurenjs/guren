@@ -406,8 +406,6 @@ async function assertBlogScaffold(appDir: string): Promise<void> {
 async function assertFeatureScaffolds(appDir: string): Promise<void> {
   const appBootstrap = await readFile(join(appDir, 'src/app.ts'), 'utf8')
   for (const providerName of [
-    'CoreCacheServiceProvider',
-    'CacheProvider',
     'CoreEventServiceProvider',
     'EventProvider',
     'CoreMailServiceProvider',
@@ -425,11 +423,13 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
     assert(appBootstrap.includes(providerName), `Fresh app must register ${providerName} in src/app.ts after feature scaffolds.`)
   }
 
-  const cacheProvider = await readFile(join(appDir, 'app/Providers/CacheProvider.ts'), 'utf8')
-  assert(cacheProvider.includes("from '@guren/core'"), 'Cache blueprint must import from @guren/core.')
-  assert(cacheProvider.includes('createCacheManager'), 'Cache blueprint must create a cache manager.')
-  assert(cacheProvider.includes("this.container.singleton('cache'"), 'Cache blueprint must register cache in the container.')
-  assert(!cacheProvider.includes('@guren/server'), 'Cache blueprint must not import from @guren/server.')
+  // The template declares its environment, so cache is a definition (RFC 0027 §2), not a provider.
+  assert(/config:\s*\[[^\]]*\bcache\b/.test(appBootstrap), 'Fresh app must list the cache definition in createApp({ config }).')
+  const cacheConfig = await readFile(join(appDir, 'config/cache.ts'), 'utf8')
+  assert(cacheConfig.includes("import { defineCacheConfig } from '@guren/core'"), 'Cache blueprint must define its config through @guren/core.')
+  assert(cacheConfig.includes('default: env.CACHE_STORE'), 'Cache blueprint must select its store from the declared CACHE_STORE.')
+  const envSchema = await readFile(join(appDir, 'config/env.ts'), 'utf8')
+  assert(envSchema.includes("CACHE_STORE: Env.string().default('memory')"), 'Cache blueprint must declare CACHE_STORE in config/env.ts.')
 
   const eventProvider = await readFile(join(appDir, 'app/Providers/EventProvider.ts'), 'utf8')
   assert(eventProvider.includes("from '@guren/core'"), 'Events blueprint must import from @guren/core.')
@@ -767,7 +767,7 @@ async function main(): Promise<void> {
       const appTs = await readFile(join(appDir, 'src/app.ts'), 'utf8')
       assert(appTs.includes('QueueServiceProvider'), 'Worker blueprint must scaffold queue.')
       assert(appTs.includes('EventServiceProvider'), 'Worker blueprint must scaffold events.')
-      assert(appTs.includes('CacheServiceProvider'), 'Worker blueprint must scaffold cache.')
+      assert(/config:\s*\[[^\]]*\bcache\b/.test(appTs), 'Worker blueprint must scaffold cache.')
       assert(appTs.includes('SchedulingServiceProvider'), 'Worker blueprint must scaffold schedule.')
       // Anchored on the providers array: the import line alone would satisfy a
       // plain substring check while the provider stayed unregistered.

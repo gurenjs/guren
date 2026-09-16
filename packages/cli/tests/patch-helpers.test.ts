@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { parseSourceFile } from '../src/parse-cache'
-import { addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertImport, insertProvider, PATCH_REASONS } from '../src/patch-helpers'
+import { addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertArrayOptionEntry, insertImport, insertProvider, PATCH_REASONS } from '../src/patch-helpers'
 import { captureWarnings, createTempWorkspace, PG_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 
 describe('addImport', () => {
@@ -562,6 +562,29 @@ createApp({ providers: [DatabaseProvider] })`
 
     expect(result.content).toBeUndefined()
     expect(result.reason).toBe(PATCH_REASONS.providersArrayNotFound)
+  })
+})
+
+describe('insertArrayOptionEntry', () => {
+  it('writes and appends to createApp({ config })', () => {
+    const created = insertArrayOptionEntry('createApp({ env, routes })', 'config', 'database')
+    expect(created.content).toContain('config: [database]')
+
+    const appended = insertArrayOptionEntry(created.content ?? '', 'config', 'cache')
+    expect(appended.content).toContain('config: [database, cache]')
+  })
+
+  it('reports an entry already listed', () => {
+    expect(insertArrayOptionEntry('createApp({ config: [database, cache] })', 'config', 'cache').reason)
+      .toBe(PATCH_REASONS.alreadyPresent)
+  })
+
+  // Matching `config:` as a suffix would splice into an unrelated option.
+  it('does not take a longer option name ending in the key for it', () => {
+    const result = insertArrayOptionEntry('createApp({ inertiaConfig: [a], routes })', 'config', 'cache')
+
+    expect(result.content).toContain('inertiaConfig: [a]')
+    expect(result.content).toContain('config: [cache]')
   })
 })
 

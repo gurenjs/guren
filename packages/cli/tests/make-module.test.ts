@@ -152,7 +152,7 @@ export default app
   })
 
   // An import of a binding nothing references is an unused local, so the app
-  // stops compiling under noUnusedLocals (as `addProviderRegistration` enforces).
+  // stops compiling under noUnusedLocals (as `addArrayOptionRegistration` enforces).
   it('withholds the module import when the app entry cannot be patched', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-module-unpatchable-')
     try {

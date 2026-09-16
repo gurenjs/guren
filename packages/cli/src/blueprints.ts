@@ -166,7 +166,7 @@ export default registerAdminRoutes
     run: async (options) => addOAuth(blueprintWriterOptions(options)),
   },
   cache: {
-    description: 'Install the default cache provider, an example cache service, and the CACHE_STORE env entry.',
+    description: 'Install the cache config, an example cache service, and the CACHE_STORE env entry.',
     run: async (options) => addCache(blueprintWriterOptions(options)),
   },
   events: {
