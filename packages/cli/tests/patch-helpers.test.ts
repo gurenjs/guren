@@ -542,8 +542,6 @@ createApp({ providers: [DatabaseProvider] })`
     expect(result.content).toContain('providers: [DatabaseProvider, SessionProvider]')
   })
 
-  // The scaffolded entry lists no providers since RFC 0027 §4 deleted
-  // DatabaseProvider, so the array is written rather than reported as missing.
   it('writes the providers array into an app that lists none', () => {
     const result = insertProvider('createApp({ routes: registerWebRoutes })', 'SessionProvider')
 
@@ -555,6 +553,15 @@ createApp({ providers: [DatabaseProvider] })`
 
     expect(result.content).toBeUndefined()
     expect(result.reason).toContain('createApp')
+  })
+
+  // Returning the text unchanged would let the caller write the import with no
+  // registration, which noUnusedLocals then rejects.
+  it('reports a providers option it cannot append to', () => {
+    const result = insertProvider('createApp({ providers: appProviders })', 'SessionProvider')
+
+    expect(result.content).toBeUndefined()
+    expect(result.reason).toBe(PATCH_REASONS.providersArrayNotFound)
   })
 })
 

@@ -1241,8 +1241,7 @@ export function registerWebRoutes(router: Router): void {
     return workspace
   }
 
-  // Every provider makeAuth can wire, in one run, into the scaffolded shape:
-  // an entry listing no providers since RFC 0027 §4 deleted DatabaseProvider.
+  // Every provider makeAuth can wire, in one run, into an entry listing none.
   it('writes the providers array into an app that lists none', async () => {
     const workspace = await seedAuthWorkspace(
       'guren-cli-make-auth-providerless-',

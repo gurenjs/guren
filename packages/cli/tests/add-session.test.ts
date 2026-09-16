@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import {
   APP_FIXTURE,
   CONSOLE_FIXTURE,
+  ENV_SCHEMA_FIXTURE,
   MYSQL_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
@@ -80,12 +81,7 @@ describe('guren add session', () => {
   it('declares SESSION_DRIVER in config/env.ts when the app has a schema', async () => {
     await seedApp(PG_SCHEMA_FIXTURE, { env: 'APP_KEY=\n' })
     await mkdir('config', { recursive: true })
-    await writeFile('config/env.ts', `import { defineEnv, Env } from '@guren/core'
-
-export default defineEnv({
-  APP_KEY: Env.string(),
-})
-`)
+    await writeFile('config/env.ts', ENV_SCHEMA_FIXTURE)
 
     await runBlueprint('session', {})
 

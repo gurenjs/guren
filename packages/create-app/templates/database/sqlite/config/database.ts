@@ -4,10 +4,11 @@ import env from './env.js'
 const database = createSqliteDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  // `context` is the application's validated environment. drizzle-kit and
-  // `guren db:*` run this outside an application, so the schema is parsed here.
+  // `context` is the application's validated environment. `guren db:*` runs this
+  // outside one, where report mode reads the schema without requiring the keys
+  // only the web process needs (APP_KEY and APP_URL in production).
   filename: (context) => {
-    const values = context?.env ?? env.parse().values
+    const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
     // `bun test` sets NODE_ENV=test automatically, so the test suite reads and
     // writes a separate SQLite file and never touches the development database.
     // This takes priority over DATABASE_URL, which .env sets unconditionally.

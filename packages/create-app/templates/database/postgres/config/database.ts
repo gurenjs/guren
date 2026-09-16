@@ -4,9 +4,10 @@ import env from './env.js'
 const database = createPostgresDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  // `context` is the application's validated environment. drizzle-kit and
-  // `guren db:*` run this outside an application, so the schema is parsed here.
-  connectionString: (context) => (context?.env ?? env.parse().values).DATABASE_URL
+  // `context` is the application's validated environment. `guren db:*` runs this
+  // outside one, where report mode reads the schema without requiring the keys
+  // only the web process needs (APP_KEY and APP_URL in production).
+  connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
     ?? 'postgres://guren:guren@localhost:54322/guren',
 })
 

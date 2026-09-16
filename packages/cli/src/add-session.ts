@@ -114,7 +114,7 @@ export async function addSession(options: AddSessionOptions = {}): Promise<AddSe
 SESSION_DRIVER=database
 # SESSION_DRIVER=memory
 # SESSION_DRIVER=cookie
-`, 'database', { default: 'database' })
+`, { expected: 'database', declare: true })
 
   const migrationPending = options.migration !== false
     && !(await generateSchemaMigration('create_sessions_table', 'sessions'))

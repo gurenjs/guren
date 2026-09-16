@@ -645,17 +645,18 @@ the template migration settled:
   `insertProvider` refused that shape (`patch-helpers.ts:337`). Every `guren add`
   on a fresh app would have degraded to "add it by hand". It now creates the
   option, as `addToArrayOption` already did for `modules:` and `commands:`.
-- **A connection thunk with no context parses the schema itself.** §1's table
-  says so; the shipped file had to be written for it. Falling back to the
-  driver's literal default instead would let `guren db:migrate` silently migrate
-  the local database while `DATABASE_URL` named another.
+- **A connection thunk with no context parses the schema itself, in `report`
+  mode** rather than the `throw` §1's table lists. Falling back to the driver's
+  literal default would let `guren db:migrate` migrate the local database while
+  `DATABASE_URL` named another, and `throw` would make a production migration
+  require `APP_KEY` and `APP_URL`, which only the web process needs.
+  `drizzle.config.ts` keeps its own raw read, as §1 leaves it out of scope.
 - **`TEST_DATABASE_URL` is declared**, since the SQLite config reads it and the
   drift check requires the schema and `.env.example` to name the same keys.
 - **`APP_KEY` is `.requiredInProduction()`, not required as §1's sketch declares
-  it.** A connection thunk with no context parses the whole schema (above), so
-  every strictly required key becomes one drizzle-kit and `guren db:*` must also
-  satisfy, and `.env.example` ships `APP_KEY=` blank. Production keeps the strict
-  rule, which is what `APP_URL` gets for the same reason.
+  it.** `.env.example` ships `APP_KEY=` blank and the scaffolder fills in only
+  `.env`, so a strictly required key would fail the boot of a development app
+  set up from the example. Production keeps the strict rule, as `APP_URL` does.
 - **`SESSION_DRIVER` is declared `Env.string()` until the session blueprint is a
   definition**, not the `Env.enum()` §1 sketches. `scripts/smoke/session-drivers.ts`
   boots with an unknown driver to read the declared stores out of the session

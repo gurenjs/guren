@@ -20,7 +20,7 @@ type FilenameResolver = (context?: { env: ResolverEnv }) => string
  */
 function extractDatabaseFilenameResolver(
   source: string,
-  schema: { parse: () => { values: ResolverEnv } },
+  schema: { parse: (source?: unknown, options?: { mode?: string }) => { values: ResolverEnv } },
 ): FilenameResolver {
   const match = source.match(/filename: (\(context\) => \{[\s\S]*?\n {2}\}),/)
   if (!match) {
@@ -92,14 +92,19 @@ describe('SQLite default template', () => {
           .toBe('postgres://example')
       })
 
-      // drizzle-kit and `guren db:*` resolve with no context, where the file
-      // parses config/env.ts itself rather than falling back to its default.
+      // `guren db:*` resolves with no context, where the file parses config/env.ts
+      // itself, in report mode: a production migration must not need APP_KEY.
+      const modes: Array<string | undefined> = []
       const schemaBacked = extractDatabaseFilenameResolver(dbConfig, {
-        parse: () => ({ values: { DATABASE_URL: './data/from-schema.db' } }),
+        parse: (_source, options) => {
+          modes.push(options?.mode)
+          return { values: { DATABASE_URL: './data/from-schema.db' } }
+        },
       })
       withNodeEnv('production', () => {
         expect(schemaBacked()).toBe('./data/from-schema.db')
       })
+      expect(modes).toEqual(['report'])
 
       const schema = await readFile(join(dest, 'db/schema.ts'), 'utf8')
       expect(schema).toContain('sqliteTable')

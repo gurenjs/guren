@@ -334,11 +334,12 @@ export function insertProvider(
 ): InsertResult {
   const match = matchInCode(content, /providers:\s*\[/)
 
-  // An entry listing no providers is the scaffolded shape since RFC 0027 §4
-  // deleted DatabaseProvider, so the option is written rather than refused.
+  // A createApp() listing no providers gets the option written. One that sets it
+  // to a non-literal (`providers: list`) has no array to append to.
   if (!match) {
     const created = insertCallOptions(content, [{ key: 'providers', source: `[${providerName}]` }], 'createApp')
-    return typeof created === 'string' ? { reason: created } : { content: created.content }
+    if (typeof created === 'string') return { reason: created }
+    return created.inserted.length > 0 ? { content: created.content } : { reason: PATCH_REASONS.providersArrayNotFound }
   }
 
   // Depth-counted rather than matched to the first `]`, which a nested array
@@ -414,8 +415,8 @@ function findCallOptionsSpan(
  * Adds an entry to an array-valued option of a single-object-argument call
  * (`modules: [...]` in `createApp`, `commands: [...]` in `defineModule`),
  * creating the option when absent and scoped to `callName`'s own object.
- * `addProvider` stays a separate implementation rather than delegating here,
- * so its existing callers keep its failure-when-absent behaviour.
+ * `addProvider` stays a separate implementation: it patches text, so a provider
+ * and its import land in one write.
  */
 export async function addToArrayOption(
   filePath: string,
