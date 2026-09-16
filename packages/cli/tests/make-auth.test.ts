@@ -1241,9 +1241,8 @@ export function registerWebRoutes(router: Router): void {
     return workspace
   }
 
-  // Every provider makeAuth can wire, in one run, so import-first ordering
-  // restored at any one of the five call sites fails here.
-  it('withholds every provider import when the providers array cannot be found', async () => {
+  // Every provider makeAuth can wire, in one run, into an entry listing none.
+  it('writes the providers array into an app that lists none', async () => {
     const workspace = await seedAuthWorkspace(
       'guren-cli-make-auth-providerless-',
       'src/app.ts',
@@ -1262,16 +1261,14 @@ export default app
       const { warnings } = await captureWarnings(() =>
         makeAuth({ install: true, force: true, oauth: 'github' }))
 
-      const reported = warnings.join('\n')
-      for (const provider of ['AuthProvider', 'CoreMailServiceProvider', 'MailProvider', 'OAuthProvider']) {
-        expect(reported).toContain(`Could not register ${provider} in src/app.ts: Could not find providers array.`)
-      }
+      expect(warnings.join('\n')).not.toContain('Could not register')
 
       // An import whose registration never landed is an unused binding, and
-      // the app stops compiling under noUnusedLocals.
+      // the app stops compiling under noUnusedLocals, so every name lands in both.
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
-      for (const provider of ['AuthProvider', 'MailServiceProvider', 'MailProvider', 'OAuthServiceProvider', 'OAuthProvider']) {
-        expect(appContent).not.toContain(provider)
+      expect(appContent).toMatch(/providers:\s*\[/u)
+      for (const provider of ['AuthProvider', 'CoreMailServiceProvider', 'MailProvider', 'OAuthProvider']) {
+        expect(appContent).toContain(provider)
       }
     } finally {
       await workspace.cleanup()

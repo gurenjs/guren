@@ -58,7 +58,6 @@ All three set `GUREN_TESTING=1` so `actingAs()` header auth is accepted.
 ```typescript
 const app = await TestApp.create({
   auth: {},
-  providers: [DatabaseProvider],
   routes: registerWebRoutes,
 })
 const csrf = await app.withCsrf()

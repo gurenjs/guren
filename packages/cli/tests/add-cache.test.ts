@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { APP_FIXTURE, createTempWorkspace, type TempWorkspace } from './helpers'
+import { APP_FIXTURE, ENV_SCHEMA_FIXTURE, createTempWorkspace, type TempWorkspace } from './helpers'
 import { fileExists } from '../src/discovery'
 import { runBlueprint } from '../src/blueprints'
 
@@ -56,6 +56,29 @@ describe('guren add cache', () => {
       expect(env).toContain('CACHE_STORE=memory')
       expect(env).toContain('APP_KEY=')
     }
+  })
+
+  // Without this, `guren check --env` fails the app it just scaffolded: the
+  // schema declares every key .env.example assigns, and this added one.
+  it('declares CACHE_STORE in config/env.ts when the app has a schema', async () => {
+    await seedApp('APP_KEY=\n')
+    await mkdir('config', { recursive: true })
+    await writeFile('config/env.ts', ENV_SCHEMA_FIXTURE)
+
+    await runBlueprint('cache', {})
+
+    expect(await readFile(resolve('config/env.ts'), 'utf8'))
+      .toContain("CACHE_STORE: Env.string().default('memory'),")
+  })
+
+  it('leaves CACHE_STORE undeclared when .env.example only comments it out', async () => {
+    await seedApp('APP_KEY=\n# CACHE_STORE=redis\n')
+    await mkdir('config', { recursive: true })
+    await writeFile('config/env.ts', ENV_SCHEMA_FIXTURE)
+
+    await runBlueprint('cache', {})
+
+    expect(await readFile(resolve('config/env.ts'), 'utf8')).toBe(ENV_SCHEMA_FIXTURE)
   })
 
   it('leaves an env file that already mentions CACHE_STORE unchanged', async () => {

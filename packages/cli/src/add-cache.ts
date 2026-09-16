@@ -25,7 +25,7 @@ export async function addCache(options: WriterOptions): Promise<string[]> {
   await appendEnvEntry('CACHE_STORE', `
 # Which store CacheProvider uses. Declare it there before naming it here.
 CACHE_STORE=memory
-`)
+`, { declare: true })
 
   return created
 }

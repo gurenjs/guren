@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import {
   APP_FIXTURE,
   CONSOLE_FIXTURE,
+  ENV_SCHEMA_FIXTURE,
   MYSQL_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
@@ -73,6 +74,19 @@ describe('guren add session', () => {
     const env = await readFile(resolve('.env.example'), 'utf8')
     expect(env).toContain('SESSION_DRIVER=database')
     expect(env).toContain('# SESSION_DRIVER=memory')
+  })
+
+  // Without this, `guren check --env` fails the app it just scaffolded: the
+  // schema declares every key .env.example assigns, and this added one.
+  it('declares SESSION_DRIVER in config/env.ts when the app has a schema', async () => {
+    await seedApp(PG_SCHEMA_FIXTURE, { env: 'APP_KEY=\n' })
+    await mkdir('config', { recursive: true })
+    await writeFile('config/env.ts', ENV_SCHEMA_FIXTURE)
+
+    await runBlueprint('session', {})
+
+    expect(await readFile(resolve('config/env.ts'), 'utf8'))
+      .toContain("SESSION_DRIVER: Env.string().default('database'),")
   })
 
   const dialects = [

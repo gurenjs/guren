@@ -2,7 +2,6 @@ import type { WriterOptions } from './utils'
 import { assertCwdUnsupported, runCommand } from './utils'
 import { appDependsOn } from './discovery'
 import { declareEnvEntries, ENV_SCHEMA_FILE } from './app-env'
-import { PATCH_REASONS } from './patch-helpers'
 import { addProviderRegistration, APP_ENTRY_CANDIDATES, resolveAppEntry } from './provider-registrar'
 import {
   applyEnvEntries,
@@ -165,9 +164,7 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     )
 
     if (!wiring.registered) {
-      throw wiring.provider.reason === PATCH_REASONS.providersArrayNotFound
-        ? new Error(`Could not find providers array in ${appPath}. Please register the provider manually.`)
-        : new Error(`Could not register ${providerName} in ${appPath}: ${wiring.provider.reason}`)
+      throw new Error(`Could not register ${providerName} in ${appPath}: ${wiring.provider.reason}`)
     }
 
     if (wiring.provider.modified || wiring.import.modified) {
