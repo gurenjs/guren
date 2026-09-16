@@ -133,7 +133,9 @@ function agentTemplate(className: string, agentName: string, tools: readonly str
     ...(output ? ['', `  output = Output.object({ schema: ${className}Output })`] : []),
     ...(tools.length > 0 ? ['', '  override tools() {', `    return this.appTools([${quoted.join(', ')}])`, '  }'] : []),
   ]
-  return `${imports}\n${schema}\nexport class ${className} extends Agent {\n${members.join('\n')}\n}\n`
+  // The type argument is what makes a name `scopes` does not grant a compile error in appTools().
+  const base = tools.length > 0 ? `Agent<typeof ${className}.scopes>` : 'Agent'
+  return `${imports}\n${schema}\nexport class ${className} extends ${base} {\n${members.join('\n')}\n}\n`
 }
 
 function testTemplate(input: {

@@ -68,6 +68,7 @@ describe('guren make:ai-agent', () => {
     const { notes } = await makeAiAgent('Triager', { tools: 'tickets_show, tickets.update' })
 
     const source = await readFile(resolve('app/Ai/Agents/Triager.ts'), 'utf8')
+    expect(source).toContain('export class Triager extends Agent<typeof Triager.scopes> {')
     expect(source).toContain("static override scopes = ['tool:tickets_show', 'tool:tickets.update'] as const")
     expect(source).toContain("return this.appTools(['tickets_show', 'tickets.update'])")
     expect(notes.some((note) => note.includes('"tickets.update" is outside [A-Za-z0-9_-]{1,64}'))).toBe(true)
