@@ -10,7 +10,6 @@ const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Respons
 /** Markers the fake SDK exports, so a test can tell "resolved" from "stubbed". */
 const SDK_SERVER_INDEX_MARKER = 'fake-sdk-server-index'
 const SDK_TRANSPORT_MARKER = 'fake-sdk-transport'
-const SDK_V2_SERVER_MARKER = 'fake-sdk-v2-server'
 
 /**
  * An entrypoint importing both SDK subpaths and reporting what it got.
@@ -43,16 +42,6 @@ function installFakeMcpSdk(root: string): void {
     `export const WebStandardStreamableHTTPServerTransport = '${SDK_TRANSPORT_MARKER}'\n`,
     'utf8',
   )
-
-  // SDK v2, the root `@guren/plugin-mcp` imports (RFC 0028 §3).
-  const v2 = join(root, 'node_modules/@modelcontextprotocol/server')
-  mkdirSync(v2, { recursive: true })
-  writeFileSync(
-    join(v2, 'package.json'),
-    JSON.stringify({ name: '@modelcontextprotocol/server', version: '2.0.0', type: 'module', main: 'index.js' }),
-    'utf8',
-  )
-  writeFileSync(join(v2, 'index.js'), `export const createMcpHandler = '${SDK_V2_SERVER_MARKER}'\n`, 'utf8')
 }
 
 /** Writes a minimal buildable app under `root`, as `buildVercelOutput` options. */
@@ -443,12 +432,15 @@ describe('@guren/plugin-vercel', () => {
           + 'export default { fetch() { return new Response(String(createMcpHandler)) } }\n',
         mcpPlugin: true,
       })
-      installFakeMcpSdk(root)
+      const v2 = join(root, 'node_modules/@modelcontextprotocol/server')
+      mkdirSync(v2, { recursive: true })
+      writeFileSync(join(v2, 'package.json'), JSON.stringify({ name: '@modelcontextprotocol/server', type: 'module' }))
+      writeFileSync(join(v2, 'index.js'), "export const createMcpHandler = 'fake-sdk-v2-server'\n")
 
       await buildVercelOutput(app)
 
       const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
-      expect(bundle).toContain(SDK_V2_SERVER_MARKER)
+      expect(bundle).toContain('fake-sdk-v2-server')
       expect(bundle).not.toContain('The MCP endpoint is unavailable on Vercel')
     })
 

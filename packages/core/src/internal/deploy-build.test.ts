@@ -543,19 +543,21 @@ describe('the module graph this list describes', () => {
    * comment and an identifier, and a line-based search misses an `import(` whose
    * specifier sits on the next line — reporting an import that was never deleted.
    */
+  const transpilers = { ts: new Bun.Transpiler({ loader: 'ts' }), tsx: new Bun.Transpiler({ loader: 'tsx' }) }
+
   function importersOf(specifier: string, root: string): string[] {
     return sourcesUnder(root).filter((file) => {
-      const transpiler = new Bun.Transpiler({ loader: file.endsWith('.tsx') ? 'tsx' : 'ts' })
-      return transpiler
+      const source = readFileSync(file, 'utf8')
+      // Text first, parse second: the parse is what rejects a mere mention.
+      if (!source.includes(specifier)) return false
+      return transpilers[file.endsWith('.tsx') ? 'tsx' : 'ts']
         // A CLI entry's shebang is not TypeScript, and the scan rejects it.
-        .scanImports(readFileSync(file, 'utf8').replace(/^#!.*/, ''))
+        .scanImports(source.replace(/^#!.*/, ''))
         .some((entry) => entry.path === specifier)
     })
   }
 
-  const imported = DEV_ONLY_MODULES.flatMap((module) =>
-    module.importedBy === null ? [] : [{ ...module, importedBy: module.importedBy }],
-  )
+  const imported = DEV_ONLY_MODULES.filter((module) => module.importedBy !== null)
 
   // Per entry, and only inside the package the entry is listed for: searching every
   // package would let one package's import keep another's stale entry alive.

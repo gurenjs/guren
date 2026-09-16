@@ -3,9 +3,9 @@
  * context the Workers runtime would pass. Shared by the two deferral suites
  * because it is this package's only description of how a request crosses that
  * seam holding one: the protocol version, the header set and the seam's
- * principal are pinned here rather than twice. The SDK client is not used — it
- * owns the `fetch` it calls, and the third `app.fetch` argument is the point.
- * It sends the 2025 handshake by hand, so it is also the legacy-era wire case.
+ * principal are pinned here rather than twice. Two raw POSTs rather than the SDK
+ * client, whose extra requests (`notifications/initialized` at least) would reach
+ * the same context and add `waitUntil` entries the suites count.
  */
 import type { Application } from '@guren/core'
 
@@ -27,7 +27,7 @@ export interface SeamToolResult {
 export async function callToolOverSeam(app: Application, call: SeamToolCall): Promise<SeamToolResult> {
   // Each step must answer 200 with a JSON-RPC result before the next runs: a
   // discarded response would pass a 500 as readily as a success.
-  const send = async (id: number, method: string, params: unknown): Promise<unknown> => {
+  const send = async <T>(id: number, method: string, params: unknown): Promise<T> => {
     const request = presentExternalMcpAuth(
       new Request('http://localhost/mcp', {
         method: 'POST',
@@ -41,9 +41,11 @@ export async function callToolOverSeam(app: Application, call: SeamToolCall): Pr
     if (response.status !== 200) {
       throw new Error(`${method} answered ${response.status}: ${text}`)
     }
-    const message = parseJsonRpc(text, response.headers.get('Content-Type'))
-    if (!('result' in message)) {
-      throw new Error(`${method} answered a JSON-RPC error: ${text}`)
+    // The stateless 2025 transport always answers as a one-event SSE stream.
+    const data = text.split('\n').find((line) => line.startsWith('data: '))
+    const message = data ? (JSON.parse(data.slice('data: '.length)) as { result?: T }) : {}
+    if (message.result === undefined) {
+      throw new Error(`${method} answered no JSON-RPC result: ${text}`)
     }
     return message.result
   }
@@ -53,17 +55,7 @@ export async function callToolOverSeam(app: Application, call: SeamToolCall): Pr
     capabilities: {},
     clientInfo: { name: 't', version: '1' },
   })
-  return (await send(2, 'tools/call', { name: call.tool, arguments: call.arguments ?? {} })) as SeamToolResult
-}
-
-/** The stateless transport answers either as JSON or as a one-event SSE stream. */
-function parseJsonRpc(text: string, contentType: string | null): { result?: unknown } {
-  if (!contentType?.includes('text/event-stream')) {
-    return JSON.parse(text) as { result?: unknown }
-  }
-  const data = text.split('\n').find((line) => line.startsWith('data: '))
-  if (!data) throw new Error(`Expected an SSE data event, got: ${text}`)
-  return JSON.parse(data.slice('data: '.length)) as { result?: unknown }
+  return send<SeamToolResult>(2, 'tools/call', { name: call.tool, arguments: call.arguments ?? {} })
 }
 
 /** The context shape workerd hands `fetch`, with `waitUntil` collecting instead of running. */

@@ -244,6 +244,13 @@ validation for `isError` results. v2 adds `ttlMs: 0` and `cacheScope: 'private'`
 modern list results by default, which is correct here because the tool list depends on
 the caller's abilities. `server/discover` is answered by the handler.
 
+**Amended in implementation:** the handler is built with `maxSubscriptions: 0`. By
+default any authenticated caller, whatever its scopes, can open a
+`subscriptions/listen` SSE stream that the rate limiter never meters and that counts
+against a cap every caller shares. The endpoint publishes no change events, so the
+stream serves nothing. The factory also logs its own throw: the SDK reports it only
+to `onerror`, which receives every rejected client request as well.
+
 **Status codes on a production endpoint.** Unlike the Dev MCP, this endpoint ships.
 The `405` and `415` changes above apply to it too and are listed in the
 changeset body. ~~Whether the 4 MiB default is right is Open Question 1.~~

@@ -45,7 +45,6 @@ interface ScaffoldOptions {
 /** Markers the fake SDK exports, so a test can tell "resolved" from "stubbed". */
 const SDK_SERVER_INDEX_MARKER = 'fake-sdk-server-index'
 const SDK_TRANSPORT_MARKER = 'fake-sdk-transport'
-const SDK_V2_SERVER_MARKER = 'fake-sdk-v2-server'
 
 /**
  * A stand-in for `@modelcontextprotocol/sdk` inside the scaffolded app, without
@@ -67,17 +66,6 @@ function installFakeMcpSdk(root: string): void {
     join(pkg, 'server/webStandardStreamableHttp.js'),
     `export const WebStandardStreamableHTTPServerTransport = '${SDK_TRANSPORT_MARKER}'\n`,
   )
-
-  // SDK v2, the root `@guren/plugin-mcp` imports (RFC 0028 §3).
-  const v2 = join(root, 'node_modules/@modelcontextprotocol/server')
-  mkdirSync(v2, { recursive: true })
-  writeJson(join(v2, 'package.json'), {
-    name: '@modelcontextprotocol/server',
-    version: '2.0.0',
-    type: 'module',
-    main: 'index.js',
-  })
-  writeFileSync(join(v2, 'index.js'), `export const createMcpHandler = '${SDK_V2_SERVER_MARKER}'\n`)
 }
 
 /**
@@ -502,11 +490,14 @@ describe('buildLambdaOutput', () => {
         http: 'String(createMcpHandler)',
       },
     })
-    installFakeMcpSdk(root)
+    const v2 = join(root, 'node_modules/@modelcontextprotocol/server')
+    mkdirSync(v2, { recursive: true })
+    writeJson(join(v2, 'package.json'), { name: '@modelcontextprotocol/server', type: 'module' })
+    writeFileSync(join(v2, 'index.js'), "export const createMcpHandler = 'fake-sdk-v2-server'\n")
 
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
-    expect(probeHttpExport(root)).toBe(SDK_V2_SERVER_MARKER)
+    expect(probeHttpExport(root)).toBe('fake-sdk-v2-server')
   })
 
   test('should keep the Dev MCP server stubbed even for an app depending on the plugin', async () => {

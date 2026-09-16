@@ -500,9 +500,9 @@ export function appUsesMcpPlugin(root: string): boolean {
 
 /**
  * The dev-only modules that must stay stubbed for this app: `DEV_ONLY_MODULES`
- * minus the transport entry when the app declared `@guren/plugin-mcp` (stubbing
- * `MCP_TRANSPORT_SPECIFIER` compiled the endpoint shut everywhere before RFC 0016
- * Phase 4a). `server/mcp.js` stays stubbed: that is the Dev MCP. Each entry keeps
+ * minus the v1 transport entry when the app declared `@guren/plugin-mcp` (RFC 0016
+ * Phase 4a). Since the plugin moved to SDK v2 that entry has no importer, so the
+ * split changes no bundle (RFC 0028 §4). `server/mcp.js` stays stubbed: the Dev MCP. Each entry keeps
  * its narrow `kind` so platform `Record<kind, message>` tables stay indexable.
  */
 export function stubbableDevOnlyModules(options: {

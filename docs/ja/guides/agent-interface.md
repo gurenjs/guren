@@ -377,6 +377,7 @@ export default app
 - トークンストアがまったく設定されていない場合: `auth.useTokens(store)` を名指しする `500` を返します。トークンを拒否したかのように見えるのではなく、設定ミスとして読めるようにするためです
 - 認証済みの `GET` または `DELETE`: 開閉するセッションのストリームがないので `405` を返します
 - 認証済みの `POST` で `Content-Type` が `application/json` でない場合: `415` を返します
+- `subscriptions/listen` リクエスト: JSON-RPC エラーを返します。実行中にツール一覧は変わらないので、ストリームを開いたままにしても届けるものがありません
 
 このエンドポイントのために CSRF の例外を書く必要はありません。`Authorization: Bearer` を持ち、`Cookie` ヘッダーをまったく持たないリクエストは、フレームワーク全体で CSRF 検証をスキップします。守るべき ambient authority がないからで、ディスパッチャは構造上 cookie を持たない bearer リクエストを組み立てます。
 

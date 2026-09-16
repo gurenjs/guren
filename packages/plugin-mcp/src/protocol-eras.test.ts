@@ -11,6 +11,7 @@ import {
 } from '@guren/core'
 
 import { mcpPlugin } from './plugin'
+import { APP_MCP_REQUEST } from './server'
 
 type ProtocolEra = 'modern' | 'legacy'
 
@@ -132,7 +133,7 @@ describe('mcpPlugin across protocol eras', () => {
 
         expect(bodies.length).toBeGreaterThan(0)
         for (const body of bodies) {
-          expect(body).not.toContain('guren.appMcpRequest')
+          expect(body).not.toContain(APP_MCP_REQUEST)
           expect(body).not.toContain('authInfo')
         }
 
@@ -150,6 +151,37 @@ describe('mcpPlugin across protocol eras', () => {
       })
     })
   }
+
+  test('refuses a subscriptions/listen stream rather than holding it open', async () => {
+    const response = await app.fetch(
+      new Request('http://localhost/mcp', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${reader}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'subscriptions/listen',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'subscriptions/listen',
+          params: {
+            notifications: { toolsListChanged: true },
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientInfo': { name: 'listen', version: '1.0.0' },
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
+        }),
+      }),
+    )
+
+    // A held stream never finishes, so reading the body to the end is the assertion.
+    expect(await response.text()).toContain('Subscription limit reached')
+  })
 
   test('answers a GET with 405, since there is no session stream to open', async () => {
     const response = await app.fetch(

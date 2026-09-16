@@ -514,6 +514,8 @@ so the app must configure an [API token store](./api-tokens.md):
 - an authenticated `GET` or `DELETE` → `405`, since there is no session stream to
   open or close
 - an authenticated `POST` whose `Content-Type` is not `application/json` → `415`
+- a `subscriptions/listen` request → a JSON-RPC error, since the tool list never
+  changes while the server runs and a held stream would serve nothing
 
 You do not need to write a CSRF exemption for it. A request carrying
 `Authorization: Bearer` and no `Cookie` header at all skips CSRF verification

@@ -324,11 +324,11 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
       // Everything `cloudflare:build` stubs for an app that declares
       // `@guren/plugin-mcp`.
       const deployed = [...stubbableDevOnlyModules({ mcpPlugin: true }), ...SQL_CLIENT_MODULES]
-      const served = bundleSize('transport-served', deployed)
+      const served = bundleSize('sdk-served', deployed)
       // And the same worker with the SDK v2 root stubbed under the names
       // plugin-mcp imports. "The bundle resolves" cannot tell the two apart, so
       // the size difference is the only proof the real SDK reached the worker.
-      const stubbed = bundleSize('transport-stubbed', [
+      const stubbed = bundleSize('sdk-stubbed', [
         ...deployed,
         { specifier: '@modelcontextprotocol/server', exportNames: ['createMcpHandler', 'Server'] },
       ])

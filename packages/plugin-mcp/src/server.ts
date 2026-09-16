@@ -30,6 +30,9 @@ import type { AgentRateLimiter } from './rate-limit'
 
 export type { AuditedTool }
 
+/** The `authInfo.extra` key carrying one request's server options to the handler's factory. */
+export const APP_MCP_REQUEST = 'guren.appMcpRequest'
+
 export interface AppMcpServerOptions {
   /** Tools already filtered to `expose.mcp`. */
   tools: readonly DerivedAgentTool[]
