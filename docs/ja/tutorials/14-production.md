@@ -132,13 +132,12 @@ import env from '../config/env.js'
 import http from '../config/http.js'
 import { registerWebRoutes } from '../routes/web.js'
 import { sessions } from '../db/schema.js'
-import { StorageServiceProvider as CoreStorageServiceProvider } from '@guren/core'
-import StorageProvider from '../app/Providers/StorageProvider.js'
+import storage from '../config/storage.js'
 import AttachmentsProvider from '../app/Providers/AttachmentsProvider.js'
 import { EventServiceProvider as CoreEventServiceProvider } from '@guren/core'
 import EventProvider from '../app/Providers/EventProvider.js'
-import { QueueServiceProvider as CoreQueueServiceProvider } from '@guren/core'
-import QueueProvider from '../app/Providers/QueueProvider.js'
+import queue from '../config/queue.js'
+import JobsProvider from '../app/Providers/JobsProvider.js'
 import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'
 import MailProvider from '../app/Providers/MailProvider.js'
 
@@ -151,9 +150,9 @@ const app = createApp({
     },
   },
   env,
-  config: [database, http],
+  config: [database, http, storage, queue],
   routes: registerWebRoutes,
-  providers: [AuthProvider, CoreStorageServiceProvider, StorageProvider, AttachmentsProvider, CoreEventServiceProvider, EventProvider, CoreQueueServiceProvider, QueueProvider, CoreMailServiceProvider, MailProvider],
+  providers: [AuthProvider, AttachmentsProvider, CoreEventServiceProvider, EventProvider, JobsProvider, CoreMailServiceProvider, MailProvider],
   auth: {
     sessionOptions: {
       // Sessions in the database, not in this process: a restart, a second

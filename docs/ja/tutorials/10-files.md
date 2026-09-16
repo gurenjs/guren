@@ -24,7 +24,7 @@ bun run dev
 bunx guren add attachments
 ```
 
-何が行われたのかを読んでおきましょう。これから保守するのは自分自身です。まずストレージレイヤーが導入されました(`app/Providers/StorageProvider.ts` と `app/Services/FileStorage.ts`、ディスクは 2 つ、`./storage/app` を根とする `local` と `./public/storage` を根とする `public`)。続いて `db/schema.ts` に `attachments` テーブルが追加され、`config/attachments.ts` と `app/Providers/AttachmentsProvider.ts` が書かれ、`src/app.ts` にプロバイダーが登録され、ルート registrar の先頭で `registerAttachmentRoutes` を呼ぶことで配信ルートがマウントされ、`attachments:prune` コンソールコマンドが登録されました。テーブルにはマイグレーションが必要です。
+何が行われたのかを読んでおきましょう。これから保守するのは自分自身です。まずストレージレイヤーが導入されました(`config: [...]` に登録された `config/storage.ts` と `app/Services/FileStorage.ts`、ディスクは 2 つ、`./storage/app` を根とする `local` と `./public/storage` を根とする `public`)。続いて `db/schema.ts` に `attachments` テーブルが追加され、`config/attachments.ts` と `app/Providers/AttachmentsProvider.ts` が書かれ、`src/app.ts` にプロバイダーが登録され、ルート registrar の先頭で `registerAttachmentRoutes` を呼ぶことで配信ルートがマウントされ、`attachments:prune` コンソールコマンドが登録されました。テーブルにはマイグレーションが必要です。
 
 ```bash run
 bun run db:make create_attachments
@@ -240,7 +240,7 @@ describe('post attachments', () => {
 })
 ```
 
-このファイルで読む価値があるのは 3 か所です。1 つ目、アップロードは `File` を含む `FormData` で、`TestApp` はそれを見つけると multipart として送ります。JSON のボディではファイルを運べません。2 つ目、URL については存在するかどうかではなく、署名されているかどうかをアサートしています。署名の無い URL は、ディスクが公開されていることを意味するからです。3 つ目、最後のテストは attachment の行が記録するオブジェクトキーをたどってディスクそのものを検査します。投稿を削除したら、そのファイルを残してはいけません。これはデータベースへのアサーションだけでは分からないことです。テストは `NODE_ENV=test` で走り、スキャフォールドされた `StorageProvider` はそのとき `local` ディスクを `./storage/app/testing` に置きます。`disk()` がパスを組み立てずにディスクへ問い合わせるのはこのためで、テストのアップロードが開発用データベースの指すファイルに混ざることはありません。
+このファイルで読む価値があるのは 3 か所です。1 つ目、アップロードは `File` を含む `FormData` で、`TestApp` はそれを見つけると multipart として送ります。JSON のボディではファイルを運べません。2 つ目、URL については存在するかどうかではなく、署名されているかどうかをアサートしています。署名の無い URL は、ディスクが公開されていることを意味するからです。3 つ目、最後のテストは attachment の行が記録するオブジェクトキーをたどってディスクそのものを検査します。投稿を削除したら、そのファイルを残してはいけません。これはデータベースへのアサーションだけでは分からないことです。テストは `NODE_ENV=test` で走り、スキャフォールドされた `config/storage.ts` はそのとき `local` ディスクを `./storage/app/testing` に置きます。`disk()` がパスを組み立てずにディスクへ問い合わせるのはこのためで、テストのアップロードが開発用データベースの指すファイルに混ざることはありません。
 
 ```bash run expect-fail
 bun test
