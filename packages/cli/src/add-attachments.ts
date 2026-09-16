@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { appBindsService, appDefinesConfig } from './discovery'
+import { appBindsService } from './discovery'
 import { registerConsoleCommand } from './console-registrar'
 import {
   appendSchemaTable,
@@ -159,7 +159,6 @@ async function patchSchema(): Promise<void> {
  * a second manager would shadow it.
  */
 export async function appBindsStorage(): Promise<boolean> {
-  const cwd = process.cwd()
-  return (await appBindsService('storage', cwd)).length > 0 || (await appDefinesConfig('storage', cwd)).length > 0
+  return (await appBindsService('storage', process.cwd(), { definitions: true })).length > 0
 }
 

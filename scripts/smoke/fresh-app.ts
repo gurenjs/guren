@@ -403,6 +403,10 @@ async function assertBlogScaffold(appDir: string): Promise<void> {
   }
 }
 
+function listsConfigDefinition(appSource: string, binding: string): boolean {
+  return new RegExp(`config:\\s*\\[[^\\]]*\\b${binding}\\b`).test(appSource)
+}
+
 async function assertFeatureScaffolds(appDir: string): Promise<void> {
   const appBootstrap = await readFile(join(appDir, 'src/app.ts'), 'utf8')
   for (const providerName of [
@@ -422,7 +426,7 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
 
   // The template declares its environment, so cache, queue and storage are definitions (RFC 0027 §2).
   for (const definition of ['cache', 'queue', 'storage']) {
-    assert(new RegExp(`config:\\s*\\[[^\\]]*\\b${definition}\\b`).test(appBootstrap), `Fresh app must list the ${definition} definition in createApp({ config }).`)
+    assert(listsConfigDefinition(appBootstrap, definition), `Fresh app must list the ${definition} definition in createApp({ config }).`)
   }
   const cacheConfig = await readFile(join(appDir, 'config/cache.ts'), 'utf8')
   assert(cacheConfig.includes("import { defineCacheConfig } from '@guren/core'"), 'Cache blueprint must define its config through @guren/core.')
@@ -766,9 +770,9 @@ async function main(): Promise<void> {
     } else if (blueprint === 'worker') {
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       const appTs = await readFile(join(appDir, 'src/app.ts'), 'utf8')
-      assert(/config:\s*\[[^\]]*\bqueue\b/.test(appTs), 'Worker blueprint must scaffold queue.')
+      assert(listsConfigDefinition(appTs, 'queue'), 'Worker blueprint must scaffold queue.')
       assert(appTs.includes('EventServiceProvider'), 'Worker blueprint must scaffold events.')
-      assert(/config:\s*\[[^\]]*\bcache\b/.test(appTs), 'Worker blueprint must scaffold cache.')
+      assert(listsConfigDefinition(appTs, 'cache'), 'Worker blueprint must scaffold cache.')
       assert(appTs.includes('SchedulingServiceProvider'), 'Worker blueprint must scaffold schedule.')
       // Anchored on the providers array: the import line alone would satisfy a
       // plain substring check while the provider stayed unregistered.

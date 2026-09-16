@@ -527,40 +527,30 @@ export function formatTruncatedList(items: string[], limit = 3): string {
 }
 
 /**
- * Whether the app already binds `key` in the container. The conventional
- * provider file name answers this in neither direction: a custom provider
- * binds the service without that file, and installing a second manager over it
- * would shadow the app's own.
+ * The files binding `key` in the container. The conventional provider file name
+ * answers this in neither direction: a custom provider binds the service without
+ * that file, and installing a second manager over it would shadow the app's own.
+ * `definitions` also counts a `config/` file calling `define<Key>Config()` (RFC
+ * 0027 §2), which binds inside the helper with no container call in the source.
  */
-export async function appBindsService(key: string, appRoot: string): Promise<string[]> {
+export async function appBindsService(
+  key: string,
+  appRoot: string,
+  options: { definitions?: boolean } = {},
+): Promise<string[]> {
+  const dirs = options.definitions ? ['app', 'src', 'config'] : ['app', 'src']
   const roots = await listAppRoots(appRoot)
   const groups = await Promise.all(
-    roots.flatMap((root) => ['app', 'src'].map((dir) => collectFiles(resolve(root.dir, dir)))),
+    roots.flatMap((root) => dirs.map((dir) => collectFiles(resolve(root.dir, dir)))),
   )
-  const bindingPattern = new RegExp(`\\b(?:instance|singleton|bind)\\(\\s*['"]${escapeRegExp(key)}['"]`)
+  const patterns = [new RegExp(`\\b(?:instance|singleton|bind)\\(\\s*['"]${escapeRegExp(key)}['"]`)]
+  if (options.definitions) patterns.push(new RegExp(`\\bdefine${escapeRegExp(key)}Config\\s*\\(`, 'i'))
   const binding: string[] = []
   for (const filePath of groups.flat()) {
     const source = await readIfExists(appRoot, filePath)
-    if (source && bindingPattern.test(source)) binding.push(filePath)
+    if (source && patterns.some((pattern) => pattern.test(source))) binding.push(filePath)
   }
   return binding
-}
-
-/**
- * The `config/` files (the app's and each module's) defining `key` through its
- * `define<Key>Config()` helper (RFC 0027 §2). {@link appBindsService} cannot see
- * these: the binding happens inside the helper, with no container call in source.
- */
-export async function appDefinesConfig(key: string, appRoot: string): Promise<string[]> {
-  const roots = await listAppRoots(appRoot)
-  const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root.dir, 'config'))))
-  const definitionPattern = new RegExp(`\\bdefine${escapeRegExp(key)}Config\\s*\\(`, 'i')
-  const defining: string[] = []
-  for (const filePath of groups.flat()) {
-    const source = await readIfExists(appRoot, filePath)
-    if (source && definitionPattern.test(source)) defining.push(filePath)
-  }
-  return defining
 }
 
 /**

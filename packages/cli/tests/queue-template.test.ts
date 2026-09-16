@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { Container, SyncDriver, type AppEnv, type ConfigDefinition, type QueueManager } from '@guren/core'
+import { Container, SyncDriver, type AppEnv, type QueueManager } from '@guren/core'
+import { loadConfigTemplate } from './helpers'
 
-// Through a variable: a static import pulls the template into the root typecheck,
-// where no config/env.ts declares the key it reads.
-const templatePath = '../templates/scaffold/queue/config/queue.ts'
-const queueConfig = ((await import(templatePath)) as { default: ConfigDefinition<'queue'> }).default
+const queueConfig = await loadConfigTemplate('queue')
 
 // The template itself: scaffold-output.test.ts pins the written file byte-identical to it.
 describe('scaffolded queue config definition', () => {

@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'bun:test'
-import { Container, LocalStorageDriver, type AppEnv, type ConfigDefinition } from '@guren/core'
+import { Container, LocalStorageDriver, type AppEnv } from '@guren/core'
 
 import StorageProvider from '../templates/scaffold/storage/app/Providers/StorageProvider'
+import { loadConfigTemplate } from './helpers'
 
-// Through a variable: a static import pulls the template into the root typecheck,
-// where no config/env.ts declares the key it reads.
-const definitionPath = '../templates/scaffold/storage/config/storage.ts'
-const storageConfig = ((await import(definitionPath)) as { default: ConfigDefinition<'storage'> }).default
+const storageConfig = await loadConfigTemplate('storage')
 
 // The templates themselves, not renders of them: scaffold-output.test.ts pins every
 // blueprint's written file byte-identical to these sources.

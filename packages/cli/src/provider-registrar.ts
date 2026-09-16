@@ -143,8 +143,8 @@ export async function wireProvider(
 /**
  * Whether a blueprint installs `key` as a `config/<key>.ts` definition rather than
  * a provider. It needs `config/env.ts`, since a definition reads declared keys only,
- * and no source already binding `key`: a definition beside that binding configures
- * the key twice, which fails the boot.
+ * and no provider already binding `key`: a definition beside that binding configures
+ * the key twice, which fails the boot. An existing definition keeps the answer yes.
  */
 export async function installsConfigDefinition(key: string): Promise<boolean> {
   const cwd = process.cwd()
