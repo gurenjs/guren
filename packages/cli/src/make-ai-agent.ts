@@ -1,10 +1,8 @@
 import { PORTABLE_AGENT_TOOL_NAME_PATTERN } from '@guren/core'
 import { AI_PLUGIN_PACKAGE } from './add-ai'
 import { CliError } from './cli-error'
-import { compareVersions } from './codemods'
-import { appDependsOn } from './discovery'
+import { appDependsOn, readIfExists } from './discovery'
 import { detectRunner } from './make-test'
-import { readInstalledVersion } from './plugin-manifest'
 import { resolveAppEntry } from './provider-registrar'
 import { listTools } from './tool-list'
 import {
@@ -15,9 +13,6 @@ import {
   writeScaffoldFile,
   type WriterOptions,
 } from './utils'
-
-/** The `@guren/testing` release that ships `TestApp.fakeAi()`, which `--test` writes against. */
-export const FAKE_AI_TESTING_VERSION = '1.11.0'
 
 export interface MakeAiAgentOptions extends WriterOptions {
   /** Comma-separated tool names for `appTools()`, each checked against the app's derived tools. */
@@ -74,15 +69,17 @@ export async function makeAiAgent(name: string, options: MakeAiAgentOptions = {}
   return { files, notes }
 }
 
-/** The generated test calls `fakeAi()`, which an app on an older `@guren/testing` does not have. */
+/**
+ * The generated test calls `TestApp.fakeAi()`. Asked of the installed declarations, not a
+ * version number: the release that first ships it is not known when this is written.
+ */
 async function testingNotes(cwd: string): Promise<string[]> {
-  const upgrade = `The test uses TestApp.fakeAi(), from @guren/testing ${FAKE_AI_TESTING_VERSION}.`
   if ((await appDependsOn(cwd, '@guren/testing')) === false) {
-    return [`${upgrade} Run: bun add -d @guren/testing`]
+    return ['The test uses TestApp.fakeAi() from @guren/testing. Run: bun add -d @guren/testing']
   }
-  const installed = await readInstalledVersion(cwd, '@guren/testing')
-  if (installed !== null && compareVersions(installed, FAKE_AI_TESTING_VERSION) < 0) {
-    return [`${upgrade} This app has ${installed}. Run: bun add -d @guren/testing@^${FAKE_AI_TESTING_VERSION}`]
+  const declarations = await readIfExists(cwd, 'node_modules/@guren/testing/dist/index.d.ts')
+  if (declarations !== null && !declarations.includes('fakeAi(')) {
+    return ['The test uses TestApp.fakeAi(), which the installed @guren/testing predates. Run: bun add -d @guren/testing@latest']
   }
   return []
 }
@@ -117,25 +114,26 @@ function importOf(fromFile: string, target: string): string {
 }
 
 function agentTemplate(className: string, agentName: string, tools: readonly string[], output: boolean): string {
-  const quoted = tools.map((tool) => `'${tool}'`)
-  const imports = output
-    ? `import { Agent, Output } from '${AI_PLUGIN_PACKAGE}'\nimport { z } from 'zod'`
-    : `import { Agent } from '${AI_PLUGIN_PACKAGE}'`
-  const schema = output
-    ? `\nconst ${className}Output = z.object({\n  summary: z.string(),\n})\n`
-    : ''
-  const members = [
-    // Pinned so a minifier renaming the class cannot change the name fakes and audit lines use.
-    `  static override agentName = '${agentName}'`,
-    ...(tools.length > 0 ? [`  static override scopes = [${tools.map((tool) => `'tool:${tool}'`).join(', ')}] as const`] : []),
-    '',
-    "  instructions = 'Describe the task, which tools to use, and what a good answer looks like.'",
-    ...(output ? ['', `  output = Output.object({ schema: ${className}Output })`] : []),
-    ...(tools.length > 0 ? ['', '  override tools() {', `    return this.appTools([${quoted.join(', ')}])`, '  }'] : []),
-  ]
-  // The type argument is what makes a name `scopes` does not grant a compile error in appTools().
-  const base = tools.length > 0 ? `Agent<typeof ${className}.scopes>` : 'Agent'
-  return `${imports}\n${schema}\nexport class ${className} extends ${base} {\n${members.join('\n')}\n}\n`
+  const imports = [`import { Agent${output ? ', Output' : ''} } from '${AI_PLUGIN_PACKAGE}'`]
+  // Pinned so a minifier renaming the class cannot change the name fakes and audit lines use.
+  const statics = [`  static override agentName = '${agentName}'`]
+  const members = ["  instructions = 'Describe the task, which tools to use, and what a good answer looks like.'"]
+  let schema = ''
+  let base = 'Agent'
+
+  if (output) {
+    imports.push("import { z } from 'zod'")
+    schema = `\nconst ${className}Output = z.object({\n  summary: z.string(),\n})\n`
+    members.push('', `  output = Output.object({ schema: ${className}Output })`)
+  }
+  if (tools.length > 0) {
+    statics.push(`  static override scopes = [${tools.map((tool) => `'tool:${tool}'`).join(', ')}] as const`)
+    members.push('', '  override tools() {', `    return this.appTools([${tools.map((tool) => `'${tool}'`).join(', ')}])`, '  }')
+    // The type argument is what makes a name `scopes` does not grant a compile error in appTools().
+    base = `Agent<typeof ${className}.scopes>`
+  }
+
+  return `${imports.join('\n')}\n${schema}\nexport class ${className} extends ${base} {\n${[...statics, '', ...members].join('\n')}\n}\n`
 }
 
 function testTemplate(input: {

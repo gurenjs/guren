@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { consola } from 'consola'
+import { cliDependencyRange } from './cli-manifest'
 import type { DependencyManifest } from './drizzle-pins'
 import { scaffoldTemplateFile } from './scaffold-templates'
 import { writeRoot, writeScaffoldFiles, type WriterOptions } from './utils'
@@ -15,13 +14,7 @@ import { writeRoot, writeScaffoldFiles, type WriterOptions } from './utils'
  * outside its semver, and a caret would float an app past the tested line.
  */
 export function oxlintRange(): string {
-  const manifestPath = fileURLToPath(new URL('../package.json', import.meta.url))
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as DependencyManifest
-  const range = manifest.peerDependencies?.oxlint
-  if (range === undefined) {
-    throw new Error('@guren/cli declares no oxlint peer range — add lint has nothing to install')
-  }
-  return range
+  return cliDependencyRange('peerDependencies', 'oxlint')
 }
 
 /** `bunx oxlint` runs the shim under Bun, so an app needs no Node install for it. */

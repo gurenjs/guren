@@ -101,22 +101,33 @@ describe('guren make:ai-agent', () => {
     ])
     expect(notes).toEqual([
       '@guren/plugin-ai is not in package.json yet. Run: bunx guren add ai',
-      'The test uses TestApp.fakeAi(), from @guren/testing 1.11.0. Run: bun add -d @guren/testing',
+      'The test uses TestApp.fakeAi() from @guren/testing. Run: bun add -d @guren/testing',
     ])
     const test = await readFile(resolve('modules/support/tests/Ai/Triager.test.ts'), 'utf8')
     expect(test).toContain("import app from '../../../../src/app.js'")
     expect(test).toContain("import { Triager } from '../../app/Ai/Agents/Triager.js'")
   })
 
-  it('notes a @guren/testing without fakeAi() when writing the test', async () => {
+  it('notes an installed @guren/testing that predates fakeAi() when writing the test', async () => {
     await writeFile('package.json', JSON.stringify({ name: 'app', devDependencies: { '@guren/testing': '^1.10.0' } }))
-    await writeWorkspaceFiles(process.cwd(), { 'node_modules/@guren/testing/package.json': JSON.stringify({ version: '1.10.1' }) })
+    await writeWorkspaceFiles(process.cwd(), {
+      'node_modules/@guren/testing/dist/index.d.ts': 'export declare class TestApp {\n  agent(): unknown\n}\n',
+    })
 
     const { notes } = await makeAiAgent('Triager', { test: true })
 
     expect(notes).toContain(
-      'The test uses TestApp.fakeAi(), from @guren/testing 1.11.0. This app has 1.10.1. Run: bun add -d @guren/testing@^1.11.0',
+      'The test uses TestApp.fakeAi(), which the installed @guren/testing predates. Run: bun add -d @guren/testing@latest',
     )
+  })
+
+  it('notes nothing about @guren/testing whose declarations carry fakeAi()', async () => {
+    await writeFile('package.json', JSON.stringify({ name: 'app', dependencies: { '@guren/plugin-ai': '^0.1.0' }, devDependencies: { '@guren/testing': '^1.11.0' } }))
+    await writeWorkspaceFiles(process.cwd(), {
+      'node_modules/@guren/testing/dist/index.d.ts': 'export declare class TestApp {\n  fakeAi(): unknown\n}\n',
+    })
+
+    expect((await makeAiAgent('Triager', { test: true })).notes).toEqual([])
   })
 
   it('writes into cwd rather than the process directory', async () => {

@@ -11,7 +11,8 @@ import {
   writeWorkspaceFiles,
   type TempWorkspace,
 } from './helpers'
-import { addAi, aiPackageRange } from '../src/add-ai'
+import { addAi } from '../src/add-ai'
+import { cliDependencyRange } from '../src/cli-manifest'
 import { checkEnvExample } from '../src/app-env'
 import { fileExists } from '../src/discovery'
 import { loadResolvedConfig } from '../src/resolved-config'
@@ -80,7 +81,7 @@ describe('guren add ai', () => {
     const lines = await infoLines(() => addAi({ provider: 'openai' }))
 
     expect(lines).toContain(
-      `Run: bun add @guren/plugin-ai ai@${aiPackageRange('ai')} @ai-sdk/openai@${aiPackageRange('@ai-sdk/openai')}`,
+      `Run: bun add @guren/plugin-ai ai@${cliDependencyRange('devDependencies', 'ai')} @ai-sdk/openai@${cliDependencyRange('devDependencies', '@ai-sdk/openai')}`,
     )
     expect(await readFile(resolve('config/ai.ts'), 'utf8')).toContain("import { createOpenAI } from '@ai-sdk/openai'")
     expect(await readFile(resolve('config/env.ts'), 'utf8')).toContain('OPENAI_API_KEY: Env.string().optional().secret(),')
@@ -91,7 +92,7 @@ describe('guren add ai', () => {
 
     const lines = await infoLines(() => addAi({ provider: 'gateway' }))
 
-    expect(lines).toContain(`Run: bun add ai@${aiPackageRange('ai')}`)
+    expect(lines).toContain(`Run: bun add ai@${cliDependencyRange('devDependencies', 'ai')}`)
     expect(await readFile(resolve('config/ai.ts'), 'utf8')).toContain("import { createGateway } from 'ai'")
   })
 
@@ -105,6 +106,38 @@ describe('guren add ai', () => {
     const app = await readFile(resolve('src/app.ts'), 'utf8')
     expect(app.match(/aiPlugin\(/g)).toHaveLength(1)
     expect(app.match(/config: \[ai\]/g)).toHaveLength(1)
+  })
+
+  it('refuses to switch the provider of an existing config/ai.ts without --force, before touching env or packages', async () => {
+    await seedApp()
+    await addAi({})
+
+    await expect(addAi({ provider: 'openai' })).rejects.toThrow('config/ai.ts already configures another default provider')
+    expect(await readFile(resolve('config/env.ts'), 'utf8')).not.toContain('OPENAI_API_KEY')
+
+    await addAi({ provider: 'openai', force: true })
+    expect(await readFile(resolve('config/ai.ts'), 'utf8')).toContain("default: 'openai'")
+  })
+
+  it('warns when the installed plugin does not support the app\'s @guren/core', async () => {
+    await seedApp()
+    await writeWorkspaceFiles(process.cwd(), {
+      'node_modules/@guren/plugin-ai/package.json': JSON.stringify({ gurenPlugin: { compatibility: '>=1.18.0 <2.0.0' } }),
+      'node_modules/@guren/core/package.json': JSON.stringify({ version: '1.17.2' }),
+    })
+    const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
+    try {
+      await addAi({})
+      expect(warn.mock.calls.map((args) => String(args[0]))).toContain(
+        '@guren/plugin-ai supports @guren/core >=1.18.0 <2.0.0, and this app has 1.17.2. Upgrade @guren/core, or the plugin runs against a second copy of it.',
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('refuses an explicit cwd rather than scaffolding into two directories', async () => {
+    await expect(addAi({ cwd: '/elsewhere' })).rejects.toThrow('guren add ai does not support an explicit cwd yet')
   })
 
   it('refuses an unknown provider before writing anything', async () => {
@@ -151,6 +184,6 @@ describe('guren add ai', () => {
     const plugin = JSON.parse(await readFile(join(cliRoot, '../plugin-ai/package.json'), 'utf8')) as {
       dependencies: Record<string, string>
     }
-    expect(aiPackageRange('ai')).toBe(plugin.dependencies.ai!)
+    expect(cliDependencyRange('devDependencies', 'ai')).toBe(plugin.dependencies.ai!)
   })
 })
