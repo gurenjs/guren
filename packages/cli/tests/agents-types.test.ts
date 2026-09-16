@@ -251,7 +251,53 @@ describe('buildAgentToolsContent', () => {
   )
 })
 
+describe('buildAgentToolsContent: the @guren/plugin-ai types', () => {
+  test('emits neither AgentToolInputTypes nor the augmentation without the plugin', () => {
+    const { tools } = deriveAgentTools(fixtureDefinitions())
+    const content = buildAgentToolsContent(tools, { resources })
+
+    expect(content).not.toContain('AgentToolInputTypes')
+    expect(content).not.toContain('@guren/plugin-ai')
+  })
+
+  test('types each tool from the merge: sources, required keys and the resource or output type', () => {
+    const definitions = fixtureDefinitions()
+    const { tools } = deriveAgentTools(definitions)
+    const content = buildAgentToolsContent(tools, { resources, pluginAi: { definitions } })
+
+    expect(content).toContain("  'posts.store': { id: string; title: string }")
+    expect(content).toContain("  'posts.index': Record<string, never>")
+    expect(content).toContain("declare module '@guren/plugin-ai' {")
+    expect(content).toContain(
+      "    'posts.index': { input: AgentToolInputTypes['posts.index']; output: AgentToolOutputTypes['posts.index'] }",
+    )
+    expect(content).toContain(
+      "    'posts.summary': { input: AgentToolInputTypes['posts.summary']; output: { total: number } }",
+    )
+    expect(content).toContain("    'posts.store': { input: AgentToolInputTypes['posts.store']; output: unknown }")
+  })
+
+  test('types a property unknown, never guessed, when its schema is out of reach', () => {
+    const { tools } = deriveAgentTools(fixtureDefinitions())
+    const content = buildAgentToolsContent(tools, { resources, pluginAi: { definitions: [] } })
+
+    // `id` is a path parameter and needs no schema; `title` came from a body schema.
+    expect(content).toContain("  'posts.store': { id: string; title: unknown }")
+  })
+})
+
 describe('generateAgentTypes', () => {
+  test('adds the @guren/plugin-ai types only for an app depending on the plugin', async () => {
+    const withPlugin = await makeApp({ 'package.json': JSON.stringify({ dependencies: { '@guren/plugin-ai': '^0.1.0' } }) })
+    const without = await makeApp({ 'package.json': JSON.stringify({ dependencies: { '@guren/core': '^1.18.0' } }) })
+
+    const written = await generateAgentTypes(fixtureDefinitions(), { appRoot: withPlugin, resources })
+    const plain = await generateAgentTypes(fixtureDefinitions(), { appRoot: without, resources })
+
+    expect(await readFile(written.outputPath, 'utf8')).toContain("declare module '@guren/plugin-ai'")
+    expect(await readFile(plain.outputPath, 'utf8')).not.toContain('@guren/plugin-ai')
+  })
+
   test('writes the manifest for an app whose routes declare agent metadata', async () => {
     const dir = await makeApp()
 

@@ -17,9 +17,11 @@ import {
   quoteNames,
   resolveResourceShapeType,
   type ResourceTypeRef,
+  type RouteDefinitionLike,
 } from './api-client-types'
 import { discoverRoutePathFiles } from './route-path-check'
-import { fileExists } from './discovery'
+import { appDependsOn, fileExists } from './discovery'
+import { PLUGIN_AI_PACKAGE, renderPluginAiTypes } from './agents-types-plugin-ai'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
@@ -140,7 +142,13 @@ export async function generateAgentTypes(
     return { outputPath: '', tools, warnings }
   }
 
-  const content = buildAgentToolsContent(tools, { resources: options.resources, warnings })
+  const content = buildAgentToolsContent(tools, {
+    resources: options.resources,
+    warnings,
+    // TypeScript rejects augmenting an uninstalled module (TS2664), and an
+    // unreadable manifest skips optional output rather than breaking the build.
+    pluginAi: (await appDependsOn(appRoot, PLUGIN_AI_PACKAGE)) === true ? { definitions } : undefined,
+  })
   const outputPath = await writeGeneratedFileIn(appRoot, outputFile, content, { force: options.force })
 
   return { outputPath, tools, warnings }
@@ -150,6 +158,12 @@ export interface BuildAgentToolsOptions {
   resources?: AgentResourceRef[]
   /** Sink for per-tool notes about hints that could not be resolved. */
   warnings?: string[]
+  /**
+   * Set for an app depending on `@guren/plugin-ai`: emits `AgentToolInputTypes` and
+   * the `AppAgentTools` augmentation (RFC 0029 §11). `definitions` are the ones the
+   * tools were derived from, since the Zod schemas behind a tool live only there.
+   */
+  pluginAi?: { definitions: readonly RouteDefinitionLike[] }
 }
 
 /** What a `resource` hint contributed to one tool, once resolved. */
@@ -173,14 +187,19 @@ export function buildAgentToolsContent(
 
   let importsData = false
   const outputTypes: string[] = []
+  const resourceTyped = new Set<string>()
   const entries = sorted.map((tool) => {
     const enrichment = resolveEnrichment(tool, declared, options.warnings)
     if (enrichment) {
       importsData = true
+      resourceTyped.add(tool.toolName)
       outputTypes.push(`  '${escapeSingleQuoted(tool.toolName)}': ${enrichment.dataType}`)
     }
     return renderTool(tool, enrichment)
   })
+  const pluginAiTypes = options.pluginAi
+    ? renderPluginAiTypes(sorted, { definitions: options.pluginAi.definitions, resourceTyped })
+    : ''
 
   const dataImport = importsData ? "\nimport type { Data } from './data.gen'\n" : ''
 
@@ -225,7 +244,7 @@ export type AgentToolName = keyof typeof agentTools
 export interface AgentToolOutputTypes {
 ${outputTypes.length > 0 ? outputTypes.join('\n') : '  // No tool declares a resolvable resource response hint.'}
 }
-`
+${pluginAiTypes}`
 }
 
 /**

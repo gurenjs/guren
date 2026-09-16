@@ -24,3 +24,31 @@ export type AiAgentName = NamesOf<AiAgents>
 
 /** The RFC 0016 scope grammar. Only the `tool:` form is exact; a prefix is checked for shape. */
 export type AgentToolScope = `tool:${AgentToolName}` | `tools:${string}.*` | 'tools:read' | 'tools:*'
+
+type AppAgentToolField<K extends string, F extends 'input' | 'output'> = K extends keyof AppAgentTools
+  ? AppAgentTools[K] extends Record<F, infer T> ? T : unknown
+  : unknown
+
+/** A tool's arguments, as `.guren/agents.gen.ts` renders its route contract; `unknown` before codegen. */
+export type AgentToolInput<K extends string> = AppAgentToolField<K, 'input'>
+
+/** A tool's success body; `unknown` when the route declares no `output` schema or resolvable `resource` hint. */
+export type AgentToolOutput<K extends string> = AppAgentToolField<K, 'output'>
+
+type UngrantedNames<S extends readonly string[], N extends readonly string[]> = {
+  [I in keyof N]: `tool:${N[I]}` extends S[number] ? never : N[I]
+}[number]
+
+/**
+ * `N` when every name has a `tool:` entry in `S`, otherwise a tuple type that
+ * names the ungranted ones in the compile error. Settles nothing when `S` is
+ * widened or holds a prefix, `tools:read` or `tools:*` grant: those depend on
+ * the derived tool list, which `as()` checks at construction (RFC 0029 §2.2).
+ */
+export type Granted<S extends readonly string[], N extends readonly string[]> = string extends S[number]
+  ? N
+  : [Exclude<S[number], `tool:${string}`>] extends [never]
+    ? [UngrantedNames<S, N>] extends [never]
+      ? N
+      : ReadonlyArray<`${UngrantedNames<S, N>} is not granted by static scopes`>
+    : N

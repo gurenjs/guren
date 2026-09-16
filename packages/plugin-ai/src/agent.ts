@@ -16,10 +16,10 @@ import {
   type ToolSet,
 } from 'ai'
 
-import { appToolDefinitions, appTools, type AppToolDefinition } from './app-tools'
+import { appToolDefinitions, appTools, type AppToolDefinition, type AppToolDenial, type AppToolError } from './app-tools'
 import { readAgentContext, setAgentContext, type AgentContext } from './context'
 import type { AiManager } from './manager'
-import type { AgentToolName, AgentToolScope, AiProviderName } from './types'
+import type { AgentToolInput, AgentToolName, AgentToolOutput, AgentToolScope, AiProviderName, Granted } from './types'
 
 /** What `as()` accepts: a principal, or a user record contributing its `id` (and `abilities`, if it carries them). */
 export type AgentPrincipalInput =
@@ -51,7 +51,13 @@ export interface BoundAgent<T extends Agent> {
   prompt(input: string, options?: PromptOptions): Promise<AgentResponse<InferAgentOutput<T>>>
 }
 
-export interface AgentClass<T extends Agent = Agent> {
+/** What `appTools(names)` returns: each tool typed against its route contract, refusals included in the result. */
+export type AppTools<N extends string> = {
+  [K in N]: Tool<AgentToolInput<K>, AgentToolOutput<K> | AppToolDenial | AppToolError>
+}
+
+// oxlint-disable-next-line typescript/no-explicit-any -- any Agent subclass, whatever its scopes parameter
+export interface AgentClass<T extends Agent<any> = Agent<any>> {
   new (): T
   readonly name: string
   readonly agentName?: string
@@ -65,10 +71,11 @@ let constructing: AgentContext | undefined
 /**
  * Subclass and set `instructions`; optionally `provider`, `tools()`, `output`
  * (an `Output.object(...)`, read by {@link InferAgentOutput}) and `stopWhen`.
- * Not constructed with `new`: `AiManager.agent(Class).as(principal)` or
- * `Class.as(principal)` construct it.
+ * Constructed by `ai.agent(Class).as(principal)` or `Class.as(principal)`, never `new`.
+ * `extends Agent<typeof X.scopes>` (scopes `as const`) makes an ungranted
+ * `appTools()` name a compile error (RFC 0029 §11).
  */
-export abstract class Agent {
+export abstract class Agent<S extends readonly AgentToolScope[] = readonly AgentToolScope[]> {
   /**
    * The stable wire name (audit, fakes, queued runs). Defaults to the class name, which a
    * minifier that mangles identifiers rewrites; pin it before anything durable keys on it.
@@ -105,8 +112,8 @@ export abstract class Agent {
   }
 
   /** The application's own agent tools, gated by the invocation pipeline (RFC 0029 §2). */
-  protected appTools<const N extends readonly AgentToolName[]>(names: N): Record<N[number], Tool> {
-    return appTools(this, names) as Record<N[number], Tool>
+  protected appTools<const N extends readonly AgentToolName[]>(names: N & Granted<S, N>): AppTools<N[number]> {
+    return appTools(this, names) as AppTools<N[number]>
   }
 
   /** {@link appTools} before packaging as AI SDK tools, for another agent runtime to wrap. */

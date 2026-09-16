@@ -9,6 +9,7 @@ export type {
   AgentPrincipalInput,
   AgentResponse,
   AnonymousAgentOptions,
+  AppTools,
   BoundAgent,
   InferAgentOutput,
   PromptOptions,
@@ -26,13 +27,16 @@ export { aiPlugin } from './plugin'
 export type { AiPluginConfig } from './plugin'
 
 export type {
+  AgentToolInput,
   AgentToolName,
+  AgentToolOutput,
   AgentToolScope,
   AiAgentName,
   AiAgents,
   AiProviderName,
   AiProviders,
   AppAgentTools,
+  Granted,
 } from './types'
 
 // What an agent class file needs from the AI SDK, so it imports one package.
