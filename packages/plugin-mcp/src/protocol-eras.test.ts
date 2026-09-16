@@ -53,9 +53,13 @@ describe('mcpPlugin across protocol eras', () => {
     reader = (await createApiToken(store, { name: 'reader', userId: 2, abilities: ['tools:read'] })).plainTextToken
   })
 
-  async function connect(era: ProtocolEra, bearer: string, tenant: string): Promise<Client> {
+  async function connect(era: ProtocolEra, bearer: string, tenant: string, bodies?: string[]): Promise<Client> {
     const transport = new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
-      fetch: (input, init) => app.fetch(new Request(input, init), { TENANT: tenant }),
+      fetch: async (input, init) => {
+        const response = await app.fetch(new Request(input, init), { TENANT: tenant })
+        bodies?.push(await response.clone().text())
+        return response
+      },
       requestInit: { headers: { Authorization: `Bearer ${bearer}` } },
     })
     // A pin, not a preference: a server that only spoke 2025 would fail the
@@ -114,6 +118,25 @@ describe('mcpPlugin across protocol eras', () => {
         }
 
         await Promise.all(callers.map(({ client }) => client.close()))
+      })
+
+      // The per-request options ride to the server factory inside `authInfo`,
+      // which request handlers can read; nothing of it may reach the client.
+      test('never puts the in-process request state on the wire', async () => {
+        const bodies: string[] = []
+        const client = await connect(era, writer, 'acme', bodies)
+
+        await client.listTools()
+        await client.callTool({ name: 'whoami.show', arguments: {} })
+        await client.callTool({ name: 'posts.store', arguments: {} })
+
+        expect(bodies.length).toBeGreaterThan(0)
+        for (const body of bodies) {
+          expect(body).not.toContain('guren.appMcpRequest')
+          expect(body).not.toContain('authInfo')
+        }
+
+        await client.close()
       })
 
       test('refuses a tool the caller\'s scopes do not reach', async () => {
