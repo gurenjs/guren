@@ -20,6 +20,15 @@ const DEFAULT_KINDS = {
 
 export type GurenPluginEnvType = keyof typeof DEFAULT_KINDS
 
+/** The text an env file assigns, as the `default` `type`'s builder takes; unchanged when it does not convert. */
+export function envDefaultFromText(text: string, type: GurenPluginEnvType = 'string'): string | number | boolean {
+  switch (DEFAULT_KINDS[type]) {
+    case 'number': return text.trim() === '' ? text : Number(text)
+    case 'boolean': return text === 'true' ? true : text === 'false' ? false : text
+    default: return text
+  }
+}
+
 export function envDeclarationProblem(entry: GurenPluginEnvEntry): string | undefined {
   const type = entry.type ?? 'string'
   if (!Object.hasOwn(DEFAULT_KINDS, type)) {

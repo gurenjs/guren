@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { addImport, addProvider, hasImport, hasAuthProvider, ensureMysqlImports, ensureNamedImports, ensurePgImports, ensureSqliteImports } from './patch-helpers'
+import { addImport, hasImport, hasAuthProvider, ensureMysqlImports, ensureNamedImports, ensurePgImports, ensureSqliteImports } from './patch-helpers'
 
 describe('patch-helpers', () => {
   let tempDir: string
@@ -125,59 +125,6 @@ const app = createApp({})`
       expect(content.indexOf("import { billingModule } from '../modules/billing'")).toBeLessThan(
         content.indexOf('const app = createApp({})'),
       )
-    })
-  })
-
-  describe('addProvider', () => {
-    it('should add provider to providers array', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/core'
-import DatabaseProvider from './Providers/DatabaseProvider.js'
-
-const app = new Application({
-  providers: [DatabaseProvider],
-})`
-
-      await writeFile(filePath, initialContent, 'utf8')
-
-      const result = await addProvider(filePath, 'AuthProvider')
-
-      expect(result.modified).toBe(true)
-
-      const content = await Bun.file(filePath).text()
-      expect(content).toContain('AuthProvider')
-      expect(content).toMatch(/providers:\s*\[.*DatabaseProvider.*AuthProvider.*\]/)
-    })
-
-    it('should not add duplicate provider', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/core'
-import AuthProvider from './Providers/AuthProvider.js'
-
-const app = new Application({
-  providers: [AuthProvider],
-})`
-
-      await writeFile(filePath, initialContent, 'utf8')
-
-      const result = await addProvider(filePath, 'AuthProvider')
-
-      expect(result.modified).toBe(false)
-      expect(result.reason).toBe('Provider already registered')
-    })
-
-    it('should return false when the entry has no createApp() call to add the array to', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/core'
-
-const app = new Application()`
-
-      await writeFile(filePath, initialContent, 'utf8')
-
-      const result = await addProvider(filePath, 'AuthProvider')
-
-      expect(result.modified).toBe(false)
-      expect(result.reason).toBe('Could not find a createApp({ ... }) call')
     })
   })
 

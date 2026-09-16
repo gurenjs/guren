@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { createTempWorkspace, type TempWorkspace } from './helpers'
+import { createTempWorkspace, ENV_SCHEMA_FIXTURE, writeWorkspaceFiles, type TempWorkspace } from './helpers'
 import { appendEnvEntry } from '../src/env-registrar'
 
 const ENTRY = `
-# Which store CacheProvider uses.
+# Which cache store the app uses.
 CACHE_STORE=memory
 `
 
@@ -30,7 +30,7 @@ describe('appendEnvEntry', () => {
     for (const file of ['.env.example', '.env']) {
       const content = await readFile(resolve(file), 'utf8')
       expect(content).toContain('APP_KEY=')
-      expect(content).toContain('\n\n# Which store CacheProvider uses.\nCACHE_STORE=memory\n')
+      expect(content).toContain('\n\n# Which cache store the app uses.\nCACHE_STORE=memory\n')
     }
   })
 
@@ -67,5 +67,38 @@ describe('appendEnvEntry', () => {
     // re-run appends the entry again.
     await expect(appendEnvEntry('CACHE_STORE', '\n# CACHE_STORE is a thing\n'))
       .rejects.toThrow('does not assign CACHE_STORE=')
+  })
+
+  it('declares the builder a blueprint names, defaulting to the assigned value', async () => {
+    await writeWorkspaceFiles(process.cwd(), { '.env.example': 'APP_KEY=\n', 'config/env.ts': ENV_SCHEMA_FIXTURE })
+
+    await appendEnvEntry('SESSION_DRIVER', '\nSESSION_DRIVER=database\n', {
+      declare: { type: 'enum', choices: ['database', 'cookie'] },
+    })
+
+    expect(await readFile(resolve('config/env.ts'), 'utf8'))
+      .toContain("SESSION_DRIVER: Env.enum(['database', 'cookie']).default('database'),")
+  })
+
+  // `Env.port().default('587')` would not typecheck in the app.
+  it('converts the assigned text to the default a non-string builder takes', async () => {
+    await writeWorkspaceFiles(process.cwd(), { '.env.example': 'APP_KEY=\n', 'config/env.ts': ENV_SCHEMA_FIXTURE })
+
+    await appendEnvEntry('SMTP_PORT', '\nSMTP_PORT=587\n', { declare: { type: 'port' } })
+    await appendEnvEntry('SMTP_SECURE', '\nSMTP_SECURE=false\n', { declare: { type: 'boolean' } })
+
+    const schema = await readFile(resolve('config/env.ts'), 'utf8')
+    expect(schema).toContain('SMTP_PORT: Env.port().default(587),')
+    expect(schema).toContain('SMTP_SECURE: Env.boolean().default(false),')
+  })
+
+  it('refuses a declaration whose default the builder would not accept', async () => {
+    await writeWorkspaceFiles(process.cwd(), { '.env.example': 'APP_KEY=\n', 'config/env.ts': ENV_SCHEMA_FIXTURE })
+
+    await expect(appendEnvEntry('SESSION_DRIVER', '\nSESSION_DRIVER=redis\n', {
+      declare: { type: 'enum', choices: ['database', 'cookie'] },
+    })).rejects.toThrow('default must be one of its choices')
+    expect(await readFile(resolve('config/env.ts'), 'utf8')).toBe(ENV_SCHEMA_FIXTURE)
+    expect(await readFile(resolve('.env.example'), 'utf8')).toBe('APP_KEY=\n')
   })
 })

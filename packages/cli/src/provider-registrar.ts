@@ -2,7 +2,7 @@ import { consola } from 'consola'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { findFirstExisting, readIfExists } from './discovery'
-import { insertImport, insertProvider, PATCH_REASONS, type PatchResult } from './patch-helpers'
+import { insertArrayOptionEntry, insertImport, PATCH_REASONS, type PatchResult } from './patch-helpers'
 import { relativeImportPath } from './utils'
 
 /**
@@ -17,52 +17,53 @@ export async function resolveAppEntry(cwd: string = process.cwd()): Promise<stri
   return findFirstExisting(cwd, APP_ENTRY_CANDIDATES)
 }
 
-export type ProviderWiring =
-  | { registered: false; provider: PatchResult }
-  | { registered: true; provider: PatchResult; import: PatchResult }
+export type EntryWiring =
+  | { registered: false; entry: PatchResult }
+  | { registered: true; entry: PatchResult; import: PatchResult }
 
 /**
- * Registers `providerName` in `appPath`'s `providers: [...]` array and adds
+ * Adds `entry` to `appPath`'s `createApp({ <key>: [...] })` array and adds
  * `importStatement`, in **one write**: a lone import breaks `noUnusedLocals`, a lone
  * registration is an unresolved identifier, and two sequenced patches can leave either.
  * Silent by design — callers with their own reporting read the outcome, not the console.
  */
-export async function addProviderRegistration(
+export async function addArrayOptionRegistration(
   appPath: string,
-  providerName: string,
+  key: 'providers' | 'config',
+  entry: string,
   importStatement: string,
   isRegistered?: (entries: string[]) => boolean,
-): Promise<ProviderWiring> {
+): Promise<EntryWiring> {
   const content = await readIfExists(process.cwd(), appPath)
 
   if (content === null) {
-    return { registered: false, provider: { modified: false, reason: PATCH_REASONS.fileNotFound } }
+    return { registered: false, entry: { modified: false, reason: PATCH_REASONS.fileNotFound } }
   }
 
-  const inserted = insertProvider(content, providerName, isRegistered)
-  const alreadyRegistered = inserted.reason === PATCH_REASONS.providerAlreadyRegistered
+  const inserted = insertArrayOptionEntry(content, key, entry, { isRegistered })
+  const alreadyRegistered = inserted.reason === PATCH_REASONS.alreadyPresent
 
   if (inserted.content === undefined && !alreadyRegistered) {
-    return { registered: false, provider: { modified: false, reason: inserted.reason } }
+    return { registered: false, entry: { modified: false, reason: inserted.reason } }
   }
 
-  // An already-registered provider still needs its import checked: the two can
+  // An already-registered entry still needs its import checked: the two can
   // fall out of sync when a user removes one by hand.
-  const withProvider = inserted.content ?? content
-  const withImport = insertImport(withProvider, importStatement)
+  const withEntry = inserted.content ?? content
+  const withImport = insertImport(withEntry, importStatement)
 
-  const provider: PatchResult = alreadyRegistered
-    ? { modified: false, reason: PATCH_REASONS.providerAlreadyRegistered }
+  const entryResult: PatchResult = alreadyRegistered
+    ? { modified: false, reason: PATCH_REASONS.alreadyPresent }
     : { modified: true }
   const importResult: PatchResult = withImport === null
     ? { modified: false, reason: PATCH_REASONS.importAlreadyExists }
     : { modified: true }
 
-  if (provider.modified || importResult.modified) {
-    await writeFile(resolve(process.cwd(), appPath), withImport ?? withProvider, 'utf8')
+  if (entryResult.modified || importResult.modified) {
+    await writeFile(resolve(process.cwd(), appPath), withImport ?? withEntry, 'utf8')
   }
 
-  return { registered: true, provider, import: importResult }
+  return { registered: true, entry: entryResult, import: importResult }
 }
 
 export interface WireProviderOptions {
@@ -72,80 +73,80 @@ export interface WireProviderOptions {
   verbose?: boolean
 }
 
-/** The import line for a provider scaffolded as `app/Providers/<Name>.ts`. */
-function scaffoldedProviderImport(appPath: string, providerName: string): string {
-  return `import ${providerName} from '${relativeImportPath(appPath, `app/Providers/${providerName}.js`)}'`
+/** The import of a scaffolded file's default export, relative to the entry that imports it. */
+function defaultExportImport(name: string, target: string): (appPath: string) => string {
+  return (appPath) => `import ${name} from '${relativeImportPath(appPath, target)}'`
 }
 
-/** What the app author has to do by hand for a provider this could not wire. */
-function reportManualStep(providerName: string, importStatement: string): void {
-  consola.info(`Add ${providerName} to your createApp() providers array by hand: ${importStatement}`)
+function scaffoldedProviderImport(providerName: string): (appPath: string) => string {
+  return defaultExportImport(providerName, `app/Providers/${providerName}.js`)
 }
 
-function warnNoAppEntry(providerName: string, importStatement: string): void {
-  consola.warn(`Could not find ${APP_ENTRY_CANDIDATES.join(' or ')} — ${providerName} was not registered.`)
-  reportManualStep(providerName, importStatement)
+/** What the app author has to do by hand for an entry this could not wire. */
+function reportManualStep(key: string, entry: string, importStatement: string): void {
+  consola.info(`Add ${entry} to your createApp() ${key} array by hand: ${importStatement}`)
 }
 
-function report(
-  appPath: string,
-  providerName: string,
-  importStatement: string,
-  wiring: ProviderWiring,
-  verbose: boolean,
-): void {
-  if (!wiring.registered) {
-    consola.warn(`Could not register ${providerName} in ${appPath}: ${wiring.provider.reason}.`)
-    reportManualStep(providerName, importStatement)
+function warnNoAppEntry(key: string, entry: string, importStatement: string): void {
+  consola.warn(`Could not find ${APP_ENTRY_CANDIDATES.join(' or ')} — ${entry} was not registered.`)
+  reportManualStep(key, entry, importStatement)
+}
+
+async function wireArrayOption(
+  key: 'providers' | 'config',
+  entry: string,
+  importFor: string | ((appPath: string) => string),
+  options: WireProviderOptions,
+): Promise<void> {
+  const appPath = options.appPath ?? (await resolveAppEntry())
+  // With no entry the import is still derived, from the conventional one, for the manual step.
+  const importStatement = typeof importFor === 'string' ? importFor : importFor(appPath ?? APP_ENTRY_CANDIDATES[0])
+
+  if (!appPath) {
+    warnNoAppEntry(key, entry, importStatement)
     return
   }
 
-  if (!verbose) return
+  const wiring = await addArrayOptionRegistration(appPath, key, entry, importStatement)
 
-  if (wiring.import.modified) {
-    consola.success(`Added ${providerName} import to ${appPath}`)
-  } else {
-    consola.info(`${providerName} import already exists in ${appPath}`)
+  if (!wiring.registered) {
+    consola.warn(`Could not register ${entry} in ${appPath}: ${wiring.entry.reason}.`)
+    reportManualStep(key, entry, importStatement)
+    return
   }
 
-  if (wiring.provider.modified) {
-    consola.success(`Added ${providerName} to providers array in ${appPath}`)
+  if (!options.verbose) return
+
+  if (wiring.import.modified) {
+    consola.success(`Added ${entry} import to ${appPath}`)
   } else {
-    consola.info(`${providerName} already registered in ${appPath}`)
+    consola.info(`${entry} import already exists in ${appPath}`)
+  }
+
+  if (wiring.entry.modified) {
+    consola.success(`Added ${entry} to ${key} array in ${appPath}`)
+  } else {
+    consola.info(`${entry} already registered in ${appPath}`)
   }
 }
 
-/** `addProviderRegistration` against the app's entry file, reporting every failure. */
+/** Registers a provider in the app entry's `providers` array, reporting every failure. */
 export async function wireProvider(
   providerName: string,
   importStatement: string,
   options: WireProviderOptions = {},
 ): Promise<void> {
-  const appPath = options.appPath ?? (await resolveAppEntry())
-
-  if (!appPath) {
-    warnNoAppEntry(providerName, importStatement)
-    return
-  }
-
-  const wiring = await addProviderRegistration(appPath, providerName, importStatement)
-  report(appPath, providerName, importStatement, wiring, Boolean(options.verbose))
+  await wireArrayOption('providers', providerName, importStatement, options)
 }
 
-/**
- * `wireProvider` for a provider scaffolded at `app/Providers/<Name>.ts` — the one place
- * that knows those are default exports, imported relative to whichever entry was found.
- */
+/** Registers the definition `config/<binding>.ts` default-exports (RFC 0027 §2) in the `config` array. */
+export async function wireConfig(binding: string, options: WireProviderOptions = {}): Promise<void> {
+  await wireArrayOption('config', binding, defaultExportImport(binding, `config/${binding}.js`), options)
+}
+
+/** `wireProvider` for a provider scaffolded at `app/Providers/<Name>.ts`, a default export. */
 export async function wireAppProvider(providerName: string, options: WireProviderOptions = {}): Promise<void> {
-  const appPath = options.appPath ?? (await resolveAppEntry())
-
-  if (!appPath) {
-    // The import is only derivable from an entry, so name the conventional one.
-    warnNoAppEntry(providerName, scaffoldedProviderImport(APP_ENTRY_CANDIDATES[0], providerName))
-    return
-  }
-
-  await wireProvider(providerName, scaffoldedProviderImport(appPath, providerName), { ...options, appPath })
+  await wireArrayOption('providers', providerName, scaffoldedProviderImport(providerName), options)
 }
 
 export interface ProviderRegistration {
@@ -168,10 +169,10 @@ export async function wireProviders(
   // Warned one by one even with no entry to patch: an app missing any one of a
   // blueprint's providers is missing the feature, so a single warning under-reports.
   for (const { name, importStatement } of registrations) {
-    const statement = importStatement ?? scaffoldedProviderImport(appPath ?? APP_ENTRY_CANDIDATES[0], name)
+    const statement = importStatement ?? scaffoldedProviderImport(name)(appPath ?? APP_ENTRY_CANDIDATES[0])
 
     if (!appPath) {
-      warnNoAppEntry(name, statement)
+      warnNoAppEntry('providers', name, statement)
       continue
     }
 

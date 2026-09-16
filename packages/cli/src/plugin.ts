@@ -2,7 +2,7 @@ import type { WriterOptions } from './utils'
 import { assertCwdUnsupported, runCommand } from './utils'
 import { appDependsOn } from './discovery'
 import { declareEnvEntries, ENV_SCHEMA_FILE } from './app-env'
-import { addProviderRegistration, APP_ENTRY_CANDIDATES, resolveAppEntry } from './provider-registrar'
+import { addArrayOptionRegistration, APP_ENTRY_CANDIDATES, resolveAppEntry } from './provider-registrar'
 import {
   applyEnvEntries,
   assertEnvEntriesAllowed,
@@ -156,18 +156,19 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
 
     // Any entry invoking the factory counts as registered, including a
     // user-configured `vercelPlugin({ ... })`.
-    const wiring = await addProviderRegistration(
+    const wiring = await addArrayOptionRegistration(
       appPath,
+      'providers',
       providerExpression,
       providerImport,
       factoryName ? (entries) => entries.some((entry) => entry.startsWith(`${factoryName}(`)) : undefined,
     )
 
     if (!wiring.registered) {
-      throw new Error(`Could not register ${providerName} in ${appPath}: ${wiring.provider.reason}`)
+      throw new Error(`Could not register ${providerName} in ${appPath}: ${wiring.entry.reason}`)
     }
 
-    if (wiring.provider.modified || wiring.import.modified) {
+    if (wiring.entry.modified || wiring.import.modified) {
       messages.push({ kind: 'updated', text: appPath })
     } else {
       messages.push({ kind: 'checked', text: `${appPath} (already registered)` })

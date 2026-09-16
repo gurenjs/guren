@@ -657,12 +657,13 @@ the template migration settled:
   it.** `.env.example` ships `APP_KEY=` blank and the scaffolder fills in only
   `.env`, so a strictly required key would fail the boot of a development app
   set up from the example. Production keeps the strict rule, as `APP_URL` does.
-- **`SESSION_DRIVER` is declared `Env.string()` until the session blueprint is a
-  definition**, not the `Env.enum()` §1 sketches. `scripts/smoke/session-drivers.ts`
-  boots with an unknown driver to read the declared stores out of the session
-  manager's refusal, then exercises each; an enum rejects the name during env
-  validation, before that manager exists, and the probe would lose its list. The
-  enum lands with the session definition, which reworks the probe with it.
+- **`SESSION_DRIVER` stays `Env.string()`**, not the `Env.enum()` §1 sketches.
+  `scripts/smoke/session-drivers.ts` boots with an unknown driver to read the
+  declared stores out of the session manager's refusal, then exercises each. An
+  enum rejects the name during env validation, before that manager exists, and
+  its message names the schema's values, which match the manager's `stores` only
+  until one is edited. The enum waits for a way to list a manager's stores
+  without a failed boot, which is `@guren/server` surface, not a scaffold change.
 - **`.env.example` ships only what the base app reads.** The `REDIS_URL`,
   `QUEUE_CONNECTION`, `MAIL_*` and `RESEND_API_KEY` lines belonged to blueprints
   that now add their own keys, which also retires `MAIL_FROM_NAME="${APP_NAME}"`:
@@ -672,6 +673,22 @@ the template migration settled:
 - **The api-only template's test builds on its own entry** (`TestApp.fromApp`),
   which a test asserting the app's configuration has to do: `TestApp.create()`
   builds a second app that never sees the definitions.
+
+**Amended in implementation (Part 2d-2).** The blueprints migrate in more than
+one PR. The first adds `wireConfig()` (the `createApp({ config })` counterpart
+of provider wiring, one write for the entry and its import) and typed
+declarations in `appendEnvEntry`, and migrates `guren add cache`:
+
+- **A blueprint writes a definition only into an app that has `config/env.ts`.**
+  A definition reads declared keys through `AppEnv`, which an app without a
+  schema leaves empty, so such an app keeps getting `CacheProvider`.
+- **The definition replaces both providers.** `defineCacheConfig` binds `cache`
+  itself, so neither `CacheProvider` nor `CoreCacheServiceProvider` is wired.
+- **`appBindsService()` does not see a definition yet.** It matches
+  `instance|singleton|bind('<key>'` under `app/` and `src/`, and a definition
+  contains no such call. Nothing reads it for `cache`; `storage` (read by
+  `guren add attachments`) and `session` (read by `sessions-check.ts`) change
+  with their own blueprints.
 
 ### 7. `.env.example`, drift, and lint
 

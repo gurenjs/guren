@@ -94,7 +94,7 @@ async function patchAppEntry(moduleDir: string, camelName: string): Promise<void
   const moduleImport = `import { ${moduleBinding} } from '${importPath}'`
 
   // Registration first, import only once it lands (as in
-  // `addProviderRegistration`): an import nothing references is an unused
+  // `addArrayOptionRegistration`): an import nothing references is an unused
   // local, which stops the app compiling under `noUnusedLocals`.
   const modulesResult = await addToArrayOption(appPath, 'modules', moduleBinding)
   if (modulesResult.modified) {

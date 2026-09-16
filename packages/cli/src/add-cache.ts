@@ -1,29 +1,42 @@
+import { ENV_SCHEMA_FILE } from './app-env'
+import { fileExists } from './discovery'
 import { appendEnvEntry } from './env-registrar'
-import { wireProviders } from './provider-registrar'
+import { wireConfig, wireProviders } from './provider-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
 import { writeScaffoldFiles, type WriterOptions } from './utils'
 
 /**
- * `guren add cache`: the cache provider and an example service, plus the
- * `CACHE_STORE` entry the provider reads. An app has no 'cache' binding of its
- * own until this runs, which is why the scaffolded .env files ship no
- * CACHE_STORE line for it to read.
+ * `guren add cache`: the cache configuration and an example service, plus the
+ * `CACHE_STORE` entry it reads. An app declaring its environment in
+ * `config/env.ts` gets a `config/cache.ts` definition (RFC 0027 §2); one without
+ * gets `CacheProvider`, since a definition reads only declared keys.
  */
 export async function addCache(options: WriterOptions): Promise<string[]> {
+  // An app that already has CacheProvider keeps it: a definition beside it binds
+  // 'cache' twice, which fails the boot.
+  const declaresEnv = await fileExists(process.cwd(), ENV_SCHEMA_FILE)
+    && !(await fileExists(process.cwd(), 'app/Providers/CacheProvider.ts'))
+
   // Skipped per file rather than thrown, so a re-run repairs whatever is
   // missing instead of aborting on the first file that already exists.
   const created = await writeScaffoldFiles([
-    scaffoldTemplateFile('cache', 'app/Providers/CacheProvider.ts'),
+    declaresEnv
+      ? scaffoldTemplateFile('cache', 'config/cache.ts')
+      : scaffoldTemplateFile('cache', 'app/Providers/CacheProvider.ts'),
     scaffoldTemplateFile('cache', 'app/Services/ApplicationCache.ts'),
   ], { ...options, skipExisting: true })
 
-  await wireProviders([
-    { name: 'CoreCacheServiceProvider', importStatement: "import { CacheServiceProvider as CoreCacheServiceProvider } from '@guren/core'" },
-    { name: 'CacheProvider' },
-  ])
+  if (declaresEnv) {
+    await wireConfig('cache')
+  } else {
+    await wireProviders([
+      { name: 'CoreCacheServiceProvider', importStatement: "import { CacheServiceProvider as CoreCacheServiceProvider } from '@guren/core'" },
+      { name: 'CacheProvider' },
+    ])
+  }
 
   await appendEnvEntry('CACHE_STORE', `
-# Which store CacheProvider uses. Declare it there before naming it here.
+# Which cache store the app uses. Declare it in the cache config before naming it here.
 CACHE_STORE=memory
 `, { declare: true })
 

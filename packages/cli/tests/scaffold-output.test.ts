@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   CLI_DIST_BIN,
+  ENV_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
   SERVER_DIST_ENTRY,
   assertWorkspaceBuilt,
@@ -10,6 +11,7 @@ import {
   seedApiOnlyApp,
   seedAttachmentsConfig,
   seedInertiaApp,
+  writeWorkspaceFiles,
 } from './helpers'
 import { parseSourceFile } from '../src/parse-cache'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
@@ -414,6 +416,7 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
     'attachments/db/schema.ts': 'pinned by the attachments fixture pin above',
     'oauth/db/schema.ts': 'pinned by the schema-table fixture pin above',
     'session/db/schema.ts': 'pinned by the schema-table fixture pin above',
+    'cache/config/env.ts': 'pinned by the byte-identical template gate below, which runs cache against a declared env',
   }
 
   it('every companion fixture is pinned to a builder, or names why not', async () => {
@@ -445,26 +448,44 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
     expect(Object.keys(COVERED_ELSEWHERE).filter((name) => !dirs.has(name))).toEqual([])
   })
 
+  // Written in place of the provider when the app declares its environment (RFC 0027 §2).
+  const ENV_DECLARED_ONLY = new Set(['cache/config/cache.ts'])
+
   it('every shipped blueprint template lands byte-identical', async () => {
     const templatePaths = (await relativeSourcePaths(SCAFFOLD_TEMPLATE_ROOT))
       .filter((path) => !(path.split('/')[0] in COVERED_ELSEWHERE))
     expect(templatePaths.length).toBeGreaterThan(0)
+    expect([...ENV_DECLARED_ONLY].filter((path) => !templatePaths.includes(path))).toEqual([])
 
-    const blueprints = [...new Set(templatePaths.map((path) => path.split('/')[0]))].sort()
+    for (const declaresEnv of [false, true]) {
+      const paths = templatePaths.filter((path) => ENV_DECLARED_ONLY.has(path) === declaresEnv)
+      const blueprints = [...new Set(paths.map((path) => path.split('/')[0]))].sort()
 
-    const workspace = await createTempWorkspace('guren-blueprint-template-pin-')
-    try {
-      await seedInertiaApp(workspace.dir)
-      for (const blueprint of blueprints) {
-        await runBlueprint(blueprint, {})
+      const workspace = await createTempWorkspace('guren-blueprint-template-pin-')
+      try {
+        await seedInertiaApp(workspace.dir)
+        if (declaresEnv) await writeWorkspaceFiles(workspace.dir, { 'config/env.ts': ENV_SCHEMA_FIXTURE })
+        for (const blueprint of blueprints) {
+          await runBlueprint(blueprint, {})
+        }
+        for (const path of paths) {
+          const appPath = path.split('/').slice(1).join('/')
+          const written = await readFile(join(workspace.dir, appPath), 'utf8')
+          expect(written).toBe(await readFile(join(SCAFFOLD_TEMPLATE_ROOT, path), 'utf8'))
+        }
+        // The typecheck companion stands in for the schema these runs leave behind.
+        if (declaresEnv) {
+          const schema = await readFile(join(workspace.dir, 'config/env.ts'), 'utf8')
+          const declared = schema.split('\n').filter((line) => /^\s+[A-Z_]+: Env\./.test(line) && !ENV_SCHEMA_FIXTURE.includes(line))
+          expect(declared.length).toBeGreaterThan(0)
+          for (const blueprint of blueprints) {
+            const companion = await readFile(join(SCAFFOLD_FIXTURE_ROOT, blueprint, 'config/env.ts'), 'utf8')
+            for (const line of declared) expect(companion).toContain(line)
+          }
+        }
+      } finally {
+        await workspace.cleanup()
       }
-      for (const path of templatePaths) {
-        const appPath = path.split('/').slice(1).join('/')
-        const written = await readFile(join(workspace.dir, appPath), 'utf8')
-        expect(written).toBe(await readFile(join(SCAFFOLD_TEMPLATE_ROOT, path), 'utf8'))
-      }
-    } finally {
-      await workspace.cleanup()
     }
   })
 })
