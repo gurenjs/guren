@@ -75,12 +75,11 @@ export async function appConfiguresSessions(): Promise<boolean> {
 }
 
 /**
- * `guren add session`: the `sessions` schema table and its migration,
- * `config/session.ts` (a definition, or beside `SessionProvider` in an app with no
- * `config/env.ts`), the `SESSION_DRIVER` env entry, and
- * the `sessions:prune` command. Without it an app's sessions live in process
- * memory, which is correct on one long-lived server and drops every login on
- * Workers, Lambda and Vercel (RFC 0020).
+ * `guren add session`: the `sessions` table and its migration, `config/session.ts`
+ * (a definition, or beside `SessionProvider` in an app with no `config/env.ts`),
+ * `SESSION_DRIVER`, and `sessions:prune`. Without it sessions live in process
+ * memory: right on one long-lived server, and every login is dropped on Workers,
+ * Lambda and Vercel (RFC 0020).
  */
 export async function addSession(options: AddSessionOptions = {}): Promise<AddSessionResult> {
   const schema = await appendSchemaTable({
