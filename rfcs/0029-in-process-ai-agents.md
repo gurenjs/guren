@@ -653,6 +653,19 @@ the tool descriptions get the right answer out of the model is §10's job.
   owns (`app/Agents`, `config/agents.ts`, a Workers-only class); a durable
   agent and an in-process one are different things and the scaffold should
   not blur them.
+
+  **Amended in implementation (Part 1b):** `add ai` writes no conversation
+  tables and has no `--no-conversations`: nothing reads them until the
+  `database` store of §5 lands in Part 2. It declares only the provider's key,
+  optional and secret, so the app boots before the key exists and the first
+  prompt fails; `AI_PROVIDER` is left out, since `config/ai.ts` configures one
+  provider. `.env.test` is not written (no scaffolded app has one, and an
+  optional key needs no placeholder). The command refuses an app without
+  `config/env.ts`, whose keys a definition cannot read, and installs through
+  `bun add` (`--no-install` prints the command) with the `ai` and provider
+  ranges `@guren/cli` typechecks the templates against. `make:ai-agent` writes
+  no `app/Ai/agents.ts` entry: `aiPlugin()` has no `agents` option to read one
+  yet. `make:ai-tool` follows with Part 3's local-tool advisory.
 - **`guren check`** (content-activated, nothing runs for an app with no
   `Agent` subclass): a literal `appTools([...])` name that no `.agent()`
   route derives; a name outside the class's `static scopes`; an `Agent`

@@ -18,6 +18,7 @@ import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelat
 import { builtinSubCommands } from '../src/commands'
 import { buildOAuthProviderTemplate, makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { runBlueprint } from '../src/blueprints'
+import { AI_PROVIDERS, addAi } from '../src/add-ai'
 import { makeFeature } from '../src/make-feature'
 import { makeChannel } from '../src/make-channel'
 import { makeCommand } from '../src/make-command'
@@ -33,6 +34,7 @@ import { makeModel } from '../src/make-model'
 import { makeModule } from '../src/make-module'
 import { makeNotification } from '../src/make-notification'
 import { makeAgent } from '../src/make-agent'
+import { makeAiAgent } from '../src/make-ai-agent'
 import { makePolicy } from '../src/make-policy'
 import { makeProvider } from '../src/make-provider'
 import { makeResource } from '../src/make-resource'
@@ -125,6 +127,7 @@ const singleFileCases: Array<[string, () => Promise<unknown>]> = [
   // Writes three files: the class, config/agents.ts, and guren.arch.ts. All
   // three land in the workspace, so the parse gate below covers each.
   ['make:agent', () => makeAgent('Triager')],
+  ['make:ai-agent --output --test', () => makeAiAgent('Triager', { output: true, test: true })],
   ['make:channel', () => makeChannel('Orders')],
   ['make:command', () => makeCommand('SendDigest')],
   ['make:event', () => makeEvent('OrderShipped')],
@@ -417,6 +420,7 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
     'oauth/db/schema.ts': 'pinned by the schema-table fixture pin above',
     'session/db/schema.ts': 'pinned by the schema-table fixture pin above',
     'cache/config/env.ts': 'pinned by the byte-identical template gate below, which runs cache against a declared env',
+    'ai/config/env.ts': 'pinned by the add ai template gate below, which runs every provider against a declared env',
   }
 
   it('every companion fixture is pinned to a builder, or names why not', async () => {
@@ -441,7 +445,28 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
     auth: 'flag-dependent scaffold; every template is covered by the auth reachability gate above',
     attachments: 'its run installs the storage blueprint, which this shared workspace also runs; '
       + 'its templates are byte-pinned by the attachments fixture pin above',
+    ai: 'not a registry blueprint (guren add ai takes --provider); pinned per provider by the add ai gate below',
   }
+
+  it('add ai writes each provider template byte-identical and declares only what the companion does', async () => {
+    const companion = await readFile(join(SCAFFOLD_FIXTURE_ROOT, 'ai/config/env.ts'), 'utf8')
+    for (const provider of Object.keys(AI_PROVIDERS)) {
+      const workspace = await createTempWorkspace(`guren-add-ai-template-pin-${provider}-`)
+      try {
+        await seedInertiaApp(workspace.dir)
+        await writeWorkspaceFiles(workspace.dir, { 'config/env.ts': ENV_SCHEMA_FIXTURE })
+        await addAi({ provider })
+        expect(await readFile(join(workspace.dir, 'config/ai.ts'), 'utf8'))
+          .toBe(await readFile(join(SCAFFOLD_TEMPLATE_ROOT, `ai/${provider}/config/ai.ts`), 'utf8'))
+        const schema = await readFile(join(workspace.dir, 'config/env.ts'), 'utf8')
+        const declared = schema.split('\n').filter((line) => /^\s+[A-Z_]+: Env\./.test(line) && !ENV_SCHEMA_FIXTURE.includes(line))
+        expect(declared).toHaveLength(1)
+        expect(companion).toContain(declared[0]!)
+      } finally {
+        await workspace.cleanup()
+      }
+    }
+  })
 
   it('exempts only template dirs that exist', async () => {
     const dirs = new Set((await relativeSourcePaths(SCAFFOLD_TEMPLATE_ROOT)).map((path) => path.split('/')[0]))
