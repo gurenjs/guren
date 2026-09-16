@@ -167,7 +167,10 @@ export function resolveAgentName(cls: Pick<AgentClass, 'name' | 'agentName'>): s
   return own ?? cls.name
 }
 
-/** @internal `AiManager.agent().as()`. */
+/**
+ * `AiManager.agent().as()`: construct `cls` for `principal`, resolving its model through
+ * `scope.manager`. Public so another manager (a test fake) binds agents the same way.
+ */
 export function bindAgent<T extends Agent>(
   cls: AgentClass<T>,
   input: AgentPrincipalInput,

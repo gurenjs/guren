@@ -3,7 +3,7 @@
  * configured in `config/ai.ts` and reaches the application only through
  * `appTools()`, which runs every call through the agent invocation pipeline.
  */
-export { Agent, agent, resolveAgentName } from './agent'
+export { Agent, agent, bindAgent, resolveAgentName } from './agent'
 export type {
   AgentClass,
   AgentPrincipalInput,

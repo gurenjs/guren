@@ -46,4 +46,20 @@ A tool defined with `tool()` inside `tools()` runs with whatever authority its c
 
 Tool names reach the model provider verbatim. Anthropic and OpenAI accept only `[A-Za-z0-9_-]{1,64}`, so a route named `tickets.show` needs `.agent({ toolName: 'tickets_show' })`.
 
+In tests, `app.fakeAi()` from `@guren/testing` scripts the model per agent while the tools still run through the pipeline. It needs `ai` installed beside `@guren/plugin-ai`, since the fake is built on `MockLanguageModelV4` from `ai/test`:
+
+```ts
+using ai = app.fakeAi()
+ai.respond(SupportTriager, [
+  { toolCalls: [{ name: 'tickets_show', input: { id: 4812 } }], then: { output: { category: 'billing', priority: 2 } } },
+])
+
+await app.post('/tickets/4812/triage').assertRedirect('/tickets/4812')
+
+ai.assertPrompted(SupportTriager, (input) => input.includes('#4812'))
+ai.calls(SupportTriager)[0].toolCalls   // [{ name: 'tickets_show', input, output }]
+```
+
+A prompt with nothing scripted fails when `ai` is disposed, naming the agent, even if the route turned the error into a 500.
+
 Requires Node 22 or later (the AI SDK's floor), or Bun.

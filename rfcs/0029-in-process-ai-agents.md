@@ -618,6 +618,17 @@ stubbed the tools would pass with a route the agent could never reach.
 `respond()` with nothing scripted makes any prompt a test failure naming the
 agent, so an untested agent cannot pass by returning an empty string.
 
+**Amended in implementation:** a scripted response is a string, `{ text }`,
+`{ output }` or `{ toolCalls, then }`, and each prompt consumes one. Since
+`model()` is told a provider and never a class, the fake constructs agents
+through `bindAgent` (exported for this) with a per-class manager. An
+unscripted prompt throws naming the agent, and disposing the fake throws
+again, because a route turns the first throw into a 500 whose body names
+nothing. `assertNotPrompted(Agent, predicate)` fails on a matching prompt and
+`assertNeverPrompted(Agent)` on any prompt. `@guren/plugin-ai` and `ai` are
+optional peers of `@guren/testing`, imported when `fromApp()` boots an app
+that binds `ai`, which keeps `fakeAi()` synchronous.
+
 A fake measures the wiring and nothing else; whether the instructions and
 the tool descriptions get the right answer out of the model is §10's job.
 
