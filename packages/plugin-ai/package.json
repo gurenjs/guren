@@ -1,0 +1,60 @@
+{
+  "name": "@guren/plugin-ai",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "In-process AI agents for Guren applications: model calls on the Vercel AI SDK that reach the app through its own gated agent tools (RFC 0029).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gurenjs/guren",
+    "directory": "packages/plugin-ai"
+  },
+  "homepage": "https://github.com/gurenjs/guren#readme",
+  "bugs": {
+    "url": "https://github.com/gurenjs/guren/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "gurenPlugin": {
+    "compatibility": ">=1.18.0 <2.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun --bun tsdown",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@guren/core": "^1.18.0",
+    "ai": "^7.0.102"
+  },
+  "devDependencies": {
+    "@guren/plugin-mcp": "^0.5.0",
+    "@types/node": "^20.14.10",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2",
+    "zod": "^4"
+  },
+  "peerDependencies": {
+    "@guren/server": ">=2.23.3"
+  },
+  "peerDependenciesMeta": {
+    "@guren/server": {
+      "optional": true
+    }
+  }
+}

@@ -95,6 +95,11 @@
     // type packages via the root `typecheck:agents` script, which the
     // `typecheck` chain runs.
     "packages/plugin-agents",
+    // Built output, matched only by the glob above. A dist declaration merging a
+    // property into a server interface (`ServiceBindings.ai` in `@guren/plugin-ai`)
+    // must name an *identical* type to the src declaration's, and a second
+    // declaration of the same interface is not identical, so the program fails.
+    "packages/*/dist",
     "packages/create-app/templates",
     "packages/cli/templates/scaffold",
     "packages/cli/tests/fixtures/scaffold-typecheck"

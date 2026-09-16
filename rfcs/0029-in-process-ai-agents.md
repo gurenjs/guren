@@ -282,8 +282,13 @@ Scope gate, approval gate, redaction, audit emission and duration measurement
 run for an in-process call exactly as they do for an MCP, CLI or durable one.
 An approval-gated tool returns the pipeline's `denied` result with the
 pending-approval id; `toToolResult` hands the model
-`{ denied: 'approval_pending', message, approvalId }` so it can tell the
-user, the same body an MCP client sees. A `failed` dispatch throws into the
+~~`{ denied: 'approval_pending', message, approvalId }`~~
+**Amended in implementation:** `{ denied: reason, message, approval? }`
+so it can tell the user, where `reason` is the pipeline's denial reason and
+`approval` is the approval gate's body verbatim (`status`, `requestId`,
+`expiresAt`, ...), the fields an MCP client parses rather than renamed
+copies. A route answering with an error status is not a denial: the model
+reads `{ error: true, status, body }`. A `failed` dispatch throws into the
 tool, which the AI SDK reports to the model as a tool error. A `preflight`
 rehearsal is not exposed: an in-process agent has no reason to rehearse
 against itself.
@@ -317,6 +322,16 @@ sliding window, 60 calls per minute by default,
 `DEFAULT_AGENT_CALLS_PER_MINUTE`) comes through the `interpose` seam, where
 it belongs; an in-process agent that loops on a failing tool is bounded the
 same way a durable one is.
+
+**Amended in implementation:** the budget is fixed at 60 calls per bound
+instance (`DEFAULT_IN_PROCESS_CALLS_PER_MINUTE`), with no per-class knob
+until an app asks for one; the sketch's `agent.budget()` does not exist. An
+entry of `static scopes` outside the grammar is a construction error too,
+rather than only a `guren check` report, since it grants nothing. And a
+derived tool name outside `[A-Za-z0-9_-]{1,64}` (`tickets.index`, as in the
+examples above) is warned about once when `appTools()` packages it:
+Anthropic and OpenAI reject such a name at the API, so the route needs a
+portable `agent.toolName`. `appToolDefinitions()` keeps the name verbatim.
 
 #### 2.3 The one server change
 
@@ -822,10 +837,24 @@ already checks.
 
 ### Phasing
 
-1. **Part 1**: `Agent` (§1), `appTools()` and the surface (§2), `config/ai.ts`
+1. ~~**Part 1**: `Agent` (§1), `appTools()` and the surface (§2), `config/ai.ts`
    (§3), `fakeAi()` (§7), `guren add ai` and `make:ai-agent` (§8), the typed
    names of §11. Everything a first feature needs, testable without a
-   network and with every name checked by the compiler.
+   network and with every name checked by the compiler.~~
+   **Amended in implementation:** Part 1 ships as two PRs.
+   - **Part 1a**: the `'in-process'` surface member (§2.3), `Agent` with
+     `prompt()` (§1), `appToolDefinitions()` / `appTools()` (§2),
+     `aiPlugin({ audit, approvals })` (§2.5), `defineAiConfig` and
+     `AiManager` (§3), and the empty augmentation targets `AppAgentTools`,
+     `AiProviders` and `AiAgents` (§11) with `InferProviders`. `Agent` and
+     `appTools()` land together, so no release has a model-calling class
+     whose only route into the application is a hand-written closure.
+     `AgentResponse` carries `finishReason`; `conversationId` and
+     `PromptOptions.conversation` wait for §5 in Part 2. Tested against
+     `MockLanguageModelV4` from `ai/test` directly.
+   - **Part 1b**: `fakeAi()` (§7), `guren add ai` and `make:ai-agent` (§8),
+     and the `.guren/agents.gen.ts` additions that fill the §11 targets
+     (`AgentToolInputTypes`, `Granted`).
 2. **Part 2**: `stream()` and the client transport (§4), `database`
    conversations (§5), `queue()` and `AgentResponded` (§6), `broadcast()`.
 3. **Part 3**: `embed()` / `image()` thin wrappers on the configured

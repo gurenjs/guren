@@ -104,6 +104,15 @@ describe('parseAuditRecord', () => {
     expect(parseAuditRecord(JSON.stringify(record))).toEqual(record)
   })
 
+  test('should read back a record from the in-process surface', () => {
+    const record = toAuditRecord(
+      new AgentToolDenied(PRINCIPAL, 'posts.store', {}, 'scope', 'in-process'),
+      NOW,
+    )
+
+    expect(parseAuditRecord(JSON.stringify(record))).toEqual(record)
+  })
+
   test('should refuse an unknown surface or denial reason', () => {
     const denied = toAuditRecord(new AgentToolDenied(PRINCIPAL, 'posts.store', {}, 'scope', 'mcp'), NOW)
 
