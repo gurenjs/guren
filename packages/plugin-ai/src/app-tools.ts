@@ -7,6 +7,7 @@
 import {
   PORTABLE_AGENT_TOOL_NAME_PATTERN,
   createAgentApprovalContext,
+  createAgentCallBudget,
   createAgentInvocationPipeline,
   expandToolScopes,
   parseToolScope,
@@ -164,7 +165,14 @@ function buildPipeline(
   const { container, principal } = context
   const app = container.make<Application>('app')
   const approvals = createAgentApprovalContext(runtime.approvals, principal)
-  const budget = new SlidingWindowBudget(CALLS_PER_MINUTE, () => Date.now())
+  // Per bound instance: a floor on one run's burst rate, bounding a model that
+  // loops on a failing tool. Same meter as `@guren/plugin-agents`' (RFC 0017 §4).
+  const budget = createAgentCallBudget({
+    callsPerMinute: CALLS_PER_MINUTE,
+    message: (limit) =>
+      `This agent has already made ${limit} tool calls in the last minute, which is its budget. `
+      + 'Nothing was executed.',
+  })
 
   return createAgentInvocationPipeline({
     // `boot()` is idempotent; after a failed boot it retries rather than
@@ -182,7 +190,7 @@ function buildPipeline(
     ...(approvals ? { approvals } : {}),
     approvalConfigureHint: 'aiPlugin({ approvals: { store, notify } })',
     scopeSubject: "The agent's scopes",
-    interpose: () => budget.consume(),
+    interpose: budget,
     origin: applicationOrigin(context),
     handoff: 'seam',
   })
@@ -255,35 +263,4 @@ function warnIfNonPortable(name: string): void {
     `[@guren/plugin-ai] The tool name "${name}" is outside [A-Za-z0-9_-]{1,64}, which some model providers `
     + '(Anthropic, OpenAI) reject. Set agent.toolName on its route to a portable name.',
   )
-}
-
-/**
- * A sliding 60-second window per bound instance: a floor on one run's burst
- * rate, bounding a model that loops on a failing tool. Same rule as
- * `@guren/plugin-agents`' per-instance meter (RFC 0017 §4).
- */
-class SlidingWindowBudget {
-  private readonly hits: number[] = []
-
-  constructor(
-    private readonly limit: number,
-    private readonly now: () => number,
-  ) {}
-
-  consume(): AgentInvocationDenial | undefined {
-    const at = this.now()
-    while (this.hits.length > 0 && this.hits[0]! <= at - 60_000) {
-      this.hits.shift()
-    }
-    if (this.hits.length >= this.limit) {
-      return {
-        reason: 'rate-limit',
-        message:
-          `This agent has already made ${this.limit} tool calls in the last minute, which is its budget. `
-          + 'Nothing was executed.',
-      }
-    }
-    this.hits.push(at)
-    return undefined
-  }
 }

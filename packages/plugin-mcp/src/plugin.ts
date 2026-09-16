@@ -2,7 +2,6 @@ import {
   AGENT_AUDIT_BINDING,
   AgentToolDenied,
   AgentToolInvoked,
-  DEFAULT_AGENT_AUDIT_PATH,
   createAgentApprovalContext,
   createAgentInvocationPipeline,
   createAuditEmitter,
@@ -11,11 +10,11 @@ import {
   isReservedAgentToolName,
   readBearerToken,
   redactAgentArguments,
+  resolveAgentAuditSink,
   verifyApiToken,
   type AgentApprovalRequest,
   type AgentApprovalStore,
-  type AgentAuditRecord,
-  type AgentAuditSink,
+  type AgentAuditConfig,
   type AgentPrincipal,
   type AgentToolDenialReason,
   type Application,
@@ -64,7 +63,7 @@ export interface McpPluginConfig {
    * awaited — handed to `waitUntil` on Workers so a slow write lands; a throw warns.
    * @default undefined — no sink; events are emitted, nothing is written
    */
-  audit?: { file?: string; days?: number } | { sink: (record: AgentAuditRecord) => void | Promise<void> }
+  audit?: AgentAuditConfig
   /**
    * The approval queue (RFC 0016 §5.4 item 4): an `approval: 'required'` route answers with a
    * request id; approved, the same call with the same arguments runs once. No memory-backed
@@ -105,7 +104,7 @@ const factory = definePlugin<McpPluginConfig>({
       )
     }
 
-    const sink = config.audit ? await resolveAuditSink(config.audit) : undefined
+    const sink = config.audit ? await resolveAgentAuditSink(config.audit) : undefined
 
     const { tools, warnings } = deriveAgentTools(app.router.definitions())
     for (const warning of warnings) {
@@ -376,19 +375,6 @@ async function verifyBearer(
     rateKey: verified.token.id,
     credential: { authorization: header },
   }
-}
-
-/**
- * `{ file }` is built behind a dynamic `import()` so an application that
- * configured its own `sink` never evaluates the filesystem module.
- */
-async function resolveAuditSink(
-  config: NonNullable<McpPluginConfig['audit']>,
-): Promise<AgentAuditSink> {
-  if ('sink' in config) return config.sink
-
-  const { createFileAuditSink } = await import('./audit-file')
-  return createFileAuditSink(config.file ?? DEFAULT_AGENT_AUDIT_PATH, config.days)
 }
 
 /**

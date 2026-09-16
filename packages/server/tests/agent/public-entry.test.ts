@@ -40,6 +40,12 @@ describe('@guren/server/agent entry', () => {
     expect(PREFLIGHT_ARGUMENT).toBe('_preflight')
   })
 
+  test('should leave out the audit sink, whose file branch writes to disk', async () => {
+    const entry: Record<string, unknown> = await import('../../src/agent/public')
+    expect(entry.resolveAgentAuditSink).toBeUndefined()
+    expect(entry.createFileAuditSink).toBeUndefined()
+  })
+
   test('should diagnose both failure shapes', () => {
     expect(describeBuildFailure({ missing: ['id'] })).toBe(
       'Missing required path parameter(s): id.',

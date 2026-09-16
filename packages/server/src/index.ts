@@ -128,6 +128,9 @@ export type {
 // that binding to record the `'cli'` surface.
 export { AGENT_AUDIT_BINDING, createAuditEmitter } from './agent/audit-emitter'
 export type { AgentAuditEmitter, AgentAuditSink, AuditEmitterOptions } from './agent/audit-emitter'
+// Not in `@guren/server/agent`: the file branch writes to disk.
+export { resolveAgentAuditSink } from './agent/audit-sink'
+export type { AgentAuditConfig } from './agent/audit-sink'
 // The approval queue (RFC 0016 §5.4 item 4): the store an application
 // implements, plus the pure rules deciding whether a record authorizes a call.
 // Here so `guren check` and the plugin read one configuration key, and the
@@ -185,6 +188,8 @@ export type {
   AuditedTool,
   InterposedAgentCall,
 } from './agent/pipeline'
+export { createAgentCallBudget } from './agent/call-budget'
+export type { AgentCallBudget, AgentCallBudgetOptions } from './agent/call-budget'
 // Reading one approval record as an answer for the caller that asked. Shared by
 // `guren_approval_status` over MCP and the durable surface's own status check
 // (RFC 0017 §5): two readers, one rule for what a caller may be told.

@@ -2,12 +2,13 @@
  * The file half of the agent audit sink: JSONL appended through
  * `DailyFileChannel`, which already owns rotation, the `days` retention sweep,
  * directory creation and the line format — a second appender would be a second
- * rotation rule. A separate module so `plugin.ts` can reach it through a
- * dynamic `import()` and an application with no file sink never evaluates it.
+ * rotation rule. Reached only through the dynamic `import()` in `./audit-sink`,
+ * so an application with its own sink never constructs the filesystem channel.
  */
-import { DailyFileChannel, type AgentAuditRecord } from '@guren/core'
+import { DailyFileChannel } from '../logging/channels/DailyFileChannel'
+import type { AgentAuditRecord } from './audit'
 
-/** Appends one record per line. Returns the sink `plugin.ts` calls per event. */
+/** Appends one record per line, in the shape {@link import('./audit').parseAuditRecord} reads back. */
 export function createFileAuditSink(
   filePath: string,
   days: number | undefined,
