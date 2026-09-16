@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
@@ -1357,21 +1357,11 @@ describe('session config driver reading (RFC 0020)', () => {
   })
 
   // RFC 0027 §2: the definition's `default` reads a declared key, which no static
-  // read resolves, so the verdict judges every store the config declares.
-  it('reads a session config definition as a backed store', async () => {
+  // read resolves, so the verdict judges every store the scaffolded definition declares.
+  it('reads the scaffolded session config definition as a backed store', async () => {
     const files = {
       'src/app.ts': SESSION_APP,
-      'config/session.ts': `import { defineSessionConfig } from '@guren/core'
-import { sessions } from '../db/schema'
-
-export default defineSessionConfig((env) => ({
-  default: env.SESSION_DRIVER,
-  stores: {
-    database: { driver: 'database', table: sessions },
-    cookie: { driver: 'cookie' },
-  },
-}))
-`,
+      'config/session.ts': await readFile(join(import.meta.dir, '../templates/scaffold/session/definition/config/session.ts'), 'utf8'),
     }
 
     await withApp('guren-session-definition-backed-', files, cloudflare, async (dir) => {

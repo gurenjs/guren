@@ -27,7 +27,7 @@ export interface ServiceScaffold {
  * and no provider already binding `key`: a definition beside that binding configures
  * the key twice, which fails the boot. An existing definition keeps the answer yes.
  */
-async function installsConfigDefinition(key: string): Promise<boolean> {
+export async function installsConfigDefinition(key: string): Promise<boolean> {
   const cwd = process.cwd()
   return await fileExists(cwd, ENV_SCHEMA_FILE) && (await appBindsService(key, cwd)).length === 0
 }
