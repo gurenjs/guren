@@ -18,12 +18,20 @@ export const ENV_SCHEMA_FILE = 'config/env.ts'
 export const ENV_EXAMPLE_FILE = '.env.example'
 
 /** Read by shape, never `instanceof`: the app's `@guren/core` is not this process's copy. */
-type DeclaredEnvVars = Readonly<Record<string, Pick<EnvVar<unknown>, 'defaultValue' | 'choices' | 'isSecret' | 'description'>>>
+export type DeclaredEnvVars = Readonly<Record<string, Pick<EnvVar<unknown>, 'defaultValue' | 'choices' | 'isSecret' | 'description'>>>
+
+/** The app's own schema, read by shape like its variables: enough to parse, nothing more. */
+export interface AppEnvSchema {
+  parse(source?: undefined, options?: { mode?: 'report' }): {
+    values: object
+    unset: ReadonlySet<string>
+  }
+}
 
 type EnvSchemaLoad =
   | { readonly status: 'absent' }
   | { readonly status: 'unreadable'; readonly message: string }
-  | { readonly status: 'loaded'; readonly vars: DeclaredEnvVars }
+  | { readonly status: 'loaded'; readonly vars: DeclaredEnvVars; readonly schema: AppEnvSchema }
 
 export async function loadEnvSchema(cwd: string): Promise<EnvSchemaLoad> {
   if (!(await fileExists(cwd, ENV_SCHEMA_FILE))) return { status: 'absent' }
@@ -42,7 +50,7 @@ export async function loadEnvSchema(cwd: string): Promise<EnvSchemaLoad> {
   if (Object.values(schema.vars).some((spec) => typeof spec !== 'object' || spec === null || !('defaultValue' in spec))) {
     return { status: 'unreadable', message: `${ENV_SCHEMA_FILE} was declared with a @guren/core too old to report its variables. Upgrade @guren/core.` }
   }
-  return { status: 'loaded', vars: schema.vars as DeclaredEnvVars }
+  return { status: 'loaded', vars: schema.vars as DeclaredEnvVars, schema: schema as AppEnvSchema }
 }
 
 /**

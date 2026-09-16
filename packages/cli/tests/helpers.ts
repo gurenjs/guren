@@ -168,6 +168,23 @@ export const users = sqliteTable('users', {
 })
 `
 
+/** The declared environment and one definition resolving against it (RFC 0027 §1, §2). */
+export const CONFIG_ENV_FIXTURE = `import { defineEnv, Env } from '@guren/core'
+
+export default defineEnv({
+  CACHE_STORE: Env.enum(['memory', 'redis']).default('memory'),
+})
+`
+
+export const CACHE_CONFIG_FIXTURE = `import { defineConfig } from '@guren/core'
+
+export default defineConfig({
+  key: 'cache',
+  resolve: (env) => ({ default: env.CACHE_STORE }),
+  bind: () => {},
+})
+`
+
 /**
  * A routes file that genuinely resolves `@guren/core` at runtime. `Router` is
  * used as a *value*: a type-only import is erased and resolves nothing, and

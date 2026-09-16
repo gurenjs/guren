@@ -1,6 +1,7 @@
 import { ServiceProvider, type OwnedBinding } from '../container/ServiceProvider'
 import type { ConfigDefinition, ConfigDefinitions } from '../config/define'
 import type { AppEnv, EnvSource } from '../config/env'
+import { recordEnvReads } from '../config/env-reads'
 import type { Application } from '../http/Application'
 import { warnOnce } from '../support/warn-once'
 
@@ -18,6 +19,7 @@ interface ResolvedDefinition {
  */
 export class ConfigServiceProvider extends ServiceProvider {
   private env = {} as AppEnv
+  private unset: ReadonlySet<string> = new Set()
   private resolved: ResolvedDefinition[] = []
   private owned = new Map<string, OwnedBinding>()
 
@@ -31,7 +33,21 @@ export class ConfigServiceProvider extends ServiceProvider {
     assertDistinctKeys(definitions)
 
     for (const definition of definitions) {
-      const config = definition.resolve(this.env)
+      const { env, read } = recordEnvReads(this.env)
+      const config = definition.resolve(env)
+
+      // Reachable only where parsing reported rather than threw, which today is
+      // GUREN_INTROSPECT=1. Binding would hand the redacted placeholder to a
+      // manager constructor that validates it; nothing bound answers 503 instead.
+      const placeholders = [...read].filter((key) => this.unset.has(key))
+      if (placeholders.length > 0) {
+        warnOnce(
+          `config-unverified:${definition.key}`,
+          `[guren] the "${definition.key}" config reads ${placeholders.join(', ')}, which the environment does not set; it was left unbound.`,
+        )
+        continue
+      }
+
       const before = new Map(this.container.getBindings().map((key) => [key, this.container.bindingOf(key)]))
       definition.bind(this.container, config)
 
@@ -58,6 +74,7 @@ export class ConfigServiceProvider extends ServiceProvider {
 
   private parseEnv(app: Application): AppEnv {
     const schema = app.envSchema
+    this.unset = new Set()
     if (!schema) return {} as AppEnv
 
     const source = this.container.makeOptional<EnvSource>('env.source')
@@ -69,6 +86,7 @@ export class ConfigServiceProvider extends ServiceProvider {
       warnOnce(`env-invalid:${problem.key}`, `[guren] Invalid environment: ${problem.key} ${problem.message} (reported under GUREN_INTROSPECT=1).`)
     }
 
+    this.unset = parsed.unset
     this.container.instance('env', parsed.values)
     return parsed.values as AppEnv
   }
