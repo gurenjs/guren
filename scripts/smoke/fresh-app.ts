@@ -412,24 +412,25 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
     'MailProvider',
     'CoreNotificationServiceProvider',
     'NotificationProvider',
-    'CoreQueueServiceProvider',
-    'QueueProvider',
+    'JobsProvider',
     'CoreSchedulingServiceProvider',
-    'CoreStorageServiceProvider',
-    'StorageProvider',
     'CoreBroadcastServiceProvider',
     'BroadcastProvider',
   ]) {
     assert(appBootstrap.includes(providerName), `Fresh app must register ${providerName} in src/app.ts after feature scaffolds.`)
   }
 
-  // The template declares its environment, so cache is a definition (RFC 0027 §2), not a provider.
-  assert(/config:\s*\[[^\]]*\bcache\b/.test(appBootstrap), 'Fresh app must list the cache definition in createApp({ config }).')
+  // The template declares its environment, so cache, queue and storage are definitions (RFC 0027 §2).
+  for (const definition of ['cache', 'queue', 'storage']) {
+    assert(new RegExp(`config:\\s*\\[[^\\]]*\\b${definition}\\b`).test(appBootstrap), `Fresh app must list the ${definition} definition in createApp({ config }).`)
+  }
   const cacheConfig = await readFile(join(appDir, 'config/cache.ts'), 'utf8')
   assert(cacheConfig.includes("import { defineCacheConfig } from '@guren/core'"), 'Cache blueprint must define its config through @guren/core.')
   assert(cacheConfig.includes('default: env.CACHE_STORE'), 'Cache blueprint must select its store from the declared CACHE_STORE.')
   const envSchema = await readFile(join(appDir, 'config/env.ts'), 'utf8')
-  assert(envSchema.includes("CACHE_STORE: Env.string().default('memory')"), 'Cache blueprint must declare CACHE_STORE in config/env.ts.')
+  for (const declaration of ["CACHE_STORE: Env.string().default('memory')", "QUEUE_CONNECTION: Env.string().default('sync')", "STORAGE_DISK: Env.string().default('local')"]) {
+    assert(envSchema.includes(declaration), `Feature blueprints must declare ${declaration} in config/env.ts.`)
+  }
 
   const eventProvider = await readFile(join(appDir, 'app/Providers/EventProvider.ts'), 'utf8')
   assert(eventProvider.includes("from '@guren/core'"), 'Events blueprint must import from @guren/core.')
@@ -448,12 +449,13 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   assert(welcomeMail.includes('manager: MailManager'), 'Mail scaffold must require explicit MailManager injection.')
   assert(!welcomeMail.includes('getMailManager()'), 'Mail scaffold must not use the global mail manager helper.')
 
-  const queueProvider = await readFile(join(appDir, 'app/Providers/QueueProvider.ts'), 'utf8')
-  assert(queueProvider.includes("from '@guren/core'"), 'Queue blueprint must import from @guren/core.')
-  assert(queueProvider.includes('createQueueManager'), 'Queue blueprint must create a queue manager.')
-  assert(queueProvider.includes("this.container.instance('queue', queue)"), 'Queue blueprint must bind the queue manager into the container.')
-  assert(queueProvider.includes('registerJob(ProcessWelcomeSequenceJob)'), 'Queue blueprint must register its sample job.')
-  assert(!queueProvider.includes('@guren/server'), 'Queue blueprint must not import from @guren/server.')
+  const queueConfig = await readFile(join(appDir, 'config/queue.ts'), 'utf8')
+  assert(queueConfig.includes("from '@guren/core'"), 'Queue blueprint must import from @guren/core.')
+  assert(queueConfig.includes('defineQueueConfig'), 'Queue blueprint must define its queue config.')
+  assert(queueConfig.includes('default: env.QUEUE_CONNECTION'), 'Queue blueprint must select its driver from the declared QUEUE_CONNECTION.')
+  const jobsProvider = await readFile(join(appDir, 'app/Providers/JobsProvider.ts'), 'utf8')
+  assert(jobsProvider.includes('registerJob(ProcessWelcomeSequenceJob)'), 'Queue blueprint must register its sample job.')
+  assert(!jobsProvider.includes("'queue'"), 'Queue blueprint must leave binding the queue to config/queue.ts.')
 
   const notificationProvider = await readFile(join(appDir, 'app/Providers/NotificationProvider.ts'), 'utf8')
   assert(notificationProvider.includes("from '@guren/core'"), 'Notification blueprint must import from @guren/core.')
@@ -461,15 +463,14 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   assert(notificationProvider.includes('new MailChannel(mail)'), 'Notification blueprint must wire the mail channel through the container mail manager.')
   assert(notificationProvider.includes('new DatabaseChannel()'), 'Notification blueprint must wire the database channel.')
 
-  const storageProvider = await readFile(join(appDir, 'app/Providers/StorageProvider.ts'), 'utf8')
-  assert(storageProvider.includes("from '@guren/core'"), 'Storage blueprint must import from @guren/core.')
-  assert(storageProvider.includes('createStorageManager'), 'Storage blueprint must create a storage manager.')
-  assert(storageProvider.includes("this.container.instance('storage'"), 'Storage blueprint must bind storage into the container.')
+  const storageConfig = await readFile(join(appDir, 'config/storage.ts'), 'utf8')
+  assert(storageConfig.includes("from '@guren/core'"), 'Storage blueprint must import from @guren/core.')
+  assert(storageConfig.includes('defineStorageConfig'), 'Storage blueprint must define its storage config.')
   assert(
-    storageProvider.includes("public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' }"),
+    storageConfig.includes("public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' }"),
     "Storage blueprint must expose a public disk that declares itself public and carries a served URL — a local disk has no per-object visibility (an undeclared 'public' disk reports 'private' and refuses put({ visibility: 'public' })), and without url + a root inside public/ every disk.url() points at nothing the app serves.",
   )
-  assert(storageProvider.includes('STORAGE_DISK'), 'Storage blueprint must select its disk from STORAGE_DISK.')
+  assert(storageConfig.includes('default: env.STORAGE_DISK'), 'Storage blueprint must select its disk from the declared STORAGE_DISK.')
 
   const broadcastProvider = await readFile(join(appDir, 'app/Providers/BroadcastProvider.ts'), 'utf8')
   assert(broadcastProvider.includes("from '@guren/core'"), 'Broadcasting blueprint must import from @guren/core.')
@@ -765,7 +766,7 @@ async function main(): Promise<void> {
     } else if (blueprint === 'worker') {
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       const appTs = await readFile(join(appDir, 'src/app.ts'), 'utf8')
-      assert(appTs.includes('QueueServiceProvider'), 'Worker blueprint must scaffold queue.')
+      assert(/config:\s*\[[^\]]*\bqueue\b/.test(appTs), 'Worker blueprint must scaffold queue.')
       assert(appTs.includes('EventServiceProvider'), 'Worker blueprint must scaffold events.')
       assert(/config:\s*\[[^\]]*\bcache\b/.test(appTs), 'Worker blueprint must scaffold cache.')
       assert(appTs.includes('SchedulingServiceProvider'), 'Worker blueprint must scaffold schedule.')

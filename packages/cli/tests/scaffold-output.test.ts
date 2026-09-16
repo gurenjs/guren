@@ -417,6 +417,8 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
     'oauth/db/schema.ts': 'pinned by the schema-table fixture pin above',
     'session/db/schema.ts': 'pinned by the schema-table fixture pin above',
     'cache/config/env.ts': 'pinned by the byte-identical template gate below, which runs cache against a declared env',
+    'queue/config/env.ts': 'pinned by the byte-identical template gate below, which runs queue against a declared env',
+    'storage/config/env.ts': 'pinned by the byte-identical template gate below, which runs storage against a declared env',
   }
 
   it('every companion fixture is pinned to a builder, or names why not', async () => {
@@ -449,7 +451,12 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
   })
 
   // Written in place of the provider when the app declares its environment (RFC 0027 §2).
-  const ENV_DECLARED_ONLY = new Set(['cache/config/cache.ts'])
+  const ENV_DECLARED_ONLY = new Set([
+    'cache/config/cache.ts',
+    'queue/app/Providers/JobsProvider.ts',
+    'queue/config/queue.ts',
+    'storage/config/storage.ts',
+  ])
 
   it('every shipped blueprint template lands byte-identical', async () => {
     const templatePaths = (await relativeSourcePaths(SCAFFOLD_TEMPLATE_ROOT))
@@ -478,10 +485,9 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
           const schema = await readFile(join(workspace.dir, 'config/env.ts'), 'utf8')
           const declared = schema.split('\n').filter((line) => /^\s+[A-Z_]+: Env\./.test(line) && !ENV_SCHEMA_FIXTURE.includes(line))
           expect(declared.length).toBeGreaterThan(0)
-          for (const blueprint of blueprints) {
-            const companion = await readFile(join(SCAFFOLD_FIXTURE_ROOT, blueprint, 'config/env.ts'), 'utf8')
-            for (const line of declared) expect(companion).toContain(line)
-          }
+          const companions = await Promise.all(blueprints.map((blueprint) =>
+            readFile(join(SCAFFOLD_FIXTURE_ROOT, blueprint, 'config/env.ts'), 'utf8')))
+          for (const line of declared) expect(companions.join('\n')).toContain(line)
         }
       } finally {
         await workspace.cleanup()

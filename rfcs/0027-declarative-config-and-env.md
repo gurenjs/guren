@@ -684,11 +684,31 @@ declarations in `appendEnvEntry`, and migrates `guren add cache`:
   schema leaves empty, so such an app keeps getting `CacheProvider`.
 - **The definition replaces both providers.** `defineCacheConfig` binds `cache`
   itself, so neither `CacheProvider` nor `CoreCacheServiceProvider` is wired.
-- **`appBindsService()` does not see a definition yet.** It matches
+- **`appBindsService()` does not see a definition.** It matches
   `instance|singleton|bind('<key>'` under `app/` and `src/`, and a definition
-  contains no such call. Nothing reads it for `cache`; `storage` (read by
-  `guren add attachments`) and `session` (read by `sessions-check.ts`) change
-  with their own blueprints.
+  contains no such call, so `appDefinesConfig()` reads `config/` for the
+  `define<Key>Config(` call beside it. `guren add attachments` asks both before
+  installing storage; `sessions-check.ts` changes with the session blueprint.
+
+The second PR migrates `guren add storage` and `guren add queue` the same way,
+through one rule shared with cache: a definition when `config/env.ts` exists and
+no source binds the key, so a re-run over an installed provider keeps it. What
+else it settled:
+
+- **Queue keeps a provider for its jobs.** `registerJob()` is imperative and a
+  definition binds only, so `app/Providers/JobsProvider.ts` holds the `boot()`
+  registration beside `config/queue.ts`. It takes a new name because the
+  provider-form `QueueProvider.ts` still ships for apps without a schema.
+- **`STORAGE_DISK` and `QUEUE_CONNECTION` stay `Env.string()`**, and each
+  definition refuses a name its map does not declare when it resolves, naming
+  the map's own keys. An enum would move that refusal to env validation, where
+  the message names the schema's values, the `SESSION_DRIVER` trade above. The
+  queue definition refuses where the provider fell back to `sync` silently.
+- **Mail moves with auth, and session on its own.** `make:auth` writes
+  `config/mail.ts` in the provider form and the mail blueprint's `--force`
+  overwrites what auth wrote, so the two migrate together. Session carries the
+  `sessions-check.ts` and `deploy-runtime.ts` readers, which read a
+  `SessionConfig`-annotated declarator a definition does not have.
 
 ### 7. `.env.example`, drift, and lint
 
