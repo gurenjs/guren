@@ -1,46 +1,23 @@
-import { describe, test, expect, afterEach, spyOn } from 'bun:test'
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { describe, test, expect, spyOn } from 'bun:test'
 import {
   AgentToolDenied,
   AgentToolInvoked,
   EventServiceProvider,
   createApp,
-  createAuditEmitter,
-  dailyFilePath,
-  parseAuditRecord,
   type AgentAuditEmitter,
   type Application,
   type EventManager as EventManagerType,
   type Router,
 } from '@guren/core'
 
-import { createFileAuditSink } from './audit-file'
 import { mcpPlugin } from './plugin'
 import { callToolOverSeam, recordingExecutionContext } from './seam-tool-call'
 
 /**
- * What this endpoint does *with* the emitter, plus the file sink it can build;
- * the emitter's own rules live in `packages/server/src/agent/audit-emitter.test.ts`.
- * Genuinely this package's: the plugin registers no listener, publishes the
- * emitter for other surfaces, and the file sink writes lines the reader parses back.
+ * What this endpoint does *with* the emitter: it registers no listener and
+ * publishes the emitter for other surfaces. The emitter's own rules and the file
+ * sink live beside them in `packages/server/src/agent/`.
  */
-
-/** Future-seeded, like the server-side fixtures: a past epoch expires everything. */
-const NOW = new Date('2087-03-14T01:59:26.535Z')
-
-const INVOKED = new AgentToolInvoked(
-  { kind: 'user', id: 42 },
-  'posts.index',
-  // Already through `redactAgentArguments` by the time an emitter sees it:
-  // neither the mask nor the visible value may be touched again on the way out.
-  { page: 2, token: '[redacted]' },
-  200,
-  12,
-  'mcp',
-)
-const DENIED = new AgentToolDenied({ kind: 'user', id: 42 }, 'posts.store', { title: 'x' }, 'scope', 'mcp')
 
 describe('the audit sink through the plugin', () => {
   function registerRoutes(router: Router): void {
@@ -204,81 +181,5 @@ describe('the audit sink through the plugin', () => {
     } finally {
       warn.mockRestore()
     }
-  })
-})
-
-describe('the file audit sink', () => {
-  const dirs: string[] = []
-
-  afterEach(() => {
-    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
-  })
-
-  function tempBasePath(): string {
-    const dir = mkdtempSync(join(tmpdir(), 'guren-mcp-audit-'))
-    dirs.push(dir)
-    return join(dir, 'agent-audit.log')
-  }
-
-  /** The dated file the sink's records landed in, line by line. */
-  function writtenLines(basePath: string, at: Date): string[] {
-    return readFileSync(dailyFilePath(basePath, at), 'utf8').split('\n').filter((line) => line !== '')
-  }
-
-  test('should append records as JSONL the reader parses back', () => {
-    // Through the real `DailyFileChannel` and real files on disk: the sink reuses
-    // the channel rather than appending itself, so what a reader copes with is
-    // the channel's line format, which a mock would let change unnoticed.
-    const basePath = tempBasePath()
-    const sink = createFileAuditSink(basePath, 30)
-
-    const emit = createAuditEmitter(sink, undefined, () => NOW)
-    emit(INVOKED)
-    emit(DENIED)
-
-    expect(writtenLines(basePath, NOW).map(parseAuditRecord)).toEqual([
-      {
-        ts: '2087-03-14T01:59:26.535Z',
-        outcome: 'invoked',
-        surface: 'mcp',
-        tool: 'posts.index',
-        principal: { kind: 'user', id: 42 },
-        arguments: { page: 2, token: '[redacted]' },
-        status: 200,
-        durationMs: 12,
-      },
-      {
-        ts: '2087-03-14T01:59:26.535Z',
-        outcome: 'denied',
-        surface: 'mcp',
-        tool: 'posts.store',
-        principal: { kind: 'user', id: 42 },
-        arguments: { title: 'x' },
-        reason: 'scope',
-      },
-    ])
-  })
-
-  test('should survive arguments named after the log envelope’s own fields', () => {
-    // The channel's JSON format writes `{ timestamp, level, message,
-    // ...context }` and the record rides in `context`, so an argument called
-    // `timestamp` sits one level down and cannot displace the envelope's. A sink
-    // spreading the record's arguments at the top level instead would let
-    // attacker-chosen values overwrite it.
-    const basePath = tempBasePath()
-    const args = { level: 'error', message: 'not the envelope’s', timestamp: '1999-12-31T00:00:00.000Z' }
-    const event = new AgentToolInvoked({ kind: 'user', id: 7 }, 'posts.store', args, 201, 3, 'cli')
-
-    createAuditEmitter(createFileAuditSink(basePath, 30), undefined, () => NOW)(event)
-
-    const [line] = writtenLines(basePath, NOW)
-    expect(parseAuditRecord(line)?.arguments).toEqual(args)
-    // And the envelope still reports the record's instant, not an argument's.
-    // Read off the raw line: `parseAuditRecord` discards the envelope.
-    const envelope = JSON.parse(line) as Record<string, unknown>
-    expect(envelope.timestamp).toBe('2087-03-14T01:59:26.535Z')
-    expect(envelope.level).toBe('info')
-    expect(envelope.message).toBe('agent.audit')
-    expect(parseAuditRecord(line)?.ts).toBe('2087-03-14T01:59:26.535Z')
   })
 })

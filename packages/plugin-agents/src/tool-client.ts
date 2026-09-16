@@ -12,6 +12,7 @@ import {
   APPROVAL_STATUS_TOOL_NAME,
   createAgentApprovalContext,
   createAgentAuditRecorder,
+  createAgentCallBudget,
   createAgentInvocationPipeline,
   toApprovalStatusReport,
 } from '@guren/core'
@@ -222,10 +223,19 @@ export function createAgentToolClient(options: AgentToolClientOptions): AgentToo
     abilities: abilities as string[],
   }
 
-  const budget = new SlidingWindowBudget(
-    registration.budget?.callsPerMinute ?? DEFAULT_AGENT_CALLS_PER_MINUTE,
-    options.now ?? (() => Date.now()),
-  )
+  // The per-instance meter: a sliding 60-second window held in this client, so an
+  // eviction resets it. A floor on one instance's burst rate, not a global budget,
+  // which needs the app's own rate-limit middleware. A preflight spends it too.
+  // `validateAgentsConfig` refuses a non-finite limit before this can throw on one:
+  // `Infinity` would leave the window unmetered and its record growing without bound.
+  const budget = createAgentCallBudget({
+    callsPerMinute: registration.budget?.callsPerMinute ?? DEFAULT_AGENT_CALLS_PER_MINUTE,
+    ...(options.now ? { now: options.now } : {}),
+    message: (limit) =>
+      `This agent instance has already made ${limit} tool calls in the last minute, which is `
+      + 'its budget. Nothing was executed. Raise it with `budget: { callsPerMinute }` in '
+      + 'config/agents.ts, or space the calls out with a schedule.',
+  })
 
   // Per client, which is per instance, because the principal above is: an
   // approval is bound to who asked for it. No deferrer, here or on the audit
@@ -253,7 +263,7 @@ export function createAgentToolClient(options: AgentToolClientOptions): AgentToo
     // gate, before the approval gate. That gate writes a record and pages a
     // human, and deduplicates only on identical arguments, so an unattended
     // loop varying one field would otherwise file unbounded requests.
-    interpose: () => budget.consume(),
+    interpose: budget,
     // In-process: the request never crosses a socket, so there is no real Host
     // to carry. An app running host-authorization middleware has to admit this
     // origin — `guren tool:call` re-enters the same way and has the same
@@ -314,7 +324,7 @@ export function createAgentToolClient(options: AgentToolClientOptions): AgentToo
     // Metered as a read, the way `guren_approval_status` is: a status check
     // reaches the application's storage, so an unmetered one is a hole in the
     // per-instance budget an agent can poll through.
-    const overBudget = budget.consume()
+    const overBudget = budget()
     if (overBudget) {
       record.denied(audited, args, overBudget.reason)
       return { unavailable: true, message: overBudget.message }
@@ -384,44 +394,4 @@ function fromDenial(denial: AgentInvocationDenial, toolName: string): AgentToolC
     }
   }
   return { denied: true, reason: denial.reason, message: denial.message }
-}
-
-/**
- * The per-instance meter.
- *
- * A sliding 60-second window held in the client instance, so an eviction resets
- * it: a floor on one instance's burst rate, not a global budget, which needs
- * the app's own rate-limit middleware. A preflight spends it too.
- */
-class SlidingWindowBudget {
-  private readonly hits: number[] = []
-
-  constructor(
-    private readonly limit: number,
-    private readonly now: () => number,
-  ) {}
-
-  /** @returns a denial when the window is full, `undefined` when the call may proceed. */
-  consume(): AgentInvocationDenial | undefined {
-    const at = this.now()
-    const cutoff = at - 60_000
-    while (this.hits.length > 0 && this.hits[0] <= cutoff) {
-      this.hits.shift()
-    }
-    // Bounded by `limit` once the config rule holds: nothing is pushed while
-    // the window is full, so the array never exceeds it. That is why
-    // `validateAgentsConfig` refuses a non-finite limit — `Infinity` would make
-    // this branch unreachable and let `hits` grow without bound.
-    if (this.hits.length >= this.limit) {
-      return {
-        reason: 'rate-limit',
-        message:
-          `This agent instance has already made ${this.limit} tool calls in the last minute, which is `
-          + 'its budget. Nothing was executed. Raise it with `budget: { callsPerMinute }` in '
-          + 'config/agents.ts, or space the calls out with a schedule.',
-      }
-    }
-    this.hits.push(at)
-    return undefined
-  }
 }

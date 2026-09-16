@@ -7,7 +7,7 @@ import type {
   AgentApprovalRequest,
   AgentApprovalStore,
   AgentAuditEmitter,
-  AgentAuditRecord,
+  AgentAuditConfig,
   DerivedAgentTool,
 } from '@guren/core'
 
@@ -20,7 +20,7 @@ export interface AiPluginConfig {
    * binding `mcpPlugin({ audit })` publishes, else only emits events. Configuring
    * both is refused at the first `appTools()` call.
    */
-  audit?: { file?: string; days?: number } | { sink: (record: AgentAuditRecord) => void | Promise<void> }
+  audit?: AgentAuditConfig
   /** Absent, an `approval: 'required'` tool is refused fail-closed. */
   approvals?: {
     store: AgentApprovalStore

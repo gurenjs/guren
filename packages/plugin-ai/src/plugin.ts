@@ -1,11 +1,10 @@
 import {
   AGENT_AUDIT_BINDING,
-  DEFAULT_AGENT_AUDIT_PATH,
   createAuditEmitter,
   definePlugin,
   deriveAgentTools,
+  resolveAgentAuditSink,
   type AgentAuditEmitter,
-  type AgentAuditSink,
   type Application,
   type DerivedAgentTool,
   type EventManager,
@@ -24,7 +23,7 @@ const factory = definePlugin<AiPluginConfig>({
   },
   async boot(container, config): Promise<void> {
     const events = container.has('events') ? container.make<EventManager>('events') : undefined
-    const sink = config.audit ? await resolveAuditSink(config.audit) : undefined
+    const sink = config.audit ? await resolveAgentAuditSink(config.audit) : undefined
     const own = sink ? createAuditEmitter(sink, events) : undefined
 
     const app = container.make<Application>('app')
@@ -67,12 +66,6 @@ const factory = definePlugin<AiPluginConfig>({
     container.instance(AI_RUNTIME_BINDING, runtime)
   },
 })
-
-async function resolveAuditSink(config: NonNullable<AiPluginConfig['audit']>): Promise<AgentAuditSink> {
-  if ('sink' in config) return config.sink
-  const { createFileAuditSink } = await import('./audit-file')
-  return createFileAuditSink(config.file ?? DEFAULT_AGENT_AUDIT_PATH, config.days)
-}
 
 /**
  * Register in-process agents' audit trail and approval queue (RFC 0029 §2.5).
