@@ -686,8 +686,8 @@ declarations in `appendEnvEntry`, and migrates `guren add cache`:
   itself, so neither `CacheProvider` nor `CoreCacheServiceProvider` is wired.
 - **`appBindsService()` does not see a definition.** It matches
   `instance|singleton|bind('<key>'` under `app/` and `src/`, and a definition
-  contains no such call, so `appDefinesConfig()` reads `config/` for the
-  `define<Key>Config(` call beside it. `guren add attachments` asks both before
+  contains no such call, so its `definitions` option also reads `config/` for
+  the `define<Key>Config(` call. `guren add attachments` asks with it before
   installing storage; `sessions-check.ts` changes with the session blueprint.
 
 The second PR migrates `guren add storage` and `guren add queue` the same way,
