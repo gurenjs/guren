@@ -126,8 +126,10 @@ bunx guren spec:generate
 import 'zod/compile'
 import { createApp } from '@guren/core'
 import { DatabaseSessionStore, createRateLimitMiddleware } from '@guren/core'
-import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import AuthProvider from '../app/Providers/AuthProvider.js'
+import database from '../config/database.js'
+import env from '../config/env.js'
+import http from '../config/http.js'
 import { registerWebRoutes } from '../routes/web.js'
 import { sessions } from '../db/schema.js'
 import { StorageServiceProvider as CoreStorageServiceProvider } from '@guren/core'
@@ -140,32 +142,6 @@ import QueueProvider from '../app/Providers/QueueProvider.js'
 import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'
 import MailProvider from '../app/Providers/MailProvider.js'
 
-// The Host header is client-controlled, so production should answer only to the
-// host this app is deployed as, which APP_URL carries. Emailed links do not
-// depend on this — app/Auth/AppUrl.ts resolves those per request and fails
-// closed there.
-function hostAuthorization() {
-  const exclude = ['/health']
-
-  if (process.env.NODE_ENV !== 'production') {
-    return { allowedHosts: ['localhost:*', '127.0.0.1:*'], exclude }
-  }
-
-  const appUrl = process.env.APP_URL?.trim()
-  // Read at module scope, where not every platform has populated process.env yet
-  // (the Cloudflare worker imports this module before wrangler `vars` land), so a
-  // missing value warns and leaves the check off rather than throwing and
-  // stopping the app from booting at all.
-  if (!appUrl) {
-    console.warn('[app] APP_URL is not set — host authorization is disabled. Set it to the public base URL of this app.')
-    return false
-  }
-
-  // `hostname:*` rather than the bare host: the hostname is the security
-  // boundary, and a proxy may or may not include the default port in `Host`.
-  return { allowedHosts: [`${new URL(appUrl).hostname}:*`], exclude }
-}
-
 const app = createApp({
   // Rendered into every server-rendered document. Replace public/favicon.svg
   // with your own artwork, or add more tags here (Open Graph, apple-touch-icon).
@@ -174,8 +150,10 @@ const app = createApp({
       head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
     },
   },
+  env,
+  config: [database, http],
   routes: registerWebRoutes,
-  providers: [DatabaseProvider, AuthProvider, CoreStorageServiceProvider, StorageProvider, AttachmentsProvider, CoreEventServiceProvider, EventProvider, CoreQueueServiceProvider, QueueProvider, CoreMailServiceProvider, MailProvider],
+  providers: [AuthProvider, CoreStorageServiceProvider, StorageProvider, AttachmentsProvider, CoreEventServiceProvider, EventProvider, CoreQueueServiceProvider, QueueProvider, CoreMailServiceProvider, MailProvider],
   auth: {
     sessionOptions: {
       // Sessions in the database, not in this process: a restart, a second
@@ -187,7 +165,6 @@ const app = createApp({
   // and the request locale is detected from ?locale=, a locale cookie, or
   // Accept-Language. `guren codegen` types the keys for t()/useTranslation().
   i18n: { supported: ['en'] },
-  hostAuthorization: hostAuthorization(),
 })
 
 // One shared counter per prefix, so the two limiters cannot spend each other's
@@ -268,7 +245,7 @@ curl -s localhost:3333/health
 {"status":"ok"}
 ```
 
-このルートは第 1 章からずっと `routes/web.ts` にあり、これから生成する `fly.toml` はヘルスチェックをそこに向けます。そして `hostAuthorization()` が除外している唯一のパスでもあります。これは見た目より重要です。本番のアプリは `APP_URL` が指すホストにしか応答せず、IP で叩きに来るロードバランサーはそのホストではありません。ヘルスチェックは、ほかの全員を拒んでいるサーバーにも届く必要があります。
+このルートは第 1 章からずっと `routes/web.ts` にあり、これから生成する `fly.toml` はヘルスチェックをそこに向けます。そして `config/http.ts` がホスト認可から除外している唯一のパスでもあります。これは見た目より重要です。本番のアプリは `APP_URL` が指すホストにしか応答せず、IP で叩きに来るロードバランサーはそのホストではありません。ヘルスチェックは、ほかの全員を拒んでいるサーバーにも届く必要があります。
 
 **チェックポイント:** `localhost:3333` でブログを開き、サインインして、サーバーを再起動してください。サインインしたままです。セッションがテーブルの行になったからです。
 

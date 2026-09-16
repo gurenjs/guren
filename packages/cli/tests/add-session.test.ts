@@ -90,7 +90,7 @@ export default defineEnv({
     await runBlueprint('session', {})
 
     expect(await readFile(resolve('config/env.ts'), 'utf8'))
-      .toContain("SESSION_DRIVER: Env.enum(['database', 'memory', 'cookie']).default('database'),")
+      .toContain("SESSION_DRIVER: Env.string().default('database'),")
   })
 
   const dialects = [

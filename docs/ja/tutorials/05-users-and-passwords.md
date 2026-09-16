@@ -123,35 +123,11 @@ export default class AuthProvider extends ServiceProvider {
 // fallback), so keep .refine()/.transform() free of side effects.
 import 'zod/compile'
 import { createApp } from '@guren/core'
-import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import AuthProvider from '../app/Providers/AuthProvider.js'
+import database from '../config/database.js'
+import env from '../config/env.js'
+import http from '../config/http.js'
 import { registerWebRoutes } from '../routes/web.js'
-
-// The Host header is client-controlled, so production should answer only to the
-// host this app is deployed as, which APP_URL carries. Emailed links do not
-// depend on this — app/Auth/AppUrl.ts resolves those per request and fails
-// closed there.
-function hostAuthorization() {
-  const exclude = ['/health']
-
-  if (process.env.NODE_ENV !== 'production') {
-    return { allowedHosts: ['localhost:*', '127.0.0.1:*'], exclude }
-  }
-
-  const appUrl = process.env.APP_URL?.trim()
-  // Read at module scope, where not every platform has populated process.env yet
-  // (the Cloudflare worker imports this module before wrangler `vars` land), so a
-  // missing value warns and leaves the check off rather than throwing and
-  // stopping the app from booting at all.
-  if (!appUrl) {
-    console.warn('[app] APP_URL is not set — host authorization is disabled. Set it to the public base URL of this app.')
-    return false
-  }
-
-  // `hostname:*` rather than the bare host: the hostname is the security
-  // boundary, and a proxy may or may not include the default port in `Host`.
-  return { allowedHosts: [`${new URL(appUrl).hostname}:*`], exclude }
-}
 
 const app = createApp({
   // Rendered into every server-rendered document. Replace public/favicon.svg
@@ -161,8 +137,10 @@ const app = createApp({
       head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
     },
   },
+  env,
+  config: [database, http],
   routes: registerWebRoutes,
-  providers: [DatabaseProvider, AuthProvider],
+  providers: [AuthProvider],
   // Sessions and CSRF protection: an in-memory session store by default,
   // which chapter 14 replaces with a database-backed one.
   auth: {},
@@ -170,7 +148,6 @@ const app = createApp({
   // and the request locale is detected from ?locale=, a locale cookie, or
   // Accept-Language. `guren codegen` types the keys for t()/useTranslation().
   i18n: { supported: ['en'] },
-  hostAuthorization: hostAuthorization(),
 })
 
 export default app

@@ -656,6 +656,12 @@ the template migration settled:
   every strictly required key becomes one drizzle-kit and `guren db:*` must also
   satisfy, and `.env.example` ships `APP_KEY=` blank. Production keeps the strict
   rule, which is what `APP_URL` gets for the same reason.
+- **`SESSION_DRIVER` is declared `Env.string()` until the session blueprint is a
+  definition**, not the `Env.enum()` §1 sketches. `scripts/smoke/session-drivers.ts`
+  boots with an unknown driver to read the declared stores out of the session
+  manager's refusal, then exercises each; an enum rejects the name during env
+  validation, before that manager exists, and the probe would lose its list. The
+  enum lands with the session definition, which reworks the probe with it.
 - **`.env.example` ships only what the base app reads.** The `REDIS_URL`,
   `QUEUE_CONNECTION`, `MAIL_*` and `RESEND_API_KEY` lines belonged to blueprints
   that now add their own keys, which also retires `MAIL_FROM_NAME="${APP_NAME}"`:
