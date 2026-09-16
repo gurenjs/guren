@@ -2,9 +2,10 @@
  * The fixture application `guren cloudflare:build` assembles the workerd
  * suite's worker from.
  *
- * A real Guren app: three agent tools — one behind the approval queue — and a
- * probe surface the tests drive over HTTP rather than by importing this module,
- * so no assertion depends on the test and the worker sharing a module instance.
+ * A real Guren app: three agent tools — one behind the approval queue — served to
+ * durable agents and over the App MCP endpoint, and a probe surface the tests
+ * drive over HTTP rather than by importing this module, so no assertion depends
+ * on the test and the worker sharing a module instance.
  */
 // Assigned before `createApp` runs: `EncryptionServiceProvider.register()` reads
 // `process.env.APP_KEY` at registration, and this module registers at evaluation.
@@ -14,10 +15,13 @@ import {
   AgentToolInvoked,
   EncryptionServiceProvider,
   EventServiceProvider,
+  MemoryApiTokenStore,
+  createApiToken,
   createApp,
   type EventManager,
   type Router,
 } from '@guren/core'
+import { mcpPlugin } from '@guren/plugin-mcp'
 import { z } from 'zod'
 
 import { agentsPlugin } from '../../../../src/plugin'
@@ -40,6 +44,9 @@ const auditedPrincipals: string[] = []
  * supposed to hold at one however many entrypoints wake the isolate.
  */
 let boots = 0
+
+/** Bearer tokens for the App MCP suite, in memory like every other fixture store. */
+const mcpTokens = new MemoryApiTokenStore()
 
 const RoutingQuery = z.object({ mode: z.enum(['absent', 'allow', 'deny', 'response', 'throw']) })
 
@@ -104,6 +111,17 @@ function registerRoutes(router: Router): void {
     return Response.json({ id: record.id, status: record.status })
   })
 
+  // Minted per request: workerd refuses the crypto `createApiToken` uses at
+  // module scope, where the rest of this fixture is built.
+  router.get('/__probe/mcp-token', async () => {
+    const { plainTextToken } = await createApiToken(mcpTokens, {
+      name: 'mcp-suite',
+      userId: 'mcp-suite',
+      abilities: ['tools:read'],
+    })
+    return Response.json({ token: plainTextToken })
+  })
+
   router.get('/__probe/break', { query: BreakQuery }, ({ query }) => {
     approvalQueue.failLookups = query.times
     return Response.json({ failLookups: query.times })
@@ -134,8 +152,14 @@ function registerRoutes(router: Router): void {
 
 const application = createApp({
   routes: registerRoutes,
-  providers: [EventServiceProvider, EncryptionServiceProvider, agentsPlugin(agents)],
+  providers: [
+    EventServiceProvider,
+    EncryptionServiceProvider,
+    agentsPlugin(agents),
+    mcpPlugin({ rateLimit: false }),
+  ],
 })
+application.auth.useTokens(mcpTokens)
 
 // A counting wrapper rather than the Application itself: `bootWorkersApp`
 // latches on this object, so `boots` is exactly the number of boots that

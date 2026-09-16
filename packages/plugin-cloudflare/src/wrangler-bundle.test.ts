@@ -1,5 +1,4 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +7,6 @@ import {
   SQL_CLIENT_MODULES,
   stubbableDevOnlyModules,
 } from '@guren/core/internal/deploy-build'
-import type { Miniflare } from 'miniflare'
 
 // Opt-in end-to-end contract test: proves wrangler can bundle a worker that
 // imports `@guren/orm` with only the stubs `cloudflare:build` scaffolds and no
@@ -345,117 +343,6 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
     },
     300_000,
   )
-})
-
-/**
- * The App MCP endpoint answering under workerd (RFC 0028 §5): bundling proves only
- * that the SDK resolves, and v2's server selects its `workerd` shims at runtime.
- * A real app with a token store serves both protocol eras through Miniflare, the
- * bundle being what `wrangler deploy` would upload with `cloudflare:build`'s stubs.
- */
-describe.skipIf(!enabled)('workerd serves the App MCP endpoint', () => {
-  let root: string
-  let mf: Miniflare | undefined
-
-  const WORKER = `import { createApp, createApiToken, EventServiceProvider, MemoryApiTokenStore, type Application, type Router } from '@guren/core'
-import { mcpPlugin } from '@guren/plugin-mcp'
-
-// workerd forbids I/O, crypto and timers at module scope, so the app, its boot
-// and the probe's token all wait for the first request.
-let ready: Promise<{ app: Application; token: string }> | undefined
-
-async function start(): Promise<{ app: Application; token: string }> {
-  const store = new MemoryApiTokenStore()
-  const app = createApp({
-    routes: (router: Router) => {
-      router
-        .get('/tenant', (c) => Response.json({ tenant: (c.env as { TENANT?: string }).TENANT ?? null }))
-        .name('tenant.show')
-        .agent({ description: 'Echo the tenant binding' })
-    },
-    providers: [EventServiceProvider, mcpPlugin({ rateLimit: false })],
-  })
-  app.auth.useTokens(store)
-  await app.boot()
-  const { plainTextToken } = await createApiToken(store, { name: 'probe', userId: 1, abilities: ['tools:*'] })
-  return { app, token: plainTextToken }
-}
-
-export default {
-  async fetch(request: Request, env: unknown, ctx: unknown): Promise<Response> {
-    const { app, token } = await (ready ??= start())
-    if (new URL(request.url).pathname === '/_probe/token') return new Response(token)
-    return app.fetch(request, env as never, ctx as never)
-  },
-}
-`
-
-  beforeAll(async () => {
-    root = mkdtempSync(join(tmpdir(), 'guren-workerd-mcp-'))
-    vendorClosure(root, 'mcp-workerd-probe', workspaceClosure('@guren/plugin-mcp'), {
-      required: ['@modelcontextprotocol/server'],
-    })
-    writeFileSync(join(root, 'worker.ts'), WORKER)
-    writeWranglerConfig(root, 'mcp-workerd-probe', [
-      ...stubbableDevOnlyModules({ mcpPlugin: true }),
-      ...SQL_CLIENT_MODULES,
-    ])
-
-    const out = join(root, 'out')
-    const result = wrangler(root, ['deploy', '--dry-run', '--outdir', out])
-    expect(result.output).not.toMatch(/Could not resolve/)
-    expect(result.exitCode).toBe(0)
-
-    const { Miniflare } = await import('miniflare')
-    mf = new Miniflare({
-      // Contents rather than a path: Miniflare's module walk refuses the bundle's
-      // computed `import()`, and a path under the temp directory fails workerd's
-      // start with "internal error" even for a one-line worker.
-      modules: [{ type: 'ESModule', path: 'worker.js', contents: readFileSync(join(out, 'worker.js'), 'utf8') }],
-      compatibilityDate: '2026-07-01',
-      compatibilityFlags: ['nodejs_compat'],
-      bindings: { TENANT: 'acme' },
-    })
-  }, 300_000)
-
-  afterAll(async () => {
-    await mf?.dispose()
-    if (root) rmSync(root, { recursive: true, force: true })
-  })
-
-  const serve = async (request: Request): Promise<Response> =>
-    (await mf!.dispatchFetch(request.url, {
-      method: request.method,
-      headers: Object.fromEntries(request.headers),
-      body: request.body ? await request.text() : undefined,
-    })) as unknown as Response
-
-  for (const era of ['modern', 'legacy'] as const) {
-    test(`answers a ${era} client`, async () => {
-      const token = await (await serve(new Request('http://localhost/_probe/token'))).text()
-      const client = new Client(
-        { name: `workerd-${era}`, version: '1.0.0' },
-        era === 'modern' ? { versionNegotiation: { mode: { pin: '2026-07-28' } } } : {},
-      )
-      await client.connect(
-        new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
-          fetch: (input, init) => serve(new Request(input, init)),
-          requestInit: { headers: { Authorization: `Bearer ${token}` } },
-        }),
-      )
-
-      expect(client.getProtocolEra()).toBe(era)
-      const { tools } = await client.listTools()
-      expect(tools.map((tool) => tool.name)).toContain('tenant.show')
-
-      const result = await client.callTool({ name: 'tenant.show', arguments: {} })
-      const [first] = result.content as Array<{ text?: string }>
-      // The binding crossed workerd's env into the re-entrant request.
-      expect(JSON.parse(first?.text ?? '')).toEqual({ tenant: 'acme' })
-
-      await client.close()
-    }, 60_000)
-  }
 })
 
 /**

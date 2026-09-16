@@ -319,42 +319,33 @@ reaches `@guren/cli` at runtime, since the unconditional stub would break it.
   constant needs re-baselining in the same change (Open Question 3). If the root turns
   out too large to accept, the fallback is a shim that re-exports the transport, and
   §4's removal list changes.
-  **Measured in step 3** (`GUREN_TEST_WRANGLER=1`, wrangler `deploy --dry-run`): the
-  worker with the v2 server root bundled is 195.8 KiB gzipped, and 53.7 KiB with that
-  root stubbed, so the SDK costs 142.1 KiB (6.4% of the old 3 MiB budget). This
-  measures bundling only; serving a request under workerd is still open.
-  Re-measured in step 4 on the merged step 3 (static `createMcpHandler` import,
-  `maxSubscriptions: 0`): 181.6 KiB served, 53.6 KiB stubbed, so the SDK costs
-  127.9 KiB (5.9%). Serving is covered by the workerd bullet below.
+  **Measured in step 4** (`GUREN_TEST_WRANGLER=1`, wrangler `deploy --dry-run`): the
+  worker with the v2 server root bundled is 181.6 KiB gzipped, and 53.6 KiB with that
+  root stubbed, so the SDK costs 127.9 KiB (5.9% of the old 3 MiB budget). Step 3 had
+  measured 142.1 KiB before its review changes.
 - **workerd.** v2's server dist imports `@modelcontextprotocol/core/internal` and
   selects `./_shims` through a `workerd` condition. The Workers test app has to serve a
   modern and a legacy request.
-  **Measured in step 4:** `wrangler-bundle.test.ts` (`GUREN_TEST_WRANGLER=1`) bundles a
-  worker with a real app, a token store and `mcpPlugin()` using `cloudflare:build`'s
-  stubs, then runs it in Miniflare. A client pinned to 2026-07-28 and a 2025-era client
-  each negotiate their era, list tools and call one, and the call reads a binding from
-  workerd's `env`. Construction and boot wait for the first request, since workerd
-  forbids crypto at module scope. One harness detail: Miniflare needs the bundle as
-  module `contents`, because loading it by path fails workerd's start with "internal
-  error" even for a one-line worker.
+  **Measured in step 4:** the plugin-agents workerd lane, whose fixture is the worker
+  `cloudflare:build` generates and which runs on every PR, now mounts `mcpPlugin()`.
+  A client pinned to 2026-07-28 and a 2025-era client each negotiate their era, list
+  the tools their token reaches and call one through the app
+  (`packages/plugin-agents/tests/workers/mcp.workers.ts`).
 - **Clients.** `npx @modelcontextprotocol/inspector@latest` (printed by
   `guren tool:dev`, `packages/cli/src/tool-dev.ts:212`) and the `.mcp.json` clients the
   harness installs connect to both endpoints.
-  **Measured in step 4**, against a local Bun app serving both endpoints, through a
-  proxy that logged each request's method and `MCP-Protocol-Version`:
-  - Inspector 2.6.0 (`--cli`, the SDK v2 client) negotiates **2025-11-25** on both
-    endpoints: `initialize`, `notifications/initialized`, then a `GET` answered `405`,
-    which it tolerates, then `tools/list` and `tools/call` succeed. So `guren tool:dev`'s
-    printed command keeps working, on the legacy leg.
-  - Claude Code 2.1.261, configured like the harness's `.mcp.json` (`type: "http"`),
-    negotiates **2026-07-28** on both: `server/discover`, then `tools/list` (plus
-    `prompts/list`, `resources/list` and a `subscriptions/listen` on the Dev MCP, whose
-    `McpServer` advertises `listChanged`). It sends no `subscriptions/listen` to the App
-    MCP, whose low-level `Server` advertises plain `tools`, so `maxSubscriptions: 0`
-    there is never exercised by it. The model turn itself was not run; connection and
-    listing are what this measures.
-  So each era now has a real client in daily use, and Open Question 2 (a modern-only
-  date) waits on Inspector moving.
+  **Measured in step 4**, against a local Bun app, with a proxy logging each request's
+  `MCP-Protocol-Version`:
+  - Inspector 2.6.0 (`--cli`) negotiates 2025-11-25 on both endpoints, tolerates the
+    `405` its `GET` receives, and lists and calls tools on both. The command
+    `guren tool:dev` prints keeps working.
+  - Claude Code 2.1.261 (`type: "http"`, as the harness's `.mcp.json` writes it)
+    negotiates 2026-07-28 on both and lists tools. It opens `subscriptions/listen` only
+    on the Dev MCP, whose `McpServer` advertises `listChanged`, so it never reaches the
+    App MCP's `maxSubscriptions: 0`. The model turn was not run.
+
+  Each era has a client in daily use, and Open Question 2 (a date for modern-only)
+  waits on Inspector negotiating 2026-07-28.
 
 ### 6. Versioning
 
