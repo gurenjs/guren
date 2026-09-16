@@ -137,15 +137,6 @@ export interface GurenCliApi {
   /** The OKF docs relation graph (RFC 0005). Optional, like the above. */
   buildDocsGraphReport?(options: { cwd?: string; entity?: string; path?: string }): Promise<unknown>
   renderDocsGraphMarkdown?(report: unknown): string
-  /**
-   * The Dev MCP endpoint on the 2026-07-28 protocol (RFC 0028). Spelled here
-   * rather than imported: this package cannot declare @guren/cli, so an imported
-   * type would build as `any`. Optional because an older CLI lacks it.
-   */
-  createDevMcpHandler?(options: { cwd: string; version?: string }): {
-    fetch(request: Request): Promise<Response>
-    close(): Promise<void>
-  }
 }
 
 export interface CreateMcpServerOptions {

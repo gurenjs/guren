@@ -136,8 +136,9 @@ const factory = definePlugin<McpPluginConfig>({
     const limiter = config.rateLimit === false ? undefined : new AgentRateLimiter(config.rateLimit)
 
     // Dynamic: the SDK stays out of module graphs that never mount the endpoint.
-    // One line: core's deploy-build.test.ts greps for this import to keep the stub list honest.
-    const { WebStandardStreamableHTTPServerTransport } = await import('@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js')
+    const { WebStandardStreamableHTTPServerTransport } = await import(
+      '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
+    )
 
     const emit = createAuditEmitter(sink, events)
     if (sink) {

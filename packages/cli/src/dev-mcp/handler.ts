@@ -1,7 +1,7 @@
-import { createMcpHandler } from '@modelcontextprotocol/server'
-
-import { runCheck } from '../check'
+import { generateAgentTypes } from '../agents-types'
+import { generateApiClientTypes } from '../api-client-types'
 import { generateChannelTypes } from '../channel-types'
+import { runCheck } from '../check'
 import { renderContextMarkdown } from '../context'
 import { generateDataTypes } from '../data-types'
 import { runDoctor, suggestNextSteps } from '../doctor'
@@ -13,15 +13,12 @@ import { generateGuidelines } from '../guidelines'
 import { makeController } from '../make-controller'
 import { makeFeature } from '../make-feature'
 import { makeModel } from '../make-model'
-import { makeRoute } from '../make-route'
 import { makeTest } from '../make-test'
 import { makeView } from '../make-view'
 import { listModels } from '../model-list'
 import { generatePageTypes } from '../pages-types'
 import { generateRouteTypes } from '../routes-types'
-import { generateAgentTypes } from '../agents-types'
-import { generateApiClientTypes } from '../api-client-types'
-import { createDevMcpServer, type DevMcpApi } from './server'
+import type { DevMcpApi } from './server'
 
 export interface DevMcpHandler {
   fetch(request: Request): Promise<Response>
@@ -56,7 +53,6 @@ function defaultApi(): DevMcpApi {
     makeModel,
     makeView,
     makeTest,
-    makeRoute,
     generateRouteTypes,
     generatePageTypes,
     generateDataTypes,
@@ -71,17 +67,26 @@ function defaultApi(): DevMcpApi {
 
 /**
  * The Dev MCP endpoint (`GUREN_MCP=1`, RFC 0028 §1), serving the 2026-07-28 MCP
- * revision and 2025-era clients from one handler. Origin and peer checks are not
- * here: `createMcpHandler` performs none, so the mounting side keeps its guard.
+ * revision and 2025-era clients from one handler.
+ * `createMcpHandler` validates no Origin or peer; the mounting side keeps its guard.
+ * The SDK loads on the first request: a static import in this package-index module
+ * costs every consumer of it (the edit hook, `deploy-check`) ~40 ms it never uses.
  */
 export function createDevMcpHandler(options: CreateDevMcpHandlerOptions): DevMcpHandler {
   const api = options.api ?? defaultApi()
-  const handler = createMcpHandler(() =>
-    createDevMcpServer({ cwd: options.cwd, api, version: options.version }),
-  )
+  let started: Promise<DevMcpHandler> | undefined
+
+  const start = (): Promise<DevMcpHandler> => {
+    started ??= import('./serve').then(({ startDevMcp }) =>
+      startDevMcp({ cwd: options.cwd, api, version: options.version }),
+    )
+    return started
+  }
 
   return {
-    fetch: (request) => handler.fetch(request),
-    close: () => handler.close(),
+    fetch: async (request) => (await start()).fetch(request),
+    close: async () => {
+      if (started) await (await started).close()
+    },
   }
 }

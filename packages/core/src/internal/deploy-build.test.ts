@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -533,65 +533,56 @@ describe('the built artifact', () => {
 describe('the module graph this list describes', () => {
   const repoRoot = join(import.meta.dir, '../../../..')
 
-  /**
-   * Matched on the import form, not the bare string: `vite` alone also hits a
-   * `@vite-ignore` comment and an identifier, leaving this green after the real
-   * import was deleted.
-   */
-  function importersOf(specifier: string): string {
-    const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const { stdout } = Bun.spawnSync({
-      cmd: [
-        'git',
-        'grep',
-        '-lE',
-        `(from|import\\(|require\\()[[:space:]]*['"]${escaped}['"]`,
-        '--',
-        'packages/server/src',
-        'packages/orm/src',
-        // The App MCP transport entry is there for @guren/plugin-mcp's import (RFC 0016 Phase 4a).
-        'packages/plugin-mcp/src',
-      ],
-      cwd: repoRoot,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    return stdout.toString().trim()
+  function sourcesUnder(root: string): string[] {
+    return readdirSync(join(repoRoot, root), { recursive: true, encoding: 'utf8' })
+      .filter((entry) => entry.endsWith('.ts') || entry.endsWith('.tsx'))
+      .map((entry) => join(repoRoot, root, entry))
   }
 
-  // Per entry, not one alternation: a single match would mask every stale one.
-  test.each(DEV_ONLY_MODULES.map((module) => module.specifier))(
-    'should still be imported by the framework: %s',
-    (specifier) => {
-      expect(importersOf(specifier)).not.toBe('')
+  /**
+   * Parsed imports, not a text search: `vite` alone also hits a `@vite-ignore`
+   * comment and an identifier, and a line-based search misses an `import(` whose
+   * specifier sits on the next line — reporting an import that was never deleted.
+   */
+  function importersOf(specifier: string, root: string): string[] {
+    return sourcesUnder(root).filter((file) => {
+      const transpiler = new Bun.Transpiler({ loader: file.endsWith('.tsx') ? 'tsx' : 'ts' })
+      return transpiler
+        .scanImports(readFileSync(file, 'utf8'))
+        .some((entry) => entry.path === specifier)
+    })
+  }
+
+  // Per entry, and only inside the package the entry is listed for: searching every
+  // package would let one package's import keep another's stale entry alive.
+  test.each([...DEV_ONLY_MODULES])(
+    'should still be imported by the package it is listed for: $specifier',
+    (module) => {
+      expect(importersOf(module.specifier, module.importedBy)).not.toEqual([])
     },
   )
 
   test('should not match a specifier that is merely mentioned', () => {
-    // Guards the check above: a grep that stopped working would pass every case,
-    // and a substring match would accept a module only named in a comment.
-    expect(importersOf('@guren/not-a-real-dev-only-module')).toBe('')
-    expect(importersOf('vit')).toBe('')
+    // Guards the check above: a scan that stopped working would pass every case,
+    // and a prefix match would accept a module only named in a comment.
+    expect(importersOf('@guren/not-a-real-dev-only-module', 'packages/server/src')).toEqual([])
+    expect(importersOf('vit', 'packages/server/src')).toEqual([])
   })
 
-  test.each(
-    DEV_ONLY_MODULES.filter((module) => module.exportNames.length > 0).map((module) => [
-      module.specifier,
-      module.exportNames,
-    ] as const),
-  )('should name exports the importer actually destructures: %s', (specifier, exportNames) => {
-    // A wrong name still renders a stub and fails only at bundle time with "no
-    // matching export".
-    const found = importersOf(specifier)
-    expect(found).not.toBe('')
+  test.each(DEV_ONLY_MODULES.filter((module) => module.exportNames.length > 0))(
+    'should name exports the importer actually destructures: $specifier',
+    (module) => {
+      // A wrong name still renders a stub and fails only at bundle time with "no
+      // matching export".
+      const files = importersOf(module.specifier, module.importedBy)
+      expect(files).not.toEqual([])
 
-    const files = found.split('\n')
-    const source = files.map((file) => readFileSync(join(repoRoot, file), 'utf8')).join('\n')
-
-    for (const name of exportNames) {
-      expect(source).toContain(name)
-    }
-  })
+      const source = files.map((file) => readFileSync(file, 'utf8')).join('\n')
+      for (const name of module.exportNames) {
+        expect(source).toContain(name)
+      }
+    },
+  )
 })
 
 describe('renderDevOnlyStub', () => {
@@ -612,7 +603,7 @@ describe('renderDevOnlyStub', () => {
   for (const [name, terminator] of terminators) {
     test(`keeps a ${name} inside the leading comment`, () => {
       const stub = renderDevOnlyStub(
-        { specifier: 'x', kind: 'sqlite', exportNames: [] },
+        { specifier: 'x', kind: 'sqlite', exportNames: [], importedBy: 'packages/orm/src' },
         `unavailable${terminator}globalThis.INJECTED = true //`,
       )
 
@@ -629,7 +620,7 @@ describe('renderDevOnlyStub', () => {
   ] as const) {
     test(`escapes a ${name} in the thrown message`, () => {
       const stub = renderDevOnlyStub(
-        { specifier: 'x', kind: 'sqlite', exportNames: [] },
+        { specifier: 'x', kind: 'sqlite', exportNames: [], importedBy: 'packages/orm/src' },
         `unavailable${separator}globalThis.INJECTED = true //`,
       )
 
@@ -640,7 +631,7 @@ describe('renderDevOnlyStub', () => {
 
   test('still names every export the importer destructures', () => {
     const stub = renderDevOnlyStub(
-      { specifier: 'x', kind: 'sqlite', exportNames: ['Database', 'open'] },
+      { specifier: 'x', kind: 'sqlite', exportNames: ['Database', 'open'], importedBy: 'packages/orm/src' },
       'nope',
     )
 

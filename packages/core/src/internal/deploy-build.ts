@@ -426,6 +426,12 @@ export interface DevOnlyModule {
    * bundle fails with "no matching export". Empty means namespace access only.
    */
   readonly exportNames: readonly string[]
+  /**
+   * The package source that reaches this module, repo-relative. An entry is here
+   * because one package imports it, so the module-graph check searches that package
+   * alone: a stale entry cannot be kept alive by an unrelated package's import.
+   */
+  readonly importedBy: string
 }
 
 /**
@@ -436,18 +442,20 @@ export interface DevOnlyModule {
  * Workers, load-bearing on Lambda/Vercel. `as const` keys consumers' exhaustive tables.
  */
 export const DEV_ONLY_MODULES = [
-  { specifier: 'bun:sqlite', kind: 'sqlite', exportNames: ['Database'] },
-  { specifier: 'vite', kind: 'vite', exportNames: ['createServer'] },
-  { specifier: '@guren/cli', kind: 'mcp', exportNames: [] },
+  { specifier: 'bun:sqlite', kind: 'sqlite', exportNames: ['Database'], importedBy: 'packages/orm/src' },
+  { specifier: 'vite', kind: 'vite', exportNames: ['createServer'], importedBy: 'packages/server/src' },
+  { specifier: '@guren/cli', kind: 'mcp', exportNames: [], importedBy: 'packages/server/src' },
   {
     specifier: '@modelcontextprotocol/sdk/server/mcp.js',
     kind: 'mcp',
     exportNames: ['McpServer', 'ResourceTemplate'],
+    importedBy: 'packages/server/src',
   },
   {
     specifier: '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js',
     kind: 'mcp',
     exportNames: ['WebStandardStreamableHTTPServerTransport'],
+    importedBy: 'packages/plugin-mcp/src',
   },
 ] as const satisfies readonly DevOnlyModule[]
 
@@ -534,9 +542,9 @@ export interface SqlClientModule extends DevOnlyModule {
  * or a D1 app fails on `Could not resolve "postgres"`; export names mirror drizzle-orm's.
  */
 export const SQL_CLIENT_MODULES = [
-  { specifier: 'postgres', kind: 'sql-driver', dialect: 'postgres', exportNames: [] },
-  { specifier: 'mysql2', kind: 'sql-driver', dialect: 'mysql', exportNames: [] },
-  { specifier: 'mysql2/promise', kind: 'sql-driver', dialect: 'mysql', exportNames: ['createPool'] },
+  { specifier: 'postgres', kind: 'sql-driver', dialect: 'postgres', exportNames: [], importedBy: 'packages/orm/src' },
+  { specifier: 'mysql2', kind: 'sql-driver', dialect: 'mysql', exportNames: [], importedBy: 'packages/orm/src' },
+  { specifier: 'mysql2/promise', kind: 'sql-driver', dialect: 'mysql', exportNames: ['createPool'], importedBy: 'packages/orm/src' },
   {
     specifier: '@aws-sdk/client-rds-data',
     kind: 'sql-driver',
@@ -548,6 +556,7 @@ export const SQL_CLIENT_MODULES = [
       'ExecuteStatementCommand',
       'RollbackTransactionCommand',
     ],
+    importedBy: 'packages/orm/src',
   },
 ] as const satisfies readonly SqlClientModule[]
 
