@@ -131,8 +131,18 @@ describe('guren add ai', () => {
 
     await addAi({})
 
-    const resolved = await loadResolvedConfig(process.cwd())
-    expect(resolved.entries.map((entry) => [entry.key, entry.file])).toEqual([['ai', 'config/ai.ts']])
+    const saved = process.env.ANTHROPIC_API_KEY
+    // Blank, as `add ai` leaves .env: the SDK would send it to the API as a key.
+    process.env.ANTHROPIC_API_KEY = ''
+    try {
+      const resolved = await loadResolvedConfig(process.cwd())
+      expect(resolved.entries.map((entry) => [entry.key, entry.file])).toEqual([['ai', 'config/ai.ts']])
+      const config = resolved.entries[0]!.config as { providers: Record<string, { model: () => unknown }> }
+      expect(() => config.providers.anthropic!.model()).toThrow('Set ANTHROPIC_API_KEY in .env to call the anthropic provider.')
+    } finally {
+      if (saved === undefined) delete process.env.ANTHROPIC_API_KEY
+      else process.env.ANTHROPIC_API_KEY = saved
+    }
     expect((await checkEnvExample(process.cwd())).filter((result) => result.status === 'fail')).toEqual([])
   })
 
