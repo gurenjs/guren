@@ -672,6 +672,20 @@ describe('ProviderManager', () => {
   })
 })
 
+describe('fake', () => {
+  it('should restore the fake it shadowed when a nested fake is disposed', () => {
+    const container = new Container()
+    container.instance('service', 'real')
+
+    using _outer = container.fake('service', 'outer')
+    {
+      using _inner = container.fake('service', 'inner')
+      expect(container.make<string>('service')).toBe('inner')
+    }
+    expect(container.make<string>('service')).toBe('outer')
+  })
+})
+
 describe('makeOptional', () => {
   it('should return undefined for an unbound service and the instance for a bound one', () => {
     const container = new Container()

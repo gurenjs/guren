@@ -56,30 +56,52 @@ export interface FakeAiRuntime {
   MockLanguageModelV4: typeof MockLanguageModelV4
 }
 
-let runtimePromise: Promise<FakeAiRuntime> | undefined
+let runtimePromise: Promise<FakeAiRuntime | Error> | undefined
+let loadedRuntime: FakeAiRuntime | Error | undefined
 
 /**
- * Rejects when `@guren/plugin-ai` or `ai` is not installed, or is a version without the
- * names used here: an optional peer can resolve to an older copy whose names are `undefined`.
+ * Import the optional peers once, so {@link createFakeAi} can stay synchronous. Settles to an
+ * Error when either is missing or is a version without the names used here.
  */
-export function loadFakeAiRuntime(): Promise<FakeAiRuntime> {
-  runtimePromise ??= (async () => {
-    const [plugin, test] = await Promise.all([import('@guren/plugin-ai'), import('ai/test')])
-    const runtime: Partial<FakeAiRuntime> = {
-      bindAgent: plugin.bindAgent,
-      resolveAgentName: plugin.resolveAgentName,
-      MockLanguageModelV4: test.MockLanguageModelV4,
-    }
-    const missing = (Object.keys(runtime) as Array<keyof FakeAiRuntime>).filter((name) => typeof runtime[name] !== 'function')
-    if (missing.length > 0) {
-      throw new Error(
-        `the installed @guren/plugin-ai or ai does not export ${missing.join(', ')}; `
-        + 'upgrade @guren/plugin-ai to a release with fakeAi() support and ai to 7.x.',
-      )
-    }
-    return runtime as FakeAiRuntime
-  })()
-  return runtimePromise
+export async function preloadFakeAiRuntime(): Promise<void> {
+  runtimePromise ??= loadFakeAiRuntime().catch((error: unknown) =>
+    error instanceof Error ? error : new Error(String(error)))
+  loadedRuntime = await runtimePromise
+}
+
+async function loadFakeAiRuntime(): Promise<FakeAiRuntime> {
+  const [plugin, test] = await Promise.all([import('@guren/plugin-ai'), import('ai/test')])
+  const runtime: Partial<FakeAiRuntime> = {
+    bindAgent: plugin.bindAgent,
+    resolveAgentName: plugin.resolveAgentName,
+    MockLanguageModelV4: test.MockLanguageModelV4,
+  }
+  // An optional peer can resolve to an older copy, whose missing names import as `undefined`.
+  const missing = (Object.keys(runtime) as Array<keyof FakeAiRuntime>).filter((name) => typeof runtime[name] !== 'function')
+  if (missing.length > 0) {
+    throw new Error(
+      `the installed @guren/plugin-ai or ai does not export ${missing.join(', ')}; `
+      + 'upgrade @guren/plugin-ai to a release with fakeAi() support and ai to 7.x.',
+    )
+  }
+  return runtime as FakeAiRuntime
+}
+
+/** `TestApp.fakeAi()` once the TestApp knows its container. */
+export function createFakeAi(container: Container): FakeAi {
+  if (!container.has('ai')) {
+    throw new Error(
+      'This app binds no `ai` manager to fake. Add config/ai.ts (defineAiConfig from @guren/plugin-ai) '
+      + 'to createApp({ config }).',
+    )
+  }
+  if (!loadedRuntime || loadedRuntime instanceof Error) {
+    throw new Error(
+      'fakeAi() needs @guren/plugin-ai and ai installed, and could not import them'
+      + (loadedRuntime ? `: ${loadedRuntime.message}` : '.'),
+    )
+  }
+  return new FakeAi(container, loadedRuntime)
 }
 
 const USAGE = {
@@ -96,6 +118,8 @@ export class FakeAi implements AiManager, Disposable {
   private readonly scripts = new Map<string, FakeAiResponse[]>()
   private readonly recorded = new Map<string, FakeAiCall[]>()
   private readonly failures: string[] = []
+  /** One per scripted prompt, read on dispose: a loop `stopWhen` ended early never asks for the rest. */
+  private readonly progress: Array<{ name: string; consumed: () => number; total: number }> = []
   private readonly restore: Disposable
 
   constructor(
@@ -108,8 +132,7 @@ export class FakeAi implements AiManager, Disposable {
 
   /** Queue one response per future prompt of `cls`, consumed in order. */
   respond(cls: AgentClass, responses: FakeAiResponse[]): this {
-    const name = this.nameOf(cls)
-    this.scripts.set(name, [...(this.scripts.get(name) ?? []), ...responses])
+    listFor(this.scripts, this.nameOf(cls)).push(...responses)
     return this
   }
 
@@ -177,11 +200,16 @@ export class FakeAi implements AiManager, Disposable {
     )
   }
 
-  /** Restores the real binding, then fails if any prompt found nothing scripted. */
+  /** Restores the binding, then fails on any prompt that found nothing scripted or left steps unused. */
   [Symbol.dispose](): void {
     this.restore[Symbol.dispose]()
-    if (this.failures.length > 0) {
-      throw new Error(`fakeAi() saw unscripted model calls:\n- ${this.failures.join('\n- ')}`)
+    const unused = this.progress
+      .filter((prompt) => prompt.consumed() < prompt.total)
+      .map((prompt) =>
+        `Agent [${prompt.name}] stopped after ${prompt.consumed()} of its ${prompt.total} scripted steps; `
+        + 'the loop ended before the scripted answer (check the agent\'s stopWhen).')
+    if (this.failures.length + unused.length > 0) {
+      throw new Error(`fakeAi() found prompts its script did not answer:${formatList([...this.failures, ...unused])}`)
     }
   }
 
@@ -191,7 +219,7 @@ export class FakeAi implements AiManager, Disposable {
       prompt: async (input, options) => {
         const call: FakeAiCall = { input, principal, toolCalls: [] }
         // Recorded on entry: a prompt that throws was still made.
-        this.recorded.set(name, [...(this.recorded.get(name) ?? []), call])
+        listFor(this.recorded, name).push(call)
         try {
           const response = await bound.prompt(input, options)
           call.response = response
@@ -223,33 +251,32 @@ export class FakeAi implements AiManager, Disposable {
 
     const steps = flatten(response)
     let step = 0
-    const mock = new this.runtime.MockLanguageModelV4({
+    this.progress.push({ name, consumed: () => step, total: steps.length })
+    return new this.runtime.MockLanguageModelV4({
       modelId: `fake:${name}`,
       doGenerate: async () => {
-        const current = steps[step]
-        if (current === undefined) {
-          return this.fail(
-            `Agent [${name}] asked the model for step ${step + 1}, but its scripted response has ${steps.length}. `
-            + 'End the response with an answer (text or output) after the last toolCalls.',
-          )
-        }
         const index = step++
+        const current = steps[index]
+        // Unreachable while `bindAgent` resolves a model per prompt; guards a memoized one.
+        if (current === undefined) {
+          return this.fail(`Agent [${name}] asked the model for step ${index + 1}, but its scripted response has ${steps.length}.`)
+        }
+        if ('text' in current) {
+          return { content: [{ type: 'text', text: current.text }], finishReason: { unified: 'stop', raw: undefined }, usage: USAGE, warnings: [] }
+        }
         return {
-          content: 'toolCalls' in current
-            ? current.toolCalls.map((toolCall, callIndex) => ({
-                type: 'tool-call' as const,
-                toolCallId: `fake-${index}-${callIndex}`,
-                toolName: toolCall.name,
-                input: JSON.stringify(toolCall.input ?? {}),
-              }))
-            : [{ type: 'text' as const, text: current.text }],
-          finishReason: { unified: 'toolCalls' in current ? ('tool-calls' as const) : ('stop' as const), raw: undefined },
+          content: current.toolCalls.map((toolCall, callIndex) => ({
+            type: 'tool-call',
+            toolCallId: `fake-${index}-${callIndex}`,
+            toolName: toolCall.name,
+            input: JSON.stringify(toolCall.input ?? {}),
+          })),
+          finishReason: { unified: 'tool-calls', raw: undefined },
           usage: USAGE,
           warnings: [],
         }
       },
     })
-    return mock
   }
 
   private fail(message: string): never {
@@ -258,12 +285,22 @@ export class FakeAi implements AiManager, Disposable {
   }
 
   private failureSuffix(): string {
-    return this.failures.length > 0 ? `\nUnscripted model calls:\n- ${this.failures.join('\n- ')}` : ''
+    return this.failures.length > 0 ? `\nUnscripted model calls:${formatList(this.failures)}` : ''
   }
 
   private nameOf(cls: AgentClass): string {
     return this.runtime.resolveAgentName(cls)
   }
+}
+
+function listFor<T>(lists: Map<string, T[]>, key: string): T[] {
+  let list = lists.get(key)
+  if (!list) lists.set(key, (list = []))
+  return list
+}
+
+function formatList(lines: readonly string[]): string {
+  return lines.map((line) => `\n- ${line}`).join('')
 }
 
 type FakeAiStep = { toolCalls: FakeAiToolCall[] } | { text: string }

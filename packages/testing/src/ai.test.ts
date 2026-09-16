@@ -4,7 +4,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { Controller, createApp, createCsrfMiddleware, type Router } from '@guren/core'
-import { Agent, Output, aiPlugin, defineAiConfig, type AgentToolScope } from '@guren/plugin-ai'
+import { Agent, Output, aiPlugin, defineAiConfig, stepCountIs, type AgentToolScope } from '@guren/plugin-ai'
 import { TestApp } from './test-app'
 
 /**
@@ -33,6 +33,11 @@ class Writer extends Agent {
   override tools() {
     return this.appTools(['posts_store', 'posts_publish'])
   }
+}
+
+class OneStepWriter extends Writer {
+  static override agentName = 'one-step-writer'
+  override stopWhen = stepCountIs(1)
 }
 
 class NeverScripted extends Agent {
@@ -161,7 +166,35 @@ describe('TestApp.fakeAi', () => {
     await expect(factory.as({ id: 1 }).prompt('first')).resolves.toMatchObject({ text: 'done' })
     await expect(factory.as({ id: 1 }).prompt('second')).resolves.toMatchObject({ text: 'only' })
     await expect(factory.as({ id: 1 }).prompt('third')).rejects.toThrow('Agent [writer] was prompted, but nothing is scripted')
-    expect(() => ai[Symbol.dispose]()).toThrow('fakeAi() saw unscripted model calls')
+    expect(() => ai[Symbol.dispose]()).toThrow('fakeAi() found prompts its script did not answer')
+  })
+
+  it('should consume one response per prompt on the same bound agent', async () => {
+    using ai = app.fakeAi()
+    ai.respond(Summarizer, ['first', 'second'])
+    const bound = application.container.make('ai').agent(Summarizer).as(null)
+
+    const answers = [(await bound.prompt('a')).text, (await bound.prompt('b')).text]
+
+    expect(answers).toEqual(['first', 'second'])
+  })
+
+  it('should fail on dispose when the loop stops before the scripted answer', async () => {
+    const ai = app.fakeAi()
+    ai.respond(OneStepWriter, [{ toolCalls: [{ name: 'posts_store', input: { title: 'x' } }], then: 'never read' }])
+
+    await application.container.make('ai').agent(OneStepWriter).as({ id: 1 }).prompt('write')
+
+    expect(() => ai[Symbol.dispose]()).toThrow('Agent [one-step-writer] stopped after 1 of its 2 scripted steps')
+  })
+
+  it('should keep an outer fake in place when a nested one is disposed', () => {
+    using outer = app.fakeAi()
+    {
+      using _inner = app.fakeAi()
+    }
+
+    expect(application.container.make('ai')).toBe(outer)
   })
 
   it('should report what was prompted when an assertion fails', () => {

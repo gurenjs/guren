@@ -87,7 +87,8 @@ let cached: Promise<LocalPackage[]> | undefined
 
 /**
  * The packages a scaffolded app resolves from this checkout: what the templates
- * declare, plus everything those packages depend on inside the workspace.
+ * declare, plus everything those packages depend on inside the workspace. An
+ * optional peer is not followed: the app installs one only by declaring it.
  */
 export function collectLocalPackages(): Promise<LocalPackage[]> {
   cached ??= (async () => {
@@ -106,7 +107,7 @@ export function collectLocalPackages(): Promise<LocalPackage[]> {
 
     // Reachability, not build order: `dependencySchedule()` drops the core↔cli
     // edge to break that cycle, and a vendor set missing either side of it would
-    // resolve the other from npm. Follows dependencies + peerDependencies.
+    // resolve the other from npm. Follows dependencies + required peerDependencies.
     const selected = new Map<string, WorkspacePackage>()
     const queue = [...seed]
     while (queue.length > 0) {
@@ -119,7 +120,8 @@ export function collectLocalPackages(): Promise<LocalPackage[]> {
         continue // Not ours to vendor — react, hono, drizzle-orm and friends.
       }
       selected.set(name, pkg)
-      queue.push(...pkg.dependencies)
+      const optional = (await readManifest(pkg.dir)).peerDependenciesMeta ?? {}
+      queue.push(...pkg.dependencies.filter((dep) => optional[dep]?.optional !== true))
     }
 
     return [...selected.values()]

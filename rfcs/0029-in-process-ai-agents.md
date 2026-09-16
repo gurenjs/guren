@@ -624,7 +624,8 @@ agent, so an untested agent cannot pass by returning an empty string.
 through `bindAgent` (exported for this) with a per-class manager. An
 unscripted prompt throws naming the agent, and disposing the fake throws
 again, because a route turns the first throw into a 500 whose body names
-nothing. `assertNotPrompted(Agent, predicate)` fails on a matching prompt and
+nothing. Dispose also fails on a prompt whose loop stopped before the
+scripted answer. `assertNotPrompted(Agent, predicate)` fails on a matching prompt and
 `assertNeverPrompted(Agent)` on any prompt. `@guren/plugin-ai` and `ai` are
 optional peers of `@guren/testing`, imported when `fromApp()` boots an app
 that binds `ai`, which keeps `fakeAi()` synchronous.

@@ -119,7 +119,8 @@ describe('vendorLocalPackages', () => {
         }
         for (const [dep, range] of Object.entries(manifest.peerDependencies ?? {})) {
           if (!dep.startsWith('@guren/')) continue
-          expect(range).toMatch(/^\d+\.\d+\.\d+/)
+          // An optional peer outside the vendored set keeps its range: nothing installs it.
+          if (roots.has(dep)) expect(range).toMatch(/^\d+\.\d+\.\d+/)
           expect(manifest.peerDependenciesMeta?.[dep]).toEqual({ optional: true })
         }
       }
