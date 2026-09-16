@@ -21,9 +21,9 @@ import {
 } from './api-client-types'
 import { discoverRoutePathFiles } from './route-path-check'
 import { appDependsOn, fileExists } from './discovery'
-import { schemaPropertyTypes, schemaToTypeString } from './schema-type-extractor'
+import { PLUGIN_AI_PACKAGE, renderPluginAiTypes } from './agents-types-plugin-ai'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
-import { escapeSingleQuoted, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
 export const AGENTS_MANIFEST_FILE = '.guren/agents.gen.ts'
 
@@ -154,8 +154,6 @@ export async function generateAgentTypes(
   return { outputPath, tools, warnings }
 }
 
-const PLUGIN_AI_PACKAGE = '@guren/plugin-ai'
-
 export interface BuildAgentToolsOptions {
   resources?: AgentResourceRef[]
   /** Sink for per-tool notes about hints that could not be resolved. */
@@ -189,25 +187,19 @@ export function buildAgentToolsContent(
 
   let importsData = false
   const outputTypes: string[] = []
-  const inputTypes: string[] = []
-  const augmentation: string[] = []
+  const resourceTyped = new Set<string>()
   const entries = sorted.map((tool) => {
     const enrichment = resolveEnrichment(tool, declared, options.warnings)
-    const key = `'${escapeSingleQuoted(tool.toolName)}'`
     if (enrichment) {
       importsData = true
-      outputTypes.push(`  ${key}: ${enrichment.dataType}`)
-    }
-    if (options.pluginAi) {
-      const definition = findDefinition(tool, options.pluginAi.definitions)
-      inputTypes.push(`  ${key}: ${renderInputType(tool, definition)}`)
-      const output = enrichment
-        ? `AgentToolOutputTypes[${key}]`
-        : schemaToTypeString(definition?.schemas?.output, JSON_OUTPUT) ?? 'unknown'
-      augmentation.push(`    ${key}: { input: AgentToolInputTypes[${key}]; output: ${output} }`)
+      resourceTyped.add(tool.toolName)
+      outputTypes.push(`  '${escapeSingleQuoted(tool.toolName)}': ${enrichment.dataType}`)
     }
     return renderTool(tool, enrichment)
   })
+  const pluginAiTypes = options.pluginAi
+    ? renderPluginAiTypes(sorted, { definitions: options.pluginAi.definitions, resourceTyped })
+    : ''
 
   const dataImport = importsData ? "\nimport type { Data } from './data.gen'\n" : ''
 
@@ -252,74 +244,7 @@ export type AgentToolName = keyof typeof agentTools
 export interface AgentToolOutputTypes {
 ${outputTypes.length > 0 ? outputTypes.join('\n') : '  // No tool declares a resolvable resource response hint.'}
 }
-${options.pluginAi ? renderPluginAiTypes(inputTypes, augmentation) : ''}`
-}
-
-function renderPluginAiTypes(inputTypes: string[], augmentation: string[]): string {
-  return `
-/**
- * The arguments each tool accepts, as its route's Zod contracts render them
- * (the extraction \`api-client.gen.ts\` uses), over the property set and
- * required keys of the merged \`inputSchema\` above and as that JSON Schema
- * reads: a coercing \`z.coerce.number()\` is a \`number\`, a date a \`string\`.
- * A property whose schema the extractor cannot render is \`unknown\`, never a guess.
- */
-export interface AgentToolInputTypes {
-${inputTypes.join('\n')}
-}
-
-// Types \`appTools()\` in @guren/plugin-ai (RFC 0029 §11): a name no route
-// derives fails to compile, and each tool is typed against its contract.
-// \`output\` is the success body; a gate's refusal is typed by the plugin.
-declare module '@guren/plugin-ai' {
-  interface AppAgentTools {
-${augmentation.join('\n')}
-  }
-}
-`
-}
-
-/** A tool call's arguments are JSON validated against `inputSchema`, so they are typed as that schema reads. */
-const JSON_INPUT = { io: 'input', json: true } as const
-const JSON_OUTPUT = { io: 'output', json: true } as const
-
-/** The route a tool was derived from: `deriveAgentTools()` keeps the first claim of a name. */
-function findDefinition(
-  tool: DerivedAgentTool,
-  definitions: readonly RouteDefinitionLike[],
-): RouteDefinitionLike | undefined {
-  return definitions.find(
-    (definition) =>
-      definition.name === tool.routeName
-      && definition.method.toUpperCase() === tool.method
-      && definition.path === tool.path,
-  )
-}
-
-/**
- * Keys, sources and required-ness come from the derivation's merge, never
- * re-derived here: only the type text of each property is new.
- */
-function renderInputType(tool: DerivedAgentTool, definition: RouteDefinitionLike | undefined): string {
-  const names = Object.keys(tool.inputSources)
-  if (names.length === 0) return 'Record<string, never>'
-
-  const required = new Set(tool.inputSchema.required as string[] | undefined)
-  const schemas = definition?.schemas
-  const propertyTypes: Record<'params' | 'query' | 'body', Record<string, string | undefined> | undefined> = {
-    params: schemaPropertyTypes(schemas?.params, JSON_INPUT),
-    query: schemaPropertyTypes(schemas?.query, JSON_INPUT),
-    body: tool.inputBodyNested
-      ? { body: schemaToTypeString(schemas?.body, JSON_INPUT) }
-      : schemaPropertyTypes(schemas?.body, JSON_INPUT),
-  }
-
-  const fields = names.map((name) => {
-    const source = tool.inputSources[name]!
-    const type = source === 'path' ? 'string' : propertyTypes[source]?.[name]
-    return `${quoteObjectKey(name)}${required.has(name) ? '' : '?'}: ${type ?? 'unknown'}`
-  })
-  return `{ ${fields.join('; ')} }`
+${pluginAiTypes}`
 }
 
 /**
