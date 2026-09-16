@@ -899,7 +899,7 @@ import { apiTokens } from '../db/schema.js'
 
 const app = createApp({
   routes: registerWebRoutes,
-  providers: [DatabaseProvider, AuthProvider, /* … */ mcpPlugin()],
+  providers: [AuthProvider, /* … */ mcpPlugin()],
 })
 
 // The endpoint verifies bearer tokens against this store, and a token's

@@ -30,8 +30,8 @@ type StubbedModule = { specifier: string; exportNames: readonly string[] }
  * Write the stub files and the `wrangler.jsonc` aliasing `modules` to them —
  * what `cloudflare:build` scaffolds, written directly so a probe pins the
  * contract rather than the command that emits it. Which modules a probe passes
- * is the whole variable: the App MCP probe stubs everything *except* the
- * transport, the configuration RFC 0016 Phase 4a produces.
+ * is the whole variable: the App MCP probe stubs what `cloudflare:build` stubs
+ * for an app declaring the plugin, then that plus the SDK itself.
  */
 function writeWranglerConfig(root: string, name: string, modules: readonly StubbedModule[]): void {
   mkdirSync(join(root, 'stubs'), { recursive: true })
@@ -263,8 +263,8 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
 
     // Every third-party dependency of the closure, flattened to the top level.
     vendorClosure(root, 'mcp-bundle-probe', closure, {
-      // The real SDK from npm: what the transport costs is what this reports.
-      required: ['@modelcontextprotocol/sdk'],
+      // The real SDK from npm: what the endpoint costs is what this reports.
+      required: ['@modelcontextprotocol/server'],
     })
 
     writeFileSync(
@@ -319,23 +319,22 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
   }
 
   test(
-    'bundles the App MCP transport and stays inside the free-plan budget',
+    'bundles the App MCP SDK and stays inside the free-plan budget',
     () => {
       // Everything `cloudflare:build` stubs for an app that declares
-      // `@guren/plugin-mcp` — which is everything except the transport.
-      const served = bundleSize('transport-served', [
-        ...stubbableDevOnlyModules({ mcpPlugin: true }),
-        ...SQL_CLIENT_MODULES,
+      // `@guren/plugin-mcp`.
+      const deployed = [...stubbableDevOnlyModules({ mcpPlugin: true }), ...SQL_CLIENT_MODULES]
+      const served = bundleSize('sdk-served', deployed)
+      // And the same worker with the SDK v2 root stubbed under the names
+      // plugin-mcp imports. "The bundle resolves" cannot tell the two apart, so
+      // the size difference is the only proof the real SDK reached the worker.
+      const stubbed = bundleSize('sdk-stubbed', [
+        ...deployed,
+        { specifier: '@modelcontextprotocol/server', exportNames: ['createMcpHandler', 'Server'] },
       ])
-      // And the same worker as every deploy plugin built it before RFC 0016
-      // Phase 4a. Both are measured because "the bundle resolves" cannot tell
-      // them apart — the stub declares the transport's export name, so the
-      // stubbed configuration bundles fine and deploys an endpoint that throws.
-      // The size difference is the only proof the real transport reached it.
-      const stubbed = bundleSize('transport-stubbed', [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES])
 
       console.log(
-        `App MCP transport costs ${((served - stubbed) / 1024).toFixed(1)} KiB gzipped `
+        `App MCP SDK costs ${((served - stubbed) / 1024).toFixed(1)} KiB gzipped `
           + `(${((served / FREE_PLAN_GZIP_BUDGET) * 100).toFixed(1)}% of the ${FREE_PLAN_GZIP_BUDGET / 1024 / 1024} MiB free-plan budget used in total)`,
       )
 
@@ -360,7 +359,7 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
     root = mkdtempSync(join(tmpdir(), 'guren-wrangler-oauth-'))
 
     vendorClosure(root, 'mcp-oauth-bundle-probe', workspaceClosure('@guren/plugin-mcp'), {
-      required: ['@modelcontextprotocol/sdk'],
+      required: ['@modelcontextprotocol/server'],
       // No `@guren/*` manifest declares it — a real app installs it itself,
       // which is exactly what the build's guard demands.
       extra: { '@cloudflare/workers-oauth-provider': '^0.10.3' },

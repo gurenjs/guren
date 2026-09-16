@@ -542,8 +542,23 @@ createApp({ providers: [DatabaseProvider] })`
     expect(result.content).toContain('providers: [DatabaseProvider, SessionProvider]')
   })
 
-  it('reports an app with no providers array rather than inventing one', () => {
+  it('writes the providers array into an app that lists none', () => {
     const result = insertProvider('createApp({ routes: registerWebRoutes })', 'SessionProvider')
+
+    expect(result.content).toContain('providers: [SessionProvider]')
+  })
+
+  it('reports an entry with no createApp() call rather than inventing one', () => {
+    const result = insertProvider('const app = new Application()', 'SessionProvider')
+
+    expect(result.content).toBeUndefined()
+    expect(result.reason).toContain('createApp')
+  })
+
+  // Returning the text unchanged would let the caller write the import with no
+  // registration, which noUnusedLocals then rejects.
+  it('reports a providers option it cannot append to', () => {
+    const result = insertProvider('createApp({ providers: appProviders })', 'SessionProvider')
 
     expect(result.content).toBeUndefined()
     expect(result.reason).toBe(PATCH_REASONS.providersArrayNotFound)

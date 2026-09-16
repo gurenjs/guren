@@ -660,6 +660,10 @@ described:
   the scaffold writes once and never overwrites. An app that adds the plugin later
   would keep the stale alias forever, so the build **fails** and names the one line
   to delete rather than warning.
+- **Superseded by RFC 0028 §4.** `@guren/plugin-mcp` moved to MCP SDK v2, whose
+  server root no stub names, so the plugin no longer imports the transport entry this
+  section releases. The entry and the build failure above remain until RFC 0028's
+  removal PR, and neither changes a bundle in the meantime.
 
 `--mcp-oauth` shipped as designed, in a second PR. What the design left open:
 

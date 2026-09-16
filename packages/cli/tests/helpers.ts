@@ -176,6 +176,14 @@ export default defineEnv({
 })
 `
 
+/** A `config/env.ts` declaring only APP_KEY, so a blueprint's declaration is never already present. */
+export const ENV_SCHEMA_FIXTURE = `import { defineEnv, Env } from '@guren/core'
+
+export default defineEnv({
+  APP_KEY: Env.string(),
+})
+`
+
 export const CACHE_CONFIG_FIXTURE = `import { defineConfig } from '@guren/core'
 
 export default defineConfig({
@@ -385,10 +393,7 @@ export const kernel = new ConsoleKernel({ container: app.container })
 kernel.registerMany([])
 `
 
-/**
- * An app file with no providers array to patch — the provider-wiring twin of
- * `REGISTRAR_LESS_ROUTES_FIXTURE`.
- */
+/** An app file whose `createApp()` lists no providers, the shape the scaffolded entry ships. */
 export const PROVIDERLESS_APP_FIXTURE = `import { createApp } from '@guren/core'
 
 const app = createApp({

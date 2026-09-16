@@ -261,7 +261,6 @@ import { TestApp } from '@guren/testing'
 
 const app = await TestApp.create({
   auth: {},                      // mounts session + CSRF middleware (needed for withCsrf())
-  providers: [DatabaseProvider],
   routes: registerWebRoutes,
 })
 

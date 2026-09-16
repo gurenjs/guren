@@ -3,8 +3,9 @@
  * context the Workers runtime would pass. Shared by the two deferral suites
  * because it is this package's only description of how a request crosses that
  * seam holding one: the protocol version, the header set and the seam's
- * principal are pinned here rather than twice. The SDK client is not used — it
- * owns the `fetch` it calls, and the third `app.fetch` argument is the point.
+ * principal are pinned here rather than twice. Two raw POSTs rather than the SDK
+ * client, whose extra requests (`notifications/initialized` at least) would reach
+ * the same context and add `waitUntil` entries the suites count.
  */
 import type { Application } from '@guren/core'
 
@@ -17,34 +18,44 @@ export interface SeamToolCall {
   executionCtx?: unknown
 }
 
-export async function callToolOverSeam(app: Application, call: SeamToolCall): Promise<void> {
-  const post = (body: unknown): Request =>
-    presentExternalMcpAuth(
+/** The `tools/call` result; a refusal is still a result, carrying `isError`. */
+export interface SeamToolResult {
+  content: Array<{ type: string; text?: string }>
+  isError?: boolean
+}
+
+export async function callToolOverSeam(app: Application, call: SeamToolCall): Promise<SeamToolResult> {
+  // Each step must answer 200 with a JSON-RPC result before the next runs: a
+  // discarded response would pass a 500 as readily as a success.
+  const send = async <T>(id: number, method: string, params: unknown): Promise<T> => {
+    const request = presentExternalMcpAuth(
       new Request('http://localhost/mcp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
       }),
       { principal: { kind: 'user', id: 'u_1', abilities: ['tools:*'] }, scopes: ['tools:*'] },
     )
-
-  const send = async (body: unknown): Promise<void> => {
-    const response = await app.fetch(post(body), undefined, call.executionCtx as never)
-    await response.arrayBuffer()
+    const response = await app.fetch(request, undefined, call.executionCtx as never)
+    const text = await response.text()
+    if (response.status !== 200) {
+      throw new Error(`${method} answered ${response.status}: ${text}`)
+    }
+    // The stateless 2025 transport always answers as a one-event SSE stream.
+    const data = text.split('\n').find((line) => line.startsWith('data: '))
+    const message = data ? (JSON.parse(data.slice('data: '.length)) as { result?: T }) : {}
+    if (message.result === undefined) {
+      throw new Error(`${method} answered no JSON-RPC result: ${text}`)
+    }
+    return message.result
   }
 
-  await send({
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } },
+  await send(1, 'initialize', {
+    protocolVersion: '2025-06-18',
+    capabilities: {},
+    clientInfo: { name: 't', version: '1' },
   })
-  await send({
-    jsonrpc: '2.0',
-    id: 2,
-    method: 'tools/call',
-    params: { name: call.tool, arguments: call.arguments ?? {} },
-  })
+  return send<SeamToolResult>(2, 'tools/call', { name: call.tool, arguments: call.arguments ?? {} })
 }
 
 /** The context shape workerd hands `fetch`, with `waitUntil` collecting instead of running. */

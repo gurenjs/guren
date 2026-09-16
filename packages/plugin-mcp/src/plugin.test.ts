@@ -1,6 +1,5 @@
 import { describe, test, expect, beforeAll } from 'bun:test'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { z } from 'zod'
 import {
   AgentToolInvoked,
@@ -521,8 +520,11 @@ describe('mcpPlugin approval notification deferral', () => {
     const notified: string[] = []
     const app = await bootWith((request) => void notified.push(request.tool))
 
-    await callToolOverSeam(app, { tool: 'wires.store', arguments: { amount: 250 } })
+    const result = await callToolOverSeam(app, { tool: 'wires.store', arguments: { amount: 250 } })
 
+    // Queued, not run: the call answers with the pending request rather than the wire.
+    expect(result.isError).toBe(true)
+    expect(result.content.map((block) => block.text).join('\n')).toContain('requestId')
     expect(notified).toEqual(['wires.store'])
   })
 })
