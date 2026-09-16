@@ -1,5 +1,6 @@
 import type { Hono } from 'hono'
 import type {
+  Container,
   EnvSchema,
   I18nPluginOptions,
   RouteDefinition,
@@ -8,6 +9,7 @@ import type {
 } from '@guren/server'
 import { TestResponse } from './http'
 import { TestAgent, type AgentTestBridge } from './agent'
+import { createFakeAi, preloadFakeAiRuntime, type FakeAi } from './ai'
 
 type BootCallback = (app: Hono) => void | Promise<void>
 type ProviderLike = { register?(): unknown; boot?(): unknown }
@@ -30,6 +32,8 @@ type ApplicationLike = {
    * has none, and `agent()` must say so rather than throw on an internal.
    */
   readonly router?: { definitions(): RouteDefinition[] }
+  /** What `fakeAi()` swaps the `ai` binding in. Optional for the same reason as `router`. */
+  readonly container?: Container
 }
 /**
  * The `Application` constructor as this file calls it — structural for the same
@@ -44,7 +48,7 @@ type ApplicationConstructor = new (options: {
   auth?: Record<string, unknown>
   i18n?: I18nPluginOptions
   env?: EnvSchema
-}) => ApplicationLike & { readonly container: { instance(key: string, value: unknown): unknown } }
+}) => ApplicationLike & { readonly container: Container }
 
 /**
  * Options for creating a TestApp instance.
@@ -391,6 +395,8 @@ export class TestApp {
    * "this construction cannot see any routes".
    */
   private routeDefinitions?: readonly RouteDefinition[]
+  /** The booted app's container; undefined for `fromFetch`/`fromWorkers`, like `routeDefinitions`. */
+  private container?: Container
   /** Present when created via fromWorkers(); propagated across builder copies. */
   workers?: WorkersTestContext
 
@@ -463,6 +469,7 @@ export class TestApp {
     const app = new TestApp(fetchFn)
     // After boot(), because that is when the app mounts its routes.
     app.routeDefinitions = application.router?.definitions()
+    await app.attachContainer(application.container)
     return app
   }
 
@@ -487,6 +494,7 @@ export class TestApp {
     // The one thing `fromFetch` cannot recover from a bare function: the route
     // graph `agent()` derives tools from.
     testApp.routeDefinitions = app.router?.definitions()
+    await testApp.attachContainer(app.container)
     return testApp
   }
 
@@ -554,6 +562,7 @@ export class TestApp {
     copy.defaultHeaders = { ...this.defaultHeaders }
     copy.authenticatedUser = this.authenticatedUser
     copy.routeDefinitions = this.routeDefinitions
+    copy.container = this.container
     copy.workers = this.workers
     return copy
   }
@@ -566,6 +575,32 @@ export class TestApp {
    */
   agent(): TestAgent {
     return new TestAgent(this.agentBridge())
+  }
+
+  // oxlint-disable-next-line guren/comment-length -- public API whose @example is the documented entry point
+  /**
+   * Replace the app's `ai` binding with a scripted fake (RFC 0029 §7). Models are scripted
+   * per agent with `respond()`; tools still run through `appTools()` and the pipeline.
+   * Disposing restores the binding and fails if any prompt found nothing scripted.
+   * @example
+   * using ai = app.fakeAi()
+   * ai.respond(SupportTriager, [{ output: { priority: 2 } }])
+   */
+  fakeAi(): FakeAi {
+    if (!this.container) {
+      throw new Error(
+        'This TestApp has no application container, so it has no `ai` binding to fake. '
+          + 'fakeAi() needs TestApp.fromApp(app); TestApp.fromFetch()/fromWorkers() '
+          + 'are handed a bare fetch function.',
+      )
+    }
+    return createFakeAi(this.container)
+  }
+
+  private async attachContainer(container: Container | undefined): Promise<void> {
+    this.container = container
+    // Only for an app that binds `ai`: the import is what keeps `fakeAi()` synchronous.
+    if (container?.has('ai')) await preloadFakeAiRuntime()
   }
 
   private agentBridge(): AgentTestBridge {

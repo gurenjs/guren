@@ -253,16 +253,18 @@ export class Container {
   }
 
   /**
-   * Replace a binding with a fake for tests; the returned disposable restores the
-   * original (`using _ = container.fake(key, fake)`).
+   * Replace a binding with a fake for tests; the returned disposable restores what
+   * was there before, a fake it shadowed included (`using _ = container.fake(key, fake)`).
    */
   fake<K extends keyof ServiceBindings>(key: K, instance: ServiceBindings[K]): Disposable
   fake(key: string, instance: unknown): Disposable
   fake(key: string, instance: unknown): Disposable {
+    const shadowed = this.fakes.has(key) ? { instance: this.fakes.get(key) } : undefined
     this.fakes.set(key, instance)
     return {
       [Symbol.dispose]: () => {
-        this.fakes.delete(key)
+        if (shadowed) this.fakes.set(key, shadowed.instance)
+        else this.fakes.delete(key)
       },
     }
   }
