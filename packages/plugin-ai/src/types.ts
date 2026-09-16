@@ -25,15 +25,15 @@ export type AiAgentName = NamesOf<AiAgents>
 /** The RFC 0016 scope grammar. Only the `tool:` form is exact; a prefix is checked for shape. */
 export type AgentToolScope = `tool:${AgentToolName}` | `tools:${string}.*` | 'tools:read' | 'tools:*'
 
-/** A tool's arguments, as `.guren/agents.gen.ts` renders its route contract; `unknown` before codegen. */
-export type AgentToolInput<K extends string> = K extends keyof AppAgentTools
-  ? AppAgentTools[K] extends { input: infer I } ? I : unknown
+type AppAgentToolField<K extends string, F extends 'input' | 'output'> = K extends keyof AppAgentTools
+  ? AppAgentTools[K] extends Record<F, infer T> ? T : unknown
   : unknown
 
+/** A tool's arguments, as `.guren/agents.gen.ts` renders its route contract; `unknown` before codegen. */
+export type AgentToolInput<K extends string> = AppAgentToolField<K, 'input'>
+
 /** A tool's success body; `unknown` when the route declares no `output` schema or resolvable `resource` hint. */
-export type AgentToolOutput<K extends string> = K extends keyof AppAgentTools
-  ? AppAgentTools[K] extends { output: infer O } ? O : unknown
-  : unknown
+export type AgentToolOutput<K extends string> = AppAgentToolField<K, 'output'>
 
 type UngrantedNames<S extends readonly string[], N extends readonly string[]> = {
   [I in keyof N]: `tool:${N[I]}` extends S[number] ? never : N[I]

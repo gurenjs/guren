@@ -203,7 +203,7 @@ export function buildAgentToolsContent(
       inputTypes.push(`  ${key}: ${renderInputType(tool, definition)}`)
       const output = enrichment
         ? `AgentToolOutputTypes[${key}]`
-        : (definition?.schemas?.output && schemaToTypeString(definition.schemas.output, { io: 'output', json: true })) || 'unknown'
+        : schemaToTypeString(definition?.schemas?.output, JSON_OUTPUT) ?? 'unknown'
       augmentation.push(`    ${key}: { input: AgentToolInputTypes[${key}]; output: ${output} }`)
     }
     return renderTool(tool, enrichment)
@@ -281,6 +281,7 @@ ${augmentation.join('\n')}
 
 /** A tool call's arguments are JSON validated against `inputSchema`, so they are typed as that schema reads. */
 const JSON_INPUT = { io: 'input', json: true } as const
+const JSON_OUTPUT = { io: 'output', json: true } as const
 
 /** The route a tool was derived from: `deriveAgentTools()` keeps the first claim of a name. */
 function findDefinition(
@@ -305,22 +306,17 @@ function renderInputType(tool: DerivedAgentTool, definition: RouteDefinitionLike
 
   const required = new Set(tool.inputSchema.required as string[] | undefined)
   const schemas = definition?.schemas
-  const propertyTypes = {
+  const propertyTypes: Record<'params' | 'query' | 'body', Record<string, string | undefined> | undefined> = {
     params: schemaPropertyTypes(schemas?.params, JSON_INPUT),
     query: schemaPropertyTypes(schemas?.query, JSON_INPUT),
-    body: tool.inputBodyNested ? undefined : schemaPropertyTypes(schemas?.body, JSON_INPUT),
+    body: tool.inputBodyNested
+      ? { body: schemaToTypeString(schemas?.body, JSON_INPUT) }
+      : schemaPropertyTypes(schemas?.body, JSON_INPUT),
   }
 
   const fields = names.map((name) => {
     const source = tool.inputSources[name]!
-    let type: string | undefined
-    if (source === 'path') {
-      type = 'string'
-    } else if (source === 'body' && tool.inputBodyNested) {
-      type = schemaToTypeString(schemas?.body, JSON_INPUT)
-    } else {
-      type = propertyTypes[source]?.[name]
-    }
+    const type = source === 'path' ? 'string' : propertyTypes[source]?.[name]
     return `${quoteObjectKey(name)}${required.has(name) ? '' : '?'}: ${type ?? 'unknown'}`
   })
   return `{ ${fields.join('; ')} }`

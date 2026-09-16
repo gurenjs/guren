@@ -69,36 +69,39 @@ export function schemaToTypeString(schema: unknown, options: SchemaTypeOptions):
     return undefined
   }
   if (!getTypeName(z)) return undefined
-  return zodToType(z, options.io, options.json === true)
+  return zodToType(z, options)
 }
 
 /**
  * An object schema's per-property types, looking through wrappers the way
- * `readObjectSchema` does, so a caller can assemble a type from properties
+ * `readObjectSchema` in `@guren/server` does, so a caller can assemble a type from properties
  * another merge chose. `undefined` when no object is reached.
  */
 export function schemaPropertyTypes(schema: unknown, options: SchemaTypeOptions): Record<string, string> | undefined {
   if (!schema || typeof schema !== 'object') return undefined
   let node = schema as ZodSchemaLike
-  while (!isZod3Schema(node) && getTypeName(node) && typeOf(node) !== 'object') {
+  for (;;) {
+    if (isZod3Schema(node)) {
+      refuseZod3()
+      return undefined
+    }
+    if (!getTypeName(node)) return undefined
+    if (typeOf(node) === 'object') break
     const inner = unwrapSingleChild(node, options.io)
     if (!inner) return undefined
     node = inner
   }
-  if (isZod3Schema(node)) {
-    refuseZod3()
-    return undefined
-  }
-  const shape = getTypeName(node) ? objectShape(node) : undefined
+  const shape = objectShape(node)
   if (!shape) return undefined
   const types: Record<string, string> = Object.create(null)
   for (const [key, value] of Object.entries(shape)) {
-    types[key] = zodToType(value, options.io, options.json === true)
+    types[key] = zodToType(value, options)
   }
   return types
 }
 
-function zodToType(z: ZodSchemaLike, io: SchemaIo, json: boolean): string {
+function zodToType(z: ZodSchemaLike, options: SchemaTypeOptions): string {
+  const { io, json } = options
   // Re-checked per node: a v3 schema can sit inside a v4 object, and would otherwise
   // render as a silent `unknown` instead of being refused.
   if (isZod3Schema(z)) {
@@ -117,7 +120,7 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo, json: boolean): string {
 
   if (TRANSPARENT_WRAPPERS.has(t)) {
     const wrapped = innerSchema(def)
-    return wrapped ? zodToType(wrapped, io, json) : 'unknown'
+    return wrapped ? zodToType(wrapped, options) : 'unknown'
   }
 
   switch (t) {
@@ -141,7 +144,7 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo, json: boolean): string {
 
     case 'array': {
       const el = arrayElement(def)
-      if (el) return `${wrapComplex(zodToType(el, io, json))}[]`
+      if (el) return `${wrapComplex(zodToType(el, options))}[]`
       return 'unknown[]'
     }
 
@@ -153,14 +156,14 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo, json: boolean): string {
       const fields = entries.map(([key, val]) => {
         const opt = isOptional(val, io) ? '?' : ''
         // z.object({ 'user-id': ... }) would otherwise emit invalid TypeScript.
-        return `${quoteObjectKey(key)}${opt}: ${zodToType(val, io, json)}`
+        return `${quoteObjectKey(key)}${opt}: ${zodToType(val, options)}`
       })
       return `{ ${fields.join('; ')} }`
     }
 
     case 'nullable': {
       const i = innerSchema(def)
-      return i ? `${zodToType(i, io, json)} | null` : 'unknown | null'
+      return i ? `${zodToType(i, options)} | null` : 'unknown | null'
     }
 
     // Presence-deciding wrappers (see `isOptional`) that pass the type through.
@@ -169,12 +172,12 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo, json: boolean): string {
     case 'prefault':
     case 'nonoptional': {
       const wrapped = innerSchema(def)
-      return wrapped ? zodToType(wrapped, io, json) : 'unknown'
+      return wrapped ? zodToType(wrapped, options) : 'unknown'
     }
 
     case 'pipe': {
       const side = pipeSide(def, io)
-      return side ? zodToType(side, io, json) : 'unknown'
+      return side ? zodToType(side, options) : 'unknown'
     }
 
     case 'transform':
@@ -183,19 +186,19 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo, json: boolean): string {
     // `z.discriminatedUnion()` produces this same node.
     case 'union': {
       const opts = def.options as ZodSchemaLike[] | undefined
-      if (opts) return opts.map((o) => zodToType(o, io, json)).join(' | ')
+      if (opts) return opts.map((o) => zodToType(o, options)).join(' | ')
       return 'unknown'
     }
 
     case 'intersection': {
       const l = def.left as ZodSchemaLike | undefined
       const r = def.right as ZodSchemaLike | undefined
-      return `${l ? zodToType(l, io, json) : 'unknown'} & ${r ? zodToType(r, io, json) : 'unknown'}`
+      return `${l ? zodToType(l, options) : 'unknown'} & ${r ? zodToType(r, options) : 'unknown'}`
     }
 
     case 'record': {
       const vt = recordValueType(def)
-      return vt ? `Record<string, ${zodToType(vt, io, json)}>` : 'Record<string, unknown>'
+      return vt ? `Record<string, ${zodToType(vt, options)}>` : 'Record<string, unknown>'
     }
 
     case 'enum': {
@@ -210,7 +213,7 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo, json: boolean): string {
 
     case 'promise': {
       const i = innerSchema(def)
-      return i ? `Promise<${zodToType(i, io, json)}>` : 'Promise<unknown>'
+      return i ? `Promise<${zodToType(i, options)}>` : 'Promise<unknown>'
     }
 
     default:
