@@ -101,7 +101,7 @@ export abstract class Agent {
   protected make<K extends keyof ServiceBindings>(key: K): ServiceBindings[K]
   protected make<T>(key: string): T
   protected make(key: string): unknown {
-    return this.context().container.make(key)
+    return readAgentContext(this).container.make(key)
   }
 
   /** The application's own agent tools, gated by the invocation pipeline (RFC 0029 §2). */
@@ -116,7 +116,7 @@ export abstract class Agent {
 
   /** Who this instance acts as; `null` for an anonymous run. */
   get principal(): AgentPrincipal | null {
-    return this.context().principal
+    return readAgentContext(this).principal
   }
 
   /** Bind to the default application's `ai` manager (RFC 0023 §3). */
@@ -131,10 +131,6 @@ export abstract class Agent {
     options?: PromptOptions,
   ): Promise<AgentResponse<InferAgentOutput<T>>> {
     return ambientManager(this.name).agent(this).as(null).prompt(input, options)
-  }
-
-  private context(): AgentContext {
-    return readAgentContext(this)
   }
 }
 
@@ -175,10 +171,10 @@ export function resolveAgentName(cls: Pick<AgentClass, 'name' | 'agentName'>): s
 export function bindAgent<T extends Agent>(
   cls: AgentClass<T>,
   input: AgentPrincipalInput,
-  scope: Pick<AgentContext, 'container' | 'manager'>,
+  scope: { container: AgentContext['container']; manager: AiManager },
 ): BoundAgent<T> {
   const principal = normalizePrincipal(input)
-  constructing = { ...scope, principal, cls }
+  constructing = { container: scope.container, principal, cls }
   let instance: T
   try {
     instance = new cls()

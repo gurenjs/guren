@@ -30,9 +30,8 @@ const USAGE = {
 }
 
 /** A model that answers each generate call with the next step of the script. */
-export function scriptedModel(steps: ScriptedStep[], modelId = 'scripted'): MockLanguageModelV4 {
+export function scriptedModel(steps: ScriptedStep[]): MockLanguageModelV4 {
   return new MockLanguageModelV4({
-    modelId,
     doGenerate: steps.map((step, index) => ({
       content: 'text' in step
         ? [{ type: 'text' as const, text: step.text }]
@@ -80,7 +79,7 @@ export class MemoryApprovalStore implements AgentApprovalStore {
   }
 }
 
-export function registerRoutes(router: Router): void {
+function registerRoutes(router: Router): void {
   router.middleware(requireAuthenticated()).group((guarded) => {
     guarded
       .get('/me', async (c) => {
@@ -123,10 +122,15 @@ export interface Harness {
 }
 
 export async function bootHarness(
-  options: { plugin?: AiPluginConfig | false; providers?: ServiceProviderConstructor[] } = {},
+  options: {
+    plugin?: AiPluginConfig | false
+    providers?: ServiceProviderConstructor[]
+    /** Registered after `aiPlugin()`. */
+    after?: ServiceProviderConstructor[]
+  } = {},
 ): Promise<Harness> {
   const current = scriptedModel([{ text: 'unscripted' }])
-  const judge = scriptedModel([{ text: 'from the judge provider' }], 'judge')
+  const judge = scriptedModel([{ text: 'from the judge provider' }])
 
   const app = createApp({
     routes: registerRoutes,
@@ -143,6 +147,7 @@ export async function bootHarness(
       EventServiceProvider,
       ...(options.providers ?? []),
       ...(options.plugin === false ? [] : [aiPlugin(options.plugin ?? {})]),
+      ...(options.after ?? []),
     ],
   })
   // Mounted before boot so every route sits behind it: an in-process call is

@@ -30,7 +30,7 @@ export interface AiPluginConfig {
 }
 
 export interface AiRuntime {
-  /** Derived on first use and memoized: every provider has booted by then. */
+  /** Derived on use; memoized once the application has finished booting. */
   tools(): readonly DerivedAgentTool[]
   audit(): AgentAuditEmitter
   approvals?: AiPluginConfig['approvals']

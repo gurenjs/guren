@@ -1,3 +1,7 @@
 {
-  "extends": ["./tsconfig.json", "../../tsconfig.build-base.json"]
+  "extends": ["./tsconfig.json", "../../tsconfig.build-base.json"],
+  // Source only: the tests import @guren/plugin-mcp, a devDependency that builds after this package.
+  "include": [
+    "src/**/*"
+  ]
 }

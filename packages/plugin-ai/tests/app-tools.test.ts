@@ -3,7 +3,7 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { afterEach, beforeAll, describe, expect, test } from 'bun:test'
-import { AgentToolDenied, AgentToolInvoked } from '@guren/core'
+import { AgentToolDenied, AgentToolInvoked, definePlugin } from '@guren/core'
 // The real other publisher of `agent.audit`, so a change to when `mcpPlugin`
 // binds it fails here rather than passing against a stand-in.
 import { mcpPlugin } from '@guren/plugin-mcp'
@@ -31,6 +31,14 @@ class Writer extends Agent {
   }
 }
 
+class Late extends Agent {
+  static override scopes: readonly AgentToolScope[] = ['tool:late_tool']
+  instructions = 'x'
+  override tools() {
+    return this.appTools(['late_tool'])
+  }
+}
+
 const store = new MemoryApprovalStore()
 let h: Harness
 let ai: AiManager
@@ -44,6 +52,13 @@ afterEach(() => {
   h.records.length = 0
   store.records.length = 0
 })
+
+/** The one tool result a single-call script produced. */
+function onlyOutput<T>(response: Parameters<typeof toolResults>[0]): T {
+  const results = toolResults(response)
+  expect(results).toHaveLength(1)
+  return results[0]![1] as T
+}
 
 function toolResults(response: { steps: Array<{ toolResults: Array<{ toolName: string; output: unknown }> }> }) {
   return response.steps.flatMap((step) => step.toolResults.map((result) => [result.toolName, result.output]))
@@ -60,7 +75,6 @@ describe('appTools: the allowed path', () => {
 
     expect(response.text).toBe('There is one post.')
     expect(toolResults(response)).toEqual([['posts.index', { posts: [{ id: 1 }] }]])
-    // The advertised schema is the derived one, not a hand-written copy.
     expect(model.doGenerateCalls[0]!.tools?.map((advertised) => advertised.name)).toEqual(['posts.index', 'echo_me'])
   })
 
@@ -105,8 +119,7 @@ describe('appTools: the gates', () => {
     const response = await ai.agent(Writer).as({ id: 1, abilities: ['tool:posts.index'] }).prompt('Write one.')
     await drainEvents()
 
-    const [[, output]] = toolResults(response) as [[string, { denied: string }]]
-    expect(output.denied).toBe('scope')
+    expect(onlyOutput<{ denied: string }>(response).denied).toBe('scope')
     expect(h.records).toHaveLength(1)
     expect(h.records[0]).toBeInstanceOf(AgentToolDenied)
     expect((h.records[0] as AgentToolDenied).reason).toBe('scope')
@@ -118,7 +131,7 @@ describe('appTools: the gates', () => {
 
     const response = await ai.agent(Writer).as({ id: 1 }).prompt('Publish 3.')
 
-    const [[, output]] = toolResults(response) as [[string, { denied: string; approval: { status: string; requestId: string } }]]
+    const output = onlyOutput<{ denied: string; approval: { status: string; requestId: string } }>(response)
     expect(output.denied).toBe('approval')
     expect(output.approval.status).toBe('pending')
     expect(store.records.map((record) => record.id)).toEqual([output.approval.requestId])
@@ -162,6 +175,23 @@ describe('appTools: construction errors', () => {
     }
 
     expect(() => ai.agent(Misspelled).as({ id: 1 })).toThrow(/"posts\.index" is not in the scope grammar/)
+  })
+
+  test('should not cache the tool list before the application has finished booting', async () => {
+    const late = definePlugin({
+      name: 'late-routes',
+      register() {},
+      boot(container) {
+        const app = container.make('app')
+        // An agent built mid-boot sees the routes as they are now...
+        expect(() => container.make('ai').agent(Late).as({ id: 1 })).toThrow(/no route derives the tool "late_tool"/)
+        app.router.get('/late', () => Response.json({ late: true })).name('late_tool').agent({ description: 'Late' })
+      },
+    })
+    const h2 = await bootHarness({ after: [late()] })
+
+    // ...and one built after boot sees the route registered later in it.
+    expect(() => h2.app.container.make('ai').agent(Late).as({ id: 1 })).not.toThrow()
   })
 
   test('should name aiPlugin() when the plugin is not registered', async () => {
@@ -212,7 +242,7 @@ describe('aiPlugin: audit resolution', () => {
 
     const response = await unqueued.app.container.make('ai').agent(Writer).as({ id: 1 }).prompt('Publish.')
 
-    const [[, output]] = toolResults(response) as [[string, { denied: string; message: string }]]
+    const output = onlyOutput<{ denied: string; message: string }>(response)
     expect(output.denied).toBe('approval')
     expect(output.message).toContain('aiPlugin({ approvals: { store, notify } })')
   })

@@ -14,13 +14,12 @@ export type {
   PromptOptions,
 } from './agent'
 
-export { appToolDefinitions, appTools, DEFAULT_IN_PROCESS_CALLS_PER_MINUTE } from './app-tools'
+export { appToolDefinitions, appTools } from './app-tools'
 export type { AppToolDefinition, AppToolDenial, AppToolError } from './app-tools'
 
 export { defineAiConfig } from './config'
 export type { AiConfig, AiConfigDefinition, AiProviderConfig, InferProviders } from './config'
 
-export { ConfiguredAiManager } from './manager'
 export type { AiManager, BoundAgentFactory } from './manager'
 
 export { aiPlugin } from './plugin'

@@ -5,11 +5,9 @@
 import type { AgentInvocationPipeline, AgentPrincipal, Container } from '@guren/core'
 
 import type { AgentClass } from './agent'
-import type { AiManager } from './manager'
 
 export interface AgentContext {
   container: Container
-  manager: AiManager
   principal: AgentPrincipal | null
   cls: AgentClass
   /** Built on the first `appTools()` call, then shared by every tool of the instance. */

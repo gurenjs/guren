@@ -27,18 +27,22 @@ const factory = definePlugin<AiPluginConfig>({
     const sink = config.audit ? await resolveAuditSink(config.audit) : undefined
     const own = sink ? createAuditEmitter(sink, events) : undefined
 
+    const app = container.make<Application>('app')
     let tools: readonly DerivedAgentTool[] | undefined
-    let published: AgentAuditEmitter | undefined
+    // Cached only once the whole boot has settled: a provider booting after this
+    // one may still register `.agent()` routes, and may build an agent before it does.
+    let settled = false
+    void app.booted().then(() => { settled = true }, () => {})
 
     const runtime: AiRuntime = {
       tools() {
         if (tools) return tools
-        const derived = deriveAgentTools(container.make<Application>('app').router.definitions())
+        const derived = deriveAgentTools(app.router.definitions())
         for (const warning of derived.warnings) {
           console.warn(`[@guren/plugin-ai] ${warning}`)
         }
-        tools = derived.tools
-        return tools
+        if (settled) tools = derived.tools
+        return derived.tools
       },
       // Read at first use, never in `boot`: `mcpPlugin` binds its emitter in its
       // own `boot`, so a check here would pass or fail by `providers` order.
@@ -53,13 +57,9 @@ const factory = definePlugin<AiPluginConfig>({
           }
           return own
         }
-        // Memoized only on a hit, so a binding published after an early look still wins.
-        if (published) return published
-        if (bound) {
-          published = container.make<AgentAuditEmitter>(AGENT_AUDIT_BINDING)
-          return published
-        }
-        return createAuditEmitter(undefined, events)
+        return bound
+          ? container.make<AgentAuditEmitter>(AGENT_AUDIT_BINDING)
+          : createAuditEmitter(undefined, events)
       },
       ...(config.approvals ? { approvals: config.approvals } : {}),
     }

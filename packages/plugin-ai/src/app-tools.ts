@@ -52,7 +52,7 @@ export interface AppToolError {
   body: unknown
 }
 
-export const DEFAULT_IN_PROCESS_CALLS_PER_MINUTE = 60
+const CALLS_PER_MINUTE = 60
 
 const warnedNonPortable = new Set<string>()
 
@@ -60,9 +60,10 @@ export function appToolDefinitions(agent: object, names: readonly string[]): App
   const context = readAgentContext(agent)
   const runtime = resolveRuntime(context)
   const derived = runtime.tools()
-  const requested = [...new Set(names)]
-  const selected = selectTools(context, derived, requested)
-  const pipeline = (context.pipeline ??= buildPipeline(context, runtime, derived))
+  const scoped = derived.map(toScopedTool)
+  const granted = expandToolScopes(context.cls.scopes, scoped)
+  const selected = selectTools(context, derived, new Set(granted), [...new Set(names)])
+  const pipeline = (context.pipeline ??= buildPipeline(context, runtime, effectiveAbilities(context, scoped, granted)))
 
   return selected.map((derivedTool) => ({
     name: derivedTool.toolName,
@@ -80,7 +81,7 @@ export function appTools(agent: object, names: readonly string[]): Record<string
       return [
         definition.name,
         tool({
-          ...(definition.description !== undefined ? { description: definition.description } : {}),
+          description: definition.description,
           inputSchema: jsonSchema(definition.inputSchema as JSONSchema7),
           execute: (args: unknown) => definition.execute(args as Record<string, unknown>),
         }),
@@ -106,12 +107,11 @@ function resolveRuntime(context: AgentContext): AiRuntime {
 function selectTools(
   context: AgentContext,
   derived: readonly DerivedAgentTool[],
+  granted: ReadonlySet<string>,
   names: readonly string[],
 ): DerivedAgentTool[] {
   const agentName = resolveAgentName(context.cls)
   const scopes = context.cls.scopes
-  const scoped = derived.map(toScopedTool)
-  const granted = new Set(expandToolScopes(scopes, scoped))
   const problems: string[] = []
 
   for (const entry of scopes) {
@@ -159,12 +159,12 @@ function selectTools(
 function buildPipeline(
   context: AgentContext,
   runtime: AiRuntime,
-  derived: readonly DerivedAgentTool[],
+  abilities: string[],
 ): AgentInvocationPipeline {
   const { container, principal } = context
   const app = container.make<Application>('app')
   const approvals = createAgentApprovalContext(runtime.approvals, principal)
-  const budget = new SlidingWindowBudget(DEFAULT_IN_PROCESS_CALLS_PER_MINUTE, () => Date.now())
+  const budget = new SlidingWindowBudget(CALLS_PER_MINUTE, () => Date.now())
 
   return createAgentInvocationPipeline({
     // `boot()` is idempotent; after a failed boot it retries rather than
@@ -176,7 +176,7 @@ function buildPipeline(
       },
     },
     principal,
-    abilities: effectiveAbilities(context, derived),
+    abilities,
     surface: 'in-process',
     audit: runtime.audit(),
     ...(approvals ? { approvals } : {}),
@@ -193,14 +193,10 @@ function buildPipeline(
  * any: intersected as *tools*, never as strings, since `tools:posts.*` and
  * `tool:posts.show` share a tool and no string. Consent narrows; it never widens.
  */
-function effectiveAbilities(context: AgentContext, derived: readonly DerivedAgentTool[]): string[] {
-  const scoped = derived.map(toScopedTool)
-  const agentTools = expandToolScopes(context.cls.scopes, scoped)
-  const principalAbilities = context.principal?.abilities
-  const allowed = principalAbilities
-    ? agentTools.filter((name) => new Set(expandToolScopes(principalAbilities, scoped)).has(name))
-    : agentTools
-  return allowed.map((name) => `tool:${name}`)
+function effectiveAbilities(context: AgentContext, scoped: readonly ScopedTool[], granted: readonly string[]): string[] {
+  const abilities = context.principal?.abilities
+  const consented = abilities ? new Set(expandToolScopes(abilities, scoped)) : undefined
+  return granted.filter((name) => !consented || consented.has(name)).map((name) => `tool:${name}`)
 }
 
 /**
