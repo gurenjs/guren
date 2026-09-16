@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
   APP_FIXTURE,
+  CONSOLE_FIXTURE,
   MYSQL_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
@@ -12,13 +13,6 @@ import {
 } from './helpers'
 import { runBlueprint } from '../src/blueprints'
 import { addSession, appConfiguresSessions } from '../src/add-session'
-
-const CONSOLE_FIXTURE = `import { ConsoleKernel } from '@guren/core'
-import app from './app'
-
-export const kernel = new ConsoleKernel({ container: app.container })
-kernel.registerMany([])
-`
 
 async function seedApp(schema: string, options: { console?: boolean; env?: string } = {}): Promise<void> {
   await mkdir('db', { recursive: true })

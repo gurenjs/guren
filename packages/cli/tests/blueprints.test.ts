@@ -8,6 +8,7 @@ import {
   APP_FIXTURE,
   BLOG_ROUTES_FIXTURE,
   CAN_DENY_FILE_READS,
+  CONSOLE_FIXTURE,
   DEFAULT_ROUTES_FIXTURE,
   MYSQL_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
@@ -1111,6 +1112,7 @@ describe('oauth blueprint output', () => {
   it('keeps OAuth state in an oauth_states table the provider binds', async () => {
     await seedAppFile(APP_FIXTURE)
     await seedSchema()
+    await writeFile('src/console.ts', CONSOLE_FIXTURE)
 
     await runBlueprint('oauth')
 
@@ -1126,6 +1128,12 @@ describe('oauth blueprint output', () => {
     const appSource = await readFile('src/app.ts', 'utf8')
     expect(appSource).toContain('OAuthProvider')
     expect(appSource).not.toContain('OAuthServiceProvider')
+
+    // Without the sweeper, a sign-in abandoned before its callback keeps its
+    // row: nothing looks that state up again.
+    const consoleSource = await readFile('src/console.ts', 'utf8')
+    expect(consoleSource).toContain("import { OAuthStatesPruneCommand } from '@guren/core'")
+    expect(consoleSource).toContain('kernel.registerMany([OAuthStatesPruneCommand])')
   })
 
   it('refuses an app with no db/schema.ts and writes nothing', async () => {

@@ -19,6 +19,7 @@ import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } 
 import { wireRouteRegistrar } from './route-registrar'
 import { addSession, appConfiguresSessions } from './add-session'
 import { appendOAuthStateTable } from './oauth-state-table'
+import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
 import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -1629,6 +1630,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
         const upper = provider.toUpperCase()
         consola.info(`  • Set OAUTH_${upper}_CLIENT_ID / OAUTH_${upper}_CLIENT_SECRET / OAUTH_${upper}_REDIRECT_URI in your .env (see .env.example)`)
       }
+      if (oauthStateTable) {
+        consola.info('  • Register OAuthStatesPruneCommand (from @guren/core) in src/console.ts, then schedule `oauth-states:prune` so abandoned sign-ins do not keep their rows')
+      }
     }
   }
 
@@ -1675,6 +1679,9 @@ async function installAuth(
       )
     }
     await wireAppProvider('OAuthProvider', wiring)
+    if (oauthStateTable) {
+      await registerConsoleCommand('OAuthStatesPruneCommand')
+    }
   }
 
   // Enable session + CSRF middleware: AuthServiceProvider is only registered
@@ -1708,5 +1715,8 @@ async function installAuth(
   for (const provider of oauthProviders) {
     const upper = provider.toUpperCase()
     consola.info(`  • Set OAUTH_${upper}_CLIENT_ID / OAUTH_${upper}_CLIENT_SECRET / OAUTH_${upper}_REDIRECT_URI in your .env (see .env.example)`)
+  }
+  if (oauthStateTable) {
+    consola.info('  • Schedule `oauth-states:prune` so abandoned sign-ins do not keep their rows')
   }
 }

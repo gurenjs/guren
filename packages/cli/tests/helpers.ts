@@ -377,6 +377,14 @@ const app = createApp({
 export default app
 `
 
+/** The `src/console.ts` shape `registerConsoleCommand` patches. */
+export const CONSOLE_FIXTURE = `import { ConsoleKernel } from '@guren/core'
+import app from './app'
+
+export const kernel = new ConsoleKernel({ container: app.container })
+kernel.registerMany([])
+`
+
 /**
  * An app file with no providers array to patch — the provider-wiring twin of
  * `REGISTRAR_LESS_ROUTES_FIXTURE`.

@@ -12,6 +12,7 @@ import {
   sanitizeOAuthRedirect,
   type OAuthBindingSession,
   type OAuthProviderConfig,
+  type OAuthStateStore,
 } from '../../src/auth/oauth'
 import { hashToken } from '../../src/auth/utils'
 
@@ -30,6 +31,31 @@ function bindingDroppingStore(): MemoryOAuthStateStore {
 
 afterEach(() => {
   globalThis.fetch = realFetch
+})
+
+describe('OAuthManager.pruneExpiredStates', () => {
+  it('sweeps the store that can sweep, passing the cutoff', async () => {
+    const swept: Date[] = []
+    const store: OAuthStateStore = {
+      store: async () => {},
+      find: async () => null,
+      delete: async () => {},
+      deleteExpired: async (now) => {
+        swept.push(now)
+      },
+    }
+    const now = new Date('2026-01-01T00:00:00Z')
+
+    await new OAuthManager({ stateStore: store }).pruneExpiredStates(now)
+
+    expect(swept).toEqual([now])
+  })
+
+  // Redis expires its own keys and the memory store sweeps on write, so neither
+  // implements deleteExpired; the sweep must be a no-op rather than a throw.
+  it('is a no-op for a store that expires its own entries', async () => {
+    await new OAuthManager({ stateStore: new MemoryOAuthStateStore() }).pruneExpiredStates()
+  })
 })
 
 describe('oauth helpers', () => {
