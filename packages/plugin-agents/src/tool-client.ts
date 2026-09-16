@@ -223,14 +223,12 @@ export function createAgentToolClient(options: AgentToolClientOptions): AgentToo
     abilities: abilities as string[],
   }
 
-  // The per-instance meter: a sliding 60-second window held in this client, so an
-  // eviction resets it. A floor on one instance's burst rate, not a global budget,
-  // which needs the app's own rate-limit middleware. A preflight spends it too.
-  // `validateAgentsConfig` refuses a non-finite limit before this can throw on one:
-  // `Infinity` would leave the window unmetered and its record growing without bound.
+  // The per-instance meter, held in this client so an eviction resets it: a floor
+  // on one instance's burst rate, not a global budget, which needs the app's own
+  // rate-limit middleware. A preflight spends it too.
   const budget = createAgentCallBudget({
     callsPerMinute: registration.budget?.callsPerMinute ?? DEFAULT_AGENT_CALLS_PER_MINUTE,
-    ...(options.now ? { now: options.now } : {}),
+    now: options.now,
     message: (limit) =>
       `This agent instance has already made ${limit} tool calls in the last minute, which is `
       + 'its budget. Nothing was executed. Raise it with `budget: { callsPerMinute }` in '

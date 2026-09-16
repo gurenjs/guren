@@ -128,8 +128,7 @@ export type {
 // that binding to record the `'cli'` surface.
 export { AGENT_AUDIT_BINDING, createAuditEmitter } from './agent/audit-emitter'
 export type { AgentAuditEmitter, AgentAuditSink, AuditEmitterOptions } from './agent/audit-emitter'
-// The `audit` option every agent surface plugin takes, and the one reading of it.
-// Only here: the file sink writes the lines `parseAuditRecord` reads back.
+// Not in `@guren/server/agent`: the file branch writes to disk.
 export { resolveAgentAuditSink } from './agent/audit-sink'
 export type { AgentAuditConfig } from './agent/audit-sink'
 // The approval queue (RFC 0016 §5.4 item 4): the store an application
