@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { appBindsService } from './discovery'
+import { appBindsService, appDefinesConfig } from './discovery'
 import { registerConsoleCommand } from './console-registrar'
 import {
   appendSchemaTable,
@@ -153,11 +153,13 @@ async function patchSchema(): Promise<void> {
 }
 
 /**
- * Whether the app already binds a 'storage' service. The conventional file name
- * answers this in neither direction: a custom provider binds storage without
- * that file, and installing a second manager would shadow it.
+ * Whether the app already binds a 'storage' service, through a provider or a
+ * `config/` definition. The conventional file name answers this in neither
+ * direction: a custom provider binds storage without that file, and installing
+ * a second manager would shadow it.
  */
 export async function appBindsStorage(): Promise<boolean> {
-  return (await appBindsService('storage', process.cwd())).length > 0
+  const cwd = process.cwd()
+  return (await appBindsService('storage', cwd)).length > 0 || (await appDefinesConfig('storage', cwd)).length > 0
 }
 

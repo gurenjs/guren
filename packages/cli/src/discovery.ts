@@ -547,6 +547,23 @@ export async function appBindsService(key: string, appRoot: string): Promise<str
 }
 
 /**
+ * The `config/` files (the app's and each module's) defining `key` through its
+ * `define<Key>Config()` helper (RFC 0027 §2). {@link appBindsService} cannot see
+ * these: the binding happens inside the helper, with no container call in source.
+ */
+export async function appDefinesConfig(key: string, appRoot: string): Promise<string[]> {
+  const roots = await listAppRoots(appRoot)
+  const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root.dir, 'config'))))
+  const definitionPattern = new RegExp(`\\bdefine${escapeRegExp(key)}Config\\s*\\(`, 'i')
+  const defining: string[] = []
+  for (const filePath of groups.flat()) {
+    const source = await readIfExists(appRoot, filePath)
+    if (source && definitionPattern.test(source)) defining.push(filePath)
+  }
+  return defining
+}
+
+/**
  * Where a `configureAttachments()` call can live: the documented home is
  * `config/attachments.ts`, but nothing enforces the filename, so every
  * config/, src/, and app/ source of the app and its modules is scanned (the

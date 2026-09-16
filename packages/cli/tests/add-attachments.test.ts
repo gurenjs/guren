@@ -10,7 +10,9 @@ import {
   DEFAULT_ROUTES_FIXTURE,
   PG_SCHEMA_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
+  ENV_SCHEMA_FIXTURE,
   createTempWorkspace,
+  writeWorkspaceFiles,
   type TempWorkspace,
 } from './helpers'
 import { runBlueprint } from '../src/blueprints'
@@ -165,6 +167,23 @@ describe('guren add attachments', () => {
 
     expect(existsSync(resolve('app/Providers/StorageProvider.ts'))).toBe(false)
     expect(existsSync(resolve('config/attachments.ts'))).toBe(true)
+  })
+
+  // RFC 0027 §2: a definition binds storage with no container call in the source.
+  it('does not install the storage blueprint over a storage config definition', async () => {
+    await seedApp(PG_SCHEMA_FIXTURE)
+    await writeWorkspaceFiles(process.cwd(), { 'config/env.ts': ENV_SCHEMA_FIXTURE })
+    const definition = `import { defineStorageConfig } from '@guren/core'
+
+export default defineStorageConfig(() => ({ default: 'vault', disks: { vault: { driver: 'local', root: './vault' } } }))
+`
+    await writeFile('config/storage.ts', definition)
+
+    await runBlueprint('attachments', { force: true })
+
+    expect(await readFile(resolve('config/storage.ts'), 'utf8')).toBe(definition)
+    expect(existsSync(resolve('app/Providers/StorageProvider.ts'))).toBe(false)
+    expect(await readFile(resolve('src/app.ts'), 'utf8')).not.toContain('storage')
   })
 
   it('repairs instead of throwing on a second run', async () => {
