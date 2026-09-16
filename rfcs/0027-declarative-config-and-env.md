@@ -624,6 +624,48 @@ reaching it, and a resolved table is a live object from the app's own drizzle co
 The deploy-runtime *cache* verdict this table implies exists in no form today, so
 it is new work rather than a swap.
 
+**Amended in implementation (Part 2d).** Part 2d ships as three PRs, ordered by
+which class of gate each one turns red, because the §7 lint scope cannot land
+first: `scripts/smoke/fresh-app.ts:547-552` installs thirteen blueprints and then
+runs `bun run lint` inside the app, and the bare template is already red at
+`src/app.ts` (`APP_URL`) and `config/database.ts` (`DATABASE_URL`). So the reads
+go away first (templates), then the blueprint reads, and the `overrides` block
+lands last, when a fresh app plus every blueprint is provably green. What else
+the template migration settled:
+
+- **Blueprints declare through `appendEnvEntry`, not `declareEnvEntries`.** That
+  function is reached only by `guren plugin` (`plugin.ts:188`); `guren add
+  session` and `guren add cache` write their keys as text
+  (`env-registrar.ts:15`). Since `guren check --env` fails on a key
+  `.env.example` assigns and the schema does not declare, a blueprint run against
+  a migrated app would have failed the app's own gate, so `appendEnvEntry` takes
+  the declaration and writes both.
+- **Provider wiring writes a missing `providers` array.** §4 deletes
+  `DatabaseProvider`, which leaves the scaffolded entry with no array, and
+  `insertProvider` refused that shape (`patch-helpers.ts:337`). Every `guren add`
+  on a fresh app would have degraded to "add it by hand". It now creates the
+  option, as `addToArrayOption` already did for `modules:` and `commands:`.
+- **A connection thunk with no context parses the schema itself.** §1's table
+  says so; the shipped file had to be written for it. Falling back to the
+  driver's literal default instead would let `guren db:migrate` silently migrate
+  the local database while `DATABASE_URL` named another.
+- **`TEST_DATABASE_URL` is declared**, since the SQLite config reads it and the
+  drift check requires the schema and `.env.example` to name the same keys.
+- **`APP_KEY` is `.requiredInProduction()`, not required as §1's sketch declares
+  it.** A connection thunk with no context parses the whole schema (above), so
+  every strictly required key becomes one drizzle-kit and `guren db:*` must also
+  satisfy, and `.env.example` ships `APP_KEY=` blank. Production keeps the strict
+  rule, which is what `APP_URL` gets for the same reason.
+- **`.env.example` ships only what the base app reads.** The `REDIS_URL`,
+  `QUEUE_CONNECTION`, `MAIL_*` and `RESEND_API_KEY` lines belonged to blueprints
+  that now add their own keys, which also retires `MAIL_FROM_NAME="${APP_NAME}"`:
+  `guren env:example` escapes `$`, so that line was one no generator could
+  reproduce. The naming conflict §7 notes (`MAIL_MAILER` against `MAIL_DRIVER`)
+  is settled where those keys now live, in the mail blueprint.
+- **The api-only template's test builds on its own entry** (`TestApp.fromApp`),
+  which a test asserting the app's configuration has to do: `TestApp.create()`
+  builds a second app that never sees the definitions.
+
 ### 7. `.env.example`, drift, and lint
 
 - **`guren env:example`** maps the schema to `GurenPluginEnvEntry` records

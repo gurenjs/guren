@@ -1,24 +1,19 @@
 import { describe, it } from 'bun:test'
 import { TestApp } from '@guren/testing'
-import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
-import { registerApiRoutes } from '../routes/api.js'
+import app from '../src/app.js'
 
+// Built from the app entry, so the test exercises the config definitions
+// createApp() wires rather than a second app that never sees them.
 describe('api', () => {
   it('answers the health check', async () => {
-    const app = await TestApp.create({
-      routes: registerApiRoutes,
-      providers: [DatabaseProvider],
-    })
+    const http = await TestApp.fromApp(app)
 
-    await app.get('/health').assertOk()
+    await http.get('/health').assertOk()
   })
 
   it('serves the API root', async () => {
-    const app = await TestApp.create({
-      routes: registerApiRoutes,
-      providers: [DatabaseProvider],
-    })
+    const http = await TestApp.fromApp(app)
 
-    await app.get('/api/v1').assertOk()
+    await http.get('/api/v1').assertOk()
   })
 })

@@ -58,6 +58,24 @@ describe('guren add cache', () => {
     }
   })
 
+  // Without this, `guren check --env` fails the app it just scaffolded: the
+  // schema declares every key .env.example assigns, and this added one.
+  it('declares CACHE_STORE in config/env.ts when the app has a schema', async () => {
+    await seedApp('APP_KEY=\n')
+    await mkdir('config', { recursive: true })
+    await writeFile('config/env.ts', `import { defineEnv, Env } from '@guren/core'
+
+export default defineEnv({
+  APP_KEY: Env.string(),
+})
+`)
+
+    await runBlueprint('cache', {})
+
+    expect(await readFile(resolve('config/env.ts'), 'utf8'))
+      .toContain("CACHE_STORE: Env.string().default('memory'),")
+  })
+
   it('leaves an env file that already mentions CACHE_STORE unchanged', async () => {
     const existing = 'APP_KEY=\n# CACHE_STORE=redis\n'
     await seedApp(existing)

@@ -386,8 +386,8 @@ kernel.registerMany([])
 `
 
 /**
- * An app file with no providers array to patch — the provider-wiring twin of
- * `REGISTRAR_LESS_ROUTES_FIXTURE`.
+ * An app file whose `createApp()` lists no providers: the scaffolded shape since
+ * RFC 0027 §4 deleted DatabaseProvider, which the wiring writes the array into.
  */
 export const PROVIDERLESS_APP_FIXTURE = `import { createApp } from '@guren/core'
 

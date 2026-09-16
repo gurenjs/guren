@@ -166,7 +166,7 @@ const app = new Application({
       expect(result.reason).toBe('Provider already registered')
     })
 
-    it('should return false if providers array not found', async () => {
+    it('should return false when the entry has no createApp() call to add the array to', async () => {
       const filePath = join(tempDir, 'app.ts')
       const initialContent = `import { Application } from '@guren/core'
 
@@ -177,7 +177,7 @@ const app = new Application()`
       const result = await addProvider(filePath, 'AuthProvider')
 
       expect(result.modified).toBe(false)
-      expect(result.reason).toBe('Could not find providers array')
+      expect(result.reason).toBe('Could not find a createApp({ ... }) call')
     })
   })
 

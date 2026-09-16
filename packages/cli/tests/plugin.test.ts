@@ -340,24 +340,25 @@ export default app
     })
   })
 
-  // This command throws where the scaffolders warn, so an import written before
-  // the array patch stops the app compiling under noUnusedLocals.
-  it('leaves the app entry untouched when the providers array cannot be found', async () => {
-    const providerless = `import { createApp } from '@guren/core'
+  // The array is written rather than refused, so an install works on an entry
+  // that lists no provider yet.
+  it('writes the providers array when the app entry lists none', async () => {
+    await writeFile('src/app.ts', `import { createApp } from '@guren/core'
 
 const app = createApp({
   routes: () => {},
 })
 
 export default app
-`
-    await writeFile('src/app.ts', providerless)
+`)
 
-    await expect(installPlugin({ packageName: '@acme/guren-plugin-audit' })).rejects.toThrow(
-      'Could not find providers array in src/app.ts',
-    )
+    const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
 
-    expect(await readFile('src/app.ts', 'utf8')).toBe(providerless)
+    expect(textsOf(messages, 'updated')).toContain('src/app.ts')
+
+    const app = await readFile('src/app.ts', 'utf8')
+    expect(app).toContain("import { AcmeGurenPluginAuditProvider } from '@acme/guren-plugin-audit'")
+    expect(app).toContain('providers: [AcmeGurenPluginAuditProvider]')
   })
 
   it('registers into a root app.ts when src/app.ts is absent', async () => {

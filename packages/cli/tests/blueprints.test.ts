@@ -772,16 +772,15 @@ export const users = pgTable('users', {
       expect(patched).toContain('providers: [CoreCacheServiceProvider, CacheProvider]')
     })
 
-    it('leaves an unpatchable app file untouched rather than importing into it', async () => {
+    it('writes the providers array into an app that lists none', async () => {
       await seedAppFile(PROVIDERLESS_APP_FIXTURE)
 
       const { warnings } = await captureWarnings(() => runBlueprint('cache'))
 
-      expect(warnings.join('\n')).toContain(
-        'Could not register CoreCacheServiceProvider in src/app.ts: Could not find providers array.',
-      )
-      // Not even the import — see installProvider()'s ordering rationale.
-      expect(await readFile('src/app.ts', 'utf8')).toBe(PROVIDERLESS_APP_FIXTURE)
+      expect(warnings).toEqual([])
+      const patched = await readFile('src/app.ts', 'utf8')
+      expect(patched).toContain('providers: [CoreCacheServiceProvider, CacheProvider]')
+      expect(patched).toContain("import CacheProvider from '../app/Providers/CacheProvider.js'")
     })
 
     it('registers both providers without warning when the array is there', async () => {

@@ -4,44 +4,49 @@ import { join } from 'node:path'
 import { scaffoldAppBlueprint } from '../src/blueprints'
 import { createTempWorkspace } from './helpers'
 
-/**
- * Extracts and evaluates the generated `resolveDatabaseFilename()` from a
- * scaffolded config/database.ts so its priority order can be exercised
- * directly against controlled process.env values, instead of trusting that
- * matching source substrings implies correct runtime behavior.
- */
-function extractDatabaseFilenameResolver(source: string): () => string {
-  const match = source.match(/function resolveDatabaseFilename\(\): string \{[\s\S]*?\n\}/)
-  if (!match) {
-    throw new Error('resolveDatabaseFilename() not found in generated config/database.ts')
-  }
-  // Strip the TypeScript return-type annotation — new Function() only parses plain JS.
-  const plainJs = match[0].replace('(): string {', '() {')
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  return new Function(`${plainJs}\nreturn resolveDatabaseFilename;`)() as () => string
+interface ResolverEnv {
+  DATABASE_URL?: string
+  TEST_DATABASE_URL?: string
 }
 
-function withEnv(vars: Record<string, string | undefined>, run: () => void): void {
-  const original: Record<string, string | undefined> = {}
-  for (const key of Object.keys(vars)) {
-    original[key] = process.env[key]
+type FilenameResolver = (context?: { env: ResolverEnv }) => string
+
+/**
+ * Extracts and evaluates the generated `filename` resolver from a scaffolded
+ * config/database.ts so its priority order can be exercised directly against
+ * controlled values, instead of trusting that matching source substrings
+ * implies correct runtime behavior. `schema` stands in for the `config/env.ts`
+ * the file closes over, which only a call with no context may reach.
+ */
+function extractDatabaseFilenameResolver(
+  source: string,
+  schema: { parse: () => { values: ResolverEnv } },
+): FilenameResolver {
+  const match = source.match(/filename: (\(context\) => \{[\s\S]*?\n {2}\}),/)
+  if (!match) {
+    throw new Error('filename resolver not found in generated config/database.ts')
   }
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  return new Function('env', `return ${match[1]}`)(schema) as FilenameResolver
+}
+
+/** A schema whose use is a failure: every call that passes a context must not reach it. */
+const unusedSchema = {
+  parse: (): { values: ResolverEnv } => {
+    throw new Error('resolved through config/env.ts despite being given a context')
+  },
+}
+
+function withNodeEnv(value: string, run: () => void): void {
+  const original = process.env.NODE_ENV
   try {
-    for (const [key, value] of Object.entries(vars)) {
-      if (value === undefined) {
-        delete process.env[key]
-      } else {
-        process.env[key] = value
-      }
-    }
+    process.env.NODE_ENV = value
     run()
   } finally {
-    for (const [key, value] of Object.entries(original)) {
-      if (value === undefined) {
-        delete process.env[key]
-      } else {
-        process.env[key] = value
-      }
+    if (original === undefined) {
+      delete process.env.NODE_ENV
+    } else {
+      process.env.NODE_ENV = original
     }
   }
 }
@@ -62,31 +67,38 @@ describe('SQLite default template', () => {
       expect(dbConfig).toContain('guren.test.db')
       expect(dbConfig).toContain("process.env.NODE_ENV === 'test'")
 
-      const resolveDatabaseFilename = extractDatabaseFilenameResolver(dbConfig)
+      const resolveDatabaseFilename = extractDatabaseFilenameResolver(dbConfig, unusedSchema)
 
       // A scaffolded .env always sets DATABASE_URL and Bun loads .env even under
       // test, so NODE_ENV=test must win over an inherited DATABASE_URL for the
       // isolation to actually happen.
-      withEnv(
-        { NODE_ENV: 'test', DATABASE_URL: './data/guren.db', TEST_DATABASE_URL: undefined },
-        () => {
-          expect(resolveDatabaseFilename()).toBe('./data/guren.test.db')
-        },
-      )
-
-      withEnv(
-        { NODE_ENV: 'test', DATABASE_URL: './data/guren.db', TEST_DATABASE_URL: './data/shard-3.db' },
-        () => {
-          expect(resolveDatabaseFilename()).toBe('./data/shard-3.db')
-        },
-      )
-
-      withEnv({ NODE_ENV: 'production', DATABASE_URL: undefined }, () => {
-        expect(resolveDatabaseFilename()).toBe('./data/guren.db')
+      withNodeEnv('test', () => {
+        expect(resolveDatabaseFilename({ env: { DATABASE_URL: './data/guren.db' } }))
+          .toBe('./data/guren.test.db')
       })
 
-      withEnv({ NODE_ENV: 'production', DATABASE_URL: 'postgres://example' }, () => {
-        expect(resolveDatabaseFilename()).toBe('postgres://example')
+      withNodeEnv('test', () => {
+        expect(resolveDatabaseFilename({
+          env: { DATABASE_URL: './data/guren.db', TEST_DATABASE_URL: './data/shard-3.db' },
+        })).toBe('./data/shard-3.db')
+      })
+
+      withNodeEnv('production', () => {
+        expect(resolveDatabaseFilename({ env: {} })).toBe('./data/guren.db')
+      })
+
+      withNodeEnv('production', () => {
+        expect(resolveDatabaseFilename({ env: { DATABASE_URL: 'postgres://example' } }))
+          .toBe('postgres://example')
+      })
+
+      // drizzle-kit and `guren db:*` resolve with no context, where the file
+      // parses config/env.ts itself rather than falling back to its default.
+      const schemaBacked = extractDatabaseFilenameResolver(dbConfig, {
+        parse: () => ({ values: { DATABASE_URL: './data/from-schema.db' } }),
+      })
+      withNodeEnv('production', () => {
+        expect(schemaBacked()).toBe('./data/from-schema.db')
       })
 
       const schema = await readFile(join(dest, 'db/schema.ts'), 'utf8')
@@ -133,13 +145,11 @@ describe('API-only SQLite template', () => {
       const dbConfig = await readFile(join(dest, 'config/database.ts'), 'utf8')
       expect(dbConfig).toContain('guren.test.db')
 
-      const resolveDatabaseFilename = extractDatabaseFilenameResolver(dbConfig)
-      withEnv(
-        { NODE_ENV: 'test', DATABASE_URL: './data/guren.db', TEST_DATABASE_URL: undefined },
-        () => {
-          expect(resolveDatabaseFilename()).toBe('./data/guren.test.db')
-        },
-      )
+      const resolveDatabaseFilename = extractDatabaseFilenameResolver(dbConfig, unusedSchema)
+      withNodeEnv('test', () => {
+        expect(resolveDatabaseFilename({ env: { DATABASE_URL: './data/guren.db' } }))
+          .toBe('./data/guren.test.db')
+      })
 
       const pkg = JSON.parse(await readFile(join(dest, 'package.json'), 'utf8')) as {
         devDependencies?: Record<string, string>

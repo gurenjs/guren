@@ -542,11 +542,19 @@ createApp({ providers: [DatabaseProvider] })`
     expect(result.content).toContain('providers: [DatabaseProvider, SessionProvider]')
   })
 
-  it('reports an app with no providers array rather than inventing one', () => {
+  // The scaffolded entry lists no providers since RFC 0027 §4 deleted
+  // DatabaseProvider, so the array is written rather than reported as missing.
+  it('writes the providers array into an app that lists none', () => {
     const result = insertProvider('createApp({ routes: registerWebRoutes })', 'SessionProvider')
 
+    expect(result.content).toContain('providers: [SessionProvider]')
+  })
+
+  it('reports an entry with no createApp() call rather than inventing one', () => {
+    const result = insertProvider('const app = new Application()', 'SessionProvider')
+
     expect(result.content).toBeUndefined()
-    expect(result.reason).toBe(PATCH_REASONS.providersArrayNotFound)
+    expect(result.reason).toContain('createApp')
   })
 })
 

@@ -334,8 +334,11 @@ export function insertProvider(
 ): InsertResult {
   const match = matchInCode(content, /providers:\s*\[/)
 
+  // An entry listing no providers is the scaffolded shape since RFC 0027 §4
+  // deleted DatabaseProvider, so the option is written rather than refused.
   if (!match) {
-    return { reason: PATCH_REASONS.providersArrayNotFound }
+    const created = insertCallOptions(content, [{ key: 'providers', source: `[${providerName}]` }], 'createApp')
+    return typeof created === 'string' ? { reason: created } : { content: created.content }
   }
 
   // Depth-counted rather than matched to the first `]`, which a nested array
