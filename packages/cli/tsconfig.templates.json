@@ -15,7 +15,10 @@
       "templates/scaffold/prototype",
       "tests/fixtures/scaffold-typecheck/prototype",
       "templates/scaffold/storage",
-      "tests/fixtures/scaffold-typecheck/storage"
+      "tests/fixtures/scaffold-typecheck/storage",
+      "templates/scaffold/cache/definition",
+      "templates/scaffold/queue/definition",
+      "templates/scaffold/storage/definition"
     ],
     "paths": {
       "@/.guren/pages.gen": [

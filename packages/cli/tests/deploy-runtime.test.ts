@@ -1356,6 +1356,30 @@ describe('session config driver reading (RFC 0020)', () => {
     })
   })
 
+  // RFC 0027 §2: the definition's `default` reads a declared key, which no static
+  // read resolves, so the verdict judges every store the config declares.
+  it('reads a session config definition as a backed store', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'config/session.ts': `import { defineSessionConfig } from '@guren/core'
+import { sessions } from '../db/schema'
+
+export default defineSessionConfig((env) => ({
+  default: env.SESSION_DRIVER,
+  stores: {
+    database: { driver: 'database', table: sessions },
+    cookie: { driver: 'cookie' },
+  },
+}))
+`,
+    }
+
+    await withApp('guren-session-definition-backed-', files, cloudflare, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      expect(check.status).toBe('pass')
+    })
+  })
+
   it('vouches for a plugin driver its manifest declares persistent', async () => {
     const files = {
       'src/app.ts': SESSION_APP,

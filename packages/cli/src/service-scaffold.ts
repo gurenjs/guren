@@ -2,7 +2,7 @@ import { appendEnvEntry } from './env-registrar'
 import { ENV_SCHEMA_FILE } from './app-env'
 import { appBindsService, fileExists } from './discovery'
 import { wireConfig, wireProviders } from './provider-registrar'
-import { scaffoldTemplateFile } from './scaffold-templates'
+import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
 import { writeScaffoldFiles, type ScaffoldFilesOptions } from './utils'
 
 /** A blueprint installing one container service, in either form it ships (RFC 0027 §2). */
@@ -36,10 +36,10 @@ async function installsConfigDefinition(key: string): Promise<boolean> {
 export async function installServiceScaffold(scaffold: ServiceScaffold, options: ScaffoldFilesOptions): Promise<string[]> {
   const { key, coreProvider, provider, definitionProviders = [], shared = [], env } = scaffold
   const definition = await installsConfigDefinition(key)
-  const paths = definition
-    ? [`config/${key}.ts`, ...definitionProviders.map((name) => `app/Providers/${name}.ts`)]
-    : [`app/Providers/${provider}.ts`]
-  const created = await writeScaffoldFiles([...paths, ...shared].map((path) => scaffoldTemplateFile(key, path)), options)
+  const files = definition
+    ? [`config/${key}.ts`, ...definitionProviders.map((name) => `app/Providers/${name}.ts`)].map((path) => definitionTemplateFile(key, path))
+    : [scaffoldTemplateFile(key, `app/Providers/${provider}.ts`)]
+  const created = await writeScaffoldFiles([...files, ...shared.map((path) => scaffoldTemplateFile(key, path))], options)
 
   if (definition) {
     await wireConfig(key)

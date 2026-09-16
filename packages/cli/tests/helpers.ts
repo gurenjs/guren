@@ -183,7 +183,7 @@ export default defineEnv({
  * `config/env.ts` declares the keys it reads (`typecheck:templates` checks it).
  */
 export async function loadConfigTemplate<K extends keyof ConfigDefinitions>(key: K): Promise<ConfigDefinition<K>> {
-  const path = join(import.meta.dir, '../templates/scaffold', key, 'config', `${key}.ts`)
+  const path = join(import.meta.dir, '../templates/scaffold', key, 'definition/config', `${key}.ts`)
   return ((await import(path)) as { default: ConfigDefinition<K> }).default
 }
 
