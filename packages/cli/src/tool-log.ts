@@ -40,6 +40,7 @@ const SURFACES = Object.keys({
   'cli': true,
   'webmcp': true,
   'durable': true,
+  'in-process': true,
 } satisfies Record<AgentSurface, true>) as readonly AgentSurface[]
 
 export interface ToolLogOptions {

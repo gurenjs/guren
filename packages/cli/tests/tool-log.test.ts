@@ -209,6 +209,17 @@ describe('guren tool:log', () => {
       expect(printed().map((row) => JSON.parse(row).outcome)).toEqual(['denied', 'denied'])
     })
 
+    it('filters to the in-process surface', async () => {
+      // `@guren/plugin-ai` writes it (RFC 0029 §2.3); the accepted list is what
+      // would refuse it as a typo while its records sat in the trail.
+      await seed(TODAY, [
+        line({ tool: 'posts.index', surface: 'mcp' }),
+        line({ tool: 'posts.show', surface: 'in-process' }),
+      ])
+      await runToolLog({ appRoot: appDir, surface: 'in-process', json: true })
+      expect(printed().map((row) => JSON.parse(row).tool)).toEqual(['posts.show'])
+    })
+
     it('refuses an unknown --surface instead of answering with an empty list', async () => {
       // An empty listing reads as "no agent calls happened" — the wrong
       // conclusion to hand someone who mistyped.

@@ -95,6 +95,10 @@
     // type packages via the root `typecheck:agents` script, which the
     // `typecheck` chain runs.
     "packages/plugin-agents",
+    // Build output is not source; the glob above matched it only by accident. A built
+    // module augmentation beside its src twin must name an identical type (TS2717),
+    // which a second declaration never is: `ServiceBindings.ai` in `@guren/plugin-ai`.
+    "packages/*/dist",
     "packages/create-app/templates",
     "packages/cli/templates/scaffold",
     "packages/cli/tests/fixtures/scaffold-typecheck"

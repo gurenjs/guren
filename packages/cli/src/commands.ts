@@ -1709,7 +1709,7 @@ const toolLogCommand = defineCommand({
     },
     surface: {
       type: 'string',
-      description: 'Only records from this surface (mcp, dev-mcp, cli, webmcp, durable)',
+      description: 'Only records from this surface (mcp, dev-mcp, cli, webmcp, durable, in-process)',
       valueHint: 'mcp',
     },
     denied: {

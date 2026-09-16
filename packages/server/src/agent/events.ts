@@ -23,13 +23,13 @@ export interface AgentPrincipal {
 }
 
 /**
- * The protocol surface an invocation arrived on: `'mcp'` the application's own
- * endpoint, `'dev-mcp'` the development one, `'cli'` a `guren tool:call`,
- * `'webmcp'` an in-browser session call, `'durable'` an agent the application
- * hosts itself (RFC 0017 §4). Every consumer enumerates these as a *total* map,
- * so adding one fails to compile rather than silently failing to parse.
+ * The protocol surface an invocation arrived on: `'mcp'` the app's endpoint, `'dev-mcp'`
+ * the development one, `'cli'` a `guren tool:call`, `'webmcp'` an in-browser session,
+ * `'durable'` an agent the app hosts (RFC 0017 §4), `'in-process'` `@guren/plugin-ai`
+ * (RFC 0029 §2.3). Every consumer enumerates these as a *total* map, so adding one
+ * fails to compile rather than silently failing to parse.
  */
-export type AgentSurface = 'mcp' | 'dev-mcp' | 'cli' | 'webmcp' | 'durable'
+export type AgentSurface = 'mcp' | 'dev-mcp' | 'cli' | 'webmcp' | 'durable' | 'in-process'
 
 /**
  * Emitted when an agent tool invocation completed — successfully or not.
