@@ -18,8 +18,6 @@ export interface PatchResult {
 export const PATCH_REASONS = {
   fileNotFound: 'File not found',
   importAlreadyExists: 'Import already exists',
-  providersArrayNotFound: 'Could not find providers array',
-  providerAlreadyRegistered: 'Provider already registered',
   alreadyPresent: 'Already present',
   optionAlreadySet: 'Option already set',
 } as const
@@ -316,37 +314,44 @@ export async function addImport(
 export type InsertResult = { content: string; reason?: undefined } | { content?: undefined; reason: string }
 
 /**
- * Pure, and split out for the same reason as `insertImport`: a caller adding
- * the entry's import too applies both here and writes once, so a failure
- * cannot leave half the pair on disk. Splices into the array's own span rather
- * than re-joining `parseArrayEntries` output, which writes the mask back and
- * blanked an unrelated `mcpPlugin({ path: '/mcp' })` to `'    '`.
+ * Pure, like `insertImport`: a caller adding the entry's import too writes once.
+ * Scoped to `callName`'s own object, creating the option when absent. Splices
+ * into the array's own span rather than re-joining `parseArrayEntries` output,
+ * which writes the mask back and blanked `mcpPlugin({ path: '/mcp' })` to `'    '`.
  */
 export function insertArrayOptionEntry(
   content: string,
   key: string,
   entry: string,
-  /**
-   * Defaults to exact-match against `entry`; factory registrations pass
-   * a prefix check so `vercelPlugin({ ... })` counts as registered. Entries
-   * arrive masked, so a predicate must not test text holding a string literal.
-   */
-  isRegistered?: (entries: string[]) => boolean,
+  options: {
+    callName?: string
+    /**
+     * Defaults to exact-match against `entry`; factory registrations pass
+     * a prefix check so `vercelPlugin({ ... })` counts as registered. Entries
+     * arrive masked, so a predicate must not test text holding a string literal.
+     */
+    isRegistered?: (entries: string[]) => boolean
+  } = {},
 ): InsertResult {
-  const notFound = `Could not find ${key} array`
-  const match = matchInCode(content, new RegExp(`(?<![\\w$])${escapeRegExp(key)}\\s*:\\s*\\[`))
+  const callName = options.callName ?? 'createApp'
+  const span = findCallOptionsSpan(content, callName)
+  if (typeof span === 'string') return { reason: span }
 
-  // A createApp() without the option gets it written. One that sets it to a
+  const notFound = `Could not find the ${key} array`
+  const optionsSource = content.slice(span.start, span.end + 1)
+  const keyMatch = matchInCode(optionsSource, new RegExp(`(?:^|[{,]\\s*)${escapeRegExp(key)}\\s*:\\s*\\[`))
+
+  // A call without the option gets it written. One that sets it to a
   // non-literal (`providers: list`) has no array to append to.
-  if (!match) {
-    const created = insertCallOptions(content, [{ key, source: `[${entry}]` }], 'createApp')
+  if (!keyMatch) {
+    const created = insertCallOptions(content, [{ key, source: `[${entry}]` }], callName)
     if (typeof created === 'string') return { reason: created }
     return created.inserted.length > 0 ? { content: created.content } : { reason: notFound }
   }
 
   // Depth-counted rather than matched to the first `]`, which a nested array
   // or an object argument holding one ends early.
-  const open = match.index + match[0].length - 1
+  const open = span.start + keyMatch.index + keyMatch[0].length - 1
   const close = findClosingDelimiter(content, open, '[', ']')
 
   if (close === -1) {
@@ -356,8 +361,8 @@ export function insertArrayOptionEntry(
   const interior = content.slice(open + 1, close)
   const entries = parseArrayEntries(interior)
 
-  const alreadyRegistered = isRegistered
-    ? isRegistered(entries.map((parsed) => parsed.code))
+  const alreadyRegistered = options.isRegistered
+    ? options.isRegistered(entries.map((parsed) => parsed.code))
     : entries.some((parsed) => parsed.source === entry)
   if (alreadyRegistered) {
     return { reason: PATCH_REASONS.alreadyPresent }
@@ -366,39 +371,6 @@ export function insertArrayOptionEntry(
   return {
     content: content.slice(0, open + 1) + appendArrayEntry(interior, entry) + content.slice(close),
   }
-}
-
-/** `insertArrayOptionEntry` for `createApp({ providers })`. */
-export function insertProvider(
-  content: string,
-  providerName: string,
-  isRegistered?: (entries: string[]) => boolean,
-): InsertResult {
-  const inserted = insertArrayOptionEntry(content, 'providers', providerName, isRegistered)
-  return inserted.reason === PATCH_REASONS.alreadyPresent ? { reason: PATCH_REASONS.providerAlreadyRegistered } : inserted
-}
-
-/** Adds a provider to the `providers` array in the app's createApp() call. */
-export async function addProvider(
-  filePath: string,
-  providerName: string,
-  isRegistered?: (entries: string[]) => boolean,
-): Promise<PatchResult> {
-  const absolutePath = resolve(process.cwd(), filePath)
-  const content = await readIfExists(process.cwd(), filePath)
-
-  if (content === null) {
-    return { modified: false, reason: PATCH_REASONS.fileNotFound }
-  }
-
-  const inserted = insertProvider(content, providerName, isRegistered)
-
-  if (inserted.content === undefined) {
-    return { modified: false, reason: inserted.reason }
-  }
-
-  await writeFile(absolutePath, inserted.content, 'utf8')
-  return { modified: true }
 }
 
 /**
@@ -424,11 +396,8 @@ function findCallOptionsSpan(
 }
 
 /**
- * Adds an entry to an array-valued option of a single-object-argument call
- * (`modules: [...]` in `createApp`, `commands: [...]` in `defineModule`),
- * creating the option when absent and scoped to `callName`'s own object.
- * `addProvider` stays a separate implementation: it patches text, so a provider
- * and its import land in one write.
+ * `insertArrayOptionEntry` against a file, for an entry needing no import
+ * (`modules: [...]` in `createApp`, `commands: [...]` in `defineModule`).
  */
 export async function addToArrayOption(
   filePath: string,
@@ -436,43 +405,19 @@ export async function addToArrayOption(
   valueSource: string,
   callName = 'createApp',
 ): Promise<PatchResult> {
-  const absolutePath = resolve(process.cwd(), filePath)
   const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
     return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
-  const span = findCallOptionsSpan(content, callName)
+  const inserted = insertArrayOptionEntry(content, key, valueSource, { callName })
 
-  if (typeof span === 'string') {
-    return { modified: false, reason: span }
+  if (inserted.content === undefined) {
+    return { modified: false, reason: inserted.reason }
   }
 
-  const optionsSource = content.slice(span.start, span.end + 1)
-  const keyMatch = matchInCode(optionsSource, new RegExp(`(?:^|[{,]\\s*)${escapeRegExp(key)}\\s*:\\s*\\[`))
-
-  if (!keyMatch) {
-    return addCreateAppOption(filePath, key, `[${valueSource}]`, callName)
-  }
-
-  const open = span.start + keyMatch.index + keyMatch[0].length - 1
-  const close = findClosingDelimiter(content, open, '[', ']')
-
-  if (close === -1) {
-    return { modified: false, reason: `Could not parse the ${key} array` }
-  }
-
-  const interior = content.slice(open + 1, close)
-
-  if (parseArrayEntries(interior).some((entry) => entry.source === valueSource)) {
-    return { modified: false, reason: PATCH_REASONS.alreadyPresent }
-  }
-
-  const updatedContent
-    = content.slice(0, open + 1) + appendArrayEntry(interior, valueSource) + content.slice(close)
-
-  await writeFile(absolutePath, updatedContent, 'utf8')
+  await writeFile(resolve(process.cwd(), filePath), inserted.content, 'utf8')
   return { modified: true }
 }
 

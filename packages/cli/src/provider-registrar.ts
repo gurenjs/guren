@@ -40,7 +40,7 @@ export async function addArrayOptionRegistration(
     return { registered: false, entry: { modified: false, reason: PATCH_REASONS.fileNotFound } }
   }
 
-  const inserted = insertArrayOptionEntry(content, key, entry, isRegistered)
+  const inserted = insertArrayOptionEntry(content, key, entry, { isRegistered })
   const alreadyRegistered = inserted.reason === PATCH_REASONS.alreadyPresent
 
   if (inserted.content === undefined && !alreadyRegistered) {
@@ -73,9 +73,13 @@ export interface WireProviderOptions {
   verbose?: boolean
 }
 
-/** The import line for a provider scaffolded as `app/Providers/<Name>.ts`. */
-function scaffoldedProviderImport(appPath: string, providerName: string): string {
-  return `import ${providerName} from '${relativeImportPath(appPath, `app/Providers/${providerName}.js`)}'`
+/** The import of a scaffolded file's default export, relative to the entry that imports it. */
+function defaultExportImport(name: string, target: string): (appPath: string) => string {
+  return (appPath) => `import ${name} from '${relativeImportPath(appPath, target)}'`
+}
+
+function scaffoldedProviderImport(providerName: string): (appPath: string) => string {
+  return defaultExportImport(providerName, `app/Providers/${providerName}.js`)
 }
 
 /** What the app author has to do by hand for an entry this could not wire. */
@@ -91,10 +95,12 @@ function warnNoAppEntry(key: string, entry: string, importStatement: string): vo
 async function wireArrayOption(
   key: 'providers' | 'config',
   entry: string,
-  importStatement: string,
+  importFor: string | ((appPath: string) => string),
   options: WireProviderOptions,
 ): Promise<void> {
   const appPath = options.appPath ?? (await resolveAppEntry())
+  // With no entry the import is still derived, from the conventional one, for the manual step.
+  const importStatement = typeof importFor === 'string' ? importFor : importFor(appPath ?? APP_ENTRY_CANDIDATES[0])
 
   if (!appPath) {
     warnNoAppEntry(key, entry, importStatement)
@@ -133,30 +139,14 @@ export async function wireProvider(
   await wireArrayOption('providers', providerName, importStatement, options)
 }
 
-/**
- * Registers the definition `config/<binding>.ts` default-exports (RFC 0027 §2) in
- * the app entry's `config` array, imported relative to whichever entry was found.
- */
+/** Registers the definition `config/<binding>.ts` default-exports (RFC 0027 §2) in the `config` array. */
 export async function wireConfig(binding: string, options: WireProviderOptions = {}): Promise<void> {
-  const appPath = options.appPath ?? (await resolveAppEntry())
-  const importFor = (entry: string): string => `import ${binding} from '${relativeImportPath(entry, `config/${binding}.js`)}'`
-  await wireArrayOption('config', binding, importFor(appPath ?? APP_ENTRY_CANDIDATES[0]), { ...options, ...(appPath ? { appPath } : {}) })
+  await wireArrayOption('config', binding, defaultExportImport(binding, `config/${binding}.js`), options)
 }
 
-/**
- * `wireProvider` for a provider scaffolded at `app/Providers/<Name>.ts` — the one place
- * that knows those are default exports, imported relative to whichever entry was found.
- */
+/** `wireProvider` for a provider scaffolded at `app/Providers/<Name>.ts`, a default export. */
 export async function wireAppProvider(providerName: string, options: WireProviderOptions = {}): Promise<void> {
-  const appPath = options.appPath ?? (await resolveAppEntry())
-
-  if (!appPath) {
-    // The import is only derivable from an entry, so name the conventional one.
-    warnNoAppEntry('providers', providerName, scaffoldedProviderImport(APP_ENTRY_CANDIDATES[0], providerName))
-    return
-  }
-
-  await wireProvider(providerName, scaffoldedProviderImport(appPath, providerName), { ...options, appPath })
+  await wireArrayOption('providers', providerName, scaffoldedProviderImport(providerName), options)
 }
 
 export interface ProviderRegistration {
@@ -179,7 +169,7 @@ export async function wireProviders(
   // Warned one by one even with no entry to patch: an app missing any one of a
   // blueprint's providers is missing the feature, so a single warning under-reports.
   for (const { name, importStatement } of registrations) {
-    const statement = importStatement ?? scaffoldedProviderImport(appPath ?? APP_ENTRY_CANDIDATES[0], name)
+    const statement = importStatement ?? scaffoldedProviderImport(name)(appPath ?? APP_ENTRY_CANDIDATES[0])
 
     if (!appPath) {
       warnNoAppEntry('providers', name, statement)

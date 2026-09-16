@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { parseSourceFile } from '../src/parse-cache'
-import { addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertArrayOptionEntry, insertImport, insertProvider, PATCH_REASONS } from '../src/patch-helpers'
+import { addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertArrayOptionEntry, insertImport, PATCH_REASONS } from '../src/patch-helpers'
 import { captureWarnings, createTempWorkspace, PG_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 
 describe('addImport', () => {
@@ -477,7 +477,7 @@ describe('insertImport — already-imported detection', () => {
   })
 })
 
-describe('insertProvider', () => {
+describe('insertArrayOptionEntry — providers', () => {
   // The array a scaffolded worker app actually has: several lines, and a
   // plugin argument whose string literal is unrelated to the registration.
   const MULTILINE_APP = `const app = createApp({
@@ -492,7 +492,7 @@ describe('insertProvider', () => {
 `
 
   it('appends without rewriting an unrelated string literal', () => {
-    const result = insertProvider(MULTILINE_APP, 'SessionProvider')
+    const result = insertArrayOptionEntry(MULTILINE_APP, 'providers', 'SessionProvider')
 
     expect(result.content).toBeDefined()
     expect(result.content).toContain('SessionProvider')
@@ -502,7 +502,7 @@ describe('insertProvider', () => {
   })
 
   it('leaves the array spanning the lines it already spanned', () => {
-    const result = insertProvider(MULTILINE_APP, 'SessionProvider')
+    const result = insertArrayOptionEntry(MULTILINE_APP, 'providers', 'SessionProvider')
 
     // Asserted separately from the literal: re-joining entries collapses the
     // array and blanks the literal, and either alone can regress.
@@ -511,7 +511,7 @@ describe('insertProvider', () => {
   })
 
   it('keeps a single-line array on one line', () => {
-    const result = insertProvider('createApp({ providers: [DatabaseProvider] })', 'AuthProvider')
+    const result = insertArrayOptionEntry('createApp({ providers: [DatabaseProvider] })', 'providers', 'AuthProvider')
 
     expect(result.content).toBe('createApp({ providers: [DatabaseProvider, AuthProvider] })')
   })
@@ -519,7 +519,7 @@ describe('insertProvider', () => {
   it('spans an array holding a nested one', () => {
     const nested = "createApp({ providers: [plugin({ hosts: ['a'] })] })"
 
-    const result = insertProvider(nested, 'SessionProvider')
+    const result = insertArrayOptionEntry(nested, 'providers', 'SessionProvider')
 
     // Matching to the first `]` ended the array inside `hosts`, splicing the
     // new entry into the middle of the plugin's own argument.
@@ -527,7 +527,7 @@ describe('insertProvider', () => {
   })
 
   it('does not treat a `$` in an existing entry as a replacement pattern', () => {
-    const result = insertProvider('createApp({ providers: [$1, $$legacy] })', 'SessionProvider')
+    const result = insertArrayOptionEntry('createApp({ providers: [$1, $$legacy] })', 'providers', 'SessionProvider')
 
     expect(result.content).toBe('createApp({ providers: [$1, $$legacy, SessionProvider] })')
   })
@@ -536,20 +536,20 @@ describe('insertProvider', () => {
     const commented = `// providers: [OldProvider],
 createApp({ providers: [DatabaseProvider] })`
 
-    const result = insertProvider(commented, 'SessionProvider')
+    const result = insertArrayOptionEntry(commented, 'providers', 'SessionProvider')
 
     expect(result.content).toContain('// providers: [OldProvider],')
     expect(result.content).toContain('providers: [DatabaseProvider, SessionProvider]')
   })
 
   it('writes the providers array into an app that lists none', () => {
-    const result = insertProvider('createApp({ routes: registerWebRoutes })', 'SessionProvider')
+    const result = insertArrayOptionEntry('createApp({ routes: registerWebRoutes })', 'providers', 'SessionProvider')
 
     expect(result.content).toContain('providers: [SessionProvider]')
   })
 
   it('reports an entry with no createApp() call rather than inventing one', () => {
-    const result = insertProvider('const app = new Application()', 'SessionProvider')
+    const result = insertArrayOptionEntry('const app = new Application()', 'providers', 'SessionProvider')
 
     expect(result.content).toBeUndefined()
     expect(result.reason).toContain('createApp')
@@ -558,10 +558,10 @@ createApp({ providers: [DatabaseProvider] })`
   // Returning the text unchanged would let the caller write the import with no
   // registration, which noUnusedLocals then rejects.
   it('reports a providers option it cannot append to', () => {
-    const result = insertProvider('createApp({ providers: appProviders })', 'SessionProvider')
+    const result = insertArrayOptionEntry('createApp({ providers: appProviders })', 'providers', 'SessionProvider')
 
     expect(result.content).toBeUndefined()
-    expect(result.reason).toBe(PATCH_REASONS.providersArrayNotFound)
+    expect(result.reason).toBe('Could not find the providers array')
   })
 })
 
@@ -820,9 +820,9 @@ describe('array entries — depth-0 splitting', () => {
   it('reads an entry whose object argument holds a comma as one entry', () => {
     const app = 'createApp({ providers: [mcpPlugin({ path: mcpPath, prefix: mcpPrefix })] })'
 
-    const result = insertProvider(app, 'mcpPlugin({ path: mcpPath, prefix: mcpPrefix })')
+    const result = insertArrayOptionEntry(app, 'providers', 'mcpPlugin({ path: mcpPath, prefix: mcpPrefix })')
 
-    expect(result.reason).toBe(PATCH_REASONS.providerAlreadyRegistered)
+    expect(result.reason).toBe(PATCH_REASONS.alreadyPresent)
   })
 
   // The prefix predicate matched the leading fragment either way, so it is the
@@ -830,11 +830,11 @@ describe('array entries — depth-0 splitting', () => {
   it('still recognizes a factory prefix across that comma', () => {
     const app = "createApp({ providers: [mcpPlugin({ path: '/mcp', prefix: '/x' })] })"
 
-    const result = insertProvider(app, 'mcpPlugin()', (entries) =>
-      entries.some((entry) => entry.startsWith('mcpPlugin(')),
-    )
+    const result = insertArrayOptionEntry(app, 'providers', 'mcpPlugin()', {
+      isRegistered: (entries) => entries.some((entry) => entry.startsWith('mcpPlugin(')),
+    })
 
-    expect(result.reason).toBe(PATCH_REASONS.providerAlreadyRegistered)
+    expect(result.reason).toBe(PATCH_REASONS.alreadyPresent)
   })
 
   it('reads an entry holding a nested array as one entry', async () => {
@@ -872,9 +872,9 @@ describe('array entries — masked entries vs. an unmasked value', () => {
   it('matches an existing entry whose argument holds a string literal', () => {
     const app = "createApp({ providers: [mcpPlugin({ path: '/mcp' })] })"
 
-    const result = insertProvider(app, "mcpPlugin({ path: '/mcp' })")
+    const result = insertArrayOptionEntry(app, 'providers', "mcpPlugin({ path: '/mcp' })")
 
-    expect(result.reason).toBe(PATCH_REASONS.providerAlreadyRegistered)
+    expect(result.reason).toBe(PATCH_REASONS.alreadyPresent)
   })
 
   // Masking is length-preserving, so `'/mcp'` and `'/api'` are the same blanked
@@ -882,7 +882,7 @@ describe('array entries — masked entries vs. an unmasked value', () => {
   it('separates two entries whose string literals are the same length', () => {
     const app = "createApp({ providers: [mcpPlugin({ path: '/mcp' })] })"
 
-    const result = insertProvider(app, "mcpPlugin({ path: '/api' })")
+    const result = insertArrayOptionEntry(app, 'providers', "mcpPlugin({ path: '/api' })")
 
     expect(result.content).toBe(
       "createApp({ providers: [mcpPlugin({ path: '/mcp' }), mcpPlugin({ path: '/api' })] })",
@@ -892,7 +892,7 @@ describe('array entries — masked entries vs. an unmasked value', () => {
   it('does not read a value that appears only in a comment inside the array', () => {
     const app = "createApp({ providers: [DatabaseProvider /* , mcpPlugin({ path: '/mcp' }) */] })"
 
-    const result = insertProvider(app, "mcpPlugin({ path: '/mcp' })")
+    const result = insertArrayOptionEntry(app, 'providers', "mcpPlugin({ path: '/mcp' })")
 
     expect(result.content).toBe(
       "createApp({ providers: [DatabaseProvider, mcpPlugin({ path: '/mcp' })"
@@ -906,9 +906,11 @@ describe('array entries — masked entries vs. an unmasked value', () => {
     const app = "createApp({ providers: [mcpPlugin({ path: '/mcp' })] })"
     const seen: string[] = []
 
-    insertProvider(app, 'mcpPlugin()', (entries) => {
-      seen.push(...entries)
-      return false
+    insertArrayOptionEntry(app, 'providers', 'mcpPlugin()', {
+      isRegistered: (entries) => {
+        seen.push(...entries)
+        return false
+      },
     })
 
     expect(seen).toEqual(["mcpPlugin({ path: '    ' })"])

@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { APP_FIXTURE, ENV_SCHEMA_FIXTURE, createTempWorkspace, linkWorkspaceCore, type TempWorkspace } from './helpers'
+import { APP_FIXTURE, ENV_SCHEMA_FIXTURE, createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles, type TempWorkspace } from './helpers'
 import { checkEnvExample } from '../src/app-env'
 import { fileExists } from '../src/discovery'
 import { runBlueprint } from '../src/blueprints'
@@ -76,8 +76,7 @@ describe('guren add cache', () => {
   // RFC 0027 §2: the definition binds 'cache' itself, so neither provider is wired.
   it('writes a config/cache.ts definition an app with a schema resolves and checks clean', async () => {
     await seedApp('APP_KEY=\n')
-    await mkdir('config', { recursive: true })
-    await writeFile('config/env.ts', ENV_SCHEMA_FIXTURE)
+    await writeWorkspaceFiles(process.cwd(), { 'config/env.ts': ENV_SCHEMA_FIXTURE })
     await linkWorkspaceCore(process.cwd())
 
     const created = await runBlueprint('cache', {})
@@ -102,8 +101,7 @@ describe('guren add cache', () => {
   it('keeps the provider of an app that installed cache before declaring its environment', async () => {
     await seedApp('APP_KEY=\n')
     await runBlueprint('cache', {})
-    await mkdir('config', { recursive: true })
-    await writeFile('config/env.ts', ENV_SCHEMA_FIXTURE)
+    await writeWorkspaceFiles(process.cwd(), { 'config/env.ts': ENV_SCHEMA_FIXTURE })
 
     await runBlueprint('cache', {})
 

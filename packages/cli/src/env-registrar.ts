@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { declareEnvEntries, ENV_SCHEMA_FILE } from './app-env'
 import { readIfExists } from './discovery'
-import { takesStringDefault } from './plugin-env'
+import { envDeclarationProblem, envDefaultFromText } from './plugin-env'
 import type { GurenPluginEnvEntry } from './plugin-manifest'
 
 const ENV_FILES = ['.env.example', '.env'] as const
@@ -38,6 +38,17 @@ export async function appendEnvEntry(key: string, entry: string, options: Append
     throw new Error(`The env entry for ${key} does not assign ${key}=.`)
   }
 
+  // Validated before any file is touched: a blueprint's own mistake (a default
+  // outside its choices, `587x` for a port) would leave an app that fails to boot.
+  const declaration = options.declare === true ? {} : options.declare
+  const schemaEntry: GurenPluginEnvEntry | undefined = declaration && {
+    key,
+    ...(value === '' ? {} : { default: envDefaultFromText(value, declaration.type) }),
+    ...declaration,
+  }
+  const problem = schemaEntry && envDeclarationProblem(schemaEntry)
+  if (problem) throw new Error(`The env declaration for ${key} is invalid: ${problem}`)
+
   let exampleCommentsItOut = false
   for (const file of ENV_FILES) {
     const existing = await readIfExists(process.cwd(), file)
@@ -62,11 +73,9 @@ export async function appendEnvEntry(key: string, entry: string, options: Append
 
   // Declaring a key the example only comments out would fail `guren check --env`,
   // which requires the example to assign every declared key.
-  if (!options.declare || exampleCommentsItOut) return
+  if (!schemaEntry || exampleCommentsItOut) return
 
-  const declaration = options.declare === true ? {} : options.declare
-  const derived = value !== '' && takesStringDefault(declaration.type) ? { default: value } : {}
-  const { unpatched } = await declareEnvEntries([{ key, ...derived, ...declaration }])
+  const { unpatched } = await declareEnvEntries([schemaEntry])
   if (unpatched.length > 0) {
     consola.warn(`Could not declare ${key} in ${ENV_SCHEMA_FILE} — add it to the defineEnv({ ... }) call by hand.`)
   }

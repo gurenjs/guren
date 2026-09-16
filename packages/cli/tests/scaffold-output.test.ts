@@ -416,26 +416,8 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
     'attachments/db/schema.ts': 'pinned by the attachments fixture pin above',
     'oauth/db/schema.ts': 'pinned by the schema-table fixture pin above',
     'session/db/schema.ts': 'pinned by the schema-table fixture pin above',
-    'cache/config/env.ts': 'pinned by the env declaration pin below',
+    'cache/config/env.ts': 'pinned by the byte-identical template gate below, which runs cache against a declared env',
   }
-
-  // The fixture stands in for the schema an app has after the blueprint declared its key.
-  it('cache: config/env.ts declares what the blueprint writes', async () => {
-    const fixture = await readFile(join(SCAFFOLD_FIXTURE_ROOT, 'cache/config/env.ts'), 'utf8')
-    const workspace = await createTempWorkspace('guren-env-declaration-pin-')
-    try {
-      await seedInertiaApp(workspace.dir)
-      await writeWorkspaceFiles(workspace.dir, { 'config/env.ts': ENV_SCHEMA_FIXTURE })
-      await runBlueprint('cache', {})
-      const declared = (await readFile(join(workspace.dir, 'config/env.ts'), 'utf8'))
-        .split('\n')
-        .filter((line) => /^\s+[A-Z_]+: Env\./.test(line) && !ENV_SCHEMA_FIXTURE.includes(line))
-      expect(declared.length).toBeGreaterThan(0)
-      for (const line of declared) expect(fixture).toContain(line)
-    } finally {
-      await workspace.cleanup()
-    }
-  })
 
   it('every companion fixture is pinned to a builder, or names why not', async () => {
     const fixturePaths = await relativeSourcePaths(SCAFFOLD_FIXTURE_ROOT)
@@ -490,6 +472,16 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
           const appPath = path.split('/').slice(1).join('/')
           const written = await readFile(join(workspace.dir, appPath), 'utf8')
           expect(written).toBe(await readFile(join(SCAFFOLD_TEMPLATE_ROOT, path), 'utf8'))
+        }
+        // The typecheck companion stands in for the schema these runs leave behind.
+        if (declaresEnv) {
+          const schema = await readFile(join(workspace.dir, 'config/env.ts'), 'utf8')
+          const declared = schema.split('\n').filter((line) => /^\s+[A-Z_]+: Env\./.test(line) && !ENV_SCHEMA_FIXTURE.includes(line))
+          expect(declared.length).toBeGreaterThan(0)
+          for (const blueprint of blueprints) {
+            const companion = await readFile(join(SCAFFOLD_FIXTURE_ROOT, blueprint, 'config/env.ts'), 'utf8')
+            for (const line of declared) expect(companion).toContain(line)
+          }
         }
       } finally {
         await workspace.cleanup()
