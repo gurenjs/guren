@@ -1,8 +1,7 @@
 import { consola } from 'consola'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { ENV_SCHEMA_FILE } from './app-env'
-import { appBindsService, fileExists, findFirstExisting, readIfExists } from './discovery'
+import { findFirstExisting, readIfExists } from './discovery'
 import { insertArrayOptionEntry, insertImport, PATCH_REASONS, type PatchResult } from './patch-helpers'
 import { relativeImportPath } from './utils'
 
@@ -138,17 +137,6 @@ export async function wireProvider(
   options: WireProviderOptions = {},
 ): Promise<void> {
   await wireArrayOption('providers', providerName, importStatement, options)
-}
-
-/**
- * Whether a blueprint installs `key` as a `config/<key>.ts` definition rather than
- * a provider. It needs `config/env.ts`, since a definition reads declared keys only,
- * and no provider already binding `key`: a definition beside that binding configures
- * the key twice, which fails the boot. An existing definition keeps the answer yes.
- */
-export async function installsConfigDefinition(key: string): Promise<boolean> {
-  const cwd = process.cwd()
-  return await fileExists(cwd, ENV_SCHEMA_FILE) && (await appBindsService(key, cwd)).length === 0
 }
 
 /** Registers the definition `config/<binding>.ts` default-exports (RFC 0027 §2) in the `config` array. */
