@@ -153,11 +153,12 @@ async function patchSchema(): Promise<void> {
 }
 
 /**
- * Whether the app already binds a 'storage' service. The conventional file name
- * answers this in neither direction: a custom provider binds storage without
- * that file, and installing a second manager would shadow it.
+ * Whether the app already binds a 'storage' service, through a provider or a
+ * `config/` definition. The conventional file name answers this in neither
+ * direction: a custom provider binds storage without that file, and installing
+ * a second manager would shadow it.
  */
 export async function appBindsStorage(): Promise<boolean> {
-  return (await appBindsService('storage', process.cwd())).length > 0
+  return (await appBindsService('storage', process.cwd(), { definitions: true })).length > 0
 }
 

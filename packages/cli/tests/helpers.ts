@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import type { ConfigDefinition, ConfigDefinitions } from '@guren/core'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
 
@@ -175,6 +176,16 @@ export default defineEnv({
   CACHE_STORE: Env.enum(['memory', 'redis']).default('memory'),
 })
 `
+
+/**
+ * A scaffold template's `config/<key>.ts` definition, imported through a variable:
+ * a static import pulls the template into the root typecheck, where no
+ * `config/env.ts` declares the keys it reads (`typecheck:templates` checks it).
+ */
+export async function loadConfigTemplate<K extends keyof ConfigDefinitions>(key: K): Promise<ConfigDefinition<K>> {
+  const path = join(import.meta.dir, '../templates/scaffold', key, 'config', `${key}.ts`)
+  return ((await import(path)) as { default: ConfigDefinition<K> }).default
+}
 
 /** A `config/env.ts` declaring only APP_KEY, so a blueprint's declaration is never already present. */
 export const ENV_SCHEMA_FIXTURE = `import { defineEnv, Env } from '@guren/core'

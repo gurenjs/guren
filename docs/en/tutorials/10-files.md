@@ -24,7 +24,7 @@ One command installs it:
 bunx guren add attachments
 ```
 
-Read what it did, because you will be maintaining it. It installed the storage layer first (`app/Providers/StorageProvider.ts` and `app/Services/FileStorage.ts`, two disks: `local` rooted at `./storage/app` and `public` rooted at `./public/storage`). Then it added an `attachments` table to `db/schema.ts`, wrote `config/attachments.ts` and `app/Providers/AttachmentsProvider.ts`, registered the provider in `src/app.ts`, mounted the delivery route by calling `registerAttachmentRoutes` at the top of your route registrar, and registered an `attachments:prune` console command. The table needs its migration:
+Read what it did, because you will be maintaining it. It installed the storage layer first (`config/storage.ts`, listed in `config: [...]`, and `app/Services/FileStorage.ts`, two disks: `local` rooted at `./storage/app` and `public` rooted at `./public/storage`). Then it added an `attachments` table to `db/schema.ts`, wrote `config/attachments.ts` and `app/Providers/AttachmentsProvider.ts`, registered the provider in `src/app.ts`, mounted the delivery route by calling `registerAttachmentRoutes` at the top of your route registrar, and registered an `attachments:prune` console command. The table needs its migration:
 
 ```bash run
 bun run db:make create_attachments
@@ -240,7 +240,7 @@ describe('post attachments', () => {
 })
 ```
 
-Three things worth reading in this file. The upload is a `FormData` with a `File` in it, and `TestApp` sends it as multipart when it sees one; a JSON body could not carry a file. The URL is asserted to be signed, not merely present, because an unsigned URL would mean the disk is public. And the last test checks the disk itself, through the object key the attachment row records: deleting a post must not leave its files behind, and no database assertion can tell you that. The suite runs with `NODE_ENV=test`, and the scaffolded `StorageProvider` then roots the `local` disk at `./storage/app/testing`. That is why `disk()` asks the disk instead of building a path, and why test uploads never mix with the files your development database points at.
+Three things worth reading in this file. The upload is a `FormData` with a `File` in it, and `TestApp` sends it as multipart when it sees one; a JSON body could not carry a file. The URL is asserted to be signed, not merely present, because an unsigned URL would mean the disk is public. And the last test checks the disk itself, through the object key the attachment row records: deleting a post must not leave its files behind, and no database assertion can tell you that. The suite runs with `NODE_ENV=test`, and the scaffolded `config/storage.ts` then roots the `local` disk at `./storage/app/testing`. That is why `disk()` asks the disk instead of building a path, and why test uploads never mix with the files your development database points at.
 
 ```bash run expect-fail
 bun test

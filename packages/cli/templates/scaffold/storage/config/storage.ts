@@ -1,0 +1,47 @@
+import { defineStorageConfig } from '@guren/core'
+
+// Declared once, chosen per environment: set STORAGE_DISK in .env (or in
+// your platform's vars) to switch without touching code. Drivers are built
+// on first use, so a disk you never touch never opens a connection — but the
+// values below are read when this object is built, so keep anything that can
+// throw (a required-env helper) out of it.
+const disks = {
+  // `bun test` sets NODE_ENV=test. The test database is reset between runs and
+  // these files are not, so the suite writes under storage/app/testing: in
+  // ./storage/app they would match no row the development database holds.
+  // Keep both roots string literals; `guren check` judges each one.
+  local: { driver: 'local', root: process.env.NODE_ENV === 'test' ? './storage/app/testing' : './storage/app' },
+
+  // Declared public because it is: everything under it is served. A local
+  // disk has no per-object visibility, so this is where that is decided.
+  // Rooted inside public/ so the root asset server serves these files and
+  // disk.url() returns a URL that actually resolves (images and the other
+  // allowlisted extensions; add a route for anything else).
+
+  // For assets you ship, then. Never for bytes someone uploaded: anything on
+  // this disk is fetchable by URL with no signature, no expiry and no
+  // authorization check.
+
+  // The framework forces a download for document types served out of public/,
+  // so an uploaded .svg will not execute on your origin — but that is a
+  // backstop against one consequence, not access control, and
+  // inlineDocuments: true opts out of it.
+
+  // Uploads belong on `local` above, handed out through the attachments
+  // delivery route — which is what `guren add attachments` configures, and
+  // what `guren check` verifies.
+  public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
+} as const
+
+export default defineStorageConfig((env) => {
+  // Checked here rather than left to the first upload: an unknown name is
+  // accepted at construction and only throws when a disk is resolved,
+  // which can be a queued job or a rarely-hit route in production.
+  if (!(env.STORAGE_DISK in disks)) {
+    throw new Error(
+      `STORAGE_DISK="${env.STORAGE_DISK}" is not a declared disk. Declare it in config/storage.ts or use one of: ${Object.keys(disks).join(', ')}.`,
+    )
+  }
+
+  return { default: env.STORAGE_DISK, disks }
+})

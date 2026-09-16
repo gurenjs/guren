@@ -49,12 +49,12 @@ bunx guren add queue
 bunx guren add mail
 ```
 
-どのコマンドも、その種類のサンプルとプロバイダーを 1 つずつ書き、フレームワーク側とアプリ側の両方のサービスプロバイダーを `src/app.ts` に登録しました。開いてみてください。providers の配列は 1 行に書き直され、末尾に 6 つの要素が増えています。コマンドごとに、フレームワークのプロバイダーとアプリのプロバイダーが 1 つずつです。この 1 行化はパッチを当てたコマンドによるもので、どの `add` コマンドも同じ形を残していきます。
+どのコマンドも、その種類のサンプルと、それを動かすものを書き、`src/app.ts` に登録しました。開いてみてください。providers の配列は 1 行に書き直され、末尾に 5 つの要素が増えています。events と mail はフレームワークのプロバイダーとアプリのプロバイダーを 1 つずつ、queue は `JobsProvider` を足しました。キューマネージャーのほうは `config: [...]` の `queue` です。この 1 行化はパッチを当てたコマンドによるもので、どの `add` コマンドも同じ形を残していきます。
 
-この 3 つのプロバイダーは読んでおく価値があります。うち 2 つは、このあと自分で編集するファイルです。
+次のファイルは読んでおく価値があります。うち 2 つは、このあと自分で編集するファイルです。
 
 - `app/Providers/EventProvider.ts` は listener クラスを `events.listen()` に渡し、クラスが指定するイベントを購読させます。結び付けているのは規約ではなくコードの 1 行です。`app/Listeners/` を走査して仕事を探すものは何もありません。
-- `app/Providers/QueueProvider.ts` はキューマネージャーを構築し、ジョブクラスごとに `registerJob()` を呼びます。ドライバーの行に注目してください。`QUEUE_CONNECTION=sync` は dispatch されたジョブを**インラインで、dispatch したプロセスの中で**実行します。`memory` はワーカーが処理するキューに載せます。`.env` にはすでに `sync` と書かれています。
+- `config/queue.ts` はキューマネージャーを構築し、`app/Providers/JobsProvider.ts` はジョブクラスごとに `registerJob()` を呼びます。config のドライバーの行に注目してください。`QUEUE_CONNECTION=sync` は dispatch されたジョブを**インラインで、dispatch したプロセスの中で**実行します。`memory` はワーカーが処理するキューに載せます。`guren add queue` が `.env` に `sync` と書き込みました。
 - `app/Providers/MailProvider.ts` はメールマネージャーを構築します。同じく `.env` にある `MAIL_MAILER=log` は、メールを送る代わりに送信予定の内容をサーバーの出力に印字します。サービスの申し込みは要りませんし、うっかり本当に配送してしまうこともありません。
 
 サンプル(`OrderPlaced`、`SendOrderReceiptListener`、`ProcessWelcomeSequenceJob`、`WelcomeEmailMail`)は、それぞれのファイルの形を確認できるように置かれています。第 3 節でこの 4 つをすべて置き換えます。
@@ -267,26 +267,15 @@ export default class EventProvider extends ServiceProvider {
 
 `events.on(CommentPosted, (event) => listener.handle(event))` でも listener は動きますが、`Listener` クラスにはこの配線を使いません。`on()` が受け取るのは関数だけで、それがどのクラスから来たかを知りません。そのため `shouldHandle()` も `shouldQueue` も、何の警告もなく無視されます。
 
-キュープロバイダーは、ジョブクラスが dispatch 可能になる場所です。
+ジョブプロバイダーは、ジョブクラスが dispatch 可能になる場所です。
 
-```ts file=app/Providers/QueueProvider.ts
-import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob } from '@guren/core'
+```ts file=app/Providers/JobsProvider.ts
+import { ServiceProvider, registerJob } from '@guren/core'
 import { SendCommentMailJob } from '../Jobs/SendCommentMailJob.js'
 
-export default class QueueProvider extends ServiceProvider {
-  register(): void {
-    const queue = createQueueManager({
-      // QUEUE_CONNECTION=sync executes jobs inline on dispatch (default,
-      // no worker process needed); 'memory' queues them for a Worker.
-      default: process.env.QUEUE_CONNECTION === 'memory' ? 'memory' : 'sync',
-      drivers: {
-        sync: () => new SyncDriver(),
-        memory: () => new MemoryDriver(),
-      },
-    })
-
-    this.container.instance('queue', queue)
-  }
+// config/queue.ts binds the queue; this registers the jobs it runs.
+export default class JobsProvider extends ServiceProvider {
+  register(): void {}
 
   boot(): void {
     // A queued message carries the job's name, so the driver can only run a job
@@ -391,12 +380,12 @@ globs:
   - "app/Jobs/**"
   - "app/Mail/**"
   - "app/Providers/EventProvider.ts"
-  - "app/Providers/QueueProvider.ts"
+  - "app/Providers/JobsProvider.ts"
 ---
 
 # Background work
 
-1. **Every `Job` subclass is registered.** Add `registerJob(TheJob)` to `boot()` in `app/Providers/QueueProvider.ts` in the same change that adds the class. A queued message carries the job's name and the driver resolves it through that registry; an unregistered job throws at dispatch time and `guren check` says nothing about it.
+1. **Every `Job` subclass is registered.** Add `registerJob(TheJob)` to `boot()` in `app/Providers/JobsProvider.ts` in the same change that adds the class. A queued message carries the job's name and the driver resolves it through that registry; an unregistered job throws at dispatch time and `guren check` says nothing about it.
 2. **Every listener is wired with `listen()`.** A class in `app/Listeners/` runs only because `boot()` in `app/Providers/EventProvider.ts` calls `events.listen(TheListener)`. That call reads the class's `event`, `priority`, `shouldQueue`, `queue` and `shouldHandle()`. Never wire a `Listener` class through `events.on(TheEvent, (event) => listener.handle(event))`: `on()` sees only the function, so `shouldHandle()` and `shouldQueue` are silently ignored. To queue work, dispatch a job from `handle`; set `shouldQueue` only when the listener itself should run on the worker.
 3. **A job payload is JSON: ids, never records.** The job may run in another process, after the row has changed. Load what you need inside `handle`, and return early when the record is gone.
 4. **Controllers announce, listeners decide.** A controller emits an event and returns. Rules about who gets mail (skip the actor, skip duplicates) live in the job or the listener, not in the action.
@@ -484,7 +473,7 @@ bun test
 
 > When a post is published, mail everyone who commented on it. Emit a `PostPublished` event from `publish` in `PostController`, wire a listener in `EventProvider` that dispatches a `NotifyCommentersJob`, and send a `PostPublishedMail` to each distinct commenter, skipping the post's author. `tests/PostPublishedMail.test.ts` describes it; make it pass.
 
-このプロンプトは `registerJob` に触れていませんが、触れる必要もありません。第 4 節で書いた rule は `app/Jobs/**` と `app/Providers/QueueProvider.ts` にスコープされているので、エージェントはそのどちらかを書く前に rule を読みます。この実験の狙いはそこにあります。何よりも先に、diff の中の登録の行を確かめてください。
+このプロンプトは `registerJob` に触れていませんが、触れる必要もありません。第 4 節で書いた rule は `app/Jobs/**` と `app/Providers/JobsProvider.ts` にスコープされているので、エージェントはそのどちらかを書く前に rule を読みます。この実験の狙いはそこにあります。何よりも先に、diff の中の登録の行を確かめてください。
 
 **手元にエージェントが無い場合は、** イベントが投稿を運びます。
 
@@ -595,25 +584,14 @@ export default class EventProvider extends ServiceProvider {
 }
 ```
 
-```ts file=app/Providers/QueueProvider.ts fallback
-import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob } from '@guren/core'
+```ts file=app/Providers/JobsProvider.ts fallback
+import { ServiceProvider, registerJob } from '@guren/core'
 import { SendCommentMailJob } from '../Jobs/SendCommentMailJob.js'
 import { NotifyCommentersJob } from '../Jobs/NotifyCommentersJob.js'
 
-export default class QueueProvider extends ServiceProvider {
-  register(): void {
-    const queue = createQueueManager({
-      // QUEUE_CONNECTION=sync executes jobs inline on dispatch (default,
-      // no worker process needed); 'memory' queues them for a Worker.
-      default: process.env.QUEUE_CONNECTION === 'memory' ? 'memory' : 'sync',
-      drivers: {
-        sync: () => new SyncDriver(),
-        memory: () => new MemoryDriver(),
-      },
-    })
-
-    this.container.instance('queue', queue)
-  }
+// config/queue.ts binds the queue; this registers the jobs it runs.
+export default class JobsProvider extends ServiceProvider {
+  register(): void {}
 
   boot(): void {
     // A queued message carries the job's name, so the driver can only run a job
@@ -770,7 +748,7 @@ bun test
 
 rubric は次のとおりです。
 
-- `registerJob(NotifyCommentersJob)` が `QueueProvider.boot()` にあり、`events.listen(NotifyCommentersListener)` が `EventProvider.boot()` にある。この 2 つが揃っていなければ、この機能はコンパイルの通る死んだコードです。`events.on(...)` で配線した listener もここでは動きますが、rule 2 に反します。
+- `registerJob(NotifyCommentersJob)` が `JobsProvider.boot()` にあり、`events.listen(NotifyCommentersListener)` が `EventProvider.boot()` にある。この 2 つが揃っていなければ、この機能はコンパイルの通る死んだコードです。`events.on(...)` で配線した listener もここでは動きますが、rule 2 に反します。
 - ペイロードは `{ postId }`。宛先は渡されるのではなく `handle` の中で解決される。
 - コメントした人が著者 id で重複排除され、投稿の著者がリストから外れる。しかもジョブの中で。Bob からのコメント 2 件に対して、Bob へのメールは 1 通です。
 - `publish` は emit して戻る。コメントを問い合わせもしないし、メールの存在も知らない。
@@ -796,7 +774,7 @@ git commit -m "feat: mail commenters when a post is published"
 
 ## よくあるつまずき
 
-- **`SyncDriver: job class "X" is not registered.`** `QueueProvider.boot()` に `registerJob(X)` がありません。第 4 節の rule は、まさにこのエラーを防ぐために存在します。
+- **`SyncDriver: job class "X" is not registered.`** `JobsProvider.boot()` に `registerJob(X)` がありません。第 4 節の rule は、まさにこのエラーを防ぐために存在します。
 - **`Email must have at least one recipient`(あるいは subject、body)。** `send()` は組み立てられたメッセージを検証します。`undefined` を受け取った `to()` も、件名を設定する前に return する `build()` も、どちらもここに行き着きます。
 - **何も届かないのにエラーも出ない。** listener が `EventProvider.boot()` で配線されているか確かめてください。listener がひとつも無いイベントは、成功した `emit` です。
 - **キューを fake にしたテストで `manager.getDefaultDriverName is not a function` が出て、リクエストが 500 を返す。** `fakeQueue()` を `queue` に直接バインドしています。このキーが保持するのは `QueueManager` で、fake はドライバーです。`fakeMail()` を `mail` にバインドしたときと同じ間違いです。ドライバーを `createQueueManager()` のファクトリーから返し、そのマネージャーをバインドしてください。

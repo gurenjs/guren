@@ -1,4 +1,4 @@
-import { mkdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { AttachmentDeliveryController, type RouteDefinition } from '@guren/core'
@@ -519,6 +519,30 @@ export function register(): unknown {
       const results = await runDelivery(workspace.dir, [config, provider], MOUNTED)
 
       expect(results.find((c) => c.key.startsWith('attachments-serve-redirect:'))?.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // A silently unread map would pass every disk; the scaffold's definition must stay readable.
+  it('reads the disks of the scaffolded storage config definition', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-definition-')
+    try {
+      const config = await writeConfig(
+        workspace.dir,
+        deliveryConfig(`\n  disks: { local: { visibility: 'private', serve: 'redirect' } },`),
+      )
+      const storage = await writeConfig(
+        workspace.dir,
+        await readFile(join(import.meta.dir, '../templates/scaffold/storage/config/storage.ts'), 'utf8'),
+        'config/storage.ts',
+      )
+
+      const results = await runDelivery(workspace.dir, [config, storage], MOUNTED)
+
+      const result = results.find((c) => c.key.startsWith('attachments-serve-redirect:'))
+      expect(result?.status).toBe('fail')
+      expect(result?.message).toContain("'local'")
     } finally {
       await workspace.cleanup()
     }

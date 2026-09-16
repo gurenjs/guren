@@ -23,6 +23,7 @@ import { appendTableToSchema, detectSchemaDialect, ensureMysqlImports, ensurePgI
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
+import { installServiceScaffold } from './service-scaffold'
 import { assertCwdUnsupported, camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -205,18 +206,24 @@ export default registerAdminRoutes
     },
   },
   queue: {
-    description: 'Install queue infrastructure with a memory driver and sample job.',
+    description: 'Install queue infrastructure with sync/memory drivers (switchable via QUEUE_CONNECTION) and a sample job.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
       const jobPath = await makeJob('ProcessWelcomeSequence', writerOptions)
-      const created = await writeScaffoldFiles([
-        scaffoldTemplateFile('queue', 'app/Providers/QueueProvider.ts'),
-      ], writerOptions)
-
-      await wireProviders([
-        { name: 'CoreQueueServiceProvider', importStatement: "import { QueueServiceProvider as CoreQueueServiceProvider } from '@guren/core'" },
-        { name: 'QueueProvider' },
-      ])
+      const created = await installServiceScaffold({
+        key: 'queue',
+        coreProvider: 'QueueServiceProvider',
+        provider: 'QueueProvider',
+        // A definition binds the queue; the jobs it runs still need a provider's boot().
+        definitionProviders: ['JobsProvider'],
+        env: {
+          key: 'QUEUE_CONNECTION',
+          entry: `
+# Which queue driver dispatch uses: sync runs jobs inline, memory queues them for a worker.
+QUEUE_CONNECTION=sync
+`,
+        },
+      }, writerOptions)
 
       return [jobPath, ...created]
     },
@@ -240,20 +247,19 @@ export default registerAdminRoutes
   },
   storage: {
     description: 'Install storage infrastructure with local/public disks (switchable via STORAGE_DISK) and a sample storage service.',
-    run: async (options) => {
-      const writerOptions = blueprintWriterOptions(options)
-      const created = await writeScaffoldFiles([
-        scaffoldTemplateFile('storage', 'app/Providers/StorageProvider.ts'),
-        scaffoldTemplateFile('storage', 'app/Services/FileStorage.ts'),
-      ], writerOptions)
-
-      await wireProviders([
-        { name: 'CoreStorageServiceProvider', importStatement: "import { StorageServiceProvider as CoreStorageServiceProvider } from '@guren/core'" },
-        { name: 'StorageProvider' },
-      ])
-
-      return created
-    },
+    run: async (options) => installServiceScaffold({
+      key: 'storage',
+      coreProvider: 'StorageServiceProvider',
+      provider: 'StorageProvider',
+      shared: ['app/Services/FileStorage.ts'],
+      env: {
+        key: 'STORAGE_DISK',
+        entry: `
+# Which disk the app stores to. Declare it in the storage config before naming it here.
+STORAGE_DISK=local
+`,
+      },
+    }, blueprintWriterOptions(options)),
   },
   broadcasting: {
     description: 'Install broadcasting infrastructure with a memory driver and sample public/private channels.',

@@ -20,8 +20,13 @@ import {
   readShippedSchemaFile,
   seedApiOnlyApp,
   seedShippedApiOnlyApp,
+  ENV_SCHEMA_FIXTURE,
+  linkWorkspaceCore,
+  writeWorkspaceFiles,
   type TempWorkspace,
 } from './helpers'
+import { checkEnvExample } from '../src/app-env'
+import { loadResolvedConfig } from '../src/resolved-config'
 import { addResource, listBlueprints, runBlueprint } from '../src/blueprints'
 import { runCheck } from '../src/check'
 
@@ -737,6 +742,43 @@ export const users = pgTable('users', {
       'CoreSchedulingServiceProvider',
       'SchedulingProvider',
     ])
+  })
+
+  // RFC 0027 §2: an app declaring its environment gets definitions, and only the
+  // provider a definition cannot replace (job registration runs in boot()).
+  it('installs storage and queue as config definitions an app with a schema resolves', async () => {
+    await seedAppFile(APP_FIXTURE)
+    await writeWorkspaceFiles(process.cwd(), { '.env.example': 'APP_KEY=\n', 'config/env.ts': ENV_SCHEMA_FIXTURE })
+    await linkWorkspaceCore(process.cwd())
+
+    await runBlueprint('storage')
+    await runBlueprint('queue')
+
+    for (const path of ['app/Providers/StorageProvider.ts', 'app/Providers/QueueProvider.ts']) {
+      expect(existsSync(path)).toBe(false)
+    }
+    const app = await readFile('src/app.ts', 'utf8')
+    expect(app).toMatch(/config: \[storage, queue\]/)
+    expect(app).toContain('providers: [JobsProvider]')
+    expect(app).not.toContain('ServiceProvider')
+
+    const resolved = await loadResolvedConfig(process.cwd())
+    expect(resolved.entries.map((entry) => [entry.key, entry.problem])).toEqual([['queue', undefined], ['storage', undefined]])
+    expect((await checkEnvExample(process.cwd())).filter((result) => result.status === 'fail')).toEqual([])
+  })
+
+  it('keeps the providers of an app that installed storage and queue before declaring its environment', async () => {
+    await seedAppFile(APP_FIXTURE)
+    await runBlueprint('storage')
+    await runBlueprint('queue')
+    await writeWorkspaceFiles(process.cwd(), { 'config/env.ts': ENV_SCHEMA_FIXTURE })
+
+    await runBlueprint('storage', { force: true })
+    await runBlueprint('queue', { force: true })
+
+    expect(existsSync('config/storage.ts')).toBe(false)
+    expect(existsSync('config/queue.ts')).toBe(false)
+    expect(await readFile('src/app.ts', 'utf8')).not.toMatch(/config: \[/)
   })
 
   // `addImport`/`addProvider` report an unpatchable app entry by returning a
