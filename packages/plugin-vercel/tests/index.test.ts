@@ -416,10 +416,31 @@ describe('@guren/plugin-vercel', () => {
       // Two mechanisms had to stop firing, and the markers tell them apart from
       // "resolved nothing": `webStandardStreamableHttp.js` is the entry the stub
       // map releases, and `server/index.js` is one only the SDK-prefix catch-all
-      // could have stubbed — @guren/plugin-mcp imports it *statically*.
+      // could have stubbed — @guren/plugin-mcp imported it *statically* on SDK v1.
       const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
       expect(bundle).toContain(SDK_TRANSPORT_MARKER)
       expect(bundle).toContain(SDK_SERVER_INDEX_MARKER)
+      expect(bundle).not.toContain('The MCP endpoint is unavailable on Vercel')
+    })
+
+    it('bundles the SDK v2 root @guren/plugin-mcp imports', async () => {
+      // No alias or filter names `@modelcontextprotocol/server`, so neither the
+      // v1 stub map nor the v1 subpath catch-all may swallow it.
+      const app = scaffoldApp(root, {
+        source:
+          "import { createMcpHandler } from '@modelcontextprotocol/server'\n"
+          + 'export default { fetch() { return new Response(String(createMcpHandler)) } }\n',
+        mcpPlugin: true,
+      })
+      const v2 = join(root, 'node_modules/@modelcontextprotocol/server')
+      mkdirSync(v2, { recursive: true })
+      writeFileSync(join(v2, 'package.json'), JSON.stringify({ name: '@modelcontextprotocol/server', type: 'module' }))
+      writeFileSync(join(v2, 'index.js'), "export const createMcpHandler = 'fake-sdk-v2-server'\n")
+
+      await buildVercelOutput(app)
+
+      const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
+      expect(bundle).toContain('fake-sdk-v2-server')
       expect(bundle).not.toContain('The MCP endpoint is unavailable on Vercel')
     })
 

@@ -341,7 +341,7 @@ would be the mocked-driver trap. Instead:
   wire protocol, which lives in the replatformed
   `@modelcontextprotocol/server` 2.x line. That migration is real future work
   for `plugin-mcp`, out of scope here, and nothing in this RFC may depend on
-  either side of it.
+  either side of it. RFC 0028 carries that migration.
 - **No Queues driver, no `scheduled` export.** Both were recorded as
   prerequisites in 0016's Phase 4b note, and both turn out to be independent
   platform-parity work that nothing in Parts 1–2 consumes. They move to their

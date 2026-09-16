@@ -502,13 +502,20 @@ export default app
 ```
 
 The endpoint mounts at `/mcp` and speaks streamable HTTP, stateless: one MCP
-server per request, no session to keep. **Bearer authentication is required**,
+server per request, no session to keep. It serves both the MCP 2026-07-28
+protocol and clients that still open with the 2025-era `initialize` handshake
+(2025-11-25 and earlier), from the same path. **Bearer authentication is required**,
 so the app must configure an [API token store](./api-tokens.md):
 
 - no bearer, or one that is invalid, expired or revoked → `401` with
   `WWW-Authenticate: Bearer`, before any MCP framing
 - no token store configured at all → `500` naming `auth.useTokens(store)`, so a
   misconfiguration reads as a misconfiguration rather than a rejected token
+- an authenticated `GET` or `DELETE` → `405`, since there is no session stream to
+  open or close
+- an authenticated `POST` whose `Content-Type` is not `application/json` → `415`
+- a `subscriptions/listen` request → a JSON-RPC error, since the tool list never
+  changes while the server runs and a held stream would serve nothing
 
 You do not need to write a CSRF exemption for it. A request carrying
 `Authorization: Bearer` and no `Cookie` header at all skips CSRF verification

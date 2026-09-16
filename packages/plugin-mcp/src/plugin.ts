@@ -23,11 +23,12 @@ import {
   type EventManager,
   type ServiceProviderConstructor,
 } from '@guren/core'
+import { createMcpHandler } from '@modelcontextprotocol/server'
 import type { Context } from 'hono'
 
 import { readExternalMcpAuth, type ExternalMcpAuth } from './external-auth'
 import { AgentRateLimiter, createRateLimitInterposition, type RateLimitConfig } from './rate-limit'
-import { createAppMcpServer } from './server'
+import { APP_MCP_REQUEST, createAppMcpServer, type AppMcpServerOptions } from './server'
 
 export interface McpPluginConfig {
   /**
@@ -135,9 +136,31 @@ const factory = definePlugin<McpPluginConfig>({
     // across instances still needs a shared store.
     const limiter = config.rateLimit === false ? undefined : new AgentRateLimiter(config.rateLimit)
 
-    // Dynamic: the SDK stays out of module graphs that never mount the endpoint.
-    const { WebStandardStreamableHTTPServerTransport } = await import(
-      '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
+    // One handler serves both protocol eras. Per-request state rides in
+    // `authInfo.extra`: the SDK hands the legacy leg a clone of the request, so
+    // nothing keyed on the `Request` object reaches the factory (RFC 0028 §3).
+    const handler = createMcpHandler(
+      ({ authInfo }) => {
+        // The SDK turns a throw here into a bare 500 and reports it only to
+        // `onerror`, which also receives every rejected client request, so the
+        // one failure that is this plugin's own is logged here instead.
+        try {
+          const options = authInfo?.extra?.[APP_MCP_REQUEST] as AppMcpServerOptions | undefined
+          if (!options) {
+            throw new Error('App MCP: request reached the handler without an authenticated caller.')
+          }
+          return createAppMcpServer(options)
+        } catch (error) {
+          console.error('[@guren/plugin-mcp]', error)
+          throw error
+        }
+      },
+      {
+        // Nothing here ever publishes a change event, so a `subscriptions/listen`
+        // stream would only hold a connection open, unmetered, against a cap
+        // every caller shares.
+        maxSubscriptions: 0,
+      },
     )
 
     const emit = createAuditEmitter(sink, events)
@@ -221,7 +244,7 @@ const factory = definePlugin<McpPluginConfig>({
         ...(executionCtx ? { executionCtx } : {}),
       })
 
-      const server = createAppMcpServer({
+      const serverOptions: AppMcpServerOptions = {
         tools: exposed,
         abilities,
         ...(approvals ? { approvals } : {}),
@@ -252,13 +275,18 @@ const factory = definePlugin<McpPluginConfig>({
             ),
           )
         },
-      })
+      }
 
-      const transport = new WebStandardStreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
+      // In-process only: the SDK hands `authInfo` to the factory and to request
+      // handlers, never to the wire. No token rides along, since nothing reads it.
+      return handler.fetch(c.req.raw, {
+        authInfo: {
+          token: '',
+          clientId: String(principal.id),
+          scopes: [...abilities],
+          extra: { [APP_MCP_REQUEST]: serverOptions },
+        },
       })
-      await server.connect(transport)
-      return transport.handleRequest(c.req.raw)
     })
   },
 })

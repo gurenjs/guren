@@ -222,6 +222,10 @@ read or serialize it, and nothing in the SDK source serializes it either. The
 `extra` payload is therefore in-process only, and `createAppMcpServer` must keep it
 that way: it is not logged, not echoed in results, and not placed in audit records.
 
+**Amended in implementation:** `token` is always `''`, for bearer callers too.
+Nothing reads it, and leaving the credential out keeps a secret from riding along
+in-process state it has no use in. This also settles Open Question 4.
+
 `authInfo` is built only after authentication succeeds. A request that reaches the
 factory without it is a wiring bug, and the thrown error becomes the entry's `500`
 (`createMcpHandler.ts:954-960`) rather than a server built with defaults.
@@ -239,6 +243,13 @@ the tool declares an `outputSchema`) still holds: the v2 client skips output
 validation for `isError` results. v2 adds `ttlMs: 0` and `cacheScope: 'private'` to
 modern list results by default, which is correct here because the tool list depends on
 the caller's abilities. `server/discover` is answered by the handler.
+
+**Amended in implementation:** the handler is built with `maxSubscriptions: 0`. By
+default any authenticated caller, whatever its scopes, can open a
+`subscriptions/listen` SSE stream that the rate limiter never meters and that counts
+against a cap every caller shares. The endpoint publishes no change events, so the
+stream serves nothing. The factory also logs its own throw: the SDK reports it only
+to `onerror`, which receives every rejected client request as well.
 
 **Status codes on a production endpoint.** Unlike the Dev MCP, this endpoint ships.
 The `405` and `415` changes above apply to it too and are listed in the
@@ -268,6 +279,14 @@ SDK for plugin-mcp apps change package names, and the doc comment on
 `MCP_SDK_SUBPATH_PREFIX` (`deploy-build.ts:654-657`, "reached only through
 subpaths") is corrected in this release, since plugin-mcp's root import makes it false
 immediately.
+**Amended in implementation:** no alias, filter or stub file changes, but the
+transport entry's `importedBy` does. Once plugin-mcp stops importing the v1 transport,
+the module-graph check would fail on it, so it becomes `importedBy: null`: kept only
+for the stub file committed configs alias, and checked the other way (no package may
+import it). The Lambda and Vercel fixtures gain a fake `@modelcontextprotocol/server`
+and assert plugin-mcp's v2 import is bundled. `assertMcpTransportNotAliased` still
+fails a plugin-mcp app whose `wrangler.jsonc` aliases the v1 transport, though that
+alias is now inert; it goes with the rest of the removal list below.
 
 **The minor after: remove the Phase 4a machinery.** With `createMcpServer` gone:
 
@@ -300,6 +319,10 @@ reaches `@guren/cli` at runtime, since the unconditional stub would break it.
   constant needs re-baselining in the same change (Open Question 3). If the root turns
   out too large to accept, the fallback is a shim that re-exports the transport, and
   §4's removal list changes.
+  **Measured in step 3** (`GUREN_TEST_WRANGLER=1`, wrangler `deploy --dry-run`): the
+  worker with the v2 server root bundled is 195.8 KiB gzipped, and 53.7 KiB with that
+  root stubbed, so the SDK costs 142.1 KiB (6.4% of the old 3 MiB budget). This
+  measures bundling only; serving a request under workerd is still open.
 - **workerd.** v2's server dist imports `@modelcontextprotocol/core/internal` and
   selects `./_shims` through a `workerd` condition. The Workers test app has to serve a
   modern and a legacy request.
@@ -419,9 +442,10 @@ the lookup misses for every 2025-era client.
    longer enforces (removed 2026-09-04; `wrangler deploy` checks 64 MiB uncompressed on
    every plan), so it gates nothing real today. Replace it with the uncompressed
    limit, or keep a tighter self-imposed budget and state why?
-4. **`authInfo.token` for externally verified callers.** A caller presented through
+4. ~~**`authInfo.token` for externally verified callers.** A caller presented through
    `presentExternalMcpAuth` holds no bearer token, so §3 sends `''`. Nothing in the
    plugin reads it back, but an empty required field is a trap for a later reader.
-   Keep `''`, or send a fixed marker such as `'external'`?
+   Keep `''`, or send a fixed marker such as `'external'`?~~ **Closed in
+   implementation:** `''` for every caller, bearer included (§3).
 5. **`createDevMcpHandler` stability.** It is a cross-package seam rather than an API
    for apps. Mark it `@experimental`, or name it as internal in the CLI's exports?

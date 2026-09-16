@@ -475,9 +475,29 @@ describe('buildLambdaOutput', () => {
     // Two separate mechanisms had to stop firing, and the markers tell them apart
     // from "resolved nothing": `webStandardStreamableHttp.js` is the entry the
     // stub map releases, and `server/index.js` is one no entry ever named — only
-    // the catch-all could have stubbed it, and @guren/plugin-mcp imports it
-    // *statically*, so a catch-all still in force leaves the endpoint shut.
+    // the catch-all could have stubbed it, and @guren/plugin-mcp imported it
+    // *statically* on SDK v1, so a catch-all in force left the endpoint shut.
     expect(probeHttpExport(root)).toBe(`${SDK_SERVER_INDEX_MARKER}|${SDK_TRANSPORT_MARKER}`)
+  })
+
+  test('should bundle the SDK v2 root @guren/plugin-mcp imports', async () => {
+    // No stub or filter names `@modelcontextprotocol/server`, so neither the v1
+    // stub map nor the v1 subpath catch-all may swallow it.
+    scaffoldApp(root, {
+      mcpPlugin: true,
+      entry: {
+        preamble: ["import { createMcpHandler } from '@modelcontextprotocol/server'"],
+        http: 'String(createMcpHandler)',
+      },
+    })
+    const v2 = join(root, 'node_modules/@modelcontextprotocol/server')
+    mkdirSync(v2, { recursive: true })
+    writeJson(join(v2, 'package.json'), { name: '@modelcontextprotocol/server', type: 'module' })
+    writeFileSync(join(v2, 'index.js'), "export const createMcpHandler = 'fake-sdk-v2-server'\n")
+
+    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+
+    expect(probeHttpExport(root)).toBe('fake-sdk-v2-server')
   })
 
   test('should keep the Dev MCP server stubbed even for an app depending on the plugin', async () => {

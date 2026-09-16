@@ -6,12 +6,7 @@
  * which would validate (and coerce/transform) a second time on top of the
  * route's own validation (RFC 0016 §3.2).
  */
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  type CallToolResult,
-} from '@modelcontextprotocol/sdk/types.js'
+import { Server, type CallToolResult } from '@modelcontextprotocol/server'
 import {
   advertisesStructuredOutput,
   APPROVAL_STATUS_TOOL_NAME,
@@ -34,6 +29,9 @@ import { describePreflightTool, readPreflightArguments, toPreflightVerdict } fro
 import type { AgentRateLimiter } from './rate-limit'
 
 export type { AuditedTool }
+
+/** The `authInfo.extra` key carrying one request's server options to the handler's factory. */
+export const APP_MCP_REQUEST = 'guren.appMcpRequest'
 
 export interface AppMcpServerOptions {
   /** Tools already filtered to `expose.mcp`. */
@@ -81,8 +79,8 @@ export interface AppMcpServerOptions {
 }
 
 /**
- * One server per request, stateless — `Server.connect()` binds a transport
- * once, so the endpoint constructs a fresh pair each time.
+ * One server per request: the tool list and every gate depend on the caller, so
+ * the endpoint's handler builds one from each request's options.
  */
 export function createAppMcpServer(options: AppMcpServerOptions): Server {
   const server = new Server(options.serverInfo, { capabilities: { tools: {} } })
@@ -101,7 +99,7 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
   // approval-gated tool is callable (the call queues), so it stays listed; rate
   // limits are runtime state, not capability. Resolving approvals here would
   // page approvers on every connection, so only the synchronous gate runs.
-  server.setRequestHandler(ListToolsRequestSchema, () => {
+  server.setRequestHandler('tools/list', () => {
     const listed = tools
       .filter((tool) => gateToolCall(tool, options.abilities, { approvalsConfigured }).allowed)
       .map((tool) => describeTool(tool))
@@ -125,7 +123,7 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
     }
   })
 
-  server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
+  server.setRequestHandler('tools/call', async (request): Promise<CallToolResult> => {
     const name = request.params.name
     const args = (request.params.arguments ?? {}) as Record<string, unknown>
 
@@ -270,7 +268,6 @@ function describeTool(tool: DerivedAgentTool) {
     name: tool.toolName,
     ...(tool.description ? { description: tool.description } : {}),
     inputSchema: tool.inputSchema as { type: 'object'; [key: string]: unknown },
-    // Only an object output schema is advertised: MCP requires
     // Only an object output schema is advertised: MCP requires
     // `outputSchema.type === 'object'`, and a non-object one would make the SDK
     // client reject the *entire* tools/list. A route whose `output` is

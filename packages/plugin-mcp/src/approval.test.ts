@@ -8,8 +8,8 @@
  * would expire every record and pass the expiry cases for the wrong reason.
  */
 import { describe, test, expect } from 'bun:test'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { Client } from '@modelcontextprotocol/client'
+import { InMemoryTransport } from '@modelcontextprotocol/server'
 import {
   Router,
   agentApprovalFingerprint,
