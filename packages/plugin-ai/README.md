@@ -28,7 +28,7 @@ createApp({ config: [ai], providers: [aiPlugin()] })
 // app/Ai/Agents/SupportTriager.ts
 import { Agent, Output } from '@guren/plugin-ai'
 
-export class SupportTriager extends Agent {
+export class SupportTriager extends Agent<typeof SupportTriager.scopes> {
   static override agentName = 'support-triager'
   static override scopes = ['tool:tickets_show', 'tool:tickets_update'] as const
   instructions = 'You triage support tickets. Read before you write.'
@@ -41,6 +41,8 @@ export class SupportTriager extends Agent {
 
 const response = await this.make('ai').agent(SupportTriager).as(await this.auth.user()).prompt('Ticket #4812: ...')
 ```
+
+With `guren codegen` run, `.guren/agents.gen.ts` types `appTools()`: a name no route derives is a compile error, each tool's input and result are typed from its route contract, and the `Agent<typeof SupportTriager.scopes>` parameter makes a name missing from a `tool:` entry in `scopes` one too. A prefix grant (`tools:tickets.*`) is checked when `as()` constructs the agent.
 
 A tool defined with `tool()` inside `tools()` runs with whatever authority its closure has, and nothing gates or audits it. Anything a route already does belongs in `appTools()`.
 
