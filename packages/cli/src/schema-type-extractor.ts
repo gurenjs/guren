@@ -29,6 +29,12 @@ interface SchemaTypeOptions {
    * and a caller that wanted `'input'`, which is the bug that introduced it.
    */
   io: SchemaIo
+  /**
+   * Render what a JSON value validated against the walker's JSON Schema carries, as
+   * an agent tool's arguments and result are: coercion is not advertised there, a
+   * `bigint` is a JSON integer and a `Date` a string.
+   */
+  json?: boolean
 }
 
 /**
@@ -63,10 +69,36 @@ export function schemaToTypeString(schema: unknown, options: SchemaTypeOptions):
     return undefined
   }
   if (!getTypeName(z)) return undefined
-  return zodToType(z, options.io)
+  return zodToType(z, options.io, options.json === true)
 }
 
-function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
+/**
+ * An object schema's per-property types, looking through wrappers the way
+ * `readObjectSchema` does, so a caller can assemble a type from properties
+ * another merge chose. `undefined` when no object is reached.
+ */
+export function schemaPropertyTypes(schema: unknown, options: SchemaTypeOptions): Record<string, string> | undefined {
+  if (!schema || typeof schema !== 'object') return undefined
+  let node = schema as ZodSchemaLike
+  while (!isZod3Schema(node) && getTypeName(node) && typeOf(node) !== 'object') {
+    const inner = unwrapSingleChild(node, options.io)
+    if (!inner) return undefined
+    node = inner
+  }
+  if (isZod3Schema(node)) {
+    refuseZod3()
+    return undefined
+  }
+  const shape = getTypeName(node) ? objectShape(node) : undefined
+  if (!shape) return undefined
+  const types: Record<string, string> = Object.create(null)
+  for (const [key, value] of Object.entries(shape)) {
+    types[key] = zodToType(value, options.io, options.json === true)
+  }
+  return types
+}
+
+function zodToType(z: ZodSchemaLike, io: SchemaIo, json: boolean): string {
   // Re-checked per node: a v3 schema can sit inside a v4 object, and would otherwise
   // render as a silent `unknown` instead of being refused.
   if (isZod3Schema(z)) {
@@ -79,21 +111,21 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
 
   // `.coerce` sits on the node itself, so check it before the plain type mapping below
   // claims the parsed type.
-  if (io === 'input' && def.coerce === true && t in COERCED_INPUT_TYPES) {
+  if (!json && io === 'input' && def.coerce === true && t in COERCED_INPUT_TYPES) {
     return COERCED_INPUT_TYPES[t]
   }
 
   if (TRANSPARENT_WRAPPERS.has(t)) {
     const wrapped = innerSchema(def)
-    return wrapped ? zodToType(wrapped, io) : 'unknown'
+    return wrapped ? zodToType(wrapped, io, json) : 'unknown'
   }
 
   switch (t) {
     case 'string': return 'string'
     case 'number': return 'number'
     case 'boolean': return 'boolean'
-    case 'bigint': return 'bigint'
-    case 'date': return 'Date'
+    case 'bigint': return json ? 'number' : 'bigint'
+    case 'date': return json ? 'string' : 'Date'
     case 'undefined': return 'undefined'
     case 'null': return 'null'
     case 'void': return 'void'
@@ -109,7 +141,7 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
 
     case 'array': {
       const el = arrayElement(def)
-      if (el) return `${wrapComplex(zodToType(el, io))}[]`
+      if (el) return `${wrapComplex(zodToType(el, io, json))}[]`
       return 'unknown[]'
     }
 
@@ -121,14 +153,14 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
       const fields = entries.map(([key, val]) => {
         const opt = isOptional(val, io) ? '?' : ''
         // z.object({ 'user-id': ... }) would otherwise emit invalid TypeScript.
-        return `${quoteObjectKey(key)}${opt}: ${zodToType(val, io)}`
+        return `${quoteObjectKey(key)}${opt}: ${zodToType(val, io, json)}`
       })
       return `{ ${fields.join('; ')} }`
     }
 
     case 'nullable': {
       const i = innerSchema(def)
-      return i ? `${zodToType(i, io)} | null` : 'unknown | null'
+      return i ? `${zodToType(i, io, json)} | null` : 'unknown | null'
     }
 
     // Presence-deciding wrappers (see `isOptional`) that pass the type through.
@@ -137,12 +169,12 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
     case 'prefault':
     case 'nonoptional': {
       const wrapped = innerSchema(def)
-      return wrapped ? zodToType(wrapped, io) : 'unknown'
+      return wrapped ? zodToType(wrapped, io, json) : 'unknown'
     }
 
     case 'pipe': {
       const side = pipeSide(def, io)
-      return side ? zodToType(side, io) : 'unknown'
+      return side ? zodToType(side, io, json) : 'unknown'
     }
 
     case 'transform':
@@ -151,19 +183,19 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
     // `z.discriminatedUnion()` produces this same node.
     case 'union': {
       const opts = def.options as ZodSchemaLike[] | undefined
-      if (opts) return opts.map((o) => zodToType(o, io)).join(' | ')
+      if (opts) return opts.map((o) => zodToType(o, io, json)).join(' | ')
       return 'unknown'
     }
 
     case 'intersection': {
       const l = def.left as ZodSchemaLike | undefined
       const r = def.right as ZodSchemaLike | undefined
-      return `${l ? zodToType(l, io) : 'unknown'} & ${r ? zodToType(r, io) : 'unknown'}`
+      return `${l ? zodToType(l, io, json) : 'unknown'} & ${r ? zodToType(r, io, json) : 'unknown'}`
     }
 
     case 'record': {
       const vt = recordValueType(def)
-      return vt ? `Record<string, ${zodToType(vt, io)}>` : 'Record<string, unknown>'
+      return vt ? `Record<string, ${zodToType(vt, io, json)}>` : 'Record<string, unknown>'
     }
 
     case 'enum': {
@@ -178,7 +210,7 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
 
     case 'promise': {
       const i = innerSchema(def)
-      return i ? `Promise<${zodToType(i, io)}>` : 'Promise<unknown>'
+      return i ? `Promise<${zodToType(i, io, json)}>` : 'Promise<unknown>'
     }
 
     default:

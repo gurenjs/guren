@@ -815,6 +815,18 @@ string in the sections above, and what types it:
 | `metrics` in `defineEval()` | `keyof ReturnType<typeof grade>` | `metrics` is constrained to the ids `grade()` returns, so a metric that is never scored is a compile error |
 | `this.make('ai')` | `ServiceBindings['ai']` | the augmentation in §3 |
 
+**Amended in implementation:** the check is opted into with the class's
+scopes as a type parameter, `class SupportTriager extends
+Agent<typeof SupportTriager.scopes>`, since a protected instance method has
+no path to the subclass's static side; without it only the names are
+checked. Each `appTools()` result is typed
+`AgentToolOutput<K> | AppToolDenial | AppToolError`, because a gate's refusal
+and a route's error status reach the model as the tool's result (§2.1). The
+generated augmentation carries `{ input, output }` per tool, the one channel
+from `.guren/agents.gen.ts` into the plugin, and both it and
+`AgentToolInputTypes` are emitted only for an app depending on
+`@guren/plugin-ai`.
+
 What types cannot reach, and where it goes instead:
 
 - A **computed** `appTools()` argument or scopes list widens to `string`;
