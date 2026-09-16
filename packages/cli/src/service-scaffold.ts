@@ -1,6 +1,6 @@
-import { appendEnvEntry } from './env-registrar'
 import { ENV_SCHEMA_FILE } from './app-env'
-import { appBindsService, fileExists } from './discovery'
+import { appendEnvEntry } from './env-registrar'
+import { appBindsService, callsDefineConfig, fileExists, readIfExists } from './discovery'
 import { wireConfig, wireProviders } from './provider-registrar'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
 import { writeScaffoldFiles, type ScaffoldFilesOptions } from './utils'
@@ -23,13 +23,15 @@ export interface ServiceScaffold {
 
 /**
  * Whether a blueprint installs `key` as a `config/<key>.ts` definition rather than
- * a provider. It needs `config/env.ts`, since a definition reads declared keys only,
- * and no provider already binding `key`: a definition beside that binding configures
- * the key twice, which fails the boot. An existing definition keeps the answer yes.
+ * a provider. It needs `config/env.ts`, since a definition reads declared keys only;
+ * no provider already binding `key`, since a second binding fails the boot; and no
+ * `config/<key>.ts` other than a definition, which a re-run keeps and `config` cannot list.
  */
 export async function installsConfigDefinition(key: string): Promise<boolean> {
   const cwd = process.cwd()
-  return await fileExists(cwd, ENV_SCHEMA_FILE) && (await appBindsService(key, cwd)).length === 0
+  if (!(await fileExists(cwd, ENV_SCHEMA_FILE)) || (await appBindsService(key, cwd)).length > 0) return false
+  const existing = await readIfExists(cwd, `config/${key}.ts`)
+  return existing === null || callsDefineConfig(existing, key)
 }
 
 /** Writes and wires `scaffold` as a definition or a provider, per {@link installsConfigDefinition}. */

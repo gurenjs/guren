@@ -112,6 +112,21 @@ describe('guren add session', () => {
     expect(report.checks.filter((check) => check.key.startsWith('config-unwired'))).toEqual([])
   })
 
+  // The inert config `guren check` points at `add session` for: wiring it into
+  // `config` would list a module with no definition, which fails the boot.
+  it('wires SessionProvider, not config, for an existing config/session.ts that is not a definition', async () => {
+    await seedApp(PG_SCHEMA_FIXTURE, { env: 'APP_KEY=\n' })
+    const legacy = "import { type SessionConfig } from '@guren/core'\n\nexport const sessionConfig: SessionConfig = { default: 'memory' }\n"
+    await writeWorkspaceFiles(process.cwd(), { 'config/env.ts': ENV_SCHEMA_FIXTURE, 'config/session.ts': legacy })
+
+    await runBlueprint('session', {})
+
+    expect(await readFile(resolve('config/session.ts'), 'utf8')).toBe(legacy)
+    const app = await readFile(resolve('src/app.ts'), 'utf8')
+    expect(app).not.toMatch(/config: \[/)
+    expect(app).toContain('SessionProvider')
+  })
+
   const dialects = [
     ['SQLite', SQLITE_SCHEMA_FIXTURE, "sqliteTable('sessions'", "integer('expires_at', { mode: 'timestamp_ms' })"],
     ['MySQL', MYSQL_SCHEMA_FIXTURE, "mysqlTable('sessions'", "varchar('id', { length: 64 })"],

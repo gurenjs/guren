@@ -49,7 +49,6 @@ const SCHEMA_IMPORTS: Record<SchemaDialect, (content: string) => string> = {
   mysql: (content) => ensureMysqlImports(content, ['mysqlTable', 'varchar', 'json', 'timestamp', 'index']),
 }
 
-
 export interface AddSessionOptions extends WriterOptions {
   /** Leave the migration to the caller, which is generating one over the same schema. */
   migration?: boolean
@@ -65,7 +64,7 @@ export interface AddSessionResult {
 
 /**
  * Whether the app already has sessions of its own: the conventional config
- * file, or a `session` binding from a provider or definition under any name. Both directions
+ * file, or a `session` binding from a provider or definition. Both directions
  * matter — a second manager would shadow the app's, and a config file with no
  * provider leaves sessions on the in-memory default.
  */
