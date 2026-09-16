@@ -323,12 +323,38 @@ reaches `@guren/cli` at runtime, since the unconditional stub would break it.
   worker with the v2 server root bundled is 195.8 KiB gzipped, and 53.7 KiB with that
   root stubbed, so the SDK costs 142.1 KiB (6.4% of the old 3 MiB budget). This
   measures bundling only; serving a request under workerd is still open.
+  Re-measured in step 4 on the merged step 3 (static `createMcpHandler` import,
+  `maxSubscriptions: 0`): 181.6 KiB served, 53.6 KiB stubbed, so the SDK costs
+  127.9 KiB (5.9%). Serving is covered by the workerd bullet below.
 - **workerd.** v2's server dist imports `@modelcontextprotocol/core/internal` and
   selects `./_shims` through a `workerd` condition. The Workers test app has to serve a
   modern and a legacy request.
+  **Measured in step 4:** `wrangler-bundle.test.ts` (`GUREN_TEST_WRANGLER=1`) bundles a
+  worker with a real app, a token store and `mcpPlugin()` using `cloudflare:build`'s
+  stubs, then runs it in Miniflare. A client pinned to 2026-07-28 and a 2025-era client
+  each negotiate their era, list tools and call one, and the call reads a binding from
+  workerd's `env`. Construction and boot wait for the first request, since workerd
+  forbids crypto at module scope. One harness detail: Miniflare needs the bundle as
+  module `contents`, because loading it by path fails workerd's start with "internal
+  error" even for a one-line worker.
 - **Clients.** `npx @modelcontextprotocol/inspector@latest` (printed by
   `guren tool:dev`, `packages/cli/src/tool-dev.ts:212`) and the `.mcp.json` clients the
   harness installs connect to both endpoints.
+  **Measured in step 4**, against a local Bun app serving both endpoints, through a
+  proxy that logged each request's method and `MCP-Protocol-Version`:
+  - Inspector 2.6.0 (`--cli`, the SDK v2 client) negotiates **2025-11-25** on both
+    endpoints: `initialize`, `notifications/initialized`, then a `GET` answered `405`,
+    which it tolerates, then `tools/list` and `tools/call` succeed. So `guren tool:dev`'s
+    printed command keeps working, on the legacy leg.
+  - Claude Code 2.1.261, configured like the harness's `.mcp.json` (`type: "http"`),
+    negotiates **2026-07-28** on both: `server/discover`, then `tools/list` (plus
+    `prompts/list`, `resources/list` and a `subscriptions/listen` on the Dev MCP, whose
+    `McpServer` advertises `listChanged`). It sends no `subscriptions/listen` to the App
+    MCP, whose low-level `Server` advertises plain `tools`, so `maxSubscriptions: 0`
+    there is never exercised by it. The model turn itself was not run; connection and
+    listing are what this measures.
+  So each era now has a real client in daily use, and Open Question 2 (a modern-only
+  date) waits on Inspector moving.
 
 ### 6. Versioning
 

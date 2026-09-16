@@ -277,12 +277,13 @@
       "name": "@guren/plugin-cloudflare",
       "version": "0.10.1",
       "dependencies": {
-        "@guren/core": "^1.15.0",
+        "@guren/core": "^1.18.0",
         "citty": "^0.1.6",
       },
       "devDependencies": {
         "@cloudflare/workers-oauth-provider": "^0.10.3",
         "@cloudflare/workers-types": "^4.20260702.1",
+        "@modelcontextprotocol/client": "^2.0.0",
         "@types/node": "^20.14.10",
         "hono": "^4.13.7",
         "miniflare": "5.20260801.1-alpha",
