@@ -420,6 +420,7 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
     'queue/config/env.ts': 'pinned by the byte-identical template gate below, which runs queue against a declared env',
     'storage/config/env.ts': 'pinned by the byte-identical template gate below, which runs storage against a declared env',
     'session/config/env.ts': 'pinned by the byte-identical template gate below, which runs session against a declared env',
+    'mail/config/env.ts': 'pinned by the byte-identical template gate below, which runs mail against a declared env',
   }
 
   it('every companion fixture is pinned to a builder, or names why not', async () => {

@@ -13,12 +13,12 @@ export async function addCache(options: WriterOptions): Promise<string[]> {
     coreProvider: 'CacheServiceProvider',
     provider: 'CacheProvider',
     shared: ['app/Services/ApplicationCache.ts'],
-    env: {
+    env: [{
       key: 'CACHE_STORE',
       entry: `
 # Which cache store the app uses. Declare it in the cache config before naming it here.
 CACHE_STORE=memory
 `,
-    },
+    }],
   }, { ...options, skipExisting: true })
 }

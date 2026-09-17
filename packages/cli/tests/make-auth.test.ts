@@ -3,8 +3,11 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, CONSOLE_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, APP_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, CONSOLE_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, linkWorkspaceCore, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
+import { checkEnvExample } from '../src/app-env'
+import { runBlueprint } from '../src/blueprints'
 import { makeAuth } from '../src/make-auth'
+import { loadResolvedConfig } from '../src/resolved-config'
 
 // Shared with the blog blueprint's AuthProvider, which ports this boot() so
 // its nav does not render as a guest while signed in. That file diverges on
@@ -685,6 +688,43 @@ export const users = mysqlTable('users', {
       }
     })
   }
+
+  // RFC 0027 §2: reset mail and `guren add mail` share one config/mail.ts,
+  // and the definition replaces both mail providers.
+  it('installs the mail definition guren add mail also writes when the app declares its environment', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-mail-definition-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'src/app.ts': APP_FIXTURE,
+        'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+        'db/schema.ts': PG_SCHEMA_FIXTURE,
+        '.env.example': 'APP_KEY=\n',
+        'config/env.ts': ENV_SCHEMA_FIXTURE,
+      })
+      await linkWorkspaceCore(workspace.dir)
+
+      const created = await makeAuth({ install: true, force: true })
+      await runBlueprint('mail', { force: true })
+
+      expect(created).not.toEqual(expect.arrayContaining([expect.stringContaining('MailProvider.ts')]))
+      expect(existsSync(join(workspace.dir, 'app/Providers/MailProvider.ts'))).toBe(false)
+      expect(await readFile(join(workspace.dir, 'config/mail.ts'), 'utf8'))
+        .toBe(await readFile(resolve(import.meta.dir, '../templates/scaffold/mail/definition/config/mail.ts'), 'utf8'))
+      const app = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
+      expect(app.match(/config: \[([^\]]*)\]/)?.[1]).toBe('session, mail')
+      expect(app).not.toContain('MailProvider')
+      expect(app).not.toContain('MailServiceProvider')
+      expect(await readFile(join(workspace.dir, 'config/env.ts'), 'utf8')).toContain('SMTP_PORT: Env.port().default(587),')
+
+      const resolved = await loadResolvedConfig(workspace.dir)
+      const mail = resolved.entries.find((entry) => entry.key === 'mail')
+      expect(mail?.problem).toBeUndefined()
+      expect(mail?.config).toMatchObject({ default: 'log', transports: { smtp: { host: 'localhost', port: 587 } } })
+      expect((await checkEnvExample(workspace.dir)).filter((result) => result.status === 'fail')).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 
   it('leaves the OAuth manager on Core\'s provider when there is no db/schema.ts', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-no-schema-')
