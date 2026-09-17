@@ -129,7 +129,7 @@ export default defineCacheConfig((env) => ({
 
 **A key is configured once.** If a definition and a provider both bind `cache`, the boot fails and names both, rather than one silently winning. When you move a service to a definition, delete its provider.
 
-Name checks belong in the definition. A manager accepts any store name and throws on first use, which may be a queued job hours later, so the queue, mail and storage scaffolds check at boot:
+Name checks belong in the definition. A manager accepts any store name and throws on first use, which may be a queued job hours later, so the cache, queue, mail and storage scaffolds check at boot:
 
 ```ts
 // config/queue.ts
