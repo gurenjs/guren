@@ -6,7 +6,7 @@
  */
 import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
-import type { Env, TriagerStub } from '../../config/env'
+import type { Env, TriagerStub } from '../../config/bindings'
 
 /** One triager for the whole application. A per-tenant demo would derive this. */
 const INSTANCE = 'main'

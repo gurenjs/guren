@@ -1,7 +1,7 @@
 import { GurenAgent } from '@guren/plugin-agents/agent'
 import type { AgentToolApprovalSettled, AgentToolCallResult } from '@guren/plugin-agents'
 
-import type { Env } from '../../config/env'
+import type { Env } from '../../config/bindings'
 import { planSweep, type ParkedAsks, type TicketSummary } from './sweep-plan'
 
 /** Settled approvals kept for `report()`. State is a durable value, not a log. */

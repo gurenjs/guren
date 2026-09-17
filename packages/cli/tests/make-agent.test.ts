@@ -261,57 +261,84 @@ describe('makeAgent', () => {
     })
   }
 
-  it('imports Env from config/env.ts and writes that file when the project has none', async () => {
+  it('imports Env from config/bindings.ts and writes that file when the project has none', async () => {
     await inWorkspace(async (dir) => {
       const result = await makeAgent('Triager', { cwd: dir })
       const source = await read(dir, 'app/Agents/Triager.ts')
-      const env = await read(dir, 'config/env.ts')
+      const bindings = await read(dir, 'config/bindings.ts')
 
       // `@cloudflare/workers-types` declares `Cloudflare.Env`, never a bare
       // `Env`, so the class has to import the one the app defines.
-      expect(source).toContain("import type { Env } from '@/config/env'")
-      expect(result.patches).toContainEqual({ file: 'config/env.ts', status: 'created' })
-      expect(env).toContain('export interface Env {')
-      expect(env).toContain('DB: unknown')
+      expect(source).toContain("import type { Env } from '@/config/bindings'")
+      expect(result.patches).toContainEqual({ file: 'config/bindings.ts', status: 'created' })
+      expect(bindings).toContain('export interface Env {')
+      expect(bindings).toContain('DB: unknown')
       // The binding slot uses the name `guren cloudflare:build` would bind the class under.
-      expect(env).toContain('// TRIAGER?: {')
-      expect(parseSourceFile(env, 'env.ts')).not.toBeNull()
+      expect(bindings).toContain('// TRIAGER?: {')
+      expect(parseSourceFile(bindings, 'bindings.ts')).not.toBeNull()
+    })
+  })
+
+  // RFC 0027 §1: config/env.ts is the env schema, which declares no bindings.
+  it('writes config/bindings.ts beside an env schema and leaves the schema alone', async () => {
+    await inWorkspace(async (dir) => {
+      const schema = "import { defineEnv, Env } from '@guren/core'\n\nexport default defineEnv({ APP_KEY: Env.string() })\n"
+      await writeWorkspaceFiles(dir, { 'config/env.ts': schema })
+
+      const result = await makeAgent('Triager', { cwd: dir })
+
+      expect(await read(dir, 'app/Agents/Triager.ts')).toContain("import type { Env } from '@/config/bindings'")
+      expect(result.patches).toContainEqual({ file: 'config/bindings.ts', status: 'created' })
+      expect(await read(dir, 'config/env.ts')).toBe(schema)
     })
   })
 
   for (const [label, handWritten] of [
     ['declares Env', 'export interface Env {\n  DB: unknown\n  QUEUE: unknown\n}\n'],
-    ['re-exports Env', "export type { Env } from './bindings'\n"],
+    ['re-exports Env', "export type { Env } from './workers'\n"],
   ] as Array<[string, string]>) {
-    it(`leaves an existing config/env.ts alone when it ${label}`, async () => {
+    it(`leaves an existing config/bindings.ts alone when it ${label}`, async () => {
       await inWorkspace(async (dir) => {
-        await writeWorkspaceFiles(dir, { 'config/env.ts': handWritten })
+        await writeWorkspaceFiles(dir, { 'config/bindings.ts': handWritten })
 
         const result = await makeAgent('Triager', { cwd: dir })
 
         expect(result.patches).toContainEqual({
-          file: 'config/env.ts',
+          file: 'config/bindings.ts',
           status: 'skipped',
           reason: 'it already exports `Env`',
         })
-        expect(await read(dir, 'config/env.ts')).toBe(handWritten)
+        expect(await read(dir, 'config/bindings.ts')).toBe(handWritten)
       })
     })
   }
 
-  it('refuses a config/env.ts that exports no Env and hands back the interface', async () => {
+  it('keeps importing Env from the config/env.ts an earlier make:agent wrote', async () => {
     await inWorkspace(async (dir) => {
-      const other = 'export interface Bindings {\n  DB: unknown\n}\n'
-      await writeWorkspaceFiles(dir, { 'config/env.ts': other })
+      const legacy = 'export interface Env {\n  DB: unknown\n}\n'
+      await writeWorkspaceFiles(dir, { 'config/env.ts': legacy })
 
       const result = await makeAgent('Triager', { cwd: dir })
-      const patch = result.patches.find((entry) => entry.file === 'config/env.ts')
+
+      expect(await read(dir, 'app/Agents/Triager.ts')).toContain("import type { Env } from '@/config/env'")
+      expect(result.patches).toContainEqual({ file: 'config/env.ts', status: 'skipped', reason: 'it already exports `Env`' })
+      expect(result.patches.some((patch) => patch.file === 'config/bindings.ts')).toBe(false)
+    })
+  })
+
+  it('refuses a config/bindings.ts that exports no Env and hands back the interface', async () => {
+    await inWorkspace(async (dir) => {
+      const other = 'export interface Bindings {\n  DB: unknown\n}\n'
+      await writeWorkspaceFiles(dir, { 'config/bindings.ts': other })
+
+      const result = await makeAgent('Triager', { cwd: dir })
+      const patch = result.patches.find((entry) => entry.file === 'config/bindings.ts')
 
       expect(patch?.status).toBe('refused')
       if (patch?.status !== 'refused') return
       expect(patch.reason).toContain('exports no `Env`')
       expect(patch.snippet).toContain('export interface Env {')
-      expect(await read(dir, 'config/env.ts')).toBe(other)
+      expect(await read(dir, 'config/bindings.ts')).toBe(other)
     })
   })
 

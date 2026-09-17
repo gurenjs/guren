@@ -62,7 +62,7 @@ bunx guren make:agent Triager
 | `app/Agents/Triager.ts` | クラス本体: state の形、cron スケジュール、ツール呼び出し1つ |
 | `config/agents.ts` | 登録エントリ。ファイルがなければ作成し、あればパッチします |
 | `guren.arch.ts` | `app/Agents/**` から `app/Models/**`・`db/**`・`@guren/orm`・`@guren/plugin-agents/runtime` への import を禁じるルール |
-| `config/env.ts` | クラスが import する `Env`: D1 バインディングと、エージェントの Durable Object namespace 用のコメントアウトされたスロット。なければ作成し、すでに `Env` を export していればそのままにします |
+| `config/bindings.ts` | クラスが import する `Env`: D1 バインディングと、エージェントの Durable Object namespace 用のコメントアウトされたスロット。なければ作成し、すでに `Env` を export していればそのままにします。以前の `make:agent` が `config/env.ts` に `Env` を書いたアプリは、引き続きそこから import します |
 | `tsconfig.json` | `compilerOptions.types` に `@cloudflare/workers-types` を追記します。`Cloudflare.Env` と `DurableObject` はここから来ます |
 
 既存ファイルはその場でパッチされます。当てられなかったパッチは黙って飛ばさず、貼り付け用のテキストとともに報告します。登録されているように見えて実際はされていないアプリが残るほうが、メッセージ1つよりも困るからです。`types` 配列のない tsconfig や、コメントを含む tsconfig には、代わりに追加すべき行を表示します。
@@ -72,10 +72,10 @@ bunx guren make:agent Triager
 - **`src/app.ts` には触れません。** 上記のとおり `agentsPlugin(agents)` は自分で `createApp({ providers })` に追加してください。
 - **依存関係。** アプリに `@cloudflare/workers-types` がなければ `bun add -d @cloudflare/workers-types` を実行します。その場合はコマンドがそう伝えます。
 
-`config/env.ts` が `wrangler types` による生成ではなく手書きなのは、この型を `tsc` と Bun のテスト実行の両方が読むからです。どちらも「先に wrangler を実行してあること」を前提にはできません。`@cloudflare/workers-types` が宣言するのは `Cloudflare.Env` で素の `Env` ではないので、クラスはアプリ自身のものを import します。バインディングが増えたら広げてください。
+`config/bindings.ts` が `wrangler types` による生成ではなく手書きなのは、この型を `tsc` と Bun のテスト実行の両方が読むからです。どちらも「先に wrangler を実行してあること」を前提にはできません。`@cloudflare/workers-types` が宣言するのは `Cloudflare.Env` で素の `Env` ではないので、クラスはアプリ自身のものを import します。バインディングが増えたら広げてください。
 
 ```ts
-// config/env.ts
+// config/bindings.ts
 export interface Env {
   /** D1 バインディング。ORM しか読まないので `unknown` */
   DB: unknown
@@ -156,7 +156,7 @@ agentsPlugin({
 // app/Agents/Triager.ts
 import { GurenAgent } from '@guren/plugin-agents/agent'
 
-import type { Env } from '@/config/env'
+import type { Env } from '@/config/bindings'
 
 interface TriagerState {
   lastRunAt: string | null
@@ -349,7 +349,7 @@ export default defineAgentsConfig({
 import { Controller } from '@guren/core'
 import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
-import type { Env } from '@/config/env'
+import type { Env } from '@/config/bindings'
 
 export default class AgentOpsController extends Controller {
   async sweep(): Promise<Response> {
