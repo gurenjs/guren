@@ -15,6 +15,9 @@ export type {
   PromptOptions,
 } from './agent'
 
+export { ChatTurnSchema } from './chat'
+export type { ChatTurn } from './chat'
+
 export { appToolDefinitions, appTools } from './app-tools'
 export type { AppToolDefinition, AppToolDenial, AppToolError } from './app-tools'
 

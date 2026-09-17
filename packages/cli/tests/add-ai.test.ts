@@ -348,7 +348,8 @@ describe('guren add ai', () => {
         const store = new DatabaseConversationStore(options)
         const owner = { kind: 'user', id: 1 }
 
-        const id = await store.create({ agentName: 'support', owner, messages: [{ role: 'user', content: 'one' }] })
+        const id = crypto.randomUUID()
+        await store.create({ id, agentName: 'support', owner, messages: [{ role: 'user', content: 'one' }] })
         await store.append(id, owner, [{ role: 'assistant', content: 'two' }])
 
         expect(await store.load(id, owner)).toEqual({

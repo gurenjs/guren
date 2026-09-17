@@ -20,6 +20,7 @@ import {
 import { appToolDefinitions, appTools, type AppToolDefinition, type AppToolDenial, type AppToolError } from './app-tools'
 import { readAgentContext, setAgentContext, type AgentContext } from './context'
 import type { AiManager } from './manager'
+import { CONVERSATION_HEADER } from './protocol'
 import type { AgentToolInput, AgentToolName, AgentToolOutput, AgentToolScope, AiProviderName, Granted } from './types'
 
 /** What `as()` accepts: a principal, or a user record contributing its `id` (and `abilities`, if it carries them). */
@@ -57,6 +58,11 @@ export interface BoundAgent<T extends Agent> {
   /** The constructed instance, principal and container already set. */
   readonly agent: T
   prompt(input: string, options?: PromptOptions): Promise<AgentResponse<InferAgentOutput<T>>>
+  /**
+   * `prompt()` as a UI-message stream `Response` for `useChat`, with the conversation id in the
+   * `X-Guren-Conversation` header when the call starts or continues one (RFC 0029 §4).
+   */
+  stream(input: string, options?: PromptOptions): Promise<Response>
   /** The same agent, prompting within conversation `id`, which this principal must have started with this agent. */
   continue(id: string): BoundAgent<T>
 }
@@ -208,53 +214,72 @@ export function bindAgent<T extends Agent>(
 
   const agentName = resolveAgentName(cls)
 
+  const run = async (input: string, options: PromptOptions, bound: string | undefined) => {
+    if (bound !== undefined && options.conversation !== undefined && options.conversation !== bound) {
+      throw new Error(
+        `${agentName} is bound to conversation "${bound}" by continue(), and this call asks for `
+        + `${options.conversation === true ? 'a new one' : `"${options.conversation}"`}. Pass one or the other.`,
+      )
+    }
+    // Settled before `model()`: a refused conversation must reach no model, and a fake's script.
+    const history = await openConversation(options.conversation ?? bound)
+    const userMessage: ModelMessage = { role: 'user', content: input }
+    const output = (instance as { output?: OutputInterface }).output
+    const loop = new ToolLoopAgent({
+      id: agentName,
+      model: scope.manager.model(options.provider ?? instance.provider),
+      instructions: instance.instructions,
+      tools,
+      ...(output ? { output } : {}),
+      stopWhen: instance.stopWhen ?? stepCountIs(DEFAULT_STOP_WHEN),
+    })
+    const call = {
+      ...(history ? { messages: [...history.messages, userMessage] } : { prompt: input }),
+      ...(options.signal ? { abortSignal: options.signal } : {}),
+    }
+    // Only once the model has answered: a failed or aborted turn stores nothing, and a new conversation no row.
+    const store = async (responseMessages: readonly ModelMessage[]) => {
+      if (!history) return
+      const turn = [userMessage, ...responseMessages]
+      if (history.isNew) {
+        await history.store.create({ id: history.id, agentName, owner: history.owner, messages: turn })
+      } else {
+        await history.store.append(history.id, history.owner, turn)
+      }
+    }
+    return { history, output, loop, call, store }
+  }
+
   const bound = (conversation: string | undefined): BoundAgent<T> => ({
     agent: instance,
     continue: (id) => bound(id),
     prompt: async (input, options = {}) => {
-      if (conversation !== undefined && options.conversation !== undefined && options.conversation !== conversation) {
-        throw new Error(
-          `${agentName} is bound to conversation "${conversation}" by continue(), and this prompt asks for `
-          + `${options.conversation === true ? 'a new one' : `"${options.conversation}"`}. Pass one or the other.`,
-        )
-      }
-      // Settled before `model()`: a refused conversation must reach no model, and a fake's script.
-      const history = await openConversation(options.conversation ?? conversation)
-      const userMessage: ModelMessage = { role: 'user', content: input }
-
-      const output = (instance as { output?: OutputInterface }).output
-      const loop = new ToolLoopAgent({
-        id: agentName,
-        model: scope.manager.model(options.provider ?? instance.provider),
-        instructions: instance.instructions,
-        tools,
-        ...(output ? { output } : {}),
-        stopWhen: instance.stopWhen ?? stepCountIs(DEFAULT_STOP_WHEN),
-      })
-      const result = await loop.generate({
-        ...(history ? { messages: [...history.messages, userMessage] } : { prompt: input }),
-        ...(options.signal ? { abortSignal: options.signal } : {}),
-      })
-
-      let conversationId: string | undefined
-      if (history) {
-        const turn = [userMessage, ...result.responseMessages]
-        // Created only once the model has answered, so a failed first prompt leaves no empty conversation.
-        if (history.id === undefined) {
-          conversationId = await history.store.create({ agentName, owner: history.owner, messages: turn })
-        } else {
-          conversationId = history.id
-          await history.store.append(conversationId, history.owner, turn)
-        }
-      }
+      const { history, output, loop, call, store } = await run(input, options, conversation)
+      const result = await loop.generate(call)
+      await store(result.responseMessages)
       return {
         text: result.text,
         output: (output ? result.output : result.text) as InferAgentOutput<T>,
         steps: result.steps as Array<StepResult<ToolSet>>,
         usage: result.usage,
         finishReason: result.finishReason,
-        ...(conversationId ? { conversationId } : {}),
+        ...(history ? { conversationId: history.id } : {}),
       }
+    },
+    stream: async (input, options = {}) => {
+      const { history, loop, call, store } = await run(input, options, conversation)
+      const result = await loop.stream({
+        ...call,
+        onEnd: async (event) => {
+          // The response has already started, so a storage failure has no status to set; the body waits for this.
+          try {
+            await store(event.responseMessages)
+          } catch (error) {
+            console.error(`[@guren/plugin-ai] ${agentName} could not store its turn in conversation "${history?.id}".`, error)
+          }
+        },
+      })
+      return result.toUIMessageStreamResponse(history ? { headers: { [CONVERSATION_HEADER]: history.id } } : {})
     },
   })
 
@@ -274,7 +299,7 @@ export function bindAgent<T extends Agent>(
       )
     }
     const store = scope.manager.conversations()
-    if (requested === true) return { store, owner, id: undefined, messages: [] as ModelMessage[] }
+    if (requested === true) return { store, owner, id: crypto.randomUUID(), isNew: true, messages: [] as ModelMessage[] }
     const stored = await store.load(requested, owner)
     if (!stored) {
       throw new Error(`${agentName} cannot continue conversation "${requested}": no conversation with that id belongs to this principal.`)
@@ -285,7 +310,7 @@ export function bindAgent<T extends Agent>(
         + 'Continue it with that agent, or start a new one.',
       )
     }
-    return { store, owner, id: requested, messages: stored.messages }
+    return { store, owner, id: requested, isNew: false, messages: stored.messages }
   }
 
   return bound(undefined)

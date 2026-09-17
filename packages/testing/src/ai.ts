@@ -45,8 +45,9 @@ export interface FakeAiRecordedToolCall {
 export interface FakeAiCall {
   input: string
   principal: AgentPrincipalInput
-  /** Empty until the prompt settles, and for a prompt that failed before any step finished. */
+  /** Empty until the prompt settles (for `stream()`, until its body is read), and when no step finished. */
   toolCalls: FakeAiRecordedToolCall[]
+  /** Set by `prompt()`; a `stream()` call answers with a `Response` instead. */
   response?: AgentResponse<unknown>
   error?: unknown
 }
@@ -223,23 +224,27 @@ export class FakeAi implements AiManager, Disposable {
   }
 
   private recording<T extends Agent>(name: string, principal: AgentPrincipalInput, bound: BoundAgent<T>): BoundAgent<T> {
+    const record = async <R>(input: string, run: (call: FakeAiCall) => Promise<R>): Promise<R> => {
+      const call: FakeAiCall = { input, principal, toolCalls: [] }
+      // Recorded on entry: a prompt that throws was still made.
+      listFor(this.recorded, name).push(call)
+      try {
+        return await run(call)
+      } catch (error) {
+        call.error = error
+        throw error
+      }
+    }
     return {
       agent: bound.agent,
       continue: (id) => this.recording(name, principal, bound.continue(id)),
-      prompt: async (input, options) => {
-        const call: FakeAiCall = { input, principal, toolCalls: [] }
-        // Recorded on entry: a prompt that throws was still made.
-        listFor(this.recorded, name).push(call)
-        try {
-          const response = await bound.prompt(input, options)
-          call.response = response
-          call.toolCalls = recordedToolCalls(response.steps)
-          return response
-        } catch (error) {
-          call.error = error
-          throw error
-        }
-      },
+      prompt: (input, options) => record(input, async (call) => {
+        const response = await bound.prompt(input, options)
+        call.response = response
+        call.toolCalls = recordedToolCalls(response.steps)
+        return response
+      }),
+      stream: (input, options) => record(input, async (call) => tapToolCalls(await bound.stream(input, options), call)),
     }
   }
 
@@ -262,28 +267,46 @@ export class FakeAi implements AiManager, Disposable {
     const steps = flatten(response)
     let step = 0
     this.progress.push({ name, consumed: () => step, total: steps.length })
+    const next = () => {
+      const index = step++
+      const current = steps[index]
+      // Unreachable while `bindAgent` resolves a model per prompt; guards a memoized one.
+      if (current === undefined) {
+        return this.fail(`Agent [${name}] asked the model for step ${index + 1}, but its scripted response has ${steps.length}.`)
+      }
+      return 'text' in current
+        ? { content: [{ type: 'text' as const, text: current.text }], finishReason: { unified: 'stop' as const, raw: undefined } }
+        : {
+            content: current.toolCalls.map((toolCall, callIndex) => ({
+              type: 'tool-call' as const,
+              toolCallId: `fake-${index}-${callIndex}`,
+              toolName: toolCall.name,
+              input: JSON.stringify(toolCall.input ?? {}),
+            })),
+            finishReason: { unified: 'tool-calls' as const, raw: undefined },
+          }
+    }
     return new this.runtime.MockLanguageModelV4({
       modelId: `fake:${name}`,
-      doGenerate: async () => {
-        const index = step++
-        const current = steps[index]
-        // Unreachable while `bindAgent` resolves a model per prompt; guards a memoized one.
-        if (current === undefined) {
-          return this.fail(`Agent [${name}] asked the model for step ${index + 1}, but its scripted response has ${steps.length}.`)
-        }
-        if ('text' in current) {
-          return { content: [{ type: 'text', text: current.text }], finishReason: { unified: 'stop', raw: undefined }, usage: USAGE, warnings: [] }
-        }
+      doGenerate: async () => ({ ...next(), usage: USAGE, warnings: [] }),
+      doStream: async () => {
+        const { content, finishReason } = next()
+        const parts: unknown[] = [{ type: 'stream-start', warnings: [] }]
+        content.forEach((part, index) => {
+          if (part.type === 'text') {
+            parts.push({ type: 'text-start', id: `text-${index}` }, { type: 'text-delta', id: `text-${index}`, delta: part.text }, { type: 'text-end', id: `text-${index}` })
+          } else {
+            parts.push(part)
+          }
+        })
+        parts.push({ type: 'finish', finishReason, usage: USAGE })
         return {
-          content: current.toolCalls.map((toolCall, callIndex) => ({
-            type: 'tool-call',
-            toolCallId: `fake-${index}-${callIndex}`,
-            toolName: toolCall.name,
-            input: JSON.stringify(toolCall.input ?? {}),
-          })),
-          finishReason: { unified: 'tool-calls', raw: undefined },
-          usage: USAGE,
-          warnings: [],
+          stream: new ReadableStream({
+            start(controller) {
+              for (const part of parts) controller.enqueue(part)
+              controller.close()
+            },
+          }) as never,
         }
       },
     })
@@ -320,6 +343,38 @@ function flatten(response: FakeAiResponse): FakeAiStep[] {
   if ('toolCalls' in response) return [{ toolCalls: response.toolCalls }, ...flatten(response.then)]
   if ('output' in response) return [{ text: JSON.stringify(response.output) }]
   return [{ text: response.text }]
+}
+
+/** Fill `call.toolCalls` from the UI-message chunks as the body is read, passing every byte through. */
+function tapToolCalls(response: Response, call: FakeAiCall): Response {
+  if (!response.body) return response
+  const decoder = new TextDecoder()
+  const byId = new Map<string, FakeAiRecordedToolCall>()
+  let pending = ''
+  const tap = new TransformStream<Uint8Array, Uint8Array>({
+    transform(bytes, controller) {
+      controller.enqueue(bytes)
+      pending += decoder.decode(bytes, { stream: true })
+      const lines = pending.split('\n')
+      pending = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: {')) continue
+        const chunk = JSON.parse(line.slice('data: '.length)) as { type: string; toolCallId?: string; toolName?: string; input?: unknown; output?: unknown; errorText?: string }
+        if (chunk.type === 'tool-input-available' && chunk.toolCallId) {
+          const recorded: FakeAiRecordedToolCall = { name: chunk.toolName ?? '', input: chunk.input }
+          byId.set(chunk.toolCallId, recorded)
+          call.toolCalls.push(recorded)
+        } else if (chunk.type === 'tool-output-available' && chunk.toolCallId) {
+          const recorded = byId.get(chunk.toolCallId)
+          if (recorded) recorded.output = chunk.output
+        } else if (chunk.type === 'tool-output-error' && chunk.toolCallId) {
+          const recorded = byId.get(chunk.toolCallId)
+          if (recorded) recorded.error = chunk.errorText
+        }
+      }
+    },
+  })
+  return new Response(response.body.pipeThrough(tap), response)
 }
 
 function recordedToolCalls(steps: ReadonlyArray<StepResult<ToolSet>>): FakeAiRecordedToolCall[] {

@@ -160,7 +160,7 @@ describe('conversations through prompt() and continue()', () => {
     const { conversationId } = await support.prompt('Hi', { conversation: true })
 
     await expect(support.continue(conversationId!).prompt('again', { conversation: true }))
-      .rejects.toThrow(`support is bound to conversation "${conversationId}" by continue(), and this prompt asks for a new one.`)
+      .rejects.toThrow(`support is bound to conversation "${conversationId}" by continue(), and this call asks for a new one.`)
     expect(model.doGenerateCalls).toHaveLength(1)
   })
 })
@@ -168,7 +168,8 @@ describe('conversations through prompt() and continue()', () => {
 describe('MemoryConversationStore', () => {
   test('should keep its history from a caller mutating what it loaded or appended', async () => {
     const store = new MemoryConversationStore()
-    const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
+    const id = crypto.randomUUID()
+    await store.create({ id, agentName: 'support', owner: USER, messages: [] })
     const message = { role: 'user' as const, content: 'original' }
     await store.append(id, USER, [message])
 
@@ -229,7 +230,8 @@ describe('DatabaseConversationStore', () => {
   for (const [mode, table] of [['json', messages], ['text', messagesText]] as const) {
     test(`should load appended messages in position order across appends (${mode} column)`, async () => {
       const store = new DatabaseConversationStore({ conversations, messages: table, dataMode: mode })
-      const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
+      const id = crypto.randomUUID()
+      await store.create({ id, agentName: 'support', owner: USER, messages: [] })
 
       await store.append(id, USER, [{ role: 'user', content: 'one' }, { role: 'assistant', content: 'two' }])
       await store.append(id, USER, [{ role: 'user', content: 'three' }, { role: 'assistant', content: 'four' }])
@@ -248,7 +250,8 @@ describe('DatabaseConversationStore', () => {
 
   test('should answer null for another owner, and refuse its append without writing', async () => {
     const store = new DatabaseConversationStore({ conversations, messages })
-    const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
+    const id = crypto.randomUUID()
+    await store.create({ id, agentName: 'support', owner: USER, messages: [] })
     const intruder: AgentPrincipal = { kind: 'user', id: '1' }
 
     expect(await store.load(id, intruder)).toBeNull()
@@ -260,6 +263,7 @@ describe('DatabaseConversationStore', () => {
     const store = new DatabaseConversationStore({ conversations, messages })
 
     await expect(store.create({
+      id: crypto.randomUUID(),
       agentName: 'support',
       owner: USER,
       messages: [{ role: 'user', content: [{ type: 'text', text: 'x', providerOptions: { bad: { n: 1n } } as never }] }],
@@ -270,7 +274,8 @@ describe('DatabaseConversationStore', () => {
 
   test('should write none of an append whose later message fails to store', async () => {
     const store = new DatabaseConversationStore({ conversations, messages })
-    const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
+    const id = crypto.randomUUID()
+    await store.create({ id, agentName: 'support', owner: USER, messages: [] })
 
     await expect(store.append(id, USER, [
       { role: 'user', content: 'stored first' },
@@ -282,7 +287,8 @@ describe('DatabaseConversationStore', () => {
 
   test('should store binary file data as base64, which replays as the same bytes', async () => {
     const store = new DatabaseConversationStore({ conversations, messages })
-    const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
+    const id = crypto.randomUUID()
+    await store.create({ id, agentName: 'support', owner: USER, messages: [] })
 
     await store.append(id, USER, [{
       role: 'assistant',

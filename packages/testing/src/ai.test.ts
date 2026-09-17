@@ -242,6 +242,32 @@ describe('TestApp.fakeAi', () => {
     expect((await summarizer.as(null).prompt('y')).text).toBe('kept for the next prompt')
   })
 
+  it('should stream a scripted answer and record the tools it ran once the body is read', async () => {
+    using ai = app.fakeAi()
+    ai.respond(Writer, [{ toolCalls: [{ name: 'posts_store', input: { title: 'Streamed' } }], then: 'Created it.' }])
+
+    const response = await application.container.make('ai').agent(Writer).as({ id: 1 }).stream('Write it')
+    const body = await response.text()
+
+    expect(body).toContain('"delta":"Created it."')
+    expect(created).toEqual(['Streamed'])
+    expect(ai.calls(Writer)[0]!.toolCalls).toEqual([
+      { name: 'posts_store', input: { title: 'Streamed' }, output: { created: 'Streamed' } },
+    ])
+  })
+
+  it('should record a stream made through continue()', async () => {
+    using ai = app.fakeAi()
+    ai.respond(Summarizer, ['first', 'second'])
+    const summarizer = application.container.make('ai').agent(Summarizer).as({ id: 1 })
+
+    const first = await summarizer.stream('one', { conversation: true })
+    await first.text()
+    await (await summarizer.continue(first.headers.get('X-Guren-Conversation')!).stream('two')).text()
+
+    expect(ai.calls(Summarizer).map((call) => call.input)).toEqual(['one', 'two'])
+  })
+
   it('should restore the real manager on dispose', async () => {
     {
       using ai = app.fakeAi()
