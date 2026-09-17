@@ -2,7 +2,12 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS } from '@guren/core/internal/deploy-build'
+import {
+  DEV_ONLY_MODULES,
+  DOCUMENT_ASSET_EXTENSIONS,
+  DOCUMENT_ASSET_HEADERS,
+  SQL_CLIENT_MODULES,
+} from '@guren/core/internal/deploy-build'
 import { buildCloudflareOutput } from './build'
 
 import { CLIENT_MANIFEST, captureWarnings, scaffoldApp, writeJson } from '../tests/app-fixture'
@@ -520,8 +525,9 @@ describe('workers runtime configuration', () => {
     expect(config.alias['bun:sqlite']).toBe('./.cloudflare/stub-bun-sqlite.js')
     expect(config.alias.vite).toBe('./.cloudflare/stub-vite.js')
     expect(config.alias['@guren/cli']).toBe('./.cloudflare/stub-guren-cli.js')
-    // The MCP SDK is imported only by @guren/cli and @guren/plugin-mcp (RFC 0028).
-    expect(Object.keys(config.alias).filter((key) => key.startsWith('@modelcontextprotocol/'))).toEqual([])
+    expect(Object.keys(config.alias).sort()).toEqual(
+      [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES].map((module) => module.specifier).sort(),
+    )
     expect(config.define['process.env.NODE_ENV']).toBe('"production"')
 
     expect(readFileSync(join(root, '.cloudflare/stub-bun-sqlite.js'), 'utf8')).toContain('throw new Error')

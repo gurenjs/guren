@@ -406,7 +406,7 @@ describe('buildLambdaOutput', () => {
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
     const bundle = readFileSync(join(root, '.lambda/function/handler.js'), 'utf8')
-    expect(bundle).toContain('The Dev MCP endpoint is unavailable on AWS Lambda')
+    expect(bundle).toContain('The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on AWS Lambda')
     expect(bundle).not.toContain('fake-guren-cli')
   })
 })

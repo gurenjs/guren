@@ -20,8 +20,7 @@ export interface ScaffoldAppOptions {
   ssr?: boolean
   renderExport?: string
   /**
-   * Declare `@guren/plugin-mcp` under `dependencies` — the App MCP opt-in the
-   * build reads (RFC 0016 §7).
+   * Declare `@guren/plugin-mcp` under `dependencies`, which `--mcp-oauth` requires.
    */
   mcpPlugin?: boolean
   /** Declare `@cloudflare/workers-oauth-provider` under `dependencies`. */

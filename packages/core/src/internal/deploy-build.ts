@@ -416,7 +416,7 @@ export const DOCUMENT_ASSET_HEADERS: Readonly<Record<string, string>> = {
 }
 
 /** What a dev-only module is needed for, so a plugin can word its own message. */
-export type DevOnlyModuleKind = 'sqlite' | 'vite' | 'mcp' | 'sql-driver'
+export type DevOnlyModuleKind = 'sqlite' | 'vite' | 'guren-cli' | 'sql-driver'
 
 export interface DevOnlyModule {
   readonly specifier: string
@@ -444,7 +444,7 @@ export interface DevOnlyModule {
 export const DEV_ONLY_MODULES = [
   { specifier: 'bun:sqlite', kind: 'sqlite', exportNames: ['Database'], importedBy: 'packages/orm/src' },
   { specifier: 'vite', kind: 'vite', exportNames: ['createServer'], importedBy: 'packages/server/src' },
-  { specifier: '@guren/cli', kind: 'mcp', exportNames: [], importedBy: 'packages/server/src' },
+  { specifier: '@guren/cli', kind: 'guren-cli', exportNames: [], importedBy: 'packages/server/src' },
 ] as const satisfies readonly DevOnlyModule[]
 
 /** The package an app declares to opt into the App MCP endpoint. */

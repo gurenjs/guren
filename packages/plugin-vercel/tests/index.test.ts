@@ -359,7 +359,7 @@ describe('@guren/plugin-vercel', () => {
 
       const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
       expect(bundle).toContain('fake-sdk-v2-server')
-      expect(bundle).not.toContain('The Dev MCP endpoint is unavailable on Vercel')
+      expect(bundle).not.toContain('The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on Vercel')
     })
 
     it('stubs @guren/cli, which serves the Dev MCP', async () => {
@@ -376,7 +376,7 @@ describe('@guren/plugin-vercel', () => {
       await buildVercelOutput(app)
 
       const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
-      expect(bundle).toContain('The Dev MCP endpoint is unavailable on Vercel')
+      expect(bundle).toContain('The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on Vercel')
       expect(bundle).not.toContain('fake-guren-cli')
     })
   })

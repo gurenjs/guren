@@ -50,8 +50,6 @@ export interface BuildLambdaOutputOptions {
   databaseDialects?: readonly DatabaseDialect[]
 }
 
-const MCP_UNAVAILABLE = 'The Dev MCP endpoint is unavailable on AWS Lambda — it generates files on disk.'
-
 /**
  * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, each naming
  * the Lambda-appropriate replacement. Keyed only on the kinds this platform
@@ -61,7 +59,8 @@ const MCP_UNAVAILABLE = 'The Dev MCP endpoint is unavailable on AWS Lambda — i
 const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string> = {
   sqlite: 'bun:sqlite is unavailable on AWS Lambda — use createAwsDataApiDatabase() or createPostgresDatabase().',
   vite: 'The Vite dev server is unavailable on AWS Lambda — serve assets from S3/CloudFront.',
-  mcp: MCP_UNAVAILABLE,
+  'guren-cli':
+    'The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on AWS Lambda — they read and generate files on disk.',
 }
 
 /**

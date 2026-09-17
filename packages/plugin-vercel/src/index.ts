@@ -208,9 +208,6 @@ function documentAssetPattern(): string {
   return `^/.*\\.(?:${alternatives})$`
 }
 
-const MCP_UNAVAILABLE =
-  'The Dev MCP endpoint is unavailable on Vercel — it generates files on disk, and the function filesystem is read-only.'
-
 /**
  * Why each dev-only module cannot run here, or `null` for one that can. `sqlite`
  * is the `null`: the function runs on Vercel's Bun runtime, so `bun:sqlite` works
@@ -221,7 +218,8 @@ const MCP_UNAVAILABLE =
 const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string | null> = {
   sqlite: null,
   vite: 'The Vite dev server is unavailable on Vercel — assets are served from the static output directory.',
-  mcp: MCP_UNAVAILABLE,
+  'guren-cli':
+    'The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on Vercel — they read and generate files on disk, and the function filesystem is read-only.',
 }
 
 /**

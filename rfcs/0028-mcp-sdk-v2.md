@@ -309,8 +309,9 @@ moved into plugin-cloudflare as the `appDependsOn` it already had, and Lambda an
 Vercel stopped reading the manifest. `importedBy` is a `string` again. The two retired
 stub files are no longer written either: wrangler 4.129 bundles a worker whose
 unused `alias` names a missing file (`deploy --dry-run` exits 0), so the committed
-lines are inert rather than breaking. `MCP_UNAVAILABLE` now says "Dev MCP endpoint" on all three targets:
-the App MCP endpoint does serve there. The plugin-agents fixture declares
+lines are inert rather than breaking. The `mcp` kind became `guren-cli`, and its message on all three targets names
+the Dev MCP endpoint and the docs viewer: `@guren/cli` backs both, and the App MCP
+endpoint does serve there. The plugin-agents fixture declares
 `@guren/plugin-mcp`, which the removed guard used to refuse.
 
 From then on the `@guren/cli` stub is the only thing keeping SDK v2 out of the bundle
