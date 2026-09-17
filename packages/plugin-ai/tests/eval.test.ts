@@ -1,0 +1,685 @@
+process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { createApp, type Application } from '@guren/core'
+import { MockLanguageModelV4 } from 'ai/test'
+
+import { Agent, aiPlugin, defineAiConfig } from '../src'
+import {
+  defineEval,
+  fromJsonl,
+  hillclimbReporter,
+  parseJsonlCases,
+  runEval,
+  summarizeMetrics,
+  computeCostUsd,
+  type EvalCase,
+  type EvalReporter,
+  type EvalRow,
+  type EvalTraceTurn,
+} from '../src/eval'
+import { scriptedModel, type ScriptedStep } from './fixture'
+
+const PRICING = { input: 3, output: 15 }
+
+class Triager extends Agent {
+  static override agentName = 'triager'
+  instructions = 'Triage the ticket.'
+}
+
+class Judge extends Agent {
+  static override agentName = 'judge'
+  instructions = 'Score the answer.'
+  override provider = 'judge'
+}
+
+class ToolUser extends Agent<typeof ToolUser.scopes> {
+  static override agentName = 'tool-user'
+  static override scopes = ['tool:posts_index'] as const
+  instructions = 'Read the posts.'
+
+  override tools() {
+    return this.appTools(['posts_index'])
+  }
+}
+
+interface EvalHarness {
+  app: Application
+  container: Application['container']
+}
+
+async function bootEvalApp(options: {
+  model: MockLanguageModelV4
+  judgeModel?: MockLanguageModelV4
+  pricing?: { input: number; output: number; cacheRead?: number }
+} = { model: scriptedModel([{ text: 'ok' }]) }): Promise<EvalHarness> {
+  const app = createApp({
+    routes: (router) => {
+      router
+        .get('/posts', () => Response.json({ posts: [{ id: 1 }] }))
+        .name('posts_index')
+        .agent({ description: 'List posts' })
+    },
+    config: [
+      defineAiConfig(() => ({
+        default: 'main',
+        providers: {
+          main: { model: () => options.model, ...(options.pricing ? { pricing: options.pricing } : {}) },
+          judge: { model: () => options.judgeModel ?? options.model, pricing: { input: 1, output: 1 } },
+        },
+      })),
+    ],
+    providers: [aiPlugin()],
+  })
+  await app.boot()
+  return { app, container: app.container }
+}
+
+function cases(...ids: string[]): EvalCase[] {
+  return ids.map((id) => ({ id, input: `prompt ${id}`, expected: { answer: 'yes' }, tags: ['billing'] }))
+}
+
+/** A reporter that keeps everything in memory, so a test asserts the runner and not the disk. */
+interface MemoryReporter extends EvalReporter {
+  rows: EvalRow[]
+  traces: EvalTraceTurn[][]
+  failures: Array<{ message: string }>
+}
+
+function memoryReporter(completed: EvalRow[] = []): MemoryReporter {
+  const rows: EvalRow[] = []
+  const traces: EvalTraceTurn[][] = []
+  const failures: Array<{ message: string }> = []
+  return {
+    rows,
+    traces,
+    failures,
+    begin: () => ({
+      completed,
+      location: '(memory)',
+      row: (row, trace) => { rows.push(row); traces.push(trace) },
+      failure: (failure) => { failures.push(failure) },
+      end: () => {},
+    }),
+  }
+}
+
+function answering(steps: ScriptedStep[]): MockLanguageModelV4 {
+  return scriptedModel(steps)
+}
+
+/** Always answers, but stops for length: the plumbing status, not a model result. */
+function truncatingModel(): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    doGenerate: async () => ({
+      content: [{ type: 'text' as const, text: 'half an ans' }],
+      finishReason: { unified: 'length' as const, raw: undefined },
+      usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 4, text: 4, reasoning: 0 } },
+      warnings: [],
+    }),
+  })
+}
+
+const temporaries: string[] = []
+afterEach(() => {
+  for (const directory of temporaries.splice(0)) rmSync(directory, { recursive: true, force: true })
+})
+
+function scratch(): string {
+  const directory = mkdtempSync(resolve(tmpdir(), 'guren-eval-'))
+  temporaries.push(directory)
+  return directory
+}
+
+describe('runEval', () => {
+  test('should run each case in its own app and record model, usage, cost and scores', async () => {
+    const built: Application[] = []
+    const reporter = memoryReporter()
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: async () => {
+          const harness = await bootEvalApp({ model: answering([{ text: 'billing' }]), pricing: PRICING })
+          built.push(harness.app)
+          return harness
+        },
+        cases: cases('a', 'b'),
+        grade: ({ response }) => ({ category: response.text === 'billing' ? 1 : 0 }),
+        metrics: [{ id: 'category', kind: 'binary' }],
+        reporter,
+      }),
+    )
+
+    expect(built).toHaveLength(2)
+    expect(result.rows.map((row) => row.caseId)).toEqual(['a', 'b'])
+    expect(result.rows[0]!.model).toBe('mock-model-id')
+    expect(result.rows[0]!.status).toBe('ok')
+    expect(result.rows[0]!.scores).toEqual({ category: 1 })
+    expect(result.rows[0]!.usage.inputTokens).toBe(3)
+    expect(result.rows[0]!.costUsd).toBeCloseTo((3 * 3 + 2 * 15) / 1_000_000, 12)
+    expect(result.summary.metrics[0]).toMatchObject({ id: 'category', mean: 1, n: 2 })
+    expect(result.summary.metrics[0]!.halfWidth).toBeCloseTo(1 / Math.sqrt(2), 12)
+  })
+
+  test('should leave costUsd absent, never zero, for a provider that configures no pricing', async () => {
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]) }),
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+    )
+
+    expect(Object.hasOwn(result.rows[0]!, 'costUsd')).toBe(false)
+    expect(result.summary.costUsd).toBeUndefined()
+  })
+
+  test('should warn that a cost ceiling cannot be evaluated without pricing', async () => {
+    const warnings: string[] = []
+    await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]) }),
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+      { maxCostUsd: 5, onWarning: (message) => warnings.push(message) },
+    )
+
+    expect(warnings.join('\n')).toContain('--max-cost-usd 5')
+  })
+
+  test('should keep a truncated row out of the mean and count it beside it', async () => {
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: truncatingModel(), pricing: PRICING }),
+        cases: cases('a'),
+        grade: () => ({ category: 1 }),
+        metrics: [{ id: 'category', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+    )
+
+    expect(result.rows[0]!.status).toBe('truncated')
+    expect(result.summary.truncated).toBe(1)
+    expect(result.summary.metrics[0]).toMatchObject({ n: 0, mean: 0 })
+    expect(result.summary.metrics[0]!.halfWidth).toBeUndefined()
+  })
+
+  test('should stop starting cases once the derived cost crosses the ceiling', async () => {
+    const reporter = memoryReporter()
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: { input: 1_000_000, output: 1_000_000 } }),
+        cases: cases('a', 'b', 'c'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter,
+      }),
+      { maxCostUsd: 1 },
+    )
+
+    expect(result.rows).toHaveLength(1)
+    expect(result.summary.costCapReached).toBe(true)
+    expect(result.summary.costCapUsd).toBe(1)
+  })
+
+  test('should send a grader crash to the sidecar without retrying it', async () => {
+    let graded = 0
+    const reporter = memoryReporter()
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('a'),
+        grade: (): { ok: number } => {
+          graded += 1
+          throw new Error('the grader read a column that is not there')
+        },
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter,
+      }),
+    )
+
+    expect(graded).toBe(1)
+    expect(result.rows).toHaveLength(0)
+    expect(result.failures[0]).toMatchObject({ caseId: 'a', failure: 'grade', attempts: 1 })
+    expect(result.failures[0]!.message).toContain('not there')
+    expect(result.summary.failures).toBe(1)
+  })
+
+  test('should retry a provider error and record the attempt count on the sidecar row', async () => {
+    let calls = 0
+    const flaky = new MockLanguageModelV4({
+      doGenerate: async () => {
+        calls += 1
+        throw new Error('upstream said 503')
+      },
+    })
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: flaky, pricing: PRICING }),
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        retries: 1,
+        reporter: memoryReporter(),
+      }),
+    )
+
+    expect(result.failures[0]).toMatchObject({ failure: 'provider', attempts: 2 })
+    // The SDK retries a *retryable* error itself; a plain one reaches the runner each time.
+    expect(calls).toBe(2)
+  })
+
+  test('should fail the whole run, not the row, when a response carries no usage', async () => {
+    const usageless = new MockLanguageModelV4({
+      doGenerate: async () => ({
+        content: [{ type: 'text' as const, text: 'x' }],
+        finishReason: { unified: 'stop' as const, raw: undefined },
+        usage: {
+          inputTokens: { total: undefined, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: undefined, text: undefined, reasoning: undefined },
+        },
+        warnings: [],
+      }),
+    })
+
+    await expect(
+      runEval(
+        defineEval({
+          flow: 'triage',
+          agent: Triager,
+          app: () => bootEvalApp({ model: usageless, pricing: PRICING }),
+          cases: cases('a'),
+          grade: () => ({ ok: 1 }),
+          metrics: [{ id: 'ok', kind: 'binary' }],
+          reporter: memoryReporter(),
+        }),
+      ),
+    ).rejects.toThrow('carried no usage')
+  })
+
+  test('should skip a (case, rep) the reporter already holds and summarize over both', async () => {
+    const earlier: EvalRow = {
+      caseId: 'a',
+      rep: 1,
+      status: 'ok',
+      input: 'prompt a',
+      text: 'x',
+      output: 'x',
+      scores: { ok: 0 },
+      provider: 'mock-provider',
+      model: 'mock-model-id',
+      usage: { inputTokens: 3, outputTokens: 2 },
+      finishReason: 'stop',
+      steps: 1,
+      toolCalls: [],
+      tags: [],
+      durationMs: 1,
+      startedAt: new Date().toISOString(),
+    }
+    const reporter = memoryReporter([earlier])
+    let prompts = 0
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: async () => {
+          prompts += 1
+          return bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING })
+        },
+        cases: cases('a', 'b'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter,
+      }),
+    )
+
+    expect(prompts).toBe(1)
+    expect(reporter.rows.map((row) => row.caseId)).toEqual(['b'])
+    expect(result.summary.rows).toBe(2)
+    expect(result.summary.metrics[0]).toMatchObject({ n: 2, mean: 0.5 })
+  })
+
+  test('should repeat each case --reps times, keyed so a resume is idempotent', async () => {
+    const reporter = memoryReporter()
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('a', 'b'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter,
+      }),
+      { reps: 2 },
+    )
+
+    expect(reporter.rows.map((row) => `${row.caseId}#${row.rep}`).sort()).toEqual(['a#1', 'a#2', 'b#1', 'b#2'])
+    expect(result.summary.metrics[0]!.halfWidth).toBeCloseTo(1 / Math.sqrt(4), 12)
+  })
+
+  test('should record the judge\'s usage and cost in their own fields', async () => {
+    const reporter = memoryReporter()
+    await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({
+          model: answering([{ text: 'answer' }]),
+          judgeModel: answering([{ text: '1' }]),
+          pricing: PRICING,
+        }),
+        cases: cases('a'),
+        judge: { agent: Judge, provider: 'judge' },
+        grade: async ({ judge, response }) => ({ rubric: (await judge(`Grade: ${response.text}`)).text === '1' ? 1 : 0 }),
+        metrics: [{ id: 'rubric', kind: 'binary' }],
+        reporter,
+      }),
+    )
+
+    const row = reporter.rows[0]!
+    expect(row.scores).toEqual({ rubric: 1 })
+    expect(row.judgeCalls).toBe(1)
+    expect(row.judgeCostUsd).toBeCloseTo((3 * 1 + 2 * 1) / 1_000_000, 12)
+    // The row's own cost stays the model's, so a judge cannot dampen a difference.
+    expect(row.costUsd).toBeCloseTo((3 * 3 + 2 * 15) / 1_000_000, 12)
+  })
+
+  test('should refuse a grade() that asks for a judge the eval does not configure', async () => {
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('a'),
+        grade: async ({ judge }) => ({ ok: (await judge('x')) ? 1 : 0 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+    )
+
+    expect(result.failures[0]!.message).toContain('configures none')
+  })
+
+  test('should run the app\'s own tools for real and put them in the trace', async () => {
+    const reporter = memoryReporter()
+    await runEval(
+      defineEval({
+        flow: 'tools',
+        agent: ToolUser,
+        app: () => bootEvalApp({
+          model: answering([{ toolCalls: [{ name: 'posts_index', input: {} }] }, { text: 'one post' }]),
+          pricing: PRICING,
+        }),
+        cases: cases('a'),
+        grade: ({ response }) => ({ ok: response.text === 'one post' ? 1 : 0 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter,
+      }),
+    )
+
+    const row = reporter.rows[0]!
+    expect(row.toolCalls).toEqual(['posts_index'])
+    expect(row.scores).toEqual({ ok: 1 })
+    const trace = reporter.traces[0]!
+    expect(trace[0]).toEqual({ role: 'system', content: 'Read the posts.' })
+    expect(trace[1]).toEqual({ role: 'user', content: 'prompt a' })
+    expect(trace.find((turn) => turn.role === 'tool')?.name).toBe('posts_index')
+    expect(trace.find((turn) => turn.role === 'tool')?.content).toContain('"posts"')
+  })
+
+  test('should run only the first --cases in file order', async () => {
+    const reporter = memoryReporter()
+    await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('a', 'b', 'c'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter,
+      }),
+      { cases: 2 },
+    )
+
+    expect(reporter.rows.map((row) => row.caseId)).toEqual(['a', 'b'])
+  })
+
+  test('should call no model and write nothing on --dry-run', async () => {
+    let built = 0
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: async () => {
+          built += 1
+          return bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING })
+        },
+        cases: cases('a', 'b'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+      { dryRun: true },
+    )
+
+    expect(built).toBe(0)
+    expect(result.rows).toHaveLength(0)
+    expect(result.plannedCases.map((kase) => kase.id)).toEqual(['a', 'b'])
+  })
+
+  test('should refuse an eval with no flow name and one that resolves no cases', async () => {
+    const define = (flow: string | undefined, kases: EvalCase[]) =>
+      defineEval({
+        ...(flow ? { flow } : {}),
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]) }),
+        cases: kases,
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      })
+
+    await expect(runEval(define(undefined, cases('a')))).rejects.toThrow('no flow name')
+    await expect(runEval(define('triage', []))).rejects.toThrow('resolved no cases')
+  })
+})
+
+describe('defineEval', () => {
+  test('should refuse empty and duplicated metrics', () => {
+    const base = {
+      agent: Triager,
+      app: () => bootEvalApp({ model: answering([{ text: 'x' }]) }),
+      cases: cases('a'),
+      grade: () => ({ ok: 1 }),
+    }
+
+    expect(() => defineEval({ ...base, metrics: [] })).toThrow('is empty')
+    expect(() => defineEval({ ...base, metrics: [{ id: 'ok', kind: 'binary' }, { id: 'ok', kind: 'score' }] }))
+      .toThrow('declares "ok" twice')
+  })
+
+  test('should constrain metric ids to the scores grade() returns', () => {
+    defineEval({
+      agent: Triager,
+      app: () => bootEvalApp({ model: answering([{ text: 'x' }]) }),
+      cases: cases('a'),
+      grade: () => ({ category: 1, prioritySet: 0 }),
+      // @ts-expect-error a metric grade() never scores is a compile error (RFC 0029 §11)
+      metrics: [{ id: 'categorie', kind: 'binary' }],
+    })
+  })
+})
+
+describe('fromJsonl', () => {
+  test('should read one case per line and keep file order', async () => {
+    const directory = scratch()
+    const path = resolve(directory, 'cases.jsonl')
+    await Bun.write(path, '{"id":"a","input":"one","tags":["billing"]}\n\n{"id":"b","input":"two"}\n')
+    expect(fromJsonl(path)()).toEqual([
+      { id: 'a', input: 'one', tags: ['billing'] },
+      { id: 'b', input: 'two' },
+    ])
+  })
+
+  test('should name the line for a malformed case, a missing id or input, and a repeated id', () => {
+    expect(() => parseJsonlCases('{', 'cases.jsonl')).toThrow('cases.jsonl:1 is not valid JSON')
+    expect(() => parseJsonlCases('{"input":"x"}', 'cases.jsonl')).toThrow('has no string `id`')
+    expect(() => parseJsonlCases('{"id":"a"}', 'cases.jsonl')).toThrow('has no string `input`')
+    expect(() => parseJsonlCases('{"id":"a","input":"x"}\n{"id":"a","input":"y"}', 'cases.jsonl'))
+      .toThrow('repeats the case id "a"')
+  })
+
+  test('should read the file when the run starts, not when the eval file is imported', () => {
+    const source = fromJsonl(resolve(scratch(), 'absent.jsonl'))
+    expect(() => source()).toThrow('Could not read eval cases')
+  })
+})
+
+describe('hillclimbReporter', () => {
+  test('should write the layout the harness report builders read', async () => {
+    const root = scratch()
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'billing' }]), pricing: PRICING }),
+        cases: cases('a', 'b/2'),
+        grade: ({ response }) => ({ ok: response.text === 'billing' ? 1 : 0 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: hillclimbReporter({ root, cwd: root }),
+      }),
+    )
+
+    const directory = resolve(root, 'triage', 'baseline')
+    expect(result.location).toBe(directory)
+    const rows = readFileSync(resolve(directory, 'results.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as EvalRow)
+    expect(rows.map((row) => row.caseId)).toEqual(['a', 'b/2'])
+    // A case id is free text; the trace file name is not, and the row keeps the true id.
+    expect(readdirSync(resolve(directory, 'traces')).sort()).toEqual(['a_rep1.json', 'b_2_rep1.json'])
+    expect(JSON.parse(readFileSync(resolve(directory, 'summary.json'), 'utf8')).metrics[0].mean).toBe(1)
+    expect(existsSync(resolve(directory, 'errors.jsonl'))).toBe(false)
+
+    const state = JSON.parse(readFileSync(resolve(directory, '_state.json'), 'utf8')) as {
+      seed: number
+      split: { dev: string[]; test: string[] }
+    }
+    expect([...state.split.dev, ...state.split.test].sort()).toEqual(['a', 'b/2'])
+    // One case per stratum: assigning within a stratum would put every case on one side.
+    expect(state.split.dev).toHaveLength(1)
+    expect(state.split.test).toHaveLength(1)
+    expect(typeof state.seed).toBe('number')
+  })
+
+  test('should never edit _state.json after writing it, and should resume over results.jsonl', async () => {
+    const root = scratch()
+    const define = (ids: string[]) =>
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases(...ids),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: hillclimbReporter({ root, cwd: root }),
+      })
+
+    await runEval(define(['a']))
+    const directory = resolve(root, 'triage', 'baseline')
+    const first = readFileSync(resolve(directory, '_state.json'), 'utf8')
+
+    const second = await runEval(define(['a', 'b']))
+
+    expect(readFileSync(resolve(directory, '_state.json'), 'utf8')).toBe(first)
+    expect(readFileSync(resolve(directory, 'results.jsonl'), 'utf8').trim().split('\n')).toHaveLength(2)
+    expect(second.summary.rows).toBe(2)
+  })
+
+  test('should put an attempt that produced nothing scorable in errors.jsonl', async () => {
+    const root = scratch()
+    await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('a'),
+        grade: (): { ok: number } => { throw new Error('boom') },
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: hillclimbReporter({ root, cwd: root }),
+      }),
+    )
+
+    const errors = readFileSync(resolve(root, 'triage', 'baseline', 'errors.jsonl'), 'utf8').trim()
+    expect(JSON.parse(errors)).toMatchObject({ caseId: 'a', failure: 'grade', attempts: 1 })
+  })
+
+  test('should write nothing on a dry run while still naming the directory', async () => {
+    const root = scratch()
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]) }),
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: hillclimbReporter({ root, cwd: root }),
+      }),
+      { dryRun: true },
+    )
+
+    expect(result.location).toBe(resolve(root, 'triage', 'baseline'))
+    expect(existsSync(resolve(root, 'triage'))).toBe(false)
+  })
+})
+
+describe('cost and statistics', () => {
+  test('should charge cached reads and writes at their own rate, and the input rate without one', () => {
+    const usage = { inputTokens: 1000, noCacheInputTokens: 400, cacheReadTokens: 500, cacheWriteTokens: 100, outputTokens: 200 }
+    expect(computeCostUsd(usage, { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }))
+      .toBeCloseTo((400 * 3 + 500 * 0.3 + 100 * 3.75 + 200 * 15) / 1_000_000, 12)
+    expect(computeCostUsd(usage, { input: 3, output: 15 }))
+      .toBeCloseTo((400 * 3 + 500 * 3 + 100 * 3 + 200 * 15) / 1_000_000, 12)
+    expect(computeCostUsd(usage, undefined)).toBeUndefined()
+  })
+
+  test('should report the half-width for a binary metric only, over the rows in the mean', () => {
+    const row = (id: string, scores: Record<string, number>, status: 'ok' | 'truncated' = 'ok'): EvalRow => ({
+      caseId: id, rep: 1, status, input: '', text: '', output: '', scores,
+      provider: 'p', model: 'm', usage: {}, finishReason: 'stop', steps: 1, toolCalls: [],
+      tags: [], durationMs: 0, startedAt: '',
+    })
+
+    const summaries = summarizeMetrics(
+      [row('a', { hit: 1, score: 0.5 }), row('b', { hit: 0, score: 0.9 }), row('c', { hit: 1, score: 1 }, 'truncated')],
+      [{ id: 'hit', kind: 'binary' }, { id: 'score', kind: 'score' }],
+    )
+
+    expect(summaries[0]).toMatchObject({ mean: 0.5, n: 2 })
+    expect(summaries[0]!.halfWidth).toBeCloseTo(1 / Math.sqrt(2), 12)
+    expect(summaries[1]).toMatchObject({ mean: 0.7, n: 2 })
+    expect(summaries[1]!.halfWidth).toBeUndefined()
+  })
+})

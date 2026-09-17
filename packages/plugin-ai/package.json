@@ -43,6 +43,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./eval": {
+      "types": "./dist/eval.d.ts",
+      "default": "./dist/eval.js"
+    },
     "./client": {
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"

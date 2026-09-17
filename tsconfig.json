@@ -67,6 +67,9 @@
       "@guren/plugin-ai": [
         "./packages/plugin-ai/src/index.ts"
       ],
+      "@guren/plugin-ai/*": [
+        "./packages/plugin-ai/src/*"
+      ],
       "@guren/plugin-vercel": [
         "./packages/plugin-vercel/src/index.ts"
       ],
