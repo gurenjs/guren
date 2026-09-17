@@ -1,11 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { describe, expect, it } from 'bun:test'
 import { CannotJudge, type Surface } from '../sync-import-floors'
 import {
   judgePublishedImports,
-  readTarball,
   releaseLineHeads,
   run,
   type PublishedRelease,
@@ -111,36 +107,6 @@ describe('releaseLineHeads', () => {
       '0.6.1',
       '1.10.0',
     ])
-  })
-})
-
-describe('readTarball', () => {
-  let scratch: string
-
-  beforeAll(async () => {
-    scratch = await mkdtemp(join(tmpdir(), 'guren-published-imports-'))
-  })
-  afterAll(async () => {
-    await rm(scratch, { recursive: true, force: true })
-  })
-
-  // Each format spells a path past the 100-byte name field differently; CI's GNU tar defaults to `gnu`, macOS bsdtar to `pax`.
-  const bsdtar = Bun.spawnSync(['tar', '--version']).stdout.toString().includes('bsdtar')
-  const FORMATS = { gnu: bsdtar ? 'gnutar' : 'gnu', pax: bsdtar ? 'pax' : 'posix', ustar: 'ustar' }
-
-  it.each(Object.entries(FORMATS))('reads every regular file of a %s archive, long paths included', async (label, format) => {
-    const deep = `package/dist/${'nested-directory/'.repeat(6)}chunk-with-a-long-name.js`
-    const files = { 'package/package.json': '{"name":"x"}\n', 'package/dist/index.js': DEPLOY_BUILD, [deep]: 'export {}\n' }
-    for (const [path, content] of Object.entries(files)) {
-      await mkdir(join(scratch, path, '..'), { recursive: true })
-      await writeFile(join(scratch, path), content)
-    }
-    const tgz = join(scratch, `fixture-${label}.tgz`)
-    const tar = Bun.spawnSync(['tar', `--format=${format}`, '-czf', tgz, 'package'], { cwd: scratch, env: { ...process.env, COPYFILE_DISABLE: '1' } })
-    expect(tar.success).toBe(true)
-
-    const entries = readTarball(new Uint8Array(await readFile(tgz)))
-    expect(Object.fromEntries(entries.map((entry) => [entry.path, entry.source]))).toEqual(files)
   })
 })
 

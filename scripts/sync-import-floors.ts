@@ -30,7 +30,7 @@ type DependencyGroup = (typeof DEPENDENCY_GROUPS)[number]
 // Resolving a barrel at every admitted release is hundreds of files per version,
 // and `@guren/core`'s root re-exports all of `@guren/server`'s. Subpath entries
 // are a few files each, and are where cross-package internals are shared.
-export const ROOT_ENTRY = '.'
+const ROOT_ENTRY = '.'
 
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '/index.ts', '/index.tsx', '/index.js']
 const TEST_FILE = /(\.test|\.spec)\.[cm]?[jt]sx?$|\/(__tests__|tests?|fixtures)\//
@@ -43,7 +43,7 @@ const RANGE = /^(>=|\^|~)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/
 export class CannotJudge extends Error {}
 
 /** A package as it was published at `version`; `rev: null` reads the working tree. */
-export interface Snapshot {
+interface Snapshot {
   version: string
   rev: string | null
 }
@@ -74,7 +74,7 @@ export interface Requirement {
   files: Set<string>
 }
 
-export interface Gap {
+interface Gap {
   requirement: Requirement
   text: string
 }
@@ -390,7 +390,7 @@ export class SurfaceReader {
   }
 }
 
-export function importSites(source: string, relativeFile: string): ImportSite[] {
+function importSites(source: string, relativeFile: string): ImportSite[] {
   if (!source.includes('@guren/')) return []
   const program = parseModule(source, relativeFile).program
   const sites: ImportSite[] = []
@@ -428,6 +428,27 @@ export function importSites(source: string, relativeFile: string): ImportSite[] 
   }
 
   return sites
+}
+
+/** The subpaths and names `files` import, per dependency; a package's imports of itself are left out. */
+export function groupRequirements(
+  pkgName: string,
+  files: ReadonlyArray<{ path: string; source: string }>,
+  keep: (site: ImportSite) => boolean = () => true,
+): Map<string, Map<string, Requirement>> {
+  const byDependency = new Map<string, Map<string, Requirement>>()
+  for (const file of files) {
+    for (const site of importSites(file.source, file.path)) {
+      if (site.dependency === pkgName || !keep(site)) continue
+      const requirements = byDependency.get(site.dependency) ?? new Map<string, Requirement>()
+      byDependency.set(site.dependency, requirements)
+      const requirement = requirements.get(site.subpath) ?? { subpath: site.subpath, names: new Set(), files: new Set() }
+      requirements.set(site.subpath, requirement)
+      for (const name of site.names) requirement.names.add(name)
+      requirement.files.add(file.path)
+    }
+  }
+  return byDependency
 }
 
 async function sourceFiles(pkg: WorkspacePackage): Promise<string[]> {
@@ -488,19 +509,15 @@ async function planImportFloors(root: string, workspace: WorkspacePackage[]): Pr
     const manifestPath = `${pkg.relativeDir}/package.json`
     const manifest = reader.manifest(pkg, { version: pkg.version ?? '', rev: null })
 
-    const byDependency = new Map<string, Map<string, Requirement>>()
-    for (const file of await sourceFiles(pkg)) {
-      const relativeFile = `${pkg.relativeDir}/${file}`
-      for (const site of importSites(readFileSync(join(pkg.dir, file), 'utf8'), relativeFile)) {
-        if (site.dependency === pkg.name || site.subpath === ROOT_ENTRY || !byName.has(site.dependency)) continue
-        const requirements = byDependency.get(site.dependency) ?? new Map<string, Requirement>()
-        byDependency.set(site.dependency, requirements)
-        const requirement = requirements.get(site.subpath) ?? { subpath: site.subpath, names: new Set(), files: new Set() }
-        requirements.set(site.subpath, requirement)
-        for (const name of site.names) requirement.names.add(name)
-        requirement.files.add(relativeFile)
-      }
-    }
+    const files = (await sourceFiles(pkg)).map((file) => ({
+      path: `${pkg.relativeDir}/${file}`,
+      source: readFileSync(join(pkg.dir, file), 'utf8'),
+    }))
+    const byDependency = groupRequirements(
+      pkg.name,
+      files,
+      (site) => site.subpath !== ROOT_ENTRY && byName.has(site.dependency),
+    )
 
     for (const [dependencyName, bySubpath] of byDependency) {
       const dependency = byName.get(dependencyName)!

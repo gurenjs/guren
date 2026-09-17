@@ -5,34 +5,30 @@
  * updating the dependency beside the old dependent then fails to link. The inverse of
  * `audit:import-floors`, which holds a floor to what current source imports.
  * Reads each release line's latest tarball (`dist/**.js`, roots and subpaths) against
- * the releasing package's working-tree source. Blind to type-only names (`.d.ts`), to
- * an import through an undeclared range, and to a changed *value*: a renamed table
- * key the old dependent looks up links fine and misbehaves. Exit 1 drift, 2 cannot run.
+ * the releasing package's working-tree source, before `changeset version` consumes the
+ * plan. Blind to type-only names (`.d.ts`), to an import through an undeclared range,
+ * and to a changed *value*: a renamed table key links fine and misbehaves.
+ * Exit 1 drift, 2 cannot run.
  */
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 import { readChangesetDirectory } from './core-semver-audit'
 import { DEPENDENCY_GROUPS, plannedVersions } from './plugin-compat-audit'
-import {
-  CannotJudge,
-  importSites,
-  missingFrom,
-  Repository,
-  SurfaceReader,
-  type Requirement,
-  type Surface,
-} from '../sync-import-floors'
+import { CannotJudge, groupRequirements, missingFrom, Repository, SurfaceReader, type Surface } from '../sync-import-floors'
 import { collectPackages, repoRoot } from '../workspace-packages'
 
 const REGISTRY = 'https://registry.npmjs.org'
 const FETCH_TIMEOUT_MS = 30_000
-const RUNTIME_FILE = /\.m?js$/
+
+type Ranges = Partial<Record<(typeof DEPENDENCY_GROUPS)[number], Record<string, string>>>
 
 export interface PublishedRelease {
   name: string
   version: string
-  /** `dependencies` then `peerDependencies`, as the registry reports them for this version. */
-  ranges: Partial<Record<(typeof DEPENDENCY_GROUPS)[number], Record<string, string>>>
+  /** `dependencies` and `peerDependencies`, as the registry reports them for this version. */
+  ranges: Ranges
   files: Array<{ path: string; source: string }>
 }
 
@@ -46,7 +42,16 @@ export interface PublishedImportsResult {
   pairsChecked: number
 }
 
-/** Over already-fetched tarball text, so fixtures can exercise it without a registry. */
+/** The first group whose range for `release` admits its version; the candidate filter and the judge must agree. */
+function admittingRange(ranges: Ranges, release: PendingRelease): { group: string; range: string } | undefined {
+  for (const group of DEPENDENCY_GROUPS) {
+    const range = ranges[group]?.[release.name]
+    if (range !== undefined && Bun.semver.satisfies(release.version, range)) return { group, range }
+  }
+  return undefined
+}
+
+/** Over already-read tarball text, so fixtures can exercise it without a registry. */
 export function judgePublishedImports(
   published: readonly PublishedRelease[],
   releasing: readonly PendingRelease[],
@@ -56,26 +61,10 @@ export function judgePublishedImports(
   let pairsChecked = 0
 
   for (const dependent of published) {
-    const byDependency = new Map<string, Map<string, Requirement>>()
-    for (const file of dependent.files) {
-      for (const site of importSites(file.source, `${dependent.name}@${dependent.version}/${file.path}`)) {
-        if (site.dependency === dependent.name) continue
-        const requirements = byDependency.get(site.dependency) ?? new Map<string, Requirement>()
-        byDependency.set(site.dependency, requirements)
-        const requirement = requirements.get(site.subpath) ?? { subpath: site.subpath, names: new Set(), files: new Set() }
-        requirements.set(site.subpath, requirement)
-        for (const name of site.names) requirement.names.add(name)
-        requirement.files.add(file.path)
-      }
-    }
-
+    const byDependency = groupRequirements(dependent.name, dependent.files)
     for (const release of releasing) {
       const requirements = byDependency.get(release.name)
-      if (!requirements) continue
-      const admitting = DEPENDENCY_GROUPS.flatMap((group) => {
-        const range = dependent.ranges[group]?.[release.name]
-        return range !== undefined && Bun.semver.satisfies(release.version, range) ? [{ group, range }] : []
-      })[0]
+      const admitting = requirements && admittingRange(dependent.ranges, release)
       if (!admitting) continue
       pairsChecked += 1
 
@@ -88,7 +77,8 @@ export function judgePublishedImports(
         const specifier = `${release.name}${gap.requirement.subpath.slice(1)}`
         failures.push(
           `${dependent.name}@${dependent.version} imports ${specifier} (${[...gap.requirement.files].sort().join(', ')}), ` +
-            `and ${release.name} ${release.version} ships ${gap.text.replace(gap.requirement.subpath, specifier)}. Its ${admitting.group}["${release.name}"] is "${admitting.range}", which admits ` +
+            `and ${release.name} ${release.version} ships ${gap.text.replace(gap.requirement.subpath, specifier)}. Its ` +
+            `${admitting.group}["${release.name}"] is "${admitting.range}", which admits ` +
             `${release.version}, so an app updating ${release.name} beside it fails to link. Keep the ` +
             'name exported (deprecated) until no admitting published release imports it.',
         )
@@ -99,63 +89,17 @@ export function judgePublishedImports(
   return { failures, pairsChecked }
 }
 
-/** Regular files of a `.tgz`, as text. A truncated long path would drop a chunk silently, so all three long-name forms are read. */
-export function readTarball(gzipped: Uint8Array): Array<{ path: string; source: string }> {
-  const tar = Bun.gunzipSync(gzipped)
-  const decoder = new TextDecoder()
-  const field = (header: Uint8Array, start: number, end: number): string =>
-    decoder.decode(header.subarray(start, end)).replace(/\0[\s\S]*$/, '')
-
-  const entries: Array<{ path: string; source: string }> = []
-  let longPath: string | undefined
-  let offset = 0
-  while (offset + 512 <= tar.length) {
-    const header = tar.subarray(offset, offset + 512)
-    if (header.every((byte) => byte === 0)) break
-    const size = Number.parseInt(field(header, 124, 136).trim() || '0', 8)
-    if (!Number.isFinite(size)) throw new CannotJudge(`Unreadable tar header at byte ${offset}.`)
-    const body = tar.subarray(offset + 512, offset + 512 + size)
-    offset += 512 + Math.ceil(size / 512) * 512
-
-    const type = field(header, 156, 157)
-    if (type === 'x') {
-      longPath = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(decoder.decode(body))?.[1]
-      continue
-    }
-    if (type === 'L') {
-      longPath = decoder.decode(body).replace(/\0[\s\S]*$/, '')
-      continue
-    }
-    if (type === 'g' || type === 'K') continue
-    if (type === '0' || type === '') {
-      const name = field(header, 0, 100)
-      const prefix = field(header, 345, 500)
-      entries.push({ path: longPath ?? (prefix ? `${prefix}/${name}` : name), source: decoder.decode(body) })
-    }
-    longPath = undefined
-  }
-  return entries
-}
-
 interface Packument {
-  'dist-tags'?: Record<string, string>
-  versions?: Record<
-    string,
-    {
-      dependencies?: Record<string, string>
-      peerDependencies?: Record<string, string>
-      dist?: { tarball?: string }
-    }
-  >
+  versions?: Record<string, { dependencies?: Record<string, string>; peerDependencies?: Record<string, string>; dist?: { tarball?: string } }>
 }
 
-type Fetch = (url: string, init: { signal: AbortSignal }) => Promise<Response>
+type Fetch = (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<Response>
 
-async function fetchOk(fetch: Fetch, url: string): Promise<Response | null> {
+async function fetchOk(fetch: Fetch, url: string, headers: Record<string, string> = {}): Promise<Response | null> {
   let lastError = ''
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
       if (response.status === 404) return null
       if (response.ok) return response
       lastError = `HTTP ${response.status}`
@@ -168,7 +112,10 @@ async function fetchOk(fetch: Fetch, url: string): Promise<Response | null> {
 
 /** `null` when the package was never published: there is no copy on npm to break. */
 async function fetchPackument(fetch: Fetch, name: string): Promise<Packument | null> {
-  const response = await fetchOk(fetch, `${REGISTRY}/${encodeURIComponent(name)}`)
+  const response = await fetchOk(fetch, `${REGISTRY}/${encodeURIComponent(name)}`, {
+    // The abbreviated packument: versions, their ranges and tarballs, without readmes.
+    accept: 'application/vnd.npm.install-v1+json',
+  })
   if (!response) return null
   try {
     return (await response.json()) as Packument
@@ -190,11 +137,36 @@ export function releaseLineHeads(versions: readonly string[]): string[] {
   return [...heads.values()].sort(Bun.semver.order)
 }
 
+/** Unpacked with the system `tar`, which reads every long-path form an in-house parser would have to get right. */
+async function readPublished(
+  fetch: Fetch,
+  candidate: Omit<PublishedRelease, 'files'> & { tarball: string },
+  scratch: string,
+): Promise<PublishedRelease> {
+  const response = await fetchOk(fetch, candidate.tarball)
+  if (!response) throw new CannotJudge(`${candidate.tarball} is listed by the registry but answers 404.`)
+  const dir = join(scratch, `${candidate.name.replaceAll('/', '__')}@${candidate.version}`)
+  const archive = `${dir}.tgz`
+  await Bun.write(archive, await response.arrayBuffer())
+  await mkdir(dir, { recursive: true })
+  const tar = Bun.spawnSync(['tar', '-xzf', archive, '-C', dir])
+  if (!tar.success) throw new CannotJudge(`${candidate.tarball} did not unpack: ${tar.stderr.toString().trim()}`)
+
+  const files: PublishedRelease['files'] = []
+  for await (const path of new Bun.Glob('**/*.{js,mjs}').scan({ cwd: dir })) {
+    const source = await Bun.file(join(dir, path)).text()
+    if (source.includes('@guren/')) files.push({ path, source })
+  }
+  files.sort((a, b) => a.path.localeCompare(b.path))
+  return { name: candidate.name, version: candidate.version, ranges: candidate.ranges, files }
+}
+
 export async function run(
   options: { root?: string; fetch?: Fetch } = {},
 ): Promise<{ code: 0 | 1 | 2; messages: string[] }> {
   const root = options.root ?? repoRoot
   const fetch = options.fetch ?? globalThis.fetch
+  const scratch = await mkdtemp(join(tmpdir(), 'guren-published-imports-'))
   try {
     const workspace = (await collectPackages(root)).filter((pkg) => !pkg.private)
     const byName = new Map(workspace.map((pkg) => [pkg.name, pkg]))
@@ -209,18 +181,12 @@ export async function run(
       await Promise.all(workspace.map(async (pkg) => [pkg.name, await fetchPackument(fetch, pkg.name)] as const)),
     )
 
-    // After `changeset version` the plan is consumed, and the release is the workspace version npm lacks.
-    const releasing: PendingRelease[] = []
-    for (const pkg of workspace) {
-      const latest = packuments.get(pkg.name)?.['dist-tags']?.latest
-      const version = planned.get(pkg.name) ?? (latest && pkg.version && Bun.semver.order(pkg.version, latest) > 0 ? pkg.version : undefined)
-      if (version) releasing.push({ name: pkg.name, version })
-    }
+    const releasing = [...planned].map(([name, version]) => ({ name, version }))
     if (releasing.length === 0) {
       return { code: 0, messages: ['Published imports audit: no pending @guren/* release, nothing to judge.'] }
     }
 
-    const candidates: Array<{ name: string; version: string; tarball: string; ranges: PublishedRelease['ranges'] }> = []
+    const candidates: Array<Omit<PublishedRelease, 'files'> & { tarball: string }> = []
     let unpublished = 0
     for (const pkg of workspace) {
       const packument = packuments.get(pkg.name)
@@ -231,37 +197,13 @@ export async function run(
       for (const version of releaseLineHeads(Object.keys(packument.versions ?? {}))) {
         const meta = packument.versions![version]!
         const ranges = { dependencies: meta.dependencies, peerDependencies: meta.peerDependencies }
-        const admits = releasing.some((release) =>
-          DEPENDENCY_GROUPS.some((group) => {
-            const range = ranges[group]?.[release.name]
-            return range !== undefined && Bun.semver.satisfies(release.version, range)
-          }),
-        )
-        if (!admits) continue
+        if (!releasing.some((release) => admittingRange(ranges, release))) continue
         if (!meta.dist?.tarball) throw new CannotJudge(`The registry lists no tarball for ${pkg.name}@${version}.`)
         candidates.push({ name: pkg.name, version, tarball: meta.dist.tarball, ranges })
       }
     }
 
-    const published = await Promise.all(
-      candidates.map(async (candidate): Promise<PublishedRelease> => {
-        const response = await fetchOk(fetch, candidate.tarball)
-        if (!response) throw new CannotJudge(`${candidate.tarball} is listed by the registry but answers 404.`)
-        let entries: Array<{ path: string; source: string }>
-        try {
-          entries = readTarball(new Uint8Array(await response.arrayBuffer()))
-        } catch (error) {
-          if (error instanceof CannotJudge) throw error
-          throw new CannotJudge(`${candidate.tarball} is not a readable gzipped tarball: ${String(error)}`)
-        }
-        return {
-          name: candidate.name,
-          version: candidate.version,
-          ranges: candidate.ranges,
-          files: entries.filter((entry) => RUNTIME_FILE.test(entry.path) && entry.source.includes('@guren/')),
-        }
-      }),
-    )
+    const published = await Promise.all(candidates.map((candidate) => readPublished(fetch, candidate, scratch)))
 
     const reader = new SurfaceReader(new Repository(root), byName, 'working-tree')
     const { failures, pairsChecked } = judgePublishedImports(published, releasing, (name, subpath) => {
@@ -279,6 +221,8 @@ export async function run(
   } catch (error) {
     if (!(error instanceof CannotJudge)) throw error
     return { code: 2, messages: ['Published imports audit could not run.', error.message] }
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
   }
 }
 
