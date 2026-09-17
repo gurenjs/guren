@@ -120,9 +120,13 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
   let capReached = false
   let pricingWarned = false
   let next = 0
+  let stopped = false
 
   const worker = async (): Promise<void> => {
     for (;;) {
+      // A runner failure in one worker stops the others: rows appended after the summary
+      // was written would leave summary.json describing fewer rows than results.jsonl holds.
+      if (stopped) return
       // A cap is a *soft* ceiling: this stops new cases only, and cases in flight complete.
       if (options.maxCostUsd !== undefined && spentUsd >= options.maxCostUsd) {
         if (next < attempts.length) capReached = true
@@ -131,18 +135,24 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
       const attempt = attempts[next++]
       if (!attempt) return
 
-      const outcome = await runCase(definition, attempt.kase, attempt.rep, {
-        timeoutMs,
-        retries,
-        onPricingMissing: (provider) => {
-          if (pricingWarned || options.maxCostUsd === undefined) return
-          pricingWarned = true
-          options.onWarning?.(
-            `The provider "${provider}" configures no \`pricing\` in config/ai.ts, so no cost is derived `
-            + `and --max-cost-usd ${options.maxCostUsd} cannot stop this run.`,
-          )
-        },
-      })
+      let outcome: Awaited<ReturnType<typeof runCase>>
+      try {
+        outcome = await runCase(definition, attempt.kase, attempt.rep, {
+          timeoutMs,
+          retries,
+          onPricingMissing: (provider) => {
+            if (pricingWarned || options.maxCostUsd === undefined) return
+            pricingWarned = true
+            options.onWarning?.(
+              `The provider "${provider}" configures no \`pricing\` in config/ai.ts, so no cost is derived `
+              + `and --max-cost-usd ${options.maxCostUsd} cannot stop this run.`,
+            )
+          },
+        })
+      } catch (error) {
+        stopped = true
+        throw error
+      }
 
       if ('row' in outcome) {
         spentUsd += (outcome.row.costUsd ?? 0) + (outcome.row.judgeCostUsd ?? 0)
