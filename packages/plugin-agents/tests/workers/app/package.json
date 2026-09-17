@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@guren/plugin-agents": "workspace:*"
+    "@guren/plugin-agents": "workspace:*",
+    "@guren/plugin-mcp": "workspace:*"
   }
 }

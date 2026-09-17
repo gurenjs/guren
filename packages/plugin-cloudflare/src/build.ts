@@ -3,11 +3,9 @@ import { relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   AGENTS_CONFIG_FILE,
-  appUsesMcpPlugin,
   DATABASE_FACTORIES,
   DEV_ONLY_MODULES,
   MCP_PLUGIN_PACKAGE,
-  MCP_TRANSPORT_SPECIFIER,
   SQL_CLIENT_MODULES,
   bundledRuntimeEnv,
   detectDatabaseDialects,
@@ -15,7 +13,6 @@ import {
   DOCUMENT_ASSET_HEADERS,
   importSpecifier,
   renderDevOnlyStub,
-  stubbableDevOnlyModules,
   assertOutputDirOutsideRoot,
   resetOutputDir,
   resolveClientAssetEnv,
@@ -98,20 +95,14 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   assertWranglerJsoncIsAuthoritative(root)
 
   const packageJson = readPackageJson(root)
-  // The App MCP opt-in is decided once and threaded to both halves below (the
-  // guard on the committed config and the alias set the scaffold writes), so the
-  // two cannot disagree. Parsing package.json twice is cheap; deciding twice is not.
-  const mcpPlugin = appUsesMcpPlugin(root)
-
   const mcpOAuth = options.mcpOAuth === true
   const mcpPath = options.mcpPath ?? DEFAULT_MCP_PATH
 
   // Checked before the app build: these are one-line edits to files the developer
   // owns, and reporting them after minutes of Vite output is reporting them where
   // nobody reads.
-  assertMcpTransportNotAliased(root, mcpPlugin)
   if (mcpOAuth) {
-    assertMcpOAuthUsable(root, mcpPlugin)
+    assertMcpOAuthUsable(root)
     assertOAuthKvBound(root)
   }
 
@@ -179,10 +170,10 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     scaffoldConsentFlow(root)
   }
 
-  scaffoldWranglerConfig(root, out, packageJson.name, mcpPlugin, mcpOAuth, agents.exports)
+  scaffoldWranglerConfig(root, out, packageJson.name, mcpOAuth, agents.exports)
 }
 
-const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on Cloudflare Workers — it generates files on disk.'
+const MCP_UNAVAILABLE = 'The Dev MCP endpoint is unavailable on Cloudflare Workers — it generates files on disk.'
 
 /** `mcpPlugin()`'s own default mount path — see `BuildCloudflareOutputOptions.mcpPath`. */
 const DEFAULT_MCP_PATH = '/mcp'
@@ -210,8 +201,8 @@ const OAUTH_ENDPOINTS = {
  * `@cloudflare/workers-oauth-provider`, which wrangler resolves from the *app's*
  * `node_modules` at `wrangler deploy`, from a production install — not devDeps.
  */
-function assertMcpOAuthUsable(root: string, mcpPlugin: boolean): void {
-  if (!mcpPlugin) {
+function assertMcpOAuthUsable(root: string): void {
+  if (!appDependsOn(root, MCP_PLUGIN_PACKAGE)) {
     throw new Error(
       `Cloudflare build: --mcp-oauth fronts the App MCP endpoint with an OAuth provider, but this app does not depend on ${MCP_PLUGIN_PACKAGE}, so it serves no such endpoint. Install and mount the plugin first:\n`
       + `  bun add ${MCP_PLUGIN_PACKAGE}\n`
@@ -289,9 +280,8 @@ function oauthKvNamespace(): Record<string, string> {
 }
 
 /**
- * Whether the app declares `name` under `dependencies`. Same answer-shape as
- * `appUsesMcpPlugin` in `@guren/core/internal/deploy-build`: an absent,
- * unreadable or malformed manifest answers `false`.
+ * Whether the app declares `name` under `dependencies` (devDependencies do not
+ * ship). An absent, unreadable or malformed manifest answers `false`.
  */
 function appDependsOn(root: string, name: string): boolean {
   try {
@@ -744,12 +734,20 @@ const STUB_FILES: Record<DevOnlySpecifier | SqlClientSpecifier, string> = {
   'bun:sqlite': 'stub-bun-sqlite.js',
   vite: 'stub-vite.js',
   '@guren/cli': 'stub-guren-cli.js',
-  '@modelcontextprotocol/sdk/server/mcp.js': 'stub-mcp-server.js',
-  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js': 'stub-mcp-transport.js',
   postgres: 'stub-postgres.js',
   mysql2: 'stub-mysql2.js',
   'mysql2/promise': 'stub-mysql2-promise.js',
   '@aws-sdk/client-rds-data': 'stub-rds-data.js',
+}
+
+/**
+ * Stub files no alias this plugin writes names any more: configs scaffolded before
+ * RFC 0028 alias the v1 SDK subpaths to them, and wrangler fails on an alias whose
+ * file is missing. Nothing imports those subpaths, so the lines are inert.
+ */
+const RETIRED_STUB_FILES: Record<string, readonly string[]> = {
+  'stub-mcp-server.js': ['McpServer', 'ResourceTemplate'],
+  'stub-mcp-transport.js': ['WebStandardStreamableHTTPServerTransport'],
 }
 
 function writeDevOnlyStubs(out: string): void {
@@ -759,54 +757,21 @@ function writeDevOnlyStubs(out: string): void {
       renderDevOnlyStub(module, UNAVAILABLE_ON_WORKERS[module.kind]),
     )
   }
+  for (const [file, exportNames] of Object.entries(RETIRED_STUB_FILES)) {
+    writeFileSync(resolve(out, file), renderDevOnlyStub({ exportNames }, MCP_UNAVAILABLE))
+  }
 }
 
 /**
  * A package-name alias does not cover subpaths and wrangler cannot match a
- * prefix, so every stubbed specifier needs its own entry (an SDK subpath added
- * upstream needs a new `DEV_ONLY_MODULES` entry). `mcpPlugin` drops only the App
- * MCP transport's alias (RFC 0016 §7; the adapter is workerd-compatible). Stub
- * *files* are written unconditionally, so a config still pointing at one keeps finding it.
+ * prefix, so every stubbed specifier needs its own entry.
  */
-function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string, string> {
-  const stubbed = [...stubbableDevOnlyModules({ mcpPlugin }), ...SQL_CLIENT_MODULES]
-
+function devOnlyAliases(outRelative: string): Record<string, string> {
   return Object.fromEntries(
-    stubbed.map((module) => [
+    STUBBED_MODULES.map((module) => [
       module.specifier,
       `./${outRelative}/${STUB_FILES[module.specifier]}`,
     ]),
-  )
-}
-
-/**
- * Fail rather than deploy an app declaring `@guren/plugin-mcp` while its committed
- * `wrangler.jsonc` aliases the App MCP transport to a stub *this build generated*:
- * the endpoint stays compiled shut with every gate green. The *value* decides
- * (another target is a deliberate override), matched on the last path segment of
- * either separator against `STUB_FILES`; `parseJsonc` keeps comments from matching.
- */
-function assertMcpTransportNotAliased(root: string, mcpPlugin: boolean): void {
-  if (!mcpPlugin) {
-    return
-  }
-
-  const configPath = resolve(root, 'wrangler.jsonc')
-  const config = readWranglerConfig(configPath)
-  const alias = config?.alias
-  if (!isRecord(alias)) {
-    return
-  }
-
-  const target = alias[MCP_TRANSPORT_SPECIFIER]
-  if (typeof target !== 'string' || target.split(/[\\/]/).pop() !== STUB_FILES[MCP_TRANSPORT_SPECIFIER]) {
-    return
-  }
-
-  throw new Error(
-    `Cloudflare build: ${configPath} aliases the App MCP transport to a stub, but this app depends on ${MCP_PLUGIN_PACKAGE} — the endpoint would deploy compiled shut. Delete this one line from "alias":\n`
-    + `  ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: ${JSON.stringify(target)}\n`
-    + `Leave every other alias entry in place; ${JSON.stringify('@modelcontextprotocol/sdk/server/mcp.js')} in particular must stay stubbed — that is the dev-only MCP server, which generates files on disk.`,
   )
 }
 
@@ -1335,7 +1300,6 @@ function scaffoldWranglerConfig(
   root: string,
   out: string,
   packageName: string | undefined,
-  mcpPlugin: boolean,
   mcpOAuth: boolean,
   agents: AgentExport[],
 ): void {
@@ -1348,7 +1312,7 @@ function scaffoldWranglerConfig(
     main: `${outRelative}/worker.js`,
     compatibility_date: new Date().toISOString().slice(0, 10),
     compatibility_flags: ['nodejs_compat'],
-    alias: devOnlyAliases(outRelative, mcpPlugin),
+    alias: devOnlyAliases(outRelative),
     define: {
       // Framework and app code branch on NODE_ENV at module scope, statements in
       // the generated worker cannot beat ESM import hoisting, and wrangler `vars`
@@ -1398,7 +1362,7 @@ function scaffoldWranglerConfig(
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      warnMissingBuildOwnedKeys(configPath, outRelative, mcpPlugin, mcpOAuth)
+      warnMissingBuildOwnedKeys(configPath, outRelative, mcpOAuth)
       return
     }
     throw error
@@ -1544,7 +1508,6 @@ function parseJsonc(text: string): unknown {
 function warnMissingBuildOwnedKeys(
   configPath: string,
   outRelative: string,
-  mcpPlugin: boolean,
   mcpOAuth: boolean,
 ): void {
   const config = readWranglerConfig(configPath)
@@ -1561,7 +1524,7 @@ function warnMissingBuildOwnedKeys(
   // A non-object `alias` is malformed rather than outdated, and `in` would throw
   // out of a function whose point is to warn. Treat it as holding no entries.
   const alias = isRecord(config.alias) ? config.alias : {}
-  for (const [specifier, target] of Object.entries(devOnlyAliases(outRelative, mcpPlugin))) {
+  for (const [specifier, target] of Object.entries(devOnlyAliases(outRelative))) {
     if (!(specifier in alias)) {
       missing.push(`${JSON.stringify(specifier)}: ${JSON.stringify(target)} (inside "alias")`)
     }

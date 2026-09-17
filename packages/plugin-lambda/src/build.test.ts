@@ -38,49 +38,6 @@ interface ScaffoldOptions {
   renderExport?: string
   /** Lines placed above the handler exports, plus the body of the `http` export. */
   entry?: { preamble?: string[]; http: string }
-  /** Declare `@guren/plugin-mcp` under `dependencies` — the App MCP opt-in (RFC 0016 §7). */
-  mcpPlugin?: boolean
-}
-
-/** Markers the fake SDK exports, so a test can tell "resolved" from "stubbed". */
-const SDK_SERVER_INDEX_MARKER = 'fake-sdk-server-index'
-const SDK_TRANSPORT_MARKER = 'fake-sdk-transport'
-
-/**
- * A stand-in for `@modelcontextprotocol/sdk` inside the scaffolded app, without
- * an `exports` map on purpose: a slightly wrong subpath under one fails to
- * resolve and reads exactly like the stub still intercepting, the verdict these
- * tests distinguish. `webStandardStreamableHttp.js` is the entry
- * `stubbableDevOnlyModules` releases; `server/index.js` only the SDK-prefix catch-all stubs.
- */
-function installFakeMcpSdk(root: string): void {
-  const pkg = join(root, 'node_modules/@modelcontextprotocol/sdk')
-  mkdirSync(join(pkg, 'server'), { recursive: true })
-  writeJson(join(pkg, 'package.json'), {
-    name: '@modelcontextprotocol/sdk',
-    version: '1.30.0',
-    type: 'module',
-  })
-  writeFileSync(join(pkg, 'server/index.js'), `export const MARKER = '${SDK_SERVER_INDEX_MARKER}'\n`)
-  writeFileSync(
-    join(pkg, 'server/webStandardStreamableHttp.js'),
-    `export const WebStandardStreamableHTTPServerTransport = '${SDK_TRANSPORT_MARKER}'\n`,
-  )
-}
-
-/**
- * An entry importing both SDK subpaths and reporting what it got.
- * `server/index.js` comes in as a *namespace*: the catch-all stub for an unlisted
- * subpath is a bare `throw` with no exports, so a named import would fail the
- * bundle rather than the bundled module, making the stubbed and unstubbed cases
- * fail at different stages. A namespace import bundles either way and throws on evaluation.
- */
-const SDK_ENTRY: ScaffoldOptions['entry'] = {
-  preamble: [
-    "import * as serverIndex from '@modelcontextprotocol/sdk/server/index.js'",
-    "import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'",
-  ],
-  http: '`${serverIndex.MARKER}|${WebStandardStreamableHTTPServerTransport}`',
 }
 
 function scaffoldApp(root: string, options: ScaffoldOptions = {}): void {
@@ -88,7 +45,6 @@ function scaffoldApp(root: string, options: ScaffoldOptions = {}): void {
     ssr = true,
     renderExport = 'export const render = () => ({ body: "", head: [] })',
     entry = { http: 'process.env.NODE_ENV' },
-    mcpPlugin = false,
   } = options
 
   mkdirSync(join(root, 'src'), { recursive: true })
@@ -106,7 +62,6 @@ function scaffoldApp(root: string, options: ScaffoldOptions = {}): void {
   )
   writeJson(join(root, 'package.json'), {
     name: '@acme/demo-app',
-    ...(mcpPlugin ? { dependencies: { '@guren/plugin-mcp': '^0.2.0' } } : {}),
   })
 
   mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
@@ -422,69 +377,8 @@ describe('buildLambdaOutput', () => {
     expect(existsSync(join(root, 'src/lambda.ts'))).toBe(true)
   })
 
-  test('should make an unlisted MCP SDK subpath throw rather than resolve empty', async () => {
-    scaffoldApp(root, {
-      entry: {
-        preamble: ["import * as sdk from '@modelcontextprotocol/sdk/server/unlisted.js'"],
-        http: 'String(sdk)',
-      },
-    })
-
-    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
-
-    const probe = 'await import(process.argv[1])'
-    const result = Bun.spawnSync({
-      cmd: [process.execPath, '-e', probe, join(root, '.lambda/function/handler.js')],
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-
-    expect(result.exitCode).not.toBe(0)
-    expect(result.stderr.toString()).toContain('The MCP endpoint is unavailable on AWS Lambda')
-  })
-
-  test('should stub both MCP SDK subpaths for an app that does not depend on the plugin', async () => {
-    // The regression hold: nothing about RFC 0016 Phase 4a may reach an app
-    // that never asked for the App MCP endpoint.
-    scaffoldApp(root, { entry: SDK_ENTRY })
-    installFakeMcpSdk(root)
-
-    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
-
-    const result = Bun.spawnSync({
-      cmd: [process.execPath, '-e', 'await import(process.argv[1])', join(root, '.lambda/function/handler.js')],
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-
-    expect(result.exitCode).not.toBe(0)
-    expect(result.stderr.toString()).toContain('The MCP endpoint is unavailable on AWS Lambda')
-    // Not merely "something threw": the SDK sits installed beside the app, so
-    // its markers reaching the bundle is what "resolved for real" looks like.
-    const bundle = readFileSync(join(root, '.lambda/function/handler.js'), 'utf8')
-    expect(bundle).not.toContain(SDK_TRANSPORT_MARKER)
-    expect(bundle).not.toContain(SDK_SERVER_INDEX_MARKER)
-  })
-
-  test('should bundle the real MCP SDK for an app depending on @guren/plugin-mcp', async () => {
-    scaffoldApp(root, { entry: SDK_ENTRY, mcpPlugin: true })
-    installFakeMcpSdk(root)
-
-    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
-
-    // Two separate mechanisms had to stop firing, and the markers tell them apart
-    // from "resolved nothing": `webStandardStreamableHttp.js` is the entry the
-    // stub map releases, and `server/index.js` is one no entry ever named — only
-    // the catch-all could have stubbed it, and @guren/plugin-mcp imported it
-    // *statically* on SDK v1, so a catch-all in force left the endpoint shut.
-    expect(probeHttpExport(root)).toBe(`${SDK_SERVER_INDEX_MARKER}|${SDK_TRANSPORT_MARKER}`)
-  })
-
   test('should bundle the SDK v2 root @guren/plugin-mcp imports', async () => {
-    // No stub or filter names `@modelcontextprotocol/server`, so neither the v1
-    // stub map nor the v1 subpath catch-all may swallow it.
     scaffoldApp(root, {
-      mcpPlugin: true,
       entry: {
         preamble: ["import { createMcpHandler } from '@modelcontextprotocol/server'"],
         http: 'String(createMcpHandler)',
@@ -500,30 +394,20 @@ describe('buildLambdaOutput', () => {
     expect(probeHttpExport(root)).toBe('fake-sdk-v2-server')
   })
 
-  test('should keep the Dev MCP server stubbed even for an app depending on the plugin', async () => {
-    // Its McpServer drives the CLI's code generators against a filesystem the
-    // function does not have, and the App MCP endpoint never touches it.
+  test('should stub @guren/cli, which serves the Dev MCP', async () => {
     scaffoldApp(root, {
-      mcpPlugin: true,
-      entry: {
-        preamble: ["import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'"],
-        http: 'String(McpServer)',
-      },
+      entry: { preamble: ["import * as cli from '@guren/cli'"], http: 'String(cli.default)' },
     })
-    installFakeMcpSdk(root)
-    writeFileSync(
-      join(root, 'node_modules/@modelcontextprotocol/sdk/server/mcp.js'),
-      "export const McpServer = 'fake-sdk-mcp-server'\n",
-    )
+    const cli = join(root, 'node_modules/@guren/cli')
+    mkdirSync(cli, { recursive: true })
+    writeJson(join(cli, 'package.json'), { name: '@guren/cli', type: 'module' })
+    writeFileSync(join(cli, 'index.js'), "export default 'fake-guren-cli'\n")
 
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
-    // The stub's throw is a *function body*, so importing succeeds and calling is
-    // what fails — asserted on the bundle text rather than on a process exit
-    // code, which would pass for the wrong reason.
     const bundle = readFileSync(join(root, '.lambda/function/handler.js'), 'utf8')
-    expect(bundle).toContain('The MCP endpoint is unavailable on AWS Lambda')
-    expect(bundle).not.toContain('fake-sdk-mcp-server')
+    expect(bundle).toContain('The Dev MCP endpoint is unavailable on AWS Lambda')
+    expect(bundle).not.toContain('fake-guren-cli')
   })
 })
 

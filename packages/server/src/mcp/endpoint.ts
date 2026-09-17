@@ -1,7 +1,7 @@
 /**
- * Identity and activation rules for the dev-only MCP endpoint. Free of MCP SDK
- * imports so middleware (CSRF) and the app bootstrap can reason about the
- * endpoint without `@modelcontextprotocol/sdk`, which apps need not install.
+ * Identity and activation rules for the dev-only MCP endpoint, which middleware
+ * (CSRF) and the app bootstrap read without mounting it. The server itself lives
+ * in `@guren/cli` (RFC 0028 §1).
  */
 import type { MiddlewareHandler } from 'hono'
 import { createLoopbackGuard } from '../http/middleware/loopback-guard'

@@ -1,13 +1,10 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
-  appUsesMcpPlugin,
   bundledRuntimeEnv,
   DEV_ONLY_MODULES,
   importSpecifier,
-  MCP_SDK_SUBPATH_PREFIX,
   renderDevOnlyStub,
-  stubbableDevOnlyModules,
   assertOutputDirOutsideRoot,
   resetOutputDir,
   resolveClientAssetEnv,
@@ -53,7 +50,7 @@ export interface BuildLambdaOutputOptions {
   databaseDialects?: readonly DatabaseDialect[]
 }
 
-const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on AWS Lambda — it generates files on disk.'
+const MCP_UNAVAILABLE = 'The Dev MCP endpoint is unavailable on AWS Lambda — it generates files on disk.'
 
 /**
  * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, each naming
@@ -69,14 +66,12 @@ const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], s
 
 /**
  * Stubs rather than externals: inlining a lazily-imported module hoists its
- * static imports to the bundle top level, so an external reached that way (the
- * MCP SDK) fails at import time though no code path runs it. An app declaring
- * `@guren/plugin-mcp` serves the endpoint here, so its transport must reach the
- * bundle (RFC 0016 §7) — `stubbableDevOnlyModules` owns that split.
+ * static imports to the bundle top level, so an external reached that way fails
+ * at import time though no code path runs it.
  */
-function devOnlyStubs(mcpPlugin: boolean): Record<string, string> {
+function devOnlyStubs(): Record<string, string> {
   return Object.fromEntries(
-    stubbableDevOnlyModules({ mcpPlugin }).map((module) => [
+    DEV_ONLY_MODULES.map((module) => [
       module.specifier,
       renderDevOnlyStub(module, UNAVAILABLE_ON_LAMBDA[module.kind]),
     ]),
@@ -93,26 +88,16 @@ function devOnlyStubs(mcpPlugin: boolean): Record<string, string> {
 function stubsFor(
   root: string,
   dialects: readonly DatabaseDialect[] | undefined,
-  mcpPlugin: boolean,
 ): Record<string, string> {
   const unused = unusedSqlClients({ root, label: 'Lambda build', dialects })
 
   return {
-    ...devOnlyStubs(mcpPlugin),
+    ...devOnlyStubs(),
     ...Object.fromEntries(
       unused.map(({ module, message }) => [module.specifier, renderDevOnlyStub(module, message)]),
     ),
   }
 }
-
-/**
- * Fallback for an MCP SDK subpath `DEV_ONLY_MODULES` does not name. It cannot
- * know which names the importer destructures, so it throws on evaluation rather
- * than handing back missing exports. Reachable only for an app that does *not*
- * declare `@guren/plugin-mcp`, whose statically imported `server/index.js` and
- * `types.js` it would otherwise stub shut — see `stubFilter`.
- */
-const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -120,16 +105,9 @@ function escapeRegExp(value: string): string {
 
 // Derived from the stubs actually rendered, so it stays the only enumeration of
 // stubbed specifiers: a specifier filtered with no stub loads as an empty module
-// instead of failing. The catch-all cannot be derived — "any MCP SDK subpath is
-// stubbed" holds always and would swallow the `server/index.js` and `types.js`
-// an MCP app imports statically — so it follows the same `mcpPlugin` decision.
-function stubFilter(stubs: Record<string, string>, mcpPlugin: boolean): RegExp {
-  const terms = Object.keys(stubs).map(escapeRegExp)
-  if (!mcpPlugin) {
-    terms.push(`${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`)
-  }
-
-  return new RegExp(`^(?:${terms.join('|')})$`)
+// instead of failing.
+function stubFilter(stubs: Record<string, string>): RegExp {
+  return new RegExp(`^(?:${Object.keys(stubs).map(escapeRegExp).join('|')})$`)
 }
 
 /**
@@ -183,17 +161,7 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const wrapperPath = resolve(out, `${LAMBDA_HANDLER_MODULE}.ts`)
   writeFileSync(wrapperPath, renderHandlerModule({ out, entrypoint, env: bakedEnv }))
 
-  // One read of the app's manifest, threaded to both halves of the stub
-  // decision: two reads are two places for them to disagree, silently — the
-  // catch-all stubbing what the stub map deliberately released.
-  const mcpPlugin = appUsesMcpPlugin(root)
-
-  await bundleHandler(
-    wrapperPath,
-    funcDir,
-    stubsFor(root, options.databaseDialects, mcpPlugin),
-    mcpPlugin,
-  )
+  await bundleHandler(wrapperPath, funcDir, stubsFor(root, options.databaseDialects))
 
   // Lambda's Node.js runtime treats `.js` as CommonJS unless the package is
   // marked as a module; the bundle and the SSR chunks are both ESM.
@@ -287,9 +255,8 @@ async function bundleHandler(
   handlerEntry: string,
   funcDir: string,
   stubs: Record<string, string>,
-  mcpPlugin: boolean,
 ): Promise<void> {
-  const filter = stubFilter(stubs, mcpPlugin)
+  const filter = stubFilter(stubs)
 
   const result = await Bun.build({
     entrypoints: [handlerEntry],
@@ -326,7 +293,7 @@ async function bundleHandler(
             namespace: 'guren-lambda-stub',
           }))
           build.onLoad({ filter: /.*/, namespace: 'guren-lambda-stub' }, (args) => ({
-            contents: stubs[args.path] ?? unlistedMcpStub,
+            contents: stubs[args.path],
             loader: 'js',
           }))
         },

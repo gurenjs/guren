@@ -430,10 +430,8 @@ export interface DevOnlyModule {
    * The package source that reaches this module, repo-relative. An entry is here
    * because one package imports it, so the module-graph check searches that package
    * alone: a stale entry cannot be kept alive by an unrelated package's import.
-   * `null`: no package imports it any more, and it stays only so the stub file a
-   * committed `wrangler.jsonc` aliases keeps being written (RFC 0028 §4).
    */
-  readonly importedBy: string | null
+  readonly importedBy: string
 }
 
 /**
@@ -447,73 +445,10 @@ export const DEV_ONLY_MODULES = [
   { specifier: 'bun:sqlite', kind: 'sqlite', exportNames: ['Database'], importedBy: 'packages/orm/src' },
   { specifier: 'vite', kind: 'vite', exportNames: ['createServer'], importedBy: 'packages/server/src' },
   { specifier: '@guren/cli', kind: 'mcp', exportNames: [], importedBy: 'packages/server/src' },
-  {
-    specifier: '@modelcontextprotocol/sdk/server/mcp.js',
-    kind: 'mcp',
-    exportNames: ['McpServer', 'ResourceTemplate'],
-    importedBy: 'packages/server/src',
-  },
-  {
-    specifier: '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js',
-    kind: 'mcp',
-    exportNames: ['WebStandardStreamableHTTPServerTransport'],
-    importedBy: null,
-  },
 ] as const satisfies readonly DevOnlyModule[]
-
-/** One entry of `DEV_ONLY_MODULES`, with its `kind` still narrowed. */
-export type DevOnlyModuleEntry = (typeof DEV_ONLY_MODULES)[number]
-
-/**
- * The v1 transport `@guren/plugin-mcp` imported before SDK v2 (RFC 0016 §7): the
- * one `DEV_ONLY_MODULES` entry whose stubbing is conditional. Nothing imports it
- * now, so the condition changes no bundle; it goes in RFC 0028's removal PR.
- */
-export const MCP_TRANSPORT_SPECIFIER =
-  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 
 /** The package an app declares to opt into the App MCP endpoint. */
 export const MCP_PLUGIN_PACKAGE = '@guren/plugin-mcp'
-
-/**
- * Whether the app opted into the App MCP endpoint (RFC 0016 §7, Open Question 5):
- * declaring `@guren/plugin-mcp` in `dependencies` is the opt-in, so no build flag
- * can silently compile the endpoint shut. `devDependencies` do not count (they do
- * not ship). An absent, unreadable, or malformed manifest answers `false`: the
- * transport stays stubbed, which is the safe direction.
- */
-export function appUsesMcpPlugin(root: string): boolean {
-  try {
-    const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
-      dependencies?: Record<string, string>
-    }
-    const dependencies = manifest.dependencies
-    return (
-      typeof dependencies === 'object'
-      && dependencies !== null
-      && MCP_PLUGIN_PACKAGE in dependencies
-    )
-  } catch {
-    return false
-  }
-}
-
-/**
- * The dev-only modules that must stay stubbed for this app: `DEV_ONLY_MODULES`
- * minus the v1 transport entry when the app declared `@guren/plugin-mcp` (RFC 0016
- * Phase 4a). Since the plugin moved to SDK v2 that entry has no importer, so the
- * split changes no bundle (RFC 0028 §4). `server/mcp.js` stays stubbed: the Dev MCP. Each entry keeps
- * its narrow `kind` so platform `Record<kind, message>` tables stay indexable.
- */
-export function stubbableDevOnlyModules(options: {
-  mcpPlugin: boolean
-}): readonly DevOnlyModuleEntry[] {
-  if (!options.mcpPlugin) {
-    return DEV_ONLY_MODULES
-  }
-
-  return DEV_ONLY_MODULES.filter((module) => module.specifier !== MCP_TRANSPORT_SPECIFIER)
-}
 
 /** A database `@guren/orm` can connect through, named after the factory the app's config calls. */
 export type DatabaseDialect = 'postgres' | 'mysql' | 'sqlite' | 'aws-data-api' | 'd1'
@@ -720,7 +655,7 @@ function toJsStringLiteral(value: string): string {
  * called without `new` would hide the real reason).
  * @param message Platform-specific explanation, including the replacement API.
  */
-export function renderDevOnlyStub(module: DevOnlyModule, message: string): string {
+export function renderDevOnlyStub(module: Pick<DevOnlyModule, 'exportNames'>, message: string): string {
   // The message lands in the file twice with different escaping: as the thrown
   // error's string literal and as comment text, where a line terminator would end
   // the comment and run what follows as code.
@@ -737,11 +672,3 @@ export function renderDevOnlyStub(module: DevOnlyModule, message: string): strin
   const fallback = `function unavailable() { ${error} }`
   return `// ${comment}\n${throwing}\n${fallback}\nexport default Object.assign(unavailable${named})\n`
 }
-
-/**
- * The v1 MCP SDK is reached only through subpaths, which a package-name alias does
- * not cover (hence each one in `DEV_ONLY_MODULES`). A platform whose aliasing supports
- * prefixes routes unlisted subpaths under this prefix to a stub too. SDK v2 lives
- * under other package names, so `@guren/plugin-mcp`'s import is never matched.
- */
-export const MCP_SDK_SUBPATH_PREFIX = '@modelcontextprotocol/sdk/'

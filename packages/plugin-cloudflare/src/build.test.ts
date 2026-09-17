@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS, MCP_TRANSPORT_SPECIFIER } from '@guren/core/internal/deploy-build'
+import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS } from '@guren/core/internal/deploy-build'
 import { buildCloudflareOutput } from './build'
 
 import { CLIENT_MANIFEST, captureWarnings, scaffoldApp, writeJson } from '../tests/app-fixture'
@@ -520,55 +520,32 @@ describe('workers runtime configuration', () => {
     expect(config.alias['bun:sqlite']).toBe('./.cloudflare/stub-bun-sqlite.js')
     expect(config.alias.vite).toBe('./.cloudflare/stub-vite.js')
     expect(config.alias['@guren/cli']).toBe('./.cloudflare/stub-guren-cli.js')
-    // The SDK is only ever imported through subpaths, which a package-name
-    // alias does not cover.
-    expect(config.alias['@modelcontextprotocol/sdk/server/mcp.js']).toBeDefined()
+    // The MCP SDK is imported only by @guren/cli and @guren/plugin-mcp (RFC 0028).
+    expect(Object.keys(config.alias).filter((key) => key.startsWith('@modelcontextprotocol/'))).toEqual([])
     expect(config.define['process.env.NODE_ENV']).toBe('"production"')
 
     expect(readFileSync(join(root, '.cloudflare/stub-bun-sqlite.js'), 'utf8')).toContain('throw new Error')
     expect(existsSync(join(root, '.cloudflare/stub-vite.js'))).toBe(true)
-
-    // The regression hold for the App MCP change: an app that did not ask for
-    // the endpoint keeps every stub it had.
-    expect(config.alias[MCP_TRANSPORT_SPECIFIER]).toBe('./.cloudflare/stub-mcp-transport.js')
   })
 
-  test('should leave the App MCP transport unaliased for an app depending on the plugin', async () => {
+  test('should keep writing the stubs a config scaffolded before RFC 0028 aliases', async () => {
     scaffoldApp(root, { mcpPlugin: true })
+    writeFileSync(
+      join(root, 'wrangler.jsonc'),
+      `{\n  "name": "legacy",\n  "main": ".cloudflare/worker.js",\n  "alias": {\n`
+        + `    "@modelcontextprotocol/sdk/server/mcp.js": "./.cloudflare/stub-mcp-server.js",\n`
+        + `    "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js": "./.cloudflare/stub-mcp-transport.js"\n`
+        + `  }\n}\n`,
+    )
 
-    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
-
-    const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
-    // The alias was the only thing killing the endpoint on Workers; the
-    // adapter itself is workerd-compatible (RFC 0016 §7).
-    expect(config.alias[MCP_TRANSPORT_SPECIFIER]).toBeUndefined()
-    // Everything else is unchanged — the Dev MCP's McpServer generates files
-    // on disk and must stay compiled shut whatever the app depends on.
-    expect(config.alias['@modelcontextprotocol/sdk/server/mcp.js']).toBe('./.cloudflare/stub-mcp-server.js')
-    expect(config.alias['@guren/cli']).toBe('./.cloudflare/stub-guren-cli.js')
-    expect(config.alias['bun:sqlite']).toBe('./.cloudflare/stub-bun-sqlite.js')
-    expect(config.alias.vite).toBe('./.cloudflare/stub-vite.js')
-    expect(config.alias.postgres).toBe('./.cloudflare/stub-postgres.js')
-
-    // The stub file is still written: an app whose committed config predates
-    // this version keeps pointing at it.
-    expect(existsSync(join(root, '.cloudflare/stub-mcp-transport.js'))).toBe(true)
-  })
-
-  test('should not suggest the transport alias when warning an MCP app about a stale config', async () => {
-    scaffoldApp(root, { mcpPlugin: true })
-    // A config predating the build-owned keys entirely, with no alias at all —
-    // so the warning names every entry it is missing.
-    writeFileSync(join(root, 'wrangler.jsonc'), '{ "name": "legacy" }\n')
-
+    // Wrangler fails on an alias whose file is missing, even one nothing imports.
     const warning = await captureWarnings(() =>
       buildCloudflareOutput({ rootDir: root, skipAppBuild: true }),
     )
 
-    expect(warning).toContain('@modelcontextprotocol/sdk/server/mcp.js')
-    // Suggesting the transport alias would talk this app into the very stub
-    // the guard below fails on.
-    expect(warning).not.toContain(MCP_TRANSPORT_SPECIFIER)
+    expect(readFileSync(join(root, '.cloudflare/stub-mcp-server.js'), 'utf8')).toContain('export function McpServer()')
+    expect(existsSync(join(root, '.cloudflare/stub-mcp-transport.js'))).toBe(true)
+    expect(warning).not.toContain('@modelcontextprotocol')
   })
 
   test('should define import.meta.url so module-scope URL resolution survives', async () => {
@@ -720,141 +697,6 @@ describe('workers runtime configuration', () => {
     await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
       /both flatten to/,
     )
-  })
-})
-
-describe('buildCloudflareOutput with a stale committed wrangler.jsonc', () => {
-  let root: string
-
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'guren-cf-mcp-'))
-  })
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true })
-  })
-
-  /** A config carrying the alias set as scaffolded before the app added the plugin. */
-  function writeStaleConfig(root: string, extra = ''): void {
-    writeFileSync(
-      join(root, 'wrangler.jsonc'),
-      `{\n${extra}  "name": "legacy",\n  "main": ".cloudflare/worker.js",\n  "alias": {\n`
-        + `    "bun:sqlite": "./.cloudflare/stub-bun-sqlite.js",\n`
-        + `    ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: "./.cloudflare/stub-mcp-transport.js"\n`
-        + `  }\n}\n`,
-    )
-  }
-
-  test('should fail and name the alias line to delete', async () => {
-    scaffoldApp(root, { mcpPlugin: true })
-    writeStaleConfig(root)
-
-    // The scaffold never overwrites an existing config, so this alias would survive
-    // every build and deploy the endpoint compiled shut, with nothing red anywhere.
-    const error = await buildCloudflareOutput({ rootDir: root, skipAppBuild: true }).catch(
-      (thrown: Error) => thrown,
-    )
-
-    expect(error).toBeInstanceOf(Error)
-    const message = (error as Error).message
-    expect(message).toContain('@guren/plugin-mcp')
-    // The exact line, so the fix is an edit rather than a search.
-    expect(message).toContain(
-      `${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: "./.cloudflare/stub-mcp-transport.js"`,
-    )
-    // And the one entry that must survive the edit.
-    expect(message).toContain('@modelcontextprotocol/sdk/server/mcp.js')
-  })
-
-  test('should fail on generated residue under a custom output directory', async () => {
-    scaffoldApp(root, { mcpPlugin: true })
-    // Same residue, different outputDir: the alias target is a path this build
-    // chose, so matching the whole of it would miss every app that moved its output.
-    writeFileSync(
-      join(root, 'wrangler.jsonc'),
-      `{\n  "name": "legacy",\n  "alias": {\n`
-        + `    ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: "./dist/cf/stub-mcp-transport.js"\n`
-        + `  }\n}\n`,
-    )
-
-    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
-      /@guren\/plugin-mcp/,
-    )
-  })
-
-  test('should leave an alias pointing at the developer own shim alone', async () => {
-    scaffoldApp(root, { mcpPlugin: true })
-    // An alias on this specifier is only *build residue* when it names the stub
-    // file this build writes; pointing it elsewhere is a deliberate override, and
-    // failing on it would refuse a config with nothing wrong with it.
-    writeFileSync(
-      join(root, 'wrangler.jsonc'),
-      `{\n  "name": "legacy",\n  "alias": {\n`
-        + `    ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: "./shims/my-transport.js"\n`
-        + `  }\n}\n`,
-    )
-
-    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
-
-    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
-  })
-
-  test('should leave a non-string alias target alone', async () => {
-    scaffoldApp(root, { mcpPlugin: true })
-    // Malformed rather than stale, and this guard exists to name one editable
-    // line — it cannot name one in a value that is not a path.
-    writeFileSync(
-      join(root, 'wrangler.jsonc'),
-      `{\n  "name": "legacy",\n  "alias": { ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: 42 }\n}\n`,
-    )
-
-    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
-
-    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
-  })
-
-  test('should build normally when the app does not depend on the plugin', async () => {
-    scaffoldApp(root)
-    writeStaleConfig(root)
-
-    // Without the plugin the alias is correct, not stale — a guard that fired
-    // here would break every app that has ever deployed to Workers.
-    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
-
-    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
-  })
-
-  test('should not fail on the alias line commented out rather than deleted', async () => {
-    scaffoldApp(root, { mcpPlugin: true })
-    // A developer following the failure message comments the line out rather than
-    // deleting it, so specifier and stub filename are still in the file: a guard
-    // matching text rather than parsed keys would fail this build forever.
-    writeFileSync(
-      join(root, 'wrangler.jsonc'),
-      `{\n  "name": "legacy",\n  "main": ".cloudflare/worker.js",\n  "alias": {\n`
-        + `    "bun:sqlite": "./.cloudflare/stub-bun-sqlite.js",\n`
-        + `    // Removed for the App MCP endpoint (RFC 0016):\n`
-        + `    // ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: "./.cloudflare/stub-mcp-transport.js"\n`
-        + `  }\n}\n`,
-    )
-
-    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
-
-    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
-  })
-
-  test('should build rather than fail when the config cannot be parsed', async () => {
-    scaffoldApp(root, { mcpPlugin: true })
-    writeFileSync(join(root, 'wrangler.jsonc'), '{ "name": "legacy", "alias": ')
-
-    // Unreadable is not evidence of a stale alias, and the existing
-    // build-owned-keys warning already reports the file.
-    const warning = await captureWarnings(() =>
-      buildCloudflareOutput({ rootDir: root, skipAppBuild: true }),
-    )
-
-    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
-    expect(warning).toContain('could not parse')
   })
 })
 
