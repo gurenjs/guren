@@ -42,6 +42,11 @@ describe('Blog config definitions', () => {
     expect(container.make<StorageManager>('storage').disk('public')).toBeDefined()
   })
 
+  it('keeps a blank MAIL_FROM_NAME blank', async () => {
+    vi.stubEnv('MAIL_FROM_NAME', '')
+    expect(env.parse(undefined, { mode: 'report' }).values.MAIL_FROM_NAME).toBe('')
+  })
+
   it('registers an OAuth provider only when all three of its keys are set', async () => {
     vi.stubEnv('OAUTH_GITHUB_CLIENT_ID', 'id')
     vi.stubEnv('OAUTH_GITHUB_CLIENT_SECRET', 'secret')

@@ -21,7 +21,8 @@ const env = defineEnv({
   MAIL_MAILER: Env.string().default('log'),
   RESEND_API_KEY: Env.string().secret().optional().describe('Read only when MAIL_MAILER=resend.'),
   MAIL_FROM_ADDRESS: Env.string().default('noreply@blog.example.com'),
-  MAIL_FROM_NAME: Env.string().default('Guren Blog'),
+  // A blank display name is a choice, so it stays blank rather than taking the default.
+  MAIL_FROM_NAME: Env.string().default('Guren Blog').allowEmpty(),
   OAUTH_GITHUB_CLIENT_ID: Env.string().optional(),
   OAUTH_GITHUB_CLIENT_SECRET: Env.string().secret().optional(),
   OAUTH_GITHUB_REDIRECT_URI: Env.url().optional(),
