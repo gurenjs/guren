@@ -25,7 +25,7 @@ const app = createApp({
 export default app
 ```
 
-`create-guren-app` はこの形で生成します。`guren add cache`、`guren add mail`、`guren add queue`、`guren add storage`、`guren add session`、`guren add oauth` は、それぞれの定義を `config` 配列に追加します。
+`create-guren-app` はこの形で生成します。`guren add cache`、`guren add mail`、`guren add queue`、`guren add storage`、`guren add session`、`guren add oauth` は、`config/env.ts` があれば、それぞれの定義を `config` 配列に追加します（[サービスプロバイダを使うアプリ](#サービスプロバイダを使うアプリ) を参照）。
 
 ## 環境変数を宣言する
 
@@ -129,7 +129,7 @@ export default defineCacheConfig((env) => ({
 
 **1 つのキーを設定できるのは 1 か所だけです。** 定義とプロバイダの両方が `cache` をバインドすると、どちらかが黙って勝つのではなく、両方の名前を挙げて起動に失敗します。サービスを定義に移したら、そのプロバイダは削除してください。
 
-名前のチェックは定義の中で行います。マネージャはどんなストア名でも受け付け、実際に使われた時点で例外を投げます。それが数時間後のキューのジョブということもあるので、scaffold は起動時に確認しています。
+名前のチェックは定義の中で行います。マネージャはどんなストア名でも受け付け、実際に使われた時点で例外を投げます。それが数時間後のキューのジョブということもあるので、queue、mail、storage の scaffold は起動時に確認しています。
 
 ```ts
 // config/queue.ts

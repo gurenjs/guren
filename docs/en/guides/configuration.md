@@ -25,7 +25,7 @@ const app = createApp({
 export default app
 ```
 
-`create-guren-app` writes this shape, and `guren add cache`, `guren add mail`, `guren add queue`, `guren add storage`, `guren add session` and `guren add oauth` add their definition to the `config` array.
+`create-guren-app` writes this shape, and `guren add cache`, `guren add mail`, `guren add queue`, `guren add storage`, `guren add session` and `guren add oauth` add their definition to the `config` array once `config/env.ts` exists (see [Apps with service providers](#apps-with-service-providers)).
 
 ## Declaring the environment
 
@@ -129,7 +129,7 @@ export default defineCacheConfig((env) => ({
 
 **A key is configured once.** If a definition and a provider both bind `cache`, the boot fails and names both, rather than one silently winning. When you move a service to a definition, delete its provider.
 
-Name checks belong in the definition. A manager accepts any store name and throws on first use, which may be a queued job hours later, so the scaffolds check at boot:
+Name checks belong in the definition. A manager accepts any store name and throws on first use, which may be a queued job hours later, so the queue, mail and storage scaffolds check at boot:
 
 ```ts
 // config/queue.ts
