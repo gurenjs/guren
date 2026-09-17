@@ -71,6 +71,8 @@ export interface WireProviderOptions {
   appPath?: string
   /** Also report each success / already-present step (the interactive `guren add auth` flow). */
   verbose?: boolean
+  /** Counts an existing entry as this one, e.g. a configured `aiPlugin({ ... })` for `aiPlugin()`. */
+  isRegistered?: (entries: string[]) => boolean
 }
 
 /** The import of a scaffolded file's default export, relative to the entry that imports it. */
@@ -107,7 +109,7 @@ async function wireArrayOption(
     return
   }
 
-  const wiring = await addArrayOptionRegistration(appPath, key, entry, importStatement)
+  const wiring = await addArrayOptionRegistration(appPath, key, entry, importStatement, options.isRegistered)
 
   if (!wiring.registered) {
     consola.warn(`Could not register ${entry} in ${appPath}: ${wiring.entry.reason}.`)

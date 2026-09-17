@@ -46,6 +46,7 @@ bunx guren add storage         # File storage disks
 bunx guren add attachments     # Uploads attached to your models
 bunx guren add events          # Events & listeners
 bunx guren add broadcasting    # Real-time (SSE)
+bunx guren add ai              # In-process AI agents on the AI SDK
 bunx guren add schedule        # Cron scheduling
 bunx guren add prototype       # Prototype mode: pages from fixtures, no backend yet
 bunx guren add lint            # oxlint with the Guren rules

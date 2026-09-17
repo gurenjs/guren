@@ -14,7 +14,7 @@ import { showUsage } from 'citty'
 import { defineCommand } from './define-command'
 import { UsageError } from './run-cli'
 import { newCommand } from './new-command'
-import { addResource, listBlueprints, runBlueprint } from './blueprints'
+import { addResource, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { CODEGEN_STEP, makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
@@ -27,6 +27,7 @@ import { makeJob } from './make-job'
 import { makeMail } from './make-mail'
 import { makeMiddleware } from './make-middleware'
 import { makeAgent } from './make-agent'
+import { makeAiAgent } from './make-ai-agent'
 import { makePolicy } from './make-policy'
 import { makeMigration } from './make-migration'
 import { makeModel } from './make-model'
@@ -584,6 +585,48 @@ const makeAgentCommand = defineCommand({
     for (const note of notes) {
       consola.info(note)
     }
+  },
+})
+
+const makeAiAgentCommand = defineCommand({
+  meta: {
+    name: 'make:ai-agent',
+    description: 'Scaffold an in-process AI agent (RFC 0029) under app/Ai/Agents. For a durable Workers agent, use make:agent.',
+  },
+  args: {
+    name: {
+      type: 'positional',
+      required: true,
+      description: 'Agent class name (e.g., SupportTriager)',
+    },
+    tools: {
+      type: 'string',
+      description: 'Comma-separated agent tool names for appTools(), checked against the routes (e.g., "tickets_show,tickets_update").',
+    },
+    output: {
+      type: 'boolean',
+      description: 'Declare a structured output with a Zod schema stub.',
+    },
+    test: {
+      type: 'boolean',
+      description: 'Also write a test that scripts the agent with app.fakeAi().',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Overwrite existing files',
+      alias: 'f',
+    },
+    module: MODULE_ARG,
+  },
+  async run({ args }) {
+    const { files, notes } = await makeAiAgent(args.name, {
+      ...toWriterOptions(args),
+      tools: args.tools,
+      output: Boolean(args.output),
+      test: Boolean(args.test),
+    })
+    for (const file of files) consola.success(`Created ${file}`)
+    for (const note of notes) consola.warn(note)
   },
 })
 
@@ -3150,6 +3193,40 @@ const addPluginCommand = defineCommand({
   },
 })
 
+const addAiCommand = defineCommand({
+  meta: {
+    name: 'ai',
+    description: 'Install in-process AI agents (RFC 0029): config/ai.ts, the provider key, aiPlugin(), and the packages.',
+  },
+  args: {
+    provider: {
+      type: 'string',
+      description: 'Model provider for config/ai.ts: anthropic, openai, or gateway (default: anthropic).',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Overwrite config/ai.ts if it exists.',
+    },
+    install: {
+      type: 'boolean',
+      default: true,
+      description: 'Run bun add for missing packages (--no-install prints the command instead).',
+    },
+  },
+  async run({ args }) {
+    const { addAi } = await import('./add-ai')
+    const overwritten: string[] = []
+    const created = await addAi({
+      provider: args.provider,
+      force: Boolean(args.force),
+      install: args.install,
+      overwritten,
+    })
+    announceWrittenFiles(created, overwritten)
+    consola.info('Next: bunx guren make:ai-agent <Name> --tools <tool,...> --test')
+  },
+})
+
 const addPrototypeCommand = defineCommand({
   meta: {
     name: 'prototype',
@@ -3171,6 +3248,27 @@ const addPrototypeCommand = defineCommand({
   },
 })
 
+const addSubCommands = {
+  admin: addAdminCommand,
+  ai: addAiCommand,
+  attachments: createAddBlueprintCommand('attachments', 'Install the attachments layer: schema table, config, provider, and the prune command.'),
+  auth: addAuthCommand,
+  oauth: createAddBlueprintCommand('oauth', 'Install OAuth scaffolding with provider presets and callback routes.'),
+  broadcasting: createAddBlueprintCommand('broadcasting', 'Install broadcasting scaffolding with sample public and private channels.'),
+  cache: createAddBlueprintCommand('cache', 'Install cache scaffolding and an example cache service.'),
+  events: createAddBlueprintCommand('events', 'Install event scaffolding with a sample event and listener.'),
+  lint: createAddBlueprintCommand('lint', 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.'),
+  mail: createAddBlueprintCommand('mail', 'Install mail scaffolding with a sample mailable.'),
+  notifications: createAddBlueprintCommand('notifications', 'Install notification scaffolding with sample channels and a sample notification.'),
+  queue: createAddBlueprintCommand('queue', 'Install queue scaffolding with a sample job.'),
+  resource: addResourceCommand,
+  plugin: addPluginCommand,
+  prototype: addPrototypeCommand,
+  session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, and sessions:prune.'),
+  schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
+  storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),
+}
+
 const addCommand = defineCommand({
   meta: {
     name: 'add',
@@ -3183,28 +3281,10 @@ const addCommand = defineCommand({
       description: 'Show available blueprints.',
     },
   },
-  subCommands: {
-    admin: addAdminCommand,
-    attachments: createAddBlueprintCommand('attachments', 'Install the attachments layer: schema table, config, provider, and the prune command.'),
-    auth: addAuthCommand,
-    oauth: createAddBlueprintCommand('oauth', 'Install OAuth scaffolding with provider presets and callback routes.'),
-    broadcasting: createAddBlueprintCommand('broadcasting', 'Install broadcasting scaffolding with sample public and private channels.'),
-    cache: createAddBlueprintCommand('cache', 'Install cache scaffolding and an example cache service.'),
-    events: createAddBlueprintCommand('events', 'Install event scaffolding with a sample event and listener.'),
-    lint: createAddBlueprintCommand('lint', 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.'),
-    mail: createAddBlueprintCommand('mail', 'Install mail scaffolding with a sample mailable.'),
-    notifications: createAddBlueprintCommand('notifications', 'Install notification scaffolding with sample channels and a sample notification.'),
-    queue: createAddBlueprintCommand('queue', 'Install queue scaffolding with a sample job.'),
-    resource: addResourceCommand,
-    plugin: addPluginCommand,
-    prototype: addPrototypeCommand,
-    session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, and sessions:prune.'),
-    schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
-    storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),
-  },
+  subCommands: addSubCommands,
   async run(ctx) {
     if (ctx.args.help || ctx.rawArgs.length === 0) {
-      consola.info(`Available blueprints: ${listBlueprints().join(', ')}, plugin`)
+      consola.info(`Available: ${Object.keys(addSubCommands).sort().join(', ')}`)
       await showUsage(ctx.cmd)
     }
   },
@@ -3412,6 +3492,7 @@ export const builtinSubCommands = {
   'docs:graph': docsGraphCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
+  'make:ai-agent': makeAiAgentCommand,
   'make:module': makeModuleCommand,
   'make:channel': makeChannelCommand,
   'make:command': makeConsoleCommandCommand,

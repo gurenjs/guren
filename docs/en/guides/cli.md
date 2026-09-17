@@ -34,6 +34,7 @@ bunx guren add broadcasting
 bunx guren add schedule
 bunx guren add lint
 bunx guren add prototype
+bunx guren add ai --provider anthropic
 ```
 
 > **Golden path:** Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
@@ -104,6 +105,17 @@ and controller, with the Resource typed against the page-data type and the pages
 they are. `bun run build:prototype` runs `check --prototype` before Vite, so a route with
 no fixture entry fails the build rather than the customer's click.
 
+`add ai` sets up in-process AI agents with `@guren/plugin-ai`. It writes `config/ai.ts`
+for one provider (`--provider anthropic`, `openai` or `gateway`), declares that
+provider's API key in `config/env.ts` and the env files, and registers the config and
+`aiPlugin()` in `createApp()`. It then runs `bun add` for the plugin, `ai` and the
+provider package; `--no-install` prints the command instead. The key is optional, so
+the app boots without it and the first prompt fails. The command needs a
+`config/env.ts`. `make:ai-agent <Name>` then writes an agent class to
+`app/Ai/Agents`. `--tools` hands it the named agent tools after checking that a route
+derives each one, `--output` adds a structured-output schema stub, and `--test` writes
+a test that scripts the model with `app.fakeAi()`.
+
 `make:controller` reads the same two signals but adapts instead of refusing: on
 an app they identify as API-only, the generated controller returns JSON
 (`this.json(...)`) rather than an Inertia page, so it typechecks as written and
@@ -151,6 +163,7 @@ table to.
 | `make:notification <Name>` | Generates a notification class | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | Generates a mailable class | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | Generates a console command in `app/Console/Commands`; `--command <name>` sets the invocation name. Register it in `src/console.ts` — see the [console commands guide](./console.md) | `bunx guren make:command SendDigest --command reports:digest` |
+| `make:ai-agent <Name>` | Scaffolds an in-process AI agent in `app/Ai/Agents` (`@guren/plugin-ai`). `--tools` grants route-derived agent tools, `--output` adds a Zod output schema, `--test` writes a `fakeAi()` test | `bunx guren make:ai-agent SupportTriager --tools tickets_show --test` |
 | `make:agent <Name>` | Scaffolds a durable agent in `app/Agents`, registers it in `config/agents.ts`, adds the `guren.arch.ts` rule that keeps it off your models and ORM, and writes the `config/env.ts` and tsconfig `types` entry its class needs — see [Durable Agents](./durable-agents.md) | `bunx guren make:agent Triager` |
 
 > **Note:** `make:*` commands avoid overwriting existing files. Use `--force` if you need to replace them.
