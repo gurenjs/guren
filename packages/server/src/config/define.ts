@@ -12,7 +12,7 @@ import type { MailConfig } from '../mail/types'
 import { createQueueManager, type QueueConfig } from '../queue/QueueManager'
 import { createStorageManager } from '../storage/StorageManager'
 import type { StorageConfig } from '../storage/types'
-import { createOAuthManager, type OAuthProviderConfig, type OAuthStateStore } from '../auth/oauth'
+import { createOAuthManager, type OAuthManagerOptions, type OAuthProviderConfig } from '../auth/oauth'
 import type { HostAuthorizationOptions } from '../http/middleware/host-authorization'
 import type { AppEnv } from './env'
 
@@ -21,11 +21,10 @@ export interface HttpConfig {
   readonly hostAuthorization?: HostAuthorizationOptions | false
 }
 
-export interface OAuthConfig {
+/** `stateStore` and `stateConfig` are the manager's own options, passed through unchanged. */
+export interface OAuthConfig extends Readonly<OAuthManagerOptions> {
   /** Each entry is registered with `OAuthManager.registerProvider(name, config)`. */
   readonly providers?: Readonly<Record<string, OAuthProviderConfig>>
-  /** Where authorize states wait for their callback; process memory when absent. */
-  readonly stateStore?: OAuthStateStore
 }
 
 /** What each key configures. Augmentable, like `SessionDrivers`: `@guren/core` adds `session` and `database`. */
@@ -89,7 +88,7 @@ export function defineOAuthConfig(resolve: Resolve<'oauth'>): ConfigDefinition<'
     resolve,
     bind: (container, config) => {
       container.singleton('oauth', () => {
-        const manager = createOAuthManager({ stateStore: config.stateStore })
+        const manager = createOAuthManager(config)
         for (const [name, provider] of Object.entries(config.providers ?? {})) {
           manager.registerProvider(name, provider)
         }

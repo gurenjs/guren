@@ -160,7 +160,7 @@ async callback(): Promise<Response> {
 
 `redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped: `redirectTo` comes back as `undefined` and your fallback applies.
 
-To allow specific external hosts (wildcards supported), follow [Redirect After Login](./oauth.md#redirect-after-login) in the OAuth guide, which shows the full provider.
+To allow specific external hosts (wildcards supported), list them in `stateConfig` in `config/oauth.ts`. [Redirect After Login](./oauth.md#redirect-after-login) in the OAuth guide shows the definition.
 
 > **Note:** `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement, or the middleware rewrites an approved external redirect to `/`.
 
