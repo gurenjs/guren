@@ -9,50 +9,30 @@ import {
   ErrorServiceProvider,
   InertiaServiceProvider,
   AuthServiceProvider as CoreAuthServiceProvider,
-  OAuthServiceProvider as CoreOAuthServiceProvider,
   NotificationServiceProvider as CoreNotificationServiceProvider,
-  StorageServiceProvider as CoreStorageServiceProvider,
   BroadcastServiceProvider as CoreBroadcastServiceProvider,
 } from '@guren/core'
-import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import AuthProvider from '../app/Providers/AuthProvider.js'
-import OAuthProvider from '../app/Providers/OAuthProvider.js'
-import CacheProvider from '../app/Providers/CacheProvider.js'
 import requestLogger from '../app/Http/middleware/requestLogger.js'
 import EventServiceProvider from '../app/Providers/EventServiceProvider.js'
 import SchedulingProvider from '../app/Providers/SchedulingProvider.js'
 import NotificationProvider from '../app/Providers/NotificationProvider.js'
-import StorageProvider from '../app/Providers/StorageProvider.js'
 import AttachmentsProvider from '../app/Providers/AttachmentsProvider.js'
 import BroadcastProvider from '../app/Providers/BroadcastProvider.js'
-import SessionProvider from '../app/Providers/SessionProvider.js'
+import cache from '../config/cache.js'
+import database from '../config/database.js'
+import env from '../config/env.js'
+import http from '../config/http.js'
+import mail from '../config/mail.js'
+import oauth from '../config/oauth.js'
+import queue from '../config/queue.js'
+import session from '../config/session.js'
+import storage from '../config/storage.js'
 import { registerWebRoutes } from '../routes/web.js'
 import '../config/inertia.js'
 
+// oxlint-disable-next-line guren/no-unvalidated-env-read -- `CI` is the e2e job's switch for serving over HTTP, not app config
 const secureCookies = process.env.NODE_ENV === 'production' && !process.env.CI
-
-// The Host header is client-controlled, so production answers only to the host
-// APP_URL carries. Read at module scope, where not every platform has populated
-// process.env yet (a Cloudflare worker imports this before wrangler `vars`
-// land), so a missing value warns and leaves the check off rather than blocking
-// boot. Emailed links fail closed separately, in app/Auth/AppUrl.ts.
-function hostAuthorization() {
-  const exclude = ['/health']
-
-  if (process.env.NODE_ENV !== 'production') {
-    return { allowedHosts: ['localhost:*', '127.0.0.1:*'], exclude }
-  }
-
-  const appUrl = process.env.APP_URL?.trim()
-  if (!appUrl) {
-    console.warn('[app] APP_URL is not set — host authorization is disabled. Set it to the public base URL of this app.')
-    return false
-  }
-
-  // `hostname:*` rather than the bare host: the hostname is the security
-  // boundary, and a proxy may or may not include the default port in `Host`.
-  return { allowedHosts: [`${new URL(appUrl).hostname}:*`], exclude }
-}
 
 const app = createApp({
   // Rendered into every server-rendered document. Replace public/favicon.svg
@@ -62,26 +42,21 @@ const app = createApp({
       head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
     },
   },
+  env,
+  config: [database, http, session, cache, mail, queue, storage, oauth],
   routes: registerWebRoutes,
   providers: [
     ErrorServiceProvider,
     InertiaServiceProvider,
     CoreAuthServiceProvider,
-    DatabaseProvider,
     AuthProvider,
-    CoreOAuthServiceProvider,
-    OAuthProvider,
-    CacheProvider,
     CoreNotificationServiceProvider,
     NotificationProvider,
-    CoreStorageServiceProvider,
-    StorageProvider,
     AttachmentsProvider,
     CoreBroadcastServiceProvider,
     BroadcastProvider,
     EventServiceProvider,
     SchedulingProvider,
-    SessionProvider,
   ],
   i18n: {
     supported: ['en', 'ja'],
@@ -101,7 +76,6 @@ const app = createApp({
       },
     },
   },
-  hostAuthorization: hostAuthorization(),
 })
 
 app.use('*', requestLogger)

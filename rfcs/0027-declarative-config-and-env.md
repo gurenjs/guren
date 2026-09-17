@@ -845,7 +845,11 @@ Referencing `RFC 0027` in each PR:
    pre-PR list. **Amended in implementation:** the configuration guide
    (`docs/en` and `docs/ja`) lands here rather than in Part 0, beside the
    templates it describes; Part 0 documents its API through JSDoc and the
-   changeset.
+   changeset. **Amended in implementation:** the blog's `.env.example`
+   set `QUEUE_CONNECTION=sync`, which nothing read and no driver declared. Its
+   queue definition declares `sync` and `memory`, and the example now names
+   `memory`, the driver the blog already ran on. Its OAuth state stays in
+   memory: the blog's schema has no state table.
 
 ## Alternatives Considered
 

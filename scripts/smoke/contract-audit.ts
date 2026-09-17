@@ -14,7 +14,7 @@ async function read(root: string, relativePath: string): Promise<string> {
 async function auditBlog(root: string): Promise<void> {
   const appBootstrap = await read(root, 'src/app.ts')
   assert(appBootstrap.includes('providers: ['), 'Blog app must declare providers through createApp().')
-  assert(appBootstrap.includes('CacheProvider'), 'Blog app must register CacheProvider.')
+  assert(appBootstrap.includes('config: [database, http, session, cache, mail, queue, storage, oauth]'), 'Blog app must list its config definitions through createApp().')
   assert(appBootstrap.includes('EventServiceProvider'), 'Blog app must register EventServiceProvider.')
   assert(appBootstrap.includes('SchedulingProvider'), 'Blog app must register SchedulingProvider.')
 
@@ -45,15 +45,12 @@ async function auditBlog(root: string): Promise<void> {
   const eventProvider = await read(root, 'app/Providers/EventServiceProvider.ts')
   assert(eventProvider.includes("from '@guren/core'"), 'Blog event provider must use @guren/core imports.')
   assert(eventProvider.includes('createEventManager'), 'Blog event provider must create an event manager.')
-  assert(eventProvider.includes('createMailManager'), 'Blog event provider must configure mail through the provider.')
-  assert(eventProvider.includes('createQueueManager'), 'Blog event provider must configure queue through the provider.')
   assert(eventProvider.includes("this.container.singleton('events'"), 'Blog event provider must register events in the container.')
-  assert(eventProvider.includes("this.container.singleton('mail'"), 'Blog event provider must register mail in the container.')
-  assert(eventProvider.includes("this.container.singleton('queue'"), 'Blog event provider must register queue in the container.')
 
-  const cacheProvider = await read(root, 'app/Providers/CacheProvider.ts')
-  assert(cacheProvider.includes('createCacheManager'), 'Blog cache provider must create the cache manager.')
-  assert(cacheProvider.includes("this.container.singleton('cache'"), 'Blog cache provider must register cache in the container.')
+  for (const [file, helper] of [['cache', 'defineCacheConfig'], ['mail', 'defineMailConfig'], ['queue', 'defineQueueConfig'], ['storage', 'defineStorageConfig'], ['session', 'defineSessionConfig'], ['oauth', 'defineOAuthConfig']] as const) {
+    const definition = await read(root, `config/${file}.ts`)
+    assert(definition.includes(`export default ${helper}(`), `Blog config/${file}.ts must be a ${helper} definition.`)
+  }
 
   const schedulingProvider = await read(root, 'app/Providers/SchedulingProvider.ts')
   assert(schedulingProvider.includes('createScheduler'), 'Blog scheduling provider must create a scheduler.')
