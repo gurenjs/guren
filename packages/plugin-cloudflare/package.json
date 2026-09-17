@@ -1,6 +1,18 @@
 {
   "name": "@guren/plugin-cloudflare",
   "version": "0.12.0",
+  "description": "Deploy a Guren application to Cloudflare Workers, with D1 as the database.",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "cloudflare",
+    "cloudflare-workers",
+    "d1",
+    "deploy"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {

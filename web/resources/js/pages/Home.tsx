@@ -198,17 +198,17 @@ export default function Home({ codeExamples }: Props) {
               crimson lotus
             </p>
             <h1 className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl md:text-6xl">
-              The fullstack TypeScript framework for the{' '}
+              The{' '}
               <span className="bg-gradient-to-r from-crimson-400 to-crimson-600 bg-clip-text text-transparent">
-                AI-agent era
-              </span>
-              .
+                Bun-first
+              </span>{' '}
+              fullstack TypeScript framework.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/70 md:text-xl">
-              Guren is a fullstack framework for Bun where your AI agent works from the same
-              map you do. Laravel-style conventions, type safety from the route definition to
-              the React component, and mechanical checks that verify the work. Secure by
-              default, agent-ready by default.
+              Develop on Bun. Deploy to Bun, AWS Lambda, Vercel, or Cloudflare Workers. Your
+              coding agent works from the same map you do: Laravel-style conventions, type
+              safety from the route definition to the React component, and mechanical checks
+              that verify the work. Secure by default, agent-ready by default.
             </p>
             <div className="mt-10 flex flex-wrap items-center gap-4">
               <Link

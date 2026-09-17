@@ -1,6 +1,22 @@
 {
   "name": "@guren/orm",
   "version": "2.11.0",
+  "description": "Eloquent-style models for the Guren framework, on Drizzle ORM: PostgreSQL, MySQL, SQLite and Cloudflare D1.",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "orm",
+    "drizzle",
+    "eloquent",
+    "active-record",
+    "postgres",
+    "mysql",
+    "sqlite",
+    "d1"
+  ],
   "type": "module",
   "sideEffects": [
     "./src/instance-guard.ts",

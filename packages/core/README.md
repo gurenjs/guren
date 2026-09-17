@@ -1,6 +1,6 @@
 # @guren/core
 
-The framework entry point for [Guren](https://guren.dev/) — a Laravel-inspired fullstack TypeScript framework, built for Bun. Application code imports the whole framework API from this one package.
+The framework entry point for [Guren](https://guren.dev/) — a Bun-first fullstack TypeScript framework with Laravel-style conventions. Develop on Bun; deploy to Bun, AWS Lambda (Node.js), Vercel, or Cloudflare Workers. Application code imports the whole framework API from this one package.
 
 ```bash
 bun add @guren/core

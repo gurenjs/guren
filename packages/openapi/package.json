@@ -1,6 +1,17 @@
 {
   "name": "@guren/openapi",
   "version": "1.4.0",
+  "description": "OpenAPI 3.1 document generation from Guren route contracts.",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "openapi",
+    "zod",
+    "api"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {
