@@ -19,7 +19,7 @@ import {
   type Router,
   type ServiceProviderConstructor,
 } from '@guren/core'
-import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
+import { MockEmbeddingModelV4, MockImageModelV4, MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 
 import { AgentResponded, aiPlugin, defineAiConfig, type AiPluginConfig, type ConversationsConfig } from '../src'
 
@@ -147,6 +147,9 @@ export interface Harness {
   records: Array<AgentToolInvoked | AgentToolDenied>
   /** Swap what the `default` provider answers with, per test. */
   script(steps: ScriptedStep[]): MockLanguageModelV4
+  /** The `main` provider's embedding and image models; only `main` configures them. */
+  embeddings: MockEmbeddingModelV4
+  images: MockImageModelV4
 }
 
 export async function bootHarness(
@@ -161,6 +164,20 @@ export async function bootHarness(
 ): Promise<Harness> {
   const current = scriptedModel([{ text: 'unscripted' }])
   const judge = scriptedModel([{ text: 'from the judge provider' }])
+  const embeddings = new MockEmbeddingModelV4({
+    modelId: 'mock-embeddings',
+    maxEmbeddingsPerCall: Number.POSITIVE_INFINITY,
+    doEmbed: async ({ values }) => ({ embeddings: values.map((_, index) => [index, 0.5]), warnings: [] }),
+  })
+  const images = new MockImageModelV4({
+    modelId: 'mock-images',
+    maxImagesPerCall: Number.MAX_SAFE_INTEGER,
+    doGenerate: async ({ n }) => ({
+      images: Array.from({ length: n }, (_, index) => `image-${index}`),
+      warnings: [],
+      response: { timestamp: new Date(0), modelId: 'mock-images', headers: undefined },
+    }),
+  })
 
   const app = createApp({
     routes: (router) => {
@@ -171,7 +188,7 @@ export async function bootHarness(
       defineAiConfig(() => ({
         default: 'main',
         providers: {
-          main: { model: () => current },
+          main: { model: () => current, embeddingModel: () => embeddings, imageModel: () => images },
           judge: { model: () => judge },
         },
         ...(options.conversations ? { conversations: options.conversations } : {}),
@@ -201,6 +218,8 @@ export async function bootHarness(
   return {
     app,
     records,
+    embeddings,
+    images,
     // The manager memoizes the model the factory returns, so the factory hands
     // back one object whose script is replaced in place.
     script(steps) {

@@ -731,8 +731,17 @@ unscripted prompt throws naming the agent, and disposing the fake throws
 again, because a route turns the first throw into a 500 whose body names
 nothing. Dispose also fails on a prompt whose loop stopped before the
 scripted answer. `assertNotPrompted(Agent, predicate)` fails on a matching prompt and
-`assertNeverPrompted(Agent)` on any prompt. `@guren/plugin-ai` and `ai` are
-optional peers of `@guren/testing`, imported when `fromApp()` boots an app
+`assertNeverPrompted(Agent)` on any prompt. Part 3's `embed()` /
+`embedMany()` / `image()` are scripted by `respondEmbeddings()` (a queue
+drawn one vector per *value*, so a script does not depend on how the SDK
+batches a large `embedMany()`, or a function answering every value) and
+`respondImages()` (one entry per call), read back through `embedCalls()` /
+`imageCalls()` and `assertEmbedded` / `assertNeverEmbedded` /
+`assertGeneratedImage` / `assertNeverGeneratedImage`. The fake refuses a
+provider whose `config/ai.ts` entry declares no model of that kind, without
+calling the factory: it answers the call itself, but a test that passes
+against a config which would throw in production measures nothing.
+`@guren/plugin-ai` and `ai` are optional peers of `@guren/testing`, imported when `fromApp()` boots an app
 that binds `ai`, which keeps `fakeAi()` synchronous.
 
 A fake measures the wiring and nothing else; whether the instructions and
@@ -1011,11 +1020,22 @@ already checks.
      (`AgentToolInputTypes`, `Granted`).
 2. **Part 2**: `stream()` and the client transport (§4), `database`
    conversations (§5), `queue()` and `AgentResponded` (§6), `broadcast()`.
-3. **Part 3**: `embed()` / `image()` thin wrappers on the configured
-   provider, `guren check` and `guren audit` rules, `context` /
+3. **Part 3**: ~~`embed()` / `image()` thin wrappers on the configured
+   provider~~, `guren check` and `guren audit` rules, `context` /
    `spec:generate`, `defineEval()` and `guren ai:eval` (§10), the harness
    skill, `docs/en/guides/ai-agents.md`, ~~the blog example gaining one agent
    and one eval~~.
+   **Amended in implementation:** Part 3 ships as one PR per item, and the
+   wrappers shipped with three deviations. `embedMany()` is exported beside
+   `embed()`: the SDK splits a large batch across calls itself, and a caller
+   left to loop `embed()` loses that. `AiManager` gains
+   `imageModel(provider?)`, which the §1 listing does not name, because an
+   image model resolved anywhere but the manager would bypass the fake. Each
+   wrapper takes the AI SDK's own options object minus `model` and the SDK's
+   `_internal` test seam, plus `provider` and a `manager` escape hatch for a
+   process running more than one application; a caller passing neither gets
+   the ambient default application (RFC 0023 §3), as `Agent`'s statics do.
+   Vector storage stays out of scope (Open Question 5).
    **Amended in implementation:** the example agent went into
    `examples/agents` rather than the blog. The blog declares no `.agent()`
    route and has no test that boots the application, which `fakeAi()` needs;

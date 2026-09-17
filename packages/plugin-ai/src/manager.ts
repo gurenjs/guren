@@ -1,5 +1,5 @@
 import type { Container } from '@guren/core'
-import type { EmbeddingModel, LanguageModel } from 'ai'
+import type { EmbeddingModel, ImageModel, LanguageModel } from 'ai'
 
 import { bindAgent, type Agent, type AgentClass, type AgentPrincipalInput, type BoundAgent } from './agent'
 import { describeNames, type AiConfig, type AiProviderConfig } from './config'
@@ -22,6 +22,7 @@ export interface AiManager {
   agent<T extends Agent>(cls: AgentClass<T>): BoundAgentFactory<T>
   model(provider?: AiProviderName): LanguageModel
   embeddingModel(provider?: AiProviderName): EmbeddingModel
+  imageModel(provider?: AiProviderName): ImageModel
   /** The store `config/ai.ts` configures; throws when it configures none. */
   conversations(): ConversationStore
 }
@@ -29,6 +30,7 @@ export interface AiManager {
 export class ConfiguredAiManager implements AiManager {
   private readonly models = new Map<string, LanguageModel>()
   private readonly embeddingModels = new Map<string, EmbeddingModel>()
+  private readonly imageModels = new Map<string, ImageModel>()
   private conversationStore?: ConversationStore
 
   constructor(
@@ -53,6 +55,17 @@ export class ConfiguredAiManager implements AiManager {
       const factory = this.provider(name).embeddingModel
       if (!factory) {
         throw new Error(`The AI provider "${name}" configures no embeddingModel in config/ai.ts.`)
+      }
+      return factory()
+    })
+  }
+
+  imageModel(provider?: AiProviderName): ImageModel {
+    const name = provider ?? this.config.default
+    return memoize(this.imageModels, name, () => {
+      const factory = this.provider(name).imageModel
+      if (!factory) {
+        throw new Error(`The AI provider "${name}" configures no imageModel in config/ai.ts.`)
       }
       return factory()
     })
