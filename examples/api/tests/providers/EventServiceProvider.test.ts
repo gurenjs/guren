@@ -1,22 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Container } from '@guren/core'
 
-const {
-  eventManager,
-  createEventManager,
-  createMailManager,
-  createQueueManager,
-  setMailManager,
-  registerJob,
-} = vi.hoisted(() => {
+const { eventManager, createEventManager, registerJob } = vi.hoisted(() => {
   const eventManager = { on: vi.fn(), listen: vi.fn() }
-  const queueManager = { driver: vi.fn() }
   return {
     eventManager,
     createEventManager: vi.fn(() => eventManager),
-    createMailManager: vi.fn(() => ({ id: 'mail' })),
-    createQueueManager: vi.fn(() => queueManager),
-    setMailManager: vi.fn(),
     registerJob: vi.fn(),
   }
 })
@@ -26,11 +15,7 @@ vi.mock('@guren/core', async () => {
   return {
     ...actual,
     createEventManager,
-    createMailManager,
-    createQueueManager,
-    setMailManager,
     registerJob,
-    MemoryDriver: class {},
   }
 })
 
@@ -41,7 +26,7 @@ describe('API EventServiceProvider', () => {
     vi.clearAllMocks()
   })
 
-  it('initializes the event system once and wires queue/mail listeners', () => {
+  it('binds one event manager and wires the jobs and listeners at boot', () => {
     const container = new Container()
     container.instance('notifications', { registerChannel: vi.fn() })
     container.instance('broadcast', { broadcast: vi.fn() })
@@ -49,14 +34,11 @@ describe('API EventServiceProvider', () => {
     const provider = new EventServiceProvider(container)
 
     provider.register()
-    const first = container.make('events')
-    const second = container.make('events')
+    expect(container.make('events')).toBe(container.make('events'))
 
-    expect(first).toBe(second)
+    provider.boot()
+
     expect(createEventManager).toHaveBeenCalledTimes(1)
-    expect(createMailManager).toHaveBeenCalledTimes(1)
-    expect(setMailManager).toHaveBeenCalledTimes(1)
-    expect(createQueueManager).toHaveBeenCalledTimes(1)
     expect(registerJob).toHaveBeenCalled()
     expect(eventManager.listen).toHaveBeenCalled()
     expect(eventManager.on).toHaveBeenCalled()
