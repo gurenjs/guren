@@ -205,6 +205,17 @@ describe('guren add ai', () => {
       expect(lines).toContain('Next: bun run db:make, then bun run db:migrate to create ai_conversations and ai_messages.')
     })
 
+    it('adds both tables above and into a schema that keeps an aggregate object of its tables', async () => {
+      await seedApp({ schema: `${PG_SCHEMA_FIXTURE}\nexport const schema = {\n  users,\n}\n\nexport type AppSchema = typeof schema\n` })
+
+      await addAi({})
+
+      const schema = await readFile(resolve('db/schema.ts'), 'utf8')
+      expect(schema).toContain('  users,\n  aiConversations,\n  aiMessages,\n}')
+      // Ahead of the aggregate, or `schema` names a binding declared below it (TS2448).
+      expect(schema.indexOf('export const aiMessages =')).toBeLessThan(schema.indexOf('export const schema ='))
+    })
+
     const dialects = [
       ['SQLite', SQLITE_SCHEMA_FIXTURE, "message: text('message', { mode: 'json' }).notNull()"],
       ['MySQL', MYSQL_SCHEMA_FIXTURE, "conversationId: varchar('conversation_id', { length: 36 })"],
