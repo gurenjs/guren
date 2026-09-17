@@ -748,6 +748,29 @@ The mail PR migrates `guren add mail` and the mail half of `make:auth` together:
   state store, so the database-backed `OAuthProvider` cannot become a
   definition without a `@guren/server` change.
 
+The OAuth PR migrates `guren add oauth` and `make:auth --oauth`:
+
+- **`OAuthConfig` gains `stateStore`**, which `defineOAuthConfig` hands to
+  `createOAuthManager()`. The database store is built from a schema table, so
+  `config/oauth.ts` imports `oauthStates` as `config/session.ts` imports
+  `sessions`; an app with no schema gets the definition without it.
+- **Every `OAUTH_*` key is optional**, and a provider is registered only when all
+  three of its keys are set, as `OAuthProvider` did. A definition is left unbound
+  only for keys in the parse's `unset` set, which holds required and invalid keys,
+  so an unconfigured provider does not unbind the configured one. The redirect
+  URI is `Env.url()` with no default: the old `.env.example` suggested
+  `http://localhost:3333/...`, a default a production app would inherit silently.
+- **The starters drop their commented-out `OAUTH_*` lines.** `appendEnvEntry`
+  reads a commented key as a choice already made and skips declaring it, which
+  would leave the definition reading keys `AppEnv` does not have.
+- **`make:auth` renders `config/oauth.ts` from a builder** beside
+  `buildOAuthProviderTemplate`, and `add oauth`'s static template is pinned to its
+  render for every provider, the arrangement the provider already had.
+- **The deploy-runtime check reads `defineOAuthConfig(` as OAuth.** It already
+  scanned `config/` and saw the `DatabaseOAuthStateStore` construction, but with
+  neither `createOAuthManager` nor `OAuthServiceProvider` present, a definition
+  without a store would have passed silently.
+
 ### 7. `.env.example`, drift, and lint
 
 - **`guren env:example`** maps the schema to `GurenPluginEnvEntry` records
