@@ -94,7 +94,9 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
     agentName,
     provider: definition.provider ?? '(the agent\'s own)',
     reps,
-    cases: selected.map((kase) => ({ id: kase.id, tags: kase.tags })),
+    // Every case, not the `--cases` selection: `_state.json` is written once and describes
+    // the case set, so a first run capped at two must not fix the split at two ids forever.
+    cases: all.map((kase) => ({ id: kase.id, tags: kase.tags })),
     metrics: definition.metrics,
     startedAt: startedAt.toISOString(),
     dryRun: Boolean(options.dryRun),
@@ -155,33 +157,46 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, attempts.length) }, worker))
-
-  const finishedAt = new Date()
-  const allRows = [...handle.completed, ...rows]
-  const summary: EvalSummary = {
-    flow,
-    variant,
-    agentName,
-    provider: definition.provider ?? '(the agent\'s own)',
-    cases: selected.length,
-    reps,
-    rows: allRows.length,
-    truncated: allRows.filter((row) => row.status === 'truncated').length,
-    failures: failures.length,
-    metrics: summarizeMetrics(allRows, definition.metrics),
-    usage: totalUsage(allRows),
-    ...maybe('costUsd', totalCostUsd(allRows)),
-    ...maybe('judgeCostUsd', totalJudgeCostUsd(allRows)),
-    ...maybe('costCapUsd', options.maxCostUsd),
-    ...(capReached ? { costCapReached: true } : {}),
-    startedAt: startedAt.toISOString(),
-    finishedAt: finishedAt.toISOString(),
-    durationMs: finishedAt.getTime() - startedAt.getTime(),
+  const buildSummary = (): EvalSummary => {
+    const finishedAt = new Date()
+    const allRows = [...handle.completed, ...rows]
+    return {
+      flow,
+      variant,
+      agentName,
+      provider: definition.provider ?? '(the agent\'s own)',
+      cases: selected.length,
+      reps,
+      rows: allRows.length,
+      truncated: allRows.filter((row) => row.status === 'truncated').length,
+      failures: failures.length,
+      metrics: summarizeMetrics(allRows, definition.metrics),
+      usage: totalUsage(allRows),
+      ...maybe('costUsd', totalCostUsd(allRows)),
+      ...maybe('judgeCostUsd', totalJudgeCostUsd(allRows)),
+      ...maybe('costCapUsd', options.maxCostUsd),
+      ...(capReached ? { costCapReached: true } : {}),
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      durationMs: finishedAt.getTime() - startedAt.getTime(),
+    }
   }
-  await handle.end(summary)
 
-  return { summary, rows: allRows, failures, ...maybe('location', handle.location), plannedCases: selected }
+  // Written even when a runner failure stops the run: a summary.json left disagreeing with
+  // the results.jsonl beside it describes a run that never happened.
+  try {
+    await Promise.all(Array.from({ length: Math.min(concurrency, attempts.length) }, worker))
+  } finally {
+    await handle.end(buildSummary())
+  }
+
+  return {
+    summary: buildSummary(),
+    rows: [...handle.completed, ...rows],
+    failures,
+    ...maybe('location', handle.location),
+    plannedCases: selected,
+  }
 }
 
 export { formatSummary }
@@ -207,8 +222,9 @@ async function runCase(
   while (attempt < options.retries + 1) {
     attempt += 1
     const began = Date.now()
+    const controller = new AbortController()
     try {
-      const result = await withTimeout(runAttempt(definition, kase, options), options.timeoutMs, kase.id)
+      const result = await withTimeout(runAttempt(definition, kase, options, controller.signal), options, kase.id, controller)
       return {
         row: {
           ...result.row,
@@ -238,6 +254,7 @@ async function runAttempt(
   definition: AnyEvalDefinition,
   kase: EvalCase,
   options: CaseOptions,
+  signal: AbortSignal,
 ): Promise<{ row: Omit<EvalRow, 'rep' | 'startedAt' | 'durationMs'>; trace: EvalTraceTurn[] }> {
   // A fresh app per case: the tools dispatch through the pipeline against it, so the
   // grader reads the end state its own tools wrote rather than the transcript.
@@ -268,13 +285,13 @@ async function runAttempt(
         )
       }
       const judgeBound = manager.agent(definition.judge.agent).as(null)
-      const response = await judgeBound.prompt(input, promptOptions(definition.judge.provider))
+      const response = await judgeBound.prompt(input, promptOptions(definition.judge.provider, signal))
       judgeUsages.push(toEvalUsage(response.usage))
       judgeCosts.push(computeCostUsd(toEvalUsage(response.usage), pricingOf(manager, definition.judge.provider ?? manager.config.default)))
       return response as AgentResponse<unknown>
     }
 
-    const response = await bound.prompt(kase.input, promptOptions(definition.provider))
+    const response = await bound.prompt(kase.input, promptOptions(definition.provider, signal))
     const model = response.steps.at(-1)?.model
     if (!model || response.steps.length === 0) {
       throw new EvalRunError(
@@ -304,8 +321,9 @@ async function runAttempt(
         text: response.text,
         output: response.output,
         scores,
-        provider: `${model.provider}`,
+        provider: providerName,
         model: model.modelId,
+        modelProvider: model.provider,
         usage,
         ...maybe('costUsd', computeCostUsd(usage, pricing)),
         ...(judgeUsages.length > 0
@@ -319,13 +337,22 @@ async function runAttempt(
       trace,
     }
   } finally {
-    if (definition.teardown) await definition.teardown(app, kase)
-    await dispose(app)
+    // Neither may replace the failure that is already on its way out, or skip the other.
+    if (definition.teardown) await settle(() => definition.teardown?.(app, kase), 'teardown', kase.id)
+    await settle(() => dispose(app), 'disposal', kase.id)
   }
 }
 
-function promptOptions(provider: string | undefined): PromptOptions {
-  return provider ? ({ provider } as PromptOptions) : {}
+async function settle(work: () => unknown, what: string, caseId: string): Promise<void> {
+  try {
+    await work()
+  } catch (error) {
+    console.error(`[@guren/plugin-ai] ${what} failed for eval case "${caseId}".`, error)
+  }
+}
+
+function promptOptions(provider: string | undefined, signal: AbortSignal): PromptOptions {
+  return { signal, ...(provider ? ({ provider } as Pick<PromptOptions, 'provider'>) : {}) }
 }
 
 function resolveManager(app: EvalAppHandle): AiManager {
@@ -395,13 +422,23 @@ class TimeoutError extends Error {
   override name = 'EvalTimeoutError'
 }
 
-async function withTimeout<T>(work: Promise<T>, ms: number, caseId: string): Promise<T> {
+/**
+ * The ceiling binds the work, not the wait: aborting is what stops the model call and
+ * releases the app. Racing alone would leave a timed-out case billing in the background,
+ * with its cost outside `--max-cost-usd` and its app alive under `--concurrency`.
+ */
+async function withTimeout<T>(work: Promise<T>, options: CaseOptions, caseId: string, controller: AbortController): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
+  // The race has already reported by the time the aborted work rejects.
+  void work.catch(() => {})
   try {
     return await Promise.race([
       work,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new TimeoutError(`${caseId} exceeded the ${ms}ms per-case ceiling.`)), ms)
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new TimeoutError(`${caseId} exceeded the ${options.timeoutMs}ms per-case ceiling.`))
+        }, options.timeoutMs)
       }),
     ])
   } finally {

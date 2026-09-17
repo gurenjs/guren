@@ -157,6 +157,9 @@ describe('runEval', () => {
     expect(built).toHaveLength(2)
     expect(result.rows.map((row) => row.caseId)).toEqual(['a', 'b'])
     expect(result.rows[0]!.model).toBe('mock-model-id')
+    expect(result.rows[0]!.modelProvider).toBe('mock-provider')
+    // The config provider is what the cost was priced under, so the row names both.
+    expect(result.rows[0]!.provider).toBe('main')
     expect(result.rows[0]!.status).toBe('ok')
     expect(result.rows[0]!.scores).toEqual({ category: 1 })
     expect(result.rows[0]!.usage.inputTokens).toBe(3)
@@ -327,8 +330,9 @@ describe('runEval', () => {
       text: 'x',
       output: 'x',
       scores: { ok: 0 },
-      provider: 'mock-provider',
+      provider: 'main',
       model: 'mock-model-id',
+      modelProvider: 'mock-provider',
       usage: { inputTokens: 3, outputTokens: 2 },
       finishReason: 'stop',
       steps: 1,
@@ -467,6 +471,83 @@ describe('runEval', () => {
     expect(reporter.rows.map((row) => row.caseId)).toEqual(['a', 'b'])
   })
 
+  test('should abort the model call when a case passes the per-case ceiling, and release its app', async () => {
+    let aborted = false
+    let closed = 0
+    const hanging = new MockLanguageModelV4({
+      doGenerate: async (options) => new Promise<never>((_, reject) => {
+        options.abortSignal?.addEventListener('abort', () => {
+          aborted = true
+          reject(new Error('aborted by the caller'))
+        })
+      }),
+    })
+
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: async () => {
+          const harness = await bootEvalApp({ model: hanging, pricing: PRICING })
+          return { ...harness, close: () => { closed += 1 } }
+        },
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        timeoutMs: 50,
+        retries: 0,
+        reporter: memoryReporter(),
+      }),
+    )
+
+    expect(result.failures[0]).toMatchObject({ caseId: 'a', failure: 'timeout', attempts: 1 })
+    // Racing alone would leave the call billing in the background with its app alive.
+    await Bun.sleep(20)
+    expect(aborted).toBe(true)
+    expect(closed).toBe(1)
+  })
+
+  test('should keep the failure a grader raised when teardown throws on the way out', async () => {
+    let closed = 0
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: async () => {
+          const harness = await bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING })
+          return { ...harness, close: () => { closed += 1 } }
+        },
+        cases: cases('a'),
+        grade: (): { ok: number } => { throw new Error('the grader read a column that is not there') },
+        teardown: () => { throw new Error('teardown blew up too') },
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+    )
+
+    expect(result.failures[0]).toMatchObject({ failure: 'grade' })
+    expect(result.failures[0]!.message).toContain('not there')
+    expect(closed).toBe(1)
+  })
+
+  test('should run every case with more than one in flight', async () => {
+    const reporter = memoryReporter()
+    await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('a', 'b', 'c', 'd'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter,
+      }),
+      { concurrency: 2 },
+    )
+
+    expect(reporter.rows.map((row) => row.caseId).sort()).toEqual(['a', 'b', 'c', 'd'])
+  })
+
   test('should call no model and write nothing on --dry-run', async () => {
     let built = 0
     const result = await runEval(
@@ -593,6 +674,28 @@ describe('hillclimbReporter', () => {
     expect(typeof state.seed).toBe('number')
   })
 
+  test('should split every case the eval declares, not the --cases selection', async () => {
+    const root = scratch()
+    await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('a', 'b', 'c', 'd'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: hillclimbReporter({ root, cwd: root }),
+      }),
+      { cases: 2 },
+    )
+
+    const state = JSON.parse(readFileSync(resolve(root, 'triage', 'baseline', '_state.json'), 'utf8')) as {
+      split: { dev: string[]; test: string[] }
+    }
+    // The file is written once: a first run capped at two must not fix the split at two ids.
+    expect([...state.split.dev, ...state.split.test].sort()).toEqual(['a', 'b', 'c', 'd'])
+  })
+
   test('should never edit _state.json after writing it, and should resume over results.jsonl', async () => {
     const root = scratch()
     const define = (ids: string[]) =>
@@ -668,7 +771,7 @@ describe('cost and statistics', () => {
   test('should report the half-width for a binary metric only, over the rows in the mean', () => {
     const row = (id: string, scores: Record<string, number>, status: 'ok' | 'truncated' = 'ok'): EvalRow => ({
       caseId: id, rep: 1, status, input: '', text: '', output: '', scores,
-      provider: 'p', model: 'm', usage: {}, finishReason: 'stop', steps: 1, toolCalls: [],
+      provider: 'p', model: 'm', modelProvider: 'mp', usage: {}, finishReason: 'stop', steps: 1, toolCalls: [],
       tags: [], durationMs: 0, startedAt: '',
     })
 

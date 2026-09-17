@@ -75,9 +75,11 @@ export interface EvalRow {
   text: string
   output: unknown
   scores: EvalScores
-  /** The provider the call was routed to; `model` comes from the response, never from config. */
+  /** The `config/ai.ts` provider the call was routed to, and the one its cost was priced under. */
   provider: string
+  /** Both from the response, never from config: the model that answered, and who served it. */
   model: string
+  modelProvider: string
   usage: EvalUsage
   /** Absent, never zero, when the provider configures no `pricing`. */
   costUsd?: number
@@ -119,7 +121,7 @@ export interface EvalRunContext {
   agentName: string
   provider: string
   reps: number
-  /** In the order the runner will attempt them, after `--cases` has capped the set. */
+  /** Every case the eval declares, in file order, whether or not `--cases` selected it. */
   cases: ReadonlyArray<Pick<EvalCase, 'id' | 'tags'>>
   metrics: readonly EvalMetric[]
   startedAt: string

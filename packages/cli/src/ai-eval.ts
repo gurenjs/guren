@@ -61,6 +61,7 @@ export interface AiEvalDependencies {
   loadRunner?: () => Promise<EvalRunnerModule>
   /** Everything the command prints, so a test reads it instead of stdout. */
   print?: (line: string) => void
+  warn?: (message: string) => void
 }
 
 const EVAL_DIR = 'tests/evals'
@@ -69,6 +70,7 @@ const EVAL_KIND = 'guren.eval'
 
 export async function runAiEval(options: AiEvalOptions, dependencies: AiEvalDependencies = {}): Promise<EvalRunResultLike> {
   const print = dependencies.print ?? ((line: string) => consola.log(line))
+  const warn = dependencies.warn ?? ((message: string) => consola.warn(message))
   const appRoot = resolve(process.cwd(), options.appRoot ?? '.')
   const file = await resolveEvalFile(options, appRoot)
   const definition = await (dependencies.loadDefinition ?? importDefault)(file)
@@ -89,7 +91,7 @@ export async function runAiEval(options: AiEvalOptions, dependencies: AiEvalDepe
     ...defined('maxCostUsd', options.maxCostUsd),
     ...defined('concurrency', options.concurrency),
     ...defined('dryRun', options.dryRun),
-    onWarning: (message: string) => consola.warn(message),
+    onWarning: warn,
   })
 
   if (options.json) {

@@ -83,6 +83,21 @@ describe('runAiEval', () => {
     expect(lines.join('\n')).toContain('Guren ships no viewer')
   })
 
+  test('should pass the runner a warning channel the caller can observe', async () => {
+    await seedEval()
+    const warnings: string[] = []
+    const runner = stubRunner()
+
+    await runAiEval(
+      { flow: 'triage' },
+      { loadDefinition: async () => DEFINITION, loadRunner: async () => runner, print: () => {}, warn: (message) => warnings.push(message) },
+    )
+
+    const onWarning = runner.calls[0]!.options.onWarning as (message: string) => void
+    onWarning('no pricing')
+    expect(warnings).toEqual(['no pricing'])
+  })
+
   test('should report a dry run as a plan, not as a summary', async () => {
     await seedEval()
     const lines: string[] = []
