@@ -740,25 +740,12 @@ const STUB_FILES: Record<DevOnlySpecifier | SqlClientSpecifier, string> = {
   '@aws-sdk/client-rds-data': 'stub-rds-data.js',
 }
 
-/**
- * Stub files no alias this plugin writes names any more: configs scaffolded before
- * RFC 0028 alias the v1 SDK subpaths to them, and wrangler fails on an alias whose
- * file is missing. Nothing imports those subpaths, so the lines are inert.
- */
-const RETIRED_STUB_FILES: Record<string, readonly string[]> = {
-  'stub-mcp-server.js': ['McpServer', 'ResourceTemplate'],
-  'stub-mcp-transport.js': ['WebStandardStreamableHTTPServerTransport'],
-}
-
 function writeDevOnlyStubs(out: string): void {
   for (const module of STUBBED_MODULES) {
     writeFileSync(
       resolve(out, STUB_FILES[module.specifier]),
       renderDevOnlyStub(module, UNAVAILABLE_ON_WORKERS[module.kind]),
     )
-  }
-  for (const [file, exportNames] of Object.entries(RETIRED_STUB_FILES)) {
-    writeFileSync(resolve(out, file), renderDevOnlyStub({ exportNames }, MCP_UNAVAILABLE))
   }
 }
 

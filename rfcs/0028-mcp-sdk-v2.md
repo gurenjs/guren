@@ -307,8 +307,9 @@ alias is now inert; it goes with the rest of the removal list below.
 `appUsesMcpPlugin` had no reader left but `--mcp-oauth`'s prerequisite check, so it
 moved into plugin-cloudflare as the `appDependsOn` it already had, and Lambda and
 Vercel stopped reading the manifest. `importedBy` is a `string` again. The two retired
-stub files are written from `RETIRED_STUB_FILES` beside `STUB_FILES`, keeping their
-v1 export names. `MCP_UNAVAILABLE` now says "Dev MCP endpoint" on all three targets:
+stub files are no longer written either: wrangler 4.129 bundles a worker whose
+unused `alias` names a missing file (`deploy --dry-run` exits 0), so the committed
+lines are inert rather than breaking. `MCP_UNAVAILABLE` now says "Dev MCP endpoint" on all three targets:
 the App MCP endpoint does serve there. The plugin-agents fixture declares
 `@guren/plugin-mcp`, which the removed guard used to refuse.
 

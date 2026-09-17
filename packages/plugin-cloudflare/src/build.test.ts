@@ -528,7 +528,7 @@ describe('workers runtime configuration', () => {
     expect(existsSync(join(root, '.cloudflare/stub-vite.js'))).toBe(true)
   })
 
-  test('should keep writing the stubs a config scaffolded before RFC 0028 aliases', async () => {
+  test('should build a plugin-mcp app whose config still aliases the v1 SDK', async () => {
     scaffoldApp(root, { mcpPlugin: true })
     writeFileSync(
       join(root, 'wrangler.jsonc'),
@@ -538,13 +538,13 @@ describe('workers runtime configuration', () => {
         + `  }\n}\n`,
     )
 
-    // Wrangler fails on an alias whose file is missing, even one nothing imports.
+    // Nothing imports those subpaths, so the dangling targets are inert: wrangler
+    // 4.129 bundles a worker whose unused alias names a missing file.
     const warning = await captureWarnings(() =>
       buildCloudflareOutput({ rootDir: root, skipAppBuild: true }),
     )
 
-    expect(readFileSync(join(root, '.cloudflare/stub-mcp-server.js'), 'utf8')).toContain('export function McpServer()')
-    expect(existsSync(join(root, '.cloudflare/stub-mcp-transport.js'))).toBe(true)
+    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
     expect(warning).not.toContain('@modelcontextprotocol')
   })
 
