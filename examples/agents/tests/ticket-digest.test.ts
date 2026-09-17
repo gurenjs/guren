@@ -43,5 +43,4 @@ describe('TicketDigest', () => {
     const { tickets } = listed!.output as { tickets: Array<{ id: number }> }
     expect(tickets.map((ticket) => ticket.id)).toContain(created.ticket.id)
   })
-
 })

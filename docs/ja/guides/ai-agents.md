@@ -70,7 +70,7 @@ bunx guren make:ai-agent TicketDigest --tools tickets_index --output --test
 
 `--tools` は、何かを書き込む前に、各名前がルートから導出されるツールに存在するかを確認します。`--output` は構造化出力のスキーマを、`--test` はモデルをスクリプト化するテストを追加します。`--module <name>` を付けるとモジュールの中に書き込みます。[永続エージェント](./durable-agents.md)を生成する `make:agent` とは別のコマンドです。
 
-[`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) にあるエージェントです。
+[`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) のエージェントを短くしたものです。
 
 ```ts
 // app/Ai/Agents/TicketDigest.ts
@@ -144,7 +144,7 @@ export default class AgentOpsController extends Controller {
 
 principal が `abilities` を持つ場合、エージェントが得るツールは、クラスの `scopes` とその abilities の両方が許可するツールに絞られます。呼び出し側の同意はエージェントを狭めることはあっても、広げることはありません。
 
-`as(null)` は匿名の実行で、誰かが起動したわけではない処理(定期的な要約など)に使います。このとき `appTools()` が受け付けるのは、ルートが read-only と宣言されているツールだけで、それ以外は構築時のエラーにすべて名前が挙がります。匿名のリクエストには、書き込みを認可したり承認したりする対象の identity がありません。そのため、ツールを1回ずつ呼んで拒否されるのではなく、エージェントを組み立てる時点で拒否されます。
+`as(null)` は匿名の実行で、誰かが起動したわけではない処理(定期的な要約など)に使います。このとき `appTools()` が受け付けるのは、ルートが read-only と宣言されているツールだけです。渡した名前のうちこれを満たさないものは、すべて構築時のエラーに名前が挙がります。匿名のリクエストには、書き込みを認可したり承認したりする対象の identity がありません。そのため、ツールを1回ずつ呼んで拒否されるのではなく、エージェントを組み立てる時点で拒否されます。
 
 ## アプリケーションのツール
 
@@ -361,7 +361,7 @@ events.on(AgentResponded, async (event) => {
 
 ## テスト
 
-`@guren/testing` の `app.fakeAi()` は、`TestApp.fromApp(app)` で起動したアプリの `ai` バインディングを差し替えます。スクリプト化するのはモデルだけです。ツールはパイプラインを通ってルートにディスパッチされるので、テストでもスコープゲート、ポリシー、承認ゲートが実際に働きます。`examples/agents` のテストです。
+`@guren/testing` の `app.fakeAi()` は、`TestApp.fromApp(app)` で起動したアプリの `ai` バインディングを差し替えます。スクリプト化するのはモデルだけです。ツールはパイプラインを通ってルートにディスパッチされるので、テストでもスコープゲート、ポリシー、承認ゲートが実際に働きます。`examples/agents` のテストを短くしたものです。元のテストはチケットを先に作り、ツールが返した実際の答えにそのチケットが入っていることも確認します。
 
 ```ts
 import { beforeAll, describe, expect, test } from 'bun:test'

@@ -70,7 +70,7 @@ bunx guren make:ai-agent TicketDigest --tools tickets_index --output --test
 
 `--tools` checks each name against the tools your routes derive before writing anything, `--output` adds a structured output schema, and `--test` writes a test that scripts the model. `--module <name>` writes inside a module. The command is not `make:agent`, which scaffolds a [durable agent](./durable-agents.md).
 
-This is the agent in [`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents):
+Shortened from the agent in [`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents):
 
 ```ts
 // app/Ai/Agents/TicketDigest.ts
@@ -144,7 +144,7 @@ Give `userOrFail()` a type argument with an `id`. Without one it returns an `Aut
 
 When the principal carries `abilities`, the tools the agent gets are the tools both the class's `scopes` and those abilities grant. A caller's consent can narrow an agent and never widen it.
 
-`as(null)` is an anonymous run, for work nobody started (a scheduled summary, say). Under it, `appTools()` accepts only tools whose route is declared read-only, and names every other one in a construction error. An anonymous request carries no identity for a write to be authorized or approved against, so the refusal happens when the agent is built rather than one tool call at a time.
+`as(null)` is an anonymous run, for work nobody started (a scheduled summary, say). Under it, `appTools()` accepts only tools whose route is declared read-only, and names every requested tool that fails that check in a construction error. An anonymous request carries no identity for a write to be authorized or approved against, so the refusal happens when the agent is built rather than one tool call at a time.
 
 ## The application's tools
 
@@ -361,7 +361,7 @@ A queued run is attempted once. A retry would call the model again and run every
 
 ## Testing
 
-`app.fakeAi()` from `@guren/testing` replaces the `ai` binding of an app booted with `TestApp.fromApp(app)`. It scripts the model and nothing else: tools still dispatch through the pipeline into your routes, so a test sees the scope gate, the policies and the approval gate do their work. This is the test from `examples/agents`:
+`app.fakeAi()` from `@guren/testing` replaces the `ai` binding of an app booted with `TestApp.fromApp(app)`. It scripts the model and nothing else: tools still dispatch through the pipeline into your routes, so a test sees the scope gate, the policies and the approval gate do their work. Shortened from the test in `examples/agents`, which also creates the ticket first and checks that the tool's real answer carries it:
 
 ```ts
 import { beforeAll, describe, expect, test } from 'bun:test'
