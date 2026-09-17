@@ -109,7 +109,11 @@ bunx guren add admin --public
 宣言し、設定と `aiPlugin()` を `createApp()` に登録します。続けてプラグイン、`ai`、
 プロバイダのパッケージを `bun add` します。`--no-install` を付けるとコマンドの表示だけに
 なります。キーは任意なので、未設定でもアプリは起動し、最初のプロンプトで失敗します。
-このコマンドには `config/env.ts` が必要です。その後 `make:ai-agent <Name>` で
+このコマンドには `config/env.ts` が必要です。`db/schema.ts` のあるアプリでは
+`ai_conversations` と `ai_messages` の 2 テーブルを追加し、マイグレーションを生成して、
+会話をそこに保存するよう `config/ai.ts` を設定します。`--no-conversations` を付けると
+これを省きます。テーブルにはツールの結果を含め、モデルが見た会話がそのまま入るので、
+機密データとして扱ってください。その後 `make:ai-agent <Name>` で
 `app/Ai/Agents` にエージェントクラスを書きます。`--tools` は、ルートから導出される
 ことを確かめたうえで、指定したエージェントツールを渡します。`--output` は構造化出力の
 スキーマの雛形を加え、`--test` は `app.fakeAi()` でモデルを台本化するテストを書きます。

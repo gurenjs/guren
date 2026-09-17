@@ -111,7 +111,11 @@ provider's API key in `config/env.ts` and the env files, and registers the confi
 `aiPlugin()` in `createApp()`. It then runs `bun add` for the plugin, `ai` and the
 provider package; `--no-install` prints the command instead. The key is optional, so
 the app boots without it and the first prompt fails. The command needs a
-`config/env.ts`. `make:ai-agent <Name>` then writes an agent class to
+`config/env.ts`. In an app with a `db/schema.ts`, it also adds the
+`ai_conversations` and `ai_messages` tables, generates their migration, and
+configures `config/ai.ts` to keep conversations in them; `--no-conversations` skips
+that. The tables hold each transcript as the model saw it, tool results included, so
+treat them as sensitive data. `make:ai-agent <Name>` then writes an agent class to
 `app/Ai/Agents`. `--tools` hands it the named agent tools after checking that a route
 derives each one, `--output` adds a structured-output schema stub, and `--test` writes
 a test that scripts the model with `app.fakeAi()`.

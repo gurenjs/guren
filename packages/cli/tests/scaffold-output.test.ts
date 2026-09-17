@@ -466,7 +466,8 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
       try {
         await seedInertiaApp(workspace.dir)
         await writeWorkspaceFiles(workspace.dir, { 'config/env.ts': ENV_SCHEMA_FIXTURE })
-        await addAi({ provider })
+        // The conversations wiring is patched in after the template and pinned in tests/add-ai.test.ts.
+        await addAi({ provider, conversations: false })
         expect(await readFile(join(workspace.dir, 'config/ai.ts'), 'utf8'))
           .toBe(await readFile(join(SCAFFOLD_TEMPLATE_ROOT, `ai/${provider}/config/ai.ts`), 'utf8'))
         const schema = await readFile(join(workspace.dir, 'config/env.ts'), 'utf8')

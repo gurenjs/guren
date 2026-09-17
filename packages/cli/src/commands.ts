@@ -3212,6 +3212,11 @@ const addAiCommand = defineCommand({
       default: true,
       description: 'Run bun add for missing packages (--no-install prints the command instead).',
     },
+    conversations: {
+      type: 'boolean',
+      default: true,
+      description: 'Add the ai_conversations and ai_messages tables and store conversations in them (--no-conversations skips both).',
+    },
   },
   async run({ args }) {
     const { addAi } = await import('./add-ai')
@@ -3220,6 +3225,7 @@ const addAiCommand = defineCommand({
       provider: args.provider,
       force: Boolean(args.force),
       install: args.install,
+      conversations: args.conversations,
       overwritten,
     })
     announceWrittenFiles(created, overwritten)
