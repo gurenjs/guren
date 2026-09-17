@@ -319,7 +319,7 @@ export default function SupportChat({ conversationId }: { conversationId: string
 }
 ```
 
-`useChat` を使うには、アプリに `@ai-sdk/react` をインストールしてください。履歴をサーバー側に置くことから、制約が4つあります。
+`useChat` を使うには、`ai` 7 と対になる `@ai-sdk/react` 4.x をアプリにインストールしてください。履歴をサーバー側に置くことから、制約が4つあります。
 
 - チャットには会話ストアが必要です。ステートレスな形はありません。
 - `output` を宣言したエージェントはストリーミングできません。JSON がプレーンテキストとしてチャットに届いてしまうからです。そのエージェントには `prompt()` を使ってください。

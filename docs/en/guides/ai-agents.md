@@ -319,7 +319,7 @@ export default function SupportChat({ conversationId }: { conversationId: string
 }
 ```
 
-Install `@ai-sdk/react` in the app for `useChat`. Four limits follow from keeping history on the server:
+Install `@ai-sdk/react` 4.x, the line that pairs with `ai` 7, in the app for `useChat`. Four limits follow from keeping history on the server:
 
 - A chat needs a conversation store. No stateless form exists.
 - An agent that declares `output` cannot stream, since its JSON would reach the chat as plain text. Use `prompt()` for it.
