@@ -227,26 +227,16 @@ return this.redirect(redirectTo ?? '/dashboard')
 
 `redirectTo` is sanitized automatically: app-relative paths (`/settings/billing`) always pass, but absolute URLs are dropped unless their host is in `allowedRedirectHosts`. This prevents an attacker from crafting a login link that redirects a user off-site after authenticating.
 
-The allowlist is part of the manager's `stateConfig`, which `defineOAuthConfig` does not accept (it takes `providers` and `stateStore` only). An app that needs one binds `oauth` from a service provider's `register()` and removes `config/oauth.ts` from `createApp({ config })`, since a key bound twice fails the boot:
+The allowlist goes in the definition's `stateConfig`, next to the providers and the state store:
 
 ```ts
-// app/Providers/OAuthProvider.ts
-import { createOAuthManager, DatabaseOAuthStateStore, ServiceProvider } from '@guren/core'
-import { oauthStates } from '../../db/schema.js'
-
-export default class OAuthProvider extends ServiceProvider {
-  register(): void {
-    this.container.singleton('oauth', () => {
-      const manager = createOAuthManager({
-        stateStore: new DatabaseOAuthStateStore(oauthStates),
-        stateConfig: {
-          allowedRedirectHosts: ['app.example.com', '*.example.com'], // supports wildcards
-        },
-      })
-      // Register each provider with manager.registerProvider(), as config/oauth.ts did.
-      return manager
-    })
-  }
+// config/oauth.ts, the end of the defineOAuthConfig callback
+return {
+  providers,
+  stateStore: new DatabaseOAuthStateStore(oauthStates),
+  stateConfig: {
+    allowedRedirectHosts: ['app.example.com', '*.example.com'], // supports wildcards
+  },
 }
 ```
 
