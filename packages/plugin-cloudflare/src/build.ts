@@ -714,7 +714,7 @@ const STUBBED_MODULES = [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES]
 const UNAVAILABLE_ON_WORKERS: Record<(typeof STUBBED_MODULES)[number]['kind'], string> = {
   sqlite: 'bun:sqlite is unavailable on Cloudflare Workers — use createD1Database().',
   vite: 'The Vite dev server is unavailable on Cloudflare Workers — assets are served by Workers Static Assets.',
-  'guren-cli':
+  mcp:
     'The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on Cloudflare Workers — they read and generate files on disk.',
   'sql-driver':
     'This database client is unavailable on Cloudflare Workers — use createD1Database(). '

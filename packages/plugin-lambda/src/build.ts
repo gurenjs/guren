@@ -59,7 +59,7 @@ export interface BuildLambdaOutputOptions {
 const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string> = {
   sqlite: 'bun:sqlite is unavailable on AWS Lambda — use createAwsDataApiDatabase() or createPostgresDatabase().',
   vite: 'The Vite dev server is unavailable on AWS Lambda — serve assets from S3/CloudFront.',
-  'guren-cli':
+  mcp:
     'The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on AWS Lambda — they read and generate files on disk.',
 }
 
