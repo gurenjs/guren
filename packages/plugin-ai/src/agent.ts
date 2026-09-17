@@ -3,7 +3,7 @@
  * `ToolLoopAgent`, constructed by `as(principal)` so that `this.make()` and
  * `appTools()` resolve from the application and principal the call belongs to.
  */
-import { ambientContainer, type AgentPrincipal, type ServiceBindings } from '@guren/core'
+import { type AgentPrincipal, type ServiceBindings } from '@guren/core'
 import {
   ToolLoopAgent,
   stepCountIs,
@@ -17,6 +17,7 @@ import {
   type ToolSet,
 } from 'ai'
 
+import { ambientManager } from './ambient'
 import { appToolDefinitions, appTools, type AppToolDefinition, type AppToolDenial, type AppToolError } from './app-tools'
 import { readAgentContext, setAgentContext, type AgentContext } from './context'
 import type { AiManager } from './manager'
@@ -24,6 +25,8 @@ import { CONVERSATION_HEADER } from './protocol'
 import { RunAgentJob, registeredAgent } from './queue'
 import { resolveRuntime } from './runtime'
 import type { AgentToolInput, AgentToolName, AgentToolOutput, AgentToolScope, AiProviderName, Granted } from './types'
+
+const ON_A_MANAGER = 'call ai.agent(Class).as(...) on a manager'
 
 /** What `as()` accepts: a principal, or a user record contributing its `id` (and `abilities`, if it carries them). */
 export type AgentPrincipalInput =
@@ -175,7 +178,7 @@ export abstract class Agent<S extends readonly AgentToolScope[] = readonly Agent
 
   /** Bind to the default application's `ai` manager (RFC 0023 §3). */
   static as<T extends Agent>(this: AgentClass<T>, principal: AgentPrincipalInput): BoundAgent<T> {
-    return ambientManager(this.name).agent(this).as(principal)
+    return ambientManager(`${this.name}.as()`, ON_A_MANAGER).agent(this).as(principal)
   }
 
   /** `as(null).prompt(...)`: an anonymous, read-only run. */
@@ -184,7 +187,7 @@ export abstract class Agent<S extends readonly AgentToolScope[] = readonly Agent
     input: string,
     options?: PromptOptions,
   ): Promise<AgentResponse<InferAgentOutput<T>>> {
-    return ambientManager(this.name).agent(this).as(null).prompt(input, options)
+    return ambientManager(`${this.name}.prompt()`, ON_A_MANAGER).agent(this).as(null).prompt(input, options)
   }
 }
 
@@ -416,13 +419,3 @@ function normalizePrincipal(input: AgentPrincipalInput): AgentPrincipal | null {
   }
 }
 
-function ambientManager(className: string): AiManager {
-  const container = ambientContainer()
-  if (!container?.has('ai')) {
-    throw new Error(
-      `${className}.as() resolves the \`ai\` manager from the default application, and none is bound. `
-      + 'Add config/ai.ts (defineAiConfig) to createApp({ config }), or call ai.agent(Class).as(...) on a manager.',
-    )
-  }
-  return container.make('ai')
-}

@@ -396,6 +396,49 @@ It needs the `BroadcastServiceProvider` on top of the queue wiring above, and it
 - **The run always ends the stream.** A job that fails before finishing publishes one `error` chunk, so a subscriber is never left waiting, and that chunk fails the job once the stream closes.
 - **No `AgentResponded` is emitted**, since the `finish` chunk ends the run, and an agent that declares `output` is refused, as it is for `stream()`. A subscriber that joins late misses what was already published.
 
+## Embeddings and images
+
+`embed()`, `embedMany()` and `image()` are the AI SDK's own calls with the model resolved by provider name, the way an agent resolves its language model. Declare the factory in `config/ai.ts` first: a provider with no `embeddingModel` (Anthropic ships none) is refused by name rather than at the request.
+
+```ts
+// config/ai.ts
+import { defineAiConfig } from '@guren/plugin-ai'
+import { createOpenAI } from '@ai-sdk/openai'
+
+export default defineAiConfig((env) => {
+  const openai = createOpenAI({ apiKey: env.OPENAI_API_KEY })
+  return {
+    default: env.AI_PROVIDER,
+    providers: {
+      openai: {
+        model: () => openai('gpt-5'),
+        embeddingModel: () => openai.textEmbeddingModel('text-embedding-3-small'),
+        imageModel: () => openai.imageModel('gpt-image-1'),
+      },
+    },
+  }
+})
+```
+
+```ts
+import { embed, embedMany, image } from '@guren/plugin-ai'
+
+const { embedding } = await embed({ value: ticket.body })
+const { embeddings } = await embedMany({ values: chunks })
+const { image: cover } = await image({ prompt: 'A red fox in snow', size: '1024x1024' })
+```
+
+Every option the AI SDK takes (`maxRetries`, `abortSignal`, `headers`, `providerOptions`, `n`, `size`, `aspectRatio`, `seed`) is passed through untouched, and the result is the SDK's own. Two options belong to Guren:
+
+| Option | |
+|---|---|
+| `provider` | A provider name from `config/ai.ts`; its `default` when absent. |
+| `manager` | The manager to resolve the model from. Absent, it is the default application's `ai` binding, as it is for `Agent`'s statics. Pass `this.make('ai')` from a controller in a process that boots more than one application. |
+
+Resolving by name is what keeps these calls inside the test seam: nothing in your code holds a model, so `fakeAi()` answers an `embed()` the same way it answers a prompt.
+
+Where the vectors go is your application's business. `@guren/orm` has no vector column type, so a `pgvector` column is a hand-written migration and a raw query today. `result.image` is the SDK's `GeneratedFile` (`base64`, `uint8Array`, `mediaType`); storing one is [Attachments](./attachments.md)' job.
+
 ## Testing
 
 `app.fakeAi()` from `@guren/testing` replaces the `ai` binding of an app booted with `TestApp.fromApp(app)`. It scripts the model and nothing else: tools still dispatch through the pipeline into your routes, so a test sees the scope gate, the policies and the approval gate do their work. Shortened from the test in `examples/agents`, which also creates the ticket first and checks that the tool's real answer carries it:
@@ -449,7 +492,16 @@ Install `ai` next to `@guren/plugin-ai`: the fake is built on the AI SDK's mock 
 
 `assertPrompted(Agent, predicate?)`, `assertNotPrompted(Agent, predicate)` and `assertNeverPrompted(Agent)` check the prompts. A prompt with nothing scripted throws, and disposing the fake at the end of the `using` block throws again naming the agent, because a route usually turns the first error into a 500 whose body says nothing. Disposal also fails when the loop stopped (through `stopWhen`) before reaching the scripted answer.
 
-The fake answers `conversations()` from the real store, so a scripted prompt with `conversation: true` writes the same rows it would in production. It does not script embedding models.
+The fake answers `conversations()` from the real store, so a scripted prompt with `conversation: true` writes the same rows it would in production.
+`respondEmbeddings()` and `respondImages()` script the other two calls:
+
+```ts
+using ai = app.fakeAi()
+ai.respondEmbeddings([[0.1, 0.2], [0.3, 0.4]])   // one vector per value
+ai.respondImages(['<base64>', ['<base64>', '<base64>']])   // one entry per image() call
+```
+
+An array of vectors is drawn one per *value*, so `embedMany(['a', 'b'])` takes two of them however the SDK batches the request; a function (`(value) => number[]`) answers every value instead and never runs out. `embedCalls()` and `imageCalls()` return what each call asked for, and `assertEmbedded(predicate?)`, `assertNeverEmbedded()`, `assertGeneratedImage(predicate?)` and `assertNeverGeneratedImage()` mirror the prompt assertions. An unscripted `embed()` or `image()` fails the call and the disposal, as an unscripted prompt does, and so does a provider whose `config/ai.ts` entry declares no model of that kind.
 
 A fake proves the wiring. Whether the instructions and tool descriptions get the right answer out of a real model is the other measurement, and that one calls the model.
 
@@ -514,7 +566,6 @@ Three things the summary is careful about:
 
 These parts of the design have not shipped:
 
-- `embed()` and `image()` wrappers. Call the AI SDK with `ai.embeddingModel(name)` meanwhile.
 - `make:ai-tool`, and typed provider and agent names.
 
 ## Related
