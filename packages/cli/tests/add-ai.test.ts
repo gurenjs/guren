@@ -2,9 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
+import { Database } from 'bun:sqlite'
 import {
   APP_FIXTURE,
   ENV_SCHEMA_FIXTURE,
+  MYSQL_SCHEMA_FIXTURE,
+  PG_SCHEMA_FIXTURE,
+  SQLITE_SCHEMA_FIXTURE,
+  TSC_TIMEOUT,
+  checkTypes,
+  templateCompilerOptions,
   createTempWorkspace,
   linkWorkspaceCore,
   linkWorkspacePackage,
@@ -19,14 +26,24 @@ import { loadResolvedConfig } from '../src/resolved-config'
 
 const cliRoot = resolve(import.meta.dir, '..')
 
-async function seedApp(options: { env?: boolean; manifest?: Record<string, unknown> } = {}): Promise<void> {
+async function seedApp(options: { env?: boolean; manifest?: Record<string, unknown>; schema?: string } = {}): Promise<void> {
   await writeWorkspaceFiles(process.cwd(), {
+    ...(options.schema ? { 'db/schema.ts': options.schema } : {}),
     'src/app.ts': APP_FIXTURE,
     '.env.example': 'APP_KEY=\n',
     '.env': 'APP_KEY=\n',
     'package.json': JSON.stringify(options.manifest ?? { name: 'app', dependencies: {} }),
     ...(options.env === false ? {} : { 'config/env.ts': ENV_SCHEMA_FIXTURE }),
   })
+}
+
+const CONVERSATIONS_LINE = "  conversations: { driver: 'database', conversations: aiConversations, messages: aiMessages },"
+
+/** The provider package `loadResolvedConfig` imports, from the CLI's own install. */
+async function linkAnthropic(): Promise<void> {
+  const link = join(process.cwd(), 'node_modules/@ai-sdk/anthropic')
+  await mkdir(dirname(link), { recursive: true })
+  await symlink(join(cliRoot, 'node_modules/@ai-sdk/anthropic'), link, 'dir')
 }
 
 /** What `consola.info` printed while `task` ran. */
@@ -158,9 +175,7 @@ describe('guren add ai', () => {
     await seedApp()
     await linkWorkspaceCore(process.cwd())
     await linkWorkspacePackage('plugin-ai', process.cwd())
-    const anthropicLink = join(process.cwd(), 'node_modules/@ai-sdk/anthropic')
-    await mkdir(dirname(anthropicLink), { recursive: true })
-    await symlink(join(cliRoot, 'node_modules/@ai-sdk/anthropic'), anthropicLink, 'dir')
+    await linkAnthropic()
 
     await addAi({})
 
@@ -179,6 +194,173 @@ describe('guren add ai', () => {
     expect((await checkEnvExample(process.cwd())).filter((result) => result.status === 'fail')).toEqual([])
   })
 
+  describe('conversations', () => {
+    it('appends both tables, wires the database store into config/ai.ts, and points at the migration', async () => {
+      await seedApp({ schema: PG_SCHEMA_FIXTURE })
+
+      const lines = await infoLines(() => addAi({}))
+
+      const schema = await readFile(resolve('db/schema.ts'), 'utf8')
+      expect(schema).toContain("export const aiConversations = pgTable('ai_conversations'")
+      expect(schema).toContain("uniqueIndex('ai_messages_conversation_position_idx').on(t.conversationId, t.position)")
+      expect(schema.indexOf('export const aiConversations')).toBeLessThan(schema.indexOf('export const aiMessages'))
+      const config = await readFile(resolve('config/ai.ts'), 'utf8')
+      expect(config).toContain("import { aiConversations, aiMessages } from '../db/schema'")
+      expect(config).toContain(`  default: 'anthropic',\n${CONVERSATIONS_LINE}\n`)
+      expect(lines).toContain('Next: bun run db:make, then bun run db:migrate to create ai_conversations and ai_messages.')
+    })
+
+    it('adds both tables above and into a schema that keeps an aggregate object of its tables', async () => {
+      await seedApp({ schema: `${PG_SCHEMA_FIXTURE}\nexport const schema = {\n  users,\n}\n\nexport type AppSchema = typeof schema\n` })
+
+      await addAi({})
+
+      const schema = await readFile(resolve('db/schema.ts'), 'utf8')
+      expect(schema).toContain('  users,\n  aiConversations,\n  aiMessages,\n}')
+      // Ahead of the aggregate, or `schema` names a binding declared below it (TS2448).
+      expect(schema.indexOf('export const aiMessages =')).toBeLessThan(schema.indexOf('export const schema ='))
+    })
+
+    it('points at the migration when only the messages table is new', async () => {
+      await seedApp({ schema: PG_SCHEMA_FIXTURE })
+      await addAi({})
+      const schema = await readFile('db/schema.ts', 'utf8')
+      await writeFile('db/schema.ts', schema.slice(0, schema.indexOf('export const aiMessages')))
+
+      const lines = await infoLines(() => addAi({}))
+
+      expect(lines).toContain('Next: bun run db:make, then bun run db:migrate to create ai_conversations and ai_messages.')
+    })
+
+    const dialects = [
+      ['SQLite', SQLITE_SCHEMA_FIXTURE, "message: text('message', { mode: 'json' }).notNull()"],
+      ['MySQL', MYSQL_SCHEMA_FIXTURE, "conversationId: varchar('conversation_id', { length: 36 })"],
+    ] as const
+    for (const [dialect, fixture, column] of dialects) {
+      it(`emits ${dialect} column types`, async () => {
+        await seedApp({ schema: fixture })
+
+        await addAi({})
+
+        expect(await readFile(resolve('db/schema.ts'), 'utf8')).toContain(column)
+      })
+    }
+
+    it('writes the config and schema unchanged with --no-conversations', async () => {
+      await seedApp({ schema: PG_SCHEMA_FIXTURE })
+
+      await addAi({ conversations: false })
+
+      expect(await readFile(resolve('db/schema.ts'), 'utf8')).toBe(PG_SCHEMA_FIXTURE)
+      expect(await readFile(resolve('config/ai.ts'), 'utf8')).not.toContain('conversations')
+    })
+
+    it('still installs agents in an app with no db/schema.ts, leaving conversations unconfigured', async () => {
+      await seedApp()
+      const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
+      try {
+        await addAi({})
+        expect(warn.mock.calls.map((args) => String(args[0]))).toContain(
+          'No db/schema.ts found — conversations stay unconfigured. Run `bunx guren add ai` again after adding db/schema.ts to store them.',
+        )
+      } finally {
+        warn.mockRestore()
+      }
+      expect(await readFile(resolve('config/ai.ts'), 'utf8')).not.toContain('conversations')
+    })
+
+    it('adds conversations to a config an earlier run wrote without them, once across re-runs', async () => {
+      await seedApp()
+      await addAi({})
+      await writeWorkspaceFiles(process.cwd(), { 'db/schema.ts': PG_SCHEMA_FIXTURE })
+      // Mentioned in a comment only, which names no store.
+      await writeFile('config/ai.ts', `// conversations: added below\n${await readFile('config/ai.ts', 'utf8')}`)
+
+      await addAi({})
+      await addAi({})
+
+      const config = await readFile(resolve('config/ai.ts'), 'utf8')
+      expect(config.match(/conversations: \{/g)).toHaveLength(1)
+      expect(config.match(/import \{ aiConversations, aiMessages \}/g)).toHaveLength(1)
+      expect((await readFile(resolve('db/schema.ts'), 'utf8')).match(/export const aiMessages =/g)).toHaveLength(1)
+    })
+
+    it('leaves a config/ai.ts it did not write alone, saying what to add', async () => {
+      await seedApp({ schema: PG_SCHEMA_FIXTURE })
+      const handWritten = "import { defineAiConfig } from '@guren/plugin-ai'\n\nexport default defineAiConfig(() => ({ default: 'anthropic', providers: {} }))\n"
+      await writeWorkspaceFiles(process.cwd(), { 'config/ai.ts': handWritten })
+      const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
+      try {
+        await addAi({})
+        expect(warn.mock.calls.some((args) => String(args[0]).startsWith('config/ai.ts is not in the shape guren add ai writes'))).toBe(true)
+      } finally {
+        warn.mockRestore()
+      }
+      expect(await readFile(resolve('config/ai.ts'), 'utf8')).toBe(handWritten)
+    })
+
+    it(
+      'emits a schema and config/ai.ts that typecheck in every dialect',
+      async () => {
+        // One app per dialect, each on a different provider, so every template's anchor is wired too.
+        const apps = [['pg', PG_SCHEMA_FIXTURE, 'anthropic'], ['sqlite', SQLITE_SCHEMA_FIXTURE, 'openai'], ['mysql', MYSQL_SCHEMA_FIXTURE, 'gateway']] as const
+        const root = process.cwd()
+        const files = [join(cliRoot, 'tests/fixtures/scaffold-typecheck/ai/config/env.ts')]
+        for (const [dir, schema, provider] of apps) {
+          await mkdir(dir)
+          process.chdir(dir)
+          try {
+            await seedApp({ schema })
+            await addAi({ provider })
+            expect(await readFile('config/ai.ts', 'utf8')).toContain(CONVERSATIONS_LINE)
+            files.push(resolve('db/schema.ts'), resolve('config/ai.ts'))
+          } finally {
+            process.chdir(root)
+          }
+        }
+
+        expect(checkTypes(files, templateCompilerOptions({
+          '@ai-sdk/anthropic': [join(cliRoot, 'node_modules/@ai-sdk/anthropic')],
+          '@ai-sdk/openai': [join(cliRoot, 'node_modules/@ai-sdk/openai')],
+          ai: [join(cliRoot, 'node_modules/ai')],
+        }))).toEqual([])
+      },
+      TSC_TIMEOUT,
+    )
+
+    // The tables and the store agree only by column property name, which nothing else checks.
+    it('writes SQLite tables the database store reads and writes', async () => {
+      await seedApp({ schema: SQLITE_SCHEMA_FIXTURE })
+      for (const name of ['core', 'orm', 'plugin-ai']) await linkWorkspacePackage(name, process.cwd())
+      await linkAnthropic()
+
+      await addAi({})
+
+      const resolved = await loadResolvedConfig(process.cwd())
+      const { conversations: options } = resolved.entries[0]!.config as { conversations: { conversations: object; messages: object } }
+      const sqlite = new Database(':memory:')
+      try {
+        for (const table of [options.conversations, options.messages]) sqlite.exec(createTableSql(table))
+        const { DrizzleAdapter } = await import(join(process.cwd(), 'node_modules/@guren/core/dist/index.js'))
+        const { drizzle } = await import(Bun.resolveSync('drizzle-orm/bun-sqlite', join(cliRoot, '../orm')))
+        DrizzleAdapter.configure(drizzle({ client: sqlite }))
+        const { DatabaseConversationStore } = await import(join(process.cwd(), 'node_modules/@guren/plugin-ai/dist/index.js'))
+        const store = new DatabaseConversationStore(options)
+        const owner = { kind: 'user', id: 1 }
+
+        const id = await store.create({ agentName: 'support', owner, messages: [{ role: 'user', content: 'one' }] })
+        await store.append(id, owner, [{ role: 'assistant', content: 'two' }])
+
+        expect(await store.load(id, owner)).toEqual({
+          agentName: 'support',
+          messages: [{ role: 'user', content: 'one' }, { role: 'assistant', content: 'two' }],
+        })
+      } finally {
+        sqlite.close()
+      }
+    })
+  })
+
   // One owner per range: the `ai` an app installs is the one @guren/plugin-ai is built on.
   it('installs the ai range @guren/plugin-ai depends on', async () => {
     const plugin = JSON.parse(await readFile(join(cliRoot, '../plugin-ai/package.json'), 'utf8')) as {
@@ -187,3 +369,12 @@ describe('guren add ai', () => {
     expect(cliDependencyRange('devDependencies', 'ai')).toBe(plugin.dependencies.ai!)
   })
 })
+
+/** DDL from a drizzle table's own columns, so the test reads the names the scaffold wrote. */
+function createTableSql(table: object): string {
+  const columns = Object.values(table).filter(
+    (column): column is { name: string; getSQLType(): string } => typeof column?.getSQLType === 'function',
+  )
+  const name = (table as Record<symbol, unknown>)[Symbol.for('drizzle:Name')]
+  return `CREATE TABLE ${String(name)} (${columns.map((column) => `${column.name} ${column.getSQLType()}`).join(', ')})`
+}

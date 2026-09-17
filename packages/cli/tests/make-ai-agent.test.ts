@@ -7,7 +7,7 @@ import {
   checkTypes,
   createTempWorkspace,
   linkWorkspaceCore,
-  resolvedCompilerOptions,
+  templateCompilerOptions,
   writeWorkspaceFiles,
   type TempWorkspace,
 } from './helpers'
@@ -162,18 +162,10 @@ describe('guren make:ai-agent', () => {
       const test = await readFile(resolve('tests/Ai/Triager.test.ts'), 'utf8')
       expect(test).toContain("ai.respond(Triager, [{ output: { summary: 'A scripted summary.' } }])")
 
-      const parsed = resolvedCompilerOptions(join(cliRoot, 'tsconfig.templates.json'))
-      const diagnostics = checkTypes(files, {
-        ...parsed,
-        rootDirs: undefined,
-        typeRoots: [join(repoRoot, 'node_modules'), join(cliRoot, 'node_modules/@types')],
-        types: ['bun-types'],
-        paths: {
-          ...parsed.paths,
-          '@guren/testing': [join(cliRoot, '../testing/src/index.ts')],
-          zod: [join(cliRoot, 'node_modules/zod')],
-        },
-      })
+      const diagnostics = checkTypes(files, templateCompilerOptions({
+        '@guren/testing': [join(cliRoot, '../testing/src/index.ts')],
+        zod: [join(cliRoot, 'node_modules/zod')],
+      }))
       expect(diagnostics).toEqual([])
     },
     TSC_TIMEOUT,

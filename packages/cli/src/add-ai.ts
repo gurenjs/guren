@@ -1,9 +1,21 @@
 import { consola } from 'consola'
+import { writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { ENV_SCHEMA_FILE } from './app-env'
 import { CliError } from './cli-error'
 import { cliDependencyRange } from './cli-manifest'
 import { appDependsOn, fileExists, readIfExists } from './discovery'
 import { appendEnvEntry } from './env-registrar'
+import { generateSchemaMigration } from './make-migration'
+import {
+  appendSchemaTable,
+  ensureMysqlImports,
+  ensurePgImports,
+  ensureSqliteImports,
+  insertImport,
+  type AppendSchemaTableResult,
+  type SchemaDialect,
+} from './patch-helpers'
 import { checkPluginCompatibility, readCoreVersion, readPluginManifest } from './plugin-manifest'
 import { wireConfig, wireProvider } from './provider-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -37,8 +49,78 @@ export const AI_PROVIDERS: Readonly<Record<string, AiProviderPreset>> = {
   },
 }
 
+/**
+ * The two tables `DatabaseConversationStore` reads (RFC 0029 §5), by column property name.
+ * Ids are client-generated UUIDs, hence `varchar(36)` where MySQL indexes them. The unique
+ * (conversation, position) index is what refuses two concurrent appends the same slot.
+ */
+const CONVERSATIONS_TABLE_BLOCKS: Record<SchemaDialect, string> = {
+  pg: `export const aiConversations = pgTable('ai_conversations', {
+  id: text('id').primaryKey(),
+  agentName: text('agent_name').notNull(),
+  owner: text('owner').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+})
+`,
+  sqlite: `export const aiConversations = sqliteTable('ai_conversations', {
+  id: text('id').primaryKey(),
+  agentName: text('agent_name').notNull(),
+  owner: text('owner').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})
+`,
+  mysql: `export const aiConversations = mysqlTable('ai_conversations', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  agentName: varchar('agent_name', { length: 255 }).notNull(),
+  owner: varchar('owner', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at').notNull(),
+  updatedAt: timestamp('updated_at').notNull(),
+})
+`,
+}
+
+const MESSAGES_TABLE_BLOCKS: Record<SchemaDialect, string> = {
+  pg: `export const aiMessages = pgTable('ai_messages', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id').notNull().references(() => aiConversations.id, { onDelete: 'cascade' }),
+  position: integer('position').notNull(),
+  message: jsonb('message').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+}, (t) => [uniqueIndex('ai_messages_conversation_position_idx').on(t.conversationId, t.position)])
+`,
+  sqlite: `export const aiMessages = sqliteTable('ai_messages', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id').notNull().references(() => aiConversations.id, { onDelete: 'cascade' }),
+  position: integer('position').notNull(),
+  message: text('message', { mode: 'json' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+}, (t) => [uniqueIndex('ai_messages_conversation_position_idx').on(t.conversationId, t.position)])
+`,
+  mysql: `export const aiMessages = mysqlTable('ai_messages', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  conversationId: varchar('conversation_id', { length: 36 }).notNull().references(() => aiConversations.id, { onDelete: 'cascade' }),
+  position: int('position').notNull(),
+  message: json('message').notNull(),
+  createdAt: timestamp('created_at').notNull(),
+}, (t) => [uniqueIndex('ai_messages_conversation_position_idx').on(t.conversationId, t.position)])
+`,
+}
+
+const CONVERSATIONS_SCHEMA_IMPORTS: Record<SchemaDialect, (content: string) => string> = {
+  pg: (content) => ensurePgImports(content, ['pgTable', 'text', 'integer', 'jsonb', 'timestamp', 'uniqueIndex']),
+  sqlite: (content) => ensureSqliteImports(content, ['sqliteTable', 'text', 'integer', 'uniqueIndex']),
+  mysql: (content) => ensureMysqlImports(content, ['mysqlTable', 'varchar', 'int', 'json', 'timestamp', 'uniqueIndex']),
+}
+
+const CONVERSATIONS_IMPORT = "import { aiConversations, aiMessages } from '../db/schema'"
+const CONVERSATIONS_ENTRY = "  conversations: { driver: 'database', conversations: aiConversations, messages: aiMessages },\n"
+
 export interface AddAiOptions extends WriterOptions {
   provider?: string
+  /** Add the conversation tables and the `database` store (default); false leaves conversations unconfigured. */
+  conversations?: boolean
   /** Run `bun add` for the missing packages; otherwise print the command. */
   install?: boolean
 }
@@ -46,7 +128,8 @@ export interface AddAiOptions extends WriterOptions {
 /**
  * `guren add ai` (RFC 0029 §8): `config/ai.ts` for one provider, its key in
  * `config/env.ts` and the env files, `aiPlugin()` in `createApp({ providers })`,
- * and the packages. The conversation tables wait for the `database` store (§5).
+ * the packages, and (with a `db/schema.ts`) the `ai_conversations` / `ai_messages` tables the
+ * `database` conversation store reads, patched into `config/ai.ts` after its template (§5).
  */
 export async function addAi(options: AddAiOptions = {}): Promise<string[]> {
   assertCwdUnsupported(options, 'guren add ai')
@@ -77,10 +160,15 @@ export async function addAi(options: AddAiOptions = {}): Promise<string[]> {
     )
   }
 
+  const tables = options.conversations === false ? 'skipped' : await appendConversationTables()
+
   const created = await writeScaffoldFiles(
     [scaffoldTemplateFile(`ai/${providerName}`, 'config/ai.ts')],
     { ...options, skipExisting: true },
   )
+  if (tables === 'appended' || tables === 'already-declared') {
+    await wireConversationStore(providerName)
+  }
 
   await wireConfig('ai')
   await wireProvider('aiPlugin()', `import { aiPlugin } from '${AI_PLUGIN_PACKAGE}'`, {
@@ -93,7 +181,50 @@ export async function addAi(options: AddAiOptions = {}): Promise<string[]> {
 
   await installPackages(provider, Boolean(options.install))
   await warnIfCoreIncompatible()
+
+  if (tables === 'appended') {
+    const generated = await generateSchemaMigration('create_ai_conversations_tables', 'AI conversation tables')
+    consola.info(`Next: ${generated ? '' : 'bun run db:make, then '}bun run db:migrate to create ai_conversations and ai_messages.`)
+  }
   return created
+}
+
+/** `'appended'` when either table is new, which is what a migration would cover. */
+async function appendConversationTables(): Promise<AppendSchemaTableResult> {
+  const manualGuidance = 'conversations stay unconfigured. Run `bunx guren add ai` again after adding db/schema.ts to store them.'
+  const conversations = await appendSchemaTable({
+    name: 'aiConversations',
+    blocks: CONVERSATIONS_TABLE_BLOCKS,
+    imports: CONVERSATIONS_SCHEMA_IMPORTS,
+    manualGuidance,
+  })
+  if (conversations === 'no-schema') return conversations
+  // Second: its foreign key names aiConversations, which must be declared above it.
+  const messages = await appendSchemaTable({
+    name: 'aiMessages',
+    blocks: MESSAGES_TABLE_BLOCKS,
+    imports: CONVERSATIONS_SCHEMA_IMPORTS,
+    manualGuidance,
+  })
+  return conversations === 'appended' || messages === 'appended' ? 'appended' : 'already-declared'
+}
+
+/** Point `config/ai.ts` at the tables when it names no store and still has the shape the template gives it. */
+async function wireConversationStore(providerName: string): Promise<void> {
+  const source = await readIfExists(process.cwd(), 'config/ai.ts')
+  if (source === null || /^\s*conversations\s*:/m.test(source)) return
+
+  const anchor = `  default: '${providerName}',\n`
+  if (!source.includes(anchor)) {
+    consola.warn(
+      'config/ai.ts is not in the shape guren add ai writes, so conversations were not wired. '
+      + `Add \`${CONVERSATIONS_ENTRY.trim()}\` with ${CONVERSATIONS_IMPORT}.`,
+    )
+    return
+  }
+  const withImport = insertImport(source, CONVERSATIONS_IMPORT) ?? source
+  await writeFile(resolve(process.cwd(), 'config/ai.ts'), withImport.replace(anchor, `${anchor}${CONVERSATIONS_ENTRY}`), 'utf8')
+  consola.info('Wired config/ai.ts to store conversations in ai_conversations and ai_messages.')
 }
 
 async function installPackages(provider: AiProviderPreset, install: boolean): Promise<void> {

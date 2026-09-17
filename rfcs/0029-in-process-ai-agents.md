@@ -600,7 +600,7 @@ since a chat client posts them back as strings.
   option naming a different conversation than `continue(id)` bound is refused.
 - Binary file data is stored as base64 and a `URL` as its href, both forms a
   `ModelMessage` accepts on replay.
-- `guren add ai` scaffolding the two tables follows in its own PR.
+- `guren add ai` scaffolds the two tables (§8).
 
 ### 6. Queueing
 
@@ -698,6 +698,18 @@ the tool descriptions get the right answer out of the model is §10's job.
   ranges `@guren/cli` typechecks the templates against. `make:ai-agent` writes
   no `app/Ai/agents.ts` entry: `aiPlugin()` has no `agents` option to read one
   yet. `make:ai-tool` follows with Part 3's local-tool advisory.
+
+  **Amended in implementation (Part 2a):** `add ai` appends `aiConversations`
+  and `aiMessages` to `db/schema.ts` per dialect (MySQL keys are `varchar(36)`,
+  and `ai_messages` has a unique index on (`conversation_id`, `position`) and a
+  cascading foreign key), generates their migration, and adds
+  `conversations: { driver: 'database', ... }` to `config/ai.ts`.
+  `--no-conversations` skips all three. The provider templates stay free of
+  the schema import, which is patched in after them, so one template per
+  provider still type-checks without a schema companion. An app with no
+  `db/schema.ts` still gets agents, with conversations left unconfigured. A
+  `config/ai.ts` not in the scaffold's shape is left alone, with the lines to
+  add printed.
 - **`guren check`** (content-activated, nothing runs for an app with no
   `Agent` subclass): a literal `appTools([...])` name that no `.agent()`
   route derives; a name outside the class's `static scopes`; an `Agent`
