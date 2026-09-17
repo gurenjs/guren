@@ -15,14 +15,16 @@ import {
   type SchemaDialect,
 } from './patch-helpers'
 import { readIfExists } from './discovery'
-import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } from './provider-registrar'
+import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireConfig, wireProvider } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { addSession, appConfiguresSessions } from './add-session'
 import { appendOAuthStateTable } from './oauth-state-table'
 import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
 import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
-import { scaffoldTemplateFile } from './scaffold-templates'
+import { MAIL_SCAFFOLD } from './mail-scaffold'
+import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
+import { appendScaffoldEnv, installsConfigDefinition } from './service-scaffold'
 
 function authFile(path: string): ScaffoldFileEntry {
   return scaffoldTemplateFile('auth', path)
@@ -1374,7 +1376,7 @@ async function warnAboutStalePasswordScaffold(): Promise<void> {
   }
   if (leftovers.some((path) => MAIL_SCAFFOLD_PATHS.includes(path))) {
     consola.warn(
-      'Your app entry may still register MailProvider and CoreMailServiceProvider from that run — remove them too if nothing else sends mail.',
+      'Your app entry may still register MailProvider and CoreMailServiceProvider, or list mail in its config array, from that run — remove them too if nothing else sends mail.',
     )
   }
 }
@@ -1510,6 +1512,8 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   // `oauthStates`, so OAuth state stays on Core's in-memory provider.
   const schemaSource = await readIfExists(process.cwd(), 'db/schema.ts')
   const oauthStateTable = includeOAuth && schemaSource !== null
+  // Also before any write: the config/mail.ts written below would otherwise decide it.
+  const mailDefinition = includeExtras && (await installsConfigDefinition('mail'))
 
   const files = [
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: buildLoginControllerTemplate(includePassword) },
@@ -1555,8 +1559,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
       authFile('resources/js/pages/auth/ResetPassword.tsx'),
       authFile('app/Auth/PasswordResetStore.ts'),
       authFile('app/Mail/PasswordResetMail.ts'),
-      authFile('app/Providers/MailProvider.ts'),
-      authFile('config/mail.ts'),
+      ...(mailDefinition
+        ? [definitionTemplateFile('mail', 'config/mail.ts')]
+        : [authFile('app/Providers/MailProvider.ts'), authFile('config/mail.ts')]),
     )
   }
 
@@ -1577,6 +1582,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   }
 
   const created = await writeScaffoldFiles(files, options)
+  if (mailDefinition) {
+    await appendScaffoldEnv(MAIL_SCAFFOLD, true)
+  }
 
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens()
@@ -1606,7 +1614,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   )
 
   if (options.install) {
-    await installAuth(features, { migrationGenerated, oauthStateTable })
+    await installAuth(features, { migrationGenerated, oauthStateTable, mailDefinition })
   } else {
     consola.info('Next steps:')
     consola.info(CODEGEN_STEP)
@@ -1614,7 +1622,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     consola.info('  • Enable sessions and CSRF by adding `auth: {}` to your createApp() options')
     consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
     if (includeExtras) {
-      consola.info('  • Register MailProvider in your createApp() providers array (used to send password reset emails)')
+      consola.info(mailDefinition
+        ? '  • Add the default export of config/mail.ts to your createApp() config array (used to send password reset emails)'
+        : '  • Register MailProvider in your createApp() providers array (used to send password reset emails)')
       consola.info('  • Set APP_URL in your .env to the public base URL of this app — emailed links are built from it, and production refuses to send without it')
     }
     if (!migrationGenerated) {
@@ -1641,7 +1651,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
 async function installAuth(
   { includeExtras, includePassword, oauthProviders }: AuthFeatures,
-  { migrationGenerated, oauthStateTable }: { migrationGenerated: boolean; oauthStateTable: boolean },
+  { migrationGenerated, oauthStateTable, mailDefinition }: { migrationGenerated: boolean; oauthStateTable: boolean; mailDefinition: boolean },
 ): Promise<void> {
   consola.info('Installing authentication configuration...')
 
@@ -1657,7 +1667,9 @@ async function installAuth(
 
   await wireAppProvider('AuthProvider', wiring)
 
-  if (includeExtras) {
+  if (mailDefinition) {
+    await wireConfig('mail', wiring)
+  } else if (includeExtras) {
     // Core's provider goes before MailProvider (the `guren add mail`
     // convention) so `'mail'` resolves to the configured manager rather than
     // Core's empty-config default, whichever order the two commands run in.

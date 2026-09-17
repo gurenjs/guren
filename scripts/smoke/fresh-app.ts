@@ -49,7 +49,7 @@ const RESOURCE_FIELDS = FIELD_TYPES.flatMap((type) => [
 // It cannot be derived from the CLI's registry (`resource` needs a name, `mail`
 // a flag), so assertCoversEveryBlueprint() checks it against that registry.
 // admin and oauth follow auth for its sign-in page; `--force` on mail
-// supersedes the MailProvider auth wrote.
+// rewrites the config/mail.ts auth wrote.
 const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   // Before auth, which runs the session blueprint itself when the app has no
   // session config: this way the templates land here and auth exercises its
@@ -412,8 +412,6 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   for (const providerName of [
     'CoreEventServiceProvider',
     'EventProvider',
-    'CoreMailServiceProvider',
-    'MailProvider',
     'CoreNotificationServiceProvider',
     'NotificationProvider',
     'JobsProvider',
@@ -424,15 +422,15 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
     assert(appBootstrap.includes(providerName), `Fresh app must register ${providerName} in src/app.ts after feature scaffolds.`)
   }
 
-  // The template declares its environment, so cache, queue and storage are definitions (RFC 0027 §2).
-  for (const definition of ['cache', 'queue', 'storage']) {
+  // The template declares its environment, so these are definitions (RFC 0027 §2).
+  for (const definition of ['cache', 'mail', 'queue', 'storage']) {
     assert(listsConfigDefinition(appBootstrap, definition), `Fresh app must list the ${definition} definition in createApp({ config }).`)
   }
   const cacheConfig = await readFile(join(appDir, 'config/cache.ts'), 'utf8')
   assert(cacheConfig.includes("import { defineCacheConfig } from '@guren/core'"), 'Cache blueprint must define its config through @guren/core.')
   assert(cacheConfig.includes('default: env.CACHE_STORE'), 'Cache blueprint must select its store from the declared CACHE_STORE.')
   const envSchema = await readFile(join(appDir, 'config/env.ts'), 'utf8')
-  for (const declaration of ["CACHE_STORE: Env.string().default('memory')", "QUEUE_CONNECTION: Env.string().default('sync')", "STORAGE_DISK: Env.string().default('local')"]) {
+  for (const declaration of ["CACHE_STORE: Env.string().default('memory')", "MAIL_MAILER: Env.string().default('log')", 'SMTP_PORT: Env.port().default(587)', "QUEUE_CONNECTION: Env.string().default('sync')", "STORAGE_DISK: Env.string().default('local')"]) {
     assert(envSchema.includes(declaration), `Feature blueprints must declare ${declaration} in config/env.ts.`)
   }
 
@@ -442,12 +440,10 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   assert(eventProvider.includes('events.listen(SendOrderReceiptListener)'), 'Events blueprint must register listeners through the event manager.')
   assert(!eventProvider.includes('@guren/server'), 'Events blueprint must not import from @guren/server.')
 
-  const mailProvider = await readFile(join(appDir, 'app/Providers/MailProvider.ts'), 'utf8')
-  assert(mailProvider.includes("from '@guren/core'"), 'Mail blueprint must import from @guren/core.')
-  assert(mailProvider.includes('createMailManager'), 'Mail blueprint must create a mail manager.')
-  assert(mailProvider.includes("this.container.singleton('mail', (container) =>"), 'Mail blueprint must bind the mail manager into the container.')
-  assert(!mailProvider.includes('setMailManager('), 'Mail blueprint must not publish the mail manager through the global setter (RFC 0023).')
-  assert(!mailProvider.includes('@guren/server'), 'Mail blueprint must not import from @guren/server.')
+  const mailConfig = await readFile(join(appDir, 'config/mail.ts'), 'utf8')
+  assert(mailConfig.includes("import { defineMailConfig } from '@guren/core'"), 'Mail blueprint must define its config through @guren/core.')
+  assert(mailConfig.includes('default: env.MAIL_MAILER'), 'Mail blueprint must select its transport from the declared MAIL_MAILER.')
+  assert(!await fileExists(join(appDir, 'app/Providers/MailProvider.ts')), 'The mail definition must replace MailProvider.')
 
   const welcomeMail = await readFile(join(appDir, 'app/Mail/WelcomeEmailMail.ts'), 'utf8')
   assert(welcomeMail.includes('manager: MailManager'), 'Mail scaffold must require explicit MailManager injection.')

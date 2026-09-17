@@ -9,7 +9,7 @@ const drivers = {
 
 export default defineQueueConfig((env) => {
   // Checked at boot: the manager accepts any name and throws on the first dispatch.
-  if (!(env.QUEUE_CONNECTION in drivers)) {
+  if (!Object.hasOwn(drivers, env.QUEUE_CONNECTION)) {
     throw new Error(
       `QUEUE_CONNECTION="${env.QUEUE_CONNECTION}" is not a declared driver. Declare it in config/queue.ts or use one of: ${Object.keys(drivers).join(', ')}.`,
     )

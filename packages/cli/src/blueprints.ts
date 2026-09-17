@@ -18,6 +18,7 @@ import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
 import { makeListener } from './make-listener'
 import { makeMail } from './make-mail'
+import { MAIL_SCAFFOLD } from './mail-scaffold'
 import { makeNotification } from './make-notification'
 import { appendTableToSchema, detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
@@ -189,20 +190,11 @@ export default registerAdminRoutes
     },
   },
   mail: {
-    description: 'Install mail infrastructure with a memory transport and sample mailable.',
+    description: 'Install mail infrastructure with a transport switchable via MAIL_MAILER and a sample mailable.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
       const mailPath = await makeMail('WelcomeEmail', writerOptions)
-      const created = await writeScaffoldFiles([
-        scaffoldTemplateFile('mail', 'app/Providers/MailProvider.ts'),
-      ], writerOptions)
-
-      await wireProviders([
-        { name: 'CoreMailServiceProvider', importStatement: "import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'" },
-        { name: 'MailProvider' },
-      ])
-
-      return [mailPath, ...created]
+      return [mailPath, ...(await installServiceScaffold(MAIL_SCAFFOLD, writerOptions))]
     },
   },
   queue: {
@@ -216,13 +208,13 @@ export default registerAdminRoutes
         provider: 'QueueProvider',
         // A definition binds the queue; the jobs it runs still need a provider's boot().
         definitionProviders: ['JobsProvider'],
-        env: {
+        env: [{
           key: 'QUEUE_CONNECTION',
           entry: `
 # Which queue driver dispatch uses: sync runs jobs inline, memory queues them for a worker.
 QUEUE_CONNECTION=sync
 `,
-        },
+        }],
       }, writerOptions)
 
       return [jobPath, ...created]
@@ -252,13 +244,13 @@ QUEUE_CONNECTION=sync
       coreProvider: 'StorageServiceProvider',
       provider: 'StorageProvider',
       shared: ['app/Services/FileStorage.ts'],
-      env: {
+      env: [{
         key: 'STORAGE_DISK',
         entry: `
 # Which disk the app stores to. Declare it in the storage config before naming it here.
 STORAGE_DISK=local
 `,
-      },
+      }],
     }, blueprintWriterOptions(options)),
   },
   broadcasting: {

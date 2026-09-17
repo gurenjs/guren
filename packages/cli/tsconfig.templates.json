@@ -18,7 +18,9 @@
       "tests/fixtures/scaffold-typecheck/storage",
       "templates/scaffold/cache/definition",
       "templates/scaffold/queue/definition",
-      "templates/scaffold/storage/definition"
+      "templates/scaffold/storage/definition",
+      "tests/fixtures/scaffold-typecheck/mail",
+      "templates/scaffold/mail/definition"
     ],
     "paths": {
       "@/.guren/pages.gen": [

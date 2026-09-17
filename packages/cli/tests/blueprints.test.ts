@@ -628,7 +628,7 @@ export const users = pgTable('users', {
     // The scaffolded .env declares the sender; a hard-coded one ignores it.
     const mailProviderSource = await readFile('app/Providers/MailProvider.ts', 'utf8')
     expect(mailProviderSource).toContain("process.env.MAIL_FROM_ADDRESS || 'noreply@example.com'")
-    expect(mailProviderSource).toContain("process.env.MAIL_FROM_NAME ?? 'Guren App'")
+    expect(mailProviderSource).toContain("process.env.MAIL_FROM_NAME ?? 'Guren'")
     expect(mailProviderSource).not.toContain('process.env.MAIL_FROM_ADDRESS ??')
     expect(eventFiles.some((file) => file.endsWith('app/Providers/EventProvider.ts'))).toBe(true)
     expect(cacheFiles.some((file) => file.endsWith('app/Providers/CacheProvider.ts'))).toBe(true)

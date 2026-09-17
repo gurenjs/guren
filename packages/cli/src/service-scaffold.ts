@@ -1,5 +1,5 @@
 import { ENV_SCHEMA_FILE } from './app-env'
-import { appendEnvEntry } from './env-registrar'
+import { appendEnvEntry, type AppendEnvEntryOptions } from './env-registrar'
 import { appBindsService, callsDefineConfig, fileExists, readIfExists } from './discovery'
 import { wireConfig, wireProviders } from './provider-registrar'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
@@ -17,8 +17,25 @@ export interface ServiceScaffold {
   definitionProviders?: readonly string[]
   /** Files both forms write. */
   shared?: readonly string[]
-  /** The env key both forms read, and the block `.env.example` and `.env` get. */
-  env: { key: string; entry: string }
+  /** The env keys both forms read, each with the block `.env.example` and `.env` get. */
+  env: readonly ScaffoldEnvEntry[]
+  /** Env keys only the definition reads. */
+  definitionEnv?: readonly ScaffoldEnvEntry[]
+}
+
+export interface ScaffoldEnvEntry {
+  key: string
+  entry: string
+  /** The `config/env.ts` builder; a string defaulting to the assigned value when absent. */
+  declare?: Exclude<AppendEnvEntryOptions['declare'], true>
+}
+
+/** Appends and declares, in order, the env entries `scaffold` reads in the form `definition` names. */
+export async function appendScaffoldEnv(scaffold: ServiceScaffold, definition: boolean): Promise<void> {
+  const entries = definition ? [...scaffold.env, ...(scaffold.definitionEnv ?? [])] : scaffold.env
+  for (const { key, entry, declare } of entries) {
+    await appendEnvEntry(key, entry, { declare: declare ?? true })
+  }
 }
 
 /**
@@ -36,7 +53,7 @@ export async function installsConfigDefinition(key: string): Promise<boolean> {
 
 /** Writes and wires `scaffold` as a definition or a provider, per {@link installsConfigDefinition}. */
 export async function installServiceScaffold(scaffold: ServiceScaffold, options: ScaffoldFilesOptions): Promise<string[]> {
-  const { key, coreProvider, provider, definitionProviders = [], shared = [], env } = scaffold
+  const { key, coreProvider, provider, definitionProviders = [], shared = [] } = scaffold
   const definition = await installsConfigDefinition(key)
   const files = definition
     ? [`config/${key}.ts`, ...definitionProviders.map((name) => `app/Providers/${name}.ts`)].map((path) => definitionTemplateFile(key, path))
@@ -53,6 +70,6 @@ export async function installServiceScaffold(scaffold: ServiceScaffold, options:
     ])
   }
 
-  await appendEnvEntry(env.key, env.entry, { declare: true })
+  await appendScaffoldEnv(scaffold, definition)
   return created
 }

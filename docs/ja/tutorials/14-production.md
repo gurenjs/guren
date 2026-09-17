@@ -138,8 +138,7 @@ import { EventServiceProvider as CoreEventServiceProvider } from '@guren/core'
 import EventProvider from '../app/Providers/EventProvider.js'
 import queue from '../config/queue.js'
 import JobsProvider from '../app/Providers/JobsProvider.js'
-import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'
-import MailProvider from '../app/Providers/MailProvider.js'
+import mail from '../config/mail.js'
 
 const app = createApp({
   // Rendered into every server-rendered document. Replace public/favicon.svg
@@ -150,9 +149,9 @@ const app = createApp({
     },
   },
   env,
-  config: [database, http, storage, queue],
+  config: [database, http, storage, queue, mail],
   routes: registerWebRoutes,
-  providers: [AuthProvider, AttachmentsProvider, CoreEventServiceProvider, EventProvider, JobsProvider, CoreMailServiceProvider, MailProvider],
+  providers: [AuthProvider, AttachmentsProvider, CoreEventServiceProvider, EventProvider, JobsProvider],
   auth: {
     sessionOptions: {
       // Sessions in the database, not in this process: a restart, a second

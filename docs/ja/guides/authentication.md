@@ -18,9 +18,9 @@ Guren には Laravel 由来の認証スタックが同梱されていて、セ�
 bunx guren make:auth --install
 ```
 
-このコマンドは、ログイン・登録・パスワードリセットのコントローラー、Inertia ページ、レイアウト、`AuthProvider`、`MailProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグを付けると、次の4点も自動で行われます。
+このコマンドは、ログイン・登録・パスワードリセットのコントローラー、Inertia ページ、レイアウト、`AuthProvider`、`config/mail.ts`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグを付けると、次の4点も自動で行われます。
 
-1. `Application` の providers 配列に `AuthProvider` と `MailProvider` を登録
+1. `Application` の providers 配列に `AuthProvider` を登録し、config 配列にメールの定義を追加
 2. 開発環境用の設定で `createSessionMiddleware` を追加(本番では `cookieSecure: true`)
 3. `routes/web.ts` で `registerAuthRoutes(router)` を接続
 4. `db/schema.ts` にパスワードや remember トークンのカラムを追加
@@ -43,7 +43,7 @@ bunx guren make:auth --install --minimal
 
 ### パスワードリセット
 
-ログインページの「Forgot your password?」から、`ForgotPasswordController` と `ResetPasswordController` によるフローに入ります。内部ではフレームワークの `createPasswordResetToken` / `verifyPasswordResetToken` を使っています。リセットトークンは、生成される `app/Auth/PasswordResetStore.ts`(インメモリストア。本番や複数インスタンス構成では Redis ベースのストアに差し替えてください)に保存され、同じく生成される `config/mail.ts` 経由でメール送信されます。`config/mail.ts` はデフォルトで `log` ドライバを使うので、リセットリンクはコンソールにそのまま出力され、開発環境では設定なしで動作確認できます。実際にメールを送るには `MAIL_DRIVER=smtp`(および `SMTP_*` の環境変数)を設定してください。
+ログインページの「Forgot your password?」から、`ForgotPasswordController` と `ResetPasswordController` によるフローに入ります。内部ではフレームワークの `createPasswordResetToken` / `verifyPasswordResetToken` を使っています。リセットトークンは、生成される `app/Auth/PasswordResetStore.ts`(インメモリストア。本番や複数インスタンス構成では Redis ベースのストアに差し替えてください)に保存され、同じく生成される `config/mail.ts` 経由でメール送信されます。`config/mail.ts` はデフォルトで `log` ドライバを使うので、リセットリンクはコンソールにそのまま出力され、開発環境では設定なしで動作確認できます。実際にメールを送るには `MAIL_MAILER=smtp`(および `SMTP_*` の環境変数)を設定してください。
 
 ### メール確認
 
