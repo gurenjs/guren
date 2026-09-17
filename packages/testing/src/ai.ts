@@ -251,6 +251,7 @@ export class FakeAi implements AiManager, Disposable {
       stream: (input, options) => record(input, async (call) => tapToolCalls(await bound.stream(input, options), call)),
       // Not recorded here: the worker's run comes back through agent() and records its prompt then.
       queue: (input, options) => bound.queue(input, options),
+      broadcast: (input, channel, options) => bound.broadcast(input, channel, options),
     }
   }
 

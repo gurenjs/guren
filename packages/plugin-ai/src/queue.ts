@@ -2,11 +2,13 @@
  * Queued agent runs (RFC 0029 §6): `queue()` dispatches {@link RunAgentJob}, and the worker
  * prompts the agent and emits {@link AgentResponded}, since a closure cannot cross to a worker.
  */
-import { Event, Job, type AgentPrincipal } from '@guren/core'
+import { Event, Job, type AgentPrincipal, type BroadcastManager } from '@guren/core'
+import { parseJsonEventStream, uiMessageChunkSchema, type UIMessageChunk } from 'ai'
 
 import type { AgentClass, AgentResponse } from './agent'
 import { describeNames } from './config'
 import type { AiManager } from './manager'
+import { AGENT_CHUNK_EVENT } from './protocol'
 import { AI_RUNTIME_BINDING, missingRuntime, type AiRuntime } from './runtime'
 import type { AiProviderName } from './types'
 
@@ -17,6 +19,8 @@ export interface RunAgentPayload {
   /** Created by `queue()` when the run starts one, so the worker always continues it. */
   conversationId?: string
   provider?: AiProviderName
+  /** Set by `broadcast()`: the run streams to this channel rather than emitting `AgentResponded`. */
+  channel?: string
 }
 
 /** What `AgentResponded` carries: the response without `steps`, which a queued listener would serialize whole. */
@@ -42,13 +46,17 @@ export class RunAgentJob extends Job<RunAgentPayload> {
   static override maxAttempts = 1
 
   async handle(payload: RunAgentPayload): Promise<void> {
-    const runtime = this.makeOptional<AiRuntime>(AI_RUNTIME_BINDING)
-    if (!runtime) throw missingRuntime('RunAgentJob')
-    const cls = registeredAgent(runtime, payload.agentName)
-    const response = await this.make<AiManager>('ai').agent(cls).as(payload.principal).prompt(payload.input, {
-      provider: payload.provider,
-      conversation: payload.conversationId,
-    })
+    const bind = () => {
+      const runtime = this.makeOptional<AiRuntime>(AI_RUNTIME_BINDING)
+      if (!runtime) throw missingRuntime('RunAgentJob')
+      return this.make<AiManager>('ai').agent(registeredAgent(runtime, payload.agentName)).as(payload.principal)
+    }
+    const options = { provider: payload.provider, conversation: payload.conversationId }
+    if (payload.channel !== undefined) {
+      await publishStream(this.make('broadcast'), payload.channel, () => bind().stream(payload.input, options))
+      return
+    }
+    const response = await bind().prompt(payload.input, options)
     const { text, output, usage, finishReason, conversationId } = response
     await this.makeOptional('events')?.emit(
       new AgentResponded(payload.agentName, payload.principal, conversationId, { text, output, usage, finishReason }),
@@ -65,4 +73,30 @@ export function registeredAgent(runtime: AiRuntime, name: string): AgentClass {
     )
   }
   return cls
+}
+
+/**
+ * Publishes every chunk of the run's UI-message stream, then fails the job on an `error` chunk. A run
+ * that throws before its stream ends still publishes one `error` chunk, or subscribers would wait forever.
+ */
+async function publishStream(broadcast: BroadcastManager, channel: string, stream: () => Promise<Response>): Promise<void> {
+  const publish = (chunk: UIMessageChunk) => broadcast.broadcast(channel, AGENT_CHUNK_EVENT, chunk)
+  let ended = false
+  try {
+    const response = await stream()
+    const chunks = parseJsonEventStream({ stream: response.body!, schema: uiMessageChunkSchema })
+    for await (const parsed of chunks) {
+      if (!parsed.success) throw parsed.error
+      await publish(parsed.value)
+      if (parsed.value.type === 'error') {
+        ended = true
+        throw new Error(parsed.value.errorText)
+      }
+      if (parsed.value.type === 'finish') ended = true
+    }
+  } catch (error) {
+    // Masked like the stream's own error chunks: the transcript's subscribers are not its operators.
+    if (!ended) await publish({ type: 'error', errorText: 'The agent run failed.' })
+    throw error
+  }
 }

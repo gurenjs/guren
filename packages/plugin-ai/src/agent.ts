@@ -87,6 +87,12 @@ export interface BoundAgent<T extends Agent> {
    * abilities included: a run queued before a user loses an ability still runs with it.
    */
   queue(input: string, options?: QueueOptions): Promise<QueuedAgentRun>
+  /**
+   * `queue()`, streaming the run to broadcast `channel` instead: each UI-message chunk is published as
+   * `AgentChunk`, and no `AgentResponded` is emitted, since the stream's `finish` chunk ends the run.
+   * Anyone subscribed to `channel` reads the transcript; register it as a private channel.
+   */
+  broadcast(input: string, channel: string, options?: QueueOptions): Promise<QueuedAgentRun>
   /** The same agent, prompting within conversation `id`, which this principal must have started with this agent. */
   continue(id: string): BoundAgent<T>
 }
@@ -295,12 +301,7 @@ export function bindAgent<T extends Agent>(
       }
     },
     stream: async (input, options = {}) => {
-      if (output) {
-        throw new Error(
-          `${agentName} declares an output schema, which stream() would send to the client as raw JSON text. `
-          + 'Call prompt() for its parsed output.',
-        )
-      }
+      refuseStreamingOutput()
       const { history, loop, call, persistTurn } = await run(input, options, conversation)
       const result = await loop.stream({
         ...call,
@@ -317,30 +318,54 @@ export function bindAgent<T extends Agent>(
       })
       return result.toUIMessageStreamResponse(history ? { headers: { [CONVERSATION_HEADER]: history.id } } : {})
     },
-    queue: async (input, options = {}) => {
-      if (registeredAgent(resolveRuntime(scope.container, `${agentName}.queue()`), agentName) !== cls) {
-        throw new Error(
-          `aiPlugin({ agents }) registers a different class under "${agentName}" than ${cls.name}, `
-          + 'so a worker would run that one. Give each agent its own static agentName.',
-        )
+    queue: (input, options = {}) => enqueue(input, options, conversation, undefined),
+    broadcast: async (input, channel, options = {}) => {
+      refuseStreamingOutput()
+      if (!scope.container.has('broadcast')) {
+        throw new Error(`${agentName}.broadcast() publishes through the \`broadcast\` binding, and none is bound. Register BroadcastServiceProvider.`)
       }
-      if (!scope.container.has('queue')) {
-        throw new Error(`${agentName}.queue() dispatches through the \`queue\` binding, and none is bound. Register QueueServiceProvider.`)
-      }
-      // The worker checks again; this fails a run that could never succeed here, rather than in its log.
-      const history = await openConversation(requestedConversation(options.conversation, conversation))
-      // Created before dispatch: the id is usable at once, and a redelivered run only appends.
-      if (history?.isNew) {
-        await history.store.create({ id: history.id, agentName, owner: history.owner, messages: [] })
-      }
-      const jobId = await scope.container.make('queue').dispatch(
-        RunAgentJob,
-        { agentName, input, principal: instance.principal, conversationId: history?.id, provider: options.provider },
-        { queue: options.queue, delay: options.delay },
-      )
-      return { jobId, ...(history ? { conversationId: history.id } : {}) }
+      return enqueue(input, options, conversation, channel)
     },
   })
+
+  const enqueue = async (
+    input: string,
+    options: QueueOptions,
+    conversation: string | undefined,
+    channel: string | undefined,
+  ): Promise<QueuedAgentRun> => {
+    const caller = `${agentName}.${channel === undefined ? 'queue' : 'broadcast'}()`
+    if (registeredAgent(resolveRuntime(scope.container, caller), agentName) !== cls) {
+      throw new Error(
+        `aiPlugin({ agents }) registers a different class under "${agentName}" than ${cls.name}, `
+        + 'so a worker would run that one. Give each agent its own static agentName.',
+      )
+    }
+    if (!scope.container.has('queue')) {
+      throw new Error(`${caller} dispatches through the \`queue\` binding, and none is bound. Register QueueServiceProvider.`)
+    }
+    // The worker checks again; this fails a run that could never succeed here, rather than in its log.
+    const history = await openConversation(requestedConversation(options.conversation, conversation))
+    // Created before dispatch: the id is usable at once, and a redelivered run only appends.
+    if (history?.isNew) {
+      await history.store.create({ id: history.id, agentName, owner: history.owner, messages: [] })
+    }
+    const jobId = await scope.container.make('queue').dispatch(
+      RunAgentJob,
+      { agentName, input, principal: instance.principal, conversationId: history?.id, provider: options.provider, channel },
+      { queue: options.queue, delay: options.delay },
+    )
+    return { jobId, ...(history ? { conversationId: history.id } : {}) }
+  }
+
+  const refuseStreamingOutput = () => {
+    if (output) {
+      throw new Error(
+        `${agentName} declares an output schema, which stream() would send to the client as raw JSON text. `
+        + 'Call prompt() for its parsed output.',
+      )
+    }
+  }
 
   const openConversation = async (requested: true | string | undefined) => {
     if (requested === undefined) return undefined

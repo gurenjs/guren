@@ -540,12 +540,30 @@ const { messages, sendMessage } = useChat({
   `prepareSendMessagesRequest` and a `fetch` that reads the header.
 - **`fakeAi()`:** `simulateStreamingMiddleware()` answers `doStream` from its script, and a streamed
   call's `toolCalls` fill in as the body is read.
-- **`broadcast()`:** it moves to a later part than `queue()` (Part 2c), since it publishes over the
-  broadcasting layer and needs a stream consumer of its own on the worker.
+- **`broadcast()`:** it moves after `queue()` (Part 2c) into Part 2d, below.
 
 `broadcast(input, channel)` (Part 2) queues the prompt (§6) and emits each
 UI-message chunk over `BroadcastManager` to the channel, which is
 laravel/ai's `broadcast()` on Guren's existing broadcasting layer.
+
+**Amended in implementation (Part 2d):**
+
+- **`broadcast(input, channel, options)`** takes `queue()`'s options and returns the same
+  `{ jobId, conversationId? }`. It is `RunAgentJob` with a `channel` in the payload, so the registry,
+  `maxAttempts` and the enqueue-time conversation are shared rather than repeated.
+- **The worker streams through the agent's own `stream()`** and parses its body, so `fakeAi()` records a
+  broadcast run and its tool calls the way it records `stream()`. An `output` agent is refused at enqueue.
+- **One event name, `AgentChunk`** (`AGENT_CHUNK_EVENT`, also exported from `/client`), with the
+  UI-message chunk as its data. The client subscribes once rather than once per chunk type.
+- **No `AgentResponded`:** the UI stream carries no usage, and its `finish` chunk already ends the run
+  for the subscriber.
+- **A failed run still ends the stream.** A job that throws before its `finish` chunk publishes one
+  `error` chunk (`The agent run failed.`, masked like the stream's own), and an `error` chunk in the
+  stream fails the job.
+- **Limits:** publishing is not authorized; `sseMiddleware` authorizes subscribing, so the channel
+  must be a private channel with an authorizer, or anyone subscribed reads the transcript. A
+  subscriber who joins late misses what was already published, a redelivered run publishes the
+  transcript again, and every chunk is one publish.
 
 ### 5. Conversations
 
