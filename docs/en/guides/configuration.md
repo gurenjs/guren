@@ -258,7 +258,7 @@ An invalid override makes `create()` reject with an `EnvValidationError`.
 
 ## Apps with service providers
 
-An app created before config definitions configures services in providers (`CacheProvider`, `MailProvider`, a `SessionProvider` reading `config/session.ts`). Those keep working, and nothing requires moving them. When you do:
+An app created before config definitions configures services in providers (`CacheProvider`, `MailProvider`, a `SessionProvider` reading `config/session.ts`). Those keep working, and nothing requires moving them. `bunx guren doctor --next` finds them and prints each definition to write, with the values the provider read and the variables to declare. When you move one:
 
 1. Add `config/env.ts` and declare the variables the provider reads.
 2. Write `config/<service>.ts` with the matching `define*Config` helper, reading `env` instead of `process.env`.

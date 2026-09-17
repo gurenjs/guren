@@ -33,6 +33,7 @@ import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, resolveRoutesFile } from './
 import { appDeclaresPrototypeRoutes } from './prototype-check'
 import type { RouteDefinition } from '@guren/core'
 import { analyzeDeployRuntime, judgeDeployRuntime } from './deploy-runtime'
+import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
 
@@ -52,6 +53,8 @@ export interface NextStep {
   description: string
   filePath?: string
   command?: string
+  /** Source to write at `filePath` (RFC 0027 migration hints); rendered as a block. */
+  content?: string
 }
 
 export interface DoctorReport {
@@ -1382,6 +1385,14 @@ export async function suggestNextSteps(
   }
 
   try {
+    for (const step of await configMigrationSteps(cwd)) {
+      steps.push({ ...step, priority: priority++ })
+    }
+  } catch {
+    // An unreadable provider contributes no migration hint.
+  }
+
+  try {
     for (const filePath of controllerFiles) {
       const source = await readFile(filePath, 'utf-8')
       const ast = parseSourceFile(source, filePath)
@@ -1488,6 +1499,57 @@ export async function suggestNextSteps(
   return steps
 }
 
+async function configMigrationSteps(cwd: string): Promise<Omit<NextStep, 'priority'>[]> {
+  const migrations = await detectConfigMigrations(cwd)
+  if (migrations.length === 0) return []
+
+  const steps: Omit<NextStep, 'priority'>[] = []
+  const { exists: hasSchema, missing: declarations } = await undeclaredEnv(cwd, migrations)
+  if (!hasSchema || declarations.length > 0) {
+    steps.push({
+      title: hasSchema ? 'Declare the variables the config definitions read' : 'Create config/env.ts',
+      description: hasSchema
+        ? `Add ${declarations.map((entry) => entry.key).join(', ')} to defineEnv({ ... }), then run the command to list them in .env.example.`
+        : 'Config definitions read a validated environment. Declare the variables the providers below read, then run the command to list them in .env.example.',
+      filePath: 'config/env.ts',
+      command: 'bunx guren env:example',
+      content: hasSchema ? envDeclarationLines(declarations) : envSchemaSource(declarations),
+    })
+  }
+
+  for (const migration of migrations) {
+    steps.push({
+      title: `Move ${migration.key} configuration to ${migration.target}`,
+      description: migrationDescription(migration),
+      filePath: migration.target,
+      ...(migration.content ? { content: migration.content } : {}),
+    })
+  }
+  return steps
+}
+
+function migrationDescription(migration: ConfigMigration): string {
+  const removed = migration.legacyFiles.filter((file) => file !== migration.target)
+  const replaces = migration.legacyFiles.includes(migration.target)
+    ? `Replace the SessionConfig object in ${migration.target} with the definition below`
+    : `Write the definition below to ${migration.target}`
+  const cleanup = removed.length > 0 ? `, and delete ${removed.join(' and ')} in the same change` : ''
+  const unreadable = migration.content === null ? ' The configuration could not be read, so write it by hand (see the configuration guide).' : ''
+  return [
+    `${replaces}, list it in createApp({ env, config: [...] })${cleanup}. A definition and a provider binding the same key fail the boot.${unreadable}`,
+    ...migration.notes,
+  ].join(' ')
+}
+
+function envDeclarationLines(declarations: readonly EnvDeclaration[]): string {
+  return `${declarations.map((entry) => `${entry.key}: ${entry.source},`).join('\n')}\n`
+}
+
+function envSchemaSource(declarations: readonly EnvDeclaration[]): string {
+  const body = declarations.map((entry) => `  ${entry.key}: ${entry.source},`).join('\n')
+  return `import { defineEnv, Env, type InferEnv } from '@guren/core'\n\nconst env = defineEnv({\n${body}\n})\n\nexport default env\n\ndeclare module '@guren/core' {\n  interface AppEnv extends InferEnv<typeof env> {}\n}\n`
+}
+
 export function renderDoctorReport(report: DoctorReport): void {
   consola.box(`Guren doctor report for ${report.cwd}`)
 
@@ -1530,6 +1592,7 @@ export function renderDoctorReport(report: DoctorReport): void {
       consola.info(`   ${step.description}`)
       if (step.filePath) consola.info(`   File: ${step.filePath}`)
       if (step.command) consola.info(`   Run: ${step.command}`)
+      if (step.content) console.log(step.content.replace(/\n$/, '').split('\n').map((line) => `      ${line}`).join('\n'))
     }
   }
 }

@@ -14,16 +14,20 @@ export interface BabelNode {
  * Minimal generic AST walker. Recurses into every node-shaped child unless
  * the visitor returns `false` for the current node, which prunes its subtree.
  */
-export function walk(value: unknown, visit: (node: BabelNode) => boolean | void): void {
+export function walk(
+  value: unknown,
+  visit: (node: BabelNode, parent: BabelNode | null) => boolean | void,
+  parent: BabelNode | null = null,
+): void {
   if (Array.isArray(value)) {
-    for (const item of value) walk(item, visit)
+    for (const item of value) walk(item, visit, parent)
     return
   }
   if (value === null || typeof value !== 'object') return
   const node = value as BabelNode
   if (typeof node.type !== 'string') return
 
-  if (visit(node) === false) return
+  if (visit(node, parent) === false) return
 
   // for...in rather than Object.entries: the latter allocates an entry array
   // per node, which measurably dominates traversal on a large AST.
@@ -31,7 +35,7 @@ export function walk(value: unknown, visit: (node: BabelNode) => boolean | void)
     // `*Comments` children carry a `type` of `CommentLine`/`CommentBlock`, so
     // a structural check would walk them as if they were code.
     if (key === 'loc' || key.endsWith('Comments')) continue
-    walk(node[key], visit)
+    walk(node[key], visit, node)
   }
 }
 

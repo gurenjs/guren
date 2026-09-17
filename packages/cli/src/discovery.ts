@@ -293,6 +293,10 @@ export function discoverAppSourceFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app')
 }
 
+export function discoverProviderFiles(appRoot: string): Promise<string[]> {
+  return discoverDir(appRoot, 'app/Providers')
+}
+
 export function discoverControllerFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Http/Controllers')
 }

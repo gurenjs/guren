@@ -258,7 +258,7 @@ const app = await TestApp.create({
 
 ## サービスプロバイダを使うアプリ
 
-config 定義より前に作られたアプリは、サービスをプロバイダで設定しています（`CacheProvider`、`MailProvider`、`config/session.ts` を読む `SessionProvider` など）。これらはそのまま動き、移行は必須ではありません。移すときの手順は次のとおりです。
+config 定義より前に作られたアプリは、サービスをプロバイダで設定しています（`CacheProvider`、`MailProvider`、`config/session.ts` を読む `SessionProvider` など）。これらはそのまま動き、移行は必須ではありません。`bunx guren doctor --next` はこうしたプロバイダを見つけ、書くべき定義を、プロバイダが読んでいた値と宣言すべき変数つきで表示します。移すときの手順は次のとおりです。
 
 1. `config/env.ts` を追加し、プロバイダが読んでいる変数を宣言する。
 2. 対応する `define*Config` ヘルパーで `config/<service>.ts` を書き、`process.env` の代わりに `env` を読む。
