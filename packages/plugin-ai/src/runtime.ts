@@ -11,6 +11,8 @@ import type {
   DerivedAgentTool,
 } from '@guren/core'
 
+import type { AgentClass } from './agent'
+
 export const AI_RUNTIME_BINDING = 'ai.runtime'
 
 /** The same shapes `mcpPlugin` takes. */
@@ -27,6 +29,11 @@ export interface AiPluginConfig {
     notify: (request: AgentApprovalRequest) => void | Promise<void>
     ttlMs?: number
   }
+  /**
+   * The agents a worker may run: `queue()` resolves the class back from its `agentName`,
+   * never from the class name, which a deploy may rename or a minifier mangle (RFC 0029 §6).
+   */
+  agents?: readonly AgentClass[]
 }
 
 export interface AiRuntime {
@@ -34,4 +41,6 @@ export interface AiRuntime {
   tools(): readonly DerivedAgentTool[]
   audit(): AgentAuditEmitter
   approvals?: AiPluginConfig['approvals']
+  /** `aiPlugin({ agents })`, keyed by `agentName`. */
+  agents: ReadonlyMap<string, AgentClass>
 }

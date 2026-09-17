@@ -540,7 +540,8 @@ const { messages, sendMessage } = useChat({
   `prepareSendMessagesRequest` and a `fetch` that reads the header.
 - **`fakeAi()`:** `simulateStreamingMiddleware()` answers `doStream` from its script, and a streamed
   call's `toolCalls` fill in as the body is read.
-- **`broadcast()`:** it moves to Part 2c with `queue()`.
+- **`broadcast()`:** it moves to a later part than `queue()` (Part 2c), since it publishes over the
+  broadcasting layer and needs a stream consumer of its own on the worker.
 
 `broadcast(input, channel)` (Part 2) queues the prompt (§6) and emits each
 UI-message chunk over `BroadcastManager` to the channel, which is
@@ -650,6 +651,24 @@ pitfall), and a queued message must survive a deploy. Completion emits
 `EventManager`; laravel/ai's `->then(closure)` has no serializable
 counterpart, and an event is what the rest of Guren already listens to.
 `AgentPrincipal` is `{ kind, id, abilities? }`, serializable as-is.
+
+**Amended in implementation (Part 2c):**
+
+- **`queue(input, { conversation, provider, queue, delay })`** returns `{ jobId, conversationId? }`.
+  `conversation: true` mints the id at enqueue time, so the caller can hand it to a client before the
+  worker runs; the payload carries it with `startsConversation`, and the worker creates the
+  conversation under that id. `signal` has no queued form.
+- **The registry lives on the plugin's runtime binding,** not in a module-global map: `aiPlugin({ agents })`
+  refuses two classes under one `agentName`, and the name `anonymous`, at boot. `queue()` refuses a class
+  the registry does not hold, or holds a different class for, before anything is dispatched: the worker
+  would otherwise run the other class, or fail. `registerJob(RunAgentJob)` is process-wide, like every job.
+- **`RunAgentJob.maxAttempts` is 1.** A retry would call the model again and re-run every tool the first
+  attempt already ran.
+- **`AgentResponded.response` is `{ text, output, usage, finishReason }`,** without `steps`, since a queued
+  listener serializes the event whole. It is emitted only when `events` is bound.
+- **The principal is a snapshot.** Its `abilities` travel as they were when the run was queued; a user who
+  loses an ability in between still runs with it. `agentName` stays `string` until `app/Ai/agents.ts`
+  is written by the CLI (§11).
 
 ### 7. Testing (`@guren/testing`)
 

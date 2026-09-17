@@ -13,6 +13,8 @@ export type {
   BoundAgent,
   InferAgentOutput,
   PromptOptions,
+  QueuedAgentRun,
+  QueueOptions,
 } from './agent'
 
 export { ChatTurnSchema } from './chat'
@@ -27,6 +29,9 @@ export { defineAiConfig } from './config'
 export type { AiConfig, AiConfigDefinition, AiProviderConfig, InferProviders } from './config'
 
 export type { AiManager, BoundAgentFactory } from './manager'
+
+export { AgentResponded, RunAgentJob } from './queue'
+export type { QueuedAgentResponse, RunAgentPayload } from './queue'
 
 export { aiPlugin } from './plugin'
 export type { AiPluginConfig } from './plugin'
