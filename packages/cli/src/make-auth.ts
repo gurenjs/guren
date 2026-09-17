@@ -15,14 +15,17 @@ import {
   type SchemaDialect,
 } from './patch-helpers'
 import { readIfExists } from './discovery'
-import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } from './provider-registrar'
+import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireConfig, wireProvider } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { addSession, appConfiguresSessions } from './add-session'
 import { appendOAuthStateTable } from './oauth-state-table'
 import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
 import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
-import { scaffoldTemplateFile } from './scaffold-templates'
+import { MAIL_SCAFFOLD } from './mail-scaffold'
+import { KNOWN_OAUTH_PROVIDERS, OAUTH_PROVIDER_LABELS, oauthEnvEntries } from './oauth-scaffold'
+import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
+import { appendScaffoldEnv, installsConfigDefinition, scaffoldEnv } from './service-scaffold'
 
 function authFile(path: string): ScaffoldFileEntry {
   return scaffoldTemplateFile('auth', path)
@@ -200,6 +203,51 @@ ${bindManager}
 ${registrations}
   }
 }
+`
+}
+
+/** `config/oauth.ts` for an app declaring its environment (RFC 0027 §2), registering what {@link buildOAuthProviderTemplate} does. */
+export function buildOAuthConfigTemplate(providers: string[], databaseStateStore: boolean): string {
+  const imports = [
+    ...(databaseStateStore ? ['DatabaseOAuthStateStore'] : []),
+    'defineOAuthConfig',
+    'type OAuthProviderConfig',
+    ...providers.map((provider) => OAUTH_PROVIDER_FACTORIES[provider]),
+  ]
+
+  const registrations = providers
+    .map((provider) => {
+      const upper = provider.toUpperCase()
+      return `  if (env.OAUTH_${upper}_CLIENT_ID && env.OAUTH_${upper}_CLIENT_SECRET && env.OAUTH_${upper}_REDIRECT_URI) {
+    providers.${provider} = ${OAUTH_PROVIDER_FACTORIES[provider]}({
+      clientId: env.OAUTH_${upper}_CLIENT_ID,
+      clientSecret: env.OAUTH_${upper}_CLIENT_SECRET,
+      redirectUri: env.OAUTH_${upper}_REDIRECT_URI,
+    })
+  }`
+    })
+    .join('\n\n')
+
+  const stateStore = databaseStateStore
+    ? `
+    // The authorize redirect and its callback may reach different processes, so
+    // the state tying them together lives in the database, not in memory.
+    stateStore: new DatabaseOAuthStateStore(oauthStates),`
+    : ''
+
+  return `import { ${imports.join(', ')} } from '@guren/core'${databaseStateStore ? "\nimport { oauthStates } from '../db/schema.js'" : ''}
+
+export default defineOAuthConfig((env) => {
+  // A provider is registered only when all three of its keys are set, so a
+  // half-configured one fails app-side rather than at the provider.
+  const providers: Record<string, OAuthProviderConfig> = {}
+
+${registrations}
+
+  return {
+    providers,${stateStore}
+  }
+})
 `
 }
 
@@ -539,12 +587,6 @@ export const ProfileUpdateSchema = z.object({
 
 export type ProfileUpdateInput = z.infer<typeof ProfileUpdateSchema>
 `
-}
-
-const OAUTH_PROVIDER_LABELS: Record<string, string> = {
-  github: 'GitHub',
-  google: 'Google',
-  discord: 'Discord',
 }
 
 function buildOAuthButtonLinks(providers: string[]): string {
@@ -1374,12 +1416,10 @@ async function warnAboutStalePasswordScaffold(): Promise<void> {
   }
   if (leftovers.some((path) => MAIL_SCAFFOLD_PATHS.includes(path))) {
     consola.warn(
-      'Your app entry may still register MailProvider and CoreMailServiceProvider from that run — remove them too if nothing else sends mail.',
+      'Your app entry may still register MailProvider and CoreMailServiceProvider, or list mail in its config array, from that run — remove them too if nothing else sends mail.',
     )
   }
 }
-
-const KNOWN_OAUTH_PROVIDERS = ['github', 'google', 'discord'] as const
 
 function parseOAuthProviders(raw: string | undefined): string[] {
   if (!raw) {
@@ -1510,6 +1550,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   // `oauthStates`, so OAuth state stays on Core's in-memory provider.
   const schemaSource = await readIfExists(process.cwd(), 'db/schema.ts')
   const oauthStateTable = includeOAuth && schemaSource !== null
+  // Also before any write: the config files written below would otherwise decide these.
+  const mailDefinition = includeExtras && (await installsConfigDefinition('mail'))
+  const oauthDefinition = includeOAuth && (await installsConfigDefinition('oauth'))
 
   const files = [
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: buildLoginControllerTemplate(includePassword) },
@@ -1555,8 +1598,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
       authFile('resources/js/pages/auth/ResetPassword.tsx'),
       authFile('app/Auth/PasswordResetStore.ts'),
       authFile('app/Mail/PasswordResetMail.ts'),
-      authFile('app/Providers/MailProvider.ts'),
-      authFile('config/mail.ts'),
+      ...(mailDefinition
+        ? [definitionTemplateFile('mail', 'config/mail.ts')]
+        : [authFile('app/Providers/MailProvider.ts'), authFile('config/mail.ts')]),
     )
   }
 
@@ -1571,12 +1615,18 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   if (includeOAuth) {
     files.push(
-      { path: 'app/Providers/OAuthProvider.ts', contents: buildOAuthProviderTemplate(oauthProviders, oauthStateTable) },
+      oauthDefinition
+        ? { path: 'config/oauth.ts', contents: buildOAuthConfigTemplate(oauthProviders, oauthStateTable) }
+        : { path: 'app/Providers/OAuthProvider.ts', contents: buildOAuthProviderTemplate(oauthProviders, oauthStateTable) },
       { path: 'app/Http/Controllers/Auth/OAuthController.ts', contents: buildOAuthControllerTemplate(oauthProviders, includeVerify) },
     )
   }
 
   const created = await writeScaffoldFiles(files, options)
+  await appendScaffoldEnv([
+    ...(mailDefinition ? scaffoldEnv(MAIL_SCAFFOLD, true) : []),
+    ...oauthEnvEntries(oauthProviders),
+  ])
 
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens()
@@ -1606,7 +1656,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   )
 
   if (options.install) {
-    await installAuth(features, { migrationGenerated, oauthStateTable })
+    await installAuth(features, { migrationGenerated, oauthStateTable, mailDefinition, oauthDefinition })
   } else {
     consola.info('Next steps:')
     consola.info(CODEGEN_STEP)
@@ -1614,7 +1664,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     consola.info('  • Enable sessions and CSRF by adding `auth: {}` to your createApp() options')
     consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
     if (includeExtras) {
-      consola.info('  • Register MailProvider in your createApp() providers array (used to send password reset emails)')
+      consola.info(mailDefinition
+        ? '  • Add the default export of config/mail.ts to your createApp() config array (used to send password reset emails)'
+        : '  • Register MailProvider in your createApp() providers array (used to send password reset emails)')
       consola.info('  • Set APP_URL in your .env to the public base URL of this app — emailed links are built from it, and production refuses to send without it')
     }
     if (!migrationGenerated) {
@@ -1623,7 +1675,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     consola.info(includePassword ? '  • Run `bun run db:migrate` and `bun run db:seed`' : '  • Run `bun run db:migrate`')
     consola.info('  • Install zod if not already installed: `bun add zod`')
     if (includeOAuth) {
-      consola.info(oauthStateTable
+      consola.info(oauthDefinition
+        ? '  • Add the default export of config/oauth.ts to your createApp() config array'
+        : oauthStateTable
         ? '  • Register OAuthProvider in your createApp() providers array (it binds the OAuth manager itself; do not also register CoreOAuthServiceProvider)'
         : '  • Register CoreOAuthServiceProvider (from @guren/core) and OAuthProvider in your createApp() providers array')
       for (const provider of oauthProviders) {
@@ -1641,7 +1695,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
 async function installAuth(
   { includeExtras, includePassword, oauthProviders }: AuthFeatures,
-  { migrationGenerated, oauthStateTable }: { migrationGenerated: boolean; oauthStateTable: boolean },
+  { migrationGenerated, oauthStateTable, mailDefinition, oauthDefinition }: { migrationGenerated: boolean; oauthStateTable: boolean; mailDefinition: boolean; oauthDefinition: boolean },
 ): Promise<void> {
   consola.info('Installing authentication configuration...')
 
@@ -1657,7 +1711,9 @@ async function installAuth(
 
   await wireAppProvider('AuthProvider', wiring)
 
-  if (includeExtras) {
+  if (mailDefinition) {
+    await wireConfig('mail', wiring)
+  } else if (includeExtras) {
     // Core's provider goes before MailProvider (the `guren add mail`
     // convention) so `'mail'` resolves to the configured manager rather than
     // Core's empty-config default, whichever order the two commands run in.
@@ -1669,7 +1725,9 @@ async function installAuth(
     await wireAppProvider('MailProvider', wiring)
   }
 
-  if (oauthProviders.length > 0) {
+  if (oauthDefinition) {
+    await wireConfig('oauth', wiring)
+  } else if (oauthProviders.length > 0) {
     // A database-backed OAuthProvider binds `oauth` itself.
     if (!oauthStateTable) {
       await wireProvider(
@@ -1679,9 +1737,9 @@ async function installAuth(
       )
     }
     await wireAppProvider('OAuthProvider', wiring)
-    if (oauthStateTable) {
-      await registerConsoleCommand('OAuthStatesPruneCommand')
-    }
+  }
+  if (oauthStateTable) {
+    await registerConsoleCommand('OAuthStatesPruneCommand')
   }
 
   // Enable session + CSRF middleware: AuthServiceProvider is only registered

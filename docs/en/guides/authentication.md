@@ -18,9 +18,9 @@ For new applications, run the bundled scaffolder with automatic installation (th
 bunx guren make:auth --install
 ```
 
-This command generates login, registration, and password reset controllers, Inertia pages, a layout, `AuthProvider`, `MailProvider`, user model, SQL migration, and a demo seeder. The `--install` flag automatically:
+This command generates login, registration, and password reset controllers, Inertia pages, a layout, `AuthProvider`, `config/mail.ts`, user model, SQL migration, and a demo seeder. The `--install` flag automatically:
 
-1. Registers `AuthProvider` and `MailProvider` in your `Application` providers array
+1. Registers `AuthProvider` in your `Application` providers array and lists the mail definition in its `config` array
 2. Adds `createSessionMiddleware` with development-friendly defaults (uses `cookieSecure: true` in production)
 3. Wires `registerAuthRoutes(router)` into `routes/web.ts`
 4. Updates `db/schema.ts` to include password and remember-token columns
@@ -43,7 +43,7 @@ bunx guren make:auth --install --minimal
 
 ### Password reset
 
-Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `verifyPasswordResetToken` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store, so swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_DRIVER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
+Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `verifyPasswordResetToken` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store, so swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_MAILER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
 
 ### Email verification
 
@@ -67,7 +67,7 @@ This adds a `githubId` / `googleId` column per provider to the `users` table, an
 
 `--oauth` without `--verify` scaffolds the profile email **read-only**: `ProfileUpdateSchema` omits the field and `ProfileController.update()` never reads one, so neither the form nor a hand-crafted request can move an account off the address its provider vouched for. With `--verify` the field stays editable, because a replacement address resets `emailVerifiedAt` and has to be confirmed through a link sent to it. Note that in every mode an address is only *claimed*, never reserved: registration accepts any well-formed email and `users.email` is unique, so an account already holding an address blocks its real owner's first OAuth sign-in. Add your own ownership checks if that matters for your app.
 
-The OAuth state that ties the callback to its authorize redirect is kept in the database. `--oauth` adds an `oauth_states` table to `db/schema.ts`, covered by the same migration as `users` and `sessions`, and the `OAuthProvider` binds the `oauth` manager itself over `DatabaseOAuthStateStore`, so `--install` does not register `CoreOAuthServiceProvider`. The redirect and the callback can then reach different processes, which on Workers, Lambda and Vercel is the normal case (see [State Storage](./oauth.md#state-storage)). An app with no `db/schema.ts` keeps the in-memory store and `CoreOAuthServiceProvider`.
+The OAuth state that ties the callback to its authorize redirect is kept in the database. `--oauth` adds an `oauth_states` table to `db/schema.ts`, covered by the same migration as `users` and `sessions`, and the `OAuthProvider` binds the `oauth` manager itself over `DatabaseOAuthStateStore`, so `--install` does not register `CoreOAuthServiceProvider`. The redirect and the callback can then reach different processes, which on Workers, Lambda and Vercel is the normal case (see [State Storage](./oauth.md#state-storage)). An app with no `db/schema.ts` keeps the in-memory store and `CoreOAuthServiceProvider`. In an app with `config/env.ts`, the manager is a `config/oauth.ts` definition listed in `createApp({ config })` instead of `OAuthProvider`: the same registrations and store, reading `OAUTH_*` keys the command declares there.
 
 `--oauth` shares its `OAuthController` / `OAuthProvider` file paths and the database state store with `guren add oauth` below, with a complete (not stub) callback. Don't run both against the same app, since the second run either aborts (no `--force`) or overwrites the first (`--force`).
 
@@ -105,7 +105,7 @@ This creates:
 
 and wires `OAuthProvider` into `src/app.ts`.
 
-It also adds an `oauth_states` table to `db/schema.ts` and generates its migration (run `bun run db:make` yourself if `drizzle-kit` is not installed yet). `OAuthProvider` binds the `oauth` manager over `DatabaseOAuthStateStore`, so the callback does not need to reach the process that issued the authorize redirect, which on Workers, Lambda and Vercel it usually does not (see [State Storage](./oauth.md#state-storage)). `CoreOAuthServiceProvider` is not registered, because its manager keeps state in process memory. The command refuses to run in an app with no `db/schema.ts`, and writes nothing.
+It also adds an `oauth_states` table to `db/schema.ts` and generates its migration (run `bun run db:make` yourself if `drizzle-kit` is not installed yet). `OAuthProvider` binds the `oauth` manager over `DatabaseOAuthStateStore`, so the callback does not need to reach the process that issued the authorize redirect, which on Workers, Lambda and Vercel it usually does not (see [State Storage](./oauth.md#state-storage)). `CoreOAuthServiceProvider` is not registered, because its manager keeps state in process memory. The command refuses to run in an app with no `db/schema.ts`, and writes nothing. In an app with `config/env.ts`, the manager is a `config/oauth.ts` definition listed in `createApp({ config })` instead of `OAuthProvider`: the same registrations and store, reading `OAUTH_*` keys the command declares there.
 
 ### Configure provider credentials
 

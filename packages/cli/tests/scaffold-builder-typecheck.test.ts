@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { checkTypes, TSC_TIMEOUT, createTempWorkspace, resolvedCompilerOptions, seedInertiaApp, type TsconfigCompilerOptions } from './helpers'
+import { checkTypes, TSC_TIMEOUT, createTempWorkspace, resolvedCompilerOptions, seedInertiaApp, writeWorkspaceFiles, type TsconfigCompilerOptions } from './helpers'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { generatePageTypes } from '../src/pages-types'
@@ -54,7 +54,10 @@ export const login = pages.auth.Login
 export const missing = pages.auth.NotAPage
 `
 
-const compiledCombos: Array<[string, MakeAuthOptions, string[]]> = [
+// An app declaring its environment gets the config definitions (RFC 0027 §2), which read AppEnv.
+const DECLARED_ENV = join(cliRoot, '../create-app/templates/default/config/env.ts')
+
+const compiledCombos: Array<[string, MakeAuthOptions, string[], boolean?]> = [
   [
     'oauth-verify',
     { oauth: 'github', verify: true },
@@ -70,16 +73,23 @@ const compiledCombos: Array<[string, MakeAuthOptions, string[]]> = [
     { oauth: 'github,google', oauthOnly: true },
     ['app/Http/Controllers/ProfileController.ts', 'resources/js/pages/auth/Login.tsx'],
   ],
+  [
+    'oauth-verify-declared-env',
+    { oauth: 'github,google', verify: true },
+    ['config/oauth.ts', 'config/mail.ts'],
+    true,
+  ],
 ]
 
 describe('rendered make:auth output typechecks', () => {
-  for (const [label, options, expectedWrites] of compiledCombos) {
+  for (const [label, options, expectedWrites, declaresEnv] of compiledCombos) {
     it(
       `make:auth ${label}`,
       async () => {
         const workspace = await createTempWorkspace(`guren-typecheck-auth-${label}-`)
         try {
           await seedInertiaApp(workspace.dir)
+          if (declaresEnv) await writeWorkspaceFiles(workspace.dir, { 'config/env.ts': await readFile(DECLARED_ENV, 'utf8') })
           // Relative to cwd, not workspace.dir: the macOS tmpdir is a
           // symlink (/var → /private/var), and makeAuth reports the realpath.
           const created = (await makeAuth({ ...options, force: true })).map((file) =>

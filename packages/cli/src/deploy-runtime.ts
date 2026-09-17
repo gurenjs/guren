@@ -188,6 +188,7 @@ const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
 const CALLED_SIGNALS: Record<string, SignalKind> = {
   createSessionMiddleware: 'session',
   createOAuthManager: 'oauth',
+  defineOAuthConfig: 'oauth',
   createLambdaHandler: 'lambda',
 }
 
@@ -787,7 +788,7 @@ const UNKNOWN_DRIVER_FIX = 'A driver registered in application code cannot be se
 
 const BACKED_STORE_FIX = 'Run `bunx guren add session` for a database-backed session store, use DatabaseOAuthStateStore from `@guren/core` (or the Redis equivalent from `@guren/core/redis`) for OAuth state, and a Redis-backed cache/queue driver.'
 
-const OAUTH_STATE_STORE_FIX = 'Bind the OAuth manager yourself with `createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })` from `@guren/core`, over an `oauth_states` table in db/schema.ts (the columns are in the OAuth guide), or with RedisOAuthStateStore from `@guren/core/redis`, and drop OAuthServiceProvider from the providers, since it binds the in-memory default.'
+const OAUTH_STATE_STORE_FIX = 'Bind the OAuth manager yourself with `createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })` from `@guren/core`, over an `oauth_states` table in db/schema.ts (the columns are in the OAuth guide), or with RedisOAuthStateStore from `@guren/core/redis`, and drop OAuthServiceProvider from the providers, since it binds the in-memory default. A `config/oauth.ts` definition takes the same store as `stateStore` in what `defineOAuthConfig` resolves.'
 
 /** Memory stores whose remedy is narrower than BACKED_STORE_FIX; every other one gets that. */
 const MEMORY_STORE_FIXES: Record<string, string> = {

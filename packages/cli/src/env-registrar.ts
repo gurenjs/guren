@@ -73,7 +73,11 @@ export async function appendEnvEntry(key: string, entry: string, options: Append
 
   // Declaring a key the example only comments out would fail `guren check --env`,
   // which requires the example to assign every declared key.
-  if (!schemaEntry || exampleCommentsItOut) return
+  if (!schemaEntry) return
+  if (exampleCommentsItOut) {
+    consola.warn(`.env.example comments ${key} out, so it was not declared in ${ENV_SCHEMA_FILE}: assign it there and declare it by hand if the app reads it.`)
+    return
+  }
 
   const { unpatched } = await declareEnvEntries([schemaEntry])
   if (unpatched.length > 0) {

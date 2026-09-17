@@ -18,9 +18,9 @@ Guren には Laravel 由来の認証スタックが同梱されていて、セ�
 bunx guren make:auth --install
 ```
 
-このコマンドは、ログイン・登録・パスワードリセットのコントローラー、Inertia ページ、レイアウト、`AuthProvider`、`MailProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグを付けると、次の4点も自動で行われます。
+このコマンドは、ログイン・登録・パスワードリセットのコントローラー、Inertia ページ、レイアウト、`AuthProvider`、`config/mail.ts`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグを付けると、次の4点も自動で行われます。
 
-1. `Application` の providers 配列に `AuthProvider` と `MailProvider` を登録
+1. `Application` の providers 配列に `AuthProvider` を登録し、config 配列にメールの定義を追加
 2. 開発環境用の設定で `createSessionMiddleware` を追加(本番では `cookieSecure: true`)
 3. `routes/web.ts` で `registerAuthRoutes(router)` を接続
 4. `db/schema.ts` にパスワードや remember トークンのカラムを追加
@@ -43,7 +43,7 @@ bunx guren make:auth --install --minimal
 
 ### パスワードリセット
 
-ログインページの「Forgot your password?」から、`ForgotPasswordController` と `ResetPasswordController` によるフローに入ります。内部ではフレームワークの `createPasswordResetToken` / `verifyPasswordResetToken` を使っています。リセットトークンは、生成される `app/Auth/PasswordResetStore.ts`(インメモリストア。本番や複数インスタンス構成では Redis ベースのストアに差し替えてください)に保存され、同じく生成される `config/mail.ts` 経由でメール送信されます。`config/mail.ts` はデフォルトで `log` ドライバを使うので、リセットリンクはコンソールにそのまま出力され、開発環境では設定なしで動作確認できます。実際にメールを送るには `MAIL_DRIVER=smtp`(および `SMTP_*` の環境変数)を設定してください。
+ログインページの「Forgot your password?」から、`ForgotPasswordController` と `ResetPasswordController` によるフローに入ります。内部ではフレームワークの `createPasswordResetToken` / `verifyPasswordResetToken` を使っています。リセットトークンは、生成される `app/Auth/PasswordResetStore.ts`(インメモリストア。本番や複数インスタンス構成では Redis ベースのストアに差し替えてください)に保存され、同じく生成される `config/mail.ts` 経由でメール送信されます。`config/mail.ts` はデフォルトで `log` ドライバを使うので、リセットリンクはコンソールにそのまま出力され、開発環境では設定なしで動作確認できます。実際にメールを送るには `MAIL_MAILER=smtp`(および `SMTP_*` の環境変数)を設定してください。
 
 ### メール確認
 
@@ -67,7 +67,7 @@ bunx guren make:auth --install --oauth github,google
 
 `--verify` を伴わない `--oauth` では、プロフィールのメールアドレスが**読み取り専用**でスキャフォールドされます。`ProfileUpdateSchema` からフィールドが除かれ、`ProfileController.update()` もメールアドレスを受け取らないので、フォームからも、直接組み立てたリクエストからも、プロバイダーが保証したアドレスからアカウントを移すことはできません。`--verify` を併用した場合は編集可能なままです。変更後のアドレスは `emailVerifiedAt` がリセットされ、そのアドレス宛のリンクで確認するまで検証済みになりません。なお、どのモードでもアドレスは「主張」されるだけで、予約されるわけではありません。登録フォームは形式が正しいメールアドレスをすべて受け付け、`users.email` は一意制約を持つので、すでにそのアドレスを保持しているアカウントがあると、本来の持ち主の初回 OAuth サインインは拒否されます。これが問題になるアプリでは、独自の所有確認を追加してください。
 
-コールバックを認可リダイレクトと結びつける OAuth state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。`OAuthProvider` は `DatabaseOAuthStateStore` を使う `oauth` マネージャーを自分でコンテナに束縛するので、`--install` は `CoreOAuthServiceProvider` を登録しません。これでリダイレクトとコールバックが別のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれが普通です([Stateストレージ](./oauth.md#stateストレージ)を参照)。`db/schema.ts` が無いアプリでは、これまでどおりメモリ上のストアと `CoreOAuthServiceProvider` を使います。
+コールバックを認可リダイレクトと結びつける OAuth state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。`OAuthProvider` は `DatabaseOAuthStateStore` を使う `oauth` マネージャーを自分でコンテナに束縛するので、`--install` は `CoreOAuthServiceProvider` を登録しません。これでリダイレクトとコールバックが別のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれが普通です([Stateストレージ](./oauth.md#stateストレージ)を参照)。`db/schema.ts` が無いアプリでは、これまでどおりメモリ上のストアと `CoreOAuthServiceProvider` を使います。`config/env.ts` を持つアプリでは、`OAuthProvider` の代わりに `createApp({ config })` に並ぶ `config/oauth.ts` の定義がマネージャーを束縛します。登録内容とストアは同じで、コマンドが宣言する `OAUTH_*` キーを読みます。
 
 `--oauth` は、`OAuthController` / `OAuthProvider` のファイルパスと、state をデータベースに保存する仕組みを下記の `guren add oauth` と共有しています。違いは、コールバックがスタブではなく完成された実装である点だけです。同じアプリに対して両方を実行しないでください。2回目の実行は、`--force` なしなら失敗し、`--force` ありなら1回目の生成物を上書きします。
 
@@ -105,7 +105,7 @@ bunx guren add oauth
 
 あわせて、`src/app.ts` に `OAuthProvider` が自動登録されます。
 
-`db/schema.ts` には `oauth_states` テーブルが追加され、そのマイグレーションも生成されます。`drizzle-kit` をまだインストールしていない場合は、あとで `bun run db:make` を実行してください。`OAuthProvider` は `DatabaseOAuthStateStore` を使う `oauth` マネージャーをコンテナに束縛します。コールバックが認可リダイレクトを発行したプロセスに届かなくても動き、Workers、Lambda、Vercel ではその状況が普通です([Stateストレージ](./oauth.md#stateストレージ)を参照)。`CoreOAuthServiceProvider` はメモリ上に state を持つので登録しません。`db/schema.ts` が無いアプリでは、何も書き込まずにエラーで終了します。
+`db/schema.ts` には `oauth_states` テーブルが追加され、そのマイグレーションも生成されます。`drizzle-kit` をまだインストールしていない場合は、あとで `bun run db:make` を実行してください。`OAuthProvider` は `DatabaseOAuthStateStore` を使う `oauth` マネージャーをコンテナに束縛します。コールバックが認可リダイレクトを発行したプロセスに届かなくても動き、Workers、Lambda、Vercel ではその状況が普通です([Stateストレージ](./oauth.md#stateストレージ)を参照)。`CoreOAuthServiceProvider` はメモリ上に state を持つので登録しません。`db/schema.ts` が無いアプリでは、何も書き込まずにエラーで終了します。`config/env.ts` を持つアプリでは、`OAuthProvider` の代わりに `createApp({ config })` に並ぶ `config/oauth.ts` の定義がマネージャーを束縛します。登録内容とストアは同じで、コマンドが宣言する `OAUTH_*` キーを読みます。
 
 ### プロバイダー資格情報の設定
 

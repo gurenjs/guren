@@ -13,6 +13,7 @@ import {
   MYSQL_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
   PROVIDERLESS_APP_FIXTURE,
+  SQLITE_SCHEMA_FIXTURE,
   REGISTRAR_LESS_ROUTES_FIXTURE,
   captureWarnings,
   createTempWorkspace,
@@ -22,6 +23,7 @@ import {
   seedShippedApiOnlyApp,
   ENV_SCHEMA_FIXTURE,
   linkWorkspaceCore,
+  linkWorkspacePackage,
   writeWorkspaceFiles,
   type TempWorkspace,
 } from './helpers'
@@ -628,7 +630,7 @@ export const users = pgTable('users', {
     // The scaffolded .env declares the sender; a hard-coded one ignores it.
     const mailProviderSource = await readFile('app/Providers/MailProvider.ts', 'utf8')
     expect(mailProviderSource).toContain("process.env.MAIL_FROM_ADDRESS || 'noreply@example.com'")
-    expect(mailProviderSource).toContain("process.env.MAIL_FROM_NAME ?? 'Guren App'")
+    expect(mailProviderSource).toContain("process.env.MAIL_FROM_NAME ?? 'Guren'")
     expect(mailProviderSource).not.toContain('process.env.MAIL_FROM_ADDRESS ??')
     expect(eventFiles.some((file) => file.endsWith('app/Providers/EventProvider.ts'))).toBe(true)
     expect(cacheFiles.some((file) => file.endsWith('app/Providers/CacheProvider.ts'))).toBe(true)
@@ -1175,6 +1177,32 @@ describe('oauth blueprint output', () => {
     const consoleSource = await readFile('src/console.ts', 'utf8')
     expect(consoleSource).toContain("import { OAuthStatesPruneCommand } from '@guren/core'")
     expect(consoleSource).toContain('kernel.registerMany([OAuthStatesPruneCommand])')
+  })
+
+  // RFC 0027 §2: the definition binds `oauth` over the same table, reading keys it declares.
+  it('installs config/oauth.ts as a definition in an app declaring its environment', async () => {
+    await seedAppFile(APP_FIXTURE)
+    await seedSchema(SQLITE_SCHEMA_FIXTURE)
+    await writeFile('src/console.ts', CONSOLE_FIXTURE)
+    await writeWorkspaceFiles(process.cwd(), { '.env.example': 'APP_KEY=\n', 'config/env.ts': ENV_SCHEMA_FIXTURE })
+    await linkWorkspaceCore(process.cwd())
+    await linkWorkspacePackage('orm', process.cwd())
+
+    await runBlueprint('oauth')
+
+    expect(existsSync('app/Providers/OAuthProvider.ts')).toBe(false)
+    expect(await readFile('config/oauth.ts', 'utf8')).toContain('stateStore: new DatabaseOAuthStateStore(oauthStates),')
+    const appSource = await readFile('src/app.ts', 'utf8')
+    expect(appSource).toMatch(/config: \[oauth\]/)
+    expect(appSource).not.toContain('OAuthProvider')
+    expect(await readFile('src/console.ts', 'utf8')).toContain('kernel.registerMany([OAuthStatesPruneCommand])')
+    const schema = await readFile('config/env.ts', 'utf8')
+    expect(schema).toContain('OAUTH_GITHUB_CLIENT_SECRET: Env.string().optional().secret(),')
+    expect(schema).toContain('OAUTH_DISCORD_REDIRECT_URI: Env.url().optional(),')
+
+    const resolved = await loadResolvedConfig(process.cwd())
+    expect(resolved.entries.map((entry) => [entry.key, entry.problem])).toEqual([['oauth', undefined]])
+    expect((await checkEnvExample(process.cwd())).filter((result) => result.status === 'fail')).toEqual([])
   })
 
   it('refuses an app with no db/schema.ts and writes nothing', async () => {

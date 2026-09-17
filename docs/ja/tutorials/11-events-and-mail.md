@@ -49,13 +49,13 @@ bunx guren add queue
 bunx guren add mail
 ```
 
-どのコマンドも、その種類のサンプルと、それを動かすものを書き、`src/app.ts` に登録しました。開いてみてください。providers の配列は 1 行に書き直され、末尾に 5 つの要素が増えています。events と mail はフレームワークのプロバイダーとアプリのプロバイダーを 1 つずつ、queue は `JobsProvider` を足しました。キューマネージャーのほうは `config: [...]` の `queue` です。この 1 行化はパッチを当てたコマンドによるもので、どの `add` コマンドも同じ形を残していきます。
+どのコマンドも、その種類のサンプルと、それを動かすものを書き、`src/app.ts` に登録しました。開いてみてください。providers の配列は 1 行に書き直され、末尾に 3 つの要素が増えています。events はフレームワークのプロバイダーとアプリのプロバイダーを 1 つずつ、queue は `JobsProvider` を足しました。キューとメールのマネージャーは `config: [...]` の `queue` と `mail` です。この 1 行化はパッチを当てたコマンドによるもので、どの `add` コマンドも同じ形を残していきます。
 
 次のファイルは読んでおく価値があります。うち 2 つは、このあと自分で編集するファイルです。
 
 - `app/Providers/EventProvider.ts` は listener クラスを `events.listen()` に渡し、クラスが指定するイベントを購読させます。結び付けているのは規約ではなくコードの 1 行です。`app/Listeners/` を走査して仕事を探すものは何もありません。
 - `config/queue.ts` はキューマネージャーを構築し、`app/Providers/JobsProvider.ts` はジョブクラスごとに `registerJob()` を呼びます。config のドライバーの行に注目してください。`QUEUE_CONNECTION=sync` は dispatch されたジョブを**インラインで、dispatch したプロセスの中で**実行します。`memory` はワーカーが処理するキューに載せます。`guren add queue` が `.env` に `sync` と書き込みました。
-- `app/Providers/MailProvider.ts` はメールマネージャーを構築します。同じく `.env` にある `MAIL_MAILER=log` は、メールを送る代わりに送信予定の内容をサーバーの出力に印字します。サービスの申し込みは要りませんし、うっかり本当に配送してしまうこともありません。
+- `config/mail.ts` はメールマネージャーを構築します。同じく `.env` にある `MAIL_MAILER=log` は、メールを送る代わりに送信予定の内容をサーバーの出力に印字します。サービスの申し込みは要りませんし、うっかり本当に配送してしまうこともありません。
 
 サンプル(`OrderPlaced`、`SendOrderReceiptListener`、`ProcessWelcomeSequenceJob`、`WelcomeEmailMail`)は、それぞれのファイルの形を確認できるように置かれています。第 3 節でこの 4 つをすべて置き換えます。
 

@@ -34,6 +34,7 @@ bunx guren add broadcasting
 bunx guren add schedule
 bunx guren add lint
 bunx guren add prototype
+bunx guren add ai --provider anthropic
 ```
 > **Golden path:** まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリの成長に応じて他の機能を追加してください。
 
@@ -102,6 +103,17 @@ bunx guren add admin --public
 `bun run build:prototype` は Vite の前に `check --prototype` を走らせるので、fixture に
 エントリの無いルートは顧客のクリックではなくビルドで落ちます。
 
+`add ai` は `@guren/plugin-ai` によるインプロセスの AI エージェントを導入します。
+1 つのプロバイダ(`--provider anthropic`、`openai`、`gateway` のいずれか)向けの
+`config/ai.ts` を書き、そのプロバイダの API キーを `config/env.ts` と env ファイルに
+宣言し、設定と `aiPlugin()` を `createApp()` に登録します。続けてプラグイン、`ai`、
+プロバイダのパッケージを `bun add` します。`--no-install` を付けるとコマンドの表示だけに
+なります。キーは任意なので、未設定でもアプリは起動し、最初のプロンプトで失敗します。
+このコマンドには `config/env.ts` が必要です。その後 `make:ai-agent <Name>` で
+`app/Ai/Agents` にエージェントクラスを書きます。`--tools` は、ルートから導出される
+ことを確かめたうえで、指定したエージェントツールを渡します。`--output` は構造化出力の
+スキーマの雛形を加え、`--test` は `app.fakeAi()` でモデルを台本化するテストを書きます。
+
 `make:controller` は同じ2つのシグナルを読みますが、中断ではなく適応します。
 API 専用と判定されたアプリでは、生成されるコントローラーは Inertia ページではなく
 JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes/api.ts` に
@@ -147,6 +159,7 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | `app/Console/Commands` にコンソールコマンドを生成。`--command <name>` で呼び出し名を指定。`src/console.ts` への登録が必要([コンソールコマンドガイド](./console.md)参照) | `bunx guren make:command SendDigest --command reports:digest` |
 | `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |
+| `make:ai-agent <Name>` | インプロセスの AI エージェント(`@guren/plugin-ai`)を `app/Ai/Agents` に生成する。`--tools` はルート由来のエージェントツールを付与し、`--output` は Zod の出力スキーマを加え、`--test` は `fakeAi()` のテストを書く | `bunx guren make:ai-agent SupportTriager --tools tickets_show --test` |
 | `make:agent <Name>` | 永続エージェントを `app/Agents` に生成し、`config/agents.ts` に登録し、モデルや ORM から遠ざける `guren.arch.ts` のルールを追加し、クラスが必要とする `config/env.ts` と tsconfig の `types` エントリも書き出す([永続エージェント](./durable-agents.md)参照) | `bunx guren make:agent Triager` |
 | `make:validator <Name>` | Zodバリデーションスキーマ(ルートパラメータ・一覧クエリ・ペイロード)を `app/Http/Validators` に生成。`--fields` は `make:feature` と同じ構文 | `bunx guren make:validator Post --fields "title:string,body:text"` |
 | `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完、`--issue <ref>`(カンマ区切りで複数可)でGitHubのIssue/PRへの `issues:` リンクを記入 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |
