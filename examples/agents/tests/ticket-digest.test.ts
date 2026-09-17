@@ -40,7 +40,7 @@ describe('TicketDigest', () => {
     ai.assertPrompted(TicketDigest, (input) => input.startsWith('Today is '))
     const [listed] = ai.calls(TicketDigest)[0]!.toolCalls
     expect(listed?.name).toBe('tickets_index')
-    const tickets = (listed?.output as { tickets: Array<{ id: number }> }).tickets
+    const { tickets } = listed!.output as { tickets: Array<{ id: number }> }
     expect(tickets.map((ticket) => ticket.id)).toContain(created.ticket.id)
   })
 
