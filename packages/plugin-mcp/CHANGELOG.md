@@ -1,5 +1,32 @@
 # @guren/plugin-mcp
 
+## 0.6.0
+
+### Minor Changes
+
+- 0eabb37: The App MCP endpoint now serves the MCP 2026-07-28 protocol as well as clients that open with the 2025-era `initialize` handshake, from the same path (RFC 0028). The plugin runs on MCP TypeScript SDK v2: `@modelcontextprotocol/server` replaces `@modelcontextprotocol/sdk` as its dependency. Authentication, scopes, approvals, rate limits and the audit trail are unchanged, and no configuration changes.
+
+  **Behaviour changes on the endpoint:** after authentication, a `GET` or `DELETE` answers `405` (there is no session stream to open), and a `POST` whose `Content-Type` is not `application/json` answers `415`. A 2026-07-28 `subscriptions/listen` request is refused in-band (`Subscription limit reached`): the endpoint publishes no change events, so a held stream would serve nothing.
+
+### Patch Changes
+
+- 61c401c: The `audit` option and its file sink now come from `@guren/core` (`AgentAuditConfig`, `resolveAgentAuditSink`) instead of a copy in this package. No behaviour change. Needs the `@guren/core` release that exports them.
+- Updated dependencies [029a516]
+- Updated dependencies [61c401c]
+- Updated dependencies [a798a10]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [909b4b6]
+- Updated dependencies [3e11a0f]
+- Updated dependencies [83143a7]
+- Updated dependencies [0eabb37]
+- Updated dependencies [1c9ccae]
+- Updated dependencies [8d4275c]
+- Updated dependencies [218db73]
+- Updated dependencies [000a5e0]
+- Updated dependencies [13b9205]
+- Updated dependencies [d67480f]
+  - @guren/core@1.19.0
+
 ## 0.5.0
 
 ### Minor Changes

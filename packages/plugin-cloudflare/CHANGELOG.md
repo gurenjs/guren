@@ -1,5 +1,37 @@
 # @guren/plugin-cloudflare
 
+## 0.11.0
+
+### Minor Changes
+
+- 218db73: Declare the environment once and validate it at boot (RFC 0027 Part 0). `defineEnv({ APP_KEY: Env.string().secret(), SMTP_PORT: Env.port().default(587) })` builds a schema from `Env.string`, `url`, `number`, `port`, `boolean`, `enum` and `custom` (a synchronous Standard Schema), each with `.optional()`, `.default()`, `.allowEmpty()`, `.secret()`, `.describe()` and `.requiredInProduction()`. A blank `FOO=` counts as unset, so `.default()` applies to it, and numbers, ports and booleans are coerced by the builder.
+
+  `createApp({ env })` validates the schema at the start of `boot()`, before any provider registers, and binds the result as `env`. A failure throws one `EnvValidationError` listing every problem, with secret values redacted; under `GUREN_INTROSPECT=1` the problems are logged instead. Values are read from the `env.source` binding first and `process.env` second: `@guren/plugin-cloudflare` binds the entrypoint's env there before boot, since wrangler `vars` are not guaranteed to reach `process.env`, and `TestApp.create({ env, envSource })` binds a test's overrides. `env.parse(source, { mode })` runs the same validation outside an application. `NODE_ENV` and `GUREN_*` cannot be declared (`isRawEnvKey()`), because production gates only fold at bundle time as the literal `process.env.NODE_ENV` read.
+
+  `createApp({ inertia: { share } })` registers shared Inertia props scoped to that application's container.
+
+### Patch Changes
+
+- 1c9ccae: A deployed app now renders its translations. `createApp({ i18n })` reads `lang/<locale>/*.json` from the filesystem, which Cloudflare Workers, AWS Lambda and Vercel functions do not ship, so the default scaffold's home page showed `messages.welcome` instead of its welcome text and the logs reported `no translations loaded for locale 'en'`.
+
+  `guren cloudflare:build`, `guren lambda:build` and the Vercel build now read `lang/` at build time and inject the catalogs as `GUREN_TRANSLATIONS`. When the app passes neither `loader` nor `path`, the i18n provider serves the injected catalogs through a `MemoryLoader`. An explicit `loader` still wins, and a `lang/` file that is not valid JSON is left out with a build warning. `GUREN_TRANSLATIONS` holding something other than a catalog object fails the boot.
+
+- Updated dependencies [029a516]
+- Updated dependencies [61c401c]
+- Updated dependencies [a798a10]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [909b4b6]
+- Updated dependencies [3e11a0f]
+- Updated dependencies [83143a7]
+- Updated dependencies [0eabb37]
+- Updated dependencies [1c9ccae]
+- Updated dependencies [8d4275c]
+- Updated dependencies [218db73]
+- Updated dependencies [000a5e0]
+- Updated dependencies [13b9205]
+- Updated dependencies [d67480f]
+  - @guren/core@1.19.0
+
 ## 0.10.1
 
 ### Patch Changes

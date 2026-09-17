@@ -1,5 +1,19 @@
 # create-guren-app
 
+## 1.16.0
+
+### Minor Changes
+
+- 7719ddb: Scaffolded apps declare their environment in `config/env.ts` and pass it to `createApp({ env, config })` (RFC 0027 Part 2d). `config/database.ts` default-exports `defineDatabaseConfig()` and resolves its connection through the validated environment, so `config/app.ts` and `app/Providers/DatabaseProvider.ts` are gone; host authorization moves to `config/http.ts`, where a production app with no `APP_URL` fails its boot instead of disabling the check. `.env.example` lists what the base app reads, and each blueprint adds its own keys when it runs.
+
+  `APP_URL` and `APP_KEY` are required in production, so a production boot without either now fails instead of warning. Development is unchanged: both stay optional there, and the scaffolder still writes an `APP_KEY` into `.env`.
+
+### Patch Changes
+
+- 1452763: The scaffolded `config/database.ts` imports its database factory and seeder context type from `@guren/core` instead of `@guren/orm`, the same package the scaffolded models and seeders import from. Both packages export the same functions, so existing apps need no change.
+- dcb81a7: The blog starter's `PostController` reads the validated body of `posts.store`, `posts.update` and `posts.search` with `this.validated()` instead of validating it a second time.
+- 000a5e0: `guren add oauth` and `guren make:auth --oauth` write `config/oauth.ts` as a `defineOAuthConfig` definition listed in `createApp({ config })` when the app declares its environment in `config/env.ts` and nothing already binds OAuth (RFC 0027 §2). The definition replaces `OAuthProvider` and `CoreOAuthServiceProvider`, keeps state in `oauth_states` when the app has a schema, and registers a provider once its `OAUTH_<PROVIDER>_CLIENT_ID`, `_CLIENT_SECRET` and `_REDIRECT_URI` keys, which the commands declare, are all set. The deploy-runtime check reads `defineOAuthConfig` as OAuth. Both forms now append those keys to `.env.example` and `.env`, so the starter `.env.example` files no longer carry them commented out; a blueprint key an existing `.env.example` only comments out is reported instead of being skipped silently.
+
 ## 1.15.4
 
 ### Patch Changes
