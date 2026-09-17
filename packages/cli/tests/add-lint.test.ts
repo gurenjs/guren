@@ -115,10 +115,13 @@ describe('guren add lint', () => {
     const written = new Map<string, string>()
     for (const file of await collectFiles(scaffoldRoot, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)) {
       const source = await readFile(file, 'utf8')
-      if (!source.includes('process.env.')) continue
+      if (!/process\.env[.[]/u.test(source)) continue
       const template = toPosixRelative(scaffoldRoot, file)
-      // The app path: without the blueprint directory and a `definition/` form segment.
-      const target = template.split('/').slice(1).filter((segment, index) => index > 0 || segment !== 'definition').join('/')
+      // The app path starts at the first scoped root, past `<blueprint>/` and any form or variant directory.
+      const segments = template.split('/')
+      const root = segments.findIndex((segment) => ['app', 'config', 'routes', 'src', 'modules'].includes(segment))
+      if (root === -1) continue
+      const target = segments.slice(root).join('/')
       expect(written.get(target)).toBeUndefined()
       written.set(target, template)
       await mkdir(dirname(resolve(target)), { recursive: true })

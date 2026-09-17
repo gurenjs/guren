@@ -28,6 +28,7 @@ If the plugin's manifest omits `provider` (common for `definePlugin()`-based plu
 import { somePlugin } from 'guren-plugin-something'
 
 export const app = createApp({
+  // oxlint-disable-next-line guren/no-unvalidated-env-read -- plugin options are built before createApp() parses the environment
   providers: [somePlugin({ apiKey: process.env.SOME_API_KEY! })],
 })
 ```
