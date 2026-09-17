@@ -2,7 +2,7 @@
 
 Guren には、時間のかかるタスクをバックグラウンドで処理するキューが組み込まれています。メール送信、アップロード処理、外部API呼び出しといった重い処理を抱えながらレスポンスを速く保つには、この仕組みが欠かせません。
 
-推奨パターン: `@guren/core` から queue API をインポートし、provider で queue manager を構成します。コントローラーではジョブのディスパッチだけを行います。
+推奨パターン: `@guren/core` から queue API をインポートし、ドライバは `config/queue.ts` で構成します。コントローラーではジョブのディスパッチだけを行います。
 
 ## コアコンセプト
 
@@ -144,7 +144,7 @@ class ProxyJob extends BaseJob {
 
 ### ファサードを使用（推奨）
 
-`queue` バインディングは、プロバイダ（`QueueServiceProvider` か自前のプロバイダ）が登録した `QueueManager` です。`Job.dispatch()` はそのデフォルトドライバをコンテナから自分で解決するので、マネージャーをバインドしてドライバを登録すればディスパッチに必要な準備は終わりです。ワーカーに渡すときやキューを調べるときは、マネージャーを解決してドライバを取り出します。
+`queue` バインディングは、`config/queue.ts` が構成した `QueueManager` です。`Job.dispatch()` はそのデフォルトドライバをコンテナから自分で解決するので、マネージャーをバインドしてドライバを登録すればディスパッチに必要な準備は終わりです。ワーカーに渡すときやキューを調べるときは、マネージャーを解決してドライバを取り出します。
 
 ```ts
 // Resolve the queue manager from the container
@@ -160,24 +160,68 @@ await Queue.dispatch(SendWelcomeEmailJob, { userId: 1 })
 
 ### 直接セットアップ
 
-`Job.dispatch()` はコンテナを通してマネージャーを見つけます。自分で組み立てたマネージャーは、プロバイダの `register()` で `queue` としてバインドします。
+`Job.dispatch()` はコンテナを通してマネージャーを見つけます。マネージャーを `queue` としてバインドするのは `config/queue.ts` です。`bunx guren add queue` はこの定義を書き出し、`config/env.ts` に `QUEUE_CONNECTION` を宣言して、定義を `createApp({ config })` に追加します。
 
 ```ts
-import { ServiceProvider, createQueueManager, MemoryDriver } from '@guren/core'
+// config/queue.ts
+import { defineQueueConfig, MemoryDriver, SyncDriver } from '@guren/core'
 
-export default class QueueProvider extends ServiceProvider {
-  register(): void {
-    const queue = createQueueManager({
-      default: 'memory',
-      drivers: {
-        memory: () => new MemoryDriver(),
-      },
-    })
+// QUEUE_CONNECTION=sync はディスパッチ時にジョブをその場で実行する（デフォルト。
+// ワーカープロセス不要）。'memory' はワーカー向けにジョブを積む。
+const drivers = {
+  sync: () => new SyncDriver(),
+  memory: () => new MemoryDriver(),
+}
 
-    this.container.instance('queue', queue)
+export default defineQueueConfig((env) => {
+  // 起動時に検査する。マネージャーはどんな名前も受け付け、最初のディスパッチで投げる。
+  if (!Object.hasOwn(drivers, env.QUEUE_CONNECTION)) {
+    throw new Error(
+      `QUEUE_CONNECTION="${env.QUEUE_CONNECTION}" is not a declared driver. Declare it in config/queue.ts or use one of: ${Object.keys(drivers).join(', ')}.`,
+    )
+  }
+
+  return { default: env.QUEUE_CONNECTION, drivers }
+})
+```
+
+コールバックには検証済みの環境変数が渡されるので、`QUEUE_CONNECTION` をはじめ読み取るキーはすべて `config/env.ts` に宣言しておきます（[設定ガイド](./configuration.md)を参照）。
+
+定義は queue をバインドしますが、ジョブの登録はしません。ワーカーはメッセージに書かれた名前からジョブクラスを引くので、登録はプロバイダの `boot()` に残します。`guren add queue` はそのプロバイダも書き出します。
+
+```ts
+// app/Providers/JobsProvider.ts
+import { ServiceProvider, registerJob } from '@guren/core'
+import { ProcessWelcomeSequenceJob } from '../Jobs/ProcessWelcomeSequenceJob.js'
+
+// config/queue.ts が queue をバインドし、ここでは実行するジョブを登録する。
+export default class JobsProvider extends ServiceProvider {
+  register(): void {}
+
+  boot(): void {
+    // 自分では何もディスパッチしないワーカーも含め、起動したすべてのプロセスで登録する。
+    // キューのメッセージが持つのはジョブの名前で、クラスではない。
+    registerJob(ProcessWelcomeSequenceJob)
   }
 }
 ```
+
+両方をアプリに追加します。
+
+```ts
+// src/app.ts
+import queue from '../config/queue.js'
+import JobsProvider from '../app/Providers/JobsProvider.js'
+
+const app = createApp({
+  env,
+  config: [database, http, queue],
+  providers: [JobsProvider],
+  routes: registerWebRoutes,
+})
+```
+
+キュー をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 どこにもバインドされていないマネージャーは `Job.dispatch()` から見つかりません。その場合は `await queue.dispatch(SendWelcomeEmailJob, payload)` のように、マネージャー経由で明示的にディスパッチします。`setQueueDriver()` でドライバを固定する方法も残っていますが、2.23.0 で非推奨になり、3.0.0 で削除されます。
 
@@ -285,27 +329,34 @@ await worker.stop()
 
 ### QueueManagerを使用
 
-複数のキューバックエンドを持つアプリケーションには、`createQueueManager()` を使用します。
+複数のキューバックエンドを持つアプリケーションでは、各ドライバを `config/queue.ts` に宣言し、デフォルトは `QUEUE_CONNECTION` で選びます。
 
 ```ts
-import { createQueueManager, MemoryDriver, RedisDriver, createRedisClient } from '@guren/core'
+// config/queue.ts
+import { defineQueueConfig, MemoryDriver, RedisDriver } from '@guren/core'
+import { createRedisClient } from '@guren/core/redis'
 
-const redis = createRedisClient({ url: process.env.REDIS_URL })
-
-const queueManager = createQueueManager({
-  default: 'redis',
+export default defineQueueConfig((env) => ({
+  default: env.QUEUE_CONNECTION,
   drivers: {
     memory: () => new MemoryDriver(),
-    redis: () => new RedisDriver(redis),
+    // ファクトリはドライバを最初に解決したときに実行されるため、Redis に接続するのは
+    // このドライバが使われたときだけ。
+    redis: () => new RedisDriver(createRedisClient({ url: env.REDIS_URL })),
   },
-})
+}))
+```
 
-// デフォルトドライバを解決する。Job.dispatch() が見つけるのは、コンテナに
-// `queue` としてバインドしたマネージャーだけ（上の「直接セットアップ」を参照）
-const driver = queueManager.driver()
+`default` を環境変数から決める場合は、上のスキャフォールドにあるドライバ名の検査を残してください。ドライバはバインドされたマネージャーから取り出します。
+
+```ts
+const queue = app.container.make('queue') // QueueManager
+
+// デフォルトドライバを解決
+const driver = queue.driver()
 
 // 特定のドライバを取得
-const memoryDriver = queueManager.driver('memory')
+const memoryDriver = queue.driver('memory')
 ```
 
 ### Redisドライバ
@@ -313,24 +364,17 @@ const memoryDriver = queueManager.driver('memory')
 本番環境では、ジョブの永続化と複数サーバーでの共有のためにRedisドライバを使用します。
 
 ```ts
-import { createQueueManager, RedisDriver, createRedisClient } from '@guren/core'
+import { RedisDriver } from '@guren/core'
+import { createRedisClient } from '@guren/core/redis'
 
-const redis = createRedisClient({
-  url: process.env.REDIS_URL,
-})
-
-const queue = createQueueManager({
-  default: 'redis',
-  drivers: {
-    redis: () =>
-      new RedisDriver(redis, {
-        prefix: 'myapp:queue:', // キープレフィックス（デフォルト: 'guren:queue:'）
-      }),
-  },
-})
-
-const driver = queue.driver()
+// config/queue.ts の `drivers` のエントリ。`env` はコールバックの引数
+redis: () =>
+  new RedisDriver(createRedisClient({ url: env.REDIS_URL }), {
+    prefix: 'myapp:queue:', // キープレフィックス（デフォルト: 'queue:'）
+  }),
 ```
+
+`REDIS_URL` は `config/env.ts` に宣言します。`@guren/core/redis` は ioredis を読み込むので、使う設定ファイルでだけ import します。
 
 ### Syncドライバ
 
@@ -339,12 +383,10 @@ Syncドライバはディスパッチしたプロセス内でジョブをその�
 Syncキューには待ち行列が無いため、リトライのバックオフは適用されません。Syncドライバへ戻されたジョブは、`backoff`戦略が算出する遅延に関係なく即座に再実行されます。リトライのタイミングを確認したい場合はMemoryまたはRedisドライバとワーカーを使用してください。
 
 ```ts
-import { createQueueManager, SyncDriver } from '@guren/core'
+import { SyncDriver } from '@guren/core'
 
-const queue = createQueueManager({
-  default: 'sync',
-  drivers: { sync: () => new SyncDriver() },
-})
+// config/queue.ts の `drivers` のエントリ
+sync: () => new SyncDriver(),
 ```
 
 ## 失敗したジョブ

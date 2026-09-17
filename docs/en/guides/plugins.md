@@ -109,7 +109,8 @@ Your `package.json` must include the `gurenPlugin` field:
     "compatibility": ">=1.0.0",
     "provider": "AnalyticsServiceProvider",
     "env": [
-      { "key": "ANALYTICS_API_KEY", "comment": "Analytics service API key" }
+      { "key": "ANALYTICS_API_KEY", "comment": "Analytics service API key", "secret": true },
+      { "key": "ANALYTICS_BATCH_SIZE", "type": "number", "default": 50 }
     ],
     "publishes": [
       { "from": "stubs/analytics.ts", "to": "config/analytics.ts" }
@@ -122,10 +123,34 @@ Your `package.json` must include the `gurenPlugin` field:
 |-------|---------|
 | `compatibility` | Semver range of Guren versions your plugin supports. Verified by `bunx guren plugin` at install time and by `bunx guren doctor`. |
 | `provider` | Named class export for `bunx guren plugin` to register in `createApp({ providers })`. Omit for `definePlugin()` factories (registered manually). |
-| `env` | Env keys appended to the app's `.env.example` (and `.env` when present) at install time. |
+| `env` | Env keys the app needs. At install time they are appended to `.env.example` (and `.env` when present) and declared in `config/env.ts`; see below. |
 | `publishes` | Files copied from your package into the app (`config/`, `db/migrations/`, or `resources/` only). Existing files are never overwritten without `--force`. |
 
 The manifest is pure data: the CLI never executes plugin code during installation.
+
+### Env entries
+
+`bunx guren plugin` does two things with each `env` entry. It appends `KEY=value` to `.env.example` (created when absent) and to `.env` when that file exists, skipping a key the file already assigns. When the app has a `config/env.ts`, it also adds the key to the `defineEnv({ ... })` call there, so the app validates it at boot like its own variables (see [Configuration](./configuration.md#declaring-the-environment)). A key `config/env.ts` already declares keeps its declaration. A `config/env.ts` with no `defineEnv({ ... })` call is left as it is, and the install prints the keys to declare by hand.
+
+| Entry field | Effect |
+|-------------|--------|
+| `key` | The variable name. A key that is not upper snake case is skipped, and a `GUREN_*` key fails the install. |
+| `value` | Written after `=` in the env files. Blank when absent. |
+| `comment` | A `#` comment line above the key, and the declaration's `.describe()`. |
+| `type` | The builder: `string` (default), `url`, `number`, `port`, `boolean` or `enum`. |
+| `choices` | The strings a `type: "enum"` key admits. Required for `enum`, refused elsewhere. |
+| `default` | `.default(value)`. Must match the type: a number for `number` and `port`, a boolean for `boolean`, one of `choices` for `enum`. |
+| `required` | Declares the key without `.optional()`, so the boot fails while it is unset. Has no effect when `default` is set. |
+| `secret` | `.secret()`, which keeps the value out of validation messages. |
+
+The manifest above declares:
+
+```typescript
+ANALYTICS_API_KEY: Env.string().optional().secret().describe('Analytics service API key'),
+ANALYTICS_BATCH_SIZE: Env.number().default(50),
+```
+
+An entry the builder would reject (an unknown `type`, a `default` of the wrong kind, a line break in `value` or `comment`) fails the install right after the package is added, before `src/app.ts`, the env files or `config/env.ts` change.
 
 ### Optional: Contribute CLI Commands
 
@@ -246,7 +271,7 @@ Any plugin, official (`@guren/plugin-*`) or community (`guren-plugin-*`), can be
 bunx guren plugin @guren/plugin-vercel
 ```
 
-The `plugin` command installs the package with `bun add` when missing (pass `--no-install` to skip), verifies the plugin's declared Guren compatibility (`--ignore-compatibility` to register anyway), adds the provider import, registers it in `createApp({ providers })`, and applies any `env` and `publishes` entries from the plugin's `gurenPlugin` manifest. `--force` overwrites already-published files.
+The `plugin` command installs the package with `bun add` when missing (pass `--no-install` to skip), verifies the plugin's declared Guren compatibility (`--ignore-compatibility` to register anyway), adds the provider import, registers it in `createApp({ providers })`, and applies any `env` (see [Env entries](#env-entries)) and `publishes` entries from the plugin's `gurenPlugin` manifest. `--force` overwrites already-published files.
 
 > **Note:** Automatic registration covers class-based provider exports and the official zero-config factory plugins (`@guren/plugin-vercel`, `@guren/plugin-cloudflare`), which are registered as `providers: [vercelPlugin()]`-style calls. Third-party plugins built with `definePlugin()` export a factory that must be called with its configuration, so register them manually in `createApp({ providers })` as shown below.
 

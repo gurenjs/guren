@@ -144,12 +144,13 @@ await storage.disk('local').put('secret.pdf', content)
 
 ### Multiple Disks
 
-Configure multiple storage backends in your application:
+`config/storage.ts` declares the disks the app stores to. Each disk reads its credentials from the validated `env`:
 
 ```ts
-import { StorageManager } from '@guren/core'
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
 
-const storage = new StorageManager({
+export default defineStorageConfig((env) => ({
   default: 'local',
   disks: {
     local: {
@@ -166,17 +167,32 @@ const storage = new StorageManager({
     },
     s3: {
       driver: 's3',
-      bucket: process.env.AWS_BUCKET!,
-      region: process.env.AWS_REGION || 'us-east-1',
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      bucket: env.AWS_BUCKET ?? '',
+      region: env.AWS_REGION ?? 'us-east-1',
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
       visibility: 'private',
     },
     memory: {
       driver: 'memory',
     },
   },
-})
+}))
+```
+
+```ts
+// src/app.ts
+import { createApp } from '@guren/core'
+import env from '../config/env.js'
+import storage from '../config/storage.js'
+
+const app = createApp({ env, config: [storage] })
+```
+
+Every key the callback reads (`AWS_BUCKET`, `AWS_REGION`, ...) must be declared in `config/env.ts`; see the [configuration guide](./configuration.md). The definition binds the manager as `storage`, so code resolves it from the container:
+
+```ts
+const storage = app.container.make('storage')
 
 // Use default disk (local)
 await storage.disk().put('file.txt', 'content')
@@ -185,6 +201,8 @@ await storage.disk().put('file.txt', 'content')
 await storage.disk('s3').put('uploads/file.txt', content)
 await storage.disk('public').put('images/logo.png', logoBuffer)
 ```
+
+Apps that configure storage in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 ### Driver Options
 
@@ -217,30 +235,35 @@ await storage.disk('public').put('images/logo.png', logoBuffer)
 ### AWS S3
 
 ```ts
-const storage = new StorageManager({
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
+
+export default defineStorageConfig((env) => ({
   default: 's3',
   disks: {
     s3: {
       driver: 's3',
       bucket: 'my-bucket',
       region: 'ap-northeast-1',
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
     },
   },
-})
+}))
 ```
 
 ### S3-Compatible Services
 
-For services like MinIO, DigitalOcean Spaces, or Cloudflare R2:
+For services like MinIO, DigitalOcean Spaces, or Cloudflare R2, point the S3 driver at the service's endpoint. Each is one more entry under `disks`:
 
 ```ts
-// MinIO
-const storage = new StorageManager({
-  default: 's3',
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
+
+export default defineStorageConfig((env) => ({
+  default: 'minio',
   disks: {
-    s3: {
+    minio: {
       driver: 's3',
       bucket: 'my-bucket',
       region: 'us-east-1',
@@ -248,59 +271,50 @@ const storage = new StorageManager({
       accessKeyId: 'minioadmin',
       secretAccessKey: 'minioadmin',
     },
-  },
-})
-
-// DigitalOcean Spaces
-const storage = new StorageManager({
-  default: 's3',
-  disks: {
-    s3: {
+    spaces: {
       driver: 's3',
       bucket: 'my-space',
       region: 'nyc3',
       endpoint: 'https://nyc3.digitaloceanspaces.com',
-      accessKeyId: process.env.DO_SPACES_KEY,
-      secretAccessKey: process.env.DO_SPACES_SECRET,
+      accessKeyId: env.DO_SPACES_KEY,
+      secretAccessKey: env.DO_SPACES_SECRET,
       url: 'https://my-space.nyc3.cdn.digitaloceanspaces.com',
     },
-  },
-})
-
-// Cloudflare R2
-const storage = new StorageManager({
-  default: 's3',
-  disks: {
-    s3: {
+    r2: {
       driver: 's3',
       bucket: 'my-bucket',
       region: 'auto',
-      endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      accessKeyId: env.R2_ACCESS_KEY_ID,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
     },
   },
-})
+}))
 ```
+
+Declare the keys these disks read (`DO_SPACES_KEY`, `CF_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, ...) in `config/env.ts`. Make an endpoint key such as `CF_ACCOUNT_ID` required for the disk the app selects: declared `.optional()` and left unset, it turns the endpoint into `https://undefined.r2.cloudflarestorage.com`.
 
 Endpoints that do not implement S3 object ACLs (R2 documents `x-amz-acl` and the ACL operations as unsupported, and MinIO deployments vary) need `acl: false`. The driver then stops sending the header, `getVisibility()` reports the disk's configured `visibility`, and `put({ visibility })` / `setVisibility()` throw when asked for the other value instead of silently not applying it:
 
 ```ts
-const storage = new StorageManager({
-  default: 's3',
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
+
+export default defineStorageConfig((env) => ({
+  default: 'r2',
   disks: {
-    s3: {
+    r2: {
       driver: 's3',
       bucket: 'my-bucket',
       region: 'auto',
-      endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      accessKeyId: env.R2_ACCESS_KEY_ID,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
       acl: false,
       visibility: 'public',
     },
   },
-})
+}))
 ```
 
 > [!NOTE]
@@ -323,26 +337,39 @@ const url = await disk.temporaryUrl('private/document.pdf', expiration)
 Declare every disk once and pick one with an environment variable, the way `bunx guren add storage` scaffolds it. Drivers are built on first use, so a disk you never touch never constructs a client or opens a connection:
 
 ```ts
-const storage = createStorageManager({
-  default: process.env.STORAGE_DISK || 'local',
-  disks: {
-    // Not served by anything. Uploads belong here — see the note below.
+// config/storage.ts
+import { defineStorageConfig, type DiskConfig } from '@guren/core'
+
+export default defineStorageConfig((env) => {
+  const disks: Record<string, DiskConfig> = {
+    // Not served by anything. Uploads belong here; see the note below.
     local: { driver: 'local', root: './storage/app' },
     // Served, because it is inside public/. For assets you ship.
     public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
-    s3: { driver: 's3', bucket: process.env.S3_BUCKET!, region: 'ap-northeast-1' },
-  },
+  }
+
+  if (env.S3_BUCKET) {
+    disks.s3 = { driver: 's3', bucket: env.S3_BUCKET, region: 'ap-northeast-1' }
+  }
+
+  if (!Object.hasOwn(disks, env.STORAGE_DISK)) {
+    throw new Error(
+      `STORAGE_DISK="${env.STORAGE_DISK}" is not a declared disk. Declare it in config/storage.ts or use one of: ${Object.keys(disks).join(', ')}.`,
+    )
+  }
+
+  return { default: env.STORAGE_DISK, disks }
 })
 ```
 
-`STORAGE_DISK=local` in development, `STORAGE_DISK=s3` in production: no code change, and `storage.disk()` returns whichever one is selected.
+`STORAGE_DISK=local` in development, `STORAGE_DISK=s3` in production: no code change, and `storage.disk()` returns whichever one is selected. `guren add storage` declares `STORAGE_DISK`; declare `S3_BUCKET` yourself in `config/env.ts`.
 
-> **Do not root a disk that receives uploads inside `public/`, or anywhere `guren storage:link` exposes.** Everything under the served tree is fetchable by URL with no signature, no expiry and no authorization check — including files a stranger uploaded. Keep uploads on a disk like `local` above and hand them out through the [attachments delivery route](./attachments.md); `guren check` fails an attachments config whose disk is reachable that way.
+> **Do not root a disk that receives uploads inside `public/`, or anywhere `guren storage:link` exposes.** Everything under the served tree is fetchable by URL with no signature, no expiry and no authorization check, including files a stranger uploaded. Keep uploads on a disk like `local` above and hand them out through the [attachments delivery route](./attachments.md); `guren check` fails an attachments config whose disk is reachable that way.
 
 Two things to know about this shape:
 
-- **The config values are read eagerly**, even for a disk you never resolve: they are evaluated when you build the object. `process.env.S3_BUCKET` being unset is harmless, but a helper that *throws* on a missing variable will throw at startup for a disk the app never touches. Keep those out of the disk map, or build that disk with `storage.registerDisk('s3', () => new S3Driver({ ... }))`, whose callback really does run on first use.
-- **An unknown name is not caught at construction.** `createStorageManager({ default: 'typo' })` succeeds and only throws `Storage disk not found: typo` when a disk is first resolved, which can be inside a queued job. The scaffolded provider checks the value against its own disk map at boot for this reason; do the same if you write the config by hand.
+- **The config values are read at boot**, even for a disk you never resolve: the callback runs when the app boots, after `config/env.ts` is validated. So declare a variable that only one environment's disk needs as `.optional()`. A required declaration fails the boot wherever the variable is unset, whether or not that environment ever touches the disk. Guarding the disk on the variable, as `S3_BUCKET` is above, keeps the disk out of the map where it is not configured.
+- **An unknown name is not caught by the manager.** It accepts `default: 'typo'` and only throws `Storage disk not found: typo` when a disk is first resolved, which can be inside a queued job. The scaffolded `config/storage.ts` checks `STORAGE_DISK` against its own disk map when the app boots for this reason, and so does the definition above. With `S3_BUCKET` unset, `STORAGE_DISK=s3` fails the boot instead of the first upload.
 
 ## File Uploads
 
@@ -469,7 +496,7 @@ describe('File uploads', () => {
 
 ## Best Practices
 
-1. **Use environment variables**: Never hardcode credentials or bucket names.
+1. **Use environment variables**: Never hardcode credentials or bucket names. Declare them in `config/env.ts` and read them in `config/storage.ts`.
 
 2. **Validate uploads**: Always validate file types, sizes, and content before storing.
 

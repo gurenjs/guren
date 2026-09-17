@@ -82,6 +82,21 @@ const app = await TestApp.create({
 })
 ```
 
+To try one environment variable without mutating `process.env`, pass your `config/env.ts` schema as `env` and the override as `envSource`. `envSource` is read ahead of `process.env`, and `''` makes a variable unset. `create()` takes no `config` array, so the override reaches what providers and controllers read through `this.make('env')`; an invalid value makes `create()` reject with an `EnvValidationError`:
+
+```ts
+import { TestApp } from '@guren/testing'
+import env from '../config/env.js'
+
+const app = await TestApp.create({
+  env,
+  envSource: { CACHE_STORE: 'memory', APP_URL: '' },
+  providers: [ReportProvider],
+})
+```
+
+`TestApp.fromApp(app)` boots with the schema and config definitions `src/app.ts` passes to `createApp()`, so a feature test sees the configuration production uses. [Configuration](./configuration.md#tests) has the details.
+
 ### Fluent Assertions
 
 Chain assertions directly on the response:
@@ -187,32 +202,36 @@ test('accepts an API token', async () => {
 
 ```ts
 // config/database.ts
-function resolveDatabaseFilename(): string {
-  if (process.env.NODE_ENV === 'test') {
-    return process.env.TEST_DATABASE_URL || './data/guren.test.db'
-  }
-  return process.env.DATABASE_URL || './data/guren.db'
-}
+const database = createSqliteDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  filename: (context) => {
+    const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
+    return process.env.NODE_ENV === 'test'
+      ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
+      : values.DATABASE_URL ?? './data/guren.db'
+  },
+})
 ```
 
-Tests read and write `./data/guren.test.db` by default, a separate file from `./data/guren.db`, so nothing a test creates ever leaks into the data you're looking at in the dev server. Override the test file itself with `TEST_DATABASE_URL` (for example, to give each parallel CI shard its own file); `DATABASE_URL` stays authoritative for every other environment.
+Tests read and write `./data/guren.test.db` by default, a separate file from `./data/guren.db`, so nothing a test creates ever leaks into the data you're looking at in the dev server. Override the test file itself with `TEST_DATABASE_URL` (for example, to give each parallel CI shard its own file); `DATABASE_URL` stays authoritative for every other environment. Both keys are declared in the scaffolded `config/env.ts`, and `context` carries their validated values when the app boots (see [Configuration](./configuration.md#the-database-connection)).
 
 > [!WARNING]
-> Scaffolds created before this branch existed write straight to `DATABASE_URL` (or `./data/guren.db`) regardless of `NODE_ENV`, so `bun test` pollutes the same database your dev server reads from. Retrofit it by replacing the `filename` option, not just adding the helper. The helper alone does nothing until `createSqliteDatabase()` is actually pointed at it:
+> Scaffolds created before this branch existed write straight to `DATABASE_URL` (or `./data/guren.db`) regardless of `NODE_ENV`, so `bun test` pollutes the same database your dev server reads from. Retrofit it by replacing the `filename` option, and declare `DATABASE_URL` and `TEST_DATABASE_URL` in `config/env.ts` (an app without that file adds it first; see [Configuration](./configuration.md#apps-with-service-providers)):
 >
 > ```diff
-> +function resolveDatabaseFilename(): string {
-> +  if (process.env.NODE_ENV === 'test') {
-> +    return process.env.TEST_DATABASE_URL || './data/guren.test.db'
-> +  }
-> +  return process.env.DATABASE_URL || './data/guren.db'
-> +}
+> +import env from './env.js'
 > +
 >  const database = createSqliteDatabase({
 >    migrationsFolder: new URL('../db/migrations', import.meta.url),
 >    seedersFolder: new URL('../db/seeders', import.meta.url),
 > -  filename: () => process.env.DATABASE_URL || './data/guren.db',
-> +  filename: resolveDatabaseFilename,
+> +  filename: (context) => {
+> +    const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
+> +    return process.env.NODE_ENV === 'test'
+> +      ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
+> +      : values.DATABASE_URL ?? './data/guren.db'
+> +  },
 >  })
 > ```
 
