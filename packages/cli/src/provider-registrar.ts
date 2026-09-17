@@ -2,7 +2,7 @@ import { consola } from 'consola'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { findFirstExisting, readIfExists } from './discovery'
-import { insertArrayOptionEntry, insertImport, PATCH_REASONS, type PatchResult } from './patch-helpers'
+import { defaultImportBinding, insertArrayOptionEntry, insertImport, PATCH_REASONS, type PatchResult } from './patch-helpers'
 import { relativeImportPath } from './utils'
 
 /**
@@ -21,17 +21,24 @@ export type EntryWiring =
   | { registered: false; entry: PatchResult }
   | { registered: true; entry: PatchResult; import: PatchResult }
 
+/** The default export of a scaffolded file: `local` from `target`, a project path without extension. */
+export interface DefaultExportImport {
+  local: string
+  target: string
+}
+
 /**
- * Adds `entry` to `appPath`'s `createApp({ <key>: [...] })` array and adds
- * `importStatement`, in **one write**: a lone import breaks `noUnusedLocals`, a lone
- * registration is an unresolved identifier, and two sequenced patches can leave either.
- * Silent by design — callers with their own reporting read the outcome, not the console.
+ * Adds `entry` to `appPath`'s `createApp({ <key>: [...] })` array and adds its import,
+ * in **one write**: a lone import breaks `noUnusedLocals`, a lone registration is an
+ * unresolved identifier, and two sequenced patches can leave either. A default export
+ * the entry already imports keeps its binding, under whatever name and specifier: a
+ * second import is a duplicate declaration, and a second entry a second definition.
  */
 export async function addArrayOptionRegistration(
   appPath: string,
   key: 'providers' | 'config',
   entry: string,
-  importStatement: string,
+  importFor: string | DefaultExportImport,
   isRegistered?: (entries: string[]) => boolean,
 ): Promise<EntryWiring> {
   const content = await readIfExists(process.cwd(), appPath)
@@ -40,7 +47,8 @@ export async function addArrayOptionRegistration(
     return { registered: false, entry: { modified: false, reason: PATCH_REASONS.fileNotFound } }
   }
 
-  const inserted = insertArrayOptionEntry(content, key, entry, { isRegistered })
+  const bound = typeof importFor === 'string' ? null : defaultImportBinding(content, appPath, importFor.target)
+  const inserted = insertArrayOptionEntry(content, key, bound ?? entry, { isRegistered })
   const alreadyRegistered = inserted.reason === PATCH_REASONS.alreadyPresent
 
   if (inserted.content === undefined && !alreadyRegistered) {
@@ -50,7 +58,7 @@ export async function addArrayOptionRegistration(
   // An already-registered entry still needs its import checked: the two can
   // fall out of sync when a user removes one by hand.
   const withEntry = inserted.content ?? content
-  const withImport = insertImport(withEntry, importStatement)
+  const withImport = bound === null ? insertImport(withEntry, importStatementFor(importFor, appPath)) : null
 
   const entryResult: PatchResult = alreadyRegistered
     ? { modified: false, reason: PATCH_REASONS.alreadyPresent }
@@ -66,20 +74,17 @@ export async function addArrayOptionRegistration(
   return { registered: true, entry: entryResult, import: importResult }
 }
 
+function importStatementFor(importFor: string | DefaultExportImport, appPath: string): string {
+  return typeof importFor === 'string'
+    ? importFor
+    : `import ${importFor.local} from '${relativeImportPath(appPath, `${importFor.target}.js`)}'`
+}
+
 export interface WireProviderOptions {
   /** App entry to patch; resolved from {@link APP_ENTRY_CANDIDATES} when omitted. */
   appPath?: string
   /** Also report each success / already-present step (the interactive `guren add auth` flow). */
   verbose?: boolean
-}
-
-/** The import of a scaffolded file's default export, relative to the entry that imports it. */
-function defaultExportImport(name: string, target: string): (appPath: string) => string {
-  return (appPath) => `import ${name} from '${relativeImportPath(appPath, target)}'`
-}
-
-function scaffoldedProviderImport(providerName: string): (appPath: string) => string {
-  return defaultExportImport(providerName, `app/Providers/${providerName}.js`)
 }
 
 /** What the app author has to do by hand for an entry this could not wire. */
@@ -95,19 +100,19 @@ function warnNoAppEntry(key: string, entry: string, importStatement: string): vo
 async function wireArrayOption(
   key: 'providers' | 'config',
   entry: string,
-  importFor: string | ((appPath: string) => string),
+  importFor: string | DefaultExportImport,
   options: WireProviderOptions,
 ): Promise<void> {
   const appPath = options.appPath ?? (await resolveAppEntry())
   // With no entry the import is still derived, from the conventional one, for the manual step.
-  const importStatement = typeof importFor === 'string' ? importFor : importFor(appPath ?? APP_ENTRY_CANDIDATES[0])
+  const importStatement = importStatementFor(importFor, appPath ?? APP_ENTRY_CANDIDATES[0])
 
   if (!appPath) {
     warnNoAppEntry(key, entry, importStatement)
     return
   }
 
-  const wiring = await addArrayOptionRegistration(appPath, key, entry, importStatement)
+  const wiring = await addArrayOptionRegistration(appPath, key, entry, importFor)
 
   if (!wiring.registered) {
     consola.warn(`Could not register ${entry} in ${appPath}: ${wiring.entry.reason}.`)
@@ -141,12 +146,12 @@ export async function wireProvider(
 
 /** Registers the definition `config/<binding>.ts` default-exports (RFC 0027 §2) in the `config` array. */
 export async function wireConfig(binding: string, options: WireProviderOptions = {}): Promise<void> {
-  await wireArrayOption('config', binding, defaultExportImport(binding, `config/${binding}.js`), options)
+  await wireArrayOption('config', binding, { local: binding, target: `config/${binding}` }, options)
 }
 
 /** `wireProvider` for a provider scaffolded at `app/Providers/<Name>.ts`, a default export. */
 export async function wireAppProvider(providerName: string, options: WireProviderOptions = {}): Promise<void> {
-  await wireArrayOption('providers', providerName, scaffoldedProviderImport(providerName), options)
+  await wireArrayOption('providers', providerName, scaffoldedProvider(providerName), options)
 }
 
 export interface ProviderRegistration {
@@ -169,13 +174,10 @@ export async function wireProviders(
   // Warned one by one even with no entry to patch: an app missing any one of a
   // blueprint's providers is missing the feature, so a single warning under-reports.
   for (const { name, importStatement } of registrations) {
-    const statement = importStatement ?? scaffoldedProviderImport(name)(appPath ?? APP_ENTRY_CANDIDATES[0])
-
-    if (!appPath) {
-      warnNoAppEntry('providers', name, statement)
-      continue
-    }
-
-    await wireProvider(name, statement, { ...options, appPath })
+    await wireArrayOption('providers', name, importStatement ?? scaffoldedProvider(name), { ...options, appPath: appPath ?? undefined })
   }
+}
+
+function scaffoldedProvider(providerName: string): DefaultExportImport {
+  return { local: providerName, target: `app/Providers/${providerName}` }
 }

@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import { readIfExists } from './discovery'
 import { parseSourceFile } from './parse-cache'
-import { resolve } from 'node:path'
+import { posix, resolve } from 'node:path'
 import { escapeRegExp } from './utils'
 
 export interface PatchResult {
@@ -199,6 +199,32 @@ function namedBindingsAlreadyImported(content: string, importStatement: string):
   }
 
   return requested.bindings.every((binding) => bound.has(binding))
+}
+
+/**
+ * The local name `content` default-imports `target` under, or `null`. `target` is a
+ * project-relative path without extension (`config/cache`), matched however the
+ * specifier spells it: relative to `fromFile`, through the `@/` alias, with or without
+ * an extension. A type-only import binds no value and does not count.
+ */
+export function defaultImportBinding(content: string, fromFile: string, target: string): string | null {
+  const ast = parseSourceFile(content)
+  if (!ast) return null
+
+  for (const statement of ast.program.body) {
+    if (statement.type !== 'ImportDeclaration' || statement.importKind === 'type') continue
+    const binding = statement.specifiers.find((specifier) => specifier.type === 'ImportDefaultSpecifier')
+    if (binding && projectPathOf(statement.source.value, fromFile) === target) return binding.local.name
+  }
+  return null
+}
+
+/** `specifier` as a project-relative path without extension, or `null` for a package import. */
+function projectPathOf(specifier: string, fromFile: string): string | null {
+  const path = specifier.startsWith('@/')
+    ? specifier.slice(2)
+    : specifier.startsWith('.') ? posix.join(posix.dirname(fromFile.replaceAll('\\', '/')), specifier) : null
+  return path === null ? null : posix.normalize(path).replace(/\.[cm]?[jt]sx?$/u, '')
 }
 
 /** The name an import specifier refers to — `import { "a-b" as c }` is legal. */
