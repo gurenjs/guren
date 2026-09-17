@@ -3,7 +3,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { Controller, MemoryQueueDriver, Worker, createApp, createCsrfMiddleware, createQueueManager, type Router } from '@guren/core'
+import { BroadcastManager, Controller, MemoryQueueDriver, Worker, createApp, createCsrfMiddleware, createQueueManager, type Router } from '@guren/core'
 import { Agent, Output, aiPlugin, defineAiConfig, stepCountIs, type AgentToolScope } from '@guren/plugin-ai'
 import { TestApp } from './test-app'
 
@@ -94,7 +94,7 @@ beforeAll(async () => {
         conversations: { driver: 'memory' },
       })),
     ],
-    providers: [aiPlugin({ agents: [Summarizer] })],
+    providers: [aiPlugin({ agents: [Summarizer, Writer] })],
   })
   application.use('*', createCsrfMiddleware({ exclude: ['/summarize', '/unscripted'] }))
   app = await TestApp.fromApp(application)
@@ -244,6 +244,28 @@ describe('TestApp.fakeAi', () => {
     await new Worker(driver, { container: application.container, stopWhenEmpty: true, sleep: 0 }).start()
 
     expect(ai.calls(Summarizer).map((call) => [call.input, call.response?.text])).toEqual([['long text', 'queued summary']])
+  })
+
+  it('should record a broadcast run and the tools it ran when the worker streams it', async () => {
+    using ai = app.fakeAi()
+    ai.respond(Writer, [{ toolCalls: [{ name: 'posts_store', input: { title: 'Broadcast' } }], then: 'Created it.' }])
+    const driver = new MemoryQueueDriver()
+    application.container.instance('queue', createQueueManager({ drivers: { memory: () => driver } }))
+    const broadcast = new BroadcastManager()
+    application.container.instance('broadcast', broadcast)
+    const types: string[] = []
+    broadcast.driver().subscribe('private-writer.1', (event) => {
+      types.push((event.data as { type: string }).type)
+    })
+
+    await application.container.make('ai').agent(Writer).as({ id: 1 }).broadcast('Write it', 'private-writer.1')
+    await new Worker(driver, { container: application.container, stopWhenEmpty: true, sleep: 0 }).start()
+
+    expect(created).toEqual(['Broadcast'])
+    expect(types.at(-1)).toBe('finish')
+    expect(ai.calls(Writer).map((call) => [call.input, call.toolCalls.map((recorded) => recorded.name)])).toEqual([
+      ['Write it', ['posts_store']],
+    ])
   })
 
   it('should refuse an anonymous conversation without consuming a scripted response', async () => {

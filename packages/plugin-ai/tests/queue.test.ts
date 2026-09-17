@@ -1,17 +1,10 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, expect, test } from 'bun:test'
-import {
-  MemoryQueueDriver,
-  Worker,
-  createQueueManager,
-  type AgentPrincipal,
-  type EventManager,
-  type QueuedJob,
-} from '@guren/core'
+import type { AgentPrincipal, MemoryQueueDriver, QueuedJob } from '@guren/core'
 
-import { Agent, AgentResponded, RunAgentJob, type RunAgentPayload } from '../src'
-import { bootHarness, type Harness } from './fixture'
+import { Agent, RunAgentJob, type RunAgentPayload } from '../src'
+import { bootHarness, withQueue, type Harness } from './fixture'
 
 class Support extends Agent {
   static override agentName = 'support'
@@ -27,20 +20,7 @@ const USER: AgentPrincipal = { kind: 'user', id: 7, abilities: ['tickets.read'] 
 
 async function bootQueued(options: Parameters<typeof bootHarness>[0] = {}) {
   const h = await bootHarness({ conversations: { driver: 'memory' }, plugin: { agents: [Support] }, ...options })
-  const driver = new MemoryQueueDriver()
-  h.app.container.instance('queue', createQueueManager({ default: 'memory', drivers: { memory: () => driver } }))
-  const responded: AgentResponded[] = []
-  h.app.container.make<EventManager>('events').on(AgentResponded, (event) => {
-    responded.push(event)
-  })
-  const failures: Error[] = []
-  const work = async () => {
-    const worker = new Worker(driver, { container: h.app.container, stopWhenEmpty: true, sleep: 0 }, {
-      jobFailed: (_job, error) => failures.push(error),
-    })
-    await worker.start()
-  }
-  return { h, driver, responded, failures, work }
+  return { h, ...withQueue(h) }
 }
 
 async function queuedJobs(driver: MemoryQueueDriver): Promise<QueuedJob[]> {
