@@ -1,11 +1,11 @@
-import { type SessionConfig } from '@guren/core'
+import { defineSessionConfig } from '@guren/core'
 import { sessions } from '../db/schema.js'
 
 // SESSION_DRIVER picks a store per environment. `database` is the default
 // because this app runs on Workers, where per-isolate memory does not survive
 // between the login redirect and the next read.
-export const sessionConfig: SessionConfig = {
-  default: process.env.SESSION_DRIVER || 'database',
+export default defineSessionConfig((env) => ({
+  default: env.SESSION_DRIVER,
   stores: {
     database: { driver: 'database', table: sessions },
     // No table, no binding: everything in the session travels in the cookie,
@@ -14,4 +14,4 @@ export const sessionConfig: SessionConfig = {
     // that can be flipped while D1 is down.
     cookie: { driver: 'cookie' },
   },
-}
+}))

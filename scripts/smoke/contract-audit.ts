@@ -104,6 +104,7 @@ async function auditWeb(root: string): Promise<void> {
   const appBootstrap = await read(root, 'src/app.ts')
   assert(appBootstrap.includes('providers: ['), 'Web app must declare providers through createApp().')
   assert(appBootstrap.includes('DatabaseProvider'), 'Web app must register DatabaseProvider.')
+  assert(appBootstrap.includes('  env,\n  config: [session, oauth],'), 'Web app must pass its env schema and the session and oauth definitions to createApp().')
 
   const homeController = await read(root, 'app/Http/Controllers/HomeController.ts')
   assert(homeController.includes('pages.Home'), 'Web home controller must use typed page definitions.')

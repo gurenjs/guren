@@ -1,3 +1,4 @@
+import type { AppEnv } from '@guren/core'
 import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
 import { configureOrm, seedDatabase } from './database.js'
@@ -30,7 +31,7 @@ async function hasMigrations(): Promise<boolean> {
   return existsSync(resolve(migrationsFolder, 'meta/_journal.json'))
 }
 
-export async function bootModels(): Promise<void> {
+export async function bootModels(env?: AppEnv): Promise<void> {
   if (bootstrapped) {
     return
   }
@@ -41,7 +42,7 @@ export async function bootModels(): Promise<void> {
   }
 
   try {
-    await configureOrm()
+    await configureOrm(env ? { env } : undefined)
     // D1 seeding is a CLI workflow (`wrangler d1 execute`) and seedDatabase()
     // throws on Workers. One-shot provisioning, not part of booting, so it stays
     // out of production boots on every runtime: run `bun run db:seed`.

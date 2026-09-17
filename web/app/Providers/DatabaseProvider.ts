@@ -11,7 +11,7 @@ export default class DatabaseProvider extends ServiceProvider {
       return
     }
 
-    await bootModels()
+    await bootModels(this.container.makeOptional('env'))
     this.initialized = true
   }
 }
