@@ -144,12 +144,13 @@ await storage.disk('local').put('secret.pdf', content)
 
 ### 複数のディスク
 
-1つのアプリケーションに複数のストレージバックエンドを設定できます。
+`config/storage.ts` に、アプリが使うディスクを宣言します。各ディスクの認証情報は検証済みの `env` から読みます。
 
 ```ts
-import { StorageManager } from '@guren/core'
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
 
-const storage = new StorageManager({
+export default defineStorageConfig((env) => ({
   default: 'local',
   disks: {
     local: {
@@ -166,17 +167,32 @@ const storage = new StorageManager({
     },
     s3: {
       driver: 's3',
-      bucket: process.env.AWS_BUCKET!,
-      region: process.env.AWS_REGION || 'us-east-1',
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      bucket: env.AWS_BUCKET ?? '',
+      region: env.AWS_REGION ?? 'us-east-1',
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
       visibility: 'private',
     },
     memory: {
       driver: 'memory',
     },
   },
-})
+}))
+```
+
+```ts
+// src/app.ts
+import { createApp } from '@guren/core'
+import env from '../config/env.js'
+import storage from '../config/storage.js'
+
+const app = createApp({ env, config: [storage] })
+```
+
+コールバックが読むキー（`AWS_BUCKET`、`AWS_REGION` など）は、すべて `config/env.ts` で宣言しておく必要があります。[設定ガイド](./configuration.md)を参照してください。定義は manager を `storage` としてバインドするので、コードからはコンテナで解決します。
+
+```ts
+const storage = app.container.make('storage')
 
 // デフォルトディスク（local）を使用
 await storage.disk().put('file.txt', 'content')
@@ -185,6 +201,8 @@ await storage.disk().put('file.txt', 'content')
 await storage.disk('s3').put('uploads/file.txt', content)
 await storage.disk('public').put('images/logo.png', logoBuffer)
 ```
+
+provider でストレージを構成しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照してください。
 
 ### ドライバオプション
 
@@ -217,30 +235,35 @@ await storage.disk('public').put('images/logo.png', logoBuffer)
 ### AWS S3
 
 ```ts
-const storage = new StorageManager({
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
+
+export default defineStorageConfig((env) => ({
   default: 's3',
   disks: {
     s3: {
       driver: 's3',
       bucket: 'my-bucket',
       region: 'ap-northeast-1',
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
     },
   },
-})
+}))
 ```
 
 ### S3互換サービス
 
-MinIO、DigitalOcean Spaces、Cloudflare R2などのサービスにも対応しています。
+MinIO、DigitalOcean Spaces、Cloudflare R2などのサービスには、S3 ドライバの接続先をそのサービスのエンドポイントに向けて対応します。サービスごとに `disks` のエントリを1つ足します。
 
 ```ts
-// MinIO
-const storage = new StorageManager({
-  default: 's3',
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
+
+export default defineStorageConfig((env) => ({
+  default: 'minio',
   disks: {
-    s3: {
+    minio: {
       driver: 's3',
       bucket: 'my-bucket',
       region: 'us-east-1',
@@ -248,59 +271,50 @@ const storage = new StorageManager({
       accessKeyId: 'minioadmin',
       secretAccessKey: 'minioadmin',
     },
-  },
-})
-
-// DigitalOcean Spaces
-const storage = new StorageManager({
-  default: 's3',
-  disks: {
-    s3: {
+    spaces: {
       driver: 's3',
       bucket: 'my-space',
       region: 'nyc3',
       endpoint: 'https://nyc3.digitaloceanspaces.com',
-      accessKeyId: process.env.DO_SPACES_KEY,
-      secretAccessKey: process.env.DO_SPACES_SECRET,
+      accessKeyId: env.DO_SPACES_KEY,
+      secretAccessKey: env.DO_SPACES_SECRET,
       url: 'https://my-space.nyc3.cdn.digitaloceanspaces.com',
     },
-  },
-})
-
-// Cloudflare R2
-const storage = new StorageManager({
-  default: 's3',
-  disks: {
-    s3: {
+    r2: {
       driver: 's3',
       bucket: 'my-bucket',
       region: 'auto',
-      endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      accessKeyId: env.R2_ACCESS_KEY_ID,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
     },
   },
-})
+}))
 ```
+
+これらのディスクが読むキー（`DO_SPACES_KEY`、`CF_ACCOUNT_ID`、`R2_ACCESS_KEY_ID` など）は `config/env.ts` で宣言します。アプリが選ぶディスクのエンドポイントに使う `CF_ACCOUNT_ID` のようなキーは、必須として宣言してください。`.optional()` のまま未設定にすると、エンドポイントが `https://undefined.r2.cloudflarestorage.com` になります。
 
 S3 のオブジェクト ACL に対応していないエンドポイント（R2 は `x-amz-acl` と ACL 操作を非対応と明記しており、MinIO は構成によります）では `acl: false` を指定します。するとドライバはヘッダを送らなくなり、`getVisibility()` はディスクに設定した `visibility` を返します。`put({ visibility })` や `setVisibility()` で逆の値を求められた場合は、黙って無視せず例外を投げます。
 
 ```ts
-const storage = new StorageManager({
-  default: 's3',
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
+
+export default defineStorageConfig((env) => ({
+  default: 'r2',
   disks: {
-    s3: {
+    r2: {
       driver: 's3',
       bucket: 'my-bucket',
       region: 'auto',
-      endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      accessKeyId: process.env.R2_ACCESS_KEY_ID,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      accessKeyId: env.R2_ACCESS_KEY_ID,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
       acl: false,
       visibility: 'public',
     },
   },
-})
+}))
 ```
 
 > [!NOTE]
@@ -323,26 +337,39 @@ const url = await disk.temporaryUrl('private/document.pdf', expiration)
 ディスクはまとめて宣言しておき、環境変数で選びます（`bunx guren add storage` はこの形で生成します）。ドライバが作られるのは初回利用時なので、触らないディスクはクライアントも接続も作りません。
 
 ```ts
-const storage = createStorageManager({
-  default: process.env.STORAGE_DISK || 'local',
-  disks: {
+// config/storage.ts
+import { defineStorageConfig, type DiskConfig } from '@guren/core'
+
+export default defineStorageConfig((env) => {
+  const disks: Record<string, DiskConfig> = {
     // 何からも配信されません。アップロードはこちらへ（下の注記を参照）。
     local: { driver: 'local', root: './storage/app' },
     // public/ の中にあるため配信されます。自分で用意するアセット向け。
     public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
-    s3: { driver: 's3', bucket: process.env.S3_BUCKET!, region: 'ap-northeast-1' },
-  },
+  }
+
+  if (env.S3_BUCKET) {
+    disks.s3 = { driver: 's3', bucket: env.S3_BUCKET, region: 'ap-northeast-1' }
+  }
+
+  if (!Object.hasOwn(disks, env.STORAGE_DISK)) {
+    throw new Error(
+      `STORAGE_DISK="${env.STORAGE_DISK}" is not a declared disk. Declare it in config/storage.ts or use one of: ${Object.keys(disks).join(', ')}.`,
+    )
+  }
+
+  return { default: env.STORAGE_DISK, disks }
 })
 ```
 
-開発では `STORAGE_DISK=local`、本番では `STORAGE_DISK=s3` にします。コードを書き換える必要はなく、`storage.disk()` が選ばれた方を返します。
+開発では `STORAGE_DISK=local`、本番では `STORAGE_DISK=s3` にします。コードを書き換える必要はなく、`storage.disk()` が選ばれた方を返します。`STORAGE_DISK` は `guren add storage` が宣言します。`S3_BUCKET` は自分で `config/env.ts` に宣言してください。
 
 > **アップロードを受け取るディスクを `public/` 配下、および `guren storage:link` が公開する場所に置かないでください。** 配信ツリー配下のファイルは、署名も有効期限も認可チェックもなしに URL で取得できます。見知らぬ相手がアップロードしたファイルも同様です。アップロードは上記の `local` のようなディスクに置き、[attachments の配信ルート](./attachments.md)経由で渡してください。`guren check` は、その形になっている attachments 設定を失敗として報告します。
 
 この形について、2点注意があります。
 
-- **解決しないディスクの設定値も先に読まれます。** オブジェクトを組み立てた時点で評価されるためです。`process.env.S3_BUCKET` が未設定でも害はありませんが、未設定時に例外を投げるヘルパーを書くと、そのディスクを一度も使わなくても起動時に落ちます。そうしたヘルパーはディスクの定義に置かず、`storage.registerDisk('s3', () => new S3Driver({ ... }))` を使ってください。このコールバックなら、本当に初回利用時まで実行されません。
-- **知らないディスク名は構築時には弾かれません。** `createStorageManager({ default: 'typo' })` は成功し、最初にディスクを解決したときに初めて `Storage disk not found: typo` を投げます。それがキュージョブの中ということもあり得ます。生成される StorageProvider が起動時に名前を検証しているのはこのためです。設定を手書きする場合も同じようにしてください。
+- **解決しないディスクの設定値も起動時に読まれます。** コールバックは、`config/env.ts` の検証が済んだあと、アプリの起動時に実行されるためです。一部の環境のディスクでしか使わない変数は `.optional()` で宣言してください。必須として宣言すると、そのディスクを使わない環境でも、変数が未設定なら起動に失敗します。上の `S3_BUCKET` のように変数の有無でディスクを足すと、設定のない環境ではディスク自体がマップに入りません。
+- **知らないディスク名は manager では弾かれません。** manager は `default: 'typo'` をそのまま受け付け、最初にディスクを解決したときに初めて `Storage disk not found: typo` を投げます。それがキュージョブの中ということもあり得ます。生成される `config/storage.ts` が起動時に `STORAGE_DISK` をディスクのマップと照合しているのはこのためで、上の定義も同じ照合をしています。`S3_BUCKET` が未設定のまま `STORAGE_DISK=s3` にすると、最初のアップロードではなく起動の時点で失敗します。
 
 ## ファイルアップロード
 
@@ -465,7 +492,7 @@ describe('ファイルアップロード', () => {
 
 ## ベストプラクティス
 
-1. **環境変数を使用**: 認証情報やバケット名をハードコードしない。
+1. **環境変数を使用**: 認証情報やバケット名をハードコードしない。`config/env.ts` で宣言し、`config/storage.ts` で読みます。
 
 2. **アップロードを検証**: 保存前にファイルタイプ、サイズ、コンテンツを必ず検証。
 

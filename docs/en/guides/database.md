@@ -36,21 +36,29 @@ import { DrizzleAdapter } from '@guren/core'
 DrizzleAdapter.configure({ connectionString: process.env.DATABASE_URL })
 ```
 
+That is the low-level call. An app does not make it itself: `config/database.ts` builds the connection with a driver factory and default-exports it with `defineDatabaseConfig()`, and `createApp({ config })` lists that definition, so the ORM connects at boot with the app's validated environment. `DATABASE_URL` is declared in the scaffolded `config/env.ts`. The driver sections below show the file for each database, and [Configuration](./configuration.md#the-database-connection) explains the resolver's `context` argument.
+
 ## MySQL Support
 
 Use `createMySqlDatabase` when your app runs on MySQL-compatible databases.
 
 ```ts
 // config/database.ts
-import { createMySqlDatabase } from '@guren/core'
+import { createMySqlDatabase, defineDatabaseConfig } from '@guren/core'
+import env from './env.js'
 
 const database = createMySqlDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  connectionString: () => process.env.DATABASE_URL,
+  // `context` is the app's validated environment. `guren db:*` runs this
+  // outside an app, so the schema is parsed here instead.
+  connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
+    ?? 'mysql://guren:guren@localhost:33306/guren',
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
 
 Like the PostgreSQL and SQLite adapters, the MySQL adapter exposes the same runtime API (`getDatabase`, `migrateDatabase`, `configureOrm`, `seedDatabase`) so switching drivers is mostly an import/configuration change.
@@ -64,20 +72,29 @@ Use `createAwsDataApiDatabase` when your app runs on AWS Lambda against Aurora S
 
 ```ts
 // config/database.ts
-import { createAwsDataApiDatabase } from '@guren/core'
+import { createAwsDataApiDatabase, defineDatabaseConfig, type ConnectionContext } from '@guren/core'
+import env from './env.js'
+
+// `context` is the app's validated environment. `guren db:*` runs the resolvers
+// outside an app, so the schema is parsed here instead.
+const values = (context?: ConnectionContext) => context?.env ?? env.parse(undefined, { mode: 'report' }).values
 
 const database = createAwsDataApiDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  // Each setting also falls back to an environment variable:
+  // A resolver returning undefined falls back to the environment variable:
   // DATABASE_NAME, DATABASE_RESOURCE_ARN, DATABASE_SECRET_ARN
-  database: () => process.env.DATABASE_NAME,
-  resourceArn: () => process.env.DATABASE_RESOURCE_ARN,
-  secretArn: () => process.env.DATABASE_SECRET_ARN,
+  database: (context) => values(context).DATABASE_NAME,
+  resourceArn: (context) => values(context).DATABASE_RESOURCE_ARN,
+  secretArn: (context) => values(context).DATABASE_SECRET_ARN,
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
+
+Declare the three keys in `config/env.ts` (see [Configuration](./configuration.md#declaring-the-environment)), for example as `Env.string().optional()`.
 
 Install the driver package alongside it:
 
@@ -900,16 +917,29 @@ Guren supports SQLite out of the box via Bun's built-in SQLite driver. New proje
 
 ```ts
 // config/database.ts
-import { createSqliteDatabase } from '@guren/core'
+import { createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
+import env from './env.js'
 
 const database = createSqliteDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  filename: () => process.env.DATABASE_URL || './data/guren.db',
+  // `context` is the app's validated environment. `guren db:*` runs this
+  // outside an app, so the schema is parsed here instead.
+  filename: (context) => {
+    const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
+    // `bun test` sets NODE_ENV=test, so the suite uses its own file.
+    return process.env.NODE_ENV === 'test'
+      ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
+      : values.DATABASE_URL ?? './data/guren.db'
+  },
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
+
+With `seedOnBoot` true, the app runs the seeders at boot once the migrations folder holds migrations. Scaffolds turn it off in production, where you run `bunx guren db:seed` explicitly. [Testing](./testing.md#test-database-isolation) covers the separate test file.
 
 The SQLite adapter has the same API as `createPostgresDatabase`, so switching between them only requires changing the import and connection config.
 

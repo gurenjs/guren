@@ -58,33 +58,29 @@ Wraps the app's fetch handler for API Gateway v1/v2 and ALB. Routes, controllers
 
 Processes SQS messages as Guren jobs. Supports **partial batch failure**: only failed messages are returned to SQS for retry.
 
-Configure the SQS driver in the queue provider `guren add queue` scaffolds at `app/Providers/QueueProvider.ts`:
+Configure the SQS driver in the `config/queue.ts` that `guren add queue` scaffolds, and list it in `createApp({ config })`:
 
 ```typescript
+// config/queue.ts
 import { SQSClient } from '@aws-sdk/client-sqs'
-import { ServiceProvider, createQueueManager, createSqsAdapter, SqsDriver } from '@guren/core'
+import { createSqsAdapter, defineQueueConfig, SqsDriver } from '@guren/core'
 
-export default class QueueProvider extends ServiceProvider {
-  register(): void {
-    const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
-    const queue = createQueueManager({
-      default: 'sqs',
-      drivers: {
-        sqs: () =>
-          new SqsDriver(adapter, {
-            queueUrl: process.env.SQS_QUEUE_URL!,
-            // Optional: map logical queue names to separate SQS URLs
-            queueUrls: {
-              emails: process.env.SQS_EMAILS_QUEUE_URL!,
-            },
-          }),
-      },
-    })
-
-    this.container.instance('queue', queue)
-  }
-}
+export default defineQueueConfig((env) => ({
+  default: 'sqs',
+  drivers: {
+    sqs: () =>
+      new SqsDriver(createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' })), {
+        queueUrl: env.SQS_QUEUE_URL,
+        // Optional: map logical queue names to separate SQS URLs
+        queueUrls: {
+          emails: env.SQS_EMAILS_QUEUE_URL,
+        },
+      }),
+  },
+}))
 ```
+
+Declare `SQS_QUEUE_URL` and `SQS_EMAILS_QUEUE_URL` in `config/env.ts` (see [Configuration](./configuration.md)), so a function deployed without them fails at boot instead of on the first dispatch. An app that configures its queue in a provider keeps working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 Jobs are dispatched the same way as on the server: `await SendEmailJob.dispatch({ to: 'user@example.com' })`. The `SqsDriver` serializes the job to SQS, and the Lambda handler deserializes and executes it.
 
@@ -161,12 +157,18 @@ See the [Database Guide](./database.md) for the full factory reference.
 `createPostgresDatabase` works against RDS when the function runs inside the VPC. Route connections through RDS Proxy and disable prepared statements, which pin proxy sessions:
 
 ```typescript
+// config/database.ts
+import { createPostgresDatabase } from '@guren/core'
+import env from './env.js'
+
 const database = createPostgresDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
-  connectionString: () => process.env.DATABASE_URL,
+  connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL,
   clientOptions: { prepare: false, max: 1 },
 })
 ```
+
+The resolver reads the validated environment when the app boots, and parses the schema itself when `guren db:migrate` calls it outside one ([The database connection](./configuration.md#the-database-connection)).
 
 ### Only the client you use is bundled
 
@@ -237,23 +239,20 @@ Deploying assets by hand instead? Sync `.lambda/assets` to a bucket and set `GUR
 
 ### Service Providers
 
-Auto-discovery (`Bun.Glob`) is not available on Lambda. List all providers explicitly:
+A bundle has no directory to scan, so everything the app registers is named in `createApp()`: services as config definitions in `config`, and any providers the app still has in `providers`:
 
 ```typescript
 const app = createApp({
-  providers: [
-    DatabaseProvider,
-    AuthProvider,
-    CacheProvider,
-    // ... all providers
-  ],
-  routes: registerRoutes,
+  env,
+  config: [database, http, session, cache, queue],
+  providers: [SessionDriversProvider],
+  routes: registerWebRoutes,
 })
 ```
 
 ### Migrations & Seeding
 
-The scaffolded `config/app.ts` seeds the database on boot as a local development convenience and skips it when `NODE_ENV=production`. Keep that guard. Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
+The scaffolded `config/database.ts` seeds the database on boot as a local development convenience (`seedOnBoot: process.env.NODE_ENV !== 'production'`) and skips it in production. Keep that guard. Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
 
 **Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so a `db:migrate` console command can apply them in place. See [Console — `createConsoleHandler(kernel)`](#console--createconsolehandlerkernel) for the command and how to invoke it.
 
@@ -284,31 +283,34 @@ bun add @aws-sdk/client-dynamodb
 ```
 
 ```typescript
-// app/Providers/SessionProvider.ts
-import { createSessionManager, ServiceProvider } from '@guren/core'
-import { registerDynamoDbSessionDriver } from '@guren/plugin-lambda'
-import { sessionConfig } from '../../config/session.js'
+// config/session.ts
+import { defineSessionConfig } from '@guren/core'
+import { sessions } from '../db/schema.js'
 
-export default class SessionProvider extends ServiceProvider {
+export default defineSessionConfig((env) => ({
+  default: env.SESSION_DRIVER,
+  stores: {
+    database: { driver: 'database', table: sessions },
+    dynamodb: { driver: 'dynamodb' },
+  },
+}))
+```
+
+`config/session.ts` can name the store but cannot register its driver, so add the driver to the bound manager from a provider's `register()`:
+
+```typescript
+// app/Providers/SessionDriversProvider.ts
+import { ServiceProvider } from '@guren/core'
+import { registerDynamoDbSessionDriver } from '@guren/plugin-lambda'
+
+export default class SessionDriversProvider extends ServiceProvider {
   register(): void {
-    const manager = createSessionManager(sessionConfig)
-    registerDynamoDbSessionDriver(manager)
-    this.container.instance('session', manager)
+    registerDynamoDbSessionDriver(this.container.make('session'))
   }
 }
 ```
 
-```typescript
-// config/session.ts
-import { type SessionConfig } from '@guren/core'
-
-export const sessionConfig: SessionConfig = {
-  default: process.env.SESSION_DRIVER || 'dynamodb',
-  stores: {
-    dynamodb: { driver: 'dynamodb' },
-  },
-}
-```
+List `session` in `createApp({ config })` and the provider in `providers`, then set `SESSION_DRIVER=dynamodb` on the function. Definitions bind before any provider registers, and the session manager resolves stores lazily, so the driver is in place before the boot checks that the default store's driver exists. A driver registered in `boot()` would be too late for that check.
 
 The table name comes from `DYNAMODB_SESSIONS_TABLE`, which the CDK construct's `sessionsTable` sets on every function; pass `table` in the store config to name it yourself. Registration is a call rather than an import side effect, so a bundler that drops an unused import cannot drop the driver with it.
 

@@ -60,26 +60,33 @@ bunx wrangler d1 create my-app
 ドライバはランタイムによって `config/database.ts` で切り替えます。D1 は SQLite 互換なので、スキーマは SQLite のダイアレクトで書き、開発時はローカルの SQLite ファイルを使います。
 
 ```typescript
-import { createD1Database, createSqliteDatabase } from '@guren/core'
-import { getWorkersEnv } from '@guren/plugin-cloudflare'
+// config/database.ts
+import { createD1Database, createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
+import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
+import env from './env.js'
 
 interface WorkersEnv {
   DB: unknown
 }
 
-export function isWorkersRuntime(): boolean {
-  return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers'
-}
-
 const database = isWorkersRuntime()
-  ? createD1Database({ binding: () => getWorkersEnv<WorkersEnv>().DB })
+  ? createD1Database({
+      binding: () => getWorkersEnv<WorkersEnv>().DB,
+      migrationsFolder: new URL('../db/migrations', import.meta.url),
+    })
   : createSqliteDatabase({
       migrationsFolder: new URL('../db/migrations', import.meta.url),
-      filename: () => process.env.SQLITE_DATABASE_PATH || './data/guren.db',
+      seedersFolder: new URL('../db/seeders', import.meta.url),
+      // `context` はアプリの検証済み環境変数。`guren db:*` はアプリの外で動くので、スキーマを自分で解析する
+      filename: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).SQLITE_DATABASE_PATH,
     })
 
-export const { getDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
+
+`config/env.ts` に `SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db')` を宣言し、`database` を `createApp({ config })` に加えてください。リゾルバの詳細は [設定ガイド](./configuration.md#データベース接続) にあります。`getWorkersEnv` と `isWorkersRuntime` は `@guren/plugin-cloudflare/env` から import します。パッケージのルートにはビルド用のツールも含まれていて、ワーカーのバンドルには不要だからです。
 
 バインディングは値ではなく、解決用の関数として渡します。バインディングが存在するのはリクエストが届いてからなので、読み取りを遅らせる必要があります。
 
@@ -95,47 +102,63 @@ bunx wrangler d1 migrations apply my-app --remote
 > [!WARNING]
 > 先にビルドしてください。`migrations_dir` は生成ディレクトリの中を指しているので、ビルド前は空です。空のフォルダを見つけた `wrangler` は「適用するマイグレーションはありません」と**エラーではなく正常終了で**報告するため、ビルド前に適用すると失敗が成功のように見えます。
 
-モデルの初期化では、Workers 上ではファイルシステムの確認を飛ばします（確認する対象がないため）。
-
-```typescript
-export async function bootModels(): Promise<void> {
-  await configureOrm()
-  if (!isWorkersRuntime()) {
-    await seedDatabase()
-  }
-}
-```
+ワーカーが自分でシードを実行することもありません。`defineDatabaseConfig` がシードするのは、`seedOnBoot` が true で、かつデータベースがマイグレーションありと報告したときだけです。`cloudflare:build` は `NODE_ENV` を `production` に固定しますし、D1 のハンドルは探すファイルシステムを持たないので、マイグレーションなしと報告します。ローカルの `bun run dev` は SQLite 側を使い、マイグレーションがあればブート時にシードします。
 
 ## セッションと OAuth state はデータベースに保存する
 
 これは好みの問題ではありません。リクエストごとに別の isolate へ届くことがあり、isolate 同士はデータベース以外に何も共有しないためです。メモリ実装のままでもローカルでは動いているように見えますが、本番ではセッションが毎回消えます。
 
 ```typescript
-import { createApp, AuthServiceProvider, DatabaseSessionStore } from '@guren/core'
+// config/session.ts
+import { defineSessionConfig } from '@guren/core'
 import { sessions } from '../db/schema.js'
 
-const app = createApp({
-  providers: [AuthServiceProvider],
-  auth: {
-    autoSession: true,
-    sessionOptions: {
-      store: new DatabaseSessionStore(sessions),
-      cookieSecure: true,
-    },
+export default defineSessionConfig((env) => ({
+  default: env.SESSION_DRIVER,
+  stores: {
+    database: { driver: 'database', table: sessions },
   },
-})
+}))
 ```
+
+`config/env.ts` には `SESSION_DRIVER: Env.string().default('database')` を宣言します。デプロイ先で何も設定しなくても、データベースのストアが選ばれます。
 
 OAuth も同様です。認可へのリダイレクトと、そこから戻ってくるコールバックは別の isolate に届くのが普通なので、両者を結びつける state は共有できる場所に置く必要があります。
 
 ```typescript
-import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
+// config/oauth.ts
+import { DatabaseOAuthStateStore, defineOAuthConfig } from '@guren/core'
 import { oauthStates } from '../db/schema.js'
 
-const oauth = createOAuthManager({
+export default defineOAuthConfig(() => ({
+  // `providers` は OAuth ガイドのとおり
   stateStore: new DatabaseOAuthStateStore(oauthStates),
+}))
+```
+
+2つの定義は、それを使うセッションミドルウェアの設定と一緒に `createApp()` に並べます:
+
+```typescript
+// src/app.ts
+import { createApp } from '@guren/core'
+import database from '../config/database.js'
+import env from '../config/env.js'
+import oauth from '../config/oauth.js'
+import session from '../config/session.js'
+import { registerWebRoutes } from '../routes/web.js'
+
+const app = createApp({
+  env,
+  config: [database, session, oauth],
+  auth: {
+    autoSession: true,
+    sessionOptions: { cookieSecure: true },
+  },
+  routes: registerWebRoutes,
 })
 ```
+
+これらのストアをプロバイダや `auth.sessionOptions.store` で配線しているアプリもそのまま動きます。詳しくは [サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 どちらのストアもテーブルを必要とします。`sessions` は `bunx guren add session` が生成し、`oauth_states` のカラムは [Stateストレージ](./oauth.md#stateストレージ) に載っています。`bunx guren make:auth --oauth` は両方のテーブルを生成し、両方のストアを配線します。
 
@@ -156,22 +179,30 @@ bunx wrangler r2 bucket create my-app-media
 ]
 ```
 
-次に、Workers 上では R2、それ以外ではローカルファイルシステムを使うディスクを登録します。`config/database.ts` が D1 に使っているのと同じランタイム判定です:
+次に、`config/storage.ts` で `media` をデフォルトのディスクにします:
 
 ```typescript
-// app/Providers/StorageProvider.ts
-import { ServiceProvider, createStorageManager, LocalStorageDriver } from '@guren/core'
-import { R2Driver, getWorkersEnv } from '@guren/plugin-cloudflare'
-import { isWorkersRuntime } from '../../config/database.js'
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
+
+export default defineStorageConfig(() => ({ default: 'media' }))
+```
+
+ストレージの設定で指定できるドライバは組み込みの `local`・`s3`・`memory` だけです。ディスク自体は、プロバイダの `register()` からバインド済みのマネージャに登録します。Workers 上では R2、それ以外ではローカルファイルシステムを使います。`config/database.ts` が D1 に使っているのと同じランタイム判定です:
+
+```typescript
+// app/Providers/MediaDiskProvider.ts
+import { ServiceProvider, LocalStorageDriver } from '@guren/core'
+import { R2Driver } from '@guren/plugin-cloudflare'
+import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
 interface Env {
   MEDIA: unknown
 }
 
-export default class StorageProvider extends ServiceProvider {
+export default class MediaDiskProvider extends ServiceProvider {
   register(): void {
-    const storage = createStorageManager({ default: 'media' })
-    storage.registerDisk('media', () =>
+    this.container.make('storage').registerDisk('media', () =>
       isWorkersRuntime()
         ? new R2Driver({
             binding: () => getWorkersEnv<Env>().MEDIA,
@@ -179,10 +210,11 @@ export default class StorageProvider extends ServiceProvider {
           })
         : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
     )
-    this.container.instance('storage', storage)
   }
 }
 ```
+
+`storage` を `createApp({ config })` に、`MediaDiskProvider` を `providers` に加えてください。
 
 `binding` は値ではなくリゾルバです。バインディングは最初のリクエストと共に届くので、D1 バインディングと同じく読み取りを遅らせる必要があります。あとは[ストレージガイド](./storage.md)の `storage.disk('media').put(...)` / `get(...)` / `files(...)` がそのまま動きます。`bun run dev` はディスクに、`wrangler dev` と本番は R2 に書き込みます。
 
@@ -215,7 +247,7 @@ Bun プロセス（スクリプトや Workers 以外のデプロイ）から同�
 bun -e "console.log('base64:'+Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64'))" | bunx wrangler secret put APP_KEY
 ```
 
-アプリが読む他の値（OAuth の認証情報、API キーなど）も同じ方法で設定します。`wrangler secret put` で設定した値は実行時に `process.env.*` から参照できます。`wrangler.jsonc` の `vars` に書いてよいのは、秘密でない値だけです。
+アプリが読む他の値（OAuth の認証情報、API キーなど）も同じ方法で設定し、それぞれ `config/env.ts` で宣言します。vars とシークレットはワーカーのエントリポイントの `env` に届き、`process.env` に届くとは限りません。`@guren/plugin-cloudflare` がアプリのブート前にこの `env` をバインドし、スキーマはそこから値を読むので、アプリのコードはローカルと同じく検証済みの値を読めます（[設定](./configuration.md#cloudflare-workers)）。`wrangler.jsonc` の `vars` に書いてよいのは、秘密でない値だけです。
 
 ## 無料プランの制限
 

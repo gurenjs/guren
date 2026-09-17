@@ -2,7 +2,7 @@
 
 Guren provides a unified caching API with support for multiple storage backends. Caching helps improve application performance by storing expensive computations or database queries for quick retrieval.
 
-The standard vNext path is: import cache APIs from `@guren/core`, configure the cache manager in a provider, and keep services responsible for cache keys and invalidation.
+The standard path is: import cache APIs from `@guren/core`, configure the stores in `config/cache.ts`, and keep services responsible for cache keys and invalidation.
 
 ## Core Concepts
 
@@ -98,16 +98,52 @@ const settings = await cache.store().rememberForever('app:settings', async () =>
 
 ## Configuration
 
-### Multiple Stores
-
-Configure multiple cache backends in your application:
+`bunx guren add cache` writes `config/cache.ts`, declares `CACHE_STORE` in `config/env.ts`, and adds the definition to `createApp({ config })`:
 
 ```ts
-import { CacheManager } from '@guren/core'
-import { createRedisClient } from '@guren/core'
+// config/cache.ts
+import { defineCacheConfig } from '@guren/core'
 
-const cache = new CacheManager({
-  default: 'redis',
+// CACHE_STORE picks the store. `memory` is per-process: correct on one
+// long-lived server, wrong on Workers, Lambda and Vercel, where two requests
+// can land in different instances.
+export default defineCacheConfig((env) => ({
+  default: env.CACHE_STORE,
+  stores: {
+    memory: { driver: 'memory' },
+    // For Redis, add `createRedisClient` from '@guren/core/redis' and a
+    // `redis: { driver: 'redis', client: () => createRedisClient({ url: env.REDIS_URL }) }`
+    // entry, with REDIS_URL declared in config/env.ts. Import it only where you use
+    // it, since that module pulls in ioredis. The function runs when the store is
+    // first resolved, so no connection opens until CACHE_STORE selects it.
+  },
+}))
+```
+
+```ts
+// src/app.ts
+import cache from '../config/cache.js'
+
+const app = createApp({
+  env,
+  config: [database, http, cache],
+  routes: registerWebRoutes,
+})
+```
+
+The callback receives the validated environment, so every key it reads must be declared in `config/env.ts`. See the [configuration guide](./configuration.md) for declaring variables and for how definitions boot.
+
+### Multiple Stores
+
+Declare every backend the app may use under `stores`, and let `CACHE_STORE` pick the default:
+
+```ts
+// config/cache.ts
+import { defineCacheConfig } from '@guren/core'
+import { createRedisClient } from '@guren/core/redis'
+
+export default defineCacheConfig((env) => ({
+  default: env.CACHE_STORE,
   stores: {
     memory: {
       driver: 'memory',
@@ -118,7 +154,7 @@ const cache = new CacheManager({
       driver: 'redis',
       // `client` may be a function: it runs when this store is first used, so a
       // store that is declared but not selected opens no connection.
-      client: () => createRedisClient({ url: process.env.REDIS_URL }),
+      client: () => createRedisClient({ url: env.REDIS_URL }),
       prefix: 'myapp:cache:', // Key prefix (default: 'cache:')
     },
     file: {
@@ -127,15 +163,27 @@ const cache = new CacheManager({
       extension: '.cache',    // File extension (default: '.cache')
     },
   },
-})
+}))
+```
 
-// Use default store (redis)
+`@guren/core/redis` pulls in ioredis, so import it only in the config that uses it. `REDIS_URL` goes in `config/env.ts` beside `CACHE_STORE`.
+
+The name in `CACHE_STORE` is not checked at boot. A name missing from `stores` throws `Cache store not found` the first time the store is resolved.
+
+The definition binds the manager as `cache` in the container:
+
+```ts
+const cache = app.container.make('cache') // CacheManager
+
+// Use default store (CACHE_STORE)
 await cache.store().set('key', 'value')
 
 // Use specific store
 await cache.store('memory').set('temp', 'data', 60)
 await cache.store('file').set('persistent', 'data')
 ```
+
+Apps that configure the cache in a `CacheProvider` keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers) for moving one to a definition.
 
 ### Driver Options
 
@@ -263,30 +311,28 @@ export async function checkRateLimit(ip: string, limit: number): Promise<boolean
 ### Session-like Data
 
 ```ts
-const cache = new CacheManager({
-  default: 'redis',
-  stores: {
-    redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) },
-  },
-})
+import { resolve, type CacheManager } from '@guren/core'
+
+// The app's cache as config/cache.ts configures it, with CACHE_STORE=redis
+const cache = () => resolve<CacheManager>('cache')
 
 export async function setUserPreferences(
   userId: string,
   preferences: Record<string, unknown>
 ): Promise<void> {
-  await cache.store().set(`user:${userId}:prefs`, preferences, 86400) // 24 hours
+  await cache().store().set(`user:${userId}:prefs`, preferences, 86400) // 24 hours
 }
 
 export async function getUserPreferences(
   userId: string
 ): Promise<Record<string, unknown> | null> {
-  return cache.store().get(`user:${userId}:prefs`)
+  return cache().store().get(`user:${userId}:prefs`)
 }
 ```
 
 ## Container Integration
 
-The cache subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+`config/cache.ts` binds the cache manager as a singleton. You can resolve it from the container:
 
 ```ts
 // Access via app.container or this.container in providers
@@ -294,26 +340,6 @@ The cache subsystem is registered as a singleton via a `ServiceProvider`. You ca
 // Type-safe resolution
 const cache = container.make('cache') // CacheManager
 await cache.store().get('key')
-```
-
-### Custom Configuration via ServiceProvider
-
-Override the default cache configuration by creating your own provider:
-
-```ts
-import { ServiceProvider, createCacheManager } from '@guren/core'
-
-class AppCacheProvider extends ServiceProvider {
-  register(): void {
-    this.container.singleton('cache', () => createCacheManager({
-      default: 'redis',
-      stores: {
-        redis: { driver: 'redis', host: 'localhost' },
-        memory: { driver: 'memory', maxSize: 500 },
-      },
-    }))
-  }
-}
 ```
 
 ## Testing

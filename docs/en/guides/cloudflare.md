@@ -60,26 +60,33 @@ bunx wrangler d1 create my-app
 Select the driver by runtime in `config/database.ts`. D1 speaks SQLite, so write your schema in the SQLite dialect and keep a local SQLite file for development:
 
 ```typescript
-import { createD1Database, createSqliteDatabase } from '@guren/core'
-import { getWorkersEnv } from '@guren/plugin-cloudflare'
+// config/database.ts
+import { createD1Database, createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
+import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
+import env from './env.js'
 
 interface WorkersEnv {
   DB: unknown
 }
 
-export function isWorkersRuntime(): boolean {
-  return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers'
-}
-
 const database = isWorkersRuntime()
-  ? createD1Database({ binding: () => getWorkersEnv<WorkersEnv>().DB })
+  ? createD1Database({
+      binding: () => getWorkersEnv<WorkersEnv>().DB,
+      migrationsFolder: new URL('../db/migrations', import.meta.url),
+    })
   : createSqliteDatabase({
       migrationsFolder: new URL('../db/migrations', import.meta.url),
-      filename: () => process.env.SQLITE_DATABASE_PATH || './data/guren.db',
+      seedersFolder: new URL('../db/seeders', import.meta.url),
+      // `context` is the app's validated environment; `guren db:*` runs outside one and parses the schema itself.
+      filename: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).SQLITE_DATABASE_PATH,
     })
 
-export const { getDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
+
+Declare `SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db')` in `config/env.ts` and list `database` in `createApp({ config })`; the [Configuration guide](./configuration.md#the-database-connection) covers the resolver. Import `getWorkersEnv` and `isWorkersRuntime` from `@guren/plugin-cloudflare/env`: the package root also carries the build tooling, which has no place in the worker bundle.
 
 The binding is a resolver, not a value: bindings only exist once a request arrives, so it must be read lazily.
 
@@ -95,47 +102,63 @@ bunx wrangler d1 migrations apply my-app --remote
 > [!WARNING]
 > Build first. `migrations_dir` points inside the generated directory, and `wrangler` reports "no migrations to apply" — successfully, with no error — when it finds an empty folder. Applying before building is the one failure here that looks like success.
 
-Skip the filesystem probe when bootstrapping models, since there is no filesystem to probe:
-
-```typescript
-export async function bootModels(): Promise<void> {
-  await configureOrm()
-  if (!isWorkersRuntime()) {
-    await seedDatabase()
-  }
-}
-```
+The worker never seeds itself either. `defineDatabaseConfig` seeds only when `seedOnBoot` is true and the database reports migrations; `cloudflare:build` pins `NODE_ENV` to `production`, and a D1 handle reports none, since it has no filesystem to look in. Locally, `bun run dev` takes the SQLite branch and seeds on boot once migrations exist.
 
 ## Sessions and OAuth State Must Be Database-Backed
 
 This is not a preference. Each request may land on a different isolate, and isolates share nothing but the database. The in-memory defaults will appear to work locally and then drop every session in production.
 
 ```typescript
-import { createApp, AuthServiceProvider, DatabaseSessionStore } from '@guren/core'
+// config/session.ts
+import { defineSessionConfig } from '@guren/core'
 import { sessions } from '../db/schema.js'
 
-const app = createApp({
-  providers: [AuthServiceProvider],
-  auth: {
-    autoSession: true,
-    sessionOptions: {
-      store: new DatabaseSessionStore(sessions),
-      cookieSecure: true,
-    },
+export default defineSessionConfig((env) => ({
+  default: env.SESSION_DRIVER,
+  stores: {
+    database: { driver: 'database', table: sessions },
   },
-})
+}))
 ```
+
+Declare `SESSION_DRIVER: Env.string().default('database')` in `config/env.ts`, so a deploy that sets nothing still gets the database store.
 
 The same applies to OAuth: the authorize redirect and the callback that follows it routinely land on different isolates, so the state that ties them together has to be shared.
 
 ```typescript
-import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
+// config/oauth.ts
+import { DatabaseOAuthStateStore, defineOAuthConfig } from '@guren/core'
 import { oauthStates } from '../db/schema.js'
 
-const oauth = createOAuthManager({
+export default defineOAuthConfig(() => ({
+  // `providers` as in the OAuth guide
   stateStore: new DatabaseOAuthStateStore(oauthStates),
+}))
+```
+
+List both definitions in `createApp()` beside the session middleware they back:
+
+```typescript
+// src/app.ts
+import { createApp } from '@guren/core'
+import database from '../config/database.js'
+import env from '../config/env.js'
+import oauth from '../config/oauth.js'
+import session from '../config/session.js'
+import { registerWebRoutes } from '../routes/web.js'
+
+const app = createApp({
+  env,
+  config: [database, session, oauth],
+  auth: {
+    autoSession: true,
+    sessionOptions: { cookieSecure: true },
+  },
+  routes: registerWebRoutes,
 })
 ```
+
+An app that wires these stores in a provider or through `auth.sessionOptions.store` keeps working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 Both stores need tables: `sessions` comes from `bunx guren add session`, and the `oauth_states` columns are in [State Storage](./oauth.md#state-storage). `bunx guren make:auth --oauth` generates both tables and wires both stores.
 
@@ -156,22 +179,30 @@ bunx wrangler r2 bucket create my-app-media
 ]
 ```
 
-Then register a disk that uses R2 on Workers and the local filesystem everywhere else, the same runtime switch `config/database.ts` uses for D1:
+Then make `media` the default disk in `config/storage.ts`:
 
 ```typescript
-// app/Providers/StorageProvider.ts
-import { ServiceProvider, createStorageManager, LocalStorageDriver } from '@guren/core'
-import { R2Driver, getWorkersEnv } from '@guren/plugin-cloudflare'
-import { isWorkersRuntime } from '../../config/database.js'
+// config/storage.ts
+import { defineStorageConfig } from '@guren/core'
+
+export default defineStorageConfig(() => ({ default: 'media' }))
+```
+
+A storage config can name only the built-in drivers (`local`, `s3`, `memory`), so register the disk itself on the bound manager from a provider's `register()`. It uses R2 on Workers and the local filesystem everywhere else, the same runtime switch `config/database.ts` uses for D1:
+
+```typescript
+// app/Providers/MediaDiskProvider.ts
+import { ServiceProvider, LocalStorageDriver } from '@guren/core'
+import { R2Driver } from '@guren/plugin-cloudflare'
+import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
 interface Env {
   MEDIA: unknown
 }
 
-export default class StorageProvider extends ServiceProvider {
+export default class MediaDiskProvider extends ServiceProvider {
   register(): void {
-    const storage = createStorageManager({ default: 'media' })
-    storage.registerDisk('media', () =>
+    this.container.make('storage').registerDisk('media', () =>
       isWorkersRuntime()
         ? new R2Driver({
             binding: () => getWorkersEnv<Env>().MEDIA,
@@ -179,10 +210,11 @@ export default class StorageProvider extends ServiceProvider {
           })
         : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
     )
-    this.container.instance('storage', storage)
   }
 }
 ```
+
+List `storage` in `createApp({ config })` and `MediaDiskProvider` in `providers`.
 
 `binding` is a resolver, not a value: bindings arrive with the first request, so it must be read lazily, exactly like the D1 binding. Every `storage.disk('media').put(...)` / `get(...)` / `files(...)` call from the [Storage guide](./storage.md) then works unchanged; `bun run dev` writes to disk, `wrangler dev` and production write to R2.
 
@@ -215,7 +247,7 @@ The one class the synchronous gates cannot catch — bytes whose header lies —
 bun -e "console.log('base64:'+Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64'))" | bunx wrangler secret put APP_KEY
 ```
 
-Add any others your app reads (OAuth credentials, API keys) the same way. Secrets set through `wrangler secret put` are available as `process.env.*` at runtime; only non-sensitive values belong in the `vars` block of `wrangler.jsonc`.
+Add any others your app reads (OAuth credentials, API keys) the same way, and declare each in `config/env.ts`. Vars and secrets arrive on the worker entrypoint's `env` rather than reliably on `process.env`; `@guren/plugin-cloudflare` binds that `env` before the app boots, and the schema reads from it, so app code reads the validated values as it does locally ([Configuration](./configuration.md#cloudflare-workers)). Only non-sensitive values belong in the `vars` block of `wrangler.jsonc`.
 
 ## Free Plan Limits
 

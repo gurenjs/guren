@@ -73,6 +73,21 @@ const app = await TestApp.create({
 })
 ```
 
+`process.env` を書き換えずに環境変数を 1 つだけ試すには、`config/env.ts` のスキーマを `env` に、上書きする値を `envSource` に渡します。`envSource` は `process.env` より先に読まれ、`''` を渡した変数は未設定として扱われます。`create()` は `config` 配列を受け取らないため、上書きが届くのはプロバイダーやコントローラーが `this.make('env')` で読む値です。不正な値を渡すと `create()` は `EnvValidationError` で reject します:
+
+```ts
+import { TestApp } from '@guren/testing'
+import env from '../config/env.js'
+
+const app = await TestApp.create({
+  env,
+  envSource: { CACHE_STORE: 'memory', APP_URL: '' },
+  providers: [ReportProvider],
+})
+```
+
+`TestApp.fromApp(app)` は `src/app.ts` が `createApp()` に渡すスキーマと config 定義で起動するので、機能テストは本番と同じ設定で動きます。詳しくは[設定](./configuration.md#テスト)を参照してください。
+
 ### リクエストの送信
 
 TestApp は標準的な HTTP メソッドをすべてサポートしています。
@@ -307,32 +322,36 @@ test('placing an order queues the processing job', async () => {
 
 ```ts
 // config/database.ts
-function resolveDatabaseFilename(): string {
-  if (process.env.NODE_ENV === 'test') {
-    return process.env.TEST_DATABASE_URL || './data/guren.test.db'
-  }
-  return process.env.DATABASE_URL || './data/guren.db'
-}
+const database = createSqliteDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  filename: (context) => {
+    const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
+    return process.env.NODE_ENV === 'test'
+      ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
+      : values.DATABASE_URL ?? './data/guren.db'
+  },
+})
 ```
 
-テストはデフォルトで `./data/guren.db` とは別ファイルの `./data/guren.test.db` を読み書きします。そのため、テストが作成したデータが開発サーバーで見ているデータに混ざることはありません。テスト用ファイル自体は `TEST_DATABASE_URL` で上書きできます(例: 並列実行する CI シャードごとに別ファイルを割り当てる場合)。それ以外の環境では引き続き `DATABASE_URL` が優先されます。
+テストはデフォルトで `./data/guren.db` とは別ファイルの `./data/guren.test.db` を読み書きします。そのため、テストが作成したデータが開発サーバーで見ているデータに混ざることはありません。テスト用ファイル自体は `TEST_DATABASE_URL` で上書きできます(例: 並列実行する CI シャードごとに別ファイルを割り当てる場合)。それ以外の環境では引き続き `DATABASE_URL` が優先されます。どちらのキーもスキャフォールドの `config/env.ts` に宣言済みで、アプリの起動時には検証済みの値が `context` で渡されます([設定](./configuration.md#データベース接続)を参照)。
 
 > [!WARNING]
-> このブランチが導入される前にスキャフォールドされたプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)へ直接書き込みます。そのため `bun test` が開発サーバーと同じデータベースを汚染してしまいます。後付けする際はヘルパー関数を追加するだけでなく `filename` オプション自体を差し替えてください。ヘルパーを定義しただけでは `createSqliteDatabase()` が古い `filename` を参照したままで、効果がありません:
+> このブランチが導入される前にスキャフォールドされたプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)へ直接書き込みます。そのため `bun test` が開発サーバーと同じデータベースを汚染してしまいます。後付けする際は `filename` オプションを差し替え、`DATABASE_URL` と `TEST_DATABASE_URL` を `config/env.ts` に宣言してください。このファイルがないアプリは先に追加します([設定](./configuration.md#サービスプロバイダを使うアプリ)を参照):
 >
 > ```diff
-> +function resolveDatabaseFilename(): string {
-> +  if (process.env.NODE_ENV === 'test') {
-> +    return process.env.TEST_DATABASE_URL || './data/guren.test.db'
-> +  }
-> +  return process.env.DATABASE_URL || './data/guren.db'
-> +}
+> +import env from './env.js'
 > +
 >  const database = createSqliteDatabase({
 >    migrationsFolder: new URL('../db/migrations', import.meta.url),
 >    seedersFolder: new URL('../db/seeders', import.meta.url),
 > -  filename: () => process.env.DATABASE_URL || './data/guren.db',
-> +  filename: resolveDatabaseFilename,
+> +  filename: (context) => {
+> +    const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
+> +    return process.env.NODE_ENV === 'test'
+> +      ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
+> +      : values.DATABASE_URL ?? './data/guren.db'
+> +  },
 >  })
 > ```
 

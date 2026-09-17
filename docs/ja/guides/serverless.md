@@ -58,33 +58,29 @@ bunx guren lambda:build
 
 SQS メッセージを Guren のジョブとして処理します。**部分バッチ失敗**に対応しており、失敗したメッセージだけが SQS に戻されてリトライされます。
 
-`guren add queue` が `app/Providers/QueueProvider.ts` に置くキュープロバイダで、SQS ドライバを設定します:
+SQS ドライバは `guren add queue` が生成する `config/queue.ts` で設定し、`createApp({ config })` に加えます:
 
 ```typescript
+// config/queue.ts
 import { SQSClient } from '@aws-sdk/client-sqs'
-import { ServiceProvider, createQueueManager, createSqsAdapter, SqsDriver } from '@guren/core'
+import { createSqsAdapter, defineQueueConfig, SqsDriver } from '@guren/core'
 
-export default class QueueProvider extends ServiceProvider {
-  register(): void {
-    const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
-    const queue = createQueueManager({
-      default: 'sqs',
-      drivers: {
-        sqs: () =>
-          new SqsDriver(adapter, {
-            queueUrl: process.env.SQS_QUEUE_URL!,
-            // オプション: 論理キュー名を別の SQS URL にマッピング
-            queueUrls: {
-              emails: process.env.SQS_EMAILS_QUEUE_URL!,
-            },
-          }),
-      },
-    })
-
-    this.container.instance('queue', queue)
-  }
-}
+export default defineQueueConfig((env) => ({
+  default: 'sqs',
+  drivers: {
+    sqs: () =>
+      new SqsDriver(createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' })), {
+        queueUrl: env.SQS_QUEUE_URL,
+        // オプション: 論理キュー名を別の SQS URL にマッピング
+        queueUrls: {
+          emails: env.SQS_EMAILS_QUEUE_URL,
+        },
+      }),
+  },
+}))
 ```
+
+`SQS_QUEUE_URL` と `SQS_EMAILS_QUEUE_URL` は `config/env.ts` で宣言してください（[設定](./configuration.md) を参照）。宣言しておけば、値を設定し忘れた関数は最初のディスパッチではなくブート時に失敗します。キューをプロバイダで設定しているアプリもそのまま動きます。詳しくは [サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 ジョブのディスパッチはサーバー上と同じです（`await SendEmailJob.dispatch({ to: 'user@example.com' })`）。`SqsDriver` がジョブを SQS にシリアライズし、Lambda ハンドラーがデシリアライズして実行します。
 
@@ -161,12 +157,18 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 関数を VPC 内で動かす場合は `createPostgresDatabase` が RDS に対して動作します。接続は RDS Proxy 経由にし、プリペアドステートメントは無効化してください。プロキシのセッションピニングを引き起こします:
 
 ```typescript
+// config/database.ts
+import { createPostgresDatabase } from '@guren/core'
+import env from './env.js'
+
 const database = createPostgresDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
-  connectionString: () => process.env.DATABASE_URL,
+  connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL,
   clientOptions: { prepare: false, max: 1 },
 })
 ```
+
+このリゾルバは、アプリのブート時には検証済みの環境変数を受け取ります。アプリの外から `guren db:migrate` が呼ぶときは、スキーマを自分で解析します（[データベース接続](./configuration.md#データベース接続)）。
 
 ### 使うクライアントだけがバンドルされる
 
@@ -236,23 +238,20 @@ Lambda は静的ファイルの配信に向きません。`lambda:build` が `pu
 
 ### サービスプロバイダ
 
-自動検出（`Bun.Glob`）は Lambda では使えません。プロバイダはすべて明示的に列挙してください:
+バンドルには走査できるディレクトリがありません。アプリが登録するものはすべて `createApp()` に書きます。サービスは config 定義として `config` に、まだ残っているプロバイダは `providers` に並べます:
 
 ```typescript
 const app = createApp({
-  providers: [
-    DatabaseProvider,
-    AuthProvider,
-    CacheProvider,
-    // ... すべてのプロバイダ
-  ],
-  routes: registerRoutes,
+  env,
+  config: [database, http, session, cache, queue],
+  providers: [SessionDriversProvider],
+  routes: registerWebRoutes,
 })
 ```
 
 ### マイグレーションとシード
 
-スキャフォールドされた `config/app.ts` は、ローカル開発の利便性としてブート時にシードを実行し、`NODE_ENV=production` ではスキップします。このガードはそのまま残してください。Lambda はコールドスタートのたびにアプリをブートするため、ブート時シードは本番データに対して繰り返し実行されてしまいます。
+スキャフォールドされた `config/database.ts` は、ローカル開発の利便性としてブート時にシードを実行し（`seedOnBoot: process.env.NODE_ENV !== 'production'`）、本番ではスキップします。このガードはそのまま残してください。Lambda はコールドスタートのたびにアプリをブートするため、ブート時シードは本番データに対して繰り返し実行されてしまいます。
 
 **マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、`db:migrate` コンソールコマンドでその場で適用できます。コマンド定義と呼び出し方は [コンソールハンドラ `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
 
@@ -283,31 +282,34 @@ bun add @aws-sdk/client-dynamodb
 ```
 
 ```typescript
-// app/Providers/SessionProvider.ts
-import { createSessionManager, ServiceProvider } from '@guren/core'
-import { registerDynamoDbSessionDriver } from '@guren/plugin-lambda'
-import { sessionConfig } from '../../config/session.js'
+// config/session.ts
+import { defineSessionConfig } from '@guren/core'
+import { sessions } from '../db/schema.js'
 
-export default class SessionProvider extends ServiceProvider {
+export default defineSessionConfig((env) => ({
+  default: env.SESSION_DRIVER,
+  stores: {
+    database: { driver: 'database', table: sessions },
+    dynamodb: { driver: 'dynamodb' },
+  },
+}))
+```
+
+`config/session.ts` はストアに名前を付けられますが、ドライバの登録まではできません。バインドされたマネージャへのドライバ追加は、プロバイダの `register()` で行います:
+
+```typescript
+// app/Providers/SessionDriversProvider.ts
+import { ServiceProvider } from '@guren/core'
+import { registerDynamoDbSessionDriver } from '@guren/plugin-lambda'
+
+export default class SessionDriversProvider extends ServiceProvider {
   register(): void {
-    const manager = createSessionManager(sessionConfig)
-    registerDynamoDbSessionDriver(manager)
-    this.container.instance('session', manager)
+    registerDynamoDbSessionDriver(this.container.make('session'))
   }
 }
 ```
 
-```typescript
-// config/session.ts
-import { type SessionConfig } from '@guren/core'
-
-export const sessionConfig: SessionConfig = {
-  default: process.env.SESSION_DRIVER || 'dynamodb',
-  stores: {
-    dynamodb: { driver: 'dynamodb' },
-  },
-}
-```
+`session` を `createApp({ config })` に、このプロバイダを `providers` に加え、関数に `SESSION_DRIVER=dynamodb` を設定します。定義はどのプロバイダの登録よりも先にバインドされ、セッションマネージャはストアを遅延して解決します。そのため、デフォルトストアのドライバが存在するかをブート時に確かめる時点で、ドライバは登録済みです。`boot()` で登録すると、この確認に間に合いません。
 
 テーブル名は `DYNAMODB_SESSIONS_TABLE` から読みます。CDK コンストラクトの `sessionsTable` が全関数に設定するもので、ストア設定に `table` を渡せば自分で指定できます。登録が import の副作用ではなく関数呼び出しなのは、未使用 import を落とすバンドラがドライバごと落とすのを防ぐためです。
 

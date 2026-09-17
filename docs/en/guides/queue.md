@@ -2,7 +2,7 @@
 
 The queue moves slow work off the request: sending mail, processing uploads, calling an external API. A controller dispatches a job and responds immediately; a worker process picks the job up and runs it afterwards.
 
-The standard vNext path is: import queue APIs from `@guren/core`, configure the queue manager in a provider, and keep controllers focused on dispatching jobs.
+The standard path is: import queue APIs from `@guren/core`, configure the drivers in `config/queue.ts`, and keep controllers focused on dispatching jobs.
 
 ## Core Concepts
 
@@ -144,7 +144,7 @@ until the backlog clears.
 
 ### Using the Facade
 
-The `queue` binding is the `QueueManager` your provider registered (`QueueServiceProvider`, or a provider of your own). `Job.dispatch()` resolves the manager's default driver from the container by itself, so binding the manager and registering a driver is all a dispatch needs. Resolve the manager when you want the driver in hand, for a worker or to inspect a queue:
+The `queue` binding is the `QueueManager` that `config/queue.ts` configures. `Job.dispatch()` resolves the manager's default driver from the container by itself, so binding the manager and registering a driver is all a dispatch needs. Resolve the manager when you want the driver in hand, for a worker or to inspect a queue:
 
 ```ts
 // Resolve the queue manager from the container
@@ -160,24 +160,68 @@ await Queue.dispatch(SendWelcomeEmailJob, { userId: 1 })
 
 ### Manual Setup
 
-`Job.dispatch()` finds the manager through the container, so a manager you build yourself is bound as `queue` from a provider's `register()`:
+`Job.dispatch()` finds the manager through the container, where `config/queue.ts` binds it as `queue`. `bunx guren add queue` writes that definition, declares `QUEUE_CONNECTION` in `config/env.ts`, and adds the definition to `createApp({ config })`:
 
 ```ts
-import { ServiceProvider, createQueueManager, MemoryDriver } from '@guren/core'
+// config/queue.ts
+import { defineQueueConfig, MemoryDriver, SyncDriver } from '@guren/core'
 
-export default class QueueProvider extends ServiceProvider {
-  register(): void {
-    const queue = createQueueManager({
-      default: 'memory',
-      drivers: {
-        memory: () => new MemoryDriver(),
-      },
-    })
+// QUEUE_CONNECTION=sync executes jobs inline on dispatch (the default, no
+// worker process needed); 'memory' queues them for a Worker.
+const drivers = {
+  sync: () => new SyncDriver(),
+  memory: () => new MemoryDriver(),
+}
 
-    this.container.instance('queue', queue)
+export default defineQueueConfig((env) => {
+  // Checked at boot: the manager accepts any name and throws on the first dispatch.
+  if (!Object.hasOwn(drivers, env.QUEUE_CONNECTION)) {
+    throw new Error(
+      `QUEUE_CONNECTION="${env.QUEUE_CONNECTION}" is not a declared driver. Declare it in config/queue.ts or use one of: ${Object.keys(drivers).join(', ')}.`,
+    )
+  }
+
+  return { default: env.QUEUE_CONNECTION, drivers }
+})
+```
+
+The callback receives the validated environment, so `QUEUE_CONNECTION` and any other key it reads must be declared in `config/env.ts` (see the [configuration guide](./configuration.md)). The name check runs when the app boots, because the manager itself accepts any driver name and throws only on the first dispatch.
+
+A definition binds the queue but does not register jobs. The worker looks a job class up by the name in its message, so registration stays in a provider's `boot()`, and `guren add queue` writes one:
+
+```ts
+// app/Providers/JobsProvider.ts
+import { ServiceProvider, registerJob } from '@guren/core'
+import { ProcessWelcomeSequenceJob } from '../Jobs/ProcessWelcomeSequenceJob.js'
+
+// config/queue.ts binds the queue; this registers the jobs it runs.
+export default class JobsProvider extends ServiceProvider {
+  register(): void {}
+
+  boot(): void {
+    // Every booted process registers them, including a worker that dispatches
+    // nothing itself: a queued message carries the job's name, not its class.
+    registerJob(ProcessWelcomeSequenceJob)
   }
 }
 ```
+
+Both go into the app:
+
+```ts
+// src/app.ts
+import queue from '../config/queue.js'
+import JobsProvider from '../app/Providers/JobsProvider.js'
+
+const app = createApp({
+  env,
+  config: [database, http, queue],
+  providers: [JobsProvider],
+  routes: registerWebRoutes,
+})
+```
+
+Apps that bind the queue in a `QueueProvider` keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers) for moving one to a definition.
 
 `Job.dispatch()` cannot find a manager that nothing binds. Dispatch through that manager explicitly instead: `await queue.dispatch(SendWelcomeEmailJob, payload)`. `setQueueDriver()` can still pin such a manager's driver, but it is deprecated since 2.23.0 and removed in 3.0.0.
 
@@ -285,27 +329,34 @@ await worker.stop()
 
 ### Using QueueManager
 
-For applications with multiple queue backends, use `createQueueManager()`:
+For applications with multiple queue backends, declare each driver in `config/queue.ts` and let `QUEUE_CONNECTION` pick the default:
 
 ```ts
-import { createQueueManager, MemoryDriver, RedisDriver, createRedisClient } from '@guren/core'
+// config/queue.ts
+import { defineQueueConfig, MemoryDriver, RedisDriver } from '@guren/core'
+import { createRedisClient } from '@guren/core/redis'
 
-const redis = createRedisClient({ url: process.env.REDIS_URL })
-
-const queueManager = createQueueManager({
-  default: 'redis',
+export default defineQueueConfig((env) => ({
+  default: env.QUEUE_CONNECTION,
   drivers: {
     memory: () => new MemoryDriver(),
-    redis: () => new RedisDriver(redis),
+    // A factory runs when its driver is first resolved, so Redis is dialed only
+    // once something uses this driver.
+    redis: () => new RedisDriver(createRedisClient({ url: env.REDIS_URL })),
   },
-})
+}))
+```
 
-// Resolve the default driver. Job.dispatch() only finds a manager bound as
-// `queue` in the container (see Manual Setup above).
-const driver = queueManager.driver()
+Keep the driver-name check from the scaffold above when `default` comes from the environment. Resolve drivers from the bound manager:
+
+```ts
+const queue = app.container.make('queue') // QueueManager
+
+// Resolve the default driver
+const driver = queue.driver()
 
 // Get a specific driver
-const memoryDriver = queueManager.driver('memory')
+const memoryDriver = queue.driver('memory')
 ```
 
 ### Redis Driver
@@ -313,24 +364,22 @@ const memoryDriver = queueManager.driver('memory')
 For production, use the Redis driver for persistence and multi-server support:
 
 ```ts
-import { createQueueManager, RedisDriver, createRedisClient } from '@guren/core'
+// config/queue.ts
+import { defineQueueConfig, RedisDriver } from '@guren/core'
+import { createRedisClient } from '@guren/core/redis'
 
-const redis = createRedisClient({
-  url: process.env.REDIS_URL,
-})
-
-const queue = createQueueManager({
+export default defineQueueConfig((env) => ({
   default: 'redis',
   drivers: {
     redis: () =>
-      new RedisDriver(redis, {
-        prefix: 'myapp:queue:', // Key prefix (default: 'guren:queue:')
+      new RedisDriver(createRedisClient({ url: env.REDIS_URL }), {
+        prefix: 'myapp:queue:', // Key prefix (default: 'queue:')
       }),
   },
-})
-
-const driver = queue.driver()
+}))
 ```
+
+Declare `REDIS_URL` in `config/env.ts`. `@guren/core/redis` pulls in ioredis, so import it only in the config that uses it.
 
 ### Sync Driver
 
@@ -344,12 +393,13 @@ released back to the sync driver runs again immediately, whatever delay its
 you need to observe retry timing.
 
 ```ts
-import { createQueueManager, SyncDriver } from '@guren/core'
+// config/queue.ts
+import { defineQueueConfig, SyncDriver } from '@guren/core'
 
-const queue = createQueueManager({
+export default defineQueueConfig(() => ({
   default: 'sync',
   drivers: { sync: () => new SyncDriver() },
-})
+}))
 ```
 
 ## Failed Jobs
@@ -400,7 +450,7 @@ await driver.deleteFailedJob(jobId)
 
 ## Container Integration
 
-The queue subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+`config/queue.ts` binds the queue manager as a singleton. You can resolve it from the container:
 
 ```ts
 // Access via app.container or this.container in providers

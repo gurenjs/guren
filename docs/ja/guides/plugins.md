@@ -109,7 +109,8 @@ export type { AnalyticsConfig } from './plugin'
     "compatibility": ">=1.0.0",
     "provider": "AnalyticsServiceProvider",
     "env": [
-      { "key": "ANALYTICS_API_KEY", "comment": "Analytics service API key" }
+      { "key": "ANALYTICS_API_KEY", "comment": "Analytics service API key", "secret": true },
+      { "key": "ANALYTICS_BATCH_SIZE", "type": "number", "default": 50 }
     ],
     "publishes": [
       { "from": "stubs/analytics.ts", "to": "config/analytics.ts" }
@@ -122,10 +123,34 @@ export type { AnalyticsConfig } from './plugin'
 |-----------|------|
 | `compatibility` | サポートするGurenバージョンのsemver範囲。`bunx guren plugin`のインストール時と`bunx guren doctor`で検証されます。 |
 | `provider` | `bunx guren plugin`が`createApp({ providers })`に登録する名前付きクラスエクスポート。`definePlugin()`ファクトリの場合は省略します（手動登録）。 |
-| `env` | インストール時にアプリの`.env.example`（`.env`が存在すればそちらにも）へ追記される環境変数キー。 |
+| `env` | アプリが必要とする環境変数キー。インストール時に`.env.example`（`.env`が存在すればそちらにも）へ追記され、`config/env.ts`に宣言されます。詳しくは下記を参照してください。 |
 | `publishes` | パッケージからアプリへコピーされるファイル（`config/`、`db/migrations/`、`resources/`のみ）。既存ファイルは`--force`なしでは上書きされません。 |
 
 マニフェストはただのデータです。CLIはインストール中にプラグインのコードを実行しません。
+
+### envエントリ
+
+`bunx guren plugin`は`env`の各エントリを2か所に反映します。まず`.env.example`（なければ作成）と、存在する場合は`.env`に`KEY=value`を追記します。ファイルがすでに代入しているキーは追記しません。次に、アプリに`config/env.ts`があれば、その`defineEnv({ ... })`呼び出しにキーを追加します。これでアプリ自身の変数と同じように起動時に検証されます（[設定](./configuration.md#環境変数を宣言する)を参照）。`config/env.ts`がすでに宣言しているキーは、その宣言をそのまま残します。`defineEnv({ ... })`呼び出しのない`config/env.ts`は変更せず、手で宣言すべきキーをインストール時に表示します。
+
+| エントリのフィールド | 効果 |
+|-------------|--------|
+| `key` | 変数名。大文字のスネークケースでないキーは読み飛ばされ、`GUREN_*`のキーがあるとインストールが失敗します。 |
+| `value` | envファイルの`=`の後ろに書かれる値。省略すると空になります。 |
+| `comment` | キーの上に置かれる`#`コメント行。宣言の`.describe()`にも使われます。 |
+| `type` | ビルダー。`string`（デフォルト）、`url`、`number`、`port`、`boolean`、`enum`のいずれかです。 |
+| `choices` | `type: "enum"`のキーが受け付ける文字列。`enum`では必須で、それ以外の型では拒否されます。 |
+| `default` | `.default(value)`。型に合わせる必要があります（`number`と`port`は数値、`boolean`は真偽値、`enum`は`choices`のいずれか）。 |
+| `required` | `.optional()`を付けずに宣言し、未設定のままでは起動が失敗します。`default`があるときは効果がありません。 |
+| `secret` | `.secret()`。検証エラーのメッセージに値を出しません。 |
+
+上のマニフェストは次のように宣言されます:
+
+```typescript
+ANALYTICS_API_KEY: Env.string().optional().secret().describe('Analytics service API key'),
+ANALYTICS_BATCH_SIZE: Env.number().default(50),
+```
+
+ビルダーが受け付けないエントリ（未知の`type`、型に合わない`default`、`value`や`comment`に含まれる改行）があると、パッケージの追加直後にインストールが失敗します。`src/app.ts`、envファイル、`config/env.ts`はどれも変更されません。
 
 ### オプション: CLIコマンドを追加する
 
@@ -246,7 +271,7 @@ npm publish
 bunx guren plugin @guren/plugin-vercel
 ```
 
-`plugin`コマンドは、依存が未インストールなら`bun add`でインストールし（`--no-install`でスキップできます）、プラグインが宣言するGuren互換性を検証します（`--ignore-compatibility`を付ければ、無視して登録できます）。そのうえでプロバイダーのimportを追加して`createApp({ providers })`に登録し、マニフェストの`env`・`publishes`エントリを適用します。`--force`は公開済みファイルの上書きに使います。
+`plugin`コマンドは、依存が未インストールなら`bun add`でインストールし（`--no-install`でスキップできます）、プラグインが宣言するGuren互換性を検証します（`--ignore-compatibility`を付ければ、無視して登録できます）。そのうえでプロバイダーのimportを追加して`createApp({ providers })`に登録し、マニフェストの`env`（[envエントリ](#envエントリ)を参照）・`publishes`エントリを適用します。`--force`は公開済みファイルの上書きに使います。
 
 > **注意:** 自動登録が対応しているのは、クラスベースのプロバイダーエクスポートと、公式のゼロ設定ファクトリプラグイン(`@guren/plugin-vercel`・`@guren/plugin-cloudflare`。`providers: [vercelPlugin()]`形式の呼び出しで登録されます)です。サードパーティの`definePlugin()`プラグインは設定を渡してファクトリを呼ぶ必要があるため、下記のように`createApp({ providers })`へ手動で登録してください。
 

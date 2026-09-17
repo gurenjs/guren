@@ -35,27 +35,75 @@ sequenceDiagram
 
 ### Registering the Manager
 
-`OAuthServiceProvider` binds an `OAuthManager` singleton as `oauth` in the container. Register your providers during app boot:
+`config/oauth.ts` default-exports a `defineOAuthConfig` definition. Its callback receives the validated env and returns the providers to register and the state store; the definition builds an `OAuthManager` from them and binds it as `oauth` in the container. `bunx guren add oauth` writes this file:
 
 ```ts
 // config/oauth.ts
-import { createGitHubOAuthProviderConfig, createOAuthManager } from '@guren/core'
+import { DatabaseOAuthStateStore, defineOAuthConfig, type OAuthProviderConfig, createGitHubOAuthProviderConfig, createGoogleOAuthProviderConfig, createDiscordOAuthProviderConfig } from '@guren/core'
+import { oauthStates } from '../db/schema.js'
 
-export const oauth = createOAuthManager()
+export default defineOAuthConfig((env) => {
+  // A provider is registered only when all three of its keys are set, so a
+  // half-configured one fails app-side rather than at the provider.
+  const providers: Record<string, OAuthProviderConfig> = {}
 
-oauth.registerProvider('github', createGitHubOAuthProviderConfig({
-  clientId: process.env.GITHUB_CLIENT_ID!,
-  clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/github/callback`,
-}))
+  if (env.OAUTH_GITHUB_CLIENT_ID && env.OAUTH_GITHUB_CLIENT_SECRET && env.OAUTH_GITHUB_REDIRECT_URI) {
+    providers.github = createGitHubOAuthProviderConfig({
+      clientId: env.OAUTH_GITHUB_CLIENT_ID,
+      clientSecret: env.OAUTH_GITHUB_CLIENT_SECRET,
+      redirectUri: env.OAUTH_GITHUB_REDIRECT_URI,
+    })
+  }
+
+  if (env.OAUTH_GOOGLE_CLIENT_ID && env.OAUTH_GOOGLE_CLIENT_SECRET && env.OAUTH_GOOGLE_REDIRECT_URI) {
+    providers.google = createGoogleOAuthProviderConfig({
+      clientId: env.OAUTH_GOOGLE_CLIENT_ID,
+      clientSecret: env.OAUTH_GOOGLE_CLIENT_SECRET,
+      redirectUri: env.OAUTH_GOOGLE_REDIRECT_URI,
+    })
+  }
+
+  if (env.OAUTH_DISCORD_CLIENT_ID && env.OAUTH_DISCORD_CLIENT_SECRET && env.OAUTH_DISCORD_REDIRECT_URI) {
+    providers.discord = createDiscordOAuthProviderConfig({
+      clientId: env.OAUTH_DISCORD_CLIENT_ID,
+      clientSecret: env.OAUTH_DISCORD_CLIENT_SECRET,
+      redirectUri: env.OAUTH_DISCORD_REDIRECT_URI,
+    })
+  }
+
+  return {
+    providers,
+    // The authorize redirect and its callback may reach different processes, so
+    // the state tying them together lives in the database, not in memory.
+    stateStore: new DatabaseOAuthStateStore(oauthStates),
+  }
+})
 ```
+
+Each provider reads three keys, `OAUTH_<PROVIDER>_CLIENT_ID`, `_CLIENT_SECRET` and `_REDIRECT_URI`, declared in `config/env.ts` (see [Configuration](./configuration.md#declaring-the-environment)); `guren add oauth` declares them for you. `_REDIRECT_URI` is the full callback URL, such as `https://your.app/auth/github/callback`. A provider whose keys are not all set is left unregistered, and starting its flow throws `OAuth provider "github" is not configured.`
+
+List the definition in `createApp({ config })`:
+
+```ts
+// src/app.ts
+import { createApp } from '@guren/core'
+import database from '../config/database.js'
+import env from '../config/env.js'
+import oauth from '../config/oauth.js'
+
+const app = createApp({
+  env,
+  config: [database, oauth],
+})
+```
+
+Apps that bind `oauth` in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 ### Login Controller
 
 ```ts
-import { Controller } from '@guren/core'
+import { Controller, type OAuthManager } from '@guren/core'
 import { z } from 'zod'
-import { oauth } from '@/config/oauth'
 import { User } from '@/app/Models/User'
 
 const CallbackQuerySchema = z.object({
@@ -64,10 +112,14 @@ const CallbackQuerySchema = z.object({
 })
 
 export default class GitHubOAuthController extends Controller {
+  private oauth(): OAuthManager {
+    return this.make<OAuthManager>('oauth')
+  }
+
   async start() {
     // Passing the session ties the flow to this browser — see
     // "Binding State to the Browser" below.
-    const { url } = await oauth.authorize('github', {
+    const { url } = await this.oauth().authorize('github', {
       redirectTo: this.query('redirect_to'),
       session: this.auth.session(),
     })
@@ -77,7 +129,7 @@ export default class GitHubOAuthController extends Controller {
   async callback() {
     const { code, state } = this.validateQuery(CallbackQuerySchema)
 
-    const { profile, redirectTo } = await oauth.handleCallback('github', {
+    const { profile, redirectTo } = await this.oauth().handleCallback('github', {
       code,
       state,
       session: this.auth.session(),
@@ -125,10 +177,10 @@ Pass the session to both legs of the flow to close it:
 
 ```ts
 // starting the flow
-const { url } = await oauth.authorize('github', { session: this.auth.session() })
+const { url } = await this.oauth().authorize('github', { session: this.auth.session() })
 
 // in the callback
-await oauth.handleCallback('github', { code, state, session: this.auth.session() })
+await this.oauth().handleCallback('github', { code, state, session: this.auth.session() })
 ```
 
 `authorize()` mints a fresh per-flow value, keeps it in the session, and stores
@@ -160,12 +212,12 @@ callback instead of quietly accepting a transferable state. Send the `state` tha
 Pass a `redirectTo` when starting the flow (e.g. the page the user was on). It survives the round trip to the provider and comes back from `handleCallback`:
 
 ```ts
-const { url } = await oauth.authorize('github', {
+const { url } = await this.oauth().authorize('github', {
   redirectTo: '/settings/billing',
   session: this.auth.session(),
 })
 // ...later, in the callback:
-const { redirectTo } = await oauth.handleCallback('github', {
+const { redirectTo } = await this.oauth().handleCallback('github', {
   code,
   state,
   session: this.auth.session(),
@@ -175,69 +227,69 @@ return this.redirect(redirectTo ?? '/dashboard')
 
 `redirectTo` is sanitized automatically: app-relative paths (`/settings/billing`) always pass, but absolute URLs are dropped unless their host is in `allowedRedirectHosts`. This prevents an attacker from crafting a login link that redirects a user off-site after authenticating.
 
+The allowlist is part of the manager's `stateConfig`, which `defineOAuthConfig` does not accept (it takes `providers` and `stateStore` only). An app that needs one binds `oauth` from a service provider's `register()` and removes `config/oauth.ts` from `createApp({ config })`, since a key bound twice fails the boot:
+
 ```ts
-export const oauth = createOAuthManager({
-  stateConfig: {
-    allowedRedirectHosts: ['app.example.com', '*.example.com'], // supports wildcards
-  },
-})
+// app/Providers/OAuthProvider.ts
+import { createOAuthManager, DatabaseOAuthStateStore, ServiceProvider } from '@guren/core'
+import { oauthStates } from '../../db/schema.js'
+
+export default class OAuthProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('oauth', () => {
+      const manager = createOAuthManager({
+        stateStore: new DatabaseOAuthStateStore(oauthStates),
+        stateConfig: {
+          allowedRedirectHosts: ['app.example.com', '*.example.com'], // supports wildcards
+        },
+      })
+      // Register each provider with manager.registerProvider(), as config/oauth.ts did.
+      return manager
+    })
+  }
+}
 ```
 
 ## Built-in Providers
 
-```ts
-import {
-  createGitHubOAuthProviderConfig,
-  createGoogleOAuthProviderConfig,
-  createDiscordOAuthProviderConfig,
-} from '@guren/core'
+Each factory fills in the provider's endpoints and default scopes, so the definition passes only the three keys. `config/oauth.ts` above registers all three:
 
-oauth.registerProvider('github', createGitHubOAuthProviderConfig({
-  clientId: process.env.GITHUB_CLIENT_ID!,
-  clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/github/callback`,
-}))
+| Provider | Factory | Keys |
+|----------|---------|------|
+| GitHub | `createGitHubOAuthProviderConfig` | `OAUTH_GITHUB_CLIENT_ID`, `OAUTH_GITHUB_CLIENT_SECRET`, `OAUTH_GITHUB_REDIRECT_URI` |
+| Google | `createGoogleOAuthProviderConfig` | `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET`, `OAUTH_GOOGLE_REDIRECT_URI` |
+| Discord | `createDiscordOAuthProviderConfig` | `OAUTH_DISCORD_CLIENT_ID`, `OAUTH_DISCORD_CLIENT_SECRET`, `OAUTH_DISCORD_REDIRECT_URI` |
 
-oauth.registerProvider('google', createGoogleOAuthProviderConfig({
-  clientId: process.env.GOOGLE_CLIENT_ID!,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/google/callback`,
-}))
-
-oauth.registerProvider('discord', createDiscordOAuthProviderConfig({
-  clientId: process.env.DISCORD_CLIENT_ID!,
-  clientSecret: process.env.DISCORD_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/discord/callback`,
-}))
-```
+Delete the block for a provider you do not offer, along with its keys in `config/env.ts`.
 
 ### Any OAuth 2.0 Provider
 
-Providers you register directly need the raw endpoints and, optionally, a `mapProfile` function to normalize the user-info response:
+A provider without a factory needs the raw endpoints and, optionally, a `mapProfile` function to normalize the user-info response. Add it to `providers` in `config/oauth.ts`, and declare its three `OAUTH_GITLAB_*` keys in `config/env.ts`:
 
 ```ts
-import type { OAuthProviderConfig } from '@guren/core'
-
-const gitlabConfig: OAuthProviderConfig = {
-  clientId: process.env.GITLAB_CLIENT_ID!,
-  clientSecret: process.env.GITLAB_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/gitlab/callback`,
-  authorizeUrl: 'https://gitlab.com/oauth/authorize',
-  tokenUrl: 'https://gitlab.com/oauth/token',
-  userInfoUrl: 'https://gitlab.com/api/v4/user',
-  scopes: ['read_user'],
-  mapProfile: (raw, token) => ({
-    id: String(raw.id),
-    email: raw.email as string | undefined,
-    name: raw.name as string | undefined,
-    avatar: raw.avatar_url as string | undefined,
-    token,
-    raw,
-  }),
+// config/oauth.ts, inside the defineOAuthConfig callback
+if (env.OAUTH_GITLAB_CLIENT_ID && env.OAUTH_GITLAB_CLIENT_SECRET && env.OAUTH_GITLAB_REDIRECT_URI) {
+  providers.gitlab = {
+    clientId: env.OAUTH_GITLAB_CLIENT_ID,
+    clientSecret: env.OAUTH_GITLAB_CLIENT_SECRET,
+    redirectUri: env.OAUTH_GITLAB_REDIRECT_URI,
+    authorizeUrl: 'https://gitlab.com/oauth/authorize',
+    tokenUrl: 'https://gitlab.com/oauth/token',
+    userInfoUrl: 'https://gitlab.com/api/v4/user',
+    scopes: ['read_user'],
+    mapProfile: (raw, token) => ({
+      id: String(raw.id),
+      email: raw.email as string | undefined,
+      name: raw.name as string | undefined,
+      avatar: raw.avatar_url as string | undefined,
+      token,
+      raw,
+    }),
+  }
 }
-
-oauth.registerProvider('gitlab', gitlabConfig)
 ```
+
+On a manager you build yourself with `createOAuthManager()`, `manager.registerProvider('gitlab', config)` registers the same object, as the [test below](#testing) does with a built-in factory.
 
 ## Provider Email Verification
 
@@ -280,15 +332,19 @@ fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVe
 
 The one-time `state` value that ties the callback back to the original request is stored server-side. The default `MemoryOAuthStateStore` works for single-process dev, but production deployments with more than one process (load balancers, serverless) need shared storage. Otherwise the callback can land on a process that never issued the state.
 
-For most apps, `DatabaseOAuthStateStore` is the recommended default, since it stores state in the same database your app already uses, with no extra infrastructure:
+For most apps, `DatabaseOAuthStateStore` is the recommended default, since it stores state in the same database your app already uses, with no extra infrastructure. `guren add oauth` and `make:auth --oauth` pass it as the definition's `stateStore`:
 
 ```ts
-import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
-import { oauthStates } from '@/db/schema'
+// config/oauth.ts
+import { DatabaseOAuthStateStore, defineOAuthConfig } from '@guren/core'
+import { oauthStates } from '../db/schema.js'
 
-export const oauth = createOAuthManager({
+export default defineOAuthConfig(() => ({
+  providers: {
+    // one entry per provider, as in Registering the Manager
+  },
   stateStore: new DatabaseOAuthStateStore(oauthStates),
-})
+}))
 ```
 
 ```ts
@@ -309,17 +365,19 @@ store cannot persist a binding, so every bound state comes back unbound and
 the console names the store as the cause). Add the column before binding flows
 via `session` or `bindTo`.
 
-A state row is removed when its callback arrives, so a sign-in abandoned before that keeps its row. Schedule `oauth-states:prune`, the console command `guren add oauth` registers, to sweep the expired ones; it calls `OAuthManager.pruneExpiredStates()` on the store behind your `oauth` binding. Redis remains available for apps that already run it, and expires its own keys:
+A state row is removed when its callback arrives, so a sign-in abandoned before that keeps its row. Schedule `oauth-states:prune`, the console command `guren add oauth` registers, to sweep the expired ones; it calls `OAuthManager.pruneExpiredStates()` on the store behind your `oauth` binding. Redis remains available for apps that already run it, and expires its own keys. Declare `REDIS_URL` in `config/env.ts`:
 
 ```ts
-import { createOAuthManager } from '@guren/core'
+// config/oauth.ts
+import { defineOAuthConfig } from '@guren/core'
 import { createRedisClient, RedisOAuthStateStore } from '@guren/core/redis'
 
-const redis = createRedisClient({ url: process.env.REDIS_URL })
-
-export const oauth = createOAuthManager({
-  stateStore: new RedisOAuthStateStore(redis),
-})
+export default defineOAuthConfig((env) => ({
+  providers: {
+    // one entry per provider, as in Registering the Manager
+  },
+  stateStore: new RedisOAuthStateStore(createRedisClient({ url: env.REDIS_URL })),
+}))
 ```
 
 ## Configuration Options

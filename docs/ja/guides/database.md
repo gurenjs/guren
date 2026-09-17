@@ -11,7 +11,9 @@ Guren は Drizzle ORM と PostgreSQL を組み合わせて使います。この�
 - `db/migrations/`: 生成または手書きの SQL マイグレーション。
 - `db/seeders/`: サンプルデータを投入するシードスクリプト。
 
-`.env` ファイルで `DATABASE_URL` を設定してください(デフォルト値: `postgres://guren:guren@localhost:54322/guren`)。
+`.env` ファイルで `DATABASE_URL` を設定してください(デフォルト値: `postgres://guren:guren@localhost:54322/guren`)。このキーはスキャフォールドの `config/env.ts` に宣言済みです。
+
+`config/database.ts` はドライバのファクトリで接続を作り、`defineDatabaseConfig()` で包んで default export します。`createApp({ config })` にこの定義を並べると、アプリは検証済みの環境変数を使って起動時に ORM を接続します。下の各ドライバの節にファイルの形を載せています。リゾルバが受け取る `context` 引数は[設定](./configuration.md#データベース接続)で説明しています。
 
 ## スキーマ定義
 `db/schema.ts` で Drizzle のスキーマビルダーを使います。
@@ -76,16 +78,29 @@ Guren は Bun 組み込みの SQLite ドライバで SQLite に対応してい�
 
 ```ts
 // config/database.ts
-import { createSqliteDatabase } from '@guren/core'
+import { createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
+import env from './env.js'
 
 const database = createSqliteDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  filename: () => process.env.DATABASE_URL || './data/guren.db',
+  // `context` はアプリの検証済み環境変数です。`guren db:*` はアプリの外で
+  // これを呼ぶため、そのときはここでスキーマを読みます。
+  filename: (context) => {
+    const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
+    // `bun test` は NODE_ENV=test を設定するので、テストは専用ファイルを使います。
+    return process.env.NODE_ENV === 'test'
+      ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
+      : values.DATABASE_URL ?? './data/guren.db'
+  },
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
+
+`seedOnBoot` が true のとき、マイグレーションフォルダにマイグレーションがあれば起動時にシーダーを実行します。スキャフォールドは本番でこれを無効にしているので、本番では `bunx guren db:seed` を明示的に実行してください。テスト用ファイルの分離は[テストガイド](./testing.md#テストデータベースの分離)で説明しています。
 
 SQLite アダプタは `createPostgresDatabase` と同じ API を持つため、切り替えはインポートと接続設定の変更だけで済みます。
 
@@ -98,15 +113,21 @@ MySQL(および互換データベース)を使う場合は `createMySqlDatabase`
 
 ```ts
 // config/database.ts
-import { createMySqlDatabase } from '@guren/core'
+import { createMySqlDatabase, defineDatabaseConfig } from '@guren/core'
+import env from './env.js'
 
 const database = createMySqlDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  connectionString: () => process.env.DATABASE_URL,
+  // `context` はアプリの検証済み環境変数です。`guren db:*` はアプリの外で
+  // これを呼ぶため、そのときはここでスキーマを読みます。
+  connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
+    ?? 'mysql://guren:guren@localhost:33306/guren',
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
 
 MySQL アダプタも PostgreSQL / SQLite と同じランタイム API(`getDatabase`, `migrateDatabase`, `configureOrm`, `seedDatabase`)を提供するため、切り替え時は主に import と接続設定の変更だけで済みます。
@@ -120,20 +141,29 @@ AWS Lambda 上で RDS Data API を有効にした Aurora Serverless v2 に接続
 
 ```ts
 // config/database.ts
-import { createAwsDataApiDatabase } from '@guren/core'
+import { createAwsDataApiDatabase, defineDatabaseConfig, type ConnectionContext } from '@guren/core'
+import env from './env.js'
+
+// `context` はアプリの検証済み環境変数です。`guren db:*` はアプリの外で
+// リゾルバを呼ぶため、そのときはここでスキーマを読みます。
+const values = (context?: ConnectionContext) => context?.env ?? env.parse(undefined, { mode: 'report' }).values
 
 const database = createAwsDataApiDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  // 各設定は環境変数へのフォールバックもあります:
+  // リゾルバが undefined を返すと環境変数にフォールバックします:
   // DATABASE_NAME, DATABASE_RESOURCE_ARN, DATABASE_SECRET_ARN
-  database: () => process.env.DATABASE_NAME,
-  resourceArn: () => process.env.DATABASE_RESOURCE_ARN,
-  secretArn: () => process.env.DATABASE_SECRET_ARN,
+  database: (context) => values(context).DATABASE_NAME,
+  resourceArn: (context) => values(context).DATABASE_RESOURCE_ARN,
+  secretArn: (context) => values(context).DATABASE_SECRET_ARN,
 })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
+
+3 つのキーは `config/env.ts` に宣言してください(例: `Env.string().optional()`。[設定](./configuration.md#環境変数を宣言する)を参照)。
 
 ドライバパッケージも合わせてインストールしてください:
 

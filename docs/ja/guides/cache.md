@@ -2,7 +2,7 @@
 
 Guren のキャッシュ API は共通で、裏側のストレージバックエンドだけを差し替えられます。コストの高い計算やデータベースクエリの結果を保存しておき、次からは素早く取り出すことで、アプリケーションを速く保てます。
 
-推奨パターン: `@guren/core` から cache API をインポートし、provider で cache manager を構成します。各サービスではキャッシュキーの管理と無効化を担当します。
+推奨パターン: `@guren/core` から cache API をインポートし、ストアは `config/cache.ts` で構成します。各サービスではキャッシュキーの管理と無効化を担当します。
 
 ## コアコンセプト
 
@@ -98,16 +98,52 @@ const settings = await cache.store().rememberForever('app:settings', async () =>
 
 ## 設定
 
-### 複数のストア
-
-アプリケーションで複数のキャッシュバックエンドを設定できます。
+`bunx guren add cache` は `config/cache.ts` を書き出し、`config/env.ts` に `CACHE_STORE` を宣言して、定義を `createApp({ config })` に追加します。
 
 ```ts
-import { CacheManager } from '@guren/core'
-import { createRedisClient } from '@guren/core'
+// config/cache.ts
+import { defineCacheConfig } from '@guren/core'
 
-const cache = new CacheManager({
-  default: 'redis',
+// CACHE_STORE でストアを選ぶ。`memory` はプロセス単位なので、長時間動く
+// 1 台のサーバーでは正しく動くが、Workers、Lambda、Vercel では 2 つの
+// リクエストが別インスタンスに届くことがあり、正しく動かない。
+export default defineCacheConfig((env) => ({
+  default: env.CACHE_STORE,
+  stores: {
+    memory: { driver: 'memory' },
+    // Redis を使う場合は '@guren/core/redis' の `createRedisClient` と
+    // `redis: { driver: 'redis', client: () => createRedisClient({ url: env.REDIS_URL }) }`
+    // のエントリを追加し、REDIS_URL を config/env.ts に宣言する。このモジュールは
+    // ioredis を読み込むので、使う場所でだけインポートする。関数はストアを最初に
+    // 解決したときに実行されるため、CACHE_STORE で選ぶまで接続は開かない。
+  },
+}))
+```
+
+```ts
+// src/app.ts
+import cache from '../config/cache.js'
+
+const app = createApp({
+  env,
+  config: [database, http, cache],
+  routes: registerWebRoutes,
+})
+```
+
+コールバックには検証済みの環境変数が渡されるので、読み取るキーはすべて `config/env.ts` に宣言しておきます。変数の宣言方法と定義が起動時にどう処理されるかは[設定ガイド](./configuration.md)を参照してください。
+
+### 複数のストア
+
+アプリで使う可能性のあるバックエンドを `stores` にすべて宣言し、デフォルトは `CACHE_STORE` で選びます。
+
+```ts
+// config/cache.ts
+import { defineCacheConfig } from '@guren/core'
+import { createRedisClient } from '@guren/core/redis'
+
+export default defineCacheConfig((env) => ({
+  default: env.CACHE_STORE,
   stores: {
     memory: {
       driver: 'memory',
@@ -118,7 +154,7 @@ const cache = new CacheManager({
       driver: 'redis',
       // `client` には関数も渡せます。最初にこのストアが使われたときに実行されるため、
       // 宣言だけして選ばれなかったストアは接続を開きません。
-      client: () => createRedisClient({ url: process.env.REDIS_URL }),
+      client: () => createRedisClient({ url: env.REDIS_URL }),
       prefix: 'myapp:cache:', // キープレフィックス（デフォルト: 'cache:'）
     },
     file: {
@@ -127,15 +163,27 @@ const cache = new CacheManager({
       extension: '.cache',    // ファイル拡張子（デフォルト: '.cache'）
     },
   },
-})
+}))
+```
 
-// デフォルトストア（redis）を使用
+`@guren/core/redis` は ioredis を読み込むので、使う設定ファイルでだけインポートします。`REDIS_URL` は `CACHE_STORE` と並べて `config/env.ts` に宣言します。
+
+`CACHE_STORE` の名前は起動時には検査されません。`stores` にない名前を指定すると、そのストアを最初に解決した時点で `Cache store not found` が投げられます。
+
+定義はマネージャーをコンテナの `cache` にバインドします。
+
+```ts
+const cache = app.container.make('cache') // CacheManager
+
+// デフォルトストア（CACHE_STORE）を使用
 await cache.store().set('key', 'value')
 
 // 特定のストアを使用
 await cache.store('memory').set('temp', 'data', 60)
 await cache.store('file').set('persistent', 'data')
 ```
+
+`CacheProvider` でキャッシュを構成しているアプリもそのまま動きます。定義へ移す手順は[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照してください。
 
 ### ドライバオプション
 
@@ -263,24 +311,22 @@ export async function checkRateLimit(ip: string, limit: number): Promise<boolean
 ### セッションライクなデータ
 
 ```ts
-const cache = new CacheManager({
-  default: 'redis',
-  stores: {
-    redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) },
-  },
-})
+import { resolve, type CacheManager } from '@guren/core'
+
+// config/cache.ts が構成したアプリのキャッシュ（CACHE_STORE=redis）
+const cache = () => resolve<CacheManager>('cache')
 
 export async function setUserPreferences(
   userId: string,
   preferences: Record<string, unknown>
 ): Promise<void> {
-  await cache.store().set(`user:${userId}:prefs`, preferences, 86400) // 24時間
+  await cache().store().set(`user:${userId}:prefs`, preferences, 86400) // 24時間
 }
 
 export async function getUserPreferences(
   userId: string
 ): Promise<Record<string, unknown> | null> {
-  return cache.store().get(`user:${userId}:prefs`)
+  return cache().store().get(`user:${userId}:prefs`)
 }
 ```
 
