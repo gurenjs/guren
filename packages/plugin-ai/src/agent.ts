@@ -9,6 +9,7 @@ import {
   stepCountIs,
   type FinishReason,
   type LanguageModelUsage,
+  type ModelMessage,
   type OutputInterface,
   type StepResult,
   type StopCondition,
@@ -31,6 +32,11 @@ export interface PromptOptions {
   /** A provider name from `config/ai.ts`, overriding the class's own for this call. */
   provider?: AiProviderName
   signal?: AbortSignal
+  /**
+   * `true` starts a conversation and returns its id; an id continues one, as `continue(id)` does.
+   * Absent, nothing is stored. Refused under `as(null)`, since no owner could be checked.
+   */
+  conversation?: true | string
 }
 
 export interface AgentResponse<TOutput> {
@@ -40,6 +46,8 @@ export interface AgentResponse<TOutput> {
   /** Summed over every step. */
   usage: LanguageModelUsage
   finishReason: FinishReason
+  /** Set when the prompt started or continued a conversation. */
+  conversationId?: string
 }
 
 /** The class's `output` member's parsed type, or `string` when it declares none. */
@@ -49,6 +57,8 @@ export interface BoundAgent<T extends Agent> {
   /** The constructed instance, principal and container already set. */
   readonly agent: T
   prompt(input: string, options?: PromptOptions): Promise<AgentResponse<InferAgentOutput<T>>>
+  /** The same agent, prompting within conversation `id`, which this principal must have started with this agent. */
+  continue(id: string): BoundAgent<T>
 }
 
 /** What `appTools(names)` returns: each tool typed against its route contract, refusals included in the result. */
@@ -195,12 +205,19 @@ export function bindAgent<T extends Agent>(
   // the construction error RFC 0029 §2.2 asks for, before any model is called.
   const tools = instance.tools()
 
-  return {
+  const agentName = resolveAgentName(cls)
+
+  const bound = (conversation: string | undefined): BoundAgent<T> => ({
     agent: instance,
+    continue: (id) => bound(id),
     prompt: async (input, options = {}) => {
+      // Settled before `model()`: a refused conversation must reach no model, and a fake's script.
+      const history = await openConversation(options.conversation ?? conversation)
+      const userMessage: ModelMessage = { role: 'user', content: input }
+
       const output = (instance as { output?: OutputInterface }).output
       const loop = new ToolLoopAgent({
-        id: resolveAgentName(cls),
+        id: agentName,
         model: scope.manager.model(options.provider ?? instance.provider),
         instructions: instance.instructions,
         tools,
@@ -208,18 +225,52 @@ export function bindAgent<T extends Agent>(
         stopWhen: instance.stopWhen ?? stepCountIs(DEFAULT_STOP_WHEN),
       })
       const result = await loop.generate({
-        prompt: input,
+        ...(history ? { messages: [...history.messages, userMessage] } : { prompt: input }),
         ...(options.signal ? { abortSignal: options.signal } : {}),
       })
+
+      let conversationId: string | undefined
+      if (history) {
+        // Created only once the model has answered, so a failed first prompt leaves no empty conversation.
+        conversationId = history.id ?? await history.store.create({ agentName, owner: history.owner })
+        await history.store.append(conversationId, history.owner, [userMessage, ...result.responseMessages])
+      }
       return {
         text: result.text,
         output: (output ? result.output : result.text) as InferAgentOutput<T>,
         steps: result.steps as Array<StepResult<ToolSet>>,
         usage: result.usage,
         finishReason: result.finishReason,
+        ...(conversationId ? { conversationId } : {}),
       }
     },
+  })
+
+  const openConversation = async (requested: true | string | undefined) => {
+    if (requested === undefined) return undefined
+    const owner = instance.principal
+    if (!owner) {
+      throw new Error(
+        `${agentName} was asked for a conversation under as(null). A conversation belongs to the principal `
+        + 'that started it, and an anonymous run has none to check: bind a user or service with as(principal).',
+      )
+    }
+    const store = scope.manager.conversations()
+    if (requested === true) return { store, owner, id: undefined, messages: [] as ModelMessage[] }
+    const stored = await store.load(requested, owner)
+    if (!stored) {
+      throw new Error(`${agentName} cannot continue conversation "${requested}": no conversation with that id belongs to this principal.`)
+    }
+    if (stored.agentName !== agentName) {
+      throw new Error(
+        `${agentName} cannot continue conversation "${requested}", which ${stored.agentName} started. `
+        + 'Continue it with that agent, or start a new one.',
+      )
+    }
+    return { store, owner, id: requested, messages: stored.messages }
   }
+
+  return bound(undefined)
 }
 
 function normalizePrincipal(input: AgentPrincipalInput): AgentPrincipal | null {

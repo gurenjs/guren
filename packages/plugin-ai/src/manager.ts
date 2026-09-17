@@ -3,6 +3,7 @@ import type { EmbeddingModel, LanguageModel } from 'ai'
 
 import { bindAgent, type Agent, type AgentClass, type AgentPrincipalInput, type BoundAgent } from './agent'
 import { describeNames, type AiConfig, type AiProviderConfig } from './config'
+import { createConversationStore, type ConversationStore } from './conversations'
 import type { AiProviderName } from './types'
 
 export interface BoundAgentFactory<T extends Agent> {
@@ -21,11 +22,14 @@ export interface AiManager {
   agent<T extends Agent>(cls: AgentClass<T>): BoundAgentFactory<T>
   model(provider?: AiProviderName): LanguageModel
   embeddingModel(provider?: AiProviderName): EmbeddingModel
+  /** The store `config/ai.ts` configures; throws when it configures none. */
+  conversations(): ConversationStore
 }
 
 export class ConfiguredAiManager implements AiManager {
   private readonly models = new Map<string, LanguageModel>()
   private readonly embeddingModels = new Map<string, EmbeddingModel>()
+  private conversationStore?: ConversationStore
 
   constructor(
     readonly config: AiConfig,
@@ -52,6 +56,16 @@ export class ConfiguredAiManager implements AiManager {
       }
       return factory()
     })
+  }
+
+  conversations(): ConversationStore {
+    if (!this.config.conversations) {
+      throw new Error(
+        'config/ai.ts configures no conversation store. Add `conversations: { driver: \'database\', conversations, messages }` '
+        + '(the tables guren add ai scaffolds), or `{ driver: \'memory\' }` for development.',
+      )
+    }
+    return (this.conversationStore ??= createConversationStore(this.config.conversations))
   }
 
   private provider(name: string): AiProviderConfig {

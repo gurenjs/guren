@@ -13,6 +13,7 @@ import type {
   AiManager,
   BoundAgent,
   BoundAgentFactory,
+  ConversationStore,
   bindAgent,
   resolveAgentName,
 } from '@guren/plugin-ai'
@@ -121,12 +122,14 @@ export class FakeAi implements AiManager, Disposable {
   /** One per scripted prompt, read on dispose: a loop `stopWhen` ended early never asks for the rest. */
   private readonly progress: Array<{ name: string; consumed: () => number; total: number }> = []
   private readonly restore: Disposable
+  private readonly real: AiManager
 
   constructor(
     private readonly container: Container,
     private readonly runtime: FakeAiRuntime,
   ) {
-    this.config = container.make<AiManager>('ai').config
+    this.real = container.make<AiManager>('ai')
+    this.config = this.real.config
     this.restore = container.fake('ai', this)
   }
 
@@ -179,6 +182,7 @@ export class FakeAi implements AiManager, Disposable {
           agent: (other) => this.agent(other),
           model: (provider) => this.scriptedModel(name, provider),
           embeddingModel: (provider) => this.embeddingModel(provider),
+          conversations: () => this.conversations(),
         }
         const bound = this.runtime.bindAgent(cls, principal, { container: this.container, manager })
         return this.recording(name, principal, bound)
@@ -200,6 +204,11 @@ export class FakeAi implements AiManager, Disposable {
     )
   }
 
+  /** The real manager's store: fakeAi() scripts the model, and conversations persist as configured. */
+  conversations(): ConversationStore {
+    return this.real.conversations()
+  }
+
   /** Restores the binding, then fails on any prompt that found nothing scripted or left steps unused. */
   [Symbol.dispose](): void {
     this.restore[Symbol.dispose]()
@@ -216,6 +225,7 @@ export class FakeAi implements AiManager, Disposable {
   private recording<T extends Agent>(name: string, principal: AgentPrincipalInput, bound: BoundAgent<T>): BoundAgent<T> {
     return {
       agent: bound.agent,
+      continue: (id) => this.recording(name, principal, bound.continue(id)),
       prompt: async (input, options) => {
         const call: FakeAiCall = { input, principal, toolCalls: [] }
         // Recorded on entry: a prompt that throws was still made.

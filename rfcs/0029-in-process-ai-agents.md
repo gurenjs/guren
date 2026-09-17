@@ -570,6 +570,33 @@ not apply. The `database` entry in `config/ai.ts` names both tables, as
 driver is the seam the AgentCore RFC fills (`agentcore`: `create_event` per
 turn, keyed by actor and session).
 
+**Amended in implementation (Part 2a):** a conversation starts only when the
+call asks for one. `prompt(input, { conversation: true })` starts it and returns
+`conversationId`; `continue(id)` and `{ conversation: id }` continue it; a plain
+`prompt()` stores nothing, whatever `config/ai.ts` configures, so a one-off
+agent writes no rows per call. Ids are plain strings (`crypto.randomUUID()`),
+since a chat client posts them back as strings.
+- `AiManager` gains `conversations()`, the store `config/ai.ts` names under
+  `conversations: { driver, ... }`; a driver nothing registered fails the boot.
+  `registerConversationDriver()` is the runtime half of augmenting
+  `ConversationDrivers`. `fakeAi()` delegates `conversations()` to the real
+  manager: it scripts the model, and history persists as the app configures it.
+- The owner is compared by `agentApprovalPrincipalKey()`, the key approvals use,
+  so `5` and `'5'` and a user and a service stay distinct. `load()` answers
+  `null` for an unknown id and another owner's alike.
+- The conversation row is created after the first answer, so a failed first
+  prompt leaves nothing. Each turn appends the user message and
+  `result.responseMessages` in one transaction, so a replay never meets a tool
+  call without its result; an adapter without transactions refuses the append.
+- Order is an integer `position`, with a unique index on
+  (`conversationId`, `position`): a concurrent append to one conversation
+  fails rather than interleaving. Column properties are `id`, `agentName`,
+  `owner`, `createdAt`, `updatedAt` and `id`, `conversationId`, `position`,
+  `message`, `createdAt`; `dataMode: 'text'` stores the message as a JSON string.
+- Binary file data is stored as base64 and a `URL` as its href, both forms a
+  `ModelMessage` accepts on replay.
+- `guren add ai` scaffolding the two tables follows in its own PR.
+
 ### 6. Queueing
 
 ```ts
