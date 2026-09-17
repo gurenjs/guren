@@ -4,6 +4,9 @@ import {
   AgentToolDenied,
   AgentToolInvoked,
   EventServiceProvider,
+  MemoryQueueDriver,
+  Worker,
+  createQueueManager,
   createApp,
   createCsrfMiddleware,
   requireAuthenticated,
@@ -18,7 +21,7 @@ import {
 } from '@guren/core'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 
-import { aiPlugin, defineAiConfig, type AiPluginConfig, type ConversationsConfig } from '../src'
+import { AgentResponded, aiPlugin, defineAiConfig, type AiPluginConfig, type ConversationsConfig } from '../src'
 
 export type ScriptedStep =
   | { text: string }
@@ -214,4 +217,20 @@ export async function bootHarness(
 /** Let the event manager's fire-and-forget listeners run. */
 export async function drainEvents(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/** Binds a memory queue on the harness app; `work()` drains it through a real `Worker`. */
+export function withQueue(h: Harness) {
+  const driver = new MemoryQueueDriver()
+  h.app.container.instance('queue', createQueueManager({ default: 'memory', drivers: { memory: () => driver } }))
+  const responded: AgentResponded[] = []
+  h.app.container.make<EventManager>('events').on(AgentResponded, (event) => {
+    responded.push(event)
+  })
+  const failures: Error[] = []
+  const work = () =>
+    new Worker(driver, { container: h.app.container, stopWhenEmpty: true, sleep: 0 }, {
+      jobFailed: (_job, error) => failures.push(error),
+    }).start()
+  return { driver, responded, failures, work }
 }

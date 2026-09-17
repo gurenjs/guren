@@ -18,6 +18,7 @@ export type {
 } from './agent'
 
 export { ChatTurnSchema } from './chat'
+export { AGENT_CHUNK_EVENT } from './protocol'
 
 export { appToolDefinitions, appTools } from './app-tools'
 export type { AppToolDefinition, AppToolDenial, AppToolError } from './app-tools'
