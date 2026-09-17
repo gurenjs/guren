@@ -40,6 +40,7 @@ import {
 import { describeMethod } from './http-methods'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
+import { auditAiLocalTools, describeLocalTool, type AiLocalToolListing } from './ai-local-tools-audit'
 import { auditCsrfExemptions, DECLARE_CALL_PATTERN, type CsrfExemptionScan } from './csrf-exemption-audit'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
@@ -70,6 +71,11 @@ export interface AuditReport {
   dependencyScan?: DependencyScan
   /** Coverage of the installed-package scan for CSRF exemptions. */
   csrfExemptionScan: CsrfExemptionScan
+  /**
+   * In-process agents' local tools (RFC 0029 §2.4), which no pipeline gate
+   * covers. Absent for an app with no `Agent` subclass.
+   */
+  aiLocalTools?: AiLocalToolListing[]
 }
 
 export interface RunAuditOptions {
@@ -217,11 +223,13 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
     )
   }
 
-  const routesAnalyzed = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
+  const definitions = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
+  const routesAnalyzed = definitions !== undefined
   auditForceWrites(controllerMethods, findings)
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
   const csrfExemptionScan = await auditCsrfExemptions(cwd, findings)
+  const aiLocalTools = await auditAiLocalTools(cwd, definitions, controllerMethods, findings)
 
   const dependencyScan: DependencyScan = dependencyScanOutput
     ? dependencyFindingsFromOutput(await dependencyScanOutput, findings)
@@ -243,6 +251,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
     routesAnalyzed,
     dependencyScan,
     csrfExemptionScan,
+    ...(aiLocalTools ? { aiLocalTools } : {}),
   }
 }
 
@@ -408,7 +417,7 @@ async function auditRoutes(
   routesFile: string | undefined,
   controllerMethods: Map<string, ControllerMethodInfo>,
   findings: AuditFinding[],
-): Promise<boolean> {
+): Promise<RouteDefinition[] | undefined> {
   const resolvedRoutesFile = resolve(cwd, await routesEntryOrDefault(cwd, routesFile))
 
   let definitions
@@ -425,7 +434,7 @@ async function auditRoutes(
         'Ensure the routes entry (routes/web.ts or routes/api.ts) is importable, or pass --routes <file>.',
       ),
     )
-    return false
+    return undefined
   }
 
   // A module that failed to load leaves its own routes unchecked, which must
@@ -648,7 +657,7 @@ async function auditRoutes(
     }
   }
 
-  return true
+  return definitions
 }
 
 const SCAN_DIRECTORIES = ['app', 'src', 'routes', 'config']
@@ -973,6 +982,13 @@ export function renderAuditReport(report: AuditReport): void {
       `CSRF exemption declared by: ${quietDeclarers.join(', ')} `
       + '(path chosen at boot from each package\'s configuration).',
     )
+  }
+
+  if (report.aiLocalTools && report.aiLocalTools.length > 0) {
+    consola.info(
+      'In-process agent local tools, outside the appTools() guarantee (no scope, policy, approval or audit):',
+    )
+    for (const listing of report.aiLocalTools) consola.info(`       ${describeLocalTool(listing)}`)
   }
 
   for (const f of report.findings) {

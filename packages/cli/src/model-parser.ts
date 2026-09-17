@@ -262,7 +262,7 @@ function stringArrayEntries(node: Node | null | undefined): string[] | undefined
 }
 
 /** Entries of `static <name> = ['a', 'b']`, or undefined when absent or not an array literal. */
-function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): string[] | undefined {
+export function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): string[] | undefined {
   return stringArrayEntries(findStaticClassProperty(classDecl, name)?.value)
 }
 

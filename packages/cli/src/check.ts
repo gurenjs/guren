@@ -31,6 +31,7 @@ import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
+import { checkAiAgents } from './ai-agent-check'
 import { checkSessionsConfig } from './sessions-check'
 import { checkPrototypeRoutes } from './prototype-check'
 import { checkDeployRuntime } from './deploy-runtime'
@@ -481,6 +482,20 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     })
     checks.push(...registry.checks)
     agentScopeExpansions = registry.expansions
+
+    // 7.95. In-process agents (RFC 0029 §8): appTools() names against the derived
+    // tools and the class's scopes, aiPlugin() registered, one audit trail.
+    // Content-activated. Gated like 7.7; a failed graph load leaves the names
+    // unverified rather than underived, while an absent routes file derives none.
+    if (sourceChanged) {
+      checks.push(
+        ...(await checkAiAgents({
+          cwd,
+          cache,
+          ...(graph?.error ? {} : { definitions: graph?.definitions ?? [] }),
+        })),
+      )
+    }
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated
     // and dialect-gated. Not changed-filtered: the schema is a handful of files,

@@ -55,6 +55,10 @@ const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
     owaspApi('API3', 'Broken Object Property Level Authorization'),
     cwe('CWE-915', 'Improperly Controlled Modification of Dynamically-Determined Object Attributes'),
   ],
+  'ai-local-tool-write': [
+    owasp('A01', 'Broken Access Control'),
+    cwe('CWE-862', 'Missing Authorization'),
+  ],
   'force-write-request-data': [
     owaspApi('API3', 'Broken Object Property Level Authorization'),
     cwe('CWE-915', 'Improperly Controlled Modification of Dynamically-Determined Object Attributes'),
