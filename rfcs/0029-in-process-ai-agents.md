@@ -521,7 +521,9 @@ const { messages, sendMessage } = useChat({
   A controller passes `{ conversation: conversation ?? true }`, since `continue()` takes no `null`, and
   `signal: this.request.raw.signal` (the controller's `request` is Hono's wrapper).
 - **No stateless form:** the `UiMessagesSchema` form is not shipped, so `stream()` accepts no client
-  transcript at all, which settles the forged-role question structurally.
+  transcript at all, which settles the forged-role question structurally. A chat therefore needs a
+  conversation store: the transport's first turn sends `conversation: null`, the controller passes
+  `true`, and an app whose `config/ai.ts` configures no store fails that turn before any model call.
 - **Starting a conversation:** the id is chosen before the stream starts and sent in
   `X-Guren-Conversation`, so `ConversationStore.create()` takes the id from its caller. The turn is
   stored in the stream's `onEnd`, which the response body waits for.

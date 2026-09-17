@@ -83,6 +83,16 @@ describe('BoundAgent.stream', () => {
     expect(model.doStreamCalls).toHaveLength(0)
   })
 
+  test('should refuse to start a conversation when config/ai.ts configures no store', async () => {
+    const h = await bootHarness()
+    const model = h.script([{ text: 'never' }])
+
+    await expect(h.app.container.make('ai').agent(Support).as(USER).stream('Hi', { conversation: true }))
+      .rejects.toThrow('config/ai.ts configures no conversation store.')
+    expect(model.doStreamCalls).toHaveLength(0)
+  })
+
+  // The SDK runs `onAbort` and not `onEnd` for an aborted stream, which is what stores nothing.
   test('should store nothing for a turn the caller aborts mid-stream', async () => {
     const h = await bootHarness({ conversations: { driver: 'memory' } })
     const model = h.script([])

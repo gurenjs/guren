@@ -1,6 +1,6 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import type { UIMessage, UIMessageChunk } from 'ai'
 
 import { Agent, ChatTurnSchema } from '../src'
@@ -14,11 +14,11 @@ class Support extends Agent {
 
 const USER = { kind: 'user' as const, id: 1 }
 
-async function bootChat(): Promise<Harness & { bodies: unknown[] }> {
+async function bootChat(options: { conversations?: boolean } = {}): Promise<Harness & { bodies: unknown[] }> {
   const bodies: unknown[] = []
   let harness: Harness | undefined
   harness = await bootHarness({
-    conversations: { driver: 'memory' },
+    ...(options.conversations === false ? {} : { conversations: { driver: 'memory' as const } }),
     routes: (router) => {
       router.post('/chat', async (c) => {
         const body: unknown = await c.req.json()
@@ -108,6 +108,20 @@ describe('createChatTransport', () => {
 
     expect(h.bodies.at(-1)).toEqual({ conversation: id, message: 'after the reload' })
     expect(announced).toEqual([])
+  })
+
+  test('should fail the first turn in an app with no conversation store, rather than chat without history', async () => {
+    const h = await bootChat({ conversations: false })
+    const model = h.script([{ text: 'never' }])
+    const fetch = browser(h)
+    await fetch('/posts')
+    const error = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(send(createChatTransport('/chat', { fetch }), 'hello')).rejects.toThrow('config/ai.ts configures no conversation store.')
+      expect(model.doStreamCalls).toHaveLength(0)
+    } finally {
+      error.mockRestore()
+    }
   })
 
   test('should refuse to regenerate, since the server holds the history', async () => {

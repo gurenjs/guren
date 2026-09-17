@@ -250,6 +250,7 @@ describe('TestApp.fakeAi', () => {
     const body = await response.text()
 
     expect(body).toContain('"delta":"Created it."')
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
     expect(created).toEqual(['Streamed'])
     expect(ai.calls(Writer)[0]!.toolCalls).toEqual([
       { name: 'posts_store', input: { title: 'Streamed' }, output: { created: 'Streamed' } },
@@ -262,6 +263,7 @@ describe('TestApp.fakeAi', () => {
     const summarizer = application.container.make('ai').agent(Summarizer).as({ id: 1 })
 
     const first = await summarizer.stream('one', { conversation: true })
+    expect(first.headers.get('X-Guren-Conversation')).toMatch(/^[0-9a-f-]{36}$/)
     await first.text()
     await (await summarizer.continue(first.headers.get('X-Guren-Conversation')!).stream('two')).text()
 
