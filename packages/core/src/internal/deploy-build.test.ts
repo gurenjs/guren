@@ -4,6 +4,7 @@ import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  SQL_CLIENT_MODULES,
   assertOutputDirOutsideRoot,
   CLIENT_ASSETS_URL_PREFIX,
   clientManifestJson,
@@ -498,19 +499,36 @@ describe('the module graph this list describes', () => {
 })
 
 describe('the surface published deploy plugins link against', () => {
-  // Deploy plugins already on npm import these names under a caret on core and look
-  // a stub's message up by `kind` in a table keyed `sqlite`, `vite` and `mcp`
-  // (Cloudflare adds `sql-driver`). A missing name fails their root module at link
-  // time; an unknown kind hands renderDevOnlyStub an undefined message.
-  const PUBLISHED_MESSAGE_KEYS = ['sqlite', 'vite', 'mcp', 'sql-driver'] as const
+  // Deploy plugins already on npm import these names under a caret on core and look a
+  // stub's message up by `kind`. Lambda and Vercel key only the dev-only kinds;
+  // Cloudflare also walks SQL_CLIENT_MODULES with `sql-driver`. A missing name fails
+  // their root module at link time; an unknown kind passes an undefined message.
+  const DEV_ONLY_KEYS: readonly string[] = ['sqlite', 'vite', 'mcp']
+  const SQL_CLIENT_KEYS: readonly string[] = ['sql-driver']
 
-  test('should keep every kind a published plugin looks its message up by', () => {
-    const table: Record<string, string> = Object.fromEntries(
-      PUBLISHED_MESSAGE_KEYS.map((kind) => [kind, `${kind} is unavailable here.`]),
-    )
+  function tableOf(keys: readonly string[]): Record<string, string> {
+    return Object.fromEntries(keys.map((kind) => [kind, `${kind} is unavailable here.`]))
+  }
 
-    for (const module of [...DEV_ONLY_MODULES, ...stubbableDevOnlyModules({ mcpPlugin: false })]) {
-      expect(PUBLISHED_MESSAGE_KEYS).toContain(module.kind)
+  test('should keep every dev-only kind the Lambda and Vercel tables look up', () => {
+    const table = tableOf(DEV_ONLY_KEYS)
+
+    for (const module of stubbableDevOnlyModules({ mcpPlugin: false })) {
+      expect(DEV_ONLY_KEYS).toContain(module.kind)
+      expect(() => renderDevOnlyStub(module, table[module.kind])).not.toThrow()
+    }
+  })
+
+  test('should keep every kind the Cloudflare table looks up across both lists', () => {
+    const table = tableOf([...DEV_ONLY_KEYS, ...SQL_CLIENT_KEYS])
+
+    for (const module of DEV_ONLY_MODULES) {
+      expect(DEV_ONLY_KEYS).toContain(module.kind)
+    }
+    for (const module of SQL_CLIENT_MODULES) {
+      expect(SQL_CLIENT_KEYS).toContain(module.kind)
+    }
+    for (const module of [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES]) {
       expect(() => renderDevOnlyStub(module, table[module.kind])).not.toThrow()
     }
   })

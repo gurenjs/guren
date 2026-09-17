@@ -290,9 +290,9 @@ alias is now inert; it goes with the rest of the removal list below.
 
 **The minor after: remove the Phase 4a machinery.** With `createMcpServer` gone:
 
-- delete the two SDK entries from `DEV_ONLY_MODULES`, `MCP_TRANSPORT_SPECIFIER`, the
-  `stubbableDevOnlyModules` filter, `assertMcpTransportNotAliased`
-  (`build.ts:784-812`), and the `MCP_SDK_SUBPATH_PREFIX` catch-all;
+- delete the two SDK entries from `DEV_ONLY_MODULES`, ~~`MCP_TRANSPORT_SPECIFIER`, the
+  `stubbableDevOnlyModules` filter,~~ `assertMcpTransportNotAliased`
+  (`build.ts:784-812`), and the ~~`MCP_SDK_SUBPATH_PREFIX`~~ catch-all;
 - keep writing `stub-mcp-server.js` and `stub-mcp-transport.js` from a separate
   compatibility list. `writeDevOnlyStubs` iterates `STUBBED_MODULES`
   (`build.ts:755`), so removing the entries alone would stop the files existing and
@@ -304,14 +304,26 @@ alias is now inert; it goes with the rest of the removal list below.
   `web`, `packages/plugin-agents/tests/workers/app`).
 
 **Amended in implementation:** the removal went one step further than the list.
-`appUsesMcpPlugin` had no reader left but `--mcp-oauth`'s prerequisite check, so it
-moved into plugin-cloudflare as the `appDependsOn` it already had, and Lambda and
+`appUsesMcpPlugin` had no reader left but `--mcp-oauth`'s prerequisite check, so
+~~it moved into plugin-cloudflare as the `appDependsOn` it already had~~
+plugin-cloudflare now uses the `appDependsOn` it already had, and Lambda and
 Vercel stopped reading the manifest. `importedBy` is a `string` again. The two retired
 stub files are no longer written either: wrangler 4.129 bundles a worker whose
 unused `alias` names a missing file (`deploy --dry-run` exits 0), so the committed
-lines are inert rather than breaking. The `mcp` kind became `guren-cli`, and its message on all three targets names
+lines are inert rather than breaking. ~~The `mcp` kind became `guren-cli`, and its~~
+The `@guren/cli` entry's message on all three targets names
 the Dev MCP endpoint and the docs viewer: `@guren/cli` backs both, and the App MCP
-endpoint does serve there. The plugin-agents fixture declares
+endpoint does serve there.
+
+**Amended again before release (#892):** `MCP_TRANSPORT_SPECIFIER`,
+`MCP_SDK_SUBPATH_PREFIX`, `stubbableDevOnlyModules` and `appUsesMcpPlugin` stay
+exported from `@guren/core/internal/deploy-build`, deprecated and unused in this
+repo, and the `@guren/cli` entry's kind stays `mcp`. `@guren/plugin-lambda` 0.6.1,
+`@guren/plugin-vercel` 0.6.1 and `@guren/plugin-cloudflare` 0.11.0 import those names
+under `@guren/core: ^1.19.0` and key their stub messages on `mcp`, so the removal
+would have failed their root modules at link time for an app that updated core
+alone, and the rename would have passed `renderDevOnlyStub` an undefined message.
+Both go in core 2.0, which those ranges do not admit. The plugin-agents fixture declares
 `@guren/plugin-mcp`, which the removed guard used to refuse.
 
 From then on the `@guren/cli` stub is the only thing keeping SDK v2 out of the bundle
