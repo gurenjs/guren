@@ -1,6 +1,17 @@
 {
   "name": "@guren/plugin-vercel",
   "version": "0.7.0",
+  "description": "Deploy a Guren SSR application to Vercel through the Build Output API, on Vercel's Bun runtime.",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "vercel",
+    "serverless",
+    "deploy"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {

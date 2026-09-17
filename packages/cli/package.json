@@ -1,6 +1,19 @@
 {
   "name": "@guren/cli",
   "version": "2.25.0",
+  "description": "CLI for the Guren framework: scaffolding (make:*, add), migrations, codegen, and the check, audit and gate commands a coding agent runs to verify its work.",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "cli",
+    "scaffold",
+    "codegen",
+    "ai-agents",
+    "claude-code"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {

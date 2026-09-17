@@ -1,8 +1,19 @@
 {
   "name": "@guren/plugin-ai",
   "version": "0.2.0",
-  "type": "module",
   "description": "In-process AI agents for Guren applications: model calls on the Vercel AI SDK that reach the app through its own gated agent tools (RFC 0029).",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "ai",
+    "ai-agents",
+    "ai-sdk",
+    "llm"
+  ],
+  "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -1,6 +1,19 @@
 {
   "name": "@guren/plugin-lambda",
   "version": "0.7.0",
+  "description": "Deploy a Guren application to AWS Lambda on the Node.js runtime, with a CDK construct for the infrastructure.",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "aws",
+    "aws-lambda",
+    "cdk",
+    "serverless",
+    "deploy"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {

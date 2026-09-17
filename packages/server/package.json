@@ -1,6 +1,20 @@
 {
   "name": "@guren/server",
   "version": "2.25.0",
+  "description": "HTTP layer of the Guren framework, on Hono: routing, controllers, middleware, auth, sessions, queues and the AWS Lambda adapter. Applications import it through @guren/core.",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "hono",
+    "http",
+    "router",
+    "mvc",
+    "middleware",
+    "auth"
+  ],
   "type": "module",
   "sideEffects": false,
   "license": "MIT",

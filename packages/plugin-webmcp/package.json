@@ -1,8 +1,18 @@
 {
   "name": "@guren/plugin-webmcp",
   "version": "0.1.1",
-  "type": "module",
   "description": "Experimental WebMCP client for Guren: registers an app's agent tools on the browser's modelContext API (RFC 0016 Phase 3). The WebMCP specification is a W3C Community Group draft and its API churns.",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "webmcp",
+    "mcp",
+    "ai-agents"
+  ],
+  "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",

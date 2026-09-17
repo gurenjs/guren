@@ -1,6 +1,23 @@
 {
   "name": "create-guren-app",
   "version": "1.17.0",
+  "description": "Scaffold a Guren app: a Bun-first fullstack TypeScript framework with Laravel-style conventions, Inertia.js + React, Drizzle ORM, and an agent harness for Claude Code and other coding agents.",
+  "keywords": [
+    "guren",
+    "bun",
+    "typescript",
+    "fullstack",
+    "framework",
+    "bun-framework",
+    "create-app",
+    "starter",
+    "laravel",
+    "hono",
+    "drizzle",
+    "inertia",
+    "react",
+    "claude-code"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {

@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/7nohe?logo=githubsponsors)](https://github.com/sponsors/7nohe)
 
-**The fullstack TypeScript framework for the AI-agent era.**
+**The Bun-first fullstack TypeScript framework.**
 
-Guren is a fullstack framework for Bun where your coding agent works from the same map you do. Laravel-style conventions, type safety from the route definition to the React component, and mechanical checks that verify the work. Secure by default, agent-ready by default.
+Develop on Bun; deploy to Bun, AWS Lambda (Node.js), Vercel, or Cloudflare Workers. Your coding agent works from the same map you do: Laravel-style conventions, type safety from the route definition to the React component, and mechanical checks that verify the work. Secure by default, agent-ready by default.
 
 > **v2** is stable. Breaking changes only in major releases, per the [release policy](docs/en/guides/release-policy.md).
 
