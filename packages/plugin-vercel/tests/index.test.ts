@@ -7,63 +7,16 @@ import { buildVercelOutput, createVercelHandler, vercelPlugin } from '../src/ind
 
 const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Response('ok') } }\n"
 
-/** Markers the fake SDK exports, so a test can tell "resolved" from "stubbed". */
-const SDK_SERVER_INDEX_MARKER = 'fake-sdk-server-index'
-const SDK_TRANSPORT_MARKER = 'fake-sdk-transport'
-
-/**
- * An entrypoint importing both SDK subpaths and reporting what it got.
- * `server/index.js` comes in as a *namespace*: the catch-all stub for an
- * unlisted subpath is a bare `throw` with no exports, so a named import would
- * fail the bundle rather than the bundled module.
- */
-const SDK_ENTRY_SOURCE =
-  "import * as serverIndex from '@modelcontextprotocol/sdk/server/index.js'\n"
-  + "import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'\n"
-  + 'export default { fetch() { return new Response(`${serverIndex.MARKER}|${WebStandardStreamableHTTPServerTransport}`) } }\n'
-
-/**
- * A stand-in for `@modelcontextprotocol/sdk` inside the scaffolded app.
- * Deliberately without an `exports` map: a slightly wrong subpath under one
- * fails to resolve and reads exactly like the stub still intercepting, which is
- * the verdict these tests exist to distinguish.
- */
-function installFakeMcpSdk(root: string): void {
-  const pkg = join(root, 'node_modules/@modelcontextprotocol/sdk')
-  mkdirSync(join(pkg, 'server'), { recursive: true })
-  writeFileSync(
-    join(pkg, 'package.json'),
-    JSON.stringify({ name: '@modelcontextprotocol/sdk', version: '1.30.0', type: 'module' }),
-    'utf8',
-  )
-  writeFileSync(join(pkg, 'server/index.js'), `export const MARKER = '${SDK_SERVER_INDEX_MARKER}'\n`, 'utf8')
-  writeFileSync(
-    join(pkg, 'server/webStandardStreamableHttp.js'),
-    `export const WebStandardStreamableHTTPServerTransport = '${SDK_TRANSPORT_MARKER}'\n`,
-    'utf8',
-  )
-}
-
 /** Writes a minimal buildable app under `root`, as `buildVercelOutput` options. */
 function scaffoldApp(
   root: string,
-  options: { entrypoint?: string; source?: string; mcpPlugin?: boolean } = {},
+  options: { entrypoint?: string; source?: string } = {},
 ): { rootDir: string; entrypoint: string; outputDir: string } {
-  const { entrypoint = 'src/index.ts', source = DEFAULT_ENTRYPOINT_SOURCE, mcpPlugin = false } = options
+  const { entrypoint = 'src/index.ts', source = DEFAULT_ENTRYPOINT_SOURCE } = options
   const entrypointPath = join(root, entrypoint)
 
   mkdirSync(dirname(entrypointPath), { recursive: true })
   writeFileSync(entrypointPath, source, 'utf8')
-
-  if (mcpPlugin) {
-    // Declaring the plugin under `dependencies` is the App MCP opt-in the
-    // build reads (RFC 0016 §7).
-    writeFileSync(
-      join(root, 'package.json'),
-      JSON.stringify({ name: 'demo-app', dependencies: { '@guren/plugin-mcp': '^0.2.0' } }),
-      'utf8',
-    )
-  }
 
   return { rootDir: root, entrypoint: entrypointPath, outputDir: join(root, '.vercel/output') }
 }
@@ -391,46 +344,11 @@ describe('@guren/plugin-vercel', () => {
       expect(copied).toContain('Parent docs.')
     })
 
-    it('stubs both MCP SDK subpaths for an app that does not depend on the plugin', async () => {
-      // The regression hold: nothing about RFC 0016 Phase 4a reaches an app
-      // that never asked for the App MCP endpoint.
-      const app = scaffoldApp(root, { source: SDK_ENTRY_SOURCE })
-      installFakeMcpSdk(root)
-
-      await buildVercelOutput(app)
-
-      const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
-      expect(bundle).toContain('The MCP endpoint is unavailable on Vercel')
-      // The SDK sits installed beside the app, so its markers reaching the
-      // bundle is what "resolved for real" would look like.
-      expect(bundle).not.toContain(SDK_TRANSPORT_MARKER)
-      expect(bundle).not.toContain(SDK_SERVER_INDEX_MARKER)
-    })
-
-    it('bundles the real MCP SDK for an app depending on @guren/plugin-mcp', async () => {
-      const app = scaffoldApp(root, { source: SDK_ENTRY_SOURCE, mcpPlugin: true })
-      installFakeMcpSdk(root)
-
-      await buildVercelOutput(app)
-
-      // Two mechanisms had to stop firing, and the markers tell them apart from
-      // "resolved nothing": `webStandardStreamableHttp.js` is the entry the stub
-      // map releases, and `server/index.js` is one only the SDK-prefix catch-all
-      // could have stubbed — @guren/plugin-mcp imported it *statically* on SDK v1.
-      const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
-      expect(bundle).toContain(SDK_TRANSPORT_MARKER)
-      expect(bundle).toContain(SDK_SERVER_INDEX_MARKER)
-      expect(bundle).not.toContain('The MCP endpoint is unavailable on Vercel')
-    })
-
     it('bundles the SDK v2 root @guren/plugin-mcp imports', async () => {
-      // No alias or filter names `@modelcontextprotocol/server`, so neither the
-      // v1 stub map nor the v1 subpath catch-all may swallow it.
       const app = scaffoldApp(root, {
         source:
           "import { createMcpHandler } from '@modelcontextprotocol/server'\n"
           + 'export default { fetch() { return new Response(String(createMcpHandler)) } }\n',
-        mcpPlugin: true,
       })
       const v2 = join(root, 'node_modules/@modelcontextprotocol/server')
       mkdirSync(v2, { recursive: true })
@@ -441,29 +359,25 @@ describe('@guren/plugin-vercel', () => {
 
       const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
       expect(bundle).toContain('fake-sdk-v2-server')
-      expect(bundle).not.toContain('The MCP endpoint is unavailable on Vercel')
+      expect(bundle).not.toContain('The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on Vercel')
     })
 
-    it('keeps the Dev MCP server stubbed even for an app depending on the plugin', async () => {
-      // Its McpServer drives the CLI's code generators against a filesystem
-      // the function does not have, and the App MCP endpoint never touches it.
+    it('stubs @guren/cli, which serves the Dev MCP', async () => {
       const app = scaffoldApp(root, {
         source:
-          "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'\n"
-          + 'export default { fetch() { return new Response(String(McpServer)) } }\n',
-        mcpPlugin: true,
+          "import * as cli from '@guren/cli'\n"
+          + 'export default { fetch() { return new Response(String(cli.default)) } }\n',
       })
-      installFakeMcpSdk(root)
-      writeFileSync(
-        join(root, 'node_modules/@modelcontextprotocol/sdk/server/mcp.js'),
-        "export const McpServer = 'fake-sdk-mcp-server'\n",
-      )
+      const cli = join(root, 'node_modules/@guren/cli')
+      mkdirSync(cli, { recursive: true })
+      writeFileSync(join(cli, 'package.json'), JSON.stringify({ name: '@guren/cli', type: 'module' }))
+      writeFileSync(join(cli, 'index.js'), "export default 'fake-guren-cli'\n")
 
       await buildVercelOutput(app)
 
       const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
-      expect(bundle).toContain('The MCP endpoint is unavailable on Vercel')
-      expect(bundle).not.toContain('fake-sdk-mcp-server')
+      expect(bundle).toContain('The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on Vercel')
+      expect(bundle).not.toContain('fake-guren-cli')
     })
   })
 })

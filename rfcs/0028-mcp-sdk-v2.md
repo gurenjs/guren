@@ -303,6 +303,17 @@ alias is now inert; it goes with the rest of the removal list below.
   lines from the four committed configs (`examples/agents`, `examples/deploy/cloudflare`,
   `web`, `packages/plugin-agents/tests/workers/app`).
 
+**Amended in implementation:** the removal went one step further than the list.
+`appUsesMcpPlugin` had no reader left but `--mcp-oauth`'s prerequisite check, so it
+moved into plugin-cloudflare as the `appDependsOn` it already had, and Lambda and
+Vercel stopped reading the manifest. `importedBy` is a `string` again. The two retired
+stub files are no longer written either: wrangler 4.129 bundles a worker whose
+unused `alias` names a missing file (`deploy --dry-run` exits 0), so the committed
+lines are inert rather than breaking. The `mcp` kind became `guren-cli`, and its message on all three targets names
+the Dev MCP endpoint and the docs viewer: `@guren/cli` backs both, and the App MCP
+endpoint does serve there. The plugin-agents fixture declares
+`@guren/plugin-mcp`, which the removed guard used to refuse.
+
 From then on the `@guren/cli` stub is the only thing keeping SDK v2 out of the bundle
 of an app without plugin-mcp. That invariant is tested on all three targets, starting
 from the committed `wrangler.jsonc` files as they are today, and

@@ -16,7 +16,7 @@ const enabled = process.env.GUREN_TEST_BUNDLE === '1'
  * Packages this probe must not have installed: the clients of dialects a
  * Postgres app never uses, plus the dev-only modules this build stubs.
  */
-const ABSENT_PACKAGES = ['mysql2', '@aws-sdk', 'vite', '@modelcontextprotocol']
+const ABSENT_PACKAGES = ['mysql2', '@aws-sdk', 'vite', '@guren/cli']
 
 function run(cmd: string[], cwd: string): { exitCode: number; output: string } {
   const result = Bun.spawnSync({ cmd, cwd, stdout: 'pipe', stderr: 'pipe' })
@@ -76,7 +76,7 @@ describe.skipIf(!enabled)('vercel:build bundles an app importing @guren/orm', ()
     )
 
     // The dev-only imports stand in for the ones Guren's own graph makes (the
-    // disabled MCP endpoint reaches `@guren/cli` and the SDK, `Application`
+    // disabled MCP endpoint reaches `@guren/cli`, `Application`
     // reaches Vite), keeping the probe to two installed packages.
     writeFileSync(
       join(root, 'src/vercel.ts'),
@@ -84,7 +84,7 @@ describe.skipIf(!enabled)('vercel:build bundles an app importing @guren/orm', ()
         + 'export default {\n'
         + '  async fetch(): Promise<Response> {\n'
         + "    await import('vite')\n"
-        + "    await import('@modelcontextprotocol/sdk/server/mcp.js')\n"
+        + "    await import('@guren/cli')\n"
         + '    return new Response(String(typeof (await getDatabase())))\n'
         + '  },\n'
         + '}\n',

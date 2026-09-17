@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import {
   DEV_ONLY_MODULES,
   SQL_CLIENT_MODULES,
-  stubbableDevOnlyModules,
 } from '@guren/core/internal/deploy-build'
 
 // Opt-in end-to-end contract test: proves wrangler can bundle a worker that
@@ -321,9 +320,8 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
   test(
     'bundles the App MCP SDK and stays inside the free-plan budget',
     () => {
-      // Everything `cloudflare:build` stubs for an app that declares
-      // `@guren/plugin-mcp`.
-      const deployed = [...stubbableDevOnlyModules({ mcpPlugin: true }), ...SQL_CLIENT_MODULES]
+      // Everything `cloudflare:build` stubs.
+      const deployed = [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES]
       const served = bundleSize('sdk-served', deployed)
       // And the same worker with the SDK v2 root stubbed under the names
       // plugin-mcp imports. "The bundle resolves" cannot tell the two apart, so

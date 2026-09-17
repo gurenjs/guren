@@ -108,7 +108,7 @@ async function runCliJson<T>(args: string[], cwd: string): Promise<T> {
  * in-process: everything here reaches `loadRouteDefinitions()`, whose module
  * graph is frozen for the process lifetime (see `load-routes.ts`), and no
  * in-process trick re-evaluates it on Bun; a child process does. Returns the
- * in-process shapes; keep the signatures in step with `GurenCliApi` in `@guren/server`.
+ * in-process shapes, which the Dev MCP's `DevMcpApi` type-checks.
  */
 export function createFreshContextApi(): {
   generateContext(options: { cwd: string }): Promise<ProjectContext>

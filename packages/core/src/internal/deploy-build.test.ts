@@ -4,20 +4,16 @@ import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  appUsesMcpPlugin,
   assertOutputDirOutsideRoot,
   CLIENT_ASSETS_URL_PREFIX,
   clientManifestJson,
   DATABASE_FACTORIES,
-  MCP_TRANSPORT_SPECIFIER,
-  stubbableDevOnlyModules,
   detectDatabaseDialects,
   DEV_ONLY_MODULES,
   parseDatabaseDialects,
   unusedSqlClients,
   renderDevOnlyStub,
   importSpecifier,
-  MCP_SDK_SUBPATH_PREFIX,
   readManifest,
   resolveClientAssetEnv,
   resolvePathLike,
@@ -413,98 +409,6 @@ describe('resolvePathLike', () => {
   })
 })
 
-describe('DEV_ONLY_MODULES', () => {
-  test('should list every MCP SDK entry under the documented subpath prefix', () => {
-    const sdkEntries = DEV_ONLY_MODULES.filter((module) =>
-      module.specifier.startsWith('@modelcontextprotocol/'),
-    )
-
-    // A package-name alias does not cover subpaths, so a bare package entry
-    // leaves the real SDK in a Workers bundle.
-    expect(sdkEntries.length).toBeGreaterThan(0)
-    for (const entry of sdkEntries) {
-      expect(entry.specifier.startsWith(MCP_SDK_SUBPATH_PREFIX)).toBe(true)
-    }
-  })
-
-  test('should carry the transport entry committed wrangler configs still alias', () => {
-    // Its stub file must keep being written until RFC 0028's removal PR.
-    expect(DEV_ONLY_MODULES.map((module) => module.specifier)).toContain(MCP_TRANSPORT_SPECIFIER)
-  })
-})
-
-describe('appUsesMcpPlugin', () => {
-  let root: string
-
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'guren-mcp-optin-'))
-  })
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true })
-  })
-
-  function writeManifest(manifest: unknown): void {
-    writeFileSync(join(root, 'package.json'), JSON.stringify(manifest))
-  }
-
-  test('should report the opt-in when the plugin is a runtime dependency', () => {
-    writeManifest({ name: 'app', dependencies: { '@guren/core': '^1.12.0', '@guren/plugin-mcp': '^0.2.0' } })
-
-    expect(appUsesMcpPlugin(root)).toBe(true)
-  })
-
-  test('should not report the opt-in for a devDependency', () => {
-    // A devDependency never ships, so the deployed app has no endpoint for the
-    // transport to serve.
-    writeManifest({ name: 'app', devDependencies: { '@guren/plugin-mcp': '^0.2.0' } })
-
-    expect(appUsesMcpPlugin(root)).toBe(false)
-  })
-
-  test('should not report the opt-in when the manifest declares no dependencies', () => {
-    writeManifest({ name: 'app' })
-
-    expect(appUsesMcpPlugin(root)).toBe(false)
-  })
-
-  test('should not report the opt-in when there is no manifest', () => {
-    // Absent evidence is not evidence of opt-in; false leaves it stubbed.
-    expect(appUsesMcpPlugin(root)).toBe(false)
-  })
-
-  test('should not report the opt-in when the manifest is malformed', () => {
-    writeFileSync(join(root, 'package.json'), '{ not json')
-
-    expect(appUsesMcpPlugin(root)).toBe(false)
-  })
-})
-
-describe('stubbableDevOnlyModules', () => {
-  test('should stub every dev-only module for an app without the MCP plugin', () => {
-    expect(stubbableDevOnlyModules({ mcpPlugin: false }).map((module) => module.specifier)).toEqual(
-      DEV_ONLY_MODULES.map((module) => module.specifier),
-    )
-  })
-
-  test('should drop only the transport for an app with the MCP plugin', () => {
-    const specifiers = stubbableDevOnlyModules({ mcpPlugin: true }).map((module) => module.specifier)
-
-    expect(specifiers).toEqual(
-      DEV_ONLY_MODULES.map((module) => module.specifier).filter(
-        (specifier) => specifier !== MCP_TRANSPORT_SPECIFIER,
-      ),
-    )
-    // The Dev MCP's McpServer generates files on disk and must stay compiled
-    // shut whatever the app depends on; `@guren/cli` behind it drags in Babel.
-    expect(specifiers).toContain('@modelcontextprotocol/sdk/server/mcp.js')
-    expect(specifiers).toContain('@guren/cli')
-    expect(specifiers).toContain('bun:sqlite')
-    expect(specifiers).toContain('vite')
-    expect(specifiers).not.toContain(MCP_TRANSPORT_SPECIFIER)
-  })
-})
-
 describe('the built artifact', () => {
   test('should import nothing but node builtins', () => {
     // Importing it must not drag the framework runtime into a developer's build.
@@ -557,26 +461,12 @@ describe('the module graph this list describes', () => {
     })
   }
 
-  const imported = DEV_ONLY_MODULES.filter((module) => module.importedBy !== null)
-
   // Per entry, and only inside the package the entry is listed for: searching every
   // package would let one package's import keep another's stale entry alive.
-  test.each(imported)(
+  test.each([...DEV_ONLY_MODULES])(
     'should still be imported by the package it is listed for: $specifier',
     (module) => {
       expect(importersOf(module.specifier, module.importedBy)).not.toEqual([])
-    },
-  )
-
-  // The other direction for an entry kept with no importer: a package that starts
-  // importing it again must name itself, or the stub would silently govern it.
-  test.each(DEV_ONLY_MODULES.filter((module) => module.importedBy === null))(
-    'should be imported by no package when listed without an importer: $specifier',
-    (module) => {
-      const packages = readdirSync(join(repoRoot, 'packages')).filter((name) =>
-        existsSync(join(repoRoot, 'packages', name, 'src')),
-      )
-      expect(packages.flatMap((name) => importersOf(module.specifier, `packages/${name}/src`))).toEqual([])
     },
   )
 
@@ -587,7 +477,7 @@ describe('the module graph this list describes', () => {
     expect(importersOf('vit', 'packages/server/src')).toEqual([])
   })
 
-  test.each(imported.filter((module) => module.exportNames.length > 0))(
+  test.each(DEV_ONLY_MODULES.filter((module) => module.exportNames.length > 0))(
     'should name exports the importer actually destructures: $specifier',
     (module) => {
       // A wrong name still renders a stub and fails only at bundle time with "no
@@ -621,7 +511,7 @@ describe('renderDevOnlyStub', () => {
   for (const [name, terminator] of terminators) {
     test(`keeps a ${name} inside the leading comment`, () => {
       const stub = renderDevOnlyStub(
-        { specifier: 'x', kind: 'sqlite', exportNames: [], importedBy: 'packages/orm/src' },
+        { exportNames: [] },
         `unavailable${terminator}globalThis.INJECTED = true //`,
       )
 
@@ -638,7 +528,7 @@ describe('renderDevOnlyStub', () => {
   ] as const) {
     test(`escapes a ${name} in the thrown message`, () => {
       const stub = renderDevOnlyStub(
-        { specifier: 'x', kind: 'sqlite', exportNames: [], importedBy: 'packages/orm/src' },
+        { exportNames: [] },
         `unavailable${separator}globalThis.INJECTED = true //`,
       )
 
@@ -649,7 +539,7 @@ describe('renderDevOnlyStub', () => {
 
   test('still names every export the importer destructures', () => {
     const stub = renderDevOnlyStub(
-      { specifier: 'x', kind: 'sqlite', exportNames: ['Database', 'open'], importedBy: 'packages/orm/src' },
+      { exportNames: ['Database', 'open'] },
       'nope',
     )
 

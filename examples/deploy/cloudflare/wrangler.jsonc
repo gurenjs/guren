@@ -11,9 +11,7 @@
   "alias": {
     "bun:sqlite": "./.cloudflare/stub-bun-sqlite.js",
     "vite": "./.cloudflare/stub-vite.js",
-    "@guren/cli": "./.cloudflare/stub-guren-cli.js",
-    "@modelcontextprotocol/sdk/server/mcp.js": "./.cloudflare/stub-mcp-server.js",
-    "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js": "./.cloudflare/stub-mcp-transport.js"
+    "@guren/cli": "./.cloudflare/stub-guren-cli.js"
   },
 
   // Substituted at build time. workerd leaves `import.meta.url` undefined,

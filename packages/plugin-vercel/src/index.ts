@@ -2,16 +2,13 @@ import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { basename, extname, resolve } from 'node:path'
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 import {
-  appUsesMcpPlugin,
   assertOutputDirOutsideRoot,
   bundledRuntimeEnv,
   DEV_ONLY_MODULES,
   DOCUMENT_ASSET_EXTENSIONS,
   DOCUMENT_ASSET_HEADERS,
-  MCP_SDK_SUBPATH_PREFIX,
   removeShadowingIndex,
   renderDevOnlyStub,
-  stubbableDevOnlyModules,
   resetOutputDir,
   resolveClientAssetEnv,
   resolvePathLike,
@@ -211,9 +208,6 @@ function documentAssetPattern(): string {
   return `^/.*\\.(?:${alternatives})$`
 }
 
-const MCP_UNAVAILABLE =
-  'The MCP endpoint is unavailable on Vercel — it generates files on disk, and the function filesystem is read-only.'
-
 /**
  * Why each dev-only module cannot run here, or `null` for one that can. `sqlite`
  * is the `null`: the function runs on Vercel's Bun runtime, so `bun:sqlite` works
@@ -224,22 +218,21 @@ const MCP_UNAVAILABLE =
 const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string | null> = {
   sqlite: null,
   vite: 'The Vite dev server is unavailable on Vercel — assets are served from the static output directory.',
-  mcp: MCP_UNAVAILABLE,
+  'guren-cli':
+    'The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on Vercel — they read and generate files on disk, and the function filesystem is read-only.',
 }
 
 /**
  * Modules replaced with throwing stubs, in match order. One defect shape — a
  * *literal* dynamic import of a package the app never installed, followed by a
  * bundler regardless of branch: dev-only modules, and SQL clients of unused
- * dialects. An app declaring `@guren/plugin-mcp` serves the App MCP endpoint here,
- * so its transport must reach the bundle (RFC 0016 §7); the *Dev* MCP stays stubbed.
+ * dialects.
  */
 function stubbedModules(
   root: string,
   dialects: readonly DatabaseDialect[] | undefined,
-  mcpPlugin: boolean,
 ): Record<string, string> {
-  const devOnly = stubbableDevOnlyModules({ mcpPlugin }).flatMap((module) => {
+  const devOnly = DEV_ONLY_MODULES.flatMap((module) => {
     const message = UNAVAILABLE_ON_VERCEL[module.kind]
     return message === null ? [] : [[module.specifier, renderDevOnlyStub(module, message)]]
   })
@@ -252,31 +245,14 @@ function stubbedModules(
   return Object.fromEntries([...devOnly, ...unused])
 }
 
-/**
- * Fallback for an MCP SDK subpath `DEV_ONLY_MODULES` does not name. It cannot
- * know which names the importer destructures, so it throws on evaluation rather
- * than resolving to an empty module. Reachable only for an app that does *not*
- * declare `@guren/plugin-mcp`, whose statically imported `server/index.js` and
- * `types.js` this would otherwise leave compiled shut.
- */
-const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 // Derived from the stubs actually rendered, so it stays the only enumeration of
-// stubbed specifiers. The catch-all cannot be derived the same way: "while any
-// MCP SDK subpath is stubbed" holds always (`server/mcp.js` is stubbed for every
-// app) and would swallow the `server/index.js` and `types.js` an MCP app imports
-// (RFC 0016 Phase 4a), so it follows the same `mcpPlugin` decision as the stubs.
-function stubFilter(stubs: Record<string, string>, mcpPlugin: boolean): RegExp {
-  const terms = Object.keys(stubs).map(escapeRegExp)
-  if (!mcpPlugin) {
-    terms.push(`${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`)
-  }
-
-  return new RegExp(`^(?:${terms.join('|')})$`)
+// stubbed specifiers.
+function stubFilter(stubs: Record<string, string>): RegExp {
+  return new RegExp(`^(?:${Object.keys(stubs).map(escapeRegExp).join('|')})$`)
 }
 
 /**
@@ -293,12 +269,8 @@ async function bundleFunction(input: {
   dialects: readonly DatabaseDialect[] | undefined
   bundledEnv: Record<string, string>
 }): Promise<void> {
-  // One read of the app's manifest, threaded to both halves of the stub
-  // decision: which modules are rendered, and whether unlisted MCP SDK subpaths
-  // are swallowed by the catch-all. Two reads could disagree silently.
-  const mcpPlugin = appUsesMcpPlugin(input.root)
-  const stubs = stubbedModules(input.root, input.dialects, mcpPlugin)
-  const filter = stubFilter(stubs, mcpPlugin)
+  const stubs = stubbedModules(input.root, input.dialects)
+  const filter = stubFilter(stubs)
 
   const result = await Bun.build({
     entrypoints: [input.entrypoint],
@@ -331,7 +303,7 @@ async function bundleFunction(input: {
         setup(build) {
           build.onResolve({ filter }, (args) => ({ path: args.path, namespace: 'guren-vercel-stub' }))
           build.onLoad({ filter: /.*/, namespace: 'guren-vercel-stub' }, (args) => ({
-            contents: stubs[args.path] ?? unlistedMcpStub,
+            contents: stubs[args.path],
             loader: 'js',
           }))
         },

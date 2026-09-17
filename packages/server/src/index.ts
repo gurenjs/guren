@@ -1071,9 +1071,7 @@ export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'
 export { createTypedBroadcaster } from './broadcasting/typed'
 // Redis: client factory
 export { createRedisClient } from './redis/client'
-// MCP: public via the '@guren/server/mcp' subpath, deliberately not re-exported
-// here — @guren/core re-exports this barrel wholesale, so it would pull
-// @modelcontextprotocol/sdk's types into every app's root import.
+// MCP: the Dev MCP provider is public via the '@guren/server/mcp' subpath only.
 // Docs viewer (RFC 0005): dev-only, loopback-guarded OKF bundle UI. Internal for
 // the same reason; `Application` mounts it by dynamic relative import.
 export { detectServerlessRuntime, SERVERLESS_RUNTIME_LABELS } from './runtime/serverless'

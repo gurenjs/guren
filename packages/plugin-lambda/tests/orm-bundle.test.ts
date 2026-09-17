@@ -18,7 +18,7 @@ const enabled = process.env.GUREN_TEST_BUNDLE === '1'
  * unconditionally — reached from the probe entry below, so a build that stopped
  * stubbing them fails here rather than in a user's deploy.
  */
-const ABSENT_PACKAGES = ['mysql2', '@aws-sdk', 'vite', '@modelcontextprotocol']
+const ABSENT_PACKAGES = ['mysql2', '@aws-sdk', 'vite', '@guren/cli']
 
 function run(cmd: string[], cwd: string): { exitCode: number; output: string } {
   const result = Bun.spawnSync({ cmd, cwd, stdout: 'pipe', stderr: 'pipe' })
@@ -87,7 +87,7 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
         + 'export const http = async () => new Response(String(typeof (await getDatabase())))\n\n'
         + 'export const devOnly = async () => [\n'
         + "  await import('vite'),\n"
-        + "  await import('@modelcontextprotocol/sdk/server/mcp.js'),\n"
+        + "  await import('@guren/cli'),\n"
         + ']\n',
     )
   })

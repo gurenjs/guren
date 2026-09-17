@@ -653,6 +653,9 @@ described:
   also killed the plugin's static imports of `server/index.js` and `types.js`. So
   the rule lives in `@guren/core/internal/deploy-build`
   (`appUsesMcpPlugin` + `stubbableDevOnlyModules`) and all three platforms read it.
+  **Amended by RFC 0028 §4:** once `@guren/plugin-mcp` moved to SDK v2 and the Dev
+  MCP server moved behind `@guren/cli`, no v1 SDK subpath was imported, and the
+  transport split, the catch-all and both helpers were removed.
 - Exactly **one** entry is dropped: the transport. `server/mcp.js` (the Dev MCP's
   `McpServer`), `@guren/cli`, `bun:sqlite` and `vite` stay stubbed for every app —
   "the two MCP SDK stubs" in the bullet above overstated it.
