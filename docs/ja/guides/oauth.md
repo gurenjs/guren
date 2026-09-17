@@ -210,26 +210,16 @@ return this.redirect(redirectTo ?? '/dashboard')
 
 `redirectTo` は自動的にサニタイズされます。アプリ相対パス（`/settings/billing`）は常に許可されますが、絶対URLは `allowedRedirectHosts` にホストが含まれていない限り破棄されます。攻撃者がログイン後のユーザーを外部サイトへ飛ばすリンクを細工するのを防ぐためです。
 
-許可リストはマネージャーの `stateConfig` に含まれますが、`defineOAuthConfig` が受け取るのは `providers` と `stateStore` だけです。許可リストが必要なアプリは、サービスプロバイダの `register()` で `oauth` を束縛し、`createApp({ config })` から `config/oauth.ts` を外します。同じキーを二重に束縛すると起動に失敗するためです。
+許可リストは定義の `stateConfig` に、プロバイダーや state ストアと並べて書きます。
 
 ```ts
-// app/Providers/OAuthProvider.ts
-import { createOAuthManager, DatabaseOAuthStateStore, ServiceProvider } from '@guren/core'
-import { oauthStates } from '../../db/schema.js'
-
-export default class OAuthProvider extends ServiceProvider {
-  register(): void {
-    this.container.singleton('oauth', () => {
-      const manager = createOAuthManager({
-        stateStore: new DatabaseOAuthStateStore(oauthStates),
-        stateConfig: {
-          allowedRedirectHosts: ['app.example.com', '*.example.com'], // ワイルドカード対応
-        },
-      })
-      // config/oauth.ts と同じく、各プロバイダーを manager.registerProvider() で登録します。
-      return manager
-    })
-  }
+// config/oauth.ts の defineOAuthConfig コールバック末尾
+return {
+  providers,
+  stateStore: new DatabaseOAuthStateStore(oauthStates),
+  stateConfig: {
+    allowedRedirectHosts: ['app.example.com', '*.example.com'], // ワイルドカード対応
+  },
 }
 ```
 
