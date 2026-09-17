@@ -30,7 +30,7 @@ type DependencyGroup = (typeof DEPENDENCY_GROUPS)[number]
 // Resolving a barrel at every admitted release is hundreds of files per version,
 // and `@guren/core`'s root re-exports all of `@guren/server`'s. Subpath entries
 // are a few files each, and are where cross-package internals are shared.
-const ROOT_ENTRY = '.'
+export const ROOT_ENTRY = '.'
 
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '/index.ts', '/index.tsx', '/index.js']
 const TEST_FILE = /(\.test|\.spec)\.[cm]?[jt]sx?$|\/(__tests__|tests?|fixtures)\//
@@ -40,10 +40,10 @@ const TEST_FILE = /(\.test|\.spec)\.[cm]?[jt]sx?$|\/(__tests__|tests?|fixtures)\
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
 const RANGE = /^(>=|\^|~)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/
 
-class CannotJudge extends Error {}
+export class CannotJudge extends Error {}
 
 /** A package as it was published at `version`; `rev: null` reads the working tree. */
-interface Snapshot {
+export interface Snapshot {
   version: string
   rev: string | null
 }
@@ -55,26 +55,26 @@ interface Manifest {
 }
 
 /** What one subpath of a snapshot exports. `open`: a star from outside the workspace. */
-interface Surface {
+export interface Surface {
   exists: boolean
   names: Set<string>
   open: boolean
 }
 
-interface ImportSite {
+export interface ImportSite {
   dependency: string
   subpath: string
   /** Value names bound from the entry; empty when only the subpath must resolve. */
   names: string[]
 }
 
-interface Requirement {
+export interface Requirement {
   subpath: string
   names: Set<string>
   files: Set<string>
 }
 
-interface Gap {
+export interface Gap {
   requirement: Requirement
   text: string
 }
@@ -101,7 +101,7 @@ interface FloorPlan {
   edgesChecked: number
 }
 
-class Repository {
+export class Repository {
   private readonly texts = new Map<string, string | undefined>()
   private readonly histories = new Map<string, Snapshot[]>()
 
@@ -257,13 +257,18 @@ function withoutScriptExtension(path: string): string {
   return path.replace(/\.[cm]?jsx?$/, '')
 }
 
-class SurfaceReader {
+export class SurfaceReader {
   private readonly surfaces = new Map<string, Surface>()
   private readonly modules = new Map<string, Surface>()
 
+  /**
+   * `reexports`: which copy of another workspace package a star re-export reads.
+   * `lowest-admitted` judges a published release; `working-tree` judges the one about to ship.
+   */
   constructor(
     private readonly repo: Repository,
     private readonly packages: ReadonlyMap<string, WorkspacePackage>,
+    private readonly reexports: 'lowest-admitted' | 'working-tree' = 'lowest-admitted',
   ) {}
 
   manifest(pkg: WorkspacePackage, snapshot: Snapshot): Manifest {
@@ -366,6 +371,9 @@ class SurfaceReader {
     const split = splitSpecifier(specifier)
     const dependency = split && this.packages.get(split[0])
     if (!split || !dependency) return { exists: true, names: new Set(), open: true }
+    if (this.reexports === 'working-tree') {
+      return this.surface(dependency, { version: dependency.version ?? '', rev: null }, split[1])
+    }
 
     // What this release re-exports depends on which copy the consumer installed;
     // the lowest its own range admits is the one that can lack a name.
@@ -382,7 +390,7 @@ class SurfaceReader {
   }
 }
 
-function importSites(source: string, relativeFile: string): ImportSite[] {
+export function importSites(source: string, relativeFile: string): ImportSite[] {
   if (!source.includes('@guren/')) return []
   const program = parseModule(source, relativeFile).program
   const sites: ImportSite[] = []
@@ -432,9 +440,14 @@ async function sourceFiles(pkg: WorkspacePackage): Promise<string[]> {
 
 /** What `snapshot` lacks of `requirements`; empty when it carries all. */
 function lacking(reader: SurfaceReader, pkg: WorkspacePackage, snapshot: Snapshot, requirements: Requirement[]): Gap[] {
+  return missingFrom((subpath) => reader.surface(pkg, snapshot, subpath), `${pkg.name} ${snapshot.version}`, requirements)
+}
+
+/** What the entries `surfaceAt` reads lack of `requirements`; `label` names that copy. */
+export function missingFrom(surfaceAt: (subpath: string) => Surface, label: string, requirements: Requirement[]): Gap[] {
   const gaps: Gap[] = []
   for (const requirement of requirements) {
-    const surface = reader.surface(pkg, snapshot, requirement.subpath)
+    const surface = surfaceAt(requirement.subpath)
     if (!surface.exists) {
       gaps.push({ requirement, text: `no ${requirement.subpath} subpath` })
       continue
@@ -443,7 +456,7 @@ function lacking(reader: SurfaceReader, pkg: WorkspacePackage, snapshot: Snapsho
     if (missing.length === 0) continue
     if (surface.open) {
       throw new CannotJudge(
-        `${pkg.name} ${snapshot.version} ${requirement.subpath} re-exports a module outside this workspace, so ` +
+        `${label} ${requirement.subpath} re-exports a module outside this workspace, so ` +
           `whether it provides ${missing.join(', ')} cannot be read from source.`,
       )
     }
