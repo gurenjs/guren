@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { createGitHubOAuthProviderConfig, MemoryOAuthStateStore, type OAuthManager } from '../../src/auth/oauth'
+import { createGitHubOAuthProviderConfig, MemoryOAuthStateStore, type OAuthManager, type OAuthStatePayload } from '../../src/auth/oauth'
 import {
   defineCacheConfig,
   defineConfig,
@@ -16,6 +16,16 @@ import { resetDefaultApplication } from '../../src/http/default-application'
 import { CacheServiceProvider } from '../../src/providers'
 
 const log: string[] = []
+
+function recordStored<T>(stateStore: MemoryOAuthStateStore, pick: (payload: OAuthStatePayload) => T): T[] {
+  const recorded: T[] = []
+  const store = stateStore.store.bind(stateStore)
+  stateStore.store = async (hash, payload) => {
+    recorded.push(pick(payload))
+    await store(hash, payload)
+  }
+  return recorded
+}
 
 function sentinelCache(label: string) {
   const manager = { label }
@@ -143,12 +153,7 @@ describe('the per-concern helpers', () => {
   test('defineOAuthConfig keeps authorize states in the stateStore it names', async () => {
     const github = createGitHubOAuthProviderConfig({ clientId: 'id', clientSecret: 'secret', redirectUri: 'http://localhost/callback' })
     const stateStore = new MemoryOAuthStateStore()
-    const stored: string[] = []
-    const store = stateStore.store.bind(stateStore)
-    stateStore.store = async (hash, payload) => {
-      stored.push(payload.provider)
-      await store(hash, payload)
-    }
+    const stored = recordStored(stateStore, (payload) => payload.provider)
     const app = createApp({ config: [defineOAuthConfig(() => ({ providers: { github }, stateStore }))] })
 
     await app.boot()
@@ -160,12 +165,7 @@ describe('the per-concern helpers', () => {
   test('defineOAuthConfig passes its stateConfig allowlist to the manager', async () => {
     const github = createGitHubOAuthProviderConfig({ clientId: 'id', clientSecret: 'secret', redirectUri: 'http://localhost/callback' })
     const stateStore = new MemoryOAuthStateStore()
-    const redirects: Array<string | undefined> = []
-    const store = stateStore.store.bind(stateStore)
-    stateStore.store = async (hash, payload) => {
-      redirects.push(payload.redirectTo)
-      await store(hash, payload)
-    }
+    const redirects = recordStored(stateStore, (payload) => payload.redirectTo)
     const app = createApp({
       config: [defineOAuthConfig(() => ({
         providers: { github },
