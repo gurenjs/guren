@@ -1,6 +1,6 @@
 /**
- * Queued agent runs (RFC 0029 §6): `queue()` dispatches {@link RunAgentJob}, and the worker
- * prompts the agent and emits {@link AgentResponded}, since a closure cannot cross to a worker.
+ * Queued agent runs (RFC 0029 §4, §6): `queue()` and `broadcast()` dispatch {@link RunAgentJob}. The worker
+ * prompts the agent and emits {@link AgentResponded}, or streams it to a broadcast channel.
  */
 import { Event, Job, type AgentPrincipal, type BroadcastManager } from '@guren/core'
 import { parseJsonEventStream, uiMessageChunkSchema, type UIMessageChunk } from 'ai'
@@ -16,7 +16,7 @@ export interface RunAgentPayload {
   agentName: string
   input: string
   principal: AgentPrincipal | null
-  /** Created by `queue()` when the run starts one, so the worker always continues it. */
+  /** Created at enqueue when the run starts one, so the worker always continues it. */
   conversationId?: string
   provider?: AiProviderName
   /** Set by `broadcast()`: the run streams to this channel rather than emitting `AgentResponded`. */
@@ -46,6 +46,7 @@ export class RunAgentJob extends Job<RunAgentPayload> {
   static override maxAttempts = 1
 
   async handle(payload: RunAgentPayload): Promise<void> {
+    // Resolved lazily, so a broadcast run that cannot bind still ends its channel with an error chunk.
     const bind = () => {
       const runtime = this.makeOptional<AiRuntime>(AI_RUNTIME_BINDING)
       if (!runtime) throw missingRuntime('RunAgentJob')
@@ -53,7 +54,7 @@ export class RunAgentJob extends Job<RunAgentPayload> {
     }
     const options = { provider: payload.provider, conversation: payload.conversationId }
     if (payload.channel !== undefined) {
-      await publishStream(this.make('broadcast'), payload.channel, () => bind().stream(payload.input, options))
+      await publishStream(this.make('broadcast'), payload.channel, payload.agentName, () => bind().stream(payload.input, options))
       return
     }
     const response = await bind().prompt(payload.input, options)
@@ -76,27 +77,36 @@ export function registeredAgent(runtime: AiRuntime, name: string): AgentClass {
 }
 
 /**
- * Publishes every chunk of the run's UI-message stream, then fails the job on an `error` chunk. A run
- * that throws before its stream ends still publishes one `error` chunk, or subscribers would wait forever.
+ * Publishes every chunk of the run's UI-message stream. An `error` chunk does not end the stream (the SDK
+ * may take another step after it), so the job fails only once the stream has closed. A run that closes
+ * or throws without a `finish` or `error` chunk publishes one, or subscribers would wait forever.
  */
-async function publishStream(broadcast: BroadcastManager, channel: string, stream: () => Promise<Response>): Promise<void> {
+async function publishStream(
+  broadcast: BroadcastManager,
+  channel: string,
+  agentName: string,
+  stream: () => Promise<Response>,
+): Promise<void> {
   const publish = (chunk: UIMessageChunk) => broadcast.broadcast(channel, AGENT_CHUNK_EVENT, chunk)
+  // Masked like the stream's own error chunks: the transcript's subscribers are not its operators.
+  const endWithError = () => publish({ type: 'error', errorText: 'The agent run failed.' })
   let ended = false
+  let errored = false
   try {
     const response = await stream()
-    const chunks = parseJsonEventStream({ stream: response.body!, schema: uiMessageChunkSchema })
-    for await (const parsed of chunks) {
+    for await (const parsed of parseJsonEventStream({ stream: response.body!, schema: uiMessageChunkSchema })) {
       if (!parsed.success) throw parsed.error
       await publish(parsed.value)
-      if (parsed.value.type === 'error') {
-        ended = true
-        throw new Error(parsed.value.errorText)
-      }
+      if (parsed.value.type === 'error') errored = ended = true
       if (parsed.value.type === 'finish') ended = true
     }
+    if (!ended) await endWithError()
   } catch (error) {
-    // Masked like the stream's own error chunks: the transcript's subscribers are not its operators.
-    if (!ended) await publish({ type: 'error', errorText: 'The agent run failed.' })
+    // The original error is the one worth failing the job with, not a second publish failure.
+    if (!ended) await endWithError().catch(() => {})
     throw error
+  }
+  if (errored) {
+    throw new Error(`${agentName}'s broadcast run streamed an error chunk; the cause is logged by the stream's onError.`)
   }
 }

@@ -301,7 +301,7 @@ export function bindAgent<T extends Agent>(
       }
     },
     stream: async (input, options = {}) => {
-      refuseStreamingOutput()
+      refuseStreamingOutput('stream()')
       const { history, loop, call, persistTurn } = await run(input, options, conversation)
       const result = await loop.stream({
         ...call,
@@ -318,9 +318,9 @@ export function bindAgent<T extends Agent>(
       })
       return result.toUIMessageStreamResponse(history ? { headers: { [CONVERSATION_HEADER]: history.id } } : {})
     },
-    queue: (input, options = {}) => enqueue(input, options, conversation, undefined),
+    queue: (input, options = {}) => enqueue(input, options, conversation),
     broadcast: async (input, channel, options = {}) => {
-      refuseStreamingOutput()
+      refuseStreamingOutput('broadcast()')
       if (!scope.container.has('broadcast')) {
         throw new Error(`${agentName}.broadcast() publishes through the \`broadcast\` binding, and none is bound. Register BroadcastServiceProvider.`)
       }
@@ -332,7 +332,7 @@ export function bindAgent<T extends Agent>(
     input: string,
     options: QueueOptions,
     conversation: string | undefined,
-    channel: string | undefined,
+    channel?: string,
   ): Promise<QueuedAgentRun> => {
     const caller = `${agentName}.${channel === undefined ? 'queue' : 'broadcast'}()`
     if (registeredAgent(resolveRuntime(scope.container, caller), agentName) !== cls) {
@@ -358,10 +358,10 @@ export function bindAgent<T extends Agent>(
     return { jobId, ...(history ? { conversationId: history.id } : {}) }
   }
 
-  const refuseStreamingOutput = () => {
+  const refuseStreamingOutput = (caller: string) => {
     if (output) {
       throw new Error(
-        `${agentName} declares an output schema, which stream() would send to the client as raw JSON text. `
+        `${agentName} declares an output schema, which ${caller} would send to the client as raw JSON text. `
         + 'Call prompt() for its parsed output.',
       )
     }

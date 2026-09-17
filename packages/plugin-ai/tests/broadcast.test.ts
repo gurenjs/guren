@@ -1,20 +1,12 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, expect, test } from 'bun:test'
-import {
-  BroadcastManager,
-  MemoryQueueDriver,
-  Worker,
-  createQueueManager,
-  type AgentPrincipal,
-  type BroadcastEvent,
-  type EventManager,
-} from '@guren/core'
+import { BroadcastManager, type AgentPrincipal, type BroadcastEvent } from '@guren/core'
 import { convertArrayToReadableStream } from 'ai/test'
 import { z } from 'zod'
 
-import { AGENT_CHUNK_EVENT, Agent, AgentResponded, Output, RunAgentJob, tool } from '../src'
-import { bootHarness } from './fixture'
+import { AGENT_CHUNK_EVENT, Agent, Output, RunAgentJob, tool } from '../src'
+import { bootHarness, withQueue, type Harness } from './fixture'
 
 class Support extends Agent {
   static override agentName = 'support'
@@ -38,28 +30,39 @@ class Classifier extends Agent {
 
 const USER: AgentPrincipal = { kind: 'user', id: 7 }
 const CHANNEL = 'private-support.7'
+const USAGE = {
+  inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 2, text: 2, reasoning: 0 },
+}
+
+/** A first step that streams an `error` part, then a tool call the SDK still runs, then a text answer. */
+function scriptRecoveredError(h: Harness): void {
+  const model = h.script([{ text: 'It shipped.' }])
+  const answer = model.doStream
+  let call = 0
+  model.doStream = async (options) => {
+    if (call++ > 0) return answer(options)
+    return {
+      stream: convertArrayToReadableStream([
+        { type: 'stream-start' as const, warnings: [] },
+        { type: 'error' as const, error: new Error('transient') },
+        { type: 'tool-call' as const, toolCallId: 'c1', toolName: 'order', input: JSON.stringify({ id: 4812 }) },
+        { type: 'finish' as const, finishReason: { unified: 'tool-calls' as const, raw: undefined }, usage: USAGE },
+      ]),
+    }
+  }
+}
 
 async function bootBroadcast() {
   const h = await bootHarness({ conversations: { driver: 'memory' }, plugin: { agents: [Support, Lookup, Classifier] } })
-  const driver = new MemoryQueueDriver()
-  h.app.container.instance('queue', createQueueManager({ default: 'memory', drivers: { memory: () => driver } }))
   const broadcast = new BroadcastManager()
   h.app.container.instance('broadcast', broadcast)
   const published: BroadcastEvent[] = []
   broadcast.driver().subscribe(CHANNEL, (event) => {
     published.push(event)
   })
-  const responded: AgentResponded[] = []
-  h.app.container.make<EventManager>('events').on(AgentResponded, (event) => {
-    responded.push(event)
-  })
-  const failures: Error[] = []
-  const work = () =>
-    new Worker(driver, { container: h.app.container, stopWhenEmpty: true, sleep: 0 }, {
-      jobFailed: (_job, error) => failures.push(error),
-    }).start()
   const chunks = () => published.map((event) => [event.event, (event.data as { type: string }).type])
-  return { h, published, responded, failures, work, chunks }
+  return { h, broadcast, published, chunks, ...withQueue(h) }
 }
 
 describe('broadcast()', () => {
@@ -123,6 +126,56 @@ describe('broadcast()', () => {
     const errors = published.filter((event) => (event.data as { type: string }).type === 'error')
     expect(errors).toHaveLength(1)
     expect(JSON.stringify(errors[0]!.data)).not.toContain('provider down')
+  })
+
+  test('should keep publishing after a mid-stream error chunk the SDK recovers from, then fail the job', async () => {
+    const { h, failures, work, chunks } = await bootBroadcast()
+    scriptRecoveredError(h)
+
+    const run = await h.app.container.make('ai').agent(Lookup).as(USER).broadcast('Where is 4812?', CHANNEL, { conversation: true })
+    await work()
+
+    const types = chunks().map(([, type]) => type)
+    expect(types).toContain('tool-output-available')
+    expect(types.at(-1)).toBe('finish')
+    expect(failures.map((error) => error.message)).toEqual([expect.stringContaining("lookup's broadcast run streamed an error chunk")])
+    const stored = await h.app.container.make('ai').conversations().load(run.conversationId!, USER)
+    expect(stored?.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
+  })
+
+  test('should fail the job with the run\'s own error when publishing the error chunk fails too', async () => {
+    const { h, broadcast, failures, work } = await bootBroadcast()
+    broadcast.driver().publish = async () => {
+      throw new Error('broadcast driver down')
+    }
+    await h.app.container.make('queue').dispatch(RunAgentJob, { agentName: 'renamed', input: 'x', principal: USER, channel: CHANNEL })
+
+    await work()
+
+    expect(failures.map((error) => error.message)).toEqual([expect.stringContaining('No agent named "renamed"')])
+  })
+
+  test('should not publish a second error chunk when publishing fails after the stream\'s own', async () => {
+    const { h, broadcast, published, failures, work } = await bootBroadcast()
+    scriptRecoveredError(h)
+    const driver = broadcast.driver()
+    const publish = driver.publish.bind(driver)
+    // Fails the one publish after the error chunk, so a second error chunk would still get through.
+    let failNext = false
+    driver.publish = async (channel, event, data) => {
+      if (failNext) {
+        failNext = false
+        throw new Error('broadcast driver down')
+      }
+      await publish(channel, event, data)
+      failNext = (data as { type: string }).type === 'error'
+    }
+
+    await h.app.container.make('ai').agent(Lookup).as(USER).broadcast('Where is 4812?', CHANNEL)
+    await work()
+
+    expect(failures.map((error) => error.message)).toEqual(['broadcast driver down'])
+    expect(published.filter((event) => (event.data as { type: string }).type === 'error')).toHaveLength(1)
   })
 
   // Pins the SDK closing a truncated stream with `finish`, which is why publishStream needs no guard for it.

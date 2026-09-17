@@ -2,7 +2,7 @@
 '@guren/plugin-ai': minor
 ---
 
-Agents broadcast (RFC 0029 §4). `broadcast(input, channel, options)` queues the run like `queue()`, and the worker publishes each UI-message chunk to `channel` as the `AgentChunk` broadcast event:
+`broadcast(input, channel, options)` (RFC 0029 §4) queues the run like `queue()`, and the worker publishes each UI-message chunk to `channel` as the `AgentChunk` broadcast event:
 
 ```ts
 await SupportTriager.as(user).broadcast('Ticket #4812: ...', `private-support.${user.id}`, { conversation: true })
