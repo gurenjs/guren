@@ -420,6 +420,7 @@ The routes an agent calls are checked by the ordinary agent-route rules, and the
 ## Related
 
 - [Agent Interface](./agent-interface.md): `.agent()` routes, tool derivation, scopes, approvals, and the audit trail an agent's calls land in
+- [AI Agents](./ai-agents.md): calling a model with the app's tools, from a request, a job or a durable agent
 - [Cloudflare Workers Deployment](./cloudflare.md): the rest of the deploy path (D1, sessions, secrets, static assets)
 - [Authorization](./authorization.md): the policies that decide what the `agent:<name>:<instance>` principal may do
 - [Encryption](./encryption.md): `APP_KEY` and the encrypter the ledger needs

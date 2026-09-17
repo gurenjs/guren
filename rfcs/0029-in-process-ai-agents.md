@@ -1014,8 +1014,14 @@ already checks.
 3. **Part 3**: `embed()` / `image()` thin wrappers on the configured
    provider, `guren check` and `guren audit` rules, `context` /
    `spec:generate`, `defineEval()` and `guren ai:eval` (§10), the harness
-   skill, `docs/en/guides/ai-agents.md`, the blog example gaining one agent
-   and one eval.
+   skill, `docs/en/guides/ai-agents.md`, ~~the blog example gaining one agent
+   and one eval~~.
+   **Amended in implementation:** the example agent went into
+   `examples/agents` rather than the blog. The blog declares no `.agent()`
+   route and has no test that boots the application, which `fakeAi()` needs;
+   `examples/agents` has both. Its `tickets.index` route took the portable
+   tool name `tickets_index` so the agent works against Anthropic and OpenAI.
+   The eval waits for `defineEval()`.
 
 Each PR references `RFC 0029`. A tutorial chapter follows Part 2.
 
