@@ -39,7 +39,9 @@ export class SupportTriager extends Agent<typeof SupportTriager.scopes> {
   }
 }
 
-const response = await this.make('ai').agent(SupportTriager).as(await this.auth.user()).prompt('Ticket #4812: ...')
+// In a controller: the container-bound form
+const user = await this.auth.userOrFail<{ id: number }>()
+const response = await this.make('ai').agent(SupportTriager).as(user).prompt('Ticket #4812: ...')
 ```
 
 With `guren codegen` run, `.guren/agents.gen.ts` types `appTools()`: a name no route derives is a compile error, each tool's input and result are typed from its route contract, and the `Agent<typeof SupportTriager.scopes>` parameter makes a name missing from a `tool:` entry in `scopes` one too. A prefix grant (`tools:tickets.*`) is checked when `as()` constructs the agent.
