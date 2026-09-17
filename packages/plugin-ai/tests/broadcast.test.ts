@@ -10,6 +10,7 @@ import {
   type BroadcastEvent,
   type EventManager,
 } from '@guren/core'
+import { convertArrayToReadableStream } from 'ai/test'
 import { z } from 'zod'
 
 import { AGENT_CHUNK_EVENT, Agent, AgentResponded, Output, RunAgentJob, tool } from '../src'
@@ -122,6 +123,25 @@ describe('broadcast()', () => {
     const errors = published.filter((event) => (event.data as { type: string }).type === 'error')
     expect(errors).toHaveLength(1)
     expect(JSON.stringify(errors[0]!.data)).not.toContain('provider down')
+  })
+
+  // Pins the SDK closing a truncated stream with `finish`, which is why publishStream needs no guard for it.
+  test('should end the channel even when the model stream closes without a finish part', async () => {
+    const { h, failures, work, chunks } = await bootBroadcast()
+    const model = h.script([])
+    model.doStream = async () => ({
+      stream: convertArrayToReadableStream([
+        { type: 'stream-start' as const, warnings: [] },
+        { type: 'text-start' as const, id: 't' },
+        { type: 'text-delta' as const, id: 't', delta: 'cut off' },
+      ]),
+    })
+
+    await h.app.container.make('ai').agent(Support).as(USER).broadcast('Hi', CHANNEL)
+    await work()
+
+    expect(failures).toEqual([])
+    expect(chunks().at(-1)).toEqual([AGENT_CHUNK_EVENT, 'finish'])
   })
 
   test('should refuse an agent with an output schema, and a missing broadcast binding, before dispatching', async () => {
