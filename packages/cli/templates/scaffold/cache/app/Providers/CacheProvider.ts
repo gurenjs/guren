@@ -1,3 +1,4 @@
+// oxlint-disable guren/no-unvalidated-env-read -- the provider form serves apps with no config/env.ts to declare these keys in
 import { ServiceProvider, createCacheManager } from '@guren/core'
 
 // CACHE_STORE picks the store. `memory` is per-process: correct on one
