@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { cp, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -356,13 +356,10 @@ describe('the RFC 0023 codemod', () => {
 
       const { first, second, detected } = await applyTwice(dir)
 
-      expect(detected).toContain('app/Providers/EventServiceProvider.ts')
-      expect(first).toBe(detected.length)
+      // The blog binds mail and queue through config definitions, so no setter is left to move.
+      expect(detected).toEqual([])
+      expect(first).toBe(0)
       expect(second).toBe(0)
-
-      const provider = await readFile(join(dir, 'app/Providers/EventServiceProvider.ts'), 'utf8')
-      expect(provider).not.toContain('setMailManager')
-      expect(provider).toContain("this.container.singleton('mail'")
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
