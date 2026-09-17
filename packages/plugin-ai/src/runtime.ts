@@ -5,6 +5,7 @@
  */
 import type {
   AgentApprovalRequest,
+  Container,
   AgentApprovalStore,
   AgentAuditEmitter,
   AgentAuditConfig,
@@ -43,4 +44,16 @@ export interface AiRuntime {
   approvals?: AiPluginConfig['approvals']
   /** `aiPlugin({ agents })`, keyed by `agentName`. */
   agents: ReadonlyMap<string, AgentClass>
+}
+
+export function resolveRuntime(container: Pick<Container, 'has' | 'make'>, caller: string): AiRuntime {
+  if (!container.has(AI_RUNTIME_BINDING)) throw missingRuntime(caller)
+  return container.make<AiRuntime>(AI_RUNTIME_BINDING)
+}
+
+export function missingRuntime(caller: string): Error {
+  return new Error(
+    `${caller} needs aiPlugin() in createApp({ providers }). The plugin decides where these calls are audited, `
+    + 'which approval queue gates them, and which agents a worker may run.',
+  )
 }

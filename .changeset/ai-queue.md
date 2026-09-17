@@ -13,7 +13,7 @@ events.on(AgentResponded, ({ agentName, principal, conversationId, response }) =
 ```
 
 - A queued agent must be registered with `aiPlugin({ agents })`. The worker resolves the class from its `agentName`, and `queue()` refuses an unregistered class before dispatching. Two classes under one name are refused at boot.
-- `conversation: true` returns the new conversation's id immediately, and the worker creates it under that id.
-- `RunAgentJob` runs once (`maxAttempts: 1`): a retry would re-run every tool the first attempt ran.
+- `conversation: true` creates the conversation before dispatching and returns its id, which can be continued or queued on at once.
+- `RunAgentJob` runs once (`maxAttempts: 1`): a retry would re-run every tool the first attempt ran. Keep the worker `--timeout` and the driver's visibility timeout above the longest run, or it is delivered again.
 - `AgentResponded.response` carries `text`, `output`, `usage` and `finishReason`, not `steps`.
 - The principal is recorded when the run is queued, abilities included.

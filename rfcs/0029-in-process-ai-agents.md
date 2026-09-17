@@ -655,17 +655,20 @@ counterpart, and an event is what the rest of Guren already listens to.
 **Amended in implementation (Part 2c):**
 
 - **`queue(input, { conversation, provider, queue, delay })`** returns `{ jobId, conversationId? }`.
-  `conversation: true` mints the id at enqueue time, so the caller can hand it to a client before the
-  worker runs; the payload carries it with `startsConversation`, and the worker creates the
-  conversation under that id. A run that fails leaves that id naming no conversation, so the caller
-  starts again with a new one. `queue()` checks a continued conversation's owner and agent before
-  dispatching, as the worker does again. `signal` has no queued form.
+  `conversation: true` creates the conversation, empty, before dispatching: its id is usable at once
+  (a second `queue()` on it, a client), and the worker only ever continues a conversation, so a
+  redelivered run appends rather than failing on a duplicate id. A run that fails leaves the empty
+  conversation. `queue()` checks a continued conversation's owner and agent before dispatching, as the
+  worker does again. `signal` has no queued form.
 - **The registry lives on the plugin's runtime binding,** not in a module-global map: `aiPlugin({ agents })`
   refuses two classes under one `agentName`, and the name `anonymous`, at boot. `queue()` refuses a class
   the registry does not hold, or holds a different class for, before anything is dispatched: the worker
   would otherwise run the other class, or fail. `registerJob(RunAgentJob)` is process-wide, like every job.
-- **`RunAgentJob.maxAttempts` is 1.** A retry would call the model again and re-run every tool the first
-  attempt already ran.
+- **`RunAgentJob.maxAttempts` is 1,** since a retry would call the model again and re-run every tool.
+  That stops only the worker's own retry. A driver with a visibility timeout (Redis, SQS) delivers a run
+  that outlasts it again, and the worker's `--timeout` fails a job without cancelling it, so both belong
+  above the longest run. Two queued turns on one conversation run concurrently with more than one
+  worker; the database store refuses the second append, after its model call.
 - **`AgentResponded.response` is `{ text, output, usage, finishReason }`,** without `steps`, since a queued
   listener serializes the event whole. It is emitted only when `events` is bound.
 - **The principal is a snapshot.** Its `abilities` travel as they were when the run was queued; a user who

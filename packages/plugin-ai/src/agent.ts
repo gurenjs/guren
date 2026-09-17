@@ -21,8 +21,8 @@ import { appToolDefinitions, appTools, type AppToolDefinition, type AppToolDenia
 import { readAgentContext, setAgentContext, type AgentContext } from './context'
 import type { AiManager } from './manager'
 import { CONVERSATION_HEADER } from './protocol'
-import { RunAgentJob, START_CONVERSATION, registeredAgent, type QueuedPromptOptions, type RunAgentPayload } from './queue'
-import { AI_RUNTIME_BINDING, type AiRuntime } from './runtime'
+import { RunAgentJob, registeredAgent } from './queue'
+import { resolveRuntime } from './runtime'
 import type { AgentToolInput, AgentToolName, AgentToolOutput, AgentToolScope, AiProviderName, Granted } from './types'
 
 /** What `as()` accepts: a principal, or a user record contributing its `id` (and `abilities`, if it carries them). */
@@ -44,7 +44,7 @@ export interface PromptOptions {
 
 export interface QueueOptions {
   provider?: AiProviderName
-  /** As {@link PromptOptions.conversation}; `true` mints the id now, so `queue()` can return it. */
+  /** As {@link PromptOptions.conversation}; `true` creates the conversation now, so its id is usable before the run. */
   conversation?: true | string
   /** The queue name; `default` when absent. */
   queue?: string
@@ -249,10 +249,9 @@ export function bindAgent<T extends Agent>(
     return requested ?? conversation
   }
 
-  const run = async (input: string, options: QueuedPromptOptions, conversation: string | undefined) => {
-    const requested = requestedConversation(options.conversation, conversation)
+  const run = async (input: string, options: PromptOptions, conversation: string | undefined) => {
     // Settled before `model()`: a refused conversation must reach no model, and a fake's script.
-    const history = await openConversation(requested, options[START_CONVERSATION])
+    const history = await openConversation(requestedConversation(options.conversation, conversation))
     const userMessage: ModelMessage = { role: 'user', content: input }
     const loop = new ToolLoopAgent({
       id: agentName,
@@ -319,11 +318,7 @@ export function bindAgent<T extends Agent>(
       return result.toUIMessageStreamResponse(history ? { headers: { [CONVERSATION_HEADER]: history.id } } : {})
     },
     queue: async (input, options = {}) => {
-      const requested = requestedConversation(options.conversation, conversation)
-      if (!scope.container.has(AI_RUNTIME_BINDING)) {
-        throw new Error(`${agentName}.queue() resolves the agent on a worker through aiPlugin({ agents }), and no aiPlugin() is registered.`)
-      }
-      if (registeredAgent(scope.container.make<AiRuntime>(AI_RUNTIME_BINDING), agentName) !== cls) {
+      if (registeredAgent(resolveRuntime(scope.container, `${agentName}.queue()`), agentName) !== cls) {
         throw new Error(
           `aiPlugin({ agents }) registers a different class under "${agentName}" than ${cls.name}, `
           + 'so a worker would run that one. Give each agent its own static agentName.',
@@ -332,30 +327,23 @@ export function bindAgent<T extends Agent>(
       if (!scope.container.has('queue')) {
         throw new Error(`${agentName}.queue() dispatches through the \`queue\` binding, and none is bound. Register QueueServiceProvider.`)
       }
-      // The worker checks again; this makes a run that could never succeed fail here rather than in its log.
-      if (requested !== undefined) {
-        const owner = conversationOwner()
-        if (requested === true) scope.manager.conversations()
-        else await loadConversation(requested, owner)
+      // The worker checks again; this fails a run that could never succeed here, rather than in its log.
+      const history = await openConversation(requestedConversation(options.conversation, conversation))
+      // Created before dispatch: the id is usable at once, and a redelivered run only appends.
+      if (history?.isNew) {
+        await history.store.create({ id: history.id, agentName, owner: history.owner, messages: [] })
       }
-      const conversationId = requested === true ? crypto.randomUUID() : requested
-      const payload: RunAgentPayload = {
-        agentName,
-        input,
-        principal: instance.principal,
-        ...(conversationId ? { conversationId } : {}),
-        ...(requested === true ? { startsConversation: true } : {}),
-        ...(options.provider ? { provider: options.provider } : {}),
-      }
-      const jobId = await scope.container.make('queue').dispatch(RunAgentJob, payload, {
-        ...(options.queue ? { queue: options.queue } : {}),
-        ...(options.delay ? { delay: options.delay } : {}),
-      })
-      return { jobId, ...(conversationId ? { conversationId } : {}) }
+      const jobId = await scope.container.make('queue').dispatch(
+        RunAgentJob,
+        { agentName, input, principal: instance.principal, conversationId: history?.id, provider: options.provider },
+        { queue: options.queue, delay: options.delay },
+      )
+      return { jobId, ...(history ? { conversationId: history.id } : {}) }
     },
   })
 
-  const conversationOwner = () => {
+  const openConversation = async (requested: true | string | undefined) => {
+    if (requested === undefined) return undefined
     const owner = instance.principal
     if (!owner) {
       throw new Error(
@@ -369,20 +357,9 @@ export function bindAgent<T extends Agent>(
         + `is named "${ANONYMOUS_AGENT_NAME}". Pass agent({ agentName }) to keep conversations with it.`,
       )
     }
-    return owner
-  }
-
-  const openConversation = async (requested: true | string | undefined, startId: string | undefined) => {
-    if (requested === undefined) return undefined
-    const owner = conversationOwner()
     const store = scope.manager.conversations()
-    if (requested === true) return { store, owner, id: startId ?? crypto.randomUUID(), isNew: true, messages: [] as ModelMessage[] }
-    const stored = await loadConversation(requested, owner)
-    return { store, owner, id: requested, isNew: false, messages: stored.messages }
-  }
-
-  const loadConversation = async (requested: string, owner: AgentPrincipal) => {
-    const stored = await scope.manager.conversations().load(requested, owner)
+    if (requested === true) return { store, owner, id: crypto.randomUUID(), isNew: true, messages: [] as ModelMessage[] }
+    const stored = await store.load(requested, owner)
     if (!stored) {
       throw new Error(`${agentName} cannot continue conversation "${requested}": no conversation with that id belongs to this principal.`)
     }
@@ -392,7 +369,7 @@ export function bindAgent<T extends Agent>(
         + 'Continue it with that agent, or start a new one.',
       )
     }
-    return stored
+    return { store, owner, id: requested, isNew: false, messages: stored.messages }
   }
 
   return bound(undefined)

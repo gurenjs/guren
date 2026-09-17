@@ -80,18 +80,23 @@ describe('queue()', () => {
     expect(Object.keys(responded[0]!.response)).not.toContain('steps')
   })
 
-  test('should return the id of a conversation it starts, and have the worker create it under that id', async () => {
-    const { h, responded, failures, work } = await bootQueued()
-    h.script([{ text: 'first answer' }])
+  test('should create the conversation it starts before dispatching, so its id can be queued on at once', async () => {
+    const { h, driver, responded, failures, work } = await bootQueued()
+    h.script([{ text: 'first answer' }, { text: 'second answer' }])
+    const support = ai(h).agent(Support).as(USER)
 
-    const run = await ai(h).agent(Support).as(USER).queue('first question', { conversation: true })
+    const run = await support.queue('first question', { conversation: true })
+    expect(await ai(h).conversations().load(run.conversationId!, USER)).toEqual({ agentName: 'support', messages: [] })
+    const next = await support.continue(run.conversationId!).queue('second question')
+    const [first] = await queuedJobs(driver)
+    expect(first!.payload).toEqual({ agentName: 'support', input: 'first question', principal: USER, conversationId: run.conversationId })
     await work()
 
     expect(failures).toEqual([])
-    expect(run.conversationId).toBeString()
-    expect(responded[0]!.conversationId).toBe(run.conversationId)
+    expect(next.conversationId).toBe(run.conversationId)
+    expect(responded.map((event) => event.conversationId)).toEqual([run.conversationId, run.conversationId])
     const stored = await ai(h).conversations().load(run.conversationId!, USER)
-    expect(stored?.messages.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(stored?.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
   })
 
   test('should append to a conversation continued through continue()', async () => {

@@ -25,7 +25,7 @@ import { jsonSchema, tool, type JSONSchema7, type Tool } from 'ai'
 import { resolveAgentName } from './agent'
 import { describeNames } from './config'
 import { readAgentContext, type AgentContext } from './context'
-import { AI_RUNTIME_BINDING, type AiRuntime } from './runtime'
+import { resolveRuntime, type AiRuntime } from './runtime'
 
 /** A runtime-neutral tool: what an adapter for another agent runtime wraps. */
 export interface AppToolDefinition {
@@ -59,7 +59,7 @@ const warnedNonPortable = new Set<string>()
 
 export function appToolDefinitions(agent: object, names: readonly string[]): AppToolDefinition[] {
   const context = readAgentContext(agent)
-  const runtime = resolveRuntime(context)
+  const runtime = resolveRuntime(context.container, `${resolveAgentName(context.cls)} calls appTools(), which`)
   const derived = runtime.tools()
   const scoped = derived.map(toScopedTool)
   const granted = expandToolScopes(context.cls.scopes, scoped)
@@ -91,15 +91,6 @@ export function appTools(agent: object, names: readonly string[]): Record<string
   )
 }
 
-function resolveRuntime(context: AgentContext): AiRuntime {
-  if (!context.container.has(AI_RUNTIME_BINDING)) {
-    throw new Error(
-      `${resolveAgentName(context.cls)} calls appTools(), which needs aiPlugin() in createApp({ providers }). `
-      + 'The plugin decides where these calls are audited and which approval queue gates them.',
-    )
-  }
-  return context.container.make<AiRuntime>(AI_RUNTIME_BINDING)
-}
 
 /**
  * Every problem at once, as one construction error (RFC 0029 §2.2): a name no
