@@ -4,7 +4,6 @@ import { defineEnv, Env, type InferEnv } from '@guren/core'
 const env = defineEnv({
   APP_KEY: Env.string().secret().requiredInProduction()
     .describe('Signs sessions and CSRF tokens.'),
-  // Local SQLite only; production reads the DB binding in wrangler.jsonc.
   SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db'),
   SESSION_DRIVER: Env.string().default('database'),
   OAUTH_GITHUB_CLIENT_ID: Env.string().optional(),
