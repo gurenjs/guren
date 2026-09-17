@@ -2,13 +2,13 @@
 
 Guren provides a fluent API for sending emails with support for multiple transport backends. The mail system integrates with the queue system for async sending and supports HTML templates, attachments, and more.
 
-The standard vNext path is: import mail APIs from `@guren/core`, configure the mail manager in a provider, and keep controllers focused on composing and dispatching mail work.
+The standard path is: import mail APIs from `@guren/core`, configure the mail manager in `config/mail.ts`, and keep controllers focused on composing and dispatching mail work.
 
 ## Core Concepts
 
 - **MailManager** – Central registry for configuring and accessing mail transports.
 - **Mail** – Fluent builder for composing and sending emails.
-- **Transport** – Email delivery backend. Guren ships with SMTP, Resend, and Memory (testing) transports.
+- **Transport** – Email delivery backend. Guren ships with SMTP, Resend, Log (development), and Memory (testing) transports.
 
 ## Basic Usage
 
@@ -99,39 +99,58 @@ await builder.send()
 
 ### Multiple Transports
 
-Configure multiple mail backends for different use cases:
+`config/mail.ts` declares every transport the app can send through and picks the default from the environment. `bunx guren add mail` writes this file with the `log`, `memory` and `smtp` transports; the `resend` entry is one added by hand:
 
 ```ts
-import { MailManager, mail } from '@guren/core'
+// config/mail.ts
+import { defineMailConfig } from '@guren/core'
 
-const mailManager = new MailManager({
-  default: 'smtp',
-  from: { email: 'noreply@example.com', name: 'MyApp' },
-  transports: {
+export default defineMailConfig((env) => {
+  const transports = {
+    log: { driver: 'log' },
+    memory: { driver: 'memory' },
     smtp: {
       driver: 'smtp',
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
+      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS ?? '' } : undefined,
     },
-    resend: {
-      driver: 'resend',
-      apiKey: process.env.RESEND_API_KEY,
-    },
-    memory: {
-      driver: 'memory',
-    },
-  },
-})
+    resend: { driver: 'resend', apiKey: env.RESEND_API_KEY ?? '' },
+  }
 
-// Use default transport (smtp)
+  // The manager accepts any name and throws on the first send, which can be a queued job.
+  if (!Object.hasOwn(transports, env.MAIL_MAILER)) {
+    throw new Error(
+      `MAIL_MAILER="${env.MAIL_MAILER}" is not a declared transport. Declare it in config/mail.ts or use one of: ${Object.keys(transports).join(', ')}.`,
+    )
+  }
+
+  return {
+    default: env.MAIL_MAILER,
+    from: { email: env.MAIL_FROM_ADDRESS, name: env.MAIL_FROM_NAME },
+    transports,
+  }
+})
+```
+
+```ts
+// src/app.ts
+import { createApp } from '@guren/core'
+import env from '../config/env.js'
+import mail from '../config/mail.js'
+
+const app = createApp({ env, config: [mail] })
+```
+
+Every key the callback reads must be declared in `config/env.ts`. `guren add mail` declares `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` and the `SMTP_*` keys; a transport you add yourself, such as `resend` above, needs its key declared by hand (`RESEND_API_KEY: Env.string().secret().optional()`). See the [configuration guide](./configuration.md) for declaring variables.
+
+`MAIL_MAILER=log` prints outgoing mail to the server output, which is enough in development. Set `MAIL_MAILER=smtp` or `resend` in production without changing code, or name a transport per message:
+
+```ts
+// Use the default transport
 await mail(mailManager).to('user@example.com').subject('Test').text('Hello').send()
 
-// Use specific transport
+// Use a specific transport
 await mail(mailManager)
   .via('resend')
   .to('user@example.com')
@@ -139,6 +158,8 @@ await mail(mailManager)
   .text('Hello')
   .send()
 ```
+
+Apps that configure mail in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 ### Transport Options
 
@@ -157,6 +178,11 @@ await mail(mailManager)
 | Option | Default | Description |
 |--------|---------|-------------|
 | `apiKey` | required | Resend API key |
+
+**Log Transport (Development):**
+| Option | Default | Description |
+|--------|---------|-------------|
+| `logger` | `console.log` | Receives each formatted message instead of sending it |
 
 **Memory Transport (Testing):**
 | Option | Default | Description |
@@ -266,22 +292,21 @@ await mail(mailManager)
 
 ## Queued Emails
 
-Send emails asynchronously using the queue system. The queued job resolves the mail manager from the container of the app the worker runs (`mail`), and `queue()` dispatches through the `queue` manager bound beside it, so a provider that binds both is all the wiring there is. Pass the provider's container to `createMailManager()` so the manager knows which app it belongs to:
+Send emails asynchronously using the queue system. The queued job resolves the mail manager from the container of the app the worker runs (`mail`), and `queue()` dispatches through the `queue` manager bound in the same container. Listing both definitions in `createApp()` is all the wiring there is:
 
 ```ts
-import { ServiceProvider, createMailManager, createQueueManager, MemoryDriver } from '@guren/core'
+// src/app.ts
+import { createApp } from '@guren/core'
+import env from '../config/env.js'
+import mail from '../config/mail.js'
+import queue from '../config/queue.js'
 
-export default class MailProvider extends ServiceProvider {
-  register(): void {
-    this.container.singleton('queue', () =>
-      createQueueManager({ default: 'memory', drivers: { memory: () => new MemoryDriver() } }),
-    )
-    this.container.singleton('mail', (container) => createMailManager(mailConfig, container))
-  }
-}
+const app = createApp({ env, config: [mail, queue] })
 ```
 
-A mail manager created without a container queues through the default application's `queue` binding instead. A job that finds no `mail` binding falls back to whatever `setMailManager()` installed, but that setter is deprecated as of 2.23.0: bind the manager on the app's container, as the provider above does.
+`defineMailConfig` builds the manager with the container that resolves it, so the manager knows which app it belongs to. See the [queue guide](./queue.md) for `config/queue.ts`; `QUEUE_CONNECTION=sync` runs the job inline, so pick a driver a worker consumes when you want the send off the request.
+
+A mail manager created with `createMailManager(config)` and no container queues through the default application's `queue` binding instead. A job that finds no `mail` binding falls back to whatever `setMailManager()` installed, but that setter is deprecated as of 2.23.0: bind the manager on the app's container, which `config/mail.ts` does.
 
 ```ts
 // Queue the email instead of sending immediately
@@ -362,7 +387,7 @@ await welcomeMail.queue('emails')
 
 ## Container Integration
 
-The mail subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+`config/mail.ts` binds the mail manager as a singleton under `mail`. You can resolve it from the container:
 
 ```ts
 // Access via app.container or this.container in providers
@@ -450,7 +475,7 @@ describe('Email', () => {
 
 ## Best Practices
 
-1. **Use environment variables**: Never hardcode SMTP credentials or API keys.
+1. **Use environment variables**: Never hardcode SMTP credentials or API keys. Declare them in `config/env.ts` and read them in `config/mail.ts`.
 
 2. **Set a default from address**: Configure a default sender to avoid repetition.
 

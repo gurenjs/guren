@@ -2,13 +2,13 @@
 
 Guren のメール送信は Fluent API で書け、トランスポートのバックエンドを複数使い分けられます。キューと組み合わせれば非同期に送信でき、HTML テンプレートや添付ファイルにも対応しています。
 
-推奨パターン: `@guren/core` から mail API をインポートし、provider で mail manager を構成します。コントローラーではメールの組み立てと送信に集中します。
+推奨パターン: `@guren/core` から mail API をインポートし、`config/mail.ts` で mail manager を構成します。コントローラーではメールの組み立てと送信に集中します。
 
 ## コアコンセプト
 
 - **MailManager**: メールトランスポートを設定・アクセスするための中央レジストリ。
 - **Mail**: メールを作成・送信するための Fluent ビルダー。
-- **Transport**: メール配信のバックエンド。Guren には SMTP、Resend、Memory（テスト用）のトランスポートが付属。
+- **Transport**: メール配信のバックエンド。Guren には SMTP、Resend、Log（開発用）、Memory（テスト用）のトランスポートが付属。
 
 ## 基本的な使い方
 
@@ -27,7 +27,9 @@ await Mail.to('user@example.com')
   .send()
 ```
 
-### クイックスタート
+### 直接インスタンス化
+
+`MailManager` を直接作ることもできます。
 
 ```ts
 import { MailManager, mail } from '@guren/core'
@@ -96,36 +98,55 @@ await builder.send()
 
 ### 複数のトランスポート
 
-異なるユースケースに対応するため、複数のメールバックエンドを設定できます。
+`config/mail.ts` に送信に使うトランスポートをすべて宣言し、既定のトランスポートは環境変数で選びます。`bunx guren add mail` は `log`、`memory`、`smtp` の3つを持つこのファイルを生成します。`resend` は手で追加したトランスポートの例です。
 
 ```ts
-import { MailManager, mail } from '@guren/core'
+// config/mail.ts
+import { defineMailConfig } from '@guren/core'
 
-const mailManager = new MailManager({
-  default: 'smtp',
-  from: { email: 'noreply@example.com', name: 'MyApp' },
-  transports: {
+export default defineMailConfig((env) => {
+  const transports = {
+    log: { driver: 'log' },
+    memory: { driver: 'memory' },
     smtp: {
       driver: 'smtp',
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
+      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS ?? '' } : undefined,
     },
-    resend: {
-      driver: 'resend',
-      apiKey: process.env.RESEND_API_KEY,
-    },
-    memory: {
-      driver: 'memory',
-    },
-  },
-})
+    resend: { driver: 'resend', apiKey: env.RESEND_API_KEY ?? '' },
+  }
 
-// デフォルトトランスポート（smtp）を使用
+  // manager はどんな名前も受け付け、最初の送信で例外を投げる。それがキュージョブの中のこともある。
+  if (!Object.hasOwn(transports, env.MAIL_MAILER)) {
+    throw new Error(
+      `MAIL_MAILER="${env.MAIL_MAILER}" is not a declared transport. Declare it in config/mail.ts or use one of: ${Object.keys(transports).join(', ')}.`,
+    )
+  }
+
+  return {
+    default: env.MAIL_MAILER,
+    from: { email: env.MAIL_FROM_ADDRESS, name: env.MAIL_FROM_NAME },
+    transports,
+  }
+})
+```
+
+```ts
+// src/app.ts
+import { createApp } from '@guren/core'
+import env from '../config/env.js'
+import mail from '../config/mail.js'
+
+const app = createApp({ env, config: [mail] })
+```
+
+コールバックが読むキーは、すべて `config/env.ts` で宣言しておく必要があります。`guren add mail` は `MAIL_MAILER`、`MAIL_FROM_ADDRESS`、`MAIL_FROM_NAME` と `SMTP_*` を宣言します。上の `resend` のように自分で足したトランスポートのキーは、手で宣言してください（`RESEND_API_KEY: Env.string().secret().optional()`）。変数の宣言方法は[設定ガイド](./configuration.md)にあります。
+
+`MAIL_MAILER=log` は送信するメールをサーバーの出力に書き出すので、開発ではこれで足ります。本番ではコードを変えずに `MAIL_MAILER=smtp` や `resend` に切り替えます。メールごとにトランスポートを指定することもできます。
+
+```ts
+// デフォルトトランスポートを使用
 await mail(mailManager).to('user@example.com').subject('Test').text('Hello').send()
 
 // 特定のトランスポートを使用
@@ -136,6 +157,8 @@ await mail(mailManager)
   .text('Hello')
   .send()
 ```
+
+メール をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 ### トランスポートオプション
 
@@ -154,6 +177,11 @@ await mail(mailManager)
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
 | `apiKey` | 必須 | Resend API キー |
+
+**Log Transport（開発用）:**
+| オプション | デフォルト | 説明 |
+|-----------|-----------|------|
+| `logger` | `console.log` | 送信する代わりに、整形したメッセージを受け取る |
 
 **Memory Transport（テスト用）:**
 | オプション | デフォルト | 説明 |
@@ -263,22 +291,21 @@ await mail(mailManager)
 
 ## キューによるメール送信
 
-キューを使うとメールを非同期に送信できます。queued job はワーカーが動かすアプリの container から mail manager（`mail`）を取り出し、`queue()` はその隣にバインドされた `queue` manager へディスパッチします。両方をバインドする provider があれば配線は完了です。manager がどのアプリのものか分かるよう、`createMailManager()` には provider の container を渡します。
+キューを使うとメールを非同期に送信できます。queued job はワーカーが動かすアプリの container から mail manager（`mail`）を取り出し、`queue()` は同じ container にバインドされた `queue` manager へディスパッチします。`createApp()` に2つの定義を並べれば配線は完了です。
 
 ```ts
-import { ServiceProvider, createMailManager, createQueueManager, MemoryDriver } from '@guren/core'
+// src/app.ts
+import { createApp } from '@guren/core'
+import env from '../config/env.js'
+import mail from '../config/mail.js'
+import queue from '../config/queue.js'
 
-export default class MailProvider extends ServiceProvider {
-  register(): void {
-    this.container.singleton('queue', () =>
-      createQueueManager({ default: 'memory', drivers: { memory: () => new MemoryDriver() } }),
-    )
-    this.container.singleton('mail', (container) => createMailManager(mailConfig, container))
-  }
-}
+const app = createApp({ env, config: [mail, queue] })
 ```
 
-container を渡さずに作った mail manager は、既定アプリケーションの `queue` バインディングへキューします。`mail` バインディングを見つけられない job は `setMailManager()` が入れた値にフォールバックしますが、この setter は 2.23.0 で非推奨です。上のプロバイダのように、アプリのコンテナへ束縛してください。
+`defineMailConfig` は、manager を解決する container を渡して manager を作ります。そのため manager は自分がどのアプリのものかを知っています。`config/queue.ts` は[キューガイド](./queue.md)を参照してください。`QUEUE_CONNECTION=sync` ではジョブがその場で実行されるので、送信をリクエストから切り離したいときはワーカーが処理するドライバを選びます。
+
+container を渡さずに `createMailManager(config)` で作った mail manager は、既定アプリケーションの `queue` バインディングへキューします。`mail` バインディングを見つけられない job は `setMailManager()` が入れた値にフォールバックしますが、この setter は 2.23.0 で非推奨です。`config/mail.ts` と同じように、アプリのコンテナへ束縛してください。
 
 ```ts
 // 即座に送信せずキューに入れる
@@ -357,6 +384,44 @@ await welcomeMail.send()
 await welcomeMail.queue('emails')
 ```
 
+## コンテナとの統合
+
+`config/mail.ts` は mail manager を `mail` という名前のシングルトンとしてバインドします。コンテナから解決できます。
+
+```ts
+// app.container、または provider 内の this.container から取得
+
+const mailManager = container.make('mail') // MailManager
+```
+
+### `container.fake()` を使ったテスト
+
+テストで mail manager を差し替えると、実際には送信せずに送ったメッセージを捕捉できます。
+
+```ts
+// app.container、または provider 内の this.container から取得
+import { MailManager, MemoryTransport } from '@guren/core'
+
+test('sends welcome email on registration', async () => {
+  const memoryTransport = new MemoryTransport()
+  const fakeMail = new MailManager({
+    default: 'memory',
+    from: { email: 'test@example.com' },
+  })
+  fakeMail.registerTransport('memory', () => memoryTransport)
+
+  using _ = container.fake('mail', fakeMail)
+
+  // テスト対象のコードを実行する。ファサードやコンテナ経由で送ったメールは
+  // すべて memoryTransport に捕捉される
+  await registerUser({ email: 'new@example.com' })
+
+  const sent = memoryTransport.getSentMessages()
+  expect(sent).toHaveLength(1)
+  expect(sent[0].to[0].email).toBe('new@example.com')
+})
+```
+
 ## テスト
 
 テストでは Memory トランスポートを使います。
@@ -409,7 +474,7 @@ describe('Email', () => {
 
 ## ベストプラクティス
 
-1. **環境変数を使う**: SMTP の認証情報や API キーをハードコードしない。
+1. **環境変数を使う**: SMTP の認証情報や API キーをハードコードしない。`config/env.ts` で宣言し、`config/mail.ts` で読みます。
 
 2. **デフォルトの送信元を設定する**: 毎回書かずに済むよう、送信者を既定値として持たせます。
 

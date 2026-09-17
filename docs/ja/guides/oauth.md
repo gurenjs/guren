@@ -35,27 +35,75 @@ sequenceDiagram
 
 ### マネージャーの登録
 
-`OAuthServiceProvider` が `OAuthManager` のシングルトンをコンテナに `oauth` として束縛します。プロバイダーはアプリの起動時に登録します。
+`config/oauth.ts` は `defineOAuthConfig` の定義を default export します。コールバックは検証済みの env を受け取り、登録するプロバイダーと state ストアを返します。定義はそれをもとに `OAuthManager` を組み立て、コンテナに `oauth` として束縛します。このファイルは `bunx guren add oauth` が生成します。
 
 ```ts
 // config/oauth.ts
-import { createGitHubOAuthProviderConfig, createOAuthManager } from '@guren/core'
+import { DatabaseOAuthStateStore, defineOAuthConfig, type OAuthProviderConfig, createGitHubOAuthProviderConfig, createGoogleOAuthProviderConfig, createDiscordOAuthProviderConfig } from '@guren/core'
+import { oauthStates } from '../db/schema.js'
 
-export const oauth = createOAuthManager()
+export default defineOAuthConfig((env) => {
+  // 3つのキーがすべて設定されたプロバイダーだけを登録します。設定が
+  // 途中のプロバイダーは、プロバイダー側ではなくアプリ側で失敗します。
+  const providers: Record<string, OAuthProviderConfig> = {}
 
-oauth.registerProvider('github', createGitHubOAuthProviderConfig({
-  clientId: process.env.GITHUB_CLIENT_ID!,
-  clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/github/callback`,
-}))
+  if (env.OAUTH_GITHUB_CLIENT_ID && env.OAUTH_GITHUB_CLIENT_SECRET && env.OAUTH_GITHUB_REDIRECT_URI) {
+    providers.github = createGitHubOAuthProviderConfig({
+      clientId: env.OAUTH_GITHUB_CLIENT_ID,
+      clientSecret: env.OAUTH_GITHUB_CLIENT_SECRET,
+      redirectUri: env.OAUTH_GITHUB_REDIRECT_URI,
+    })
+  }
+
+  if (env.OAUTH_GOOGLE_CLIENT_ID && env.OAUTH_GOOGLE_CLIENT_SECRET && env.OAUTH_GOOGLE_REDIRECT_URI) {
+    providers.google = createGoogleOAuthProviderConfig({
+      clientId: env.OAUTH_GOOGLE_CLIENT_ID,
+      clientSecret: env.OAUTH_GOOGLE_CLIENT_SECRET,
+      redirectUri: env.OAUTH_GOOGLE_REDIRECT_URI,
+    })
+  }
+
+  if (env.OAUTH_DISCORD_CLIENT_ID && env.OAUTH_DISCORD_CLIENT_SECRET && env.OAUTH_DISCORD_REDIRECT_URI) {
+    providers.discord = createDiscordOAuthProviderConfig({
+      clientId: env.OAUTH_DISCORD_CLIENT_ID,
+      clientSecret: env.OAUTH_DISCORD_CLIENT_SECRET,
+      redirectUri: env.OAUTH_DISCORD_REDIRECT_URI,
+    })
+  }
+
+  return {
+    providers,
+    // 認可リダイレクトとコールバックは別のプロセスに届くことがあるので、
+    // 両者を結びつける state はメモリではなくデータベースに置きます。
+    stateStore: new DatabaseOAuthStateStore(oauthStates),
+  }
+})
 ```
+
+各プロバイダーが読むのは `OAUTH_<PROVIDER>_CLIENT_ID`・`_CLIENT_SECRET`・`_REDIRECT_URI` の3つのキーで、`config/env.ts` で宣言します（[設定](./configuration.md#環境変数を宣言する)を参照）。`guren add oauth` を使えば宣言まで済みます。`_REDIRECT_URI` には `https://your.app/auth/github/callback` のようなコールバックの完全な URL を設定します。キーがそろっていないプロバイダーは登録されず、そのフローを開始すると `OAuth provider "github" is not configured.` がスローされます。
+
+定義は `createApp({ config })` に並べます。
+
+```ts
+// src/app.ts
+import { createApp } from '@guren/core'
+import database from '../config/database.js'
+import env from '../config/env.js'
+import oauth from '../config/oauth.js'
+
+const app = createApp({
+  env,
+  config: [database, oauth],
+})
+```
+
+OAuth をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 ### ログインコントローラー
 
 ```ts
-import { Controller } from '@guren/core'
+import { Controller, type OAuthManager } from '@guren/core'
 import { z } from 'zod'
-import { oauth } from '@/config/oauth'
 import { User } from '@/app/Models/User'
 
 const CallbackQuerySchema = z.object({
@@ -64,10 +112,14 @@ const CallbackQuerySchema = z.object({
 })
 
 export default class GitHubOAuthController extends Controller {
+  private oauth(): OAuthManager {
+    return this.make<OAuthManager>('oauth')
+  }
+
   async start() {
     // セッションを渡すとフローがこのブラウザに束縛されます。
     // 詳細は下の「stateをブラウザに束縛する」を参照してください。
-    const { url } = await oauth.authorize('github', {
+    const { url } = await this.oauth().authorize('github', {
       redirectTo: this.query('redirect_to'),
       session: this.auth.session(),
     })
@@ -76,7 +128,7 @@ export default class GitHubOAuthController extends Controller {
 
   async callback() {
     const { code, state } = this.validateQuery(CallbackQuerySchema)
-    const { profile, redirectTo } = await oauth.handleCallback('github', {
+    const { profile, redirectTo } = await this.oauth().handleCallback('github', {
       code,
       state,
       session: this.auth.session(),
@@ -119,10 +171,10 @@ https://your.app/auth/github/callback?code=<攻撃者のもの>&state=<攻撃者
 
 ```ts
 // フロー開始時
-const { url } = await oauth.authorize('github', { session: this.auth.session() })
+const { url } = await this.oauth().authorize('github', { session: this.auth.session() })
 
 // コールバック時
-await oauth.handleCallback('github', { code, state, session: this.auth.session() })
+await this.oauth().handleCallback('github', { code, state, session: this.auth.session() })
 ```
 
 `authorize()` はフローごとに新しい値を発行してセッションに保持し、そのハッシュだけを state と一緒に保存します。`handleCallback()` は値を読み戻し（同時に削除し）、束縛が一致しない state を拒否します。セッションへの書き込みには、初回訪問者のセッションをプロバイダーとの往復をまたいで残す役割もあります。そのおかげで、コールバックのリクエストが同じセッションを持って戻ってきます。
@@ -143,12 +195,12 @@ await oauth.handleCallback('github', { code, state, session: this.auth.session()
 フロー開始時に `redirectTo`（ユーザーが元々いたページなど）を渡すと、プロバイダーとの往復を経ても保持され、`handleCallback` から返ってきます。
 
 ```ts
-const { url } = await oauth.authorize('github', {
+const { url } = await this.oauth().authorize('github', {
   redirectTo: '/settings/billing',
   session: this.auth.session(),
 })
 // ...後で、コールバック内で:
-const { redirectTo } = await oauth.handleCallback('github', {
+const { redirectTo } = await this.oauth().handleCallback('github', {
   code,
   state,
   session: this.auth.session(),
@@ -158,69 +210,69 @@ return this.redirect(redirectTo ?? '/dashboard')
 
 `redirectTo` は自動的にサニタイズされます。アプリ相対パス（`/settings/billing`）は常に許可されますが、絶対URLは `allowedRedirectHosts` にホストが含まれていない限り破棄されます。攻撃者がログイン後のユーザーを外部サイトへ飛ばすリンクを細工するのを防ぐためです。
 
+許可リストはマネージャーの `stateConfig` に含まれますが、`defineOAuthConfig` が受け取るのは `providers` と `stateStore` だけです。許可リストが必要なアプリは、サービスプロバイダの `register()` で `oauth` を束縛し、`createApp({ config })` から `config/oauth.ts` を外します。同じキーを二重に束縛すると起動に失敗するためです。
+
 ```ts
-export const oauth = createOAuthManager({
-  stateConfig: {
-    allowedRedirectHosts: ['app.example.com', '*.example.com'], // ワイルドカード対応
-  },
-})
+// app/Providers/OAuthProvider.ts
+import { createOAuthManager, DatabaseOAuthStateStore, ServiceProvider } from '@guren/core'
+import { oauthStates } from '../../db/schema.js'
+
+export default class OAuthProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('oauth', () => {
+      const manager = createOAuthManager({
+        stateStore: new DatabaseOAuthStateStore(oauthStates),
+        stateConfig: {
+          allowedRedirectHosts: ['app.example.com', '*.example.com'], // ワイルドカード対応
+        },
+      })
+      // config/oauth.ts と同じく、各プロバイダーを manager.registerProvider() で登録します。
+      return manager
+    })
+  }
+}
 ```
 
 ## 組み込みプロバイダー
 
-```ts
-import {
-  createGitHubOAuthProviderConfig,
-  createGoogleOAuthProviderConfig,
-  createDiscordOAuthProviderConfig,
-} from '@guren/core'
+各ファクトリがプロバイダーのエンドポイントとデフォルトのスコープを埋めるので、定義から渡すのは3つのキーだけです。上の `config/oauth.ts` は3つとも登録しています。
 
-oauth.registerProvider('github', createGitHubOAuthProviderConfig({
-  clientId: process.env.GITHUB_CLIENT_ID!,
-  clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/github/callback`,
-}))
+| プロバイダー | ファクトリ | キー |
+|----------|---------|------|
+| GitHub | `createGitHubOAuthProviderConfig` | `OAUTH_GITHUB_CLIENT_ID`, `OAUTH_GITHUB_CLIENT_SECRET`, `OAUTH_GITHUB_REDIRECT_URI` |
+| Google | `createGoogleOAuthProviderConfig` | `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET`, `OAUTH_GOOGLE_REDIRECT_URI` |
+| Discord | `createDiscordOAuthProviderConfig` | `OAUTH_DISCORD_CLIENT_ID`, `OAUTH_DISCORD_CLIENT_SECRET`, `OAUTH_DISCORD_REDIRECT_URI` |
 
-oauth.registerProvider('google', createGoogleOAuthProviderConfig({
-  clientId: process.env.GOOGLE_CLIENT_ID!,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/google/callback`,
-}))
-
-oauth.registerProvider('discord', createDiscordOAuthProviderConfig({
-  clientId: process.env.DISCORD_CLIENT_ID!,
-  clientSecret: process.env.DISCORD_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/discord/callback`,
-}))
-```
+提供しないプロバイダーは、そのブロックと `config/env.ts` のキーを削除してください。
 
 ### 任意の OAuth 2.0 プロバイダー
 
-直接登録するプロバイダーには、エンドポイントをそのまま指定します。ユーザー情報レスポンスを正規化する必要があれば `mapProfile` 関数も渡します。
+ファクトリの無いプロバイダーには、エンドポイントをそのまま指定します。ユーザー情報レスポンスを正規化する必要があれば `mapProfile` 関数も渡します。`config/oauth.ts` の `providers` に追加し、`OAUTH_GITLAB_*` の3つのキーを `config/env.ts` で宣言してください。
 
 ```ts
-import type { OAuthProviderConfig } from '@guren/core'
-
-const gitlabConfig: OAuthProviderConfig = {
-  clientId: process.env.GITLAB_CLIENT_ID!,
-  clientSecret: process.env.GITLAB_CLIENT_SECRET!,
-  redirectUri: `${process.env.APP_URL}/auth/gitlab/callback`,
-  authorizeUrl: 'https://gitlab.com/oauth/authorize',
-  tokenUrl: 'https://gitlab.com/oauth/token',
-  userInfoUrl: 'https://gitlab.com/api/v4/user',
-  scopes: ['read_user'],
-  mapProfile: (raw, token) => ({
-    id: String(raw.id),
-    email: raw.email as string | undefined,
-    name: raw.name as string | undefined,
-    avatar: raw.avatar_url as string | undefined,
-    token,
-    raw,
-  }),
+// config/oauth.ts の defineOAuthConfig コールバック内
+if (env.OAUTH_GITLAB_CLIENT_ID && env.OAUTH_GITLAB_CLIENT_SECRET && env.OAUTH_GITLAB_REDIRECT_URI) {
+  providers.gitlab = {
+    clientId: env.OAUTH_GITLAB_CLIENT_ID,
+    clientSecret: env.OAUTH_GITLAB_CLIENT_SECRET,
+    redirectUri: env.OAUTH_GITLAB_REDIRECT_URI,
+    authorizeUrl: 'https://gitlab.com/oauth/authorize',
+    tokenUrl: 'https://gitlab.com/oauth/token',
+    userInfoUrl: 'https://gitlab.com/api/v4/user',
+    scopes: ['read_user'],
+    mapProfile: (raw, token) => ({
+      id: String(raw.id),
+      email: raw.email as string | undefined,
+      name: raw.name as string | undefined,
+      avatar: raw.avatar_url as string | undefined,
+      token,
+      raw,
+    }),
+  }
 }
-
-oauth.registerProvider('gitlab', gitlabConfig)
 ```
+
+`createOAuthManager()` で自分で組み立てたマネージャーなら、同じオブジェクトを `manager.registerProvider('gitlab', config)` で登録できます。[後述のテスト](#テスト)では組み込みファクトリで同じことをしています。
 
 ## プロバイダーによるメールアドレスの検証状態
 
@@ -263,16 +315,7 @@ fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVe
 
 コールバックを元のリクエストに結びつける一度限りの `state` 値は、サーバー側で保存されます。デフォルトの `MemoryOAuthStateStore` は単一プロセスの開発環境なら動きますが、複数プロセス（ロードバランサー、サーバーレス）構成の本番環境では共有ストレージが要ります。そうしないと、コールバックがstateを発行していないプロセスに届いてしまうことがあります。
 
-ほとんどのアプリでは `DatabaseOAuthStateStore` を選んでおけば十分です。アプリが既に使っているデータベースにstateを保存するので、追加のインフラは要りません:
-
-```ts
-import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
-import { oauthStates } from '@/db/schema'
-
-export const oauth = createOAuthManager({
-  stateStore: new DatabaseOAuthStateStore(oauthStates),
-})
-```
+ほとんどのアプリでは `DatabaseOAuthStateStore` を選んでおけば十分です。アプリが既に使っているデータベースにstateを保存するので、追加のインフラは要りません。`guren add oauth` と `make:auth --oauth` は、これを定義の `stateStore` に渡します（[マネージャーの登録](#マネージャーの登録)を参照）。ストアが読み書きするのは `oauth_states` テーブルです:
 
 ```ts
 // db/schema.ts（sqliteダイアレクトの例）
@@ -287,18 +330,22 @@ export const oauthStates = sqliteTable('oauth_states', {
 
 `binding` 列は[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュを保持します。この列が無いとストアは束縛を保存できません。束縛済みのstateがすべて未束縛で戻ってくるため、`handleCallback` は「Invalid or expired OAuth state」として拒否します。原因のストアはコンソールの警告が示します。`session` / `bindTo` を使う前に列を追加してください。
 
-state行が消えるのはコールバックが届いたときなので、途中で放棄されたサインインの行はそのまま残ります。`guren add oauth` が登録するコンソールコマンド `oauth-states:prune` をスケジュールすると、期限切れの行をまとめて削除できます。このコマンドは `oauth` に束縛されたストアに対して `OAuthManager.pruneExpiredStates()` を呼びます。既にRedisを運用しているアプリなら、Redisも引き続き使えます。Redisはキーを自分で期限切れにします:
+state行が消えるのはコールバックが届いたときなので、途中で放棄されたサインインの行はそのまま残ります。`guren add oauth` が登録するコンソールコマンド `oauth-states:prune` をスケジュールすると、期限切れの行をまとめて削除できます。このコマンドは `oauth` に束縛されたストアに対して `OAuthManager.pruneExpiredStates()` を呼びます。既にRedisを運用しているアプリなら、Redisも引き続き使えます。Redisはキーを自分で期限切れにします。`REDIS_URL` は `config/env.ts` で宣言してください:
 
 ```ts
-import { createOAuthManager } from '@guren/core'
+// config/oauth.ts
+import { defineOAuthConfig } from '@guren/core'
 import { createRedisClient, RedisOAuthStateStore } from '@guren/core/redis'
 
-const redis = createRedisClient({ url: process.env.REDIS_URL })
-
-export const oauth = createOAuthManager({
-  stateStore: new RedisOAuthStateStore(redis),
-})
+export default defineOAuthConfig((env) => ({
+  providers: {
+    // マネージャーの登録と同じく、プロバイダーごとに1エントリ
+  },
+  stateStore: new RedisOAuthStateStore(createRedisClient({ url: env.REDIS_URL })),
+}))
 ```
+
+キャッシュやキューのドライバと違い、`stateStore` はファクトリではなく値です。そのためこのクライアントは最初のサインイン時ではなく、アプリの起動時に接続します。
 
 ## 設定オプション
 
