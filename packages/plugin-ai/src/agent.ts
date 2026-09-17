@@ -332,7 +332,12 @@ export function bindAgent<T extends Agent>(
       if (!scope.container.has('queue')) {
         throw new Error(`${agentName}.queue() dispatches through the \`queue\` binding, and none is bound. Register QueueServiceProvider.`)
       }
-      if (requested !== undefined) conversationOwner()
+      // The worker checks again; this makes a run that could never succeed fail here rather than in its log.
+      if (requested !== undefined) {
+        const owner = conversationOwner()
+        if (requested === true) scope.manager.conversations()
+        else await loadConversation(requested, owner)
+      }
       const conversationId = requested === true ? crypto.randomUUID() : requested
       const payload: RunAgentPayload = {
         agentName,
@@ -372,7 +377,12 @@ export function bindAgent<T extends Agent>(
     const owner = conversationOwner()
     const store = scope.manager.conversations()
     if (requested === true) return { store, owner, id: startId ?? crypto.randomUUID(), isNew: true, messages: [] as ModelMessage[] }
-    const stored = await store.load(requested, owner)
+    const stored = await loadConversation(requested, owner)
+    return { store, owner, id: requested, isNew: false, messages: stored.messages }
+  }
+
+  const loadConversation = async (requested: string, owner: AgentPrincipal) => {
+    const stored = await scope.manager.conversations().load(requested, owner)
     if (!stored) {
       throw new Error(`${agentName} cannot continue conversation "${requested}": no conversation with that id belongs to this principal.`)
     }
@@ -382,7 +392,7 @@ export function bindAgent<T extends Agent>(
         + 'Continue it with that agent, or start a new one.',
       )
     }
-    return { store, owner, id: requested, isNew: false, messages: stored.messages }
+    return stored
   }
 
   return bound(undefined)

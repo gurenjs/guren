@@ -657,7 +657,9 @@ counterpart, and an event is what the rest of Guren already listens to.
 - **`queue(input, { conversation, provider, queue, delay })`** returns `{ jobId, conversationId? }`.
   `conversation: true` mints the id at enqueue time, so the caller can hand it to a client before the
   worker runs; the payload carries it with `startsConversation`, and the worker creates the
-  conversation under that id. `signal` has no queued form.
+  conversation under that id. A run that fails leaves that id naming no conversation, so the caller
+  starts again with a new one. `queue()` checks a continued conversation's owner and agent before
+  dispatching, as the worker does again. `signal` has no queued form.
 - **The registry lives on the plugin's runtime binding,** not in a module-global map: `aiPlugin({ agents })`
   refuses two classes under one `agentName`, and the name `anonymous`, at boot. `queue()` refuses a class
   the registry does not hold, or holds a different class for, before anything is dispatched: the worker

@@ -137,6 +137,27 @@ describe('queue()', () => {
     expect(await queuedJobs(driver)).toEqual([])
   })
 
+  test('should refuse a conversation this principal cannot continue before dispatching', async () => {
+    const { h, driver } = await bootQueued()
+    h.script([{ text: 'first answer' }])
+    const started = await ai(h).agent(Support).as(USER).prompt('first', { conversation: true })
+
+    await expect(ai(h).agent(Support).as(USER).queue('x', { conversation: 'missing' })).rejects.toThrow(
+      'support cannot continue conversation "missing"',
+    )
+    await expect(ai(h).agent(Support).as({ id: 8 }).continue(started.conversationId!).queue('x')).rejects.toThrow(
+      'no conversation with that id belongs to this principal',
+    )
+    expect(await queuedJobs(driver)).toEqual([])
+  })
+
+  test('should refuse to start a conversation when config/ai.ts configures no store', async () => {
+    const { h, driver } = await bootQueued({ conversations: undefined })
+
+    await expect(ai(h).agent(Support).as(USER).queue('x', { conversation: true })).rejects.toThrow('configures no conversation store')
+    expect(await queuedJobs(driver)).toEqual([])
+  })
+
   test('should refuse a conversation option that contradicts continue()', async () => {
     const { h } = await bootQueued()
 
