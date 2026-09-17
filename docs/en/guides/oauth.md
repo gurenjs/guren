@@ -380,6 +380,8 @@ export default defineOAuthConfig((env) => ({
 }))
 ```
 
+Unlike a cache or queue driver, `stateStore` is a value rather than a factory, so this client connects when the app boots, not on the first sign-in.
+
 ## Configuration Options
 
 ```ts
