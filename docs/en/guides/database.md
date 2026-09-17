@@ -50,8 +50,6 @@ import env from './env.js'
 const database = createMySqlDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  // `context` is the app's validated environment. `guren db:*` runs this
-  // outside an app, so the schema is parsed here instead.
   connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
     ?? 'mysql://guren:guren@localhost:33306/guren',
 })
@@ -75,8 +73,6 @@ Use `createAwsDataApiDatabase` when your app runs on AWS Lambda against Aurora S
 import { createAwsDataApiDatabase, defineDatabaseConfig, type ConnectionContext } from '@guren/core'
 import env from './env.js'
 
-// `context` is the app's validated environment. `guren db:*` runs the resolvers
-// outside an app, so the schema is parsed here instead.
 const values = (context?: ConnectionContext) => context?.env ?? env.parse(undefined, { mode: 'report' }).values
 
 const database = createAwsDataApiDatabase({
@@ -923,8 +919,6 @@ import env from './env.js'
 const database = createSqliteDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  // `context` is the app's validated environment. `guren db:*` runs this
-  // outside an app, so the schema is parsed here instead.
   filename: (context) => {
     const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
     // `bun test` sets NODE_ENV=test, so the suite uses its own file.

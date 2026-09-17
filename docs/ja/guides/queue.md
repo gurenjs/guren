@@ -185,7 +185,7 @@ export default defineQueueConfig((env) => {
 })
 ```
 
-コールバックには検証済みの環境変数が渡されるので、`QUEUE_CONNECTION` をはじめ読み取るキーはすべて `config/env.ts` に宣言しておきます（[設定ガイド](./configuration.md)を参照）。マネージャー自体はどんなドライバ名も受け付け、最初のディスパッチで初めて例外を投げます。そのため名前の検査はアプリの起動時に行います。
+コールバックには検証済みの環境変数が渡されるので、`QUEUE_CONNECTION` をはじめ読み取るキーはすべて `config/env.ts` に宣言しておきます（[設定ガイド](./configuration.md)を参照）。
 
 定義は queue をバインドしますが、ジョブの登録はしません。ワーカーはメッセージに書かれた名前からジョブクラスを引くので、登録はプロバイダの `boot()` に残します。`guren add queue` はそのプロバイダも書き出します。
 
@@ -221,7 +221,7 @@ const app = createApp({
 })
 ```
 
-`QueueProvider` で queue をバインドしているアプリもそのまま動きます。定義へ移す手順は[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照してください。
+キュー をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 どこにもバインドされていないマネージャーは `Job.dispatch()` から見つかりません。その場合は `await queue.dispatch(SendWelcomeEmailJob, payload)` のように、マネージャー経由で明示的にディスパッチします。`setQueueDriver()` でドライバを固定する方法も残っていますが、2.23.0 で非推奨になり、3.0.0 で削除されます。
 
@@ -364,22 +364,17 @@ const memoryDriver = queue.driver('memory')
 本番環境では、ジョブの永続化と複数サーバーでの共有のためにRedisドライバを使用します。
 
 ```ts
-// config/queue.ts
-import { defineQueueConfig, RedisDriver } from '@guren/core'
+import { RedisDriver } from '@guren/core'
 import { createRedisClient } from '@guren/core/redis'
 
-export default defineQueueConfig((env) => ({
-  default: 'redis',
-  drivers: {
-    redis: () =>
-      new RedisDriver(createRedisClient({ url: env.REDIS_URL }), {
-        prefix: 'myapp:queue:', // キープレフィックス（デフォルト: 'queue:'）
-      }),
-  },
-}))
+// config/queue.ts の `drivers` のエントリ。`env` はコールバックの引数
+redis: () =>
+  new RedisDriver(createRedisClient({ url: env.REDIS_URL }), {
+    prefix: 'myapp:queue:', // キープレフィックス（デフォルト: 'queue:'）
+  }),
 ```
 
-`REDIS_URL` は `config/env.ts` に宣言します。`@guren/core/redis` は ioredis を読み込むので、使う設定ファイルでだけインポートします。
+`REDIS_URL` は `config/env.ts` に宣言します。`@guren/core/redis` は ioredis を読み込むので、使う設定ファイルでだけ import します。
 
 ### Syncドライバ
 
@@ -388,13 +383,10 @@ Syncドライバはディスパッチしたプロセス内でジョブをその�
 Syncキューには待ち行列が無いため、リトライのバックオフは適用されません。Syncドライバへ戻されたジョブは、`backoff`戦略が算出する遅延に関係なく即座に再実行されます。リトライのタイミングを確認したい場合はMemoryまたはRedisドライバとワーカーを使用してください。
 
 ```ts
-// config/queue.ts
-import { defineQueueConfig, SyncDriver } from '@guren/core'
+import { SyncDriver } from '@guren/core'
 
-export default defineQueueConfig(() => ({
-  default: 'sync',
-  drivers: { sync: () => new SyncDriver() },
-}))
+// config/queue.ts の `drivers` のエントリ
+sync: () => new SyncDriver(),
 ```
 
 ## 失敗したジョブ

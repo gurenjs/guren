@@ -158,7 +158,7 @@ const app = createApp({
 })
 ```
 
-これらのストアをプロバイダや `auth.sessionOptions.store` で配線しているアプリもそのまま動きます。詳しくは [サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
+セッションと OAuth state のストア をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 どちらのストアもテーブルを必要とします。`sessions` は `bunx guren add session` が生成し、`oauth_states` のカラムは [Stateストレージ](./oauth.md#stateストレージ) に載っています。`bunx guren make:auth --oauth` は両方のテーブルを生成し、両方のストアを配線します。
 

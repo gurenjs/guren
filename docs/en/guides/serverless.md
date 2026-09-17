@@ -80,7 +80,7 @@ export default defineQueueConfig((env) => ({
 }))
 ```
 
-Declare `SQS_QUEUE_URL` and `SQS_EMAILS_QUEUE_URL` in `config/env.ts` (see [Configuration](./configuration.md)), so a function deployed without them fails at boot instead of on the first dispatch. An app that configures its queue in a provider keeps working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
+Declare `SQS_QUEUE_URL` and `SQS_EMAILS_QUEUE_URL` in `config/env.ts` (see [Configuration](./configuration.md)), so a function deployed without them fails at boot instead of on the first dispatch. Apps that configure the queue in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 Jobs are dispatched the same way as on the server: `await SendEmailJob.dispatch({ to: 'user@example.com' })`. The `SqsDriver` serializes the job to SQS, and the Lambda handler deserializes and executes it.
 

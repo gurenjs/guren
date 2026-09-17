@@ -84,8 +84,6 @@ import env from './env.js'
 const database = createSqliteDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  // `context` はアプリの検証済み環境変数です。`guren db:*` はアプリの外で
-  // これを呼ぶため、そのときはここでスキーマを読みます。
   filename: (context) => {
     const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
     // `bun test` は NODE_ENV=test を設定するので、テストは専用ファイルを使います。
@@ -119,8 +117,6 @@ import env from './env.js'
 const database = createMySqlDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  // `context` はアプリの検証済み環境変数です。`guren db:*` はアプリの外で
-  // これを呼ぶため、そのときはここでスキーマを読みます。
   connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
     ?? 'mysql://guren:guren@localhost:33306/guren',
 })
@@ -144,8 +140,6 @@ AWS Lambda 上で RDS Data API を有効にした Aurora Serverless v2 に接続
 import { createAwsDataApiDatabase, defineDatabaseConfig, type ConnectionContext } from '@guren/core'
 import env from './env.js'
 
-// `context` はアプリの検証済み環境変数です。`guren db:*` はアプリの外で
-// リゾルバを呼ぶため、そのときはここでスキーマを読みます。
 const values = (context?: ConnectionContext) => context?.env ?? env.parse(undefined, { mode: 'report' }).values
 
 const database = createAwsDataApiDatabase({

@@ -69,7 +69,7 @@ bunx guren make:auth --install --oauth github,google
 
 コールバックを認可リダイレクトと結びつける OAuth state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡し、`--install` がその定義を `createApp({ config })` に追加します。これでリダイレクトとコールバックが別のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれが普通です([Stateストレージ](./oauth.md#stateストレージ)を参照)。`db/schema.ts` が無いアプリでは `stateStore` の無い定義が生成され、state はプロセスのメモリに残ります。
 
-定義の形で生成されるのは、`config/env.ts` があり、`oauth` を束縛するプロバイダが無い場合です。それ以外では、同じ登録内容の `app/Providers/OAuthProvider.ts` を生成します(`db/schema.ts` が無ければ `CoreOAuthServiceProvider` も登録します)。
+定義の形で生成されるのは、`config/env.ts` があり、`oauth` を束縛するプロバイダが無い場合です。それ以外では、同じ登録内容の `app/Providers/OAuthProvider.ts` を生成し、そちらを登録します(`db/schema.ts` が無ければ `CoreOAuthServiceProvider` も登録します)。OAuth をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 `--oauth` は、`OAuthController` / `config/oauth.ts` のファイルパスと、state をデータベースに保存する仕組みを下記の `guren add oauth` と共有しています。違いは、コールバックがスタブではなく完成された実装である点だけです。同じアプリに対して両方を実行しないでください。2回目の実行は、`--force` なしなら失敗し、`--force` ありなら1回目の生成物を上書きします。
 
@@ -109,7 +109,7 @@ bunx guren add oauth
 
 `db/schema.ts` には `oauth_states` テーブルが追加され、そのマイグレーションも生成されます。`drizzle-kit` をまだインストールしていない場合は、あとで `bun run db:make` を実行してください。`oauth-states:prune` コマンドも登録されます。`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡すので、コールバックが認可リダイレクトを発行したプロセスに届かなくても動きます。Workers、Lambda、Vercel ではその状況が普通です([Stateストレージ](./oauth.md#stateストレージ)を参照)。`CoreOAuthServiceProvider` はメモリ上に state を持つので登録しません。`db/schema.ts` が無いアプリでは、何も書き込まずにエラーで終了します。
 
-定義の形で生成されるのは、`config/env.ts` があり、`oauth` を束縛するプロバイダが無い場合です。それ以外では、同じ登録内容とストアを持つ `app/Providers/OAuthProvider.ts` を生成し、そちらを登録します。この形で設定したアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照してください。
+[`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` が無いアプリや、すでにプロバイダが `oauth` を束縛しているアプリには、同じ登録内容とストアを持つ `app/Providers/OAuthProvider.ts` が生成されます。
 
 ### プロバイダー資格情報の設定
 
@@ -160,16 +160,7 @@ async callback(): Promise<Response> {
 
 `redirectTo` は、フローの入口と出口の両方でオープンリダイレクト対策の検証を通ります。デフォルトで通過するのはアプリ相対パス(`/settings`)だけです。プロトコル相対URL(`//evil.com`)、バックスラッシュ変種、http(s) 以外のスキーム、許可リスト外のホストは破棄され、`redirectTo` は `undefined` になってフォールバックが適用されます。
 
-特定の外部ホストを許可する場合(ワイルドカード対応)は、マネージャーに `stateConfig` が必要です。`defineOAuthConfig` が受け取るのは `providers` と `stateStore` だけなので、許可リストを使うにはプロバイダの `register()` で `oauth` を自分で束縛し、`createApp({ config })` から `config/oauth.ts` を外します。両方で束縛すると起動に失敗します。プロバイダ全体は [OAuth ガイド](./oauth.md#ログイン後のリダイレクト)にあります。
-
-```ts
-this.container.singleton('oauth', () =>
-  createOAuthManager({
-    stateStore: new DatabaseOAuthStateStore(oauthStates),
-    stateConfig: { allowedRedirectHosts: ['accounts.example.com', '*.example.org'] },
-  }),
-)
-```
+特定の外部ホストを許可する場合(ワイルドカード対応)は、プロバイダ全体の例がある OAuth ガイドの[ログイン後のリダイレクト](./oauth.md#ログイン後のリダイレクト)に従ってください。
 
 > **Note:** `createRedirectSafetyMiddleware`(オプトイン)は、独自の `allowedHosts` オプションで `Location` ヘッダーを検証します。併用する場合は両方の許可リストを揃えてください。ずれていると、許可したはずの外部リダイレクトがミドルウェアに `/` へ書き換えられます。
 
@@ -231,7 +222,7 @@ app.use('*', createSessionMiddleware())
 
 `bunx guren add session` が生成するのは、`sessions` テーブルとそのマイグレーション、`database` と `cookie` のストアを宣言した `config/session.ts`、`SESSION_DRIVER` キー(`config/env.ts` に `database` をデフォルトとして宣言し、`.env` と `.env.example` にも追加)、そして `sessions:prune` コマンドです。定義は `createApp({ config })` に追加されます。下の `redis` ストアだけは手で足す部分です。`@guren/core/redis` を import すると ioredis が全バンドルに入るので、必要になるまで scaffold は出しません。`guren add auth` はこれを内部で実行するので、生成直後のアプリは最初からデータベースに永続化されます。以下は、手で配線する場合のためにその生成物を説明したものです。
 
-定義の形で生成されるのは、`config/env.ts` があり、`session` を束縛するプロバイダが無い場合です。それ以外では、プレーンな `SessionConfig` としての `config/session.ts` と、それを束縛する `app/Providers/SessionProvider.ts` を生成します。この形で設定したアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照してください。
+[`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` が無いアプリや、すでにプロバイダが `session` を束縛しているアプリには、プレーンな `SessionConfig` としての `config/session.ts` と、それを束縛する `app/Providers/SessionProvider.ts` が生成されます。
 
 候補となるストアが複数あるなら、一度まとめて宣言して環境ごとに選びます。`defineSessionConfig` が `session` キーに `SessionManager` を bind し、`AuthServiceProvider` は起動時にそれを組み込んだセッションミドルウェアを構築します。ストア自体は最初のリクエストで解決します。
 
@@ -256,7 +247,7 @@ export default defineSessionConfig((env) => ({
 }))
 ```
 
-コールバックが読む他のキーと同じく、`REDIS_URL` も `config/env.ts` で宣言します([環境変数を宣言する](./configuration.md#環境変数を宣言する)を参照)。定義はデータベースの定義と並べて登録します。
+`REDIS_URL` は `config/env.ts` に宣言します。`@guren/core/redis` は ioredis を読み込むので、使う設定ファイルでだけ import します。定義はデータベースの定義と並べて登録します。
 
 ```ts
 // src/app.ts
@@ -293,7 +284,15 @@ stores: {
 
 `database` ドライバには、`db/schema.ts` の `sessions` テーブルとマイグレーションが要ります。列は `id`(text 主キー)・`data`・`expiresAt` の3つで、方言ごとの定義は [Cloudflare ガイド](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed) にあります。期限切れ行は `manager.pruneExpired()` をスケジュール実行して掃除してください(`read()` は期限切れをすでに不在として扱います)。
 
-マネージャ側の cookie と TTL 設定が基本になり、`auth.sessionOptions` がフィールド単位で上書きします。`auth.sessionOptions.store` とマネージャの両方を設定すると、どちらかを黙って選ぶのではなく起動時にエラーになります。`default` ストアのドライバが未登録の場合も同じく起動で失敗し、未宣言の `default` 名は `AuthServiceProvider` が起動時にマネージャを組み立てる時点で失敗します。いずれの場合も、`SESSION_DRIVER` の typo は最初のログインではなく起動で止まります。`memory` は常に宣言済みなので、`SESSION_DRIVER=memory` はエントリなしで動きます。定義は `ConfigServiceProvider` の `register()` で、どのプロバイダよりも先に bind されます。そのため `AuthServiceProvider` の boot 時には、マネージャがすでに用意されています。プラグイン側は、`SessionDrivers` インターフェースを augmentation で拡張し、`manager.registerDriver(name, factory)` を呼べばドライバを追加できます。解決は遅延なので、プラグインの `register()` が設定の宣言より後に走っても構いません。
+マネージャ側の cookie と TTL 設定が基本になり、`auth.sessionOptions` がフィールド単位で上書きします。次の設定ミスは起動時にエラーになるので、`SESSION_DRIVER` の typo は最初のログインより前に見つかります。
+
+- `auth.sessionOptions.store` とマネージャの両方を設定した(どちらかを黙って選ぶことはしません)
+- `default` ストアのドライバが登録されていない
+- `default` の名前が `stores` に宣言されていない(`AuthServiceProvider` がマネージャを組み立てる時点で検出します)
+
+`memory` は常に宣言済みなので、`SESSION_DRIVER=memory` はエントリなしで動きます。マネージャはどのプロバイダの boot よりも前にバインドされます。詳しくは [config 定義](./configuration.md#config-定義) を参照してください。
+
+プラグインは、`SessionDrivers` インターフェースを augmentation で拡張し、`manager.registerDriver(name, factory)` を呼んでドライバを追加します。解決は遅延なので、プラグインの `register()` が設定の宣言より後に走っても構いません。
 
 > [!WARNING]
 > Cloudflare Workers、AWS Lambda、Vercel ではリクエスト間でメモリを共有しないので、デフォルトの `MemorySessionStore` はログイン直後のリクエストでセッションを失います。ミドルウェアはその状況を検出するとプロセスごとに一度警告し、`guren check` とデプロイビルドは事前に警告します。

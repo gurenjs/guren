@@ -158,7 +158,7 @@ const app = createApp({
 })
 ```
 
-An app that wires these stores in a provider or through `auth.sessionOptions.store` keeps working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
+Apps that configure the session and OAuth state stores in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 Both stores need tables: `sessions` comes from `bunx guren add session`, and the `oauth_states` columns are in [State Storage](./oauth.md#state-storage). `bunx guren make:auth --oauth` generates both tables and wires both stores.
 

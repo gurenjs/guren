@@ -166,8 +166,6 @@ export default defineCacheConfig((env) => ({
 }))
 ```
 
-`@guren/core/redis` は ioredis を読み込むので、使う設定ファイルでだけインポートします。`REDIS_URL` は `CACHE_STORE` と並べて `config/env.ts` に宣言します。
-
 `CACHE_STORE` の名前は起動時には検査されません。`stores` にない名前を指定すると、そのストアを最初に解決した時点で `Cache store not found` が投げられます。
 
 定義はマネージャーをコンテナの `cache` にバインドします。
@@ -183,7 +181,7 @@ await cache.store('memory').set('temp', 'data', 60)
 await cache.store('file').set('persistent', 'data')
 ```
 
-`CacheProvider` でキャッシュを構成しているアプリもそのまま動きます。定義へ移す手順は[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照してください。
+キャッシュ をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 ### ドライバオプション
 

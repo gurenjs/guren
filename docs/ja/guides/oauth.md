@@ -97,7 +97,7 @@ const app = createApp({
 })
 ```
 
-サービスプロバイダで `oauth` を束縛しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照してください。
+OAuth をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 ### ログインコントローラー
 
@@ -315,20 +315,7 @@ fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVe
 
 コールバックを元のリクエストに結びつける一度限りの `state` 値は、サーバー側で保存されます。デフォルトの `MemoryOAuthStateStore` は単一プロセスの開発環境なら動きますが、複数プロセス（ロードバランサー、サーバーレス）構成の本番環境では共有ストレージが要ります。そうしないと、コールバックがstateを発行していないプロセスに届いてしまうことがあります。
 
-ほとんどのアプリでは `DatabaseOAuthStateStore` を選んでおけば十分です。アプリが既に使っているデータベースにstateを保存するので、追加のインフラは要りません。`guren add oauth` と `make:auth --oauth` は、これを定義の `stateStore` に渡します:
-
-```ts
-// config/oauth.ts
-import { DatabaseOAuthStateStore, defineOAuthConfig } from '@guren/core'
-import { oauthStates } from '../db/schema.js'
-
-export default defineOAuthConfig(() => ({
-  providers: {
-    // マネージャーの登録と同じく、プロバイダーごとに1エントリ
-  },
-  stateStore: new DatabaseOAuthStateStore(oauthStates),
-}))
-```
+ほとんどのアプリでは `DatabaseOAuthStateStore` を選んでおけば十分です。アプリが既に使っているデータベースにstateを保存するので、追加のインフラは要りません。`guren add oauth` と `make:auth --oauth` は、これを定義の `stateStore` に渡します（[マネージャーの登録](#マネージャーの登録)を参照）。ストアが読み書きするのは `oauth_states` テーブルです:
 
 ```ts
 // db/schema.ts（sqliteダイアレクトの例）

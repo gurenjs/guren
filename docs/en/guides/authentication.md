@@ -69,7 +69,7 @@ This adds a `githubId` / `googleId` column per provider to the `users` table, a 
 
 The OAuth state that ties the callback to its authorize redirect is kept in the database. `--oauth` adds an `oauth_states` table to `db/schema.ts`, covered by the same migration as `users` and `sessions`, and `config/oauth.ts` passes `DatabaseOAuthStateStore` as its `stateStore`. `--install` lists the definition in `createApp({ config })`. The redirect and the callback can then reach different processes, which on Workers, Lambda and Vercel is the normal case (see [State Storage](./oauth.md#state-storage)). An app with no `db/schema.ts` gets the definition without a `stateStore`, so state stays in process memory.
 
-The definition is what the command writes once `config/env.ts` exists and no provider binds `oauth`. Otherwise it writes `app/Providers/OAuthProvider.ts` with the same registrations (plus `CoreOAuthServiceProvider` when there is no `db/schema.ts`).
+The definition is what the command writes once `config/env.ts` exists and no provider binds `oauth`. Otherwise it writes `app/Providers/OAuthProvider.ts` with the same registrations (plus `CoreOAuthServiceProvider` when there is no `db/schema.ts`) and wires that provider instead. Apps that configure OAuth in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 `--oauth` shares its `OAuthController` / `config/oauth.ts` file paths and the database state store with `guren add oauth` below, with a complete (not stub) callback. Don't run both against the same app, since the second run either aborts (no `--force`) or overwrites the first (`--force`).
 
@@ -109,7 +109,7 @@ and lists the `config/oauth.ts` definition in `createApp({ config })`. The defin
 
 It also adds an `oauth_states` table to `db/schema.ts` and generates its migration (run `bun run db:make` yourself if `drizzle-kit` is not installed yet), and registers the `oauth-states:prune` command. `config/oauth.ts` passes `DatabaseOAuthStateStore` as its `stateStore`, so the callback does not need to reach the process that issued the authorize redirect, which on Workers, Lambda and Vercel it usually does not (see [State Storage](./oauth.md#state-storage)). `CoreOAuthServiceProvider` is not registered, because its manager keeps state in process memory. The command refuses to run in an app with no `db/schema.ts`, and writes nothing.
 
-The definition is what the command writes once `config/env.ts` exists and no provider binds `oauth`. Otherwise it writes `app/Providers/OAuthProvider.ts` with the same registrations and store, and wires that provider instead; apps configured that way keep working, see [Apps with service providers](./configuration.md#apps-with-service-providers).
+As with [`--oauth`](#oauth-login-buttons), an app without `config/env.ts`, or with a provider already binding `oauth`, gets `app/Providers/OAuthProvider.ts` with the same registrations and store instead.
 
 ### Configure provider credentials
 
@@ -160,16 +160,7 @@ async callback(): Promise<Response> {
 
 `redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped: `redirectTo` comes back as `undefined` and your fallback applies.
 
-To allow specific external hosts (wildcards supported), the manager needs a `stateConfig`. `defineOAuthConfig` accepts only `providers` and `stateStore`, so an allowlist means binding `oauth` yourself from a provider's `register()` and removing `config/oauth.ts` from `createApp({ config })`; a key bound by both fails the boot. The [OAuth guide](./oauth.md#redirect-after-login) shows the provider:
-
-```ts
-this.container.singleton('oauth', () =>
-  createOAuthManager({
-    stateStore: new DatabaseOAuthStateStore(oauthStates),
-    stateConfig: { allowedRedirectHosts: ['accounts.example.com', '*.example.org'] },
-  }),
-)
-```
+To allow specific external hosts (wildcards supported), follow [Redirect After Login](./oauth.md#redirect-after-login) in the OAuth guide, which shows the full provider.
 
 > **Note:** `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement, or the middleware rewrites an approved external redirect to `/`.
 
@@ -231,7 +222,7 @@ app.use('*', createSessionMiddleware())
 
 `bunx guren add session` writes the `sessions` table and its migration, `config/session.ts` (declaring the `database` and `cookie` stores), the `SESSION_DRIVER` key (declared in `config/env.ts` with a `database` default, and added to `.env` and `.env.example`), and the `sessions:prune` command, and lists the definition in `createApp({ config })`. The `redis` store below is the one addition you make by hand: importing `@guren/core/redis` pulls ioredis into every bundle, so the scaffold leaves it out until you want it. `guren add auth` runs it for you, so a scaffolded app is database-backed from the start. The rest of this section is what it produces, for an app wiring it by hand.
 
-The definition is what the command writes once `config/env.ts` exists and no provider binds `session`. Otherwise it writes `config/session.ts` as a plain `SessionConfig` beside an `app/Providers/SessionProvider.ts` that binds it; apps configured that way keep working, see [Apps with service providers](./configuration.md#apps-with-service-providers).
+As with [`--oauth`](#oauth-login-buttons), an app without `config/env.ts`, or with a provider already binding `session`, gets `config/session.ts` as a plain `SessionConfig` and an `app/Providers/SessionProvider.ts` that binds it instead.
 
 For more than one candidate store, declare them once and pick by environment. `defineSessionConfig` binds a `SessionManager` under the `session` key, and `AuthServiceProvider` builds the session middleware around it at boot, resolving the store itself on the first request:
 
@@ -256,7 +247,7 @@ export default defineSessionConfig((env) => ({
 }))
 ```
 
-`REDIS_URL` must be declared in `config/env.ts` like any other key the callback reads (see [Declaring the environment](./configuration.md#declaring-the-environment)). List the definition beside the database one:
+Declare `REDIS_URL` in `config/env.ts`, and import `@guren/core/redis` only in the config that uses it, since it pulls in ioredis. List the definition beside the database one:
 
 ```ts
 // src/app.ts
@@ -271,7 +262,7 @@ const app = createApp({
 })
 ```
 
-`defineSessionConfig()` builds its manager with `createSessionManager()`, which is `new SessionManager()` plus the `database` driver, which only `@guren/core` can supply: the store wraps your table in an ORM model, and the HTTP layer underneath does not depend on the ORM. Use it whenever a `database` store is declared; `registerDatabaseSessionDriver(manager)` adds the driver to a manager you built some other way.
+`defineSessionConfig()` builds its manager with `createSessionManager()`, which is `new SessionManager()` plus the `database` driver. Only `@guren/core` can supply that driver: the store wraps your table in an ORM model, and the HTTP layer underneath does not depend on the ORM. Use it whenever a `database` store is declared; `registerDatabaseSessionDriver(manager)` adds the driver to a manager you built some other way.
 
 #### The `cookie` store
 
@@ -293,7 +284,15 @@ Set `ttlSeconds` deliberately: nothing server-side can expire the cookie early, 
 
 The `database` driver needs a `sessions` table in `db/schema.ts` and a migration. It has three columns: `id` (text primary key), `data`, and `expiresAt`. The dialect-specific shape is in the [Cloudflare guide](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed). Sweep expired rows on a schedule with `manager.pruneExpired()`; `read()` already treats them as missing.
 
-Cookie and TTL settings on the manager are the base; `auth.sessionOptions` overrides them field by field. Setting `auth.sessionOptions.store` *and* binding a manager fails the boot rather than picking one silently, as does a `default` store whose driver nobody registered; an unknown `default` name fails when `AuthServiceProvider` builds the manager at boot. Either way a typo in `SESSION_DRIVER` stops the boot instead of the first login. `memory` is always declared, so `SESSION_DRIVER=memory` works without an entry. Definitions are bound in `ConfigServiceProvider`'s `register()`, ahead of every provider, so the manager is in place when `AuthServiceProvider` boots. A plugin adds a driver by augmenting the `SessionDrivers` interface and calling `manager.registerDriver(name, factory)`; resolution is lazy, so the plugin's `register()` may run after the config was declared.
+Cookie and TTL settings on the manager are the base, and `auth.sessionOptions` overrides them field by field. These mistakes fail the boot, so a typo in `SESSION_DRIVER` stops the app before the first login:
+
+- setting `auth.sessionOptions.store` *and* binding a manager (nothing picks one silently)
+- a `default` store whose driver nobody registered
+- a `default` name that `stores` does not declare, caught when `AuthServiceProvider` builds the manager
+
+`memory` is always declared, so `SESSION_DRIVER=memory` works without an entry. The manager is bound before any provider boots; see [Config definitions](./configuration.md#config-definitions).
+
+A plugin adds a driver by augmenting the `SessionDrivers` interface and calling `manager.registerDriver(name, factory)`. Resolution is lazy, so the plugin's `register()` may run after the config was declared.
 
 > [!WARNING]
 > On Cloudflare Workers, AWS Lambda, or Vercel, requests share no memory, so the default `MemorySessionStore` loses a login on the very next request. The middleware warns once per process when it finds itself in that position; `guren check` and the deploy builds warn ahead of time.

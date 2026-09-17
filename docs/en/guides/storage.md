@@ -202,7 +202,7 @@ await storage.disk('s3').put('uploads/file.txt', content)
 await storage.disk('public').put('images/logo.png', logoBuffer)
 ```
 
-Apps that configure storage in a provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
+Apps that configure storage in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 ### Driver Options
 

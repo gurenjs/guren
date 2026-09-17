@@ -185,7 +185,7 @@ export default defineQueueConfig((env) => {
 })
 ```
 
-The callback receives the validated environment, so `QUEUE_CONNECTION` and any other key it reads must be declared in `config/env.ts` (see the [configuration guide](./configuration.md)). The name check runs when the app boots, because the manager itself accepts any driver name and throws only on the first dispatch.
+The callback receives the validated environment, so `QUEUE_CONNECTION` and any other key it reads must be declared in `config/env.ts` (see the [configuration guide](./configuration.md)).
 
 A definition binds the queue but does not register jobs. The worker looks a job class up by the name in its message, so registration stays in a provider's `boot()`, and `guren add queue` writes one:
 
@@ -221,7 +221,7 @@ const app = createApp({
 })
 ```
 
-Apps that bind the queue in a `QueueProvider` keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers) for moving one to a definition.
+Apps that configure the queue in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 `Job.dispatch()` cannot find a manager that nothing binds. Dispatch through that manager explicitly instead: `await queue.dispatch(SendWelcomeEmailJob, payload)`. `setQueueDriver()` can still pin such a manager's driver, but it is deprecated since 2.23.0 and removed in 3.0.0.
 
@@ -364,22 +364,17 @@ const memoryDriver = queue.driver('memory')
 For production, use the Redis driver for persistence and multi-server support:
 
 ```ts
-// config/queue.ts
-import { defineQueueConfig, RedisDriver } from '@guren/core'
+import { RedisDriver } from '@guren/core'
 import { createRedisClient } from '@guren/core/redis'
 
-export default defineQueueConfig((env) => ({
-  default: 'redis',
-  drivers: {
-    redis: () =>
-      new RedisDriver(createRedisClient({ url: env.REDIS_URL }), {
-        prefix: 'myapp:queue:', // Key prefix (default: 'queue:')
-      }),
-  },
-}))
+// config/queue.ts: a `drivers` entry, where `env` is the callback's argument
+redis: () =>
+  new RedisDriver(createRedisClient({ url: env.REDIS_URL }), {
+    prefix: 'myapp:queue:', // Key prefix (default: 'queue:')
+  }),
 ```
 
-Declare `REDIS_URL` in `config/env.ts`. `@guren/core/redis` pulls in ioredis, so import it only in the config that uses it.
+Declare `REDIS_URL` in `config/env.ts`, and import `@guren/core/redis` only in the config that uses it, since it pulls in ioredis.
 
 ### Sync Driver
 
@@ -393,13 +388,10 @@ released back to the sync driver runs again immediately, whatever delay its
 you need to observe retry timing.
 
 ```ts
-// config/queue.ts
-import { defineQueueConfig, SyncDriver } from '@guren/core'
+import { SyncDriver } from '@guren/core'
 
-export default defineQueueConfig(() => ({
-  default: 'sync',
-  drivers: { sync: () => new SyncDriver() },
-}))
+// config/queue.ts: a `drivers` entry
+sync: () => new SyncDriver(),
 ```
 
 ## Failed Jobs

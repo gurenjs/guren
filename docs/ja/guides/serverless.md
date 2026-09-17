@@ -80,7 +80,7 @@ export default defineQueueConfig((env) => ({
 }))
 ```
 
-`SQS_QUEUE_URL` と `SQS_EMAILS_QUEUE_URL` は `config/env.ts` で宣言してください（[設定](./configuration.md) を参照）。宣言しておけば、値を設定し忘れた関数は最初のディスパッチではなくブート時に失敗します。キューをプロバイダで設定しているアプリもそのまま動きます。詳しくは [サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
+`SQS_QUEUE_URL` と `SQS_EMAILS_QUEUE_URL` は `config/env.ts` で宣言してください（[設定](./configuration.md) を参照）。宣言しておけば、値を設定し忘れた関数は最初のディスパッチではなくブート時に失敗します。キュー をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 ジョブのディスパッチはサーバー上と同じです（`await SendEmailJob.dispatch({ to: 'user@example.com' })`）。`SqsDriver` がジョブを SQS にシリアライズし、Lambda ハンドラーがデシリアライズして実行します。
 

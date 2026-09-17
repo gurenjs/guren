@@ -166,8 +166,6 @@ export default defineCacheConfig((env) => ({
 }))
 ```
 
-`@guren/core/redis` pulls in ioredis, so import it only in the config that uses it. `REDIS_URL` goes in `config/env.ts` beside `CACHE_STORE`.
-
 The name in `CACHE_STORE` is not checked at boot. A name missing from `stores` throws `Cache store not found` the first time the store is resolved.
 
 The definition binds the manager as `cache` in the container:
@@ -183,7 +181,7 @@ await cache.store('memory').set('temp', 'data', 60)
 await cache.store('file').set('persistent', 'data')
 ```
 
-Apps that configure the cache in a `CacheProvider` keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers) for moving one to a definition.
+Apps that configure the cache in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 ### Driver Options
 

@@ -202,7 +202,7 @@ await storage.disk('s3').put('uploads/file.txt', content)
 await storage.disk('public').put('images/logo.png', logoBuffer)
 ```
 
-provider でストレージを構成しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照してください。
+ストレージ をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 ### ドライバオプション
 

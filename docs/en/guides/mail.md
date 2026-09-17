@@ -2,7 +2,7 @@
 
 Guren provides a fluent API for sending emails with support for multiple transport backends. The mail system integrates with the queue system for async sending and supports HTML templates, attachments, and more.
 
-The standard vNext path is: import mail APIs from `@guren/core`, configure the mail manager in `config/mail.ts`, and keep controllers focused on composing and dispatching mail work.
+The standard path is: import mail APIs from `@guren/core`, configure the mail manager in `config/mail.ts`, and keep controllers focused on composing and dispatching mail work.
 
 ## Core Concepts
 
@@ -159,7 +159,7 @@ await mail(mailManager)
   .send()
 ```
 
-Apps that configure mail in a provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
+Apps that configure mail in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 ### Transport Options
 

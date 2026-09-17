@@ -97,7 +97,7 @@ const app = createApp({
 })
 ```
 
-Apps that bind `oauth` in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
+Apps that configure OAuth in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 ### Login Controller
 
@@ -332,20 +332,7 @@ fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVe
 
 The one-time `state` value that ties the callback back to the original request is stored server-side. The default `MemoryOAuthStateStore` works for single-process dev, but production deployments with more than one process (load balancers, serverless) need shared storage. Otherwise the callback can land on a process that never issued the state.
 
-For most apps, `DatabaseOAuthStateStore` is the recommended default, since it stores state in the same database your app already uses, with no extra infrastructure. `guren add oauth` and `make:auth --oauth` pass it as the definition's `stateStore`:
-
-```ts
-// config/oauth.ts
-import { DatabaseOAuthStateStore, defineOAuthConfig } from '@guren/core'
-import { oauthStates } from '../db/schema.js'
-
-export default defineOAuthConfig(() => ({
-  providers: {
-    // one entry per provider, as in Registering the Manager
-  },
-  stateStore: new DatabaseOAuthStateStore(oauthStates),
-}))
-```
+For most apps, `DatabaseOAuthStateStore` is the recommended default, since it stores state in the same database your app already uses, with no extra infrastructure. `guren add oauth` and `make:auth --oauth` pass it as the definition's `stateStore`, as shown in [Registering the Manager](#registering-the-manager). The store reads an `oauth_states` table:
 
 ```ts
 // db/schema.ts (sqlite dialect shown)
