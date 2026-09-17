@@ -3198,7 +3198,7 @@ const addCommand = defineCommand({
     resource: addResourceCommand,
     plugin: addPluginCommand,
     prototype: addPrototypeCommand,
-    session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, SessionProvider, and sessions:prune.'),
+    session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, and sessions:prune.'),
     schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
     storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),
   },

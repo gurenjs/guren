@@ -710,6 +710,25 @@ else it settled:
   `sessions-check.ts` and `deploy-runtime.ts` readers, which read a
   `SessionConfig`-annotated declarator a definition does not have.
 
+The session PR migrates `guren add session` the same way, with the readers the
+templates depend on:
+
+- **`session-config.ts` also reads a `defineSessionConfig()` resolver's object**,
+  from an arrow's expression body or a `return`, rather than waiting for the
+  resolved-config producer above. Without it `deploy-runtime.ts` does not go
+  quiet on a migrated app: an app with `auth: {}` and no readable session config
+  raises "sessions are enabled with no persistent store". The definition's
+  `default` reads `env.SESSION_DRIVER`, which a static read cannot resolve, so the
+  verdict judges every store it declares, `database` and `cookie`, both backed.
+- **`sessions-check.ts` keeps its table rule for a definition** and skips its
+  provider rule, since `config-unwired` already judges whether the entry's
+  `config` array lists the file. The resolved-config rewiring (`getTableName()`,
+  the enum re-resolution) stays deferred.
+- **Definition-form templates live under `<blueprint>/definition/`.**
+  `config/session.ts` ships in both forms, so the written path cannot key the
+  template; cache, queue and storage move there too, and the byte-identical
+  template gate reads the form from the path instead of a hand-kept list.
+
 ### 7. `.env.example`, drift, and lint
 
 - **`guren env:example`** maps the schema to `GurenPluginEnvEntry` records

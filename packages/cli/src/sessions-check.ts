@@ -43,7 +43,8 @@ export async function checkSessionsConfig(options: {
 }): Promise<CheckResult[]> {
   const { cwd, cache, files, schemaTables } = options
   const results: CheckResult[] = []
-  let sawConfig = false
+  // A definition is bound by the entry's `config` array, which `config-unwired` judges.
+  let sawProviderConfig = false
 
   for (const filePath of files) {
     const source = await cache.source(filePath)
@@ -53,8 +54,7 @@ export async function checkSessionsConfig(options: {
     if (!parsed) continue
 
     const configs = sessionConfigsIn(parsed.ast)
-    if (configs.length === 0) continue
-    sawConfig = true
+    if (configs.some((site) => site.form === 'declared')) sawProviderConfig = true
 
     const relPath = relative(cwd, filePath)
     for (const { config } of configs) {
@@ -62,7 +62,7 @@ export async function checkSessionsConfig(options: {
     }
   }
 
-  if (!sawConfig) return results
+  if (!sawProviderConfig) return results
   return [...results, await checkBinding(cwd)]
 }
 
