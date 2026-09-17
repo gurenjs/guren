@@ -512,6 +512,36 @@ const { messages, sendMessage } = useChat({
 })
 ```
 
+**Amended in implementation (Part 2b):**
+- **`stream()` itself:** `stream(input, options)` takes the same options as `prompt()` and returns
+  `result.toUIMessageStreamResponse()` from `ToolLoopAgent.stream({ messages })`, not
+  `createAgentUIStreamResponse()`. The latter takes UI messages, and the stored history is
+  `ModelMessage`, which the SDK does not convert back into UI messages.
+- **`ChatTurnSchema`:** it is `{ conversation: string | null, message: string }`, one user turn as text.
+  A controller passes `{ conversation: conversation ?? true }`, since `continue()` takes no `null`, and
+  `signal: this.request.raw.signal` (the controller's `request` is Hono's wrapper).
+- **No stateless form:** the `UiMessagesSchema` form is not shipped, so `stream()` accepts no client
+  transcript at all, which settles the forged-role question structurally. A chat therefore needs a
+  conversation store: the transport's first turn sends `conversation: null`, the controller passes
+  `true`, and an app whose `config/ai.ts` configures no store fails that turn before any model call.
+- **Starting a conversation:** the id is chosen before the stream starts and sent in
+  `X-Guren-Conversation`, so `ConversationStore.create()` takes the id from its caller. The turn is
+  stored in the stream's `onEnd`, which the response body waits for.
+- **Aborts and storage failures:** a turn aborted through `signal` stores nothing, and neither does a
+  new conversation. The SDK still runs `onEnd` for a stream aborted after a finished step, so the
+  signal is checked there too. A storage failure cannot change a status already sent, so it is logged and the
+  body finishes.
+- **Structured output:** an agent that declares `output` is refused by `stream()`, which would send
+  its JSON as plain text. `prompt()` returns the parsed value.
+- **`createChatTransport()`:** the initial conversation comes from its `conversation` option, not
+  `useChat({ id })`, and `onConversation` reports a new one. The transport refuses
+  `regenerate-message`, since the server holds the history, and a user message with a file part, which
+  a text turn would drop. It is a `DefaultChatTransport` with
+  `prepareSendMessagesRequest` and a `fetch` that reads the header.
+- **`fakeAi()`:** `simulateStreamingMiddleware()` answers `doStream` from its script, and a streamed
+  call's `toolCalls` fill in as the body is read.
+- **`broadcast()`:** it moves to Part 2c with `queue()`.
+
 `broadcast(input, channel)` (Part 2) queues the prompt (§6) and emits each
 UI-message chunk over `BroadcastManager` to the channel, which is
 laravel/ai's `broadcast()` on Guren's existing broadcasting layer.

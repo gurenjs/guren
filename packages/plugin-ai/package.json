@@ -31,6 +31,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
     }
   },
   "scripts": {
@@ -51,7 +55,8 @@
     "zod": "^4"
   },
   "peerDependencies": {
-    "@guren/server": ">=2.23.3"
+    "@guren/server": ">=2.23.3",
+    "zod": "^3.25.76 || ^4.1.8"
   },
   "peerDependenciesMeta": {
     "@guren/server": {

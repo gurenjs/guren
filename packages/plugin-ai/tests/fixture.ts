@@ -16,7 +16,7 @@ import {
   type Router,
   type ServiceProviderConstructor,
 } from '@guren/core'
-import { MockLanguageModelV4 } from 'ai/test'
+import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 
 import { aiPlugin, defineAiConfig, type AiPluginConfig, type ConversationsConfig } from '../src'
 
@@ -29,9 +29,10 @@ const USAGE = {
   outputTokens: { total: 2, text: 2, reasoning: 0 },
 }
 
-/** A model that answers each generate call with the next step of the script. */
+/** A model that answers each generate or stream call with the next step of the script. */
 export function scriptedModel(steps: ScriptedStep[]): MockLanguageModelV4 {
   return new MockLanguageModelV4({
+    doStream: steps.map((step, index) => ({ stream: convertArrayToReadableStream(streamParts(step, index)) })),
     doGenerate: steps.map((step, index) => ({
       content: 'text' in step
         ? [{ type: 'text' as const, text: step.text }]
@@ -46,6 +47,30 @@ export function scriptedModel(steps: ScriptedStep[]): MockLanguageModelV4 {
       warnings: [],
     })),
   })
+}
+
+function streamParts(step: ScriptedStep, index: number) {
+  const content = 'text' in step
+    ? [
+        { type: 'text-start' as const, id: `text-${index}` },
+        { type: 'text-delta' as const, id: `text-${index}`, delta: step.text },
+        { type: 'text-end' as const, id: `text-${index}` },
+      ]
+    : step.toolCalls.map((call, callIndex) => ({
+        type: 'tool-call' as const,
+        toolCallId: `call-${index}-${callIndex}`,
+        toolName: call.name,
+        input: JSON.stringify(call.input),
+      }))
+  return [
+    { type: 'stream-start' as const, warnings: [] },
+    ...content,
+    {
+      type: 'finish' as const,
+      finishReason: { unified: 'text' in step ? ('stop' as const) : ('tool-calls' as const), raw: undefined },
+      usage: USAGE,
+    },
+  ]
 }
 
 /** An array with a compare-and-set `consume`, as `@guren/plugin-agents`' tests use. */
@@ -128,13 +153,17 @@ export async function bootHarness(
     /** Registered after `aiPlugin()`. */
     after?: ServiceProviderConstructor[]
     conversations?: ConversationsConfig
+    routes?: (router: Router) => void
   } = {},
 ): Promise<Harness> {
   const current = scriptedModel([{ text: 'unscripted' }])
   const judge = scriptedModel([{ text: 'from the judge provider' }])
 
   const app = createApp({
-    routes: registerRoutes,
+    routes: (router) => {
+      registerRoutes(router)
+      options.routes?.(router)
+    },
     config: [
       defineAiConfig(() => ({
         default: 'main',
@@ -175,6 +204,8 @@ export async function bootHarness(
       const next = scriptedModel(steps)
       current.doGenerate = next.doGenerate
       current.doGenerateCalls = next.doGenerateCalls
+      current.doStream = next.doStream
+      current.doStreamCalls = next.doStreamCalls
       return current
     },
   }

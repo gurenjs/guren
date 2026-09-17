@@ -12,8 +12,11 @@ export interface StoredConversation {
 }
 
 export interface ConversationStore {
-  /** Stores the conversation with its first messages, all or none, and returns its id. */
-  create(meta: { agentName: string; owner: AgentPrincipal; messages: readonly ModelMessage[] }): Promise<string>
+  /**
+   * Stores the conversation with its first messages, all or none. The caller picks the id, so a
+   * streamed first turn can name it in the response before the answer is stored.
+   */
+  create(meta: { id: string; agentName: string; owner: AgentPrincipal; messages: readonly ModelMessage[] }): Promise<void>
   /** `null` for an unknown id and for another owner's conversation alike, so ids cannot be probed. */
   load(id: string, owner: AgentPrincipal): Promise<StoredConversation | null>
   /** Appends after the stored messages, all or none. Refuses an id `owner` does not own. */
@@ -62,14 +65,13 @@ interface MemoryConversation extends StoredConversation {
 export class MemoryConversationStore implements ConversationStore {
   private readonly conversations = new Map<string, MemoryConversation>()
 
-  async create(meta: { agentName: string; owner: AgentPrincipal; messages: readonly ModelMessage[] }): Promise<string> {
-    const id = crypto.randomUUID()
-    this.conversations.set(id, {
+  async create(meta: { id: string; agentName: string; owner: AgentPrincipal; messages: readonly ModelMessage[] }): Promise<void> {
+    if (this.conversations.has(meta.id)) throw new Error(`A conversation "${meta.id}" already exists.`)
+    this.conversations.set(meta.id, {
       agentName: meta.agentName,
       owner: agentApprovalPrincipalKey(meta.owner),
       messages: storableMessages(meta.messages),
     })
-    return id
   }
 
   async load(id: string, owner: AgentPrincipal): Promise<StoredConversation | null> {
@@ -109,9 +111,8 @@ export class DatabaseConversationStore implements ConversationStore {
     }
   }
 
-  async create(meta: { agentName: string; owner: AgentPrincipal; messages: readonly ModelMessage[] }): Promise<string> {
-    // Client-generated: MySQL returns no inserted key for a text primary key.
-    const id = crypto.randomUUID()
+  async create(meta: { id: string; agentName: string; owner: AgentPrincipal; messages: readonly ModelMessage[] }): Promise<void> {
+    const { id } = meta
     const stored = storableMessages(meta.messages)
     await this.messages.transaction(async () => {
       const now = new Date()
@@ -124,7 +125,6 @@ export class DatabaseConversationStore implements ConversationStore {
       })
       await this.insertMessages(id, 0, stored, now)
     })
-    return id
   }
 
   async load(id: string, owner: AgentPrincipal): Promise<StoredConversation | null> {

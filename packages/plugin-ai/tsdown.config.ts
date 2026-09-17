@@ -4,6 +4,6 @@ import { tsdownPreset } from '../../scripts/tsdown-preset'
 
 export default defineConfig({
   ...tsdownPreset,
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/client.ts'],
   tsconfig: 'tsconfig.build.json',
 })

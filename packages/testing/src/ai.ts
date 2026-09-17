@@ -17,7 +17,7 @@ import type {
   bindAgent,
   resolveAgentName,
 } from '@guren/plugin-ai'
-import type { EmbeddingModel, LanguageModel, StepResult, ToolSet } from 'ai'
+import type { EmbeddingModel, LanguageModel, StepResult, ToolSet, simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
 import type { MockLanguageModelV4 } from 'ai/test'
 
 /** The model's final answer: plain text, or the value an agent's `output` schema parses. */
@@ -38,15 +38,16 @@ export interface FakeAiRecordedToolCall {
   input: unknown
   /** Present when the tool returned. */
   output?: unknown
-  /** Present when the tool threw. */
+  /** Present when the tool threw, or its input failed validation: the error for `prompt()`, its message for `stream()`. */
   error?: unknown
 }
 
 export interface FakeAiCall {
   input: string
   principal: AgentPrincipalInput
-  /** Empty until the prompt settles, and for a prompt that failed before any step finished. */
+  /** Empty until the prompt settles (for `stream()`, until its body is read), and when no step finished. */
   toolCalls: FakeAiRecordedToolCall[]
+  /** Set by `prompt()`; a `stream()` call answers with a `Response` instead. */
   response?: AgentResponse<unknown>
   error?: unknown
 }
@@ -55,6 +56,8 @@ export interface FakeAiRuntime {
   bindAgent: typeof bindAgent
   resolveAgentName: typeof resolveAgentName
   MockLanguageModelV4: typeof MockLanguageModelV4
+  wrapLanguageModel: typeof wrapLanguageModel
+  simulateStreamingMiddleware: typeof simulateStreamingMiddleware
 }
 
 let runtimePromise: Promise<FakeAiRuntime | Error> | undefined
@@ -71,11 +74,13 @@ export async function preloadFakeAiRuntime(): Promise<void> {
 }
 
 async function loadFakeAiRuntime(): Promise<FakeAiRuntime> {
-  const [plugin, test] = await Promise.all([import('@guren/plugin-ai'), import('ai/test')])
+  const [plugin, sdk, test] = await Promise.all([import('@guren/plugin-ai'), import('ai'), import('ai/test')])
   const runtime: Partial<FakeAiRuntime> = {
     bindAgent: plugin.bindAgent,
     resolveAgentName: plugin.resolveAgentName,
     MockLanguageModelV4: test.MockLanguageModelV4,
+    wrapLanguageModel: sdk.wrapLanguageModel,
+    simulateStreamingMiddleware: sdk.simulateStreamingMiddleware,
   }
   // An optional peer can resolve to an older copy, whose missing names import as `undefined`.
   const missing = (Object.keys(runtime) as Array<keyof FakeAiRuntime>).filter((name) => typeof runtime[name] !== 'function')
@@ -223,23 +228,27 @@ export class FakeAi implements AiManager, Disposable {
   }
 
   private recording<T extends Agent>(name: string, principal: AgentPrincipalInput, bound: BoundAgent<T>): BoundAgent<T> {
+    const record = async <R>(input: string, run: (call: FakeAiCall) => Promise<R>): Promise<R> => {
+      const call: FakeAiCall = { input, principal, toolCalls: [] }
+      // Recorded on entry: a call that throws was still made.
+      listFor(this.recorded, name).push(call)
+      try {
+        return await run(call)
+      } catch (error) {
+        call.error = error
+        throw error
+      }
+    }
     return {
       agent: bound.agent,
       continue: (id) => this.recording(name, principal, bound.continue(id)),
-      prompt: async (input, options) => {
-        const call: FakeAiCall = { input, principal, toolCalls: [] }
-        // Recorded on entry: a prompt that throws was still made.
-        listFor(this.recorded, name).push(call)
-        try {
-          const response = await bound.prompt(input, options)
-          call.response = response
-          call.toolCalls = recordedToolCalls(response.steps)
-          return response
-        } catch (error) {
-          call.error = error
-          throw error
-        }
-      },
+      prompt: (input, options) => record(input, async (call) => {
+        const response = await bound.prompt(input, options)
+        call.response = response
+        call.toolCalls = recordedToolCalls(response.steps)
+        return response
+      }),
+      stream: (input, options) => record(input, async (call) => tapToolCalls(await bound.stream(input, options), call)),
     }
   }
 
@@ -262,7 +271,7 @@ export class FakeAi implements AiManager, Disposable {
     const steps = flatten(response)
     let step = 0
     this.progress.push({ name, consumed: () => step, total: steps.length })
-    return new this.runtime.MockLanguageModelV4({
+    const model = new this.runtime.MockLanguageModelV4({
       modelId: `fake:${name}`,
       doGenerate: async () => {
         const index = step++
@@ -287,6 +296,8 @@ export class FakeAi implements AiManager, Disposable {
         }
       },
     })
+    // `stream()` reaches the same script: the middleware answers doStream from doGenerate.
+    return this.runtime.wrapLanguageModel({ model, middleware: this.runtime.simulateStreamingMiddleware() })
   }
 
   private fail(message: string): never {
@@ -320,6 +331,42 @@ function flatten(response: FakeAiResponse): FakeAiStep[] {
   if ('toolCalls' in response) return [{ toolCalls: response.toolCalls }, ...flatten(response.then)]
   if ('output' in response) return [{ text: JSON.stringify(response.output) }]
   return [{ text: response.text }]
+}
+
+/** Fill `call.toolCalls` from the UI-message chunks as the body is read, passing every byte through. */
+function tapToolCalls(response: Response, call: FakeAiCall): Response {
+  if (!response.body) return response
+  const decoder = new TextDecoder()
+  const byId = new Map<string, FakeAiRecordedToolCall>()
+  let pending = ''
+  const tap = new TransformStream<Uint8Array, Uint8Array>({
+    transform(bytes, controller) {
+      controller.enqueue(bytes)
+      pending += decoder.decode(bytes, { stream: true })
+      const lines = pending.split('\n')
+      pending = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: {"type":"tool-')) continue
+        const chunk = JSON.parse(line.slice('data: '.length)) as { type: string; toolCallId?: string; toolName?: string; input?: unknown; output?: unknown; errorText?: string }
+        if ((chunk.type === 'tool-input-available' || chunk.type === 'tool-input-error') && chunk.toolCallId) {
+          const recorded: FakeAiRecordedToolCall = {
+            name: chunk.toolName ?? '',
+            input: chunk.input,
+            ...(chunk.type === 'tool-input-error' ? { error: chunk.errorText } : {}),
+          }
+          byId.set(chunk.toolCallId, recorded)
+          call.toolCalls.push(recorded)
+        } else if (chunk.type === 'tool-output-available' && chunk.toolCallId) {
+          const recorded = byId.get(chunk.toolCallId)
+          if (recorded) recorded.output = chunk.output
+        } else if (chunk.type === 'tool-output-error' && chunk.toolCallId) {
+          const recorded = byId.get(chunk.toolCallId)
+          if (recorded) recorded.error = chunk.errorText
+        }
+      }
+    },
+  })
+  return new Response(response.body.pipeThrough(tap), response)
 }
 
 function recordedToolCalls(steps: ReadonlyArray<StepResult<ToolSet>>): FakeAiRecordedToolCall[] {
