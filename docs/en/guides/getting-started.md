@@ -85,12 +85,12 @@ Stop the container with `bun run db:down` when you are done.
 
 ### Environment variables
 
-The scaffolder creates `.env` from `.env.example` and fills in a fresh `APP_KEY`. Key settings:
+The scaffolder creates `.env` from `.env.example` and fills in a fresh `APP_KEY`. `config/env.ts` declares every variable the app reads and validates them at boot; the [Configuration Guide](./configuration.md) covers it. Key settings:
 
 - `APP_URL`: Base URL reported to Inertia (default `http://localhost:3333`).
 - `DATABASE_URL`: Connection string (a file path for SQLite, a URL for Postgres/MySQL).
 - `PORT`: HTTP port for the dev server (default `3333`).
-- `CACHE_STORE`, `QUEUE_CONNECTION`, `MAIL_MAILER`: read by the providers `guren add cache` / `guren add queue` / `guren add mail` scaffold, and each value has to name a store that provider declares. `SESSION_DRIVER` appears once `guren add auth` (or `guren add session`) writes `config/session.ts`, which reads it; until then sessions live in process memory.
+- `CACHE_STORE`, `QUEUE_CONNECTION`, `MAIL_MAILER`: added by `guren add cache` / `guren add queue` / `guren add mail`, and read by the `config/cache.ts`, `config/queue.ts` and `config/mail.ts` they write. Each value has to name a store that file declares, or the app fails to boot. `SESSION_DRIVER` appears once `guren add auth` (or `guren add session`) writes `config/session.ts`, which reads it; until then sessions live in process memory.
 
 > [!CAUTION]
 > Keep `.env` out of version control. If credentials leak in a commit, rotate the database user and regenerate any API keys referenced in the file.
