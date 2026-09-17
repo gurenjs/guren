@@ -394,6 +394,9 @@ describe('TestApp.fakeAi', () => {
     await expect(embed({ value: 'x', provider: 'bare', manager: application.container.make('ai') }))
       .rejects.toThrow('resolves the AI provider "bare", which configures no embeddingModel in config/ai.ts.')
 
+    // A refused call is still a call, as a refused prompt is: the assertion must not deny it happened.
+    ai.assertEmbedded()
+    expect(ai.embedCalls()).toEqual([{ values: [], provider: 'bare' }])
     expect(() => ai[Symbol.dispose]()).toThrow(/configures no embeddingModel/)
   })
 

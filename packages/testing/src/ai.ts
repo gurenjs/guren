@@ -70,16 +70,16 @@ export type FakeAiEmbeddings = ReadonlyArray<readonly number[]> | ((value: strin
 export type FakeAiImages = string | Uint8Array | ReadonlyArray<string | Uint8Array>
 
 export interface FakeAiEmbedCall {
-  /** One for `embed()`, the batch for `embedMany()`. */
+  /** One for `embed()`, the batch for `embedMany()`; empty when the fake refused the call. */
   values: string[]
   /** The provider name resolved for the call, the config's `default` included. */
   provider: string
 }
 
 export interface FakeAiImageCall {
-  /** Absent when the call passed only input images. */
+  /** Absent when the call passed only input images, or when the fake refused it. */
   prompt?: string
-  /** How many images were asked for. */
+  /** How many images were asked for; `0` when the fake refused the call. */
   n: number
   provider: string
 }
@@ -307,7 +307,12 @@ export class FakeAi implements AiManager, Disposable {
   }
 
   embeddingModel(provider?: string): EmbeddingModel {
-    const selected = this.selectProvider('embed() or embedMany()', 'embeddingModel', provider)
+    const selected = provider ?? this.config.default
+    // Recorded before anything can refuse the call, as a prompt is: a call the fake
+    // rejected was still a call, and an assertion saying it never happened would lie.
+    const record: FakeAiEmbedCall = { values: [], provider: selected }
+    this.embedRecords.push(record)
+    this.checkProvider('embed() or embedMany()', 'embeddingModel', selected)
     if (this.embedder === undefined && this.embeddings.length === 0) {
       this.fail(
         'embed() or embedMany() was called, but nothing is scripted for it. '
@@ -320,14 +325,17 @@ export class FakeAi implements AiManager, Disposable {
       // an embedMany() into one doEmbed per value.
       maxEmbeddingsPerCall: Number.POSITIVE_INFINITY,
       doEmbed: async ({ values }) => {
-        this.embedRecords.push({ values: [...values], provider: selected })
+        record.values.push(...values)
         return { embeddings: values.map((value) => this.vectorFor(value)), warnings: [] }
       },
     })
   }
 
   imageModel(provider?: string): ImageModel {
-    const selected = this.selectProvider('image()', 'imageModel', provider)
+    const selected = provider ?? this.config.default
+    const record: FakeAiImageCall = { n: 0, provider: selected }
+    this.imageRecords.push(record)
+    this.checkProvider('image()', 'imageModel', selected)
     const scripted = this.images.shift()
     if (scripted === undefined) {
       this.fail(
@@ -341,7 +349,8 @@ export class FakeAi implements AiManager, Disposable {
       // One doGenerate per image() call whatever `n` is: the script says what the call answers with.
       maxImagesPerCall: Number.MAX_SAFE_INTEGER,
       doGenerate: async ({ prompt, n }) => {
-        this.imageRecords.push({ ...(prompt === undefined ? {} : { prompt }), n, provider: selected })
+        record.n = n
+        if (prompt !== undefined) record.prompt = prompt
         return {
           images: images as string[] | Uint8Array[],
           warnings: [],
@@ -365,9 +374,8 @@ export class FakeAi implements AiManager, Disposable {
     return [...next]
   }
 
-  /** The provider a call resolves, refusing one config/ai.ts does not configure for this kind of model. */
-  private selectProvider(caller: string, kind: 'embeddingModel' | 'imageModel', provider: string | undefined): string {
-    const selected = provider ?? this.config.default
+  /** Refuse a provider config/ai.ts does not configure for this kind of model. */
+  private checkProvider(caller: string, kind: 'embeddingModel' | 'imageModel', selected: string): void {
     if (!Object.hasOwn(this.config.providers, selected)) {
       this.fail(
         `${caller} names the AI provider "${selected}", which config/ai.ts does not configure `
@@ -379,7 +387,6 @@ export class FakeAi implements AiManager, Disposable {
     if (!this.config.providers[selected]?.[kind]) {
       this.fail(`${caller} resolves the AI provider "${selected}", which configures no ${kind} in config/ai.ts.`)
     }
-    return selected
   }
 
   /** The real manager's store: fakeAi() scripts the model, and conversations persist as configured. */
