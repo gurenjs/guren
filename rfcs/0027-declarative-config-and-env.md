@@ -909,7 +909,14 @@ Nothing is removed and nothing is deprecated, so no app has to change.
   `config/app.ts`'s `bootModels`, and prints the new file with the values the old
   one declared. It is not a `guren upgrade` codemod: those are keyed to
   deprecations (`contributing/deprecation-policy.md`), and this RFC introduces
-  none.
+  none. **Amended in implementation:** a next step gains an optional `content`
+  field for the file, which the JSON output and the dev MCP tool carry too. The
+  provider's config object is rewritten with `process.env.X || 'y'` read as a
+  declared `env.X` default (`??` also allows a blank value), and the variables
+  `config/env.ts` lacks come as their own step. For `bootModels` it prints only
+  the `defineDatabaseConfig` line, since the factory result has no name to
+  reuse. A provider whose config is not an object literal still gets the step,
+  with no content.
 - Versioning: minors only (`@guren/server`, `@guren/core`, `@guren/orm`,
   `@guren/cli`, `@guren/testing`, `@guren/plugin-cloudflare`,
   `create-guren-app`). No major is required. RFC 0024 proposes merging server
