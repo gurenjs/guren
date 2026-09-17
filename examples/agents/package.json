@@ -21,15 +21,18 @@
     "cloudflare:build": "bun run build && bun ../../packages/cli/src/bin.ts cloudflare:build"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.54",
     "@guren/cli": "workspace:*",
     "@guren/core": "workspace:*",
     "@guren/inertia-client": "workspace:*",
     "@guren/orm": "workspace:*",
     "@guren/plugin-agents": "workspace:*",
+    "@guren/plugin-ai": "workspace:*",
     "@guren/plugin-cloudflare": "workspace:*",
     "@guren/testing": "workspace:*",
     "@inertiajs/core": "^3.6.1",
     "@inertiajs/react": "^3.6.1",
+    "ai": "^7.0.102",
     "drizzle-orm": "1.0.0-rc.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
