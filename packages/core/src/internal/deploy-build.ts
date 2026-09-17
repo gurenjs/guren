@@ -415,8 +415,12 @@ export const DOCUMENT_ASSET_HEADERS: Readonly<Record<string, string>> = {
   'X-Content-Type-Options': 'nosniff',
 }
 
-/** What a dev-only module is needed for, so a plugin can word its own message. */
-export type DevOnlyModuleKind = 'sqlite' | 'vite' | 'guren-cli' | 'sql-driver'
+/**
+ * What a dev-only module is needed for, so a plugin can word its own message.
+ * `mcp` is the `@guren/cli` entry. Deploy plugins already on npm key their message
+ * tables on these values, so renaming one breaks their builds until core 2.0.
+ */
+export type DevOnlyModuleKind = 'sqlite' | 'vite' | 'mcp' | 'sql-driver'
 
 export interface DevOnlyModule {
   readonly specifier: string
@@ -444,11 +448,56 @@ export interface DevOnlyModule {
 export const DEV_ONLY_MODULES = [
   { specifier: 'bun:sqlite', kind: 'sqlite', exportNames: ['Database'], importedBy: 'packages/orm/src' },
   { specifier: 'vite', kind: 'vite', exportNames: ['createServer'], importedBy: 'packages/server/src' },
-  { specifier: '@guren/cli', kind: 'guren-cli', exportNames: [], importedBy: 'packages/server/src' },
+  { specifier: '@guren/cli', kind: 'mcp', exportNames: [], importedBy: 'packages/server/src' },
 ] as const satisfies readonly DevOnlyModule[]
+
+/** One entry of `DEV_ONLY_MODULES`, with its `kind` still narrowed. */
+export type DevOnlyModuleEntry = (typeof DEV_ONLY_MODULES)[number]
 
 /** The package an app declares to opt into the App MCP endpoint. */
 export const MCP_PLUGIN_PACKAGE = '@guren/plugin-mcp'
+
+// The four names below serve no build in this repo. Deploy plugins already on npm
+// import them from this subpath under a caret on core, and a named ESM import the
+// installed copy lacks fails when the plugin's root module links, so an app that
+// updates core alone would stop booting. They stay until core 2.0.
+
+/** @deprecated The v1 MCP transport, which no Guren package imports since RFC 0028. */
+export const MCP_TRANSPORT_SPECIFIER =
+  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
+
+/** @deprecated The v1 MCP SDK subpath prefix, which no Guren package imports since RFC 0028. */
+export const MCP_SDK_SUBPATH_PREFIX = '@modelcontextprotocol/sdk/'
+
+/**
+ * @deprecated Whether `@guren/plugin-mcp` is a runtime dependency. No longer decides
+ * any stub: nothing imports the v1 transport it once kept out of the stub list.
+ */
+export function appUsesMcpPlugin(root: string): boolean {
+  try {
+    const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+    }
+    const dependencies = manifest.dependencies
+    return (
+      typeof dependencies === 'object'
+      && dependencies !== null
+      && MCP_PLUGIN_PACKAGE in dependencies
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * @deprecated `DEV_ONLY_MODULES`, whatever `mcpPlugin` says: the v1 transport entry
+ * this once dropped is no longer listed.
+ */
+export function stubbableDevOnlyModules(_options: {
+  mcpPlugin: boolean
+}): readonly DevOnlyModuleEntry[] {
+  return DEV_ONLY_MODULES
+}
 
 /** A database `@guren/orm` can connect through, named after the factory the app's config calls. */
 export type DatabaseDialect = 'postgres' | 'mysql' | 'sqlite' | 'aws-data-api' | 'd1'

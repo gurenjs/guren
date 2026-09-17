@@ -218,7 +218,7 @@ function documentAssetPattern(): string {
 const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string | null> = {
   sqlite: null,
   vite: 'The Vite dev server is unavailable on Vercel — assets are served from the static output directory.',
-  'guren-cli':
+  mcp:
     'The Dev MCP endpoint and docs viewer (@guren/cli) are unavailable on Vercel — they read and generate files on disk, and the function filesystem is read-only.',
 }
 

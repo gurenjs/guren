@@ -1,5 +1,40 @@
 # @guren/cli
 
+## 2.25.0
+
+### Minor Changes
+
+- 660e5c9: `guren add ai` sets up conversation storage (RFC 0029 §5). In an app with a `db/schema.ts`, it appends the `ai_conversations` and `ai_messages` tables in the app's dialect, generates their migration, and adds `conversations: { driver: 'database', conversations: aiConversations, messages: aiMessages }` to `config/ai.ts`. `--no-conversations` skips all three.
+
+  - An app with no `db/schema.ts` still gets agents, with conversations left unconfigured.
+  - Re-running on an app that ran `add ai` before adds the tables and the store without duplicating either.
+  - A `config/ai.ts` that is not in the shape `add ai` writes is left alone, and the lines to add are printed.
+
+- 12b5642: `guren doctor --next` points an app that configures services in providers at the config definitions that replace them (RFC 0027).
+
+  It detects:
+
+  - a `CacheProvider`, `MailProvider`, `QueueProvider` or `StorageProvider` that builds its manager from an object literal;
+  - a `SessionConfig`-typed `config/session.ts`, with the provider that binds it;
+  - `config/app.ts`'s `bootModels()`.
+
+  For each, the next step names the `config/<service>.ts` to write and prints it. The provider's values carry over: `process.env.CACHE_STORE || 'memory'` becomes `env.CACHE_STORE`, declared as `Env.string().default('memory')`. A separate step lists the variables `config/env.ts` does not declare yet, or the whole file when the app has none.
+
+  Next steps gain an optional `content` field holding the file. `--json` and the dev MCP `guren_doctor` tool include it. An app already on definitions gets no migration step.
+
+- e1ec882: The `.oxlintrc.json` that `guren add lint` writes and the starters ship enables `guren/no-unvalidated-env-read` as an error in `app/`, `config/`, `routes/`, `src/` and `modules/*/` (RFC 0027 §7): a `process.env.X` read there, other than `NODE_ENV` and `GUREN_*`, should come from the `env` a config definition receives. `bin/` and `drizzle.config.ts` stay out of scope. The provider-form scaffold templates and `AppUrl.ts` disable it with their reason, so those files do not turn an app's lint red. An app created before `config/env.ts` does get reports for its own `process.env` reads in `config/database.ts` and `src/app.ts` until they move to the schema or carry a disable.
+
+### Patch Changes
+
+- 3de4aa1: The `config/cache.ts` definition that `guren add cache` writes now checks at boot that `CACHE_STORE` names a declared store, as the queue, mail and storage definitions already do. An undeclared name used to pass the boot and throw on the first cache call.
+- 93a9b43: `guren make:agent` writes the Worker bindings interface its class imports to `config/bindings.ts` rather than `config/env.ts`, which is now the env schema (RFC 0027 §1). Before, an app with a `defineEnv` schema got a refusal asking it to add `interface Env` to that schema. An app whose earlier `make:agent` put `Env` in `config/env.ts` keeps importing it from there.
+- 7b6a8c3: Blueprints that register a config definition or a scaffolded provider in `createApp()` no longer duplicate one the entry already imports. `guren add cache` against an entry holding `import cache from '../config/cache'` (no extension) added a second `import cache` line, a duplicate declaration the app could not load; one importing it as `import cacheConfig from '@/config/cache.js'` gained a second entry and a second definition for the `cache` key, which `createApp()` refuses at boot. The existing binding is now registered under its own name, whatever the specifier spells.
+- Updated dependencies [de87223]
+- Updated dependencies [727d017]
+- Updated dependencies [de87223]
+  - @guren/core@1.20.0
+  - @guren/server@2.25.0
+
 ## 2.24.0
 
 ### Minor Changes

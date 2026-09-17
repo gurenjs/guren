@@ -4,13 +4,18 @@ import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  SQL_CLIENT_MODULES,
   assertOutputDirOutsideRoot,
   CLIENT_ASSETS_URL_PREFIX,
   clientManifestJson,
   DATABASE_FACTORIES,
   detectDatabaseDialects,
   DEV_ONLY_MODULES,
+  appUsesMcpPlugin,
+  MCP_SDK_SUBPATH_PREFIX,
+  MCP_TRANSPORT_SPECIFIER,
   parseDatabaseDialects,
+  stubbableDevOnlyModules,
   unusedSqlClients,
   renderDevOnlyStub,
   importSpecifier,
@@ -491,6 +496,81 @@ describe('the module graph this list describes', () => {
       }
     },
   )
+})
+
+describe('the surface published deploy plugins link against', () => {
+  // Deploy plugins already on npm import these names under a caret on core and look a
+  // stub's message up by `kind`. Lambda and Vercel key only the dev-only kinds;
+  // Cloudflare also walks SQL_CLIENT_MODULES with `sql-driver`. A missing name fails
+  // their root module at link time; an unknown kind passes an undefined message.
+  const DEV_ONLY_KEYS: readonly string[] = ['sqlite', 'vite', 'mcp']
+  const SQL_CLIENT_KEYS: readonly string[] = ['sql-driver']
+
+  function tableOf(keys: readonly string[]): Record<string, string> {
+    return Object.fromEntries(keys.map((kind) => [kind, `${kind} is unavailable here.`]))
+  }
+
+  test('should keep every dev-only kind the Lambda and Vercel tables look up', () => {
+    const table = tableOf(DEV_ONLY_KEYS)
+
+    for (const module of stubbableDevOnlyModules({ mcpPlugin: false })) {
+      expect(DEV_ONLY_KEYS).toContain(module.kind)
+      expect(() => renderDevOnlyStub(module, table[module.kind])).not.toThrow()
+    }
+  })
+
+  test('should keep every kind the Cloudflare table looks up across both lists', () => {
+    const table = tableOf([...DEV_ONLY_KEYS, ...SQL_CLIENT_KEYS])
+
+    for (const module of DEV_ONLY_MODULES) {
+      expect(DEV_ONLY_KEYS).toContain(module.kind)
+    }
+    for (const module of SQL_CLIENT_MODULES) {
+      expect(SQL_CLIENT_KEYS).toContain(module.kind)
+    }
+    for (const module of [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES]) {
+      expect(() => renderDevOnlyStub(module, table[module.kind])).not.toThrow()
+    }
+  })
+
+  test('should keep the deprecated constants at their published values', () => {
+    expect(MCP_TRANSPORT_SPECIFIER).toBe('@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js')
+    expect(MCP_SDK_SUBPATH_PREFIX).toBe('@modelcontextprotocol/sdk/')
+  })
+
+  test('should list the same modules whether or not the app declares the MCP plugin', () => {
+    expect(stubbableDevOnlyModules({ mcpPlugin: true })).toEqual(DEV_ONLY_MODULES)
+    expect(stubbableDevOnlyModules({ mcpPlugin: false })).toEqual(DEV_ONLY_MODULES)
+  })
+
+  describe('appUsesMcpPlugin', () => {
+    let root: string
+
+    beforeEach(() => {
+      root = mkdtempSync(join(tmpdir(), 'guren-mcp-optin-'))
+    })
+
+    afterEach(() => {
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    test('should report a runtime dependency on the plugin', () => {
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: { '@guren/plugin-mcp': '^0.6.0' } }))
+
+      expect(appUsesMcpPlugin(root)).toBe(true)
+    })
+
+    test('should not report a devDependency, a missing manifest or a malformed one', () => {
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ devDependencies: { '@guren/plugin-mcp': '^0.6.0' } }))
+      expect(appUsesMcpPlugin(root)).toBe(false)
+
+      writeFileSync(join(root, 'package.json'), '{ not json')
+      expect(appUsesMcpPlugin(root)).toBe(false)
+
+      rmSync(join(root, 'package.json'))
+      expect(appUsesMcpPlugin(root)).toBe(false)
+    })
+  })
 })
 
 describe('renderDevOnlyStub', () => {
