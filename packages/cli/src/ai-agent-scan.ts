@@ -7,7 +7,7 @@
  * class already found to be one. RFC 0017's durable `Agent` is not this one.
  */
 import { relative } from 'node:path'
-import type { BlockStatement, CallExpression, ClassDeclaration, Expression, Node } from '@babel/types'
+import type { BlockStatement, CallExpression, ClassDeclaration, Expression, Node, ReturnStatement } from '@babel/types'
 import { literalString, memberKeyName, objectLiteral, propertyValue, unwrapTypeAssertion, walk } from './ast-walk'
 import { blankCommentsAndStrings, classActionMembers } from './controller-methods'
 import { discoverAppSourceFiles } from './discovery'
@@ -21,6 +21,15 @@ export const AI_PLUGIN_EXPORT: PluginExport = { specifier: AI_PLUGIN_SPECIFIER, 
 const AGENT_EXPORT: PluginExport = { specifier: AI_PLUGIN_SPECIFIER, exportName: 'Agent' }
 /** The methods on `Agent`, and the functions the package exports taking the agent first. */
 const APP_TOOLS_NAMES = ['appTools', 'appToolDefinitions'] as const
+/** Bodies whose `return` belongs to something other than the member being read. */
+const NESTED_SCOPE_TYPES = new Set([
+  'FunctionDeclaration',
+  'FunctionExpression',
+  'ArrowFunctionExpression',
+  'ClassDeclaration',
+  'ClassExpression',
+  'ObjectMethod',
+])
 
 /** One `appTools([...])` / `appToolDefinitions([...])` call. */
 export interface AppToolsCall {
@@ -55,42 +64,54 @@ export interface ScannedAgent {
   localToolsUnreadable?: string
 }
 
-/** Scopes as the runtime reads them: own, else inherited, else `[]`. `null` when unreadable. */
-export function effectiveScopes(agent: ScannedAgent, byName: ReadonlyMap<string, ScannedAgent>): string[] | null {
+/**
+ * The first answer up the `extends` chain, as the runtime resolves an inherited
+ * static or method. Guarded against a cycle, which a hand-edited file can spell.
+ */
+function inherited<T>(
+  agent: ScannedAgent,
+  byName: ReadonlyMap<string, ScannedAgent>,
+  read: (agent: ScannedAgent) => T | undefined,
+): T | undefined {
   const seen = new Set<string>()
   let current: ScannedAgent | undefined = agent
   while (current && !seen.has(current.className)) {
-    if (current.ownScopes !== undefined) return current.ownScopes
+    const answer = read(current)
+    if (answer !== undefined) return answer
     seen.add(current.className)
     current = current.parent ? byName.get(current.parent) : undefined
   }
-  return []
+  return undefined
+}
+
+/** Scopes as the runtime reads them: own, else inherited, else `[]`. `null` when unreadable. */
+export function effectiveScopes(agent: ScannedAgent, byName: ReadonlyMap<string, ScannedAgent>): string[] | null {
+  // `?? []` would read an unreadable `scopes` (null) as "grants nothing", which
+  // is a verdict; undefined is the only "nobody declared any".
+  const declared = inherited(agent, byName, (current) => current.ownScopes)
+  return declared === undefined ? [] : declared
 }
 
 /** The `appTools()` calls that run for this class: its own when it declares `tools()` or calls them, else its parent's. */
 export function effectiveAppToolsCalls(agent: ScannedAgent, byName: ReadonlyMap<string, ScannedAgent>): AppToolsCall[] {
-  const seen = new Set<string>()
-  let current: ScannedAgent | undefined = agent
-  while (current && !seen.has(current.className)) {
-    if (current.declaresTools || current.appToolsCalls.length > 0) return current.appToolsCalls
-    seen.add(current.className)
-    current = current.parent ? byName.get(current.parent) : undefined
-  }
-  return []
+  return inherited(agent, byName, (current) =>
+    current.declaresTools || current.appToolsCalls.length > 0 ? current.appToolsCalls : undefined) ?? []
 }
 
 export async function scanAiAgents(cwd: string, cache: ParseCache): Promise<ScannedAgent[]> {
   const files = await discoverAppSourceFiles(cwd)
+  // Keyed by declaration, not by class name: two modules can each declare a
+  // `Triager`, and dropping one would leave its names unchecked in silence.
   const agents = new Map<string, ScannedAgent>()
+  const names = new Set<string>()
 
   // A file joins when it names the package or extends an agent found so far;
   // repeated until a pass finds nothing new, so a chain across files resolves.
   let grew = true
   while (grew) {
     grew = false
-    const known = [...agents.keys()]
-    const extendsKnown = known.length > 0
-      ? new RegExp(`\\bextends\\s+(?:${known.map(escapeRegExp).join('|')})\\b`)
+    const extendsKnown = names.size > 0
+      ? new RegExp(`\\bextends\\s+(?:${[...names].map(escapeRegExp).join('|')})\\b`)
       : null
     for (const filePath of files) {
       const source = await cache.source(filePath)
@@ -98,9 +119,11 @@ export async function scanAiAgents(cwd: string, cache: ParseCache): Promise<Scan
       if (!source.includes(AI_PLUGIN_SPECIFIER) && !extendsKnown?.test(source)) continue
       const parsed = await cache.get(filePath)
       if (!parsed) continue
-      for (const agent of agentsIn(relative(cwd, filePath).replace(/\\/g, '/'), parsed, agents)) {
-        if (agents.has(agent.className)) continue
-        agents.set(agent.className, agent)
+      for (const agent of agentsIn(relative(cwd, filePath).replace(/\\/g, '/'), parsed, names)) {
+        const key = `${agent.relPath}#${agent.className}`
+        if (agents.has(key)) continue
+        agents.set(key, agent)
+        names.add(agent.className)
         grew = true
       }
     }
@@ -109,7 +132,7 @@ export async function scanAiAgents(cwd: string, cache: ParseCache): Promise<Scan
   return [...agents.values()]
 }
 
-function agentsIn(relPath: string, parsed: ParsedFile, known: ReadonlyMap<string, ScannedAgent>): ScannedAgent[] {
+function agentsIn(relPath: string, parsed: ParsedFile, known: ReadonlySet<string>): ScannedAgent[] {
   const { source, ast } = parsed
   const agentLocals = importedLocals(ast, AGENT_EXPORT)
   const helperLocals = new Set(
@@ -195,11 +218,27 @@ function toolsMember(classDecl: ClassDeclaration): BlockStatement | Expression |
   return undefined
 }
 
-/** The object `tools()` returns, from its one top-level `return` or an expression body. */
-function returnedExpression(body: BlockStatement | Expression): Node | undefined {
-  if (body.type !== 'BlockStatement') return body
-  const returns = body.body.filter((statement) => statement.type === 'ReturnStatement')
-  return returns.length === 1 ? (returns[0]!.argument ?? undefined) : undefined
+/**
+ * The object `tools()` returns: its one `return` anywhere in the body (a
+ * conditional branch included, which is why the top-level statements are not
+ * enough), or an expression body. Nested functions carry their own returns and
+ * are skipped.
+ */
+function returnedExpression(body: BlockStatement | Expression): { value?: Node; reason?: string } {
+  if (body.type !== 'BlockStatement') return { value: body }
+
+  const returns: Array<Node | null | undefined> = []
+  walk(body, (node) => {
+    if (NESTED_SCOPE_TYPES.has(node.type)) return false
+    if (node.type === 'ReturnStatement') returns.push((node as unknown as ReturnStatement).argument)
+    return undefined
+  })
+
+  if (returns.length !== 1) {
+    return { reason: returns.length === 0 ? 'tools() has no return this scan can read' : 'tools() returns from more than one place' }
+  }
+  const argument = returns[0]
+  return argument ? { value: argument } : { reason: 'tools() returns nothing' }
 }
 
 function readLocalTools(
@@ -208,8 +247,8 @@ function readLocalTools(
   helperLocals: ReadonlySet<string>,
 ): { tools: LocalTool[]; unreadable?: string } {
   const returned = returnedExpression(body)
-  if (!returned) return { tools: [], unreadable: 'tools() has no single top-level return' }
-  const value = unwrapTypeAssertion(returned)
+  if (!returned.value) return { tools: [], unreadable: returned.reason }
+  const value = unwrapTypeAssertion(returned.value)
   if (value.type === 'CallExpression' && isAppToolsCall(value, helperLocals) !== undefined) return { tools: [] }
 
   const object = objectLiteral(value)

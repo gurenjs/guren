@@ -303,6 +303,7 @@ export default {
 | `ai-agent-app-tools-unreadable:*` | `appTools()` の引数が文字列リテラルの配列ではない(スプレッド、変数、計算された要素)。名前は検証できず、pass にもしません。 |
 | `ai-agent-scopes-unreadable:*` | `static scopes` がリテラルの配列ではないため、名前をスコープと照合していない。 |
 | `ai-agent-tools-unverified:*` | ルートグラフの読み込みに失敗したため、名前を導出済みツールと照合していない。 |
+| `ai-agent-name-collision:*` | 2つのファイルが同じクラス名でエージェントを宣言している。サブクラスは先に見つかった方から scopes と `tools()` を解決するため、一方についての判定がもう一方を指している可能性がある。どちらも検査は続けます。 |
 
 `audit` は、エージェントの `tools()` が `appTools()` のスプレッドと並べて返すローカルツールを、専用の見出しと `--json` の `aiLocalTools` にすべて列挙します。ローカルツールはクロージャの権限で動き、スコープ、ポリシー、承認、監査ログのどれも通りません。`ai-local-tool-write:*` は、ツールの `execute` が Model の書き込み(`create`、`update`、`delete`、`save`)を呼び、そのモデルのテーブルを `.agent()` ルートのアクションも使っている場合に warn します。その場合はルートの方をエージェントに渡してください。`ai-local-tools-unreadable:*` は、`tools()` がスキャンで列挙しきれるオブジェクトリテラルを返さない場合に warn します。どちらの finding もソース行を指すので、`// guren-audit-ignore` で抑制できます。
 

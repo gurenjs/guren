@@ -34,8 +34,27 @@ export async function checkAiAgents(options: AiAgentCheckOptions): Promise<Check
   const agents = await scanAiAgents(cwd, cache)
   if (agents.length === 0) return []
 
-  const byName = new Map(agents.map((agent) => [agent.className, agent]))
+  // First declaration wins, as the inheritance lookups have to pick one; a
+  // second class under the same name is reported rather than resolved.
+  const byName = new Map<string, ScannedAgent>()
   const results: CheckResult[] = []
+  for (const agent of agents) {
+    const taken = byName.get(agent.className)
+    if (!taken) {
+      byName.set(agent.className, agent)
+      continue
+    }
+    results.push(
+      check(
+        `ai-agent-name-collision:${agent.className}`,
+        TITLE,
+        'warn',
+        `${agent.className} is declared in both ${taken.relPath} and ${agent.relPath}. A subclass of either resolves its scopes and tools() from whichever was found first, so a verdict about one may describe the other.`,
+        `Rename one of the two ${agent.className} classes.`,
+        agent.relPath,
+      ),
+    )
+  }
   const tools = definitions ? deriveAgentTools(definitions).tools : undefined
 
   for (const agent of agents) {
@@ -104,7 +123,7 @@ export async function checkAiAgents(options: AiAgentCheckOptions): Promise<Check
     results.push(...judgeNames(agent, [...names], tools, scopes, location))
   }
 
-  results.push(...(await pluginFindings(cwd, cache, agents)))
+  results.push(...(await pluginFindings(cwd, cache, agents, byName)))
 
   if (results.length > 0) return results
   return [
@@ -161,13 +180,19 @@ function judgeNames(
   return results
 }
 
-async function pluginFindings(cwd: string, cache: ParseCache, agents: ScannedAgent[]): Promise<CheckResult[]> {
-  // Project-wide: a provider list may be assembled anywhere, and a missed call is an unsuppressible finding.
-  const aiCalls = await scanPluginCalls(cwd, cache, AI_PLUGIN_EXPORT, 'project')
+async function pluginFindings(
+  cwd: string,
+  cache: ParseCache,
+  agents: ScannedAgent[],
+  byName: ReadonlyMap<string, ScannedAgent>,
+): Promise<CheckResult[]> {
+  // The app's own trees answer the duplicate rule, which accuses the running
+  // app: a test helper or script configuring both plugins is not that app.
+  const aiCalls = await scanPluginCalls(cwd, cache, AI_PLUGIN_EXPORT)
   const results: CheckResult[] = []
 
-  if (aiCalls.length === 0) {
-    const byName = new Map(agents.map((agent) => [agent.className, agent]))
+  // Absence is only evidence when nothing anywhere in the project calls it.
+  if (aiCalls.length === 0 && (await scanPluginCalls(cwd, cache, AI_PLUGIN_EXPORT, 'project')).length === 0) {
     const needing = agents.filter((agent) => effectiveAppToolsCalls(agent, byName).length > 0)
     // A warn, like an unbound session config: the evidence is an absence.
     results.push(
@@ -185,8 +210,7 @@ async function pluginFindings(cwd: string, cache: ParseCache, agents: ScannedAge
 
   const aiAudit = aiCalls.find((call) => call.keys.has(AUDIT_CONFIG_KEY))
   if (aiAudit) {
-    const mcpAudit = (await scanPluginCalls(cwd, cache, MCP_PLUGIN_EXPORT, 'project')).find((call) =>
-      call.keys.has(AUDIT_CONFIG_KEY))
+    const mcpAudit = (await scanPluginCalls(cwd, cache, MCP_PLUGIN_EXPORT)).find((call) => call.keys.has(AUDIT_CONFIG_KEY))
     if (mcpAudit) {
       results.push(
         check(

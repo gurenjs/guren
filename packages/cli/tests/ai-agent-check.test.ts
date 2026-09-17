@@ -205,6 +205,49 @@ export class Escalator extends Triager {}
     expect(keys(results)).toEqual(['ai-agent-plugin-missing'])
   })
 
+  it('reads a namespace import of the plugin as the plugin', async () => {
+    const results = await run({
+      'src/app.ts': "import * as ai from '@guren/plugin-ai'\nexport default createApp({ providers: [ai.aiPlugin()] })\n",
+      'app/Ai/Agents/Triager.ts': agentFile(''),
+    })
+    expect(keys(results)).toEqual(['ai-agents'])
+  })
+
+  it('warns when two files declare an agent under one name, and checks both', async () => {
+    const body = "  static override scopes = []\n  tools() { return this.appTools(['tickets_show']) }"
+    const results = await run({
+      'src/app.ts': APP,
+      'app/Ai/Agents/Triager.ts': agentFile(body),
+      'modules/billing/app/Ai/Agents/Triager.ts': agentFile(body),
+    })
+    expect(keys(results)).toEqual([
+      'ai-agent-name-collision:Triager',
+      'ai-agent-tool-unscoped:Triager:tickets_show',
+      'ai-agent-tool-unscoped:Triager:tickets_show',
+    ])
+  })
+
+  it('does not accuse the app of two audit trails over a call outside it', async () => {
+    // Each half outside the app in turn: one widened scan is enough to accuse it falsely.
+    const appAudit = `import { aiPlugin } from '@guren/plugin-ai'
+import { mcpPlugin } from '@guren/plugin-mcp'
+export default createApp({ providers: [aiPlugin(), mcpPlugin({ audit: { file: 'a' } })] })
+`
+    const withAiHelper = await run({
+      'src/app.ts': appAudit,
+      'tests/support/app.ts': "import { aiPlugin } from '@guren/plugin-ai'\nexport const testProviders = [aiPlugin({ audit: { file: 'b' } })]\n",
+      'app/Ai/Agents/Triager.ts': agentFile(''),
+    })
+    expect(keys(withAiHelper)).toEqual(['ai-agents'])
+
+    const withMcpHelper = await run({
+      'src/app.ts': "import { aiPlugin } from '@guren/plugin-ai'\nexport default createApp({ providers: [aiPlugin({ audit: { file: 'a' } })] })\n",
+      'tests/support/app.ts': "import { mcpPlugin } from '@guren/plugin-mcp'\nexport const testProviders = [mcpPlugin({ audit: { file: 'b' } })]\n",
+      'app/Ai/Agents/Triager.ts': agentFile(''),
+    })
+    expect(keys(withMcpHelper)).toEqual(['ai-agents'])
+  })
+
   it('fails an audit trail configured in both aiPlugin() and mcpPlugin()', async () => {
     const providers = `import { aiPlugin } from '@guren/plugin-ai'
 import { mcpPlugin } from '@guren/plugin-mcp'

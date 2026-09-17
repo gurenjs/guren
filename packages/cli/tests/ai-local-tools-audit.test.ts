@@ -139,6 +139,32 @@ describe('auditAiLocalTools', () => {
     expect(findings).toEqual([])
   })
 
+  it('lists a local tool returned from a conditional branch', async () => {
+    const { findings, listings } = await run({
+      'app/Ai/Agents/Triager.ts': agent(`    if (this.limited) {
+      return { ...this.appTools(['tickets_update']) }
+    }
+    return {
+      close: tool({ execute: async ({ id }) => Ticket.where('id', id).update({ status: 'closed' }) }),
+    }`),
+    })
+    expect(findings.map((finding) => finding.key)).toEqual(['ai-local-tools-unreadable:Triager'])
+    expect(findings[0]?.message).toContain('more than one place')
+    expect(listings).toEqual([])
+  })
+
+  it('reads a return nested in a branch when it is the only one', async () => {
+    const { findings, listings } = await run({
+      'app/Ai/Agents/Triager.ts': agent(`    if (this.enabled) {
+      return {
+        close: tool({ execute: async ({ id }) => Ticket.where('id', id).update({ status: 'closed' }) }),
+      }
+    }`),
+    })
+    expect(listings?.map((listing) => listing.tool)).toEqual(['close'])
+    expect(findings.map((finding) => finding.key)).toEqual(['ai-local-tool-write:Triager.close'])
+  })
+
   it('warns when tools() cannot be listed whole', async () => {
     const { findings } = await run({
       'app/Ai/Agents/Triager.ts': agent('    return { ...this.appTools([\'tickets_update\']), ...shared }'),

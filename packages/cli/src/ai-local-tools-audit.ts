@@ -128,6 +128,9 @@ export async function auditAiLocalTools(
 }
 
 export function describeLocalTool(listing: AiLocalToolListing): string {
-  const notes = [listing.writes ? 'writes records' : '', listing.executeRead ? '' : 'execute not read'].filter(Boolean)
-  return `${listing.agent}.${listing.tool} (${listing.filePath}:${listing.line})${notes.length > 0 ? `: ${notes.join(', ')}` : ''}`
+  const notes: string[] = []
+  if (listing.writes) notes.push('writes records')
+  if (!listing.executeRead) notes.push('execute not read')
+  const where = `${listing.filePath}:${listing.line}`
+  return `${listing.agent}.${listing.tool} (${where})${notes.length > 0 ? `: ${notes.join(', ')}` : ''}`
 }

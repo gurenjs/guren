@@ -32,29 +32,39 @@ export interface PluginCall {
 
 /** Local names `exportName` is imported under from `specifier` in one file. */
 export function importedLocals(ast: File, target: PluginExport): Set<string> {
+  return importBindings(ast, target).locals
+}
+
+/** Namespace bindings too (`import * as ai`), whose member calls read as the export. */
+function importBindings(ast: File, target: PluginExport): { locals: Set<string>; namespaces: Set<string> } {
   const locals = new Set<string>()
+  const namespaces = new Set<string>()
   for (const declaration of ast.program.body) {
     if (declaration.type !== 'ImportDeclaration') continue
     if (declaration.source.value !== target.specifier) continue
     for (const specifier of declaration.specifiers) {
+      if (specifier.type === 'ImportNamespaceSpecifier') {
+        namespaces.add(specifier.local.name)
+        continue
+      }
       if (specifier.type !== 'ImportSpecifier') continue
       const imported =
         specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
       if (imported === target.exportName) locals.add(specifier.local.name)
     }
   }
-  return locals
+  return { locals, namespaces }
 }
 
 function readCalls(parsed: ParsedFile, target: PluginExport, relPath: string): PluginCall[] {
-  const locals = importedLocals(parsed.ast, target)
-  if (locals.size === 0) return []
+  const { locals, namespaces } = importBindings(parsed.ast, target)
+  if (locals.size === 0 && namespaces.size === 0) return []
 
   const calls: PluginCall[] = []
   walk(parsed.ast.program, (node) => {
     if (node.type !== 'CallExpression') return
     const call = node as unknown as CallExpression
-    if (call.callee.type !== 'Identifier' || !locals.has(call.callee.name)) return
+    if (!callsTarget(call, locals, namespaces, target.exportName)) return
 
     const argument = call.arguments[0]
     if (!argument) {
@@ -119,4 +129,23 @@ async function appFiles(cwd: string): Promise<string[]> {
   )
   const entry = await resolveAppEntry(cwd)
   return [...new Set([...groups.flat(), ...(entry ? [resolve(cwd, entry)] : [])])]
+}
+
+/** `aiPlugin(…)` through a named import, or `ai.aiPlugin(…)` through a namespace one. */
+function callsTarget(
+  call: CallExpression,
+  locals: ReadonlySet<string>,
+  namespaces: ReadonlySet<string>,
+  exportName: string,
+): boolean {
+  const { callee } = call
+  if (callee.type === 'Identifier') return locals.has(callee.name)
+  return (
+    callee.type === 'MemberExpression'
+    && !callee.computed
+    && callee.object.type === 'Identifier'
+    && namespaces.has(callee.object.name)
+    && callee.property.type === 'Identifier'
+    && callee.property.name === exportName
+  )
 }
