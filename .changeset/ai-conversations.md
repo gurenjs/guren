@@ -14,3 +14,5 @@ const next = await SupportTriager.as(user).continue(first.conversationId!).promp
 - A conversation belongs to the principal that started it and to its agent. `continue()` under another principal, another agent or `as(null)` is refused before any model call.
 - Each turn is appended in one transaction, after the model answers.
 - The stored transcript is what the model saw, tool results included, so treat the tables as sensitive data.
+- `AiManager` gains a required `conversations()` method. A hand-written `AiManager` implementation must add it.
+- The `database` driver appends inside `Model.transaction()`, so it needs a database driver with interactive transactions.

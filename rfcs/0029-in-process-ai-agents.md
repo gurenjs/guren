@@ -587,7 +587,8 @@ since a chat client posts them back as strings.
 - The conversation row is created after the first answer, so a failed first
   prompt leaves nothing. Each turn appends the user message and
   `result.responseMessages` in one transaction, so a replay never meets a tool
-  call without its result; an adapter without transactions refuses the append.
+  call without its result. The append runs in `Model.transaction()`, so the
+  `database` driver needs a database driver with interactive transactions.
 - Order is an integer `position`, with a unique index on
   (`conversationId`, `position`): a concurrent append to one conversation
   fails rather than interleaving. Column properties are `id`, `agentName`,
