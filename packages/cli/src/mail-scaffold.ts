@@ -9,7 +9,7 @@ export const MAIL_SCAFFOLD: ServiceScaffold = {
     {
       key: 'MAIL_MAILER',
       entry: `
-# Which mail transport the app sends through. Declare it in the mail config before naming it here.
+# Which mail transport the app sends through: log, memory, or one the mail config declares.
 MAIL_MAILER=log
 `,
     },

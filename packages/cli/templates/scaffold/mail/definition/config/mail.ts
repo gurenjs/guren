@@ -18,7 +18,7 @@ export default defineMailConfig((env) => {
 
   // Checked here rather than at the first send, which can be a queued job
   // or a rarely-hit route in production.
-  if (!(env.MAIL_MAILER in transports)) {
+  if (!Object.hasOwn(transports, env.MAIL_MAILER)) {
     throw new Error(
       `MAIL_MAILER="${env.MAIL_MAILER}" is not a declared transport. Declare it in config/mail.ts or use one of: ${Object.keys(transports).join(', ')}.`,
     )

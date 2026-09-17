@@ -37,7 +37,7 @@ export default defineStorageConfig((env) => {
   // Checked here rather than left to the first upload: an unknown name is
   // accepted at construction and only throws when a disk is resolved,
   // which can be a queued job or a rarely-hit route in production.
-  if (!(env.STORAGE_DISK in disks)) {
+  if (!Object.hasOwn(disks, env.STORAGE_DISK)) {
     throw new Error(
       `STORAGE_DISK="${env.STORAGE_DISK}" is not a declared disk. Declare it in config/storage.ts or use one of: ${Object.keys(disks).join(', ')}.`,
     )

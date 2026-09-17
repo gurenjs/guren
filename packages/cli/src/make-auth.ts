@@ -1583,7 +1583,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   const created = await writeScaffoldFiles(files, options)
   if (mailDefinition) {
-    await appendScaffoldEnv([...MAIL_SCAFFOLD.env, ...(MAIL_SCAFFOLD.definitionEnv ?? [])])
+    await appendScaffoldEnv(MAIL_SCAFFOLD, true)
   }
 
   // The pages above style with Guren UI tokens (bg-g-page, …).

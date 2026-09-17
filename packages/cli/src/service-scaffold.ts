@@ -30,8 +30,9 @@ export interface ScaffoldEnvEntry {
   declare?: Exclude<AppendEnvEntryOptions['declare'], true>
 }
 
-/** Appends and declares each of `entries`, in order. */
-export async function appendScaffoldEnv(entries: readonly ScaffoldEnvEntry[]): Promise<void> {
+/** Appends and declares, in order, the env entries `scaffold` reads in the form `definition` names. */
+export async function appendScaffoldEnv(scaffold: ServiceScaffold, definition: boolean): Promise<void> {
+  const entries = definition ? [...scaffold.env, ...(scaffold.definitionEnv ?? [])] : scaffold.env
   for (const { key, entry, declare } of entries) {
     await appendEnvEntry(key, entry, { declare: declare ?? true })
   }
@@ -52,7 +53,7 @@ export async function installsConfigDefinition(key: string): Promise<boolean> {
 
 /** Writes and wires `scaffold` as a definition or a provider, per {@link installsConfigDefinition}. */
 export async function installServiceScaffold(scaffold: ServiceScaffold, options: ScaffoldFilesOptions): Promise<string[]> {
-  const { key, coreProvider, provider, definitionProviders = [], shared = [], env, definitionEnv = [] } = scaffold
+  const { key, coreProvider, provider, definitionProviders = [], shared = [] } = scaffold
   const definition = await installsConfigDefinition(key)
   const files = definition
     ? [`config/${key}.ts`, ...definitionProviders.map((name) => `app/Providers/${name}.ts`)].map((path) => definitionTemplateFile(key, path))
@@ -69,6 +70,6 @@ export async function installServiceScaffold(scaffold: ServiceScaffold, options:
     ])
   }
 
-  await appendScaffoldEnv(definition ? [...env, ...definitionEnv] : env)
+  await appendScaffoldEnv(scaffold, definition)
   return created
 }

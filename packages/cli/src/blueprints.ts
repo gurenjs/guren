@@ -190,7 +190,7 @@ export default registerAdminRoutes
     },
   },
   mail: {
-    description: 'Install mail infrastructure with log/memory/smtp transports (switchable via MAIL_MAILER) and a sample mailable.',
+    description: 'Install mail infrastructure with a transport switchable via MAIL_MAILER and a sample mailable.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
       const mailPath = await makeMail('WelcomeEmail', writerOptions)

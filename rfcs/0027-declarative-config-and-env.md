@@ -733,7 +733,7 @@ The mail PR migrates `guren add mail` and the mail half of `make:auth` together:
 
 - **One definition serves both commands.** `make:auth` writes the mail
   blueprint's `config/mail.ts` rather than its own, so running either after
-  the other rewrites the same bytes and lists `mail` once. It decides the form
+  the other with `--force` rewrites the same bytes and lists `mail` once. It decides the form
   before its first write, since the file it writes would otherwise decide it.
 - **The keys are `MAIL_MAILER` and `SMTP_*`.** Auth's `MAIL_DRIVER` gives way to
   the name the mail blueprint, the blog and the guides already used. The

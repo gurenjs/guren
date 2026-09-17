@@ -13,7 +13,7 @@ export default class MailProvider extends ServiceProvider {
           from: {
             email: process.env.MAIL_FROM_ADDRESS || 'noreply@example.com',
             // oxlint-disable-next-line guren/no-nullish-env-default -- an empty display name is a choice, not a missing value
-            name: process.env.MAIL_FROM_NAME ?? 'Guren App',
+            name: process.env.MAIL_FROM_NAME ?? 'Guren',
           },
           transports: {
             log: { driver: 'log' },
