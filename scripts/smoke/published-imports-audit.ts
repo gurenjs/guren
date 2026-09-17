@@ -266,7 +266,7 @@ export async function run(
     })
 
     const summary =
-      `${pairsChecked} published release(s) admitting ${releasing.map((r) => `${r.name} ${r.version}`).join(', ')}` +
+      `${published.length} published release(s), ${pairsChecked} pair(s) with a pending release among ${releasing.map((r) => `${r.name} ${r.version}`).join(', ')}` +
       ` (${unpublished} workspace package(s) not on npm)`
     if (failures.length > 0) {
       return { code: 1, messages: [...failures, `Published imports audit failed: ${failures.length} missing import(s) across ${summary}.`] }
