@@ -5,7 +5,6 @@ import {
 import { redirectToCanonicalHost } from '../app/Http/Middleware/canonical-host.js'
 import { recordSiteAnalytics } from '../app/Http/Middleware/site-analytics.js'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
-import SessionProvider from '../app/Providers/SessionProvider.js'
 import {
   COLOR_MODE_PREPAINT_SCRIPT,
   FAVICON_HEAD,
@@ -13,6 +12,9 @@ import {
 } from '../config/document-theme.js'
 import { LIGHT_SURFACE_BODY_CLASS, usesLightSurface } from '../config/theme.js'
 import { blogModule } from '../modules/blog/index.js'
+import env from '../config/env.js'
+import oauth from '../config/oauth.js'
+import session from '../config/session.js'
 import registerWebRoutes from '../routes/web.js'
 
 const secureCookies = process.env.NODE_ENV === 'production' && !process.env.CI
@@ -28,11 +30,13 @@ const app = createApp({
     },
   },
   routes: registerWebRoutes,
-  providers: [DatabaseProvider, SessionProvider, CoreAuthServiceProvider],
+  env,
+  config: [session, oauth],
+  providers: [DatabaseProvider, CoreAuthServiceProvider],
   modules: [blogModule],
   auth: {
     autoSession: true,
-    // The store comes from SessionProvider's manager (config/session.ts).
+    // The store comes from the session manager config/session.ts defines.
     sessionOptions: {
       cookieSecure: secureCookies,
     },

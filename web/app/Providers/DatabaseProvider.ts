@@ -1,4 +1,4 @@
-import { ServiceProvider } from '@guren/core'
+import { ServiceProvider, type AppEnv } from '@guren/core'
 import { bootModels } from '../../config/app.js'
 
 export default class DatabaseProvider extends ServiceProvider {
@@ -11,7 +11,7 @@ export default class DatabaseProvider extends ServiceProvider {
       return
     }
 
-    await bootModels()
+    await bootModels(this.container.makeOptional<AppEnv>('env'))
     this.initialized = true
   }
 }

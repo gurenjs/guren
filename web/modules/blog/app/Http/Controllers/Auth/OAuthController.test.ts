@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createControllerContext,
   createControllerModuleMock,
@@ -31,7 +31,7 @@ function createCallbackController(profile: FakeProfile): {
   const ctx = createControllerContext(
     'http://guren.dev/auth/github/callback?code=abc&state=def',
     {},
-    { oauth: { handleCallback } },
+    { oauth: { handleCallback }, env: { BLOG_ADMIN_GITHUB_ID: '12345' } },
   ) as ControllerContext
 
   const controller = new OAuthController()
@@ -49,18 +49,7 @@ function createCallbackController(profile: FakeProfile): {
 }
 
 describe('OAuthController callback allowlist', () => {
-  const originalAllowlist = process.env.BLOG_ADMIN_GITHUB_ID
-
-  beforeEach(() => {
-    process.env.BLOG_ADMIN_GITHUB_ID = '12345'
-  })
-
   afterEach(() => {
-    if (originalAllowlist === undefined) {
-      delete process.env.BLOG_ADMIN_GITHUB_ID
-    } else {
-      process.env.BLOG_ADMIN_GITHUB_ID = originalAllowlist
-    }
     vi.restoreAllMocks()
   })
 

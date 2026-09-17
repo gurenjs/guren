@@ -1,4 +1,4 @@
-import { Controller, ValidationException, type OAuthManager } from '@guren/core'
+import { Controller, ValidationException, type AppEnv, type OAuthManager } from '@guren/core'
 import { z } from 'zod'
 import { User } from '../../../Models/User.js'
 import { assertAllowlistedAdmin } from '../../../Services/admin-allowlist.js'
@@ -37,7 +37,7 @@ export default class OAuthController extends Controller {
 
     // Before any lookup or creation: a single-admin blog must never create
     // accounts for arbitrary GitHub users.
-    assertAllowlistedAdmin(profile.id, process.env.BLOG_ADMIN_GITHUB_ID)
+    assertAllowlistedAdmin(profile.id, this.make<AppEnv>('env').BLOG_ADMIN_GITHUB_ID)
 
     // Lowercased: provider casing is not guaranteed stable across logins.
     const email = profile.email?.toLowerCase()
