@@ -47,8 +47,10 @@ async function auditBlog(root: string): Promise<void> {
   assert(eventProvider.includes('createEventManager'), 'Blog event provider must create an event manager.')
   assert(eventProvider.includes("this.container.singleton('events'"), 'Blog event provider must register events in the container.')
 
-  const cacheConfig = await read(root, 'config/cache.ts')
-  assert(cacheConfig.includes('export default defineCacheConfig('), 'Blog cache must be a defineCacheConfig definition.')
+  for (const [file, helper] of [['cache', 'defineCacheConfig'], ['mail', 'defineMailConfig'], ['queue', 'defineQueueConfig'], ['storage', 'defineStorageConfig'], ['session', 'defineSessionConfig'], ['oauth', 'defineOAuthConfig']] as const) {
+    const definition = await read(root, `config/${file}.ts`)
+    assert(definition.includes(`export default ${helper}(`), `Blog config/${file}.ts must be a ${helper} definition.`)
+  }
 
   const schedulingProvider = await read(root, 'app/Providers/SchedulingProvider.ts')
   assert(schedulingProvider.includes('createScheduler'), 'Blog scheduling provider must create a scheduler.')

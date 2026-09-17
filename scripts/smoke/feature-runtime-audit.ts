@@ -22,8 +22,6 @@ async function auditBlog(root: string): Promise<void> {
   assert(mailConfig.includes('export default defineMailConfig('), 'Blog mail must be a defineMailConfig definition.')
   const queueConfig = await read(root, 'examples/blog/config/queue.ts')
   assert(queueConfig.includes('memory: () => new MemoryDriver()'), 'Blog queue definition must declare the memory driver.')
-  const cacheConfig = await read(root, 'examples/blog/config/cache.ts')
-  assert(cacheConfig.includes('export default defineCacheConfig('), 'Blog cache must be a defineCacheConfig definition.')
 
   const notificationProvider = await read(root, 'examples/blog/app/Providers/NotificationProvider.ts')
   assert(notificationProvider.includes("this.container.make<NotificationManager>('notifications')"), 'Blog notification provider must resolve notifications from the container.')

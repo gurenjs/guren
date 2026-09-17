@@ -16,6 +16,8 @@ const env = defineEnv({
   SESSION_DRIVER: Env.string().default('database'),
   CACHE_STORE: Env.string().default('memory'),
   QUEUE_CONNECTION: Env.string().default('memory'),
+  // `log`, not `memory`: development needs the verification and password-reset
+  // links printed, and `memory` discards them silently.
   MAIL_MAILER: Env.string().default('log'),
   RESEND_API_KEY: Env.string().secret().optional().describe('Read only when MAIL_MAILER=resend.'),
   MAIL_FROM_ADDRESS: Env.string().default('noreply@blog.example.com'),

@@ -17,7 +17,7 @@ import oauth from '../../config/oauth.js'
 import queue from '../../config/queue.js'
 import storage from '../../config/storage.js'
 
-// Through createApp, as src/app.ts lists them: a definition binds its manager only when resolved there.
+// Through createApp: a definition binds its manager only when createApp resolves it.
 async function boot() {
   const app = createApp({ env, config: [cache, mail, queue, storage, oauth] })
   await app.boot()
@@ -29,12 +29,14 @@ describe('Blog config definitions', () => {
     vi.unstubAllEnvs()
   })
 
-  it('bind the managers the providers used to, from the environment', async () => {
+  it('bind the cache, mail, queue and storage managers from the environment', async () => {
     vi.stubEnv('MAIL_MAILER', 'memory')
     vi.stubEnv('QUEUE_CONNECTION', 'memory')
+    // Selecting redis must not dial it: the client is built when the store is first resolved.
+    vi.stubEnv('CACHE_STORE', 'redis')
     const container = await boot()
 
-    expect(container.make<CacheManager>('cache')).toBeDefined()
+    expect(container.make<CacheManager>('cache').getDefaultStoreName()).toBe('redis')
     expect(container.make<MailManager>('mail').transport()).toBeInstanceOf(MemoryTransport)
     expect(container.make<QueueManager>('queue').driver()).toBeInstanceOf(MemoryDriver)
     expect(container.make<StorageManager>('storage').disk('public')).toBeDefined()

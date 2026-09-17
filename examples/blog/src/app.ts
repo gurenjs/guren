@@ -31,9 +31,7 @@ import storage from '../config/storage.js'
 import { registerWebRoutes } from '../routes/web.js'
 import '../config/inertia.js'
 
-// Raw rather than declared: `CI` is the e2e job's switch for serving over HTTP,
-// not application configuration.
-// oxlint-disable-next-line guren/no-unvalidated-env-read -- CI switch, not app config
+// oxlint-disable-next-line guren/no-unvalidated-env-read -- `CI` is the e2e job's switch for serving over HTTP, not app config
 const secureCookies = process.env.NODE_ENV === 'production' && !process.env.CI
 
 const app = createApp({

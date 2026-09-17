@@ -14,11 +14,6 @@ import { SendWelcomeEmailJob } from '../Jobs/SendWelcomeEmailJob.js'
 import { ProcessNewPostJob } from '../Jobs/ProcessNewPostJob.js'
 import { SendPasswordResetEmailJob } from '../Jobs/SendPasswordResetEmailJob.js'
 
-/**
- * Events and their listeners. Mail, queue, cache and storage are config
- * definitions (config/*.ts); job registration and listener wiring are
- * imperative, so they stay here.
- */
 export default class EventServiceProvider extends ServiceProvider {
   register(): void {
     this.container.singleton('events', () => createEventManager())
