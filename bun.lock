@@ -19,7 +19,7 @@
     },
     "examples/agents": {
       "name": "@guren/example-agents",
-      "version": "0.1.11",
+      "version": "0.1.12",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -50,7 +50,7 @@
     },
     "examples/api": {
       "name": "@guren/example-api",
-      "version": "0.1.43",
+      "version": "0.1.44",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -103,7 +103,7 @@
     },
     "packages/cli": {
       "name": "@guren/cli",
-      "version": "2.23.3",
+      "version": "2.24.0",
       "bin": {
         "guren": "./dist/bin.js",
       },
@@ -143,7 +143,7 @@
     },
     "packages/core": {
       "name": "@guren/core",
-      "version": "1.18.0",
+      "version": "1.19.0",
       "bin": {
         "guren": "./dist/bin.js",
       },
@@ -161,7 +161,7 @@
     },
     "packages/create-app": {
       "name": "create-guren-app",
-      "version": "1.15.4",
+      "version": "1.16.0",
       "bin": {
         "create-guren-app": "./dist/cli.js",
       },
@@ -212,7 +212,7 @@
     },
     "packages/orm": {
       "name": "@guren/orm",
-      "version": "2.10.1",
+      "version": "2.11.0",
       "dependencies": {
         "drizzle-orm": "1.0.0-rc.4",
       },
@@ -237,7 +237,7 @@
     },
     "packages/plugin-agents": {
       "name": "@guren/plugin-agents",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "dependencies": {
         "@guren/core": "^1.18.0",
         "agents": "^0.22.0",
@@ -258,7 +258,7 @@
     },
     "packages/plugin-ai": {
       "name": "@guren/plugin-ai",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "dependencies": {
         "@guren/core": "^1.18.0",
         "ai": "^7.0.102",
@@ -280,7 +280,7 @@
     },
     "packages/plugin-cloudflare": {
       "name": "@guren/plugin-cloudflare",
-      "version": "0.10.1",
+      "version": "0.11.0",
       "dependencies": {
         "@guren/core": "^1.18.0",
         "citty": "^0.1.6",
@@ -297,7 +297,7 @@
     },
     "packages/plugin-lambda": {
       "name": "@guren/plugin-lambda",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "@guren/core": "^1.15.0",
         "citty": "^0.1.6",
@@ -347,7 +347,7 @@
     },
     "packages/plugin-mcp": {
       "name": "@guren/plugin-mcp",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "dependencies": {
         "@guren/core": "^1.17.0",
         "@modelcontextprotocol/server": "^2.0.0",
@@ -363,7 +363,7 @@
     },
     "packages/plugin-vercel": {
       "name": "@guren/plugin-vercel",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "@guren/core": "^1.15.0",
       },
@@ -388,10 +388,9 @@
     },
     "packages/server": {
       "name": "@guren/server",
-      "version": "2.23.3",
+      "version": "2.24.0",
       "dependencies": {
-        "@guren/orm": "^2.10.1",
-        "@modelcontextprotocol/sdk": "^1.30.0",
+        "@guren/orm": "^2.11.0",
         "chalk": "^5.3.0",
         "consola": "^3.4.2",
         "figlet": "^1.7.0",
@@ -424,7 +423,7 @@
     },
     "packages/testing": {
       "name": "@guren/testing",
-      "version": "1.10.1",
+      "version": "1.11.0",
       "devDependencies": {
         "@types/react": "^19.0.0",
         "tsdown": "^0.22.14",
@@ -454,7 +453,7 @@
     },
     "web": {
       "name": "web",
-      "version": "0.1.43",
+      "version": "0.1.44",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",

@@ -172,6 +172,8 @@ root, which is where the docs already import it from.
 1. **It isolates a dependency the root must not pull.** `/redis` (ioredis),
    `/mcp` (`@modelcontextprotocol/sdk`, deliberately kept off the barrel at
    `server/src/index.ts:1031-1033`), `/lambda`, `/vite`.
+   **Amended by RFC 0028:** `@guren/server` no longer depends on the SDK. `/mcp`
+   exports only `McpServiceProvider`, whose server lives in `@guren/cli`.
 2. **It targets a different runtime than the app graph.** `/agent`
    (browser-safe dispatch, RFC 0016 §3), `/jsx-runtime` and
    `/jsx-dev-runtime` (the `@jsxImportSource` target), `/runtime` (Bun

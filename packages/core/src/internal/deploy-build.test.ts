@@ -463,7 +463,7 @@ describe('the module graph this list describes', () => {
 
   // Per entry, and only inside the package the entry is listed for: searching every
   // package would let one package's import keep another's stale entry alive.
-  test.each(DEV_ONLY_MODULES)(
+  test.each([...DEV_ONLY_MODULES])(
     'should still be imported by the package it is listed for: $specifier',
     (module) => {
       expect(importersOf(module.specifier, module.importedBy)).not.toEqual([])
@@ -511,7 +511,7 @@ describe('renderDevOnlyStub', () => {
   for (const [name, terminator] of terminators) {
     test(`keeps a ${name} inside the leading comment`, () => {
       const stub = renderDevOnlyStub(
-        { specifier: 'x', kind: 'sqlite', exportNames: [], importedBy: 'packages/orm/src' },
+        { exportNames: [] },
         `unavailable${terminator}globalThis.INJECTED = true //`,
       )
 
@@ -528,7 +528,7 @@ describe('renderDevOnlyStub', () => {
   ] as const) {
     test(`escapes a ${name} in the thrown message`, () => {
       const stub = renderDevOnlyStub(
-        { specifier: 'x', kind: 'sqlite', exportNames: [], importedBy: 'packages/orm/src' },
+        { exportNames: [] },
         `unavailable${separator}globalThis.INJECTED = true //`,
       )
 
@@ -539,7 +539,7 @@ describe('renderDevOnlyStub', () => {
 
   test('still names every export the importer destructures', () => {
     const stub = renderDevOnlyStub(
-      { specifier: 'x', kind: 'sqlite', exportNames: ['Database', 'open'], importedBy: 'packages/orm/src' },
+      { exportNames: ['Database', 'open'] },
       'nope',
     )
 
