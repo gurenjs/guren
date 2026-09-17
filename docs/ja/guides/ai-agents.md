@@ -359,6 +359,41 @@ events.on(AgentResponded, async (event) => {
 
 キューに入れた実行は1回だけ試行されます。再試行するとモデルがもう一度呼ばれ、すべてのツールがもう一度実行されるからです。visibility timeout を持つドライバ(Redis、SQS)は、その時間を超えた実行を再配信するので、そのタイムアウトとワーカーの `--timeout` は最も長い実行より長くしてください。principal は、abilities も含めて、キューに入れた時点のものが使われます。
 
+### 実行をブロードキャストする
+
+`broadcast()` は `queue()` と同じように実行をキューに入れ、イベントを発行する代わりに回答を[ブロードキャスト](./broadcasting.md)のチャンネルへ流します。バックグラウンドの実行を、ページ側でトークンが届くたびに表示できます。
+
+```ts
+const run = await this.make('ai')
+  .agent(SupportTriager)
+  .as(user)
+  .broadcast('Triage ticket #4812.', `private-support.${user.id}`, { conversation: true })
+```
+
+ワーカーは UI メッセージのチャンクを1つずつ `AgentChunk` イベントとして publish します。このイベント名は、サーバー側でもクライアント側でも `AGENT_CHUNK_EVENT` が表します。
+
+```tsx
+import { createUseChannel } from '@guren/inertia-client'
+import { AGENT_CHUNK_EVENT } from '@guren/plugin-ai/client'
+import { useEffect } from 'react'
+
+const useChannel = createUseChannel()
+
+export function TriageFeed({ userId }: { userId: number }) {
+  const channel = useChannel(`private-support.${userId}`)
+  useEffect(() => channel.on(AGENT_CHUNK_EVENT, (chunk) => {
+    // one UIMessageChunk: text deltas, tool calls, then `finish`
+  }), [channel])
+  return null
+}
+```
+
+上記のキューの配線に加えて `BroadcastServiceProvider` が必要です。規則が3つあります。
+
+- **publish は認可されず、subscribe が認可されます。** チャンネルは authorizer 付きのプライベートチャンネルとして登録してください。そうしないと、subscribe した人は誰でも会話の中身を読めます。
+- **実行は必ずストリームを終わらせます。** 完了前に失敗したジョブは `error` チャンクを1つ publish するので、subscriber が待ち続けることはありません。このチャンクは、ストリームが閉じた時点でジョブを失敗させます。
+- **`AgentResponded` は発行されません。** `finish` チャンクが実行の終わりを示すためです。`stream()` と同じく、`output` を宣言したエージェントは拒否されます。途中から subscribe した人は、それまでに publish された分を受け取れません。
+
 ## テスト
 
 `@guren/testing` の `app.fakeAi()` は、`TestApp.fromApp(app)` で起動したアプリの `ai` バインディングを差し替えます。スクリプト化するのはモデルだけです。ツールはパイプラインを通ってルートにディスパッチされるので、テストでもスコープゲート、ポリシー、承認ゲートが実際に働きます。`examples/agents` のテストを短くしたものです。元のテストはチケットを先に作り、ツールが返した実際の答えにそのチケットが入っていることも確認します。
@@ -420,7 +455,6 @@ fake が証明するのは配線です。instructions とツールの説明が�
 
 設計のうち、次の部分はまだ出荷されていません。
 
-- `broadcast()`。キューに入れた実行の回答を[ブロードキャスト](./broadcasting.md)でストリーミングします。
 - `embed()` と `image()` のラッパー。それまでは `ai.embeddingModel(name)` を使って AI SDK を呼んでください。
 - 本物のモデルに対してエージェントを計測する `defineEval()` と `guren ai:eval`。
 - エージェント向けの `guren check` と `guren audit` のルール。ローカルツールの一覧表示を含みます。

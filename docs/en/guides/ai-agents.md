@@ -359,6 +359,41 @@ events.on(AgentResponded, async (event) => {
 
 A queued run is attempted once. A retry would call the model again and run every tool again. A driver with a visibility timeout (Redis, SQS) still redelivers a run that outlasts it, so keep that timeout and the worker's `--timeout` above your longest run. The principal travels as it was when the run was queued, abilities included.
 
+### Broadcasting a run
+
+`broadcast()` queues the run the same way and streams the answer to a [broadcast](./broadcasting.md) channel instead of emitting an event, so a page can watch a background run token by token:
+
+```ts
+const run = await this.make('ai')
+  .agent(SupportTriager)
+  .as(user)
+  .broadcast('Triage ticket #4812.', `private-support.${user.id}`, { conversation: true })
+```
+
+The worker publishes each UI-message chunk under the `AgentChunk` event, which `AGENT_CHUNK_EVENT` names on both sides:
+
+```tsx
+import { createUseChannel } from '@guren/inertia-client'
+import { AGENT_CHUNK_EVENT } from '@guren/plugin-ai/client'
+import { useEffect } from 'react'
+
+const useChannel = createUseChannel()
+
+export function TriageFeed({ userId }: { userId: number }) {
+  const channel = useChannel(`private-support.${userId}`)
+  useEffect(() => channel.on(AGENT_CHUNK_EVENT, (chunk) => {
+    // one UIMessageChunk: text deltas, tool calls, then `finish`
+  }), [channel])
+  return null
+}
+```
+
+It needs the `BroadcastServiceProvider` on top of the queue wiring above, and it carries three rules:
+
+- **Publishing is not authorized, subscribing is.** Register the channel as a private channel with an authorizer, or anyone who subscribes reads the transcript.
+- **The run always ends the stream.** A job that fails before finishing publishes one `error` chunk, so a subscriber is never left waiting, and that chunk fails the job once the stream closes.
+- **No `AgentResponded` is emitted**, since the `finish` chunk ends the run, and an agent that declares `output` is refused, as it is for `stream()`. A subscriber that joins late misses what was already published.
+
 ## Testing
 
 `app.fakeAi()` from `@guren/testing` replaces the `ai` binding of an app booted with `TestApp.fromApp(app)`. It scripts the model and nothing else: tools still dispatch through the pipeline into your routes, so a test sees the scope gate, the policies and the approval gate do their work. Shortened from the test in `examples/agents`, which also creates the ticket first and checks that the tool's real answer carries it:
@@ -420,7 +455,6 @@ A fake proves the wiring. Whether the instructions and tool descriptions get the
 
 These parts of the design have not shipped:
 
-- `broadcast()`, which would stream a queued run's answer over [broadcasting](./broadcasting.md).
 - `embed()` and `image()` wrappers. Call the AI SDK with `ai.embeddingModel(name)` meanwhile.
 - `defineEval()` and `guren ai:eval`, for measuring an agent against a real model.
 - `guren check` and `guren audit` rules for agents, including the listing of local tools.
