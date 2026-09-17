@@ -213,18 +213,18 @@ export function bindAgent<T extends Agent>(
   const tools = instance.tools()
 
   const agentName = resolveAgentName(cls)
+  const output = (instance as { output?: OutputInterface }).output
 
-  const run = async (input: string, options: PromptOptions, bound: string | undefined) => {
-    if (bound !== undefined && options.conversation !== undefined && options.conversation !== bound) {
+  const run = async (input: string, options: PromptOptions, conversation: string | undefined) => {
+    if (conversation !== undefined && options.conversation !== undefined && options.conversation !== conversation) {
       throw new Error(
-        `${agentName} is bound to conversation "${bound}" by continue(), and this call asks for `
+        `${agentName} is bound to conversation "${conversation}" by continue(), and this call asks for `
         + `${options.conversation === true ? 'a new one' : `"${options.conversation}"`}. Pass one or the other.`,
       )
     }
     // Settled before `model()`: a refused conversation must reach no model, and a fake's script.
-    const history = await openConversation(options.conversation ?? bound)
+    const history = await openConversation(options.conversation ?? conversation)
     const userMessage: ModelMessage = { role: 'user', content: input }
-    const output = (instance as { output?: OutputInterface }).output
     const loop = new ToolLoopAgent({
       id: agentName,
       model: scope.manager.model(options.provider ?? instance.provider),
@@ -238,7 +238,7 @@ export function bindAgent<T extends Agent>(
       ...(options.signal ? { abortSignal: options.signal } : {}),
     }
     // Only once the model has answered: a failed or aborted turn stores nothing, and a new conversation no row.
-    const store = async (responseMessages: readonly ModelMessage[]) => {
+    const persistTurn = async (responseMessages: readonly ModelMessage[]) => {
       if (!history) return
       const turn = [userMessage, ...responseMessages]
       if (history.isNew) {
@@ -247,16 +247,16 @@ export function bindAgent<T extends Agent>(
         await history.store.append(history.id, history.owner, turn)
       }
     }
-    return { history, output, loop, call, store }
+    return { history, loop, call, persistTurn }
   }
 
   const bound = (conversation: string | undefined): BoundAgent<T> => ({
     agent: instance,
     continue: (id) => bound(id),
     prompt: async (input, options = {}) => {
-      const { history, output, loop, call, store } = await run(input, options, conversation)
+      const { history, loop, call, persistTurn } = await run(input, options, conversation)
       const result = await loop.generate(call)
-      await store(result.responseMessages)
+      await persistTurn(result.responseMessages)
       return {
         text: result.text,
         output: (output ? result.output : result.text) as InferAgentOutput<T>,
@@ -267,13 +267,21 @@ export function bindAgent<T extends Agent>(
       }
     },
     stream: async (input, options = {}) => {
-      const { history, loop, call, store } = await run(input, options, conversation)
+      if (output) {
+        throw new Error(
+          `${agentName} declares an output schema, which stream() would send to the client as raw JSON text. `
+          + 'Call prompt() for its parsed output.',
+        )
+      }
+      const { history, loop, call, persistTurn } = await run(input, options, conversation)
       const result = await loop.stream({
         ...call,
         onEnd: async (event) => {
+          // The SDK still ends a stream aborted after a finished step, with that partial turn.
+          if (options.signal?.aborted) return
           // The response has already started, so a storage failure has no status to set; the body waits for this.
           try {
-            await store(event.responseMessages)
+            await persistTurn(event.responseMessages)
           } catch (error) {
             console.error(`[@guren/plugin-ai] ${agentName} could not store its turn in conversation "${history?.id}".`, error)
           }

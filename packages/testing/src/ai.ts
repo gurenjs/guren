@@ -17,7 +17,7 @@ import type {
   bindAgent,
   resolveAgentName,
 } from '@guren/plugin-ai'
-import type { EmbeddingModel, LanguageModel, StepResult, ToolSet } from 'ai'
+import type { EmbeddingModel, LanguageModel, StepResult, ToolSet, simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
 import type { MockLanguageModelV4 } from 'ai/test'
 
 /** The model's final answer: plain text, or the value an agent's `output` schema parses. */
@@ -38,7 +38,7 @@ export interface FakeAiRecordedToolCall {
   input: unknown
   /** Present when the tool returned. */
   output?: unknown
-  /** Present when the tool threw. */
+  /** Present when the tool threw, or its input failed validation: the error for `prompt()`, its message for `stream()`. */
   error?: unknown
 }
 
@@ -56,6 +56,8 @@ export interface FakeAiRuntime {
   bindAgent: typeof bindAgent
   resolveAgentName: typeof resolveAgentName
   MockLanguageModelV4: typeof MockLanguageModelV4
+  wrapLanguageModel: typeof wrapLanguageModel
+  simulateStreamingMiddleware: typeof simulateStreamingMiddleware
 }
 
 let runtimePromise: Promise<FakeAiRuntime | Error> | undefined
@@ -72,11 +74,13 @@ export async function preloadFakeAiRuntime(): Promise<void> {
 }
 
 async function loadFakeAiRuntime(): Promise<FakeAiRuntime> {
-  const [plugin, test] = await Promise.all([import('@guren/plugin-ai'), import('ai/test')])
+  const [plugin, sdk, test] = await Promise.all([import('@guren/plugin-ai'), import('ai'), import('ai/test')])
   const runtime: Partial<FakeAiRuntime> = {
     bindAgent: plugin.bindAgent,
     resolveAgentName: plugin.resolveAgentName,
     MockLanguageModelV4: test.MockLanguageModelV4,
+    wrapLanguageModel: sdk.wrapLanguageModel,
+    simulateStreamingMiddleware: sdk.simulateStreamingMiddleware,
   }
   // An optional peer can resolve to an older copy, whose missing names import as `undefined`.
   const missing = (Object.keys(runtime) as Array<keyof FakeAiRuntime>).filter((name) => typeof runtime[name] !== 'function')
@@ -226,7 +230,7 @@ export class FakeAi implements AiManager, Disposable {
   private recording<T extends Agent>(name: string, principal: AgentPrincipalInput, bound: BoundAgent<T>): BoundAgent<T> {
     const record = async <R>(input: string, run: (call: FakeAiCall) => Promise<R>): Promise<R> => {
       const call: FakeAiCall = { input, principal, toolCalls: [] }
-      // Recorded on entry: a prompt that throws was still made.
+      // Recorded on entry: a call that throws was still made.
       listFor(this.recorded, name).push(call)
       try {
         return await run(call)
@@ -267,49 +271,33 @@ export class FakeAi implements AiManager, Disposable {
     const steps = flatten(response)
     let step = 0
     this.progress.push({ name, consumed: () => step, total: steps.length })
-    const next = () => {
-      const index = step++
-      const current = steps[index]
-      // Unreachable while `bindAgent` resolves a model per prompt; guards a memoized one.
-      if (current === undefined) {
-        return this.fail(`Agent [${name}] asked the model for step ${index + 1}, but its scripted response has ${steps.length}.`)
-      }
-      return 'text' in current
-        ? { content: [{ type: 'text' as const, text: current.text }], finishReason: { unified: 'stop' as const, raw: undefined } }
-        : {
-            content: current.toolCalls.map((toolCall, callIndex) => ({
-              type: 'tool-call' as const,
-              toolCallId: `fake-${index}-${callIndex}`,
-              toolName: toolCall.name,
-              input: JSON.stringify(toolCall.input ?? {}),
-            })),
-            finishReason: { unified: 'tool-calls' as const, raw: undefined },
-          }
-    }
-    return new this.runtime.MockLanguageModelV4({
+    const model = new this.runtime.MockLanguageModelV4({
       modelId: `fake:${name}`,
-      doGenerate: async () => ({ ...next(), usage: USAGE, warnings: [] }),
-      doStream: async () => {
-        const { content, finishReason } = next()
-        const parts: unknown[] = [{ type: 'stream-start', warnings: [] }]
-        content.forEach((part, index) => {
-          if (part.type === 'text') {
-            parts.push({ type: 'text-start', id: `text-${index}` }, { type: 'text-delta', id: `text-${index}`, delta: part.text }, { type: 'text-end', id: `text-${index}` })
-          } else {
-            parts.push(part)
-          }
-        })
-        parts.push({ type: 'finish', finishReason, usage: USAGE })
+      doGenerate: async () => {
+        const index = step++
+        const current = steps[index]
+        // Unreachable while `bindAgent` resolves a model per prompt; guards a memoized one.
+        if (current === undefined) {
+          return this.fail(`Agent [${name}] asked the model for step ${index + 1}, but its scripted response has ${steps.length}.`)
+        }
+        if ('text' in current) {
+          return { content: [{ type: 'text', text: current.text }], finishReason: { unified: 'stop', raw: undefined }, usage: USAGE, warnings: [] }
+        }
         return {
-          stream: new ReadableStream({
-            start(controller) {
-              for (const part of parts) controller.enqueue(part)
-              controller.close()
-            },
-          }) as never,
+          content: current.toolCalls.map((toolCall, callIndex) => ({
+            type: 'tool-call',
+            toolCallId: `fake-${index}-${callIndex}`,
+            toolName: toolCall.name,
+            input: JSON.stringify(toolCall.input ?? {}),
+          })),
+          finishReason: { unified: 'tool-calls', raw: undefined },
+          usage: USAGE,
+          warnings: [],
         }
       },
     })
+    // `stream()` reaches the same script: the middleware answers doStream from doGenerate.
+    return this.runtime.wrapLanguageModel({ model, middleware: this.runtime.simulateStreamingMiddleware() })
   }
 
   private fail(message: string): never {
@@ -358,10 +346,14 @@ function tapToolCalls(response: Response, call: FakeAiCall): Response {
       const lines = pending.split('\n')
       pending = lines.pop() ?? ''
       for (const line of lines) {
-        if (!line.startsWith('data: {')) continue
+        if (!line.startsWith('data: {"type":"tool-')) continue
         const chunk = JSON.parse(line.slice('data: '.length)) as { type: string; toolCallId?: string; toolName?: string; input?: unknown; output?: unknown; errorText?: string }
-        if (chunk.type === 'tool-input-available' && chunk.toolCallId) {
-          const recorded: FakeAiRecordedToolCall = { name: chunk.toolName ?? '', input: chunk.input }
+        if ((chunk.type === 'tool-input-available' || chunk.type === 'tool-input-error') && chunk.toolCallId) {
+          const recorded: FakeAiRecordedToolCall = {
+            name: chunk.toolName ?? '',
+            input: chunk.input,
+            ...(chunk.type === 'tool-input-error' ? { error: chunk.errorText } : {}),
+          }
           byId.set(chunk.toolCallId, recorded)
           call.toolCalls.push(recorded)
         } else if (chunk.type === 'tool-output-available' && chunk.toolCallId) {

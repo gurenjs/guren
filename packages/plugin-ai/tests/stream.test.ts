@@ -4,7 +4,7 @@ import { describe, expect, spyOn, test } from 'bun:test'
 import type { AgentPrincipal } from '@guren/core'
 import { z } from 'zod'
 
-import { Agent, MemoryConversationStore, tool } from '../src'
+import { Agent, MemoryConversationStore, Output, tool } from '../src'
 import { bootHarness } from './fixture'
 
 class Support extends Agent {
@@ -119,6 +119,58 @@ describe('BoundAgent.stream', () => {
     await new Promise((resolve) => setTimeout(resolve, 100))
 
     expect(await h.app.container.make('ai').conversations().load(response.headers.get('X-Guren-Conversation')!, USER)).toBeNull()
+  })
+
+  test('should store nothing for a turn aborted after a finished tool step', async () => {
+    class Lookup extends Agent {
+      static override agentName = 'lookup'
+      instructions = 'Look it up.'
+      override tools() {
+        return { order: tool({ inputSchema: z.object({ id: z.number() }), execute: async ({ id }) => ({ id }) }) }
+      }
+    }
+    const h = await bootHarness({ conversations: { driver: 'memory' } })
+    const model = h.script([{ toolCalls: [{ name: 'order', input: { id: 7 } }] }])
+    const scripted = model.doStream
+    const abort = new AbortController()
+    let calls = 0
+    model.doStream = async (options) => {
+      if (calls++ === 0) return scripted(options)
+      return {
+        stream: new ReadableStream({
+          async start(controller) {
+            controller.enqueue({ type: 'stream-start', warnings: [] })
+            controller.enqueue({ type: 'text-start', id: 't' })
+            controller.enqueue({ type: 'text-delta', id: 't', delta: 'Order 7 is' })
+            abort.abort()
+            await new Promise((resolve) => setTimeout(resolve, 20))
+            controller.close()
+          },
+        }),
+      }
+    }
+
+    const response = await h.app.container.make('ai').agent(Lookup).as(USER)
+      .stream('Where is order 7?', { conversation: true, signal: abort.signal })
+    await response.text().catch(() => {})
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(calls).toBe(2)
+    expect(await h.app.container.make('ai').conversations().load(response.headers.get('X-Guren-Conversation')!, USER)).toBeNull()
+  })
+
+  test('should refuse to stream an agent with an output schema, before any model call', async () => {
+    class Triager extends Agent {
+      static override agentName = 'triager'
+      instructions = 'Triage.'
+      output = Output.object({ schema: z.object({ priority: z.number() }) })
+    }
+    const h = await bootHarness()
+    const model = h.script([{ text: '{"priority":1}' }])
+
+    await expect(h.app.container.make('ai').agent(Triager).as(USER).stream('Refund'))
+      .rejects.toThrow('triager declares an output schema, which stream() would send to the client as raw JSON text.')
+    expect(model.doStreamCalls).toHaveLength(0)
   })
 
   test('should finish the body and log when the turn cannot be stored', async () => {

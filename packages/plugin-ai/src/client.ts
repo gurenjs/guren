@@ -7,7 +7,8 @@ import { DefaultChatTransport, type ChatTransport, type UIMessage } from 'ai'
 import type { ChatTurn } from './chat'
 import { CONVERSATION_HEADER } from './protocol'
 
-// `XSRF_COOKIE_NAME` and `XSRF_HEADER_NAME` in @guren/server's CSRF middleware, which this entry cannot import.
+// `XSRF_COOKIE_NAME` and `XSRF_HEADER_NAME` in @guren/server's CSRF middleware, which this entry cannot import;
+// `readXsrfToken()` in @guren/plugin-webmcp's client reads the same cookie.
 const XSRF_COOKIE = 'XSRF-TOKEN'
 const XSRF_HEADER = 'X-XSRF-TOKEN'
 
@@ -55,13 +56,25 @@ export function createChatTransport<M extends UIMessage = UIMessage>(
 
 function lastUserText(messages: readonly UIMessage[]): string {
   const last = [...messages].reverse().find((message) => message.role === 'user')
+  if (last?.parts.some((part) => part.type === 'file')) {
+    throw new Error('createChatTransport() sends the user message as text, and this one attaches a file it would drop.')
+  }
   const text = last?.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('') ?? ''
   if (!text) throw new Error('createChatTransport() sends the last user message as text, and there is none to send.')
   return text
 }
 
 function xsrfHeader(): Record<string, string> {
-  if (typeof document === 'undefined') return {}
-  const cookie = document.cookie.split('; ').find((entry) => entry.startsWith(`${XSRF_COOKIE}=`))
-  return cookie ? { [XSRF_HEADER]: decodeURIComponent(cookie.slice(XSRF_COOKIE.length + 1)) } : {}
+  const cookies = (globalThis as { document?: { cookie?: string } }).document?.cookie
+  for (const part of cookies?.split(';') ?? []) {
+    const entry = part.trim()
+    if (!entry.startsWith(`${XSRF_COOKIE}=`)) continue
+    const value = entry.slice(XSRF_COOKIE.length + 1)
+    try {
+      return { [XSRF_HEADER]: decodeURIComponent(value) }
+    } catch {
+      return { [XSRF_HEADER]: value }
+    }
+  }
+  return {}
 }

@@ -124,6 +124,33 @@ describe('createChatTransport', () => {
     }
   })
 
+  test('should refuse a user message with a file it would drop, and read an XSRF cookie among others', async () => {
+    const posted: Headers[] = []
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: { cookie: 'XSRF-TOKEN2=wrong;XSRF-TOKEN=a%2Fb; theme=dark' },
+    })
+    const transport = createChatTransport('/chat', {
+      fetch: async (_input, init) => {
+        posted.push(new Headers(init?.headers))
+        return new Response(null)
+      },
+    })
+    const message = (parts: UIMessage['parts']): UIMessage[] => [{ id: 'm1', role: 'user', parts }]
+
+    await expect(transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat',
+      messageId: undefined,
+      abortSignal: undefined,
+      messages: message([{ type: 'text', text: 'see this' }, { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AA==' }]),
+    })).rejects.toThrow('attaches a file it would drop')
+    await transport.sendMessages({ trigger: 'submit-message', chatId: 'chat', messageId: undefined, abortSignal: undefined, messages: message([{ type: 'text', text: 'hi' }]) })
+      .catch(() => {})
+
+    expect(posted[0]!.get('X-XSRF-TOKEN')).toBe('a/b')
+  })
+
   test('should refuse to regenerate, since the server holds the history', async () => {
     const transport = createChatTransport('/chat', { fetch: async () => new Response(null) })
 

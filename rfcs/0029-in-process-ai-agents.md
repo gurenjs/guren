@@ -528,14 +528,18 @@ const { messages, sendMessage } = useChat({
   `X-Guren-Conversation`, so `ConversationStore.create()` takes the id from its caller. The turn is
   stored in the stream's `onEnd`, which the response body waits for.
 - **Aborts and storage failures:** a turn aborted through `signal` stores nothing, and neither does a
-  new conversation. A storage failure cannot change a status already sent, so it is logged and the
+  new conversation. The SDK still runs `onEnd` for a stream aborted after a finished step, so the
+  signal is checked there too. A storage failure cannot change a status already sent, so it is logged and the
   body finishes.
+- **Structured output:** an agent that declares `output` is refused by `stream()`, which would send
+  its JSON as plain text. `prompt()` returns the parsed value.
 - **`createChatTransport()`:** the initial conversation comes from its `conversation` option, not
   `useChat({ id })`, and `onConversation` reports a new one. The transport refuses
-  `regenerate-message`, since the server holds the history. It is a `DefaultChatTransport` with
+  `regenerate-message`, since the server holds the history, and a user message with a file part, which
+  a text turn would drop. It is a `DefaultChatTransport` with
   `prepareSendMessagesRequest` and a `fetch` that reads the header.
-- **`fakeAi()`:** its scripted model answers `doStream` too, and a streamed call's `toolCalls` fill in
-  as the body is read.
+- **`fakeAi()`:** `simulateStreamingMiddleware()` answers `doStream` from its script, and a streamed
+  call's `toolCalls` fill in as the body is read.
 - **`broadcast()`:** it moves to Part 2c with `queue()`.
 
 `broadcast(input, channel)` (Part 2) queues the prompt (§6) and emits each
