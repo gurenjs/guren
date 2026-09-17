@@ -6,7 +6,7 @@
 import { defineConfig, type AppEnv, type ConfigDefinition } from '@guren/core'
 import type { EmbeddingModel, ImageModel, LanguageModel } from 'ai'
 
-import { hasConversationDriver, type ConversationsConfig } from './conversations'
+import { createConversationStore, type ConversationsConfig } from './conversations'
 import { ConfiguredAiManager, type AiManager } from './manager'
 
 export interface AiProviderConfig {
@@ -65,11 +65,8 @@ export function defineAiConfig<const P extends Record<string, AiProviderConfig>>
           + `${describeNames(Object.keys(config.providers))}.`,
         )
       }
-      if (config.conversations && !hasConversationDriver(config.conversations.driver)) {
-        throw new Error(
-          `config/ai.ts names the conversation driver "${config.conversations.driver}", and no registered driver has that name.`,
-        )
-      }
+      // Built and discarded, so an unknown driver or an unset table fails the boot rather than the first conversation.
+      if (config.conversations) createConversationStore(config.conversations)
     },
   })
 }

@@ -12,15 +12,15 @@ export interface StoredConversation {
 }
 
 export interface ConversationStore {
-  /** Returns the new conversation's id. */
-  create(meta: { agentName: string; owner: AgentPrincipal }): Promise<string>
+  /** Stores the conversation with its first messages, all or none, and returns its id. */
+  create(meta: { agentName: string; owner: AgentPrincipal; messages: readonly ModelMessage[] }): Promise<string>
   /** `null` for an unknown id and for another owner's conversation alike, so ids cannot be probed. */
   load(id: string, owner: AgentPrincipal): Promise<StoredConversation | null>
   /** Appends after the stored messages, all or none. Refuses an id `owner` does not own. */
   append(id: string, owner: AgentPrincipal, messages: readonly ModelMessage[]): Promise<void>
 }
 
-/** Driver name to its options in `config/ai.ts`. Augmentable, as `SessionDrivers` is. */
+/** Driver name to its options in `config/ai.ts`. */
 export interface ConversationDrivers {
   // oxlint-disable-next-line typescript/no-empty-object-type -- a driver that takes no options
   memory: {}
@@ -41,34 +41,17 @@ export type ConversationsConfig = {
   [K in keyof ConversationDrivers]: { driver: K } & ConversationDrivers[K]
 }[keyof ConversationDrivers]
 
-type DriverFactory = (options: Record<string, unknown>) => ConversationStore
-
-const drivers = new Map<string, DriverFactory>([
-  ['memory', () => new MemoryConversationStore()],
-  ['database', (options) => new DatabaseConversationStore(options as ConversationDrivers['database'])],
-])
-
-/** Register a driver an augmentation of {@link ConversationDrivers} names. */
-export function registerConversationDriver<K extends keyof ConversationDrivers>(
-  name: K,
-  factory: (options: ConversationDrivers[K]) => ConversationStore,
-): void {
-  drivers.set(name, factory as DriverFactory)
-}
-
-export function hasConversationDriver(name: string): boolean {
-  return drivers.has(name)
-}
-
 export function createConversationStore(config: ConversationsConfig): ConversationStore {
-  const factory = drivers.get(config.driver)
-  if (!factory) {
-    throw new Error(
-      `config/ai.ts names the conversation driver "${config.driver}", and none is registered. `
-      + `Registered: ${[...drivers.keys()].join(', ')}.`,
-    )
+  switch (config.driver) {
+    case 'memory':
+      return new MemoryConversationStore()
+    case 'database':
+      return new DatabaseConversationStore(config)
   }
-  return factory(config as unknown as Record<string, unknown>)
+  throw new Error(
+    `config/ai.ts names the conversation driver "${(config as { driver: string }).driver}". `
+    + 'The drivers are: memory, database.',
+  )
 }
 
 interface MemoryConversation extends StoredConversation {
@@ -79,9 +62,13 @@ interface MemoryConversation extends StoredConversation {
 export class MemoryConversationStore implements ConversationStore {
   private readonly conversations = new Map<string, MemoryConversation>()
 
-  async create(meta: { agentName: string; owner: AgentPrincipal }): Promise<string> {
+  async create(meta: { agentName: string; owner: AgentPrincipal; messages: readonly ModelMessage[] }): Promise<string> {
     const id = crypto.randomUUID()
-    this.conversations.set(id, { agentName: meta.agentName, owner: agentApprovalPrincipalKey(meta.owner), messages: [] })
+    this.conversations.set(id, {
+      agentName: meta.agentName,
+      owner: agentApprovalPrincipalKey(meta.owner),
+      messages: storableMessages(meta.messages),
+    })
     return id
   }
 
@@ -110,6 +97,9 @@ export class DatabaseConversationStore implements ConversationStore {
   private readonly dataMode: 'json' | 'text'
 
   constructor(options: ConversationDrivers['database']) {
+    if (!options.conversations || !options.messages) {
+      throw new Error("The database conversation driver needs both tables: { driver: 'database', conversations, messages }.")
+    }
     this.dataMode = options.dataMode ?? 'json'
     this.conversations = class AiConversation extends Model {
       static override table = options.conversations
@@ -119,16 +109,20 @@ export class DatabaseConversationStore implements ConversationStore {
     }
   }
 
-  async create(meta: { agentName: string; owner: AgentPrincipal }): Promise<string> {
+  async create(meta: { agentName: string; owner: AgentPrincipal; messages: readonly ModelMessage[] }): Promise<string> {
     // Client-generated: MySQL returns no inserted key for a text primary key.
     const id = crypto.randomUUID()
-    const now = new Date()
-    await this.conversations.forceCreate({
-      id,
-      agentName: meta.agentName,
-      owner: agentApprovalPrincipalKey(meta.owner),
-      createdAt: now,
-      updatedAt: now,
+    const stored = storableMessages(meta.messages)
+    await this.messages.transaction(async () => {
+      const now = new Date()
+      await this.conversations.forceCreate({
+        id,
+        agentName: meta.agentName,
+        owner: agentApprovalPrincipalKey(meta.owner),
+        createdAt: now,
+        updatedAt: now,
+      })
+      await this.insertMessages(id, 0, stored, now)
     })
     return id
   }
@@ -151,19 +145,23 @@ export class DatabaseConversationStore implements ConversationStore {
     await this.messages.transaction(async () => {
       if (!(await this.conversations.where({ id, owner: ownerKey }).first())) throw unknownConversation(id)
       const last = await this.messages.where({ conversationId: id }).orderBy('position', 'desc').first()
-      let position = last ? Number(last.position) + 1 : 0
       const now = new Date()
-      for (const message of stored) {
-        await this.messages.forceCreate({
-          id: crypto.randomUUID(),
-          conversationId: id,
-          position: position++,
-          message: this.dataMode === 'text' ? JSON.stringify(message) : message,
-          createdAt: now,
-        })
-      }
+      await this.insertMessages(id, last ? Number(last.position) + 1 : 0, stored, now)
       await this.conversations.forceUpdate({ id }, { updatedAt: now })
     })
+  }
+
+  private async insertMessages(conversationId: string, from: number, messages: ModelMessage[], now: Date): Promise<void> {
+    let position = from
+    for (const message of messages) {
+      await this.messages.forceCreate({
+        id: crypto.randomUUID(),
+        conversationId,
+        position: position++,
+        message: this.dataMode === 'text' ? JSON.stringify(message) : message,
+        createdAt: now,
+      })
+    }
   }
 }
 
@@ -175,7 +173,7 @@ function unknownConversation(id: string): Error {
  * A deep copy JSON can carry: binary file data becomes base64 and a `URL` its href,
  * both forms a `ModelMessage` accepts on replay.
  */
-export function storableMessages(messages: readonly ModelMessage[]): ModelMessage[] {
+function storableMessages(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.map((message) => storable(message) as ModelMessage)
 }
 

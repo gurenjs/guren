@@ -6,7 +6,7 @@ import { DrizzleAdapter, createApp, type AgentPrincipal } from '@guren/core'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
-import { Agent, DatabaseConversationStore, MemoryConversationStore, defineAiConfig, tool } from '../src'
+import { Agent, DatabaseConversationStore, MemoryConversationStore, agent, defineAiConfig, tool } from '../src'
 import { bootHarness, scriptedModel } from './fixture'
 import { z } from 'zod'
 
@@ -129,14 +129,46 @@ describe('conversations through prompt() and continue()', () => {
       }))],
     })
 
-    await expect(app.boot()).rejects.toThrow('config/ai.ts names the conversation driver "agentcore"')
+    await expect(app.boot()).rejects.toThrow('config/ai.ts names the conversation driver "agentcore". The drivers are: memory, database.')
+  })
+
+  test('should fail the boot on a database driver missing a table', async () => {
+    const app = createApp({
+      config: [defineAiConfig(() => ({
+        default: 'main',
+        providers: { main: { model: () => scriptedModel([]) } },
+        conversations: { driver: 'database', conversations: undefined, messages: undefined },
+      }))],
+    })
+
+    await expect(app.boot()).rejects.toThrow('The database conversation driver needs both tables')
+  })
+
+  test('should refuse a conversation with an agent() that has no agentName', async () => {
+    const h = await bootHarness({ conversations: { driver: 'memory' } })
+    const model = h.script([{ text: 'never' }])
+
+    await expect(h.app.container.make('ai').agent(agent({ instructions: 'x' })).as(USER).prompt('Hi', { conversation: true }))
+      .rejects.toThrow('Pass agent({ agentName }) to keep conversations with it.')
+    expect(model.doGenerateCalls).toHaveLength(0)
+  })
+
+  test('should refuse a prompt option naming a different conversation than continue() bound', async () => {
+    const h = await bootHarness({ conversations: { driver: 'memory' } })
+    const model = h.script([{ text: 'first' }])
+    const support = h.app.container.make('ai').agent(Support).as(USER)
+    const { conversationId } = await support.prompt('Hi', { conversation: true })
+
+    await expect(support.continue(conversationId!).prompt('again', { conversation: true }))
+      .rejects.toThrow(`support is bound to conversation "${conversationId}" by continue(), and this prompt asks for a new one.`)
+    expect(model.doGenerateCalls).toHaveLength(1)
   })
 })
 
 describe('MemoryConversationStore', () => {
   test('should keep its history from a caller mutating what it loaded or appended', async () => {
     const store = new MemoryConversationStore()
-    const id = await store.create({ agentName: 'support', owner: USER })
+    const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
     const message = { role: 'user' as const, content: 'original' }
     await store.append(id, USER, [message])
 
@@ -197,7 +229,7 @@ describe('DatabaseConversationStore', () => {
   for (const [mode, table] of [['json', messages], ['text', messagesText]] as const) {
     test(`should load appended messages in position order across appends (${mode} column)`, async () => {
       const store = new DatabaseConversationStore({ conversations, messages: table, dataMode: mode })
-      const id = await store.create({ agentName: 'support', owner: USER })
+      const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
 
       await store.append(id, USER, [{ role: 'user', content: 'one' }, { role: 'assistant', content: 'two' }])
       await store.append(id, USER, [{ role: 'user', content: 'three' }, { role: 'assistant', content: 'four' }])
@@ -216,7 +248,7 @@ describe('DatabaseConversationStore', () => {
 
   test('should answer null for another owner, and refuse its append without writing', async () => {
     const store = new DatabaseConversationStore({ conversations, messages })
-    const id = await store.create({ agentName: 'support', owner: USER })
+    const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
     const intruder: AgentPrincipal = { kind: 'user', id: '1' }
 
     expect(await store.load(id, intruder)).toBeNull()
@@ -224,9 +256,21 @@ describe('DatabaseConversationStore', () => {
     expect(sqlite.query('select count(*) as n from ai_messages').get()).toEqual({ n: 0 })
   })
 
+  test('should leave no conversation when its first messages fail to store', async () => {
+    const store = new DatabaseConversationStore({ conversations, messages })
+
+    await expect(store.create({
+      agentName: 'support',
+      owner: USER,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x', providerOptions: { bad: { n: 1n } } as never }] }],
+    })).rejects.toThrow()
+
+    expect(sqlite.query('select count(*) as n from ai_conversations').get()).toEqual({ n: 0 })
+  })
+
   test('should write none of an append whose later message fails to store', async () => {
     const store = new DatabaseConversationStore({ conversations, messages })
-    const id = await store.create({ agentName: 'support', owner: USER })
+    const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
 
     await expect(store.append(id, USER, [
       { role: 'user', content: 'stored first' },
@@ -238,7 +282,7 @@ describe('DatabaseConversationStore', () => {
 
   test('should store binary file data as base64, which replays as the same bytes', async () => {
     const store = new DatabaseConversationStore({ conversations, messages })
-    const id = await store.create({ agentName: 'support', owner: USER })
+    const id = await store.create({ agentName: 'support', owner: USER, messages: [] })
 
     await store.append(id, USER, [{
       role: 'assistant',

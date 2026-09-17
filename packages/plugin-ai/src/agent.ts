@@ -75,6 +75,7 @@ export interface AgentClass<T extends Agent<any> = Agent<any>> {
 }
 
 const DEFAULT_STOP_WHEN = 20
+const ANONYMOUS_AGENT_NAME = 'anonymous'
 
 let constructing: AgentContext | undefined
 
@@ -163,7 +164,7 @@ export interface AnonymousAgentOptions {
 /** An anonymous subclass for a one-off call. Give it an `output` by subclassing instead. */
 export function agent(options: AnonymousAgentOptions): AgentClass {
   return class AnonymousAgent extends Agent {
-    static override agentName = options.agentName ?? 'anonymous'
+    static override agentName = options.agentName ?? ANONYMOUS_AGENT_NAME
     static override scopes = options.scopes ?? []
     instructions = options.instructions
     override provider = options.provider
@@ -211,6 +212,12 @@ export function bindAgent<T extends Agent>(
     agent: instance,
     continue: (id) => bound(id),
     prompt: async (input, options = {}) => {
+      if (conversation !== undefined && options.conversation !== undefined && options.conversation !== conversation) {
+        throw new Error(
+          `${agentName} is bound to conversation "${conversation}" by continue(), and this prompt asks for `
+          + `${options.conversation === true ? 'a new one' : `"${options.conversation}"`}. Pass one or the other.`,
+        )
+      }
       // Settled before `model()`: a refused conversation must reach no model, and a fake's script.
       const history = await openConversation(options.conversation ?? conversation)
       const userMessage: ModelMessage = { role: 'user', content: input }
@@ -231,9 +238,14 @@ export function bindAgent<T extends Agent>(
 
       let conversationId: string | undefined
       if (history) {
+        const turn = [userMessage, ...result.responseMessages]
         // Created only once the model has answered, so a failed first prompt leaves no empty conversation.
-        conversationId = history.id ?? await history.store.create({ agentName, owner: history.owner })
-        await history.store.append(conversationId, history.owner, [userMessage, ...result.responseMessages])
+        if (history.id === undefined) {
+          conversationId = await history.store.create({ agentName, owner: history.owner, messages: turn })
+        } else {
+          conversationId = history.id
+          await history.store.append(conversationId, history.owner, turn)
+        }
       }
       return {
         text: result.text,
@@ -253,6 +265,12 @@ export function bindAgent<T extends Agent>(
       throw new Error(
         `${agentName} was asked for a conversation under as(null). A conversation belongs to the principal `
         + 'that started it, and an anonymous run has none to check: bind a user or service with as(principal).',
+      )
+    }
+    if (agentName === ANONYMOUS_AGENT_NAME) {
+      throw new Error(
+        'A conversation is checked against the agent that started it, and every agent() without an agentName '
+        + `is named "${ANONYMOUS_AGENT_NAME}". Pass agent({ agentName }) to keep conversations with it.`,
       )
     }
     const store = scope.manager.conversations()

@@ -11,7 +11,7 @@ const next = await SupportTriager.as(user).continue(first.conversationId!).promp
 
 - `conversations: { driver: 'memory' }` keeps history in the process. `{ driver: 'database', conversations, messages }` stores it in two tables through ORM Models, one row per `ModelMessage`.
 - A plain `prompt()` stores nothing.
-- A conversation belongs to the principal that started it and to its agent. `continue()` under another principal, another agent or `as(null)` is refused before any model call.
+- A conversation belongs to the principal that started it and to its agent. `continue()` under another principal, another agent or `as(null)` is refused before any model call. So is a conversation with an `agent()` that has no `agentName`.
 - Each turn is appended in one transaction, after the model answers.
 - The stored transcript is what the model saw, tool results included, so treat the tables as sensitive data.
 - `AiManager` gains a required `conversations()` method. A hand-written `AiManager` implementation must add it.
