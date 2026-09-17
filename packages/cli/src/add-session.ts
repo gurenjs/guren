@@ -10,8 +10,9 @@ import {
   ensureSqliteImports,
   type SchemaDialect,
 } from './patch-helpers'
-import { wireProviders } from './provider-registrar'
-import { scaffoldTemplateFile } from './scaffold-templates'
+import { wireConfig, wireProviders } from './provider-registrar'
+import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
+import { installsConfigDefinition } from './service-scaffold'
 import { writeScaffoldFiles, type WriterOptions } from './utils'
 
 /**
@@ -48,8 +49,6 @@ const SCHEMA_IMPORTS: Record<SchemaDialect, (content: string) => string> = {
   mysql: (content) => ensureMysqlImports(content, ['mysqlTable', 'varchar', 'json', 'timestamp', 'index']),
 }
 
-const SCAFFOLD_PATHS = ['config/session.ts', 'app/Providers/SessionProvider.ts'] as const
-
 export interface AddSessionOptions extends WriterOptions {
   /** Leave the migration to the caller, which is generating one over the same schema. */
   migration?: boolean
@@ -65,21 +64,21 @@ export interface AddSessionResult {
 
 /**
  * Whether the app already has sessions of its own: the conventional config
- * file, or a `session` binding from a provider under any name. Both directions
+ * file, or a `session` binding from a provider or definition. Both directions
  * matter — a second manager would shadow the app's, and a config file with no
  * provider leaves sessions on the in-memory default.
  */
 export async function appConfiguresSessions(): Promise<boolean> {
   return (await fileExists(process.cwd(), 'config/session.ts'))
-    || (await appBindsService('session', process.cwd())).length > 0
+    || (await appBindsService('session', process.cwd(), { definitions: true })).length > 0
 }
 
 /**
- * `guren add session`: the `sessions` schema table and its migration,
- * `config/session.ts` + `SessionProvider`, the `SESSION_DRIVER` env entry, and
- * the `sessions:prune` command. Without it an app's sessions live in process
- * memory, which is correct on one long-lived server and drops every login on
- * Workers, Lambda and Vercel (RFC 0020).
+ * `guren add session`: the `sessions` table and its migration, `config/session.ts`
+ * (a definition, or beside `SessionProvider` in an app with no `config/env.ts`),
+ * `SESSION_DRIVER`, and `sessions:prune`. Without it sessions live in process
+ * memory: right on one long-lived server, and every login is dropped on Workers,
+ * Lambda and Vercel (RFC 0020).
  */
 export async function addSession(options: AddSessionOptions = {}): Promise<AddSessionResult> {
   const schema = await appendSchemaTable({
@@ -95,15 +94,19 @@ export async function addSession(options: AddSessionOptions = {}): Promise<AddSe
     return { files: [], schemaChanged: false }
   }
 
+  const definition = await installsConfigDefinition('session')
+
   // Skipped per file rather than thrown, so a re-run repairs whatever is
   // missing instead of aborting on the first file that already exists.
   const files = await writeScaffoldFiles(
-    SCAFFOLD_PATHS.map((path) => scaffoldTemplateFile('session', path)),
+    definition
+      ? [definitionTemplateFile('session', 'config/session.ts')]
+      : [scaffoldTemplateFile('session', 'config/session.ts'), scaffoldTemplateFile('session', 'app/Providers/SessionProvider.ts')],
     { ...options, skipExisting: true },
   )
 
   if (options.wire !== false) {
-    await wireProviders([{ name: 'SessionProvider' }])
+    await (definition ? wireConfig('session') : wireProviders([{ name: 'SessionProvider' }]))
     await registerConsoleCommand('SessionsPruneCommand')
   }
 

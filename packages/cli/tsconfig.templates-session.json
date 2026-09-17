@@ -3,7 +3,8 @@
   "compilerOptions": {
     "rootDirs": [
       "templates/scaffold/session",
-      "tests/fixtures/scaffold-typecheck/session"
+      "tests/fixtures/scaffold-typecheck/session",
+      "templates/scaffold/session/definition"
     ]
   },
   "include": [

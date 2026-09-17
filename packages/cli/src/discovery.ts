@@ -543,14 +543,18 @@ export async function appBindsService(
   const groups = await Promise.all(
     roots.flatMap((root) => dirs.map((dir) => collectFiles(resolve(root.dir, dir)))),
   )
-  const patterns = [new RegExp(`\\b(?:instance|singleton|bind)\\(\\s*['"]${escapeRegExp(key)}['"]`)]
-  if (options.definitions) patterns.push(new RegExp(`\\bdefine${escapeRegExp(key)}Config\\s*\\(`, 'i'))
+  const bindingPattern = new RegExp(`\\b(?:instance|singleton|bind)\\(\\s*['"]${escapeRegExp(key)}['"]`)
   const binding: string[] = []
   for (const filePath of groups.flat()) {
     const source = await readIfExists(appRoot, filePath)
-    if (source && patterns.some((pattern) => pattern.test(source))) binding.push(filePath)
+    if (source && (bindingPattern.test(source) || (options.definitions && callsDefineConfig(source, key)))) binding.push(filePath)
   }
   return binding
+}
+
+/** Whether `source` calls `key`'s `define<Key>Config()` helper (RFC 0027 §2). */
+export function callsDefineConfig(source: string, key: string): boolean {
+  return new RegExp(`\\bdefine${escapeRegExp(key)}Config\\s*\\(`, 'i').test(source)
 }
 
 /**

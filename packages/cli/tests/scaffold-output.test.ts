@@ -422,6 +422,7 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
     'cache/config/env.ts': 'pinned by the byte-identical template gate below, which runs cache against a declared env',
     'queue/config/env.ts': 'pinned by the byte-identical template gate below, which runs queue against a declared env',
     'storage/config/env.ts': 'pinned by the byte-identical template gate below, which runs storage against a declared env',
+    'session/config/env.ts': 'pinned by the byte-identical template gate below, which runs session against a declared env',
     'ai/config/env.ts': 'pinned by the add ai template gate below, which runs every provider against a declared env',
   }
 
@@ -475,22 +476,14 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
     expect(Object.keys(COVERED_ELSEWHERE).filter((name) => !dirs.has(name))).toEqual([])
   })
 
-  // Written in place of the provider when the app declares its environment (RFC 0027 §2).
-  const ENV_DECLARED_ONLY = new Set([
-    'cache/config/cache.ts',
-    'queue/app/Providers/JobsProvider.ts',
-    'queue/config/queue.ts',
-    'storage/config/storage.ts',
-  ])
-
   it('every shipped blueprint template lands byte-identical', async () => {
     const templatePaths = (await relativeSourcePaths(SCAFFOLD_TEMPLATE_ROOT))
       .filter((path) => !(path.split('/')[0] in COVERED_ELSEWHERE))
     expect(templatePaths.length).toBeGreaterThan(0)
-    expect([...ENV_DECLARED_ONLY].filter((path) => !templatePaths.includes(path))).toEqual([])
 
+    // `<blueprint>/definition/` holds what an app declaring its environment gets (RFC 0027 §2).
     for (const declaresEnv of [false, true]) {
-      const paths = templatePaths.filter((path) => ENV_DECLARED_ONLY.has(path) === declaresEnv)
+      const paths = templatePaths.filter((path) => (path.split('/')[1] === 'definition') === declaresEnv)
       const blueprints = [...new Set(paths.map((path) => path.split('/')[0]))].sort()
 
       const workspace = await createTempWorkspace('guren-blueprint-template-pin-')
@@ -501,7 +494,7 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
           await runBlueprint(blueprint, {})
         }
         for (const path of paths) {
-          const appPath = path.split('/').slice(1).join('/')
+          const appPath = path.split('/').slice(declaresEnv ? 2 : 1).join('/')
           const written = await readFile(join(workspace.dir, appPath), 'utf8')
           expect(written).toBe(await readFile(join(SCAFFOLD_TEMPLATE_ROOT, path), 'utf8'))
         }

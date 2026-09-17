@@ -534,7 +534,7 @@ export function register(): unknown {
       )
       const storage = await writeConfig(
         workspace.dir,
-        await readFile(join(import.meta.dir, '../templates/scaffold/storage/config/storage.ts'), 'utf8'),
+        await readFile(join(import.meta.dir, '../templates/scaffold/storage/definition/config/storage.ts'), 'utf8'),
         'config/storage.ts',
       )
 

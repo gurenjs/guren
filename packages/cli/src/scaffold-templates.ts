@@ -27,3 +27,12 @@ export function loadScaffoldTemplate(relativePath: string): string {
 export function scaffoldTemplateFile(scaffold: string, path: string): ScaffoldFileEntry {
   return { path, contents: loadScaffoldTemplate(`${scaffold}/${path}`) }
 }
+
+/**
+ * {@link scaffoldTemplateFile} for the form an app declaring its environment gets
+ * (RFC 0027 §2), kept under `<scaffold>/definition/`: `config/session.ts` exists in
+ * both forms, so the written path alone cannot tell the two templates apart.
+ */
+export function definitionTemplateFile(scaffold: string, path: string): ScaffoldFileEntry {
+  return { path, contents: loadScaffoldTemplate(`${scaffold}/definition/${path}`) }
+}

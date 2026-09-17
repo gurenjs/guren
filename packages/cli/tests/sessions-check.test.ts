@@ -99,6 +99,29 @@ describe('guren check sessions wiring (RFC 0020)', () => {
     expect(table?.message).toContain('only fails at runtime')
   })
 
+  // RFC 0027 §2: the table rule reads the resolver's object; `config-unwired`, not the
+  // provider rule, judges whether a definition is bound.
+  it('judges the table of a defineSessionConfig() definition, with no provider to find', async () => {
+    const definition = `import { defineSessionConfig } from '@guren/core'
+import { sessions } from '../db/schema'
+
+export default defineSessionConfig((env) => {
+  return { default: env.SESSION_DRIVER, stores: { database: { driver: 'database', table: sessions } } }
+})
+`
+    const results = await sessionResults({
+      'db/schema.ts': PG_SCHEMA_FIXTURE,
+      'config/session.ts': definition,
+      'src/app.ts': `import { createApp } from '@guren/core'
+import session from '../config/session.js'
+
+export default createApp({ auth: {}, config: [session] })
+`,
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['sessions-config:config/session.ts:sessions', 'fail']])
+  })
+
   it('reads a config declared with `satisfies`, not only with an annotation', async () => {
     const results = await sessionResults({
       'db/schema.ts': SCHEMA_WITH_SESSIONS,

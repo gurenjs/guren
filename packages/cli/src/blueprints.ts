@@ -80,7 +80,7 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
     },
   },
   session: {
-    description: 'Install database-backed sessions: the schema table and migration, config/session.ts, SessionProvider, and sessions:prune.',
+    description: 'Install database-backed sessions: the schema table and migration, config/session.ts, and sessions:prune.',
     run: async (options) => (await addSession(blueprintWriterOptions(options))).files,
   },
   lint: {

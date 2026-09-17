@@ -1,5 +1,6 @@
 /**
- * The one rule for reading a `SessionConfig` out of an app's source (RFC 0020).
+ * The one rule for reading a `SessionConfig` out of an app's source (RFC 0020),
+ * annotated or returned by a `defineSessionConfig()` resolver (RFC 0027 §2).
  * `guren check`'s session rules and the deploy-runtime verdicts both ask about
  * the same object, and a second reading is how one reports a backed store while
  * the other skips the table it binds. The anchor is the type, not the file
@@ -12,6 +13,7 @@ import { DEFAULT_SESSION_STORE_NAME } from '@guren/core'
 import { literalString, memberKeyName, objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 
 const SESSION_CONFIG_TYPE = 'SessionConfig'
+const SESSION_DEFINITION_HELPER = 'defineSessionConfig'
 const GUREN_PACKAGE_PREFIX = '@guren/'
 
 export { DEFAULT_SESSION_STORE_NAME }
@@ -25,17 +27,16 @@ export interface SessionConfigRead {
   stores: Map<string, string | undefined>
 }
 
-/** Locals bound to `SessionConfig` from `@guren/*`, type-only imports included. */
-function sessionConfigLocals(body: Statement[]): Set<string> {
+/** Locals bound to `imported` from `@guren/*`, type-only imports included. */
+function gurenLocals(body: Statement[], imported: string): Set<string> {
   const locals = new Set<string>()
   for (const statement of body) {
     if (statement.type !== 'ImportDeclaration') continue
     if (!statement.source.value.startsWith(GUREN_PACKAGE_PREFIX)) continue
     for (const specifier of statement.specifiers) {
       if (specifier.type !== 'ImportSpecifier') continue
-      const imported = specifier.imported
-      const name = imported.type === 'Identifier' ? imported.name : imported.value
-      if (name === SESSION_CONFIG_TYPE) locals.add(specifier.local.name)
+      const name = specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
+      if (name === imported) locals.add(specifier.local.name)
     }
   }
   return locals
@@ -70,16 +71,51 @@ function declaredSessionConfig(node: BabelNode, locals: Set<string>): ObjectExpr
   return undefined
 }
 
-/** Every `SessionConfig` a file declares, with the line its declarator starts on. */
-export function sessionConfigsIn(ast: { program: { body: Statement[] } }): Array<{ config: ObjectExpression; line: number }> {
-  const locals = sessionConfigLocals(ast.program.body)
-  if (locals.size === 0) return []
+/**
+ * The object a `defineSessionConfig(...)` call's resolver returns (RFC 0027 §2),
+ * from an arrow's expression body or a function's `return`. Its `default` reads
+ * a declared key (`env.SESSION_DRIVER`), which reads as unresolved rather than
+ * as a store.
+ */
+function definedSessionConfig(node: BabelNode, helpers: Set<string>): ObjectExpression | undefined {
+  const callee = node.callee as BabelNode
+  if (callee?.type !== 'Identifier' || !helpers.has(callee.name as string)) return undefined
+  const resolver = (node.arguments as BabelNode[] | undefined)?.[0]
+  if (resolver?.type !== 'ArrowFunctionExpression' && resolver?.type !== 'FunctionExpression') return undefined
 
-  const found: Array<{ config: ObjectExpression; line: number }> = []
+  const body = resolver.body as BabelNode
+  if (body.type !== 'BlockStatement') return objectLiteral(unwrapTypeAssertion(body as Node)) ?? undefined
+
+  let returned: ObjectExpression | undefined
+  walk(body as Node, (inner) => {
+    if (inner.type === 'ArrowFunctionExpression' || inner.type === 'FunctionExpression' || inner.type === 'FunctionDeclaration') return false
+    if (inner.type === 'ReturnStatement' && !returned) {
+      returned = objectLiteral(unwrapTypeAssertion(inner.argument as Node)) ?? undefined
+    }
+  })
+  return returned
+}
+
+export interface SessionConfigSite {
+  config: ObjectExpression
+  line: number
+  /** `declared` for a `SessionConfig`-typed object, `defined` for a `defineSessionConfig()` resolver's. */
+  form: 'declared' | 'defined'
+}
+
+/** Every session config a file declares or defines, with the line it starts on. */
+export function sessionConfigsIn(ast: { program: { body: Statement[] } }): SessionConfigSite[] {
+  const locals = gurenLocals(ast.program.body, SESSION_CONFIG_TYPE)
+  const helpers = gurenLocals(ast.program.body, SESSION_DEFINITION_HELPER)
+  if (locals.size === 0 && helpers.size === 0) return []
+
+  const found: SessionConfigSite[] = []
   walk(ast.program, (node) => {
-    if (node.type !== 'VariableDeclarator') return
-    const config = declaredSessionConfig(node, locals)
-    if (config) found.push({ config, line: node.loc?.start.line ?? 0 })
+    const line = node.loc?.start.line ?? 0
+    const declared = node.type === 'VariableDeclarator' ? declaredSessionConfig(node, locals) : undefined
+    if (declared) found.push({ config: declared, line, form: 'declared' })
+    const defined = node.type === 'CallExpression' ? definedSessionConfig(node, helpers) : undefined
+    if (defined) found.push({ config: defined, line, form: 'defined' })
   })
   return found
 }
