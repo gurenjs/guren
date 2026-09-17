@@ -8,7 +8,8 @@ const env = defineEnv({
   SESSION_DRIVER: Env.string().default('database'),
   OAUTH_GITHUB_CLIENT_ID: Env.string().optional(),
   OAUTH_GITHUB_CLIENT_SECRET: Env.string().secret().optional(),
-  OAUTH_GITHUB_REDIRECT_URI: Env.url().optional(),
+  // Not Env.url(): a malformed value should disable admin login, not fail the whole site's boot.
+  OAUTH_GITHUB_REDIRECT_URI: Env.string().optional(),
   BLOG_ADMIN_GITHUB_ID: Env.string().optional()
     .describe('The one GitHub account id allowed to sign in. Unset refuses everyone in production.'),
 })
