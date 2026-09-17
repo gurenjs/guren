@@ -160,13 +160,13 @@ export async function addAi(options: AddAiOptions = {}): Promise<string[]> {
     )
   }
 
-  const schema = options.conversations === false ? undefined : await appendConversationTables()
+  const tables = options.conversations === false ? 'skipped' : await appendConversationTables()
 
   const created = await writeScaffoldFiles(
     [scaffoldTemplateFile(`ai/${providerName}`, 'config/ai.ts')],
     { ...options, skipExisting: true },
   )
-  if (schema && schema.conversations !== 'no-schema') {
+  if (tables === 'appended' || tables === 'already-declared') {
     await wireConversationStore(providerName)
   }
 
@@ -182,14 +182,15 @@ export async function addAi(options: AddAiOptions = {}): Promise<string[]> {
   await installPackages(provider, Boolean(options.install))
   await warnIfCoreIncompatible()
 
-  if (schema && (schema.conversations === 'appended' || schema.messages === 'appended')) {
+  if (tables === 'appended') {
     const generated = await generateSchemaMigration('create_ai_conversations_tables', 'AI conversation tables')
     consola.info(`Next: ${generated ? '' : 'bun run db:make, then '}bun run db:migrate to create ai_conversations and ai_messages.`)
   }
   return created
 }
 
-async function appendConversationTables(): Promise<{ conversations: AppendSchemaTableResult; messages?: AppendSchemaTableResult }> {
+/** `'appended'` when either table is new, which is what a migration would cover. */
+async function appendConversationTables(): Promise<AppendSchemaTableResult> {
   const manualGuidance = 'conversations stay unconfigured. Run `bunx guren add ai` again after adding db/schema.ts to store them.'
   const conversations = await appendSchemaTable({
     name: 'aiConversations',
@@ -197,7 +198,7 @@ async function appendConversationTables(): Promise<{ conversations: AppendSchema
     imports: CONVERSATIONS_SCHEMA_IMPORTS,
     manualGuidance,
   })
-  if (conversations === 'no-schema') return { conversations }
+  if (conversations === 'no-schema') return conversations
   // Second: its foreign key names aiConversations, which must be declared above it.
   const messages = await appendSchemaTable({
     name: 'aiMessages',
@@ -205,24 +206,22 @@ async function appendConversationTables(): Promise<{ conversations: AppendSchema
     imports: CONVERSATIONS_SCHEMA_IMPORTS,
     manualGuidance,
   })
-  return { conversations, messages }
+  return conversations === 'appended' || messages === 'appended' ? 'appended' : 'already-declared'
 }
 
 /** Point `config/ai.ts` at the tables when it names no store and still has the shape the template gives it. */
 async function wireConversationStore(providerName: string): Promise<void> {
   const source = await readIfExists(process.cwd(), 'config/ai.ts')
-  if (source === null || /\bconversations\s*:/.test(source)) return
+  if (source === null || /^\s*conversations\s*:/m.test(source)) return
 
   const anchor = `  default: '${providerName}',\n`
   if (!source.includes(anchor)) {
     consola.warn(
-      'config/ai.ts is not in the shape guren add ai writes, so conversations were not wired. Add '
-      + "`conversations: { driver: 'database', conversations: aiConversations, messages: aiMessages }` "
-      + `with ${CONVERSATIONS_IMPORT}.`,
+      'config/ai.ts is not in the shape guren add ai writes, so conversations were not wired. '
+      + `Add \`${CONVERSATIONS_ENTRY.trim()}\` with ${CONVERSATIONS_IMPORT}.`,
     )
     return
   }
-  // null when the import is already there.
   const withImport = insertImport(source, CONVERSATIONS_IMPORT) ?? source
   await writeFile(resolve(process.cwd(), 'config/ai.ts'), withImport.replace(anchor, `${anchor}${CONVERSATIONS_ENTRY}`), 'utf8')
   consola.info('Wired config/ai.ts to store conversations in ai_conversations and ai_messages.')

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
-import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { Database } from 'bun:sqlite'
 import {
@@ -11,7 +11,7 @@ import {
   SQLITE_SCHEMA_FIXTURE,
   TSC_TIMEOUT,
   checkTypes,
-  resolvedCompilerOptions,
+  templateCompilerOptions,
   createTempWorkspace,
   linkWorkspaceCore,
   linkWorkspacePackage,
@@ -35,6 +35,15 @@ async function seedApp(options: { env?: boolean; manifest?: Record<string, unkno
     'package.json': JSON.stringify(options.manifest ?? { name: 'app', dependencies: {} }),
     ...(options.env === false ? {} : { 'config/env.ts': ENV_SCHEMA_FIXTURE }),
   })
+}
+
+const CONVERSATIONS_LINE = "  conversations: { driver: 'database', conversations: aiConversations, messages: aiMessages },"
+
+/** The provider package `loadResolvedConfig` imports, from the CLI's own install. */
+async function linkAnthropic(): Promise<void> {
+  const link = join(process.cwd(), 'node_modules/@ai-sdk/anthropic')
+  await mkdir(dirname(link), { recursive: true })
+  await symlink(join(cliRoot, 'node_modules/@ai-sdk/anthropic'), link, 'dir')
 }
 
 /** What `consola.info` printed while `task` ran. */
@@ -166,9 +175,7 @@ describe('guren add ai', () => {
     await seedApp()
     await linkWorkspaceCore(process.cwd())
     await linkWorkspacePackage('plugin-ai', process.cwd())
-    const anthropicLink = join(process.cwd(), 'node_modules/@ai-sdk/anthropic')
-    await mkdir(dirname(anthropicLink), { recursive: true })
-    await symlink(join(cliRoot, 'node_modules/@ai-sdk/anthropic'), anthropicLink, 'dir')
+    await linkAnthropic()
 
     await addAi({})
 
@@ -199,9 +206,7 @@ describe('guren add ai', () => {
       expect(schema.indexOf('export const aiConversations')).toBeLessThan(schema.indexOf('export const aiMessages'))
       const config = await readFile(resolve('config/ai.ts'), 'utf8')
       expect(config).toContain("import { aiConversations, aiMessages } from '../db/schema'")
-      expect(config).toContain(
-        "  default: 'anthropic',\n  conversations: { driver: 'database', conversations: aiConversations, messages: aiMessages },\n",
-      )
+      expect(config).toContain(`  default: 'anthropic',\n${CONVERSATIONS_LINE}\n`)
       expect(lines).toContain('Next: bun run db:make, then bun run db:migrate to create ai_conversations and ai_messages.')
     })
 
@@ -214,6 +219,17 @@ describe('guren add ai', () => {
       expect(schema).toContain('  users,\n  aiConversations,\n  aiMessages,\n}')
       // Ahead of the aggregate, or `schema` names a binding declared below it (TS2448).
       expect(schema.indexOf('export const aiMessages =')).toBeLessThan(schema.indexOf('export const schema ='))
+    })
+
+    it('points at the migration when only the messages table is new', async () => {
+      await seedApp({ schema: PG_SCHEMA_FIXTURE })
+      await addAi({})
+      const schema = await readFile('db/schema.ts', 'utf8')
+      await writeFile('db/schema.ts', schema.slice(0, schema.indexOf('export const aiMessages')))
+
+      const lines = await infoLines(() => addAi({}))
+
+      expect(lines).toContain('Next: bun run db:make, then bun run db:migrate to create ai_conversations and ai_messages.')
     })
 
     const dialects = [
@@ -257,6 +273,8 @@ describe('guren add ai', () => {
       await seedApp()
       await addAi({})
       await writeWorkspaceFiles(process.cwd(), { 'db/schema.ts': PG_SCHEMA_FIXTURE })
+      // Mentioned in a comment only, which names no store.
+      await writeFile('config/ai.ts', `// conversations: added below\n${await readFile('config/ai.ts', 'utf8')}`)
 
       await addAi({})
       await addAi({})
@@ -284,22 +302,28 @@ describe('guren add ai', () => {
     it(
       'emits a schema and config/ai.ts that typecheck in every dialect',
       async () => {
-        const diagnostics: string[] = []
-        for (const fixture of [PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE, MYSQL_SCHEMA_FIXTURE]) {
-          await seedApp({ schema: fixture })
-          await addAi({})
-          const parsed = resolvedCompilerOptions(join(cliRoot, 'tsconfig.templates.json'))
-          diagnostics.push(...checkTypes([resolve('db/schema.ts'), resolve('config/ai.ts'), join(cliRoot, 'tests/fixtures/scaffold-typecheck/ai/config/env.ts')], {
-            ...parsed,
-            rootDirs: undefined,
-            typeRoots: [join(cliRoot, '../../node_modules'), join(cliRoot, 'node_modules/@types')],
-            types: ['bun-types'],
-            paths: { ...parsed.paths, '@ai-sdk/anthropic': [join(cliRoot, 'node_modules/@ai-sdk/anthropic')] },
-          }))
-          await rm('config', { recursive: true })
-          await rm('db', { recursive: true })
+        // One app per dialect, each on a different provider, so every template's anchor is wired too.
+        const apps = [['pg', PG_SCHEMA_FIXTURE, 'anthropic'], ['sqlite', SQLITE_SCHEMA_FIXTURE, 'openai'], ['mysql', MYSQL_SCHEMA_FIXTURE, 'gateway']] as const
+        const root = process.cwd()
+        const files = [join(cliRoot, 'tests/fixtures/scaffold-typecheck/ai/config/env.ts')]
+        for (const [dir, schema, provider] of apps) {
+          await mkdir(dir)
+          process.chdir(dir)
+          try {
+            await seedApp({ schema })
+            await addAi({ provider })
+            expect(await readFile('config/ai.ts', 'utf8')).toContain(CONVERSATIONS_LINE)
+            files.push(resolve('db/schema.ts'), resolve('config/ai.ts'))
+          } finally {
+            process.chdir(root)
+          }
         }
-        expect(diagnostics).toEqual([])
+
+        expect(checkTypes(files, templateCompilerOptions({
+          '@ai-sdk/anthropic': [join(cliRoot, 'node_modules/@ai-sdk/anthropic')],
+          '@ai-sdk/openai': [join(cliRoot, 'node_modules/@ai-sdk/openai')],
+          ai: [join(cliRoot, 'node_modules/ai')],
+        }))).toEqual([])
       },
       TSC_TIMEOUT,
     )
@@ -308,9 +332,7 @@ describe('guren add ai', () => {
     it('writes SQLite tables the database store reads and writes', async () => {
       await seedApp({ schema: SQLITE_SCHEMA_FIXTURE })
       for (const name of ['core', 'orm', 'plugin-ai']) await linkWorkspacePackage(name, process.cwd())
-      const anthropicLink = join(process.cwd(), 'node_modules/@ai-sdk/anthropic')
-      await mkdir(dirname(anthropicLink), { recursive: true })
-      await symlink(join(cliRoot, 'node_modules/@ai-sdk/anthropic'), anthropicLink, 'dir')
+      await linkAnthropic()
 
       await addAi({})
 

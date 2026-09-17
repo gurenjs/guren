@@ -555,6 +555,22 @@ const TSC_BIN = join(repoRoot, 'node_modules/typescript/bin/tsc')
  * every relative path made absolute against the config's directory, since
  * {@link checkTypes} writes its own tsconfig elsewhere.
  */
+/**
+ * The scaffold templates' compiler options for {@link checkTypes} over files a command wrote
+ * into a temp app: the workspace sources, bun types, and `paths` for what the app installs.
+ */
+export function templateCompilerOptions(paths: Record<string, string[]> = {}): TsconfigCompilerOptions {
+  const cliRoot = join(repoRoot, 'packages/cli')
+  const parsed = resolvedCompilerOptions(join(cliRoot, 'tsconfig.templates.json'))
+  return {
+    ...parsed,
+    rootDirs: undefined,
+    typeRoots: [join(repoRoot, 'node_modules'), join(cliRoot, 'node_modules/@types')],
+    types: ['bun-types'],
+    paths: { ...parsed.paths, ...paths },
+  }
+}
+
 export function resolvedCompilerOptions(configPath: string): TsconfigCompilerOptions {
   const spawnOptions = { cwd: dirname(configPath), stdout: 'pipe', stderr: 'pipe' } as const
   // --showConfig exits 0 and prints whatever it could read, so a config that
