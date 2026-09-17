@@ -6,16 +6,18 @@
  * cannot rewrite still yields the hint, with `content` null.
  */
 import { dirname, relative, resolve } from 'node:path'
-import type { File, Node } from '@babel/types'
-import { objectLiteral, topLevelDeclaration, unwrapTypeAssertion, type BabelNode } from './ast-walk'
-import { callsDefineConfig, collectFiles, readIfExists, toPosixRelative } from './discovery'
+import type { File, ImportDeclaration, Node } from '@babel/types'
+import { ENV_SCHEMA_FILE } from './app-env'
+import { memberKeyName, objectLiteral, topLevelDeclaration, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
+import { callsDefineConfig, discoverProviderFiles, readIfExists, toPosixRelative } from './discovery'
 import { parseSourceFile } from './parse-cache'
 import { sessionConfigsIn } from './session-config'
+import { escapeSingleQuoted } from './utils'
 
 export interface EnvDeclaration {
   readonly key: string
-  /** The builder chain, e.g. `Env.string().default('memory')`. */
-  readonly builder: string
+  /** The builder chain, e.g. `Env.string().default('memory')`, as `insertCallOptions` takes it. */
+  readonly source: string
 }
 
 export interface ConfigMigration {
@@ -37,63 +39,78 @@ const PROVIDER_SERVICES = [
   { key: 'storage', factory: 'createStorageManager', helper: 'defineStorageConfig' },
 ] as const
 
-type Span = { start: number; end: number; text: string }
+const BINDING_METHODS = new Set(['instance', 'singleton', 'bind'])
 
-interface Rewritten {
-  text: string
-  env: Map<string, EnvDeclaration>
+interface SourceFile {
+  readonly path: string
+  readonly source: string
 }
 
 export async function detectConfigMigrations(cwd: string): Promise<ConfigMigration[]> {
-  const providerFiles = (await collectFiles(resolve(cwd, 'app/Providers'))).filter((file) => !/\.test\.[jt]sx?$/.test(file))
+  const providers: SourceFile[] = []
+  for (const path of await discoverProviderFiles(cwd)) {
+    const source = await readIfExists(cwd, path)
+    if (source !== null) providers.push({ path, source })
+  }
   const migrations: ConfigMigration[] = []
 
   for (const service of PROVIDER_SERVICES) {
     if (callsDefineConfig((await readIfExists(cwd, `config/${service.key}.ts`)) ?? '', service.key)) continue
-    for (const file of providerFiles) {
-      const migration = await providerMigration(cwd, file, service)
-      if (migration) {
-        migrations.push(migration)
-        break
-      }
-    }
+    const migration = providers.map((file) => providerMigration(cwd, file, service)).find((found) => found !== null)
+    if (migration) migrations.push(migration)
   }
 
-  const session = await sessionMigration(cwd, providerFiles)
+  const session = await sessionMigration(cwd, providers)
   if (session) migrations.push(session)
 
-  const database = await databaseMigration(cwd, providerFiles)
+  const database = await databaseMigration(cwd, providers)
   if (database) migrations.push(database)
 
   return migrations
 }
 
-/** The keys a migration needs that `config/env.ts` does not declare yet, merged across migrations. */
-export async function undeclaredEnv(cwd: string, migrations: readonly ConfigMigration[]): Promise<EnvDeclaration[]> {
-  const schema = (await readIfExists(cwd, 'config/env.ts')) ?? ''
-  const merged = new Map<string, EnvDeclaration>()
+/** Whether `config/env.ts` exists, and the variables the migrations read that its `defineEnv()` call does not declare. */
+export async function undeclaredEnv(
+  cwd: string,
+  migrations: readonly ConfigMigration[],
+): Promise<{ exists: boolean; missing: EnvDeclaration[] }> {
+  const schema = await readIfExists(cwd, ENV_SCHEMA_FILE)
+  const declared = schema === null ? new Set<string>() : declaredEnvKeys(schema)
+  const missing = new Map<string, EnvDeclaration>()
   for (const declaration of migrations.flatMap((migration) => migration.env)) {
-    if (new RegExp(`\\b${declaration.key}\\s*:`).test(schema)) continue
-    const existing = merged.get(declaration.key)
-    if (!existing || existing.builder.endsWith('.optional()')) merged.set(declaration.key, declaration)
+    if (declared.has(declaration.key)) continue
+    const existing = missing.get(declaration.key)
+    if (!existing || existing.source.startsWith('Env.string().optional()')) missing.set(declaration.key, declaration)
   }
-  return [...merged.values()]
+  return { exists: schema !== null, missing: [...missing.values()] }
 }
 
-async function providerMigration(
-  cwd: string,
-  file: string,
-  service: (typeof PROVIDER_SERVICES)[number],
-): Promise<ConfigMigration | null> {
-  const source = await readIfExists(cwd, file)
-  if (!source?.includes(`${service.factory}(`) || !/extends\s+ServiceProvider\b/.test(source)) return null
-  const ast = parseSourceFile(source, file)
+function declaredEnvKeys(schema: string): Set<string> {
+  const keys = new Set<string>()
+  const ast = parseSourceFile(schema, ENV_SCHEMA_FILE)
+  if (!ast) return keys
+  walk(ast.program, (node) => {
+    const callee = node.callee as BabelNode | undefined
+    if (node.type !== 'CallExpression' || callee?.type !== 'Identifier' || callee.name !== 'defineEnv') return
+    const object = objectLiteral((node.arguments as Node[])[0])
+    for (const property of object?.properties ?? []) {
+      const name = property.type === 'ObjectProperty' ? memberKeyName(property) : undefined
+      if (name) keys.add(name)
+    }
+  })
+  return keys
+}
+
+function providerMigration(cwd: string, file: SourceFile, service: (typeof PROVIDER_SERVICES)[number]): ConfigMigration | null {
+  const { source } = file
+  if (!source.includes(`${service.factory}(`) || !/extends\s+ServiceProvider\b/.test(source)) return null
+  const ast = parseSourceFile(source, file.path)
   if (!ast) return null
 
-  const call = findCall(ast, service.factory)
+  const call = boundFactoryCall(ast, service.key, service.factory)
   if (!call) return null
 
-  const legacyFile = toPosixRelative(cwd, file)
+  const legacyFile = toPosixRelative(cwd, file.path)
   const target = `config/${service.key}.ts`
   const notes: string[] = []
   if (/\bthrow\s+new\s+Error\(/.test(source)) {
@@ -109,52 +126,55 @@ async function providerMigration(
     return { key: service.key, legacyFiles: [legacyFile], target, content: null, env: [], notes }
   }
 
-  const body = rewriteEnvReads(source, [...config.declarations, config.object])
-  const imports = carriedImports(ast, source, body.text, resolve(cwd, file), resolve(cwd, target), [service.factory, 'ServiceProvider'])
-  const content = renderDefinition(service.helper, imports, body, config.declarations.length)
-  return { key: service.key, legacyFiles: [legacyFile], target, content, env: [...body.env.values()], notes }
+  const rendered = renderDefinition(ast, source, {
+    helper: service.helper,
+    declarations: config.declarations,
+    object: config.object,
+    from: resolve(cwd, file.path),
+    to: resolve(cwd, target),
+    dropped: [service.factory, 'ServiceProvider'],
+  })
+  return { key: service.key, legacyFiles: [legacyFile], target, content: rendered.text, env: rendered.env, notes }
 }
 
-async function sessionMigration(cwd: string, providerFiles: readonly string[]): Promise<ConfigMigration | null> {
-  const source = await readIfExists(cwd, 'config/session.ts')
+async function sessionMigration(cwd: string, providers: readonly SourceFile[]): Promise<ConfigMigration | null> {
+  const target = 'config/session.ts'
+  const source = await readIfExists(cwd, target)
   if (!source?.includes('SessionConfig')) return null
-  const ast = parseSourceFile(source, 'config/session.ts')
+  const ast = parseSourceFile(source, target)
   if (!ast) return null
 
   const site = sessionConfigsIn(ast).find((candidate) => candidate.form === 'declared')
   if (!site) return null
 
-  const providers: string[] = []
-  for (const file of providerFiles) {
-    if ((await readIfExists(cwd, file))?.includes('createSessionManager(')) providers.push(toPosixRelative(cwd, file))
-  }
-
-  const target = resolve(cwd, 'config/session.ts')
-  const body = rewriteEnvReads(source, [site.config as unknown as Node])
-  const imports = carriedImports(ast, source, body.text, target, target, ['SessionConfig'])
+  const path = resolve(cwd, target)
+  const rendered = renderDefinition(ast, source, {
+    helper: 'defineSessionConfig',
+    declarations: [],
+    object: site.config as unknown as Node,
+    from: path,
+    to: path,
+    dropped: ['SessionConfig'],
+  })
   return {
     key: 'session',
-    legacyFiles: ['config/session.ts', ...providers],
-    target: 'config/session.ts',
-    content: renderDefinition('defineSessionConfig', imports, body, 0),
-    env: [...body.env.values()],
+    legacyFiles: [target, ...providersContaining(cwd, providers, 'createSessionManager(')],
+    target,
+    content: rendered.text,
+    env: rendered.env,
     notes: [],
   }
 }
 
-async function databaseMigration(cwd: string, providerFiles: readonly string[]): Promise<ConfigMigration | null> {
+async function databaseMigration(cwd: string, providers: readonly SourceFile[]): Promise<ConfigMigration | null> {
   const source = await readIfExists(cwd, 'config/app.ts')
   if (!source || !/export\s+(?:async\s+)?function\s+bootModels\b/.test(source)) return null
-
-  const providers: string[] = []
-  for (const file of providerFiles) {
-    if ((await readIfExists(cwd, file))?.includes('bootModels')) providers.push(toPosixRelative(cwd, file))
-  }
+  if (callsDefineConfig((await readIfExists(cwd, 'config/database.ts')) ?? '', 'database')) return null
 
   const options = source.includes('seedDatabase(') ? ", { seedOnBoot: process.env.NODE_ENV !== 'production' }" : ''
   return {
     key: 'database',
-    legacyFiles: ['config/app.ts', ...providers],
+    legacyFiles: ['config/app.ts', ...providersContaining(cwd, providers, 'bootModels')],
     target: 'config/database.ts',
     content: `import { defineDatabaseConfig } from '@guren/core'\n\n// Name the dialect factory's result \`database\`, keep its named exports, and add:\nexport default defineDatabaseConfig(database${options})\n`,
     env: [],
@@ -162,17 +182,51 @@ async function databaseMigration(cwd: string, providerFiles: readonly string[]):
   }
 }
 
-function findCall(ast: File, callee: string): BabelNode | null {
+function providersContaining(cwd: string, providers: readonly SourceFile[], needle: string): string[] {
+  return providers.filter((file) => file.source.includes(needle)).map((file) => toPosixRelative(cwd, file.path))
+}
+
+/**
+ * The factory call behind the container binding for `key`: inside the bound
+ * value, or the initializer of the local it names. A second manager bound under
+ * another key is not the service's configuration.
+ */
+function boundFactoryCall(ast: File, key: string, factory: string): BabelNode | null {
   let found: BabelNode | null = null
-  visit(ast.program, null, (node) => {
-    if (found) return
-    const target = node.callee as BabelNode | undefined
-    if (node.type === 'CallExpression' && target?.type === 'Identifier' && target.name === callee) found = node
+  walk(ast.program, (node) => {
+    if (found) return false
+    const callee = node.callee as BabelNode | undefined
+    const method = callee?.type === 'MemberExpression' ? (callee.property as BabelNode) : undefined
+    if (node.type !== 'CallExpression' || method?.type !== 'Identifier' || !BINDING_METHODS.has(method.name as string)) return
+    const [name, value] = node.arguments as BabelNode[]
+    if (name?.type !== 'StringLiteral' || name.value !== key || !value) return
+
+    const bound = value.type === 'Identifier' ? localInitializer(ast, value.name as string) : value
+    found = bound ? factoryCallIn(bound, factory) : null
   })
   return found
 }
 
-/** The object a factory receives, directly or through top-level `const`s, with the declarations it needs. */
+function localInitializer(ast: File, name: string): BabelNode | null {
+  let init: BabelNode | null = null
+  walk(ast.program, (node) => {
+    const id = node.id as BabelNode | undefined
+    if (node.type === 'VariableDeclarator' && id?.type === 'Identifier' && id.name === name && node.init) init = node.init as BabelNode
+  })
+  return init
+}
+
+function factoryCallIn(root: BabelNode, factory: string): BabelNode | null {
+  let found: BabelNode | null = null
+  walk(root, (node) => {
+    if (found) return false
+    const callee = node.callee as BabelNode | undefined
+    if (node.type === 'CallExpression' && callee?.type === 'Identifier' && callee.name === factory) found = node
+  })
+  return found
+}
+
+/** The object a factory receives, directly or through a top-level `const`, with the top-level consts it references. */
 function configExpression(ast: File, argument: Node): { object: Node; declarations: Node[] } | null {
   const topLevel = new Map<string, Node>()
   for (const statement of ast.program.body) {
@@ -185,61 +239,93 @@ function configExpression(ast: File, argument: Node): { object: Node; declaratio
 
   const unwrapped = unwrapTypeAssertion(argument)
   const viaConst = unwrapped.type === 'Identifier' ? topLevel.get(unwrapped.name) : undefined
-  const object = objectLiteral(unwrapped) ?? (viaConst && unwrapped.type === 'Identifier' ? objectLiteral(declaredInit(viaConst, unwrapped.name)) : null)
+  const object = objectLiteral(unwrapped) ?? (viaConst ? objectLiteral(declaredInit(viaConst, (unwrapped as { name: string }).name)) : null)
   if (!object) return null
 
   const needed = new Set<Node>()
   const pending: Node[] = [object]
   while (pending.length > 0) {
-    visit(pending.pop(), null, (node) => {
-      if (node.type !== 'Identifier') return
-      const declaration = topLevel.get(node.name as string)
-      if (declaration && !needed.has(declaration)) {
+    for (const name of referencedNames(pending.pop())) {
+      const declaration = topLevel.get(name)
+      if (declaration && declaration !== viaConst && !needed.has(declaration)) {
         needed.add(declaration)
         pending.push(declaration)
       }
-    })
+    }
   }
-  // The const the factory received is inlined as the object, so it is not declared again.
-  const declarations = [...needed].filter((node) => node !== viaConst).sort((a, b) => (a.start ?? 0) - (b.start ?? 0))
-  return { object, declarations }
+  return { object, declarations: [...needed].sort((a, b) => (a.start ?? 0) - (b.start ?? 0)) }
 }
 
-function declaredInit(declaration: Node | undefined, name: string): Node | undefined {
-  if (declaration?.type !== 'VariableDeclaration') return undefined
+function declaredInit(declaration: Node, name: string): Node | undefined {
+  if (declaration.type !== 'VariableDeclaration') return undefined
   return declaration.declarations.find((declarator) => declarator.id.type === 'Identifier' && declarator.id.name === name)?.init ?? undefined
 }
 
-/** `process.env.X || 'y'` becomes `env.X` declared with its default; a bare read becomes optional. */
-function rewriteEnvReads(source: string, nodes: readonly Node[]): Rewritten {
+/** Identifiers read as values: not a property key, not a non-computed member name. */
+function referencedNames(root: unknown): Set<string> {
+  const names = new Set<string>()
+  walk(root, (node, parent) => {
+    if (node.type !== 'Identifier') return
+    if ((parent?.type === 'ObjectProperty' || parent?.type === 'ObjectMethod') && parent.key === node && !parent.computed && !parent.shorthand) return
+    if ((parent?.type === 'MemberExpression' || parent?.type === 'OptionalMemberExpression') && parent.property === node && !parent.computed) return
+    names.add(node.name as string)
+  })
+  return names
+}
+
+interface RenderInput {
+  readonly helper: string
+  readonly declarations: readonly Node[]
+  readonly object: Node
+  readonly from: string
+  readonly to: string
+  readonly dropped: readonly string[]
+}
+
+function renderDefinition(ast: File, source: string, input: RenderInput): { text: string; env: EnvDeclaration[] } {
+  const nodes = [...input.declarations, input.object]
+  const names = new Set(nodes.flatMap((node) => [...referencedNames(node)]))
+  const imported = ast.program.body.flatMap((statement) => statement.type === 'ImportDeclaration' ? statement.specifiers.map((entry) => entry.local.name) : [])
+  // The callback parameter must not capture a binding the carried code already names `env`.
+  const parameter = names.has('env') || imported.includes('env') ? 'validatedEnv' : 'env'
+
   const env = new Map<string, EnvDeclaration>()
-  const pieces: string[] = []
+  const pieces = nodes.map((node) => dedent(rewriteEnvReads(source, node, parameter, env)))
+  const object = pieces.pop() ?? '{}'
+  const body = pieces.join('\n\n')
 
-  for (const node of nodes) {
-    const start = node.start ?? 0
-    const replacements: Span[] = []
-    visit(node, null, (current, parent) => {
-      const key = envKey(current)
-      if (!key || key === 'NODE_ENV' || key.startsWith('GUREN_')) return
-      const fallback = parent?.type === 'LogicalExpression' && (parent.operator === '||' || parent.operator === '??') && parent.left === current
-        ? literal(parent.right as BabelNode)
-        : undefined
-      const span = fallback ? parent! : current
-      replacements.push({ start: (span.start as number) - start, end: (span.end as number) - start, text: `env.${key}` })
-      // `??` kept a blank value, which a default alone would replace.
-      const blank = parent?.operator === '??' ? '.allowEmpty()' : ''
-      if (fallback) env.set(key, { key, builder: `${fallback.builder}.default(${fallback.source})${blank}` })
-      else if (!env.has(key)) env.set(key, { key, builder: 'Env.string().optional()' })
-    })
+  const imports = carriedImports(ast, source, names, input)
+  const header = [`import { ${[input.helper, ...imports.core].join(', ')} } from '@guren/core'`, ...imports.lines].join('\n')
+  const signature = env.size > 0 ? `(${parameter})` : '()'
+  const callback = pieces.length === 0
+    ? `${signature} => (${object})`
+    : `${signature} => {\n${indent(body)}\n\n${indent(`return ${object}`)}\n}`
+  return { text: `${header}\n\nexport default ${input.helper}(${callback})\n`, env: [...env.values()] }
+}
 
-    let text = source.slice(start, node.end ?? start)
-    for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
-      text = text.slice(0, replacement.start) + replacement.text + text.slice(replacement.end)
-    }
-    pieces.push(dedent(text))
+/** `process.env.X || 'y'` becomes `env.X` declared with its default; a bare read becomes optional. */
+function rewriteEnvReads(source: string, node: Node, parameter: string, env: Map<string, EnvDeclaration>): string {
+  const start = node.start ?? 0
+  const replacements: { start: number; end: number; key: string }[] = []
+  walk(node, (current, parent) => {
+    const key = envKey(current)
+    if (!key || key === 'NODE_ENV' || key.startsWith('GUREN_')) return
+    const logical = parent?.type === 'LogicalExpression' && (parent.operator === '||' || parent.operator === '??') && parent.left === current
+    const fallback = logical ? literalSource(parent.right as BabelNode) : undefined
+    const span = fallback ? parent! : current
+    replacements.push({ start: (span.start as number) - start, end: (span.end as number) - start, key })
+    // `??` kept a blank value, which the schema would otherwise read as unset.
+    const blank = logical && parent.operator === '??' ? '.allowEmpty()' : ''
+    if (fallback) env.set(key, { key, source: `${fallback.builder}.default(${fallback.value})${blank}` })
+    else if (!env.has(key)) env.set(key, { key, source: `Env.string().optional()${blank}` })
+    return false
+  })
+
+  let text = source.slice(start, node.end ?? start)
+  for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
+    text = `${text.slice(0, replacement.start)}${parameter}.${replacement.key}${text.slice(replacement.end)}`
   }
-
-  return { text: pieces.join('\n\n'), env }
+  return text
 }
 
 function envKey(node: BabelNode): string | undefined {
@@ -252,55 +338,54 @@ function envKey(node: BabelNode): string | undefined {
   return node.computed && property.type === 'StringLiteral' ? (property.value as string) : undefined
 }
 
-function literal(node: BabelNode | undefined): { builder: string; source: string } | undefined {
-  if (node?.type === 'StringLiteral') return { builder: 'Env.string()', source: JSON.stringify(node.value).replace(/^"|"$/g, "'") }
-  if (node?.type === 'NumericLiteral') return { builder: 'Env.number()', source: String(node.value) }
-  if (node?.type === 'BooleanLiteral') return { builder: 'Env.boolean()', source: String(node.value) }
+function literalSource(node: BabelNode | undefined): { builder: string; value: string } | undefined {
+  if (node?.type === 'StringLiteral') return { builder: 'Env.string()', value: `'${escapeSingleQuoted(node.value as string)}'` }
+  if (node?.type === 'NumericLiteral') return { builder: 'Env.number()', value: String(node.value) }
+  if (node?.type === 'BooleanLiteral') return { builder: 'Env.boolean()', value: String(node.value) }
   return undefined
 }
 
-/** The file's imports the definition body still references, with relative specifiers re-rooted at the target. */
-function carriedImports(ast: File, source: string, body: string, from: string, to: string, dropped: readonly string[]): string[] {
-  const lines: string[] = []
+/** The file's imports the definition still references, with relative specifiers re-rooted at the target. */
+function carriedImports(ast: File, source: string, bodyNames: ReadonlySet<string>, input: RenderInput): { core: string[]; lines: string[] } {
   const core: string[] = []
+  const lines: string[] = []
+
   for (const statement of ast.program.body) {
     if (statement.type !== 'ImportDeclaration') continue
-    const specifier = statement.source.value
-    const kept = statement.specifiers.filter((entry) => !dropped.includes(entry.local.name) && new RegExp(`\\b${entry.local.name}\\b`).test(body))
+    const kept = statement.specifiers.filter((entry) => !input.dropped.includes(entry.local.name) && bodyNames.has(entry.local.name))
     if (kept.length === 0) continue
 
-    if (specifier === '@guren/core' && kept.every((entry) => entry.type === 'ImportSpecifier')) {
-      core.push(...kept.map((entry) => source.slice(entry.start ?? 0, entry.end ?? 0)))
+    const specifier = statement.source.value
+    const named = kept.filter((entry) => entry.type === 'ImportSpecifier')
+    const typeOnly = statement.importKind === 'type' || named.some((entry) => entry.importKind === 'type')
+    if (specifier === '@guren/core' && !typeOnly && named.length === kept.length) {
+      core.push(...named.map((entry) => source.slice(entry.start ?? 0, entry.end ?? 0)))
       continue
     }
-    const rerooted = specifier.startsWith('.')
-      ? normalizeRelative(relative(dirname(to), resolve(dirname(from), specifier)))
-      : specifier
-    const names = kept.map((entry) => source.slice(entry.start ?? 0, entry.end ?? 0))
-    const defaultName = kept.find((entry) => entry.type === 'ImportDefaultSpecifier')
-    const named = names.filter((_, index) => kept[index] !== defaultName)
-    const clause = [defaultName ? defaultName.local.name : null, named.length > 0 ? `{ ${named.join(', ')} }` : null].filter(Boolean).join(', ')
-    lines.push(`import ${statement.importKind === 'type' ? 'type ' : ''}${clause} from '${rerooted}'`)
+
+    const from = specifier.startsWith('.') ? normalizeRelative(relative(dirname(input.to), resolve(dirname(input.from), specifier))) : specifier
+    lines.push(...importLines(statement, kept, source, from))
   }
-  return [core.join(', '), ...lines]
+  return { core, lines }
+}
+
+/** A default and a namespace import share a line; named imports cannot follow a namespace one. */
+function importLines(statement: ImportDeclaration, kept: ImportDeclaration['specifiers'], source: string, from: string): string[] {
+  const prefix = statement.importKind === 'type' ? 'import type ' : 'import '
+  const defaultName = kept.find((entry) => entry.type === 'ImportDefaultSpecifier')?.local.name
+  const namespace = kept.find((entry) => entry.type === 'ImportNamespaceSpecifier')?.local.name
+  const named = kept.filter((entry) => entry.type === 'ImportSpecifier').map((entry) => source.slice(entry.start ?? 0, entry.end ?? 0))
+  if (namespace) {
+    const lead = [defaultName, `* as ${namespace}`].filter(Boolean).join(', ')
+    return [`${prefix}${lead} from '${from}'`, ...(named.length > 0 ? [`${prefix}{ ${named.join(', ')} } from '${from}'`] : [])]
+  }
+  const clause = [defaultName, named.length > 0 ? `{ ${named.join(', ')} }` : undefined].filter(Boolean).join(', ')
+  return [`${prefix}${clause} from '${from}'`]
 }
 
 function normalizeRelative(path: string): string {
   const posix = path.replace(/\\/g, '/')
   return posix.startsWith('.') ? posix : `./${posix}`
-}
-
-function renderDefinition(helper: string, imports: string[], body: Rewritten, declarationCount: number): string {
-  const [core, ...rest] = imports
-  const coreNames = [helper, ...(core ? [core] : [])].join(', ')
-  const header = [`import { ${coreNames} } from '@guren/core'`, ...rest].join('\n')
-  const parameter = body.env.size > 0 ? '(env)' : '()'
-  const segments = body.text.split('\n\n')
-  const object = segments.pop() ?? '{}'
-  const callback = declarationCount === 0
-    ? `${parameter} => (${object})`
-    : `${parameter} => {\n${indent(segments.join('\n\n'))}\n\n  return ${object}\n}`
-  return `${header}\n\nexport default ${helper}(${callback})\n`
 }
 
 /** A slice keeps its source indentation after the first line; strip the indentation common to those lines. */
@@ -313,19 +398,4 @@ function dedent(text: string): string {
 
 function indent(text: string): string {
   return text.split('\n').map((line) => (line.length > 0 ? `  ${line}` : line)).join('\n')
-}
-
-function visit(value: unknown, parent: BabelNode | null, callback: (node: BabelNode, parent: BabelNode | null) => void): void {
-  if (Array.isArray(value)) {
-    for (const item of value) visit(item, parent, callback)
-    return
-  }
-  if (value === null || typeof value !== 'object') return
-  const node = value as BabelNode
-  if (typeof node.type !== 'string') return
-  callback(node, parent)
-  for (const key in node) {
-    if (key === 'loc' || key.endsWith('Comments')) continue
-    visit(node[key], node, callback)
-  }
 }

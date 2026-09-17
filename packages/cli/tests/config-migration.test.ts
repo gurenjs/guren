@@ -2,7 +2,8 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { suggestNextSteps } from '../src/doctor'
-import { detectConfigMigrations } from '../src/config-migration'
+import { detectConfigMigrations, undeclaredEnv } from '../src/config-migration'
+import { parseSourceFile } from '../src/parse-cache'
 import { createTempWorkspace, linkWorkspaceCore, type TempWorkspace, writeWorkspaceFiles } from './helpers'
 
 const SCAFFOLD = resolve(import.meta.dir, '../templates/scaffold')
@@ -108,7 +109,7 @@ describe('guren doctor --next config migration (RFC 0027 Migration Path)', () =>
     expect(migration?.content).toContain("import { sessions } from '../db/schema'")
     expect(migration?.content).toContain('default: env.SESSION_DRIVER,')
     expect(migration?.content).not.toContain('SessionConfig =')
-    expect(migration?.env).toEqual([{ key: 'SESSION_DRIVER', builder: "Env.string().default('database')" }])
+    expect(migration?.env).toEqual([{ key: 'SESSION_DRIVER', source: "Env.string().default('database')" }])
   })
 
   it('declares only the variables config/env.ts lacks', async () => {
@@ -139,5 +140,114 @@ describe('guren doctor --next config migration (RFC 0027 Migration Path)', () =>
     const steps = await suggestNextSteps({ cwd: workspace.dir })
     expect(steps.find((step) => step.filePath === 'config/cache.ts')?.description).toContain('could not be read')
     expect(await readFile(join(workspace.dir, 'app/Providers/CacheProvider.ts'), 'utf8')).toContain('createCacheManager(cacheConfig())')
+  })
+})
+
+describe('config migration hazards', () => {
+  async function cacheMigration(provider: string, extra: Record<string, string> = {}) {
+    await writeWorkspaceFiles(workspace.dir, { 'app/Providers/CacheProvider.ts': provider, ...extra })
+    const migrations = await detectConfigMigrations(workspace.dir)
+    const migration = migrations.find((entry) => entry.key === 'cache')
+    expect(migration?.content).toBeDefined()
+    expect(parseSourceFile(migration!.content!, 'config/cache.ts')).not.toBeNull()
+    return migration!
+  }
+
+  it('reads the manager bound under the service key, not another one the provider builds', async () => {
+    const migration = await cacheMigration(`import { ServiceProvider, createCacheManager } from '@guren/core'
+
+export default class CacheProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('cache.reporting', () => createCacheManager({ default: 'memory', stores: { memory: { driver: 'memory' } } }))
+    this.container.singleton('cache', () => createCacheManager({ default: process.env.CACHE_STORE || 'redis', stores: { redis: { driver: 'memory' } } }))
+  }
+}
+`)
+    expect(migration.content).toContain('default: env.CACHE_STORE,')
+    expect(migration.env).toEqual([{ key: 'CACHE_STORE', source: "Env.string().default('redis')" }])
+  })
+
+  it('does not carry a top-level const that only shares a name with a property key', async () => {
+    const migration = await cacheMigration(`import { ServiceProvider, createCacheManager } from '@guren/core'
+
+const driver = expensiveSideEffect()
+
+export default class CacheProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('cache', createCacheManager({ stores: { memory: { driver: 'memory' } } }))
+  }
+}
+`)
+    expect(migration.content).not.toContain('expensiveSideEffect')
+  })
+
+  it('keeps namespace and type-only imports valid, re-rooted at config/', async () => {
+    const migration = await cacheMigration(`import { ServiceProvider, createCacheManager } from '@guren/core'
+import type { CacheConfig } from '@guren/core'
+import * as Redis from '../../lib/redis.js'
+
+const stores: CacheConfig['stores'] = { redis: { driver: 'redis', client: () => Redis.client() } }
+
+export default class CacheProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('cache', createCacheManager({ default: 'redis', stores }))
+  }
+}
+`)
+    expect(migration.content).toContain("import { defineCacheConfig } from '@guren/core'")
+    expect(migration.content).toContain("import type { CacheConfig } from '@guren/core'")
+    expect(migration.content).toContain("import * as Redis from '../lib/redis.js'")
+  })
+
+  it('names the callback parameter so it does not capture a local called env', async () => {
+    const migration = await cacheMigration(`import { ServiceProvider, createCacheManager } from '@guren/core'
+import env from '../../lib/env.js'
+
+export default class CacheProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('cache', createCacheManager({ default: process.env.CACHE_STORE || env.fallbackStore }))
+  }
+}
+`)
+    expect(migration.content).toContain('defineCacheConfig((validatedEnv) =>')
+    expect(migration.content).toContain('default: validatedEnv.CACHE_STORE || env.fallbackStore')
+    expect(migration.content).toContain("import env from '../lib/env.js'")
+  })
+
+  it('keeps a blank line inside the config and escapes a quoted default', async () => {
+    const migration = await cacheMigration(`import { ServiceProvider, createCacheManager } from '@guren/core'
+
+export default class CacheProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('cache', createCacheManager({
+      default: process.env.CACHE_STORE || "o'clock",
+
+      stores: { "o'clock": { driver: 'memory' } },
+    }))
+  }
+}
+`)
+    expect(migration.env).toEqual([{ key: 'CACHE_STORE', source: "Env.string().default('o\\'clock')" }])
+    expect(migration.content).toContain('stores: {')
+  })
+
+  it('finds a provider inside a module, and ignores a key named only in a comment of config/env.ts', async () => {
+    await writeWorkspaceFiles(workspace.dir, {
+      'modules/billing/app/Providers/CacheProvider.ts': "import { ServiceProvider, createCacheManager } from '@guren/core'\n\nexport default class CacheProvider extends ServiceProvider {\n  register(): void {\n    this.container.instance('cache', createCacheManager({ default: process.env.CACHE_STORE || 'memory' }))\n  }\n}\n",
+      'config/env.ts': "import { defineEnv } from '@guren/core'\n\n// CACHE_STORE: kept for reference\nexport default defineEnv({})\n",
+    })
+
+    const migrations = await detectConfigMigrations(workspace.dir)
+    expect(migrations.map((migration) => migration.legacyFiles)).toEqual([['modules/billing/app/Providers/CacheProvider.ts']])
+    expect((await undeclaredEnv(workspace.dir, migrations)).missing.map((entry) => entry.key)).toEqual(['CACHE_STORE'])
+  })
+
+  it('leaves bootModels alone once config/database.ts is a definition', async () => {
+    await writeWorkspaceFiles(workspace.dir, {
+      'config/app.ts': 'export async function bootModels(): Promise<void> {}\n',
+      'config/database.ts': "import { defineDatabaseConfig } from '@guren/core'\nexport default defineDatabaseConfig(database)\n",
+    })
+
+    expect(await detectConfigMigrations(workspace.dir)).toEqual([])
   })
 })

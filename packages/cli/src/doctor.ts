@@ -1504,8 +1504,7 @@ async function configMigrationSteps(cwd: string): Promise<Omit<NextStep, 'priori
   if (migrations.length === 0) return []
 
   const steps: Omit<NextStep, 'priority'>[] = []
-  const declarations = await undeclaredEnv(cwd, migrations)
-  const hasSchema = await fileExists(cwd, 'config/env.ts')
+  const { exists: hasSchema, missing: declarations } = await undeclaredEnv(cwd, migrations)
   if (!hasSchema || declarations.length > 0) {
     steps.push({
       title: hasSchema ? 'Declare the variables the config definitions read' : 'Create config/env.ts',
@@ -1531,7 +1530,7 @@ async function configMigrationSteps(cwd: string): Promise<Omit<NextStep, 'priori
 
 function migrationDescription(migration: ConfigMigration): string {
   const removed = migration.legacyFiles.filter((file) => file !== migration.target)
-  const replaces = migration.key === 'session'
+  const replaces = migration.legacyFiles.includes(migration.target)
     ? `Replace the SessionConfig object in ${migration.target} with the definition below`
     : `Write the definition below to ${migration.target}`
   const cleanup = removed.length > 0 ? `, and delete ${removed.join(' and ')} in the same change` : ''
@@ -1543,11 +1542,11 @@ function migrationDescription(migration: ConfigMigration): string {
 }
 
 function envDeclarationLines(declarations: readonly EnvDeclaration[]): string {
-  return `${declarations.map((entry) => `${entry.key}: ${entry.builder},`).join('\n')}\n`
+  return `${declarations.map((entry) => `${entry.key}: ${entry.source},`).join('\n')}\n`
 }
 
 function envSchemaSource(declarations: readonly EnvDeclaration[]): string {
-  const body = declarations.map((entry) => `  ${entry.key}: ${entry.builder},`).join('\n')
+  const body = declarations.map((entry) => `  ${entry.key}: ${entry.source},`).join('\n')
   return `import { defineEnv, Env, type InferEnv } from '@guren/core'\n\nconst env = defineEnv({\n${body}\n})\n\nexport default env\n\ndeclare module '@guren/core' {\n  interface AppEnv extends InferEnv<typeof env> {}\n}\n`
 }
 
