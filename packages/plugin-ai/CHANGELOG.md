@@ -1,5 +1,58 @@
 # @guren/plugin-ai
 
+## 0.2.0
+
+### Minor Changes
+
+- d6e8b00: Agents keep conversations (RFC 0029 §5). Configure a store in `config/ai.ts`, then start a conversation with `prompt(input, { conversation: true })` and continue it with `continue(id)`:
+
+  ```ts
+  const first = await SupportTriager.as(user).prompt("Hello", {
+    conversation: true,
+  });
+  const next = await SupportTriager.as(user)
+    .continue(first.conversationId!)
+    .prompt("Tell me more");
+  ```
+
+  - `conversations: { driver: 'memory' }` keeps history in the process. `{ driver: 'database', conversations, messages }` stores it in two tables through ORM Models, one row per `ModelMessage`.
+  - A plain `prompt()` stores nothing.
+  - A conversation belongs to the principal that started it and to its agent. `continue()` under another principal, another agent or `as(null)` is refused before any model call. So is a conversation with an `agent()` that has no `agentName`.
+  - Each turn is appended in one transaction, after the model answers.
+  - The stored transcript is what the model saw, tool results included, so treat the tables as sensitive data.
+  - `AiManager` gains a required `conversations()` method. A hand-written `AiManager` implementation must add it.
+  - The `database` driver appends inside `Model.transaction()`, so it needs a database driver with interactive transactions.
+
+- 180194e: Agents stream (RFC 0029 §4). `stream(input, options)` returns a UI-message stream `Response` for `useChat`, and `@guren/plugin-ai/client` exports `createChatTransport()` to consume it:
+
+  ```ts
+  async chat() {
+    const { conversation, message } = await this.validateBody(ChatTurnSchema)
+    const user = await this.auth.userOrFail()
+    return this.make('ai').agent(SupportTriager).as(user).stream(message, { conversation: conversation ?? true, signal: this.request.raw.signal })
+  }
+  ```
+
+  ```tsx
+  const { messages, sendMessage } = useChat({
+    transport: createChatTransport("/support/chat", {
+      conversation: props.conversationId,
+    }),
+  });
+  ```
+
+  - An agent that declares `output` cannot stream; call `prompt()` for its parsed value.
+  - A started or continued conversation is named in the `X-Guren-Conversation` response header. The turn is stored when the stream ends. An aborted turn stores nothing, and a storage failure is logged.
+  - A chat needs `conversations` in `config/ai.ts`: the server holds the history, and the first turn fails naming the missing store when none is configured.
+  - The transport posts `{ conversation, message }` with the `XSRF-TOKEN` cookie as `X-XSRF-TOKEN`. That is the last user message as text, never the transcript, since the server holds the history. It refuses `regenerate-message` and a message with a file attached.
+  - `ChatTurnSchema` validates that body. `zod` is now a peer dependency, on the range `ai` itself requires.
+
+### Patch Changes
+
+- Updated dependencies [de87223]
+- Updated dependencies [727d017]
+  - @guren/core@1.20.0
+
 ## 0.1.0
 
 ### Minor Changes

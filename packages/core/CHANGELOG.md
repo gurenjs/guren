@@ -1,5 +1,36 @@
 # @guren/core
 
+## 1.20.0
+
+### Minor Changes
+
+- de87223: Deploy builds stop stubbing the v1 MCP SDK, which no Guren package imports any more (RFC 0028 §4). `@guren/core/internal/deploy-build` drops the two SDK entries from `DEV_ONLY_MODULES`. `MCP_TRANSPORT_SPECIFIER`, `MCP_SDK_SUBPATH_PREFIX`, `stubbableDevOnlyModules` and `appUsesMcpPlugin` stay exported and are deprecated: deploy plugins already on npm import them under a caret on `@guren/core`, so removing them would stop an app that updates core alone from booting. They go in core 2.0. Lambda and Vercel no longer route unlisted `@modelcontextprotocol/sdk/*` subpaths to a throwing stub. Cloudflare no longer fails a `@guren/plugin-mcp` app whose `wrangler.jsonc` aliases the v1 transport, and stops adding the two SDK aliases to a new config. It also stops writing `stub-mcp-server.js` and `stub-mcp-transport.js`. An existing config that still aliases them keeps building, since nothing imports those subpaths; the two lines can be deleted. The `@guren/cli` stub's error names both features the package backs: the Dev MCP endpoint and the docs viewer. Its kind stays `mcp`, the key those published plugins look its message up by.
+- 727d017: `defineOAuthConfig()` accepts `stateConfig`, the same state options `createOAuthManager()` takes. An app that allows external post-login redirects can now declare the allowlist in `config/oauth.ts` instead of binding `oauth` in a provider:
+
+  ```ts
+  export default defineOAuthConfig((env) => ({
+    providers: {
+      github: createGitHubOAuthProviderConfig({
+        /* ... */
+      }),
+    },
+    stateConfig: { allowedRedirectHosts: ["app.example.com"] },
+  }));
+  ```
+
+### Patch Changes
+
+- Updated dependencies [660e5c9]
+- Updated dependencies [3de4aa1]
+- Updated dependencies [12b5642]
+- Updated dependencies [e1ec882]
+- Updated dependencies [93a9b43]
+- Updated dependencies [727d017]
+- Updated dependencies [de87223]
+- Updated dependencies [7b6a8c3]
+  - @guren/cli@2.25.0
+  - @guren/server@2.25.0
+
 ## 1.19.0
 
 ### Minor Changes

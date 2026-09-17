@@ -1,5 +1,15 @@
 # @guren/testing
 
+## 1.12.0
+
+### Minor Changes
+
+- d6e8b00: `app.fakeAi()` records prompts made through an agent's `continue(id)`, and its `conversations()` returns the store `config/ai.ts` configures, so a test can script a multi-turn conversation and read back what was stored.
+
+  The optional `@guren/plugin-ai` peer now starts at `>=0.1.0`, the first release that exports `bindAgent`. `continue()` and `conversations()` need the `@guren/plugin-ai` release that ships conversations.
+
+- 180194e: `app.fakeAi()` scripts `stream()` as well as `prompt()`. A streamed call is recorded on entry, and its `toolCalls` fill in as the response body is read.
+
 ## 1.11.0
 
 ### Minor Changes

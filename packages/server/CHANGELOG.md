@@ -1,5 +1,24 @@
 # @guren/server
 
+## 2.25.0
+
+### Minor Changes
+
+- 727d017: `defineOAuthConfig()` accepts `stateConfig`, the same state options `createOAuthManager()` takes. An app that allows external post-login redirects can now declare the allowlist in `config/oauth.ts` instead of binding `oauth` in a provider:
+
+  ```ts
+  export default defineOAuthConfig((env) => ({
+    providers: {
+      github: createGitHubOAuthProviderConfig({
+        /* ... */
+      }),
+    },
+    stateConfig: { allowedRedirectHosts: ["app.example.com"] },
+  }));
+  ```
+
+- de87223: Remove `createMcpServer` and its option types from `@guren/server/mcp`, deprecated in 2.24.0 (RFC 0028). The Dev MCP server lives in `@guren/cli` as `createDevMcpHandler`, and `McpServiceProvider` already mounts it. `@guren/server` no longer depends on `@modelcontextprotocol/sdk`. `guren upgrade --check-only` still reports a leftover import.
+
 ## 2.24.0
 
 ### Minor Changes
