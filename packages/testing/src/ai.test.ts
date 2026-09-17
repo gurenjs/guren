@@ -91,6 +91,7 @@ beforeAll(async () => {
             },
           },
         },
+        conversations: { driver: 'memory' },
       })),
     ],
     providers: [aiPlugin()],
@@ -216,6 +217,29 @@ describe('TestApp.fakeAi', () => {
       .toThrow('Expected agent [summarizer] never to be prompted, but it was prompted 1 time(s).')
     expect(() => ai.assertPrompted(Summarizer, (input) => input === 'other'))
       .toThrow('It was prompted with: "secret plan".')
+  })
+
+  it('should record prompts made through continue() and keep the conversation in the configured store', async () => {
+    using ai = app.fakeAi()
+    ai.respond(Summarizer, ['first summary', 'second summary'])
+    const summarizer = application.container.make('ai').agent(Summarizer).as({ id: 1 })
+
+    const first = await summarizer.prompt('first', { conversation: true })
+    const second = await summarizer.continue(first.conversationId!).prompt('second')
+
+    expect(second.conversationId).toBe(first.conversationId)
+    expect(ai.calls(Summarizer).map((call) => call.input)).toEqual(['first', 'second'])
+    const stored = await ai.conversations().load(first.conversationId!, { kind: 'user', id: 1 })
+    expect(stored!.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
+  })
+
+  it('should refuse an anonymous conversation without consuming a scripted response', async () => {
+    using ai = app.fakeAi()
+    ai.respond(Summarizer, ['kept for the next prompt'])
+    const summarizer = application.container.make('ai').agent(Summarizer)
+
+    await expect(summarizer.as(null).prompt('x', { conversation: true })).rejects.toThrow('under as(null)')
+    expect((await summarizer.as(null).prompt('y')).text).toBe('kept for the next prompt')
   })
 
   it('should restore the real manager on dispose', async () => {

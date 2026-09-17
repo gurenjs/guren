@@ -18,6 +18,9 @@ export type {
 export { appToolDefinitions, appTools } from './app-tools'
 export type { AppToolDefinition, AppToolDenial, AppToolError } from './app-tools'
 
+export { DatabaseConversationStore, MemoryConversationStore } from './conversations'
+export type { ConversationDrivers, ConversationsConfig, ConversationStore, StoredConversation } from './conversations'
+
 export { defineAiConfig } from './config'
 export type { AiConfig, AiConfigDefinition, AiProviderConfig, InferProviders } from './config'
 

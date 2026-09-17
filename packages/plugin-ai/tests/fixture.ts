@@ -18,7 +18,7 @@ import {
 } from '@guren/core'
 import { MockLanguageModelV4 } from 'ai/test'
 
-import { aiPlugin, defineAiConfig, type AiPluginConfig } from '../src'
+import { aiPlugin, defineAiConfig, type AiPluginConfig, type ConversationsConfig } from '../src'
 
 export type ScriptedStep =
   | { text: string }
@@ -127,6 +127,7 @@ export async function bootHarness(
     providers?: ServiceProviderConstructor[]
     /** Registered after `aiPlugin()`. */
     after?: ServiceProviderConstructor[]
+    conversations?: ConversationsConfig
   } = {},
 ): Promise<Harness> {
   const current = scriptedModel([{ text: 'unscripted' }])
@@ -141,6 +142,7 @@ export async function bootHarness(
           main: { model: () => current },
           judge: { model: () => judge },
         },
+        ...(options.conversations ? { conversations: options.conversations } : {}),
       })),
     ],
     providers: [

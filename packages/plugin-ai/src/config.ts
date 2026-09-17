@@ -6,6 +6,7 @@
 import { defineConfig, type AppEnv, type ConfigDefinition } from '@guren/core'
 import type { EmbeddingModel, ImageModel, LanguageModel } from 'ai'
 
+import { createConversationStore, type ConversationsConfig } from './conversations'
 import { ConfiguredAiManager, type AiManager } from './manager'
 
 export interface AiProviderConfig {
@@ -21,6 +22,8 @@ export interface AiConfig {
   /** The provider an agent uses when it names none. Checked against `providers` at boot. */
   default: string
   providers: Readonly<Record<string, AiProviderConfig>>
+  /** Where `prompt(input, { conversation })` and `continue(id)` keep history (RFC 0029 §5). Absent, both are refused. */
+  conversations?: ConversationsConfig
 }
 
 // Augments `@guren/server`, the module that declares both interfaces: an
@@ -62,6 +65,8 @@ export function defineAiConfig<const P extends Record<string, AiProviderConfig>>
           + `${describeNames(Object.keys(config.providers))}.`,
         )
       }
+      // Built and discarded, so an unknown driver or an unset table fails the boot rather than the first conversation.
+      if (config.conversations) createConversationStore(config.conversations)
     },
   })
 }

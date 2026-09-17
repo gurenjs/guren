@@ -570,6 +570,38 @@ not apply. The `database` entry in `config/ai.ts` names both tables, as
 driver is the seam the AgentCore RFC fills (`agentcore`: `create_event` per
 turn, keyed by actor and session).
 
+**Amended in implementation (Part 2a):** a conversation starts only when the
+call asks for one. `prompt(input, { conversation: true })` starts it and returns
+`conversationId`; `continue(id)` and `{ conversation: id }` continue it; a plain
+`prompt()` stores nothing, whatever `config/ai.ts` configures, so a one-off
+agent writes no rows per call. Ids are plain strings (`crypto.randomUUID()`),
+since a chat client posts them back as strings.
+- `AiManager` gains `conversations()`, the store `config/ai.ts` names under
+  `conversations: { driver, ... }`; an unknown driver or an unset table fails
+  the boot. The drivers are `memory` and `database`; registering another waits
+  for the AgentCore RFC, the first to need one. `fakeAi()` delegates `conversations()` to the real
+  manager: it scripts the model, and history persists as the app configures it.
+- The owner is compared by `agentApprovalPrincipalKey()`, the key approvals use,
+  so `5` and `'5'` and a user and a service stay distinct. `load()` answers
+  `null` for an unknown id and another owner's alike.
+- `create()` takes the first turn's messages, so the conversation row and
+  its first messages are written together after the first answer: a failed
+  first prompt leaves nothing. Each later turn appends the user message and
+  `result.responseMessages` in one transaction, so a replay never meets a tool
+  call without its result. The append runs in `Model.transaction()`, so the
+  `database` driver needs a database driver with interactive transactions.
+- Order is an integer `position`, with a unique index on
+  (`conversationId`, `position`): a concurrent append to one conversation
+  fails rather than interleaving. Column properties are `id`, `agentName`,
+  `owner`, `createdAt`, `updatedAt` and `id`, `conversationId`, `position`,
+  `message`, `createdAt`; `dataMode: 'text'` stores the message as a JSON string.
+- An `agent()` without an `agentName` cannot hold a conversation, since every
+  such agent shares the name `anonymous` the agent check compares. A prompt
+  option naming a different conversation than `continue(id)` bound is refused.
+- Binary file data is stored as base64 and a `URL` as its href, both forms a
+  `ModelMessage` accepts on replay.
+- `guren add ai` scaffolding the two tables follows in its own PR.
+
 ### 6. Queueing
 
 ```ts
