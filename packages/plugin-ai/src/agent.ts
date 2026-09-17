@@ -21,6 +21,8 @@ import { appToolDefinitions, appTools, type AppToolDefinition, type AppToolDenia
 import { readAgentContext, setAgentContext, type AgentContext } from './context'
 import type { AiManager } from './manager'
 import { CONVERSATION_HEADER } from './protocol'
+import { RunAgentJob, registeredAgent } from './queue'
+import { resolveRuntime } from './runtime'
 import type { AgentToolInput, AgentToolName, AgentToolOutput, AgentToolScope, AiProviderName, Granted } from './types'
 
 /** What `as()` accepts: a principal, or a user record contributing its `id` (and `abilities`, if it carries them). */
@@ -38,6 +40,22 @@ export interface PromptOptions {
    * Absent, nothing is stored. Refused under `as(null)`, since no owner could be checked.
    */
   conversation?: true | string
+}
+
+export interface QueueOptions {
+  provider?: AiProviderName
+  /** As {@link PromptOptions.conversation}; `true` creates the conversation now, so its id is usable before the run. */
+  conversation?: true | string
+  /** The queue name; `default` when absent. */
+  queue?: string
+  /** Milliseconds before a worker may run it. */
+  delay?: number
+}
+
+export interface QueuedAgentRun {
+  jobId: string
+  /** Set when the run starts or continues a conversation. */
+  conversationId?: string
 }
 
 export interface AgentResponse<TOutput> {
@@ -63,6 +81,12 @@ export interface BoundAgent<T extends Agent> {
    * `X-Guren-Conversation` header when the call starts or continues one (RFC 0029 §4).
    */
   stream(input: string, options?: PromptOptions): Promise<Response>
+  /**
+   * Run `prompt()` on a worker (RFC 0029 §6), which emits `AgentResponded` when the model answers.
+   * The class must be registered with `aiPlugin({ agents })`. The principal travels as it is now,
+   * abilities included: a run queued before a user loses an ability still runs with it.
+   */
+  queue(input: string, options?: QueueOptions): Promise<QueuedAgentRun>
   /** The same agent, prompting within conversation `id`, which this principal must have started with this agent. */
   continue(id: string): BoundAgent<T>
 }
@@ -81,7 +105,7 @@ export interface AgentClass<T extends Agent<any> = Agent<any>> {
 }
 
 const DEFAULT_STOP_WHEN = 20
-const ANONYMOUS_AGENT_NAME = 'anonymous'
+export const ANONYMOUS_AGENT_NAME = 'anonymous'
 
 let constructing: AgentContext | undefined
 
@@ -215,15 +239,19 @@ export function bindAgent<T extends Agent>(
   const agentName = resolveAgentName(cls)
   const output = (instance as { output?: OutputInterface }).output
 
-  const run = async (input: string, options: PromptOptions, conversation: string | undefined) => {
-    if (conversation !== undefined && options.conversation !== undefined && options.conversation !== conversation) {
+  const requestedConversation = (requested: true | string | undefined, conversation: string | undefined) => {
+    if (conversation !== undefined && requested !== undefined && requested !== conversation) {
       throw new Error(
         `${agentName} is bound to conversation "${conversation}" by continue(), and this call asks for `
-        + `${options.conversation === true ? 'a new one' : `"${options.conversation}"`}. Pass one or the other.`,
+        + `${requested === true ? 'a new one' : `"${requested}"`}. Pass one or the other.`,
       )
     }
+    return requested ?? conversation
+  }
+
+  const run = async (input: string, options: PromptOptions, conversation: string | undefined) => {
     // Settled before `model()`: a refused conversation must reach no model, and a fake's script.
-    const history = await openConversation(options.conversation ?? conversation)
+    const history = await openConversation(requestedConversation(options.conversation, conversation))
     const userMessage: ModelMessage = { role: 'user', content: input }
     const loop = new ToolLoopAgent({
       id: agentName,
@@ -288,6 +316,29 @@ export function bindAgent<T extends Agent>(
         },
       })
       return result.toUIMessageStreamResponse(history ? { headers: { [CONVERSATION_HEADER]: history.id } } : {})
+    },
+    queue: async (input, options = {}) => {
+      if (registeredAgent(resolveRuntime(scope.container, `${agentName}.queue()`), agentName) !== cls) {
+        throw new Error(
+          `aiPlugin({ agents }) registers a different class under "${agentName}" than ${cls.name}, `
+          + 'so a worker would run that one. Give each agent its own static agentName.',
+        )
+      }
+      if (!scope.container.has('queue')) {
+        throw new Error(`${agentName}.queue() dispatches through the \`queue\` binding, and none is bound. Register QueueServiceProvider.`)
+      }
+      // The worker checks again; this fails a run that could never succeed here, rather than in its log.
+      const history = await openConversation(requestedConversation(options.conversation, conversation))
+      // Created before dispatch: the id is usable at once, and a redelivered run only appends.
+      if (history?.isNew) {
+        await history.store.create({ id: history.id, agentName, owner: history.owner, messages: [] })
+      }
+      const jobId = await scope.container.make('queue').dispatch(
+        RunAgentJob,
+        { agentName, input, principal: instance.principal, conversationId: history?.id, provider: options.provider },
+        { queue: options.queue, delay: options.delay },
+      )
+      return { jobId, ...(history ? { conversationId: history.id } : {}) }
     },
   })
 

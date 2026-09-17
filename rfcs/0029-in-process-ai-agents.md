@@ -540,7 +540,8 @@ const { messages, sendMessage } = useChat({
   `prepareSendMessagesRequest` and a `fetch` that reads the header.
 - **`fakeAi()`:** `simulateStreamingMiddleware()` answers `doStream` from its script, and a streamed
   call's `toolCalls` fill in as the body is read.
-- **`broadcast()`:** it moves to Part 2c with `queue()`.
+- **`broadcast()`:** it moves to a later part than `queue()` (Part 2c), since it publishes over the
+  broadcasting layer and needs a stream consumer of its own on the worker.
 
 `broadcast(input, channel)` (Part 2) queues the prompt (§6) and emits each
 UI-message chunk over `BroadcastManager` to the channel, which is
@@ -650,6 +651,29 @@ pitfall), and a queued message must survive a deploy. Completion emits
 `EventManager`; laravel/ai's `->then(closure)` has no serializable
 counterpart, and an event is what the rest of Guren already listens to.
 `AgentPrincipal` is `{ kind, id, abilities? }`, serializable as-is.
+
+**Amended in implementation (Part 2c):**
+
+- **`queue(input, { conversation, provider, queue, delay })`** returns `{ jobId, conversationId? }`.
+  `conversation: true` creates the conversation, empty, before dispatching: its id is usable at once
+  (a second `queue()` on it, a client), and the worker only ever continues a conversation, so a
+  redelivered run appends rather than failing on a duplicate id. A run that fails leaves the empty
+  conversation. `queue()` checks a continued conversation's owner and agent before dispatching, as the
+  worker does again. `signal` has no queued form.
+- **The registry lives on the plugin's runtime binding,** not in a module-global map: `aiPlugin({ agents })`
+  refuses two classes under one `agentName`, and the name `anonymous`, at boot. `queue()` refuses a class
+  the registry does not hold, or holds a different class for, before anything is dispatched: the worker
+  would otherwise run the other class, or fail. `registerJob(RunAgentJob)` is process-wide, like every job.
+- **`RunAgentJob.maxAttempts` is 1,** since a retry would call the model again and re-run every tool.
+  That stops only the worker's own retry. A driver with a visibility timeout (Redis, SQS) delivers a run
+  that outlasts it again, and the worker's `--timeout` fails a job without cancelling it, so both belong
+  above the longest run. Two queued turns on one conversation run concurrently with more than one
+  worker; the database store refuses the second append, after its model call.
+- **`AgentResponded.response` is `{ text, output, usage, finishReason }`,** without `steps`, since a queued
+  listener serializes the event whole. It is emitted only when `events` is bound.
+- **The principal is a snapshot.** Its `abilities` travel as they were when the run was queued; a user who
+  loses an ability in between still runs with it. `agentName` stays `string` until `app/Ai/agents.ts`
+  is written by the CLI (§11).
 
 ### 7. Testing (`@guren/testing`)
 

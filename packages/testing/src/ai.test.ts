@@ -3,7 +3,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { Controller, createApp, createCsrfMiddleware, type Router } from '@guren/core'
+import { Controller, MemoryQueueDriver, Worker, createApp, createCsrfMiddleware, createQueueManager, type Router } from '@guren/core'
 import { Agent, Output, aiPlugin, defineAiConfig, stepCountIs, type AgentToolScope } from '@guren/plugin-ai'
 import { TestApp } from './test-app'
 
@@ -94,7 +94,7 @@ beforeAll(async () => {
         conversations: { driver: 'memory' },
       })),
     ],
-    providers: [aiPlugin()],
+    providers: [aiPlugin({ agents: [Summarizer] })],
   })
   application.use('*', createCsrfMiddleware({ exclude: ['/summarize', '/unscripted'] }))
   app = await TestApp.fromApp(application)
@@ -231,6 +231,19 @@ describe('TestApp.fakeAi', () => {
     expect(ai.calls(Summarizer).map((call) => call.input)).toEqual(['first', 'second'])
     const stored = await ai.conversations().load(first.conversationId!, { kind: 'user', id: 1 })
     expect(stored!.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
+  })
+
+  it('should record a queued prompt when the worker runs it, not when it is queued', async () => {
+    using ai = app.fakeAi()
+    ai.respond(Summarizer, ['queued summary'])
+    const driver = new MemoryQueueDriver()
+    application.container.instance('queue', createQueueManager({ drivers: { memory: () => driver } }))
+
+    await application.container.make('ai').agent(Summarizer).as({ id: 1 }).queue('long text')
+    ai.assertNeverPrompted(Summarizer)
+    await new Worker(driver, { container: application.container, stopWhenEmpty: true, sleep: 0 }).start()
+
+    expect(ai.calls(Summarizer).map((call) => [call.input, call.response?.text])).toEqual([['long text', 'queued summary']])
   })
 
   it('should refuse an anonymous conversation without consuming a scripted response', async () => {
