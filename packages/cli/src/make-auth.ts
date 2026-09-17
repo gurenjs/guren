@@ -194,7 +194,8 @@ import { oauthStates } from '../../db/schema.js'`,
       bindManager: `    const oauth = this.container.make<OAuthManager>('oauth')`,
     }
 
-  return `${imports}
+  return `// oxlint-disable guren/no-unvalidated-env-read -- the provider form serves apps with no config/env.ts to declare these keys in
+${imports}
 
 export default class OAuthProvider extends ServiceProvider {
   register(): void {

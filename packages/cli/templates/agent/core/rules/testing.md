@@ -70,15 +70,15 @@ const csrf = await app.withCsrf()
 `bun test` sets `NODE_ENV=test` automatically. A current scaffold's `config/database.ts` branches on it so tests never touch the dev DB:
 
 ```typescript
-function resolveDatabaseFilename(): string {
-  if (process.env.NODE_ENV === 'test') {
-    return process.env.TEST_DATABASE_URL || './data/guren.test.db'
-  }
-  return process.env.DATABASE_URL || './data/guren.db'
-}
+filename: (context) => {
+  const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
+  return process.env.NODE_ENV === 'test'
+    ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
+    : values.DATABASE_URL ?? './data/guren.db'
+},
 ```
 
-Default test file: `./data/guren.test.db`. Override with `TEST_DATABASE_URL` (e.g. per CI shard). If `config/database.ts` writes straight to `DATABASE_URL`/`./data/guren.db` with no `NODE_ENV` check (pre-1.2.0 scaffold), retrofit it by adding the function above AND pointing `createSqliteDatabase({ filename: ... })` at it — replace `filename: () => process.env.DATABASE_URL || './data/guren.db'` with `filename: resolveDatabaseFilename`. Adding the function alone does nothing; `filename` still has to reference it.
+Default test file: `./data/guren.test.db`. Override with `TEST_DATABASE_URL` (e.g. per CI shard). If `config/database.ts` writes straight to `DATABASE_URL`/`./data/guren.db` with no `NODE_ENV` check (pre-1.2.0 scaffold), retrofit its `filename` to branch on `NODE_ENV` the same way. With `config/env.ts`, declare `DATABASE_URL` and `TEST_DATABASE_URL` there and read them from `values` as above: `guren/no-unvalidated-env-read` reports a `process.env.DATABASE_URL` read in `config/`. Without `config/env.ts`, read `process.env` and branch the same way.
 
 **Cleanup between tests:** prefer `resetDatabase()` (exported from `config/database.ts`) in `beforeEach` — it operates on the same connection your models use, and drops every table then re-applies migrations, so the tables are queryable straight after (same end state as `guren db:reset`; an extra `migrateDatabase()` call is harmless but redundant). `useTruncateTables(tables)`/`useDatabaseTransactions()` from `@guren/testing` need a `DatabaseConnection` (`query`/`execute`/`beginTransaction`/`commit`/`rollback`) registered via `setTestDatabase()` — Guren's SQLite adapter doesn't expose one (`getDatabase()` resolves to the raw Drizzle instance, not this shape), so you'd have to hand-write an adapter. Only `useDatabaseTransactions()` requires that adapter to wrap the *same* connection your models write through (it begins/rolls back a transaction on it); `useTruncateTables()` just runs `DELETE FROM` per table, which commits immediately regardless of connection. `resetDatabase()` avoids the adapter question entirely.
 

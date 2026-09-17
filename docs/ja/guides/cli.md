@@ -46,7 +46,7 @@ bunx guren plugin @acme/guren-plugin-audit
 
 これらのコマンドは `src/app.ts` を更新し、対応する provider/runtime ファイルを生成します。
 
-`create-guren-app` 1.12 以降で生成したアプリには最初から入っています。`add lint` はそれ以前に作ったアプリ向けで、アプリのコードには触れません。`.oxlintrc.json`(`@guren/cli/oxlint` の Guren ルール付き oxlint。`guren/await-async-assertion` は error、`guren/comment-*` は warn)を書き、`lint` / `lint:fix` スクリプトを追加し、`oxlint` を devDependency に `~` レンジで追加します(パッチ更新のみに絞るためです。oxlint の JS プラグイン API は alpha なので)。実行後に `bun install` してください。`bunx oxlint` は Bun 上で動くため Node は不要です。
+`create-guren-app` 1.12 以降で生成したアプリには最初から入っています。`add lint` はそれ以前に作ったアプリ向けで、アプリのコードには触れません。`.oxlintrc.json`(`@guren/cli/oxlint` の Guren ルール付き oxlint。`guren/await-async-assertion` は error、`app/`・`config/`・`routes/`・`src/`・`modules/` の `guren/no-unvalidated-env-read` は error、`guren/comment-*` は warn)を書き、`lint` / `lint:fix` スクリプトを追加し、`oxlint` を devDependency に `~` レンジで追加します(パッチ更新のみに絞るためです。oxlint の JS プラグイン API は alpha なので)。実行後に `bun install` してください。`bunx oxlint` は Bun 上で動くため Node は不要です。`config/env.ts` より前に作ったアプリでは、自前の `config/database.ts` や `src/app.ts` にある `process.env` の読み取りも、スキーマへ移すか disable を付けるまでこのルールが報告します。
 
 `bunx guren add admin` は次を生成します:
 

@@ -9,6 +9,7 @@
  * source, and production fails closed rather than falling back to the request.
  */
 export function appUrl(request: { url: string }): string {
+  // oxlint-disable-next-line guren/no-unvalidated-env-read -- called with no container, in apps with and without config/env.ts
   const configured = process.env.APP_URL?.trim()
 
   if (configured) {
