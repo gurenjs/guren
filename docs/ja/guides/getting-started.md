@@ -85,12 +85,12 @@ bun run db:up
 
 ### 環境変数
 
-スキャフォールダーは `.env.example` から `.env` を作成し、新しい `APP_KEY` を書き込みます。主な設定:
+スキャフォールダーは `.env.example` から `.env` を作成し、新しい `APP_KEY` を書き込みます。アプリが読む変数は `config/env.ts` がすべて宣言し、起動時に検証します。詳しくは [設定ガイド](./configuration.md) を参照してください。主な設定:
 
 - `APP_URL`: Inertia に伝えるベース URL（デフォルト `http://localhost:3333`）。
 - `DATABASE_URL`: 接続文字列。SQLite ではファイルパス、Postgres / MySQL では URL を指定します。
 - `PORT`: 開発サーバーの HTTP ポート（デフォルト `3333`）。
-- `CACHE_STORE`、`QUEUE_CONNECTION`、`MAIL_MAILER`: `guren add cache` / `guren add queue` / `guren add mail` が生成するプロバイダが読みます。値はそのプロバイダが宣言しているストア名である必要があります。`SESSION_DRIVER` は `guren add auth`(または `guren add session`)が `config/session.ts` を書いた時点から有効になります。それまでセッションはプロセスメモリ上にあります。
+- `CACHE_STORE`、`QUEUE_CONNECTION`、`MAIL_MAILER`: `guren add cache` / `guren add queue` / `guren add mail` が追加し、それぞれが生成する `config/cache.ts`、`config/queue.ts`、`config/mail.ts` が読みます。値はそのファイルが宣言しているストア名でなければなりません。未宣言の `QUEUE_CONNECTION` や `MAIL_MAILER` は起動に失敗し、未宣言の `CACHE_STORE` は最初にキャッシュを使った時点で失敗します。`SESSION_DRIVER` は `guren add auth`(または `guren add session`)が `config/session.ts` を書いた時点から有効になります。それまでセッションはプロセスメモリ上にあります。
 
 > [!CAUTION]
 > `.env` はバージョン管理に含めないでください。もしコミットに認証情報が漏れてしまった場合は、データベースユーザーをローテーションし、ファイル内で参照している API キーをすべて再生成してください。
