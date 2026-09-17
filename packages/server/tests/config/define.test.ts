@@ -156,6 +156,31 @@ describe('the per-concern helpers', () => {
 
     expect(stored).toEqual(['github'])
   })
+
+  test('defineOAuthConfig passes its stateConfig allowlist to the manager', async () => {
+    const github = createGitHubOAuthProviderConfig({ clientId: 'id', clientSecret: 'secret', redirectUri: 'http://localhost/callback' })
+    const stateStore = new MemoryOAuthStateStore()
+    const redirects: Array<string | undefined> = []
+    const store = stateStore.store.bind(stateStore)
+    stateStore.store = async (hash, payload) => {
+      redirects.push(payload.redirectTo)
+      await store(hash, payload)
+    }
+    const app = createApp({
+      config: [defineOAuthConfig(() => ({
+        providers: { github },
+        stateStore,
+        stateConfig: { allowedRedirectHosts: ['app.example.com'] },
+      }))],
+    })
+
+    await app.boot()
+    const oauth = app.container.make<OAuthManager>('oauth')
+    await oauth.authorize('github', { redirectTo: 'https://app.example.com/welcome', bindTo: 'test' })
+    await oauth.authorize('github', { redirectTo: 'https://evil.example.net/', bindTo: 'test' })
+
+    expect(redirects).toEqual(['https://app.example.com/welcome', undefined])
+  })
 })
 
 describe('defineHttpConfig() host authorization (RFC 0027 §5)', () => {
