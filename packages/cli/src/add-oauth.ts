@@ -2,8 +2,8 @@ import { consola } from 'consola'
 import { CliError } from './cli-error'
 import { registerConsoleCommand } from './console-registrar'
 import { fileExists, readIfExists } from './discovery'
-import { oauthEnvEntries } from './make-auth'
 import { generateSchemaMigration } from './make-migration'
+import { KNOWN_OAUTH_PROVIDERS, oauthEnvEntries } from './oauth-scaffold'
 import { appendOAuthStateTable } from './oauth-state-table'
 import { resolveAppEntry, wireConfig, wireProviders } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
@@ -40,10 +40,10 @@ export async function addOAuth(options: WriterOptions = {}): Promise<string[]> {
 
   if (definition) {
     await wireConfig('oauth')
-    await appendScaffoldEnv(oauthEnvEntries(['github', 'google', 'discord']))
   } else {
     await wireProviders([{ name: 'OAuthProvider' }])
   }
+  await appendScaffoldEnv(oauthEnvEntries([...KNOWN_OAUTH_PROVIDERS]))
   await registerConsoleCommand('OAuthStatesPruneCommand')
   await wireRouteRegistrar('registerOAuthRoutes', "import registerOAuthRoutes from './oauth.js'")
 

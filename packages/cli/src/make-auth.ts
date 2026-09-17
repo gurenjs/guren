@@ -23,8 +23,9 @@ import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
 import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
 import { MAIL_SCAFFOLD } from './mail-scaffold'
+import { KNOWN_OAUTH_PROVIDERS, OAUTH_PROVIDER_LABELS, oauthEnvEntries } from './oauth-scaffold'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
-import { appendScaffoldEnv, installsConfigDefinition, scaffoldEnv, type ScaffoldEnvEntry } from './service-scaffold'
+import { appendScaffoldEnv, installsConfigDefinition, scaffoldEnv } from './service-scaffold'
 
 function authFile(path: string): ScaffoldFileEntry {
   return scaffoldTemplateFile('auth', path)
@@ -248,21 +249,6 @@ ${registrations}
   }
 })
 `
-}
-
-/** The keys {@link buildOAuthConfigTemplate} reads, each blank until the app registers with the provider. */
-export function oauthEnvEntries(providers: string[]): ScaffoldEnvEntry[] {
-  return providers.flatMap((provider) => {
-    const upper = provider.toUpperCase()
-    return [
-      {
-        key: `OAUTH_${upper}_CLIENT_ID`,
-        entry: `\n# Sign-in with ${OAUTH_PROVIDER_LABELS[provider]} is offered once all three OAUTH_${upper}_* keys are set.\nOAUTH_${upper}_CLIENT_ID=\n`,
-      },
-      { key: `OAUTH_${upper}_CLIENT_SECRET`, entry: `OAUTH_${upper}_CLIENT_SECRET=\n`, declare: { secret: true } },
-      { key: `OAUTH_${upper}_REDIRECT_URI`, entry: `OAUTH_${upper}_REDIRECT_URI=\n`, declare: { type: 'url' } },
-    ]
-  })
 }
 
 function buildOAuthControllerTemplate(providers: string[], includeVerify: boolean): string {
@@ -601,12 +587,6 @@ export const ProfileUpdateSchema = z.object({
 
 export type ProfileUpdateInput = z.infer<typeof ProfileUpdateSchema>
 `
-}
-
-const OAUTH_PROVIDER_LABELS: Record<string, string> = {
-  github: 'GitHub',
-  google: 'Google',
-  discord: 'Discord',
 }
 
 function buildOAuthButtonLinks(providers: string[]): string {
@@ -1441,8 +1421,6 @@ async function warnAboutStalePasswordScaffold(): Promise<void> {
   }
 }
 
-const KNOWN_OAUTH_PROVIDERS = ['github', 'google', 'discord'] as const
-
 function parseOAuthProviders(raw: string | undefined): string[] {
   if (!raw) {
     return []
@@ -1647,7 +1625,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   const created = await writeScaffoldFiles(files, options)
   await appendScaffoldEnv([
     ...(mailDefinition ? scaffoldEnv(MAIL_SCAFFOLD, true) : []),
-    ...(oauthDefinition ? oauthEnvEntries(oauthProviders) : []),
+    ...oauthEnvEntries(oauthProviders),
   ])
 
   // The pages above style with Guren UI tokens (bg-g-page, …).

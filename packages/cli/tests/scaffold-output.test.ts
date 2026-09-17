@@ -17,6 +17,7 @@ import { parseSourceFile } from '../src/parse-cache'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
 import { buildOAuthConfigTemplate, buildOAuthProviderTemplate, makeAuth, type MakeAuthOptions } from '../src/make-auth'
+import { KNOWN_OAUTH_PROVIDERS } from '../src/oauth-scaffold'
 import { runBlueprint } from '../src/blueprints'
 import { AI_PROVIDERS, addAi } from '../src/add-ai'
 import { makeFeature } from '../src/make-feature'
@@ -381,12 +382,12 @@ describe('oauth blueprint provider stays pinned to the make:auth builder', () =>
   // renders the same file per provider list. One manager binding, two sources.
   it('templates/scaffold/oauth OAuthProvider.ts is the builder render for every preset', async () => {
     const template = await readFile(join(SCAFFOLD_TEMPLATE_ROOT, 'oauth/app/Providers/OAuthProvider.ts'), 'utf8')
-    expect(template).toBe(buildOAuthProviderTemplate(['github', 'google', 'discord'], true))
+    expect(template).toBe(buildOAuthProviderTemplate([...KNOWN_OAUTH_PROVIDERS], true))
   })
 
   it('templates/scaffold/oauth/definition config/oauth.ts is the builder render for every preset', async () => {
     const template = await readFile(join(SCAFFOLD_TEMPLATE_ROOT, 'oauth/definition/config/oauth.ts'), 'utf8')
-    expect(template).toBe(buildOAuthConfigTemplate(['github', 'google', 'discord'], true))
+    expect(template).toBe(buildOAuthConfigTemplate([...KNOWN_OAUTH_PROVIDERS], true))
   })
 })
 
