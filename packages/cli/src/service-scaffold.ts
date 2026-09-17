@@ -30,9 +30,13 @@ export interface ScaffoldEnvEntry {
   declare?: Exclude<AppendEnvEntryOptions['declare'], true>
 }
 
-/** Appends and declares, in order, the env entries `scaffold` reads in the form `definition` names. */
-export async function appendScaffoldEnv(scaffold: ServiceScaffold, definition: boolean): Promise<void> {
-  const entries = definition ? [...scaffold.env, ...(scaffold.definitionEnv ?? [])] : scaffold.env
+/** The env entries `scaffold` reads in the form `definition` names. */
+export function scaffoldEnv(scaffold: ServiceScaffold, definition: boolean): readonly ScaffoldEnvEntry[] {
+  return definition ? [...scaffold.env, ...(scaffold.definitionEnv ?? [])] : scaffold.env
+}
+
+/** Appends and declares each of `entries`, in order. */
+export async function appendScaffoldEnv(entries: readonly ScaffoldEnvEntry[]): Promise<void> {
   for (const { key, entry, declare } of entries) {
     await appendEnvEntry(key, entry, { declare: declare ?? true })
   }
@@ -70,6 +74,6 @@ export async function installServiceScaffold(scaffold: ServiceScaffold, options:
     ])
   }
 
-  await appendScaffoldEnv(scaffold, definition)
+  await appendScaffoldEnv(scaffoldEnv(scaffold, definition))
   return created
 }

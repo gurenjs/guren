@@ -188,6 +188,7 @@ const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
 const CALLED_SIGNALS: Record<string, SignalKind> = {
   createSessionMiddleware: 'session',
   createOAuthManager: 'oauth',
+  defineOAuthConfig: 'oauth',
   createLambdaHandler: 'lambda',
 }
 

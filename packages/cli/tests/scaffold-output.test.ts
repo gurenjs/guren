@@ -16,7 +16,7 @@ import {
 import { parseSourceFile } from '../src/parse-cache'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
-import { buildOAuthProviderTemplate, makeAuth, type MakeAuthOptions } from '../src/make-auth'
+import { buildOAuthConfigTemplate, buildOAuthProviderTemplate, makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { runBlueprint } from '../src/blueprints'
 import { AI_PROVIDERS, addAi } from '../src/add-ai'
 import { makeFeature } from '../src/make-feature'
@@ -383,6 +383,11 @@ describe('oauth blueprint provider stays pinned to the make:auth builder', () =>
     const template = await readFile(join(SCAFFOLD_TEMPLATE_ROOT, 'oauth/app/Providers/OAuthProvider.ts'), 'utf8')
     expect(template).toBe(buildOAuthProviderTemplate(['github', 'google', 'discord'], true))
   })
+
+  it('templates/scaffold/oauth/definition config/oauth.ts is the builder render for every preset', async () => {
+    const template = await readFile(join(SCAFFOLD_TEMPLATE_ROOT, 'oauth/definition/config/oauth.ts'), 'utf8')
+    expect(template).toBe(buildOAuthConfigTemplate(['github', 'google', 'discord'], true))
+  })
 })
 
 describe('blueprint companion fixtures stay pinned to their builders', () => {
@@ -424,6 +429,7 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
     'storage/config/env.ts': 'pinned by the byte-identical template gate below, which runs storage against a declared env',
     'session/config/env.ts': 'pinned by the byte-identical template gate below, which runs session against a declared env',
     'mail/config/env.ts': 'pinned by the byte-identical template gate below, which runs mail against a declared env',
+    'oauth/config/env.ts': 'pinned by the byte-identical template gate below, which runs oauth against a declared env',
     'ai/config/env.ts': 'pinned by the add ai template gate below, which runs every provider against a declared env',
   }
 

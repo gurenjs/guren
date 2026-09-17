@@ -423,7 +423,7 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   }
 
   // The template declares its environment, so these are definitions (RFC 0027 §2).
-  for (const definition of ['cache', 'mail', 'queue', 'storage']) {
+  for (const definition of ['cache', 'mail', 'oauth', 'queue', 'storage']) {
     assert(listsConfigDefinition(appBootstrap, definition), `Fresh app must list the ${definition} definition in createApp({ config }).`)
   }
   const cacheConfig = await readFile(join(appDir, 'config/cache.ts'), 'utf8')

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { createGitHubOAuthProviderConfig, type OAuthManager } from '../../src/auth/oauth'
+import { createGitHubOAuthProviderConfig, MemoryOAuthStateStore, type OAuthManager } from '../../src/auth/oauth'
 import {
   defineCacheConfig,
   defineConfig,
@@ -138,6 +138,23 @@ describe('the per-concern helpers', () => {
     await app.boot()
 
     expect(app.container.make<OAuthManager>('oauth').providerNames()).toEqual(['github'])
+  })
+
+  test('defineOAuthConfig keeps authorize states in the stateStore it names', async () => {
+    const github = createGitHubOAuthProviderConfig({ clientId: 'id', clientSecret: 'secret', redirectUri: 'http://localhost/callback' })
+    const stateStore = new MemoryOAuthStateStore()
+    const stored: string[] = []
+    const store = stateStore.store.bind(stateStore)
+    stateStore.store = async (hash, payload) => {
+      stored.push(payload.provider)
+      await store(hash, payload)
+    }
+    const app = createApp({ config: [defineOAuthConfig(() => ({ providers: { github }, stateStore }))] })
+
+    await app.boot()
+    await app.container.make<OAuthManager>('oauth').authorize('github')
+
+    expect(stored).toEqual(['github'])
   })
 })
 

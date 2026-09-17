@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
-import { APP_FIXTURE, DEFAULT_ROUTES_FIXTURE, SESSION_PROVIDER, SQLITE_SCHEMA_FIXTURE, sessionConfigSource, writeInstalledPackage } from './helpers'
+import { APP_FIXTURE, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, SESSION_PROVIDER, SQLITE_SCHEMA_FIXTURE, sessionConfigSource, writeInstalledPackage } from './helpers'
 import { makeAuth } from '../src/make-auth'
 import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
@@ -647,6 +647,26 @@ export const oauth = createOAuthManager({})
       expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
     })
   })
+
+  // RFC 0027 §2: a definition binds `oauth` without createOAuthManager or the Core provider.
+  for (const [label, schema, status] of [['with', SQLITE_SCHEMA_FIXTURE, 'pass'], ['without', null, 'warn']] as const) {
+    it(`judges the config/oauth.ts make:auth --oauth writes ${label} a db/schema.ts`, async () => {
+      const files: Record<string, string> = {
+        'src/app.ts': APP_FIXTURE,
+        'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+        'config/env.ts': ENV_SCHEMA_FIXTURE,
+        ...(schema ? { 'db/schema.ts': schema } : {}),
+      }
+
+      await withApp(`guren-stores-oauth-definition-${label}-`, files, { '@guren/plugin-cloudflare': '^0.10.0' }, async (dir) => {
+        await makeAuth({ install: true, force: true, oauth: 'github', oauthOnly: true })
+
+        const analysis = await analyzeDeployRuntime(dir)
+        expect(analysis.oauthSignals.map((signal) => signal.symbol)).toEqual(['defineOAuthConfig'])
+        expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe(status)
+      })
+    })
+  }
 
   // Without these the whole BACKED_OAUTH_PATTERNS table could be broken with
   // every other test still passing, warning at a correctly-configured app.

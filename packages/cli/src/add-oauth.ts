@@ -2,18 +2,21 @@ import { consola } from 'consola'
 import { CliError } from './cli-error'
 import { registerConsoleCommand } from './console-registrar'
 import { fileExists, readIfExists } from './discovery'
+import { oauthEnvEntries } from './make-auth'
 import { generateSchemaMigration } from './make-migration'
 import { appendOAuthStateTable } from './oauth-state-table'
-import { resolveAppEntry, wireProviders } from './provider-registrar'
+import { resolveAppEntry, wireConfig, wireProviders } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { schemaPathFor } from './schema-parser'
-import { scaffoldTemplateFile } from './scaffold-templates'
+import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
+import { appendScaffoldEnv, installsConfigDefinition } from './service-scaffold'
 import { writeScaffoldFiles, type WriterOptions } from './utils'
 
 /**
- * `guren add oauth`: the OAuth provider, controller and routes, over an
- * `oauth_states` table and its migration. Core's `OAuthServiceProvider` is not
- * wired, since its manager keeps state in process memory.
+ * `guren add oauth`: the OAuth provider (a `config/oauth.ts` definition in an app
+ * declaring its environment), controller and routes, over an `oauth_states` table
+ * and its migration. Core's `OAuthServiceProvider` is not wired, since its
+ * manager keeps state in process memory.
  */
 export async function addOAuth(options: WriterOptions = {}): Promise<string[]> {
   const schemaFile = schemaPathFor(null)
@@ -24,15 +27,23 @@ export async function addOAuth(options: WriterOptions = {}): Promise<string[]> {
     )
   }
 
+  const definition = await installsConfigDefinition('oauth')
   const created = await writeScaffoldFiles([
-    scaffoldTemplateFile('oauth', 'app/Providers/OAuthProvider.ts'),
+    definition
+      ? definitionTemplateFile('oauth', 'config/oauth.ts')
+      : scaffoldTemplateFile('oauth', 'app/Providers/OAuthProvider.ts'),
     scaffoldTemplateFile('oauth', 'app/Http/Controllers/Auth/OAuthController.ts'),
     scaffoldTemplateFile('oauth', 'routes/oauth.ts'),
   ], options)
 
   const tableAppended = await appendOAuthStateTable()
 
-  await wireProviders([{ name: 'OAuthProvider' }])
+  if (definition) {
+    await wireConfig('oauth')
+    await appendScaffoldEnv(oauthEnvEntries(['github', 'google', 'discord']))
+  } else {
+    await wireProviders([{ name: 'OAuthProvider' }])
+  }
   await registerConsoleCommand('OAuthStatesPruneCommand')
   await wireRouteRegistrar('registerOAuthRoutes', "import registerOAuthRoutes from './oauth.js'")
 
@@ -51,7 +62,7 @@ export async function addOAuth(options: WriterOptions = {}): Promise<string[]> {
   consola.info('  • Set OAUTH_<PROVIDER>_CLIENT_ID / _CLIENT_SECRET / _REDIRECT_URI in .env for each provider you enable')
   consola.info('  • Schedule `oauth-states:prune` so abandoned sign-ins do not keep their rows')
   if (staleCoreProvider) {
-    consola.info(`  • Remove CoreOAuthServiceProvider from ${appEntry}: an earlier scaffold wired it, and OAuthProvider now binds the manager`)
+    consola.info(`  • Remove CoreOAuthServiceProvider from ${appEntry}: an earlier scaffold wired it, and ${definition ? 'config/oauth.ts' : 'OAuthProvider'} now binds the manager`)
   }
 
   return created
