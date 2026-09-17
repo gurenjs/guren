@@ -66,17 +66,15 @@ async function auditBlog(root: string): Promise<void> {
 async function auditApi(root: string): Promise<void> {
   const eventProvider = await read(root, 'examples/api/app/Providers/EventServiceProvider.ts')
   assert(eventProvider.includes('createEventManager'), 'API event provider must create an event manager.')
-  assert(eventProvider.includes('createMailManager'), 'API event provider must create a mail manager.')
-  assert(eventProvider.includes('createQueueManager'), 'API event provider must create a queue manager.')
-  assert(eventProvider.includes('setMailManager(mailManager)'), 'API event provider must connect the mail manager to the mail facade.')
   assert(eventProvider.includes('registerJob(SendRegistrationEmailJob)'), 'API event provider must register the registration email job.')
   assert(eventProvider.includes("this.container.singleton('events'"), 'API event provider must register the event manager in the container.')
-  assert(eventProvider.includes("this.container.singleton('mail'"), 'API event provider must register the mail manager in the container.')
-  assert(eventProvider.includes("this.container.singleton('queue'"), 'API event provider must register the queue manager in the container.')
 
-  const cacheProvider = await read(root, 'examples/api/app/Providers/CacheProvider.ts')
-  assert(cacheProvider.includes('createCacheManager'), 'API cache provider must create a cache manager.')
-  assert(cacheProvider.includes("this.container.singleton('cache'"), 'API cache provider must register cache in the container.')
+  const mailConfig = await read(root, 'examples/api/config/mail.ts')
+  assert(mailConfig.includes('export default defineMailConfig('), 'API mail must be a defineMailConfig definition.')
+  const queueConfig = await read(root, 'examples/api/config/queue.ts')
+  assert(queueConfig.includes('memory: () => new MemoryDriver()'), 'API queue definition must use the memory driver.')
+  const cacheConfig = await read(root, 'examples/api/config/cache.ts')
+  assert(cacheConfig.includes('export default defineCacheConfig('), 'API cache must be a defineCacheConfig definition.')
 
   const notificationProvider = await read(root, 'examples/api/app/Providers/NotificationProvider.ts')
   assert(notificationProvider.includes("this.container.make<NotificationManager>('notifications')"), 'API notification provider must resolve notifications from the container.')
@@ -84,9 +82,8 @@ async function auditApi(root: string): Promise<void> {
   assert(notificationProvider.includes("notifications.registerChannel('mail'"), 'API notification provider must register the mail channel.')
   assert(notificationProvider.includes("notifications.registerChannel('database'"), 'API notification provider must register the database channel.')
 
-  const storageProvider = await read(root, 'examples/api/app/Providers/StorageProvider.ts')
-  assert(storageProvider.includes('createStorageManager'), 'API storage provider must create a storage manager.')
-  assert(storageProvider.includes("this.container.instance('storage'"), 'API storage provider must register storage in the container.')
+  const storageConfig = await read(root, 'examples/api/config/storage.ts')
+  assert(storageConfig.includes('export default defineStorageConfig('), 'API storage must be a defineStorageConfig definition.')
 
   const broadcastProvider = await read(root, 'examples/api/app/Providers/BroadcastProvider.ts')
   assert(broadcastProvider.includes('createBroadcastManager'), 'API broadcast provider must create a broadcast manager.')

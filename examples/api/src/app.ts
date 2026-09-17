@@ -6,28 +6,28 @@ import 'zod/compile'
 import {
   createApp,
   NotificationServiceProvider as CoreNotificationServiceProvider,
-  StorageServiceProvider as CoreStorageServiceProvider,
   BroadcastServiceProvider as CoreBroadcastServiceProvider,
 } from '@guren/core'
 import { mountOpenApiDocs } from '@guren/openapi'
-import CacheProvider from '../app/Providers/CacheProvider.js'
-import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import EventServiceProvider from '../app/Providers/EventServiceProvider.js'
 import SchedulingProvider from '../app/Providers/SchedulingProvider.js'
 import NotificationProvider from '../app/Providers/NotificationProvider.js'
-import StorageProvider from '../app/Providers/StorageProvider.js'
 import BroadcastProvider from '../app/Providers/BroadcastProvider.js'
+import cache from '../config/cache.js'
+import database from '../config/database.js'
+import env from '../config/env.js'
+import mail from '../config/mail.js'
+import queue from '../config/queue.js'
+import storage from '../config/storage.js'
 import registerApiRoutes from '../routes/api.js'
 
 const app = createApp({
+  env,
+  config: [database, cache, mail, queue, storage],
   routes: registerApiRoutes,
   providers: [
-    DatabaseProvider,
-    CacheProvider,
     CoreNotificationServiceProvider,
     NotificationProvider,
-    CoreStorageServiceProvider,
-    StorageProvider,
     CoreBroadcastServiceProvider,
     BroadcastProvider,
     EventServiceProvider,

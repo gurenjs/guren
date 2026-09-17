@@ -63,7 +63,7 @@ async function auditBlog(root: string): Promise<void> {
 async function auditApi(root: string): Promise<void> {
   const appBootstrap = await read(root, 'src/app.ts')
   assert(appBootstrap.includes('providers: ['), 'API app must declare providers through createApp().')
-  assert(appBootstrap.includes('CacheProvider'), 'API app must register CacheProvider.')
+  assert(appBootstrap.includes('config: [database, cache, mail, queue, storage]'), 'API app must list its config definitions in createApp() (RFC 0027).')
   assert(appBootstrap.includes('EventServiceProvider'), 'API app must register EventServiceProvider.')
   assert(appBootstrap.includes('SchedulingProvider'), 'API app must register SchedulingProvider.')
 
@@ -91,15 +91,12 @@ async function auditApi(root: string): Promise<void> {
   const eventProvider = await read(root, 'app/Providers/EventServiceProvider.ts')
   assert(eventProvider.includes("from '@guren/core'"), 'API event provider must use @guren/core imports.')
   assert(eventProvider.includes('createEventManager'), 'API event provider must create an event manager.')
-  assert(eventProvider.includes('createMailManager'), 'API event provider must configure mail through the provider.')
-  assert(eventProvider.includes('createQueueManager'), 'API event provider must configure queue through the provider.')
   assert(eventProvider.includes("this.container.singleton('events'"), 'API event provider must register events in the container.')
-  assert(eventProvider.includes("this.container.singleton('mail'"), 'API event provider must register mail in the container.')
-  assert(eventProvider.includes("this.container.singleton('queue'"), 'API event provider must register queue in the container.')
 
-  const cacheProvider = await read(root, 'app/Providers/CacheProvider.ts')
-  assert(cacheProvider.includes('createCacheManager'), 'API cache provider must create the cache manager.')
-  assert(cacheProvider.includes("this.container.singleton('cache'"), 'API cache provider must register cache in the container.')
+  for (const [file, helper] of [['cache', 'defineCacheConfig'], ['mail', 'defineMailConfig'], ['queue', 'defineQueueConfig'], ['storage', 'defineStorageConfig']] as const) {
+    const definition = await read(root, `config/${file}.ts`)
+    assert(definition.includes(`export default ${helper}(`), `API config/${file}.ts must be a ${helper} definition.`)
+  }
 
   const schedulingProvider = await read(root, 'app/Providers/SchedulingProvider.ts')
   assert(schedulingProvider.includes('createScheduler'), 'API scheduling provider must create a scheduler.')
