@@ -99,7 +99,7 @@ export function judgePublishedImports(
   return { failures, pairsChecked }
 }
 
-/** Regular files of a `.tgz`, as text. Handles the ustar `prefix` field and pax `path` records. */
+/** Regular files of a `.tgz`, as text. A truncated long path would drop a chunk silently, so all three long-name forms are read. */
 export function readTarball(gzipped: Uint8Array): Array<{ path: string; source: string }> {
   const tar = Bun.gunzipSync(gzipped)
   const decoder = new TextDecoder()
@@ -107,7 +107,7 @@ export function readTarball(gzipped: Uint8Array): Array<{ path: string; source: 
     decoder.decode(header.subarray(start, end)).replace(/\0[\s\S]*$/, '')
 
   const entries: Array<{ path: string; source: string }> = []
-  let paxPath: string | undefined
+  let longPath: string | undefined
   let offset = 0
   while (offset + 512 <= tar.length) {
     const header = tar.subarray(offset, offset + 512)
@@ -119,16 +119,20 @@ export function readTarball(gzipped: Uint8Array): Array<{ path: string; source: 
 
     const type = field(header, 156, 157)
     if (type === 'x') {
-      paxPath = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(decoder.decode(body))?.[1]
+      longPath = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(decoder.decode(body))?.[1]
       continue
     }
-    if (type === 'g') continue
+    if (type === 'L') {
+      longPath = decoder.decode(body).replace(/\0[\s\S]*$/, '')
+      continue
+    }
+    if (type === 'g' || type === 'K') continue
     if (type === '0' || type === '') {
       const name = field(header, 0, 100)
       const prefix = field(header, 345, 500)
-      entries.push({ path: paxPath ?? (prefix ? `${prefix}/${name}` : name), source: decoder.decode(body) })
+      entries.push({ path: longPath ?? (prefix ? `${prefix}/${name}` : name), source: decoder.decode(body) })
     }
-    paxPath = undefined
+    longPath = undefined
   }
   return entries
 }
@@ -164,7 +168,7 @@ async function fetchOk(fetch: Fetch, url: string): Promise<Response | null> {
 
 /** `null` when the package was never published: there is no copy on npm to break. */
 async function fetchPackument(fetch: Fetch, name: string): Promise<Packument | null> {
-  const response = await fetchOk(fetch, `${REGISTRY}/${name.replace('/', '%2f')}`)
+  const response = await fetchOk(fetch, `${REGISTRY}/${encodeURIComponent(name)}`)
   if (!response) return null
   try {
     return (await response.json()) as Packument

@@ -124,15 +124,19 @@ describe('readTarball', () => {
     await rm(scratch, { recursive: true, force: true })
   })
 
-  it('reads every regular file, including paths longer than the 100-byte name field', async () => {
+  // Each format spells a path past the 100-byte name field differently; CI's GNU tar defaults to `gnu`, macOS bsdtar to `pax`.
+  const bsdtar = Bun.spawnSync(['tar', '--version']).stdout.toString().includes('bsdtar')
+  const FORMATS = { gnu: bsdtar ? 'gnutar' : 'gnu', pax: bsdtar ? 'pax' : 'posix', ustar: 'ustar' }
+
+  it.each(Object.entries(FORMATS))('reads every regular file of a %s archive, long paths included', async (label, format) => {
     const deep = `package/dist/${'nested-directory/'.repeat(6)}chunk-with-a-long-name.js`
     const files = { 'package/package.json': '{"name":"x"}\n', 'package/dist/index.js': DEPLOY_BUILD, [deep]: 'export {}\n' }
     for (const [path, content] of Object.entries(files)) {
       await mkdir(join(scratch, path, '..'), { recursive: true })
       await writeFile(join(scratch, path), content)
     }
-    const tgz = join(scratch, 'fixture.tgz')
-    const tar = Bun.spawnSync(['tar', '-czf', tgz, 'package'], { cwd: scratch, env: { ...process.env, COPYFILE_DISABLE: '1' } })
+    const tgz = join(scratch, `fixture-${label}.tgz`)
+    const tar = Bun.spawnSync(['tar', `--format=${format}`, '-czf', tgz, 'package'], { cwd: scratch, env: { ...process.env, COPYFILE_DISABLE: '1' } })
     expect(tar.success).toBe(true)
 
     const entries = readTarball(new Uint8Array(await readFile(tgz)))
