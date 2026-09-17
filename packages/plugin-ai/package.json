@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-ai",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "description": "In-process AI agents for Guren applications: model calls on the Vercel AI SDK that reach the app through its own gated agent tools (RFC 0029).",
   "license": "MIT",
@@ -39,11 +39,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.18.0",
+    "@guren/core": "^1.19.0",
     "ai": "^7.0.102"
   },
   "devDependencies": {
-    "@guren/plugin-mcp": "^0.5.0",
+    "@guren/plugin-mcp": "^0.6.0",
     "@types/node": "^20.14.10",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",

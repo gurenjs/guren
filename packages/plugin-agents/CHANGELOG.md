@@ -1,5 +1,26 @@
 # @guren/plugin-agents
 
+## 0.2.4
+
+### Patch Changes
+
+- 61c401c: The per-instance call budget now comes from `@guren/core` (`createAgentCallBudget`) instead of a copy in this package. No behaviour change. Needs the `@guren/core` release that exports it.
+- Updated dependencies [029a516]
+- Updated dependencies [61c401c]
+- Updated dependencies [a798a10]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [909b4b6]
+- Updated dependencies [3e11a0f]
+- Updated dependencies [83143a7]
+- Updated dependencies [0eabb37]
+- Updated dependencies [1c9ccae]
+- Updated dependencies [8d4275c]
+- Updated dependencies [218db73]
+- Updated dependencies [000a5e0]
+- Updated dependencies [13b9205]
+- Updated dependencies [d67480f]
+  - @guren/core@1.19.0
+
 ## 0.2.3
 
 ### Patch Changes

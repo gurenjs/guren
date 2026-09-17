@@ -1,5 +1,114 @@
 # @guren/server
 
+## 2.24.0
+
+### Minor Changes
+
+- 029a516: `AgentSurface` gains `'in-process'`, the surface `@guren/plugin-ai` records a model's tool calls under (RFC 0029 §2.3). Audit trails read it back, and `guren tool:log --surface in-process` filters to it.
+
+  Code that maps every `AgentSurface` in a total `Record<AgentSurface, …>` or an exhaustive `switch` no longer compiles until it names the new member. That is the intended effect: a surface cannot be half-recorded. `@guren/core` re-exports the union, so it moves with server.
+
+- 61c401c: Two helpers every agent surface plugin was carrying its own copy of now live beside the agent invocation pipeline:
+
+  - `resolveAgentAuditSink(config)` and the `AgentAuditConfig` type: the `audit: { file, days } | { sink }` option `mcpPlugin` and `aiPlugin` take. The file sink writes the lines `parseAuditRecord` reads back, and is loaded through a dynamic `import()`, so an app that passes its own `sink` never constructs the filesystem channel. Exported from the main entry only, not from `@guren/server/agent`.
+  - `createAgentCallBudget({ callsPerMinute, now, message })`: a sliding 60-second call meter, passed as the pipeline's `interpose` or called directly. It throws on a limit that is not a whole number of at least 1, since `Infinity` or `NaN` would leave the meter unmetered.
+
+- a798a10: Configuration as data (RFC 0027 Part 1). `createApp({ config: [...] })` takes the definitions `config/*.ts` export: each resolves its config from the validated `env` and binds the manager that config builds, inside `ConfigServiceProvider`, before any other provider registers. Its `boot` runs before any other provider boots. `defineConfig()` is the general form; `defineCacheConfig`, `defineHttpConfig`, `defineMailConfig`, `defineOAuthConfig`, `defineQueueConfig` and `defineStorageConfig` come from `@guren/server`, and `defineSessionConfig` from `@guren/core`, since only core's session manager knows the `database` driver.
+
+  ```ts
+  // config/session.ts
+  export default defineSessionConfig((env) => ({
+    default: env.SESSION_DRIVER,
+    stores: {
+      database: { driver: "database", table: sessions },
+      cookie: { driver: "cookie" },
+    },
+  }));
+  ```
+
+  Two definitions with one key fail the boot, and so does a provider that rebinds a key a definition bound: `"session" is configured twice: config/session.ts and SessionProvider.register(). Keep one.` `Container.bindingOf(key)` exposes the binding record that check compares.
+
+  `defineHttpConfig((env) => ({ hostAuthorization }))` moves host authorization into config, where it can read `APP_URL`. The middleware keeps its place ahead of every app middleware; a request that arrives before `boot()` gets a 503, and passing `createApp({ hostAuthorization })` as well fails the boot.
+
+- e9b7751: `recordEnvReads(values)` returns the environment wrapped so that every key a `resolve()` reads is recorded (RFC 0027 §2). `ConfigServiceProvider` resolves each definition through it and leaves unbound any definition that read a key the environment does not set, rather than handing a manager constructor the redacted placeholder. Only reachable under `GUREN_INTROSPECT=1`, since an unset key otherwise fails the boot.
+- dcb81a7: A route contract's `body` schema is now validated on controller-action routes too, before the action runs, instead of only typing them. A body that fails it answers 422 through `ValidationException`, keyed by the full field path as `Controller.validateBody()` keys it, so Inertia forms display it unchanged. `Controller.validated()` returns the `params`, `query` and `body` the contract parsed (coercions, defaults and transforms applied; an undeclared segment is `undefined`), and `validated('posts.store')` is typed from the `GurenRouteContracts` registry that `guren codegen` writes. Passing a name other than the route being served throws, so an action mounted on several routes passes every name: `validated(['posts.update', 'posts.patch'])`.
+
+  Existing actions keep working: `validateBody()`, `input()` and the other body readers reuse the payload the contract already parsed. One ordering changes: a check an action makes itself, such as `this.auth.userOrFail()`, now runs only after the body passes, so an unauthenticated request with an invalid body gets 422 rather than 401. Move that check into route middleware where the 401 must come first. `RouteDefinition` gains `validatesBody: true` on routes whose body schema is enforced.
+
+- 5366885: Add `Container.singletonIf(key, factory)`, which binds only when `key` is unbound (RFC 0027 Part 1).
+
+  **Behaviour change:** framework default providers no longer replace a binding that already exists. `CacheServiceProvider`, `MailServiceProvider`, `QueueServiceProvider`, `StorageServiceProvider`, `OAuthServiceProvider`, `BroadcastServiceProvider`, `NotificationServiceProvider`, `HealthServiceProvider`, `SchedulingServiceProvider`, `EventServiceProvider`, `LogServiceProvider`, `AuthorizationServiceProvider`, `ErrorServiceProvider`, `I18nServiceProvider` and `EncryptionServiceProvider`'s `encrypter` now bind through it. An app that listed its own provider for one of these subsystems _before_ the framework default used to end up with the default's empty manager; it now keeps its own. Apps that list the default first see no difference.
+
+- a17acdb: The Dev MCP endpoint (`GUREN_MCP=1`, `/_guren/mcp`) now serves the MCP 2026-07-28 protocol as well as 2025-era clients (RFC 0028). `McpServiceProvider` mounts the handler `createDevMcpHandler` from `@guren/cli` builds, behind the same loopback guard, and `@guren/server` no longer imports MCP SDK code on the path an app reaches.
+
+  **Behaviour changes on `/_guren/mcp`:** a `GET` or `DELETE` answers `405` (there is no session stream to open), and a `POST` whose `Content-Type` is not `application/json` answers `415`. When the installed `@guren/cli` predates `createDevMcpHandler`, or cannot be loaded, the endpoint is left unmounted with a warning instead of failing the boot.
+
+  **Deprecated:** `createMcpServer` from `@guren/server/mcp`, which serves only the 2025-era protocol. It warns once per process and is removed in the next minor; use `createDevMcpHandler({ cwd })` from `@guren/cli`. `bunx guren upgrade --check-only` reports imports of it. Both `@guren/server/mcp` exports are now marked `@experimental`.
+
+- 218db73: Declare the environment once and validate it at boot (RFC 0027 Part 0). `defineEnv({ APP_KEY: Env.string().secret(), SMTP_PORT: Env.port().default(587) })` builds a schema from `Env.string`, `url`, `number`, `port`, `boolean`, `enum` and `custom` (a synchronous Standard Schema), each with `.optional()`, `.default()`, `.allowEmpty()`, `.secret()`, `.describe()` and `.requiredInProduction()`. A blank `FOO=` counts as unset, so `.default()` applies to it, and numbers, ports and booleans are coerced by the builder.
+
+  `createApp({ env })` validates the schema at the start of `boot()`, before any provider registers, and binds the result as `env`. A failure throws one `EnvValidationError` listing every problem, with secret values redacted; under `GUREN_INTROSPECT=1` the problems are logged instead. Values are read from the `env.source` binding first and `process.env` second: `@guren/plugin-cloudflare` binds the entrypoint's env there before boot, since wrangler `vars` are not guaranteed to reach `process.env`, and `TestApp.create({ env, envSource })` binds a test's overrides. `env.parse(source, { mode })` runs the same validation outside an application. `NODE_ENV` and `GUREN_*` cannot be declared (`isRawEnvKey()`), because production gates only fold at bundle time as the literal `process.env.NODE_ENV` read.
+
+  `createApp({ inertia: { share } })` registers shared Inertia props scoped to that application's container.
+
+- 0756e55: An `EnvVar` now reports its `.default()` value as `defaultValue`, and the values an `Env.enum()` admits as `choices`. `guren env:example` reads both to write `.env.example` from a schema (RFC 0027 §7).
+- 000a5e0: `defineOAuthConfig` accepts `stateStore`, which the bound OAuth manager keeps authorize states in, so a definition can hold them in the database (`new DatabaseOAuthStateStore(oauthStates)`) rather than in process memory (RFC 0027 §2).
+- 13b9205: `oauth-states:prune` deletes expired rows from the `oauth_states` table. `DatabaseOAuthStateStore` only removes a row when that state is looked up again, so a sign-in abandoned before its callback left its row forever: `GET /auth/:provider` needs no authentication and writes one row per request.
+
+  `OAuthManager.pruneExpiredStates()` sweeps the state store through the optional `deleteExpired(now)` now declared on `OAuthStateStore`, and `@guren/core` ships `OAuthStatesPruneCommand` over it. `MemoryOAuthStateStore` sweeps on write and `RedisOAuthStateStore` expires its own keys, so neither implements the method and both are skipped.
+
+  `guren add oauth` registers the command in `src/console.ts` and lists scheduling it as a next step, as does `guren make:auth --oauth` when it appends the table. With no `db/schema.ts`, `make:auth` leaves OAuth state in memory and registers nothing.
+
+- fd57b6d: `createControllerModuleMock()` now installs the framework's own `Resource`, `JsonResource`, `collect`, `ValidationException`, `AuthenticationException`, `ServiceProvider`, `defineModule`, `definePlugin` and `formatValidationErrors` instead of hand-written copies.
+
+  The copies had drifted from the runtime, so a mocked controller test could pass on behavior production does not have:
+
+  - `validateParams()` failed with status **400** under the mock; the runtime answers **422**. A test asserting `statusCode: 400` for an invalid route parameter now fails and should expect 422.
+  - `validateBody()` / `validateQuery()` / `validateParams()` keyed a root-level issue (empty path) `message` where the runtime keys it `''`, and they and their `*Safe()` variants added a `message` entry to an issue-less failure, which the runtime does not.
+  - The exceptions did not extend `HttpException`, so `toResponse()`, `toJSON()`, `getFieldErrors()`, `guard`, `redirectTo` and `withRedirect()` were missing.
+  - `Resource` lacked `whenOr()`, `whenNotNull()` and `merge()`.
+  - `formatValidationErrors()` joined the whole issue path and had no fallback; the runtime keys by the first path segment and answers `{ message }` when nothing matched.
+  - `Controller.apiToken()` threw a plain `Error` where the runtime throws `AuthenticationException`.
+  - `ServiceProvider` had a concrete `boot()`, a public `container`, and no `deferred` / `provides`; `defineModule()` dropped `commands`.
+
+  The mock reads them through the new internal `@guren/server/internal/testing` subpath, because suites install the mock as `@guren/server` itself. The classes are the ones `@guren/core` exports, so `instanceof` agrees with the framework.
+
+### Patch Changes
+
+- 1e7943e: Disposing a nested `container.fake(key, …)` puts back the fake it replaced. Before, it removed the key, so the outer fake stopped applying while it was still in scope and `make(key)` returned the real binding.
+- 1c9ccae: A deployed app now renders its translations. `createApp({ i18n })` reads `lang/<locale>/*.json` from the filesystem, which Cloudflare Workers, AWS Lambda and Vercel functions do not ship, so the default scaffold's home page showed `messages.welcome` instead of its welcome text and the logs reported `no translations loaded for locale 'en'`.
+
+  `guren cloudflare:build`, `guren lambda:build` and the Vercel build now read `lang/` at build time and inject the catalogs as `GUREN_TRANSLATIONS`. When the app passes neither `loader` nor `path`, the i18n provider serves the injected catalogs through a `MemoryLoader`. An explicit `loader` still wins, and a `lang/` file that is not valid JSON is left out with a build warning. `GUREN_TRANSLATIONS` holding something other than a catalog object fails the boot.
+
+- 8d4275c: Follow-up cleanups to the Dev MCP move (RFC 0028 step 2), from a review of the merged change.
+
+  - `@guren/cli` loads the MCP SDK on the first Dev MCP request instead of at import. The package index re-exports `createDevMcpHandler`, so a static import put the SDK in the graph of every consumer of the index (the scaffolded edit hook, `deploy-check`, `create-app`) for a measured 33-43 ms none of them use.
+  - The Dev MCP server is typed against the CLI's own `ProjectContext`, `EntityContext`, `CheckReport`, `DoctorReport`, `GateReport`, `ModelInfo`, `ContextRoute` and `ResourceDefinition` rather than a hand-copied interface, which removes the casts that were hiding drift, and takes `WriterOptions` where it had copied that shape. `guren_make_component` drops a `route` entry the input schema never admitted.
+  - `McpServiceProvider` declares the two-member CLI interface it actually calls instead of importing the deprecated `createMcpServer`'s 30-member one, and exports `devMcpUnavailableReason` for the old-CLI decision. `@guren/server/mcp`'s deprecated `GurenCliApi` is unchanged from its 2.23 shape again.
+  - `DevOnlyModule` entries name the package that imports them (`importedBy`), and core's module-graph check searches that package alone, with parsed imports rather than a line-based grep. It had been widened to three roots, where any root's import satisfied any entry.
+
+- 312fc5e: The `Controller` that `createControllerModuleMock()` installs now extends the framework's own `Controller` instead of re-implementing its helpers, so a mocked controller test runs the request, validation and response code production runs. It overrides only what needs a booted application: `inertia()` still renders without shared props, a root document or an asset manifest, and `make()` still resolves from the context's `var.container`.
+
+  Helpers the copy lacked are now present: `accepted()`, `only()`, `except()`, `has()`, `query()`, `authorize()`, `can()`, `locale`, `t()`, `tc()` and `model()`.
+
+  Behavior that changes, each toward what the runtime already does:
+
+  - `redirect()` sends the `headers` option. The copy dropped it.
+  - A schema failure whose error carries no `issues` throws a `TypeError`, as in production. The copy answered 422.
+  - `this.auth` throws when no auth context is set, and cannot be assigned, because it is a getter. Stub it with `Object.defineProperty(controller, 'auth', { value: stub })`; `controller.auth = stub` and `Object.assign(controller, { auth: stub })` now throw.
+  - `inertia()` returns a promise, sends the `headers` option, sets `Vary: Accept`, and picks JSON the way the runtime does: any `X-Inertia` header, or an `Accept` that asks for JSON without `text/html`. `Accept: text/html, application/json` now renders HTML, and `createGurenControllerModule()`'s `inertia()` follows the same rule.
+  - A `gate` or `i18n` passed in `createControllerContext()`'s context values is now what `authorize()`, `can()`, `t()` and `locale` resolve.
+
+  The mock-only members are gone: `parsedBody`, `rawBody`, `multipartBody`, `readMultipart()`, `getBody()`, `getRawBody()`, `runValidation()`, `runValidationSafe()` and the public `context` field. The runtime keeps its parsed body privately under the same names, so they cannot remain on a subclass. `ctx`, `request`, `json()`, `validateBody()` and the other helpers are `protected`, as on the runtime class; call them from an action on your controller subclass rather than on the instance. Tests that only call `setContext()` and an action need no change.
+
+  `createControllerContext()` changes to match a live request: `req.param()` answers `{}` rather than `undefined` when a test sets no parameters, `req.json()` and `req.parseBody()` read through one `HonoRequest` so a body read twice in an action hits Hono's cache, and `var` exposes the context values alongside `container`. On the `ControllerContext` type, `req.queries`, `req.param`, `req.json` and `req.parseBody` are now required, because the runtime helpers call them; a context built by hand rather than by `createControllerContext()` has to supply them.
+
+  The runtime class is reached through the internal `@guren/server/internal/testing` subpath, which now exports `Controller`.
+
+- Updated dependencies [909b4b6]
+- Updated dependencies [d67480f]
+  - @guren/orm@2.11.0
+
 ## 2.23.3
 
 ### Patch Changes

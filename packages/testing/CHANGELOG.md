@@ -1,5 +1,69 @@
 # @guren/testing
 
+## 1.11.0
+
+### Minor Changes
+
+- 218db73: Declare the environment once and validate it at boot (RFC 0027 Part 0). `defineEnv({ APP_KEY: Env.string().secret(), SMTP_PORT: Env.port().default(587) })` builds a schema from `Env.string`, `url`, `number`, `port`, `boolean`, `enum` and `custom` (a synchronous Standard Schema), each with `.optional()`, `.default()`, `.allowEmpty()`, `.secret()`, `.describe()` and `.requiredInProduction()`. A blank `FOO=` counts as unset, so `.default()` applies to it, and numbers, ports and booleans are coerced by the builder.
+
+  `createApp({ env })` validates the schema at the start of `boot()`, before any provider registers, and binds the result as `env`. A failure throws one `EnvValidationError` listing every problem, with secret values redacted; under `GUREN_INTROSPECT=1` the problems are logged instead. Values are read from the `env.source` binding first and `process.env` second: `@guren/plugin-cloudflare` binds the entrypoint's env there before boot, since wrangler `vars` are not guaranteed to reach `process.env`, and `TestApp.create({ env, envSource })` binds a test's overrides. `env.parse(source, { mode })` runs the same validation outside an application. `NODE_ENV` and `GUREN_*` cannot be declared (`isRawEnvKey()`), because production gates only fold at bundle time as the literal `process.env.NODE_ENV` read.
+
+  `createApp({ inertia: { share } })` registers shared Inertia props scoped to that application's container.
+
+- dcb81a7: `contractInput({ route, params, query, body })` seeds what `Controller.validated()` reads, for a controller unit test built with `createControllerContext()`. The controller module mock implements `validated()` over the same seeded record.
+- 1e7943e: `app.fakeAi()` scripts in-process AI agents in tests (RFC 0029 §7). It replaces the app's `ai` binding for the `using` scope. Each agent's model answers from `respond()`, and its tools still run through `appTools()` and the invocation pipeline.
+
+  ```ts
+  using ai = app.fakeAi()
+  ai.respond(SupportTriager, [
+    { toolCalls: [{ name: 'tickets_show', input: { id: 4812 } }], then: { output: { priority: 2 } } },
+  ])
+
+  await app.post('/tickets/4812/triage').assertRedirect('/tickets/4812')
+
+  ai.assertPrompted(SupportTriager, (input) => input.includes('#4812'))
+  ai.assertNeverPrompted(ReviewAgent)
+  ai.calls(SupportTriager)[0].toolCalls   // [{ name, input, output }]
+  ```
+
+  - A response is a string, `{ text }`, `{ output }`, or `{ toolCalls, then }`. Each prompt consumes one response.
+  - A prompt with nothing scripted throws, naming the agent. Disposing the fake throws again, so the test still fails when a route turned that error into a 500. Disposing also fails when an agent's `stopWhen` ended the loop before it reached the scripted answer.
+  - `assertNotPrompted(Agent, predicate)` fails on a matching prompt, and `assertNeverPrompted(Agent)` fails on any prompt.
+  - Works on `TestApp.fromApp(app)`. `@guren/plugin-ai` and `ai` are optional peers of `@guren/testing`, loaded only for an app that binds `ai`.
+  - `@guren/plugin-ai` exports `bindAgent`, which the fake uses to construct agents the way `AiManager.agent().as()` does.
+
+- 312fc5e: The `Controller` that `createControllerModuleMock()` installs now extends the framework's own `Controller` instead of re-implementing its helpers, so a mocked controller test runs the request, validation and response code production runs. It overrides only what needs a booted application: `inertia()` still renders without shared props, a root document or an asset manifest, and `make()` still resolves from the context's `var.container`.
+
+  Helpers the copy lacked are now present: `accepted()`, `only()`, `except()`, `has()`, `query()`, `authorize()`, `can()`, `locale`, `t()`, `tc()` and `model()`.
+
+  Behavior that changes, each toward what the runtime already does:
+
+  - `redirect()` sends the `headers` option. The copy dropped it.
+  - A schema failure whose error carries no `issues` throws a `TypeError`, as in production. The copy answered 422.
+  - `this.auth` throws when no auth context is set, and cannot be assigned, because it is a getter. Stub it with `Object.defineProperty(controller, 'auth', { value: stub })`; `controller.auth = stub` and `Object.assign(controller, { auth: stub })` now throw.
+  - `inertia()` returns a promise, sends the `headers` option, sets `Vary: Accept`, and picks JSON the way the runtime does: any `X-Inertia` header, or an `Accept` that asks for JSON without `text/html`. `Accept: text/html, application/json` now renders HTML, and `createGurenControllerModule()`'s `inertia()` follows the same rule.
+  - A `gate` or `i18n` passed in `createControllerContext()`'s context values is now what `authorize()`, `can()`, `t()` and `locale` resolve.
+
+  The mock-only members are gone: `parsedBody`, `rawBody`, `multipartBody`, `readMultipart()`, `getBody()`, `getRawBody()`, `runValidation()`, `runValidationSafe()` and the public `context` field. The runtime keeps its parsed body privately under the same names, so they cannot remain on a subclass. `ctx`, `request`, `json()`, `validateBody()` and the other helpers are `protected`, as on the runtime class; call them from an action on your controller subclass rather than on the instance. Tests that only call `setContext()` and an action need no change.
+
+  `createControllerContext()` changes to match a live request: `req.param()` answers `{}` rather than `undefined` when a test sets no parameters, `req.json()` and `req.parseBody()` read through one `HonoRequest` so a body read twice in an action hits Hono's cache, and `var` exposes the context values alongside `container`. On the `ControllerContext` type, `req.queries`, `req.param`, `req.json` and `req.parseBody` are now required, because the runtime helpers call them; a context built by hand rather than by `createControllerContext()` has to supply them.
+
+  The runtime class is reached through the internal `@guren/server/internal/testing` subpath, which now exports `Controller`.
+
+- fd57b6d: `createControllerModuleMock()` now installs the framework's own `Resource`, `JsonResource`, `collect`, `ValidationException`, `AuthenticationException`, `ServiceProvider`, `defineModule`, `definePlugin` and `formatValidationErrors` instead of hand-written copies.
+
+  The copies had drifted from the runtime, so a mocked controller test could pass on behavior production does not have:
+
+  - `validateParams()` failed with status **400** under the mock; the runtime answers **422**. A test asserting `statusCode: 400` for an invalid route parameter now fails and should expect 422.
+  - `validateBody()` / `validateQuery()` / `validateParams()` keyed a root-level issue (empty path) `message` where the runtime keys it `''`, and they and their `*Safe()` variants added a `message` entry to an issue-less failure, which the runtime does not.
+  - The exceptions did not extend `HttpException`, so `toResponse()`, `toJSON()`, `getFieldErrors()`, `guard`, `redirectTo` and `withRedirect()` were missing.
+  - `Resource` lacked `whenOr()`, `whenNotNull()` and `merge()`.
+  - `formatValidationErrors()` joined the whole issue path and had no fallback; the runtime keys by the first path segment and answers `{ message }` when nothing matched.
+  - `Controller.apiToken()` threw a plain `Error` where the runtime throws `AuthenticationException`.
+  - `ServiceProvider` had a concrete `boot()`, a public `container`, and no `deferred` / `provides`; `defineModule()` dropped `commands`.
+
+  The mock reads them through the new internal `@guren/server/internal/testing` subpath, because suites install the mock as `@guren/server` itself. The classes are the ones `@guren/core` exports, so `instanceof` agrees with the framework.
+
 ## 1.10.1
 
 ### Patch Changes
