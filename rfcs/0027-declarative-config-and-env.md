@@ -798,7 +798,12 @@ The OAuth PR migrates `guren add oauth` and `make:auth --oauth`:
   is enabled, and the scaffolds scope it with `overrides` on `app/**`,
   `config/**`, `routes/**`, `src/**` and `modules/*/**`. A first-segment test
   inside the rule missed module code and depended on the directory oxlint ran
-  from; `overrides` globs resolve against the config file.
+  from; `overrides` globs resolve against the config file. The provider-form
+  templates, which still ship for apps with no `config/env.ts`, carry a file-level
+  disable with that reason, and `AppUrl.ts` disables its one `APP_URL` read: it
+  runs with no container, in both forms. `add-lint.test.ts` lints every scaffold
+  template that reads `process.env` through the shipped config, and checks the
+  rule fires in each glob and not in `bin/` or `drizzle.config.ts`.
 - **Blueprints** (`add-session.ts:111-117`, `add-cache.ts:25-28`, the `mail`,
   `queue` and `storage` blueprints in `packages/cli/src/blueprints.ts`) add their
   keys to `config/env.ts` through `addCreateAppOption(file, key, source,

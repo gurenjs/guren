@@ -1,5 +1,30 @@
 # @guren/plugin-lambda
 
+## 0.6.1
+
+### Patch Changes
+
+- 1c9ccae: A deployed app now renders its translations. `createApp({ i18n })` reads `lang/<locale>/*.json` from the filesystem, which Cloudflare Workers, AWS Lambda and Vercel functions do not ship, so the default scaffold's home page showed `messages.welcome` instead of its welcome text and the logs reported `no translations loaded for locale 'en'`.
+
+  `guren cloudflare:build`, `guren lambda:build` and the Vercel build now read `lang/` at build time and inject the catalogs as `GUREN_TRANSLATIONS`. When the app passes neither `loader` nor `path`, the i18n provider serves the injected catalogs through a `MemoryLoader`. An explicit `loader` still wins, and a `lang/` file that is not valid JSON is left out with a build warning. `GUREN_TRANSLATIONS` holding something other than a catalog object fails the boot.
+
+- 83143a7: `GurenLambdaApp` no longer adds a fixed `/assets/*` CloudFront behavior. The staged `.lambda/assets` directory decides: one built by a `@guren/core` that still stages a top-level `assets/` gets `/assets/*` from the per-root-entry behaviors, as its HTML needs, and one without it no longer spends one of CloudFront's 25 default cache behaviors on a path nothing requests.
+- Updated dependencies [029a516]
+- Updated dependencies [61c401c]
+- Updated dependencies [a798a10]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [909b4b6]
+- Updated dependencies [3e11a0f]
+- Updated dependencies [83143a7]
+- Updated dependencies [0eabb37]
+- Updated dependencies [1c9ccae]
+- Updated dependencies [8d4275c]
+- Updated dependencies [218db73]
+- Updated dependencies [000a5e0]
+- Updated dependencies [13b9205]
+- Updated dependencies [d67480f]
+  - @guren/core@1.19.0
+
 ## 0.6.0
 
 ### Minor Changes

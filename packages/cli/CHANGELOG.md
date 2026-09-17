@@ -1,5 +1,112 @@
 # @guren/cli
 
+## 2.24.0
+
+### Minor Changes
+
+- ba0d18d: `guren add ai` and `guren make:ai-agent` scaffold in-process AI agents (RFC 0029 §8).
+
+  ```bash
+  bunx guren add ai --provider anthropic
+  bunx guren make:ai-agent SupportTriager --tools tickets_show,tickets_update --output --test
+  ```
+
+  - `add ai` writes `config/ai.ts` for `anthropic`, `openai` or `gateway`. It declares the provider's API key in `config/env.ts` and the env files, registers the config and `aiPlugin()` in `createApp()`, and runs `bun add @guren/plugin-ai ai <provider package>`. `--no-install` prints that command instead.
+  - The key is optional, so the app boots without it. The first prompt then throws, naming the variable to set, before any request: given no key, the AI SDK would send the blank `.env` value to the API. The command refuses an app without `config/env.ts`.
+  - `make:ai-agent` writes `app/Ai/Agents/<Name>.ts` with a pinned `agentName`. `--tools` checks each name against the tools the app's routes derive, refuses an unknown one before writing, and warns on a name Anthropic and OpenAI reject. `--output` adds a Zod schema stub, and `--test` writes a test that scripts the model with `app.fakeAi()`. `--module` places both inside the module.
+  - `add ai` writes no conversation tables yet; they come with the `database` conversation store.
+
+- b1977d5: `guren codegen` types `appTools()` for an app depending on `@guren/plugin-ai` (RFC 0029 §11). `.guren/agents.gen.ts` gains `AgentToolInputTypes`, each tool's arguments rendered from its route's Zod contracts over the merged input schema (a property the extractor cannot render is `unknown`), and a `declare module '@guren/plugin-ai'` augmentation of `AppAgentTools` carrying each tool's input and output. An app without the plugin gets the same file as before.
+- 7719ddb: `guren add session` and `guren add cache` declare the keys they write into `config/env.ts`, so `guren check --env` stays green on an app they just scaffolded. Provider wiring now writes a `providers: [...]` option into a `createApp()` that has none, rather than reporting the array as missing: an entry listing no providers is the scaffolded shape since RFC 0027 §4 deleted `DatabaseProvider`.
+- 90baac5: `guren add cache` writes a `config/cache.ts` definition and lists it in `createApp({ config })` when the app declares its environment in `config/env.ts` (RFC 0027 §2), instead of `CacheProvider` and `CoreCacheServiceProvider`. An app without `config/env.ts` gets the provider as before.
+- dcb81a7: `guren codegen` registers each named route's parsed `params`, `query` and `body` types on `GurenRouteContracts` in `.guren/routes.gen.ts`, which types `Controller.validated('route.name')`. `make:feature` controllers read `this.validated()` in `store` and `update` instead of calling `validateBody()` against the schema the route already declares. `guren audit` passes a controller route whose server reports `validatesBody` as validated at route level, and keeps failing one on a server that does not enforce the schema.
+- a17acdb: Add `createDevMcpHandler({ cwd })`, the Dev MCP server on MCP SDK v2 (RFC 0028). One fetch handler serves the 2026-07-28 protocol and 2025-era clients, with the same tools, resources and prompts as before. `@guren/server`'s `McpServiceProvider` mounts it when `GUREN_MCP=1`.
+
+  `@modelcontextprotocol/server` and `zod` are now runtime dependencies of `@guren/cli`. `bunx guren upgrade --check-only` reports imports of the deprecated `createMcpServer` from `@guren/server/mcp`.
+
+- d073887: Tooling for the declared environment (RFC 0027 §1, §7).
+
+  - `guren env:example` appends each key `config/env.ts` declares to `.env.example`: the default as the value, a secret left blank, the `describe()` text and enum choices as the comment. `$` is written as `\$`, since Bun expands it inside either quote style. Lines already in the file are kept, an `export KEY=` line included, and keys the schema does not declare are reported.
+  - `guren check --env` fails when `.env.example` and `config/env.ts` disagree on the set of keys, or when `config/env.ts` cannot be imported. It also runs in the full `guren check`, and contributes nothing to an app without `config/env.ts`.
+  - `guren/no-unvalidated-env-read`, shipped through `@guren/cli/oxlint`, reports a `process.env.X` read other than `NODE_ENV` and `GUREN_*`. Enable it with `overrides` on application code, since `bin/serve.ts` and `drizzle.config.ts` run outside an application.
+  - A plugin manifest's `env` entries accept `type`, `choices`, `required`, `default` and `secret`. When the app has a `config/env.ts`, `guren plugin` declares each key in its `defineEnv({ ... })` object. An invalid declaration is refused before anything is installed.
+
+- d08715f: `guren add mail` and `guren make:auth` write one `config/mail.ts` as a `defineMailConfig` definition listed in `createApp({ config })` when the app declares its environment in `config/env.ts` and nothing already binds mail (RFC 0027 §2). The definition replaces `MailProvider` and `CoreMailServiceProvider`, ships `log`, `memory` and `smtp` transports, and declares `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` and the `SMTP_*` keys. `make:auth` in such an app reads `MAIL_MAILER`, not `MAIL_DRIVER`. An app without `config/env.ts` keeps the provider form; `guren add mail` there now also appends `MAIL_MAILER`, `MAIL_FROM_ADDRESS` and `MAIL_FROM_NAME` to `.env.example` and `.env`.
+- 000a5e0: `guren add oauth` and `guren make:auth --oauth` write `config/oauth.ts` as a `defineOAuthConfig` definition listed in `createApp({ config })` when the app declares its environment in `config/env.ts` and nothing already binds OAuth (RFC 0027 §2). The definition replaces `OAuthProvider` and `CoreOAuthServiceProvider`, keeps state in `oauth_states` when the app has a schema, and registers a provider once its `OAUTH_<PROVIDER>_CLIENT_ID`, `_CLIENT_SECRET` and `_REDIRECT_URI` keys, which the commands declare, are all set. The deploy-runtime check reads `defineOAuthConfig` as OAuth. Both forms now append those keys to `.env.example` and `.env`, so the starter `.env.example` files no longer carry them commented out; a blueprint key an existing `.env.example` only comments out is reported instead of being skipped silently.
+- d67480f: The query builder gains `sum()`, `avg()`, `min()`, `max()` and `exists()`. They apply the model's global scopes, `SoftDeletes` included, the way `get()` does. A sum keeps the column's type: `numeric`/`decimal` columns come back as a string and `bigint({ mode: 'bigint' })` columns as a bigint, so no digit is lost. `toSql()` returns the scoped conditions as a Drizzle `SQL` fragment, and `toDrizzle()` starts a Drizzle select with them applied, or applies them to a select you pass (joins included), along with the builder's `orderBy()`, `limit()` and `offset()`. A later `.where()` on that select is AND-ed with the scopes instead of replacing them. `@guren/core` re-exports the new `AggregateFunction`, `SumValue`, `AvgValue` and `DrizzleSelectQuery` types.
+
+  ### Deprecated
+
+  - **`Model.query()`**: returns a Drizzle select that skips every global scope, so it reads soft-deleted rows and other tenants' rows. Use `Model.newQuery().toDrizzle()`, or `toDrizzle(query)` for joins. Deprecated in `@guren/orm` 2.11.0, will be removed in 3.0.0. Detected by `bunx guren upgrade --check-only` as `model-query-raw`.
+
+- e9b7751: `guren check` reads an app's configuration by importing it (RFC 0027 §6). A definition is data whose `resolve` is a pure function of the validated environment, so the CLI computes a config without booting the app.
+
+  Only a file that reads as a definition, or one the entry's `createApp({ config: [...] })` array lists, is imported: the rest of `config/` is the app's own module, and running its top-level code is not this check's business. A config built from a key the environment does not set is marked unverified rather than kept, since it holds the redacted placeholder, and any value a `.secret()` variable holds is redacted out of an error the import or `resolve()` raised.
+
+  Two wiring results come with it, both judged only against that array: `config-unwired` warns about a definition the array does not list, which binds nothing while the app looks configured; `config-not-a-definition` fails a file the array lists whose default export is not a definition, which the boot dies on. A file that could not be imported warns instead. An array this cannot read whole, such as `config: definitions` or one holding a spread, reports nothing.
+
+- 1a097f8: `guren add session` (and so `guren add auth`) writes `config/session.ts` as a `defineSessionConfig` definition listed in `createApp({ config })` when the app declares its environment in `config/env.ts` and nothing already binds sessions (RFC 0027 §2); an app without `config/env.ts` keeps `SessionProvider`. `guren check`'s session table rule and the deploy-runtime session verdict read the definition, so a migrated app is not reported as keeping sessions in memory.
+- 24610b4: `guren add storage` and `guren add queue` write `config/storage.ts` and `config/queue.ts` definitions when the app declares its environment in `config/env.ts` and nothing already binds the service (RFC 0027 §2). Queue keeps its job registration in a new `app/Providers/JobsProvider.ts`. Both blueprints now add `STORAGE_DISK` / `QUEUE_CONNECTION` to the env files and declare them, and each definition refuses a disk or driver name it does not declare when the app boots; the queue provider fell back to `sync` for any unknown name. `guren add attachments` recognizes a storage definition and no longer installs the storage blueprint over it.
+
+### Patch Changes
+
+- 098b45d: `guren add oauth` keeps OAuth state in the database. It adds an `oauth_states` table to `db/schema.ts` for the app's dialect and generates its migration, and the scaffolded `OAuthProvider` binds `createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })` itself. The blueprint no longer registers `CoreOAuthServiceProvider`, whose manager kept state in process memory, so on Workers, Lambda and Vercel the authorize redirect and the callback could reach different instances and the sign-in failed.
+
+  An app with no `db/schema.ts` is refused before anything is written, since the provider imports the table.
+
+  Re-running with `--force` in an app scaffolded by an earlier release rewrites `OAuthProvider.ts` but leaves `CoreOAuthServiceProvider` in the providers array. The scaffolded provider binds after it, so the database store still wins; remove the entry by hand.
+
+- 029a516: `AgentSurface` gains `'in-process'`, the surface `@guren/plugin-ai` records a model's tool calls under (RFC 0029 §2.3). Audit trails read it back, and `guren tool:log --surface in-process` filters to it.
+
+  Code that maps every `AgentSurface` in a total `Record<AgentSurface, …>` or an exhaustive `switch` no longer compiles until it names the new member. That is the intended effect: a surface cannot be half-recorded. `@guren/core` re-exports the union, so it moves with server.
+
+- 1452763: The agent harness (`rules/orm-models.md`, the `guren-api` skill), the API digest in `guren context` and the `guren doctor` database hint now point at `@guren/core` for models, database factories and `ModelNotFoundException`, matching what `make:model`, `make:seeder` and `make:auth` already generate. `@guren/orm/drizzle/<dialect>` stays the import for `db/schema.ts`. Run `guren agent:sync` to refresh an installed harness.
+- 8d4275c: Follow-up cleanups to the Dev MCP move (RFC 0028 step 2), from a review of the merged change.
+
+  - `@guren/cli` loads the MCP SDK on the first Dev MCP request instead of at import. The package index re-exports `createDevMcpHandler`, so a static import put the SDK in the graph of every consumer of the index (the scaffolded edit hook, `deploy-check`, `create-app`) for a measured 33-43 ms none of them use.
+  - The Dev MCP server is typed against the CLI's own `ProjectContext`, `EntityContext`, `CheckReport`, `DoctorReport`, `GateReport`, `ModelInfo`, `ContextRoute` and `ResourceDefinition` rather than a hand-copied interface, which removes the casts that were hiding drift, and takes `WriterOptions` where it had copied that shape. `guren_make_component` drops a `route` entry the input schema never admitted.
+  - `McpServiceProvider` declares the two-member CLI interface it actually calls instead of importing the deprecated `createMcpServer`'s 30-member one, and exports `devMcpUnavailableReason` for the old-CLI decision. `@guren/server/mcp`'s deprecated `GurenCliApi` is unchanged from its 2.23 shape again.
+  - `DevOnlyModule` entries name the package that imports them (`importedBy`), and core's module-graph check searches that package alone, with parsed imports rather than a line-based grep. It had been widened to three roots, where any root's import satisfied any entry.
+
+- 303dd78: `guren make:auth --oauth` keeps OAuth state in the database. It adds an `oauth_states` table to `db/schema.ts` for the app's dialect, covered by the same migration as `users` and `sessions`, and the scaffolded `OAuthProvider` binds `createOAuthManager({ stateStore: new DatabaseOAuthStateStore(oauthStates) })` itself. `--install` no longer registers `CoreOAuthServiceProvider`, whose manager kept state in process memory, so on Workers, Lambda and Vercel the authorize redirect and the callback could reach different instances and the sign-in failed. An app with no `db/schema.ts` keeps the previous wiring.
+
+  An app scaffolded by an earlier release is not changed by re-running with `--force`: `OAuthProvider.ts` is rewritten, but `CoreOAuthServiceProvider` stays in the providers array. The scaffolded provider binds after it, so the database store still wins; remove the entry by hand.
+
+  The deploy-runtime warning for in-memory OAuth state now suggests the OAuth state store alone. It used to also suggest `guren add session`, which an app from `make:auth` has already run.
+
+  `make:auth` lists `bun run codegen` as its first next step. Until it runs, `.guren/pages.gen.ts` does not list the auth pages and `bun run typecheck` fails.
+
+- 13b9205: `oauth-states:prune` deletes expired rows from the `oauth_states` table. `DatabaseOAuthStateStore` only removes a row when that state is looked up again, so a sign-in abandoned before its callback left its row forever: `GET /auth/:provider` needs no authentication and writes one row per request.
+
+  `OAuthManager.pruneExpiredStates()` sweeps the state store through the optional `deleteExpired(now)` now declared on `OAuthStateStore`, and `@guren/core` ships `OAuthStatesPruneCommand` over it. `MemoryOAuthStateStore` sweeps on write and `RedisOAuthStateStore` expires its own keys, so neither implements the method and both are skipped.
+
+  `guren add oauth` registers the command in `src/console.ts` and lists scheduling it as a next step, as does `guren make:auth --oauth` when it appends the table. With no `db/schema.ts`, `make:auth` leaves OAuth state in memory and registers nothing.
+
+- Updated dependencies [029a516]
+- Updated dependencies [61c401c]
+- Updated dependencies [a798a10]
+- Updated dependencies [e9b7751]
+- Updated dependencies [1e7943e]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [909b4b6]
+- Updated dependencies [5366885]
+- Updated dependencies [3e11a0f]
+- Updated dependencies [83143a7]
+- Updated dependencies [0eabb37]
+- Updated dependencies [1c9ccae]
+- Updated dependencies [a17acdb]
+- Updated dependencies [8d4275c]
+- Updated dependencies [218db73]
+- Updated dependencies [0756e55]
+- Updated dependencies [000a5e0]
+- Updated dependencies [13b9205]
+- Updated dependencies [d67480f]
+- Updated dependencies [312fc5e]
+- Updated dependencies [fd57b6d]
+  - @guren/server@2.24.0
+  - @guren/core@1.19.0
+  - @guren/orm@2.11.0
+
 ## 2.23.3
 
 ### Patch Changes

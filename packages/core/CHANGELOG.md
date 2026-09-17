@@ -1,5 +1,131 @@
 # @guren/core
 
+## 1.19.0
+
+### Minor Changes
+
+- 029a516: `AgentSurface` gains `'in-process'`, the surface `@guren/plugin-ai` records a model's tool calls under (RFC 0029 §2.3). Audit trails read it back, and `guren tool:log --surface in-process` filters to it.
+
+  Code that maps every `AgentSurface` in a total `Record<AgentSurface, …>` or an exhaustive `switch` no longer compiles until it names the new member. That is the intended effect: a surface cannot be half-recorded. `@guren/core` re-exports the union, so it moves with server.
+
+- 61c401c: Two helpers every agent surface plugin was carrying its own copy of now live beside the agent invocation pipeline:
+
+  - `resolveAgentAuditSink(config)` and the `AgentAuditConfig` type: the `audit: { file, days } | { sink }` option `mcpPlugin` and `aiPlugin` take. The file sink writes the lines `parseAuditRecord` reads back, and is loaded through a dynamic `import()`, so an app that passes its own `sink` never constructs the filesystem channel. Exported from the main entry only, not from `@guren/server/agent`.
+  - `createAgentCallBudget({ callsPerMinute, now, message })`: a sliding 60-second call meter, passed as the pipeline's `interpose` or called directly. It throws on a limit that is not a whole number of at least 1, since `Infinity` or `NaN` would leave the meter unmetered.
+
+- a798a10: Configuration as data (RFC 0027 Part 1). `createApp({ config: [...] })` takes the definitions `config/*.ts` export: each resolves its config from the validated `env` and binds the manager that config builds, inside `ConfigServiceProvider`, before any other provider registers. Its `boot` runs before any other provider boots. `defineConfig()` is the general form; `defineCacheConfig`, `defineHttpConfig`, `defineMailConfig`, `defineOAuthConfig`, `defineQueueConfig` and `defineStorageConfig` come from `@guren/server`, and `defineSessionConfig` from `@guren/core`, since only core's session manager knows the `database` driver.
+
+  ```ts
+  // config/session.ts
+  export default defineSessionConfig((env) => ({
+    default: env.SESSION_DRIVER,
+    stores: {
+      database: { driver: "database", table: sessions },
+      cookie: { driver: "cookie" },
+    },
+  }));
+  ```
+
+  Two definitions with one key fail the boot, and so does a provider that rebinds a key a definition bound: `"session" is configured twice: config/session.ts and SessionProvider.register(). Keep one.` `Container.bindingOf(key)` exposes the binding record that check compares.
+
+  `defineHttpConfig((env) => ({ hostAuthorization }))` moves host authorization into config, where it can read `APP_URL`. The middleware keeps its place ahead of every app middleware; a request that arrives before `boot()` gets a 503, and passing `createApp({ hostAuthorization })` as well fails the boot.
+
+- dcb81a7: A route contract's `body` schema is now validated on controller-action routes too, before the action runs, instead of only typing them. A body that fails it answers 422 through `ValidationException`, keyed by the full field path as `Controller.validateBody()` keys it, so Inertia forms display it unchanged. `Controller.validated()` returns the `params`, `query` and `body` the contract parsed (coercions, defaults and transforms applied; an undeclared segment is `undefined`), and `validated('posts.store')` is typed from the `GurenRouteContracts` registry that `guren codegen` writes. Passing a name other than the route being served throws, so an action mounted on several routes passes every name: `validated(['posts.update', 'posts.patch'])`.
+
+  Existing actions keep working: `validateBody()`, `input()` and the other body readers reuse the payload the contract already parsed. One ordering changes: a check an action makes itself, such as `this.auth.userOrFail()`, now runs only after the body passes, so an unauthenticated request with an invalid body gets 422 rather than 401. Move that check into route middleware where the 401 must come first. `RouteDefinition` gains `validatesBody: true` on routes whose body schema is enforced.
+
+- 909b4b6: A database connection can read the validated environment (RFC 0027 Part 1). `configureOrm(context?)` on the Postgres, MySQL, SQLite and AWS Data API factories accepts `{ env }`, and a function passed as `connectionString`, `filename`, `database`, `resourceArn` or `secretArn` receives it. The factory keeps the context it was given, so migrations, the admin client and error reporting resolve against the same env as the connection. When a handle opened earlier resolves to a different database under the new context, `configureOrm()` closes it and runs migrations again against the new one. Called without a context, as `guren db:migrate` and scripts do, the resolver receives `undefined` and falls back as before.
+
+  Every factory gains `hasMigrations()`, which reports whether the migrations folder holds a migration without touching the database (always `false` on D1, whose migrations wrangler applies).
+
+  `defineDatabaseConfig(database, { seedOnBoot })` from `@guren/core` puts `config/database.ts` into `createApp({ config })`: it binds `database`, and at boot calls `configureOrm({ env })`, then runs the seeders when `seedOnBoot` is set and `hasMigrations()` is true. Without an env schema it passes no context.
+
+  ```ts
+  // config/database.ts
+  const database = createPostgresDatabase({
+    migrationsFolder: new URL("../db/migrations", import.meta.url),
+    connectionString: (context) =>
+      (context?.env ?? env.parse().values).DATABASE_URL,
+  });
+  export const { getDatabase, migrateDatabase, configureOrm, seedDatabase } =
+    database;
+  export default defineDatabaseConfig(database, {
+    seedOnBoot: process.env.NODE_ENV !== "production",
+  });
+  ```
+
+- 218db73: Declare the environment once and validate it at boot (RFC 0027 Part 0). `defineEnv({ APP_KEY: Env.string().secret(), SMTP_PORT: Env.port().default(587) })` builds a schema from `Env.string`, `url`, `number`, `port`, `boolean`, `enum` and `custom` (a synchronous Standard Schema), each with `.optional()`, `.default()`, `.allowEmpty()`, `.secret()`, `.describe()` and `.requiredInProduction()`. A blank `FOO=` counts as unset, so `.default()` applies to it, and numbers, ports and booleans are coerced by the builder.
+
+  `createApp({ env })` validates the schema at the start of `boot()`, before any provider registers, and binds the result as `env`. A failure throws one `EnvValidationError` listing every problem, with secret values redacted; under `GUREN_INTROSPECT=1` the problems are logged instead. Values are read from the `env.source` binding first and `process.env` second: `@guren/plugin-cloudflare` binds the entrypoint's env there before boot, since wrangler `vars` are not guaranteed to reach `process.env`, and `TestApp.create({ env, envSource })` binds a test's overrides. `env.parse(source, { mode })` runs the same validation outside an application. `NODE_ENV` and `GUREN_*` cannot be declared (`isRawEnvKey()`), because production gates only fold at bundle time as the literal `process.env.NODE_ENV` read.
+
+  `createApp({ inertia: { share } })` registers shared Inertia props scoped to that application's container.
+
+- 000a5e0: `defineOAuthConfig` accepts `stateStore`, which the bound OAuth manager keeps authorize states in, so a definition can hold them in the database (`new DatabaseOAuthStateStore(oauthStates)`) rather than in process memory (RFC 0027 §2).
+- 13b9205: `oauth-states:prune` deletes expired rows from the `oauth_states` table. `DatabaseOAuthStateStore` only removes a row when that state is looked up again, so a sign-in abandoned before its callback left its row forever: `GET /auth/:provider` needs no authentication and writes one row per request.
+
+  `OAuthManager.pruneExpiredStates()` sweeps the state store through the optional `deleteExpired(now)` now declared on `OAuthStateStore`, and `@guren/core` ships `OAuthStatesPruneCommand` over it. `MemoryOAuthStateStore` sweeps on write and `RedisOAuthStateStore` expires its own keys, so neither implements the method and both are skipped.
+
+  `guren add oauth` registers the command in `src/console.ts` and lists scheduling it as a next step, as does `guren make:auth --oauth` when it appends the table. With no `db/schema.ts`, `make:auth` leaves OAuth state in memory and registers nothing.
+
+- d67480f: The query builder gains `sum()`, `avg()`, `min()`, `max()` and `exists()`. They apply the model's global scopes, `SoftDeletes` included, the way `get()` does. A sum keeps the column's type: `numeric`/`decimal` columns come back as a string and `bigint({ mode: 'bigint' })` columns as a bigint, so no digit is lost. `toSql()` returns the scoped conditions as a Drizzle `SQL` fragment, and `toDrizzle()` starts a Drizzle select with them applied, or applies them to a select you pass (joins included), along with the builder's `orderBy()`, `limit()` and `offset()`. A later `.where()` on that select is AND-ed with the scopes instead of replacing them. `@guren/core` re-exports the new `AggregateFunction`, `SumValue`, `AvgValue` and `DrizzleSelectQuery` types.
+
+  ### Deprecated
+
+  - **`Model.query()`**: returns a Drizzle select that skips every global scope, so it reads soft-deleted rows and other tenants' rows. Use `Model.newQuery().toDrizzle()`, or `toDrizzle(query)` for joins. Deprecated in `@guren/orm` 2.11.0, will be removed in 3.0.0. Detected by `bunx guren upgrade --check-only` as `model-query-raw`.
+
+### Patch Changes
+
+- 3e11a0f: Deployed apps (Cloudflare Workers, AWS Lambda, Vercel) no longer download every lazily loaded page chunk twice. The deploy build addressed the client entry and its CSS under `/assets/`, while Vite's modulepreload helper addresses chunks under `/public/assets/`, so each Inertia navigation fetched a chunk once as a preload and again as the real import. The entry now uses `/public/assets/`, the prefix the app already uses when it serves itself. Rebuild with `cloudflare:build`, `lambda:build` or the Vercel build to pick it up.
+- 83143a7: The Cloudflare Workers and AWS Lambda builds stage the built client assets once, under `public/assets/`, instead of also copying them to a top-level `assets/`. Nothing the framework generates addresses `/assets/` any more, so the second copy doubled the static file count and kept answering a URL that should return 404, which is how a wrong asset prefix went unnoticed. Rebuild with `cloudflare:build` or `lambda:build` to pick it up. The Vercel build is unchanged: it serves `public/` from its static root and rewrites `/public/(.*)` onto it.
+- 0eabb37: `DEV_ONLY_MODULES` records that no package imports the v1 MCP transport any more (`importedBy: null`) now that `@guren/plugin-mcp` runs on SDK v2. The entry stays, so the stub file a committed `wrangler.jsonc` aliases keeps being written; deploy output is unchanged.
+- 1c9ccae: A deployed app now renders its translations. `createApp({ i18n })` reads `lang/<locale>/*.json` from the filesystem, which Cloudflare Workers, AWS Lambda and Vercel functions do not ship, so the default scaffold's home page showed `messages.welcome` instead of its welcome text and the logs reported `no translations loaded for locale 'en'`.
+
+  `guren cloudflare:build`, `guren lambda:build` and the Vercel build now read `lang/` at build time and inject the catalogs as `GUREN_TRANSLATIONS`. When the app passes neither `loader` nor `path`, the i18n provider serves the injected catalogs through a `MemoryLoader`. An explicit `loader` still wins, and a `lang/` file that is not valid JSON is left out with a build warning. `GUREN_TRANSLATIONS` holding something other than a catalog object fails the boot.
+
+- 8d4275c: Follow-up cleanups to the Dev MCP move (RFC 0028 step 2), from a review of the merged change.
+
+  - `@guren/cli` loads the MCP SDK on the first Dev MCP request instead of at import. The package index re-exports `createDevMcpHandler`, so a static import put the SDK in the graph of every consumer of the index (the scaffolded edit hook, `deploy-check`, `create-app`) for a measured 33-43 ms none of them use.
+  - The Dev MCP server is typed against the CLI's own `ProjectContext`, `EntityContext`, `CheckReport`, `DoctorReport`, `GateReport`, `ModelInfo`, `ContextRoute` and `ResourceDefinition` rather than a hand-copied interface, which removes the casts that were hiding drift, and takes `WriterOptions` where it had copied that shape. `guren_make_component` drops a `route` entry the input schema never admitted.
+  - `McpServiceProvider` declares the two-member CLI interface it actually calls instead of importing the deprecated `createMcpServer`'s 30-member one, and exports `devMcpUnavailableReason` for the old-CLI decision. `@guren/server/mcp`'s deprecated `GurenCliApi` is unchanged from its 2.23 shape again.
+  - `DevOnlyModule` entries name the package that imports them (`importedBy`), and core's module-graph check searches that package alone, with parsed imports rather than a line-based grep. It had been widened to three roots, where any root's import satisfied any entry.
+
+- Updated dependencies [ba0d18d]
+- Updated dependencies [098b45d]
+- Updated dependencies [029a516]
+- Updated dependencies [61c401c]
+- Updated dependencies [b1977d5]
+- Updated dependencies [1452763]
+- Updated dependencies [7719ddb]
+- Updated dependencies [90baac5]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [a798a10]
+- Updated dependencies [e9b7751]
+- Updated dependencies [1e7943e]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [909b4b6]
+- Updated dependencies [5366885]
+- Updated dependencies [1c9ccae]
+- Updated dependencies [a17acdb]
+- Updated dependencies [a17acdb]
+- Updated dependencies [8d4275c]
+- Updated dependencies [d073887]
+- Updated dependencies [218db73]
+- Updated dependencies [0756e55]
+- Updated dependencies [d08715f]
+- Updated dependencies [303dd78]
+- Updated dependencies [000a5e0]
+- Updated dependencies [000a5e0]
+- Updated dependencies [13b9205]
+- Updated dependencies [d67480f]
+- Updated dependencies [e9b7751]
+- Updated dependencies [1a097f8]
+- Updated dependencies [24610b4]
+- Updated dependencies [312fc5e]
+- Updated dependencies [fd57b6d]
+  - @guren/cli@2.24.0
+  - @guren/server@2.24.0
+  - @guren/orm@2.11.0
+
 ## 1.18.0
 
 ### Minor Changes

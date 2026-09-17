@@ -1,5 +1,48 @@
 # web
 
+## 0.1.44
+
+### Patch Changes
+
+- Updated dependencies [ba0d18d]
+- Updated dependencies [098b45d]
+- Updated dependencies [029a516]
+- Updated dependencies [61c401c]
+- Updated dependencies [b1977d5]
+- Updated dependencies [1452763]
+- Updated dependencies [7719ddb]
+- Updated dependencies [90baac5]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [a798a10]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [909b4b6]
+- Updated dependencies [3e11a0f]
+- Updated dependencies [83143a7]
+- Updated dependencies [0eabb37]
+- Updated dependencies [1c9ccae]
+- Updated dependencies [a17acdb]
+- Updated dependencies [8d4275c]
+- Updated dependencies [d073887]
+- Updated dependencies [218db73]
+- Updated dependencies [d08715f]
+- Updated dependencies [303dd78]
+- Updated dependencies [000a5e0]
+- Updated dependencies [000a5e0]
+- Updated dependencies [13b9205]
+- Updated dependencies [d67480f]
+- Updated dependencies [e9b7751]
+- Updated dependencies [1a097f8]
+- Updated dependencies [24610b4]
+- Updated dependencies [dcb81a7]
+- Updated dependencies [1e7943e]
+- Updated dependencies [312fc5e]
+- Updated dependencies [fd57b6d]
+  - @guren/cli@2.24.0
+  - @guren/core@1.19.0
+  - @guren/orm@2.11.0
+  - @guren/plugin-cloudflare@0.11.0
+  - @guren/testing@1.11.0
+
 ## 0.1.43
 
 ### Patch Changes

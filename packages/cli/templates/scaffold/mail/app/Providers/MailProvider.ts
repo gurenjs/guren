@@ -1,3 +1,4 @@
+// oxlint-disable guren/no-unvalidated-env-read -- the provider form serves apps with no config/env.ts to declare these keys in
 import { ServiceProvider, createMailManager } from '@guren/core'
 
 export default class MailProvider extends ServiceProvider {

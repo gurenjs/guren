@@ -2,7 +2,8 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   // The guren rules ship with @guren/cli: await-async-assertion (a bare
   // `expect(...).rejects` statement can never fail its test), no-nullish-env-default
-  // (`process.env.FOO ?? 'x'` keeps a blank `FOO=` as ''), and the comment rules.
+  // (`process.env.FOO ?? 'x'` keeps a blank `FOO=` as ''), no-unvalidated-env-read
+  // (below), and the comment rules.
   "jsPlugins": ["@guren/cli/oxlint"],
   "ignorePatterns": ["node_modules/**", ".guren/**", "dist/**", "public/build/**"],
   "rules": {
@@ -16,7 +17,15 @@
     "guren/comment-history": "warn",
     "guren/comment-param-restates": "warn",
     "no-unused-vars": ["warn", { "ignoreRestSiblings": true, "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
-  }
+  },
+  "overrides": [
+    {
+      // Application code reads the environment config/env.ts validates, through the
+      // `env` a config definition receives. bin/ and drizzle.config.ts run outside the app.
+      "files": ["app/**", "config/**", "routes/**", "src/**", "modules/*/**"],
+      "rules": { "guren/no-unvalidated-env-read": "error" }
+    }
+  ]
   // Type-aware rules (typescript/no-floating-promises and friends) need
   // `bun add -d oxlint-tsgolint` and `"options": { "typeAware": true }`.
 }

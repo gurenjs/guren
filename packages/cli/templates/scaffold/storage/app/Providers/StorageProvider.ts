@@ -1,3 +1,4 @@
+// oxlint-disable guren/no-unvalidated-env-read -- the provider form serves apps with no config/env.ts to declare these keys in
 import { ServiceProvider, createStorageManager } from '@guren/core'
 
 // Declared once, chosen per environment: set STORAGE_DISK in .env (or in
