@@ -3,7 +3,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 import { describe, expect, test } from 'bun:test'
 import type { AgentPrincipal, MemoryQueueDriver, QueuedJob } from '@guren/core'
 
-import { Agent, AgentResponded, RunAgentJob, type RunAgentPayload } from '../src'
+import { Agent, RunAgentJob, type RunAgentPayload } from '../src'
 import { bootHarness, withQueue, type Harness } from './fixture'
 
 class Support extends Agent {
