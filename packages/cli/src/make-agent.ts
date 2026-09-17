@@ -28,7 +28,9 @@ import { resourceName, writeRoot, writeScaffoldFile, type WriterOptions } from '
 
 const AGENT_DIR = 'app/Agents'
 const CONFIG_FILE = 'config/agents.ts'
-const ENV_FILE = 'config/env.ts'
+const BINDINGS_FILE = 'config/bindings.ts'
+/** Where `make:agent` wrote `Env` before `config/env.ts` became the env schema (RFC 0027 §1). */
+const LEGACY_BINDINGS_FILE = 'config/env.ts'
 const TSCONFIG_FILE = 'tsconfig.json'
 const ARCH_CANDIDATES = ['guren.arch.ts', 'guren.arch.js', 'guren.arch.mjs'] as const
 const PLUGIN_PACKAGE = '@guren/plugin-agents'
@@ -59,12 +61,12 @@ export interface MakeAgentResult {
  * is: the class name appears in four places and the state interface name
  * derives from it, so a static file would hold nothing.
  */
-export function buildAgentTemplate(className: string): string {
+export function buildAgentTemplate(className: string, bindingsFile = BINDINGS_FILE): string {
   const stateType = `${className}State`
 
   return `import { GurenAgent } from '${PLUGIN_PACKAGE}/agent'
 
-import type { Env } from '@/config/env'
+import type { Env } from '@/${bindingsFile.replace(/\.ts$/, '')}'
 
 interface ${stateType} {
   lastRunAt: string | null
@@ -140,7 +142,7 @@ function durableObjectBindingName(exportName: string): string {
     .toUpperCase()
 }
 
-/** The `config/env.ts` a project gets when it has none: the `Env` every agent class names. */
+/** The `config/bindings.ts` a project gets when it has none: the `Env` every agent class names. */
 function envTemplate(className: string): string {
   return `/**
  * The Worker bindings this app expects. \`Env\` is named by every class under
@@ -218,16 +220,17 @@ export async function makeAgent(name: string, options: MakeAgentOptions = {}): P
   const agentName = className.charAt(0).toLowerCase() + className.slice(1)
   const cwd = writeRoot(options)
 
+  const bindingsFile = await resolveBindingsFile(cwd)
   const file = await writeScaffoldFile(
     `${AGENT_DIR}/${className}.ts`,
-    buildAgentTemplate(className),
+    buildAgentTemplate(className, bindingsFile),
     options,
   )
 
   const patches: MakeAgentPatch[] = [
     await registerAgent(cwd, agentName, className, options),
     await extendArchRules(cwd, options),
-    await writeEnvType(cwd, className, options),
+    await writeEnvType(cwd, className, bindingsFile, options),
     await addWorkersTypes(cwd),
   ]
 
@@ -446,26 +449,38 @@ function findRulesArray(ast: File): RulesArray | null {
 }
 
 /**
- * Write `config/env.ts` when the project has none, and leave an existing one
+ * `config/bindings.ts`, unless an app from before it keeps `Env` in a
+ * `config/env.ts` that exports one: `config/env.ts` is now the env schema, so a
+ * file without `Env` is never where the bindings go.
+ */
+async function resolveBindingsFile(cwd: string): Promise<string> {
+  if ((await readIfExists(cwd, BINDINGS_FILE)) !== null) return BINDINGS_FILE
+  const legacy = await readIfExists(cwd, LEGACY_BINDINGS_FILE)
+  const ast = legacy === null ? null : parseSourceFile(legacy, LEGACY_BINDINGS_FILE)
+  return ast !== null && exportsEnv(ast) ? LEGACY_BINDINGS_FILE : BINDINGS_FILE
+}
+
+/**
+ * Write the bindings file when the project has none, and leave an existing one
  * alone as long as it exports the `Env` the class imports — an existing file
  * that does not is reported with the interface to add, since the import the
  * scaffold just wrote would otherwise fail on the next typecheck.
  */
-async function writeEnvType(cwd: string, className: string, options: WriterOptions): Promise<MakeAgentPatch> {
-  const existing = await readIfExists(cwd, ENV_FILE)
+async function writeEnvType(cwd: string, className: string, bindingsFile: string, options: WriterOptions): Promise<MakeAgentPatch> {
+  const existing = await readIfExists(cwd, bindingsFile)
 
   if (existing === null) {
-    await writeScaffoldFile(ENV_FILE, envTemplate(className), options)
-    return { file: ENV_FILE, status: 'created' }
+    await writeScaffoldFile(bindingsFile, envTemplate(className), options)
+    return { file: bindingsFile, status: 'created' }
   }
 
-  const ast = parseSourceFile(existing, ENV_FILE)
+  const ast = parseSourceFile(existing, bindingsFile)
   if (ast !== null && exportsEnv(ast)) {
-    return { file: ENV_FILE, status: 'skipped', reason: 'it already exports `Env`' }
+    return { file: bindingsFile, status: 'skipped', reason: 'it already exports `Env`' }
   }
 
   return {
-    file: ENV_FILE,
+    file: bindingsFile,
     status: 'refused',
     reason: ast === null
       ? 'the file could not be parsed'
