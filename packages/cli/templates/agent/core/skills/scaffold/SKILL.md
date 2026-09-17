@@ -37,6 +37,7 @@ bunx guren make:notification <Name>
 bunx guren make:migration <name>
 bunx guren make:route <Name>
 bunx guren make:module <Name>       # scaffolds modules/<name>/ (see below)
+bunx guren make:ai-agent <Name> [--tools a,b] [--output] [--test]  # in-process AI agent (needs `bunx guren add ai`)
 ```
 
 If the project has a `modules/` directory, check whether the component belongs inside an existing module before scaffolding at the project root — most `make:*` commands accept `--module <name>` to output into `modules/<name>/` instead (e.g. `bunx guren make:controller Invoice --module billing`). `make:auth` and `make:migration` don't take `--module`.

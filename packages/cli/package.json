@@ -76,11 +76,14 @@
     }
   },
   "devDependencies": {
+    "@ai-sdk/anthropic": "^4.0.54",
+    "@ai-sdk/openai": "^4.0.67",
     "@babel/types": "^7.29.0",
     "@inertiajs/react": "^3.6.1",
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^20.14.10",
     "@types/react": "^19.0.0",
+    "ai": "^7.0.102",
     "react": "^19.0.0",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",

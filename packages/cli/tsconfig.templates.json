@@ -55,6 +55,9 @@
       ],
       "@guren/inertia-client/*": [
         "../inertia-client/src/*"
+      ],
+      "@guren/plugin-ai": [
+        "../plugin-ai/src/index.ts"
       ]
     }
   },
