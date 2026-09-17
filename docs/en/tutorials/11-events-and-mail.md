@@ -49,13 +49,13 @@ bunx guren add queue
 bunx guren add mail
 ```
 
-Each one wrote a sample of its kind plus what runs it, and registered that in `src/app.ts`. Open it: the providers array has been rewritten onto a single line with five new entries at the end, a framework provider and an app provider each for events and mail, and `JobsProvider` for the queue, whose manager is a `queue` entry in `config: [...]` instead. That collapsing is the patcher's doing, not yours, and it is the shape every `add` command leaves behind.
+Each one wrote a sample of its kind plus what runs it, and registered that in `src/app.ts`. Open it: the providers array has been rewritten onto a single line with three new entries at the end: a framework provider and an app provider for events, and `JobsProvider` for the queue. The queue and mail managers are the `queue` and `mail` entries in `config: [...]` instead. That collapsing is the patcher's doing, not yours, and it is the shape every `add` command leaves behind.
 
 These are worth reading, because two of them are files you are about to edit:
 
 - `app/Providers/EventProvider.ts` hands a listener class to `events.listen()`, which subscribes it to the event the class names. That connection is a line of code, not a convention: nothing scans `app/Listeners/` looking for work.
 - `config/queue.ts` builds the queue manager, and `app/Providers/JobsProvider.ts` calls `registerJob()` for each job class. Note the driver line in the config: `QUEUE_CONNECTION=sync` runs a dispatched job **inline, in the dispatching process**; `memory` puts it in a queue a worker drains. `guren add queue` wrote `sync` into your `.env`.
-- `app/Providers/MailProvider.ts` builds the mail manager. `MAIL_MAILER=log`, also already in your `.env`, prints outgoing mail to the server output instead of sending it. Nothing to sign up for, and nothing to accidentally deliver.
+- `config/mail.ts` builds the mail manager. `MAIL_MAILER=log`, also already in your `.env`, prints outgoing mail to the server output instead of sending it. Nothing to sign up for, and nothing to accidentally deliver.
 
 The samples (`OrderPlaced`, `SendOrderReceiptListener`, `ProcessWelcomeSequenceJob`, `WelcomeEmailMail`) exist so you can see the shape of each file. You will replace all four in section 3.
 

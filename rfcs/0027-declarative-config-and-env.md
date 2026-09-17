@@ -729,6 +729,25 @@ templates depend on:
   template; cache, queue and storage move there too, and the byte-identical
   template gate reads the form from the path instead of a hand-kept list.
 
+The mail PR migrates `guren add mail` and the mail half of `make:auth` together:
+
+- **One definition serves both commands.** `make:auth` writes the mail
+  blueprint's `config/mail.ts` rather than its own, so running either after
+  the other rewrites the same bytes and lists `mail` once. It decides the form
+  before its first write, since the file it writes would otherwise decide it.
+- **The keys are `MAIL_MAILER` and `SMTP_*`.** Auth's `MAIL_DRIVER` gives way to
+  the name the mail blueprint, the blog and the guides already used. The
+  definition declares `log`, `memory` and `smtp`, so the blueprint gains `smtp`
+  and auth gains `memory`, and it refuses an undeclared `MAIL_MAILER` when it
+  resolves, like storage and queue. `SMTP_PORT` is `Env.port()`; `SMTP_USER` and
+  `SMTP_PASS` are optional, and the transport omits `auth` without a user.
+- **A blank `MAIL_FROM_NAME` now resolves to the default.** The provider form
+  kept `''` on purpose, but a declared key treats blank as unset, and the
+  manifest shape `appendEnvEntry` declares with has no `allowEmpty()`.
+- **OAuth moves in its own PR.** `defineOAuthConfig` builds its manager with no
+  state store, so the database-backed `OAuthProvider` cannot become a
+  definition without a `@guren/server` change.
+
 ### 7. `.env.example`, drift, and lint
 
 - **`guren env:example`** maps the schema to `GurenPluginEnvEntry` records
