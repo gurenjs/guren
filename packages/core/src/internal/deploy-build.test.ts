@@ -10,7 +10,11 @@ import {
   DATABASE_FACTORIES,
   detectDatabaseDialects,
   DEV_ONLY_MODULES,
+  appUsesMcpPlugin,
+  MCP_SDK_SUBPATH_PREFIX,
+  MCP_TRANSPORT_SPECIFIER,
   parseDatabaseDialects,
+  stubbableDevOnlyModules,
   unusedSqlClients,
   renderDevOnlyStub,
   importSpecifier,
@@ -491,6 +495,64 @@ describe('the module graph this list describes', () => {
       }
     },
   )
+})
+
+describe('the surface published deploy plugins link against', () => {
+  // Deploy plugins already on npm import these names under a caret on core and look
+  // a stub's message up by `kind` in a table keyed `sqlite`, `vite` and `mcp`
+  // (Cloudflare adds `sql-driver`). A missing name fails their root module at link
+  // time; an unknown kind hands renderDevOnlyStub an undefined message.
+  const PUBLISHED_MESSAGE_KEYS = ['sqlite', 'vite', 'mcp', 'sql-driver'] as const
+
+  test('should keep every kind a published plugin looks its message up by', () => {
+    const table: Record<string, string> = Object.fromEntries(
+      PUBLISHED_MESSAGE_KEYS.map((kind) => [kind, `${kind} is unavailable here.`]),
+    )
+
+    for (const module of [...DEV_ONLY_MODULES, ...stubbableDevOnlyModules({ mcpPlugin: false })]) {
+      expect(PUBLISHED_MESSAGE_KEYS).toContain(module.kind)
+      expect(() => renderDevOnlyStub(module, table[module.kind])).not.toThrow()
+    }
+  })
+
+  test('should keep the deprecated constants at their published values', () => {
+    expect(MCP_TRANSPORT_SPECIFIER).toBe('@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js')
+    expect(MCP_SDK_SUBPATH_PREFIX).toBe('@modelcontextprotocol/sdk/')
+  })
+
+  test('should list the same modules whether or not the app declares the MCP plugin', () => {
+    expect(stubbableDevOnlyModules({ mcpPlugin: true })).toEqual(DEV_ONLY_MODULES)
+    expect(stubbableDevOnlyModules({ mcpPlugin: false })).toEqual(DEV_ONLY_MODULES)
+  })
+
+  describe('appUsesMcpPlugin', () => {
+    let root: string
+
+    beforeEach(() => {
+      root = mkdtempSync(join(tmpdir(), 'guren-mcp-optin-'))
+    })
+
+    afterEach(() => {
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    test('should report a runtime dependency on the plugin', () => {
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: { '@guren/plugin-mcp': '^0.6.0' } }))
+
+      expect(appUsesMcpPlugin(root)).toBe(true)
+    })
+
+    test('should not report a devDependency, a missing manifest or a malformed one', () => {
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ devDependencies: { '@guren/plugin-mcp': '^0.6.0' } }))
+      expect(appUsesMcpPlugin(root)).toBe(false)
+
+      writeFileSync(join(root, 'package.json'), '{ not json')
+      expect(appUsesMcpPlugin(root)).toBe(false)
+
+      rmSync(join(root, 'package.json'))
+      expect(appUsesMcpPlugin(root)).toBe(false)
+    })
+  })
 })
 
 describe('renderDevOnlyStub', () => {
