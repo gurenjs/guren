@@ -6,8 +6,8 @@
  * audit-trail rules both read it.
  */
 import { relative, resolve } from 'node:path'
-import type { CallExpression, File } from '@babel/types'
-import { memberKeyName, objectLiteral, walk } from './ast-walk'
+import type { CallExpression, File, Node } from '@babel/types'
+import { memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
 import { collectFiles, listAppRoots, NON_SOURCE_DIR_NAMES } from './discovery'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { resolveAppEntry } from './provider-registrar'
@@ -33,6 +33,11 @@ export interface PluginCall {
 /** Local names `exportName` is imported under from `specifier` in one file. */
 export function importedLocals(ast: File, target: PluginExport): Set<string> {
   return importBindings(ast, target).locals
+}
+
+/** Namespace bindings of `specifier` (`import * as ai`), whose members read as its exports. */
+export function importedNamespaces(ast: File, specifier: string): Set<string> {
+  return importBindings(ast, { specifier, exportName: '' }).namespaces
 }
 
 /** Namespace bindings too (`import * as ai`), whose member calls read as the export. */
@@ -87,8 +92,18 @@ function readCalls(parsed: ParsedFile, target: PluginExport, relPath: string): P
         continue
       }
       const key = memberKeyName(property)
-      if (key === undefined) complete = false
-      else keys.add(key)
+      if (key === undefined) {
+        complete = false
+        continue
+      }
+      const value = property.type === 'ObjectProperty' ? valueEvidence(property.value as Node) : 'present'
+      // `audit: undefined` configures nothing, exactly as leaving the key out does.
+      if (value === 'absent') continue
+      if (value === 'runtime') {
+        complete = false
+        continue
+      }
+      keys.add(key)
     }
     calls.push({ relPath, keys, complete })
   })
@@ -148,4 +163,17 @@ function callsTarget(
     && callee.property.type === 'Identifier'
     && callee.property.name === exportName
   )
+}
+
+/**
+ * What a written option value proves: a value the runtime picks (a ternary, a
+ * fallback chain) proves neither presence nor absence, and an explicit
+ * `undefined`/`null` is the same as not writing the key at all.
+ */
+function valueEvidence(value: Node): 'present' | 'absent' | 'runtime' {
+  const node = unwrapTypeAssertion(value)
+  if (node.type === 'NullLiteral') return 'absent'
+  if (node.type === 'Identifier' && node.name === 'undefined') return 'absent'
+  if (node.type === 'ConditionalExpression' || node.type === 'LogicalExpression') return 'runtime'
+  return 'present'
 }

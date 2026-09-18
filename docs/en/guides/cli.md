@@ -286,7 +286,7 @@ Ignored findings stay in the report with `status: "ignored"` and an `ignoreReaso
 
 ### In-process agents
 
-`Agent` subclasses from `@guren/plugin-ai` get their own rules in `check`. They are content-activated too: an app with no such class contributes nothing. A class counts only when it extends the package's `Agent` (an aliased import is followed) or another class that does, so a durable agent from `@guren/plugin-agents` is never read as one.
+`Agent` subclasses from `@guren/plugin-ai` get their own rules in `check`. They are content-activated too: an app with no such class contributes nothing. A class counts only when it extends the package's `Agent` (a named or namespace import) or another class that does, resolved through the file's imports rather than by the superclass's spelling. A durable agent from `@guren/plugin-agents` is never read as one, and a same-named class from elsewhere is not mistaken for an agent's parent.
 
 `check` **fails** on:
 
@@ -305,7 +305,6 @@ Ignored findings stay in the report with `status: "ignored"` and an `ignoreReaso
 | `ai-agent-app-tools-unreadable:*` | The `appTools()` argument is not an array of string literals (a spread, a variable, a computed element). The names are unverifiable, and the check does not pass them. |
 | `ai-agent-scopes-unreadable:*` | `static scopes` is not a literal array, so no name was judged against it. |
 | `ai-agent-tools-unverified:*` | The route graph failed to load, so the names were not checked against the derived tools. |
-| `ai-agent-name-collision:*` | Two files declare an agent under one class name. A subclass resolves its scopes and `tools()` from whichever was found first, so a verdict about one may describe the other. Both are still checked. |
 
 `audit` lists every local tool an agent's `tools()` returns beside its `appTools()` spread, under its own heading and in `--json` as `aiLocalTools`. A local tool runs with its closure's authority: no scope, policy, approval or audit line. `ai-local-tool-write:*` warns when the tool's `execute` calls a Model write (`create`, `update`, `delete`, `save`) on a model whose table an `.agent()` route's action also uses; hand the agent that route instead. `ai-local-tools-unreadable:*` warns when `tools()` does not return an object literal the scan can list whole. Both findings point at a source line, so `// guren-audit-ignore` suppresses them.
 

@@ -213,7 +213,7 @@ export class Escalator extends Triager {}
     expect(keys(results)).toEqual(['ai-agents'])
   })
 
-  it('warns when two files declare an agent under one name, and checks both', async () => {
+  it('checks both agents when two files declare one under the same name', async () => {
     const body = "  static override scopes = []\n  tools() { return this.appTools(['tickets_show']) }"
     const results = await run({
       'src/app.ts': APP,
@@ -221,10 +221,113 @@ export class Escalator extends Triager {}
       'modules/billing/app/Ai/Agents/Triager.ts': agentFile(body),
     })
     expect(keys(results)).toEqual([
-      'ai-agent-name-collision:Triager',
       'ai-agent-tool-unscoped:Triager:tickets_show',
       'ai-agent-tool-unscoped:Triager:tickets_show',
     ])
+  })
+
+  it('reads static scopes under a quoted key, and refuses to judge a getter', async () => {
+    const quoted = await run({
+      'src/app.ts': APP,
+      'app/Ai/Agents/Triager.ts': agentFile(
+        "  static 'scopes' = ['tools:*'] as const\n  tools() { return this.appTools(['tickets_show']) }",
+      ),
+    })
+    expect(keys(quoted)).toEqual(['ai-agents'])
+
+    const getter = await run({
+      'src/app.ts': APP,
+      'app/Ai/Agents/Triager.ts': agentFile(
+        "  static get scopes() { return ['tools:*'] as const }\n  tools() { return this.appTools(['tickets_show']) }",
+      ),
+    })
+    expect(keys(getter)).toEqual(['ai-agent-scopes-unreadable:Triager'])
+  })
+
+  it('resolves a superclass through its import, not its spelling', async () => {
+    const base = `import { Agent } from '@guren/plugin-ai'
+export class Base extends Agent {
+  static override scopes = []
+  tools() { return this.appTools(['tickets_show']) }
+}
+`
+    // A same-named class from another package is not this agent's subclass.
+    const unrelated = await run({
+      'src/app.ts': APP,
+      'app/Ai/Agents/Base.ts': base,
+      'app/Services/Thing.ts': "import { Base } from 'some-library'\nexport class Child extends Base { tools() { return this.appTools(['nope']) } }\n",
+    })
+    expect(keys(unrelated)).toEqual(['ai-agent-tool-unscoped:Base:tickets_show'])
+
+    // An aliased import of the agent itself is one.
+    const aliased = await run({
+      'src/app.ts': APP,
+      'app/Ai/Agents/Base.ts': base,
+      'app/Ai/Agents/Child.ts': "import { Base as Parent } from './Base'\nexport class Child extends Parent {}\n",
+    })
+    expect(keys(aliased)).toEqual([
+      'ai-agent-tool-unscoped:Base:tickets_show',
+      'ai-agent-tool-unscoped:Child:tickets_show',
+    ])
+  })
+
+  it('judges an inherited tools() the override still calls against the subclass scopes', async () => {
+    const results = await run({
+      'src/app.ts': APP,
+      'app/Ai/Agents/Base.ts': `import { Agent } from '@guren/plugin-ai'
+export class Base extends Agent {
+  static override scopes = ['tools:*'] as const
+  tools() { return this.appTools(['tickets_show']) }
+}
+`,
+      'app/Ai/Agents/Child.ts': `import { Base } from './Base'
+export class Child extends Base {
+  static override scopes = []
+  override tools() { return { ...super.tools() } }
+}
+`,
+    })
+    expect(keys(results)).toEqual(['ai-agent-tool-unscoped:Child:tickets_show'])
+  })
+
+  it('reads an agent and its calls through a namespace import', async () => {
+    const results = await run({
+      'src/app.ts': APP,
+      'app/Ai/Agents/Triager.ts': `import * as ai from '@guren/plugin-ai'
+export class Triager extends ai.Agent {
+  static scopes = ['tools:*'] as const
+  tools() { return this['appTools'](['nope']) }
+}
+`,
+    })
+    expect(keys(results)).toEqual(['ai-agent-tool-underived:Triager:nope'])
+  })
+
+  it('does not judge a call whose receiver is another agent or another object', async () => {
+    const helper = await run({
+      'src/app.ts': APP,
+      'app/Ai/Agents/Triager.ts': `import { Agent, appTools } from '@guren/plugin-ai'
+export class Triager extends Agent {
+  static scopes = []
+  tools() { return appTools(otherAgent, ['tickets_show']) }
+}
+`,
+    })
+    expect(keys(helper)).toEqual(['ai-agents'])
+
+    const nested = await run({
+      'src/app.ts': APP,
+      'app/Ai/Agents/Other.ts': `import { Agent } from '@guren/plugin-ai'
+export class Other extends Agent {
+  static scopes = []
+  tools() {
+    const helper = { appTools(names) { return {} }, build() { return this.appTools(['nope']) } }
+    return helper.build()
+  }
+}
+`,
+    })
+    expect(keys(nested)).toEqual(['ai-agents'])
   })
 
   it('does not accuse the app of two audit trails over a call outside it', async () => {
@@ -246,6 +349,20 @@ export default createApp({ providers: [aiPlugin(), mcpPlugin({ audit: { file: 'a
       'app/Ai/Agents/Triager.ts': agentFile(''),
     })
     expect(keys(withMcpHelper)).toEqual(['ai-agents'])
+  })
+
+  it('does not read an audit key the runtime never configures', async () => {
+    const providers = `import { aiPlugin } from '@guren/plugin-ai'
+import { mcpPlugin } from '@guren/plugin-mcp'
+export const providers = [
+  aiPlugin({ audit: undefined }),
+  mcpPlugin({ audit: { file: 'storage/mcp.jsonl' } }),
+]
+`
+    expect(keys(await run({ 'config/providers.ts': providers, 'app/Ai/Agents/Triager.ts': agentFile('') }))).toEqual(['ai-agents'])
+
+    const conditional = providers.replace('audit: undefined', "audit: flag ? { file: 'a' } : undefined")
+    expect(keys(await run({ 'config/providers.ts': conditional, 'app/Ai/Agents/Triager.ts': agentFile('') }))).toEqual(['ai-agents'])
   })
 
   it('fails an audit trail configured in both aiPlugin() and mcpPlugin()', async () => {
