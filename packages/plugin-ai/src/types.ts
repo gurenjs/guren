@@ -16,6 +16,14 @@ export interface AiProviders {}
 // oxlint-disable-next-line typescript/no-empty-object-type -- an augmentation target, filled by the app
 export interface AiAgents {}
 
+/** USD per million tokens. Declared here because `config/ai.ts` names it and the eval runner prices with it. */
+export interface AiPricing {
+  input: number
+  output: number
+  cacheRead?: number
+  cacheWrite?: number
+}
+
 type NamesOf<T> = [keyof T] extends [never] ? string : Extract<keyof T, string>
 
 export type AgentToolName = NamesOf<AppAgentTools>

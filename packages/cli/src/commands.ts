@@ -28,6 +28,7 @@ import { makeMail } from './make-mail'
 import { makeMiddleware } from './make-middleware'
 import { makeAgent } from './make-agent'
 import { makeAiAgent } from './make-ai-agent'
+import { parseNumericArg, runAiEval } from './ai-eval'
 import { makePolicy } from './make-policy'
 import { makeMigration } from './make-migration'
 import { makeModel } from './make-model'
@@ -627,6 +628,79 @@ const makeAiAgentCommand = defineCommand({
     })
     for (const file of files) consola.success(`Created ${file}`)
     for (const note of notes) consola.warn(note)
+  },
+})
+
+const aiEvalCommand = defineCommand({
+  meta: {
+    name: 'ai:eval',
+    description:
+      'Run one eval against the real model (RFC 0029). Opt-in and never part of check or gate: every case calls the model.',
+  },
+  args: {
+    flow: {
+      type: 'positional',
+      required: true,
+      description: 'Eval name, resolved to tests/evals/<flow>.eval.ts',
+    },
+    variant: {
+      type: 'string',
+      description: 'Result directory under the flow (default: baseline)',
+    },
+    reps: {
+      type: 'string',
+      description: 'Run each case this many times',
+    },
+    cases: {
+      type: 'string',
+      description: 'Run only the first N cases, in file order',
+    },
+    'max-cost-usd': {
+      type: 'string',
+      description: 'Soft ceiling: no new case starts once the derived cost crosses it',
+    },
+    concurrency: {
+      type: 'string',
+      description: 'Cases in flight at once (default: 1)',
+    },
+    'dry-run': {
+      type: 'boolean',
+      alias: 'd',
+      description: 'Resolve the cases and report what would run, calling no model and writing nothing',
+    },
+    file: {
+      type: 'string',
+      description: 'Path to the eval file, instead of resolving it from the flow name',
+    },
+    dir: {
+      type: 'string',
+      description: 'Directory the flow name resolves in (default: tests/evals)',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print the summary as JSON',
+    },
+  },
+  async run({ args }) {
+    const result = await runAiEval({
+      flow: String(args.flow),
+      variant: args.variant ? String(args.variant) : undefined,
+      reps: parseNumericArg('reps', args.reps),
+      cases: parseNumericArg('cases', args.cases),
+      maxCostUsd: parseNumericArg('max-cost-usd', args['max-cost-usd']),
+      concurrency: parseNumericArg('concurrency', args.concurrency),
+      dryRun: Boolean(args['dry-run']),
+      file: args.file ? String(args.file) : undefined,
+      dir: args.dir ? String(args.dir) : undefined,
+      appRoot: args.app ? String(args.app) : undefined,
+      json: Boolean(args.json),
+    })
+    // A case that produced nothing scorable is a run the caller must see fail.
+    if (result.failures.length > 0) process.exitCode = 1
   },
 })
 
@@ -3499,6 +3573,7 @@ export const builtinSubCommands = {
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
   'make:ai-agent': makeAiAgentCommand,
+  'ai:eval': aiEvalCommand,
   'make:module': makeModuleCommand,
   'make:channel': makeChannelCommand,
   'make:command': makeConsoleCommandCommand,

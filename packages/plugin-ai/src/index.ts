@@ -45,6 +45,7 @@ export type {
   AiAgentName,
   AiAgents,
   AiProviderName,
+  AiPricing,
   AiProviders,
   AppAgentTools,
   Granted,

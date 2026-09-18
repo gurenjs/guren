@@ -77,11 +77,15 @@
   },
   "peerDependencies": {
     "@guren/openapi": ">=1.3.0",
+    "@guren/plugin-ai": ">=0.2.0",
     "oxlint": "~1.81.0",
     "vite": ">=7.0.0"
   },
   "peerDependenciesMeta": {
     "@guren/openapi": {
+      "optional": true
+    },
+    "@guren/plugin-ai": {
       "optional": true
     },
     "oxlint": {

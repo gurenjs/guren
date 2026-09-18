@@ -927,6 +927,46 @@ baseline nightly with a cost cap and reports the headline against the last
 committed baseline, the shape the repo already uses for the published
 package drift check. It never runs on a PR.
 
+**Amended in implementation (Part 3):**
+
+- `defineEval({ app })` is a factory returning any object that carries a
+  `container`, and `setup()`, `teardown()` and `grade()` receive that same
+  object back. `@guren/plugin-ai` cannot import `@guren/testing` (testing
+  already holds the plugin as an optional peer, so the pair would close a
+  build-order cycle), and `TestApp.container` is private, so the eval file
+  builds the disposable app and hands the runner the container to resolve
+  `ai` from. Faking mail and queue is the factory's to do, not the runner's.
+- The judge is a `judge(input)` function `grade()` receives, rather than a
+  second grading protocol beside it. Its usage and cost still land in the
+  row's own `judgeUsage`, `judgeCalls` and `judgeCostUsd`.
+- `_state.json` splits the case ids in half into `dev` and `test`, stratified
+  on `tags[0]`, and records the seed that produced the split. No flag selects
+  the ratio or a set: the runner writes the file for the hill-climbing loop to
+  read and runs every case `--cases` selected, which is the first N in file
+  order.
+- The default variant is `baseline` and `--concurrency` is 1.
+- The half-width is `1/sqrt(n)` over the rows that entered the mean, so `n` is
+  cases times reps with the truncated rows removed. It prints labelled as an
+  approximate half-width and names no confidence level, because the rule of
+  thumb supports none.
+- `--max-cost-usd` governs one invocation: rows a resume skipped are not
+  charged against the ceiling again. A provider with no `pricing` derives no
+  cost, so the ceiling cannot stop such a run, and the runner says so once.
+- A cached read or write with no price of its own is charged at the input
+  rate. That over-states rather than under-states, and a silent zero for
+  cached traffic is what would make one variant look cheaper than it is.
+- Retries cover the model's own faults: a provider error, and the tool-protocol
+  errors the AI SDK raises when the model names a tool that does not exist or
+  sends arguments the schema rejects. A grader crash, a failed `app()` and the
+  per-case ceiling reproduce, and re-running a timed-out case pays twice.
+- A tool that *throws* is not a sidecar failure. The pipeline hands the model an
+  `AppToolError` result (§2.1), so the run finishes and the grader scores it; the
+  failed call is recorded in the trace instead.
+- `--from-conversations` and `guren add ai --evals` are not in this part.
+  Sampling stored conversations needs the redaction of §5 applied on the way
+  out and a retention answer before a file is written, and a half-done
+  redaction is worse than no command.
+
 Ships in Part 3, after the fake and `stream()` exist to be measured.
 
 ### 11. Type safety
@@ -1132,13 +1172,16 @@ Additive. No existing call changes behaviour.
 6. **Naming.** `app/Ai/Agents` versus `app/Agents/Ai`; `make:ai-agent` versus
    `make:agent --ai`. The RFC picks the first of each so a durable agent and
    an in-process one never share a directory.
-7. **The eval report.** The harness's report builder is the viewer for the
-   §10 layout, and the lite one is a 15 KB dependency-free script that the
-   claude-api skill extracts, not something an app's repo holds. Should
-   `guren add ai --evals` vendor it into the app (self-contained evals, a
-   copy to keep current) or should `ai:eval` print the path and the
-   command (no copy, a harness the app must have installed)? Leaning print:
-   Guren emits data, and the eval method owns its viewer.
+7. **The eval report.** ~~Should `guren add ai --evals` vendor the harness's
+   report builder into the app, or should `ai:eval` print the path instead?~~
+   **Resolved in Part 3: print.** `ai:eval` writes the §10 layout and prints
+   the directory it wrote, saying that the claude-api harness's report
+   builder and `hillclimb` are what read it. Nothing is vendored. The viewer
+   the skill extracts is a 15 KB script that tracks the eval method, and a
+   copy in every app's repo is a copy that goes stale with no one watching;
+   Guren emits data, and the eval method owns its viewer. The cost of this
+   choice is that an app without the harness installed has rows and no
+   report, which `defineEval({ reporter })` is the escape hatch for.
 8. **Conversation retention and redaction hooks.** §5 stores the transcript
    as the model saw it. Should the store take a per-agent `retain` (days)
    and a `beforeStore(message)` hook so an app can mask its own fields
