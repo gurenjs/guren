@@ -5,22 +5,26 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createApp, type Application } from '@guren/core'
+import { NoSuchToolError } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 
-import { Agent, aiPlugin, defineAiConfig } from '../src'
+import { z } from 'zod'
+
+import { Agent, aiPlugin, defineAiConfig, tool } from '../src'
 import {
   defineEval,
   fromJsonl,
   hillclimbReporter,
   parseJsonlCases,
   runEval,
-  summarizeMetrics,
-  computeCostUsd,
   type EvalCase,
   type EvalReporter,
   type EvalRow,
   type EvalTraceTurn,
 } from '../src/eval'
+// Arithmetic internals, deliberately not on the published surface.
+import { computeCostUsd } from '../src/eval-cost'
+import { summarizeMetrics } from '../src/eval-stats'
 import { scriptedModel, type ScriptedStep } from './fixture'
 
 const PRICING = { input: 3, output: 15 }
@@ -43,6 +47,22 @@ class ToolUser extends Agent<typeof ToolUser.scopes> {
 
   override tools() {
     return this.appTools(['posts_index'])
+  }
+}
+
+/** A tool that throws reaches the model as an error part, never as a thrown eval failure. */
+class ToolThrower extends Agent {
+  static override agentName = 'tool-thrower'
+  instructions = 'Call the tool.'
+
+  override tools() {
+    return {
+      boom: tool({
+        description: 'throws',
+        inputSchema: z.object({}),
+        execute: async (): Promise<string> => { throw new Error('the tool blew up') },
+      }),
+    }
   }
 }
 
@@ -410,6 +430,28 @@ describe('runEval', () => {
     expect(row.costUsd).toBeCloseTo((3 * 3 + 2 * 15) / 1_000_000, 12)
   })
 
+  test('should record which model answered as the judge', async () => {
+    const reporter = memoryReporter()
+    await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({
+          model: answering([{ text: 'answer' }]),
+          judgeModel: answering([{ text: '1' }]),
+          pricing: PRICING,
+        }),
+        cases: cases('a'),
+        judge: { agent: Judge, provider: 'judge' },
+        grade: async ({ judge }) => ({ ok: (await judge('x')).text === '1' ? 1 : 0 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter,
+      }),
+    )
+
+    expect(reporter.rows[0]!.judgeModels).toEqual(['mock-model-id'])
+  })
+
   test('should refuse a grade() that asks for a judge the eval does not configure', async () => {
     const result = await runEval(
       defineEval({
@@ -451,6 +493,55 @@ describe('runEval', () => {
     expect(trace[1]).toEqual({ role: 'user', content: 'prompt a' })
     expect(trace.find((turn) => turn.role === 'tool')?.name).toBe('posts_index')
     expect(trace.find((turn) => turn.role === 'tool')?.content).toContain('"posts"')
+  })
+
+  test('should retry a tool-protocol fault, which is the model\'s and not the tool\'s', async () => {
+    let calls = 0
+    const hallucinating = new MockLanguageModelV4({
+      doGenerate: async () => {
+        calls += 1
+        throw new NoSuchToolError({ toolName: 'nope', availableTools: ['posts_index'] })
+      },
+    })
+
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: hallucinating, pricing: PRICING }),
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        retries: 1,
+        reporter: memoryReporter(),
+      }),
+    )
+
+    // Its name is `AI_NoSuchToolError`; classifying on that substring denied it the retry.
+    expect(result.failures[0]).toMatchObject({ failure: 'tool', attempts: 2 })
+    expect(calls).toBe(2)
+  })
+
+  test('should put a tool call that failed into the trace, not only the ones that returned', async () => {
+    const reporter = memoryReporter()
+    await runEval(
+      defineEval({
+        flow: 'tools',
+        agent: ToolThrower,
+        app: () => bootEvalApp({
+          model: answering([{ toolCalls: [{ name: 'boom', input: {} }] }, { text: 'gave up' }]),
+          pricing: PRICING,
+        }),
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter,
+      }),
+    )
+
+    const trace = reporter.traces[0]!
+    const outcome = trace.find((turn) => turn.role === 'tool')
+    expect(outcome?.content).toContain('error:')
   })
 
   test('should run only the first --cases in file order', async () => {

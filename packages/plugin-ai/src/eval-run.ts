@@ -6,35 +6,50 @@
  * Evals are opt-in and never part of `guren check` or `guren gate`: every case calls the
  * model, and a nondeterministic gate is not one a PR should pay for.
  */
+import {
+  InvalidToolApprovalError,
+  InvalidToolInputError,
+  MissingToolResultsError,
+  NoSuchToolError,
+  ToolCallRepairError,
+  ToolChoiceViolationError,
+} from 'ai'
+
 import { resolveAgentName } from './agent'
 import type { Agent, AgentResponse, BoundAgent, PromptOptions } from './agent'
 import type { AiProviderConfig } from './config'
 import type { AiManager } from './manager'
 import { addUsage, computeCostUsd, sumCosts, toEvalUsage } from './eval-cost'
 import { hillclimbReporter } from './eval-reporter'
-import { formatSummary, summarizeMetrics, totalCostUsd, totalJudgeCostUsd, totalUsage } from './eval-stats'
+import { summarizeMetrics, totalCostUsd, totalJudgeCostUsd, totalUsage } from './eval-stats'
 import type {
   EvalAppHandle,
   EvalCase,
   EvalDefinition,
   EvalFailure,
   EvalFailureClass,
-  EvalPricing,
-  EvalReporterHandle,
   EvalRow,
   EvalSummary,
   EvalTraceTurn,
   EvalUsage,
 } from './eval-types'
+import type { AiPricing } from './types'
 
 const DEFAULT_VARIANT = 'baseline'
 const DEFAULT_TIMEOUT_MS = 120_000
 const DEFAULT_RETRIES = 2
 const BACKOFF_BASE_MS = 500
 
+/**
+ * What *this invocation* costs and where it lands. What a run *means* — the agent, the app,
+ * the cases, the grader, the timeout and the retry budget — belongs on `defineEval()`, because
+ * two runs of one eval under different ceilings are not comparable and must not differ by a flag.
+ */
 export interface RunEvalOptions {
   /** Overrides `defineEval({ flow })`; `guren ai:eval` passes the eval file's basename. */
   flow?: string
+  /** Where the default reporter roots its output. The working directory when absent. */
+  cwd?: string
   variant?: string
   reps?: number
   /** Run only the first N cases, in file order. */
@@ -45,8 +60,6 @@ export interface RunEvalOptions {
   /** Resolve the cases and print what would run, writing nothing and calling no model. */
   dryRun?: boolean
   onWarning?: (message: string) => void
-  onRow?: (row: EvalRow) => void
-  onFailure?: (failure: EvalFailure) => void
 }
 
 export interface EvalRunResult {
@@ -77,7 +90,7 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
   const reps = Math.max(1, options.reps ?? 1)
   const concurrency = Math.max(1, options.concurrency ?? 1)
   const timeoutMs = definition.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const retries = definition.retries ?? DEFAULT_RETRIES
+  const retries = Math.max(0, definition.retries ?? DEFAULT_RETRIES)
 
   const all = typeof definition.cases === 'function' ? await definition.cases() : [...definition.cases]
   const selected = options.cases === undefined ? all : all.slice(0, options.cases)
@@ -85,35 +98,35 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
     throw new EvalRunError(`The eval "${flow}" resolved no cases; there is nothing to run.`)
   }
 
-  const startedAt = new Date()
+  const startedAt = new Date().toISOString()
   const agentName = resolveAgentName(definition.agent)
-  const reporter = definition.reporter ?? hillclimbReporter({ onWarning: options.onWarning })
+  const provider = definition.provider ?? '(the agent\'s own)'
+  const reporter = definition.reporter
+    ?? hillclimbReporter({ ...maybe('cwd', options.cwd), onWarning: options.onWarning })
   // Opened before the first app, so a dry run reports its target directory without booting one.
   const handle = await reporter.begin({
     flow,
     variant,
     agentName,
-    provider: definition.provider ?? '(the agent\'s own)',
+    provider,
     reps,
     // Every case, not the `--cases` selection: `_state.json` is written once and describes
     // the case set, so a first run capped at two must not fix the split at two ids forever.
     cases: all.map((kase) => ({ id: kase.id, tags: kase.tags })),
     metrics: definition.metrics,
-    startedAt: startedAt.toISOString(),
+    startedAt,
     dryRun: Boolean(options.dryRun),
   })
-
-  if (options.dryRun) {
-    return dryRunResult({ definition, flow, variant, reps, selected, startedAt, handle })
-  }
 
   const done = new Set(handle.completed.map((row) => `${row.caseId}#${row.rep}`))
   const rows: EvalRow[] = []
   const failures: EvalFailure[] = []
-  const attempts: Array<{ kase: EvalCase; rep: number }> = []
-  for (let rep = 1; rep <= reps; rep += 1) {
+  // A dry run plans nothing, so it spawns no worker and falls through the ordinary summary
+  // rather than assembling a second copy of it that drifts.
+  const queue: Array<{ kase: EvalCase; rep: number }> = []
+  for (let rep = 1; !options.dryRun && rep <= reps; rep += 1) {
     for (const kase of selected) {
-      if (!done.has(`${kase.id}#${rep}`)) attempts.push({ kase, rep })
+      if (!done.has(`${kase.id}#${rep}`)) queue.push({ kase, rep })
     }
   }
 
@@ -130,26 +143,15 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
       if (stopped) return
       // A cap is a *soft* ceiling: this stops new cases only, and cases in flight complete.
       if (options.maxCostUsd !== undefined && spentUsd >= options.maxCostUsd) {
-        if (next < attempts.length) capReached = true
+        if (next < queue.length) capReached = true
         return
       }
-      const attempt = attempts[next++]
-      if (!attempt) return
+      const item = queue[next++]
+      if (!item) return
 
       let outcome: Awaited<ReturnType<typeof runCase>>
       try {
-        outcome = await runCase(definition, attempt.kase, attempt.rep, {
-          timeoutMs,
-          retries,
-          onPricingMissing: (provider) => {
-            if (pricingWarned || options.maxCostUsd === undefined) return
-            pricingWarned = true
-            options.onWarning?.(
-              `The provider "${provider}" configures no \`pricing\` in config/ai.ts, so no cost is derived `
-              + `and --max-cost-usd ${options.maxCostUsd} cannot stop this run.`,
-            )
-          },
-        })
+        outcome = await runCase(definition, item.kase, item.rep, { timeoutMs, retries, onPricingMissing })
       } catch (error) {
         stopped = true
         throw error
@@ -159,66 +161,75 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
         spentUsd += (outcome.row.costUsd ?? 0) + (outcome.row.judgeCostUsd ?? 0)
         rows.push(outcome.row)
         await handle.row(outcome.row, outcome.trace)
-        options.onRow?.(outcome.row)
       } else {
         failures.push(outcome.failure)
         await handle.failure(outcome.failure)
-        options.onFailure?.(outcome.failure)
       }
     }
   }
 
+  function onPricingMissing(missing: string): void {
+    if (pricingWarned || options.maxCostUsd === undefined) return
+    pricingWarned = true
+    options.onWarning?.(
+      `The provider "${missing}" configures no \`pricing\` in config/ai.ts, so no cost is derived `
+      + `and --max-cost-usd ${options.maxCostUsd} cannot stop this run.`,
+    )
+  }
+
+  const allRows = (): EvalRow[] => [...handle.completed, ...rows]
+
   const buildSummary = (): EvalSummary => {
     const finishedAt = new Date()
-    const allRows = [...handle.completed, ...rows]
+    const scored = allRows()
     return {
       flow,
       variant,
       agentName,
-      provider: definition.provider ?? '(the agent\'s own)',
+      provider,
       // The rows include what a resume skipped, so the case count must too, or the headline
       // reads "1 cases x 1 reps = 3 rows" after a `--cases 1` re-run.
-      cases: new Set([...selected.map((kase) => kase.id), ...allRows.map((row) => row.caseId)]).size,
+      cases: new Set([...selected.map((kase) => kase.id), ...scored.map((row) => row.caseId)]).size,
       reps,
-      rows: allRows.length,
-      truncated: allRows.filter((row) => row.status === 'truncated').length,
+      rows: scored.length,
+      truncated: scored.filter((row) => row.status === 'truncated').length,
       failures: failures.length,
-      metrics: summarizeMetrics(allRows, definition.metrics),
-      usage: totalUsage(allRows),
-      ...maybe('costUsd', totalCostUsd(allRows)),
-      ...maybe('judgeCostUsd', totalJudgeCostUsd(allRows)),
+      metrics: summarizeMetrics(scored, definition.metrics),
+      usage: totalUsage(scored),
+      ...maybe('costUsd', totalCostUsd(scored)),
+      ...maybe('judgeCostUsd', totalJudgeCostUsd(scored)),
       ...maybe('costCapUsd', options.maxCostUsd),
-      ...(capReached ? { costCapReached: true } : {}),
-      startedAt: startedAt.toISOString(),
+      ...maybe('costCapReached', capReached || undefined),
+      startedAt,
       finishedAt: finishedAt.toISOString(),
-      durationMs: finishedAt.getTime() - startedAt.getTime(),
+      durationMs: finishedAt.getTime() - Date.parse(startedAt),
     }
   }
 
-  // Written even when a runner failure stops the run: a summary.json left disagreeing with
-  // the results.jsonl beside it describes a run that never happened.
+  // Built once: a second call would time itself again, so the printed duration and the one in
+  // summary.json would differ. Written even when a runner failure stops the run, so no
+  // summary.json is left describing a run the results.jsonl beside it never had.
+  let summary: EvalSummary
   try {
-    await Promise.all(Array.from({ length: Math.min(concurrency, attempts.length) }, worker))
+    await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
   } finally {
-    await handle.end(buildSummary())
+    summary = buildSummary()
+    await handle.end(summary)
   }
 
-  return {
-    summary: buildSummary(),
-    rows: [...handle.completed, ...rows],
-    failures,
-    ...maybe('location', handle.location),
-    plannedCases: selected,
-  }
+  return { summary, rows: allRows(), failures, ...maybe('location', handle.location), plannedCases: selected }
 }
-
-export { formatSummary }
 
 interface CaseOptions {
   timeoutMs: number
   retries: number
-  onPricingMissing: (provider: string) => void
+  onPricingMissing: PricingWarning
 }
+
+/** Told the provider whose `pricing` is missing, once per run. */
+type PricingWarning = (provider: string) => void
+
+const RETRYABLE = new Set<EvalFailureClass>(['provider', 'tool'])
 
 type CaseOutcome = { row: EvalRow; trace: EvalTraceTurn[] } | { failure: EvalFailure }
 
@@ -228,45 +239,31 @@ async function runCase(
   rep: number,
   options: CaseOptions,
 ): Promise<CaseOutcome> {
-  const startedAt = new Date()
-  let attempt = 0
-  let last: { failure: EvalFailureClass; message: string } = { failure: 'provider', message: 'never attempted' }
+  const startedAt = new Date().toISOString()
 
-  while (attempt < options.retries + 1) {
-    attempt += 1
+  for (let tries = 1; ; tries += 1) {
     const began = Date.now()
     const controller = new AbortController()
     try {
-      const result = await withTimeout(runAttempt(definition, kase, options, controller.signal), options, kase.id, controller)
-      return {
-        row: {
-          ...result.row,
-          rep,
-          startedAt: startedAt.toISOString(),
-          durationMs: Date.now() - began,
-        },
-        trace: result.trace,
-      }
+      const result = await withTimeout(runAttempt(definition, kase, options.onPricingMissing, controller.signal), options.timeoutMs, kase.id, controller)
+      return { row: { ...result.row, rep, startedAt, durationMs: Date.now() - began }, trace: result.trace }
     } catch (error) {
       if (error instanceof EvalRunError) throw error
       const failure = classify(error)
-      last = { failure, message: describe(error) }
-      // Only a provider error is worth a second call: a grader crash or a timeout would
-      // reproduce, and re-running a timed-out case pays for the model twice.
-      if (failure !== 'provider' || attempt > options.retries) break
-      await backoff(attempt)
+      // A grader crash, a bad setup and the ceiling all reproduce; re-running a timed-out
+      // case pays for the model twice. Only the model's own faults are worth a second call.
+      if (!RETRYABLE.has(failure) || tries > options.retries) {
+        return { failure: { caseId: kase.id, rep, failure, message: describe(error), attempts: tries, at: startedAt } }
+      }
+      await backoff(tries)
     }
-  }
-
-  return {
-    failure: { caseId: kase.id, rep, failure: last.failure, message: last.message, attempts: attempt, at: startedAt.toISOString() },
   }
 }
 
 async function runAttempt(
   definition: AnyEvalDefinition,
   kase: EvalCase,
-  options: CaseOptions,
+  onPricingMissing: PricingWarning,
   signal: AbortSignal,
 ): Promise<{ row: Omit<EvalRow, 'rep' | 'startedAt' | 'durationMs'>; trace: EvalTraceTurn[] }> {
   // A fresh app per case: the tools dispatch through the pipeline against it, so the
@@ -282,10 +279,12 @@ async function runAttempt(
     const bound = manager.agent(definition.agent).as(principal) as BoundAgent<Agent>
     const providerName = definition.provider ?? bound.agent.provider ?? manager.config.default
     const pricing = pricingOf(manager, providerName)
-    if (!pricing) options.onPricingMissing(providerName)
+    if (!pricing) onPricingMissing(providerName)
 
-    const judgeUsages: EvalUsage[] = []
-    const judgeCosts: Array<number | undefined> = []
+    const judgePricing = definition.judge
+      ? pricingOf(manager, definition.judge.provider ?? manager.config.default)
+      : undefined
+    const judged: Array<{ usage: EvalUsage; model?: string; cost?: number }> = []
     const judge = async (input: string): Promise<AgentResponse<unknown>> => {
       if (!definition.judge) {
         throw new Error(
@@ -295,9 +294,14 @@ async function runAttempt(
       }
       const judgeBound = manager.agent(definition.judge.agent).as(null)
       const response = await judgeBound.prompt(input, promptOptions(definition.judge.provider, signal))
-      const judgeUsage = toEvalUsage(response.usage)
-      judgeUsages.push(judgeUsage)
-      judgeCosts.push(computeCostUsd(judgeUsage, pricingOf(manager, definition.judge.provider ?? manager.config.default)))
+      const usage = toEvalUsage(response.usage)
+      // The judge's model is recorded for the same reason the agent's is: a round where it
+      // silently resolved to a different one is otherwise invisible in the written data.
+      judged.push({
+        usage,
+        ...maybe('model', response.steps.at(-1)?.model.modelId),
+        ...maybe('cost', computeCostUsd(usage, judgePricing)),
+      })
       return response as AgentResponse<unknown>
     }
 
@@ -318,7 +322,7 @@ async function runAttempt(
     const scores = await attempt('grade', () =>
       definition.grade({ app, case: kase, expected: kase.expected, response, judge }))
 
-    const judgeTotal = judgeUsages.reduce<EvalUsage>((total, one) => addUsage(total, one), {})
+    const judgeTotal = judged.reduce<EvalUsage>((total, one) => addUsage(total, one.usage), {})
     return {
       row: {
         caseId: kase.id,
@@ -332,8 +336,13 @@ async function runAttempt(
         modelProvider: model.provider,
         usage,
         ...maybe('costUsd', computeCostUsd(usage, pricing)),
-        ...(judgeUsages.length > 0
-          ? { judgeCalls: judgeUsages.length, judgeUsage: judgeTotal, ...maybe('judgeCostUsd', sumCosts(judgeCosts)) }
+        ...(judged.length > 0
+          ? {
+              judgeCalls: judged.length,
+              judgeUsage: judgeTotal,
+              ...maybe('judgeModels', [...new Set(judged.flatMap((one) => one.model ?? []))]),
+              ...maybe('judgeCostUsd', sumCosts(judged.map((one) => one.cost))),
+            }
           : {}),
         finishReason: response.finishReason,
         steps: response.steps.length,
@@ -371,7 +380,7 @@ function resolveManager(app: EvalAppHandle): AiManager {
   return app.container.make<AiManager>('ai')
 }
 
-function pricingOf(manager: AiManager, provider: string): EvalPricing | undefined {
+function pricingOf(manager: AiManager, provider: string): AiPricing | undefined {
   const configured = manager.config.providers as Readonly<Record<string, AiProviderConfig | undefined>>
   return configured[provider]?.pricing
 }
@@ -392,6 +401,13 @@ function buildTrace(instructions: string, input: string, response: AgentResponse
     }
     for (const result of step.toolResults) {
       trace.push({ role: 'tool', content: stringify((result as { output?: unknown }).output), name: result.toolName })
+    }
+    // `toolResults` holds successes only; without this a case whose every tool call failed
+    // writes calls with no outcomes, and the reader blames the prompt.
+    for (const part of step.content) {
+      if (part.type === 'tool-error') {
+        trace.push({ role: 'tool', content: `error: ${describe(part.error)}`, name: part.toolName })
+      }
     }
   }
   return trace
@@ -422,11 +438,24 @@ class CaseFailure extends Error {
   }
 }
 
+/**
+ * By the SDK's own marker guards, not by the error's name: `AI_NoSuchToolError` contains
+ * "Tool" but is the *model* naming a tool that does not exist, which a second call often
+ * fixes. `isInstance` rather than `instanceof`, because two copies of `ai` may be loaded.
+ */
+const TOOL_PROTOCOL_ERRORS = [
+  NoSuchToolError,
+  InvalidToolInputError,
+  ToolCallRepairError,
+  ToolChoiceViolationError,
+  MissingToolResultsError,
+  InvalidToolApprovalError,
+] as const
+
 function classify(error: unknown): EvalFailureClass {
   if (error instanceof CaseFailure) return error.failure
   if (error instanceof TimeoutError) return 'timeout'
-  const name = error instanceof Error ? error.name : ''
-  return name.includes('Tool') ? 'tool' : 'provider'
+  return TOOL_PROTOCOL_ERRORS.some((kind) => kind.isInstance(error)) ? 'tool' : 'provider'
 }
 
 function describe(error: unknown): string {
@@ -442,7 +471,7 @@ class TimeoutError extends Error {
  * releases the app. Racing alone would leave a timed-out case billing in the background,
  * with its cost outside `--max-cost-usd` and its app alive under `--concurrency`.
  */
-async function withTimeout<T>(work: Promise<T>, options: CaseOptions, caseId: string, controller: AbortController): Promise<T> {
+async function withTimeout<T>(work: Promise<T>, timeoutMs: number, caseId: string, controller: AbortController): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   // The race has already reported by the time the aborted work rejects.
   void work.catch(() => {})
@@ -452,8 +481,8 @@ async function withTimeout<T>(work: Promise<T>, options: CaseOptions, caseId: st
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           controller.abort()
-          reject(new TimeoutError(`${caseId} exceeded the ${options.timeoutMs}ms per-case ceiling.`))
-        }, options.timeoutMs)
+          reject(new TimeoutError(`${caseId} exceeded the ${timeoutMs}ms per-case ceiling.`))
+        }, timeoutMs)
       }),
     ])
   } finally {
@@ -467,48 +496,9 @@ async function backoff(attempt: number): Promise<void> {
 }
 
 async function dispose(app: EvalAppHandle): Promise<void> {
-  if (typeof app.close === 'function') {
-    await app.close()
-    return
-  }
-  const asyncDispose = (app as { [Symbol.asyncDispose]?: () => unknown })[Symbol.asyncDispose]
-  if (typeof asyncDispose === 'function') await asyncDispose.call(app)
+  if (typeof app.close === 'function') await app.close()
 }
 
-function maybe<K extends string, V>(key: K, value: V | undefined): Record<K, V> | Record<string, never> {
+function maybe<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
   return value === undefined ? {} : ({ [key]: value } as Record<K, V>)
-}
-
-function dryRunResult(context: {
-  definition: AnyEvalDefinition
-  flow: string
-  variant: string
-  reps: number
-  selected: EvalCase[]
-  startedAt: Date
-  handle: EvalReporterHandle
-}): EvalRunResult {
-  const { definition, flow, variant, reps, selected, startedAt, handle } = context
-  return {
-    summary: {
-      flow,
-      variant,
-      agentName: resolveAgentName(definition.agent),
-      provider: definition.provider ?? '(the agent\'s own)',
-      cases: selected.length,
-      reps,
-      rows: 0,
-      truncated: 0,
-      failures: 0,
-      metrics: summarizeMetrics([], definition.metrics),
-      usage: {},
-      startedAt: startedAt.toISOString(),
-      finishedAt: startedAt.toISOString(),
-      durationMs: 0,
-    },
-    rows: [],
-    failures: [],
-    ...maybe('location', handle.location),
-    plannedCases: selected,
-  }
 }

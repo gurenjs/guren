@@ -5,7 +5,8 @@
  */
 import type { LanguageModelUsage } from 'ai'
 
-import type { EvalPricing, EvalUsage } from './eval-types'
+import type { EvalUsage } from './eval-types'
+import type { AiPricing } from './types'
 
 const PER_MILLION = 1_000_000
 
@@ -37,7 +38,7 @@ export function addUsage(left: EvalUsage, right: EvalUsage): EvalUsage {
  * the input rate: that over-states rather than under-states, and a silent zero for cached
  * traffic is what makes one variant look cheaper than it is.
  */
-export function computeCostUsd(usage: EvalUsage, pricing: EvalPricing | undefined): number | undefined {
+export function computeCostUsd(usage: EvalUsage, pricing: AiPricing | undefined): number | undefined {
   if (!pricing) return undefined
 
   const cacheRead = usage.cacheReadTokens ?? 0

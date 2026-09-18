@@ -946,8 +946,13 @@ package drift check. It never runs on a PR.
 - A cached read or write with no price of its own is charged at the input
   rate. That over-states rather than under-states, and a silent zero for
   cached traffic is what would make one variant look cheaper than it is.
-- Retries cover a provider error only. A grader crash and the per-case
-  ceiling reproduce, and re-running a timed-out case pays for the model twice.
+- Retries cover the model's own faults: a provider error, and the tool-protocol
+  errors the AI SDK raises when the model names a tool that does not exist or
+  sends arguments the schema rejects. A grader crash, a failed `app()` and the
+  per-case ceiling reproduce, and re-running a timed-out case pays twice.
+- A tool that *throws* is not a sidecar failure. The pipeline hands the model an
+  `AppToolError` result (§2.1), so the run finishes and the grader scores it; the
+  failed call is recorded in the trace instead.
 - `--from-conversations` and `guren add ai --evals` are not in this part.
   Sampling stored conversations needs the redaction of §5 applied on the way
   out and a retention answer before a file is written, and a half-done

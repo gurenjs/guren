@@ -7,10 +7,11 @@
  * It emits data and prints where: the `.claude/hillclimb/` layout is the claude-api
  * harness's to read, and Guren vendors no viewer (RFC 0029 Open Question 7).
  */
-import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
+import { fileExists, findFirstExisting } from './discovery'
+import { resolveAppRoot } from './utils'
 
 /** The runner's surface as this command calls it: the app's copy, resolved at run time. */
 export interface EvalRunnerModule {
@@ -66,20 +67,27 @@ export interface AiEvalDependencies {
 
 const EVAL_DIR = 'tests/evals'
 const EVAL_SUFFIXES = ['.eval.ts', '.eval.mts', '.eval.js', '.eval.mjs'] as const
-const EVAL_KIND = 'guren.eval'
+/**
+ * The wire contract with `defineEval()`, deliberately a literal rather than an import: the
+ * plugin is an optional peer this command resolves from the *app's* copy at run time, and
+ * importing the constant would make it a hard dependency for one string.
+ * `tests/ai-eval.test.ts` pins it against the plugin's own declaration.
+ */
+export const EVAL_KIND = 'guren.eval'
 
 export async function runAiEval(options: AiEvalOptions, dependencies: AiEvalDependencies = {}): Promise<EvalRunResultLike> {
   const print = dependencies.print ?? ((line: string) => consola.log(line))
   const warn = dependencies.warn ?? ((message: string) => consola.warn(message))
-  const appRoot = resolve(process.cwd(), options.appRoot ?? '.')
+  const appRoot = resolveAppRoot(options)
   const file = await resolveEvalFile(options, appRoot)
-  // Every relative path an eval names — `fromJsonl()`, the reporter's `.claude/hillclimb`
-  // root — resolves against the working directory, and `--app` would otherwise move only
-  // where this command looked for the file.
+  // The runner is told `cwd`, so the reporter needs no process state. This still moves the
+  // working directory, because a path the *eval file* names — `fromJsonl('tests/…')`, a
+  // fixture its setup() opens — resolves against it and the runner never sees it. Safe here
+  // for the reason `add-prototype` and the scaffolder chdir: the command owns the process.
   const previousCwd = process.cwd()
   process.chdir(appRoot)
   try {
-    return await execute(options, dependencies, file, print, warn)
+    return await execute(options, dependencies, file, appRoot, print, warn)
   } finally {
     process.chdir(previousCwd)
   }
@@ -89,6 +97,7 @@ async function execute(
   options: AiEvalOptions,
   dependencies: AiEvalDependencies,
   file: string,
+  appRoot: string,
   print: (line: string) => void,
   warn: (message: string) => void,
 ): Promise<EvalRunResultLike> {
@@ -104,6 +113,7 @@ async function execute(
   const runner = await loadRunner(dependencies.loadRunner)
   const result = await runner.runEval(definition, {
     flow: options.flow,
+    cwd: appRoot,
     ...defined('variant', options.variant),
     ...defined('reps', options.reps),
     ...defined('cases', options.cases),
@@ -132,19 +142,19 @@ async function execute(
 
 async function resolveEvalFile(options: AiEvalOptions, appRoot: string): Promise<string> {
   if (options.file) {
-    const absolute = resolve(appRoot, options.file)
-    await assertReadable(absolute, `--file ${options.file}`)
-    return absolute
+    if (!(await fileExists(appRoot, options.file))) {
+      throw new Error(`--file ${options.file} does not exist: ${resolve(appRoot, options.file)}`)
+    }
+    return resolve(appRoot, options.file)
   }
 
   const directory = resolve(appRoot, options.dir ?? EVAL_DIR)
-  for (const suffix of EVAL_SUFFIXES) {
-    const candidate = resolve(directory, `${options.flow}${suffix}`)
-    if (await exists(candidate)) return candidate
-  }
+  const candidates = EVAL_SUFFIXES.map((suffix) => `${options.flow}${suffix}`)
+  const found = await findFirstExisting(directory, candidates)
+  if (found) return resolve(directory, found)
   throw new Error(
-    `No eval named "${options.flow}": looked for ${EVAL_SUFFIXES.map((suffix) => `${options.flow}${suffix}`).join(', ')} `
-    + `in ${directory}. Pass --file to name one elsewhere, or --dir to look somewhere else.`,
+    `No eval named "${options.flow}": looked for ${candidates.join(', ')} in ${directory}. `
+    + 'Pass --file to name one elsewhere, or --dir to look somewhere else.',
   )
 }
 
@@ -165,21 +175,7 @@ async function loadRunner(importer?: () => Promise<EvalRunnerModule>): Promise<E
   }
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path)
-    return true
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
-    throw error
-  }
-}
-
-async function assertReadable(path: string, label: string): Promise<void> {
-  if (!(await exists(path))) throw new Error(`${label} does not exist: ${path}`)
-}
-
-function defined<K extends string, V>(key: K, value: V | undefined): Record<K, V> | Record<string, never> {
+function defined<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
   return value === undefined ? {} : ({ [key]: value } as Record<K, V>)
 }
 

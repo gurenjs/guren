@@ -40,7 +40,7 @@ export interface EvalContainer {
  */
 export interface EvalAppHandle {
   readonly container: EvalContainer
-  /** Called after each case when present, before `Symbol.asyncDispose`. */
+  /** Called after each case, when present: the one disposal hook the runner calls. */
   close?(): unknown
 }
 
@@ -51,14 +51,6 @@ export interface EvalUsage {
   cacheWriteTokens?: number
   outputTokens?: number
   totalTokens?: number
-}
-
-/** USD per million tokens, from `AiProviderConfig.pricing`. */
-export interface EvalPricing {
-  input: number
-  output: number
-  cacheRead?: number
-  cacheWrite?: number
 }
 
 /**
@@ -86,6 +78,8 @@ export interface EvalRow {
   /** Judge usage is its own field, so a judge cannot dampen a difference between variants. */
   judgeCalls?: number
   judgeUsage?: EvalUsage
+  /** The models that answered, from their responses: a judge that silently moved is otherwise invisible. */
+  judgeModels?: string[]
   judgeCostUsd?: number
   finishReason: string
   steps: number
@@ -95,6 +89,11 @@ export interface EvalRow {
   startedAt: string
 }
 
+/**
+ * `tool` is the model and the SDK failing to complete a tool round-trip (a hallucinated name,
+ * arguments the schema rejects). A tool that *throws* is not here: the pipeline hands the model
+ * an `AppToolError` result (RFC 0029 §2.1), so the run finishes and the grader scores it.
+ */
 export type EvalFailureClass = 'setup' | 'provider' | 'tool' | 'grade' | 'timeout'
 
 /** An attempt that produced nothing scorable. Counted beside the headline, never inside it. */

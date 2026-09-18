@@ -8,14 +8,15 @@ import type { EmbeddingModel, ImageModel, LanguageModel } from 'ai'
 
 import { createConversationStore, type ConversationsConfig } from './conversations'
 import { ConfiguredAiManager, type AiManager } from './manager'
+import type { AiPricing } from './types'
 
 export interface AiProviderConfig {
   /** Called once, on first use, then memoized by {@link AiManager.model}. */
   model: () => LanguageModel
   embeddingModel?: () => EmbeddingModel
   imageModel?: () => ImageModel
-  /** USD per million tokens; read by the eval runner only. */
-  pricing?: { input: number; output: number; cacheRead?: number; cacheWrite?: number }
+  /** Read by the eval runner only (RFC 0029 §10); a provider without it yields rows with no cost. */
+  pricing?: AiPricing
 }
 
 export interface AiConfig {

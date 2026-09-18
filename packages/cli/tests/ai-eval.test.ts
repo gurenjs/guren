@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
-import { parseNumericArg, runAiEval, type EvalRunnerModule, type EvalRunResultLike } from '../src/ai-eval'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { EVAL_KIND, parseNumericArg, runAiEval, type EvalRunnerModule, type EvalRunResultLike } from '../src/ai-eval'
 import { createTempWorkspace, writeWorkspaceFiles, type TempWorkspace } from './helpers'
 
 let workspace: TempWorkspace | undefined
@@ -9,7 +12,7 @@ afterEach(async () => {
   workspace = undefined
 })
 
-const DEFINITION = { kind: 'guren.eval' }
+const DEFINITION = { kind: EVAL_KIND }
 
 function stubRunner(overrides: Partial<EvalRunResultLike> = {}): EvalRunnerModule & { calls: Array<{ definition: unknown; options: Record<string, unknown> }> } {
   const calls: Array<{ definition: unknown; options: Record<string, unknown> }> = []
@@ -33,7 +36,7 @@ function stubRunner(overrides: Partial<EvalRunResultLike> = {}): EvalRunnerModul
   }
 }
 
-async function seedEval(contents = 'export default { kind: "guren.eval" }\n', path = 'tests/evals/triage.eval.ts'): Promise<TempWorkspace> {
+async function seedEval(contents = `export default { kind: "${EVAL_KIND}" }\n`, path = 'tests/evals/triage.eval.ts'): Promise<TempWorkspace> {
   workspace = await createTempWorkspace('guren-ai-eval-')
   await writeWorkspaceFiles(workspace.dir, { [path]: contents })
   return workspace
@@ -213,7 +216,7 @@ describe('runAiEval', () => {
   })
 
   test('should import the eval file for real when no loader is injected', async () => {
-    await seedEval('export default { kind: "guren.eval", marker: 42 }\n')
+    await seedEval(`export default { kind: "${EVAL_KIND}", marker: 42 }\n`)
     const runner = stubRunner()
 
     await runAiEval({ flow: 'triage' }, { loadRunner: async () => runner, print: () => {} })
@@ -230,5 +233,16 @@ describe('parseNumericArg', () => {
     expect(parseNumericArg('reps', '')).toBeUndefined()
     expect(() => parseNumericArg('reps', 'two')).toThrow('--reps must be a positive number, got "two"')
     expect(() => parseNumericArg('cases', '0')).toThrow('--cases must be a positive number')
+  })
+})
+
+describe('EVAL_KIND', () => {
+  test('should match the marker @guren/plugin-ai stamps on a defineEval() result', () => {
+    // A literal on both sides of a run-time seam (the plugin is an optional peer resolved
+    // from the app's copy). Drift silently rejects every valid eval file, blaming the file.
+    const source = readFileSync(join(import.meta.dir, '../../plugin-ai/src/eval-types.ts'), 'utf8')
+    const declared = /export const EVAL_KIND = '([^']+)'/.exec(source)
+
+    expect(declared?.[1]).toBe(EVAL_KIND)
   })
 })

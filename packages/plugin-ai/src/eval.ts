@@ -3,13 +3,13 @@
  * wiring; an eval calls the real model over a case set with a grader, on purpose and at a
  * cost. Neither substitutes for the other, and no `guren check` or `guren gate` runs this.
  */
-export { defineEval, fromJsonl, isEvalDefinition, parseJsonlCases } from './eval-define'
+export { defineEval, fromJsonl, parseJsonlCases } from './eval-define'
 export { EvalRunError, runEval } from './eval-run'
 export type { EvalRunResult, RunEvalOptions } from './eval-run'
-export { HILLCLIMB_ROOT, hillclimbReporter } from './eval-reporter'
+export { hillclimbReporter } from './eval-reporter'
 export type { HillclimbReporterOptions } from './eval-reporter'
-export { addUsage, computeCostUsd, sumCosts, toEvalUsage } from './eval-cost'
-export { formatSummary, summarizeMetrics, totalCostUsd, totalJudgeCostUsd, totalUsage } from './eval-stats'
+export { formatSummary } from './eval-stats'
+export { EVAL_KIND } from './eval-types'
 export type {
   EvalAppHandle,
   EvalCase,
@@ -22,7 +22,6 @@ export type {
   EvalJudge,
   EvalMetric,
   EvalMetricSummary,
-  EvalPricing,
   EvalReporter,
   EvalReporterHandle,
   EvalRow,

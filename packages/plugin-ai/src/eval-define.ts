@@ -45,11 +45,6 @@ export function defineEval<
   return { ...definition, kind: EVAL_KIND }
 }
 
-/** True for a `defineEval()` result from any copy of this package. */
-export function isEvalDefinition(value: unknown): value is EvalDefinition {
-  return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === EVAL_KIND
-}
-
 /**
  * Cases from a JSONL file, one `{ id, input, expected?, seed?, tags? }` per line. Read when
  * the run starts, not at import, so a missing file fails the command rather than the module.
