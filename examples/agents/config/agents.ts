@@ -15,7 +15,7 @@ export default defineAgentsConfig({
       // Exact names, not `tools:read`: the triager reads tickets and closes
       // them, and a read grant would silently widen with every new read-only
       // route. `tickets.close` is gated on a human approval by the route.
-      scopes: ['tool:tickets.index', 'tool:tickets.close'],
+      scopes: ['tool:tickets_index', 'tool:tickets.close'],
       // Per in-memory instance, so an eviction resets it: a burst floor, not a
       // quota. A sweep spends the index call plus one per fresh ask, and
       // `MAX_ASKS_PER_SWEEP` caps that at 10 — 11 in all, so a backlog cannot

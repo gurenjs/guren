@@ -1,6 +1,6 @@
 /**
  * How a ticket row reaches an operator, on either surface. ISO 8601 strings,
- * because the agent reads the same shape out of `tickets.index`'s output
+ * because the agent reads the same shape out of `tickets_index`'s output
  * schema — a console rendering a different one would be describing a different
  * ticket than the one the agent asked to close.
  */
@@ -33,7 +33,7 @@ export function presentTicket(row: TicketRow): TicketView {
 }
 
 /**
- * Newest first and bounded, unlike the `tickets.index` tool: this one renders a
+ * Newest first and bounded, unlike the `tickets_index` tool: this one renders a
  * page, and Cloudflare's Free plan allows 50 D1 queries per Worker invocation.
  */
 export async function listTickets(limit: number): Promise<TicketView[]> {

@@ -197,7 +197,7 @@ bunx guren context
 The rest of `.claude/` is read on demand rather than at start:
 
 - **`rules/`** hold verified API rules for one area each (`orm-models.md`, `controllers-http.md`, `routes-codegen.md`, `testing.md`, `docs-and-spec.md`, `comments.md`). Each declares the file globs it applies to, so the agent loads `routes-codegen.md` when it edits a route and not before.
-- **`skills/`** are procedures the agent follows on request: `scaffold` (reach for `bunx guren make:*` instead of typing a file), `feature`, `db-manage`, `guren-api`, `agent-interface`, `plugin-authoring`, `dev-workflow`, `github-projects`.
+- **`skills/`** are procedures the agent follows on request: `scaffold` (reach for `bunx guren make:*` instead of typing a file), `feature`, `db-manage`, `guren-api`, `agent-interface`, `ai-agent`, `plugin-authoring`, `dev-workflow`, `github-projects`.
 - **`agents/`** are two subagents with their own briefs: `code-review` and `test-writer`.
 - **`.mcp.json`** points the agent at the dev MCP endpoint the `dev` script mounted, so it can query the running app.
 

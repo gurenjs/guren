@@ -100,7 +100,7 @@ export default defineAgentsConfig({
     triager: {
       module: 'app/Agents/Triager.ts',
       export: 'Triager',
-      scopes: ['tool:tickets.index', 'tool:tickets.close'],
+      scopes: ['tool:tickets_index', 'tool:tickets.close'],
       budget: { callsPerMinute: 30 },
     },
   },
@@ -173,7 +173,7 @@ export class Triager extends GurenAgent<Env, TriagerState> {
   }
 
   async sweep(): Promise<void> {
-    const listed = await this.tools.call('tickets.index', { status: 'open' })
+    const listed = await this.tools.call('tickets_index', { status: 'open' })
     if (listed.pending) return          // waiting on a human; nothing ran
     if (!listed.ok || listed.outcome.isError) return
 
@@ -420,6 +420,7 @@ const MAX_ASKS_PER_SWEEP = 10
 ## 関連
 
 - [エージェントインターフェース](./agent-interface.md): `.agent()` ルート、ツールの導出、スコープ、承認、そしてエージェントの呼び出しが載る監査ログ
+- [AI エージェント](./ai-agents.md): リクエスト・ジョブ・永続エージェントから、アプリのツールを使ってモデルを呼ぶ
 - [Cloudflare Workers デプロイ](./cloudflare.md): 残りのデプロイ経路(D1・セッション・シークレット・静的アセット)
 - [認可](./authorization.md): `agent:<name>:<instance>` principal が何をしてよいかを決めるポリシー
 - [暗号化](./encryption.md): `APP_KEY` と、台帳が必要とする encrypter

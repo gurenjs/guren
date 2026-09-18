@@ -1,10 +1,13 @@
 import { DatabaseSessionStore, EncryptionServiceProvider, EventServiceProvider, createApp } from '@guren/core'
 import { agentsPlugin } from '@guren/plugin-agents'
+import { aiPlugin } from '@guren/plugin-ai'
 
 import AuthProvider from '../app/Providers/AuthProvider'
 import DatabaseProvider from '../app/Providers/DatabaseProvider'
 import { approvalStore } from '../app/Services/DrizzleApprovalStore'
 import agents from '../config/agents'
+import ai from '../config/ai'
+import env from '../config/env'
 import { sessions } from '../db/schema'
 import registerWebRoutes from '../routes/web'
 
@@ -20,6 +23,8 @@ function secureCookies(): boolean {
 }
 
 const app = createApp({
+  env,
+  config: [ai],
   routes: registerWebRoutes,
   providers: [
     DatabaseProvider,
@@ -45,6 +50,9 @@ const app = createApp({
           ),
       },
     }),
+    // `TicketDigest`'s tool calls go through the same pipeline. It needs no
+    // approvals queue of its own: its one tool is read-only.
+    aiPlugin(),
   ],
   auth: {
     autoSession: true,
