@@ -21,7 +21,7 @@ import {
 } from '@guren/core'
 import { MockEmbeddingModelV4, MockImageModelV4, MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 
-import { AgentResponded, aiPlugin, defineAiConfig, type AiPluginConfig, type ConversationsConfig } from '../src'
+import { AgentResponded, aiPlugin, defineAiConfig, type AiManager, type AiPluginConfig, type ConversationsConfig } from '../src'
 
 export type ScriptedStep =
   | { text: string }
@@ -144,6 +144,8 @@ function registerRoutes(router: Router): void {
 
 export interface Harness {
   app: Application
+  /** The app's `ai` binding, or the fake when one has replaced it. */
+  manager: AiManager
   records: Array<AgentToolInvoked | AgentToolDenied>
   /** Swap what the `default` provider answers with, per test. */
   script(steps: ScriptedStep[]): MockLanguageModelV4
@@ -217,6 +219,9 @@ export async function bootHarness(
 
   return {
     app,
+    get manager() {
+      return app.container.make<AiManager>('ai')
+    },
     records,
     embeddings,
     images,
