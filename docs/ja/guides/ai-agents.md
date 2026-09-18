@@ -398,7 +398,7 @@ export function TriageFeed({ userId }: { userId: number }) {
 
 ## 埋め込みと画像
 
-`embed()`、`embedMany()`、`image()` は AI SDK の呼び出しそのもので、モデルだけをプロバイダ名から解決します。エージェントが言語モデルを解決するのと同じ道筋です。まず `config/ai.ts` にファクトリを書いてください。`embeddingModel` を持たないプロバイダ (Anthropic は埋め込みモデルを提供していません) は、リクエスト時ではなく名前の解決時に拒否されます。
+`embed()`、`embedMany()`、`image()` は AI SDK の呼び出しそのもので、モデルだけをプロバイダ名から解決します。エージェントが言語モデルを解決するのと同じ道筋です。まず `config/ai.ts` にファクトリを書いてください。`embeddingModel` を宣言していないプロバイダ (Anthropic は埋め込みモデルを提供していません) は拒否され、エラーがその名前を示します。
 
 ```ts
 // config/ai.ts

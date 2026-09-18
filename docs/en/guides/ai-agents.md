@@ -398,7 +398,7 @@ It needs the `BroadcastServiceProvider` on top of the queue wiring above, and it
 
 ## Embeddings and images
 
-`embed()`, `embedMany()` and `image()` are the AI SDK's own calls with the model resolved by provider name, the way an agent resolves its language model. Declare the factory in `config/ai.ts` first: a provider with no `embeddingModel` (Anthropic ships none) is refused by name rather than at the request.
+`embed()`, `embedMany()` and `image()` are the AI SDK's own calls with the model resolved by provider name, the way an agent resolves its language model. Declare the factory in `config/ai.ts` first: a provider that declares no `embeddingModel` (Anthropic ships none) is refused, and the error names it.
 
 ```ts
 // config/ai.ts
