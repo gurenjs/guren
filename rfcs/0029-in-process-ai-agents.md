@@ -213,6 +213,15 @@ hence the `await` above. The principal is what `appTools()` hands to the
 invocation pipeline (§2), and it is recorded on every audit line the prompt
 produces.
 
+**Amended.** The `as()` arguments in this document's examples are illustrative.
+`this.auth.user()` and an untyped `this.auth.userOrFail()` resolve to
+`Authenticatable`, which carries no `id`: §4's hoisted `const user` is a
+TS2345, and §1's inline call compiles only because `user<T>()` infers `T` from
+the argument position, so the generic states nothing. `user()` can also be
+`null`, which `as()` reads as an anonymous read-only run rather than as the
+caller. Application code should write
+`await this.auth.userOrFail<{ id: number }>()`.
+
 `as(null)` is an anonymous run, the right default for a cron-driven agent
 that was never given an identity, and **its `appTools()` are restricted to
 tools declared read-only** (a local `tool()` is outside this, §2.4):
@@ -1054,8 +1063,14 @@ already checks.
 3. **Part 3**: `embed()` / `image()` thin wrappers on the configured
    provider, `guren check` and `guren audit` rules, `context` /
    `spec:generate`, `defineEval()` and `guren ai:eval` (§10), the harness
-   skill, `docs/en/guides/ai-agents.md`, the blog example gaining one agent
-   and one eval.
+   skill, `docs/en/guides/ai-agents.md`, ~~the blog example gaining one agent
+   and one eval~~.
+   **Amended in implementation:** the example agent went into
+   `examples/agents` rather than the blog. The blog declares no `.agent()`
+   route and has no test that boots the application, which `fakeAi()` needs;
+   `examples/agents` has both. Its `tickets.index` route took the portable
+   tool name `tickets_index` so the agent works against Anthropic and OpenAI.
+   The eval waits for `defineEval()`.
 
 Each PR references `RFC 0029`. A tutorial chapter follows Part 2.
 

@@ -35,7 +35,10 @@ export function registerApiRoutes(router: Router): void {
       middlewares: [authenticated],
       query: ListTicketsQuerySchema,
       output: TicketListResponseSchema,
-      agent: { description: 'List tickets, optionally filtered by status.' },
+      // A portable tool name: `TicketDigest` hands this tool to a model provider,
+      // and Anthropic and OpenAI reject a dotted one. `tickets.close` keeps its
+      // name, since only the durable triager calls it, through this app's pipeline.
+      agent: { description: 'List tickets, optionally filtered by status.', toolName: 'tickets_index' },
     },
     [TicketController, 'index'],
   )
@@ -117,6 +120,12 @@ export function registerApiRoutes(router: Router): void {
   router.post('/ops/agents/triager/sweep', { name: 'agents.triager.sweep', middlewares: operator }, [
     AgentOpsController,
     'sweep',
+  ])
+
+  // The in-process agent: a model call during this request, acting as the operator.
+  router.post('/ops/agents/digest', { name: 'agents.digest', middlewares: operator }, [
+    AgentOpsController,
+    'digest',
   ])
 }
 

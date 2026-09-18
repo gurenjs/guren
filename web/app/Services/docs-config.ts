@@ -40,7 +40,7 @@ interface DocSectionConfig {
 const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   {
     title: { en: 'Getting Started', ja: 'はじめに' },
-    slugs: ['overview', 'why-guren', 'getting-started', 'first-steps', 'configuration', 'architecture'],
+    slugs: ['overview', 'why-guren', 'bun', 'getting-started', 'first-steps', 'configuration', 'architecture'],
   },
   {
     title: { en: 'The Basics', ja: '基本' },
@@ -77,7 +77,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   },
   {
     title: { en: 'AI-Native Development', ja: 'AIネイティブ開発' },
-    slugs: ['spec-anchored', 'prototype-first', 'agent-interface', 'durable-agents'],
+    slugs: ['spec-anchored', 'prototype-first', 'agent-interface', 'ai-agents', 'durable-agents'],
   },
   {
     title: { en: 'Reference', ja: 'リファレンス' },

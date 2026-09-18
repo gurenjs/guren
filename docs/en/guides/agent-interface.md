@@ -1130,4 +1130,5 @@ The full finding-key tables are in
 - [Authorization](./authorization.md): the policies that decide what a principal may do
 - [Events](./events.md): listener registration and the event manager
 - [CLI](./cli.md): `tool:list`, `tool:inspect`, and the check/audit finding keys
+- [AI Agents](./ai-agents.md): an agent class in your app that calls a model with these tools
 - [Durable Agents](./durable-agents.md): hosting an agent of your own that calls this surface

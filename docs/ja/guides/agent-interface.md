@@ -790,4 +790,5 @@ finding key の一覧は [CLI: エージェントに公開したルート](./cli
 - [認可](./authorization.md): principal が何をしてよいかを決めるポリシー
 - [イベント](./events.md): リスナーの登録方法とイベントマネージャ
 - [CLI](./cli.md): `tool:list`・`tool:inspect` と check・audit の finding key
+- [AI エージェント](./ai-agents.md): これらのツールを使ってモデルを呼ぶ、アプリ内のエージェントクラス
 - [永続エージェント](./durable-agents.md): この面を呼び出す自前のエージェントをホストする

@@ -197,7 +197,7 @@ bunx guren context
 `.claude/` の残りは、開始時ではなく必要になったときに読まれます。
 
 - **`rules/`** には領域ごとに検証済みの API ルールがあります(`orm-models.md`、`controllers-http.md`、`routes-codegen.md`、`testing.md`、`docs-and-spec.md`、`comments.md`)。それぞれが適用対象のファイル glob を宣言しているので、エージェントはルートを編集するときに `routes-codegen.md` を読み込み、それまでは読みません。
-- **`skills/`** はエージェントが求めに応じて従う手順です。`scaffold`(ファイルを手打ちせず `bunx guren make:*` に手を伸ばす)、`feature`、`db-manage`、`guren-api`、`agent-interface`、`plugin-authoring`、`dev-workflow`、`github-projects`。
+- **`skills/`** はエージェントが求めに応じて従う手順です。`scaffold`(ファイルを手打ちせず `bunx guren make:*` に手を伸ばす)、`feature`、`db-manage`、`guren-api`、`agent-interface`、`ai-agent`、`plugin-authoring`、`dev-workflow`、`github-projects`。
 - **`agents/`** は独自の brief を持つ 2 つの subagent、`code-review` と `test-writer` です。
 - **`.mcp.json`** は `dev` スクリプトがマウントした開発用 MCP エンドポイントをエージェントに指し示し、動いているアプリに問い合わせられるようにします。
 

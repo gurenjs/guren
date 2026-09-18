@@ -6,7 +6,7 @@
  * can be exercised on Bun, and this is the part worth testing there.
  */
 
-/** The shape `tickets.index` advertises, as its `output` schema states it. */
+/** The shape `tickets_index` advertises, as its `output` schema states it. */
 export interface TicketSummary {
   id: number
   title: string

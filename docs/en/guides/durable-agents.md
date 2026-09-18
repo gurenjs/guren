@@ -100,7 +100,7 @@ export default defineAgentsConfig({
     triager: {
       module: 'app/Agents/Triager.ts',
       export: 'Triager',
-      scopes: ['tool:tickets.index', 'tool:tickets.close'],
+      scopes: ['tool:tickets_index', 'tool:tickets.close'],
       budget: { callsPerMinute: 30 },
     },
   },
@@ -173,7 +173,7 @@ export class Triager extends GurenAgent<Env, TriagerState> {
   }
 
   async sweep(): Promise<void> {
-    const listed = await this.tools.call('tickets.index', { status: 'open' })
+    const listed = await this.tools.call('tickets_index', { status: 'open' })
     if (listed.pending) return          // waiting on a human; nothing ran
     if (!listed.ok || listed.outcome.isError) return
 
@@ -420,6 +420,7 @@ The routes an agent calls are checked by the ordinary agent-route rules, and the
 ## Related
 
 - [Agent Interface](./agent-interface.md): `.agent()` routes, tool derivation, scopes, approvals, and the audit trail an agent's calls land in
+- [AI Agents](./ai-agents.md): calling a model with the app's tools, from a request, a job or a durable agent
 - [Cloudflare Workers Deployment](./cloudflare.md): the rest of the deploy path (D1, sessions, secrets, static assets)
 - [Authorization](./authorization.md): the policies that decide what the `agent:<name>:<instance>` principal may do
 - [Encryption](./encryption.md): `APP_KEY` and the encrypter the ledger needs

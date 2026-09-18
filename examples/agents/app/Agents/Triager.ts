@@ -36,7 +36,7 @@ interface SweepSummary {
   refused: number
   /** Stale tickets left for later: declined, already parked, or over the ask cap. */
   deferred: number
-  /** Why `tickets.index` answered nothing, when it did: a blind sweep is not an empty one. */
+  /** Why `tickets_index` answered nothing, when it did: a blind sweep is not an empty one. */
   error?: string
 }
 
@@ -87,7 +87,7 @@ export class Triager extends GurenAgent<Env, TriagerState> {
   async sweep(): Promise<SweepSummary> {
     const now = new Date()
     const state = this.#current()
-    const listed = await this.tools.call('tickets.index', { status: 'open' })
+    const listed = await this.tools.call('tickets_index', { status: 'open' })
     const blind = failureOf(listed)
     const open = listed.ok && !listed.outcome.isError ? readTickets(listed) : []
     const plan = planSweep(open, state, now)
