@@ -213,6 +213,15 @@ hence the `await` above. The principal is what `appTools()` hands to the
 invocation pipeline (§2), and it is recorded on every audit line the prompt
 produces.
 
+**Amended.** The `as()` arguments in this document's examples are illustrative.
+`this.auth.user()` and an untyped `this.auth.userOrFail()` resolve to
+`Authenticatable`, which carries no `id`: §4's hoisted `const user` is a
+TS2345, and §1's inline call compiles only because `user<T>()` infers `T` from
+the argument position, so the generic states nothing. `user()` can also be
+`null`, which `as()` reads as an anonymous read-only run rather than as the
+caller. Application code should write
+`await this.auth.userOrFail<{ id: number }>()`.
+
 `as(null)` is an anonymous run, the right default for a cron-driven agent
 that was never given an identity, and **its `appTools()` are restricted to
 tools declared read-only** (a local `tool()` is outside this, §2.4):
