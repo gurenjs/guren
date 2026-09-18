@@ -395,7 +395,8 @@ plugins, not at boot: `mcpPlugin` binds its emitter in its own `boot`, and
 provider boot order is the app's `providers` array, so a check in this
 plugin's `boot` would pass or fail by list position (the ordering hazard
 RFC 0017's implementation notes record). `guren check` reports the same
-double configuration statically, which is the earlier signal.
+double configuration statically, which is the earlier signal
+(**Amended in implementation:** for `audit` only, see §8).
 An unconfigured approval queue stays fail-closed, as the pipeline already
 makes it: an approval-gated tool is refused with the `aiPlugin({ approvals })`
 hint, and nothing is dispatched.
@@ -795,10 +796,40 @@ the tool descriptions get the right answer out of the model is §10's job.
 - **`guren check`** (content-activated, nothing runs for an app with no
   `Agent` subclass): a literal `appTools([...])` name that no `.agent()`
   route derives; a name outside the class's `static scopes`; an `Agent`
-  subclass in an app whose `createApp()` never registers `aiPlugin()`; a
+  subclass in an app whose ~~`createApp()` never registers `aiPlugin()`~~
+  source never calls `aiPlugin()`; a
   computed `appTools()` argument is reported unverifiable, never passed
   (the AST rule from RFC 0021's prototype check).
+
+  **Amended in implementation (Part 3):** the plugin rule reads whether any
+  source file in the project calls the package's `aiPlugin` export, not the
+  `providers` array: a provider list built in another module is common, and
+  an array read as "no plugin" there would be a false finding. It is a warning,
+  as an unbound session config is (`sessions-check.ts`), because its evidence
+  is an absence. A class is an agent when it extends the
+  package's `Agent` export (named or namespace import) or a superclass whose
+  *import* resolves to a class already found to be one, so RFC 0017's durable
+  `Agent` is never read and a same-named class from elsewhere is not taken for
+  a parent; scopes and `tools()` are inherited as the runtime inherits them,
+  `super.tools()` included. The `agent({ ... })` helper is not
+  read. The scope entry outside the grammar of §2.2 fails, a non-literal
+  `static scopes` is unverifiable like a computed argument, and a route graph
+  that fails to load leaves the names unverified rather than underived. The
+  double configuration of §2.5 is reported for `audit` only: `plugin-ai`
+  throws when both plugins configure a trail, while each plugin's `approvals`
+  gates only its own surface and neither reads the other's, so two queues are
+  not a defect.
 - **`guren audit`**: the local-tool advisory from §2.4.
+
+  **Amended in implementation (Part 3):** the listing is `aiLocalTools` in
+  `--json` and its own heading in the text report. "Covers the same table"
+  is judged through the models: the tool's `execute` body and an agent
+  route's controller action each reference a Model class, and the two
+  bodies share a table when those models' `defineModel()` / `static table`
+  bindings name the same schema identifier. The write calls are the four
+  §2.4 names plus `forceCreate` / `forceUpdate` / `forceDelete`. Findings
+  point at a source line, so `// guren-audit-ignore` suppresses them, as it
+  does every other line-scoped audit finding.
 - **`guren context`** and `spec:generate` list agents with their tools and
   output schema next to models (Part 3).
 - **Deploy builds**: `ai` and the first-party providers are `fetch`-based;

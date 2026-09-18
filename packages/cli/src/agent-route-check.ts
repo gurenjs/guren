@@ -1,5 +1,4 @@
-import { relative, resolve } from 'node:path'
-import type { CallExpression } from '@babel/types'
+import { resolve } from 'node:path'
 import {
   AGENT_APPROVAL_CONFIG_KEY,
   AGENT_TOOL_NAME_PATTERN,
@@ -8,7 +7,6 @@ import {
   RESERVED_AGENT_TOOL_NAMES,
 } from '@guren/core'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
-import { memberKeyName, objectLiteral, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import {
   mutatesRecords,
@@ -19,10 +17,11 @@ import {
   INERTIA_CALL_PATTERN,
   type ControllerMethodInfo,
 } from './controller-methods'
-import { collectFiles, fileExists, listAppRoots } from './discovery'
+import { fileExists } from './discovery'
 import { describeMethod } from './http-methods'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
-import { ParseCache, type ParsedFile } from './parse-cache'
+import { ParseCache } from './parse-cache'
+import { MCP_PLUGIN_EXPORT, scanPluginCalls } from './plugin-calls'
 
 export interface AgentRouteCheckOptions {
   cwd: string
@@ -357,11 +356,7 @@ function inputFinding(route: AgentRoute): CheckResult | undefined {
   )
 }
 
-/** Local aliases of this export are followed; a same-named function from elsewhere is not. */
-const MCP_PLUGIN_SPECIFIER = '@guren/plugin-mcp'
-const MCP_PLUGIN_EXPORT = 'mcpPlugin'
-
-/** What one readable `mcpPlugin({ … })` call says about the approval queue. */
+/** What the readable `mcpPlugin({ … })` calls say about the approval queue. */
 type ApprovalConfigEvidence =
   | { kind: 'configured'; relPath: string }
   | { kind: 'absent'; relPath: string }
@@ -377,80 +372,12 @@ async function scanApprovalConfig(
   cwd: string,
   cache: ParseCache,
 ): Promise<ApprovalConfigEvidence | undefined> {
-  const roots = await listAppRoots(cwd)
-  const groups = await Promise.all(
-    roots.flatMap((root) => ['config', 'src', 'app'].map((dir) => collectFiles(resolve(root.dir, dir)))),
-  )
-  const files = groups.flat().filter((file) => !/\.test\.[jt]sx?$/.test(file))
-
-  let absent: ApprovalConfigEvidence | undefined
-  for (const filePath of files) {
-    // String pre-filter before any parse: almost no source mentions the plugin.
-    const source = await cache.source(filePath)
-    if (!source || !source.includes(MCP_PLUGIN_EXPORT)) continue
-    const parsed = await cache.get(filePath)
-    if (!parsed) continue
-
-    const relPath = relative(cwd, filePath).replace(/\\/g, '/')
-    const evidence = readMcpPluginCalls(parsed)
-    // A configured call anywhere settles it: an app may mount the endpoint twice.
-    if (evidence === 'configured') return { kind: 'configured', relPath }
-    if (evidence === 'absent') absent ??= { kind: 'absent', relPath }
-  }
-
-  return absent
-}
-
-/**
- * `'configured'` if any call carries the queue key, `'absent'` if one has
- * readable options without it, `undefined` if none was readable.
- */
-function readMcpPluginCalls(parsed: ParsedFile): 'configured' | 'absent' | undefined {
-  const locals = new Set<string>()
-  for (const declaration of parsed.ast.program.body) {
-    if (declaration.type !== 'ImportDeclaration') continue
-    if (declaration.source.value !== MCP_PLUGIN_SPECIFIER) continue
-    for (const specifier of declaration.specifiers) {
-      if (specifier.type !== 'ImportSpecifier') continue
-      const imported =
-        specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
-      if (imported === MCP_PLUGIN_EXPORT) locals.add(specifier.local.name)
-    }
-  }
-  if (locals.size === 0) return undefined
-
-  let answer: 'configured' | 'absent' | undefined
-  walk(parsed.ast.program, (node) => {
-    if (node.type !== 'CallExpression') return
-    // Typed once at the seam so everything below is `@babel/types`.
-    const call = node as unknown as CallExpression
-    const callee = call.callee
-    if (callee.type !== 'Identifier' || !locals.has(callee.name)) return
-
-    const argument = call.arguments[0]
-    // `mcpPlugin()` with no argument is a readable call with no queue.
-    if (!argument) {
-      answer ??= 'absent'
-      return
-    }
-    // Read through transparent wrapping: a bare shape test read `{ … } satisfies
-    // McpPluginOptions` as unreadable, which silenced the finding entirely.
-    const options = objectLiteral(argument)
-    if (!options) return
-
-    const properties = options.properties
-    const carriesQueue = properties.some(
-      (property) =>
-        (property.type === 'ObjectProperty' || property.type === 'ObjectMethod')
-        && memberKeyName(property) === AGENT_APPROVAL_CONFIG_KEY,
-    )
-    // A spread makes an absence unreadable; a key literally there is still evidence.
-    const spreads = properties.some((property) => property.type === 'SpreadElement')
-    if (carriesQueue) answer = 'configured'
-    else if (!spreads) answer ??= 'absent'
-  })
-
-  return answer
+  const calls = await scanPluginCalls(cwd, cache, MCP_PLUGIN_EXPORT)
+  // A configured call anywhere settles it: an app may mount the endpoint twice.
+  const configured = calls.find((call) => call.keys.has(AGENT_APPROVAL_CONFIG_KEY))
+  if (configured) return { kind: 'configured', relPath: configured.relPath }
+  const absent = calls.find((call) => call.complete)
+  return absent ? { kind: 'absent', relPath: absent.relPath } : undefined
 }
 
 /**

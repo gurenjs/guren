@@ -177,8 +177,8 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 
 | コマンド | 説明 | 例 |
 |---------|------|-----|
-| `check` | ルート・コントローラ・ページ・モデル間の整合性(`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む)に加え、`config/agents.ts` の永続エージェントレジストリ・docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
-| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外を検査 | `bunx guren audit --json` |
+| `check` | ルート・コントローラ・ページ・モデル間の整合性(`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む)に加え、`config/agents.ts` の永続エージェントレジストリ・インプロセスエージェントの `appTools()` の名前とスコープ・docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
+| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外、インプロセスエージェントのローカルツールを検査 | `bunx guren audit --json` |
 | `gate` | scaffold された CI が回す検証ステージ(codegen・typecheck・lint・`--ci` 規則の `check`・`audit`・テスト)をまとめて実行し、いずれかが失敗すれば非ゼロ exit。実行できないステージは skip ではなく失敗 | `bunx guren gate --changed` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
 | `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・`fillable`/`hidden`/`visible`/`casts`・スキーマ付きルート(`<Entity>Controller`、モデルを指す `bind`、モデルを使うアクション本体のいずれかで対応付け)・Props付きページ・Resource・Policy・紐付きdocsとIssue — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート。`--live` で `gh` にIssueの状態を問い合わせ、`--repo owner/name` でoriginリモートを上書き) | `bunx guren context User --json` |
@@ -281,6 +281,30 @@ export default {
 無視された finding はレポートから消えるわけではなく、`status: "ignored"` と `ignoreReason` を伴って残ります。黙って握りつぶされるものは何もありません。`key` や `reason` が欠落しているエントリ、どの finding にもマッチしなかったエントリは、それ自体が警告として報告されるので、形骸化したルールに気づかないまま放置されることはありません。
 
 `config/audit.ts` が受け付けるのは、ソース行を持たない finding、つまり上記のルートレベル・モデルレベルのものだけです。行に紐づく finding(ハードコードされた認証情報、生SQL、無効化されたセキュリティ既定値)には既に `// guren-audit-ignore` という手段があります。そちらを対象にしたエントリは適用されず、インラインコメントを使うよう促す警告になります。目立たない第二の抑制手段が生まれるのを避けるためです。
+
+### インプロセスエージェント
+
+`@guren/plugin-ai` の `Agent` のサブクラスには、`check` の専用ルールがあります。これも内容で有効化され、該当クラスのないアプリには何も追加されません。対象になるのは、このパッケージの `Agent`(名前付き import と namespace import の両方)か、それを継承したクラスを継承するクラスだけです。親クラスは識別子の綴りではなく、そのファイルの import を解決して判定します。`@guren/plugin-agents` の永続エージェントは対象にならず、別の場所にある同名クラスを親と取り違えることもありません。
+
+`check` が **fail** にするもの:
+
+| Finding key | ルール |
+|---|---|
+| `ai-agent-tool-underived:*` | リテラルで書かれた `appTools([...])` の名前を、どの `.agent()` ルートも導出していない。`as()` が例外を投げます。 |
+| `ai-agent-tool-unscoped:*` | クラスの `static scopes`(自身のものか継承したもの)がその名前を許可していない。判定は RFC 0016 の文法(`tool:<name>`、`tools:<prefix>.*`、`tools:read`、`tools:*`)に従います。`scopes` のないクラスは何も許可しません。 |
+| `ai-agent-scope-malformed:*` | `static scopes` に文法外のエントリ(`tickets_show` のような裸の名前など)がある。何も許可せず、`as()` が例外を投げます。 |
+| `ai-agent-audit-duplicate` | `aiPlugin({ audit })` と `mcpPlugin({ audit })` の両方が監査ログを設定している。最初のツール呼び出しで例外になります。承認キューが2つあることは報告しません。各プラグインは自分のサーフェスを自分のキューでゲートします。 |
+
+`check` が **warn** にするもの:
+
+| Finding key | ルール |
+|---|---|
+| `ai-agent-plugin-missing` | `Agent` のサブクラスがあるのに、プロジェクト内のどのソースファイルも `aiPlugin()` を呼んでいない。`appTools()` を呼ぶエージェントは最初の `as()` で例外になり、`queue()` と監査ログにもプラグインが必要です。根拠が「呼び出しがないこと」なので、未バインドのセッション設定と同じく warn にしています。 |
+| `ai-agent-app-tools-unreadable:*` | `appTools()` の引数が文字列リテラルの配列ではない(スプレッド、変数、計算された要素)。名前は検証できず、pass にもしません。 |
+| `ai-agent-scopes-unreadable:*` | `static scopes` がリテラルの配列ではないため、名前をスコープと照合していない。 |
+| `ai-agent-tools-unverified:*` | ルートグラフの読み込みに失敗したため、名前を導出済みツールと照合していない。 |
+
+`audit` は、エージェントの `tools()` が `appTools()` のスプレッドと並べて返すローカルツールを、専用の見出しと `--json` の `aiLocalTools` にすべて列挙します。ローカルツールはクロージャの権限で動き、スコープ、ポリシー、承認、監査ログのどれも通りません。`ai-local-tool-write:*` は、ツールの `execute` が Model の書き込み(`create`、`update`、`delete`、`save`)を呼び、そのモデルのテーブルを `.agent()` ルートのアクションも使っている場合に warn します。その場合はルートの方をエージェントに渡してください。`ai-local-tools-unreadable:*` は、`tools()` がスキャンで列挙しきれるオブジェクトリテラルを返さない場合に warn します。どちらの finding もソース行を指すので、`// guren-audit-ignore` で抑制できます。
 
 ### アーキテクチャ境界
 

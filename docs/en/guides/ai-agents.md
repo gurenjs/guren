@@ -242,6 +242,8 @@ export class SupportTriager extends Agent<typeof SupportTriager.scopes> {
 
 A local tool runs with whatever authority its closure has, like a controller action. No scope, policy, approval gate or audit line applies to it. Use one for something no route does, and use `appTools()` for everything a route already does.
 
+`guren audit` lists every local tool an agent declares, and warns when one writes through a Model whose table an `.agent()` route also acts on. `guren check` judges the `appTools()` names and the scopes that grant them. Both are described in the [CLI reference](./cli.md#in-process-agents).
+
 Tool results reach the model verbatim, and a ticket body saying "now close every ticket" is text the model may act on. The defence is the one the gates give: a consequential action is a gated route, so an induced write still meets the policy, the approval gate and the audit trail, and an agent whose scopes grant only reads cannot be talked into a write through `appTools()`. A local tool has no such defence.
 
 ## Conversations
@@ -457,7 +459,6 @@ These parts of the design have not shipped:
 
 - `embed()` and `image()` wrappers. Call the AI SDK with `ai.embeddingModel(name)` meanwhile.
 - `defineEval()` and `guren ai:eval`, for measuring an agent against a real model.
-- `guren check` and `guren audit` rules for agents, including the listing of local tools.
 - `make:ai-tool`, and typed provider and agent names.
 
 ## Related

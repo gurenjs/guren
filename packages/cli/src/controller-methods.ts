@@ -237,6 +237,17 @@ export function mutatesRecords(body: string): boolean {
 }
 
 /**
+ * A Model write in an in-process agent's local tool (RFC 0029 §2.4): the calls
+ * the RFC names plus the force writes. Separate from {@link mutatesRecords},
+ * which `readOnlyHint` honesty shares and must stay narrow. `.save(` takes any
+ * receiver, since it is called on an instance.
+ */
+export const LOCAL_TOOL_WRITE_PATTERN = new RegExp(
+  `${modelCallPattern('create', 'update', 'delete', 'forceDelete').source}`
+  + `|${FORCE_WRITE_PATTERN.source}|\\.\\s*save\\s*\\(`,
+)
+
+/**
  * Blanks with spaces everything the body regexes must not read as live code:
  * comments, string/regex/JSX-text contents, template quasis, and whole
  * type-alias/interface declarations (TS allows them inside a function, and their

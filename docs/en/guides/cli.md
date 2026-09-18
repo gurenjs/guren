@@ -179,8 +179,8 @@ Validate your app before shipping. These commands are also designed for AI codin
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus the durable-agent registry in `config/agents.ts`, doc links, spec-view freshness, architecture boundaries, and (for an app that declares a deploy plugin or the Lambda adapter) the deploy-runtime verdicts `guren doctor` reports, as advisory results | `bunx guren check --json` |
-| `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package | `bunx guren audit --json` |
+| `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus the durable-agent registry in `config/agents.ts`, in-process agents' `appTools()` names and scopes, doc links, spec-view freshness, architecture boundaries, and (for an app that declares a deploy plugin or the Lambda adapter) the deploy-runtime verdicts `guren doctor` reports, as advisory results | `bunx guren check --json` |
+| `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package, and in-process agents' local tools | `bunx guren audit --json` |
 | `gate` | Every verification stage the scaffolded CI runs — codegen, typecheck, lint, `check` (the `--ci` rule), `audit`, tests — reported together; exits non-zero if any stage fails, and a stage that cannot run fails rather than skips | `bunx guren gate --changed` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
 | `context [Entity]` | Project context map — or, with an entity name, everything about one model: table, relationships, `fillable`/`hidden`/`visible`/`casts`, routes with schemas (matched by `<Entity>Controller`, a `bind` naming the model, or an action body that uses it), pages with Props, resource, policy, linked docs and issues (`--module` disambiguates, `"app"` = project root; `--live` asks `gh` for issue state, `--repo owner/name` overrides the origin remote) | `bunx guren context User --json` |
@@ -283,6 +283,30 @@ export default {
 Ignored findings stay in the report with `status: "ignored"` and an `ignoreReason`. Nothing is silently dropped. An entry with a missing `key`/`reason`, or one that never matches a finding, produces its own warning so stale rules don't rot unnoticed.
 
 `config/audit.ts` only accepts findings that have no source line, the route- and model-level ones above. Line-scoped findings (hardcoded secrets, raw SQL, disabled security toggles) already have `// guren-audit-ignore` for that; an entry targeting one is rejected with a warning pointing you back to the inline comment, rather than becoming a second, less visible way to silence them.
+
+### In-process agents
+
+`Agent` subclasses from `@guren/plugin-ai` get their own rules in `check`. They are content-activated too: an app with no such class contributes nothing. A class counts only when it extends the package's `Agent` (a named or namespace import) or another class that does, resolved through the file's imports rather than by the superclass's spelling. A durable agent from `@guren/plugin-agents` is never read as one, and a same-named class from elsewhere is not mistaken for an agent's parent.
+
+`check` **fails** on:
+
+| Finding key | Rule |
+|---|---|
+| `ai-agent-tool-underived:*` | A literal `appTools([...])` name that no `.agent()` route derives. `as()` throws on it. |
+| `ai-agent-tool-unscoped:*` | A name the class's `static scopes` (own or inherited) does not grant, judged with the RFC 0016 grammar: `tool:<name>`, `tools:<prefix>.*`, `tools:read`, `tools:*`. A class with no `scopes` grants nothing. |
+| `ai-agent-scope-malformed:*` | A `static scopes` entry outside that grammar, such as a bare `tickets_show`. It grants nothing, and `as()` throws. |
+| `ai-agent-audit-duplicate` | Both `aiPlugin({ audit })` and `mcpPlugin({ audit })` configure a trail. The first tool call throws. Two approval queues are not reported: each plugin gates its own surface with its own queue. |
+
+`check` **warns** on:
+
+| Finding key | Rule |
+|---|---|
+| `ai-agent-plugin-missing` | `Agent` subclasses exist, but no source file in the project calls `aiPlugin()`. When an agent calls `appTools()`, its first `as()` throws; `queue()` and the audit trail need the plugin too. A warning because the evidence is an absence, as with an unbound session config. |
+| `ai-agent-app-tools-unreadable:*` | The `appTools()` argument is not an array of string literals (a spread, a variable, a computed element). The names are unverifiable, and the check does not pass them. |
+| `ai-agent-scopes-unreadable:*` | `static scopes` is not a literal array, so no name was judged against it. |
+| `ai-agent-tools-unverified:*` | The route graph failed to load, so the names were not checked against the derived tools. |
+
+`audit` lists every local tool an agent's `tools()` returns beside its `appTools()` spread, under its own heading and in `--json` as `aiLocalTools`. A local tool runs with its closure's authority: no scope, policy, approval or audit line. `ai-local-tool-write:*` warns when the tool's `execute` calls a Model write (`create`, `update`, `delete`, `save`) on a model whose table an `.agent()` route's action also uses; hand the agent that route instead. `ai-local-tools-unreadable:*` warns when `tools()` does not return an object literal the scan can list whole. Both findings point at a source line, so `// guren-audit-ignore` suppresses them.
 
 ### Architecture boundaries
 

@@ -242,12 +242,13 @@ export function staticStringProperty(classDecl: ClassDeclaration, name: string):
 }
 
 /**
- * Undefined for anything but a fully-readable array literal, spreads and
- * computed elements included: a partial read is worse than none, since
- * `visible: ['id', ...EXPOSED]` read as `['id']` reports columns hidden that
- * the runtime exposes.
+ * Entries of a declared list of strings, the one rule for reading one out of
+ * source (an agent's `static scopes` reads through it too). Undefined for
+ * anything but a fully-readable array literal, spreads and computed elements
+ * included: a partial read is worse than none, since `visible: ['id', ...EXPOSED]`
+ * read as `['id']` reports columns hidden that the runtime exposes.
  */
-function stringArrayEntries(node: Node | null | undefined): string[] | undefined {
+export function stringArrayEntries(node: Node | null | undefined): string[] | undefined {
   // Unwrapped because `static fillable = ['title'] as const` is the idiomatic
   // spelling and otherwise reads as a non-array.
   const array = node ? unwrapTypeAssertion(node) : null
