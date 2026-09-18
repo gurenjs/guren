@@ -1,5 +1,26 @@
 # web
 
+## 0.1.46
+
+### Patch Changes
+
+- Updated dependencies [5c9eb11]
+- Updated dependencies [7637d87]
+- Updated dependencies [ba55ddc]
+- Updated dependencies [1cfe6a0]
+- Updated dependencies [43f80e6]
+- Updated dependencies [731d296]
+- Updated dependencies [b280d7e]
+- Updated dependencies [a461482]
+- Updated dependencies [eae78ea]
+  - @guren/cli@2.26.0
+  - @guren/testing@1.13.0
+  - @guren/core@1.20.1
+  - @guren/inertia-client@1.2.2
+  - @guren/orm@2.11.1
+  - @guren/plugin-cloudflare@0.12.1
+  - @guren/plugin-markdown@0.4.1
+
 ## 0.1.45
 
 ### Patch Changes

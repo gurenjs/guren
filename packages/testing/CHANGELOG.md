@@ -1,5 +1,27 @@
 # @guren/testing
 
+## 1.13.0
+
+### Minor Changes
+
+- 1cfe6a0: `app.fakeAi()` forwards `broadcast()`. The worker's streamed run is recorded, tool calls included.
+- 43f80e6: `fakeAi()` scripts embeddings and images (RFC 0029 Part 3):
+  `respondEmbeddings()` takes a queue drawn one vector per value, or a function
+  answering every value; `respondImages()` takes one entry per `image()` call.
+  `embedCalls()` / `imageCalls()` read them back, and `assertEmbedded`,
+  `assertNeverEmbedded`, `assertGeneratedImage` and `assertNeverGeneratedImage`
+  mirror the prompt assertions. An unscripted call fails the call and the
+  disposal, as an unscripted prompt does. The `@guren/plugin-ai` optional peer
+  floor stays as it is: `imageModel()` is type-only, and the fake is loaded by
+  dynamic import, so an older plugin fails at `fakeAi()` with the name it is
+  missing rather than at install.
+- 731d296: `app.fakeAi()` forwards `queue()`. The prompt is recorded when the worker runs it, not when it is queued.
+
+### Patch Changes
+
+- b280d7e: Add an npm `description` and `keywords` to every package. Thirteen of the sixteen packages published with neither, so their npm pages and search results showed no summary. The wording states the runtime story once: develop on Bun, deploy to Bun, AWS Lambda (Node.js), Vercel or Cloudflare Workers.
+- a461482: Add a README, rendered on the package's npm page: what the package is, how to install it, one usage example, and its subpath exports.
+
 ## 1.12.0
 
 ### Minor Changes

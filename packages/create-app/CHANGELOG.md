@@ -1,5 +1,11 @@
 # create-guren-app
 
+## 1.17.1
+
+### Patch Changes
+
+- b280d7e: Add an npm `description` and `keywords` to every package. Thirteen of the sixteen packages published with neither, so their npm pages and search results showed no summary. The wording states the runtime story once: develop on Bun, deploy to Bun, AWS Lambda (Node.js), Vercel or Cloudflare Workers.
+
 ## 1.17.0
 
 ### Minor Changes
