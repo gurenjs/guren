@@ -6,6 +6,7 @@
  * Evals are opt-in and never part of `guren check` or `guren gate`: every case calls the
  * model, and a nondeterministic gate is not one a PR should pay for.
  */
+import { resolveAgentName } from './agent'
 import type { Agent, AgentResponse, BoundAgent, PromptOptions } from './agent'
 import type { AiProviderConfig } from './config'
 import type { AiManager } from './manager'
@@ -85,7 +86,7 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
   }
 
   const startedAt = new Date()
-  const agentName = definition.agent.agentName ?? definition.agent.name
+  const agentName = resolveAgentName(definition.agent)
   const reporter = definition.reporter ?? hillclimbReporter({ onWarning: options.onWarning })
   // Opened before the first app, so a dry run reports its target directory without booting one.
   const handle = await reporter.begin({
@@ -175,7 +176,9 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
       variant,
       agentName,
       provider: definition.provider ?? '(the agent\'s own)',
-      cases: selected.length,
+      // The rows include what a resume skipped, so the case count must too, or the headline
+      // reads "1 cases x 1 reps = 3 rows" after a `--cases 1` re-run.
+      cases: new Set([...selected.map((kase) => kase.id), ...allRows.map((row) => row.caseId)]).size,
       reps,
       rows: allRows.length,
       truncated: allRows.filter((row) => row.status === 'truncated').length,
@@ -268,15 +271,11 @@ async function runAttempt(
 ): Promise<{ row: Omit<EvalRow, 'rep' | 'startedAt' | 'durationMs'>; trace: EvalTraceTurn[] }> {
   // A fresh app per case: the tools dispatch through the pipeline against it, so the
   // grader reads the end state its own tools wrote rather than the transcript.
-  const app = (await definition.app()) as EvalAppHandle
+  // Building the app is setup, not a model call: an app that cannot boot reproduces, so
+  // classifying it `provider` would retry every case against a configuration error.
+  const app = await attempt('setup', () => definition.app() as Promise<EvalAppHandle>)
   try {
-    if (definition.setup) {
-      try {
-        await definition.setup(app, kase)
-      } catch (error) {
-        throw new CaseFailure('setup', error)
-      }
-    }
+    if (definition.setup) await attempt('setup', () => definition.setup?.(app, kase))
 
     const manager = resolveManager(app)
     const principal = definition.as ? await definition.as(app, kase) : null
@@ -296,14 +295,15 @@ async function runAttempt(
       }
       const judgeBound = manager.agent(definition.judge.agent).as(null)
       const response = await judgeBound.prompt(input, promptOptions(definition.judge.provider, signal))
-      judgeUsages.push(toEvalUsage(response.usage))
-      judgeCosts.push(computeCostUsd(toEvalUsage(response.usage), pricingOf(manager, definition.judge.provider ?? manager.config.default)))
+      const judgeUsage = toEvalUsage(response.usage)
+      judgeUsages.push(judgeUsage)
+      judgeCosts.push(computeCostUsd(judgeUsage, pricingOf(manager, definition.judge.provider ?? manager.config.default)))
       return response as AgentResponse<unknown>
     }
 
     const response = await bound.prompt(kase.input, promptOptions(definition.provider, signal))
     const model = response.steps.at(-1)?.model
-    if (!model || response.steps.length === 0) {
+    if (!model) {
       throw new EvalRunError(
         `${kase.id}: the response carried no model. Cost and the row's model come from the response, never from `
         + 'config, so a run cannot continue without it.',
@@ -315,14 +315,10 @@ async function runAttempt(
     }
     const trace = buildTrace(bound.agent.instructions, kase.input, response)
 
-    let scores: Record<string, number>
-    try {
-      scores = await definition.grade({ app, case: kase, expected: kase.expected, response, judge })
-    } catch (error) {
-      throw new CaseFailure('grade', error)
-    }
+    const scores = await attempt('grade', () =>
+      definition.grade({ app, case: kase, expected: kase.expected, response, judge }))
 
-    const judgeUsage = judgeUsages.reduce<EvalUsage>((total, one) => addUsage(total, one), {})
+    const judgeTotal = judgeUsages.reduce<EvalUsage>((total, one) => addUsage(total, one), {})
     return {
       row: {
         caseId: kase.id,
@@ -337,7 +333,7 @@ async function runAttempt(
         usage,
         ...maybe('costUsd', computeCostUsd(usage, pricing)),
         ...(judgeUsages.length > 0
-          ? { judgeCalls: judgeUsages.length, judgeUsage, ...maybe('judgeCostUsd', sumCosts(judgeCosts)) }
+          ? { judgeCalls: judgeUsages.length, judgeUsage: judgeTotal, ...maybe('judgeCostUsd', sumCosts(judgeCosts)) }
           : {}),
         finishReason: response.finishReason,
         steps: response.steps.length,
@@ -407,6 +403,15 @@ function stringify(value: unknown): string {
     return JSON.stringify(value) ?? String(value)
   } catch {
     return String(value)
+  }
+}
+
+/** Run `work`, tagging whatever it throws with the failure class this step belongs to. */
+async function attempt<T>(failure: EvalFailureClass, work: () => T | Promise<T>): Promise<T> {
+  try {
+    return await work()
+  } catch (error) {
+    throw new CaseFailure(failure, error)
   }
 }
 
@@ -488,7 +493,7 @@ function dryRunResult(context: {
     summary: {
       flow,
       variant,
-      agentName: definition.agent.agentName ?? definition.agent.name,
+      agentName: resolveAgentName(definition.agent),
       provider: definition.provider ?? '(the agent\'s own)',
       cases: selected.length,
       reps,

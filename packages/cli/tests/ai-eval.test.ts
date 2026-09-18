@@ -145,6 +145,36 @@ describe('runAiEval', () => {
     expect(loaded[1]!.endsWith('elsewhere/custom.ts')).toBe(true)
   })
 
+  test('should run in the app root, so an eval\'s own relative paths resolve there', async () => {
+    workspace = await createTempWorkspace('guren-ai-eval-')
+    await writeWorkspaceFiles(workspace.dir, { 'sub/tests/evals/triage.eval.ts': 'export default {}\n' })
+    let cwdDuringRun = ''
+    const before = process.cwd()
+
+    await runAiEval(
+      { flow: 'triage', appRoot: 'sub' },
+      {
+        loadDefinition: async () => DEFINITION,
+        loadRunner: async () => ({
+          ...stubRunner(),
+          runEval: async (_definition, _options) => {
+            cwdDuringRun = process.cwd()
+            return {
+              summary: { flow: 'triage', variant: 'baseline', cases: 0, reps: 1, rows: 0, truncated: 0, failures: 0, metrics: [], durationMs: 0 },
+              failures: [],
+              plannedCases: [],
+            }
+          },
+        }),
+        print: () => {},
+      },
+    )
+
+    // fromJsonl() and the reporter root are relative to the working directory, not to --app.
+    expect(cwdDuringRun.endsWith('/sub')).toBe(true)
+    expect(process.cwd()).toBe(before)
+  })
+
   test('should name where it looked when no eval file matches the flow', async () => {
     workspace = await createTempWorkspace('guren-ai-eval-')
 

@@ -548,6 +548,71 @@ describe('runEval', () => {
     expect(reporter.rows.map((row) => row.caseId).sort()).toEqual(['a', 'b', 'c', 'd'])
   })
 
+  test('should record a subclass under its own name, not a parent\'s pinned agentName', async () => {
+    class Inherits extends Triager {}
+
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Inherits,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+    )
+
+    // Statics are inherited: reading `agent.agentName` would name Triager for every subclass.
+    expect(result.summary.agentName).toBe('Inherits')
+  })
+
+  test('should keep the judge out of the summary\'s own cost, as the rows do', async () => {
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({
+          model: answering([{ text: 'answer' }]),
+          judgeModel: answering([{ text: '1' }]),
+          pricing: PRICING,
+        }),
+        cases: cases('a'),
+        judge: { agent: Judge, provider: 'judge' },
+        grade: async ({ judge }) => ({ ok: (await judge('x')).text === '1' ? 1 : 0 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+    )
+
+    // summary.usage covers the model alone, so summary.costUsd must as well.
+    expect(result.summary.costUsd).toBe(result.rows[0]!.costUsd!)
+    expect(result.summary.judgeCostUsd).toBe(result.rows[0]!.judgeCostUsd!)
+  })
+
+  test('should treat an app that cannot be built as setup, attempted once', async () => {
+    let built = 0
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: (): Promise<EvalHarness> => {
+          built += 1
+          throw new Error('DATABASE_URL is not set')
+        },
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+    )
+
+    // Retrying it would pay backoff on every case for one configuration error.
+    expect(built).toBe(1)
+    expect(result.failures[0]).toMatchObject({ failure: 'setup', attempts: 1 })
+    expect(result.failures[0]!.message).toContain('DATABASE_URL')
+  })
+
   test('should call no model and write nothing on --dry-run', async () => {
     let built = 0
     const result = await runEval(
@@ -659,7 +724,10 @@ describe('hillclimbReporter', () => {
     const rows = readFileSync(resolve(directory, 'results.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as EvalRow)
     expect(rows.map((row) => row.caseId)).toEqual(['a', 'b/2'])
     // A case id is free text; the trace file name is not, and the row keeps the true id.
-    expect(readdirSync(resolve(directory, 'traces')).sort()).toEqual(['a_rep1.json', 'b_2_rep1.json'])
+    // A sanitized id carries a digest, so `b/2` cannot land on `b_2`'s file.
+    const traces = readdirSync(resolve(directory, 'traces')).sort()
+    expect(traces[0]).toBe('a_rep1.json')
+    expect(traces[1]).toMatch(/^b_2-[0-9a-f]{8}_rep1\.json$/)
     expect(JSON.parse(readFileSync(resolve(directory, 'summary.json'), 'utf8')).metrics[0].mean).toBe(1)
     expect(existsSync(resolve(directory, 'errors.jsonl'))).toBe(false)
 
@@ -696,6 +764,24 @@ describe('hillclimbReporter', () => {
     expect([...state.split.dev, ...state.split.test].sort()).toEqual(['a', 'b', 'c', 'd'])
   })
 
+  test('should give two case ids that sanitize alike their own trace file', async () => {
+    const root = scratch()
+    await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: [{ id: 'refund/1', input: 'one' }, { id: 'refund_1', input: 'two' }],
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: hillclimbReporter({ root, cwd: root }),
+      }),
+    )
+
+    const traces = readdirSync(resolve(root, 'triage', 'baseline', 'traces'))
+    expect(traces).toHaveLength(2)
+  })
+
   test('should never edit _state.json after writing it, and should resume over results.jsonl', async () => {
     const root = scratch()
     const define = (ids: string[]) =>
@@ -718,6 +804,27 @@ describe('hillclimbReporter', () => {
     expect(readFileSync(resolve(directory, '_state.json'), 'utf8')).toBe(first)
     expect(readFileSync(resolve(directory, 'results.jsonl'), 'utf8').trim().split('\n')).toHaveLength(2)
     expect(second.summary.rows).toBe(2)
+  })
+
+  test('should count the cases its rows cover when a re-run selects fewer', async () => {
+    const root = scratch()
+    const define = () =>
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('a', 'b', 'c'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: hillclimbReporter({ root, cwd: root }),
+      })
+
+    await runEval(define())
+    const second = await runEval(define(), { cases: 1 })
+
+    // The rows include what the resume skipped, so "1 cases ... = 3 rows" would contradict itself.
+    expect(second.summary.rows).toBe(3)
+    expect(second.summary.cases).toBe(3)
   })
 
   test('should put an attempt that produced nothing scorable in errors.jsonl', async () => {

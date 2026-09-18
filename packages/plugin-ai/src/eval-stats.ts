@@ -30,8 +30,9 @@ export function totalUsage(rows: readonly EvalRow[]): EvalUsage {
   return rows.reduce<EvalUsage>((total, row) => addUsage(total, row.usage), {})
 }
 
+/** The model's cost alone, as each row reports it: the judge's is {@link totalJudgeCostUsd}. */
 export function totalCostUsd(rows: readonly EvalRow[]): number | undefined {
-  return sumCosts(rows.flatMap((row) => [row.costUsd, row.judgeCostUsd]))
+  return sumCosts(rows.map((row) => row.costUsd))
 }
 
 export function totalJudgeCostUsd(rows: readonly EvalRow[]): number | undefined {
@@ -49,6 +50,7 @@ export function formatSummary(summary: {
   failures: number
   metrics: readonly EvalMetricSummary[]
   costUsd?: number
+  judgeCostUsd?: number
   durationMs: number
 }): string {
   const lines = [
@@ -59,7 +61,8 @@ export function formatSummary(summary: {
     const halfWidth = metric.halfWidth === undefined ? '' : `  +/-${metric.halfWidth.toFixed(2)} approx half-width (1/sqrt(n))`
     lines.push(`  ${metric.id.padEnd(width)}  ${metric.mean.toFixed(3)}  n=${metric.n}${halfWidth}`)
   }
-  const cost = summary.costUsd === undefined ? 'cost n/a (no pricing)' : `cost $${summary.costUsd.toFixed(4)}`
+  const judged = summary.judgeCostUsd === undefined ? '' : ` + judge $${summary.judgeCostUsd.toFixed(4)}`
+  const cost = summary.costUsd === undefined ? 'cost n/a (no pricing)' : `cost $${summary.costUsd.toFixed(4)}${judged}`
   lines.push(`  truncated ${summary.truncated}   errors ${summary.failures}   ${cost}   ${(summary.durationMs / 1000).toFixed(1)}s`)
   return lines.join('\n')
 }

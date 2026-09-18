@@ -73,6 +73,25 @@ export async function runAiEval(options: AiEvalOptions, dependencies: AiEvalDepe
   const warn = dependencies.warn ?? ((message: string) => consola.warn(message))
   const appRoot = resolve(process.cwd(), options.appRoot ?? '.')
   const file = await resolveEvalFile(options, appRoot)
+  // Every relative path an eval names — `fromJsonl()`, the reporter's `.claude/hillclimb`
+  // root — resolves against the working directory, and `--app` would otherwise move only
+  // where this command looked for the file.
+  const previousCwd = process.cwd()
+  process.chdir(appRoot)
+  try {
+    return await execute(options, dependencies, file, print, warn)
+  } finally {
+    process.chdir(previousCwd)
+  }
+}
+
+async function execute(
+  options: AiEvalOptions,
+  dependencies: AiEvalDependencies,
+  file: string,
+  print: (line: string) => void,
+  warn: (message: string) => void,
+): Promise<EvalRunResultLike> {
   const definition = await (dependencies.loadDefinition ?? importDefault)(file)
 
   if (typeof definition !== 'object' || definition === null || (definition as { kind?: unknown }).kind !== EVAL_KIND) {

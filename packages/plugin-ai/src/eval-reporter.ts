@@ -4,6 +4,7 @@
  * `hillclimb` already read; it ships no viewer of its own, and `defineEval({ reporter })`
  * swaps the layout for another.
  */
+import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -142,7 +143,12 @@ function mulberry32(seed: number): () => number {
   }
 }
 
-/** A case id is free text; a trace file name is not. The row keeps the true id. */
+/**
+ * A case id is free text; a trace file name is not. The row keeps the true id. A digest is
+ * appended whenever sanitizing changed anything, because `refund/1` and `refund_1` otherwise
+ * name one file and the second row silently overwrites the first one's transcript.
+ */
 function safeName(id: string): string {
-  return id.replace(/[^A-Za-z0-9._-]/g, '_')
+  const safe = id.replace(/[^A-Za-z0-9._-]/g, '_')
+  return safe === id ? safe : `${safe}-${createHash('sha256').update(id).digest('hex').slice(0, 8)}`
 }
