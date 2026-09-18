@@ -451,14 +451,70 @@ Install `ai` next to `@guren/plugin-ai`: the fake is built on the AI SDK's mock 
 
 The fake answers `conversations()` from the real store, so a scripted prompt with `conversation: true` writes the same rows it would in production. It does not script embedding models.
 
-A fake proves the wiring. Whether the instructions and tool descriptions get the right answer out of a real model is a separate measurement, made on purpose and at a cost, and nothing in this plugin runs it yet.
+A fake proves the wiring. Whether the instructions and tool descriptions get the right answer out of a real model is the other measurement, and that one calls the model.
+
+## Evals
+
+An eval runs the agent against the real model over a set of cases and scores what it did. It costs money and it is not deterministic, so it is opt-in: nothing in `guren check` or `guren gate` ever runs one, and an eval never replaces the fake in a test file.
+
+An eval file declares the agent, a disposable app per case, the cases, a grader and the metrics it returns:
+
+```ts
+// tests/evals/ticket-digest.eval.ts
+import { defineEval, fromJsonl, type EvalCase } from '@guren/plugin-ai/eval'
+import { TicketDigest } from '../../app/Ai/Agents/TicketDigest'
+import { Ticket } from '../../app/Models/Ticket'
+import app from '../../src/app'
+
+type DigestCase = EvalCase<{ staleIds: number[] }, Array<{ id: number; title: string; createdAt: string }>>
+
+export default defineEval({
+  agent: TicketDigest,
+  app: async () => {
+    await app.boot()
+    return app
+  },
+  cases: fromJsonl<DigestCase>('tests/evals/ticket-digest/cases.jsonl'),
+  as: () => ({ id: 1 }),
+  setup: async (_app, kase) => {
+    for (const seed of kase.seed ?? []) {
+      await Ticket.create({ ...seed, status: 'open', createdAt: new Date(seed.createdAt), updatedAt: new Date() })
+    }
+  },
+  grade: ({ response, expected }) => {
+    const found = response.output.staleTicketIds
+    const wanted = expected?.staleIds ?? []
+    return { stale: found.length === wanted.length && wanted.every((id) => found.includes(id)) ? 1 : 0 }
+  },
+  metrics: [{ id: 'stale', kind: 'binary' }],
+})
+```
+
+Each case gets its own app, so the agent's `appTools()` dispatch through the pipeline as they do in production, and `grade()` reads the end state the tools left behind rather than the transcript. `judge` adds a second agent for what a program cannot score, on a different provider, and its cost is recorded separately so it cannot dampen a difference between variants.
+
+Cases are one JSON object per line, each with `id` and `input`, plus any `expected`, `seed` and `tags` your grader and setup read.
+
+```bash
+bunx guren ai:eval ticket-digest --dry-run                  # resolve the cases, call no model, write nothing
+bunx guren ai:eval ticket-digest --reps 2 --max-cost-usd 5  # the baseline
+bunx guren ai:eval ticket-digest --variant v1 --cases 20    # one round against it
+```
+
+`--concurrency` runs cases in parallel, `--file` and `--dir` point at an eval the flow name does not resolve, and `--json` prints the summary for a script.
+
+Results land under `.claude/hillclimb/<flow>/<variant>/`: a row per case and repetition, a trace per run, a summary, and a sidecar for attempts that produced nothing scorable, each with its failure class. Guren writes the data and ships no viewer. That layout is the one the claude-api harness's report builder reads, and `defineEval({ reporter })` swaps it for another.
+
+Three things the summary is careful about:
+
+- **Cost comes from the response's own usage** and the provider's `pricing` in `config/ai.ts`. A provider with no `pricing` yields rows with no cost rather than a zero, and `--max-cost-usd` says it cannot hold.
+- **A truncated answer** (`finishReason` of `'length'`) is kept out of every metric mean and counted beside it, so a variant cannot look better by truncating more.
+- **`--max-cost-usd` is a soft ceiling.** No new case starts once the derived cost crosses it, and cases already running finish.
 
 ## Not yet available
 
 These parts of the design have not shipped:
 
 - `embed()` and `image()` wrappers. Call the AI SDK with `ai.embeddingModel(name)` meanwhile.
-- `defineEval()` and `guren ai:eval`, for measuring an agent against a real model.
 - `make:ai-tool`, and typed provider and agent names.
 
 ## Related
