@@ -4,7 +4,7 @@
  * `hillclimb` already read; it ships no viewer of its own, and `defineEval({ reporter })`
  * swaps the layout for another.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import type {
@@ -63,10 +63,16 @@ export function hillclimbReporter(options: HillclimbReporterOptions = {}): EvalR
 }
 
 function readRows(path: string, onWarning?: (message: string) => void): EvalRow[] {
-  if (!existsSync(path)) return []
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
   const rows: EvalRow[] = []
   let skipped = 0
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
+  for (const line of text.split('\n')) {
     if (line.trim() === '') continue
     try {
       const row = JSON.parse(line) as EvalRow
@@ -84,10 +90,10 @@ function readRows(path: string, onWarning?: (message: string) => void): EvalRow[
 /**
  * The split is written once and never edited afterwards: a run that reshuffled it would
  * move cases between dev and test between rounds, which is the one thing a hill-climbing
- * loop cannot tolerate.
+ * loop cannot tolerate. Written with `wx`, so two runs of the same flow starting together
+ * cannot both pass an existence check and then overwrite one another.
  */
 function writeStateOnce(path: string, context: EvalRunContext): void {
-  if (existsSync(path)) return
   const seed = Math.floor(Math.random() * 0xffffffff)
   const random = mulberry32(seed)
   const strata = new Map<string, string[]>()
@@ -108,7 +114,12 @@ function writeStateOnce(path: string, context: EvalRunContext): void {
     (index % 2 === 0 ? dev : test).push(id)
   }
 
-  writeFileSync(path, `${JSON.stringify({ version: 1, flow: context.flow, createdAt: context.startedAt, seed, split: { dev, test } }, null, 2)}\n`)
+  const state = { version: 1, flow: context.flow, createdAt: context.startedAt, seed, split: { dev, test } }
+  try {
+    writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, { flag: 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
 }
 
 function shuffle(ids: readonly string[], random: () => number): string[] {
