@@ -50,25 +50,11 @@ export class ConfiguredAiManager implements AiManager {
   }
 
   embeddingModel(provider?: AiProviderName): EmbeddingModel {
-    const name = provider ?? this.config.default
-    return memoize(this.embeddingModels, name, () => {
-      const factory = this.provider(name).embeddingModel
-      if (!factory) {
-        throw new Error(`The AI provider "${name}" configures no embeddingModel in config/ai.ts.`)
-      }
-      return factory()
-    })
+    return this.optionalModel(this.embeddingModels, 'embeddingModel', provider)
   }
 
   imageModel(provider?: AiProviderName): ImageModel {
-    const name = provider ?? this.config.default
-    return memoize(this.imageModels, name, () => {
-      const factory = this.provider(name).imageModel
-      if (!factory) {
-        throw new Error(`The AI provider "${name}" configures no imageModel in config/ai.ts.`)
-      }
-      return factory()
-    })
+    return this.optionalModel(this.imageModels, 'imageModel', provider)
   }
 
   conversations(): ConversationStore {
@@ -79,6 +65,18 @@ export class ConfiguredAiManager implements AiManager {
       )
     }
     return (this.conversationStore ??= createConversationStore(this.config.conversations))
+  }
+
+  /** A model kind a provider may leave out, unlike `model`; the kind names itself in the error. */
+  private optionalModel<T>(cache: Map<string, T>, kind: 'embeddingModel' | 'imageModel', provider?: AiProviderName): T {
+    const name = provider ?? this.config.default
+    return memoize(cache, name, () => {
+      const factory = this.provider(name)[kind]
+      if (!factory) {
+        throw new Error(`The AI provider "${name}" configures no ${kind} in config/ai.ts.`)
+      }
+      return factory() as T
+    })
   }
 
   private provider(name: string): AiProviderConfig {

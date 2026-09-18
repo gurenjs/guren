@@ -91,6 +91,10 @@ describe('image', () => {
       manager: h.manager,
     })
 
+    const call = h.imageCalls[0]!
+    expect(call.prompt).toBe('a blue fox')
+    expect(call.n).toBe(3)
+    expect(call.size).toBe('512x512')
     expect(result.images.map((file) => file.base64)).toEqual(['image-0', 'image-1', 'image-2'])
   })
 

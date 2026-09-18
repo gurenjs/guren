@@ -344,12 +344,13 @@ export class FakeAi implements AiManager, Disposable {
       )
     }
     const images = scriptedImages(scripted)
+    const modelId = `fake:${selected}`
     return new this.runtime.MockImageModelV4({
-      modelId: `fake:${selected}`,
-      // One doGenerate per image() call whatever `n` is: the script says what the call answers with.
+      modelId,
+      // No limit of the model's own, so `n` alone never splits the call. A caller
+      // passing generateImage's own maxImagesPerCall still can, which is why `n` sums.
       maxImagesPerCall: Number.MAX_SAFE_INTEGER,
       doGenerate: async ({ prompt, n }) => {
-        // Summed, not assigned: a caller passing maxImagesPerCall splits one image() call in two.
         record.n += n
         if (prompt !== undefined) record.prompt = prompt
         return {
@@ -357,7 +358,7 @@ export class FakeAi implements AiManager, Disposable {
           warnings: [],
           // A scripted empty array is the test's choice; the SDK would otherwise retry it.
           isRetryable: false,
-          response: { timestamp: new Date(0), modelId: `fake:${selected}`, headers: undefined },
+          response: { timestamp: new Date(0), modelId, headers: undefined },
         }
       },
     })
@@ -375,14 +376,18 @@ export class FakeAi implements AiManager, Disposable {
     return [...next]
   }
 
-  /** Refuse a provider config/ai.ts does not configure for this kind of model. */
-  private checkProvider(caller: string, kind: 'embeddingModel' | 'imageModel', selected: string): void {
+  /** Refuse a provider name config/ai.ts does not configure; shared with the prompt path. */
+  private checkConfigured(subject: string, selected: string): void {
     if (!Object.hasOwn(this.config.providers, selected)) {
       this.fail(
-        `${caller} names the AI provider "${selected}", which config/ai.ts does not configure `
+        `${subject} names the AI provider "${selected}", which config/ai.ts does not configure `
         + `(it configures: ${Object.keys(this.config.providers).join(', ') || '(none)'}).`,
       )
     }
+  }
+
+  private checkProvider(caller: string, kind: 'embeddingModel' | 'imageModel', selected: string): void {
+    this.checkConfigured(caller, selected)
     // Checked, never called: the fake answers the call, but a provider with no factory
     // would throw outside the fake, and a test that passes there is measuring nothing.
     if (!this.config.providers[selected]?.[kind]) {
@@ -438,12 +443,7 @@ export class FakeAi implements AiManager, Disposable {
 
   private scriptedModel(name: string, provider: string | undefined): LanguageModel {
     const selected = provider ?? this.config.default
-    if (!Object.hasOwn(this.config.providers, selected)) {
-      return this.fail(
-        `Agent [${name}] names the AI provider "${selected}", which config/ai.ts does not configure `
-        + `(it configures: ${Object.keys(this.config.providers).join(', ') || '(none)'}).`,
-      )
-    }
+    this.checkConfigured(`Agent [${name}]`, selected)
     const response = this.scripts.get(name)?.shift()
     if (response === undefined) {
       return this.fail(

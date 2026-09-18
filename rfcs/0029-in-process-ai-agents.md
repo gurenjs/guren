@@ -180,6 +180,7 @@ interface AiManager {
   agent<A extends typeof Agent>(cls: A): BoundAgentFactory<A>   // .as(principal) → BoundAgent
   model(provider?: string): LanguageModel                        // the one resolution point
   embeddingModel(provider?: string): EmbeddingModel
+  // Amended in implementation: `imageModel(provider?): ImageModel` joins these in Part 3 (Phasing).
 }
 static as(principal: AgentPrincipal | { id: string | number; kind?: 'user' | 'service' } | null): BoundAgent<this>
 static prompt(input, options?): Promise<AgentResponse<TOutput>>   // as(null).prompt(...)
