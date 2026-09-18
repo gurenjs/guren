@@ -1,5 +1,14 @@
 # @guren/plugin-mcp
 
+## 0.6.1
+
+### Patch Changes
+
+- b280d7e: Add an npm `description` and `keywords` to every package. Thirteen of the sixteen packages published with neither, so their npm pages and search results showed no summary. The wording states the runtime story once: develop on Bun, deploy to Bun, AWS Lambda (Node.js), Vercel or Cloudflare Workers.
+- a461482: Add a README, rendered on the package's npm page: what the package is, how to install it, one usage example, and its subpath exports.
+- Updated dependencies [b280d7e]
+  - @guren/core@1.20.1
+
 ## 0.6.0
 
 ### Minor Changes

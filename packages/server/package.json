@@ -1,6 +1,6 @@
 {
   "name": "@guren/server",
-  "version": "2.25.0",
+  "version": "2.25.1",
   "description": "HTTP layer of the Guren framework, on Hono: routing, controllers, middleware, auth, sessions, queues and the AWS Lambda adapter. Applications import it through @guren/core.",
   "keywords": [
     "guren",
@@ -160,7 +160,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@guren/orm": "^2.11.0",
+    "@guren/orm": "^2.11.1",
     "chalk": "^5.3.0",
     "consola": "^3.4.2",
     "figlet": "^1.7.0",

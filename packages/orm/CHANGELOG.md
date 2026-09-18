@@ -1,5 +1,12 @@
 # @guren/orm
 
+## 2.11.1
+
+### Patch Changes
+
+- b280d7e: Add an npm `description` and `keywords` to every package. Thirteen of the sixteen packages published with neither, so their npm pages and search results showed no summary. The wording states the runtime story once: develop on Bun, deploy to Bun, AWS Lambda (Node.js), Vercel or Cloudflare Workers.
+- a461482: Add a README, rendered on the package's npm page: what the package is, how to install it, one usage example, and its subpath exports.
+
 ## 2.11.0
 
 ### Minor Changes

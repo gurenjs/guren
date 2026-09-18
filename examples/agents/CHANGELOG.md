@@ -1,5 +1,33 @@
 # @guren/example-agents
 
+## 0.1.14
+
+### Patch Changes
+
+- 7637d87: Adds `TicketDigest`, an in-process AI agent behind `POST /ops/agents/digest`, with a `fakeAi()` test. The `tickets.index` route now advertises the tool name `tickets_index`, which Anthropic and OpenAI accept; the triager's scope in `config/agents.ts` and its `tools.call()` use the new name.
+- Updated dependencies [5c9eb11]
+- Updated dependencies [7637d87]
+- Updated dependencies [ba55ddc]
+- Updated dependencies [1cfe6a0]
+- Updated dependencies [43f80e6]
+- Updated dependencies [731d296]
+- Updated dependencies [50dbc9c]
+- Updated dependencies [1cfe6a0]
+- Updated dependencies [43f80e6]
+- Updated dependencies [731d296]
+- Updated dependencies [eae78ea]
+- Updated dependencies [b280d7e]
+- Updated dependencies [a461482]
+- Updated dependencies [eae78ea]
+  - @guren/cli@2.26.0
+  - @guren/plugin-ai@0.3.0
+  - @guren/testing@1.13.0
+  - @guren/core@1.20.1
+  - @guren/inertia-client@1.2.2
+  - @guren/orm@2.11.1
+  - @guren/plugin-agents@0.2.5
+  - @guren/plugin-cloudflare@0.12.1
+
 ## 0.1.13
 
 ### Patch Changes

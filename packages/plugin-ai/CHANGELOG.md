@@ -1,5 +1,72 @@
 # @guren/plugin-ai
 
+## 0.3.0
+
+### Minor Changes
+
+- 1cfe6a0: `broadcast(input, channel, options)` (RFC 0029 §4) queues the run like `queue()`, and the worker publishes each UI-message chunk to `channel` as the `AgentChunk` broadcast event:
+
+  ```ts
+  await SupportTriager.as(user).broadcast(
+    "Ticket #4812: ...",
+    `private-support.${user.id}`,
+    { conversation: true }
+  );
+  ```
+
+  - `AGENT_CHUNK_EVENT` is exported from `@guren/plugin-ai` and `@guren/plugin-ai/client`.
+  - Publishing is not authorized: register the channel as a private channel with an authorizer, or anyone subscribed reads the transcript.
+  - A run that fails before finishing publishes one `error` chunk, so subscribers are not left waiting. An `error` chunk fails the job.
+  - A broadcast run emits no `AgentResponded`; the `finish` chunk ends it. An agent with an `output` schema is refused.
+
+- 43f80e6: Add `embed()`, `embedMany()` and `image()` (RFC 0029 Part 3): the AI SDK's own
+  calls with the model resolved by provider name through `AiManager`, so nothing
+  in an application holds a model and `fakeAi()` answers them as it answers a
+  prompt. `AiManager` gains `imageModel(provider?)` beside `embeddingModel()`.
+  Each wrapper takes the SDK's own options plus `provider` (a name from
+  `config/ai.ts`) and `manager` (the default application's `ai` binding when
+  absent). Vector storage stays out of scope.
+- 731d296: Agents queue (RFC 0029 §6). `queue(input, options)` runs `prompt()` on a worker, which emits `AgentResponded` when the model answers:
+
+  ```ts
+  providers: [aiPlugin({ agents: [SupportTriager] })]
+
+  const { conversationId } = await SupportTriager.as(user).queue('Ticket #4812: ...', { conversation: true })
+
+  events.on(AgentResponded, ({ agentName, principal, conversationId, response }) => { ... })
+  ```
+
+  - A queued agent must be registered with `aiPlugin({ agents })`. The worker resolves the class from its `agentName`, and `queue()` refuses an unregistered class before dispatching. Two classes under one name are refused at boot.
+  - `conversation: true` creates the conversation before dispatching and returns its id, which can be continued or queued on at once.
+  - `RunAgentJob` runs once (`maxAttempts: 1`): a retry would re-run every tool the first attempt ran. Keep the worker `--timeout` and the driver's visibility timeout above the longest run, or it is delivered again.
+  - `AgentResponded.response` carries `text`, `output`, `usage` and `finishReason`, not `steps`.
+  - The principal is recorded when the run is queued, abilities included.
+
+- eae78ea: Add `@guren/plugin-ai/eval`: `defineEval()` and the eval runner (RFC 0029 §10).
+
+  An eval calls the real model over a case set with a grader, which is the one
+  thing a fake cannot measure. Each case runs in its own disposable app, so the
+  agent's `appTools()` dispatch through the invocation pipeline and the grader
+  reads the end state its tools wrote rather than the transcript. The runner
+  records model and usage from the response, derives cost from the provider's
+  `pricing` (absent, a row carries no cost rather than a zero), keeps a
+  truncated answer out of every metric mean and counts it beside them, and sends
+  an attempt that produced nothing scorable to a sidecar with its failure class
+  and retry count. `hillclimbReporter()` writes the `.claude/hillclimb/` layout
+  the claude-api harness's report builders read; `defineEval({ reporter })`
+  swaps it.
+
+  Evals are opt-in and never part of `guren check` or `guren gate`.
+
+  Refs: RFC 0029
+
+### Patch Changes
+
+- 50dbc9c: Fix the README's controller snippet, which passed a principal `as()` cannot use. `this.auth.user()` resolves to `Authenticatable`, which carries no `id`, and it can be `null`; `as(null)` is an anonymous run restricted to read-only tools, so the snippet's own `tickets_update` is refused at `as()`, which calls `tools()` eagerly. Written inline the call still compiles, because `user<T>()` infers `T` from the argument position and the generic collapses to whatever `as()` accepts; hoisted into a variable the same call is a TS2345. The README now shows `await this.auth.userOrFail<{ id: number }>()`.
+- b280d7e: Add an npm `description` and `keywords` to every package. Thirteen of the sixteen packages published with neither, so their npm pages and search results showed no summary. The wording states the runtime story once: develop on Bun, deploy to Bun, AWS Lambda (Node.js), Vercel or Cloudflare Workers.
+- Updated dependencies [b280d7e]
+  - @guren/core@1.20.1
+
 ## 0.2.0
 
 ### Minor Changes

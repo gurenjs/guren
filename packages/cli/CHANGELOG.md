@@ -1,5 +1,49 @@
 # @guren/cli
 
+## 2.26.0
+
+### Minor Changes
+
+- 5c9eb11: `guren check` and `guren audit` read in-process agents (RFC 0029 §8). Both are content-activated: an app with no `Agent` subclass from `@guren/plugin-ai` gets no new findings.
+
+  `guren check` fails on what would throw at `as()` or at the first tool call:
+
+  - `ai-agent-tool-underived`: a literal `appTools([...])` name that no `.agent()` route derives.
+  - `ai-agent-tool-unscoped`: a name the class's `static scopes` does not grant (`tool:<name>`, `tools:<prefix>.*`, `tools:read`, `tools:*`).
+  - `ai-agent-scope-malformed`: a `static scopes` entry outside that grammar.
+  - `ai-agent-audit-duplicate`: both `aiPlugin({ audit })` and `mcpPlugin({ audit })` configure a trail.
+
+  It warns (`ai-agent-plugin-missing`) when no source file calls `aiPlugin()`. A spread, a variable or a computed element in `appTools()`, and a non-literal `static scopes`, are reported as unverifiable warnings rather than passed.
+
+  `guren audit` lists every local tool an agent's `tools()` returns beside `appTools()`, under its own heading and as `aiLocalTools` in `--json`. Local tools run with no scope, policy, approval or audit line. `ai-local-tool-write` warns when a tool's `execute` writes through a Model whose table an `.agent()` route's action also uses; `// guren-audit-ignore` on the tool's line suppresses it.
+
+- eae78ea: Add `guren ai:eval <flow>`, which runs one eval against the real model
+  (RFC 0029 §10).
+
+  It resolves `tests/evals/<flow>.eval.ts` and the runner from the app's own
+  `@guren/plugin-ai`, so the `defineEval()` that wrote the definition and the
+  `runEval()` that reads it are one installed copy. `--variant`, `--reps`,
+  `--cases`, `--max-cost-usd`, `--concurrency`, `--dry-run`, `--file`, `--dir`
+  and `--json` shape the run. The command emits data and prints where it landed:
+  the `.claude/hillclimb/` layout is read by the claude-api harness's report
+  builder and `hillclimb`, and Guren vendors no viewer of its own.
+
+  Evals are opt-in. Nothing in `guren check` or `guren gate` runs one.
+
+  Refs: RFC 0029
+
+### Patch Changes
+
+- 7637d87: The agent harness ships an `ai-agent` skill: how to write an in-process agent with `@guren/plugin-ai`, when `appTools()` is the right tool and a local `tool()` is not, and the `fakeAi()` test that proves the wiring. `guren agent:sync` installs it, and `--prune` now claims the `ai-agent` skill directory by name.
+- ba55ddc: The harness `ai-agent` skill points at evals: answer quality is measured with `defineEval()` and `guren ai:eval`, not inferred from a passing `fakeAi()` test.
+- b280d7e: Add an npm `description` and `keywords` to every package. Thirteen of the sixteen packages published with neither, so their npm pages and search results showed no summary. The wording states the runtime story once: develop on Bun, deploy to Bun, AWS Lambda (Node.js), Vercel or Cloudflare Workers.
+- a461482: Add a README, rendered on the package's npm page: what the package is, how to install it, one usage example, and its subpath exports.
+- Updated dependencies [b280d7e]
+- Updated dependencies [a461482]
+  - @guren/core@1.20.1
+  - @guren/orm@2.11.1
+  - @guren/server@2.25.1
+
 ## 2.25.0
 
 ### Minor Changes
