@@ -451,14 +451,70 @@ describe('TicketDigest', () => {
 
 fake は `conversations()` に本物のストアで答えるので、`conversation: true` を付けたスクリプト化プロンプトは本番と同じ行を書き込みます。埋め込みモデルはスクリプト化しません。
 
-fake が証明するのは配線です。instructions とツールの説明が本物のモデルから正しい答えを引き出せるかは、意図してコストをかけて測る別の計測で、このプラグインにはまだそれを実行する機能がありません。
+fake が証明するのは配線です。instructions とツールの説明が本物のモデルから正しい答えを引き出せるかは、もう1つの計測で決まります。そちらは実際にモデルを呼びます。
+
+## Evals
+
+eval は、本物のモデルに対してケースの集合でエージェントを動かし、その結果を採点します。費用がかかり、結果は決定的でもないので、明示的に実行したときだけ動きます。`guren check` も `guren gate` も eval を走らせませんし、テストファイルの fake を置き換えるものでもありません。
+
+eval のファイルには、エージェント、ケースごとの使い捨てアプリ、ケース、採点関数、そして採点が返す指標を書きます。
+
+```ts
+// tests/evals/ticket-digest.eval.ts
+import { defineEval, fromJsonl, type EvalCase } from '@guren/plugin-ai/eval'
+import { TicketDigest } from '../../app/Ai/Agents/TicketDigest'
+import { Ticket } from '../../app/Models/Ticket'
+import app from '../../src/app'
+
+type DigestCase = EvalCase<{ staleIds: number[] }, Array<{ id: number; title: string; createdAt: string }>>
+
+export default defineEval({
+  agent: TicketDigest,
+  app: async () => {
+    await app.boot()
+    return app
+  },
+  cases: fromJsonl<DigestCase>('tests/evals/ticket-digest/cases.jsonl'),
+  as: () => ({ id: 1 }),
+  setup: async (_app, kase) => {
+    for (const seed of kase.seed ?? []) {
+      await Ticket.create({ ...seed, status: 'open', createdAt: new Date(seed.createdAt), updatedAt: new Date() })
+    }
+  },
+  grade: ({ response, expected }) => {
+    const found = response.output.staleTicketIds
+    const wanted = expected?.staleIds ?? []
+    return { stale: found.length === wanted.length && wanted.every((id) => found.includes(id)) ? 1 : 0 }
+  },
+  metrics: [{ id: 'stale', kind: 'binary' }],
+})
+```
+
+ケースごとに新しいアプリが用意されるので、エージェントの `appTools()` は本番と同じようにパイプラインを通ります。`grade()` が読むのは会話の記録ではなく、ツールが残した最終状態です。プログラムでは採点できないものには `judge` で2つ目のエージェントを別のプロバイダで使えます。judge の費用は別枠で記録されるので、variant 間の差を薄めることはありません。
+
+ケースは1行1つの JSON オブジェクトで、`id` と `input` は必須です。`expected`・`seed`・`tags` は、採点や `setup()` が読む分だけ書きます。
+
+```bash
+bunx guren ai:eval ticket-digest --dry-run                  # resolve the cases, call no model, write nothing
+bunx guren ai:eval ticket-digest --reps 2 --max-cost-usd 5  # the baseline
+bunx guren ai:eval ticket-digest --variant v1 --cases 20    # one round against it
+```
+
+`--concurrency` はケースを並行で走らせます。flow 名から解決できない eval は `--file` と `--dir` で指定し、`--json` はスクリプト向けにサマリを出力します。
+
+結果は `.claude/hillclimb/<flow>/<variant>/` に置かれます。ケースと繰り返しごとの行、実行ごとのトレース、サマリ、そして採点できなかった試行を失敗の種別付きで記録する sidecar です。Guren が書き出すのはデータだけで、ビューアは同梱していません。このレイアウトは claude-api ハーネスのレポートビルダーが読むもので、`defineEval({ reporter })` で別のものに差し替えられます。
+
+サマリが気を付けている点が3つあります。
+
+- **費用はレスポンス自身の usage** と、`config/ai.ts` のプロバイダの `pricing` から計算します。`pricing` のないプロバイダでは、行の費用は 0 ではなく未記録になり、`--max-cost-usd` は効かないことが報告されます。
+- **途中で切れた回答**(`finishReason` が `'length'`)は、どの指標の平均からも外され、その隣で件数が数えられます。切り上げを増やした variant が良く見えることはありません。
+- **`--max-cost-usd` は緩い上限です。** 計算した費用が上限を超えると新しいケースは始まりませんが、実行中のケースは最後まで走ります。
 
 ## 未提供の機能
 
 設計のうち、次の部分はまだ出荷されていません。
 
 - `embed()` と `image()` のラッパー。それまでは `ai.embeddingModel(name)` を使って AI SDK を呼んでください。
-- 本物のモデルに対してエージェントを計測する `defineEval()` と `guren ai:eval`。
 - `make:ai-tool` と、プロバイダ名・エージェント名の型付け。
 
 ## 関連

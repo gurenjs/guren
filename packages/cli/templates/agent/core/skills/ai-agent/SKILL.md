@@ -79,6 +79,6 @@ expect(ai.calls(TicketDigest)[0]!.toolCalls[0]?.output).toBeDefined()   // the r
 - An unscripted prompt fails the test when `ai` is disposed, naming the agent, even if the route turned the error into a 500.
 - Mutation-check: bind the agent `as(null)` or drop the scope and confirm the test fails.
 
-A passing fake test proves wiring, not answer quality. No eval runner ships yet; do not claim an agent "works well" from fake tests alone, and never call a real provider from `bun test` or CI.
+A passing fake test proves wiring, not answer quality. Do not claim an agent "works well" from fake tests alone, and never call a real provider from `bun test` or CI. Answer quality is measured by an eval: `defineEval()` in `tests/evals/<flow>.eval.ts` and `bunx guren ai:eval <flow>`, which calls the real model, costs money, and is never part of `guren check` or `guren gate`. Run it when asked, with `--dry-run` first.
 
 Full guide: `docs/en/guides/ai-agents.md` (or `docs/ja/guides/ai-agents.md`) in the Guren framework repo. Routing reference: `__RULES_DIR__/routes-codegen.md`.
