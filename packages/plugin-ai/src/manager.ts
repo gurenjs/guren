@@ -1,5 +1,5 @@
 import type { Container } from '@guren/core'
-import type { EmbeddingModel, LanguageModel } from 'ai'
+import type { EmbeddingModel, ImageModel, LanguageModel } from 'ai'
 
 import { bindAgent, type Agent, type AgentClass, type AgentPrincipalInput, type BoundAgent } from './agent'
 import { describeNames, type AiConfig, type AiProviderConfig } from './config'
@@ -22,6 +22,7 @@ export interface AiManager {
   agent<T extends Agent>(cls: AgentClass<T>): BoundAgentFactory<T>
   model(provider?: AiProviderName): LanguageModel
   embeddingModel(provider?: AiProviderName): EmbeddingModel
+  imageModel(provider?: AiProviderName): ImageModel
   /** The store `config/ai.ts` configures; throws when it configures none. */
   conversations(): ConversationStore
 }
@@ -29,6 +30,7 @@ export interface AiManager {
 export class ConfiguredAiManager implements AiManager {
   private readonly models = new Map<string, LanguageModel>()
   private readonly embeddingModels = new Map<string, EmbeddingModel>()
+  private readonly imageModels = new Map<string, ImageModel>()
   private conversationStore?: ConversationStore
 
   constructor(
@@ -48,14 +50,11 @@ export class ConfiguredAiManager implements AiManager {
   }
 
   embeddingModel(provider?: AiProviderName): EmbeddingModel {
-    const name = provider ?? this.config.default
-    return memoize(this.embeddingModels, name, () => {
-      const factory = this.provider(name).embeddingModel
-      if (!factory) {
-        throw new Error(`The AI provider "${name}" configures no embeddingModel in config/ai.ts.`)
-      }
-      return factory()
-    })
+    return this.optionalModel(this.embeddingModels, 'embeddingModel', provider)
+  }
+
+  imageModel(provider?: AiProviderName): ImageModel {
+    return this.optionalModel(this.imageModels, 'imageModel', provider)
   }
 
   conversations(): ConversationStore {
@@ -66,6 +65,18 @@ export class ConfiguredAiManager implements AiManager {
       )
     }
     return (this.conversationStore ??= createConversationStore(this.config.conversations))
+  }
+
+  /** A model kind a provider may leave out, unlike `model`; the kind names itself in the error. */
+  private optionalModel<T>(cache: Map<string, T>, kind: 'embeddingModel' | 'imageModel', provider?: AiProviderName): T {
+    const name = provider ?? this.config.default
+    return memoize(cache, name, () => {
+      const factory = this.provider(name)[kind]
+      if (!factory) {
+        throw new Error(`The AI provider "${name}" configures no ${kind} in config/ai.ts.`)
+      }
+      return factory() as T
+    })
   }
 
   private provider(name: string): AiProviderConfig {

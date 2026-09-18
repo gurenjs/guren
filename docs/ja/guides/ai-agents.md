@@ -396,6 +396,49 @@ export function TriageFeed({ userId }: { userId: number }) {
 - **実行は必ずストリームを終わらせます。** 完了前に失敗したジョブは `error` チャンクを1つ publish するので、subscriber が待ち続けることはありません。このチャンクは、ストリームが閉じた時点でジョブを失敗させます。
 - **`AgentResponded` は発行されません。** `finish` チャンクが実行の終わりを示すためです。`stream()` と同じく、`output` を宣言したエージェントは拒否されます。途中から subscribe した人は、それまでに publish された分を受け取れません。
 
+## 埋め込みと画像
+
+`embed()`、`embedMany()`、`image()` は AI SDK の呼び出しそのもので、モデルだけをプロバイダ名から解決します。エージェントが言語モデルを解決するのと同じ道筋です。まず `config/ai.ts` にファクトリを書いてください。`embeddingModel` を宣言していないプロバイダ (Anthropic は埋め込みモデルを提供していません) は拒否され、エラーがその名前を示します。
+
+```ts
+// config/ai.ts
+import { defineAiConfig } from '@guren/plugin-ai'
+import { createOpenAI } from '@ai-sdk/openai'
+
+export default defineAiConfig((env) => {
+  const openai = createOpenAI({ apiKey: env.OPENAI_API_KEY })
+  return {
+    default: env.AI_PROVIDER,
+    providers: {
+      openai: {
+        model: () => openai('gpt-5'),
+        embeddingModel: () => openai.textEmbeddingModel('text-embedding-3-small'),
+        imageModel: () => openai.imageModel('gpt-image-1'),
+      },
+    },
+  }
+})
+```
+
+```ts
+import { embed, embedMany, image } from '@guren/plugin-ai'
+
+const { embedding } = await embed({ value: ticket.body })
+const { embeddings } = await embedMany({ values: chunks })
+const { image: cover } = await image({ prompt: 'A red fox in snow', size: '1024x1024' })
+```
+
+AI SDK が受け取るオプション (`maxRetries`、`abortSignal`、`headers`、`providerOptions`、`n`、`size`、`aspectRatio`、`seed`) はそのまま渡され、戻り値も SDK のものです。Guren 側のオプションは2つだけです。
+
+| オプション | 内容 |
+|---|---|
+| `provider` | `config/ai.ts` のプロバイダ名。省略すると `default` を使います。 |
+| `manager` | モデルを解決するマネージャ。省略するとデフォルトアプリケーションの `ai` バインディングを使います。`Agent` の static メソッドと同じ挙動です。1プロセスで複数のアプリケーションを起動する場合は、コントローラから `this.make('ai')` を渡してください。 |
+
+名前で解決することが、これらの呼び出しをテストの継ぎ目の内側に保ちます。アプリケーションのコードはモデルを保持しないので、`fakeAi()` はプロンプトと同じように `embed()` にも答えられます。
+
+ベクトルの保存先はアプリケーション側の判断です。`@guren/orm` にベクトル型の列はないので、`pgvector` の列は今のところ手書きのマイグレーションと生のクエリになります。`result.image` は SDK の `GeneratedFile` (`base64`、`uint8Array`、`mediaType`) で、保存は[添付ファイル](./attachments.md)の担当です。
+
 ## テスト
 
 `@guren/testing` の `app.fakeAi()` は、`TestApp.fromApp(app)` で起動したアプリの `ai` バインディングを差し替えます。スクリプト化するのはモデルだけです。ツールはパイプラインを通ってルートにディスパッチされるので、テストでもスコープゲート、ポリシー、承認ゲートが実際に働きます。`examples/agents` のテストを短くしたものです。元のテストはチケットを先に作り、ツールが返した実際の答えにそのチケットが入っていることも確認します。
@@ -449,7 +492,16 @@ describe('TicketDigest', () => {
 
 プロンプトの確認には `assertPrompted(Agent, predicate?)`、`assertNotPrompted(Agent, predicate)`、`assertNeverPrompted(Agent)` を使います。スクリプトのないプロンプトは例外を投げ、`using` ブロックの終わりで fake を破棄するときにも、エージェント名を示してもう一度例外を投げます。ルートは最初のエラーを、中身の分からない 500 に変えてしまうことが多いからです。スクリプトの回答に届く前に(`stopWhen` によって)ループが止まった場合も、破棄が失敗します。
 
-fake は `conversations()` に本物のストアで答えるので、`conversation: true` を付けたスクリプト化プロンプトは本番と同じ行を書き込みます。埋め込みモデルはスクリプト化しません。
+fake は `conversations()` に本物のストアで答えるので、`conversation: true` を付けたスクリプト化プロンプトは本番と同じ行を書き込みます。
+残る2つの呼び出しは `respondEmbeddings()` と `respondImages()` でスクリプト化します。
+
+```ts
+using ai = app.fakeAi()
+ai.respondEmbeddings([[0.1, 0.2], [0.3, 0.4]])   // 値1つにつきベクトル1つ
+ai.respondImages(['<base64>', ['<base64>', '<base64>']])   // image() の呼び出し1回につき1エントリ
+```
+
+ベクトルの配列は**値**ごとに1つずつ取り出されるので、`embedMany(['a', 'b'])` は SDK がどうバッチ化しても2つ消費します。関数 (`(value) => number[]`) を渡すと、すべての値に答えて尽きることがありません。`embedCalls()` と `imageCalls()` は各呼び出しの内容を返し、`assertEmbedded(predicate?)`、`assertNeverEmbedded()`、`assertGeneratedImage(predicate?)`、`assertNeverGeneratedImage()` がプロンプト用のアサーションに対応します。スクリプトのない `embed()` や `image()` は、スクリプトのないプロンプトと同じく呼び出しと破棄の両方で失敗します。`config/ai.ts` のエントリがその種類のモデルを宣言していないプロバイダも同様です。
 
 fake が証明するのは配線です。instructions とツールの説明が本物のモデルから正しい答えを引き出せるかは、もう1つの計測で決まります。そちらは実際にモデルを呼びます。
 
@@ -514,7 +566,6 @@ bunx guren ai:eval ticket-digest --variant v1 --cases 20    # one round against 
 
 設計のうち、次の部分はまだ出荷されていません。
 
-- `embed()` と `image()` のラッパー。それまでは `ai.embeddingModel(name)` を使って AI SDK を呼んでください。
 - `make:ai-tool` と、プロバイダ名・エージェント名の型付け。
 
 ## 関連

@@ -19,9 +19,12 @@ import {
   type Router,
   type ServiceProviderConstructor,
 } from '@guren/core'
-import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
+import { MockEmbeddingModelV4, MockImageModelV4, MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 
-import { AgentResponded, aiPlugin, defineAiConfig, type AiPluginConfig, type ConversationsConfig } from '../src'
+import { AgentResponded, aiPlugin, defineAiConfig, type AiManager, type AiPluginConfig, type ConversationsConfig } from '../src'
+
+/** `@ai-sdk/provider` is not a direct dependency, so the call shape comes from the mock. */
+type ImageGenerateOptions = Parameters<MockImageModelV4['doGenerate']>[0]
 
 export type ScriptedStep =
   | { text: string }
@@ -144,9 +147,16 @@ function registerRoutes(router: Router): void {
 
 export interface Harness {
   app: Application
+  /** The app's `ai` binding. */
+  manager: AiManager
   records: Array<AgentToolInvoked | AgentToolDenied>
   /** Swap what the `default` provider answers with, per test. */
   script(steps: ScriptedStep[]): MockLanguageModelV4
+  /** The `main` provider's embedding and image models; only `main` configures them. */
+  embeddings: MockEmbeddingModelV4
+  images: MockImageModelV4
+  /** What each image generate call was asked for; MockImageModelV4 records nothing itself. */
+  imageCalls: ImageGenerateOptions[]
 }
 
 export async function bootHarness(
@@ -161,6 +171,24 @@ export async function bootHarness(
 ): Promise<Harness> {
   const current = scriptedModel([{ text: 'unscripted' }])
   const judge = scriptedModel([{ text: 'from the judge provider' }])
+  const embeddings = new MockEmbeddingModelV4({
+    modelId: 'mock-embeddings',
+    maxEmbeddingsPerCall: Number.POSITIVE_INFINITY,
+    doEmbed: async ({ values }) => ({ embeddings: values.map((_, index) => [index, 0.5]), warnings: [] }),
+  })
+  const imageCalls: ImageGenerateOptions[] = []
+  const images = new MockImageModelV4({
+    modelId: 'mock-images',
+    maxImagesPerCall: Number.MAX_SAFE_INTEGER,
+    doGenerate: async (options) => {
+      imageCalls.push(options)
+      return {
+        images: Array.from({ length: options.n }, (_, index) => `image-${index}`),
+        warnings: [],
+        response: { timestamp: new Date(0), modelId: 'mock-images', headers: undefined },
+      }
+    },
+  })
 
   const app = createApp({
     routes: (router) => {
@@ -171,7 +199,7 @@ export async function bootHarness(
       defineAiConfig(() => ({
         default: 'main',
         providers: {
-          main: { model: () => current },
+          main: { model: () => current, embeddingModel: () => embeddings, imageModel: () => images },
           judge: { model: () => judge },
         },
         ...(options.conversations ? { conversations: options.conversations } : {}),
@@ -200,7 +228,11 @@ export async function bootHarness(
 
   return {
     app,
+    manager: app.container.make<AiManager>('ai'),
     records,
+    embeddings,
+    images,
+    imageCalls,
     // The manager memoizes the model the factory returns, so the factory hands
     // back one object whose script is replaced in place.
     script(steps) {

@@ -4,7 +4,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { BroadcastManager, Controller, MemoryQueueDriver, Worker, createApp, createCsrfMiddleware, createQueueManager, type Router } from '@guren/core'
-import { Agent, Output, aiPlugin, defineAiConfig, stepCountIs, type AgentToolScope } from '@guren/plugin-ai'
+import { Agent, Output, aiPlugin, defineAiConfig, embed, embedMany, image, stepCountIs, type AgentToolScope } from '@guren/plugin-ai'
 import { TestApp } from './test-app'
 
 /**
@@ -52,6 +52,13 @@ class AiController extends Controller {
     return this.json({ summary: response.text })
   }
 
+  async index() {
+    const { text } = await this.validateBody(z.object({ text: z.string() }))
+    // The ambient form: no manager passed, so the binding fakeAi() replaced is the one resolved.
+    const { embedding } = await embed({ value: text })
+    return this.json({ embedding })
+  }
+
   async unscripted() {
     const response = await this.make('ai').agent(NeverScripted).as(null).prompt('hello')
     return this.json({ text: response.text })
@@ -60,6 +67,7 @@ class AiController extends Controller {
 
 function routes(router: Router): void {
   router.post('/summarize', [AiController, 'summarize'])
+  router.post('/embed', [AiController, 'index'])
   router.post('/unscripted', [AiController, 'unscripted'])
   router
     .post('/posts', { body: z.object({ title: z.string() }) }, ({ body }) => {
@@ -89,6 +97,18 @@ beforeAll(async () => {
             model: () => {
               throw new Error('the real provider was reached')
             },
+            embeddingModel: () => {
+              throw new Error('the real provider was reached')
+            },
+            imageModel: () => {
+              throw new Error('the real provider was reached')
+            },
+          },
+          // Configures a language model only: what an app using Anthropic has.
+          bare: {
+            model: () => {
+              throw new Error('the real provider was reached')
+            },
           },
         },
         conversations: { driver: 'memory' },
@@ -96,7 +116,7 @@ beforeAll(async () => {
     ],
     providers: [aiPlugin({ agents: [Summarizer, Writer] })],
   })
-  application.use('*', createCsrfMiddleware({ exclude: ['/summarize', '/unscripted'] }))
+  application.use('*', createCsrfMiddleware({ exclude: ['/summarize', '/embed', '/unscripted'] }))
   app = await TestApp.fromApp(application)
 })
 
@@ -313,6 +333,98 @@ describe('TestApp.fakeAi', () => {
 
     await expect(application.container.make('ai').agent(Summarizer).as(null).prompt('x'))
       .rejects.toThrow('the real provider was reached')
+  })
+
+  it('should answer an embed() made inside a request from the script', async () => {
+    using ai = app.fakeAi()
+    ai.respondEmbeddings([[0.1, 0.2]])
+
+    await app.post('/embed', { text: 'a ticket' }).assertOk().assertJson({ embedding: [0.1, 0.2] })
+
+    ai.assertEmbedded()
+    ai.assertEmbedded((call) => call.values.includes('a ticket'))
+    expect(ai.embedCalls()).toEqual([{ values: ['a ticket'], provider: 'main' }])
+    ai.assertNeverGeneratedImage()
+  })
+
+  it('should draw one scripted vector per value, whatever the batching', async () => {
+    using ai = app.fakeAi()
+    ai.respondEmbeddings([[1], [2], [3]])
+    const manager = application.container.make('ai')
+
+    const many = await embedMany({ values: ['a', 'b'], manager })
+    const one = await embed({ value: 'c', manager })
+
+    expect(many.embeddings).toEqual([[1], [2]])
+    expect(one.embedding).toEqual([3])
+  })
+
+  it('should answer every value from a scripted function', async () => {
+    using ai = app.fakeAi()
+    ai.respondEmbeddings((value) => [value.length])
+
+    const { embeddings } = await embedMany({ values: ['a', 'bb', 'ccc'], manager: application.container.make('ai') })
+
+    expect(embeddings).toEqual([[1], [2], [3]])
+  })
+
+  it('should fail an unscripted embed() once, naming the call', async () => {
+    const ai = app.fakeAi()
+
+    await expect(embed({ value: 'x', manager: application.container.make('ai') }))
+      .rejects.toThrow('embed() or embedMany() was called, but nothing is scripted for it.')
+
+    expect(() => ai[Symbol.dispose]()).toThrow(/respondEmbeddings/)
+  })
+
+  it('should fail an embed() whose script ran out of vectors', async () => {
+    const ai = app.fakeAi()
+    ai.respondEmbeddings([[1]])
+
+    await expect(embedMany({ values: ['a', 'b'], manager: application.container.make('ai') }))
+      .rejects.toThrow('asked for the embedding of "b", and the script is exhausted')
+
+    expect(() => ai[Symbol.dispose]()).toThrow(/script is exhausted/)
+  })
+
+  it('should refuse a provider that configures no embeddingModel, as the real manager would', async () => {
+    const ai = app.fakeAi()
+    ai.respondEmbeddings([[1]])
+
+    await expect(embed({ value: 'x', provider: 'bare', manager: application.container.make('ai') }))
+      .rejects.toThrow('resolves the AI provider "bare", which configures no embeddingModel in config/ai.ts.')
+
+    // A refused call is still a call, as a refused prompt is: the assertion must not deny it happened.
+    ai.assertEmbedded()
+    expect(ai.embedCalls()).toEqual([{ values: [], provider: 'bare' }])
+    expect(() => ai[Symbol.dispose]()).toThrow(/configures no embeddingModel/)
+  })
+
+  it('should answer image() with the scripted images and record the prompt', async () => {
+    using ai = app.fakeAi()
+    ai.respondImages(['AAEC', ['AwQF', 'BgcI']])
+    const manager = application.container.make('ai')
+
+    const one = await image({ prompt: 'a red fox', manager })
+    const two = await image({ prompt: 'two foxes', n: 2, manager })
+
+    expect(one.image.base64).toBe('AAEC')
+    expect(two.images.map((file) => file.base64)).toEqual(['AwQF', 'BgcI'])
+    ai.assertGeneratedImage((call) => call.prompt === 'a red fox')
+    expect(ai.imageCalls()).toEqual([
+      { prompt: 'a red fox', n: 1, provider: 'main' },
+      { prompt: 'two foxes', n: 2, provider: 'main' },
+    ])
+    ai.assertNeverEmbedded()
+  })
+
+  it('should fail an unscripted image() once, naming the call', async () => {
+    const ai = app.fakeAi()
+
+    await expect(image({ prompt: 'x', manager: application.container.make('ai') }))
+      .rejects.toThrow('image() was called, but nothing is scripted for it.')
+
+    expect(() => ai[Symbol.dispose]()).toThrow(/respondImages/)
   })
 
   it('should refuse a TestApp built from a bare fetch function', () => {

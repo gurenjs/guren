@@ -31,6 +31,9 @@ export type { AiConfig, AiConfigDefinition, AiProviderConfig, InferProviders } f
 
 export type { AiManager, BoundAgentFactory } from './manager'
 
+export { embed, embedMany, image } from './models'
+export type { EmbedManyOptions, EmbedOptions, ImageOptions, ModelResolution } from './models'
+
 export { AgentResponded, RunAgentJob } from './queue'
 export type { QueuedAgentResponse, RunAgentPayload } from './queue'
 
