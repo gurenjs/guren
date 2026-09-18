@@ -67,7 +67,7 @@ export type FakeAiEmbeddings = ReadonlyArray<readonly number[]> | ((value: strin
  * What one `image()` call answers with: one image, or the several an `n > 1` call
  * asks for. A string is base64, which the SDK decodes to sniff the media type.
  */
-export type FakeAiImages = string | Uint8Array | ReadonlyArray<string | Uint8Array>
+export type FakeAiImages = string | Uint8Array | readonly string[] | readonly Uint8Array[]
 
 export interface FakeAiEmbedCall {
   /** One for `embed()`, the batch for `embedMany()`; empty when the fake refused the call. */
@@ -343,16 +343,17 @@ export class FakeAi implements AiManager, Disposable {
         + 'Script it with ai.respondImages([...]) before the call.',
       )
     }
-    const images = typeof scripted === 'string' || scripted instanceof Uint8Array ? [scripted] : [...scripted]
+    const images = scriptedImages(scripted)
     return new this.runtime.MockImageModelV4({
       modelId: `fake:${selected}`,
       // One doGenerate per image() call whatever `n` is: the script says what the call answers with.
       maxImagesPerCall: Number.MAX_SAFE_INTEGER,
       doGenerate: async ({ prompt, n }) => {
-        record.n = n
+        // Summed, not assigned: a caller passing maxImagesPerCall splits one image() call in two.
+        record.n += n
         if (prompt !== undefined) record.prompt = prompt
         return {
-          images: images as string[] | Uint8Array[],
+          images,
           warnings: [],
           // A scripted empty array is the test's choice; the SDK would otherwise retry it.
           isRetryable: false,
@@ -495,6 +496,13 @@ export class FakeAi implements AiManager, Disposable {
   private nameOf(cls: AgentClass): string {
     return this.runtime.resolveAgentName(cls)
   }
+}
+
+/** One script entry's images, keeping the homogeneous array the SDK's result type wants. */
+function scriptedImages(scripted: FakeAiImages): string[] | Uint8Array[] {
+  if (typeof scripted === 'string') return [scripted]
+  if (scripted instanceof Uint8Array) return [scripted]
+  return scripted.slice()
 }
 
 function listFor<T>(lists: Map<string, T[]>, key: string): T[] {
