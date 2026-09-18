@@ -97,6 +97,12 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
   if (selected.length === 0) {
     throw new EvalRunError(`The eval "${flow}" resolved no cases; there is nothing to run.`)
   }
+  // Checked for every source, not only `fromJsonl()`: two cases sharing an id write one trace,
+  // count as two samples, and are both skipped by the next resume.
+  const repeated = all.map((kase) => kase.id).filter((id, index, ids) => ids.indexOf(id) !== index)
+  if (repeated.length > 0) {
+    throw new EvalRunError(`The eval "${flow}" repeats the case id(s) ${[...new Set(repeated)].join(', ')}; each must be unique.`)
+  }
 
   const startedAt = new Date().toISOString()
   const agentName = resolveAgentName(definition.agent)
@@ -162,6 +168,9 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
         rows.push(outcome.row)
         await handle.row(outcome.row, outcome.trace)
       } else {
+        // A model call the grader then threw over is money spent: without this the ceiling
+        // never moves while a broken grader runs the whole case set.
+        spentUsd += outcome.failure.costUsd ?? 0
         failures.push(outcome.failure)
         await handle.failure(outcome.failure)
       }
@@ -206,16 +215,15 @@ export async function runEval(definition: AnyEvalDefinition, options: RunEvalOpt
     }
   }
 
-  // Built once: a second call would time itself again, so the printed duration and the one in
-  // summary.json would differ. Written even when a runner failure stops the run, so no
-  // summary.json is left describing a run the results.jsonl beside it never had.
-  let summary: EvalSummary
-  try {
-    await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
-  } finally {
-    summary = buildSummary()
-    await handle.end(summary)
-  }
+  // `allSettled`, not `all`: a rejection would otherwise resume here while a sibling worker is
+  // still mid-case, and that case's row lands after summary.json has already been written.
+  // Built once, too — a second call would time itself again and the printed duration would
+  // differ from the one on disk.
+  const settled = await Promise.allSettled(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
+  const summary = buildSummary()
+  await handle.end(summary)
+  const broke = settled.find((result) => result.status === 'rejected')
+  if (broke) throw broke.reason
 
   return { summary, rows: allRows(), failures, ...maybe('location', handle.location), plannedCases: selected }
 }
@@ -242,18 +250,30 @@ async function runCase(
   const startedAt = new Date().toISOString()
 
   for (let tries = 1; ; tries += 1) {
-    const began = Date.now()
     const controller = new AbortController()
     try {
       const result = await withTimeout(runAttempt(definition, kase, options.onPricingMissing, controller.signal), options.timeoutMs, kase.id, controller)
-      return { row: { ...result.row, rep, startedAt, durationMs: Date.now() - began }, trace: result.trace }
+      // From the case's own start, so a retry's backoff is inside the number rather than
+      // dropped: `startedAt` plus `durationMs` is when the row settled.
+      return { row: { ...result.row, rep, startedAt, durationMs: Date.now() - Date.parse(startedAt) }, trace: result.trace }
     } catch (error) {
       if (error instanceof EvalRunError) throw error
       const failure = classify(error)
       // A grader crash, a bad setup and the ceiling all reproduce; re-running a timed-out
       // case pays for the model twice. Only the model's own faults are worth a second call.
       if (!RETRYABLE.has(failure) || tries > options.retries) {
-        return { failure: { caseId: kase.id, rep, failure, message: describe(error), attempts: tries, at: startedAt } }
+        const spent = error instanceof CaseFailure ? error.costUsd : undefined
+        return {
+          failure: {
+            caseId: kase.id,
+            rep,
+            failure,
+            message: describe(error),
+            attempts: tries,
+            at: startedAt,
+            ...maybe('costUsd', spent),
+          },
+        }
       }
       await backoff(tries)
     }
@@ -272,7 +292,7 @@ async function runAttempt(
   // classifying it `provider` would retry every case against a configuration error.
   const app = await attempt('setup', () => definition.app() as Promise<EvalAppHandle>)
   try {
-    if (definition.setup) await attempt('setup', () => definition.setup?.(app, kase))
+    if (definition.setup) await attempt('setup', () => definition.setup?.(app, kase, signal))
 
     const manager = resolveManager(app)
     const principal = definition.as ? await definition.as(app, kase) : null
@@ -281,18 +301,20 @@ async function runAttempt(
     const pricing = pricingOf(manager, providerName)
     if (!pricing) onPricingMissing(providerName)
 
-    const judgePricing = definition.judge
-      ? pricingOf(manager, definition.judge.provider ?? manager.config.default)
+    const judgeBound = definition.judge ? manager.agent(definition.judge.agent).as(null) : undefined
+    // Resolved the way the agent's is, class provider included: reading only
+    // `judge.provider ?? default` prices a judge that names its own provider at another's rate.
+    const judgePricing = judgeBound && definition.judge
+      ? pricingOf(manager, definition.judge.provider ?? judgeBound.agent.provider ?? manager.config.default)
       : undefined
     const judged: Array<{ usage: EvalUsage; model?: string; cost?: number }> = []
     const judge = async (input: string): Promise<AgentResponse<unknown>> => {
-      if (!definition.judge) {
+      if (!judgeBound || !definition.judge) {
         throw new Error(
           'grade({ judge }) was called, and this eval configures none. Add judge: { agent: YourJudge, provider } '
           + 'to defineEval(), so the judge\'s usage and cost are recorded apart from the run\'s.',
         )
       }
-      const judgeBound = manager.agent(definition.judge.agent).as(null)
       const response = await judgeBound.prompt(input, promptOptions(definition.judge.provider, signal))
       const usage = toEvalUsage(response.usage)
       // The judge's model is recorded for the same reason the agent's is: a round where it
@@ -319,8 +341,15 @@ async function runAttempt(
     }
     const trace = buildTrace(bound.agent.instructions, kase.input, response)
 
-    const scores = await attempt('grade', () =>
-      definition.grade({ app, case: kase, expected: kase.expected, response, judge }))
+    const costUsd = computeCostUsd(usage, pricing)
+    let scores: Record<string, number>
+    try {
+      scores = await definition.grade({ app, case: kase, expected: kase.expected, response, judge, signal })
+    } catch (error) {
+      // `judged` fills during grade(), so the judge's share is only known here.
+      throw new CaseFailure('grade', error, sumCosts([costUsd, ...judged.map((one) => one.cost)]))
+    }
+    const judgeCostUsd = sumCosts(judged.map((one) => one.cost))
 
     const judgeTotal = judged.reduce<EvalUsage>((total, one) => addUsage(total, one.usage), {})
     return {
@@ -335,13 +364,13 @@ async function runAttempt(
         model: model.modelId,
         modelProvider: model.provider,
         usage,
-        ...maybe('costUsd', computeCostUsd(usage, pricing)),
+        ...maybe('costUsd', costUsd),
         ...(judged.length > 0
           ? {
               judgeCalls: judged.length,
               judgeUsage: judgeTotal,
               ...maybe('judgeModels', [...new Set(judged.flatMap((one) => one.model ?? []))]),
-              ...maybe('judgeCostUsd', sumCosts(judged.map((one) => one.cost))),
+              ...maybe('judgeCostUsd', judgeCostUsd),
             }
           : {}),
         finishReason: response.finishReason,
@@ -433,7 +462,7 @@ async function attempt<T>(failure: EvalFailureClass, work: () => T | Promise<T>)
 
 /** Carries the class a failure belongs to out of the place that knows it. */
 class CaseFailure extends Error {
-  constructor(readonly failure: EvalFailureClass, readonly cause: unknown) {
+  constructor(readonly failure: EvalFailureClass, readonly cause: unknown, readonly costUsd?: number) {
     super(describe(cause))
   }
 }

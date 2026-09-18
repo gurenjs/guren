@@ -1,6 +1,6 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
-import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, test } from 'bun:test'
@@ -704,6 +704,123 @@ describe('runEval', () => {
     expect(result.failures[0]!.message).toContain('DATABASE_URL')
   })
 
+  test('should let every worker settle before the summary is written', async () => {
+    const order: string[] = []
+    let built = 0
+    const usageless = new MockLanguageModelV4({
+      doGenerate: async () => ({
+        content: [{ type: 'text' as const, text: 'x' }],
+        finishReason: { unified: 'stop' as const, raw: undefined },
+        usage: {
+          inputTokens: { total: undefined, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: undefined, text: undefined, reasoning: undefined },
+        },
+        warnings: [],
+      }),
+    })
+
+    await expect(
+      runEval(
+        defineEval({
+          flow: 'triage',
+          agent: Triager,
+          // The first case stops the run; the second is already in flight and must land first.
+          app: () => bootEvalApp({ model: built++ === 0 ? usageless : answering([{ text: 'x' }]), pricing: PRICING }),
+          cases: cases('a', 'b'),
+          grade: () => ({ ok: 1 }),
+          metrics: [{ id: 'ok', kind: 'binary' }],
+          reporter: {
+            begin: () => ({
+              completed: [],
+              row: (row) => { order.push(`row:${row.caseId}`) },
+              failure: () => {},
+              end: () => { order.push('end') },
+            }),
+          },
+        }),
+        { concurrency: 2 },
+      ),
+    ).rejects.toThrow('carried no usage')
+
+    // A row appended after `end` leaves summary.json describing fewer rows than exist.
+    expect(order.at(-1)).toBe('end')
+  })
+
+  test('should charge a case whose grader threw against the cost ceiling', async () => {
+    let graded = 0
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: { input: 1_000_000, output: 1_000_000 } }),
+        cases: cases('a', 'b', 'c'),
+        grade: (): { ok: number } => {
+          graded += 1
+          throw new Error('the grader is broken')
+        },
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: memoryReporter(),
+      }),
+      { maxCostUsd: 1 },
+    )
+
+    // The model was paid for each of those calls; without counting them the ceiling never moves.
+    expect(graded).toBe(1)
+    expect(result.failures[0]!.costUsd).toBeGreaterThan(0)
+    expect(result.summary.costCapReached).toBe(true)
+  })
+
+  test('should time a retried case from its own start, backoff included', async () => {
+    let calls = 0
+    const flaky = new MockLanguageModelV4({
+      doGenerate: async () => {
+        calls += 1
+        if (calls === 1) throw new Error('upstream said 503')
+        return {
+          content: [{ type: 'text' as const, text: 'x' }],
+          finishReason: { unified: 'stop' as const, raw: undefined },
+          usage: {
+            inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 2, text: 2, reasoning: 0 },
+          },
+          warnings: [],
+        }
+      },
+    })
+
+    const result = await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: flaky, pricing: PRICING }),
+        cases: cases('a'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        retries: 1,
+        reporter: memoryReporter(),
+      }),
+    )
+
+    // Timing only the winning attempt drops the backoff, so startedAt + durationMs lies.
+    expect(result.rows[0]!.durationMs).toBeGreaterThanOrEqual(250)
+  })
+
+  test('should refuse a case set that repeats an id, whatever the source', async () => {
+    await expect(
+      runEval(
+        defineEval({
+          flow: 'triage',
+          agent: Triager,
+          app: () => bootEvalApp({ model: answering([{ text: 'x' }]) }),
+          cases: [{ id: 'a', input: 'one' }, { id: 'a', input: 'two' }],
+          grade: () => ({ ok: 1 }),
+          metrics: [{ id: 'ok', kind: 'binary' }],
+          reporter: memoryReporter(),
+        }),
+      ),
+    ).rejects.toThrow('repeats the case id(s) a')
+  })
+
   test('should call no model and write nothing on --dry-run', async () => {
     let built = 0
     const result = await runEval(
@@ -871,6 +988,29 @@ describe('hillclimbReporter', () => {
 
     const traces = readdirSync(resolve(root, 'triage', 'baseline', 'traces'))
     expect(traces).toHaveLength(2)
+  })
+
+  test('should repair a results.jsonl whose last append was cut short', async () => {
+    const root = scratch()
+    const directory = resolve(root, 'triage', 'baseline')
+    mkdirSync(resolve(directory, 'traces'), { recursive: true })
+    writeFileSync(resolve(directory, 'results.jsonl'), '{"caseId":"a","rep":1,"status":"ok","scores":{"ok":1},"usage":{}}\n{"caseId":"b","rep')
+
+    await runEval(
+      defineEval({
+        flow: 'triage',
+        agent: Triager,
+        app: () => bootEvalApp({ model: answering([{ text: 'x' }]), pricing: PRICING }),
+        cases: cases('b'),
+        grade: () => ({ ok: 1 }),
+        metrics: [{ id: 'ok', kind: 'binary' }],
+        reporter: hillclimbReporter({ root, cwd: root }),
+      }),
+    )
+
+    // Appending onto the fragment would have made the replacement row unreadable too.
+    const lines = readFileSync(resolve(directory, 'results.jsonl'), 'utf8').split('\n').filter((line) => line.trim() !== '')
+    expect(JSON.parse(lines.at(-1)!)).toMatchObject({ caseId: 'b', rep: 1 })
   })
 
   test('should never edit _state.json after writing it, and should resume over results.jsonl', async () => {

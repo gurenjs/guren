@@ -7,6 +7,7 @@
  * It emits data and prints where: the `.claude/hillclimb/` layout is the claude-api
  * harness's to read, and Guren vendors no viewer (RFC 0029 Open Question 7).
  */
+import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
@@ -66,6 +67,7 @@ export interface AiEvalDependencies {
 }
 
 const EVAL_DIR = 'tests/evals'
+const PLUGIN_PACKAGE = '@guren/plugin-ai'
 const EVAL_SUFFIXES = ['.eval.ts', '.eval.mts', '.eval.js', '.eval.mjs'] as const
 /**
  * The wire contract with `defineEval()`, deliberately a literal rather than an import: the
@@ -110,7 +112,7 @@ async function execute(
     )
   }
 
-  const runner = await loadRunner(dependencies.loadRunner)
+  const runner = await loadRunner(appRoot, dependencies.loadRunner)
   const result = await runner.runEval(definition, {
     flow: options.flow,
     cwd: appRoot,
@@ -163,9 +165,9 @@ async function importDefault(path: string): Promise<unknown> {
   return module.default
 }
 
-async function loadRunner(importer?: () => Promise<EvalRunnerModule>): Promise<EvalRunnerModule> {
+async function loadRunner(appRoot: string, importer?: () => Promise<EvalRunnerModule>): Promise<EvalRunnerModule> {
   try {
-    return await (importer ?? (() => import('@guren/plugin-ai/eval') as Promise<unknown> as Promise<EvalRunnerModule>))()
+    return await (importer ?? (() => importRunner(appRoot)))()
   } catch (error) {
     throw new Error(
       '`guren ai:eval` runs the eval through @guren/plugin-ai/eval, and could not import it. '
@@ -173,6 +175,24 @@ async function loadRunner(importer?: () => Promise<EvalRunnerModule>): Promise<E
       { cause: error },
     )
   }
+}
+
+/**
+ * Resolved from the *app*, not from this module: the eval file imported `defineEval` from the
+ * app's copy, and a bare specifier here would resolve beside the CLI — a different copy under
+ * a global install, or none at all when `--app` names a child project with its own plugin.
+ */
+async function importRunner(appRoot: string): Promise<EvalRunnerModule> {
+  let entry: string | undefined
+  try {
+    entry = createRequire(resolve(appRoot, 'package.json')).resolve(`${PLUGIN_PACKAGE}/eval`)
+  } catch {
+    // No install under the app root; fall back to this module's own resolution.
+  }
+  const loaded = entry
+    ? await import(pathToFileURL(entry).href)
+    : await import(`${PLUGIN_PACKAGE}/eval`)
+  return loaded as EvalRunnerModule
 }
 
 function defined<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {

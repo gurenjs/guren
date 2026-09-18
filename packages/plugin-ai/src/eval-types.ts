@@ -104,6 +104,8 @@ export interface EvalFailure {
   message: string
   /** How many times the case was attempted, retries included. */
   attempts: number
+  /** What the attempt had already paid when it failed, when that is known (a grader crash). */
+  costUsd?: number
   at: string
 }
 
@@ -181,6 +183,8 @@ export interface EvalGradeContext<TApp extends EvalAppHandle, TCase extends Eval
   /** `case.expected`, for the grader that reads nothing else off the case. */
   expected: TCase['expected']
   response: AgentResponse<TOutput>
+  /** Aborted when the case passes `timeoutMs`; honour it in anything long-running here. */
+  signal: AbortSignal
   /**
    * Prompt the configured judge. Its usage and cost are recorded in the row's own judge
    * fields; without `judge` on the definition, calling it throws.
@@ -218,13 +222,17 @@ export interface EvalDefinition<
   /** Overrides the agent's own provider for every case, the judge excepted. */
   provider?: AiProviderName
   as?: (app: TApp, kase: TCase) => AgentPrincipalInput | Promise<AgentPrincipalInput>
-  setup?: (app: TApp, kase: TCase) => unknown | Promise<unknown>
+  setup?: (app: TApp, kase: TCase, signal: AbortSignal) => unknown | Promise<unknown>
   teardown?: (app: TApp, kase: TCase) => unknown | Promise<unknown>
   grade: (context: EvalGradeContext<TApp, TCase, InferAgentOutput<TAgent>>) => TScores | Promise<TScores>
   metrics: ReadonlyArray<EvalMetric<Extract<keyof TScores, string>>>
   judge?: EvalJudge
   reporter?: EvalReporter
-  /** Per-case wall clock, including `setup()` and `grade()`. 120000 when absent. */
+  /**
+   * Per-case wall clock, including `setup()` and `grade()`. 120000 when absent. It aborts the
+   * model call; a hook that ignores the `signal` it is handed keeps its app alive until it
+   * returns, so a hook that can block forever must honour it.
+   */
   timeoutMs?: number
   /** Retries for a provider error, with jittered backoff. 2 when absent. */
   retries?: number

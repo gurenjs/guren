@@ -42,6 +42,9 @@ export function hillclimbReporter(options: HillclimbReporterOptions = {}): EvalR
       const results = resolve(directory, 'results.jsonl')
       const errors = resolve(directory, 'errors.jsonl')
       const completed = readRows(results, options.onWarning)
+      // A run killed mid-append leaves a line with no terminator; without this the next row
+      // is written onto that fragment and both lines become unreadable.
+      terminateLastLine(results)
       writeStateOnce(resolve(directory, '_state.json'), context)
 
       return {
@@ -86,6 +89,17 @@ function readRows(path: string, onWarning?: (message: string) => void): EvalRow[
   }
   if (skipped > 0) onWarning?.(`${path} has ${skipped} unreadable row(s); those (case, rep) pairs will run again.`)
   return rows
+}
+
+function terminateLastLine(path: string): void {
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  if (text !== '' && !text.endsWith('\n')) appendFileSync(path, '\n')
 }
 
 /**
