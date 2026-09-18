@@ -807,9 +807,11 @@ the tool descriptions get the right answer out of the model is §10's job.
   an array read as "no plugin" there would be a false finding. It is a warning,
   as an unbound session config is (`sessions-check.ts`), because its evidence
   is an absence. A class is an agent when it extends the
-  package's `Agent` export (aliases followed) or a class already found to be
-  one, so RFC 0017's durable `Agent` is never read; scopes and `tools()` are
-  inherited as the runtime inherits them. The `agent({ ... })` helper is not
+  package's `Agent` export (named or namespace import) or a superclass whose
+  *import* resolves to a class already found to be one, so RFC 0017's durable
+  `Agent` is never read and a same-named class from elsewhere is not taken for
+  a parent; scopes and `tools()` are inherited as the runtime inherits them,
+  `super.tools()` included. The `agent({ ... })` helper is not
   read. The scope entry outside the grammar of §2.2 fails, a non-literal
   `static scopes` is unverifiable like a computed argument, and a route graph
   that fails to load leaves the names unverified rather than underived. The
