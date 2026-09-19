@@ -3,6 +3,7 @@
  * generated `.guren/agents.gen.ts`, its `config/ai.ts` and its `app/Ai/agents.ts`
  * fill them. While one is empty, the name type it backs is plain `string`.
  */
+import type { Experimental_EvaluationAnswer, Experimental_EvaluationQuestion, Experimental_EvaluationResult } from 'ai'
 
 /** Tool names `appTools()` accepts, keyed by `AgentToolName`. Filled by `.guren/agents.gen.ts`. */
 // oxlint-disable-next-line typescript/no-empty-object-type -- an augmentation target, filled by codegen
@@ -15,6 +16,12 @@ export interface AiProviders {}
 /** Agent wire names from `app/Ai/agents.ts`. */
 // oxlint-disable-next-line typescript/no-empty-object-type -- an augmentation target, filled by the app
 export interface AiAgents {}
+
+/** The AI SDK's evaluation types (RFC 0029 §3), experimental upstream: see `evaluate()`. */
+export type AiEvaluationQuestion = Experimental_EvaluationQuestion
+export type AiEvaluationQuestions = Record<string, AiEvaluationQuestion>
+export type AiEvaluationAnswer<Q extends AiEvaluationQuestion> = Experimental_EvaluationAnswer<Q>
+export type AiEvaluationResult<Q extends AiEvaluationQuestions> = Experimental_EvaluationResult<Q>
 
 /** USD per million tokens. Declared here because `config/ai.ts` names it and the eval runner prices with it. */
 export interface AiPricing {

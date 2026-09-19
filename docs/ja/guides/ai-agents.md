@@ -439,6 +439,43 @@ AI SDK が受け取るオプション (`maxRetries`、`abortSignal`、`headers`�
 
 ベクトルの保存先はアプリケーション側の判断です。`@guren/orm` にベクトル型の列はないので、`pgvector` の列は今のところ手書きのマイグレーションと生のクエリになります。`result.image` は SDK の `GeneratedFile` (`base64`、`uint8Array`、`mediaType`) で、保存は[添付ファイル](./attachments.md)の担当です。
 
+## 評価
+
+`evaluate()` は、1つの状態について型付きの質問を投げ、テキストではなく確率を受け取ります。選択肢から1つ選ぶ `choice`、順序つきの段階で採点する `score`、`boolean` の3種類です。中身は AI SDK の `experimental_evaluate` で、`embed()` と同じくモデルだけをプロバイダ名から解決します。AI SDK はこの API を experimental としていて、patch リリースで変わることがあります。プラグインはそれに追随します。
+
+モデルは `config/ai.ts` の `evaluationModel` ファクトリから取ります。Jev(TypeSafe AI)のように何も生成しないモデルがあるので、このエントリでは `model` を省略できます。`defaultEvaluation` には、`evaluate()` がプロバイダを指定されなかったときに使うエントリを書きます。省略すると `default` が使われます。すでに Vercel AI Gateway 経由でモデルを使っているアプリでは、同じモデルを `gateway.evaluationModel('typesafe-ai/jev')` で取れます。
+
+```ts
+// config/ai.ts
+providers: {
+  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5') },
+  typesafe: { evaluationModel: () => createTypeSafeAi({ apiKey: env.TYPESAFE_AI_API_KEY }).evaluationModel('jev-latest') },
+},
+defaultEvaluation: 'typesafe',
+```
+
+```ts
+import { evaluate } from '@guren/plugin-ai'
+
+const { answers } = await evaluate({
+  manager: this.make('ai'),
+  state: { title: ticket.title },
+  questions: {
+    category: {
+      type: 'choice',
+      instructions: 'Which team owns this ticket?',
+      criteria: { billing: 'Charges and refunds', bug: 'Something is broken', account: null },
+    },
+    urgent: { type: 'boolean', instructions: 'Does this need a human within the hour?' },
+  },
+})
+answers.category.choice        // 'billing' | 'bug' | 'account'
+answers.category.probabilities // { billing: 0.93, bug: 0.05, account: 0.02 }
+answers.urgent.probability     // 0.37
+```
+
+`provider` と `manager` の解決は `embed()` と同じです。`choice` の答えは `criteria` のキーのどれかなので、選択肢をデータベースの enum から読めば、答えは列の型になります。確率は順位として読み、そのままの割合とは読まないでください。公開の意図分類データセットで測ったところ、Jev の確率はどのビンでも的中率を上回っていました。答えをそのまま採用するしきい値は、自分のデータのラベル付きサンプルで、必要な precision から決めてください。[`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) はこの形でチケットを振り分けていて、計測の結果は README にあります。
+
 ## テスト
 
 `@guren/testing` の `app.fakeAi()` は、`TestApp.fromApp(app)` で起動したアプリの `ai` バインディングを差し替えます。スクリプト化するのはモデルだけです。ツールはパイプラインを通ってルートにディスパッチされるので、テストでもスコープゲート、ポリシー、承認ゲートが実際に働きます。`examples/agents` のテストを短くしたものです。元のテストはチケットを先に作り、ツールが返した実際の答えにそのチケットが入っていることも確認します。
@@ -502,6 +539,21 @@ ai.respondImages(['<base64>', ['<base64>', '<base64>']])   // image() の呼び�
 ```
 
 ベクトルの配列は**値**ごとに1つずつ取り出されるので、`embedMany(['a', 'b'])` は SDK がどうバッチ化しても2つ消費します。関数 (`(value) => number[]`) を渡すと、すべての値に答えて尽きることがありません。`embedCalls()` と `imageCalls()` は各呼び出しの内容を返し、`assertEmbedded(predicate?)`、`assertNeverEmbedded()`、`assertGeneratedImage(predicate?)`、`assertNeverGeneratedImage()` がプロンプト用のアサーションに対応します。スクリプトのない `embed()` や `image()` は、スクリプトのないプロンプトと同じく呼び出しと破棄の両方で失敗します。`config/ai.ts` のエントリがその種類のモデルを宣言していないプロバイダも同様です。
+
+`respondEvaluations([...])` は、今後の `evaluate()` 1回につき1つずつ答えの組を積みます。質問ごとに値を1つ書きます。
+
+```ts
+ai.respondEvaluations([{ category: 'billing', urgent: 0.97 }])
+```
+
+| 値 | 答え |
+|---|---|
+| `choice` に文字列 | その選択肢が確率 1、他は 0 |
+| `boolean` に数値 | その確率 |
+| `score` に数値 | その位置。整数なら one-hot の分布も付く |
+| AI SDK の answer オブジェクト | そのまま通す |
+
+値は消費されるときに質問と照合されます。選択肢にない choice、段階数を超えた score、0〜1 の外の確率は、呼び出しと破棄の両方を失敗させます。本物のモデルが返せない値を fake が返すことはありません。スクリプト化したモデルは本物の `experimental_evaluate` の下で動くので、SDK 自身の検証も効きます。`evaluationCalls()` は各呼び出しの `state`、`questions`、`provider`、`answers` を返し、`assertEvaluated(predicate?)` と `assertNeverEvaluated()` がプロンプト用のアサーションに対応します。
 
 fake が証明するのは配線です。instructions とツールの説明が本物のモデルから正しい答えを引き出せるかは、もう1つの計測で決まります。そちらは実際にモデルを呼びます。
 
@@ -567,6 +619,7 @@ bunx guren ai:eval ticket-digest --variant v1 --cases 20    # one round against 
 設計のうち、次の部分はまだ出荷されていません。
 
 - `make:ai-tool` と、プロバイダ名・エージェント名の型付け。
+- `guren add ai --provider typesafe` のテンプレートと、評価の質問のスキャフォルド。それまでは `evaluationModel` のエントリを手で書いてください。
 
 ## 関連
 

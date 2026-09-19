@@ -213,6 +213,57 @@ That is why the operator routes live under `/ops/agents/` — a route registered
 beneath `/agents/` would be unreachable rather than merely refused. This app
 talks to its agent through the `TRIAGER` binding, never over HTTP.
 
+## Routing a ticket with Jev
+
+The second model in `config/ai.ts` generates no text. [Jev](https://typesafe.ai/)
+(TypeSafe AI) answers typed questions with probabilities, through the AI SDK's
+`experimental_evaluate`. `POST /tickets/:id/triage` asks it one question, which
+team owns the ticket, with the options read off the `tickets.category` column:
+
+```ts
+// app/Ai/TicketTriage.ts
+const { answers } = await ai.evaluate({
+  state: { title: ticket.title },
+  questions: {
+    category: choiceFrom(tickets.category, 'Which team owns this support ticket?', {
+      billing: 'Charges, invoices, refunds and plans',
+      // ...
+    }),
+  },
+})
+answers.category.choice   // 'billing' | 'bug' | 'account': the column's type
+```
+
+`choiceFrom` (`app/Ai/questions.ts`) is fifteen lines over the column's
+`enumValues`. Add a team to `ticketCategories` in `db/schema.ts` and the
+question, the answer's type and the confirm endpoint's validator follow; assign
+a value outside the enum and `tsc` refuses it.
+
+The probability decides what happens next. At or above
+`AUTO_CATEGORY_THRESHOLD` (0.9) the ticket is categorized (`triage: auto`);
+below it, the guess is kept and the ticket waits for an operator
+(`triage: review`, listed by `GET /tickets?triage=review`), who settles it
+with `POST /tickets/:id/category { category }`.
+
+```bash
+$ curl -s -X POST -H "$A" http://127.0.0.1:3336/tickets/1/triage
+{"ticket":{"id":1,"title":"Login page 500s on Safari","category":"bug","categoryProbability":0.98,"triage":"auto",…}}
+```
+
+The threshold is not a number the model documents. Jev's probabilities are
+ordered but, measured on Banking77 (3,080 labelled banking intents, 77 options,
+zero-shot), they run above the hit rate in every bucket: rows it scored 0.8 to
+0.9 were right 66% of the time, and a cutoff of 0.99 automated 46% of rows at
+96.8% precision. Pick the cutoff from a labelled sample of your own tickets, at
+the precision the queue needs, with the instructions you ship.
+
+Tests script the answer instead of the key: `ai.respondEvaluations([{ category: 'billing' }])`
+on the fake from `@guren/testing`, and a scripted choice outside the enum fails
+the test, so the fake cannot pass a value the real model could never return
+(`tests/ticket-triage.test.ts`). Set `TYPESAFE_AI_API_KEY` in `.env` for the
+real one; the same model is on Vercel AI Gateway as `typesafe-ai/jev`, from
+`gateway.evaluationModel()`, for an app that already routes models there.
+
 ## The two operator surfaces
 
 `routes/web.ts` is the app's one registrar — `createApp({ routes })` takes one,

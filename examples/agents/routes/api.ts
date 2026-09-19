@@ -9,6 +9,7 @@ import {
   ResolveApprovalSchema,
 } from '../app/Http/Validators/ApprovalValidator'
 import {
+  ConfirmCategorySchema,
   CreateTicketSchema,
   ListTicketsQuerySchema,
   TicketIdParamSchema,
@@ -52,6 +53,31 @@ export function registerApiRoutes(router: Router): void {
       output: TicketResponseSchema,
     },
     [TicketController, 'store'],
+  )
+
+  // The operator's two halves of routing a ticket. Neither is a tool: the
+  // evaluation is a decision the app makes, not one the agent asks for.
+  router.post(
+    '/tickets/:id/triage',
+    {
+      name: 'tickets.triage',
+      middlewares: operator,
+      params: TicketIdParamSchema,
+      output: TicketResponseSchema,
+    },
+    [TicketController, 'triage'],
+  )
+
+  router.post(
+    '/tickets/:id/category',
+    {
+      name: 'tickets.category',
+      middlewares: operator,
+      params: TicketIdParamSchema,
+      body: ConfirmCategorySchema,
+      output: TicketResponseSchema,
+    },
+    [TicketController, 'confirmCategory'],
   )
 
   router.post(

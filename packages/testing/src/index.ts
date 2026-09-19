@@ -14,6 +14,13 @@ export { FakeAi } from './ai'
 export type {
   FakeAiAnswer,
   FakeAiCall,
+  FakeAiEmbedCall,
+  FakeAiEmbeddings,
+  FakeAiEvaluation,
+  FakeAiEvaluationAnswer,
+  FakeAiEvaluationCall,
+  FakeAiImageCall,
+  FakeAiImages,
   FakeAiRecordedToolCall,
   FakeAiResponse,
   FakeAiToolCall,

@@ -4,7 +4,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { BroadcastManager, Controller, MemoryQueueDriver, Worker, createApp, createCsrfMiddleware, createQueueManager, type Router } from '@guren/core'
-import { Agent, Output, aiPlugin, defineAiConfig, embed, embedMany, image, stepCountIs, type AgentToolScope } from '@guren/plugin-ai'
+import { Agent, Output, aiPlugin, defineAiConfig, embed, embedMany, evaluate, image, stepCountIs, type AgentToolScope } from '@guren/plugin-ai'
 import { TestApp } from './test-app'
 
 /**
@@ -103,6 +103,15 @@ beforeAll(async () => {
             imageModel: () => {
               throw new Error('the real provider was reached')
             },
+            evaluationModel: () => {
+              throw new Error('the real provider was reached')
+            },
+          },
+          // Configures no language model: what a provider added for Jev alone has.
+          evalOnly: {
+            evaluationModel: () => {
+              throw new Error('the real provider was reached')
+            },
           },
           // Configures a language model only: what an app using Anthropic has.
           bare: {
@@ -187,7 +196,7 @@ describe('TestApp.fakeAi', () => {
     await expect(factory.as({ id: 1 }).prompt('first')).resolves.toMatchObject({ text: 'done' })
     await expect(factory.as({ id: 1 }).prompt('second')).resolves.toMatchObject({ text: 'only' })
     await expect(factory.as({ id: 1 }).prompt('third')).rejects.toThrow('Agent [writer] was prompted, but nothing is scripted')
-    expect(() => ai[Symbol.dispose]()).toThrow('fakeAi() found prompts its script did not answer')
+    expect(() => ai[Symbol.dispose]()).toThrow('fakeAi() found calls its script did not answer')
   })
 
   it('should consume one response per prompt on the same bound agent', async () => {
@@ -398,6 +407,72 @@ describe('TestApp.fakeAi', () => {
     ai.assertEmbedded()
     expect(ai.embedCalls()).toEqual([{ values: [], provider: 'bare' }])
     expect(() => ai[Symbol.dispose]()).toThrow(/configures no embeddingModel/)
+  })
+
+  it('should answer evaluate() from the shorthand script and record the call', async () => {
+    using ai = app.fakeAi()
+    ai.respondEvaluations([{ team: 'billing', urgent: 0.9, severity: 1 }])
+    const manager = application.container.make('ai')
+
+    const { answers } = await evaluate({
+      manager,
+      state: { title: 'Charged twice' },
+      questions: {
+        team: { type: 'choice', instructions: 'Which team?', criteria: { billing: null, bug: null } },
+        urgent: { type: 'boolean', instructions: 'Urgent?' },
+        severity: { type: 'score', instructions: 'How bad?', criteria: ['low', 'mid', 'high'] },
+      },
+    })
+
+    expect(answers.team).toEqual({ type: 'choice', choice: 'billing', probabilities: { billing: 1, bug: 0 } })
+    expect(answers.urgent).toEqual({ type: 'boolean', probability: 0.9 })
+    expect(answers.severity).toEqual({ type: 'score', score: 1, probabilities: { '0': 0, '1': 1, '2': 0 } })
+    ai.assertEvaluated((call) => JSON.stringify(call.state).includes('Charged twice'))
+    expect(ai.evaluationCalls()[0]).toMatchObject({ provider: 'main', state: { title: 'Charged twice' } })
+    expect(Object.keys(ai.evaluationCalls()[0]!.questions)).toEqual(['team', 'urgent', 'severity'])
+    ai.assertNeverEmbedded()
+  })
+
+  it('should refuse a scripted value the questions cannot produce, and an unscripted call', async () => {
+    const ai = app.fakeAi()
+    ai.respondEvaluations([{ team: 'refund' }])
+    const manager = application.container.make('ai')
+    const questions = { team: { type: 'choice', instructions: 'Which team?', criteria: { billing: null, bug: null } } } as const
+
+    await expect(evaluate({ manager, state: 'x', questions }))
+      .rejects.toThrow('ai.respondEvaluations() gives question "team" "refund", not one of its options: billing, bug.')
+    expect(String(ai.evaluationCalls()[0]!.error)).toContain('not one of its options')
+
+    await expect(evaluate({ manager, state: 'x', questions }))
+      .rejects.toThrow('Script it with ai.respondEvaluations([{ ... }]) before the call.')
+
+    expect(() => ai[Symbol.dispose]()).toThrow(/not one of its options[\s\S]*nothing is scripted/)
+  })
+
+  it('should refuse a prompt on a provider that configures no model, as the real manager would', async () => {
+    const ai = app.fakeAi()
+    ai.respond(Summarizer, ['unreached'])
+
+    await expect(application.container.make('ai').agent(Summarizer).as(null).prompt('x', { provider: 'evalOnly' }))
+      .rejects.toThrow('Agent [summarizer] resolves the AI provider "evalOnly", which configures no model in config/ai.ts.')
+
+    expect(() => ai[Symbol.dispose]()).toThrow(/configures no model/)
+  })
+
+  it('should refuse a provider that configures no evaluationModel, recording the call', async () => {
+    const ai = app.fakeAi()
+    ai.respondEvaluations([{ team: 'bug' }])
+
+    await expect(evaluate({
+      provider: 'bare',
+      manager: application.container.make('ai'),
+      state: 'x',
+      questions: { team: { type: 'choice', instructions: 'Which team?', criteria: { billing: null, bug: null } } },
+    })).rejects.toThrow('evaluate() resolves the AI provider "bare", which configures no evaluationModel in config/ai.ts.')
+
+    ai.assertEvaluated()
+    expect(ai.evaluationCalls()).toEqual([{ questions: {}, provider: 'bare' }])
+    expect(() => ai[Symbol.dispose]()).toThrow(/configures no evaluationModel/)
   })
 
   it('should answer image() with the scripted images and record the prompt', async () => {

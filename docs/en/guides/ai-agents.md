@@ -439,6 +439,43 @@ Resolving by name is what keeps these calls inside the test seam: nothing in you
 
 Where the vectors go is your application's business. `@guren/orm` has no vector column type, so a `pgvector` column is a hand-written migration and a raw query today. `result.image` is the SDK's `GeneratedFile` (`base64`, `uint8Array`, `mediaType`); storing one is [Attachments](./attachments.md)' job.
 
+## Evaluations
+
+`evaluate()` asks typed questions about one piece of state and gets probabilities back instead of text: a `choice` among options, a `score` on ordered levels, a `boolean`. It is the AI SDK's `experimental_evaluate` with the model resolved by provider name, like `embed()`. The SDK marks the API experimental and may change it in a patch release; the plugin follows.
+
+The model comes from an `evaluationModel` factory in `config/ai.ts`. `model` is optional on such an entry, since a model like Jev (TypeSafe AI) generates nothing, and `defaultEvaluation` names the entry `evaluate()` uses when the call names none (without it, `default`). An app already routing models through Vercel AI Gateway gets the same model from `gateway.evaluationModel('typesafe-ai/jev')`.
+
+```ts
+// config/ai.ts
+providers: {
+  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5') },
+  typesafe: { evaluationModel: () => createTypeSafeAi({ apiKey: env.TYPESAFE_AI_API_KEY }).evaluationModel('jev-latest') },
+},
+defaultEvaluation: 'typesafe',
+```
+
+```ts
+import { evaluate } from '@guren/plugin-ai'
+
+const { answers } = await evaluate({
+  manager: this.make('ai'),
+  state: { title: ticket.title },
+  questions: {
+    category: {
+      type: 'choice',
+      instructions: 'Which team owns this ticket?',
+      criteria: { billing: 'Charges and refunds', bug: 'Something is broken', account: null },
+    },
+    urgent: { type: 'boolean', instructions: 'Does this need a human within the hour?' },
+  },
+})
+answers.category.choice        // 'billing' | 'bug' | 'account'
+answers.category.probabilities // { billing: 0.93, bug: 0.05, account: 0.02 }
+answers.urgent.probability     // 0.37
+```
+
+`provider` and `manager` resolve as they do for `embed()`. A `choice` answer is one of the `criteria` keys, so options read off a database enum give an answer typed as the column. Read the probability as a ranking, not as a rate: measured on a public intent dataset, Jev's probabilities ran above the hit rate in every bucket. Pick the cutoff at which an answer is acted on from a labelled sample of your own data, at the precision you need. [`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) routes tickets this way, with the measurement in its README.
+
 ## Testing
 
 `app.fakeAi()` from `@guren/testing` replaces the `ai` binding of an app booted with `TestApp.fromApp(app)`. It scripts the model and nothing else: tools still dispatch through the pipeline into your routes, so a test sees the scope gate, the policies and the approval gate do their work. Shortened from the test in `examples/agents`, which also creates the ticket first and checks that the tool's real answer carries it:
@@ -502,6 +539,21 @@ ai.respondImages(['<base64>', ['<base64>', '<base64>']])   // one entry per imag
 ```
 
 An array of vectors is drawn one per *value*, so `embedMany(['a', 'b'])` takes two of them however the SDK batches the request; a function (`(value) => number[]`) answers every value instead and never runs out. `embedCalls()` and `imageCalls()` return what each call asked for, and `assertEmbedded(predicate?)`, `assertNeverEmbedded()`, `assertGeneratedImage(predicate?)` and `assertNeverGeneratedImage()` mirror the prompt assertions. An unscripted `embed()` or `image()` fails the call and the disposal, as an unscripted prompt does, and so does a provider whose `config/ai.ts` entry declares no model of that kind.
+
+`respondEvaluations([...])` queues one answer set per future `evaluate()`, a value per question:
+
+```ts
+ai.respondEvaluations([{ category: 'billing', urgent: 0.97 }])
+```
+
+| Value | The answer |
+|---|---|
+| a string, for a `choice` | that option at probability 1, the others at 0 |
+| a number, for a `boolean` | that probability |
+| a number, for a `score` | that position; an integer also carries a one-hot distribution |
+| an AI SDK answer object | passed through as it is |
+
+Each value is checked against the questions when consumed. A choice outside the options, a score past the last level or a probability outside 0 to 1 fails the call and the disposal, so the fake cannot answer what the real model could not, and the scripted model runs under the real `experimental_evaluate`, so the SDK's own validation applies as well. `evaluationCalls()` returns each call's `state`, `questions`, `provider` and `answers`; `assertEvaluated(predicate?)` and `assertNeverEvaluated()` mirror the prompt assertions.
 
 A fake proves the wiring. Whether the instructions and tool descriptions get the right answer out of a real model is the other measurement, and that one calls the model.
 
@@ -567,6 +619,7 @@ Three things the summary is careful about:
 These parts of the design have not shipped:
 
 - `make:ai-tool`, and typed provider and agent names.
+- A `guren add ai --provider typesafe` template and a scaffolder for evaluation questions. Write the `evaluationModel` entry by hand meanwhile.
 
 ## Related
 

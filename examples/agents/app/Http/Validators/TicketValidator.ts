@@ -1,11 +1,14 @@
 import { z } from 'zod'
 
+import { ticketCategories, ticketTriageStates } from '../../../db/schema'
+
 export const TicketIdParamSchema = z.object({
   id: z.coerce.number().int().positive(),
 })
 
 export const ListTicketsQuerySchema = z.object({
   status: z.enum(['open', 'closed']).optional(),
+  triage: z.enum(ticketTriageStates).optional(),
 })
 
 export const CreateTicketSchema = z.object({
@@ -14,10 +17,18 @@ export const CreateTicketSchema = z.object({
   createdAt: z.iso.datetime().optional(),
 })
 
+/** An operator's answer to a ticket the model parked for review, or an override of its automatic one. */
+export const ConfirmCategorySchema = z.object({
+  category: z.enum(ticketCategories),
+})
+
 const TicketSchema = z.object({
   id: z.number().int(),
   title: z.string(),
   status: z.enum(['open', 'closed']),
+  category: z.enum(ticketCategories).nullable(),
+  categoryProbability: z.number().nullable(),
+  triage: z.enum(ticketTriageStates),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

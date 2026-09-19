@@ -27,12 +27,12 @@ export { DatabaseConversationStore, MemoryConversationStore } from './conversati
 export type { ConversationDrivers, ConversationsConfig, ConversationStore, StoredConversation } from './conversations'
 
 export { defineAiConfig } from './config'
-export type { AiConfig, AiConfigDefinition, AiProviderConfig, InferProviders } from './config'
+export type { AiConfig, AiConfigDefinition, AiEvaluationModel, AiProviderConfig, InferProviders } from './config'
 
 export type { AiManager, BoundAgentFactory } from './manager'
 
-export { embed, embedMany, image } from './models'
-export type { EmbedManyOptions, EmbedOptions, ImageOptions, ModelResolution } from './models'
+export { embed, embedMany, evaluate, image } from './models'
+export type { EmbedManyOptions, EmbedOptions, EvaluateOptions, ImageOptions, ModelResolution } from './models'
 
 export { AgentResponded, RunAgentJob } from './queue'
 export type { QueuedAgentResponse, RunAgentPayload } from './queue'
@@ -47,6 +47,10 @@ export type {
   AgentToolScope,
   AiAgentName,
   AiAgents,
+  AiEvaluationAnswer,
+  AiEvaluationQuestion,
+  AiEvaluationQuestions,
+  AiEvaluationResult,
   AiProviderName,
   AiPricing,
   AiProviders,

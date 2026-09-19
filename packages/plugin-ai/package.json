@@ -59,7 +59,7 @@
   },
   "dependencies": {
     "@guren/core": "^1.20.1",
-    "ai": "^7.0.102"
+    "ai": "^7.0.106"
   },
   "devDependencies": {
     "@guren/plugin-mcp": "^0.6.1",

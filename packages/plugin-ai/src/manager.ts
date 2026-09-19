@@ -2,7 +2,7 @@ import type { Container } from '@guren/core'
 import type { EmbeddingModel, ImageModel, LanguageModel } from 'ai'
 
 import { bindAgent, type Agent, type AgentClass, type AgentPrincipalInput, type BoundAgent } from './agent'
-import { describeNames, type AiConfig, type AiProviderConfig } from './config'
+import { describeNames, type AiConfig, type AiEvaluationModel, type AiProviderConfig } from './config'
 import { createConversationStore, type ConversationStore } from './conversations'
 import type { AiProviderName } from './types'
 
@@ -23,14 +23,19 @@ export interface AiManager {
   model(provider?: AiProviderName): LanguageModel
   embeddingModel(provider?: AiProviderName): EmbeddingModel
   imageModel(provider?: AiProviderName): ImageModel
+  /** Resolves `provider`, then `defaultEvaluation`, then `default`. */
+  evaluationModel(provider?: AiProviderName): AiEvaluationModel
   /** The store `config/ai.ts` configures; throws when it configures none. */
   conversations(): ConversationStore
 }
+
+type ModelKind = 'model' | 'embeddingModel' | 'imageModel' | 'evaluationModel'
 
 export class ConfiguredAiManager implements AiManager {
   private readonly models = new Map<string, LanguageModel>()
   private readonly embeddingModels = new Map<string, EmbeddingModel>()
   private readonly imageModels = new Map<string, ImageModel>()
+  private readonly evaluationModels = new Map<string, AiEvaluationModel>()
   private conversationStore?: ConversationStore
 
   constructor(
@@ -45,16 +50,19 @@ export class ConfiguredAiManager implements AiManager {
   }
 
   model(provider?: AiProviderName): LanguageModel {
-    const name = provider ?? this.config.default
-    return memoize(this.models, name, () => this.provider(name).model())
+    return this.resolve(this.models, 'model', provider)
   }
 
   embeddingModel(provider?: AiProviderName): EmbeddingModel {
-    return this.optionalModel(this.embeddingModels, 'embeddingModel', provider)
+    return this.resolve(this.embeddingModels, 'embeddingModel', provider)
   }
 
   imageModel(provider?: AiProviderName): ImageModel {
-    return this.optionalModel(this.imageModels, 'imageModel', provider)
+    return this.resolve(this.imageModels, 'imageModel', provider)
+  }
+
+  evaluationModel(provider?: AiProviderName): AiEvaluationModel {
+    return this.resolve(this.evaluationModels, 'evaluationModel', provider ?? this.config.defaultEvaluation)
   }
 
   conversations(): ConversationStore {
@@ -67,8 +75,8 @@ export class ConfiguredAiManager implements AiManager {
     return (this.conversationStore ??= createConversationStore(this.config.conversations))
   }
 
-  /** A model kind a provider may leave out, unlike `model`; the kind names itself in the error. */
-  private optionalModel<T>(cache: Map<string, T>, kind: 'embeddingModel' | 'imageModel', provider?: AiProviderName): T {
+  /** Every kind is one a provider may leave out; the kind names itself in the error. */
+  private resolve<T>(cache: Map<string, T>, kind: ModelKind, provider?: AiProviderName): T {
     const name = provider ?? this.config.default
     return memoize(cache, name, () => {
       const factory = this.provider(name)[kind]

@@ -2,9 +2,10 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, expect, test } from 'bun:test'
 import { createApp, type Application } from '@guren/core'
+import { Experimental_EvaluationMockModelV4 } from 'ai/test'
 import { z } from 'zod'
 
-import { Agent, Output, agent, defineAiConfig, resolveAgentName, type AiProviderConfig } from '../src'
+import { Agent, Output, agent, defineAiConfig, evaluate, resolveAgentName, type AiProviderConfig } from '../src'
 import { bootHarness, scriptedModel } from './fixture'
 
 const Triage = z.object({ category: z.enum(['billing', 'bug']), priority: z.number().int() })
@@ -146,8 +147,8 @@ describe('Agent statics: the ambient form', () => {
 })
 
 describe('defineAiConfig and AiManager', () => {
-  async function bootWith(providers: Record<string, AiProviderConfig>, defaultName: string): Promise<Application> {
-    const app = createApp({ config: [defineAiConfig(() => ({ default: defaultName, providers }))] })
+  async function bootWith(providers: Record<string, AiProviderConfig>, defaultName: string, defaultEvaluation?: string): Promise<Application> {
+    const app = createApp({ config: [defineAiConfig(() => ({ default: defaultName, defaultEvaluation, providers }))] })
     await app.boot()
     return app
   }
@@ -176,4 +177,70 @@ describe('defineAiConfig and AiManager', () => {
       'The AI provider "main" configures no embeddingModel in config/ai.ts.',
     )
   })
+
+  test('should refuse a language model from a provider configured for evaluation alone', async () => {
+    const app = await bootWith({ main: { model: () => scriptedModel([]) }, jev: { evaluationModel: () => evaluationModel() } }, 'main')
+
+    expect(() => app.container.make('ai').model('jev')).toThrow('The AI provider "jev" configures no model in config/ai.ts.')
+    expect(() => app.container.make('ai').evaluationModel('main')).toThrow(
+      'The AI provider "main" configures no evaluationModel in config/ai.ts.',
+    )
+  })
+
+  test('should fail the boot when defaultEvaluation names no provider', async () => {
+    await expect(bootWith({ main: { model: () => scriptedModel([]) } }, 'main', 'jev')).rejects.toThrow(
+      'config/ai.ts names "jev" as its defaultEvaluation provider, but configures only: main.',
+    )
+  })
+
+  test('should evaluate through defaultEvaluation, memoizing its model', async () => {
+    let built = 0
+    const app = await bootWith(
+      { main: { model: () => scriptedModel([]) }, jev: { evaluationModel: () => (built++, evaluationModel()) } },
+      'main',
+      'jev',
+    )
+    const ai = app.container.make('ai')
+
+    const result = await evaluate({
+      manager: ai,
+      state: 'I was charged twice.',
+      questions: {
+        team: { type: 'choice', instructions: 'Which team?', criteria: { billing: null, technical: null } },
+        urgent: { type: 'boolean', instructions: 'Urgent?' },
+      },
+    })
+
+    expect(result.answers.team.choice).toBe('billing')
+    expect(result.answers.urgent.probability).toBe(0.25)
+    expect(ai.evaluationModel()).toBe(ai.evaluationModel('jev'))
+    expect(built).toBe(1)
+  })
+
+  test('should fall back to the default provider for evaluation when defaultEvaluation is absent', async () => {
+    const app = await bootWith({ main: { model: () => scriptedModel([]), evaluationModel: () => evaluationModel() } }, 'main')
+
+    const result = await evaluate({
+      manager: app.container.make('ai'),
+      state: 'x',
+      questions: { urgent: { type: 'boolean', instructions: 'Urgent?' } },
+    })
+
+    expect(result.answers.urgent.probability).toBe(0.25)
+  })
 })
+
+/** Answers every choice with its first option and every boolean with 0.25. */
+function evaluationModel(): Experimental_EvaluationMockModelV4 {
+  return new Experimental_EvaluationMockModelV4({
+    supportedQuestionTypes: ['choice', 'boolean'],
+    doEvaluate: async ({ questions }) => ({
+      answers: Object.fromEntries(Object.entries(questions).map(([id, question]) => {
+        if (question.type !== 'choice') return [id, { type: 'boolean', probability: 0.25 }]
+        const options = Object.keys(question.criteria)
+        return [id, { type: 'choice', choice: options[0]!, probabilities: Object.fromEntries(options.map((o, i) => [o, i === 0 ? 1 : 0])) }]
+      })),
+      warnings: [],
+    }),
+  })
+}

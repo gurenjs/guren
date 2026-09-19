@@ -1,5 +1,5 @@
 import type { AgentPrincipal } from '@guren/core'
-import { index, integer, sqliteTable, text } from '@guren/orm/drizzle/sqlite'
+import { index, integer, real, sqliteTable, text } from '@guren/orm/drizzle/sqlite'
 
 export const users = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -44,6 +44,20 @@ export const sessions = sqliteTable('sessions', {
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
+/**
+ * The teams a ticket is routed to. The tuple is the one list: the column, the
+ * evaluation's choice options (`app/Ai/TicketTriage.ts`) and the confirm
+ * endpoint's validator all derive from it, so adding a team here is the whole change.
+ */
+export const ticketCategories = ['billing', 'bug', 'account'] as const
+
+/**
+ * Where a ticket is in routing. `auto`: the model's answer cleared the threshold.
+ * `review`: it did not, and `category` holds its best guess for an operator to
+ * confirm or replace. One tuple, for the same reason as `ticketCategories`.
+ */
+export const ticketTriageStates = ['pending', 'auto', 'review', 'confirmed'] as const
+
 export const tickets = sqliteTable(
   'tickets',
   {
@@ -52,6 +66,12 @@ export const tickets = sqliteTable(
     status: text('status', { enum: ['open', 'closed'] })
       .notNull()
       .default('open'),
+    category: text('category', { enum: ticketCategories }),
+    /** The probability the model gave `category`; null once an operator confirmed it by hand. */
+    categoryProbability: real('category_probability'),
+    triage: text('triage', { enum: ticketTriageStates })
+      .notNull()
+      .default('pending'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .notNull()
       .$defaultFn(() => new Date()),

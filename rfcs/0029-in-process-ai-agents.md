@@ -444,6 +444,26 @@ declare module '@guren/server' {
 }
 ```
 
+**Amended in implementation (evaluation models):** a provider entry may
+carry `evaluationModel?: () => AiEvaluationModel`, an AI SDK evaluation
+model (`gateway.evaluationModel('typesafe-ai/jev')`, or
+`createTypeSafeAi().evaluationModel('jev-latest')`), and `model` is
+optional so an entry may exist for evaluation alone: a model that answers
+typed questions with probabilities generates no text. `AiConfig` gains
+`defaultEvaluation?: string`, checked at boot like `default`, because the
+default language-model provider rarely evaluates. `AiManager` gains
+`evaluationModel(provider?)` (memoized like the others; resolves
+`provider`, then `defaultEvaluation`, then `default`), and
+`evaluate({ state, questions, provider?, manager? })` joins `embed()` and
+`image()` as the SDK's `experimental_evaluate` with the model resolved by
+provider name. Resolving through the manager is the whole reason it is a
+wrapper rather than a call the application makes on the SDK directly:
+the fake (§7) then scripts every answer, where a module that imported the
+provider could only be intercepted by a process-global module mock. The
+AI SDK marks the API experimental, changeable in a patch release; the
+`AiEvaluation*` names re-export it under that same caveat, and `ai`'s
+floor is `^7.0.106`, the first release carrying it.
+
 `AiManager` is bound under `ai` in `bind()`; `model(name)` calls the factory
 once, on first use, and memoizes. The env side is validated at boot, as RFC
 0027 §1 intends: `guren add ai` adds `AI_PROVIDER` (defaulting to the
@@ -754,6 +774,18 @@ calling the factory: it answers the call itself, but a test that passes
 against a config which would throw in production measures nothing.
 `@guren/plugin-ai` and `ai` are optional peers of `@guren/testing`, imported when `fromApp()` boots an app
 that binds `ai`, which keeps `fakeAi()` synchronous.
+
+**Amended in implementation (evaluation):** `ai.respondEvaluations([{ ... }])` queues
+one answer set per future `evaluate()` (or evaluation through
+`ai.evaluationModel()`), a value per question: a string is a choice at
+probability 1, a number a boolean's probability or a score's position, and
+a full AI SDK answer passes through. Each is checked against the questions
+when consumed, and a value the questions refuse (a choice outside the
+options) fails the call and the dispose, so the fake cannot answer what the
+real model could not. The scripted model runs under the real
+`experimental_evaluate`, so the SDK's own validation applies too.
+`evaluationCalls()`, `assertEvaluated(predicate?)` and `assertNeverEvaluated()`
+read the calls.
 
 A fake measures the wiring and nothing else; whether the instructions and
 the tool descriptions get the right answer out of the model is §10's job.
