@@ -358,6 +358,16 @@ bun run dev:prototype
 bunx guren context | grep -A 8 'Prototype backlog'
 ```
 
+新しいルートで `docs/spec/screens.md` の内容が変わったので、gate が確認する前に spec views を再生成します。
+
+```bash run
+bunx guren spec:generate
+```
+
+```bash run
+bunx guren gate
+```
+
 ```bash run
 git add -A
 git commit -m "feat: prototype the announcements feature"
