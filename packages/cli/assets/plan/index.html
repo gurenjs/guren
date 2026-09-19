@@ -898,9 +898,12 @@
         <span class="note" id="export-status" role="status" aria-live="polite"></span>
         <p class="note footer-note">
           Comment on any element from the mark in its heading. This page never writes to the project
-          and makes no network request — put the feedback beside the plan and run:
+          and makes no network request.
         </p>
-        <pre class="command" id="revise-command"></pre>
+        <p class="note footer-note">Download the feedback beside the plan, then run:</p>
+        <pre class="command" id="revise-file-command"></pre>
+        <p class="note footer-note">Or copy it and pipe it into:</p>
+        <pre class="command" id="revise-stdin-command"></pre>
       </div>
     </div>
     <script>
@@ -2101,16 +2104,18 @@
         }
 
         // `planFile` is already held to a bare name with no shell metacharacter, because
-        // this line exists to be pasted into a shell.
-        document.getElementById('revise-command').textContent =
-          'bunx guren plan --revise ' + (data.planFile || '<plan.json>') + ' --feedback feedback.json'
+        // these lines exist to be pasted into a shell. The pipe that feeds the second one
+        // is left to the reader: the command that writes the clipboard differs per system.
+        var reviseCommand = 'bunx guren plan --revise ' + (data.planFile || '<plan.json>')
+        document.getElementById('revise-file-command').textContent = reviseCommand + ' --feedback feedback.json'
+        document.getElementById('revise-stdin-command').textContent = reviseCommand + ' --feedback -'
 
         document.getElementById('copy').addEventListener('click', function () {
           // Clipboard, not the network: `file://` is a secure context, and no policy
           // directive governs it. A refusal (permission, or an older engine) says so.
           window.navigator.clipboard.writeText(feedbackJson()).then(
             function () {
-              say('Copied. Save it as feedback.json beside the plan.')
+              say('Copied. Pipe it into the second command below.')
             },
             function () {
               say('The browser refused the clipboard. Use Download instead.')

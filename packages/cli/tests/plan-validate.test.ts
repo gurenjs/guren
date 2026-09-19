@@ -4,34 +4,13 @@ import type { CheckStatus } from '../src/check-result'
 import type { PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { validatePlan, type PlanCheckResult } from '../src/plan/validate'
-import { loadCommentsPlan } from './plan-fixture'
+import { loadCommentsPlan, planAppState } from './plan-fixture'
 
 function plan(): PlanDraft {
   return PlanDraftSchema.parse(loadCommentsPlan())
 }
 
-/** An application the comments fixture is a clean delta against. */
-function appState(overrides: Partial<PlanAppState> = {}): PlanAppState {
-  return {
-    models: ['Post', 'User'],
-    controllers: ['PostController'],
-    actions: ['PostController.index', 'PostController.show'],
-    resources: ['PostResource'],
-    policies: ['PostPolicy'],
-    pages: ['posts/Index', 'posts/Show'],
-    validators: { unreadable: 'validators are named by exported symbol' },
-    routes: [
-      { name: 'posts.index', method: 'GET', path: '/posts' },
-      { name: 'posts.show', method: 'GET', path: '/posts/:id' },
-    ],
-    tables: [
-      { identifier: 'posts', tableName: 'posts', columns: ['id', 'title', 'body'] },
-      { identifier: 'users', tableName: 'users', columns: ['id', 'email'] },
-    ],
-    apiOnly: false,
-    ...overrides,
-  }
-}
+const appState = (overrides: Partial<PlanAppState> = {}): PlanAppState => planAppState(overrides)
 
 function failures(results: PlanCheckResult[]): PlanCheckResult[] {
   return results.filter((result) => result.status === 'fail')

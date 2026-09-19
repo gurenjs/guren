@@ -16,7 +16,7 @@ import {
 } from '../src/plan/render'
 import { PlanDraftSchema, PlanSchema, type PlanDraft } from '../src/plan/schema'
 import { parsePlanDocument, planOutputPath, renderPlanFile } from '../src/plan-render'
-import { loadCommentsPlan, TEST_BASELINE } from './plan-fixture'
+import { loadCommentsPlan, planAppState, planPageData, TEST_BASELINE } from './plan-fixture'
 
 function draft(): PlanDraft {
   return PlanDraftSchema.parse(loadCommentsPlan())
@@ -206,10 +206,14 @@ describe('the plan file name the page prints in a command', () => {
     expect(payloadOf({ plan: draft(), planFile: name }).planFile).toBeNull()
   })
 
-  test('should be printed by the page as the revise command', () => {
+  test('should be printed by the page in both revise commands', () => {
     const html = renderPlanHtml({ plan: draft(), planFile: 'comments.plan.json' })
 
-    expect(html).toContain("'bunx guren plan --revise ' + (data.planFile || '<plan.json>')")
+    expect(html).toContain("var reviseCommand = 'bunx guren plan --revise ' + (data.planFile || '<plan.json>')")
+    expect(html).toContain("reviseCommand + ' --feedback feedback.json'")
+    // The stdin form the page's "Copy feedback" feeds (RFC 0030 §4): the pipe that
+    // writes it is the reader's, since the clipboard command differs per system.
+    expect(html).toContain("reviseCommand + ' --feedback -'")
   })
 })
 
@@ -479,7 +483,7 @@ describe('renderPlanFile', () => {
   test('should write the page beside the plan', async () => {
     const dir = await fixtureDir()
 
-    const result = await renderPlanFile(join(dir, 'comments.plan.json'))
+    const result = await renderPlanFile(join(dir, 'comments.plan.json'), { app: planAppState() })
 
     expect(result.path).toBe(join(dir, 'comments.plan.html'))
     expect(await readFile(result.path, 'utf8')).toContain('plan-data')
@@ -488,7 +492,7 @@ describe('renderPlanFile', () => {
   test('should write to the path -o names', async () => {
     const dir = await fixtureDir()
 
-    const result = await renderPlanFile(join(dir, 'comments.plan.json'), { output: join(dir, 'review.html') })
+    const result = await renderPlanFile(join(dir, 'comments.plan.json'), { output: join(dir, 'review.html'), app: planAppState() })
 
     expect(result.path).toBe(join(dir, 'review.html'))
   })
@@ -496,7 +500,7 @@ describe('renderPlanFile', () => {
   test('should resolve a relative output against the working directory it is given', async () => {
     const dir = await fixtureDir()
 
-    const result = await renderPlanFile(join(dir, 'comments.plan.json'), { output: 'review.html', cwd: dir })
+    const result = await renderPlanFile(join(dir, 'comments.plan.json'), { output: 'review.html', cwd: dir, app: planAppState() })
 
     expect(result.path).toBe(join(dir, 'review.html'))
   })
@@ -505,7 +509,7 @@ describe('renderPlanFile', () => {
     const dir = await fixtureDir()
     const planPath = join(dir, 'comments.plan.json')
 
-    await expect(renderPlanFile(planPath, { output: planPath })).rejects.toThrow(/over the plan itself/)
+    await expect(renderPlanFile(planPath, { output: planPath, app: planAppState() })).rejects.toThrow(/over the plan itself/)
     // The plan is the input every later step reads, and nothing here keeps a copy.
     expect(JSON.parse(await readFile(planPath, 'utf8')).planVersion).toBe(1)
   })
@@ -516,7 +520,7 @@ describe('renderPlanFile', () => {
     const alias = join(dir, 'alias.plan.json')
     await symlink(planPath, alias)
 
-    await expect(renderPlanFile(planPath, { output: alias })).rejects.toThrow(/over the plan itself/)
+    await expect(renderPlanFile(planPath, { output: alias, app: planAppState() })).rejects.toThrow(/over the plan itself/)
     expect(JSON.parse(await readFile(planPath, 'utf8')).planVersion).toBe(1)
   })
 
@@ -524,7 +528,7 @@ describe('renderPlanFile', () => {
     const dir = await fixtureDir()
     await mkdir(join(dir, 'out'))
 
-    await expect(renderPlanFile(join(dir, 'comments.plan.json'), { output: join(dir, 'out') })).rejects.toThrow(
+    await expect(renderPlanFile(join(dir, 'comments.plan.json'), { output: join(dir, 'out'), app: planAppState() })).rejects.toThrow(
       /Cannot write the page to .*out/,
     )
   })
@@ -532,31 +536,40 @@ describe('renderPlanFile', () => {
   test('should report a schema failure with the path that failed', async () => {
     const dir = await fixtureDir({ ...loadCommentsPlan(), title: 42 })
 
-    await expect(renderPlanFile(join(dir, 'comments.plan.json'))).rejects.toThrow(/title/)
+    await expect(renderPlanFile(join(dir, 'comments.plan.json'), { app: planAppState() })).rejects.toThrow(/title/)
   })
 
   test('should report a file that is not JSON', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'guren-plan-render-'))
     await writeFile(join(dir, 'comments.plan.json'), 'not json', 'utf8')
 
-    await expect(renderPlanFile(join(dir, 'comments.plan.json'))).rejects.toThrow(/not valid JSON/)
+    await expect(renderPlanFile(join(dir, 'comments.plan.json'), { app: planAppState() })).rejects.toThrow(/not valid JSON/)
   })
 
   test('should report a plan that is not there', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'guren-plan-render-'))
 
-    await expect(renderPlanFile(join(dir, 'missing.plan.json'))).rejects.toThrow(/Cannot read the plan/)
+    await expect(renderPlanFile(join(dir, 'missing.plan.json'), { app: planAppState() })).rejects.toThrow(/Cannot read the plan/)
   })
 
-  test('should name every id the plan declares twice', async () => {
-    const fixture = loadCommentsPlan()
-    const models = fixture.models as Array<{ id: string }>
-    models[1].id = models[0].id
-    const dir = await fixtureDir(fixture)
+  test('should run the checks against the application it is given', async () => {
+    const dir = await fixtureDir()
 
-    const result = await renderPlanFile(join(dir, 'comments.plan.json'))
+    const result = await renderPlanFile(join(dir, 'comments.plan.json'), { app: planAppState({ models: [] }) })
 
-    expect(result.duplicateIds).toEqual(['model.post'])
+    // `model.post` is an `alter` of a model this application does not declare.
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({ key: 'plan:app-missing', elementId: 'model.post', status: 'fail' }),
+    )
+    expect(planPageData(await readFile(result.path, 'utf8')).checks).toEqual(result.checks)
+  })
+
+  test('should render a plan whose checks fail rather than refusing it', async () => {
+    const dir = await fixtureDir()
+
+    const result = await renderPlanFile(join(dir, 'comments.plan.json'), { app: planAppState({ models: [] }) })
+
+    expect(await readFile(result.path, 'utf8')).toContain('plan-data')
   })
 })
 

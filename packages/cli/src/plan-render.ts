@@ -10,21 +10,28 @@ import { basename, resolve } from 'node:path'
 import type { z } from 'zod'
 
 import { CliError } from './cli-error'
-import { hasBaseline, renderPlanHtml, type PlanCheckResult } from './plan/render'
+import type { PlanAppState } from './plan/app-state'
+import { hasBaseline, renderPlanHtml } from './plan/render'
+import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { writeFileSafe } from './utils'
-import { findDuplicatePlanIds, PlanDraftSchema, PlanSchema, type Plan, type PlanDraft } from './plan/schema'
+import { PlanDraftSchema, PlanSchema, type Plan, type PlanDraft } from './plan/schema'
 
 export interface RenderPlanFileOptions {
+  /**
+   * The application the plan is checked against. Required: a page rendered without
+   * the checks shows an empty "needs attention" block, which reads as a clean plan.
+   */
+  app: PlanAppState
   /** Where to write. Relative paths resolve against the working directory, as a shell argument reads. */
   output?: string
+  /** Resolves the plan and the output path. The application root is {@link RenderPlanFileOptions.app}'s. */
   cwd?: string
-  checks?: readonly PlanCheckResult[]
 }
 
 export interface RenderedPlanFile {
   path: string
-  /** Ids declared twice: their anchors collide, so the page links to whichever came first. */
-  duplicateIds: string[]
+  /** Every §2 finding, as the page received them. */
+  checks: PlanCheckResult[]
 }
 
 function formatIssues(error: z.ZodError): string {
@@ -59,7 +66,7 @@ export function planOutputPath(planPath: string): string {
   return planPath.endsWith('.json') ? `${planPath.slice(0, -'.json'.length)}.html` : `${planPath}.html`
 }
 
-export async function renderPlanFile(planPath: string, options: RenderPlanFileOptions = {}): Promise<RenderedPlanFile> {
+export async function renderPlanFile(planPath: string, options: RenderPlanFileOptions): Promise<RenderedPlanFile> {
   const cwd = options.cwd ?? process.cwd()
   const absolutePlan = resolve(cwd, planPath)
 
@@ -78,7 +85,10 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
   }
 
   const plan = parsePlanDocument(document)
-  const html = renderPlanHtml({ plan, checks: options.checks, planFile: basename(absolutePlan) })
+  // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to
+  // render nothing. The page is where someone reads what is wrong with the plan.
+  const checks = validatePlan(plan, options.app)
+  const html = renderPlanHtml({ plan, checks, planFile: basename(absolutePlan) })
   const target = options.output ? resolve(cwd, options.output) : planOutputPath(absolutePlan)
 
   // The plan is the input every later step reads, and this command keeps no copy of it,
@@ -98,5 +108,5 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
     if (error instanceof CliError) throw error
     throw new CliError(`Cannot write the page to ${target}: ${(error as Error).message}`)
   }
-  return { path: target, duplicateIds: findDuplicatePlanIds(plan) }
+  return { path: target, checks }
 }
