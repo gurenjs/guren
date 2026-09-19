@@ -305,7 +305,9 @@ plan and the application's current context (`generateContext()`,
   with authentication and no `unauthenticated` behaviour, or with a policy and
   no `forbidden` behaviour;
 - (amended, PR #920) a flow step naming an element the plan does not declare,
-  and a flow edge whose end is not a step of that flow.
+  and a flow edge whose end is not a step of that flow; a flow edge from a
+  step to itself is a warning, since the diagram draws no such line and a
+  plan should not lose a statement in silence.
 
 **Existing tests are read as the baseline.** A static scan of the test files
 collects which routes they exercise (`app.get('/posts')`, `app.post(...)` on a
