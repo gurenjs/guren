@@ -540,10 +540,10 @@ ai.respondImages(['<base64>', ['<base64>', '<base64>']])   // one entry per imag
 
 An array of vectors is drawn one per *value*, so `embedMany(['a', 'b'])` takes two of them however the SDK batches the request; a function (`(value) => number[]`) answers every value instead and never runs out. `embedCalls()` and `imageCalls()` return what each call asked for, and `assertEmbedded(predicate?)`, `assertNeverEmbedded()`, `assertGeneratedImage(predicate?)` and `assertNeverGeneratedImage()` mirror the prompt assertions. An unscripted `embed()` or `image()` fails the call and the disposal, as an unscripted prompt does, and so does a provider whose `config/ai.ts` entry declares no model of that kind.
 
-`answer([...])` queues one answer set per future `evaluate()`, a value per question:
+`respondEvaluations([...])` queues one answer set per future `evaluate()`, a value per question:
 
 ```ts
-ai.answer([{ category: 'billing', urgent: 0.97 }])
+ai.respondEvaluations([{ category: 'billing', urgent: 0.97 }])
 ```
 
 | Value | The answer |
@@ -553,7 +553,7 @@ ai.answer([{ category: 'billing', urgent: 0.97 }])
 | a number, for a `score` | that position; an integer also carries a one-hot distribution |
 | an AI SDK answer object | passed through as it is |
 
-Each value is checked against the questions when consumed. A choice outside the options, a score past the last level or a probability outside 0 to 1 fails the call and the disposal, so the fake cannot answer what the real model could not, and the scripted model runs under the real `experimental_evaluate`, so the SDK's own validation applies as well. `evaluations()` returns each call's `state`, `questions`, `provider` and `answers`; `assertEvaluated(predicate?)` and `assertNeverEvaluated()` mirror the prompt assertions, and unconsumed answers fail the disposal.
+Each value is checked against the questions when consumed. A choice outside the options, a score past the last level or a probability outside 0 to 1 fails the call and the disposal, so the fake cannot answer what the real model could not, and the scripted model runs under the real `experimental_evaluate`, so the SDK's own validation applies as well. `evaluationCalls()` returns each call's `state`, `questions`, `provider` and `answers`; `assertEvaluated(predicate?)` and `assertNeverEvaluated()` mirror the prompt assertions.
 
 A fake proves the wiring. Whether the instructions and tool descriptions get the right answer out of a real model is the other measurement, and that one calls the model.
 

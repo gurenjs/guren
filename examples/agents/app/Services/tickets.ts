@@ -5,10 +5,10 @@
  * ticket than the one the agent asked to close.
  */
 import { Ticket } from '../Models/Ticket'
-import type { ticketCategories } from '../../db/schema'
+import type { ticketCategories, ticketTriageStates } from '../../db/schema'
 
 export type TicketCategory = (typeof ticketCategories)[number]
-export type TicketTriage = 'pending' | 'auto' | 'review' | 'confirmed'
+export type TicketTriage = (typeof ticketTriageStates)[number]
 
 export interface TicketRow {
   id: number

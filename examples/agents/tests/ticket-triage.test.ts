@@ -30,20 +30,20 @@ describe('POST /tickets/:id/triage', () => {
     const id = await createTicket('Charged twice this month, please refund one')
 
     using ai = http.fakeAi()
-    ai.answer([{ category: { type: 'choice', choice: 'billing', probabilities: { billing: 0.97, bug: 0.02, account: 0.01 } } }])
+    ai.respondEvaluations([{ category: { type: 'choice', choice: 'billing', probabilities: { billing: 0.97, bug: 0.02, account: 0.01 } } }])
 
     const { ticket } = await (await asOperator().post(`/tickets/${id}/triage`).assertOk()).json<TicketBody>()
 
     expect(ticket).toMatchObject({ category: 'billing', categoryProbability: 0.97, triage: 'auto' })
     ai.assertEvaluated((call) => JSON.stringify(call.state).includes('Charged twice'))
-    expect(Object.keys(ai.evaluations()[0]!.questions)).toEqual(['category'])
+    expect(Object.keys(ai.evaluationCalls()[0]!.questions)).toEqual(['category'])
   })
 
   test('should park the ticket for review, keeping the guess, when the model is not sure', async () => {
     const id = await createTicket('It says my card is on file but the export is empty')
 
     using ai = http.fakeAi()
-    ai.answer([{ category: { type: 'choice', choice: 'bug', probabilities: { billing: 0.38, bug: 0.55, account: 0.07 } } }])
+    ai.respondEvaluations([{ category: { type: 'choice', choice: 'bug', probabilities: { billing: 0.38, bug: 0.55, account: 0.07 } } }])
 
     const { ticket } = await (await asOperator().post(`/tickets/${id}/triage`).assertOk()).json<TicketBody>()
 
@@ -56,7 +56,7 @@ describe('POST /tickets/:id/triage', () => {
     const id = await createTicket('Cannot sign in since the password reset')
 
     using ai = http.fakeAi()
-    ai.answer([{ category: 'account' }])
+    ai.respondEvaluations([{ category: 'account' }])
 
     const { ticket } = await (await asOperator().post(`/tickets/${id}/triage`).assertOk()).json<TicketBody>()
 
@@ -66,12 +66,17 @@ describe('POST /tickets/:id/triage', () => {
   test('should refuse a scripted choice outside the enum, so the fake cannot answer what the model cannot', async () => {
     const id = await createTicket('Where is my invoice?')
 
+    // Disposed in `finally`, not `using`: the dispose is expected to throw, and it must still
+    // restore the binding when an assertion above it fails, or every later test sees the fake.
     const ai = http.fakeAi()
-    ai.answer([{ category: 'refund' }])
+    ai.respondEvaluations([{ category: 'refund' }])
 
-    await asOperator().post(`/tickets/${id}/triage`).assertStatus(500)
-    expect(String(ai.evaluations()[0]!.error)).toContain('not one of its options: billing, bug, account')
-    expect(() => ai[Symbol.dispose]()).toThrow('not one of its options')
+    try {
+      await asOperator().post(`/tickets/${id}/triage`).assertStatus(500)
+      expect(String(ai.evaluationCalls()[0]!.error)).toContain('not one of its options: billing, bug, account')
+    } finally {
+      expect(() => ai[Symbol.dispose]()).toThrow('not one of its options')
+    }
   })
 
   test('should fail when nothing is scripted, naming the fix', async () => {
@@ -79,8 +84,11 @@ describe('POST /tickets/:id/triage', () => {
 
     const ai = http.fakeAi()
 
-    await asOperator().post(`/tickets/${id}/triage`).assertStatus(500)
-    expect(() => ai[Symbol.dispose]()).toThrow('Script it with ai.answer([{ ... }])')
+    try {
+      await asOperator().post(`/tickets/${id}/triage`).assertStatus(500)
+    } finally {
+      expect(() => ai[Symbol.dispose]()).toThrow('Script it with ai.respondEvaluations([{ ... }])')
+    }
   })
 })
 

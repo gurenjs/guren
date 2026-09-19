@@ -10,10 +10,7 @@ import { createConversationStore, type ConversationsConfig } from './conversatio
 import { ConfiguredAiManager, type AiManager } from './manager'
 import type { AiPricing } from './types'
 
-/**
- * An AI SDK evaluation model instance (never a string id: those resolve through the SDK's default
- * provider, around `config/ai.ts`). Experimental upstream, so it may change in an `ai` patch release.
- */
+/** An instance, never a string id: the SDK resolves those through its own default provider, around `config/ai.ts`. */
 export type AiEvaluationModel = Exclude<Experimental_EvaluationModel, string>
 
 export interface AiProviderConfig {
@@ -28,9 +25,12 @@ export interface AiProviderConfig {
 }
 
 export interface AiConfig {
-  /** The provider an agent uses when it names none. Checked against `providers` at boot. */
+  /**
+   * The provider an agent uses when it names none. Checked against `providers` at boot; whether it
+   * configures `model` is not, so an evaluation-only app (Jev alone) can name its one entry here.
+   */
   default: string
-  /** The provider `ai.evaluate()` uses when the call names none; `default` when absent. Checked at boot. */
+  /** The provider `evaluate()` uses when the call names none; `default` when absent. Checked at boot. */
   defaultEvaluation?: string
   providers: Readonly<Record<string, AiProviderConfig>>
   /** Where `prompt(input, { conversation })` and `continue(id)` keep history (RFC 0029 §5). Absent, both are refused. */
@@ -70,17 +70,14 @@ export function defineAiConfig<const P extends Record<string, AiProviderConfig>>
       container.singleton('ai', () => new ConfiguredAiManager(config, container))
     },
     boot: (_container, config) => {
-      if (!Object.hasOwn(config.providers, config.default)) {
-        throw new Error(
-          `config/ai.ts names "${config.default}" as its default provider, but configures only: `
-          + `${describeNames(Object.keys(config.providers))}.`,
-        )
-      }
-      if (config.defaultEvaluation !== undefined && !Object.hasOwn(config.providers, config.defaultEvaluation)) {
-        throw new Error(
-          `config/ai.ts names "${config.defaultEvaluation}" as its defaultEvaluation provider, but configures only: `
-          + `${describeNames(Object.keys(config.providers))}.`,
-        )
+      for (const role of ['default', 'defaultEvaluation'] as const) {
+        const name = config[role]
+        if (name !== undefined && !Object.hasOwn(config.providers, name)) {
+          throw new Error(
+            `config/ai.ts names "${name}" as its ${role} provider, but configures only: `
+            + `${describeNames(Object.keys(config.providers))}.`,
+          )
+        }
       }
       // Built and discarded, so an unknown driver or an unset table fails the boot rather than the first conversation.
       if (config.conversations) createConversationStore(config.conversations)

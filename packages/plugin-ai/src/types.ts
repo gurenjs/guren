@@ -17,11 +17,7 @@ export interface AiProviders {}
 // oxlint-disable-next-line typescript/no-empty-object-type -- an augmentation target, filled by the app
 export interface AiAgents {}
 
-/**
- * The evaluation vocabulary (RFC 0029 §3), as `ai` spells it minus the `experimental_` prefix,
- * so an application imports one package. The AI SDK marks these experimental: a patch
- * release of `ai` may change them, and this plugin follows.
- */
+/** The AI SDK's evaluation types (RFC 0029 §3), experimental upstream: see `evaluate()`. */
 export type AiEvaluationQuestion = Experimental_EvaluationQuestion
 export type AiEvaluationQuestions = Record<string, AiEvaluationQuestion>
 export type AiEvaluationAnswer<Q extends AiEvaluationQuestion> = Experimental_EvaluationAnswer<Q>

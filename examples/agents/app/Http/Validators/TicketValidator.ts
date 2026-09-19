@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { ticketCategories } from '../../../db/schema'
+import { ticketCategories, ticketTriageStates } from '../../../db/schema'
 
 export const TicketIdParamSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -8,7 +8,7 @@ export const TicketIdParamSchema = z.object({
 
 export const ListTicketsQuerySchema = z.object({
   status: z.enum(['open', 'closed']).optional(),
-  triage: z.enum(['pending', 'auto', 'review', 'confirmed']).optional(),
+  triage: z.enum(ticketTriageStates).optional(),
 })
 
 export const CreateTicketSchema = z.object({
@@ -28,7 +28,7 @@ const TicketSchema = z.object({
   status: z.enum(['open', 'closed']),
   category: z.enum(ticketCategories).nullable(),
   categoryProbability: z.number().nullable(),
-  triage: z.enum(['pending', 'auto', 'review', 'confirmed']),
+  triage: z.enum(ticketTriageStates),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

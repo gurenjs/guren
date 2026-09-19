@@ -775,7 +775,7 @@ against a config which would throw in production measures nothing.
 `@guren/plugin-ai` and `ai` are optional peers of `@guren/testing`, imported when `fromApp()` boots an app
 that binds `ai`, which keeps `fakeAi()` synchronous.
 
-**Amended in implementation (evaluation):** `ai.answer([{ ... }])` queues
+**Amended in implementation (evaluation):** `ai.respondEvaluations([{ ... }])` queues
 one answer set per future `evaluate()` (or evaluation through
 `ai.evaluationModel()`), a value per question: a string is a choice at
 probability 1, a number a boolean's probability or a score's position, and
@@ -784,8 +784,8 @@ when consumed, and a value the questions refuse (a choice outside the
 options) fails the call and the dispose, so the fake cannot answer what the
 real model could not. The scripted model runs under the real
 `experimental_evaluate`, so the SDK's own validation applies too.
-`evaluations()`, `assertEvaluated(predicate?)` and `assertNeverEvaluated()`
-read the calls; unconsumed answers fail the dispose.
+`evaluationCalls()`, `assertEvaluated(predicate?)` and `assertNeverEvaluated()`
+read the calls.
 
 A fake measures the wiring and nothing else; whether the instructions and
 the tool descriptions get the right answer out of the model is §10's job.

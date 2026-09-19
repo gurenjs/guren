@@ -51,6 +51,13 @@ export const sessions = sqliteTable('sessions', {
  */
 export const ticketCategories = ['billing', 'bug', 'account'] as const
 
+/**
+ * Where a ticket is in routing. `auto`: the model's answer cleared the threshold.
+ * `review`: it did not, and `category` holds its best guess for an operator to
+ * confirm or replace. One tuple, for the same reason as `ticketCategories`.
+ */
+export const ticketTriageStates = ['pending', 'auto', 'review', 'confirmed'] as const
+
 export const tickets = sqliteTable(
   'tickets',
   {
@@ -62,9 +69,7 @@ export const tickets = sqliteTable(
     category: text('category', { enum: ticketCategories }),
     /** The probability the model gave `category`; null once an operator confirmed it by hand. */
     categoryProbability: real('category_probability'),
-    // `auto`: the model's answer cleared the threshold. `review`: it did not, and
-    // `category` holds its best guess for the operator to confirm or replace.
-    triage: text('triage', { enum: ['pending', 'auto', 'review', 'confirmed'] })
+    triage: text('triage', { enum: ticketTriageStates })
       .notNull()
       .default('pending'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })

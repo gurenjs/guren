@@ -540,10 +540,10 @@ ai.respondImages(['<base64>', ['<base64>', '<base64>']])   // image() の呼び�
 
 ベクトルの配列は**値**ごとに1つずつ取り出されるので、`embedMany(['a', 'b'])` は SDK がどうバッチ化しても2つ消費します。関数 (`(value) => number[]`) を渡すと、すべての値に答えて尽きることがありません。`embedCalls()` と `imageCalls()` は各呼び出しの内容を返し、`assertEmbedded(predicate?)`、`assertNeverEmbedded()`、`assertGeneratedImage(predicate?)`、`assertNeverGeneratedImage()` がプロンプト用のアサーションに対応します。スクリプトのない `embed()` や `image()` は、スクリプトのないプロンプトと同じく呼び出しと破棄の両方で失敗します。`config/ai.ts` のエントリがその種類のモデルを宣言していないプロバイダも同様です。
 
-`answer([...])` は、今後の `evaluate()` 1回につき1つずつ答えの組を積みます。質問ごとに値を1つ書きます。
+`respondEvaluations([...])` は、今後の `evaluate()` 1回につき1つずつ答えの組を積みます。質問ごとに値を1つ書きます。
 
 ```ts
-ai.answer([{ category: 'billing', urgent: 0.97 }])
+ai.respondEvaluations([{ category: 'billing', urgent: 0.97 }])
 ```
 
 | 値 | 答え |
@@ -553,7 +553,7 @@ ai.answer([{ category: 'billing', urgent: 0.97 }])
 | `score` に数値 | その位置。整数なら one-hot の分布も付く |
 | AI SDK の answer オブジェクト | そのまま通す |
 
-値は消費されるときに質問と照合されます。選択肢にない choice、段階数を超えた score、0〜1 の外の確率は、呼び出しと破棄の両方を失敗させます。本物のモデルが返せない値を fake が返すことはありません。スクリプト化したモデルは本物の `experimental_evaluate` の下で動くので、SDK 自身の検証も効きます。`evaluations()` は各呼び出しの `state`、`questions`、`provider`、`answers` を返し、`assertEvaluated(predicate?)` と `assertNeverEvaluated()` がプロンプト用のアサーションに対応します。消費されなかった答えは破棄を失敗させます。
+値は消費されるときに質問と照合されます。選択肢にない choice、段階数を超えた score、0〜1 の外の確率は、呼び出しと破棄の両方を失敗させます。本物のモデルが返せない値を fake が返すことはありません。スクリプト化したモデルは本物の `experimental_evaluate` の下で動くので、SDK 自身の検証も効きます。`evaluationCalls()` は各呼び出しの `state`、`questions`、`provider`、`answers` を返し、`assertEvaluated(predicate?)` と `assertNeverEvaluated()` がプロンプト用のアサーションに対応します。
 
 fake が証明するのは配線です。instructions とツールの説明が本物のモデルから正しい答えを引き出せるかは、もう1つの計測で決まります。そちらは実際にモデルを呼びます。
 

@@ -147,8 +147,8 @@ describe('Agent statics: the ambient form', () => {
 })
 
 describe('defineAiConfig and AiManager', () => {
-  async function bootWith(providers: Record<string, AiProviderConfig>, defaultName: string): Promise<Application> {
-    const app = createApp({ config: [defineAiConfig(() => ({ default: defaultName, providers }))] })
+  async function bootWith(providers: Record<string, AiProviderConfig>, defaultName: string, defaultEvaluation?: string): Promise<Application> {
+    const app = createApp({ config: [defineAiConfig(() => ({ default: defaultName, defaultEvaluation, providers }))] })
     await app.boot()
     return app
   }
@@ -188,28 +188,18 @@ describe('defineAiConfig and AiManager', () => {
   })
 
   test('should fail the boot when defaultEvaluation names no provider', async () => {
-    const app = createApp({
-      config: [defineAiConfig(() => ({ default: 'main', defaultEvaluation: 'jev', providers: { main: { model: () => scriptedModel([]) } } }))],
-    })
-
-    await expect(app.boot()).rejects.toThrow(
+    await expect(bootWith({ main: { model: () => scriptedModel([]) } }, 'main', 'jev')).rejects.toThrow(
       'config/ai.ts names "jev" as its defaultEvaluation provider, but configures only: main.',
     )
   })
 
   test('should evaluate through defaultEvaluation, memoizing its model', async () => {
     let built = 0
-    const app = createApp({
-      config: [defineAiConfig(() => ({
-        default: 'main',
-        defaultEvaluation: 'jev',
-        providers: {
-          main: { model: () => scriptedModel([]) },
-          jev: { evaluationModel: () => (built++, evaluationModel()) },
-        },
-      }))],
-    })
-    await app.boot()
+    const app = await bootWith(
+      { main: { model: () => scriptedModel([]) }, jev: { evaluationModel: () => (built++, evaluationModel()) } },
+      'main',
+      'jev',
+    )
     const ai = app.container.make('ai')
 
     const result = await evaluate({
@@ -243,15 +233,12 @@ describe('defineAiConfig and AiManager', () => {
 /** Answers every choice with its first option and every boolean with 0.25. */
 function evaluationModel(): Experimental_EvaluationMockModelV4 {
   return new Experimental_EvaluationMockModelV4({
-    supportedQuestionTypes: ['choice', 'score', 'boolean'],
+    supportedQuestionTypes: ['choice', 'boolean'],
     doEvaluate: async ({ questions }) => ({
       answers: Object.fromEntries(Object.entries(questions).map(([id, question]) => {
-        if (question.type === 'choice') {
-          const options = Object.keys(question.criteria)
-          return [id, { type: 'choice', choice: options[0]!, probabilities: Object.fromEntries(options.map((o, i) => [o, i === 0 ? 1 : 0])) }]
-        }
-        if (question.type === 'score') return [id, { type: 'score', score: 0 }]
-        return [id, { type: 'boolean', probability: 0.25 }]
+        if (question.type !== 'choice') return [id, { type: 'boolean', probability: 0.25 }]
+        const options = Object.keys(question.criteria)
+        return [id, { type: 'choice', choice: options[0]!, probabilities: Object.fromEntries(options.map((o, i) => [o, i === 0 ? 1 : 0])) }]
       })),
       warnings: [],
     }),

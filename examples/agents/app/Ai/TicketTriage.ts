@@ -31,7 +31,10 @@ export async function triageTicket(manager: AiManager, ticket: { title: string }
     },
   })
   const { choice, probabilities } = answers.category
-  const categoryProbability = probabilities?.[choice] ?? 0
+  // The SDK's LLM adapters answer a choice with no distribution; treating that as 0 would
+  // park every ticket for review without saying why. The threshold needs a native one.
+  if (!probabilities) throw new Error('The evaluation provider returned no probability distribution for `category`; triage needs an evaluation model that does (Jev).')
+  const categoryProbability = probabilities[choice] ?? 0
 
   return {
     category: choice,

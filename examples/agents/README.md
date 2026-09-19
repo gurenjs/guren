@@ -257,7 +257,7 @@ zero-shot), they run above the hit rate in every bucket: rows it scored 0.8 to
 96.8% precision. Pick the cutoff from a labelled sample of your own tickets, at
 the precision the queue needs, with the instructions you ship.
 
-Tests script the answer instead of the key: `ai.answer([{ category: 'billing' }])`
+Tests script the answer instead of the key: `ai.respondEvaluations([{ category: 'billing' }])`
 on the fake from `@guren/testing`, and a scripted choice outside the enum fails
 the test, so the fake cannot pass a value the real model could never return
 (`tests/ticket-triage.test.ts`). Set `TYPESAFE_AI_API_KEY` in `.env` for the
