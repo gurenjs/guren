@@ -173,8 +173,44 @@ describe('validatePlan', () => {
     const results = validatePlan(plan(), appState({ tables: [{ identifier: 'users', columns: ['id'] }] }))
 
     const result = expectResult(results, 'plan:app-unjudged', 'model.post', 'warn')
-    expect(result?.message).toContain('Table "posts" was not found')
+    expect(result?.message).toContain('table "posts" was not found')
     expect(find(results, 'plan:app-missing', 'column.post.id')).toBeUndefined()
+  })
+
+  test('should warn that columns went unjudged when the schema could not be read', () => {
+    const results = validatePlan(plan(), appState({ tables: { unreadable: 'db/schema.ts declared no table' } }))
+
+    const result = expectResult(results, 'plan:app-unjudged', 'model.post', 'warn')
+
+    expect(result?.message).toContain("schema could not be read")
+  })
+
+  test('should not treat a middleware that merely starts with "can" as authorization', () => {
+    const draft = plan()
+    draft.controllers[0].actions[0].authorization.middleware = ['auth', 'cancelWindow']
+
+    expectResult(validatePlan(draft, appState()), 'plan:route-authorization', 'route.comments.store', 'warn')
+  })
+
+  test('should treat a "can" alias as authorization', () => {
+    const draft = plan()
+    draft.controllers[0].actions[0].authorization.middleware = ['auth', 'can:create']
+
+    expect(find(validatePlan(draft, appState()), 'plan:route-authorization', 'route.comments.store')).toBeUndefined()
+  })
+
+  test('should fail an altered action the plan states no route for', () => {
+    const draft = plan()
+    draft.controllers[0].change = { kind: 'alter' }
+    draft.controllers[0].actions[0].change = { kind: 'alter' }
+    draft.routes = draft.routes.filter((route) => route.action !== 'action.comments.store')
+    draft.views[0].form = undefined
+    draft.tasks[0].acceptance = []
+
+    const result = expectResult(validatePlan(draft, appState()), 'plan:acceptance', 'action.comments.store', 'fail')
+
+    expect(result?.message).toContain('states no route reaching it')
+    expect(result?.suggestion).toContain('existing')
   })
 
   test('should fail an added action the controller already declares', () => {

@@ -206,7 +206,9 @@ async function controllerSections(cwd: string): Promise<{ classes: PlanAppNames;
 async function routeSection(cwd: string, routesFile: string | undefined): Promise<PlanAppState['routes']> {
   const loadErrors: string[] = []
   const routes = await loadContextRoutes(cwd, routesFile, loadErrors)
-  if (loadErrors[0]) return { unreadable: loadErrors[0] }
+  // Presence, not truthiness: `new Error()` pushes '', and a discarded error reports
+  // the routes file as an app with no routes rather than as one nobody could read.
+  if (loadErrors.length > 0) return { unreadable: loadErrors[0] || 'the routes file threw without a message' }
   return routes.map((route) => ({ name: route.name, method: route.method, path: route.path }))
 }
 

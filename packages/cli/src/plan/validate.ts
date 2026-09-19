@@ -39,12 +39,13 @@ export interface PlanCheckResult extends CheckResult {
 }
 
 /**
- * Authentication is judged by `guren audit`'s own name rule, so a plan and an audit
- * of the built application cannot disagree about a middleware called `sessionAuth`.
- * Authorization has no such rule for a plan — audit reads a live route's stamped
- * capabilities — so it is matched here, and first: `authorize` is an `auth` name too.
+ * Matched before authentication, since `authorize` is an `auth` name too; authentication
+ * itself goes through `guren audit`'s rule, so a plan and an audit cannot disagree.
+ * `@guren/core` spells its own `authorize*`; an app's aliases match whole or to a
+ * delimiter (`can`, `can:delete`), never as a prefix — `/^can/` also claimed
+ * `cancelWindow`, and a name misread as authorization deletes the finding.
  */
-const AUTHORIZATION_MIDDLEWARE = /^(can|authoriz|policy|gate|requireabilit)/i
+const AUTHORIZATION_MIDDLEWARE = /^(?:authoriz|requireabilit)|^(?:can|gate|policy|ability)(?:[:.\-_]|$)/i
 
 /** Which child change a parent's own change admits; `null` admits every kind. */
 const CHILD_CHANGES_BY_PARENT: Record<PlanChange['kind'], ReadonlyArray<PlanChange['kind']> | null> = {
@@ -368,6 +369,8 @@ function withSection<T>(
   section: T[] | PlanAppUnreadable,
   results: PlanCheckResult[],
   use: (readable: T[]) => void,
+  /** Elements this section would also have judged, which the section warning does not name. */
+  orElse?: (reason: string) => void,
 ): void {
   if (!isUnreadable(section)) {
     use(section)
@@ -380,6 +383,7 @@ function withSection<T>(
       `The application's ${name} could not be read (${section.unreadable}), so the plan's ${name} were neither confirmed nor refuted.`,
     ),
   )
+  orElse?.(section.unreadable)
 }
 
 function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
@@ -412,6 +416,12 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
         results,
       )
       checkColumnsAgainstApp(model, tables, results)
+    }
+  },
+  (reason) => {
+    for (const model of plan.models) {
+      if (model.change.kind === 'add' || model.columns.length === 0) continue
+      reportUnjudgedColumns(model, `the application's schema could not be read (${reason})`, results)
     }
   })
 
@@ -494,17 +504,7 @@ function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<{ identi
   const lookup = model.tableRenamedFrom ?? model.table
   const table = tables.find((candidate) => candidate.identifier === lookup || candidate.tableName === lookup)
   if (!table) {
-    // The table has its own result; without this one, its columns would go unjudged in silence.
-    if (model.columns.length > 0) {
-      results.push(
-        finding(
-          'plan:app-unjudged',
-          'warn',
-          `Table "${lookup}" was not found, so the ${model.columns.length} planned column(s) of "${model.name}" were neither confirmed nor refuted.`,
-          { elementId: model.id, section: 'models' },
-        ),
-      )
-    }
+    if (model.columns.length > 0) reportUnjudgedColumns(model, `table "${lookup}" was not found`, results)
     return
   }
   for (const column of model.columns) {
@@ -523,6 +523,21 @@ function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<{ identi
       results,
     )
   }
+}
+
+/**
+ * Columns the checks did not reach. Without it they are skipped in silence, which on
+ * the rendered page is indistinguishable from a column that was checked and passed.
+ */
+function reportUnjudgedColumns(model: PlanModel, because: string, results: PlanCheckResult[]): void {
+  results.push(
+    finding(
+      'plan:app-unjudged',
+      'warn',
+      `The ${model.columns.length} planned column(s) of "${model.name}" were neither confirmed nor refuted: ${because}.`,
+      { elementId: model.id, section: 'models' },
+    ),
+  )
 }
 
 function renameFrom(change: PlanChange): string | undefined {
@@ -659,6 +674,23 @@ function checkAcceptanceCoverage(plan: PlanDraft, index: PlanIndex, results: Pla
     for (const action of controller.actions) {
       if (action.change.kind !== 'alter') continue
       const routes = index.routesByAction.get(action.id) ?? []
+      // A behaviour's `route` is a plan route id, so an action the plan states no
+      // route for cannot be covered at all — a different fix from an uncovered route.
+      if (routes.length === 0) {
+        results.push(
+          finding(
+            'plan:acceptance',
+            'fail',
+            `Action "${action.name}" is altered, but the plan states no route reaching it, so no acceptance behaviour can name one.`,
+            {
+              elementId: action.id,
+              section: 'actions',
+              suggestion: 'Restate the route this action serves as { "kind": "existing" }, then give it an acceptance behaviour.',
+            },
+          ),
+        )
+        continue
+      }
       if (routes.some((route) => behavioursOf(route.id).length > 0)) continue
       results.push(
         finding(

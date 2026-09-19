@@ -90,6 +90,18 @@ describe('loadPlanAppState', () => {
     expect(state.tables).toEqual([])
   })
 
+  test('should report routes as unreadable when the routes file throws without a message', async () => {
+    await writeWorkspaceFiles(cwd, {
+      'package.json': '{ "name": "empty-error", "type": "module" }\n',
+      'routes/web.ts': 'throw new Error()\n',
+    })
+
+    const state = await loadPlanAppState(cwd)
+
+    // An error with an empty message must not read as an app that has no routes.
+    expect(isUnreadable(state.routes)).toBe(true)
+  })
+
   test('should always report validators as unreadable', async () => {
     const state = await loadPlanAppState(cwd)
 
