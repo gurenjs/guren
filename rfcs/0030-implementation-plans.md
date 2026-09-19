@@ -648,6 +648,24 @@ waiver with a reason, offers `make:adr` for each recorded deviation, archives
 the plan, and leaves `spec:generate` as the description of record. A plan is a
 proposal with an end, not a second specification to keep in sync.
 
+**Amended after acceptance (2026-09-19):** what `plan:close` leaves behind has
+two layers, and the plan feeds one of them. The *generated* layer is
+`docs/spec/`, regenerated from code under the existing drift gate, and it gains
+nothing from a plan. The *curated* layer is one OKF document per entity
+(`docs/entities/<Entity>.md`, `entities:` naming it) holding what code cannot
+say: purpose, business rules, decisions, non-goals, and the plans and PRs that
+touched it. `plan:close` inserts a draft block per section, fenced by
+`<!-- guren:plan <hash> -->` markers, and never rewrites text outside them.
+A rule cites the acceptance id that verifies it (`… (AC-comments-4)`); the doc
+never restates a column or a route, which the generated layer already holds,
+and a rule with no id, or an id no test carries, is a `check --docs` finding.
+
+A committed `docs/spec/behaviours.md` was considered and dropped (Open
+Question 9). Behaviours are derived data instead: `guren context <Entity>`
+gains a Behaviours section read from id-tagged test titles, and the plan page
+already shows them per element. A report command may write a catalogue on
+demand; nothing commits one.
+
 ### 8. Producers
 
 The schema, the checks, the renderer and the status derivation involve no
@@ -862,9 +880,21 @@ code and never from an earlier plan.
    paths in a way the static scan cannot read? If most do, the
    characterization rule fires on nothing and needs a runtime source instead
    (route hits recorded by `TestApp` during a test run).
-9. **A behaviours view.** Id-tagged test titles are enough to generate
+9. ~~**A behaviours view.** Id-tagged test titles are enough to generate
    `docs/spec/behaviours.md` per entity, deterministically, under the existing
-   drift gate. In this RFC, or a follow-up once plans have produced such tests?
+   drift gate. In this RFC, or a follow-up once plans have produced such tests?~~
+   **Resolved (2026-09-19):** not committed. Every living-documentation tool
+   surveyed (Cucumber, Serenity, Reqnroll, Pickles, Concordion, Gauge, Spring
+   REST Docs, the rspec and mocha reporters) emits a build report and commits
+   nothing; the one committed, CI-gated catalogue found had been dropped
+   because a forgotten regeneration reddened every open PR and PRs conflicted
+   in a file none of them wrote. No study measures whether a generated view is
+   read. What the evidence does support is the id itself: maintained trace
+   links help (a 2015 experiment: 24% faster, 50% more correct), and manual
+   upkeep is what kills them, which an id in the test title avoids. So the id
+   grammar stays, `guren check` enforces it, and behaviours surface where a
+   reader exists (§7 amendment). Revisited if a catalogue turns out to be
+   opened.
 10. **Producer confinement.** §8 relies on deny rules holding for `Read` in
     `--bare` headless mode. That has to be tested, not assumed; if they do not
     hold, the producer needs an OS-level sandbox or a copy of the tree with the
