@@ -1,11 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { FEEDBACK_MAX_BYTES, FEEDBACK_STDIN, readPlanFeedback, type PlanFeedback } from '../src/plan/feedback'
+import {
+  FEEDBACK_MAX_BYTES,
+  FEEDBACK_STDIN,
+  PLAN_FEEDBACK_VERDICTS,
+  readPlanFeedback,
+  type PlanFeedback,
+} from '../src/plan/feedback'
+import { planTemplatePath } from '../src/plan/render'
 
-/** The document the page exports, with one element of each shape it writes. */
+/**
+ * The document the page exports, with one element of each shape it writes: the third
+ * is commented but unjudged, which the page writes as a null verdict.
+ */
 const FEEDBACK: PlanFeedback = {
   planHash: 'a'.repeat(64),
   answers: [{ questionId: 'Q-delete', option: 'soft' }, { questionId: 'Q-rate', text: 'ask the team' }],
@@ -55,6 +66,16 @@ describe('readPlanFeedback', () => {
     return base.replace('"comment":""', () => `"comment":"${'x'.repeat(padding)}"`)
   }
 
+  test('should accept the verdicts the page issues, and no others', () => {
+    // The page writes this document and nothing connects the two but their spelling,
+    // so the reader's enum is held to the buttons the page actually offers.
+    const offered = readFileSync(planTemplatePath(), 'utf8').match(/var VERDICTS = \[([^\]]*)\]/)
+    expect(offered, 'the page declares no verdicts').not.toBeNull()
+
+    const keys = [...(offered?.[1] ?? '').matchAll(/key: '([^']+)'/g)].map((match) => match[1])
+    expect(keys).toEqual([...PLAN_FEEDBACK_VERDICTS])
+  })
+
   test('should read a feedback file', async () => {
     const feedback = await readPlanFeedback(await writeFeedback(FEEDBACK))
 
@@ -69,18 +90,6 @@ describe('readPlanFeedback', () => {
 
   test('should read the document from standard input', async () => {
     expect(await fromStdin(JSON.stringify(FEEDBACK))).toEqual(FEEDBACK)
-  })
-
-  test('should keep an element carrying only a comment', async () => {
-    const feedback = await fromStdin(JSON.stringify(FEEDBACK))
-
-    // The page exports a commented element with no verdict, and dropping the null
-    // would take the comment with it.
-    expect(feedback.elements[2]).toEqual({
-      elementId: 'view.posts.show',
-      verdict: null,
-      comment: 'the empty state reads oddly',
-    })
   })
 
   test('should report a document that is not JSON with the path that failed', async () => {

@@ -12,7 +12,7 @@ import { resolve } from 'node:path'
 
 import { z } from 'zod'
 
-import { CliError } from '../cli-error'
+import { CliError, formatSchemaIssues } from '../cli-error'
 
 export const FEEDBACK_STDIN = '-'
 
@@ -53,7 +53,7 @@ export type PlanFeedback = z.infer<typeof PlanFeedbackSchema>
 export interface ReadPlanFeedbackOptions {
   cwd?: string
   /** Test seam: where {@link FEEDBACK_STDIN} reads from. */
-  stdin?: () => AsyncIterable<Uint8Array | string>
+  stdin?: () => AsyncIterable<Uint8Array>
 }
 
 function overSizeMessage(origin: string): string {
@@ -64,16 +64,15 @@ function overSizeMessage(origin: string): string {
  * A pipe counted as it arrives: throwing out of the loop closes the iterator, so a
  * stream that would not end costs the cap rather than everything it has to offer.
  */
-async function readWithinLimit(chunks: AsyncIterable<Uint8Array | string>, origin: string): Promise<string> {
+async function readWithinLimit(chunks: AsyncIterable<Uint8Array>, origin: string): Promise<string> {
   const decoder = new TextDecoder()
   const parts: string[] = []
   let bytes = 0
 
   for await (const chunk of chunks) {
-    const buffer = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk
-    bytes += buffer.byteLength
+    bytes += chunk.byteLength
     if (bytes > FEEDBACK_MAX_BYTES) throw new CliError(overSizeMessage(origin))
-    parts.push(decoder.decode(buffer, { stream: true }))
+    parts.push(decoder.decode(chunk, { stream: true }))
   }
 
   parts.push(decoder.decode())
@@ -84,12 +83,6 @@ async function readWithinLimit(chunks: AsyncIterable<Uint8Array | string>, origi
 async function readFileWithinLimit(path: string): Promise<string> {
   if ((await stat(path)).size > FEEDBACK_MAX_BYTES) throw new CliError(overSizeMessage(path))
   return readFile(path, 'utf8')
-}
-
-function formatIssues(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => `  ${issue.path.length ? issue.path.join('.') : '<root>'}: ${issue.message}`)
-    .join('\n')
 }
 
 /** The feedback document, or a CliError naming what about it could not be read. */
@@ -122,7 +115,7 @@ export async function readPlanFeedback(source: string, options: ReadPlanFeedback
   const parsed = PlanFeedbackSchema.safeParse(document)
   if (!parsed.success) {
     throw new CliError(
-      `The feedback on ${origin} does not match the feedback the plan page exports:\n${formatIssues(parsed.error)}`,
+      `The feedback on ${origin} does not match the feedback the plan page exports:\n${formatSchemaIssues(parsed.error)}`,
     )
   }
   return parsed.data

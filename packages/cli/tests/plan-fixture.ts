@@ -36,9 +36,11 @@ export function planAppState(overrides: Partial<PlanAppState> = {}): PlanAppStat
 }
 
 /**
- * The same application on disk, for a test that goes through the command. It declares
- * no routes file, so the route section reads as an app with no routes rather than as
- * one nobody could read: both `plan:app-unreadable` warnings would otherwise count.
+ * The same application on disk, for the tests that go through the command and its
+ * scanners. It does not derive from {@link planAppState}; the command test asserting
+ * the fixture's three warnings is what holds the two together.
+ * It declares no routes file, so the route section reads as an application with no
+ * routes rather than as one nobody could read, which would be a second warning.
  */
 export const PLAN_APP_FILES: Record<string, string> = {
   'app/Models/Post.ts': `import { defineModel } from '@guren/core'
@@ -78,13 +80,35 @@ export const users = pgTable('users', {
 }
 
 /**
- * The page's data block, parsed back: what the page will actually read. Held apart
- * from the assertions on the block's *text*, which is where the escaping is pinned.
+ * A second application, which already has the Comment the plan adds. Two applications
+ * that both declare something is what tells a flag the command read from one it
+ * ignored; a root that does not exist would answer for whatever "no such directory"
+ * is taken to mean.
  */
-export function planPageData(html: string): PlanPagePayload {
+export const PLAN_APP_WITH_COMMENTS: Record<string, string> = {
+  ...PLAN_APP_FILES,
+  'app/Models/Comment.ts': `import { defineModel } from '@guren/core'
+import { comments } from '@/db/schema'
+
+export class Comment extends defineModel(comments) {}
+`,
+}
+
+/**
+ * The page's data block, taken out of the rendered document the way a consumer
+ * would. Asserting on this string rather than on the whole file is what lets the
+ * escaping tests fail: the document's own script and style are full of `<` and `&`.
+ */
+export function planDataBlock(html: string): string {
   const opening = '<script type="application/json" id="plan-data">'
   const start = html.indexOf(opening)
   if (start < 0) throw new Error('the rendered page carries no data block')
   const end = html.indexOf('</script>', start)
-  return JSON.parse(html.slice(start + opening.length, end)) as PlanPagePayload
+  if (end < start) throw new Error('the rendered page leaves its data block open')
+  return html.slice(start + opening.length, end)
+}
+
+/** The page's data block, parsed back: what the page will actually read. */
+export function planPageData(html: string): PlanPagePayload {
+  return JSON.parse(planDataBlock(html)) as PlanPagePayload
 }

@@ -222,14 +222,11 @@ const planRenderCommand = defineCommand({
   },
   async run({ args }) {
     // The application the plan is checked against, which the plan file need not sit
-    // in: a plan is reviewed from wherever it was written.
-    const app = await loadPlanAppState(args.app ?? process.cwd())
+    // in: a plan is reviewed from wherever it was written. Scanned only once the plan
+    // itself has parsed.
+    const app = () => loadPlanAppState(args.app ?? process.cwd())
     const rendered = await renderPlanFile(args.plan, { output: args.output, app })
 
-    const findings = rendered.checks.filter((result) => result.status !== 'pass')
-    if (findings.length > 0) {
-      consola.warn(`${findings.length} check finding(s) are pinned at the top of the page.`)
-    }
     console.log(rendered.path)
   },
 })

@@ -7,9 +7,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 
-import type { z } from 'zod'
-
-import { CliError } from './cli-error'
+import { CliError, formatSchemaIssues } from './cli-error'
 import type { PlanAppState } from './plan/app-state'
 import { hasBaseline, renderPlanHtml } from './plan/render'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
@@ -18,10 +16,11 @@ import { PlanDraftSchema, PlanSchema, type Plan, type PlanDraft } from './plan/s
 
 export interface RenderPlanFileOptions {
   /**
-   * The application the plan is checked against. Required: a page rendered without
-   * the checks shows an empty "needs attention" block, which reads as a clean plan.
+   * Required: a page rendered with no checks shows an empty banner, which reads as a
+   * clean plan. A function is resolved after the plan parses, so a mistyped path does
+   * not pay for a scan of the application.
    */
-  app: PlanAppState
+  app: PlanAppState | (() => Promise<PlanAppState>)
   /** Where to write. Relative paths resolve against the working directory, as a shell argument reads. */
   output?: string
   /** Resolves the plan and the output path. The application root is {@link RenderPlanFileOptions.app}'s. */
@@ -34,12 +33,6 @@ export interface RenderedPlanFile {
   checks: PlanCheckResult[]
 }
 
-function formatIssues(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => `  ${issue.path.length ? issue.path.join('.') : '<root>'}: ${issue.message}`)
-    .join('\n')
-}
-
 /**
  * Either form renders. A document carrying a `baseline` is held to `PlanSchema`, so
  * that a malformed baseline is reported rather than silently dropping the plan's
@@ -48,7 +41,7 @@ function formatIssues(error: z.ZodError): string {
 export function parsePlanDocument(document: unknown): PlanDraft | Plan {
   const parsed = (hasBaseline(document) ? PlanSchema : PlanDraftSchema).safeParse(document)
   if (parsed.success) return parsed.data
-  throw new CliError(`The plan does not match the plan schema:\n${formatIssues(parsed.error)}`)
+  throw new CliError(`The plan does not match the plan schema:\n${formatSchemaIssues(parsed.error)}`)
 }
 
 /** Whether two paths reach one file. A target that does not exist is not the plan, which does. */
@@ -85,9 +78,9 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
   }
 
   const plan = parsePlanDocument(document)
-  // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to
-  // render nothing. The page is where someone reads what is wrong with the plan.
-  const checks = validatePlan(plan, options.app)
+  const app = typeof options.app === 'function' ? await options.app() : options.app
+  // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to render nothing.
+  const checks = validatePlan(plan, app)
   const html = renderPlanHtml({ plan, checks, planFile: basename(absolutePlan) })
   const target = options.output ? resolve(cwd, options.output) : planOutputPath(absolutePlan)
 

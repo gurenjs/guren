@@ -2104,8 +2104,7 @@
         }
 
         // `planFile` is already held to a bare name with no shell metacharacter, because
-        // these lines exist to be pasted into a shell. The pipe that feeds the second one
-        // is left to the reader: the command that writes the clipboard differs per system.
+        // these lines exist to be pasted into a shell.
         var reviseCommand = 'bunx guren plan --revise ' + (data.planFile || '<plan.json>')
         document.getElementById('revise-file-command').textContent = reviseCommand + ' --feedback feedback.json'
         document.getElementById('revise-stdin-command').textContent = reviseCommand + ' --feedback -'

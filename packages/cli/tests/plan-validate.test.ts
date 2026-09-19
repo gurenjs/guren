@@ -1,16 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { CheckStatus } from '../src/check-result'
-import type { PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { validatePlan, type PlanCheckResult } from '../src/plan/validate'
-import { loadCommentsPlan, planAppState } from './plan-fixture'
+import { loadCommentsPlan, planAppState as appState } from './plan-fixture'
 
 function plan(): PlanDraft {
   return PlanDraftSchema.parse(loadCommentsPlan())
 }
-
-const appState = (overrides: Partial<PlanAppState> = {}): PlanAppState => planAppState(overrides)
 
 function failures(results: PlanCheckResult[]): PlanCheckResult[] {
   return results.filter((result) => result.status === 'fail')
