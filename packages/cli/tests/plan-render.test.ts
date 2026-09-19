@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -499,6 +499,34 @@ describe('renderPlanFile', () => {
     const result = await renderPlanFile(join(dir, 'comments.plan.json'), { output: 'review.html', cwd: dir })
 
     expect(result.path).toBe(join(dir, 'review.html'))
+  })
+
+  test('should refuse to write the page over the plan it is reading', async () => {
+    const dir = await fixtureDir()
+    const planPath = join(dir, 'comments.plan.json')
+
+    await expect(renderPlanFile(planPath, { output: planPath })).rejects.toThrow(/over the plan itself/)
+    // The plan is the input every later step reads, and nothing here keeps a copy.
+    expect(JSON.parse(await readFile(planPath, 'utf8')).planVersion).toBe(1)
+  })
+
+  test('should refuse it by identity, not by spelling', async () => {
+    const dir = await fixtureDir()
+    const planPath = join(dir, 'comments.plan.json')
+    const alias = join(dir, 'alias.plan.json')
+    await symlink(planPath, alias)
+
+    await expect(renderPlanFile(planPath, { output: alias })).rejects.toThrow(/over the plan itself/)
+    expect(JSON.parse(await readFile(planPath, 'utf8')).planVersion).toBe(1)
+  })
+
+  test('should name the path when it cannot be written to', async () => {
+    const dir = await fixtureDir()
+    await mkdir(join(dir, 'out'))
+
+    await expect(renderPlanFile(join(dir, 'comments.plan.json'), { output: join(dir, 'out') })).rejects.toThrow(
+      /Cannot write the page to .*out/,
+    )
   })
 
   test('should report a schema failure with the path that failed', async () => {

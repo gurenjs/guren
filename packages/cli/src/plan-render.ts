@@ -4,7 +4,7 @@
  * it is a review artifact, not project knowledge, and nothing regenerates it.
  */
 
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 
 import type { z } from 'zod'
@@ -44,6 +44,17 @@ export function parsePlanDocument(document: unknown): PlanDraft | Plan {
   throw new CliError(`The plan does not match the plan schema:\n${formatIssues(parsed.error)}`)
 }
 
+/** Whether two paths reach one file. A target that does not exist is not the plan, which does. */
+async function isSameFile(target: string, plan: string): Promise<boolean> {
+  try {
+    const [a, b] = await Promise.all([stat(target), stat(plan)])
+    return a.dev === b.dev && a.ino === b.ino
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
 export function planOutputPath(planPath: string): string {
   return planPath.endsWith('.json') ? `${planPath.slice(0, -'.json'.length)}.html` : `${planPath}.html`
 }
@@ -70,8 +81,22 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
   const html = renderPlanHtml({ plan, checks: options.checks, planFile: basename(absolutePlan) })
   const target = options.output ? resolve(cwd, options.output) : planOutputPath(absolutePlan)
 
+  // The plan is the input every later step reads, and this command keeps no copy of it,
+  // so an `-o` that lands on it would end the work rather than render it. Compared by
+  // identity rather than by path: a case-insensitive filesystem, a symlink and a hard
+  // link all reach one file under two names.
+  if (await isSameFile(target, absolutePlan)) {
+    throw new CliError(`Refusing to write the page over the plan itself at ${target}. Choose another -o path.`)
+  }
+
   // The package's own writer: it creates the directory, so `-o build/plan.html` works
   // before `build/` exists. Always `force`, since re-rendering a plan is the normal case.
-  await writeFileSafe(target, html, { force: true })
+  try {
+    await writeFileSafe(target, html, { force: true })
+  } catch (error) {
+    // A path the user chose, answered with the path rather than with a stack trace.
+    if (error instanceof CliError) throw error
+    throw new CliError(`Cannot write the page to ${target}: ${(error as Error).message}`)
+  }
   return { path: target, duplicateIds: findDuplicatePlanIds(plan) }
 }
