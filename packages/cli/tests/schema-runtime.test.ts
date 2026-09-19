@@ -376,7 +376,8 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey(), ...timest
     })
 
     test('should fall back to the static reader when the import never settles', async () => {
-      const app = await createApp({ 'db/schema.ts': `${OPAQUE_SCHEMA}\nawait new Promise(() => {})\n` })
+      // A promise nothing will settle is not enough: Bun on Linux resolves the import anyway.
+      const app = await createApp({ 'db/schema.ts': `${OPAQUE_SCHEMA}\nawait new Promise((done) => setTimeout(done, 10_000))\n` })
       await expectStaticFallback(app, /could not be imported: the import did not finish within 50ms/, { importTimeoutMs: 50 })
     })
 
