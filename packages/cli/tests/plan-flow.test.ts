@@ -140,9 +140,13 @@ describe('layoutPlanFlows', () => {
 })
 
 describe('layoutPlanFlows on graphs that are not a clean chain', () => {
-  function chain(length: number): { nodes: unknown[]; edges: unknown[] } {
+  function chain(length: number): Pick<PlanFlowInput, 'nodes' | 'edges'> {
     return {
-      nodes: Array.from({ length }, (_, index) => ({ id: `n${index}`, label: `n${index}`, kind: 'action' })),
+      nodes: Array.from({ length }, (_, index) => ({
+        id: `n${index}`,
+        label: `n${index}`,
+        kind: 'action' as const,
+      })),
       edges: Array.from({ length: length - 1 }, (_, index) => ({ from: `n${index}`, to: `n${index + 1}` })),
     }
   }
@@ -197,7 +201,7 @@ describe('layoutPlanFlows on graphs that are not a clean chain', () => {
     // Reverse declaration is the worst case for the relaxation: one edge settles a pass.
     const { nodes, edges } = chain(120)
     const forward = placed(planWith({ nodes, edges }))
-    const backward = placed(planWith({ nodes, edges: [...(edges as unknown[])].reverse() }))
+    const backward = placed(planWith({ nodes, edges: edges.slice().reverse() }))
 
     expect(backward).toEqual(forward)
     expect(forward.n119).toEqual([119, 0])

@@ -40,15 +40,11 @@ function declaredEdges(flow: { nodes: PlanFlowNode[]; edges: PlanFlowEdge[] }): 
 }
 
 /**
- * The edges that close a cycle, found by a depth-first walk in declaration order: an
- * edge onto a node already on the stack is the one that closes it. Which edge of a
- * cycle is called the back edge depends on that order, which is why the order is the
- * plan's own and not a traversal of a map.
- *
- * The walk carries its own stack rather than recursing. A recursive one overflows on a
- * chain — measured at between 1,000 and 5,000 steps under Node and between 20,000 and
- * 40,000 under Bun — so the input that breaks it depends on which runtime is executing,
- * and it breaks by taking the whole command down with a stack trace about recursion.
+ * The edges that close a cycle: a depth-first walk in declaration order, where an edge
+ * onto a node already on the stack is the one that closes it. Which edge of a cycle
+ * that is depends on the order, so the order is the plan's, not a map's.
+ * The walk carries its own stack because a recursive one overflows between 1,000 and
+ * 5,000 chained steps under Node and between 20,000 and 40,000 under Bun.
  */
 function backEdges(nodes: PlanFlowNode[], edges: PlanFlowEdge[]): Set<PlanFlowEdge> {
   const out = new Map<string, PlanFlowEdge[]>()
