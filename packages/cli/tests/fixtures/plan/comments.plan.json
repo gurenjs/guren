@@ -1,0 +1,200 @@
+{
+  "planVersion": 1,
+  "title": "Comments on posts",
+  "summary": "Signed-in users can comment on a post; an author can delete their own comment.",
+  "scope": {
+    "goals": ["Comment on a post", "Delete your own comment"],
+    "nonGoals": ["Threaded replies", "Editing a comment"]
+  },
+  "assumptions": ["Comments are shown on the post page, newest last"],
+  "questions": [
+    {
+      "id": "Q-delete",
+      "question": "Does deleting a comment remove the row?",
+      "options": [
+        { "label": "hard delete", "consequence": "The row is removed; no deleted_at column." },
+        { "label": "soft delete", "consequence": "A deleted_at column is added and lists filter on it." }
+      ],
+      "assumed": "hard delete",
+      "affects": ["model.comment", "action.comments.destroy"]
+    }
+  ],
+  "models": [
+    {
+      "id": "model.post",
+      "change": { "kind": "existing" },
+      "name": "Post",
+      "table": "posts",
+      "columns": [],
+      "relationships": [{ "name": "comments", "type": "hasMany", "target": "model.comment" }],
+      "fillable": []
+    },
+    {
+      "id": "model.comment",
+      "change": { "kind": "add" },
+      "name": "Comment",
+      "table": "comments",
+      "columns": [
+        { "name": "id", "change": { "kind": "add" }, "type": "integer", "nullable": false, "unique": false, "index": false, "primaryKey": true },
+        { "name": "body", "change": { "kind": "add" }, "type": "text", "nullable": false, "unique": false, "index": false },
+        {
+          "name": "postId",
+          "change": { "kind": "add" },
+          "type": "integer",
+          "nullable": false,
+          "unique": false,
+          "index": true,
+          "references": { "model": "model.post", "column": "id", "onDelete": "cascade" }
+        },
+        { "name": "createdAt", "change": { "kind": "add" }, "type": "datetime", "nullable": false, "unique": false, "index": false, "default": "now()" }
+      ],
+      "relationships": [{ "name": "post", "type": "belongsTo", "target": "model.post" }],
+      "fillable": ["body"]
+    }
+  ],
+  "validators": [
+    {
+      "id": "validator.comment",
+      "change": { "kind": "add" },
+      "name": "CommentPayloadSchema",
+      "fields": [{ "name": "body", "type": "text", "required": true, "rules": ["min 1", "max 2000"] }]
+    }
+  ],
+  "controllers": [
+    {
+      "id": "controller.comments",
+      "change": { "kind": "add" },
+      "className": "CommentController",
+      "actions": [
+        {
+          "id": "action.comments.store",
+          "change": { "kind": "add" },
+          "name": "store",
+          "body": "validator.comment",
+          "authorization": { "middleware": ["auth"] },
+          "response": { "kind": "redirect", "to": "/posts/:postId" },
+          "rules": ["The comment's author is the signed-in user."]
+        },
+        {
+          "id": "action.comments.destroy",
+          "change": { "kind": "add" },
+          "name": "destroy",
+          "authorization": { "middleware": ["auth"], "policy": { "id": "policy.comment", "ability": "delete" } },
+          "response": { "kind": "redirect", "to": "/posts/:postId" },
+          "rules": []
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "id": "route.comments.store",
+      "change": { "kind": "add" },
+      "method": "POST",
+      "path": "/posts/:postId/comments",
+      "name": "comments.store",
+      "action": "action.comments.store",
+      "middleware": ["auth"],
+      "bind": [{ "param": "postId", "model": "model.post" }]
+    },
+    {
+      "id": "route.comments.destroy",
+      "change": { "kind": "add" },
+      "method": "DELETE",
+      "path": "/comments/:id",
+      "name": "comments.destroy",
+      "action": "action.comments.destroy",
+      "middleware": ["auth"],
+      "bind": [{ "param": "id", "model": "model.comment" }]
+    }
+  ],
+  "views": [
+    {
+      "id": "view.posts.show",
+      "change": { "kind": "alter" },
+      "page": "posts/Show",
+      "purpose": "Show a post with its comments and a form to add one.",
+      "props": [{ "name": "comments", "type": "Data.Comment[]", "resource": "resource.comment" }],
+      "form": {
+        "validator": "validator.comment",
+        "submitsTo": "route.comments.store",
+        "fields": [{ "field": "body", "label": "Comment", "input": "textarea" }]
+      },
+      "actions": [{ "label": "Delete", "route": "route.comments.destroy" }],
+      "states": { "empty": "No comments yet." }
+    }
+  ],
+  "resources": [
+    {
+      "id": "resource.comment",
+      "change": { "kind": "add" },
+      "name": "CommentResource",
+      "model": "model.comment",
+      "fields": [
+        { "name": "id", "type": "number" },
+        { "name": "body", "type": "string" },
+        { "name": "createdAt", "type": "string" }
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy.comment",
+      "change": { "kind": "add" },
+      "name": "CommentPolicy",
+      "model": "model.comment",
+      "abilities": [{ "name": "delete", "rule": "The signed-in user wrote the comment." }]
+    }
+  ],
+  "sideEffects": [],
+  "commands": [],
+  "tasks": [
+    {
+      "id": "task.comments",
+      "entity": "Comment",
+      "summary": "Comment on a post and delete your own comment.",
+      "covers": ["model.comment", "validator.comment", "controller.comments", "route.comments.store", "route.comments.destroy", "view.posts.show", "resource.comment", "policy.comment"],
+      "acceptance": [
+        {
+          "id": "AC-comments-1",
+          "description": "A signed-in user can comment on a post.",
+          "kind": "success",
+          "actor": "user",
+          "route": "route.comments.store",
+          "given": ["a post exists"],
+          "input": [{ "name": "body", "json": "\"Nice post\"" }],
+          "expect": { "status": 302, "database": [{ "table": "comments", "has": [{ "name": "body", "json": "\"Nice post\"" }] }] }
+        },
+        {
+          "id": "AC-comments-2",
+          "description": "An empty comment is rejected.",
+          "kind": "validation",
+          "actor": "user",
+          "route": "route.comments.store",
+          "given": ["a post exists"],
+          "input": [{ "name": "body", "json": "\"\"" }],
+          "expect": { "status": 422, "errors": ["body"] }
+        },
+        {
+          "id": "AC-comments-3",
+          "description": "A guest cannot comment.",
+          "kind": "unauthenticated",
+          "actor": "guest",
+          "route": "route.comments.store",
+          "given": ["a post exists"],
+          "expect": { "redirect": "/login" }
+        },
+        {
+          "id": "AC-comments-4",
+          "description": "A user cannot delete someone else's comment.",
+          "kind": "forbidden",
+          "actor": "user",
+          "route": "route.comments.destroy",
+          "given": ["a comment written by another user exists"],
+          "expect": { "status": 403 }
+        }
+      ]
+    }
+  ],
+  "hints": []
+}
