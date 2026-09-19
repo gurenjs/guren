@@ -1,3 +1,11 @@
+/**
+ * Reads `db/schema.ts` by importing it and asking drizzle's `getTableConfig()`, which sees
+ * what the static reader marks opaque: spread columns, helper builders, the columns
+ * callback, `pgTableCreator`, an extra config built elsewhere. Importing runs app code,
+ * so edit hooks, `guren check` and the scaffolders stay on `parseSchemaTables()`.
+ * Every failure is a per-file result, never a throw and never an empty table list.
+ */
+import { realpath, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -12,19 +20,13 @@ import {
   type SchemaTable,
 } from './schema-parser'
 
-/**
- * Reads `db/schema.ts` by importing it and asking drizzle's `getTableConfig()`, which sees
- * what the static reader marks opaque: spread columns, helper builders, the columns
- * callback, `pgTableCreator`, an extra config built elsewhere. Importing runs app code,
- * so edit hooks, `guren check` and the scaffolders stay on `parseSchemaTables()`.
- * Every failure is a per-file result, never a throw and never an empty table list.
- */
-
 export type SchemaSource = 'runtime' | 'static'
 
 /** `sqlType` is drizzle's `getSQLType()`, the one type fact the runtime holds; `type` is the builder as written. */
 export interface RuntimeSchemaColumn extends SchemaColumn {
   sqlType?: string
+  /** Set when a chunk of the SQL default is one this reader cannot render, shown as `?` in its text. */
+  opaqueDefault?: true
 }
 
 export interface RuntimeSchemaTable extends SchemaTable {
@@ -105,19 +107,23 @@ export interface SchemaRuntimeOptions {
 
 /**
  * Resolves with the ESM conditions the schema's own `import` gets, so both land on one
- * module instance. `createRequire` alone would name the `.cjs` build, a second copy.
+ * module instance. `createRequire().resolve` names the `.cjs` build, a second copy.
  */
 function resolveFrom(specifier: string, directory: string): string {
-  if (typeof Bun !== 'undefined') return Bun.resolveSync(specifier, directory)
-  return createRequire(resolve(directory, 'noop.js')).resolve(specifier)
+  if (typeof Bun === 'undefined') throw new Error('reading a schema at runtime requires Bun')
+  return Bun.resolveSync(specifier, directory)
 }
 
 /** `drizzle-orm` as the schema file sees it: its own dependency, or the one `@guren/orm` installs. */
 function resolveDrizzle(specifier: string, schemaDir: string): string {
   try {
     return resolveFrom(specifier, schemaDir)
-  } catch {
-    return resolveFrom(specifier, dirname(resolveFrom('@guren/orm/package.json', schemaDir)))
+  } catch (error) {
+    try {
+      return resolveFrom(specifier, dirname(resolveFrom('@guren/orm/package.json', schemaDir)))
+    } catch {
+      throw error
+    }
   }
 }
 
@@ -146,19 +152,33 @@ function isSql(value: unknown): value is RuntimeSql {
   return typeof value === 'object' && value !== null && Array.isArray((value as RuntimeSql).queryChunks)
 }
 
-/** A drizzle `sql` object as text, from its chunks: never through a dialect, never evaluated. */
-function sqlText(sql: RuntimeSql): string {
-  return sql.queryChunks
-    .map((chunk) => {
-      if (typeof chunk === 'string') return chunk
+const TABLE_NAME = Symbol.for('drizzle:Name')
+
+/**
+ * A drizzle `sql` object as text, from its chunks: never through a dialect, never evaluated.
+ * `opaque` is set for a chunk with no rendering here (a placeholder, a view), written `?`.
+ */
+function sqlText(sql: RuntimeSql): { text: string; opaque: boolean } {
+  let opaque = false
+  const text = sql.queryChunks
+    .map((chunk): string => {
       if (typeof chunk !== 'object' || chunk === null) return String(chunk)
-      if (isSql(chunk)) return sqlText(chunk)
-      const record = chunk as { value?: unknown; name?: unknown }
+      if (isSql(chunk)) {
+        const nested = sqlText(chunk)
+        opaque ||= nested.opaque
+        return nested.text
+      }
+      const record = chunk as { value?: unknown; name?: unknown; table?: unknown; [TABLE_NAME]?: unknown }
       if (Array.isArray(record.value)) return record.value.join('')
-      if (typeof record.name === 'string') return record.name
-      return 'value' in record ? literalText(record.value) : '?'
+      // `name` alone is not a column: a placeholder carries one too.
+      if (typeof record.name === 'string' && typeof record.table === 'object') return record.name
+      if (typeof record[TABLE_NAME] === 'string') return record[TABLE_NAME]
+      if ('value' in record) return literalText(record.value)
+      opaque = true
+      return '?'
     })
     .join('')
+  return { text, opaque }
 }
 
 function literalText(value: unknown): string {
@@ -171,10 +191,11 @@ function literalText(value: unknown): string {
 }
 
 /** `.defaultNow()` and `.defaultRandom()` are stored as SQL, so they come back as `sql`. */
-function columnDefault(column: RuntimeColumn): SchemaColumnDefault | undefined {
-  if (column.default === undefined) return undefined
-  if (isSql(column.default)) return { kind: 'sql', text: sqlText(column.default) }
-  return { kind: 'value', text: literalText(column.default) }
+function columnDefault(column: RuntimeColumn): { default?: SchemaColumnDefault; opaqueDefault?: true } {
+  if (column.default === undefined) return {}
+  if (!isSql(column.default)) return { default: { kind: 'value', text: literalText(column.default) } }
+  const { text, opaque } = sqlText(column.default)
+  return { default: { kind: 'sql', text }, ...(opaque ? { opaqueDefault: true as const } : {}) }
 }
 
 interface TableEntry {
@@ -245,7 +266,6 @@ function toSchemaTable(entry: TableEntry, all: TableEntry[], module: string | nu
     const single = foreignKeys.find(
       (key) => !key.opaqueColumns && key.references?.columns.length === 1 && key.columns.length === 1 && key.columns[0] === name,
     )
-    const defaultValue = columnDefault(column)
     return {
       name,
       columnName: column.name,
@@ -255,7 +275,7 @@ function toSchemaTable(entry: TableEntry, all: TableEntry[], module: string | nu
       unique: column.isUnique,
       ...(single?.references ? { references: { table: single.references.table, column: single.references.columns[0] } } : {}),
       ...(typeof column.withTimezone === 'boolean' ? { withTimezone: column.withTimezone } : {}),
-      ...(defaultValue ? { default: defaultValue } : {}),
+      ...columnDefault(column),
       ...(typeof column.defaultFn === 'function' ? { runtimeDefault: column.defaultFn.toString() } : {}),
     }
   })
@@ -303,7 +323,6 @@ async function loadSchemaFile(appRoot: string, module: string | null, timeoutMs:
 
   let exports: Record<string, unknown>
   try {
-    // The module cache keeps the first import for the life of the process.
     exports = await withImportTimeout(import(pathToFileURL(file).href) as Promise<Record<string, unknown>>, timeoutMs)
   } catch (error) {
     return unreadable(`${path} could not be imported: ${reasonOf(error)}`)
@@ -326,14 +345,65 @@ async function loadSchemaFile(appRoot: string, module: string | null, timeoutMs:
   return { module, path, drizzleEntry: drizzle.entry, entries }
 }
 
-/** One result per `db/schema.ts` that exists, the root's and each module's. Never throws. */
-export async function readSchemaAtRuntime(appRoot: string, options: SchemaRuntimeOptions = {}): Promise<RuntimeSchemaFile[]> {
+const moduleCache = createRequire(import.meta.url).cache
+const importedAt = new Map<string, number>()
+
+/**
+ * Bun keeps ESM modules in `require.cache`, and a query string does not bust it. A schema
+ * edited since this process imported it is evicted, or a long-lived process reports the
+ * old tables as a runtime reading. Files the schema imports are not tracked.
+ */
+async function evictIfChanged(file: string): Promise<void> {
+  try {
+    const path = await realpath(file)
+    const { mtimeMs } = await stat(path)
+    const previous = importedAt.get(path)
+    if (previous !== undefined && previous !== mtimeMs) {
+      delete moduleCache[path]
+      delete moduleCache[file]
+    }
+    importedAt.set(path, mtimeMs)
+  } catch {
+    // A file that cannot be stat'ed is reported by the import that follows.
+  }
+}
+
+/**
+ * One table object exported more than once (an alias, `export *` from another root's
+ * schema) is the table of the export the static reader sees declared. With no declared
+ * export to prefer, every export stays.
+ */
+function dropReexports(loaded: LoadedSchema[], staticTables: SchemaTable[]): void {
+  const declared = (module: string | null, identifier: string): boolean =>
+    staticTables.some((table) => table.module === module && table.identifier === identifier)
+
+  const exportsOf = new Map<object, { file: LoadedSchema; entry: TableEntry }[]>()
+  for (const file of loaded) {
+    for (const entry of file.entries) exportsOf.set(entry.table, [...(exportsOf.get(entry.table) ?? []), { file, entry }])
+  }
+
+  for (const group of exportsOf.values()) {
+    if (group.length < 2 || !group.some(({ file, entry }) => declared(file.module, entry.identifier))) continue
+    for (const { file, entry } of group) {
+      if (!declared(file.module, entry.identifier)) file.entries = file.entries.filter((candidate) => candidate !== entry)
+    }
+  }
+}
+
+async function readRuntimeFiles(appRoot: string, options: SchemaRuntimeOptions, staticTables: SchemaTable[]): Promise<RuntimeSchemaFile[]> {
   const roots = await listAppRoots(appRoot)
   const timeoutMs = options.importTimeoutMs ?? IMPORT_TIMEOUT_MS
+
+  // Evicted together and before any import: a module schema importing the root's must not
+  // pin the old root instance, whose tables a foreign key would then fail to match.
+  await Promise.all(roots.map((root) => evictIfChanged(resolve(appRoot, schemaPathFor(root.module)))))
   const loaded = (await Promise.all(roots.map((root) => loadSchemaFile(appRoot, root.module, timeoutMs)))).filter((file) => file !== null)
 
+  const readable = loaded.filter((file): file is LoadedSchema => 'entries' in file)
+  dropReexports(readable, staticTables)
+
   // A foreign key may point into another root's schema, so targets resolve across all of them.
-  const all = loaded.flatMap((file) => ('entries' in file ? file.entries : []))
+  const all = readable.flatMap((file) => file.entries)
 
   return loaded.map((file): RuntimeSchemaFile => {
     if (!('entries' in file)) return file
@@ -344,6 +414,11 @@ export async function readSchemaAtRuntime(appRoot: string, options: SchemaRuntim
       return { module, path, status: 'unreadable', reason: `getTableConfig() result could not be read: ${reasonOf(error)}` }
     }
   })
+}
+
+/** One result per `db/schema.ts` that exists, the root's and each module's. Never throws. */
+export async function readSchemaAtRuntime(appRoot: string, options: SchemaRuntimeOptions = {}): Promise<RuntimeSchemaFile[]> {
+  return readRuntimeFiles(appRoot, options, await parseSchemaTables(appRoot))
 }
 
 /** `type` names the builder as written, which drizzle does not keep; the static reader does. */
@@ -365,7 +440,8 @@ function withStaticType(table: RuntimeSchemaTable, staticTable: SchemaTable | un
  * the file does not export, stays `static` beside its file's runtime tables.
  */
 export async function readSchemaTables(appRoot: string, options: SchemaRuntimeOptions = {}): Promise<SchemaRead> {
-  const [files, staticTables] = await Promise.all([readSchemaAtRuntime(appRoot, options), parseSchemaTables(appRoot)])
+  const staticTables = await parseSchemaTables(appRoot)
+  const files = await readRuntimeFiles(appRoot, options, staticTables)
   const tables: SourcedSchemaTable[] = []
   const unmatched = [...staticTables]
   const claimStatic = (module: string | null, identifier: string): SchemaTable | undefined => {

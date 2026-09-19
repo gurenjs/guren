@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseSchemaTables } from '../src/schema-parser'
@@ -382,7 +382,7 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey(), ...timest
 
     test('should fall back to the static reader when the app has no drizzle-orm', async () => {
       const app = await createApp({ 'db/schema.ts': OPAQUE_SCHEMA }, { drizzle: false })
-      await expectStaticFallback(app, /drizzle-orm could not be loaded from the app/)
+      await expectStaticFallback(app, /drizzle-orm could not be loaded from the app: .*Cannot find (module|package) '?drizzle-orm/)
     })
 
     test('should fall back to the static reader when no export is a drizzle table', async () => {
@@ -409,7 +409,7 @@ export const lookalike = { name: 'posts', columns: [] }
       expect(tableOf(tables, 'drafts').runtimeUnreadable).toMatch(/does not export drafts as a drizzle table/)
     })
 
-    test('should read a pgSchema table and report an aliased export under each name', async () => {
+    test('should read a pgSchema table and report an aliased export once, under its declared name', async () => {
       const app = await createApp({
         'db/schema.ts': `import { pgSchema, pgTable, integer, serial } from 'drizzle-orm/pg-core'
 export const posts = pgTable('posts', { id: serial('id').primaryKey() })
@@ -420,10 +420,69 @@ export const events = pgSchema('audit').table('events', { id: serial('id').prima
       const { tables } = await readSchemaTables(app)
 
       expect(tables.map((table) => [table.identifier, table.tableName, table.source])).toEqual([
-        ['articles', 'posts', 'runtime'],
         ['events', 'events', 'runtime'],
         ['posts', 'posts', 'runtime'],
       ])
+      expect(columnOf(tableOf(tables, 'events'), 'postId').references).toEqual({ table: 'posts', column: 'id' })
+    })
+
+    test('should attribute a table re-exported by another schema file to the file that declares it', async () => {
+      const app = await createApp({
+        'db/schema.ts': `import { pgTable, serial } from 'drizzle-orm/pg-core'
+export const users = pgTable('users', { id: serial('id').primaryKey() })
+export * from '../modules/billing/db/schema'
+`,
+        'modules/billing/index.ts': 'export default {}\n',
+        'modules/billing/db/schema.ts': `import { pgTable, serial } from 'drizzle-orm/pg-core'
+const shared = { id: serial('id').primaryKey() }
+export const invoices = pgTable('invoices', { ...shared })
+`,
+      })
+      const { tables } = await readSchemaTables(app)
+
+      expect(tables.map((table) => [table.module, table.identifier, table.source])).toEqual([
+        [null, 'users', 'runtime'],
+        ['billing', 'invoices', 'runtime'],
+      ])
+    })
+
+    test('should read a schema again after it was edited in the same process', async () => {
+      const app = await createApp({
+        'db/schema.ts': `import { pgTable, serial } from 'drizzle-orm/pg-core'
+export const posts = pgTable('posts', { id: serial('id').primaryKey() })
+`,
+      })
+      await readSchemaTables(app)
+      await writeFile(
+        join(app, 'db/schema.ts'),
+        `import { pgTable, serial, text } from 'drizzle-orm/pg-core'
+const extra = { title: text('title') }
+export const posts = pgTable('posts', { id: serial('id').primaryKey(), ...extra })
+`,
+      )
+      await utimes(join(app, 'db/schema.ts'), new Date(), new Date(Date.now() + 5000))
+
+      const posts = tableOf((await readSchemaTables(app)).tables, 'posts')
+      expect(posts.source).toBe('runtime')
+      expect(posts.columns.map((column) => column.name)).toEqual(['id', 'title'])
+    })
+
+    test('should name a table inside a SQL default and mark a chunk it cannot render', async () => {
+      const app = await createApp({
+        'db/schema.ts': `import { sql } from 'drizzle-orm'
+import { integer, pgTable, serial } from 'drizzle-orm/pg-core'
+export const counters = pgTable('counters', { id: serial('id').primaryKey() })
+export const rows = pgTable('rows', {
+  next: integer('next').default(sql\`(select max(\${counters.id}) from \${counters})\`),
+  bound: integer('bound').default(sql\`\${sql.placeholder('limit')}\`),
+})
+`,
+      })
+      const rows = tableOf((await readSchemaTables(app)).tables, 'rows')
+
+      expect(columnOf(rows, 'next')).toMatchObject({ default: { kind: 'sql', text: '(select max(id) from counters)' } })
+      expect(columnOf(rows, 'next').opaqueDefault).toBeUndefined()
+      expect(columnOf(rows, 'bound')).toMatchObject({ default: { kind: 'sql', text: '?' }, opaqueDefault: true })
     })
 
     test('should report nothing for an app with no schema file', async () => {
