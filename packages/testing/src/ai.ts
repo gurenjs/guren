@@ -276,39 +276,19 @@ export class FakeAi implements AiManager, Disposable {
   }
 
   assertEmbedded(predicate?: (call: FakeAiEmbedCall) => boolean): void {
-    if (this.embedRecords.length === 0) {
-      throw new Error(`Expected embed() or embedMany() to be called, but it was not.${this.failureSuffix()}`)
-    }
-    if (predicate && !this.embedRecords.some((call) => predicate(call))) {
-      throw new Error(
-        'Expected embed() or embedMany() to be called with matching values. It was called with: '
-        + `${this.embedRecords.map((call) => JSON.stringify(call.values)).join(', ')}.${this.failureSuffix()}`,
-      )
-    }
+    this.assertCalled(EMBED_CALLS, this.embedRecords, predicate)
   }
 
   assertNeverEmbedded(): void {
-    if (this.embedRecords.length > 0) {
-      throw new Error(`Expected embed() and embedMany() never to be called, but they were called ${this.embedRecords.length} time(s).`)
-    }
+    this.assertNeverCalled(EMBED_CALLS, this.embedRecords)
   }
 
   assertGeneratedImage(predicate?: (call: FakeAiImageCall) => boolean): void {
-    if (this.imageRecords.length === 0) {
-      throw new Error(`Expected image() to be called, but it was not.${this.failureSuffix()}`)
-    }
-    if (predicate && !this.imageRecords.some((call) => predicate(call))) {
-      throw new Error(
-        'Expected image() to be called with a matching prompt. It was called with: '
-        + `${this.imageRecords.map((call) => JSON.stringify(call.prompt)).join(', ')}.${this.failureSuffix()}`,
-      )
-    }
+    this.assertCalled(IMAGE_CALLS, this.imageRecords, predicate)
   }
 
   assertNeverGeneratedImage(): void {
-    if (this.imageRecords.length > 0) {
-      throw new Error(`Expected image() never to be called, but it was called ${this.imageRecords.length} time(s).`)
-    }
+    this.assertNeverCalled(IMAGE_CALLS, this.imageRecords)
   }
 
   /** Queue one answer set per future `evaluate()` call, consumed in order. */
@@ -322,21 +302,11 @@ export class FakeAi implements AiManager, Disposable {
   }
 
   assertEvaluated(predicate?: (call: FakeAiEvaluationCall) => boolean): void {
-    if (this.evaluationRecords.length === 0) {
-      throw new Error(`Expected evaluate() to be called, but it was not.${this.failureSuffix()}`)
-    }
-    if (predicate && !this.evaluationRecords.some((call) => predicate(call))) {
-      throw new Error(
-        'Expected evaluate() to be called with a matching state. It was called with: '
-        + `${this.evaluationRecords.map((call) => JSON.stringify(call.state)).join(', ')}.${this.failureSuffix()}`,
-      )
-    }
+    this.assertCalled(EVALUATION_CALLS, this.evaluationRecords, predicate)
   }
 
   assertNeverEvaluated(): void {
-    if (this.evaluationRecords.length > 0) {
-      throw new Error(`Expected evaluate() never to be called, but it was called ${this.evaluationRecords.length} time(s).`)
-    }
+    this.assertNeverCalled(EVALUATION_CALLS, this.evaluationRecords)
   }
 
   agent<T extends Agent>(cls: AgentClass<T>): BoundAgentFactory<T> {
@@ -367,20 +337,10 @@ export class FakeAi implements AiManager, Disposable {
   }
 
   embeddingModel(provider?: string): EmbeddingModel {
-    const selected = provider ?? this.config.default
-    // Recorded before anything can refuse the call, as a prompt is: a call the fake
-    // rejected was still a call, and an assertion saying it never happened would lie.
-    const record: FakeAiEmbedCall = { values: [], provider: selected }
-    this.embedRecords.push(record)
-    this.checkProvider('embed() or embedMany()', 'embeddingModel', selected)
-    if (this.embedder === undefined && this.embeddings.length === 0) {
-      this.fail(
-        'embed() or embedMany() was called, but nothing is scripted for it. '
-        + 'Script it with ai.respondEmbeddings([...]) before the call.',
-      )
-    }
+    const record = this.recordCall(EMBED_CALLS, this.embedRecords, { values: [], provider: provider ?? this.config.default })
+    if (this.embedder === undefined && this.embeddings.length === 0) this.fail(unscripted(EMBED_CALLS))
     return new this.runtime.MockEmbeddingModelV4({
-      modelId: `fake:${selected}`,
+      modelId: `fake:${record.provider}`,
       // Infinity is the SDK's "no limit": without it the mock's default of 1 splits
       // an embedMany() into one doEmbed per value.
       maxEmbeddingsPerCall: Number.POSITIVE_INFINITY,
@@ -392,19 +352,11 @@ export class FakeAi implements AiManager, Disposable {
   }
 
   imageModel(provider?: string): ImageModel {
-    const selected = provider ?? this.config.default
-    const record: FakeAiImageCall = { n: 0, provider: selected }
-    this.imageRecords.push(record)
-    this.checkProvider('image()', 'imageModel', selected)
+    const record = this.recordCall(IMAGE_CALLS, this.imageRecords, { n: 0, provider: provider ?? this.config.default })
     const scripted = this.images.shift()
-    if (scripted === undefined) {
-      this.fail(
-        'image() was called, but nothing is scripted for it. '
-        + 'Script it with ai.respondImages([...]) before the call.',
-      )
-    }
+    if (scripted === undefined) this.fail(unscripted(IMAGE_CALLS))
     const images = scriptedImages(scripted)
-    const modelId = `fake:${selected}`
+    const modelId = `fake:${record.provider}`
     return new this.runtime.MockImageModelV4({
       modelId,
       // No limit of the model's own, so `n` alone never splits the call. A caller
@@ -426,11 +378,8 @@ export class FakeAi implements AiManager, Disposable {
 
   evaluationModel(provider?: string): AiEvaluationModel {
     const selected = provider ?? this.config.defaultEvaluation ?? this.config.default
-    // Recorded before the provider check, as an embed() is: the state arrives only in
-    // doEvaluate, so a refused call is recorded without one rather than not at all.
-    const record: FakeAiEvaluationCall = { questions: {}, provider: selected }
-    this.evaluationRecords.push(record)
-    this.checkProvider('evaluate()', 'evaluationModel', selected)
+    // The state arrives only in doEvaluate, so a refused call is recorded without one.
+    const record = this.recordCall(EVALUATION_CALLS, this.evaluationRecords, { questions: {}, provider: selected })
     return new this.runtime.EvaluationMockModelV4({
       provider: 'fake',
       modelId: `fake:${selected}`,
@@ -440,12 +389,7 @@ export class FakeAi implements AiManager, Disposable {
         record.questions = questions
         try {
           const script = this.evaluationScripts.shift()
-          if (script === undefined) {
-            throw new Error(
-              `evaluate() was called (state ${JSON.stringify(state).slice(0, 80)}), but nothing is scripted for it. `
-              + 'Script it with ai.respondEvaluations([{ ... }]) before the call.',
-            )
-          }
+          if (script === undefined) throw new Error(unscripted(EVALUATION_CALLS, ` (state ${JSON.stringify(state).slice(0, 80)})`))
           record.answers = expandEvaluation(script, questions)
           return { answers: record.answers, warnings: [] }
         } catch (error) {
@@ -454,6 +398,34 @@ export class FakeAi implements AiManager, Disposable {
         }
       },
     })
+  }
+
+  /**
+   * Recorded before anything can refuse the call, as a prompt is: a call the fake
+   * rejected was still a call, and an assertion saying it never happened would lie.
+   */
+  private recordCall<C extends { provider: string }>(kind: ModelCallKind<C>, records: C[], record: C): C {
+    records.push(record)
+    this.checkProvider(kind.caller, kind.factory, record.provider)
+    return record
+  }
+
+  private assertCalled<C>(kind: ModelCallKind<C>, records: readonly C[], predicate?: (call: C) => boolean): void {
+    if (records.length === 0) {
+      throw new Error(`Expected ${kind.caller} to be called, but it was not.${this.failureSuffix()}`)
+    }
+    if (predicate && !records.some((call) => predicate(call))) {
+      throw new Error(
+        `Expected ${kind.caller} to be called with ${kind.matching}. It was called with: `
+        + `${records.map((call) => JSON.stringify(kind.describe(call))).join(', ')}.${this.failureSuffix()}`,
+      )
+    }
+  }
+
+  private assertNeverCalled<C>(kind: ModelCallKind<C>, records: readonly C[]): void {
+    if (records.length > 0) {
+      throw new Error(`Expected ${kind.never} ${records.length} time(s).`)
+    }
   }
 
   private vectorFor(value: string): number[] {
@@ -588,6 +560,48 @@ export class FakeAi implements AiManager, Disposable {
   private nameOf(cls: AgentClass): string {
     return this.runtime.resolveAgentName(cls)
   }
+}
+
+/** The wording one family of model calls contributes to the fake's failure messages. */
+interface ModelCallKind<C> {
+  caller: string
+  factory: Exclude<keyof AiProviderConfig, 'pricing'>
+  /** The `assertNever*` clause up to the count; embed's is plural, so it is not derived from `caller`. */
+  never: string
+  matching: string
+  script: string
+  describe: (call: C) => unknown
+}
+
+const EMBED_CALLS: ModelCallKind<FakeAiEmbedCall> = {
+  caller: 'embed() or embedMany()',
+  factory: 'embeddingModel',
+  never: 'embed() and embedMany() never to be called, but they were called',
+  matching: 'matching values',
+  script: 'ai.respondEmbeddings([...])',
+  describe: (call) => call.values,
+}
+
+const IMAGE_CALLS: ModelCallKind<FakeAiImageCall> = {
+  caller: 'image()',
+  factory: 'imageModel',
+  never: 'image() never to be called, but it was called',
+  matching: 'a matching prompt',
+  script: 'ai.respondImages([...])',
+  describe: (call) => call.prompt,
+}
+
+const EVALUATION_CALLS: ModelCallKind<FakeAiEvaluationCall> = {
+  caller: 'evaluate()',
+  factory: 'evaluationModel',
+  never: 'evaluate() never to be called, but it was called',
+  matching: 'a matching state',
+  script: 'ai.respondEvaluations([{ ... }])',
+  describe: (call) => call.state,
+}
+
+function unscripted(kind: ModelCallKind<never>, detail = ''): string {
+  return `${kind.caller} was called${detail}, but nothing is scripted for it. Script it with ${kind.script} before the call.`
 }
 
 /** One script entry's images, keeping the homogeneous array the SDK's result type wants. */
