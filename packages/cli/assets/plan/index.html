@@ -1409,6 +1409,13 @@
           return node
         }
 
+        /** A `<title>`: what a pointer shows on hover and a screen reader reads for the group. */
+        function svgTip(text) {
+          var node = svgEl('title')
+          node.textContent = text
+          return node
+        }
+
         function columnLine(column) {
           var parts = [column.name, column.type]
           if (column.primaryKey) parts.push('pk')
@@ -1801,14 +1808,16 @@
         var FLOW_NODE_H = 56
         var FLOW_GAP_X = 58
         var FLOW_GAP_Y = 18
-        var FLOW_BACK_FIRST = 24
-        var FLOW_BACK_LANE = 16
+        var FLOW_PAD_X = 20
+        var FLOW_LANE_FIRST = 24
+        var FLOW_LANE = 16
+        var FLOW_STEM = 14
         var FLOW_ARROW = 7
 
-        function flowBox(node) {
+        function flowBox(node, top) {
           return {
-            x: node.column * (FLOW_NODE_W + FLOW_GAP_X),
-            y: node.row * (FLOW_NODE_H + FLOW_GAP_Y),
+            x: FLOW_PAD_X + node.column * (FLOW_NODE_W + FLOW_GAP_X),
+            y: top + node.row * (FLOW_NODE_H + FLOW_GAP_Y),
             w: FLOW_NODE_W,
             h: FLOW_NODE_H,
           }
@@ -1825,20 +1834,59 @@
           return head
         }
 
+        /** Whether the straight line between two boxes runs through a third. */
+        function flowBlocked(start, end, boxes, from, to) {
+          var steps = Math.ceil(Math.max(Math.abs(end[0] - start[0]), Math.abs(end[1] - start[1])) / 6)
+          return boxes.some(function (box) {
+            if (box === from || box === to) return false
+            for (var step = 1; step < steps; step += 1) {
+              var x = start[0] + ((end[0] - start[0]) * step) / steps
+              var y = start[1] + ((end[1] - start[1]) * step) / steps
+              if (x > box.x - 3 && x < box.x + box.w + 3 && y > box.y - 3 && y < box.y + box.h + 3) return true
+            }
+            return false
+          })
+        }
+
         /**
          * A flow, from the placement `layoutPlanFlows()` computed. The page draws and
          * links; it decides nothing about where a node goes, so the same flow is the
          * same picture here, in print, and in any later view built on that value.
          */
         function drawFlow(flow) {
-          var width = flow.columns * FLOW_NODE_W + (flow.columns - 1) * FLOW_GAP_X
+          var at = idMap()
+          var boxes = []
+          flow.nodes.forEach(function (node) {
+            boxes.push((at[node.id] = flowBox(node, 0)))
+          })
+
+          // An edge a straight line cannot show is routed instead: out of the side of its
+          // box, along the gap between two columns (which no box stands in), and across in
+          // a lane of its own. A back edge takes a lane under the grid, a forward edge that
+          // would run through a box takes one over it.
+          var routes = []
+          flow.edges.forEach(function (edge) {
+            var from = at[edge.from]
+            var to = at[edge.to]
+            // The layout drops these already; a payload built elsewhere may not have.
+            if (!from || !to || edge.from === edge.to) return
+            var start = borderPoint(from, to)
+            var end = borderPoint(to, from)
+            var lane = edge.back ? 'under' : flowBlocked(start, end, boxes, from, to) ? 'over' : null
+            routes.push({ edge: edge, from: from, to: to, start: start, end: end, lane: lane })
+          })
+          function lanes(side) {
+            return routes.filter(function (route) {
+              return route.lane === side
+            }).length
+          }
+          var over = lanes('over')
+          var under = lanes('under')
+
+          var top = over ? FLOW_LANE_FIRST + (over - 1) * FLOW_LANE : 0
           var grid = flow.rows * FLOW_NODE_H + (flow.rows - 1) * FLOW_GAP_Y
-          // Each back edge runs in a lane of its own under the grid, so two loops in one
-          // flow do not draw as one line and neither crosses the boxes between its ends.
-          var lanes = flow.edges.filter(function (edge) {
-            return edge.back
-          }).length
-          var height = grid + (lanes ? FLOW_BACK_FIRST + (lanes - 1) * FLOW_BACK_LANE + 8 : 0)
+          var width = 2 * FLOW_PAD_X + flow.columns * FLOW_NODE_W + (flow.columns - 1) * FLOW_GAP_X
+          var height = top + grid + (under ? FLOW_LANE_FIRST + (under - 1) * FLOW_LANE + 8 : 0)
           var svg = svgEl('svg', {
             class: 'flow',
             width: width,
@@ -1848,35 +1896,35 @@
             'aria-label': 'Flow: ' + flow.title,
           })
 
-          var at = idMap()
-          flow.nodes.forEach(function (node) {
-            at[node.id] = flowBox(node)
-          })
-
           var labels = []
-          var lane = 0
-          flow.edges.forEach(function (edge) {
-            var from = at[edge.from]
-            var to = at[edge.to]
-            // The layout drops these already; a payload built elsewhere may not have.
-            if (!from || !to || edge.from === edge.to) return
+          var overLane = 0
+          var underLane = 0
+          routes.forEach(function (route) {
+            var edge = route.edge
             var shape
             var head
             var labelAt
-            if (edge.back) {
-              var laneY = grid + FLOW_BACK_FIRST + lane * FLOW_BACK_LANE
-              lane += 1
-              var x1 = from.x + from.w / 2
-              var x2 = to.x + to.w / 2
-              var y2 = to.y + to.h
+            if (route.lane) {
+              var laneY =
+                route.lane === 'under'
+                  ? top + grid + FLOW_LANE_FIRST + underLane++ * FLOW_LANE
+                  : top - FLOW_LANE_FIRST - overLane++ * FLOW_LANE + FLOW_LANE
+              // Off centre, so the stub does not lie on a straight edge leaving the same side.
+              var shift = route.lane === 'under' ? 12 : -12
+              var y1 = top + route.from.y + route.from.h / 2 + shift
+              var y2 = top + route.to.y + route.to.h / 2 + shift
+              var x1 = route.from.x + route.from.w + FLOW_STEM
+              var x2 = route.to.x - FLOW_STEM
               shape = svgEl('path', {
-                d: 'M ' + x1 + ' ' + (from.y + from.h) + ' V ' + laneY + ' H ' + x2 + ' V ' + y2,
+                d:
+                  'M ' + (route.from.x + route.from.w) + ' ' + y1 + ' H ' + x1 + ' V ' + laneY +
+                  ' H ' + x2 + ' V ' + y2 + ' H ' + route.to.x,
               })
-              head = flowArrow(x2, y2, -Math.PI / 2, true)
+              head = flowArrow(route.to.x, y2, 0, edge.back)
               labelAt = [(x1 + x2) / 2, laneY - 4]
             } else {
-              var start = borderPoint(from, to)
-              var end = borderPoint(to, from)
+              var start = [route.start[0], route.start[1] + top]
+              var end = [route.end[0], route.end[1] + top]
               shape = svgEl('line', { x1: start[0], y1: start[1], x2: end[0], y2: end[1] })
               head = flowArrow(end[0], end[1], Math.atan2(end[1] - start[1], end[0] - start[0]), false)
               labelAt = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2 - 5]
@@ -1893,14 +1941,16 @@
           flow.nodes.forEach(function (node) {
             // From the node, not from `at`: two steps declaring one id (a §2 finding) are
             // placed apart, and the map keeps only the last.
-            var box = flowBox(node)
+            var box = flowBox(node, top)
             var group = svgEl('g', { class: 'node' })
             var rect = svgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, rx: 8 })
             rect.setAttribute('class', 'box ' + node.kind)
             group.appendChild(rect)
+            // The whole label, for a pointer and a screen reader: the box shows two lines of it.
+            group.appendChild(svgTip(node.label))
             group.appendChild(svgText(box.x + 10, box.y + 19, node.kind, 'muted'))
             // Wrapped by hand: SVG text does not wrap, and a label is short prose.
-            wrapSvgText(node.label, 20).forEach(function (piece, index) {
+            wrapSvgText(node.label, 20, 2).forEach(function (piece, index) {
               group.appendChild(svgText(box.x + 10, box.y + 34 + index * 13, piece, 'title'))
             })
             // A node that names an element is a link into the rest of the document,
@@ -1921,8 +1971,8 @@
           return svg
         }
 
-        /** Greedy wrap to `limit` characters, so a label keeps its words. */
-        function wrapSvgText(text, limit) {
+        /** Greedy wrap to `limit` characters and `most` lines; a label cut short says so. */
+        function wrapSvgText(text, limit, most) {
           var lines = []
           var line = ''
           text.split(/\s+/).forEach(function (word) {
@@ -1934,17 +1984,25 @@
             }
           })
           if (line !== '') lines.push(line)
-          return lines.slice(0, 2)
+          var kept = lines.slice(0, most).map(function (piece) {
+            return piece.length > limit ? piece.slice(0, limit - 1) + '…' : piece
+          })
+          if (lines.length > most && kept[most - 1].slice(-1) !== '…') kept[most - 1] += '…'
+          return kept
         }
 
         function renderFlows(host) {
-          data.flows.forEach(function (flow) {
+          data.flows.forEach(function (flow, index) {
             var body = el('div')
             if (flow.description) body.appendChild(el('p', null, flow.description))
             var scroll = el('div', 'flow-scroll')
             scroll.appendChild(drawFlow(flow))
             body.appendChild(scroll)
-            host.appendChild(card({ id: flow.id, title: flow.title, change: { kind: flow.change }, body: body }))
+            // The layout keeps a change's kind; the badge also reads what a rename was
+            // from and why a drop, which only the plan's own flow carries.
+            var declared = plan.flows[index]
+            var change = declared && declared.id === flow.id ? declared.change : { kind: flow.change }
+            host.appendChild(card({ id: flow.id, title: flow.title, change: change, body: body }))
           })
         }
 

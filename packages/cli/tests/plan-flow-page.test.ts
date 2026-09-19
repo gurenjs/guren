@@ -116,9 +116,11 @@ const drawFlow = (() => {
     'anchorId',
     'svgEl',
     'svgText',
+    'svgTip',
     'borderPoint',
     'flowBox',
     'flowArrow',
+    'flowBlocked',
     'wrapSvgText',
     'drawFlow',
   ].map(functionSource)
@@ -175,7 +177,12 @@ describe('drawFlow', () => {
     const nodes = drawFlow(comment).withClass('node')
 
     expect(nodes).toHaveLength(7)
-    expect(nodes[0].children.map((child) => child.textContent)).toEqual(['', 'actor', 'A signed-in reader'])
+    expect(nodes[0].children.map((child) => `${child.tag}:${child.textContent}`)).toEqual([
+      'rect:',
+      'title:A signed-in reader',
+      'text:actor',
+      'text:A signed-in reader',
+    ])
     expect(nodes[0].children[0].attributes.class).toBe('box actor')
   })
 
@@ -197,7 +204,7 @@ describe('drawFlow', () => {
     const svg = drawFlow(comment)
     const direct = svg.children.filter((child) => child.attributes.class === 'node')
 
-    expect(direct.map((node) => node.children[2].textContent)).toEqual(['A signed-in reader', 'Notify the author'])
+    expect(direct.map((node) => node.children[3].textContent)).toEqual(['A signed-in reader', 'Notify the author'])
   })
 
   test('should not link an element id the anchor gate refuses', () => {
@@ -251,6 +258,53 @@ describe('drawFlow', () => {
 
     expect(back).toHaveLength(2)
     expect(laneOf(back[0])).not.toBe(laneOf(back[1]))
+  })
+
+  test('should run the stems of a routed edge between the columns, through no box', () => {
+    // `c` and `d` stand under `a` and `b`, where a stem dropped from a box centre would cross them.
+    const [stacked] = payloadOf(
+      planWithFlows([
+        {
+          ...SECOND_FLOW,
+          nodes: [...SECOND_FLOW.nodes, { id: 'd', label: 'Below', kind: 'job' }, { id: 'e', label: 'Below too', kind: 'job' }],
+          edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }, { from: 'd', to: 'e' }],
+        },
+      ]),
+    ).flows
+    const svg = drawFlow(stacked)
+    const rects = svg.all().filter((node) => node.tag === 'rect')
+    const stems = [...svg.withClass('back')[0].attributes.d.matchAll(/H ([\d.]+) V/g)].map((match) => Number(match[1]))
+
+    expect(stems).toHaveLength(2)
+    for (const x of stems) {
+      expect(rects.some((rect) => x >= Number(rect.attributes.x) && x <= Number(rect.attributes.x) + Number(rect.attributes.width))).toBe(false)
+      expect(x).toBeGreaterThanOrEqual(0)
+      expect(x).toBeLessThanOrEqual(Number(svg.attributes.width))
+    }
+  })
+
+  test('should route a forward edge over the grid when a box stands in its way', () => {
+    const [bypass] = payloadOf(
+      planWithFlows([{ ...SECOND_FLOW, edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'a', to: 'c', label: 'skips' }] }]),
+    ).flows
+    const svg = drawFlow(bypass)
+    const routed = svg.withClass('edge').filter((edge) => edge.tag === 'path')
+    const highest = Math.min(...svg.all().filter((node) => node.tag === 'rect').map((rect) => Number(rect.attributes.y)))
+
+    expect(routed).toHaveLength(1)
+    expect(routed[0].attributes.class).toBe('edge')
+    expect(laneOf(routed[0])).toBeLessThan(highest)
+    expect(laneOf(routed[0])).toBeGreaterThan(0)
+    expect(svg.withClass('edge').filter((edge) => edge.tag === 'line')).toHaveLength(2)
+  })
+
+  test('should say so when a label is cut, and keep the whole of it as the tip', () => {
+    const label = 'Check that the account is active before sending any payment'
+    const [long] = payloadOf(planWithFlows([{ ...SECOND_FLOW, nodes: [{ id: 'a', label, kind: 'decision' }], edges: [] }])).flows
+    const node = drawFlow(long).withClass('node')[0]
+
+    expect(node.children[1].textContent).toBe(label)
+    expect(node.children.slice(3).map((piece) => piece.textContent)).toEqual(['Check that the', 'account is active\u2026'])
   })
 
   test('should leave no room for a lane in a flow with no cycle', () => {
@@ -319,14 +373,20 @@ describe('a flow whose strings are hostile', () => {
     const tags = new Set(svg.all().map((node) => node.tag))
     const written = svg.all().filter((node) => node.textContent !== '')
 
-    expect([...tags].sort()).toEqual(['a', 'g', 'line', 'path', 'polygon', 'rect', 'svg', 'text'])
-    expect(written.every((node) => node.tag === 'text')).toBe(true)
+    expect([...tags].sort()).toEqual(['a', 'g', 'line', 'path', 'polygon', 'rect', 'svg', 'text', 'title'])
+    expect(written.every((node) => node.tag === 'text' || node.tag === 'title')).toBe(true)
     expect(written.filter((node) => node.attributes.class === 'edge-label').map((node) => node.textContent)).toEqual(
       Array.from({ length: 7 }, () => payload),
     )
-    // A node label is wrapped on whitespace, so it is read back joined.
-    const first = svg.withClass('node')[0].children.filter((child) => child.attributes.class === 'title')
-    expect(payload.split(/\s+/).join(' ')).toStartWith(first.map((piece) => piece.textContent).join(' '))
+    // The whole label is the tip; the box shows it wrapped on whitespace and cut to fit.
+    const first = svg.withClass('node')[0]
+    const pieces = first.children.filter((child) => child.attributes.class === 'title').map((piece) => piece.textContent)
+    expect(first.children[1].textContent).toBe(payload)
+    expect(pieces.length).toBeGreaterThan(0)
+    for (const piece of pieces) {
+      expect(piece.length).toBeGreaterThan(0)
+      expect(payload.split(/\s+/).join(' ')).toContain(piece.replace(/\u2026$/, ''))
+    }
   })
 })
 
@@ -387,12 +447,13 @@ describe('the flow drawing in the page source', () => {
   })
 
   test('should write flow text through svgText and by no other path', () => {
-    const drawing = ['drawFlow', 'flowArrow', 'flowBox', 'wrapSvgText'].map(functionSource).join('\n')
+    const drawing = ['drawFlow', 'flowArrow', 'flowBox', 'flowBlocked', 'wrapSvgText'].map(functionSource).join('\n')
 
     expect(drawing).not.toContain('textContent')
     expect(drawing).not.toMatch(/\bdocument\./)
     expect(drawing).not.toMatch(/\bel\(/)
     expect(functionSource('svgText')).toContain('node.textContent = text')
+    expect(functionSource('svgTip')).toContain('node.textContent = text')
   })
 
   test('should draw each flow once, inside the card the filter and the checks key on', () => {
@@ -400,7 +461,9 @@ describe('the flow drawing in the page source', () => {
 
     expect(render.match(/drawFlow\(/g)).toHaveLength(1)
     expect(render).toContain('data.flows.forEach(')
-    expect(render).toContain('card({ id: flow.id, title: flow.title, change: { kind: flow.change }, body: body })')
+    expect(render).toContain('card({ id: flow.id, title: flow.title, change: change, body: body })')
+    // `rename` carries `from` and `drop` a `reason`; the layout keeps the kind alone.
+    expect(render).toContain('declared && declared.id === flow.id ? declared.change : { kind: flow.change }')
   })
 
   test('should name the SVG namespace once, as a constant and not a request', () => {
