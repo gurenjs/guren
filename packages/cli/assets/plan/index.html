@@ -678,6 +678,125 @@
       [hidden] {
         display: none !important;
       }
+
+      .section-title {
+        display: none;
+      }
+
+      /*
+       * Print is the document, not a screenshot of the review tool. Every section is
+       * shown and starts a page, the filter and the review controls go, and the ground
+       * is white whatever the screen theme is.
+       */
+      @media print {
+        @page {
+          size: A4;
+          margin: 18mm 16mm;
+        }
+
+        :root,
+        :root.dark {
+          color-scheme: light;
+          --g-page: #ffffff;
+          --g-panel: #ffffff;
+          --g-raised: #ffffff;
+          --g-line: #d1d5db;
+          --g-line-strong: #9ca3af;
+          --g-heading: #111827;
+          --g-text: #1f2937;
+          --g-text-2: #4b5563;
+          --g-muted: #6b7280;
+          --g-accent-text: #991b1b;
+          --g-shadow-card: none;
+        }
+
+        body {
+          padding: 0;
+          font-size: 10.5pt;
+        }
+
+        .wrap {
+          max-width: none;
+        }
+
+        /* Interactive furniture: none of it means anything on paper. */
+        .tabs,
+        .controls,
+        .review,
+        .footer,
+        .er + .note {
+          display: none !important;
+        }
+
+        /* Every section prints, whichever tab the reviewer left open, and the filter
+           does not decide what a printed plan contains. */
+        [role='tabpanel'][hidden],
+        .card[hidden] {
+          display: block !important;
+        }
+
+        [role='tabpanel'],
+        #questions > .panel {
+          break-before: page;
+        }
+
+        /* A section the plan left empty is a blank page in a printed document. */
+        [role='tabpanel'].empty {
+          display: none !important;
+        }
+
+        /* An empty box to write in belongs to the review tool. The printed document
+           carries the question, its options and the one the plan assumed; a reviewer's
+           own answer travels in feedback.json. */
+        .question-answer {
+          display: none !important;
+        }
+
+        .section-title {
+          display: block;
+          margin: 0 0 14px;
+          padding-bottom: 6px;
+          border-bottom: 2px solid var(--g-line-strong);
+          font-size: 15pt;
+        }
+
+        header {
+          break-after: page;
+        }
+
+        .panel,
+        .card {
+          border-color: var(--g-line);
+          box-shadow: none;
+          break-inside: avoid;
+        }
+
+        .card.sub {
+          break-inside: avoid;
+        }
+
+        h2,
+        h3,
+        h4 {
+          break-after: avoid;
+        }
+
+        /* A badge carries the change kind, which is the one colour a printed plan
+           cannot do without. */
+        .badge,
+        .er .box {
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+        }
+
+        a {
+          text-decoration: none;
+        }
+
+        .er {
+          break-inside: avoid;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1687,7 +1806,7 @@
             })
             body.appendChild(fieldset)
 
-            var answerLabel = el('label')
+            var answerLabel = el('label', 'question-answer')
             answerLabel.appendChild(el('span', 'note', 'Answer'))
             var answerBox = el('textarea')
             answerBox.rows = 2
@@ -1748,8 +1867,13 @@
           panel.setAttribute('role', 'tabpanel')
           panel.setAttribute('aria-label', section.label)
           panel.hidden = index !== 0
+          // The tab names the section on screen; on paper there are no tabs.
+          panel.appendChild(el('h2', 'section-title', section.label))
           section.render(panel)
-          if (!items.length) panel.appendChild(el('p', 'note', 'Nothing in this section.'))
+          if (!items.length) {
+            panel.className = 'empty'
+            panel.appendChild(el('p', 'note', 'Nothing in this section.'))
+          }
           panels.appendChild(panel)
           tabEntries.push({ key: section.key, button: button, panel: panel })
         })
