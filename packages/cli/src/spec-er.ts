@@ -141,7 +141,7 @@ export function buildErGraph(
     const columns = backingColumns.get(pairKey(edge.from, edge.to))
     if (!columns) continue
     edge.source = 'both'
-    edge.foreignKeyColumns = columns
+    edge.foreignKeyColumns = [...columns]
   }
 
   edges.sort(

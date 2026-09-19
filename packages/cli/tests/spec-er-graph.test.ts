@@ -196,6 +196,32 @@ describe('renderErSpec', () => {
     expect(content.indexOf('  posts }o--||')).toBeLessThan(content.indexOf('  users ||--o{'))
   })
 
+  it('should render the Mermaid token of every cardinality a relationship can produce', () => {
+    const graph = buildErGraph(
+      [table('owners', [ID]), table('targets', [ID])],
+      [
+        model('Owner', 'owners', [
+          { name: 'single', type: 'hasOne', relatedModel: 'Target' },
+          { name: 'paired', type: 'belongsToMany', relatedModel: 'Target' },
+          { name: 'direct', type: 'belongsTo', relatedModel: 'Target' },
+          { name: 'many', type: 'hasMany', relatedModel: 'Target' },
+          { name: 'through', type: 'hasManyThrough', relatedModel: 'Target' },
+          { name: 'morphed', type: 'morphMany', relatedModel: 'Target' },
+        ]),
+        model('Target', 'targets', []),
+      ],
+    )
+
+    const { content } = renderErSpec(graph)
+
+    expect(content).toContain('  owners ||--o| targets : single')
+    expect(content).toContain('  owners }o--o{ targets : paired')
+    expect(content).toContain('  owners }o--|| targets : direct')
+    expect(content).toContain('  owners ||--o{ targets : many')
+    expect(content).toContain('  owners ||--o{ targets : through')
+    expect(content).toContain('  owners ||--o{ targets : morphed')
+  })
+
   it('should render an unknown attribute type rather than an empty token', () => {
     const { content } = renderErSpec(buildErGraph([table('posts', [column('title', { type: undefined })])], []))
 
