@@ -9,12 +9,11 @@
  * holds both halves of that to the output.
  */
 
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-
+import { readPlanAsset, type PlanAsset } from './assets'
 import { planDiagram, type PlanDiagram } from './diagram'
 import { layoutPlanFlows, type PlanFlowLayout } from './flow'
 import { planHash } from './identity'
+import { loadPlanDictionaries, matchPlanLocale, type PlanDictionary, type PlanLocale } from './locales'
 import { listPlanElements, type Plan, type PlanDraft, type PlanElementSection } from './schema'
 
 /**
@@ -37,13 +36,23 @@ export interface RenderPlanInput {
   planFile?: string
   /** Derived task status (RFC 0030 §6). Reserved: an absent value renders nothing. */
   status?: unknown
+  /** The locale the page's own words open in. Absent, the plan's `locale` decides, then `en`. */
+  uiLocale?: PlanLocale
 }
 
 export interface PlanBreakingChange {
   elementId: string
   section: PlanElementSection
   title: string
-  reason: string
+  /** A `breaking.*` key of the page's dictionaries: the page says it in whichever locale it speaks. */
+  reasonKey: string
+  reasonValues: Record<string, string>
+}
+
+/** The page's own words in every locale it can switch to, and the one it opens in. */
+export interface PlanPageI18n {
+  initial: PlanLocale
+  dictionaries: Record<PlanLocale, PlanDictionary>
 }
 
 /** One element in the page's own index: which entity's filter shows it. */
@@ -74,6 +83,7 @@ export interface PlanPagePayload {
   links: PlanLink[]
   entities: string[]
   status: unknown
+  i18n: PlanPageI18n
 }
 
 const DATA_PLACEHOLDER = '__GUREN_PLAN_DATA__'
@@ -81,32 +91,7 @@ const DATA_PLACEHOLDER = '__GUREN_PLAN_DATA__'
 /** A bare file name with no shell metacharacter, no quote, no space and no path segment. */
 export const PLAN_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
-let cachedTemplate: { path: string; source: string } | undefined
-
-/**
- * The chunk this module is bundled into sits at `dist/`, one hop below the package
- * root; the source sits at `src/plan/`, two. Both are tried rather than probed with
- * `existsSync`, which reports a permission error on a parent as absence.
- */
-const TEMPLATE_CANDIDATES = ['../assets/plan/index.html', '../../assets/plan/index.html'] as const
-
-function template(): { path: string; source: string } {
-  if (cachedTemplate !== undefined) return cachedTemplate
-
-  const tried: string[] = []
-  for (const candidate of TEMPLATE_CANDIDATES) {
-    const path = fileURLToPath(new URL(candidate, import.meta.url))
-    try {
-      cachedTemplate = { path, source: readFileSync(path, 'utf8') }
-      return cachedTemplate
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      tried.push(path)
-    }
-  }
-
-  throw new Error(`Could not locate the plan page shipped with @guren/cli. Tried:\n  ${tried.join('\n  ')}`)
-}
+const template = (): PlanAsset => readPlanAsset('index.html')
 
 /** Exported for the source-level test that holds the page to its forbidden sinks. */
 export function planTemplatePath(): string {
@@ -173,43 +158,38 @@ function entityIndex(plan: PlanDraft): Map<string, string> {
  */
 export function planBreakingChanges(plan: PlanDraft): PlanBreakingChange[] {
   const breaking: PlanBreakingChange[] = []
+  const add = (
+    element: Pick<PlanBreakingChange, 'elementId' | 'section' | 'title'>,
+    reasonKey: string,
+    reasonValues: Record<string, string> = {},
+  ): void => {
+    breaking.push({ ...element, reasonKey, reasonValues })
+  }
 
   for (const model of plan.models) {
+    const element = { elementId: model.id, section: 'models', title: model.name } as const
     if (model.change.kind === 'drop') {
-      breaking.push({ elementId: model.id, section: 'models', title: model.name, reason: `The ${model.table} table is dropped.` })
+      add(element, 'breaking.tableDropped', { table: model.table })
     } else if (model.change.kind === 'rename' || model.tableRenamedFrom !== undefined) {
-      const from = model.tableRenamedFrom ?? (model.change.kind === 'rename' ? model.change.from : '')
-      breaking.push({ elementId: model.id, section: 'models', title: model.name, reason: `Renamed from ${from}.` })
+      add(element, 'breaking.renamedFrom', {
+        from: model.tableRenamedFrom ?? (model.change.kind === 'rename' ? model.change.from : ''),
+      })
     }
 
     for (const column of model.columns) {
-      if (column.change.kind === 'drop') {
-        breaking.push({ elementId: column.id, section: 'columns', title: `${model.table}.${column.name}`, reason: 'The column is dropped.' })
-      } else if (column.change.kind === 'alter') {
-        breaking.push({ elementId: column.id, section: 'columns', title: `${model.table}.${column.name}`, reason: 'The column changes shape.' })
-      } else if (column.change.kind === 'rename') {
-        breaking.push({
-          elementId: column.id,
-          section: 'columns',
-          title: `${model.table}.${column.name}`,
-          reason: `Renamed from ${column.change.from}.`,
-        })
-      }
+      const columnElement = { elementId: column.id, section: 'columns', title: `${model.table}.${column.name}` } as const
+      if (column.change.kind === 'drop') add(columnElement, 'breaking.columnDropped')
+      else if (column.change.kind === 'alter') add(columnElement, 'breaking.columnAltered')
+      else if (column.change.kind === 'rename') add(columnElement, 'breaking.renamedFrom', { from: column.change.from })
     }
   }
 
   for (const route of plan.routes) {
-    if (route.change.kind === 'drop') {
-      breaking.push({ elementId: route.id, section: 'routes', title: route.name, reason: 'The route is dropped.' })
-    } else if (route.change.kind === 'rename') {
-      breaking.push({ elementId: route.id, section: 'routes', title: route.name, reason: `Renamed from ${route.change.from}.` })
-    } else if (route.agent !== undefined && route.change.kind === 'alter') {
-      breaking.push({
-        elementId: route.id,
-        section: 'routes',
-        title: route.name,
-        reason: `The published agent tool ${route.agent.toolName} changes.`,
-      })
+    const element = { elementId: route.id, section: 'routes', title: route.name } as const
+    if (route.change.kind === 'drop') add(element, 'breaking.routeDropped')
+    else if (route.change.kind === 'rename') add(element, 'breaking.renamedFrom', { from: route.change.from })
+    else if (route.agent !== undefined && route.change.kind === 'alter') {
+      add(element, 'breaking.agentToolChanges', { tool: route.agent.toolName })
     }
   }
 
@@ -305,6 +285,7 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
     // cannot offer.
     entities: [...new Set(elements.map((element) => element.entity))].filter((entity) => entity !== null).sort(),
     status: input.status ?? null,
+    i18n: { initial: input.uiLocale ?? matchPlanLocale(plan.locale) ?? 'en', dictionaries: loadPlanDictionaries() },
   }
 }
 
