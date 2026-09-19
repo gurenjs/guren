@@ -5,11 +5,18 @@
  * ticket than the one the agent asked to close.
  */
 import { Ticket } from '../Models/Ticket'
+import type { ticketCategories } from '../../db/schema'
+
+export type TicketCategory = (typeof ticketCategories)[number]
+export type TicketTriage = 'pending' | 'auto' | 'review' | 'confirmed'
 
 export interface TicketRow {
   id: number
   title: string
   status: 'open' | 'closed'
+  category: TicketCategory | null
+  categoryProbability: number | null
+  triage: TicketTriage
   createdAt: Date
   updatedAt: Date
 }
@@ -18,6 +25,9 @@ export interface TicketView {
   id: number
   title: string
   status: 'open' | 'closed'
+  category: TicketCategory | null
+  categoryProbability: number | null
+  triage: TicketTriage
   createdAt: string
   updatedAt: string
 }
@@ -27,6 +37,9 @@ export function presentTicket(row: TicketRow): TicketView {
     id: row.id,
     title: row.title,
     status: row.status,
+    category: row.category,
+    categoryProbability: row.categoryProbability,
+    triage: row.triage,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }

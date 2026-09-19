@@ -100,7 +100,7 @@
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^20.14.10",
     "@types/react": "^19.0.0",
-    "ai": "^7.0.102",
+    "ai": "^7.0.106",
     "react": "^19.0.0",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",

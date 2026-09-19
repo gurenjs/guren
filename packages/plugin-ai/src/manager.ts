@@ -2,7 +2,7 @@ import type { Container } from '@guren/core'
 import type { EmbeddingModel, ImageModel, LanguageModel } from 'ai'
 
 import { bindAgent, type Agent, type AgentClass, type AgentPrincipalInput, type BoundAgent } from './agent'
-import { describeNames, type AiConfig, type AiProviderConfig } from './config'
+import { describeNames, type AiConfig, type AiEvaluationModel, type AiProviderConfig } from './config'
 import { createConversationStore, type ConversationStore } from './conversations'
 import type { AiProviderName } from './types'
 
@@ -23,14 +23,19 @@ export interface AiManager {
   model(provider?: AiProviderName): LanguageModel
   embeddingModel(provider?: AiProviderName): EmbeddingModel
   imageModel(provider?: AiProviderName): ImageModel
+  /** Resolves `provider`, then `defaultEvaluation`, then `default`. Experimental upstream, like `evaluate()`. */
+  evaluationModel(provider?: AiProviderName): AiEvaluationModel
   /** The store `config/ai.ts` configures; throws when it configures none. */
   conversations(): ConversationStore
 }
+
+type OptionalModelKind = 'embeddingModel' | 'imageModel' | 'evaluationModel'
 
 export class ConfiguredAiManager implements AiManager {
   private readonly models = new Map<string, LanguageModel>()
   private readonly embeddingModels = new Map<string, EmbeddingModel>()
   private readonly imageModels = new Map<string, ImageModel>()
+  private readonly evaluationModels = new Map<string, AiEvaluationModel>()
   private conversationStore?: ConversationStore
 
   constructor(
@@ -46,7 +51,7 @@ export class ConfiguredAiManager implements AiManager {
 
   model(provider?: AiProviderName): LanguageModel {
     const name = provider ?? this.config.default
-    return memoize(this.models, name, () => this.provider(name).model())
+    return memoize(this.models, name, () => this.factory(name, 'model')())
   }
 
   embeddingModel(provider?: AiProviderName): EmbeddingModel {
@@ -55,6 +60,10 @@ export class ConfiguredAiManager implements AiManager {
 
   imageModel(provider?: AiProviderName): ImageModel {
     return this.optionalModel(this.imageModels, 'imageModel', provider)
+  }
+
+  evaluationModel(provider?: AiProviderName): AiEvaluationModel {
+    return this.optionalModel(this.evaluationModels, 'evaluationModel', provider ?? this.config.defaultEvaluation)
   }
 
   conversations(): ConversationStore {
@@ -67,16 +76,18 @@ export class ConfiguredAiManager implements AiManager {
     return (this.conversationStore ??= createConversationStore(this.config.conversations))
   }
 
-  /** A model kind a provider may leave out, unlike `model`; the kind names itself in the error. */
-  private optionalModel<T>(cache: Map<string, T>, kind: 'embeddingModel' | 'imageModel', provider?: AiProviderName): T {
+  /** A model kind a provider may leave out; the kind names itself in the error. */
+  private optionalModel<T>(cache: Map<string, T>, kind: OptionalModelKind, provider?: AiProviderName): T {
     const name = provider ?? this.config.default
-    return memoize(cache, name, () => {
-      const factory = this.provider(name)[kind]
-      if (!factory) {
-        throw new Error(`The AI provider "${name}" configures no ${kind} in config/ai.ts.`)
-      }
-      return factory() as T
-    })
+    return memoize(cache, name, () => this.factory(name, kind)() as T)
+  }
+
+  private factory<K extends 'model' | OptionalModelKind>(name: string, kind: K): NonNullable<AiProviderConfig[K]> {
+    const factory = this.provider(name)[kind]
+    if (!factory) {
+      throw new Error(`The AI provider "${name}" configures no ${kind} in config/ai.ts.`)
+    }
+    return factory
   }
 
   private provider(name: string): AiProviderConfig {

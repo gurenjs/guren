@@ -10,6 +10,10 @@ import type {
   AgentClass,
   AgentPrincipalInput,
   AgentResponse,
+  AiEvaluationModel,
+  AiEvaluationQuestion,
+  AiEvaluationQuestions,
+  AiEvaluationResult,
   AiManager,
   BoundAgent,
   BoundAgentFactory,
@@ -23,10 +27,11 @@ import type {
   LanguageModel,
   StepResult,
   ToolSet,
+  experimental_evaluate,
   simulateStreamingMiddleware,
   wrapLanguageModel,
 } from 'ai'
-import type { MockEmbeddingModelV4, MockImageModelV4, MockLanguageModelV4 } from 'ai/test'
+import type { Experimental_EvaluationMockModelV4, MockEmbeddingModelV4, MockImageModelV4, MockLanguageModelV4 } from 'ai/test'
 
 /** The model's final answer: plain text, or the value an agent's `output` schema parses. */
 export type FakeAiAnswer = string | { text: string } | { output: unknown }
@@ -84,12 +89,31 @@ export interface FakeAiImageCall {
   provider: string
 }
 
+/**
+ * One scripted evaluation: a value per question. A shorthand expands by the question's type
+ * (`'billing'` → that choice at probability 1; `0.97` → a boolean's probability, or a score's
+ * position), and a full AI SDK answer object passes through. Checked against the questions
+ * when consumed, so a fake cannot answer what the real model could not.
+ */
+export type FakeAiEvaluation = Record<string, string | number | Record<string, unknown>>
+
+export interface FakeAiEvaluationCall<Q extends AiEvaluationQuestions = AiEvaluationQuestions> {
+  state: Parameters<typeof experimental_evaluate>[0]['state']
+  questions: Q
+  /** The provider name resolved for the call, `defaultEvaluation` and `default` included. */
+  provider: string
+  /** Set once the answer was produced; absent when the call failed (nothing scripted, or a value the questions refuse). */
+  answers?: AiEvaluationResult<Q>['answers']
+  error?: unknown
+}
+
 export interface FakeAiRuntime {
   bindAgent: typeof bindAgent
   resolveAgentName: typeof resolveAgentName
   MockLanguageModelV4: typeof MockLanguageModelV4
   MockEmbeddingModelV4: typeof MockEmbeddingModelV4
   MockImageModelV4: typeof MockImageModelV4
+  EvaluationMockModelV4: typeof Experimental_EvaluationMockModelV4
   wrapLanguageModel: typeof wrapLanguageModel
   simulateStreamingMiddleware: typeof simulateStreamingMiddleware
 }
@@ -115,6 +139,7 @@ async function loadFakeAiRuntime(): Promise<FakeAiRuntime> {
     MockLanguageModelV4: test.MockLanguageModelV4,
     MockEmbeddingModelV4: test.MockEmbeddingModelV4,
     MockImageModelV4: test.MockImageModelV4,
+    EvaluationMockModelV4: test.Experimental_EvaluationMockModelV4,
     wrapLanguageModel: sdk.wrapLanguageModel,
     simulateStreamingMiddleware: sdk.simulateStreamingMiddleware,
   }
@@ -166,6 +191,8 @@ export class FakeAi implements AiManager, Disposable {
   private readonly images: FakeAiImages[] = []
   private readonly embedRecords: FakeAiEmbedCall[] = []
   private readonly imageRecords: FakeAiImageCall[] = []
+  private readonly evaluationScripts: FakeAiEvaluation[] = []
+  private readonly evaluationRecords: FakeAiEvaluationCall[] = []
   /** One per scripted prompt, read on dispose: a loop `stopWhen` ended early never asks for the rest. */
   private readonly progress: Array<{ name: string; consumed: () => number; total: number }> = []
   private readonly restore: Disposable
@@ -280,6 +307,34 @@ export class FakeAi implements AiManager, Disposable {
     }
   }
 
+  /** Queue one answer set per future `evaluate()` call, consumed in order. */
+  answer(evaluations: readonly FakeAiEvaluation[]): this {
+    this.evaluationScripts.push(...evaluations)
+    return this
+  }
+
+  evaluations(): readonly FakeAiEvaluationCall[] {
+    return this.evaluationRecords
+  }
+
+  assertEvaluated(predicate?: (call: FakeAiEvaluationCall) => boolean): void {
+    if (this.evaluationRecords.length === 0) {
+      throw new Error(`Expected evaluate() to be called, but it was not.${this.failureSuffix()}`)
+    }
+    if (predicate && !this.evaluationRecords.some((call) => predicate(call))) {
+      throw new Error(
+        'Expected evaluate() to be called with a matching state. It was called with: '
+        + `${this.evaluationRecords.map((call) => JSON.stringify(call.state)).join(', ')}.${this.failureSuffix()}`,
+      )
+    }
+  }
+
+  assertNeverEvaluated(): void {
+    if (this.evaluationRecords.length > 0) {
+      throw new Error(`Expected evaluate() never to be called, but it was called ${this.evaluationRecords.length} time(s).`)
+    }
+  }
+
   agent<T extends Agent>(cls: AgentClass<T>): BoundAgentFactory<T> {
     const name = this.nameOf(cls)
     return {
@@ -291,6 +346,7 @@ export class FakeAi implements AiManager, Disposable {
           model: (provider) => this.scriptedModel(name, provider),
           embeddingModel: (provider) => this.embeddingModel(provider),
           imageModel: (provider) => this.imageModel(provider),
+          evaluationModel: (provider) => this.evaluationModel(provider),
           conversations: () => this.conversations(),
         }
         const bound = this.runtime.bindAgent(cls, principal, { container: this.container, manager })
@@ -364,6 +420,37 @@ export class FakeAi implements AiManager, Disposable {
     })
   }
 
+  evaluationModel(provider?: string): AiEvaluationModel {
+    const selected = provider ?? this.config.defaultEvaluation ?? this.config.default
+    this.checkProvider('evaluate()', 'evaluationModel', selected)
+    return new this.runtime.EvaluationMockModelV4({
+      provider: 'fake',
+      modelId: `fake:${selected}`,
+      supportedQuestionTypes: ['choice', 'score', 'boolean'],
+      doEvaluate: async ({ state, questions }) => {
+        // Recorded per call rather than per model: the SDK validates the questions before it reaches here.
+        const record: FakeAiEvaluationCall = { state, questions, provider: selected }
+        this.evaluationRecords.push(record)
+        const script = this.evaluationScripts.shift()
+        if (script === undefined) {
+          record.error = new Error('nothing scripted')
+          return this.fail(
+            `evaluate() was called (state ${JSON.stringify(state).slice(0, 80)}), but nothing is scripted for it. `
+            + 'Script it with ai.answer([{ ... }]) before the call.',
+          )
+        }
+        try {
+          const answers = expandEvaluation(script, questions)
+          record.answers = answers as FakeAiEvaluationCall['answers']
+          return { answers, warnings: [] }
+        } catch (error) {
+          record.error = error
+          return this.fail(error instanceof Error ? error.message : String(error))
+        }
+      },
+    })
+  }
+
   private vectorFor(value: string): number[] {
     if (this.embedder) return [...this.embedder(value)]
     const next = this.embeddings.shift()
@@ -386,7 +473,7 @@ export class FakeAi implements AiManager, Disposable {
     }
   }
 
-  private checkProvider(caller: string, kind: 'embeddingModel' | 'imageModel', selected: string): void {
+  private checkProvider(caller: string, kind: 'embeddingModel' | 'imageModel' | 'evaluationModel', selected: string): void {
     this.checkConfigured(caller, selected)
     // Checked, never called: the fake answers the call, but a provider with no factory
     // would throw outside the fake, and a test that passes there is measuring nothing.
@@ -408,6 +495,9 @@ export class FakeAi implements AiManager, Disposable {
       .map((prompt) =>
         `Agent [${prompt.name}] stopped after ${prompt.consumed()} of its ${prompt.total} scripted steps; `
         + 'the loop ended before the scripted answer (check the agent\'s stopWhen).')
+    if (this.evaluationScripts.length > 0) {
+      unused.push(`${this.evaluationScripts.length} scripted evaluation answer(s) were never consumed: ai.answer() queued more than the code evaluated.`)
+    }
     if (this.failures.length + unused.length > 0) {
       throw new Error(`fakeAi() found prompts its script did not answer:${formatList([...this.failures, ...unused])}`)
     }
@@ -503,6 +593,49 @@ function scriptedImages(scripted: FakeAiImages): string[] | Uint8Array[] {
   if (typeof scripted === 'string') return [scripted]
   if (scripted instanceof Uint8Array) return [scripted]
   return scripted.slice()
+}
+
+type EvaluationAnswer =
+  | { type: 'choice'; choice: string; probabilities: Record<string, number> }
+  | { type: 'score'; score: number; probabilities?: Record<string, number> }
+  | { type: 'boolean'; probability: number }
+
+/** One answer per question, from the shorthand. Throws naming the question when the value is outside what it asks. */
+function expandEvaluation(script: FakeAiEvaluation, questions: Record<string, AiEvaluationQuestion>): Record<string, EvaluationAnswer> {
+  const unknown = Object.keys(script).filter((id) => !Object.hasOwn(questions, id))
+  if (unknown.length > 0) {
+    throw new Error(`ai.answer() scripts ${unknown.map((id) => JSON.stringify(id)).join(', ')}, which the evaluation does not ask (it asks: ${Object.keys(questions).join(', ')}).`)
+  }
+  return Object.fromEntries(Object.entries(questions).map(([id, question]) => {
+    const value = script[id]
+    if (value === undefined) throw new Error(`ai.answer() scripts no value for question "${id}".`)
+    if (typeof value === 'object') return [id, value as EvaluationAnswer]
+    switch (question.type) {
+      case 'choice': {
+        const options = Object.keys(question.criteria)
+        if (typeof value !== 'string' || !options.includes(value)) {
+          throw new Error(`ai.answer() gives question "${id}" ${JSON.stringify(value)}, not one of its options: ${options.join(', ')}.`)
+        }
+        return [id, { type: 'choice', choice: value, probabilities: Object.fromEntries(options.map((o) => [o, o === value ? 1 : 0])) }]
+      }
+      case 'score': {
+        const top = question.criteria.length - 1
+        if (typeof value !== 'number' || value < 0 || value > top) {
+          throw new Error(`ai.answer() gives question "${id}" ${JSON.stringify(value)}; a score is a number from 0 to ${top}.`)
+        }
+        const distribution = Number.isInteger(value)
+          ? { probabilities: Object.fromEntries(question.criteria.map((_, i) => [String(i), i === value ? 1 : 0])) }
+          : {}
+        return [id, { type: 'score', score: value, ...distribution }]
+      }
+      case 'boolean': {
+        if (typeof value !== 'number' || value < 0 || value > 1) {
+          throw new Error(`ai.answer() gives question "${id}" ${JSON.stringify(value)}; a boolean answer is a probability from 0 to 1.`)
+        }
+        return [id, { type: 'boolean', probability: value }]
+      }
+    }
+  }))
 }
 
 function listFor<T>(lists: Map<string, T[]>, key: string): T[] {
