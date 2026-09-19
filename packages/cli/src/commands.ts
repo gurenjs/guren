@@ -82,6 +82,7 @@ import { displayContext } from './context'
 import { displayEntityContext } from './entity-context'
 import { CHECK_SUITES, runCheck, renderCheckReport } from './check'
 import { ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, loadEnvSchema, writeEnvExample } from './app-env'
+import { readAppDefaultLocale } from './app-locale'
 import { gatingResults } from './check-result'
 import { runAudit, renderAuditReport } from './audit'
 import { runGate, renderGateReport } from './gate'
@@ -219,13 +220,24 @@ const planRenderCommand = defineCommand({
       type: 'string',
       description: 'Application root directory.',
     },
+    locale: {
+      type: 'string',
+      description:
+        "The language the page's own labels open in (en or ja); the page can switch between them. Defaults to the plan's locale, then the application's, then en.",
+      valueHint: 'ja',
+    },
   },
   async run({ args }) {
     // The application the plan is checked against, which the plan file need not sit
     // in: a plan is reviewed from wherever it was written. Scanned only once the plan
     // itself has parsed.
-    const app = () => loadPlanAppState(args.app ?? process.cwd())
-    const rendered = await renderPlanFile(args.plan, { output: args.output, app })
+    const appRoot = args.app ?? process.cwd()
+    const rendered = await renderPlanFile(args.plan, {
+      output: args.output,
+      app: () => loadPlanAppState(appRoot),
+      locale: args.locale,
+      appLocale: () => readAppDefaultLocale(appRoot),
+    })
 
     console.log(rendered.path)
   },

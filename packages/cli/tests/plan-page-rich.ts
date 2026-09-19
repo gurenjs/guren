@@ -2,6 +2,7 @@ import type { PlanCheckResult } from '../src/plan/render'
 import { PlanSchema, type Plan } from '../src/plan/schema'
 import { loadCommentsPlan, TEST_BASELINE } from './plan-fixture'
 
+// oxlint-disable-next-line typescript/no-explicit-any -- a fixture mutated before the schema parses it
 type Loose = Record<string, any>
 
 /**
@@ -119,7 +120,14 @@ export function richPlan(locale = 'en'): Plan {
 }
 
 export const RICH_CHECKS: PlanCheckResult[] = [
-  { id: 'plan-ref:route.comments.store', title: 'Route action', status: 'fail', message: 'The action is not declared.', elementId: 'route.comments.store', suggestion: 'Declare it.' } as PlanCheckResult,
-  { id: 'plan-doc', title: 'Plan document', status: 'warn', message: 'Two ids repeat.' } as PlanCheckResult,
-  { id: 'plan-ok', title: 'Identity', status: 'pass', message: 'The hash matches.', elementId: 'model.post' } as PlanCheckResult,
+  {
+    key: 'plan:route-action',
+    title: 'Route action',
+    status: 'fail',
+    message: 'The action is not declared.',
+    elementId: 'route.comments.store',
+    suggestion: 'Declare it.',
+  },
+  { key: 'plan:ids', title: 'Plan document', status: 'warn', message: 'Two ids repeat.' },
+  { key: 'plan:identity', title: 'Identity', status: 'pass', message: 'The hash matches.', elementId: 'model.post' },
 ]

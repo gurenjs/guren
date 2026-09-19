@@ -9,6 +9,7 @@ import { basename, resolve } from 'node:path'
 
 import { CliError, formatSchemaIssues } from './cli-error'
 import type { PlanAppState } from './plan/app-state'
+import { isPlanLocale, matchPlanLocale, PLAN_LOCALES, type PlanLocale } from './plan/locales'
 import { hasBaseline, renderPlanHtml } from './plan/render'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { writeFileSafe } from './utils'
@@ -25,6 +26,10 @@ export interface RenderPlanFileOptions {
   output?: string
   /** Resolves the plan and the output path. The application root is {@link RenderPlanFileOptions.app}'s. */
   cwd?: string
+  /** The locale the page's own words open in (`--locale`). One the page does not ship is refused. */
+  locale?: string
+  /** The application's default locale, asked only when neither `locale` nor the plan's language decides. */
+  appLocale?: () => Promise<string | undefined>
 }
 
 export interface RenderedPlanFile {
@@ -55,6 +60,19 @@ async function isSameFile(target: string, plan: string): Promise<boolean> {
   }
 }
 
+/**
+ * The locale the page opens in: the flag, then the plan's own language, then the
+ * application's. The application is read only when the first two give no answer.
+ */
+async function pageLocale(plan: PlanDraft | Plan, options: RenderPlanFileOptions): Promise<PlanLocale | undefined> {
+  if (options.locale !== undefined) {
+    if (isPlanLocale(options.locale)) return options.locale
+    throw new CliError(`The plan page has no ${options.locale} locale. Choose one of: ${PLAN_LOCALES.join(', ')}.`)
+  }
+  if (matchPlanLocale(plan.locale) !== undefined || options.appLocale === undefined) return undefined
+  return matchPlanLocale(await options.appLocale())
+}
+
 export function planOutputPath(planPath: string): string {
   return planPath.endsWith('.json') ? `${planPath.slice(0, -'.json'.length)}.html` : `${planPath}.html`
 }
@@ -81,7 +99,7 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
   const app = typeof options.app === 'function' ? await options.app() : options.app
   // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to render nothing.
   const checks = validatePlan(plan, app)
-  const html = renderPlanHtml({ plan, checks, planFile: basename(absolutePlan) })
+  const html = renderPlanHtml({ plan, checks, planFile: basename(absolutePlan), uiLocale: await pageLocale(plan, options) })
   const target = options.output ? resolve(cwd, options.output) : planOutputPath(absolutePlan)
 
   // The plan is the input every later step reads, and this command keeps no copy of it,

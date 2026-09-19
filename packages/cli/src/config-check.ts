@@ -15,7 +15,8 @@ import { resolveAppEntry } from './provider-registrar'
 import { loadResolvedConfig, type ResolvedConfigEntry } from './resolved-config'
 import { importsByLocal, specifierBase } from './schema-binding'
 
-function createAppOptions(program: unknown): ObjectExpression | null {
+/** The literal `createApp({ … })` takes, or `null` when the entry passes anything else. */
+export function createAppOptions(program: unknown): ObjectExpression | null {
   let options: ObjectExpression | null = null
   walk(program, (node) => {
     if (options) return false
