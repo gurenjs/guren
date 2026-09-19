@@ -12,6 +12,9 @@ export const PLAN_VERSION = 1
 
 const NonEmptySchema = z.string().min(1)
 
+// BCP 47 in its common shape (`en`, `ja`, `pt-BR`, `zh-Hant-TW`); the page puts it on `<html lang>`.
+const LocaleSchema = z.string().regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/)
+
 const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 
 // `constructor` and `toString` match the pattern, and any consumer that keys a plain
@@ -339,6 +342,7 @@ const draftShape = {
   policies: z.array(PlanPolicySchema).default([]),
   sideEffects: z.array(PlanSideEffectSchema).default([]),
   flows: z.array(PlanFlowSchema).default([]),
+  locale: LocaleSchema,
   commands: z.array(PlanCommandSchema).default([]),
   tasks: z.array(PlanTaskIntentSchema).default([]),
   hints: z.array(z.string()).default([]),

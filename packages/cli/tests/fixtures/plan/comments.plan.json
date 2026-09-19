@@ -2,6 +2,7 @@
   "planVersion": 1,
   "title": "Comments on posts",
   "summary": "Signed-in users can comment on a post; an author can delete their own comment.",
+  "locale": "en",
   "scope": {
     "goals": [
       "Comment on a post",
