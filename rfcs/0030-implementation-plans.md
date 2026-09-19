@@ -110,7 +110,7 @@ interface Plan {
   scope: { goals: string[]; nonGoals: string[] }
   assumptions: string[]          // what the model decided without being told
   openQuestions: string[]        // what it could not decide
-  baseline: { rev: string; contextHash: string }   // filled by Guren, never by the model
+  baseline: { rev: string; contextHash: Record<string, string> }   // per referenced element (§4); filled by Guren
   models: PlanModel[]
   validators: PlanValidator[]
   controllers: PlanController[]
@@ -143,7 +143,7 @@ The sections, in the terms of a conventional design document:
 
 | Section | Fields |
 |---|---|
-| Model | table, columns (name, type, nullable, default, unique, index), foreign keys, relationships, fillable, and for `alter` / `rename` / `drop` on a table with rows: `dataMigration` (required) |
+| Model | table, columns (name, type, nullable, default, unique, index), foreign keys, relationships, fillable, and for any `alter` / `rename` / `drop`: `dataMigration` (required, §2) |
 | View | page id, purpose, `Props`, form fields (each naming a validator field, never restating its rules), actions a user can take and the route each one calls, empty / error / loading states |
 | Controller | class, action, params, query, body (a validator id), authorization (middleware, policy ability), response (Inertia page id, redirect, or resource id), business rules as prose |
 | Routing | method, path, name, action id, middleware, `bind`, agent exposure |
@@ -206,8 +206,11 @@ plan and the application's current context (`generateContext()`,
 - a mutating route with authentication and no authorization, a body-carrying
   route with no validator (`describeMethod()` from `http-methods.ts`), so the
   `guren audit` findings surface in the design;
-- `dataMigration` missing where a column becomes `NOT NULL` without a default,
-  and a `drop` + `add` pair on one table that reads as a rename;
+- `dataMigration` missing on any `alter` / `rename` / `drop` of an existing
+  table or column, and a `drop` + `add` pair on one table that reads as a
+  rename. Whether the table holds rows is not something a static command can
+  know, so the rule is conservative: the plan answers every time, and
+  `{ kind: 'none', reason }` is an accepted answer;
 - an `alter` on a controller action with no acceptance behaviour naming its
   route, since nothing else can judge a change that alters no shape;
 - an added or altered route with a validator and no `validation` behaviour,
@@ -222,11 +225,18 @@ rule: a plan that alters or drops a route no existing test reaches gets a
 current behaviour and must pass before anything is edited. A path assembled at
 runtime is reported as unreadable, never as uncovered.
 
-**Impact** is computed, never written by the model: for every non-`add`
-element, the existing routes, pages, tests, `.agent()` tools and `ApiRoutes`
-entries that reference it (`referencedBy`, the route graph, `deriveAgentTools()`).
-Dropping a column, changing a type, renaming a route and altering a published
-agent tool are flagged as breaking.
+**Impact** is computed, never written by the model, and it is partial. What
+exists today reaches this far: `referencedBy` reverses model relationships and
+nothing finer; `generateEntityContext()` finds an entity's tests by file name;
+the route graph gives the routes of a controller action, and
+`deriveAgentTools()` the tools of those routes. That answers "which models,
+routes, agent tools and `ApiRoutes` entries hang off this table or action".
+It does not answer "who reads this column". Part 1 adds one new scan, property
+accesses on a model's records in controllers, resources and page `Props`, and
+the page labels Impact as a lower bound either way: an empty list means
+nothing was found, never that nothing is affected. Dropping a column, changing
+a type, renaming a route and altering a published agent tool are flagged as
+breaking regardless of what Impact found.
 
 Failures do not block rendering. They appear in the page beside the element
 they concern, and `guren plan:approve` refuses while any remain.
@@ -236,15 +246,27 @@ they concern, and `guren plan:approve` refuses while any remain.
 `guren plan:render <plan>` writes one HTML file: a fixed template under
 `packages/cli/templates/plan/`, with the plan, the check results and (later)
 the status inlined as `<script type="application/json">`. No network, no build
-step, opens from disk. The serialization escapes `</script` and `<!--`; the
-template renders every string as text, never as HTML.
+step, opens from disk.
+
+Every string in a plan is model output, and under the `github` store some of
+it passed through an editable issue, so the page treats all of it as hostile:
+the serializer escapes every `<`, `>`, `&`, U+2028 and U+2029 as `\uXXXX`; the
+template writes strings with `textContent` only; links are in-page anchors
+built from validated ids, and no plan string ever becomes an `href`; a
+`<meta http-equiv="Content-Security-Policy">` allows the inline script and
+style and nothing else (`default-src 'none'`), so a plan cannot load or post
+anywhere. The diagram is drawn by the template's own SVG code for the same
+reason: no Mermaid, and no CDN.
 
 - Tabs per section, a filter per entity, and a "changes only" toggle that
   hides `existing` elements.
 - Every id is a link: route → action → validator → page → model and back.
-- The ER diagram is drawn from the plan merged over the current schema, reusing
-  the generator in `spec-er.ts`. Existing tables are muted; added and altered
-  ones carry a badge; clicking a table opens its columns.
+- The ER diagram is drawn from the plan merged over the current schema.
+  `generateErSpec(cwd)` reads the disk and emits Mermaid Markdown, so it is not
+  reusable as it stands: Part 1 extracts the table-and-edge graph it builds
+  into a pure function both callers share, and the page renders that graph.
+  Existing tables are muted; added and altered ones carry a badge; clicking a
+  table opens its columns.
 - Breaking changes and failed checks are pinned to the top.
 - Each element has an approve toggle and a comment box. "Export feedback"
   downloads `feedback.json` (`{ elementId, verdict, comment }[]`), which
@@ -252,21 +274,38 @@ template renders every string as text, never as HTML.
 
 ### 4. Approval and revisions
 
-`guren plan:approve <plan>` records `{ hash, approvedAt, approvedBy }` where
-`hash` is the SHA-256 of the canonicalized plan. An approved plan is immutable:
-every later command recomputes the hash and refuses a plan that no longer
-matches.
+**Identity.** A plan's hash is the SHA-256 of its canonical bytes: the plan
+object with `baseline` included and approval metadata excluded, serialized as
+UTF-8 JSON with object keys sorted, arrays in document order, no insignificant
+whitespace, and numbers as `JSON.stringify` writes them. The hash is the only
+name a plan has; the slug and the issue number are handles.
 
-Changing an approved plan produces a revision:
+`guren plan:approve <plan>` records `{ hash, approvedAt, approvedBy }` beside
+the plan, never inside it. Every later command recomputes the hash and refuses
+a plan that does not match an approval.
+
+**Revisions.** Changing an approved plan produces a revision:
 
 ```bash
 bunx guren plan --revise comments --feedback feedback.json
 ```
 
-The revision is stored as a delta against the approved plan (elements ADDED,
-MODIFIED, REMOVED), the page shows only that delta, and only the delta is
-approved. A decision taken during implementation that contradicts the plan is
-recorded the same way, with a required `reason`; it is never a silent edit.
+A revision is `{ parent, ops, result }`: the parent's hash, the elements
+ADDED, MODIFIED and REMOVED by id, and the hash of the plan those operations
+yield. Applying `ops` to the parent must reproduce `result`, or the revision is
+rejected. The page shows the operations, the approval names `result`, and the
+current plan is the head of the approved chain. A decision taken during
+implementation that contradicts the plan is a revision too, with a required
+`reason`; it is never a silent edit.
+
+**Freshness.** `baseline.rev` records where the plan was written and gates
+nothing: the implementation's own commits move it on the first step.
+`baseline.contextHash` is scoped, a hash per *referenced* element (each
+`existing`, `alter`, `rename` and `drop` target, and every name an `add` must
+not collide with) of the shape the scanners read at that revision. An
+unrelated commit leaves it alone. A change to a referenced element marks that
+element stale, re-runs the §2 checks for it, and blocks only the steps that
+depend on it.
 
 ### 5. Tasks are derived, not written
 
@@ -280,9 +319,9 @@ behaviours. Guren supplies the breakdown and the order, in
 
    | Step | Work | Verify |
    |---|---|---|
-   | scaffold | deterministic, no model (see below) | `typecheck` |
+   | scaffold | deterministic, no model (see below) | codegen, then `typecheck` |
    | tests | skeletons generated from `acceptance[]` (no model); the agent fills `given` setup and what `expect` cannot express | every generated test runs and fails |
-   | data | schema delta, migration, model | `db:migrate`, `typecheck` |
+   | data | what the scaffold's table cannot express, migration, model relationships | `db:migrate`, `typecheck` |
    | http | validator, resource, policy, controller, routes | `guren check`, codegen, the slice's tests |
    | pages | page components | `typecheck`, `guren check` |
 
@@ -291,12 +330,43 @@ behaviours. Guren supplies the breakdown and the order, in
 The same plan always yields the same tasks. `hints[]` may reorder tasks that
 the dependency graph leaves unordered, and nothing else.
 
-**Scaffolding is step one, and it is not the agent's.** For an `add` entity,
-Guren computes the `make:feature` arguments from the plan (`--fields`,
-`--policy`, `--attach`, `--test`, `--module`) and runs it. One slice is around
-ten files, which is past the width at which agent success rates fall; after
-the scaffold, what is left for the agent is the difference between generated
-code and the plan: relationships, business rules, non-default form fields.
+**Scaffolding is step one, and it is not the agent's.** One slice is around
+ten files, which is past the width at which agent success rates fall, so
+whatever can be generated is generated before an agent starts.
+
+`make:feature` alone does not get there. Its flags (`--fields`, `--policy`,
+`--public`, `--attach`, `--test`, `--module`) carry six field types and a `?`
+for nullable; they cannot say default, unique, index, foreign key,
+relationship or fillable. And it stops short of a compiling application: the
+table definition, the route registration, the migration, codegen and the
+policy registration are printed as "Next steps" for a person. A scaffold step
+that ended there could not pass `typecheck`.
+
+So the step is `make:feature` plus the wiring this RFC adds, each through a
+writer the CLI already has:
+
+| Work | Writer |
+|---|---|
+| model, controller, validator, resource, pages, policy, test file | `make:feature`, arguments computed from the plan |
+| the table, with the column options and foreign keys the plan states | a plan-to-Drizzle emitter, appended with `appendTableToSchema()` |
+| routes with their body schemas, in a `routes/<entity>.ts` registrar of their own | emitted from the plan, mounted with `wireRouteRegistrar()` |
+| policy registration | no writer exists: `wireAppProvider()` registers a provider with `createApp()`, and nothing edits a provider's `boot()`. Part 3 adds one, or this stays the agent's first edit in the `http` step |
+| `.guren/*.gen.ts` | `guren codegen` |
+
+Routes go in their own file because the existing patch mounts a registrar
+call and does not insert route lines into `routes/web.ts`.
+
+The migration is not generated here: `db:make` needs drizzle-kit and
+`db:migrate` a database, which makes it the `data` step's and `plan:verify`'s
+business (§6). What the agent is left with after the scaffold is relationships
+on the model, fillable, business rules, and form fields the generated pages
+do not have.
+
+An API-only application gets no scaffold step: `make:feature` refuses one
+(`assertNotApiOnly`), since it generates Inertia pages. Its slices are
+`make:controller` and `make:validator` plus agent steps, and `views` must be
+empty in its plans (a §2 check).
+
 A step whose remaining work exceeds a threshold (files touched, elements
 covered) is split, pages by screen group first. The threshold starts at five
 files and is tuned from the metrics in §7.
@@ -307,8 +377,10 @@ becomes one `TestApp` test whose title starts with its id
 with the actor, the request and the `expect` assertions written out. A
 generated test must fail before the implementation exists, must still call the
 route its behaviour names (checked statically), and may not be edited once its
-step is verified without turning `drifted`. Those three together are what
-keeps a test an agent touched from being one that cannot fail.
+step is verified without turning `drifted`. These are tamper detection, not
+proof: a test can satisfy all three and still assert nothing that matters.
+What they rule out is the cheap failure, a test emptied or rewritten until it
+passes, and the task-end reviewer (§7) reads the tests for the rest.
 
 For `alter` / `rename` / `drop` there is no scaffold. Those steps are agent
 edits, and the narrow step width matters most there.
@@ -319,24 +391,79 @@ every slice, and separate worktrees only move the conflict to the merge.
 
 ### 6. Status is derived from the code
 
-`guren plan:status <plan>` computes one state per element. The agent cannot set
+Two commands, because they need different things from the machine.
+
+`guren plan:status <plan>` is observational. Like `check` and `doctor` it
+imports the routes file and parses source; it boots nothing, runs nothing, and
+needs no database. It computes one state per element, and the agent cannot set
 any of them.
 
-| State | Meaning | Read from |
-|---|---|---|
-| `planned` | not in the code | |
-| `present` | exists with the planned shape (for `drop`: is absent) | `schema-parser.ts`, `model-parser.ts`, registered route definitions, `classActionMembers`, `inertia-pages.ts`, discovery |
-| `wired` | reachable: route mounted from a registrar, page returned by an action, validator referenced by a route or action | `routes-check.ts`, `route-registrar.ts`, controller body scan |
-| `verified` | its step's verify commands exited 0 at the current tree | the recorded run in state |
-| `drifted` | exists and differs (column type, route method, missing prop), or a test file changed after its step was verified | same scanners |
-| `unjudged` | no static signal exists | |
+`guren plan:verify <plan> [--step <id>]` executes: the step's verify commands
+(`typecheck`, `guren check`, codegen, `db:migrate`) and its tests. `gate`
+already runs `bun test` from the CLI, so this is not new ground, but it has
+requirements `status` does not. `TestApp` boots the application and
+`db:migrate` opens the configured database, so `verify` runs against the
+application's test database configuration, with a timeout per command, and
+records what it ran against. Missing infrastructure (no database reachable,
+no `bun`, drizzle-kit absent) is reported as `blocked`, never as a failed
+implementation.
 
-Acceptance behaviours have a status of their own. `plan:status` runs the
-slice's tests with `bun test --reporter=junit`, reads the ids out of the test
-titles, and reports each behaviour as `pending` (no test carries its id),
-`failing` or `passing`. An element is `verified` when its step's verify
-commands pass *and* every behaviour naming it is `passing`; the page shows the
-behaviours under the element they cover.
+| State | Meaning | Set by |
+|---|---|---|
+| `planned` | not in the code | `status` |
+| `present` | exists, and every planned property the scanners can read matches (for `drop`: is absent, in a file the scanner fully read) | `status` |
+| `wired` | reachable from the application, below | `status` |
+| `verified` | its step's verify commands and behaviours passed, at a fingerprint that still matches | `verify` |
+| `drifted` | exists and a readable property differs, or a verified fingerprint no longer matches | `status` |
+| `unjudged` | no static signal exists | `status` |
+| `blocked` | cannot be judged or verified here; carries the reason | either |
+| `waived` | a person accepted it incomplete, with a reason, in the decision log | `plan:waive` |
+
+**What the scanners read today, and what they do not.** The comparison can only
+be as fine as its reader:
+
+| Planned property | Reader today | Gap |
+|---|---|---|
+| column type, `notNull`, primary key, single-column FK | `SchemaColumn` | |
+| column default, unique, index, composite constraints | none | Part 1 extends `schema-parser.ts` |
+| options passed as an expression | `opaqueOptions` marks them not visible | stays unknown |
+| relationship name, type, target; fillable | `model-parser.ts` | key configuration is not read |
+| action exists on the controller | `classActionMembers` | what it validates and returns comes from the body scan, as a verdict and not a contract |
+| route method, joined path, name, action | registered definitions (`loadRouteDefinitions()`) | |
+| page `Props` | `describeInertiaPage()` returns the type as one line of text | Part 1 resolves it to keys through the codegen extraction it wraps |
+
+A property with no reader is **unknown**. Unknown never counts towards
+`present`, never satisfies a `drop`, and is listed on the page as "planned,
+not checkable". An element whose every planned property is unknown is
+`unjudged`. This is the rule that keeps a missing reader from reading as a
+green one.
+
+**`wired` means mounted by the application, not visible to the CLI.** Route
+definitions are obtained by executing the registrar, so a computed path
+resolves and is judged like any other. What that load overstates is reach:
+module discovery is a directory scan, and a module never passed to
+`createApp()` shows up in the graph without serving a request.
+`routes-check.ts` judges wiring per routes *file*, not per route. So `wired`
+for a route requires both: its definition's provenance (`moduleProvenance`, or
+the entry registrar) and evidence that the owning module or registrar is one
+the application registers. A page is `wired` when an action returns it; a
+validator when a route contract or an action body references it. Where that
+evidence cannot be read, the state is `present` with a note, never `wired`.
+
+**Acceptance behaviours** have a status of their own, set by `verify` from
+`bun test --reporter=junit`: `pending` (no test carries the id), `failing`,
+`passing`. The aggregation is fixed:
+
+- a test case belongs to a behaviour when its full title, `describe` names
+  included, contains `[<id>]`; several cases may share one id (`test.each`),
+  and all of them must pass;
+- a skipped or todo case counts as failing; zero executed cases is `pending`;
+- the same id in two test files, or an id no behaviour declares, is an error;
+- no junit file, or one that does not parse, is `blocked`.
+
+An element is `verified` when its step's verify commands pass *and* every
+behaviour naming it is `passing`; the page shows the behaviours under the
+element they cover.
 
 `unjudged` is the honest case: a change to the business rules of an existing
 action alters no shape. Such an element goes from `planned` to `verified` on
@@ -346,19 +473,36 @@ reach: client-side state, conditional rendering inside a page. `assertInertia`
 sees the props a page was given and nothing past them, and this RFC does not
 extend to browser tests.
 
-Shape comparison for a column is type, nullability, default and uniqueness as
-`schema-parser.ts` reads them; for a route, method, joined path, name and
-action; for a page, the `Props` keys. Anything the scanners cannot read (a
-spread in the schema aggregate, a computed route path) is reported as
-unreadable, never as `present`.
+**Completion**, per kind of element, since "at least `wired`" has no meaning
+for some of them:
 
-A step is complete when every element it covers is at least `wired` and its
-verify commands pass. A task is complete when its steps are. Existing tests
-may be edited only where the plan lists them under Impact.
+| Element | Complete when |
+|---|---|
+| `add` / `alter` / `rename` with a static signal | `wired`, then `verified` |
+| `drop` | `present` (absent), then `verified`; there is nothing to wire |
+| `unjudged` | `verified` on its behaviours alone |
+| `existing` | never part of completion |
+| any | `waived` |
 
-**State** lives in `.guren/plans/<slug>.state.json`, git-ignored and written
-only by `plan:status`: verify results keyed by tree hash, the decision log, and
-per-step metrics. It is a cache. Deleting it loses the metrics and nothing else.
+A step is complete when every element it covers is. A task is complete when
+its steps are. `blocked` completes nothing and is reported as such: it is an
+environment problem to fix, not a state to wait out. Existing tests may be
+edited only where the plan lists them under Impact.
+
+**Verification fingerprints.** A `verified` result is recorded with the hash
+of the files that hold the step's elements and its test files, plus the
+identity of the environment it ran in. "At the current tree" would expire
+every earlier slice on the next commit; a fingerprint expires a step only
+when something it covers changes, and that is `drifted`.
+
+**What is durable and what is not.** The decision log (waivers, deviations,
+the reason for each revision) is part of the record and lives in the store
+(§9), committed or on the issue. `.guren/plans/<slug>.state.json` is
+git-ignored and holds what can be rebuilt: verification results and per-step
+metrics. A fresh clone, and CI, therefore see every element as at most `wired`
+until `plan:verify` has run there. That is the intended reading: a
+verification result is a fact about one environment, and a committed
+"verified" would be a claim nobody on the new machine has checked.
 
 ### 7. The implementation loop
 
@@ -370,8 +514,7 @@ returns the next step whose dependencies are complete, with exactly the context
 it needs: the elements it covers, the confirmed shape of what it depends on
 (`generateEntityContext()`), the acceptance behaviours, and the verify
 commands. It never returns the whole plan. It refuses when the working tree is
-dirty or when `baseline` no longer matches (the application moved since
-approval): then `plan:status` re-runs the reference checks and names what went
+dirty, and skips a step that depends on a stale element (§4), naming what went
 stale.
 
 One step is one agent session and one commit. The hand-off between sessions is
@@ -379,16 +522,24 @@ the code, the git history and the decision log, so a session that dies
 mid-task costs one step.
 
 The harness template gains a `plan-implement` skill that loops
-`plan:next` → implement → `plan:status`, and a `Stop` hook that runs
-`guren plan:status --step <id> --ci` and exits 2 while the step is incomplete.
-The hook honours `stop_hook_active`. `PostToolUse` is not used for this: it
-cannot block.
+`plan:next` → implement → `plan:verify`, and a `Stop` hook that runs
+`guren plan:verify --step <id> --ci` and exits 2 while the step is incomplete.
+`PostToolUse` is not used for this: it cannot block.
+
+The hook has to be able to give up, or a step that can never complete holds
+the session until Claude Code's own continuation cap ends it with no
+explanation. It lets the agent stop, and says why on stderr, when
+`stop_hook_active` is set and the step's state has not changed since the
+previous continuation, when any covered element is `blocked`, or after three
+continuations on one step. The step is then recorded as `stalled` in state
+with the last failing output, `plan:next` keeps returning it, and a person
+decides between fixing the environment, a revision, and `plan:waive`.
 
 On completing a task, the skill starts a reviewer in a separate context, given
 only the task's plan elements and its diff. Its findings are advisory: a
 reviewer asked for gaps reports some whether or not they exist.
 
-`plan:status` appends to state, per step: `total_cost_usd` and duration where a
+`plan:verify` appends to state, per step: `total_cost_usd` and duration where a
 producer reported them, stop-hook continuations, files touched, lines changed.
 The split threshold in §5 is set from these numbers, not from the literature.
 
@@ -419,6 +570,17 @@ reads `structured_output`; `is_error`, `error_max_structured_output_retries`,
 and a `success` without `structured_output` are all failures, reported with
 the subtype. `baseline` is stamped by Guren afterwards.
 
+Read-only is not the same as safe. The producer reads a repository that may
+contain text addressed to it, and what it reads can come back out inside the
+plan. So: the process is spawned with an argument array, never through a
+shell; the prompt and the schema go in files, with the embedded context
+bounded in size; `Read` is denied on `.env*`, key files and whatever
+`.gitignore` excludes (`--disallowedTools` patterns), so a secret cannot be
+copied into a document that is about to be rendered, committed or posted to
+an issue; and the output is only ever data. No plan string is executed: the
+`commands` section is matched against an allowlist of `guren` subcommands,
+and verify commands come from the step table in §5, never from the plan.
+
 `guren plan --print-prompt` writes the prompt and the schema to stdout and
 calls nothing, for any other agent, and for a Claude Code session already in
 progress, where the harness skill has the running agent write the JSON and
@@ -432,8 +594,10 @@ with `drifted` elements and two open plans that touch the same element.
 
 Where the approved plan, its revisions and the decision log live is an adapter.
 
-**`file`** (default): `docs/plans/<slug>/plan.json` plus `revisions/`,
-committed. One file per plan; tasks are never files, since they are derived.
+**`file`** (default): `docs/plans/<slug>/` holding `plan.json`,
+`approvals.json`, `revisions/` and `decisions.json`, committed. Tasks are
+never files, since they are derived. Approval provenance here is the commit:
+who approved is who the repository's history and review rules say it was.
 
 **`github`**: for a project that does not want plan files in the tree. It
 follows the rule the harness's `github-projects` skill already states: GitHub
@@ -453,10 +617,16 @@ bunx guren plan:sync 412                 # pushes derived status to the issues
 - Status flows one way. `plan:sync` ticks checkboxes and closes a sub-issue
   when its task is complete; an issue closed by hand is reopened on the next
   sync. Commits carry `Refs #<sub-issue>`; decisions are comments.
-- An issue body is editable by anyone with write access, so it is untrusted
-  input: only JSON that passes the schema *and* matches the approved hash is a
-  plan, and comment text is never passed to an agent. Approval caches the plan
-  at `.guren/plans/<issue>.json` so the loop does not depend on the API.
+- An issue is untrusted input, and a hash written in a comment authenticates
+  nothing by itself: whoever can edit the body can post a matching comment.
+  An approval counts only when the API reports its comment as written by an
+  account with write access to *this* repository (`author_association` of
+  OWNER, MEMBER or COLLABORATOR), never edited (`updated_at` equals
+  `created_at`), and naming the hash of the body as it now stands. Comment
+  text is never passed to an agent.
+- Approval caches the plan at `.guren/plans/<issue>.json` so the loop does not
+  depend on the API. The cached copy goes through the same schema validation
+  and hash check as a remote one on every read; a cache is not a trust upgrade.
 
 The rendered HTML is never committed under either store.
 
@@ -470,18 +640,28 @@ a clear error on the one command that needs them, and `plan:render`,
 
 ### Phasing
 
-1. **Part 1**: schema (§1), reference checks (§2), `plan:render` (§3),
-   proven against a hand-written plan for `examples/blog`. No model involved.
-2. **Part 2**: `plan:status` (§6) and task derivation (§5), measured for false
-   `present` / `wired` verdicts on the blog and on a plan for a dogfood app.
-3. **Part 3**: the `claude -p` producer and `--print-prompt` (§8),
-   `plan:approve` and revisions (§4), the scaffold step.
+This RFC asks for acceptance of Parts 1 and 2. Parts 3 to 5 are described so
+that the first two are designed with them in view, and each is re-reviewed
+against Part 2's numbers before it starts; a poor answer to Open Question 1
+reshapes or drops them.
+
+1. **Part 1**: schema (§1), identity and revisions (§4), reference checks
+   (§2), `plan:render` (§3), and the reader extensions §6 lists (column
+   default, unique, index; resolved `Props` keys; the pure ER graph; the
+   column-consumer scan). Proven against a hand-written plan for
+   `examples/blog`. No model involved.
+2. **Part 2**: `plan:status`, `plan:verify`, fingerprints and completion (§6),
+   task derivation (§5), measured for false `present` / `wired` verdicts and
+   for the share of `unknown` and `unjudged`, on the blog and on a plan for a
+   dogfood app.
+3. **Part 3**: the scaffold step and its emitters (§5), the `claude -p`
+   producer and `--print-prompt` (§8), `plan:approve`.
 4. **Part 4**: `plan:next`, the harness skill and `Stop` hook, metrics (§7),
-   `plan:close`.
+   `plan:waive`, `plan:close`.
 5. **Part 5**: the `github` store (§9), `guren check --plan`, the guide.
 
-Part 2 precedes the producer on purpose: status derivation is the claim this
-design rests on, and it can be tested before a model is ever called.
+Identity comes first and status second, before any model is called: they are
+what the rest stands on, and both can be tested without one.
 
 ## Alternatives Considered
 
@@ -538,8 +718,10 @@ code and never from an earlier plan.
 ## Open Questions
 
 1. **Status accuracy.** How often are `present` and `wired` wrong on real
-   applications, and is `unjudged` rare enough for the progress view to be
-   worth reading? Part 2 exists to answer this; a poor answer reshapes §6.
+   applications, and what share of planned properties ends up `unknown` or
+   `unjudged`? A progress view that is mostly "not checkable" is not worth
+   reading. Part 2 exists to answer this; a poor answer reshapes §6 and
+   decides whether Parts 3 to 5 happen.
 2. **One call or two.** Is the full schema within what `--json-schema` produces
    reliably, or does generation split into an outline call and per-entity detail
    calls with `--resume`? Decided by the measured rate of
@@ -562,3 +744,11 @@ code and never from an earlier plan.
 9. **A behaviours view.** Id-tagged test titles are enough to generate
    `docs/spec/behaviours.md` per entity, deterministically, under the existing
    drift gate. In this RFC, or a follow-up once plans have produced such tests?
+10. **Producer confinement.** §8 relies on deny rules holding for `Read` in
+    `--bare` headless mode. That has to be tested, not assumed; if they do not
+    hold, the producer needs an OS-level sandbox or a copy of the tree with the
+    excluded paths removed.
+11. **GitHub approval provenance.** `author_association` plus an unedited
+    comment is the strongest signal the issue API offers, and it still trusts
+    every collaborator equally. Is that enough, or does the `github` store keep
+    `approvals.json` committed and only the tasks on GitHub?
