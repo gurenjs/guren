@@ -16,13 +16,10 @@ import {
 } from '../src/plan/render'
 import { PlanDraftSchema, PlanSchema, type PlanDraft } from '../src/plan/schema'
 import { parsePlanDocument, planOutputPath, renderPlanFile } from '../src/plan-render'
-
-function loadFixture(): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(import.meta.dir, 'fixtures/plan/comments.plan.json'), 'utf8'))
-}
+import { loadCommentsPlan, TEST_BASELINE } from './plan-fixture'
 
 function draft(): PlanDraft {
-  return PlanDraftSchema.parse(loadFixture())
+  return PlanDraftSchema.parse(loadCommentsPlan())
 }
 
 /**
@@ -146,7 +143,7 @@ describe('renderPlanHtml', () => {
   })
 
   test('should render the plan hash once the plan carries a baseline', () => {
-    const plan = PlanSchema.parse({ ...loadFixture(), baseline: { rev: 'abc123', contextHash: {} } })
+    const plan = PlanSchema.parse({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
 
     const embedded = payloadOf({ plan })
 
@@ -425,7 +422,7 @@ describe('buildPlanPayload', () => {
 })
 
 describe('renderPlanFile', () => {
-  async function fixtureDir(document: unknown = loadFixture()): Promise<string> {
+  async function fixtureDir(document: unknown = loadCommentsPlan()): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), 'guren-plan-render-'))
     await writeFile(join(dir, 'comments.plan.json'), JSON.stringify(document), 'utf8')
     return dir
@@ -457,7 +454,7 @@ describe('renderPlanFile', () => {
   })
 
   test('should report a schema failure with the path that failed', async () => {
-    const dir = await fixtureDir({ ...loadFixture(), title: 42 })
+    const dir = await fixtureDir({ ...loadCommentsPlan(), title: 42 })
 
     await expect(renderPlanFile(join(dir, 'comments.plan.json'))).rejects.toThrow(/title/)
   })
@@ -476,7 +473,7 @@ describe('renderPlanFile', () => {
   })
 
   test('should name every id the plan declares twice', async () => {
-    const fixture = loadFixture()
+    const fixture = loadCommentsPlan()
     const models = fixture.models as Array<{ id: string }>
     models[1].id = models[0].id
     const dir = await fixtureDir(fixture)
@@ -489,11 +486,11 @@ describe('renderPlanFile', () => {
 
 describe('parsePlanDocument', () => {
   test('should accept a draft that carries no baseline', () => {
-    expect(parsePlanDocument(loadFixture())).toMatchObject({ title: 'Comments on posts' })
+    expect(parsePlanDocument(loadCommentsPlan())).toMatchObject({ title: 'Comments on posts' })
   })
 
   test('should hold a document with a baseline to the full plan schema', () => {
-    expect(() => parsePlanDocument({ ...loadFixture(), baseline: { rev: '' } })).toThrow(/baseline/)
+    expect(() => parsePlanDocument({ ...loadCommentsPlan(), baseline: { rev: '' } })).toThrow(/baseline/)
   })
 })
 
