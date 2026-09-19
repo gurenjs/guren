@@ -17,46 +17,95 @@
       content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'; require-trusted-types-for 'script'"
     />
     <title>Implementation plan</title>
+    <script>
+      // Guren UI switches themes on a `.dark` class rather than a media query, so that
+      // an app can drive it. A file opened from disk has no app, so it follows the OS.
+      ;(function () {
+        var dark = window.matchMedia('(prefers-color-scheme: dark)')
+        var apply = function () {
+          document.documentElement.classList.toggle('dark', dark.matches)
+        }
+        apply()
+        dark.addEventListener('change', apply)
+      })()
+    </script>
     <style>
+      /*
+       * Guren UI's own tokens, copied from its `tokens.css`. Light is the docs light
+       * theme (white + crimson), dark the rose-pine-moon ground with the rose accent.
+       * The two font families are the one part not adopted: this page may make no
+       * request, so a face it cannot supply is a face some machine renders differently.
+       */
       :root {
-        color-scheme: light dark;
-        --bg: #fbfbfd;
-        --surface: #ffffff;
-        --surface-2: #f2f3f7;
-        --text: #16181d;
-        --muted: #5d6470;
-        --border: #d9dde5;
-        --accent: #8c1c13;
-        --accent-text: #ffffff;
-        --add: #1f6f3f;
-        --alter: #8a5a00;
-        --rename: #1f5c8a;
-        --drop: #a11a1a;
-        --existing: #6b7280;
-        --fail: #a11a1a;
-        --warn: #8a5a00;
-        --pass: #1f6f3f;
+        color-scheme: light;
+        --g-font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+        --g-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+        --g-page: #ffffff;
+        --g-panel: #ffffff;
+        --g-raised: #fffafa;
+        --g-ink: #1a1212;
+        --g-line: #e5e7eb;
+        --g-line-strong: #d1d5db;
+
+        --g-heading: #111827;
+        --g-text: #1f2937;
+        --g-text-2: #4b5563;
+        --g-muted: #9ca3af;
+
+        --g-accent: #db1b1b;
+        --g-accent-down: #b91c1c;
+        --g-accent-text: #991b1b;
+        --g-accent-tint: #fff1f2;
+        --g-on-accent: #fff5f5;
+
+        --g-ok: #286983;
+        --g-ok-chip: #56949f;
+        --g-ok-tint: rgba(86, 148, 159, 0.12);
+        --g-warn: #b45309;
+        --g-warn-chip: #ea9d34;
+        --g-warn-tint: rgba(234, 157, 52, 0.14);
+        --g-danger: #b91c1c;
+        --g-danger-chip: #f23a3a;
+        --g-danger-tint: #fff1f2;
+
+        --g-tick: linear-gradient(180deg, #ff3c28, #8b0000);
+
+        --g-r-ctl: 8px;
+        --g-r-card: 12px;
+        --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
       }
 
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg: #14161a;
-          --surface: #1c1f25;
-          --surface-2: #23272f;
-          --text: #e9ebf0;
-          --muted: #a3abb8;
-          --border: #343a44;
-          --accent: #e0584b;
-          --accent-text: #14161a;
-          --add: #6fcf97;
-          --alter: #e8b64c;
-          --rename: #6fb3e8;
-          --drop: #f08a8a;
-          --existing: #98a1b0;
-          --fail: #f08a8a;
-          --warn: #e8b64c;
-          --pass: #6fcf97;
-        }
+      :root.dark,
+      .dark {
+        color-scheme: dark;
+        --g-page: #1a1a2e;
+        --g-panel: #1e1e34;
+        --g-raised: #232340;
+        --g-line: #2e2e4a;
+        --g-line-strong: #3d3d5c;
+
+        --g-heading: #e0def4;
+        --g-text: #e0def4;
+        --g-text-2: #908caa;
+        --g-muted: #6e6a86;
+
+        --g-accent-text: #eb6f92;
+        --g-accent-tint: rgba(235, 111, 146, 0.12);
+
+        --g-ok: #9ccfd8;
+        --g-ok-chip: #9ccfd8;
+        --g-ok-tint: rgba(156, 207, 216, 0.1);
+        --g-warn: #f6c177;
+        --g-warn-chip: #f6c177;
+        --g-warn-tint: rgba(246, 193, 119, 0.1);
+        --g-danger: #ffa5a5;
+        --g-danger-chip: #f23a3a;
+        --g-danger-tint: rgba(242, 58, 58, 0.12);
+
+        --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+        --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
       }
 
       * {
@@ -66,9 +115,10 @@
       body {
         margin: 0;
         padding: 0 16px 64px;
-        background: var(--bg);
-        color: var(--text);
-        font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+        background: var(--g-page);
+        color: var(--g-text);
+        font: 400 14px/1.6 var(--g-font-sans);
+        -webkit-font-smoothing: antialiased;
         overflow-wrap: anywhere;
       }
 
@@ -79,30 +129,37 @@
 
       code,
       .mono {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-family: var(--g-font-mono);
         font-size: 0.92em;
       }
 
       h1 {
-        font-size: 1.6rem;
-        margin: 24px 0 8px;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--g-heading);
+        margin: 28px 0 8px;
       }
 
       h2 {
-        font-size: 1.1rem;
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--g-heading);
         margin: 0 0 8px;
       }
 
       h3 {
-        font-size: 1rem;
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--g-heading);
         margin: 0;
       }
 
       h4 {
-        font-size: 0.85rem;
+        font: 500 11.5px/1.6 var(--g-font-mono);
+        letter-spacing: 0.06em;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--muted);
+        color: var(--g-muted);
         margin: 14px 0 6px;
       }
 
@@ -116,28 +173,31 @@
       }
 
       a {
-        color: var(--accent);
+        color: var(--g-accent-text);
       }
 
       .lede {
-        color: var(--muted);
-        font-size: 1.02rem;
+        color: var(--g-text-2);
+        font-size: 14px;
+        line-height: 1.7;
+        max-width: 56em;
       }
 
       .meta {
         display: flex;
         flex-wrap: wrap;
         gap: 6px 16px;
-        color: var(--muted);
+        color: var(--g-muted);
         font-size: 0.85rem;
         margin-bottom: 16px;
       }
 
       .panel,
       .card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
+        background: var(--g-panel);
+        border: 1px solid var(--g-line);
+        border-radius: var(--g-r-card);
+        box-shadow: var(--g-shadow-card);
       }
 
       .panel {
@@ -151,53 +211,59 @@
         grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       }
 
+      /*
+       * Guren UI ships four badge kinds and says so: when four are not enough, grow the
+       * label vocabulary rather than the palette. `rename` therefore shares `alter`'s
+       * warn, and the label carries the distinction.
+       */
       .badge {
-        display: inline-block;
-        border: 1px solid currentColor;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         border-radius: 999px;
-        padding: 0 8px;
-        font-size: 0.72rem;
-        line-height: 1.6;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        padding: 2px 9px;
+        font: 500 12px/1.6 var(--g-font-mono);
         white-space: nowrap;
       }
 
-      .badge-add {
-        color: var(--add);
+      .badge::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
       }
-      .badge-alter {
-        color: var(--alter);
-      }
-      .badge-rename {
-        color: var(--rename);
-      }
-      .badge-drop {
-        color: var(--drop);
-      }
-      .badge-existing {
-        color: var(--existing);
-      }
-      .badge-kind {
-        color: var(--muted);
-      }
-      .badge-fail {
-        color: var(--fail);
-      }
-      .badge-warn {
-        color: var(--warn);
-      }
+
+      .badge-add,
       .badge-pass {
-        color: var(--pass);
+        color: var(--g-ok);
+        background: var(--g-ok-tint);
+      }
+      .badge-alter,
+      .badge-rename,
+      .badge-warn {
+        color: var(--g-warn);
+        background: var(--g-warn-tint);
+      }
+      .badge-drop,
+      .badge-fail {
+        color: var(--g-danger);
+        background: var(--g-danger-tint);
+      }
+      .badge-existing,
+      .badge-kind {
+        color: var(--g-text-2);
+        background: var(--g-raised);
+        box-shadow: inset 0 0 0 1px var(--g-line);
       }
 
       .pinned {
-        border-left: 4px solid var(--fail);
+        border-left: 4px solid var(--g-danger);
       }
 
       .pinned-item {
         padding: 8px 0;
-        border-top: 1px solid var(--border);
+        border-top: 1px solid var(--g-line);
       }
 
       .pinned-item:first-of-type {
@@ -207,25 +273,41 @@
       .tabs {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
+        gap: 4px;
         margin: 20px 0 12px;
+        border-bottom: 1px solid var(--g-line);
       }
 
       .tabs button {
-        font: inherit;
-        font-size: 0.9rem;
-        padding: 6px 12px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: var(--surface);
-        color: var(--text);
+        position: relative;
+        padding: 9px 14px;
+        border: 0;
+        background: transparent;
+        color: var(--g-text-2);
+        font: 500 13.5px/1.45 var(--g-font-sans);
         cursor: pointer;
       }
 
+      .tabs button:hover {
+        color: var(--g-heading);
+      }
+
       .tabs button[aria-selected='true'] {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: var(--accent-text);
+        color: var(--g-heading);
+        font-weight: 700;
+      }
+
+      /* The ember tick marks the current place. Guren UI allows it on the page title
+         or the active nav item and not on both, so the heading above stays plain. */
+      .tabs button[aria-selected='true']::after {
+        content: '';
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: -1px;
+        height: 3px;
+        border-radius: 2px 2px 0 0;
+        background: var(--g-tick);
       }
 
       .controls {
@@ -240,13 +322,27 @@
       select,
       textarea,
       input {
-        font: inherit;
-        color: var(--text);
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 5px 8px;
+        color: var(--g-text);
+        background: var(--g-panel);
+        border: 1px solid var(--g-line-strong);
+        border-radius: var(--g-r-ctl);
+        padding: 8px 12px;
+        font: 400 14px/1.5 var(--g-font-sans);
         max-width: 100%;
+      }
+
+      select:focus,
+      textarea:focus,
+      input:focus {
+        outline: 2px solid var(--g-accent);
+        outline-offset: -1px;
+        border-color: transparent;
+      }
+
+      input[type='checkbox'],
+      input[type='radio'] {
+        accent-color: var(--g-accent);
+        padding: 0;
       }
 
       textarea {
@@ -265,12 +361,12 @@
       }
 
       .card.sub {
-        background: var(--surface-2);
+        background: var(--g-raised);
         margin-bottom: 8px;
       }
 
       .card:target {
-        outline: 2px solid var(--accent);
+        outline: 2px solid var(--g-accent);
         outline-offset: 2px;
       }
 
@@ -282,13 +378,13 @@
       }
 
       .card-id {
-        color: var(--muted);
+        color: var(--g-muted);
         font-size: 0.8rem;
       }
 
       .depends {
         font-size: 0.75rem;
-        color: var(--alter);
+        color: var(--g-warn);
         border: 1px dashed currentColor;
         border-radius: 6px;
         padding: 0 6px;
@@ -303,7 +399,7 @@
       }
 
       .kv dt {
-        color: var(--muted);
+        color: var(--g-muted);
       }
 
       .kv dd {
@@ -319,10 +415,10 @@
 
       .chip {
         font-size: 0.78rem;
-        border: 1px solid var(--border);
+        border: 1px solid var(--g-line);
         border-radius: 6px;
         padding: 1px 7px;
-        background: var(--surface-2);
+        background: var(--g-raised);
       }
 
       .review {
@@ -332,7 +428,7 @@
         gap: 8px;
         margin-top: 10px;
         padding-top: 10px;
-        border-top: 1px dashed var(--border);
+        border-top: 1px dashed var(--g-line);
       }
 
       .review .verdicts {
@@ -341,26 +437,34 @@
       }
 
       .review button {
-        font: inherit;
-        font-size: 0.82rem;
-        padding: 3px 10px;
-        border-radius: 6px;
-        border: 1px solid var(--border);
-        background: var(--surface);
-        color: var(--text);
+        display: inline-flex;
+        align-items: center;
+        padding: 5px 11px;
+        border-radius: var(--g-r-ctl);
+        border: 1px solid var(--g-line-strong);
+        background: var(--g-panel);
+        color: var(--g-text);
+        font: 700 12.5px/1.45 var(--g-font-sans);
+      }
+
+      .review button:hover {
+        border-color: var(--g-muted);
       }
 
       .review button[aria-pressed='true'] {
         border-color: currentColor;
-        font-weight: 600;
       }
 
       .review button.approve[aria-pressed='true'] {
-        color: var(--add);
+        color: var(--g-ok);
+        background: var(--g-ok-tint);
       }
 
+      /* Outline, not a fill: the kit spends its one red fill per screen on the primary
+         action, and a destructive control gets an explicit verb instead. */
       .review button.changes[aria-pressed='true'] {
-        color: var(--drop);
+        color: var(--g-danger);
+        background: var(--g-danger-tint);
       }
 
       .review label {
@@ -381,7 +485,7 @@
       .question-option .consequence {
         display: block;
         margin-left: 26px;
-        color: var(--muted);
+        color: var(--g-muted);
         font-size: 0.88rem;
       }
 
@@ -394,7 +498,7 @@
       }
 
       .given-when-then .label {
-        color: var(--muted);
+        color: var(--g-muted);
         text-transform: uppercase;
         font-size: 0.75rem;
         letter-spacing: 0.04em;
@@ -408,27 +512,27 @@
       }
 
       .er .box {
-        fill: var(--surface-2);
-        stroke: var(--border);
+        fill: var(--g-raised);
+        stroke: var(--g-line);
       }
 
       .er .box.add {
-        stroke: var(--add);
+        stroke: var(--g-ok);
         stroke-width: 2;
       }
 
       .er .box.alter {
-        stroke: var(--alter);
+        stroke: var(--g-warn);
         stroke-width: 2;
       }
 
       .er .box.rename {
-        stroke: var(--rename);
+        stroke: var(--g-warn);
         stroke-width: 2;
       }
 
       .er .box.drop {
-        stroke: var(--drop);
+        stroke: var(--g-danger);
         stroke-width: 2;
       }
 
@@ -437,7 +541,7 @@
       }
 
       .er text {
-        fill: var(--text);
+        fill: var(--g-text);
         font-size: 12px;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
@@ -449,12 +553,12 @@
 
       .er text.muted,
       .er text.edge-label {
-        fill: var(--muted);
+        fill: var(--g-muted);
         font-size: 11px;
       }
 
       .er line {
-        stroke: var(--muted);
+        stroke: var(--g-muted);
       }
 
       .er line.relationship {
@@ -472,25 +576,38 @@
         align-items: center;
         margin-top: 24px;
         padding-top: 16px;
-        border-top: 1px solid var(--border);
+        border-top: 1px solid var(--g-line);
       }
 
+      /* The page's one primary action, which is where the kit spends its red fill. */
       .footer button {
-        font: inherit;
         padding: 8px 16px;
-        border-radius: 8px;
-        border: 1px solid var(--accent);
-        background: var(--accent);
-        color: var(--accent-text);
+        border-radius: var(--g-r-ctl);
+        border: 1px solid transparent;
+        background: var(--g-accent);
+        color: var(--g-on-accent);
+        font: 700 13.5px/1.45 var(--g-font-sans);
+      }
+
+      .footer button:hover {
+        background: var(--g-accent-down);
       }
 
       .note {
-        color: var(--muted);
-        font-size: 0.85rem;
+        color: var(--g-text-2);
+        font-size: 12.5px;
+        line-height: 1.7;
+      }
+
+      /* Machine-issued values are mono in this kit: ids, counts, badge labels. */
+      #visible-count,
+      .card-id,
+      .meta {
+        font-family: var(--g-font-mono);
       }
 
       :focus-visible {
-        outline: 2px solid var(--accent);
+        outline: 2px solid var(--g-accent);
         outline-offset: 2px;
       }
 

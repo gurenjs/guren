@@ -124,8 +124,8 @@ describe('renderPlanHtml', () => {
   test('should leave no closing script tag anywhere in the document', () => {
     const html = renderPlanHtml({ plan: hostilePlan('</script ><script>alert(1)</script>') })
 
-    // The template's own two closing tags, and no third from the plan.
-    expect(html.match(/<\/script/g)).toHaveLength(2)
+    // The page's own three closing tags (theme, data, behaviour), and no fourth.
+    expect(html.match(/<\/script/g)).toHaveLength(3)
   })
 
   test('should not expand a replacement pattern the plan spells', () => {
@@ -207,13 +207,34 @@ describe('the plan template', () => {
     expect(source).not.toContain(sink)
   })
 
-  test('should declare a content security policy that allows no network origin', () => {
-    expect(source).toContain('http-equiv="Content-Security-Policy"')
-    expect(source).toContain("default-src 'none'")
+  /**
+   * The policy as the browser reads it, not as the file spells it. A comment explaining
+   * the policy contains the same words, and `toContain` on the whole source was
+   * satisfied by that comment while the real directive said something else.
+   */
+  const policy = (() => {
+    const match = source.match(/http-equiv="Content-Security-Policy"\s*\n?\s*content="([^"]+)"/)
+    if (!match) throw new Error('the page declares no content security policy')
+    return match[1].split(';').map((directive) => directive.trim())
+  })()
+
+  test.each([
+    "default-src 'none'",
+    "script-src 'unsafe-inline'",
+    "style-src 'unsafe-inline'",
+    'img-src data:',
+    "form-action 'none'",
+    "base-uri 'none'",
+    "require-trusted-types-for 'script'",
+  ])('should declare %s and nothing wider', (directive) => {
+    expect(policy).toContain(directive)
   })
 
   test('should load nothing over the network', () => {
     expect(source).not.toMatch(/(src|href)\s*=\s*["']https?:/)
+    // A stylesheet reaches the network through `url()`, which no attribute pattern sees.
+    // Guren UI's own sheet loads its fonts that way, so this is the copy-paste to catch.
+    expect(source).not.toMatch(/url\(\s*["']?(https?:)?\/\//)
     expect(source).not.toContain('fetch(')
     expect(source).not.toContain('XMLHttpRequest')
   })
@@ -228,13 +249,6 @@ describe('the plan template', () => {
     // closed rule, so this assertion covers maps nobody has written yet.
     expect(source.match(/Object\.create\(null\)/g)).toHaveLength(1)
     expect(source).toContain('function idMap() {')
-  })
-
-  test('should forbid a form action and a base element as well', () => {
-    // Neither falls back to `default-src`, so `'none'` has to be spelled for both.
-    expect(source).toContain("form-action 'none'")
-    expect(source).toContain("base-uri 'none'")
-    expect(source).toContain("require-trusted-types-for 'script'")
   })
 
   test('should hold the answers it exports in a list, not a map keyed by question id', () => {
