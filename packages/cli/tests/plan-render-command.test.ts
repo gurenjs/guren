@@ -92,10 +92,14 @@ describe('plan:render', () => {
     await writePlan()
 
     await render(['comments.plan.json', '--app', 'nowhere'])
+    const elsewhere = (await renderedChecks()).filter((result) => result.key === 'plan:app-missing')
+    await render()
+    const inTheApplication = (await renderedChecks()).filter((result) => result.key === 'plan:app-missing')
 
-    const failures = (await renderedChecks()).filter((result) => result.status === 'fail')
-    expect(failures.map((failure) => failure.elementId)).toContain('model.post')
-    expect(await readFile(join(workspace.dir, 'comments.plan.html'), 'utf8')).toContain('plan-data')
+    // One plan, two roots: `model.post` alters a model only one of them declares. A
+    // flag the command ignored would answer for the working directory both times.
+    expect(elsewhere.map((result) => result.elementId)).toContain('model.post')
+    expect(inTheApplication).toEqual([])
   })
 
   test('should write the page beside the plan rather than inside the application', async () => {

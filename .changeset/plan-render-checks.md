@@ -23,4 +23,6 @@ one spelling rather than two.
 The page prints two revise commands: the file form under the download button and
 the standard-input form under "Copy feedback", for piping the clipboard into
 `guren plan --revise ... --feedback -` without a file. Both hold the plan's file
-name to a bare name with no shell metacharacter, as before.
+name to a bare name with no shell metacharacter, as before. `plan --revise` is
+not a command yet: the reader it will take is here, and the page names the
+command a later release adds.
