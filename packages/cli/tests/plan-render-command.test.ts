@@ -89,7 +89,6 @@ describe('plan:render', () => {
   test('should scan the root --app names while the plan stays where the shell points', async () => {
     await writePlan()
 
-    // The same plan against an application that declares none of what it alters.
     await render(['comments.plan.json', '--app', 'nowhere'])
 
     const failures = (await renderedChecks()).filter((result) => result.status === 'fail')

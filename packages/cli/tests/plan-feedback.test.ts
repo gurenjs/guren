@@ -86,4 +86,12 @@ describe('readPlanFeedback', () => {
   test('should report a file that is not there', async () => {
     await expect(readPlanFeedback(join(dir, 'missing.json'))).rejects.toThrow(/Cannot read the feedback/)
   })
+
+  test('should report a pipe that failed as a feedback the command could not read', async () => {
+    const failing = readPlanFeedback(FEEDBACK_STDIN, {
+      stdin: () => Promise.reject(new Error('EIO')),
+    })
+
+    await expect(failing).rejects.toThrow(/Cannot read the feedback on standard input: EIO/)
+  })
 })

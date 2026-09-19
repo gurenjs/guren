@@ -15,7 +15,6 @@ import { z } from 'zod'
 
 import { CliError } from '../cli-error'
 
-/** The source that means standard input rather than a path, as every CLI spells it. */
 export const FEEDBACK_STDIN = '-'
 
 /**
@@ -67,14 +66,11 @@ export async function readPlanFeedback(source: string, options: ReadPlanFeedback
   const origin = fromStdin ? 'standard input' : resolve(options.cwd ?? process.cwd(), source)
 
   let raw: string
-  if (fromStdin) {
-    raw = await (options.stdin ?? readStdin)()
-  } else {
-    try {
-      raw = await readFile(origin, 'utf8')
-    } catch (error) {
-      throw new CliError(`Cannot read the feedback at ${origin}: ${(error as Error).message}`)
-    }
+  try {
+    raw = fromStdin ? await (options.stdin ?? readStdin)() : await readFile(origin, 'utf8')
+  } catch (error) {
+    const where = fromStdin ? 'on standard input' : `at ${origin}`
+    throw new CliError(`Cannot read the feedback ${where}: ${(error as Error).message}`)
   }
 
   // An empty read is the common shape of a pipe whose producer wrote nothing, and

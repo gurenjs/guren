@@ -289,6 +289,17 @@ describe('the plan template', () => {
     expect(source).toContain('function idMap() {')
   })
 
+  test('should address only elements the document declares', () => {
+    // A closed rule rather than a list of ids: the script reaches every static node
+    // this way, so an element removed or an id renamed on one side alone fails here
+    // instead of throwing in a browser nobody watched.
+    const declared = new Set(source.match(/\bid="([^"]+)"/g)?.map((attribute) => attribute.slice(4, -1)))
+    const addressed = [...source.matchAll(/getElementById\('([^']+)'\)/g)].map((match) => match[1])
+
+    expect(addressed).toContain('revise-stdin-command')
+    expect(addressed.filter((id) => !declared.has(id))).toEqual([])
+  })
+
   test('should hold the answers it exports in a list, not a map keyed by question id', () => {
     // Two questions may declare one id; a map would keep one and lose the other's answer.
     expect(source).toContain('var answers = []')
