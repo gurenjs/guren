@@ -109,7 +109,7 @@ interface Plan {
   summary: string
   scope: { goals: string[]; nonGoals: string[] }
   assumptions: string[]          // what the model decided without being told
-  openQuestions: string[]        // what it could not decide
+  questions: PlanQuestion[]      // what it could not decide, and what it assumed meanwhile
   baseline: { rev: string; contextHash: Record<string, string> }   // per referenced element (§4); filled by Guren
   models: PlanModel[]
   validators: PlanValidator[]
@@ -134,6 +134,19 @@ type Change =
   | { kind: 'alter'; from: string }       // `from` names what it replaces
   | { kind: 'rename'; from: string }
   | { kind: 'drop'; reason: string }
+```
+
+A headless producer cannot stop and ask. A question is therefore data, and the
+model keeps going on a stated assumption:
+
+```typescript
+interface PlanQuestion {
+  id: string
+  question: string
+  options: Array<{ label: string; consequence: string }>
+  assumed: string      // the option the plan was written under
+  affects: string[]    // element ids that change if the answer differs
+}
 ```
 
 A first build is the case where nothing is `existing`. There is no separate
@@ -268,9 +281,14 @@ reason: no Mermaid, and no CDN.
   Existing tables are muted; added and altered ones carry a badge; clicking a
   table opens its columns.
 - Breaking changes and failed checks are pinned to the top.
+- Questions open the page as a form: the options with their consequences, the
+  assumed one preselected, a free-text answer. Every element in a question's
+  `affects` is marked "depends on Q2" until the question is answered.
 - Each element has an approve toggle and a comment box. "Export feedback"
-  downloads `feedback.json` (`{ elementId, verdict, comment }[]`), which
-  `guren plan --revise` takes as input. The page never writes to the project.
+  downloads `feedback.json`
+  (`{ answers: { questionId, option?, text? }[], elements: { elementId, verdict, comment }[] }`),
+  which `guren plan --revise` takes as input. The page never writes to the
+  project.
 
 ### 4. Approval and revisions
 
@@ -282,21 +300,44 @@ name a plan has; the slug and the issue number are handles.
 
 `guren plan:approve <plan>` records `{ hash, approvedAt, approvedBy }` beside
 the plan, never inside it. Every later command recomputes the hash and refuses
-a plan that does not match an approval.
+a plan that does not match an approval. It refuses while a question is
+unanswered or a §2 check fails: an assumption nobody confirmed is not approved
+by silence.
 
-**Revisions.** Changing an approved plan produces a revision:
+**Revisions.** A plan changes through a revision, before approval and after:
 
 ```bash
-bunx guren plan --revise comments --feedback feedback.json
+bunx guren plan --revise comments --feedback feedback.json --message "soft-delete comments instead"
 ```
 
 A revision is `{ parent, ops, result }`: the parent's hash, the elements
-ADDED, MODIFIED and REMOVED by id, and the hash of the plan those operations
-yield. Applying `ops` to the parent must reproduce `result`, or the revision is
-rejected. The page shows the operations, the approval names `result`, and the
-current plan is the head of the approved chain. A decision taken during
-implementation that contradicts the plan is a revision too, with a required
-`reason`; it is never a silent edit.
+ADDED, MODIFIED and REMOVED by id, each with a `reason`, and the hash of the
+plan those operations yield. Applying `ops` to the parent must reproduce
+`result`, or the revision is rejected. The page shows the operations, the
+approval names `result`, and the current plan is the head of the approved
+chain. A decision taken during implementation that contradicts the plan is a
+revision too; it is never a silent edit.
+
+The producer is asked for `ops`, against a revision schema, and never for a
+whole plan. A model that re-emits the document can change a part nobody was
+looking at; one that emits operations cannot touch an id without saying so.
+Two rules follow from review state:
+
+- An element the feedback marked approved is locked. An op on a locked id must
+  carry `reopens: <reason>` (a changed model that forces a change in an
+  approved validator), and the page lists reopened elements apart from the
+  rest. An op on a locked id without it is rejected.
+- An answered question is removed by the revision that applies its answer,
+  together with the marks on what it affected.
+
+Each revise is a fresh call given the current plan, the feedback and the
+message. It does not resume the producing session: the plan is the state, and
+a session is gone by the time someone returns to a plan days later or on
+another machine.
+
+Before approval, editing `plan.json` by hand is as legitimate as a revision:
+it is a JSON file, and `plan:render` re-validates it. Renaming a column does
+not need a model.
 
 **Freshness.** `baseline.rev` records where the plan was written and gates
 nothing: the implementation's own commits move it on the first step.
@@ -586,6 +627,27 @@ calls nothing, for any other agent, and for a Claude Code session already in
 progress, where the harness skill has the running agent write the JSON and
 call `plan:render` rather than nesting a second `claude`.
 
+**Two producers, for two situations.** The headless one cannot ask anything:
+`claude -p` has no one to put a question to, which is why questions are data
+(§1) and answers arrive through feedback (§4). It fits a request that is
+already specific, and scripts. The in-session one is a conversation: the
+harness skill lets the running agent ask the person directly, in whatever way
+its client offers, *before* it writes the JSON, and hands the result to
+`plan:render` and the same checks. A vague request belongs there. Both end in
+the same document, and neither is the fallback of the other.
+
+`guren plan --ask` is the headless middle ground. A first call uses a schema
+that holds `questions[]` and nothing else; the CLI puts them to the person in
+the terminal; the second call produces the plan with the answers in its
+prompt. It costs one extra call and saves a full regeneration when the request
+leaves a structural choice open. The second call resumes the first
+(`--resume <session_id>`) so the code is not read twice, where that works
+(Open Question 12).
+
+Every producer call, first draft, `--ask` and each revise, records its
+`total_cost_usd` in state, so the price of a plan is the sum of its rounds and
+visible as such.
+
 Like `ai:eval`, `guren plan` is opt-in, costs money, and is never part of
 `check` or `gate`. `guren check --plan` is advisory: it reports approved plans
 with `drifted` elements and two open plans that touch the same element.
@@ -752,3 +814,10 @@ code and never from an earlier plan.
     comment is the strongest signal the issue API offers, and it still trusts
     every collaborator equally. Is that enough, or does the `github` store keep
     `approvals.json` committed and only the tasks on GitHub?
+12. **`--resume` under `--bare`.** `--ask` assumes the second call can resume
+    the first one's session in scripted mode. If it cannot, the second call is
+    a fresh one carrying the questions and answers, at the cost of re-reading.
+13. **Editing in the page.** Feedback is comments today. Simple edits (rename a
+    column, change a type, drop a route) could be made in the page and
+    exported as `ops` directly, with no model call. Worth the template's added
+    weight, or is editing `plan.json` by hand enough?
