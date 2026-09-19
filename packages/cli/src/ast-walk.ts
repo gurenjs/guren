@@ -1,4 +1,4 @@
-import type { File, Node, ObjectExpression, Statement, VariableDeclaration } from '@babel/types'
+import type { File, Node, ObjectExpression, ObjectProperty, Statement, VariableDeclaration } from '@babel/types'
 
 /**
  * A Babel AST node, typed loosely so a walker can reach children the
@@ -65,6 +65,18 @@ export function memberKeyName(member: {
   if (member.key.type === 'Identifier') return member.key.name
   if (member.key.type === 'StringLiteral' && typeof member.key.value === 'string') return member.key.value
   return undefined
+}
+
+/**
+ * A property whose key a static read can name: not a spread, a method or a computed key.
+ * An object carrying any other kind hides keys, so a reader must not take it as complete.
+ */
+export function staticProperty(property: ObjectExpression['properties'][number]): ObjectProperty | undefined {
+  return property.type === 'ObjectProperty' && !property.computed ? property : undefined
+}
+
+export function nodeText(source: string, node: { start?: number | null; end?: number | null }): string {
+  return source.slice(node.start!, node.end!)
 }
 
 /**
