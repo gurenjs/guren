@@ -2,7 +2,11 @@
 
 **Author:** Urata Daiki (@7nohe)
 **Date:** 2026-09-19
-**Status:** Draft
+**Status:** Accepted (2026-09-19; the standard two-week discussion window
+was shortened by the deciding maintainer for this solo-driven change, after
+a design review against the code recorded in PR #910). Acceptance covers
+Parts 1 and 2; Parts 3 to 5 are re-reviewed against Part 2's measurements
+before they start (see Phasing).
 
 > A coding agent asked for a feature starts writing files. What it decided
 > along the way (which tables, which routes, who may call them) is visible only
