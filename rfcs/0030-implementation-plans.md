@@ -127,6 +127,7 @@ interface Plan {
   tasks: PlanTaskIntent[]        // what each slice must do; never its order
   hints: string[]                // ordering advice Guren may ignore
   flows: PlanFlow[]              // amended: how a request moves through what the plan adds
+  locale: string                 // amended: BCP 47 tag of the language the prose is written in
 }
 ```
 
@@ -181,6 +182,16 @@ flows may both have a step called `start`. A step that names an `element` is
 what makes a flow part of the document rather than a picture beside it: the
 page links it to that element, and §2 holds the id to the same rule as every
 other reference.
+
+**Amended after acceptance (2026-09-19), language.** A plan's prose (summary,
+descriptions, labels, rules, acceptance descriptions) is written in the language
+of the request, and the plan says which in `locale`, a BCP 47 tag the producer
+prompt asks for. The page puts it on `<html lang>`, which is what governs line
+breaking and the font stack for Japanese, and `plan:close` writes the entity
+document's blocks in that language. Check results (`PlanCheckResult` titles and
+messages) stay English: they are CLI output at the same layer as `guren check`,
+and a translated page text that differs from the terminal would be two
+statements of one finding.
 
 A headless producer cannot stop and ask. A question is therefore data, and the
 model keeps going on a stated assumption:
@@ -384,6 +395,14 @@ for the entry bundle alone, a lazily fetched chunk per diagram type that
   (`{ answers: { questionId, option?, text? }[], elements: { elementId, verdict, comment }[] }`),
   which `guren plan --revise` takes as input. The page never writes to the
   project.
+- **Amended (2026-09-19):** the page's own words (tabs, buttons, badges,
+  headings, the empty and error states) come from a dictionary the CLI ships
+  beside the template, in `en` and `ja`. Every locale is embedded and the page
+  switches between them; `plan:render --locale` picks the initial one, falling
+  back to the plan's `locale`, then the application's default locale, then
+  `en`. The two dictionaries are held to key parity and matching placeholders
+  by a test, the rule `check --i18n` applies to an application's `lang/`.
+  Plan text and check results are never translated by the page.
 
 ### 4. Approval and revisions
 
