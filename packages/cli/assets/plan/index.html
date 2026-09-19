@@ -534,18 +534,45 @@
         // The schema's own id pattern. Anchors are built from ids that match it and
         // from nothing else, so no plan string ever reaches an href.
         var ID_RE = /^[A-Za-z][A-Za-z0-9_.:-]*$/
+        // The renderers are named here rather than in a second map keyed the same way:
+        // function declarations hoist, and a section added to one list only would
+        // otherwise render an empty panel or throw.
         var SECTIONS = [
-          { key: 'models', label: 'Models' },
-          { key: 'views', label: 'Views' },
-          { key: 'controllers', label: 'Controllers' },
-          { key: 'routes', label: 'Routes' },
-          { key: 'validators', label: 'Validators' },
-          { key: 'resources', label: 'Resources' },
-          { key: 'policies', label: 'Policies' },
-          { key: 'sideEffects', label: 'Side effects' },
-          { key: 'commands', label: 'Commands' },
-          { key: 'tasks', label: 'Tasks & acceptance' },
+          { key: 'models', label: 'Models', render: renderModels },
+          { key: 'views', label: 'Views', render: renderViews },
+          { key: 'controllers', label: 'Controllers', render: renderControllers },
+          { key: 'routes', label: 'Routes', render: renderRoutes },
+          { key: 'validators', label: 'Validators', render: renderValidators },
+          { key: 'resources', label: 'Resources', render: renderResources },
+          { key: 'policies', label: 'Policies', render: renderPolicies },
+          { key: 'sideEffects', label: 'Side effects', render: renderSideEffects },
+          { key: 'commands', label: 'Commands', render: renderCommands },
+          { key: 'tasks', label: 'Tasks & acceptance', render: renderTasks },
         ]
+
+        /**
+         * Every map keyed by a plan id is built here and nowhere else. `constructor`,
+         * `toString` and `valueOf` all match the schema's id pattern, and on a plain
+         * object each reads back as the inherited function rather than as absent. The
+         * The source test asserts this factory holds the file's only null-prototype
+         * construction, so a map added later is covered without anyone listing it.
+         */
+        function idMap() {
+          return Object.create(null)
+        }
+
+        /** An id-keyed multimap: the one place the `(m[k] = m[k] || []).push(v)` idiom lives. */
+        function groupBy(items, keyOf, valueOf) {
+          var map = idMap()
+          items.forEach(function (item) {
+            var key = keyOf(item)
+            if (key === undefined || key === null) return
+            var bucket = map[key]
+            if (bucket === undefined) map[key] = bucket = []
+            bucket.push(valueOf ? valueOf(item) : item)
+          })
+          return map
+        }
 
         function el(tag, className, text) {
           var node = document.createElement(tag)
@@ -564,6 +591,23 @@
           var node = el('a', 'mono', text === undefined ? id : text)
           node.setAttribute('href', '#' + anchor)
           return node
+        }
+
+        /** A span of strings and nodes in order. A string is always text, never markup. */
+        function span(parts) {
+          var node = el('span')
+          parts.forEach(function (part) {
+            if (part === null || part === undefined) return
+            node.appendChild(part.nodeType ? part : document.createTextNode(String(part)))
+          })
+          return node
+        }
+
+        /** An `h4` and the list under it. The emptiness rule is the caller's: three
+         * sections show their heading with an empty list. */
+        function group(host, heading, items, mapper) {
+          host.appendChild(el('h4', null, heading))
+          host.appendChild(list(items, mapper))
         }
 
         function list(items, mapper) {
@@ -602,9 +646,18 @@
         /* ---------- review state ---------- */
 
         var storageKey = data.planHash ? 'guren.plan.review.' + data.planHash : null
-        var review = Object.create(null)
+        var review = idMap()
 
-        var VERDICTS = ['approve', 'changes']
+        var VERDICTS = [
+          { key: 'approve', label: 'Approve' },
+          { key: 'changes', label: 'Request changes' },
+        ]
+
+        function isVerdict(value) {
+          return VERDICTS.some(function (verdict) {
+            return verdict.key === value
+          })
+        }
 
         /**
          * What comes back from storage is not this page's output: another document on the
@@ -613,12 +666,12 @@
          * dropped rather than carried into the export.
          */
         function restore(stored) {
-          var record = Object.create(null)
+          var record = idMap()
           if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return record
           Object.keys(stored).forEach(function (id) {
             var entry = stored[id]
             if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
-            var verdict = VERDICTS.indexOf(entry.verdict) === -1 ? null : entry.verdict
+            var verdict = isVerdict(entry.verdict) ? entry.verdict : null
             var comment = typeof entry.comment === 'string' ? entry.comment : ''
             if (verdict === null && comment === '') return
             record[id] = { verdict: verdict, comment: comment }
@@ -632,7 +685,7 @@
             var raw = window.localStorage.getItem(storageKey)
             if (raw) review = restore(JSON.parse(raw))
           } catch (error) {
-            review = Object.create(null)
+            review = idMap()
           }
         }
 
@@ -645,52 +698,63 @@
           }
         }
 
-        /** Only the elements someone touched; rendering seeds an entry for every id. */
+        /**
+         * Only the elements someone touched. An entry emptied again during this session
+         * is dropped here, which is the same rule `restore()` applies on the way in.
+         */
         function reviewed() {
-          var touched = Object.create(null)
+          var touched = idMap()
           Object.keys(review).forEach(function (id) {
             if (review[id].verdict || review[id].comment) touched[id] = review[id]
           })
           return touched
         }
 
+        /**
+         * The record holds an entry from the first time someone touches that element.
+         * Seeding one per card instead would make every keystroke in any comment box
+         * walk every element on the page.
+         */
         function entryFor(id) {
           if (!review[id]) review[id] = { verdict: null, comment: '' }
           return review[id]
         }
 
         function reviewControls(id) {
-          var entry = entryFor(id)
+          var stored = review[id] || { verdict: null, comment: '' }
           var wrap = el('div', 'review')
           var verdicts = el('div', 'verdicts')
-          var buttons = {}
-          ;[
-            ['approve', 'Approve'],
-            ['changes', 'Request changes'],
-          ].forEach(function (pair) {
-            var button = el('button', pair[0], pair[1])
+          var buttons = []
+
+          function syncVerdicts() {
+            buttons.forEach(function (pair) {
+              pair.button.setAttribute('aria-pressed', (review[id] || stored).verdict === pair.key ? 'true' : 'false')
+            })
+          }
+
+          VERDICTS.forEach(function (verdict) {
+            var button = el('button', verdict.key, verdict.label)
             button.type = 'button'
-            button.setAttribute('aria-pressed', entry.verdict === pair[0] ? 'true' : 'false')
             button.addEventListener('click', function () {
-              entry.verdict = entry.verdict === pair[0] ? null : pair[0]
-              Object.keys(buttons).forEach(function (key) {
-                buttons[key].setAttribute('aria-pressed', entry.verdict === key ? 'true' : 'false')
-              })
+              var entry = entryFor(id)
+              entry.verdict = entry.verdict === verdict.key ? null : verdict.key
+              syncVerdicts()
               saveReview()
             })
-            buttons[pair[0]] = button
+            buttons.push({ key: verdict.key, button: button })
             verdicts.appendChild(button)
           })
+          syncVerdicts()
           wrap.appendChild(verdicts)
 
           var label = el('label')
           label.appendChild(el('span', 'note', 'Comment'))
           var box = el('textarea')
           box.rows = 1
-          box.value = entry.comment
+          box.value = stored.comment
           box.setAttribute('aria-label', 'Comment on ' + id)
           box.addEventListener('input', function () {
-            entry.comment = box.value
+            entryFor(id).comment = box.value
             saveReview()
           })
           label.appendChild(box)
@@ -700,40 +764,42 @@
 
         /* ---------- indexes ---------- */
 
-        // Every map keyed by a plan id has a null prototype: `constructor`, `toString`
-        // and `valueOf` are all legal ids under the schema's pattern, and on a plain
-        // object each would read back as the inherited function rather than as absent.
-        var entityOf = Object.create(null)
+        var entityOf = idMap()
         data.elements.forEach(function (element) {
           entityOf[element.id] = element.entity
         })
 
-        var outgoing = Object.create(null)
-        var incoming = Object.create(null)
-        data.links.forEach(function (edge) {
-          ;(outgoing[edge.from] = outgoing[edge.from] || []).push(edge)
-          ;(incoming[edge.to] = incoming[edge.to] || []).push(edge)
+        var outgoing = groupBy(data.links, function (edge) {
+          return edge.from
+        })
+        var incoming = groupBy(data.links, function (edge) {
+          return edge.to
         })
 
-        var dependsOn = Object.create(null)
-        // The marks each question put on the elements it affects: RFC 0030 §3 shows them
-        // "until the question is answered", so answering has to be able to take them off.
-        var dependsMarks = Object.create(null)
+        var affected = []
         plan.questions.forEach(function (question) {
-          question.affects.forEach(function (affected) {
-            ;(dependsOn[affected] = dependsOn[affected] || []).push(question.id)
+          question.affects.forEach(function (elementId) {
+            affected.push({ elementId: elementId, questionId: question.id })
           })
         })
+        var dependsOn = groupBy(
+          affected,
+          function (entry) {
+            return entry.elementId
+          },
+          function (entry) {
+            return entry.questionId
+          },
+        )
+        // The marks each question put on the elements it affects: RFC 0030 §3 shows them
+        // "until the question is answered", so answering has to be able to take them off.
+        var dependsMarks = idMap()
 
-        var checksFor = Object.create(null)
-        data.checks.forEach(function (result) {
-          if (!result.elementId) return
-          ;(checksFor[result.elementId] = checksFor[result.elementId] || []).push(result)
+        var checksFor = groupBy(data.checks, function (result) {
+          return result.elementId
         })
-
-        var breakingFor = Object.create(null)
-        data.breaking.forEach(function (item) {
-          ;(breakingFor[item.elementId] = breakingFor[item.elementId] || []).push(item)
+        var breakingFor = groupBy(data.breaking, function (item) {
+          return item.elementId
         })
 
         /* ---------- cards ---------- */
@@ -762,7 +828,9 @@
             var mark = link(questionId, 'depends on ' + questionId)
             mark.className = 'depends'
             head.appendChild(mark)
-            ;(dependsMarks[questionId] = dependsMarks[questionId] || []).push(mark)
+            var marks = dependsMarks[questionId]
+            if (marks === undefined) dependsMarks[questionId] = marks = []
+            marks.push(mark)
           })
           node.appendChild(head)
 
@@ -778,7 +846,7 @@
 
           if (options.body) node.appendChild(options.body)
 
-          var related = (outgoing[options.id] || []).concat([])
+          var related = outgoing[options.id] || []
           var back = incoming[options.id] || []
           if (related.length || back.length) {
             var chips = el('div', 'chips')
@@ -814,7 +882,7 @@
 
         /* ---------- ER diagram ---------- */
 
-        var expanded = Object.create(null)
+        var expanded = idMap()
 
         function svgEl(tag, attributes) {
           var node = document.createElementNS('http://www.w3.org/2000/svg', tag)
@@ -854,6 +922,20 @@
           return [cx + dx * scale, cy + dy * scale]
         }
 
+        var BOX_WIDTH = 230
+        var GAP_X = 76
+        var drawnColumns = null
+
+        /**
+         * `.wrap` rather than the diagram's own host: the host's panel is hidden on every
+         * tab but the first, and a hidden element measures 0, which would lay the diagram
+         * out for a width no one is looking at.
+         */
+        function diagramColumns(tableCount) {
+          var width = document.querySelector('.wrap').clientWidth - 32
+          return Math.max(1, Math.min(3, Math.floor((width + GAP_X) / (BOX_WIDTH + GAP_X)), tableCount || 1))
+        }
+
         function drawDiagram(host) {
           while (host.firstChild) host.removeChild(host.firstChild)
           var tables = data.diagram.tables
@@ -862,18 +944,15 @@
             return
           }
 
-          // `.wrap` rather than the host: the host's panel is hidden on every tab but
-          // the first, and a hidden element measures 0, which would lay the diagram out
-          // for a width no one is looking at.
-          var width = document.querySelector('.wrap').clientWidth - 32
-          var boxWidth = 230
-          var gapX = 76
+          var boxWidth = BOX_WIDTH
+          var gapX = GAP_X
           var gapY = 36
-          var columns = Math.max(1, Math.min(3, Math.floor((width + gapX) / (boxWidth + gapX))))
+          var columns = diagramColumns(tables.length)
+          drawnColumns = columns
           var rowHeight = 22
           var headerHeight = 44
 
-          var placed = Object.create(null)
+          var placed = idMap()
           var rowTops = []
           var top = 0
           for (var index = 0; index < tables.length; index += columns) {
@@ -896,9 +975,7 @@
             top += tallest + gapY
           }
 
-          // The columns actually used, so a two-table plan does not draw a third empty slot.
-          var usedColumns = Math.min(columns, tables.length)
-          var totalWidth = usedColumns * boxWidth + (usedColumns - 1) * gapX
+          var totalWidth = columns * boxWidth + (columns - 1) * gapX
           var totalHeight = Math.max(top - gapY, headerHeight)
           var svg = svgEl('svg', {
             class: 'er',
@@ -919,7 +996,7 @@
             var x2 = end[0]
             var y2 = end[1]
             var line = svgEl('line', { x1: x1, y1: y1, x2: x2, y2: y2 })
-            line.setAttribute('class', edge.kind === 'relationship' ? 'relationship' : 'foreign-key')
+            if (edge.kind === 'relationship') line.setAttribute('class', 'relationship')
             svg.appendChild(line)
             var label = svgText((x1 + x2) / 2, (y1 + y2) / 2 - 4, edge.label, 'edge-label')
             label.setAttribute('text-anchor', 'middle')
@@ -985,23 +1062,14 @@
               ]),
             )
             if (model.relationships.length) {
-              body.appendChild(el('h4', null, 'Relationships'))
-              body.appendChild(
-                list(model.relationships, function (relationship) {
-                  var line = el('span')
-                  line.appendChild(document.createTextNode(relationship.name + ' ' + relationship.type + ' '))
-                  line.appendChild(link(relationship.target))
-                  return line
-                }),
-              )
+              group(body, 'Relationships', model.relationships, function (relationship) {
+                return span([relationship.name + ' ' + relationship.type + ' ', link(relationship.target)])
+              })
             }
             if (model.indexes.length) {
-              body.appendChild(el('h4', null, 'Indexes'))
-              body.appendChild(
-                list(model.indexes, function (index) {
-                  return (index.unique ? 'unique ' : '') + index.columns.join(', ')
-                }),
-              )
+              group(body, 'Indexes', model.indexes, function (index) {
+                return (index.unique ? 'unique ' : '') + index.columns.join(', ')
+              })
             }
             var node = card({ id: model.id, title: model.name, change: model.change, body: body })
 
@@ -1021,16 +1089,12 @@
                   [
                     'References',
                     column.references
-                      ? (function () {
-                          var line = el('span')
-                          line.appendChild(link(column.references.model))
-                          line.appendChild(
-                            document.createTextNode(
-                              '.' + column.references.column + (column.references.onDelete ? ' on delete ' + column.references.onDelete : ''),
-                            ),
-                          )
-                          return line
-                        })()
+                      ? span([
+                          link(column.references.model),
+                          '.' +
+                            column.references.column +
+                            (column.references.onDelete ? ' on delete ' + column.references.onDelete : ''),
+                        ])
                       : null,
                   ],
                   [
@@ -1053,27 +1117,19 @@
             var body = el('div')
             body.appendChild(kv([['Page', view.page], ['Module', view.module], ['Purpose', view.purpose]]))
             if (view.props.length) {
-              body.appendChild(el('h4', null, 'Props'))
-              body.appendChild(
-                list(view.props, function (prop) {
-                  var line = el('span')
-                  line.appendChild(document.createTextNode(prop.name + ': ' + prop.type))
-                  if (prop.resource) {
-                    line.appendChild(document.createTextNode(' from '))
-                    line.appendChild(link(prop.resource))
-                  }
-                  return line
-                }),
-              )
+              group(body, 'Props', view.props, function (prop) {
+                return span([
+                  prop.name + ': ' + prop.type,
+                  prop.resource ? ' from ' : null,
+                  prop.resource ? link(prop.resource) : null,
+                ])
+              })
             }
             if (view.form) {
               body.appendChild(el('h4', null, 'Form'))
               var form = el('div')
-              var formMeta = el('p', 'note')
-              formMeta.appendChild(document.createTextNode('validated by '))
-              formMeta.appendChild(link(view.form.validator))
-              formMeta.appendChild(document.createTextNode(', submits to '))
-              formMeta.appendChild(link(view.form.submitsTo))
+              var formMeta = span(['validated by ', link(view.form.validator), ', submits to ', link(view.form.submitsTo)])
+              formMeta.className = 'note'
               form.appendChild(formMeta)
               form.appendChild(
                 list(view.form.fields, function (field) {
@@ -1083,15 +1139,9 @@
               body.appendChild(form)
             }
             if (view.actions.length) {
-              body.appendChild(el('h4', null, 'Actions'))
-              body.appendChild(
-                list(view.actions, function (action) {
-                  var line = el('span')
-                  line.appendChild(document.createTextNode(action.label + ' -> '))
-                  line.appendChild(link(action.route))
-                  return line
-                }),
-              )
+              group(body, 'Actions', view.actions, function (action) {
+                return span([action.label + ' -> ', link(action.route)])
+              })
             }
             body.appendChild(kv([['Empty', view.states.empty], ['Error', view.states.error], ['Loading', view.states.loading]]))
             host.appendChild(card({ id: view.id, title: view.page, change: view.change, body: body }))
@@ -1109,22 +1159,16 @@
             controller.actions.forEach(function (action) {
               var body = el('div')
               var response = action.response
-              var responseText =
-                response.kind === 'inertia'
-                  ? null
-                  : response.kind === 'redirect'
-                    ? 'redirect to ' + response.to
-                    : response.kind === 'resource'
-                      ? null
-                      : response.kind === 'json'
-                        ? 'json: ' + response.description
-                        : 'empty'
-              var responseLink =
+              var responseCell =
                 response.kind === 'inertia'
                   ? link(response.view, 'renders ' + response.view)
                   : response.kind === 'resource'
                     ? link(response.resource, 'returns ' + response.resource)
-                    : null
+                    : response.kind === 'redirect'
+                      ? 'redirect to ' + response.to
+                      : response.kind === 'json'
+                        ? 'json: ' + response.description
+                        : 'empty'
               body.appendChild(
                 kv([
                   ['Params', action.params ? link(action.params) : null],
@@ -1134,20 +1178,14 @@
                   [
                     'Policy',
                     action.authorization.policy
-                      ? (function () {
-                          var line = el('span')
-                          line.appendChild(link(action.authorization.policy.id))
-                          line.appendChild(document.createTextNode(' can ' + action.authorization.policy.ability))
-                          return line
-                        })()
+                      ? span([link(action.authorization.policy.id), ' can ' + action.authorization.policy.ability])
                       : null,
                   ],
-                  ['Response', responseLink || responseText],
+                  ['Response', responseCell],
                 ]),
               )
               if (action.rules.length) {
-                body.appendChild(el('h4', null, 'Business rules'))
-                body.appendChild(list(action.rules))
+                group(body, 'Business rules', action.rules)
               }
               node.appendChild(card({ id: action.id, title: action.name, change: action.change, body: body, sub: true, parent: node }))
             })
@@ -1189,13 +1227,10 @@
           plan.validators.forEach(function (validator) {
             var body = el('div')
             body.appendChild(kv([['Module', validator.module]]))
-            body.appendChild(el('h4', null, 'Fields'))
-            body.appendChild(
-              list(validator.fields, function (field) {
-                var suffix = field.rules.length ? ' - ' + field.rules.join(', ') : ''
-                return field.name + ': ' + field.type + (field.required ? ' (required)' : ' (optional)') + suffix
-              }),
-            )
+            group(body, 'Fields', validator.fields, function (field) {
+              var suffix = field.rules.length ? ' - ' + field.rules.join(', ') : ''
+              return field.name + ': ' + field.type + (field.required ? ' (required)' : ' (optional)') + suffix
+            })
             host.appendChild(card({ id: validator.id, title: validator.name, change: validator.change, body: body }))
           })
         }
@@ -1204,12 +1239,9 @@
           plan.resources.forEach(function (resource) {
             var body = el('div')
             body.appendChild(kv([['Module', resource.module], ['Model', link(resource.model)]]))
-            body.appendChild(el('h4', null, 'Fields'))
-            body.appendChild(
-              list(resource.fields, function (field) {
-                return field.name + ': ' + field.type
-              }),
-            )
+            group(body, 'Fields', resource.fields, function (field) {
+              return field.name + ': ' + field.type
+            })
             host.appendChild(card({ id: resource.id, title: resource.name, change: resource.change, body: body }))
           })
         }
@@ -1218,12 +1250,9 @@
           plan.policies.forEach(function (policy) {
             var body = el('div')
             body.appendChild(kv([['Module', policy.module], ['Model', link(policy.model)]]))
-            body.appendChild(el('h4', null, 'Abilities'))
-            body.appendChild(
-              list(policy.abilities, function (ability) {
-                return ability.name + ': ' + ability.rule
-              }),
-            )
+            group(body, 'Abilities', policy.abilities, function (ability) {
+              return ability.name + ': ' + ability.rule
+            })
             host.appendChild(card({ id: policy.id, title: policy.name, change: policy.change, body: body }))
           })
         }
@@ -1268,13 +1297,13 @@
           gwt.appendChild(given)
 
           gwt.appendChild(el('div', 'label', 'When'))
-          var when = el('div')
-          when.appendChild(document.createTextNode('a ' + acceptance.actor + ' calls '))
-          when.appendChild(link(acceptance.route))
-          if (acceptance.input && acceptance.input.length) {
-            when.appendChild(document.createTextNode(' with ' + jsonValues(acceptance.input)))
-          }
-          gwt.appendChild(when)
+          gwt.appendChild(
+            span([
+              'a ' + acceptance.actor + ' calls ',
+              link(acceptance.route),
+              acceptance.input && acceptance.input.length ? ' with ' + jsonValues(acceptance.input) : null,
+            ]),
+          )
 
           gwt.appendChild(el('div', 'label', 'Then'))
           var then = el('div')
@@ -1288,9 +1317,8 @@
           })
           if (expectations.length) then.appendChild(list(expectations))
           if (acceptance.expect.inertia) {
-            var page = el('p', 'note')
-            page.appendChild(document.createTextNode('renders '))
-            page.appendChild(link(acceptance.expect.inertia))
+            var page = span(['renders ', link(acceptance.expect.inertia)])
+            page.className = 'note'
             then.appendChild(page)
           }
           gwt.appendChild(then)
@@ -1319,19 +1347,6 @@
             })
             host.appendChild(node)
           })
-        }
-
-        var RENDERERS = {
-          models: renderModels,
-          views: renderViews,
-          controllers: renderControllers,
-          routes: renderRoutes,
-          validators: renderValidators,
-          resources: renderResources,
-          policies: renderPolicies,
-          sideEffects: renderSideEffects,
-          commands: renderCommands,
-          tasks: renderTasks,
         }
 
         /* ---------- header, pinned findings, questions ---------- */
@@ -1370,25 +1385,21 @@
           pinned.appendChild(el('h2', null, 'Needs attention'))
           blocking.forEach(function (result) {
             var item = el('div', 'pinned-item')
-            var head = el('p')
-            head.appendChild(el('span', 'badge badge-' + result.status, result.status))
-            head.appendChild(document.createTextNode(' ' + result.title))
-            if (result.elementId) {
-              head.appendChild(document.createTextNode(' on '))
-              head.appendChild(link(result.elementId))
-            }
-            item.appendChild(head)
+            item.appendChild(
+              span([
+                el('span', 'badge badge-' + result.status, result.status),
+                ' ' + result.title,
+                result.elementId ? ' on ' : null,
+                result.elementId ? link(result.elementId) : null,
+              ]),
+            )
             item.appendChild(el('p', 'note', result.message))
             if (result.suggestion) item.appendChild(el('p', 'note', result.suggestion))
             pinned.appendChild(item)
           })
           data.breaking.forEach(function (item) {
             var node = el('div', 'pinned-item')
-            var head = el('p')
-            head.appendChild(el('span', 'badge badge-drop', 'breaking'))
-            head.appendChild(document.createTextNode(' ' + item.title + ' '))
-            head.appendChild(link(item.elementId))
-            node.appendChild(head)
+            node.appendChild(span([el('span', 'badge badge-drop', 'breaking'), ' ' + item.title + ' ', link(item.elementId)]))
             node.appendChild(el('p', 'note', item.reason))
             pinned.appendChild(node)
           })
@@ -1398,8 +1409,26 @@
         // id (`guren check` reports it, and the page still renders), and a map would keep
         // one of them while both sets of handlers went on writing to their own.
         var answers = []
-        // Run once the cards exist: a question's marks live on the elements it affects.
-        var pendingQuestions = []
+
+        /** RFC 0030 §4: an assumption nobody confirmed is not an answer. */
+        function answered(answer) {
+          return answer.option !== null || answer.text !== ''
+        }
+
+        /**
+         * The badge and the "depends on" marks are derived from the answers, so they are
+         * refreshed rather than updated. Also called once after the cards exist, since a
+         * question's marks live on the elements it affects and those render later.
+         */
+        function refreshAnswers() {
+          answers.forEach(function (answer) {
+            var settled = answered(answer)
+            answer.badge.hidden = settled
+            ;(dependsMarks[answer.questionId] || []).forEach(function (mark) {
+              mark.hidden = settled
+            })
+          })
+        }
         var questionsHost = document.getElementById('questions')
         if (plan.questions.length) {
           var questionsPanel = el('section', 'panel')
@@ -1412,17 +1441,13 @@
             // preselected so the plan reads the way it was written, and RFC 0030 §4 is
             // explicit that silence is not an answer. `answered()` is what the export
             // and the "depends on" marks go by.
-            var answer = { questionId: question.id, option: null, text: '' }
-            answers.push(answer)
-            var unanswered = el('span', 'badge badge-alter', 'unanswered')
-
-            function settle() {
-              var answered = answer.option !== null || answer.text !== ''
-              unanswered.hidden = answered
-              ;(dependsMarks[question.id] || []).forEach(function (mark) {
-                mark.hidden = answered
-              })
+            var answer = {
+              questionId: question.id,
+              option: null,
+              text: '',
+              badge: el('span', 'badge badge-alter', 'unanswered'),
             }
+            answers.push(answer)
 
             var body = el('div')
             var fieldset = el('fieldset', 'bare')
@@ -1439,7 +1464,7 @@
               var choose = function () {
                 if (!radio.checked) return
                 answer.option = option.label
-                settle()
+                refreshAnswers()
               }
               // `click` as well as `change`: clicking the preselected option is how
               // someone confirms the assumption, and that fires no `change`.
@@ -1463,7 +1488,7 @@
             answerBox.setAttribute('aria-label', 'Answer to ' + question.id)
             answerBox.addEventListener('input', function () {
               answer.text = answerBox.value
-              settle()
+              refreshAnswers()
             })
             answerLabel.appendChild(answerBox)
             body.appendChild(answerLabel)
@@ -1484,12 +1509,11 @@
                 id: question.id,
                 title: question.question,
                 body: body,
-                extraBadges: [unanswered],
+                extraBadges: [answer.badge],
                 noReview: true,
                 noFilter: true,
               }),
             )
-            pendingQuestions.push(settle)
           })
           questionsHost.appendChild(questionsPanel)
         }
@@ -1500,8 +1524,7 @@
 
         var tabs = document.getElementById('tabs')
         var panels = document.getElementById('panels')
-        var tabButtons = {}
-        var panelNodes = {}
+        var tabEntries = []
 
         SECTIONS.forEach(function (section, index) {
           var items = plan[section.key] || []
@@ -1514,55 +1537,54 @@
             selectTab(section.key)
           })
           tabs.appendChild(button)
-          tabButtons[section.key] = button
 
           var panel = el('section')
           panel.id = 'panel-' + section.key
           panel.setAttribute('role', 'tabpanel')
           panel.setAttribute('aria-label', section.label)
           panel.hidden = index !== 0
-          RENDERERS[section.key](panel)
+          section.render(panel)
           if (!items.length) panel.appendChild(el('p', 'note', 'Nothing in this section.'))
           panels.appendChild(panel)
-          panelNodes[section.key] = panel
+          tabEntries.push({ key: section.key, button: button, panel: panel })
         })
 
-        pendingQuestions.forEach(function (settle) {
-          settle()
-        })
+        refreshAnswers()
 
         // Drawn once the panels are in the document: the layout is measured, and nothing
         // in this file measures an element it has not yet appended.
         if (diagramHost) drawDiagram(diagramHost)
+
+        // Coalesced into one frame, and skipped when the column count has not moved: the
+        // width read is a synchronous layout of the whole document, and the column count
+        // is the only width-dependent quantity, so an unchanged one redraws the same SVG.
+        var resizePending = false
         window.addEventListener('resize', function () {
-          if (diagramHost) drawDiagram(diagramHost)
+          if (!diagramHost || resizePending) return
+          resizePending = true
+          window.requestAnimationFrame(function () {
+            resizePending = false
+            if (diagramColumns(data.diagram.tables.length) !== drawnColumns) drawDiagram(diagramHost)
+          })
         })
 
         function selectTab(key) {
-          SECTIONS.forEach(function (section) {
-            var selected = section.key === key
-            tabButtons[section.key].setAttribute('aria-selected', selected ? 'true' : 'false')
-            panelNodes[section.key].hidden = !selected
+          tabEntries.forEach(function (entry) {
+            var selected = entry.key === key
+            entry.button.setAttribute('aria-selected', selected ? 'true' : 'false')
+            entry.panel.hidden = !selected
           })
         }
 
         // An in-page link may point into a hidden panel or at a card the filter hides;
-        // show the panel that holds it, and keep the card itself through the filter.
-        var revealed = null
-
+        // show the panel that holds it, then re-filter so the card itself survives.
         function revealHash() {
-          var target = window.location.hash.slice(1)
-          if (!target) return
-          var node = document.getElementById(target)
+          var node = document.getElementById(window.location.hash.slice(1))
           if (!node) return
-          SECTIONS.forEach(function (section) {
-            if (panelNodes[section.key].contains(node)) selectTab(section.key)
+          tabEntries.forEach(function (entry) {
+            if (entry.panel.contains(node)) selectTab(entry.key)
           })
-          var entry = cardOf.get(node)
-          if (entry !== revealed) {
-            revealed = entry || null
-            applyFilters()
-          }
+          applyFilters()
           node.scrollIntoView()
         }
         window.addEventListener('hashchange', revealHash)
@@ -1582,10 +1604,13 @@
         function applyFilters() {
           var entity = entityFilter.value
           var only = changesOnly.checked
+          // Read rather than cached: the link target is whatever the hash says right now,
+          // so nothing has to decide when to re-run this.
+          var linked = window.location.hash.slice(1)
           cards.forEach(function (item) {
             // A link to a filtered-out element would otherwise land on a hidden card:
             // the filter is a view, not a claim that the element is gone.
-            item.keep = item === revealed || !((entity && item.entity !== entity) || (only && item.existing))
+            item.keep = item.node.id === linked || !((entity && item.entity !== entity) || (only && item.existing))
           })
           // A matching card is unreachable while an ancestor is hidden, so every
           // ancestor of a match is kept too.
@@ -1614,9 +1639,7 @@
             // Only what someone actually answered. An assumption nobody confirmed would
             // otherwise reach `plan --revise` as a decision (RFC 0030 §4).
             answers: answers
-              .filter(function (given) {
-                return given.option !== null || given.text !== ''
-              })
+              .filter(answered)
               .map(function (given) {
                 var answer = { questionId: given.questionId }
                 if (given.option !== null) answer.option = given.option

@@ -4,13 +4,14 @@
  * it is a review artifact, not project knowledge, and nothing regenerates it.
  */
 
-import { readFile, writeFile } from 'node:fs/promises'
-import { isAbsolute, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 
 import type { z } from 'zod'
 
 import { CliError } from './cli-error'
-import { renderPlanHtml, type PlanCheckResult } from './plan/render'
+import { hasBaseline, renderPlanHtml, type PlanCheckResult } from './plan/render'
+import { writeFileSafe } from './utils'
 import { findDuplicatePlanIds, PlanDraftSchema, PlanSchema, type Plan, type PlanDraft } from './plan/schema'
 
 export interface RenderPlanFileOptions {
@@ -38,9 +39,7 @@ function formatIssues(error: z.ZodError): string {
  * identity; anything else is a draft.
  */
 export function parsePlanDocument(document: unknown): PlanDraft | Plan {
-  const hasBaseline = typeof document === 'object' && document !== null && 'baseline' in document
-  const schema = hasBaseline ? PlanSchema : PlanDraftSchema
-  const parsed = schema.safeParse(document)
+  const parsed = (hasBaseline(document) ? PlanSchema : PlanDraftSchema).safeParse(document)
   if (parsed.success) return parsed.data
   throw new CliError(`The plan does not match the plan schema:\n${formatIssues(parsed.error)}`)
 }
@@ -51,7 +50,7 @@ export function planOutputPath(planPath: string): string {
 
 export async function renderPlanFile(planPath: string, options: RenderPlanFileOptions = {}): Promise<RenderedPlanFile> {
   const cwd = options.cwd ?? process.cwd()
-  const absolutePlan = isAbsolute(planPath) ? planPath : resolve(cwd, planPath)
+  const absolutePlan = resolve(cwd, planPath)
 
   let raw: string
   try {
@@ -69,12 +68,10 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
 
   const plan = parsePlanDocument(document)
   const html = renderPlanHtml({ plan, checks: options.checks })
-  const target = options.output
-    ? isAbsolute(options.output)
-      ? options.output
-      : resolve(cwd, options.output)
-    : planOutputPath(absolutePlan)
+  const target = options.output ? resolve(cwd, options.output) : planOutputPath(absolutePlan)
 
-  await writeFile(target, html, 'utf8')
+  // The package's own writer: it creates the directory, so `-o build/plan.html` works
+  // before `build/` exists. Always `force`, since re-rendering a plan is the normal case.
+  await writeFileSafe(target, html, { force: true })
   return { path: target, duplicateIds: findDuplicatePlanIds(plan) }
 }

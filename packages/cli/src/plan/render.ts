@@ -44,10 +44,9 @@ export interface PlanBreakingChange {
   reason: string
 }
 
-/** What one element is called in the page's own index: its entity, and what it links to. */
+/** One element in the page's own index: which entity's filter shows it. */
 export interface PlanElementEntry {
   id: string
-  section: PlanElementSection
   entity: string | null
 }
 
@@ -73,23 +72,23 @@ export interface PlanPagePayload {
 
 const DATA_PLACEHOLDER = '__GUREN_PLAN_DATA__'
 
-let cachedTemplate: string | undefined
+let cachedTemplate: { path: string; source: string } | undefined
 
 /**
  * The chunk this module is bundled into sits at `dist/`, one hop below the package
  * root; the source sits at `src/plan/`, two. Both are tried rather than probed with
  * `existsSync`, which reports a permission error on a parent as absence.
  */
-const TEMPLATE_CANDIDATES = ['../templates/plan/index.html', '../../templates/plan/index.html'] as const
+const TEMPLATE_CANDIDATES = ['../assets/plan/index.html', '../../assets/plan/index.html'] as const
 
-function loadTemplate(): string {
+function template(): { path: string; source: string } {
   if (cachedTemplate !== undefined) return cachedTemplate
 
   const tried: string[] = []
   for (const candidate of TEMPLATE_CANDIDATES) {
     const path = fileURLToPath(new URL(candidate, import.meta.url))
     try {
-      cachedTemplate = readFileSync(path, 'utf8')
+      cachedTemplate = { path, source: readFileSync(path, 'utf8') }
       return cachedTemplate
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -97,21 +96,12 @@ function loadTemplate(): string {
     }
   }
 
-  throw new Error(`Could not locate the plan template shipped with @guren/cli. Tried:\n  ${tried.join('\n  ')}`)
+  throw new Error(`Could not locate the plan page shipped with @guren/cli. Tried:\n  ${tried.join('\n  ')}`)
 }
 
-/** Exported for the source-level test that holds the template to its forbidden sinks. */
+/** Exported for the source-level test that holds the page to its forbidden sinks. */
 export function planTemplatePath(): string {
-  for (const candidate of TEMPLATE_CANDIDATES) {
-    const path = fileURLToPath(new URL(candidate, import.meta.url))
-    try {
-      readFileSync(path)
-      return path
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-  }
-  throw new Error('Could not locate the plan template shipped with @guren/cli.')
+  return template().path
 }
 
 /**
@@ -126,8 +116,13 @@ export function escapeJsonForScript(json: string): string {
   })
 }
 
+/** Whether a document is a full `Plan` rather than a draft. The CLI picks its schema by it. */
+export function hasBaseline(document: unknown): document is Plan {
+  return typeof document === 'object' && document !== null && 'baseline' in document
+}
+
 function hashOf(plan: PlanDraft | Plan): string | null {
-  return 'baseline' in plan ? planHash(plan) : null
+  return hasBaseline(plan) ? planHash(plan) : null
 }
 
 /**
@@ -279,7 +274,6 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
   const entities = entityIndex(plan)
   const elements: PlanElementEntry[] = listPlanElements(plan).map((element) => ({
     id: element.id,
-    section: element.section,
     entity: entities.get(element.id) ?? null,
   }))
 
@@ -304,5 +298,5 @@ export function renderPlanHtml(input: RenderPlanInput): string {
   const payload = escapeJsonForScript(JSON.stringify(buildPlanPayload(input)))
   // A replacement *function*, never a string: `$&`, "$`" and `$'` anywhere in the plan
   // would otherwise be expanded by `replace` and corrupt the document.
-  return loadTemplate().replace(DATA_PLACEHOLDER, () => payload)
+  return template().source.replace(DATA_PLACEHOLDER, () => payload)
 }

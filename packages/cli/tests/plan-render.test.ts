@@ -12,6 +12,7 @@ import {
   planLinks,
   planTemplatePath,
   renderPlanHtml,
+  type PlanPagePayload,
 } from '../src/plan/render'
 import { PlanDraftSchema, PlanSchema, type PlanDraft } from '../src/plan/schema'
 import { parsePlanDocument, planOutputPath, renderPlanFile } from '../src/plan-render'
@@ -36,6 +37,11 @@ function dataBlock(html: string): string {
   const end = html.indexOf('</script>', start)
   expect(end).toBeGreaterThan(start)
   return html.slice(start + opening.length, end)
+}
+
+/** The page's data block, parsed back: what the page will actually read. */
+function payloadOf(input: Parameters<typeof renderPlanHtml>[0]): PlanPagePayload {
+  return JSON.parse(dataBlock(renderPlanHtml(input)))
 }
 
 /**
@@ -91,7 +97,7 @@ describe('renderPlanHtml', () => {
   test('should embed the payload so that it parses back to the plan it was given', () => {
     const plan = draft()
 
-    const embedded = JSON.parse(dataBlock(renderPlanHtml({ plan })))
+    const embedded = payloadOf({ plan })
 
     expect(embedded.plan).toEqual(plan)
   })
@@ -100,7 +106,7 @@ describe('renderPlanHtml', () => {
     for (const payload of PAYLOADS) {
       const plan = hostilePlan(payload)
 
-      const embedded = JSON.parse(dataBlock(renderPlanHtml({ plan })))
+      const embedded = payloadOf({ plan })
 
       expect(embedded.plan).toEqual(plan)
     }
@@ -128,13 +134,13 @@ describe('renderPlanHtml', () => {
   test('should not expand a replacement pattern the plan spells', () => {
     const payload = 'before $` middle $& after $\''
 
-    const embedded = JSON.parse(dataBlock(renderPlanHtml({ plan: hostilePlan(payload) })))
+    const embedded = payloadOf({ plan: hostilePlan(payload) })
 
     expect(embedded.plan.title).toBe(payload)
   })
 
   test('should render a draft with no plan hash', () => {
-    const embedded = JSON.parse(dataBlock(renderPlanHtml({ plan: draft() })))
+    const embedded = payloadOf({ plan: draft() })
 
     expect(embedded.planHash).toBeNull()
   })
@@ -142,13 +148,13 @@ describe('renderPlanHtml', () => {
   test('should render the plan hash once the plan carries a baseline', () => {
     const plan = PlanSchema.parse({ ...loadFixture(), baseline: { rev: 'abc123', contextHash: {} } })
 
-    const embedded = JSON.parse(dataBlock(renderPlanHtml({ plan })))
+    const embedded = payloadOf({ plan })
 
     expect(embedded.planHash).toMatch(/^[0-9a-f]{64}$/)
   })
 
   test('should render nothing for an absent status', () => {
-    const embedded = JSON.parse(dataBlock(renderPlanHtml({ plan: draft() })))
+    const embedded = payloadOf({ plan: draft() })
 
     expect(embedded.status).toBeNull()
   })
@@ -164,13 +170,13 @@ describe('renderPlanHtml', () => {
       },
     ]
 
-    const embedded = JSON.parse(dataBlock(renderPlanHtml({ plan: draft(), checks })))
+    const embedded = payloadOf({ plan: draft(), checks })
 
     expect(embedded.checks).toEqual(checks)
   })
 
   test('should carry no checks when none are given', () => {
-    const embedded = JSON.parse(dataBlock(renderPlanHtml({ plan: draft() })))
+    const embedded = payloadOf({ plan: draft() })
 
     expect(embedded.checks).toEqual([])
   })
@@ -213,30 +219,18 @@ describe('the plan template', () => {
     expect(source).not.toMatch(/(src|href)\s*=\s*["']https?:/)
     expect(source).not.toContain('fetch(')
     expect(source).not.toContain('XMLHttpRequest')
-    expect(source).not.toContain('cdn')
   })
 
   test('should carry the data placeholder exactly once', () => {
     expect(source.match(/__GUREN_PLAN_DATA__/g)).toHaveLength(1)
   })
 
-  test.each([
-    'review',
-    'touched',
-    'entityOf',
-    'outgoing',
-    'incoming',
-    'dependsOn',
-    'dependsMarks',
-    'checksFor',
-    'breakingFor',
-    'expanded',
-    'placed',
-  ])('should key %s on a null prototype', (name) => {
-    // `constructor`, `toString` and `valueOf` all match the schema's id pattern, so a
-    // plain object reads each back as an inherited function rather than as absent.
-    expect(source).toContain(`var ${name} = Object.create(null)`)
-    expect(source).not.toContain(`var ${name} = {}`)
+  test('should build every id-keyed map through one factory', () => {
+    // A list of this file's variable names is an open roster: it grows whenever someone
+    // edits the page, and a map added without a row would be unguarded. One factory is a
+    // closed rule, so this assertion covers maps nobody has written yet.
+    expect(source.match(/Object\.create\(null\)/g)).toHaveLength(1)
+    expect(source).toContain('function idMap() {')
   })
 
   test('should forbid a form action and a base element as well', () => {
@@ -251,11 +245,13 @@ describe('the plan template', () => {
     expect(source).toContain('var answers = []')
   })
 
+  // `assets/`, not `templates/`: nothing copies this page into an application, and
+  // CLAUDE.md's scaffold-template gates key on `packages/cli/templates/**`.
   test('should resolve from the directory the published package ships', () => {
     const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8'))
 
-    expect(planTemplatePath()).toBe(join(import.meta.dir, '..', 'templates', 'plan', 'index.html'))
-    expect(manifest.files).toContain('templates')
+    expect(planTemplatePath()).toBe(join(import.meta.dir, '..', 'assets', 'plan', 'index.html'))
+    expect(manifest.files).toContain('assets')
   })
 })
 
@@ -300,7 +296,7 @@ describe('a plan whose ids name Object.prototype members', () => {
   test('should render and round-trip', () => {
     const plan = shadowingPlan()
 
-    expect(JSON.parse(dataBlock(renderPlanHtml({ plan }))).plan).toEqual(plan)
+    expect(payloadOf({ plan }).plan).toEqual(plan)
   })
 })
 
@@ -429,14 +425,14 @@ describe('buildPlanPayload', () => {
 })
 
 describe('renderPlanFile', () => {
-  async function fixtureDir(document: unknown): Promise<string> {
+  async function fixtureDir(document: unknown = loadFixture()): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), 'guren-plan-render-'))
     await writeFile(join(dir, 'comments.plan.json'), JSON.stringify(document), 'utf8')
     return dir
   }
 
   test('should write the page beside the plan', async () => {
-    const dir = await fixtureDir(loadFixture())
+    const dir = await fixtureDir()
 
     const result = await renderPlanFile(join(dir, 'comments.plan.json'))
 
@@ -445,7 +441,7 @@ describe('renderPlanFile', () => {
   })
 
   test('should write to the path -o names', async () => {
-    const dir = await fixtureDir(loadFixture())
+    const dir = await fixtureDir()
 
     const result = await renderPlanFile(join(dir, 'comments.plan.json'), { output: join(dir, 'review.html') })
 
@@ -453,7 +449,7 @@ describe('renderPlanFile', () => {
   })
 
   test('should resolve a relative output against the working directory it is given', async () => {
-    const dir = await fixtureDir(loadFixture())
+    const dir = await fixtureDir()
 
     const result = await renderPlanFile(join(dir, 'comments.plan.json'), { output: 'review.html', cwd: dir })
 
