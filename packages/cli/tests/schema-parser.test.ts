@@ -461,6 +461,8 @@ export const posts = pgTable('posts', {
   token: text('token').$defaultFn(() => crypto.randomUUID()),
   legacy: text('legacy').$default(makeLegacy),
   both: text('both').$defaultFn(() => 'runtime').default('database'),
+  twice: integer('twice').default(1).default(2),
+  overridden: timestamp('overridden').default(sql\`custom()\`).defaultNow(),
   title: text('title'),
 })
 `)
@@ -474,10 +476,17 @@ export const posts = pgTable('posts', {
       slug: { kind: 'sql', text: 'sql`gen_slug()`' },
       typed: { kind: 'sql', text: 'sql<string>`now()::text`' },
       createdAt: { kind: 'now' },
-      token: { kind: 'runtime', text: '() => crypto.randomUUID()' },
-      legacy: { kind: 'runtime', text: 'makeLegacy' },
+      token: undefined,
+      legacy: undefined,
       both: { kind: 'value', text: "'database'" },
+      twice: { kind: 'value', text: '2' },
+      overridden: { kind: 'now' },
       title: undefined,
+    })
+    expect(Object.fromEntries(table.columns.flatMap((column) => (column.runtimeDefault ? [[column.name, column.runtimeDefault]] : [])))).toEqual({
+      token: '() => crypto.randomUUID()',
+      legacy: 'makeLegacy',
+      both: "() => 'runtime'",
     })
     expect('default' in table.columns.find((column) => column.name === 'title')!).toBe(false)
   })
@@ -540,6 +549,29 @@ export const posts = pgTable('posts', {
     expect(table.opaqueColumns).toBeUndefined()
   })
 
+  it('should recognise an aliased and a namespaced sql tag', async () => {
+    const [table] = await parseSchema(`import * as d from 'drizzle-orm'
+import { sql as q } from 'drizzle-orm'
+import { pgTable, integer } from 'drizzle-orm/pg-core'
+
+export const counters = pgTable('counters', {
+  a: integer('a').default(q\`1\`),
+  b: integer('b').default(d.sql\`2\`),
+}) satisfies unknown
+`)
+    expect(table.columns.map((column) => column.default?.kind)).toEqual(['sql', 'sql'])
+  })
+
+  it('should mark a column not visible when a modifier is called through a computed member', async () => {
+    const [table] = await parseSchema(`import { pgTable, text } from 'drizzle-orm/pg-core'
+
+const modifier = 'unique'
+export const users = pgTable('users', { email: text('email')[modifier]() })
+`)
+    expect(table.columns[0].unique).toBe(false)
+    expect(table.columns[0].opaqueBuilder).toBe(true)
+  })
+
   it('should mark the column set not visible when it carries a spread or a computed key', async () => {
     const tables = await parseSchema(`import { pgTable, text } from 'drizzle-orm/pg-core'
 import { timestamps, KEY } from './columns'
@@ -557,7 +589,7 @@ export const plain = pgTable('plain', { title: text('title') })
 })
 
 describe('parseSchemaTables table constraints', () => {
-  const ARRAY_FORM = (factory: string, module: string) => `import { ${factory}, text, integer, index, uniqueIndex, unique, primaryKey, foreignKey, check } from 'drizzle-orm/${module}'
+  const ARRAY_FORM = (factory: string, module: string, int: string) => `import { ${factory}, text, ${int} as integer, index, uniqueIndex, unique, primaryKey, foreignKey, check } from 'drizzle-orm/${module}'
 import { sql } from 'drizzle-orm'
 import { users } from './users'
 
@@ -571,7 +603,7 @@ export const memberships = ${factory}('memberships', {
 }, (table) => [
   primaryKey({ columns: [table.userId, table.teamId], name: 'memberships_pk' }),
   index('memberships_role_idx').on(table.role),
-  uniqueIndex('memberships_email_idx').on(table.email, table.teamId.desc()),
+  uniqueIndex('memberships_email_idx').on(table.email, table.teamId),
   unique().on(table.role, table['email']),
   foreignKey({ columns: [table.userId], foreignColumns: [users.id], name: 'memberships_user_fk' }).onDelete('cascade'),
   foreignKey({ columns: [table.parentUserId, table.parentTeamId], foreignColumns: [table.userId, table.teamId] }),
@@ -593,9 +625,9 @@ export const memberships = ${factory}('memberships', {
     { kind: 'check', name: 'role_check', columns: [] },
   ]
 
-  for (const [factory, module] of [['pgTable', 'pg-core'], ['sqliteTable', 'sqlite-core'], ['mysqlTable', 'mysql-core']]) {
+  for (const [factory, module, int] of [['pgTable', 'pg-core', 'integer'], ['sqliteTable', 'sqlite-core', 'integer'], ['mysqlTable', 'mysql-core', 'int']]) {
     it(`should read the array form of ${factory}'s extra config`, async () => {
-      const [table] = await parseSchema(ARRAY_FORM(factory, module))
+      const [table] = await parseSchema(ARRAY_FORM(factory, module, int))
 
       expect(table.constraints).toEqual(EXPECTED)
       expect(table.opaqueConstraints).toBeUndefined()
@@ -645,11 +677,13 @@ export const docs = p.pgTable('docs', {
 }, (t) => [
   idx('docs_body_idx').using('gin', t.body),
   p.unique('docs_title_key').on(t.title).nullsNotDistinct(),
+  p.index('docs_sorted_idx').on(t.title.desc(), (t as any).body, t!.title),
 ])
 `)
     expect(table.constraints).toEqual([
       { kind: 'index', name: 'docs_body_idx', columns: ['body'] },
       { kind: 'unique', name: 'docs_title_key', columns: ['title'] },
+      { kind: 'index', name: 'docs_sorted_idx', columns: ['title', 'body', 'title'] },
     ])
     expect(table.opaqueConstraints).toBeUndefined()
   })
@@ -661,11 +695,21 @@ import { sharedIndexes, buildIndexes } from './indexes'
 export const byIdentifier = pgTable('a', { name: text('name') }, sharedIndexes)
 export const byHelper = pgTable('b', { name: text('name') }, (table) => buildIndexes(table))
 export const byCondition = pgTable('c', { name: text('name') }, (table) => (process.env.X ? [] : [index('i').on(table.name)]))
+export const byBranch = pgTable('d', { name: text('name') }, (table) => {
+  if (process.env.X) return [index('i').on(table.name)]
+  return []
+})
+export const byLocal = pgTable('e', { name: text('name') }, (table) => {
+  const target = table
+  return [index('i').on(target.name)]
+})
 `)
     expect(tables.map((table) => [table.identifier, table.constraints, table.opaqueConstraints])).toEqual([
       ['byIdentifier', [], true],
       ['byHelper', [], true],
       ['byCondition', [], true],
+      ['byBranch', [], true],
+      ['byLocal', [], true],
     ])
   })
 
@@ -677,12 +721,16 @@ export const spreadArray = pgTable('a', { name: text('name') }, (table) => [inde
 export const helperEntry = pgTable('b', { name: text('name') }, (table) => [auditIndex(table), index('b_idx').on(table.name)])
 export const spreadObject = pgTable('c', { name: text('name') }, (table) => ({ ...sharedIndexes(table), nameIdx: index('c_idx').on(table.name) }))
 export const localBuilder = pgTable('d', { name: text('name') }, (table) => [localIndex('d_idx').on(table.name)])
+export const computedKey = pgTable('e', { name: text('name') }, (table) => ({ a: index('e_idx').on(table.name), [KEY]: index('e2_idx').on(table.name) }))
+export const computedMethod = pgTable('f', { name: text('name') }, (table) => [index('f_idx')[METHOD](table.name)])
 `)
     expect(tables.map((table) => [table.identifier, table.constraints, table.opaqueConstraints])).toEqual([
       ['spreadArray', [{ kind: 'index', name: 'a_idx', columns: ['name'] }], true],
       ['helperEntry', [{ kind: 'index', name: 'b_idx', columns: ['name'] }], true],
       ['spreadObject', [{ kind: 'index', name: 'c_idx', columns: ['name'] }], true],
       ['localBuilder', [], true],
+      ['computedKey', [{ kind: 'index', name: 'e_idx', columns: ['name'] }], true],
+      ['computedMethod', [], true],
     ])
   })
 
@@ -701,6 +749,8 @@ export const accounts = pgTable('accounts', {
   primaryKey({ columns: KEY_COLUMNS }),
   foreignKey({ columns: [table.ownerId], foreignColumns: [users.id, other.id] }),
   index('accounts_spread').on(...KEY_COLUMNS),
+  primaryKey({ columns: [table.email], ...SHARED }),
+  primaryKey(SHARED),
 ])
 `)
     expect(table.constraints).toEqual([
@@ -710,6 +760,8 @@ export const accounts = pgTable('accounts', {
       { kind: 'primaryKey', columns: [], opaqueColumns: true },
       { kind: 'foreignKey', columns: ['ownerId'], opaqueColumns: true },
       { kind: 'index', name: 'accounts_spread', columns: [], opaqueColumns: true },
+      { kind: 'primaryKey', columns: ['email'], opaqueName: true, opaqueColumns: true },
+      { kind: 'primaryKey', columns: [], opaqueName: true, opaqueColumns: true },
     ])
     expect(table.opaqueConstraints).toBeUndefined()
   })

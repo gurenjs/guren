@@ -123,6 +123,12 @@ type LocatedPropsType =
   | { kind: 'interface'; node: TSInterfaceDeclaration }
   | { kind: 'type'; node: TSType }
 
+function locatedFrom(declaration: TSInterfaceDeclaration | TSTypeAliasDeclaration): LocatedPropsType {
+  return declaration.type === 'TSInterfaceDeclaration'
+    ? { kind: 'interface', node: declaration }
+    : { kind: 'type', node: declaration.typeAnnotation }
+}
+
 function typeDeclaration(node: Statement): TSInterfaceDeclaration | TSTypeAliasDeclaration | undefined {
   const declaration = node.type === 'ExportNamedDeclaration' ? node.declaration : node
   return declaration?.type === 'TSInterfaceDeclaration' || declaration?.type === 'TSTypeAliasDeclaration'
@@ -138,10 +144,7 @@ function typeDeclaration(node: Statement): TSInterfaceDeclaration | TSTypeAliasD
 function locatePropsType(ast: File): LocatedPropsType | undefined {
   for (const node of ast.program.body) {
     const declaration = typeDeclaration(node)
-    if (declaration?.id.name !== 'Props') continue
-    return declaration.type === 'TSInterfaceDeclaration'
-      ? { kind: 'interface', node: declaration }
-      : { kind: 'type', node: declaration.typeAnnotation }
+    if (declaration?.id.name === 'Props') return locatedFrom(declaration)
   }
 
   for (const node of ast.program.body) {
@@ -182,7 +185,22 @@ export function extractPagePropKeysFromSource(source: string, filePath = 'page.t
   let located = locatePropsType(ast)
   if (!located) return { status: 'undeclared' }
 
+  // Interfaces merge and a generic's members depend on its arguments, so either one
+  // leaves a single declaration's members short of the key set.
+  const declared = (name: string): LocatedPropsType | string => {
+    const declarations = ast.program.body.map(typeDeclaration).filter((candidate) => candidate?.id.name === name)
+    if (declarations.length === 0) return `\`${name}\` is not declared in the page file`
+    if (declarations.length > 1) return `\`${name}\` is declared more than once`
+    return declarations[0]!.typeParameters ? `\`${name}\` is generic` : locatedFrom(declarations[0]!)
+  }
+
   const followed = new Set<string>()
+  if (ast.program.body.some((node) => typeDeclaration(node)?.id.name === 'Props')) {
+    const props = declared('Props')
+    if (typeof props === 'string') return { status: 'unreadable', reason: props }
+    followed.add('Props')
+  }
+
   while (located.kind === 'type' && located.node.type === 'TSTypeReference') {
     const reference: TSTypeReference = located.node
     const text = source.slice(reference.start!, reference.end!)
@@ -190,14 +208,11 @@ export function extractPagePropKeysFromSource(source: string, filePath = 'page.t
       return { status: 'unreadable', reason: `\`${text}\` is a generic or qualified type` }
     }
     const name = reference.typeName.name
-    const declaration = ast.program.body.map(typeDeclaration).find((candidate) => candidate?.id.name === name)
-    if (!declaration) return { status: 'unreadable', reason: `\`${name}\` is not declared in the page file` }
     if (followed.has(name)) return { status: 'unreadable', reason: `\`${name}\` refers to itself` }
     followed.add(name)
-    if (declaration.typeParameters) return { status: 'unreadable', reason: `\`${name}\` is generic` }
-    located = declaration.type === 'TSInterfaceDeclaration'
-      ? { kind: 'interface', node: declaration }
-      : { kind: 'type', node: declaration.typeAnnotation }
+    const next = declared(name)
+    if (typeof next === 'string') return { status: 'unreadable', reason: next }
+    located = next
   }
 
   if (located.kind === 'interface') {

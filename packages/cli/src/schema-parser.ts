@@ -101,10 +101,11 @@ function* tableDeclarations(ast: File): Generator<{ identifier: string; call: Ca
     if (!declaration) continue
     for (const declarator of declaration.declarations) {
       if (declarator.id.type !== 'Identifier') continue
-      if (declarator.init?.type !== 'CallExpression') continue
-      const dialect = tableFactoryDialect(declarator.init, aliases)
+      const init = declarator.init ? unwrapTypeAssertion(declarator.init) : undefined
+      if (init?.type !== 'CallExpression') continue
+      const dialect = tableFactoryDialect(init, aliases)
       if (!dialect) continue
-      yield { identifier: declarator.id.name, call: declarator.init, dialect }
+      yield { identifier: declarator.id.name, call: init, dialect }
     }
   }
 }
@@ -227,8 +228,10 @@ export interface SchemaColumn {
   opaqueOptions?: true
   /** `.unique()` on the column; a table-level `unique().on(...)` is a `SchemaConstraint`. */
   unique: boolean
-  /** Absent when the chain declares none. */
+  /** The database default; absent when the chain declares none. */
   default?: SchemaColumnDefault
+  /** Source text of a `.$defaultFn()` / `.$default()` argument, which the database never sees. */
+  runtimeDefault?: string
   /**
    * Set when the chain does not start at a builder the file imports from drizzle (a
    * shared column, a local helper), so `notNull`, `primaryKey`, `unique`, `references`
@@ -238,13 +241,12 @@ export interface SchemaColumn {
 }
 
 /**
- * A column default as written, never evaluated. `text` is the argument's source text.
+ * A database default as written, never evaluated. `text` is the argument's source text.
  * `value` is `.default(<expression>)`, `sql` is `.default(sql\`…\`)`, `now` and `random`
- * are `.defaultNow()` / `.defaultRandom()`, and `runtime` is `.$defaultFn()` / `.$default()`,
- * which the database never sees. A database default wins over a runtime one written beside it.
+ * are `.defaultNow()` / `.defaultRandom()`. All three write one slot, so the last call wins.
  */
 export type SchemaColumnDefault =
-  | { kind: 'value' | 'sql' | 'runtime'; text: string }
+  | { kind: 'value' | 'sql'; text: string }
   | { kind: 'now' | 'random' }
 
 export interface SchemaConstraint {
@@ -301,10 +303,11 @@ function unwrapColumnChain(
     if (callee.type === 'Identifier') {
       return { type: callee.name, builder: current, methods, rooted: imports.named.has(callee.name) }
     }
-    if (callee.type !== 'MemberExpression' || callee.property.type !== 'Identifier') {
+    if (callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') {
       break
     }
-    methods.set(callee.property.name, current)
+    // Walked outermost first, and drizzle lets a repeated modifier's last call win.
+    if (!methods.has(callee.property.name)) methods.set(callee.property.name, current)
     const object = unwrapTypeAssertion(callee.object)
     if (object.type !== 'CallExpression') {
       return { methods, rooted: object.type === 'Identifier' && imports.namespaces.has(object.name) }
@@ -399,22 +402,24 @@ function sourceText(source: string, node: Node): string {
   return source.slice(node.start!, node.end!)
 }
 
-function isSqlTemplate(node: Node): boolean {
+function isSqlTemplate(node: Node, imports: DrizzleImports): boolean {
   if (node.type !== 'TaggedTemplateExpression') return false
   const tag = unwrapTypeAssertion(node.tag)
-  return tag.type === 'Identifier' && tag.name === 'sql'
+  if (tag.type === 'Identifier') return tag.name === 'sql' || imports.named.get(tag.name) === 'sql'
+  const member = memberName(tag)
+  return member !== undefined && imports.namespaces.has(member.object) && member.property === 'sql'
 }
 
-function extractDefault(methods: Map<string, CallExpression>, source: string): SchemaColumnDefault | undefined {
-  const written = methods.get('default')?.arguments[0]
-  if (written) {
-    return { kind: isSqlTemplate(unwrapTypeAssertion(written)) ? 'sql' : 'value', text: sourceText(source, written) }
+function extractDefault(methods: Map<string, CallExpression>, source: string, imports: DrizzleImports): SchemaColumnDefault | undefined {
+  for (const [method, call] of methods) {
+    if (method === 'defaultNow') return { kind: 'now' }
+    if (method === 'defaultRandom') return { kind: 'random' }
+    const written = method === 'default' ? call.arguments[0] : undefined
+    if (written) {
+      return { kind: isSqlTemplate(unwrapTypeAssertion(written), imports) ? 'sql' : 'value', text: sourceText(source, written) }
+    }
   }
-  if (methods.has('defaultNow')) return { kind: 'now' }
-  if (methods.has('defaultRandom')) return { kind: 'random' }
-
-  const runtime = (methods.get('$defaultFn') ?? methods.get('$default'))?.arguments[0]
-  return runtime ? { kind: 'runtime', text: sourceText(source, runtime) } : undefined
+  return undefined
 }
 
 function columnsFromObject(columnsArg: ObjectExpression, source: string, imports: DrizzleImports): SchemaColumn[] {
@@ -432,7 +437,8 @@ function columnsFromObject(columnsArg: ObjectExpression, source: string, imports
     }
 
     const nameArg = builder?.arguments[0]
-    const columnDefault = extractDefault(methods, source)
+    const columnDefault = extractDefault(methods, source, imports)
+    const runtimeDefault = (methods.get('$defaultFn') ?? methods.get('$default'))?.arguments[0]
 
     columns.push({
       name,
@@ -445,6 +451,7 @@ function columnsFromObject(columnsArg: ObjectExpression, source: string, imports
       ...(hasOpaqueOptions(builder) ? { opaqueOptions: true as const } : {}),
       unique: methods.has('unique'),
       ...(columnDefault ? { default: columnDefault } : {}),
+      ...(runtimeDefault ? { runtimeDefault: sourceText(source, runtimeDefault) } : {}),
       ...(rooted ? {} : { opaqueBuilder: true as const }),
     })
   }
@@ -471,9 +478,11 @@ function columnBinding(callback: Node): ColumnBinding {
 }
 
 function memberName(node: Node): { object: string; property: string } | undefined {
-  if (node.type !== 'MemberExpression' || node.object.type !== 'Identifier') return undefined
+  if (node.type !== 'MemberExpression') return undefined
+  const object = unwrapTypeAssertion(node.object)
+  if (object.type !== 'Identifier') return undefined
   const property = node.computed ? literalString(node.property) : node.property.type === 'Identifier' ? node.property.name : null
-  return property ? { object: node.object.name, property } : undefined
+  return property ? { object: object.name, property } : undefined
 }
 
 /** `table.email`, `table.email.desc()`, or a destructured `email` → `email`. */
@@ -508,7 +517,7 @@ function arrayElements(node: Node | undefined): ReadonlyArray<Node | null> | und
 function constraintKind(callee: Node, imports: DrizzleImports): SchemaConstraintKind | undefined {
   const name = callee.type === 'Identifier'
     ? imports.named.get(callee.name)
-    : callee.type === 'MemberExpression' && callee.object.type === 'Identifier' && imports.namespaces.has(callee.object.name)
+    : imports.namespaces.has(memberName(callee)?.object ?? '')
       ? memberName(callee)?.property
       : undefined
   return CONSTRAINT_BUILDERS.has(name as SchemaConstraintKind) ? (name as SchemaConstraintKind) : undefined
@@ -522,9 +531,10 @@ function readConstraint(entry: Node, binding: ColumnBinding, table: string, impo
 
   while (current.type === 'CallExpression') {
     kind = constraintKind(current.callee, imports)
-    if (kind || current.callee.type !== 'MemberExpression' || current.callee.property.type !== 'Identifier') break
-    methods.set(current.callee.property.name, current)
-    current = unwrapTypeAssertion(current.callee.object)
+    const callee = current.callee
+    if (kind || callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') break
+    methods.set(callee.property.name, current)
+    current = unwrapTypeAssertion(callee.object)
   }
   if (!kind || current.type !== 'CallExpression') return undefined
 
@@ -541,8 +551,12 @@ function readConstraint(entry: Node, binding: ColumnBinding, table: string, impo
 
   const columns = readList(columnNodes, (node) => ownColumn(node, binding))
   const constraint: SchemaConstraint = { kind, ...(name ? { name } : {}), columns: columns.items }
-  if (nameNode && !name) constraint.opaqueName = true
-  let opaque = columns.opaque
+  // A spread or computed key may override any option, and `primaryKey(OPTIONS)` may carry a name.
+  const hiddenOptions = options
+    ? options.properties.some((property) => property.type !== 'ObjectProperty' || property.computed)
+    : (kind === 'primaryKey' || kind === 'foreignKey') && columns.opaque
+  if ((nameNode && !name) || hiddenOptions) constraint.opaqueName = true
+  let opaque = columns.opaque || hiddenOptions
 
   if (kind === 'foreignKey') {
     const targets = readList(arrayElements(options ? propertyValue(options, 'foreignColumns') : undefined), (node) => memberName(unwrapTypeAssertion(node)))
@@ -562,15 +576,19 @@ function readConstraints(
 ): Pick<SchemaTable, 'constraints' | 'opaqueConstraints'> {
   if (!extraConfig) return { constraints: [] }
 
-  const returned = returnedExpression(extraConfig)
+  const callback = unwrapTypeAssertion(extraConfig)
+  // A block with anything beside its `return` may branch or bind the names the literal uses.
+  const isCallback = callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression'
+  const straight = !isCallback || callback.body.type !== 'BlockStatement' || callback.body.body.length === 1
+  const returned = straight ? returnedExpression(callback) : undefined
   const entries: Array<Node | null> | undefined =
     returned?.type === 'ArrayExpression'
       ? returned.elements
       : returned?.type === 'ObjectExpression'
-        ? returned.properties.map((property) => (property.type === 'ObjectProperty' ? property.value : null))
+        ? returned.properties.map((property) => (property.type === 'ObjectProperty' && !property.computed ? property.value : null))
         : undefined
 
-  const binding = columnBinding(unwrapTypeAssertion(extraConfig))
+  const binding = columnBinding(callback)
   const { items, opaque } = readList(entries, (entry) => readConstraint(entry, binding, table, imports))
   return { constraints: items, ...(opaque ? { opaqueConstraints: true as const } : {}) }
 }
