@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, utimes, writeFile } from 'node:f
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseSchemaTables } from '../src/schema-parser'
-import { readSchemaAtRuntime, readSchemaTables, type SourcedSchemaTable } from '../src/schema-runtime'
+import { readSchemaAtRuntime, readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../src/schema-runtime'
 import { writeWorkspaceFiles } from './helpers'
 
 // The copy `@guren/orm` pins. A temp app outside the repo resolves `drizzle-orm` from
@@ -375,10 +375,19 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey(), ...timest
       await expectStaticFallback(app, /db\/schema\.ts could not be imported/)
     })
 
-    test('should fall back to the static reader when the import never settles', async () => {
-      // A promise nothing will settle is not enough: Bun on Linux resolves the import anyway.
+    // Measured: Bun 1.3.14 on Linux resolves a dynamic import while its top-level await is
+    // still pending (a real timer or a promise nothing settles alike), so there the schema
+    // reads as a table in ~10ms and the timeout never fires. macOS waits for the await.
+    test.skipIf(process.platform === 'linux')('should fall back to the static reader when the import never settles', async () => {
       const app = await createApp({ 'db/schema.ts': `${OPAQUE_SCHEMA}\nawait new Promise((done) => setTimeout(done, 10_000))\n` })
       await expectStaticFallback(app, /could not be imported: the import did not finish within 50ms/, { importTimeoutMs: 50 })
+    })
+
+    test('should reject an import that outlives the timeout and settle with one that does not', async () => {
+      const pending = new Promise<never>(() => {})
+      await expect(withImportTimeout(pending, 20)).rejects.toThrow('the import did not finish within 20ms')
+      await expect(withImportTimeout(Promise.resolve('read'), 20)).resolves.toBe('read')
+      await expect(withImportTimeout(Promise.reject(new Error('DATABASE_URL is required')), 20)).rejects.toThrow('DATABASE_URL is required')
     })
 
     test('should fall back to the static reader when the app has no drizzle-orm', async () => {

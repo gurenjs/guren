@@ -140,7 +140,8 @@ async function loadDrizzle(schemaDir: string): Promise<DrizzleCopy> {
   return { entry, is: core.is, dialects }
 }
 
-function withImportTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+/** Exported for its test: Bun on Linux resolves a dynamic import whose top-level await is still pending. */
+export function withImportTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const expiry = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`the import did not finish within ${timeoutMs}ms`)), timeoutMs)
