@@ -13,6 +13,7 @@
   "sections.resources": "Resource",
   "sections.policies": "ポリシー",
   "sections.sideEffects": "副作用",
+  "sections.flows": "フロー",
   "sections.commands": "コマンド",
   "sections.tasks": "タスクと受け入れ条件",
   "sections.tab": "{label} ({count})",
@@ -25,8 +26,10 @@
 
   "footer.copy": "フィードバックをコピー",
   "footer.download": "feedback.json をダウンロード",
-  "footer.note": "各要素の見出しにある印からコメントを付けられます。このページはプロジェクトに何も書き込まず、ネットワークにも接続しません。フィードバックをプランと同じ場所に保存して、次のコマンドを実行してください。",
-  "footer.copied": "コピーしました。プランと同じ場所に feedback.json として保存してください。",
+  "footer.note": "各要素の見出しにある印からコメントを付けられます。このページはプロジェクトに何も書き込まず、ネットワークにも接続しません。",
+  "footer.fileCommand": "フィードバックをプランと同じ場所にダウンロードして、次のコマンドを実行してください。",
+  "footer.stdinCommand": "コピーした場合は、次のコマンドにパイプで渡してください。",
+  "footer.copied": "コピーしました。下の 2 つ目のコマンドにパイプで渡してください。",
   "footer.clipboardRefused": "ブラウザがクリップボードへの書き込みを拒否しました。ダウンロードを使ってください。",
   "footer.downloaded": "feedback.json をダウンロードしました。",
 
@@ -72,6 +75,8 @@
   "diagram.label": "プランの ER 図",
   "diagram.empty": "このプランはモデルを宣言していません。",
   "diagram.hint": "テーブルをクリックするとカラムを表示します。破線は宣言されたリレーションです。",
+
+  "flows.label": "フロー: {title}",
 
   "label.module": "モジュール",
   "label.model": "モデル",

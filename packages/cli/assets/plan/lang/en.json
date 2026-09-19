@@ -13,6 +13,7 @@
   "sections.resources": "Resources",
   "sections.policies": "Policies",
   "sections.sideEffects": "Side effects",
+  "sections.flows": "Flows",
   "sections.commands": "Commands",
   "sections.tasks": "Tasks & acceptance",
   "sections.tab": "{label} ({count})",
@@ -25,8 +26,10 @@
 
   "footer.copy": "Copy feedback",
   "footer.download": "Download feedback.json",
-  "footer.note": "Comment on any element from the mark in its heading. This page never writes to the project and makes no network request — put the feedback beside the plan and run:",
-  "footer.copied": "Copied. Save it as feedback.json beside the plan.",
+  "footer.note": "Comment on any element from the mark in its heading. This page never writes to the project and makes no network request.",
+  "footer.fileCommand": "Download the feedback beside the plan, then run:",
+  "footer.stdinCommand": "Or copy it and pipe it into:",
+  "footer.copied": "Copied. Pipe it into the second command below.",
   "footer.clipboardRefused": "The browser refused the clipboard. Use Download instead.",
   "footer.downloaded": "Downloaded feedback.json.",
 
@@ -72,6 +75,8 @@
   "diagram.label": "Entity relationship diagram of the plan",
   "diagram.empty": "The plan declares no models.",
   "diagram.hint": "Click a table to show its columns. Dashed edges are declared relationships.",
+
+  "flows.label": "Flow: {title}",
 
   "label.module": "Module",
   "label.model": "Model",

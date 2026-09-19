@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 
+import { planTemplatePath } from '../src/plan/render'
+import { pageFunctionSource } from './plan-page-dom'
 import { comparePlanDictionaries, loadPlanDictionaries, PLAN_LOCALES, type PlanDictionary } from '../src/plan/locales'
 
 interface FakeNode {
@@ -49,9 +50,13 @@ interface Formatter {
   formatText(template: string, values?: Values): string
 }
 
+const pageSource = readFileSync(planTemplatePath(), 'utf8')
+
+// oxlint-disable-next-line no-new-func -- the page is a classic script with no module to import
 const formatter = new Function(
   'document',
-  `${readFileSync(join(import.meta.dir, '../assets/plan/format.js'), 'utf8')}\nreturn { formatInto: formatInto, formatText: formatText }`,
+  `${['walkTemplate', 'formatInto', 'formatText'].map((name) => pageFunctionSource(pageSource, name)).join('\n')}
+return { formatInto: formatInto, formatText: formatText }`,
 )(fakeDocument) as Formatter
 
 const dictionaries = loadPlanDictionaries()
