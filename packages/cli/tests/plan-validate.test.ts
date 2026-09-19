@@ -429,3 +429,71 @@ describe('validatePlan', () => {
     expectResult(results, 'plan:api-only-view', 'view.posts.show', 'fail')
   })
 })
+
+describe('flows', () => {
+  function planWithFlow(nodes: unknown[], edges: unknown[]): PlanDraft {
+    return PlanDraftSchema.parse({
+      ...loadCommentsPlan(),
+      flows: [{ id: 'flow.comment', change: { kind: 'add' }, title: 'Leaving a comment', nodes, edges }],
+    })
+  }
+
+  const step = { id: 'form', label: 'The comment form', kind: 'page' }
+
+  test('should accept a step naming an element the plan declares', () => {
+    const results = validatePlan(
+      planWithFlow([{ ...step, element: 'view.posts.show' }], []),
+      appState(),
+    )
+
+    expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
+  })
+
+  test('should accept a step that names no element, since an actor is not one', () => {
+    const results = validatePlan(planWithFlow([{ id: 'reader', label: 'A reader', kind: 'actor' }], []), appState())
+
+    expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
+  })
+
+  test('should refuse a step naming an element the plan does not declare', () => {
+    const results = validatePlan(planWithFlow([{ ...step, element: 'view.nowhere' }], []), appState())
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('view.nowhere')
+  })
+
+  test('should refuse an edge naming a step this flow does not have', () => {
+    const results = validatePlan(planWithFlow([step], [{ from: 'form', to: 'nowhere' }]), appState())
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('no step of this flow')
+  })
+
+  test('should refuse an edge naming a plan element rather than a step of the flow', () => {
+    // `route.comments.store` is a real element of this plan, which says nothing about
+    // whether the flow has a step by that name. Only the flow's own steps are edge ends.
+    const results = validatePlan(planWithFlow([step], [{ from: 'form', to: 'route.comments.store' }]), appState())
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('no step of this flow')
+  })
+
+  test('should judge an edge against its own flow, since a step id is the flow\'s own', () => {
+    const plan = PlanDraftSchema.parse({
+      ...loadCommentsPlan(),
+      flows: [
+        { id: 'flow.one', change: { kind: 'add' }, title: 'One', nodes: [step], edges: [] },
+        {
+          id: 'flow.two',
+          change: { kind: 'add' },
+          title: 'Two',
+          nodes: [{ id: 'other', label: 'Other', kind: 'page' }],
+          // `form` is a step of flow.one, which says nothing about flow.two.
+          edges: [{ from: 'other', to: 'form' }],
+        },
+      ],
+    })
+
+    const results = validatePlan(plan, appState())
+
+    expect(find(failures(results), 'plan:reference', 'flow.one')).toBeUndefined()
+    expect(expectResult(results, 'plan:reference', 'flow.two', 'fail').message).toContain('"form"')
+  })
+})

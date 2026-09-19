@@ -196,6 +196,35 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
     }
   }
 
+  for (const flow of plan.flows) {
+    const nodes = new Set(flow.nodes.map((node) => node.id))
+    for (const node of flow.nodes) {
+      // A node need not name an element — an actor and an external service are not plan
+      // elements — but one that does is a reference like any other.
+      if (!node.element) continue
+      if (index.byId.has(node.element)) continue
+      results.push(
+        finding('plan:reference', 'fail', `Flow step "${node.label}" names element "${node.element}", which the plan does not declare.`, {
+          elementId: flow.id,
+          section: 'flows',
+        }),
+      )
+    }
+    for (const edge of flow.edges) {
+      // Node ids are the flow's own, so an edge is checked against its own flow rather
+      // than against the plan: two flows may both have a node called `start`.
+      for (const [end, id] of [['from', edge.from], ['to', edge.to]] as const) {
+        if (nodes.has(id)) continue
+        results.push(
+          finding('plan:reference', 'fail', `A flow edge's "${end}" names "${id}", which is no step of this flow.`, {
+            elementId: flow.id,
+            section: 'flows',
+          }),
+        )
+      }
+    }
+  }
+
   for (const route of plan.routes) {
     expect(route.id, 'routes', route.action, 'actions', 'The route action')
     for (const binding of route.bind) {
