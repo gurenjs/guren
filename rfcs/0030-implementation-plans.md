@@ -126,6 +126,7 @@ interface Plan {
   commands: PlanCommand[]        // `guren add attachments` and the like
   tasks: PlanTaskIntent[]        // what each slice must do; never its order
   hints: string[]                // ordering advice Guren may ignore
+  flows: PlanFlow[]              // amended: how a request moves through what the plan adds
 }
 ```
 
@@ -154,6 +155,32 @@ and an id may not name an `Object.prototype` member: `constructor` and
 `toString` fit the id pattern, and a consumer that keys a plain object by id
 reads the inherited function back for them. The rendered page went blank on
 such a plan before both the page and the schema were closed.
+
+**Amended after acceptance (2026-09-19, PR #920):** a plan may carry flows, as
+graphs and never as diagram source:
+
+```typescript
+interface PlanFlow {
+  id: string
+  change: Change
+  title: string
+  description?: string
+  nodes: Array<{
+    id: string                   // the flow's own namespace, not the plan's
+    label: string
+    kind: 'actor' | 'page' | 'route' | 'action' | 'job' | 'store' | 'external' | 'decision'
+    element?: string             // the plan element this step is, when it is one
+  }>
+  edges: Array<{ from: string; to: string; label?: string; kind: 'sync' | 'async' }>
+}
+```
+
+A flow's `id` is in the plan's namespace, so a revision op and a question's
+`affects` can name one. A step's `id` is not: it belongs to its flow, and two
+flows may both have a step called `start`. A step that names an `element` is
+what makes a flow part of the document rather than a picture beside it: the
+page links it to that element, and §2 holds the id to the same rule as every
+other reference.
 
 A headless producer cannot stop and ask. A question is therefore data, and the
 model keeps going on a stated assumption:
@@ -276,7 +303,9 @@ plan and the application's current context (`generateContext()`,
   route, since nothing else can judge a change that alters no shape;
 - an added or altered route with a validator and no `validation` behaviour,
   with authentication and no `unauthenticated` behaviour, or with a policy and
-  no `forbidden` behaviour.
+  no `forbidden` behaviour;
+- (amended, PR #920) a flow step naming an element the plan does not declare,
+  and a flow edge whose end is not a step of that flow.
 
 **Existing tests are read as the baseline.** A static scan of the test files
 collects which routes they exercise (`app.get('/posts')`, `app.post(...)` on a
@@ -318,6 +347,16 @@ built from validated ids, and no plan string ever becomes an `href`; a
 style and nothing else (`default-src 'none'`), so a plan cannot load or post
 anywhere. The diagram is drawn by the template's own SVG code for the same
 reason: no Mermaid, and no CDN.
+
+**Amended after acceptance (2026-09-19, PR #920):** a flow is drawn the same
+way and for the same reason. The plan carries it as a graph, never as diagram
+source: `guren` places it (longest-path layering, so a step sits after its
+furthest predecessor) and the page draws the positions it is handed, so one
+flow is one picture wherever it is drawn. A plan may describe a loop (a
+redirect back to a form, a retry), so the edge that closes a cycle is marked
+and routed apart rather than refused. Measured against mermaid 11.17.2: 3.57 MB
+for the entry bundle alone, a lazily fetched chunk per diagram type that
+`default-src 'none'` refuses, and seven `innerHTML` writes.
 
 - Tabs per section, a filter per entity, and a "changes only" toggle that
   hides `existing` elements.
