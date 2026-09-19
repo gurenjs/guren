@@ -48,8 +48,10 @@ describe('plan:render', () => {
   test('should pin the findings the plan raises against the application', async () => {
     await writePlan()
 
-    await render()
+    const warnings = await render()
 
+    // The page is where they are read; the terminal only says how many there are.
+    expect(warnings).toEqual(['3 check finding(s) are pinned at the top of the page.'])
     const findings = (await renderedChecks()).filter((result) => result.status !== 'pass')
     expect(findings.map((finding) => `${finding.status} ${finding.key} ${finding.elementId ?? ''}`).sort()).toEqual([
       'warn plan:acceptance route.comments.destroy',
