@@ -1,0 +1,300 @@
+/**
+ * The rendered plan (RFC 0030 §3): one self-contained HTML file that opens from
+ * disk and makes no request of any kind.
+ *
+ * Every string in a plan is model output, and under the `github` store some of it
+ * passed through an editable issue, so all of it is hostile. The data reaches the
+ * page as a JSON block whose `<`, `>`, `&`, U+2028 and U+2029 are escaped, and the
+ * template writes it with `textContent` only. `packages/cli/tests/plan-render.test.ts`
+ * holds both halves of that to the output.
+ */
+
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+import type { CheckResult } from '../check-result'
+import { planDiagram, type PlanDiagram } from './diagram'
+import { planHash } from './identity'
+import { listPlanElements, type Plan, type PlanDraft, type PlanElementSection } from './schema'
+
+/**
+ * A `guren check` result that names the plan element it concerns. `elementId` is
+ * optional: a finding about the plan as a whole still belongs in the banner.
+ */
+export interface PlanCheckResult extends CheckResult {
+  elementId?: string
+}
+
+export interface RenderPlanInput {
+  plan: PlanDraft | Plan
+  checks?: readonly PlanCheckResult[]
+  /** Derived task status (RFC 0030 §6). Reserved: an absent value renders nothing. */
+  status?: unknown
+}
+
+export interface PlanBreakingChange {
+  elementId: string
+  section: PlanElementSection
+  title: string
+  reason: string
+}
+
+/** What one element is called in the page's own index: its entity, and what it links to. */
+export interface PlanElementEntry {
+  id: string
+  section: PlanElementSection
+  entity: string | null
+}
+
+/** One id referencing another, so the page can show a card's outgoing and incoming links. */
+export interface PlanLink {
+  from: string
+  to: string
+  label: string
+}
+
+export interface PlanPagePayload {
+  plan: PlanDraft | Plan
+  /** Absent for a draft: identity covers the baseline, which a draft does not have. */
+  planHash: string | null
+  checks: PlanCheckResult[]
+  breaking: PlanBreakingChange[]
+  diagram: PlanDiagram
+  elements: PlanElementEntry[]
+  links: PlanLink[]
+  entities: string[]
+  status: unknown
+}
+
+const DATA_PLACEHOLDER = '__GUREN_PLAN_DATA__'
+
+let cachedTemplate: string | undefined
+
+/**
+ * The chunk this module is bundled into sits at `dist/`, one hop below the package
+ * root; the source sits at `src/plan/`, two. Both are tried rather than probed with
+ * `existsSync`, which reports a permission error on a parent as absence.
+ */
+const TEMPLATE_CANDIDATES = ['../templates/plan/index.html', '../../templates/plan/index.html'] as const
+
+function loadTemplate(): string {
+  if (cachedTemplate !== undefined) return cachedTemplate
+
+  const tried: string[] = []
+  for (const candidate of TEMPLATE_CANDIDATES) {
+    const path = fileURLToPath(new URL(candidate, import.meta.url))
+    try {
+      cachedTemplate = readFileSync(path, 'utf8')
+      return cachedTemplate
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      tried.push(path)
+    }
+  }
+
+  throw new Error(`Could not locate the plan template shipped with @guren/cli. Tried:\n  ${tried.join('\n  ')}`)
+}
+
+/** Exported for the source-level test that holds the template to its forbidden sinks. */
+export function planTemplatePath(): string {
+  for (const candidate of TEMPLATE_CANDIDATES) {
+    const path = fileURLToPath(new URL(candidate, import.meta.url))
+    try {
+      readFileSync(path)
+      return path
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  throw new Error('Could not locate the plan template shipped with @guren/cli.')
+}
+
+/**
+ * JSON for a `<script type="application/json">` block. Outside a string literal JSON
+ * writes none of these characters, so escaping them everywhere cannot change what
+ * `JSON.parse` reads back: the output spells no `</script`, `<!--` or `]]>`, and no
+ * U+2028 / U+2029 terminates a line in a consumer that re-evaluates the text.
+ */
+export function escapeJsonForScript(json: string): string {
+  return json.replace(/[<>&\u2028\u2029]/g, (character) => {
+    return `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`
+  })
+}
+
+function hashOf(plan: PlanDraft | Plan): string | null {
+  return 'baseline' in plan ? planHash(plan) : null
+}
+
+/**
+ * Which entity each element belongs to, for the page's filter. The plan already says
+ * so in `tasks[].covers`; models name their own entity, and an element no task covers
+ * has none rather than a guessed one.
+ */
+function entityIndex(plan: PlanDraft): Map<string, string> {
+  const entities = new Map<string, string>()
+  for (const task of plan.tasks) {
+    for (const covered of task.covers) {
+      if (!entities.has(covered)) entities.set(covered, task.entity)
+    }
+  }
+  for (const model of plan.models) {
+    if (!entities.has(model.id)) entities.set(model.id, model.name)
+    for (const column of model.columns) {
+      if (!entities.has(column.id)) entities.set(column.id, entities.get(model.id) as string)
+    }
+  }
+  for (const controller of plan.controllers) {
+    const entity = entities.get(controller.id)
+    if (entity === undefined) continue
+    for (const action of controller.actions) {
+      if (!entities.has(action.id)) entities.set(action.id, entity)
+    }
+  }
+  for (const task of plan.tasks) {
+    entities.set(task.id, task.entity)
+    for (const acceptance of task.acceptance) entities.set(acceptance.id, task.entity)
+  }
+  return entities
+}
+
+/**
+ * The changes that are breaking whatever Impact found (RFC 0030 §2): a dropped or
+ * altered column, a renamed table, a renamed or dropped route, and any change to a
+ * route already published as an agent tool.
+ */
+export function planBreakingChanges(plan: PlanDraft): PlanBreakingChange[] {
+  const breaking: PlanBreakingChange[] = []
+
+  for (const model of plan.models) {
+    if (model.change.kind === 'drop') {
+      breaking.push({ elementId: model.id, section: 'models', title: model.name, reason: `The ${model.table} table is dropped.` })
+    } else if (model.change.kind === 'rename' || model.tableRenamedFrom !== undefined) {
+      const from = model.tableRenamedFrom ?? (model.change.kind === 'rename' ? model.change.from : '')
+      breaking.push({ elementId: model.id, section: 'models', title: model.name, reason: `Renamed from ${from}.` })
+    }
+
+    for (const column of model.columns) {
+      if (column.change.kind === 'drop') {
+        breaking.push({ elementId: column.id, section: 'columns', title: `${model.table}.${column.name}`, reason: 'The column is dropped.' })
+      } else if (column.change.kind === 'alter') {
+        breaking.push({ elementId: column.id, section: 'columns', title: `${model.table}.${column.name}`, reason: 'The column changes shape.' })
+      } else if (column.change.kind === 'rename') {
+        breaking.push({
+          elementId: column.id,
+          section: 'columns',
+          title: `${model.table}.${column.name}`,
+          reason: `Renamed from ${column.change.from}.`,
+        })
+      }
+    }
+  }
+
+  for (const route of plan.routes) {
+    if (route.change.kind === 'drop') {
+      breaking.push({ elementId: route.id, section: 'routes', title: route.name, reason: 'The route is dropped.' })
+    } else if (route.change.kind === 'rename') {
+      breaking.push({ elementId: route.id, section: 'routes', title: route.name, reason: `Renamed from ${route.change.from}.` })
+    } else if (route.agent !== undefined && route.change.kind === 'alter') {
+      breaking.push({
+        elementId: route.id,
+        section: 'routes',
+        title: route.name,
+        reason: `The published agent tool ${route.agent.toolName} changes.`,
+      })
+    }
+  }
+
+  return breaking
+}
+
+/**
+ * Every reference one element makes to another, in document order. The page shows both
+ * directions of each link (route to action to validator to view to model, and back), so
+ * only the forward direction is listed here. Containment is not a reference: a column
+ * inside its model, or an action inside its controller, is drawn by the nesting.
+ */
+export function planLinks(plan: PlanDraft): PlanLink[] {
+  const links: PlanLink[] = []
+  const declared = new Set(listPlanElements(plan).map((element) => element.id))
+  // A reference to an id the plan never declares is a §2 check failure, not a link:
+  // an anchor to it would land nowhere.
+  const link = (from: string, to: string | undefined, label: string): void => {
+    if (to === undefined || !declared.has(to) || to === from) return
+    links.push({ from, to, label })
+  }
+
+  for (const model of plan.models) {
+    for (const column of model.columns) {
+      link(column.id, column.references?.model, 'references')
+    }
+    for (const relationship of model.relationships) link(model.id, relationship.target, relationship.type)
+  }
+
+  for (const controller of plan.controllers) {
+    for (const action of controller.actions) {
+      link(action.id, action.params, 'params')
+      link(action.id, action.query, 'query')
+      link(action.id, action.body, 'body')
+      link(action.id, action.authorization.policy?.id, 'policy')
+      if (action.response.kind === 'inertia') link(action.id, action.response.view, 'renders')
+      if (action.response.kind === 'resource') link(action.id, action.response.resource, 'returns')
+    }
+  }
+
+  for (const route of plan.routes) {
+    link(route.id, route.action, 'action')
+    for (const binding of route.bind) link(route.id, binding.model, `bind ${binding.param}`)
+  }
+
+  for (const view of plan.views) {
+    for (const prop of view.props) link(view.id, prop.resource, `prop ${prop.name}`)
+    if (view.form) {
+      link(view.id, view.form.validator, 'form validator')
+      link(view.id, view.form.submitsTo, 'submits to')
+    }
+    for (const action of view.actions) link(view.id, action.route, action.label)
+  }
+
+  for (const resource of plan.resources) link(resource.id, resource.model, 'model')
+  for (const policy of plan.policies) link(policy.id, policy.model, 'model')
+
+  for (const task of plan.tasks) {
+    for (const covered of task.covers) link(task.id, covered, 'covers')
+    for (const acceptance of task.acceptance) {
+      link(acceptance.id, acceptance.route, 'route')
+      link(acceptance.id, acceptance.expect.inertia, 'expects page')
+    }
+  }
+
+  return links
+}
+
+export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
+  const plan = input.plan
+  const entities = entityIndex(plan)
+  const elements: PlanElementEntry[] = listPlanElements(plan).map((element) => ({
+    id: element.id,
+    section: element.section,
+    entity: entities.get(element.id) ?? null,
+  }))
+
+  return {
+    plan,
+    planHash: hashOf(plan),
+    checks: [...(input.checks ?? [])],
+    breaking: planBreakingChanges(plan),
+    diagram: planDiagram(plan),
+    elements,
+    links: planLinks(plan),
+    entities: [...new Set(plan.tasks.map((task) => task.entity))].sort(),
+    status: input.status ?? null,
+  }
+}
+
+/** The plan as one self-contained HTML document. Pure: nothing but the template is read. */
+export function renderPlanHtml(input: RenderPlanInput): string {
+  const payload = escapeJsonForScript(JSON.stringify(buildPlanPayload(input)))
+  // A replacement *function*, never a string: `$&`, "$`" and `$'` anywhere in the plan
+  // would otherwise be expanded by `replace` and corrupt the document.
+  return loadTemplate().replace(DATA_PLACEHOLDER, () => payload)
+}

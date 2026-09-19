@@ -1,0 +1,1530 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      The plan is hostile input. `default-src 'none'` is what makes the page unable to
+      load or post anywhere; the two 'unsafe-inline' allowances cover this file's own
+      style and script, which are the only ones it has.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:"
+    />
+    <title>Implementation plan</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fbfbfd;
+        --surface: #ffffff;
+        --surface-2: #f2f3f7;
+        --text: #16181d;
+        --muted: #5d6470;
+        --border: #d9dde5;
+        --accent: #8c1c13;
+        --accent-text: #ffffff;
+        --add: #1f6f3f;
+        --alter: #8a5a00;
+        --rename: #1f5c8a;
+        --drop: #a11a1a;
+        --existing: #6b7280;
+        --fail: #a11a1a;
+        --warn: #8a5a00;
+        --pass: #1f6f3f;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14161a;
+          --surface: #1c1f25;
+          --surface-2: #23272f;
+          --text: #e9ebf0;
+          --muted: #a3abb8;
+          --border: #343a44;
+          --accent: #e0584b;
+          --accent-text: #14161a;
+          --add: #6fcf97;
+          --alter: #e8b64c;
+          --rename: #6fb3e8;
+          --drop: #f08a8a;
+          --existing: #98a1b0;
+          --fail: #f08a8a;
+          --warn: #e8b64c;
+          --pass: #6fcf97;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0 16px 64px;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+        overflow-wrap: anywhere;
+      }
+
+      .wrap {
+        max-width: 1040px;
+        margin: 0 auto;
+      }
+
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.92em;
+      }
+
+      h1 {
+        font-size: 1.6rem;
+        margin: 24px 0 8px;
+      }
+
+      h2 {
+        font-size: 1.1rem;
+        margin: 0 0 8px;
+      }
+
+      h3 {
+        font-size: 1rem;
+        margin: 0;
+      }
+
+      h4 {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 14px 0 6px;
+      }
+
+      p {
+        margin: 0 0 10px;
+      }
+
+      ul {
+        margin: 0 0 10px;
+        padding-left: 20px;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      .lede {
+        color: var(--muted);
+        font-size: 1.02rem;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-bottom: 16px;
+      }
+
+      .panel,
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+
+      .panel {
+        padding: 14px 16px;
+        margin-bottom: 16px;
+      }
+
+      .grid2 {
+        display: grid;
+        gap: 0 24px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      .badge {
+        display: inline-block;
+        border: 1px solid currentColor;
+        border-radius: 999px;
+        padding: 0 8px;
+        font-size: 0.72rem;
+        line-height: 1.6;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+
+      .badge-add {
+        color: var(--add);
+      }
+      .badge-alter {
+        color: var(--alter);
+      }
+      .badge-rename {
+        color: var(--rename);
+      }
+      .badge-drop {
+        color: var(--drop);
+      }
+      .badge-existing {
+        color: var(--existing);
+      }
+      .badge-kind {
+        color: var(--muted);
+      }
+      .badge-fail {
+        color: var(--fail);
+      }
+      .badge-warn {
+        color: var(--warn);
+      }
+      .badge-pass {
+        color: var(--pass);
+      }
+
+      .pinned {
+        border-left: 4px solid var(--fail);
+      }
+
+      .pinned-item {
+        padding: 8px 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .pinned-item:first-of-type {
+        border-top: 0;
+      }
+
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 20px 0 12px;
+      }
+
+      .tabs button {
+        font: inherit;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+      }
+
+      .tabs button[aria-selected='true'] {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-text);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 16px;
+        margin-bottom: 14px;
+        font-size: 0.9rem;
+      }
+
+      select,
+      textarea,
+      input {
+        font: inherit;
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 8px;
+        max-width: 100%;
+      }
+
+      textarea {
+        width: 100%;
+        resize: vertical;
+        min-height: 2.2em;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .card {
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+
+      .card.sub {
+        background: var(--surface-2);
+        margin-bottom: 8px;
+      }
+
+      .card:target {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .card-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .card-id {
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
+      .depends {
+        font-size: 0.75rem;
+        color: var(--alter);
+        border: 1px dashed currentColor;
+        border-radius: 6px;
+        padding: 0 6px;
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 2px 12px;
+        font-size: 0.9rem;
+        margin: 8px 0 0;
+      }
+
+      .kv dt {
+        color: var(--muted);
+      }
+
+      .kv dd {
+        margin: 0;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .chip {
+        font-size: 0.78rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1px 7px;
+        background: var(--surface-2);
+      }
+
+      .review {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed var(--border);
+      }
+
+      .review .verdicts {
+        display: flex;
+        gap: 6px;
+      }
+
+      .review button {
+        font: inherit;
+        font-size: 0.82rem;
+        padding: 3px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      .review button[aria-pressed='true'] {
+        border-color: currentColor;
+        font-weight: 600;
+      }
+
+      .review button.approve[aria-pressed='true'] {
+        color: var(--add);
+      }
+
+      .review button.changes[aria-pressed='true'] {
+        color: var(--drop);
+      }
+
+      .review label {
+        flex: 1 1 220px;
+      }
+
+      fieldset.bare {
+        border: 0;
+        padding: 0;
+        margin: 0;
+      }
+
+      .question-option {
+        display: block;
+        padding: 6px 0;
+      }
+
+      .question-option .consequence {
+        display: block;
+        margin-left: 26px;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      .given-when-then {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 12px;
+        margin-top: 8px;
+        font-size: 0.9rem;
+      }
+
+      .given-when-then .label {
+        color: var(--muted);
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.04em;
+        padding-top: 2px;
+      }
+
+      .er {
+        width: 100%;
+        height: auto;
+        overflow: visible;
+      }
+
+      .er .box {
+        fill: var(--surface-2);
+        stroke: var(--border);
+      }
+
+      .er .box.add {
+        stroke: var(--add);
+        stroke-width: 2;
+      }
+
+      .er .box.alter {
+        stroke: var(--alter);
+        stroke-width: 2;
+      }
+
+      .er .box.rename {
+        stroke: var(--rename);
+        stroke-width: 2;
+      }
+
+      .er .box.drop {
+        stroke: var(--drop);
+        stroke-width: 2;
+      }
+
+      .er .box.existing {
+        opacity: 0.6;
+      }
+
+      .er text {
+        fill: var(--text);
+        font-size: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .er text.title {
+        font-weight: 700;
+        font-family: inherit;
+      }
+
+      .er text.muted,
+      .er text.edge-label {
+        fill: var(--muted);
+        font-size: 11px;
+      }
+
+      .er line {
+        stroke: var(--muted);
+      }
+
+      .er line.relationship {
+        stroke-dasharray: 4 3;
+      }
+
+      .er g.table {
+        cursor: pointer;
+      }
+
+      .footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+
+      .footer button {
+        font: inherit;
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: var(--accent-text);
+      }
+
+      .note {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="application/json" id="plan-data">__GUREN_PLAN_DATA__</script>
+    <div class="wrap">
+      <header>
+        <h1 id="plan-title"></h1>
+        <p class="lede" id="plan-summary"></p>
+        <div class="meta" id="plan-meta"></div>
+        <div class="panel grid2" id="plan-scope"></div>
+      </header>
+      <section class="panel pinned" id="pinned" hidden aria-label="Blocking findings"></section>
+      <section id="questions"></section>
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Plan sections"></nav>
+      <div class="controls">
+        <label for="entity-filter">Entity</label>
+        <select id="entity-filter"></select>
+        <label><input type="checkbox" id="changes-only" /> Changes only</label>
+        <span class="note" id="visible-count"></span>
+      </div>
+      <main id="panels"></main>
+      <div class="footer">
+        <button type="button" id="export">Export feedback</button>
+        <span class="note" id="export-note"
+          >Downloads feedback.json. This page never writes to the project and makes no network request.</span
+        >
+      </div>
+    </div>
+    <script>
+      (function () {
+        'use strict'
+
+        var data = JSON.parse(document.getElementById('plan-data').textContent)
+        var plan = data.plan
+        // The schema's own id pattern. Anchors are built from ids that match it and
+        // from nothing else, so no plan string ever reaches an href.
+        var ID_RE = /^[A-Za-z][A-Za-z0-9_.:-]*$/
+        var SECTIONS = [
+          { key: 'models', label: 'Models' },
+          { key: 'views', label: 'Views' },
+          { key: 'controllers', label: 'Controllers' },
+          { key: 'routes', label: 'Routes' },
+          { key: 'validators', label: 'Validators' },
+          { key: 'resources', label: 'Resources' },
+          { key: 'policies', label: 'Policies' },
+          { key: 'sideEffects', label: 'Side effects' },
+          { key: 'commands', label: 'Commands' },
+          { key: 'tasks', label: 'Tasks & acceptance' },
+        ]
+
+        function el(tag, className, text) {
+          var node = document.createElement(tag)
+          if (className) node.className = className
+          if (text !== undefined && text !== null) node.textContent = String(text)
+          return node
+        }
+
+        function anchorId(id) {
+          return ID_RE.test(id) ? 'el-' + id : null
+        }
+
+        function link(id, text) {
+          var anchor = anchorId(id)
+          if (!anchor) return el('code', 'mono', id)
+          var node = el('a', 'mono', text === undefined ? id : text)
+          node.setAttribute('href', '#' + anchor)
+          return node
+        }
+
+        function list(items, mapper) {
+          var ul = el('ul')
+          items.forEach(function (item) {
+            var li = el('li')
+            var content = mapper ? mapper(item) : el('span', null, item)
+            if (typeof content === 'string') li.textContent = content
+            else li.appendChild(content)
+            ul.appendChild(li)
+          })
+          return ul
+        }
+
+        function kv(pairs) {
+          var dl = el('dl', 'kv')
+          pairs.forEach(function (pair) {
+            if (pair[1] === undefined || pair[1] === null || pair[1] === '') return
+            dl.appendChild(el('dt', null, pair[0]))
+            var dd = el('dd')
+            if (typeof pair[1] === 'object' && pair[1].nodeType) dd.appendChild(pair[1])
+            else dd.textContent = String(pair[1])
+            dl.appendChild(dd)
+          })
+          return dl
+        }
+
+        function changeBadge(change) {
+          if (!change) return null
+          var badge = el('span', 'badge badge-' + change.kind, change.kind)
+          if (change.kind === 'rename') badge.textContent = 'rename from ' + change.from
+          if (change.kind === 'drop') badge.title = change.reason
+          return badge
+        }
+
+        /* ---------- review state ---------- */
+
+        var storageKey = data.planHash ? 'guren.plan.review.' + data.planHash : null
+        var review = {}
+
+        function loadReview() {
+          if (!storageKey) return
+          try {
+            var raw = window.localStorage.getItem(storageKey)
+            if (raw) review = JSON.parse(raw) || {}
+          } catch (error) {
+            review = {}
+          }
+        }
+
+        function saveReview() {
+          if (!storageKey) return
+          try {
+            window.localStorage.setItem(storageKey, JSON.stringify(reviewed()))
+          } catch (error) {
+            /* A page that cannot persist still works; the export is the durable output. */
+          }
+        }
+
+        /** Only the elements someone touched; rendering seeds an entry for every id. */
+        function reviewed() {
+          var touched = {}
+          Object.keys(review).forEach(function (id) {
+            if (review[id].verdict || review[id].comment) touched[id] = review[id]
+          })
+          return touched
+        }
+
+        function entryFor(id) {
+          if (!review[id]) review[id] = { verdict: null, comment: '' }
+          return review[id]
+        }
+
+        function reviewControls(id) {
+          var entry = entryFor(id)
+          var wrap = el('div', 'review')
+          var verdicts = el('div', 'verdicts')
+          var buttons = {}
+          ;[
+            ['approve', 'Approve'],
+            ['changes', 'Request changes'],
+          ].forEach(function (pair) {
+            var button = el('button', pair[0], pair[1])
+            button.type = 'button'
+            button.setAttribute('aria-pressed', entry.verdict === pair[0] ? 'true' : 'false')
+            button.addEventListener('click', function () {
+              entry.verdict = entry.verdict === pair[0] ? null : pair[0]
+              Object.keys(buttons).forEach(function (key) {
+                buttons[key].setAttribute('aria-pressed', entry.verdict === key ? 'true' : 'false')
+              })
+              saveReview()
+            })
+            buttons[pair[0]] = button
+            verdicts.appendChild(button)
+          })
+          wrap.appendChild(verdicts)
+
+          var label = el('label')
+          label.appendChild(el('span', 'note', 'Comment'))
+          var box = el('textarea')
+          box.rows = 1
+          box.value = entry.comment
+          box.setAttribute('aria-label', 'Comment on ' + id)
+          box.addEventListener('input', function () {
+            entry.comment = box.value
+            saveReview()
+          })
+          label.appendChild(box)
+          wrap.appendChild(label)
+          return wrap
+        }
+
+        /* ---------- indexes ---------- */
+
+        var entityOf = {}
+        data.elements.forEach(function (element) {
+          entityOf[element.id] = element.entity
+        })
+
+        var outgoing = {}
+        var incoming = {}
+        data.links.forEach(function (edge) {
+          ;(outgoing[edge.from] = outgoing[edge.from] || []).push(edge)
+          ;(incoming[edge.to] = incoming[edge.to] || []).push(edge)
+        })
+
+        var dependsOn = {}
+        plan.questions.forEach(function (question) {
+          question.affects.forEach(function (affected) {
+            ;(dependsOn[affected] = dependsOn[affected] || []).push(question.id)
+          })
+        })
+
+        var checksFor = {}
+        data.checks.forEach(function (result) {
+          if (!result.elementId) return
+          ;(checksFor[result.elementId] = checksFor[result.elementId] || []).push(result)
+        })
+
+        var breakingFor = {}
+        data.breaking.forEach(function (item) {
+          ;(breakingFor[item.elementId] = breakingFor[item.elementId] || []).push(item)
+        })
+
+        /* ---------- cards ---------- */
+
+        var cards = []
+
+        function card(options) {
+          var node = el('article', 'card' + (options.sub ? ' sub' : ''))
+          var anchor = anchorId(options.id)
+          if (anchor) node.id = anchor
+
+          var head = el('div', 'card-head')
+          head.appendChild(el('h3', null, options.title))
+          var badge = changeBadge(options.change)
+          if (badge) head.appendChild(badge)
+          if (options.extraBadges) {
+            options.extraBadges.forEach(function (extra) {
+              head.appendChild(extra)
+            })
+          }
+          head.appendChild(el('code', 'card-id', options.id))
+          ;(dependsOn[options.id] || []).forEach(function (questionId) {
+            var mark = link(questionId, 'depends on ' + questionId)
+            mark.className = 'depends'
+            head.appendChild(mark)
+          })
+          node.appendChild(head)
+
+          ;(breakingFor[options.id] || []).forEach(function (item) {
+            node.appendChild(el('p', 'note', 'Breaking: ' + item.reason))
+          })
+          ;(checksFor[options.id] || []).forEach(function (result) {
+            var line = el('p', 'note')
+            line.appendChild(el('span', 'badge badge-' + result.status, result.status))
+            line.appendChild(document.createTextNode(' ' + result.title + ': ' + result.message))
+            node.appendChild(line)
+          })
+
+          if (options.body) node.appendChild(options.body)
+
+          var related = (outgoing[options.id] || []).concat([])
+          var back = incoming[options.id] || []
+          if (related.length || back.length) {
+            var chips = el('div', 'chips')
+            related.forEach(function (edge) {
+              var chip = link(edge.to, edge.label + ' -> ' + edge.to)
+              chip.className = 'chip'
+              chips.appendChild(chip)
+            })
+            back.forEach(function (edge) {
+              var chip = link(edge.from, edge.from + ' -> ' + edge.label)
+              chip.className = 'chip'
+              chips.appendChild(chip)
+            })
+            node.appendChild(chips)
+          }
+
+          if (!options.noReview) node.appendChild(reviewControls(options.id))
+
+          // A question is not filtered: it sits above the tabs and asks about every
+          // entity it affects, so an entity filter would hide the thing being asked.
+          if (!options.noFilter) {
+            cards.push({
+              node: node,
+              entity: entityOf[options.id] || null,
+              existing: options.change ? options.change.kind === 'existing' : false,
+            })
+          }
+          return node
+        }
+
+        /* ---------- ER diagram ---------- */
+
+        var expanded = {}
+
+        function svgEl(tag, attributes) {
+          var node = document.createElementNS('http://www.w3.org/2000/svg', tag)
+          Object.keys(attributes || {}).forEach(function (key) {
+            node.setAttribute(key, String(attributes[key]))
+          })
+          return node
+        }
+
+        function svgText(x, y, text, className) {
+          var node = svgEl('text', { x: x, y: y })
+          if (className) node.setAttribute('class', className)
+          node.textContent = text
+          return node
+        }
+
+        function columnLine(column) {
+          var parts = [column.name, column.type]
+          if (column.primaryKey) parts.push('pk')
+          if (column.nullable) parts.push('null')
+          if (column.unique) parts.push('uniq')
+          if (column.index) parts.push('idx')
+          return parts.join(' ')
+        }
+
+        /** Where the segment between two boxes leaves the first, so a label lands in the gap. */
+        function borderPoint(box, towards) {
+          var cx = box.x + box.w / 2
+          var cy = box.y + box.h / 2
+          var dx = towards.x + towards.w / 2 - cx
+          var dy = towards.y + towards.h / 2 - cy
+          if (dx === 0 && dy === 0) return [cx, cy]
+          var scale = Math.min(
+            dx === 0 ? Infinity : box.w / 2 / Math.abs(dx),
+            dy === 0 ? Infinity : box.h / 2 / Math.abs(dy),
+          )
+          return [cx + dx * scale, cy + dy * scale]
+        }
+
+        function drawDiagram(host) {
+          while (host.firstChild) host.removeChild(host.firstChild)
+          var tables = data.diagram.tables
+          if (!tables.length) {
+            host.appendChild(el('p', 'note', 'The plan declares no models.'))
+            return
+          }
+
+          // `.wrap` rather than the host: the host's panel is hidden on every tab but
+          // the first, and a hidden element measures 0, which would lay the diagram out
+          // for a width no one is looking at.
+          var width = document.querySelector('.wrap').clientWidth - 32
+          var boxWidth = 230
+          var gapX = 76
+          var gapY = 36
+          var columns = Math.max(1, Math.min(3, Math.floor((width + gapX) / (boxWidth + gapX))))
+          var rowHeight = 22
+          var headerHeight = 44
+
+          var placed = {}
+          var rowTops = []
+          var top = 0
+          for (var index = 0; index < tables.length; index += columns) {
+            var row = tables.slice(index, index + columns)
+            var tallest = 0
+            row.forEach(function (table, offset) {
+              var open = expanded[table.id]
+              var height = headerHeight + (open ? table.columns.length * rowHeight + 8 : 0)
+              placed[table.id] = {
+                table: table,
+                x: offset * (boxWidth + gapX),
+                y: top,
+                w: boxWidth,
+                h: height,
+                open: open,
+              }
+              if (height > tallest) tallest = height
+            })
+            rowTops.push(top)
+            top += tallest + gapY
+          }
+
+          // The columns actually used, so a two-table plan does not draw a third empty slot.
+          var usedColumns = Math.min(columns, tables.length)
+          var totalWidth = usedColumns * boxWidth + (usedColumns - 1) * gapX
+          var totalHeight = Math.max(top - gapY, headerHeight)
+          var svg = svgEl('svg', {
+            class: 'er',
+            viewBox: '0 0 ' + totalWidth + ' ' + totalHeight,
+            role: 'img',
+            'aria-label': 'Entity relationship diagram of the plan',
+          })
+
+          var edgeLabels = []
+          data.diagram.edges.forEach(function (edge) {
+            var from = placed[edge.from]
+            var to = placed[edge.to]
+            if (!from || !to) return
+            var start = borderPoint(from, to)
+            var end = borderPoint(to, from)
+            var x1 = start[0]
+            var y1 = start[1]
+            var x2 = end[0]
+            var y2 = end[1]
+            var line = svgEl('line', { x1: x1, y1: y1, x2: x2, y2: y2 })
+            line.setAttribute('class', edge.kind === 'relationship' ? 'relationship' : 'foreign-key')
+            svg.appendChild(line)
+            var label = svgText((x1 + x2) / 2, (y1 + y2) / 2 - 4, edge.label, 'edge-label')
+            label.setAttribute('text-anchor', 'middle')
+            // Appended after the boxes: an opaque box drawn later would paint over it.
+            edgeLabels.push(label)
+          })
+
+          tables.forEach(function (table) {
+            var box = placed[table.id]
+            var group = svgEl('g', { class: 'table', tabindex: '0', role: 'button' })
+            group.setAttribute('aria-expanded', box.open ? 'true' : 'false')
+            var rect = svgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, rx: 8 })
+            rect.setAttribute('class', 'box ' + table.change)
+            group.appendChild(rect)
+            group.appendChild(svgText(box.x + 12, box.y + 20, table.table, 'title'))
+            group.appendChild(svgText(box.x + 12, box.y + 36, table.model + ' - ' + table.change, 'muted'))
+            if (box.open) {
+              table.columns.forEach(function (column, index) {
+                group.appendChild(svgText(box.x + 12, box.y + headerHeight + 14 + index * rowHeight, columnLine(column)))
+              })
+            }
+            var toggle = function () {
+              expanded[table.id] = !expanded[table.id]
+              drawDiagram(host)
+            }
+            group.addEventListener('click', toggle)
+            group.addEventListener('keydown', function (event) {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                toggle()
+              }
+            })
+            svg.appendChild(group)
+          })
+
+          edgeLabels.forEach(function (label) {
+            svg.appendChild(label)
+          })
+
+          host.appendChild(svg)
+          host.appendChild(el('p', 'note', 'Click a table to show its columns. Dashed edges are declared relationships.'))
+        }
+
+        /* ---------- section renderers ---------- */
+
+        var diagramHost = null
+
+        function renderModels(host) {
+          var diagramPanel = el('div', 'panel')
+          diagramPanel.appendChild(el('h2', null, 'Entity relationships'))
+          diagramHost = el('div')
+          diagramPanel.appendChild(diagramHost)
+          host.appendChild(diagramPanel)
+
+          plan.models.forEach(function (model) {
+            var body = el('div')
+            body.appendChild(
+              kv([
+                ['Table', model.tableRenamedFrom ? model.table + ' (renamed from ' + model.tableRenamedFrom + ')' : model.table],
+                ['Module', model.module],
+                ['Fillable', model.fillable.join(', ')],
+                ['Data migration', model.dataMigration ? model.dataMigration.kind + ': ' + (model.dataMigration.reason || model.dataMigration.description) : null],
+              ]),
+            )
+            if (model.relationships.length) {
+              body.appendChild(el('h4', null, 'Relationships'))
+              body.appendChild(
+                list(model.relationships, function (relationship) {
+                  var line = el('span')
+                  line.appendChild(document.createTextNode(relationship.name + ' ' + relationship.type + ' '))
+                  line.appendChild(link(relationship.target))
+                  return line
+                }),
+              )
+            }
+            if (model.indexes.length) {
+              body.appendChild(el('h4', null, 'Indexes'))
+              body.appendChild(
+                list(model.indexes, function (index) {
+                  return (index.unique ? 'unique ' : '') + index.columns.join(', ')
+                }),
+              )
+            }
+            var node = card({ id: model.id, title: model.name, change: model.change, body: body })
+
+            if (model.columns.length) {
+              var columnsHost = el('div')
+              columnsHost.appendChild(el('h4', null, 'Columns'))
+              model.columns.forEach(function (column) {
+                var columnBody = kv([
+                  ['Type', column.type + (column.precision ? '(' + column.precision + ',' + (column.scale || 0) + ')' : '')],
+                  ['Column', column.columnName],
+                  ['Nullable', column.nullable ? 'yes' : 'no'],
+                  ['Unique', column.unique ? 'yes' : 'no'],
+                  ['Index', column.index ? 'yes' : 'no'],
+                  ['Primary key', column.primaryKey ? 'yes' : null],
+                  ['Time zone', column.withTimezone === undefined ? null : column.withTimezone ? 'yes' : 'no'],
+                  ['Default', column.default],
+                  [
+                    'References',
+                    column.references
+                      ? (function () {
+                          var line = el('span')
+                          line.appendChild(link(column.references.model))
+                          line.appendChild(
+                            document.createTextNode(
+                              '.' + column.references.column + (column.references.onDelete ? ' on delete ' + column.references.onDelete : ''),
+                            ),
+                          )
+                          return line
+                        })()
+                      : null,
+                  ],
+                  [
+                    'Data migration',
+                    column.dataMigration ? column.dataMigration.kind + ': ' + (column.dataMigration.reason || column.dataMigration.description) : null,
+                  ],
+                ])
+                columnsHost.appendChild(card({ id: column.id, title: column.name, change: column.change, body: columnBody, sub: true }))
+              })
+              node.appendChild(columnsHost)
+            }
+            host.appendChild(node)
+          })
+        }
+
+        function renderViews(host) {
+          plan.views.forEach(function (view) {
+            var body = el('div')
+            body.appendChild(kv([['Page', view.page], ['Module', view.module], ['Purpose', view.purpose]]))
+            if (view.props.length) {
+              body.appendChild(el('h4', null, 'Props'))
+              body.appendChild(
+                list(view.props, function (prop) {
+                  var line = el('span')
+                  line.appendChild(document.createTextNode(prop.name + ': ' + prop.type))
+                  if (prop.resource) {
+                    line.appendChild(document.createTextNode(' from '))
+                    line.appendChild(link(prop.resource))
+                  }
+                  return line
+                }),
+              )
+            }
+            if (view.form) {
+              body.appendChild(el('h4', null, 'Form'))
+              var form = el('div')
+              var formMeta = el('p', 'note')
+              formMeta.appendChild(document.createTextNode('validated by '))
+              formMeta.appendChild(link(view.form.validator))
+              formMeta.appendChild(document.createTextNode(', submits to '))
+              formMeta.appendChild(link(view.form.submitsTo))
+              form.appendChild(formMeta)
+              form.appendChild(
+                list(view.form.fields, function (field) {
+                  return field.label + ' (' + field.field + ', ' + field.input + ')'
+                }),
+              )
+              body.appendChild(form)
+            }
+            if (view.actions.length) {
+              body.appendChild(el('h4', null, 'Actions'))
+              body.appendChild(
+                list(view.actions, function (action) {
+                  var line = el('span')
+                  line.appendChild(document.createTextNode(action.label + ' -> '))
+                  line.appendChild(link(action.route))
+                  return line
+                }),
+              )
+            }
+            body.appendChild(kv([['Empty', view.states.empty], ['Error', view.states.error], ['Loading', view.states.loading]]))
+            host.appendChild(card({ id: view.id, title: view.page, change: view.change, body: body }))
+          })
+        }
+
+        function renderControllers(host) {
+          plan.controllers.forEach(function (controller) {
+            var node = card({
+              id: controller.id,
+              title: controller.className,
+              change: controller.change,
+              body: kv([['Module', controller.module]]),
+            })
+            controller.actions.forEach(function (action) {
+              var body = el('div')
+              var response = action.response
+              var responseText =
+                response.kind === 'inertia'
+                  ? null
+                  : response.kind === 'redirect'
+                    ? 'redirect to ' + response.to
+                    : response.kind === 'resource'
+                      ? null
+                      : response.kind === 'json'
+                        ? 'json: ' + response.description
+                        : 'empty'
+              var responseLink =
+                response.kind === 'inertia'
+                  ? link(response.view, 'renders ' + response.view)
+                  : response.kind === 'resource'
+                    ? link(response.resource, 'returns ' + response.resource)
+                    : null
+              body.appendChild(
+                kv([
+                  ['Params', action.params ? link(action.params) : null],
+                  ['Query', action.query ? link(action.query) : null],
+                  ['Body', action.body ? link(action.body) : null],
+                  ['Middleware', action.authorization.middleware.join(', ')],
+                  [
+                    'Policy',
+                    action.authorization.policy
+                      ? (function () {
+                          var line = el('span')
+                          line.appendChild(link(action.authorization.policy.id))
+                          line.appendChild(document.createTextNode(' can ' + action.authorization.policy.ability))
+                          return line
+                        })()
+                      : null,
+                  ],
+                  ['Response', responseLink || responseText],
+                ]),
+              )
+              if (action.rules.length) {
+                body.appendChild(el('h4', null, 'Business rules'))
+                body.appendChild(list(action.rules))
+              }
+              node.appendChild(card({ id: action.id, title: action.name, change: action.change, body: body, sub: true }))
+            })
+            host.appendChild(node)
+          })
+        }
+
+        function renderRoutes(host) {
+          plan.routes.forEach(function (route) {
+            var body = el('div')
+            body.appendChild(
+              kv([
+                ['Path', route.method + ' ' + route.path],
+                ['Action', link(route.action)],
+                ['Middleware', route.middleware.join(', ')],
+                [
+                  'Bind',
+                  route.bind.length
+                    ? (function () {
+                        var line = el('span')
+                        route.bind.forEach(function (binding, index) {
+                          if (index) line.appendChild(document.createTextNode(', '))
+                          line.appendChild(document.createTextNode(binding.param + ': '))
+                          line.appendChild(link(binding.model))
+                          if (binding.key) line.appendChild(document.createTextNode(' by ' + binding.key))
+                        })
+                        return line
+                      })()
+                    : null,
+                ],
+                ['Agent tool', route.agent ? route.agent.toolName + (route.agent.readOnly ? ' (read-only)' : '') : null],
+              ]),
+            )
+            host.appendChild(card({ id: route.id, title: route.name, change: route.change, body: body }))
+          })
+        }
+
+        function renderValidators(host) {
+          plan.validators.forEach(function (validator) {
+            var body = el('div')
+            body.appendChild(kv([['Module', validator.module]]))
+            body.appendChild(el('h4', null, 'Fields'))
+            body.appendChild(
+              list(validator.fields, function (field) {
+                var suffix = field.rules.length ? ' - ' + field.rules.join(', ') : ''
+                return field.name + ': ' + field.type + (field.required ? ' (required)' : ' (optional)') + suffix
+              }),
+            )
+            host.appendChild(card({ id: validator.id, title: validator.name, change: validator.change, body: body }))
+          })
+        }
+
+        function renderResources(host) {
+          plan.resources.forEach(function (resource) {
+            var body = el('div')
+            body.appendChild(kv([['Module', resource.module], ['Model', link(resource.model)]]))
+            body.appendChild(el('h4', null, 'Fields'))
+            body.appendChild(
+              list(resource.fields, function (field) {
+                return field.name + ': ' + field.type
+              }),
+            )
+            host.appendChild(card({ id: resource.id, title: resource.name, change: resource.change, body: body }))
+          })
+        }
+
+        function renderPolicies(host) {
+          plan.policies.forEach(function (policy) {
+            var body = el('div')
+            body.appendChild(kv([['Module', policy.module], ['Model', link(policy.model)]]))
+            body.appendChild(el('h4', null, 'Abilities'))
+            body.appendChild(
+              list(policy.abilities, function (ability) {
+                return ability.name + ': ' + ability.rule
+              }),
+            )
+            host.appendChild(card({ id: policy.id, title: policy.name, change: policy.change, body: body }))
+          })
+        }
+
+        function renderSideEffects(host) {
+          plan.sideEffects.forEach(function (effect) {
+            var body = kv([
+              ['Kind', effect.kind],
+              ['Module', effect.module],
+              ['Trigger', effect.trigger],
+              ['Description', effect.description],
+            ])
+            host.appendChild(card({ id: effect.id, title: effect.name, change: effect.change, body: body }))
+          })
+        }
+
+        function renderCommands(host) {
+          plan.commands.forEach(function (command) {
+            var body = el('div')
+            body.appendChild(el('p', 'mono', command.command))
+            body.appendChild(el('p', 'note', command.reason))
+            host.appendChild(card({ id: command.id, title: command.command, body: body }))
+          })
+        }
+
+        function jsonValues(values) {
+          return values
+            .map(function (value) {
+              return value.name + ' = ' + value.json
+            })
+            .join(', ')
+        }
+
+        function renderAcceptance(acceptance) {
+          var body = el('div')
+          var gwt = el('div', 'given-when-then')
+
+          gwt.appendChild(el('div', 'label', 'Given'))
+          var given = el('div')
+          if (acceptance.given.length) given.appendChild(list(acceptance.given))
+          else given.appendChild(el('span', 'note', 'nothing in particular'))
+          gwt.appendChild(given)
+
+          gwt.appendChild(el('div', 'label', 'When'))
+          var when = el('div')
+          when.appendChild(document.createTextNode('a ' + acceptance.actor + ' calls '))
+          when.appendChild(link(acceptance.route))
+          if (acceptance.input && acceptance.input.length) {
+            when.appendChild(document.createTextNode(' with ' + jsonValues(acceptance.input)))
+          }
+          gwt.appendChild(when)
+
+          gwt.appendChild(el('div', 'label', 'Then'))
+          var then = el('div')
+          var expectations = []
+          if (acceptance.expect.status !== undefined) expectations.push('status ' + acceptance.expect.status)
+          if (acceptance.expect.redirect !== undefined) expectations.push('redirect to ' + acceptance.expect.redirect)
+          if (acceptance.expect.errors) expectations.push('errors on ' + acceptance.expect.errors.join(', '))
+          ;(acceptance.expect.database || []).forEach(function (row) {
+            if (row.has) expectations.push(row.table + ' has ' + jsonValues(row.has))
+            if (row.missing) expectations.push(row.table + ' has no ' + jsonValues(row.missing))
+          })
+          if (expectations.length) then.appendChild(list(expectations))
+          if (acceptance.expect.inertia) {
+            var page = el('p', 'note')
+            page.appendChild(document.createTextNode('renders '))
+            page.appendChild(link(acceptance.expect.inertia))
+            then.appendChild(page)
+          }
+          gwt.appendChild(then)
+          body.appendChild(gwt)
+          return body
+        }
+
+        function renderTasks(host) {
+          plan.tasks.forEach(function (task) {
+            var node = card({
+              id: task.id,
+              title: task.entity + ' - ' + task.summary,
+              body: kv([['Entity', task.entity], ['Covers', task.covers.length + ' elements']]),
+            })
+            task.acceptance.forEach(function (acceptance) {
+              node.appendChild(
+                card({
+                  id: acceptance.id,
+                  title: acceptance.description,
+                  sub: true,
+                  extraBadges: [el('span', 'badge badge-kind', acceptance.kind)],
+                  body: renderAcceptance(acceptance),
+                }),
+              )
+            })
+            host.appendChild(node)
+          })
+        }
+
+        var RENDERERS = {
+          models: renderModels,
+          views: renderViews,
+          controllers: renderControllers,
+          routes: renderRoutes,
+          validators: renderValidators,
+          resources: renderResources,
+          policies: renderPolicies,
+          sideEffects: renderSideEffects,
+          commands: renderCommands,
+          tasks: renderTasks,
+        }
+
+        /* ---------- header, pinned findings, questions ---------- */
+
+        document.getElementById('plan-title').textContent = plan.title
+        document.title = plan.title
+        document.getElementById('plan-summary').textContent = plan.summary
+
+        var meta = document.getElementById('plan-meta')
+        if (data.planHash) {
+          meta.appendChild(el('span', 'mono', 'plan ' + data.planHash.slice(0, 12)))
+          if (plan.baseline) meta.appendChild(el('span', 'mono', 'baseline ' + plan.baseline.rev))
+        } else {
+          meta.appendChild(el('span', null, 'Draft: no baseline, so no plan hash yet.'))
+        }
+
+        var scope = document.getElementById('plan-scope')
+        function scopeBlock(title, items) {
+          var block = el('div')
+          block.appendChild(el('h4', null, title))
+          if (items.length) block.appendChild(list(items))
+          else block.appendChild(el('p', 'note', 'none'))
+          return block
+        }
+        scope.appendChild(scopeBlock('Goals', plan.scope.goals))
+        scope.appendChild(scopeBlock('Non-goals', plan.scope.nonGoals))
+        scope.appendChild(scopeBlock('Assumptions', plan.assumptions))
+        if (plan.hints.length) scope.appendChild(scopeBlock('Hints', plan.hints))
+
+        var pinned = document.getElementById('pinned')
+        var blocking = data.checks.filter(function (result) {
+          return result.status !== 'pass'
+        })
+        if (blocking.length || data.breaking.length) {
+          pinned.hidden = false
+          pinned.appendChild(el('h2', null, 'Needs attention'))
+          blocking.forEach(function (result) {
+            var item = el('div', 'pinned-item')
+            var head = el('p')
+            head.appendChild(el('span', 'badge badge-' + result.status, result.status))
+            head.appendChild(document.createTextNode(' ' + result.title))
+            if (result.elementId) {
+              head.appendChild(document.createTextNode(' on '))
+              head.appendChild(link(result.elementId))
+            }
+            item.appendChild(head)
+            item.appendChild(el('p', 'note', result.message))
+            if (result.suggestion) item.appendChild(el('p', 'note', result.suggestion))
+            pinned.appendChild(item)
+          })
+          data.breaking.forEach(function (item) {
+            var node = el('div', 'pinned-item')
+            var head = el('p')
+            head.appendChild(el('span', 'badge badge-drop', 'breaking'))
+            head.appendChild(document.createTextNode(' ' + item.title + ' '))
+            head.appendChild(link(item.elementId))
+            node.appendChild(head)
+            node.appendChild(el('p', 'note', item.reason))
+            pinned.appendChild(node)
+          })
+        }
+
+        var answers = {}
+        var questionsHost = document.getElementById('questions')
+        if (plan.questions.length) {
+          var questionsPanel = el('section', 'panel')
+          questionsPanel.appendChild(el('h2', null, 'Questions the plan could not decide'))
+          questionsPanel.appendChild(
+            el('p', 'note', 'Each was written under the assumed answer. Changing one changes the elements it affects.'),
+          )
+          plan.questions.forEach(function (question) {
+            answers[question.id] = { option: question.assumed, text: '' }
+            var body = el('div')
+            var fieldset = el('fieldset', 'bare')
+            var legend = el('legend', 'note', 'Options')
+            fieldset.appendChild(legend)
+            question.options.forEach(function (option) {
+              var label = el('label', 'question-option')
+              var radio = el('input')
+              radio.type = 'radio'
+              radio.name = 'question-' + question.id
+              radio.checked = option.label === question.assumed
+              radio.addEventListener('change', function () {
+                if (radio.checked) answers[question.id].option = option.label
+              })
+              label.appendChild(radio)
+              label.appendChild(document.createTextNode(' ' + option.label))
+              if (option.label === question.assumed) {
+                label.appendChild(document.createTextNode(' '))
+                label.appendChild(el('span', 'badge badge-existing', 'assumed'))
+              }
+              label.appendChild(el('span', 'consequence', option.consequence))
+              fieldset.appendChild(label)
+            })
+            body.appendChild(fieldset)
+
+            var answerLabel = el('label')
+            answerLabel.appendChild(el('span', 'note', 'Answer'))
+            var answerBox = el('textarea')
+            answerBox.rows = 2
+            answerBox.setAttribute('aria-label', 'Answer to ' + question.id)
+            answerBox.addEventListener('input', function () {
+              answers[question.id].text = answerBox.value
+            })
+            answerLabel.appendChild(answerBox)
+            body.appendChild(answerLabel)
+
+            if (question.affects.length) {
+              var affects = el('div', 'chips')
+              question.affects.forEach(function (affected) {
+                var chip = link(affected)
+                chip.className = 'chip'
+                affects.appendChild(chip)
+              })
+              body.appendChild(el('h4', null, 'Affects'))
+              body.appendChild(affects)
+            }
+
+            questionsPanel.appendChild(card({ id: question.id, title: question.question, body: body, noReview: true, noFilter: true }))
+          })
+          questionsHost.appendChild(questionsPanel)
+        }
+
+        /* ---------- tabs, filters ---------- */
+
+        loadReview()
+
+        var tabs = document.getElementById('tabs')
+        var panels = document.getElementById('panels')
+        var tabButtons = {}
+        var panelNodes = {}
+
+        SECTIONS.forEach(function (section, index) {
+          var items = plan[section.key] || []
+          var button = el('button', null, section.label + ' (' + items.length + ')')
+          button.type = 'button'
+          button.setAttribute('role', 'tab')
+          button.setAttribute('aria-selected', index === 0 ? 'true' : 'false')
+          button.setAttribute('aria-controls', 'panel-' + section.key)
+          button.addEventListener('click', function () {
+            selectTab(section.key)
+          })
+          tabs.appendChild(button)
+          tabButtons[section.key] = button
+
+          var panel = el('section')
+          panel.id = 'panel-' + section.key
+          panel.setAttribute('role', 'tabpanel')
+          panel.setAttribute('aria-label', section.label)
+          panel.hidden = index !== 0
+          RENDERERS[section.key](panel)
+          if (!items.length) panel.appendChild(el('p', 'note', 'Nothing in this section.'))
+          panels.appendChild(panel)
+          panelNodes[section.key] = panel
+        })
+
+        // Drawn once the panels are in the document: the layout is measured, and nothing
+        // in this file measures an element it has not yet appended.
+        if (diagramHost) drawDiagram(diagramHost)
+        window.addEventListener('resize', function () {
+          if (diagramHost) drawDiagram(diagramHost)
+        })
+
+        function selectTab(key) {
+          SECTIONS.forEach(function (section) {
+            var selected = section.key === key
+            tabButtons[section.key].setAttribute('aria-selected', selected ? 'true' : 'false')
+            panelNodes[section.key].hidden = !selected
+          })
+        }
+
+        // An in-page link may point into a hidden panel; show the panel that holds it.
+        function revealHash() {
+          var target = window.location.hash.slice(1)
+          if (!target) return
+          var node = document.getElementById(target)
+          if (!node) return
+          SECTIONS.forEach(function (section) {
+            if (panelNodes[section.key].contains(node)) selectTab(section.key)
+          })
+          node.scrollIntoView()
+        }
+        window.addEventListener('hashchange', revealHash)
+
+        var entityFilter = document.getElementById('entity-filter')
+        var changesOnly = document.getElementById('changes-only')
+        var visibleCount = document.getElementById('visible-count')
+        var allOption = el('option', null, 'All')
+        allOption.value = ''
+        entityFilter.appendChild(allOption)
+        data.entities.forEach(function (entity) {
+          var option = el('option', null, entity)
+          option.value = entity
+          entityFilter.appendChild(option)
+        })
+
+        function applyFilters() {
+          var entity = entityFilter.value
+          var only = changesOnly.checked
+          var shown = 0
+          cards.forEach(function (item) {
+            var hide = (entity && item.entity !== entity) || (only && item.existing)
+            item.node.hidden = hide
+            if (!hide) shown += 1
+          })
+          visibleCount.textContent = shown + ' of ' + cards.length + ' elements shown'
+        }
+        entityFilter.addEventListener('change', applyFilters)
+        changesOnly.addEventListener('change', applyFilters)
+        applyFilters()
+        revealHash()
+
+        /* ---------- feedback export ---------- */
+
+        document.getElementById('export').addEventListener('click', function () {
+          var feedback = {
+            answers: Object.keys(answers).map(function (questionId) {
+              return { questionId: questionId, option: answers[questionId].option, text: answers[questionId].text }
+            }),
+            elements: Object.keys(reviewed()).map(function (id) {
+              return { elementId: id, verdict: review[id].verdict, comment: review[id].comment }
+            }),
+          }
+          if (data.planHash) feedback.planHash = data.planHash
+          var blob = new Blob([JSON.stringify(feedback, null, 2)], { type: 'application/json' })
+          var url = URL.createObjectURL(blob)
+          var anchor = el('a')
+          anchor.href = url
+          anchor.download = 'feedback.json'
+          document.body.appendChild(anchor)
+          anchor.click()
+          document.body.removeChild(anchor)
+          URL.revokeObjectURL(url)
+        })
+      })()
+    </script>
+  </body>
+</html>
