@@ -138,3 +138,85 @@ describe('layoutPlanFlows', () => {
     expect(layoutPlanFlows(PlanDraftSchema.parse(loadCommentsPlan()))).toEqual([])
   })
 })
+
+describe('layoutPlanFlows on graphs that are not a clean chain', () => {
+  function chain(length: number): { nodes: unknown[]; edges: unknown[] } {
+    return {
+      nodes: Array.from({ length }, (_, index) => ({ id: `n${index}`, label: `n${index}`, kind: 'action' })),
+      edges: Array.from({ length: length - 1 }, (_, index) => ({ from: `n${index}`, to: `n${index + 1}` })),
+    }
+  }
+
+  test('should place a flow that is entirely a cycle, with no step to start from', () => {
+    const plan = planWith({
+      nodes: [
+        { id: 'a', label: 'a', kind: 'action' },
+        { id: 'b', label: 'b', kind: 'action' },
+        { id: 'c', label: 'c', kind: 'action' },
+      ],
+      edges: [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'c' },
+        { from: 'c', to: 'a' },
+      ],
+    })
+    const layout = layoutPlanFlows(plan)[0]
+
+    expect(placed(plan)).toEqual({ a: [0, 0], b: [1, 0], c: [2, 0] })
+    expect(layout.edges.filter((edge) => edge.back)).toHaveLength(1)
+  })
+
+  test('should give a step with no edges a place of its own', () => {
+    const plan = planWith({
+      nodes: [
+        { id: 'a', label: 'a', kind: 'action' },
+        { id: 'b', label: 'b', kind: 'action' },
+        { id: 'lonely', label: 'lonely', kind: 'actor' },
+      ],
+      edges: [{ from: 'a', to: 'b' }],
+    })
+
+    expect(placed(plan)).toEqual({ a: [0, 0], b: [1, 0], lonely: [0, 1] })
+  })
+
+  test('should stack two flows that share no step into their own rows', () => {
+    const plan = planWith({
+      nodes: ['a', 'b', 'c', 'd'].map((id) => ({ id, label: id, kind: 'action' })),
+      edges: [
+        { from: 'a', to: 'b' },
+        { from: 'c', to: 'd' },
+      ],
+    })
+    const layout = layoutPlanFlows(plan)[0]
+
+    expect(placed(plan)).toEqual({ a: [0, 0], b: [1, 0], c: [0, 1], d: [1, 1] })
+    expect([layout.columns, layout.rows]).toEqual([2, 2])
+  })
+
+  test('should reach the same placement however the edges are declared', () => {
+    // Reverse declaration is the worst case for the relaxation: one edge settles a pass.
+    const { nodes, edges } = chain(120)
+    const forward = placed(planWith({ nodes, edges }))
+    const backward = placed(planWith({ nodes, edges: [...(edges as unknown[])].reverse() }))
+
+    expect(backward).toEqual(forward)
+    expect(forward.n119).toEqual([119, 0])
+  })
+
+  test('should place the same plan the same way every time', () => {
+    const { nodes, edges } = chain(40)
+
+    expect(JSON.stringify(layoutPlanFlows(planWith({ nodes, edges })))).toBe(
+      JSON.stringify(layoutPlanFlows(planWith({ nodes, edges }))),
+    )
+  })
+
+  test('should walk a chain deeper than a call stack would carry', () => {
+    // A recursive walk overflows here: measured between 1,000 and 5,000 steps under
+    // Node and between 20,000 and 40,000 under Bun, so which runtime ran it decided
+    // whether the command survived.
+    const { nodes, edges } = chain(50000)
+
+    expect(layoutPlanFlows(planWith({ nodes, edges }))[0].columns).toBe(50000)
+  })
+})

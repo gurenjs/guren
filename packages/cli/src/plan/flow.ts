@@ -44,6 +44,11 @@ function declaredEdges(flow: { nodes: PlanFlowNode[]; edges: PlanFlowEdge[] }): 
  * edge onto a node already on the stack is the one that closes it. Which edge of a
  * cycle is called the back edge depends on that order, which is why the order is the
  * plan's own and not a traversal of a map.
+ *
+ * The walk carries its own stack rather than recursing. A recursive one overflows on a
+ * chain — measured at between 1,000 and 5,000 steps under Node and between 20,000 and
+ * 40,000 under Bun — so the input that breaks it depends on which runtime is executing,
+ * and it breaks by taking the whole command down with a stack trace about recursion.
  */
 function backEdges(nodes: PlanFlowNode[], edges: PlanFlowEdge[]): Set<PlanFlowEdge> {
   const out = new Map<string, PlanFlowEdge[]>()
@@ -57,18 +62,28 @@ function backEdges(nodes: PlanFlowNode[], edges: PlanFlowEdge[]): Set<PlanFlowEd
   const done = new Set<string>()
   const onStack = new Set<string>()
 
-  const walk = (id: string): void => {
-    onStack.add(id)
-    for (const edge of out.get(id) ?? []) {
-      if (onStack.has(edge.to)) back.add(edge)
-      else if (!done.has(edge.to)) walk(edge.to)
-    }
-    onStack.delete(id)
-    done.add(id)
-  }
+  for (const start of nodes) {
+    if (done.has(start.id)) continue
+    onStack.add(start.id)
+    const stack = [{ id: start.id, next: 0 }]
 
-  for (const node of nodes) {
-    if (!done.has(node.id)) walk(node.id)
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]
+      const outgoing = out.get(frame.id) ?? []
+      if (frame.next < outgoing.length) {
+        const edge = outgoing[frame.next]
+        frame.next += 1
+        if (onStack.has(edge.to)) back.add(edge)
+        else if (!done.has(edge.to)) {
+          onStack.add(edge.to)
+          stack.push({ id: edge.to, next: 0 })
+        }
+        continue
+      }
+      onStack.delete(frame.id)
+      done.add(frame.id)
+      stack.pop()
+    }
   }
   return back
 }
