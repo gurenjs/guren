@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { FEEDBACK_STDIN, readPlanFeedback, type PlanFeedback } from '../src/plan/feedback'
+import { FEEDBACK_MAX_BYTES, FEEDBACK_STDIN, readPlanFeedback, type PlanFeedback } from '../src/plan/feedback'
 
 /** The document the page exports, with one element of each shape it writes. */
 const FEEDBACK: PlanFeedback = {
@@ -33,7 +33,27 @@ describe('readPlanFeedback', () => {
     return path
   }
 
-  const fromStdin = (raw: string) => readPlanFeedback(FEEDBACK_STDIN, { stdin: async () => raw })
+  /** One chunk per call, so a test can watch how far a read got before it stopped. */
+  function chunked(chunks: readonly string[], produced?: { count: number }) {
+    return async function* () {
+      for (const chunk of chunks) {
+        if (produced) produced.count += 1
+        yield Buffer.from(chunk)
+      }
+    }
+  }
+
+  const fromStdin = (raw: string) => readPlanFeedback(FEEDBACK_STDIN, { stdin: chunked([raw]) })
+
+  /** A valid feedback document of exactly `bytes` bytes, padded inside one comment. */
+  function feedbackOfSize(bytes: number): string {
+    const base = JSON.stringify({
+      answers: [],
+      elements: [{ elementId: 'model.comment', verdict: 'approve', comment: '' }],
+    })
+    const padding = bytes - Buffer.byteLength(base)
+    return base.replace('"comment":""', () => `"comment":"${'x'.repeat(padding)}"`)
+  }
 
   test('should read a feedback file', async () => {
     const feedback = await readPlanFeedback(await writeFeedback(FEEDBACK))
@@ -89,9 +109,41 @@ describe('readPlanFeedback', () => {
 
   test('should report a pipe that failed as a feedback the command could not read', async () => {
     const failing = readPlanFeedback(FEEDBACK_STDIN, {
-      stdin: () => Promise.reject(new Error('EIO')),
+      // oxlint-disable-next-line require-yield -- a pipe that fails before its first chunk
+      stdin: async function* () {
+        throw new Error('EIO')
+      },
     })
 
     await expect(failing).rejects.toThrow(/Cannot read the feedback on standard input: EIO/)
+  })
+
+  test('should read a document of exactly the limit', async () => {
+    const feedback = await fromStdin(feedbackOfSize(FEEDBACK_MAX_BYTES))
+
+    expect(Buffer.byteLength(JSON.stringify(feedback))).toBe(FEEDBACK_MAX_BYTES)
+  })
+
+  test('should refuse one byte past the limit, from a file and from a pipe', async () => {
+    const tooBig = feedbackOfSize(FEEDBACK_MAX_BYTES + 1)
+
+    await expect(readPlanFeedback(await writeFeedback(tooBig))).rejects.toThrow(/over the 5 MiB limit/)
+    await expect(fromStdin(tooBig)).rejects.toThrow(/over the 5 MiB limit/)
+  })
+
+  test('should stop reading a pipe at the limit rather than at its end', async () => {
+    const megabyte = 'x'.repeat(1024 * 1024)
+    const produced = { count: 0 }
+
+    const overrun = readPlanFeedback(FEEDBACK_STDIN, {
+      stdin: chunked(
+        Array.from({ length: 1000 }, () => megabyte),
+        produced,
+      ),
+    })
+
+    await expect(overrun).rejects.toThrow(/over the 5 MiB limit/)
+    // The chunk that crosses the cap is the last one read, out of a gigabyte on offer.
+    expect(produced.count).toBe(6)
   })
 })

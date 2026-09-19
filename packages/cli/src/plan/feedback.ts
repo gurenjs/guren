@@ -7,15 +7,21 @@
  * pipe replace the file with.
  */
 
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { text } from 'node:stream/consumers'
 
 import { z } from 'zod'
 
 import { CliError } from '../cli-error'
 
 export const FEEDBACK_STDIN = '-'
+
+/**
+ * Feedback is one comment per plan element, which stays under a megabyte however
+ * long the comments are. The cap is what stops a log or a binary piped in by
+ * mistake, so it is read as bytes and refused before the document is.
+ */
+export const FEEDBACK_MAX_BYTES = 5 * 1024 * 1024
 
 /**
  * The verdicts the page issues. `null` is an element someone commented on without
@@ -47,11 +53,37 @@ export type PlanFeedback = z.infer<typeof PlanFeedbackSchema>
 export interface ReadPlanFeedbackOptions {
   cwd?: string
   /** Test seam: where {@link FEEDBACK_STDIN} reads from. */
-  stdin?: () => Promise<string>
+  stdin?: () => AsyncIterable<Uint8Array | string>
 }
 
-function readStdin(): Promise<string> {
-  return text(process.stdin)
+function overSizeMessage(origin: string): string {
+  return `The feedback on ${origin} is over the ${FEEDBACK_MAX_BYTES / 1024 / 1024} MiB limit.`
+}
+
+/**
+ * A pipe counted as it arrives: throwing out of the loop closes the iterator, so a
+ * stream that would not end costs the cap rather than everything it has to offer.
+ */
+async function readWithinLimit(chunks: AsyncIterable<Uint8Array | string>, origin: string): Promise<string> {
+  const decoder = new TextDecoder()
+  const parts: string[] = []
+  let bytes = 0
+
+  for await (const chunk of chunks) {
+    const buffer = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk
+    bytes += buffer.byteLength
+    if (bytes > FEEDBACK_MAX_BYTES) throw new CliError(overSizeMessage(origin))
+    parts.push(decoder.decode(buffer, { stream: true }))
+  }
+
+  parts.push(decoder.decode())
+  return parts.join('')
+}
+
+/** The file's size, which answers the cap without opening it. */
+async function readFileWithinLimit(path: string): Promise<string> {
+  if ((await stat(path)).size > FEEDBACK_MAX_BYTES) throw new CliError(overSizeMessage(path))
+  return readFile(path, 'utf8')
 }
 
 function formatIssues(error: z.ZodError): string {
@@ -67,10 +99,13 @@ export async function readPlanFeedback(source: string, options: ReadPlanFeedback
 
   let raw: string
   try {
-    raw = fromStdin ? await (options.stdin ?? readStdin)() : await readFile(origin, 'utf8')
+    raw = fromStdin
+      ? await readWithinLimit((options.stdin ?? (() => process.stdin))(), origin)
+      : await readFileWithinLimit(origin)
   } catch (error) {
-    const where = fromStdin ? 'on standard input' : `at ${origin}`
-    throw new CliError(`Cannot read the feedback ${where}: ${(error as Error).message}`)
+    // The cap is already an answer about the feedback; only a failed read needs one.
+    if (error instanceof CliError) throw error
+    throw new CliError(`Cannot read the feedback on ${origin}: ${(error as Error).message}`)
   }
 
   // An empty read is the common shape of a pipe whose producer wrote nothing, and
