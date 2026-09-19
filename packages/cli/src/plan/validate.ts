@@ -11,8 +11,14 @@
 import { authMiddlewareVerdict } from '../audit'
 import { describeMethod } from '../http-methods'
 import { tableNameFor } from '../inflect'
-import type { CheckResult, CheckStatus } from '../check-result'
-import { isUnreadable, type PlanAppState, type PlanAppNames } from './app-state'
+import { check, type CheckResult, type CheckStatus } from '../check-result'
+import {
+  COLUMNS_ARE_A_LOWER_BOUND,
+  isUnreadable,
+  type PlanAppNames,
+  type PlanAppState,
+  type PlanAppUnreadable,
+} from './app-state'
 import {
   findDuplicatePlanIds,
   listPlanElements,
@@ -40,16 +46,14 @@ export interface PlanCheckResult extends CheckResult {
  */
 const AUTHORIZATION_MIDDLEWARE = /^(can|authoriz|policy|gate|requireabilit)/i
 
-/** Which column changes a model's own change admits. An `alter` model admits every kind. */
-const COLUMN_CHANGES_BY_MODEL: Record<PlanChange['kind'], ReadonlyArray<PlanChange['kind']> | null> = {
+/** Which child change a parent's own change admits; `null` admits every kind. */
+const CHILD_CHANGES_BY_PARENT: Record<PlanChange['kind'], ReadonlyArray<PlanChange['kind']> | null> = {
   add: ['add'],
   existing: ['existing'],
   drop: ['drop', 'existing'],
   alter: null,
   rename: null,
 }
-
-const ACTION_CHANGES_BY_CONTROLLER = COLUMN_CHANGES_BY_MODEL
 
 export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResult[] {
   const results: PlanCheckResult[] = []
@@ -70,9 +74,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
 
 interface PlanIndex {
   byId: Map<string, PlanElementSection>
-  models: Map<string, PlanModel>
   actions: Map<string, PlanAction>
-  routes: Map<string, PlanRoute>
   /** Validator id → its field names, for the form fields that name one. */
   validatorFields: Map<string, Set<string>>
   /** Route id → the acceptance behaviours naming it. */
@@ -84,9 +86,7 @@ interface PlanIndex {
 function indexPlan(plan: PlanDraft): PlanIndex {
   const index: PlanIndex = {
     byId: new Map(listPlanElements(plan).map((ref) => [ref.id, ref.section])),
-    models: new Map(plan.models.map((model) => [model.id, model])),
     actions: new Map(plan.controllers.flatMap((c) => c.actions.map((a) => [a.id, a] as const))),
-    routes: new Map(plan.routes.map((route) => [route.id, route])),
     validatorFields: new Map(
       plan.validators.map((validator) => [validator.id, new Set(validator.fields.map((field) => field.name))]),
     ),
@@ -109,28 +109,42 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   else map.set(key, [value])
 }
 
-function result(
+/** The heading each key is grouped under; the renderer groups on `title`. */
+const TITLES: Record<string, string> = {
+  'plan:duplicate-id': 'Plan element ids',
+  'plan:reference': 'Plan references',
+  'plan:change-consistency': 'Plan change consistency',
+  'plan:app-collision': 'Plan against the application',
+  'plan:app-missing': 'Plan against the application',
+  'plan:app-unjudged': 'Plan against the application',
+  'plan:app-unreadable': 'Plan against the application',
+  'plan:api-only-view': 'Plan against the application',
+  'plan:inflection': 'Plan naming',
+  'plan:route-authorization': 'Plan route authorization',
+  'plan:route-body': 'Plan route validation',
+  'plan:data-migration': 'Plan data migrations',
+  'plan:rename-pair': 'Plan data migrations',
+  'plan:acceptance': 'Plan acceptance coverage',
+}
+
+function finding(
   key: string,
-  title: string,
   status: CheckStatus,
   message: string,
-  elementId: string,
-  section: PlanElementSection,
-  suggestion?: string,
+  extra: { elementId?: string; section?: PlanElementSection; suggestion?: string } = {},
 ): PlanCheckResult {
-  return { key, title, status, message, suggestion, elementId, section }
+  const { suggestion, ...rest } = extra
+  return { ...check(key, TITLES[key] ?? key, status, message, suggestion), ...rest }
 }
 
 function checkDuplicateIds(plan: PlanDraft, results: PlanCheckResult[]): void {
   for (const id of findDuplicatePlanIds(plan)) {
-    results.push({
-      key: 'plan:duplicate-id',
-      title: 'Plan element ids',
-      status: 'fail',
-      message: `The id "${id}" is declared by more than one element.`,
-      suggestion: 'Ids share one namespace, since a revision addresses an element by id alone.',
-      elementId: id,
-    })
+    results.push(
+      finding('plan:duplicate-id', 'fail', `The id "${id}" is declared by more than one element.`, {
+        elementId: id,
+        suggestion: 'Ids share one namespace, since a revision addresses an element by id alone.',
+      }),
+    )
   }
 }
 
@@ -139,22 +153,17 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
     from: string,
     section: PlanElementSection,
     target: string,
-    expected: PlanElementSection | PlanElementSection[],
+    expected: PlanElementSection,
     label: string,
   ): void => {
-    const sections = Array.isArray(expected) ? expected : [expected]
     const found = index.byId.get(target)
-    if (found !== undefined && sections.includes(found)) return
+    if (found === expected) return
     const what = found === undefined ? 'no plan element' : `a ${found} element`
     results.push(
-      result(
-        'plan:reference',
-        'Plan references',
-        'fail',
-        `${label} names "${target}", which is ${what}; ${sections.join(' or ')} was expected.`,
-        from,
+      finding('plan:reference', 'fail', `${label} names "${target}", which is ${what}; ${expected} was expected.`, {
+        elementId: from,
         section,
-      ),
+      }),
     )
   }
 
@@ -208,13 +217,11 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
     for (const field of view.form.fields) {
       if (fields.has(field.field)) continue
       results.push(
-        result(
+        finding(
           'plan:reference',
-          'Plan references',
           'fail',
           `The form field "${field.field}" names no field of validator "${view.form.validator}".`,
-          view.id,
-          'views',
+          { elementId: view.id, section: 'views' },
         ),
       )
     }
@@ -227,14 +234,10 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
     for (const affected of question.affects) {
       if (index.byId.has(affected)) continue
       results.push(
-        result(
-          'plan:reference',
-          'Plan references',
-          'fail',
-          `The question affects "${affected}", which no element declares.`,
-          question.id,
-          'questions',
-        ),
+        finding('plan:reference', 'fail', `The question affects "${affected}", which no element declares.`, {
+          elementId: question.id,
+          section: 'questions',
+        }),
       )
     }
   }
@@ -243,7 +246,10 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
     for (const covered of task.covers) {
       if (index.byId.has(covered)) continue
       results.push(
-        result('plan:reference', 'Plan references', 'fail', `The task covers "${covered}", which no element declares.`, task.id, 'tasks'),
+        finding('plan:reference', 'fail', `The task covers "${covered}", which no element declares.`, {
+          elementId: task.id,
+          section: 'tasks',
+        }),
       )
     }
     for (const behaviour of task.acceptance) {
@@ -259,39 +265,38 @@ function checkChangeConsistency(plan: PlanDraft, results: PlanCheckResult[]): vo
   const report = (
     childId: string,
     section: PlanElementSection,
+    noun: string,
     childKind: string,
     parentKind: string,
     parentLabel: string,
     allowed: ReadonlyArray<string>,
   ): void => {
     results.push(
-      result(
+      finding(
         'plan:change-consistency',
-        'Plan change consistency',
         'fail',
-        `A "${childKind}" ${section === 'columns' ? 'column' : 'action'} sits under ${parentLabel}, whose change is "${parentKind}"; `
+        `A "${childKind}" ${noun} sits under ${parentLabel}, whose change is "${parentKind}"; `
           + `only ${allowed.join(' or ')} is consistent there.`,
-        childId,
-        section,
+        { elementId: childId, section },
       ),
     )
   }
 
   for (const model of plan.models) {
-    const allowed = COLUMN_CHANGES_BY_MODEL[model.change.kind]
+    const allowed = CHILD_CHANGES_BY_PARENT[model.change.kind]
     if (!allowed) continue
     for (const column of model.columns) {
       if (allowed.includes(column.change.kind)) continue
-      report(column.id, 'columns', column.change.kind, model.change.kind, `model "${model.name}"`, allowed)
+      report(column.id, 'columns', 'column', column.change.kind, model.change.kind, `model "${model.name}"`, allowed)
     }
   }
 
   for (const controller of plan.controllers) {
-    const allowed = ACTION_CHANGES_BY_CONTROLLER[controller.change.kind]
+    const allowed = CHILD_CHANGES_BY_PARENT[controller.change.kind]
     if (!allowed) continue
     for (const action of controller.actions) {
       if (allowed.includes(action.change.kind)) continue
-      report(action.id, 'actions', action.change.kind, controller.change.kind, `controller "${controller.className}"`, allowed)
+      report(action.id, 'actions', 'action', action.change.kind, controller.change.kind, `controller "${controller.className}"`, allowed)
     }
   }
 }
@@ -308,36 +313,34 @@ interface TargetCheck {
   /** What the name belongs to, e.g. ` of table "comments"`. */
   scope?: string
   /**
-   * The reader answers a lower bound, so an absent name is unconfirmed rather than
-   * missing: the result warns and says why. A collision is positive evidence either way.
+   * Why an absent name is unconfirmed rather than missing, when the reader answers a
+   * lower bound: the result warns and quotes this. A collision is positive evidence either way.
    */
-  lowerBound?: string
+  unconfirmedBecause?: string
 }
 
 function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, results: PlanCheckResult[]): void {
   const has = (name: string): boolean => existing.includes(name)
+  const where = { elementId: target.id, section: target.section }
   const collision = (name: string): void => {
     results.push(
-      result(
+      finding(
         'plan:app-collision',
-        'Plan against the application',
         'fail',
         `The ${target.noun} "${name}"${target.scope ?? ''} already exists in this application.`,
-        target.id,
-        target.section,
+        where,
       ),
     )
   }
   const missing = (name: string): void => {
+    const unconfirmed = target.unconfirmedBecause
     results.push(
-      result(
-        target.lowerBound ? 'plan:app-unjudged' : 'plan:app-missing',
-        'Plan against the application',
-        target.lowerBound ? 'warn' : 'fail',
+      finding(
+        unconfirmed ? 'plan:app-unjudged' : 'plan:app-missing',
+        unconfirmed ? 'warn' : 'fail',
         `The ${target.noun} "${name}"${target.scope ?? ''} was not found in this application, and the plan's change is "${target.kind}".`
-          + (target.lowerBound ? ` ${target.lowerBound}` : ''),
-        target.id,
-        target.section,
+          + (unconfirmed ? ` ${unconfirmed}` : ''),
+        where,
       ),
     )
   }
@@ -355,21 +358,45 @@ function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, resul
   if (!has(target.current)) missing(target.current)
 }
 
-function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
-  reportUnreadable(app, results)
-
-  if (!isUnreadable(app.models)) {
-    for (const model of plan.models) {
-      checkTarget(
-        { id: model.id, section: 'models', current: model.name, previous: renameFrom(model.change), kind: model.change.kind, noun: 'model class' },
-        app.models,
-        results,
-      )
-    }
+/**
+ * Runs `use` against a readable section, or reports why it could not be judged. The
+ * one way to reach a section's contents: a check that forgot the guard would skip
+ * silently, and a warning nobody emitted is indistinguishable from a clean section.
+ */
+function withSection<T>(
+  name: string,
+  section: T[] | PlanAppUnreadable,
+  results: PlanCheckResult[],
+  use: (readable: T[]) => void,
+): void {
+  if (!isUnreadable(section)) {
+    use(section)
+    return
   }
+  results.push(
+    finding(
+      'plan:app-unreadable',
+      'warn',
+      `The application's ${name} could not be read (${section.unreadable}), so the plan's ${name} were neither confirmed nor refuted.`,
+    ),
+  )
+}
 
-  if (!isUnreadable(app.tables)) {
-    const tableNames = app.tables.flatMap((table) => [table.identifier, ...(table.tableName ? [table.tableName] : [])])
+function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
+  const named = <T extends { id: string; change: PlanChange }>(
+    elements: ReadonlyArray<T>,
+    options: { section: PlanElementSection; appSection: string; noun: string; existing: PlanAppNames; nameOf: (element: T) => string },
+  ): void => checkNamedSection(elements, options, results)
+
+  named(plan.models, { section: 'models', appSection: 'models', noun: 'model class', existing: app.models, nameOf: (m) => m.name })
+  named(plan.controllers, { section: 'controllers', appSection: 'controllers', noun: 'controller class', existing: app.controllers, nameOf: (c) => c.className })
+  named(plan.validators, { section: 'validators', appSection: 'validators', noun: 'validator', existing: app.validators, nameOf: (v) => v.name })
+  named(plan.resources, { section: 'resources', appSection: 'resources', noun: 'resource', existing: app.resources, nameOf: (r) => r.name })
+  named(plan.policies, { section: 'policies', appSection: 'policies', noun: 'policy', existing: app.policies, nameOf: (p) => p.name })
+  named(plan.views, { section: 'views', appSection: 'pages', noun: 'page', existing: app.pages, nameOf: (v) => v.page })
+
+  withSection('tables', app.tables, results, (tables) => {
+    const names = tables.flatMap((table) => [table.identifier, ...(table.tableName ? [table.tableName] : [])])
     for (const model of plan.models) {
       checkTarget(
         {
@@ -381,69 +408,39 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
           kind: model.tableRenamedFrom ? 'rename' : model.change.kind === 'rename' ? 'existing' : model.change.kind,
           noun: 'table',
         },
-        tableNames,
+        names,
         results,
       )
-      checkColumnsAgainstApp(model, app.tables, results)
+      checkColumnsAgainstApp(model, tables, results)
     }
-  }
+  })
 
-  if (!isUnreadable(app.controllers)) {
-    for (const controller of plan.controllers) {
-      checkTarget(
-        {
-          id: controller.id,
-          section: 'controllers',
-          current: controller.className,
-          previous: renameFrom(controller.change),
-          kind: controller.change.kind,
-          noun: 'controller class',
-        },
-        app.controllers,
-        results,
-      )
-    }
-  }
-
-  if (!isUnreadable(app.actions)) {
+  withSection('actions', app.actions, results, (actions) => {
     for (const controller of plan.controllers) {
       // An action's identity is `Class.action`, which is how a route names one; a
       // controller the plan renames is looked up under the name it has today.
       const className = renameFrom(controller.change) ?? controller.className
       for (const action of controller.actions) {
+        const previousName = renameFrom(action.change)
         checkTarget(
           {
             id: action.id,
             section: 'actions',
             current: `${className}.${action.name}`,
-            previous: renameFrom(action.change) && `${className}.${renameFrom(action.change)}`,
+            previous: previousName ? `${className}.${previousName}` : undefined,
             kind: action.change.kind,
             noun: 'action',
           },
-          app.actions,
+          actions,
           results,
         )
       }
     }
-  }
+  })
 
-  checkNamedSection(plan.validators, 'validators', 'validator', app.validators, results)
-  checkNamedSection(plan.resources, 'resources', 'resource', app.resources, results)
-  checkNamedSection(plan.policies, 'policies', 'policy', app.policies, results)
-
-  if (!isUnreadable(app.pages)) {
-    for (const view of plan.views) {
-      checkTarget(
-        { id: view.id, section: 'views', current: view.page, previous: renameFrom(view.change), kind: view.change.kind, noun: 'page' },
-        app.pages,
-        results,
-      )
-    }
-  }
-
-  if (!isUnreadable(app.routes)) {
-    const names = app.routes.flatMap((route) => (route.name ? [route.name] : []))
-    const endpoints = new Set(app.routes.map((route) => `${route.method.toUpperCase()} ${route.path}`))
+  withSection('routes', app.routes, results, (routes) => {
+    const names = routes.flatMap((route) => (route.name ? [route.name] : []))
+    const endpoints = new Set(routes.map((route) => `${route.method.toUpperCase()} ${route.path}`))
     for (const route of plan.routes) {
       // A route's name is checked as its identity; its path is not, since an `alter`
       // may move the path while keeping the name.
@@ -455,34 +452,41 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
       if (route.change.kind !== 'add') continue
       if (!endpoints.has(`${route.method} ${route.path}`)) continue
       results.push(
-        result(
-          'plan:app-collision',
-          'Plan against the application',
-          'fail',
-          `The route "${route.method} ${route.path}" is already registered by this application.`,
-          route.id,
-          'routes',
-        ),
+        finding('plan:app-collision', 'fail', `The route "${route.method} ${route.path}" is already registered by this application.`, {
+          elementId: route.id,
+          section: 'routes',
+        }),
       )
     }
-  }
+  })
 }
 
-function checkNamedSection(
-  elements: ReadonlyArray<{ id: string; name: string; change: PlanChange }>,
-  section: PlanElementSection,
-  noun: string,
-  existing: PlanAppNames,
+/**
+ * A section whose elements are each checked by one name, against one list of app
+ * names. `appSection` names the application's list rather than the plan's, since a
+ * plan's `views` are judged against the application's `pages`.
+ */
+function checkNamedSection<T extends { id: string; change: PlanChange }>(
+  elements: ReadonlyArray<T>,
+  options: {
+    section: PlanElementSection
+    appSection: string
+    noun: string
+    existing: PlanAppNames
+    nameOf: (element: T) => string
+  },
   results: PlanCheckResult[],
 ): void {
-  if (isUnreadable(existing)) return
-  for (const element of elements) {
-    checkTarget(
-      { id: element.id, section, current: element.name, previous: renameFrom(element.change), kind: element.change.kind, noun },
-      existing,
-      results,
-    )
-  }
+  const { section, noun, nameOf } = options
+  withSection(options.appSection, options.existing, results, (names) => {
+    for (const element of elements) {
+      checkTarget(
+        { id: element.id, section, current: nameOf(element), previous: renameFrom(element.change), kind: element.change.kind, noun },
+        names,
+        results,
+      )
+    }
+  })
 }
 
 function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<{ identifier: string; tableName?: string; columns: string[] }>, results: PlanCheckResult[]): void {
@@ -493,13 +497,11 @@ function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<{ identi
     // The table has its own result; without this one, its columns would go unjudged in silence.
     if (model.columns.length > 0) {
       results.push(
-        result(
+        finding(
           'plan:app-unjudged',
-          'Plan against the application',
           'warn',
           `Table "${lookup}" was not found, so the ${model.columns.length} planned column(s) of "${model.name}" were neither confirmed nor refuted.`,
-          model.id,
-          'models',
+          { elementId: model.id, section: 'models' },
         ),
       )
     }
@@ -515,7 +517,7 @@ function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<{ identi
         kind: column.change.kind,
         noun: 'column',
         scope: ` of table "${table.tableName ?? table.identifier}"`,
-        lowerBound: 'The schema parser reports a table\'s columns as a lower bound: a spread column goes unreported.',
+        unconfirmedBecause: COLUMNS_ARE_A_LOWER_BOUND,
       },
       table.columns,
       results,
@@ -527,55 +529,34 @@ function renameFrom(change: PlanChange): string | undefined {
   return change.kind === 'rename' ? change.from : undefined
 }
 
-function reportUnreadable(app: PlanAppState, results: PlanCheckResult[]): void {
-  const sections: Array<[string, PlanAppNames | PlanAppState['routes'] | PlanAppState['tables']]> = [
-    ['models', app.models],
-    ['controllers', app.controllers],
-    ['resources', app.resources],
-    ['policies', app.policies],
-    ['actions', app.actions],
-    ['pages', app.pages],
-    ['validators', app.validators],
-    ['routes', app.routes],
-    ['tables', app.tables],
-  ]
-  for (const [name, section] of sections) {
-    if (!isUnreadable(section)) continue
-    results.push({
-      key: 'plan:app-unreadable',
-      title: 'Plan against the application',
-      status: 'warn',
-      message: `The application's ${name} could not be read (${section.unreadable}), so the plan's ${name} were neither confirmed nor refuted.`,
-    })
-  }
-}
-
 function checkInflectedNames(plan: PlanDraft, results: PlanCheckResult[]): void {
   for (const model of plan.models) {
     if (model.change.kind !== 'add') continue
     const expected = tableNameFor(model.name)
     if (model.table === expected) continue
     results.push(
-      result(
+      finding(
         'plan:inflection',
-        'Plan naming',
         'warn',
         `Model "${model.name}" declares table "${model.table}"; Guren's own inflection derives "${expected}".`,
-        model.id,
-        'models',
-        'A table the scaffolders do not derive has to be written by hand everywhere it is named.',
+        {
+          elementId: model.id,
+          section: 'models',
+          suggestion: 'A table the scaffolders do not derive has to be written by hand everywhere it is named.',
+        },
       ),
     )
   }
 }
 
 function classifyMiddleware(names: ReadonlyArray<string>): { authenticates: boolean; authorizes: boolean } {
-  const authorizing = names.filter((name) => AUTHORIZATION_MIDDLEWARE.test(name))
-  const rest = names.filter((name) => !AUTHORIZATION_MIDDLEWARE.test(name))
-  return {
-    authenticates: authMiddlewareVerdict({ middlewareNames: rest, capabilities: undefined }) !== 'none',
-    authorizes: authorizing.length > 0,
+  const rest: string[] = []
+  let authorizes = false
+  for (const name of names) {
+    if (AUTHORIZATION_MIDDLEWARE.test(name)) authorizes = true
+    else rest.push(name)
   }
+  return { authenticates: authMiddlewareVerdict({ middlewareNames: rest, capabilities: undefined }) !== 'none', authorizes }
 }
 
 function checkRouteAuthorization(plan: PlanDraft, index: PlanIndex, results: PlanCheckResult[]): void {
@@ -587,32 +568,33 @@ function checkRouteAuthorization(plan: PlanDraft, index: PlanIndex, results: Pla
 
     if (!method.safe && authenticates && !authorizes && !action?.authorization.policy) {
       results.push(
-        result(
+        finding(
           'plan:route-authorization',
-          'Plan route authorization',
           'warn',
           `"${route.name}" mutates and requires authentication, but names no policy or authorization middleware.`,
-          route.id,
-          'routes',
-          'Authentication says who is calling; it does not say they may.',
+          {
+            elementId: route.id,
+            section: 'routes',
+            suggestion: 'Authentication says who is calling; it does not say they may.',
+          },
         ),
       )
     }
 
     if (method.bodyCarrying && action && !action.body) {
       results.push(
-        result(
+        finding(
           'plan:route-body',
-          'Plan route validation',
           'warn',
           `"${route.name}" carries a ${route.method} body, but action "${action.name}" names no body validator.`,
-          route.id,
-          'routes',
+          { elementId: route.id, section: 'routes' },
         ),
       )
     }
   }
 }
+
+const MIGRATION_ANSWER = 'Answer every time; { "kind": "none", "reason": ... } is an accepted answer.'
 
 function checkDataMigrations(plan: PlanDraft, results: PlanCheckResult[]): void {
   for (const model of plan.models) {
@@ -621,14 +603,11 @@ function checkDataMigrations(plan: PlanDraft, results: PlanCheckResult[]): void 
     const movesTable = model.change.kind === 'drop' || model.tableRenamedFrom !== undefined
     if (movesTable && !model.dataMigration) {
       results.push(
-        result(
+        finding(
           'plan:data-migration',
-          'Plan data migrations',
           'fail',
           `Model "${model.name}" ${model.change.kind === 'drop' ? 'drops' : 'renames'} table "${model.tableRenamedFrom ?? model.table}" and states no dataMigration.`,
-          model.id,
-          'models',
-          'Answer every time; { "kind": "none", "reason": ... } is an accepted answer.',
+          { elementId: model.id, section: 'models', suggestion: MIGRATION_ANSWER },
         ),
       )
     }
@@ -638,14 +617,11 @@ function checkDataMigrations(plan: PlanDraft, results: PlanCheckResult[]): void 
         if (column.change.kind === 'existing' || column.change.kind === 'add') continue
         if (column.dataMigration) continue
         results.push(
-          result(
+          finding(
             'plan:data-migration',
-            'Plan data migrations',
             'fail',
             `Column "${column.name}" of "${model.name}" is a "${column.change.kind}" on an existing table and states no dataMigration.`,
-            column.id,
-            'columns',
-            'Answer every time; { "kind": "none", "reason": ... } is an accepted answer.',
+            { elementId: column.id, section: 'columns', suggestion: MIGRATION_ANSWER },
           ),
         )
       }
@@ -667,14 +643,11 @@ function reportRenamePair(model: PlanModel, results: PlanCheckResult[]): void {
   const to = added[0] as PlanColumn
   if (from.type !== to.type) return
   results.push(
-    result(
+    finding(
       'plan:rename-pair',
-      'Plan data migrations',
       'warn',
       `"${model.name}" drops "${from.name}" and adds "${to.name}" with the same type, which reads as a rename.`,
-      to.id,
-      'columns',
-      'A rename keeps the rows; a drop and an add do not.',
+      { elementId: to.id, section: 'columns', suggestion: 'A rename keeps the rows; a drop and an add do not.' },
     ),
   )
 }
@@ -688,14 +661,15 @@ function checkAcceptanceCoverage(plan: PlanDraft, index: PlanIndex, results: Pla
       const routes = index.routesByAction.get(action.id) ?? []
       if (routes.some((route) => behavioursOf(route.id).length > 0)) continue
       results.push(
-        result(
+        finding(
           'plan:acceptance',
-          'Plan acceptance coverage',
           'fail',
           `Action "${action.name}" is altered, but no acceptance behaviour names any of its routes.`,
-          action.id,
-          'actions',
-          'An altered action may change no shape a scanner reads, so its behaviours are the only evidence it works.',
+          {
+            elementId: action.id,
+            section: 'actions',
+            suggestion: 'An altered action may change no shape a scanner reads, so its behaviours are the only evidence it works.',
+          },
         ),
       )
     }
@@ -715,14 +689,10 @@ function checkAcceptanceCoverage(plan: PlanDraft, index: PlanIndex, results: Pla
     for (const [applies, kind, because] of wanted) {
       if (!applies || kinds.has(kind)) continue
       results.push(
-        result(
-          'plan:acceptance',
-          'Plan acceptance coverage',
-          'warn',
-          `"${route.name}" ${because}, but no acceptance behaviour of kind "${kind}" names it.`,
-          route.id,
-          'routes',
-        ),
+        finding('plan:acceptance', 'warn', `"${route.name}" ${because}, but no acceptance behaviour of kind "${kind}" names it.`, {
+          elementId: route.id,
+          section: 'routes',
+        }),
       )
     }
   }
@@ -732,14 +702,10 @@ function checkApiOnlyViews(plan: PlanDraft, app: PlanAppState, results: PlanChec
   if (!app.apiOnly) return
   for (const view of plan.views) {
     results.push(
-      result(
-        'plan:api-only-view',
-        'Plan against the application',
-        'fail',
-        `This application is API-only, and "${view.page}" is an Inertia page it cannot render.`,
-        view.id,
-        'views',
-      ),
+      finding('plan:api-only-view', 'fail', `This application is API-only, and "${view.page}" is an Inertia page it cannot render.`, {
+        elementId: view.id,
+        section: 'views',
+      }),
     )
   }
 }

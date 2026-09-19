@@ -11,11 +11,27 @@
 
 import { readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { isDefinitelyAbsent, listAppRoots, type AppRoot } from '../discovery'
-import { generateContext } from '../context'
+import {
+  classNameFromPath,
+  discoverModelFiles,
+  discoverPolicyFiles,
+  discoverResourceFiles,
+  excludeBarrelFiles,
+  formatTruncatedList,
+  isDefinitelyAbsent,
+  listAppRoots,
+  MODELS_DIR,
+  RESOURCES_DIR,
+  type AppRoot,
+} from '../discovery'
+import { loadContextRoutes } from '../context-route'
 import { parseControllerMethods } from '../controller-methods'
+import { listInertiaPageIds } from '../inertia-pages'
+import { parseModelFile } from '../model-parser'
 import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
+
+const POLICIES_DIR = 'app/Policies'
 
 /** A section the scanners could not read, carrying why. */
 export interface PlanAppUnreadable {
@@ -29,13 +45,16 @@ export interface PlanAppTable {
   identifier: string
   /** The SQL table name, when the declaration states one. */
   tableName?: string
-  /**
-   * Model property names as `schema-parser.ts` reads them, which is a **lower
-   * bound**: spread columns (`...timestamps`) go unreported. A name absent here
-   * is therefore unconfirmed, never proof the column does not exist.
-   */
+  /** Model property names, a lower bound for {@link COLUMNS_ARE_A_LOWER_BOUND}. */
   columns: string[]
 }
+
+/**
+ * Why a name absent from {@link PlanAppTable.columns} is unconfirmed rather than
+ * missing. Stated once: the checks quote it, and the reason is the parser's.
+ */
+export const COLUMNS_ARE_A_LOWER_BOUND =
+  "The schema parser reports a table's columns as a lower bound: a spread column goes unreported."
 
 export interface PlanAppRoute {
   name?: string
@@ -69,9 +88,7 @@ export interface PlanAppState {
   apiOnly: boolean
 }
 
-export function isUnreadable(
-  section: PlanAppNames | PlanAppState['routes'] | PlanAppState['tables'],
-): section is PlanAppUnreadable {
+export function isUnreadable<T>(section: T[] | PlanAppUnreadable): section is PlanAppUnreadable {
   return !Array.isArray(section)
 }
 
@@ -79,46 +96,36 @@ const VALIDATOR_SECTION_REASON =
   'a plan names a validator by its exported schema symbol, which no scanner resolves from a file name'
 
 /**
- * Builds {@link PlanAppState} from a project directory. The only filesystem-facing
- * half of the checks; everything else takes the state as an argument.
+ * Builds {@link PlanAppState} from a project directory: the only filesystem-facing
+ * half of the checks. Each scanner is called directly rather than through
+ * `generateContext()`, which walks the controller tree a second time and Babel-parses
+ * every console command for sections no check here reads.
  */
 export async function loadPlanAppState(cwd: string, options: { routesFile?: string } = {}): Promise<PlanAppState> {
   const root = resolve(cwd)
-  const apiOnly = await isConfirmedApiOnlyApp(root).catch(() => false)
   const roots = await listAppRoots(root).catch((): AppRoot[] => [])
 
-  let context: Awaited<ReturnType<typeof generateContext>> | undefined
-  let contextError: string | undefined
-  try {
-    context = await generateContext({ cwd: root, routesFile: options.routesFile })
-  } catch (error) {
-    contextError = error instanceof Error ? error.message : String(error)
-  }
-
-  const [modelsDir, resourcesDir, policiesDir, pagesDir] = await Promise.all([
-    probeDirectory(roots, 'app/Models'),
-    probeDirectory(roots, 'app/Http/Resources'),
-    probeDirectory(roots, 'app/Policies'),
-    probeDirectory([{ dir: root, module: null }], 'resources/js/pages'),
+  const [apiOnly, models, resources, policies, pages, routes, controllers, tables] = await Promise.all([
+    isConfirmedApiOnlyApp(root).catch(() => false),
+    modelSection(root, roots),
+    classSection(root, roots, RESOURCES_DIR, discoverResourceFiles),
+    classSection(root, roots, POLICIES_DIR, discoverPolicyFiles),
+    pageSection(root),
+    routeSection(root, options.routesFile),
+    controllerSections(root),
+    tableSection(root, roots),
   ])
 
-  const section = (values: string[] | undefined, probe: string | undefined): PlanAppNames => {
-    if (!values) return { unreadable: contextError ?? 'the project context could not be read' }
-    return probe ? { unreadable: probe } : values
-  }
-
-  const controllers = await controllerSections(root)
-
   return {
-    models: section(context?.models.map((model) => model.className), modelsDir),
+    models,
     controllers: controllers.classes,
     actions: controllers.actions,
-    resources: section(context?.resources, resourcesDir),
-    policies: section(context?.policies, policiesDir),
-    pages: section(context?.pages, pagesDir),
+    resources,
+    policies,
+    pages,
     validators: { unreadable: VALIDATOR_SECTION_REASON },
-    routes: routeSection(context, contextError),
-    tables: await tableSection(root, roots),
+    routes,
+    tables,
     apiOnly,
   }
 }
@@ -129,15 +136,46 @@ export async function loadPlanAppState(cwd: string, options: { routesFile?: stri
  * unreadable nested directory still under-reports, which no cheap probe catches.
  */
 async function probeDirectory(roots: ReadonlyArray<AppRoot>, relativeDir: string): Promise<string | undefined> {
-  for (const root of roots) {
-    if (await isDefinitelyAbsent(root.dir, relativeDir)) continue
-    try {
-      await readdir(resolve(root.dir, relativeDir))
-    } catch (error) {
-      return `${relativeDir} would not open (${error instanceof Error ? error.message : String(error)})`
-    }
-  }
-  return undefined
+  const failures = await Promise.all(
+    roots.map(async (root) => {
+      if (await isDefinitelyAbsent(root.dir, relativeDir)) return undefined
+      try {
+        await readdir(resolve(root.dir, relativeDir))
+        return undefined
+      } catch (error) {
+        return `${relativeDir} would not open (${error instanceof Error ? error.message : String(error)})`
+      }
+    }),
+  )
+  return failures.find((failure) => failure !== undefined)
+}
+
+async function modelSection(cwd: string, roots: ReadonlyArray<AppRoot>): Promise<PlanAppNames> {
+  const [probe, files] = await Promise.all([probeDirectory(roots, MODELS_DIR), discoverModelFiles(cwd)])
+  if (probe) return { unreadable: probe }
+  const parsed = await Promise.all(files.map((file) => parseModelFile(file)))
+  return parsed.flatMap((info) => (info ? [info.className] : [])).sort((a, b) => a.localeCompare(b))
+}
+
+/** A section named after the class each discovered file declares, as `guren context` names them. */
+async function classSection(
+  cwd: string,
+  roots: ReadonlyArray<AppRoot>,
+  relativeDir: string,
+  discover: (appRoot: string) => Promise<string[]>,
+): Promise<PlanAppNames> {
+  const [probe, files] = await Promise.all([probeDirectory(roots, relativeDir), discover(cwd)])
+  if (probe) return { unreadable: probe }
+  return excludeBarrelFiles(files).map(classNameFromPath).sort()
+}
+
+async function pageSection(cwd: string): Promise<PlanAppNames> {
+  const pagesDir = 'resources/js/pages'
+  const [probe, pages] = await Promise.all([
+    probeDirectory([{ dir: cwd, module: null }], pagesDir),
+    listInertiaPageIds(cwd),
+  ])
+  return probe ? { unreadable: probe } : pages
 }
 
 /**
@@ -157,19 +195,19 @@ async function controllerSections(cwd: string): Promise<{ classes: PlanAppNames;
 
   const skipped = [...scan.unreadableFiles, ...scan.unparsedFiles]
   if (skipped.length > 0) {
-    const unreadable = { unreadable: `${skipped.length} controller file(s) did not parse: ${skipped.join(', ')}` }
+    const unreadable = {
+      unreadable: `${skipped.length} controller file(s) did not parse: ${formatTruncatedList(skipped)}`,
+    }
     return { classes: unreadable, actions: unreadable }
   }
   return { classes: [...scan.classFiles.keys()], actions: [...scan.methods.keys()] }
 }
 
-function routeSection(
-  context: Awaited<ReturnType<typeof generateContext>> | undefined,
-  contextError: string | undefined,
-): PlanAppState['routes'] {
-  if (!context) return { unreadable: contextError ?? 'the project context could not be read' }
-  if (context.routesError) return { unreadable: context.routesError }
-  return context.routes.map((route) => ({ name: route.name, method: route.method, path: route.path }))
+async function routeSection(cwd: string, routesFile: string | undefined): Promise<PlanAppState['routes']> {
+  const loadErrors: string[] = []
+  const routes = await loadContextRoutes(cwd, routesFile, loadErrors)
+  if (loadErrors[0]) return { unreadable: loadErrors[0] }
+  return routes.map((route) => ({ name: route.name, method: route.method, path: route.path }))
 }
 
 /**
@@ -187,10 +225,9 @@ async function tableSection(cwd: string, roots: ReadonlyArray<AppRoot>): Promise
   }
 
   for (const root of roots) {
-    const path = schemaPathFor(root.module)
     if (await isDefinitelyAbsent(root.dir, 'db/schema.ts')) continue
     if (parsed.some((table) => table.module === root.module)) continue
-    return { unreadable: `${path} declared no table this parser could read` }
+    return { unreadable: `${schemaPathFor(root.module)} declared no table this parser could read` }
   }
 
   return parsed.map((table) => ({
