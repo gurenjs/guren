@@ -127,6 +127,7 @@ const TITLES: Record<string, string> = {
   'plan:data-migration': 'Plan data migrations',
   'plan:rename-pair': 'Plan data migrations',
   'plan:acceptance': 'Plan acceptance coverage',
+  'plan:flow-self-loop': 'Plan flows',
 }
 
 function finding(
@@ -151,14 +152,19 @@ function checkDuplicateIds(plan: PlanDraft, results: PlanCheckResult[]): void {
 }
 
 /**
- * The section a step's kind commits it to. The kinds left out are deliberately
- * unconstrained: a `store` step may reasonably name a model or a resource, a `decision`
- * a validator or a policy, and an `actor` names nothing at all.
+ * The section a step's kind commits it to. `null` is a kind deliberately free to name
+ * any element: a `store` step may reasonably be a model or a resource, a `decision` a
+ * validator or a policy. Total, so a new kind is a decision rather than a default.
  */
-const FLOW_KIND_SECTIONS: Partial<Record<PlanFlowNode['kind'], PlanElementSection>> = {
+const FLOW_KIND_SECTIONS: Record<PlanFlowNode['kind'], PlanElementSection | null> = {
   route: 'routes',
   action: 'actions',
   page: 'views',
+  actor: null,
+  job: null,
+  store: null,
+  external: null,
+  decision: null,
 }
 
 function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: PlanCheckResult[]): void {
@@ -209,18 +215,14 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
   }
 
   for (const flow of plan.flows) {
+    const fail = (message: string): void => {
+      results.push(finding('plan:reference', 'fail', message, { elementId: flow.id, section: 'flows' }))
+    }
     const nodes = new Set<string>()
     for (const node of flow.nodes) {
       // A step id is the flow's own, so a duplicate is only a duplicate here — and it
       // is what makes an edge end ambiguous.
-      if (nodes.has(node.id)) {
-        results.push(
-          finding('plan:reference', 'fail', `Flow step "${node.id}" is declared twice, so an edge naming it is ambiguous.`, {
-            elementId: flow.id,
-            section: 'flows',
-          }),
-        )
-      }
+      if (nodes.has(node.id)) fail(`Flow step "${node.id}" is declared twice, so an edge naming it is ambiguous.`)
       nodes.add(node.id)
 
       // A node need not name an element — an actor and an external service are not plan
@@ -228,26 +230,14 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
       if (!node.element) continue
       const section = index.byId.get(node.element)
       if (section === undefined) {
-        results.push(
-          finding('plan:reference', 'fail', `Flow step "${node.label}" names element "${node.element}", which the plan does not declare.`, {
-            elementId: flow.id,
-            section: 'flows',
-          }),
-        )
+        fail(`Flow step "${node.label}" names element "${node.element}", which the plan does not declare.`)
         continue
       }
       // Where a step's kind names a section, the element has to be in it: a step drawn
       // as a route and pointing at a page reads as a route in the picture.
       const expected = FLOW_KIND_SECTIONS[node.kind]
-      if (expected === undefined || section === expected) continue
-      results.push(
-        finding(
-          'plan:reference',
-          'fail',
-          `Flow step "${node.label}" is a ${node.kind} step but names "${node.element}", which is a ${section} element.`,
-          { elementId: flow.id, section: 'flows' },
-        ),
-      )
+      if (expected === null || section === expected) continue
+      fail(`Flow step "${node.label}" is a ${node.kind} step but names "${node.element}", which is a ${section} element.`)
     }
     for (const edge of flow.edges) {
       // Node ids are the flow's own, so an edge is checked against its own flow rather
@@ -258,12 +248,7 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
       for (const [end, id] of [['from', edge.from], ['to', edge.to]] as const) {
         if (nodes.has(id) || missing.has(id)) continue
         missing.add(id)
-        results.push(
-          finding('plan:reference', 'fail', `A flow edge's "${end}" names "${id}", which is no step of this flow.`, {
-            elementId: flow.id,
-            section: 'flows',
-          }),
-        )
+        fail(`A flow edge's "${end}" names "${id}", which is no step of this flow.`)
       }
       if (missing.size > 0 || edge.from !== edge.to) continue
 

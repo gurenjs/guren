@@ -209,12 +209,33 @@ describe('layoutPlanFlows on graphs that are not a clean chain', () => {
     expect(forward.n119).toEqual([119, 0])
   })
 
-  test('should place the same plan the same way every time', () => {
-    const { nodes, edges } = chain(40)
+  test('should place a flow exactly here, whatever the implementation', () => {
+    // Written out rather than compared with itself: one call against another over the
+    // same input cannot fail, and comparing serialized output pins the key order too.
+    const plan = planWith({
+      nodes: ['a', 'b', 'c', 'd'].map((id) => ({ id, label: id, kind: 'action' as const })),
+      edges: [
+        { from: 'a', to: 'b' },
+        { from: 'a', to: 'c' },
+        { from: 'c', to: 'b' },
+        { from: 'b', to: 'a' },
+      ],
+    })
+    const layout = layoutPlanFlows(plan)[0]
 
-    expect(JSON.stringify(layoutPlanFlows(planWith({ nodes, edges })))).toBe(
-      JSON.stringify(layoutPlanFlows(planWith({ nodes, edges }))),
-    )
+    expect(layout.nodes.map((node) => [node.id, node.column, node.row])).toEqual([
+      ['a', 0, 0],
+      ['b', 2, 0],
+      ['c', 1, 0],
+      ['d', 0, 1],
+    ])
+    expect(layout.edges.map((edge) => [edge.from, edge.to, edge.back])).toEqual([
+      ['a', 'b', false],
+      ['a', 'c', false],
+      ['c', 'b', false],
+      ['b', 'a', true],
+    ])
+    expect([layout.columns, layout.rows]).toEqual([3, 2])
   })
 
   test('should report the grid of a flow with more steps than a page would ever show', () => {
@@ -242,16 +263,14 @@ describe('layoutPlanFlows on graphs that are not a clean chain', () => {
     expect(placed(twice).c).toEqual([3, 0])
   })
 
-  test('should place a chain declared back to front without paying a pass per edge', () => {
-    // A model writing a flow from its end declares its edges in reverse. Relaxing until
-    // the edge list settles costs a pass each: 1,930 ms at 8,000 steps, measured.
-    const { nodes, edges } = chain(8000)
-    const started = performance.now()
+  test('should place a chain declared back to front', () => {
+    // A model writing a flow from its end declares its edges in reverse, which is the
+    // only shape the settle-the-edge-list form was quadratic on: it cannot finish this
+    // at all, where one pass over a topological order does it in about 180 ms. Asserted
+    // on the placement rather than on a clock, so a busy machine cannot fail it.
+    const { nodes, edges } = chain(120000)
 
-    const layout = layoutPlanFlows(planWith({ nodes, edges: edges.slice().reverse() }))[0]
-
-    expect(layout.columns).toBe(8000)
-    expect(performance.now() - started).toBeLessThan(500)
+    expect(layoutPlanFlows(planWith({ nodes, edges: edges.slice().reverse() }))[0].columns).toBe(120000)
   })
 
   test('should walk a chain deeper than a call stack would carry', () => {
@@ -265,14 +284,28 @@ describe('layoutPlanFlows on graphs that are not a clean chain', () => {
 })
 
 describe('the flow module', () => {
-  const source = readFileSync(join(import.meta.dir, '../src/plan/flow.ts'), 'utf8')
+  /**
+   * The code, without its own explanation. Asserting over the whole file made the
+   * comment that describes this rule trip it, which is the mistake the sibling branch's
+   * CSP test already fixed by parsing the value instead of grepping the source.
+   */
+  const code = readFileSync(join(import.meta.dir, '../src/plan/flow.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
 
   /**
    * A spread passes one argument per element: 120,000 throws under Node, and Bun carries
    * a million. The suite runs under Bun, so no behavioural test here can see the limit
    * the other runtime has. Asserted on the source instead, like the page's sinks.
+   * Matched anywhere in the argument list, since a seed comes first: `Math.max(0, ...xs)`
+   * is the form you reach for once an empty collection has to yield a number.
    */
-  test.each(['Math.max(...', 'Math.min(...'])('should not spread an array into %s', (spread) => {
-    expect(source).not.toContain(spread)
+  test.each(['max', 'min'])('should not spread a collection into Math.%s', (call) => {
+    expect(code).not.toMatch(new RegExp(`Math\\.${call}\\([^)]*\\.\\.\\.`))
+  })
+
+  test('should still see a spread that a comment mentions', () => {
+    // The stripping must not be so eager that it takes the code with it.
+    expect(code).toContain('function widest')
   })
 })

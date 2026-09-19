@@ -431,11 +431,12 @@ describe('validatePlan', () => {
 })
 
 describe('flows', () => {
+  function planWithFlows(...flows: unknown[]): PlanDraft {
+    return PlanDraftSchema.parse({ ...loadCommentsPlan(), flows })
+  }
+
   function planWithFlow(nodes: unknown[], edges: unknown[]): PlanDraft {
-    return PlanDraftSchema.parse({
-      ...loadCommentsPlan(),
-      flows: [{ id: 'flow.comment', change: { kind: 'add' }, title: 'Leaving a comment', nodes, edges }],
-    })
+    return planWithFlows({ id: 'flow.comment', change: { kind: 'add' }, title: 'Leaving a comment', nodes, edges })
   }
 
   const step = { id: 'form', label: 'The comment form', kind: 'page' }
@@ -506,13 +507,10 @@ describe('flows', () => {
   })
 
   test('should accept the same step id in two different flows', () => {
-    const plan = PlanDraftSchema.parse({
-      ...loadCommentsPlan(),
-      flows: [
-        { id: 'flow.one', change: { kind: 'add' }, title: 'One', nodes: [step], edges: [] },
-        { id: 'flow.two', change: { kind: 'add' }, title: 'Two', nodes: [step], edges: [] },
-      ],
-    })
+    const plan = planWithFlows(
+      { id: 'flow.one', change: { kind: 'add' }, title: 'One', nodes: [step], edges: [] },
+      { id: 'flow.two', change: { kind: 'add' }, title: 'Two', nodes: [step], edges: [] },
+    )
 
     expect(failures(validatePlan(plan, appState())).filter((r) => r.key === 'plan:reference')).toEqual([])
   })
@@ -552,21 +550,28 @@ describe('flows', () => {
     expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
   })
 
+  test('should give every flow finding a title of its own', () => {
+    // A finding falls back to its own key when `TITLES` has no entry, so a new check
+    // renders `plan:flow-self-loop` where a sentence belongs. This flow trips both.
+    const results = validatePlan(planWithFlow([step, step], [{ from: 'form', to: 'form' }]), appState())
+    const flow = results.filter((result) => result.elementId === 'flow.comment')
+
+    expect(flow.map((result) => result.key)).toEqual(['plan:reference', 'plan:flow-self-loop'])
+    for (const result of flow) expect(result.title).not.toBe(result.key)
+  })
+
   test('should judge an edge against its own flow, since a step id is the flow\'s own', () => {
-    const plan = PlanDraftSchema.parse({
-      ...loadCommentsPlan(),
-      flows: [
-        { id: 'flow.one', change: { kind: 'add' }, title: 'One', nodes: [step], edges: [] },
-        {
-          id: 'flow.two',
-          change: { kind: 'add' },
-          title: 'Two',
-          nodes: [{ id: 'other', label: 'Other', kind: 'page' }],
-          // `form` is a step of flow.one, which says nothing about flow.two.
-          edges: [{ from: 'other', to: 'form' }],
-        },
-      ],
-    })
+    const plan = planWithFlows(
+      { id: 'flow.one', change: { kind: 'add' }, title: 'One', nodes: [step], edges: [] },
+      {
+        id: 'flow.two',
+        change: { kind: 'add' },
+        title: 'Two',
+        nodes: [{ id: 'other', label: 'Other', kind: 'page' }],
+        // `form` is a step of flow.one, which says nothing about flow.two.
+        edges: [{ from: 'other', to: 'form' }],
+      },
+    )
 
     const results = validatePlan(plan, appState())
 

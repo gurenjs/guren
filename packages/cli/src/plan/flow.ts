@@ -3,12 +3,12 @@
  * the page draws the positions it is handed rather than deciding them, so a flow looks
  * the same in the page, in print, and in any later view built on the same value.
  *
- * Layering is longest-path over the acyclic part of the graph. A plan may describe a
- * loop (a retry, a redirect back to the form), so the cycle-breaking is part of the
- * layout rather than a reason to refuse one.
+ * Nothing here may take a per-element engine resource: no recursion over the graph, no
+ * array spread into a call. Both ceilings are the runtime's, so the plan that breaks
+ * the layout would otherwise depend on which runtime read it.
  */
 
-import type { PlanDraft, PlanFlowEdge, PlanFlowNode } from './schema'
+import type { PlanChange, PlanDraft, PlanFlow, PlanFlowEdge, PlanFlowNode } from './schema'
 
 export interface PlanFlowLayoutNode extends PlanFlowNode {
   /** Distance from a node with no incoming edge; the page's horizontal axis. */
@@ -22,46 +22,59 @@ export interface PlanFlowLayoutEdge extends PlanFlowEdge {
   back: boolean
 }
 
-export interface PlanFlowLayout {
-  id: string
-  title: string
-  description?: string
-  change: string
+/** Everything the flow declares except its graph, plus where that graph goes. */
+export interface PlanFlowLayout extends Omit<PlanFlow, 'nodes' | 'edges' | 'change'> {
+  change: PlanChange['kind']
   nodes: PlanFlowLayoutNode[]
   edges: PlanFlowLayoutEdge[]
   columns: number
   rows: number
 }
 
-/** Edges whose endpoints the flow declares. One naming a node that does not exist is a §2 finding, not a line. */
-function declaredEdges(flow: { nodes: PlanFlowNode[]; edges: PlanFlowEdge[] }): PlanFlowEdge[] {
-  const declared = new Set(flow.nodes.map((node) => node.id))
-  return flow.edges.filter((edge) => declared.has(edge.from) && declared.has(edge.to) && edge.from !== edge.to)
+/** The largest of some numbers, folded. A spread into `Math.max` has the runtime's ceiling. */
+function widest(values: Iterable<number>): number {
+  let most = 0
+  for (const value of values) {
+    if (value > most) most = value
+  }
+  return most
 }
 
-/**
- * The edges that close a cycle: a depth-first walk in declaration order, where an edge
- * onto a node already on the stack is the one that closes it. Which edge of a cycle
- * that is depends on the order, so the order is the plan's, not a map's.
- * The walk carries its own stack because a recursive one overflows between 1,000 and
- * 5,000 chained steps under Node and between 20,000 and 40,000 under Bun.
- */
-function backEdges(nodes: PlanFlowNode[], edges: PlanFlowEdge[]): Set<PlanFlowEdge> {
+function edgesByFrom(edges: PlanFlowEdge[]): Map<string, PlanFlowEdge[]> {
   const out = new Map<string, PlanFlowEdge[]>()
   for (const edge of edges) {
     const bucket = out.get(edge.from)
     if (bucket) bucket.push(edge)
     else out.set(edge.from, [edge])
   }
+  return out
+}
 
+/**
+ * Edges the layout can draw. An end the flow does not declare is a §2 finding rather
+ * than a line, and so is a step looping to itself (`plan:flow-self-loop`), dropped here
+ * because a line from a box to itself draws nothing.
+ */
+function declaredEdges(stepIds: readonly string[], edges: PlanFlowEdge[]): PlanFlowEdge[] {
+  const declared = new Set(stepIds)
+  return edges.filter((edge) => declared.has(edge.from) && declared.has(edge.to) && edge.from !== edge.to)
+}
+
+/**
+ * The edges that close a cycle: a depth-first walk in declaration order, where an edge
+ * onto a step already on the stack is the one that closes it. Which edge of a cycle
+ * that is depends on the order, so the order is the plan's, not a map's.
+ */
+function backEdges(stepIds: readonly string[], edges: PlanFlowEdge[]): Set<PlanFlowEdge> {
+  const out = edgesByFrom(edges)
   const back = new Set<PlanFlowEdge>()
   const done = new Set<string>()
   const onStack = new Set<string>()
 
-  for (const start of nodes) {
-    if (done.has(start.id)) continue
-    onStack.add(start.id)
-    const stack = [{ id: start.id, next: 0 }]
+  for (const start of stepIds) {
+    if (done.has(start)) continue
+    onStack.add(start)
+    const stack = [{ id: start, next: 0 }]
 
     while (stack.length > 0) {
       const frame = stack[stack.length - 1]
@@ -85,31 +98,19 @@ function backEdges(nodes: PlanFlowNode[], edges: PlanFlowEdge[]): Set<PlanFlowEd
 }
 
 /**
- * Longest path from a node with no incoming edge, in one pass over a topological order.
- * Relaxing the edge list until it settles reaches the same answer but costs a pass per
- * edge that was declared before the edge it depends on: measured at 1,930 ms for a
- * chain of 8,000 steps declared back to front, which is how a model writing a flow from
- * its end produces one.
+ * Longest path from a step with no incoming edge, in one pass over a topological order.
+ * Relaxing the edge list until it settles reaches the same answer, at a pass per edge
+ * declared before the edge it depends on: quadratic on a flow written back to front,
+ * which is what a model writing one from its end produces.
  */
-function columns(nodes: PlanFlowNode[], forward: PlanFlowEdge[]): Map<string, number> {
-  // By distinct id, in declaration order. A flow may declare one id twice (§2 reports
-  // it, and rendering is not blocked by a finding), and everything here is keyed by id:
-  // seeding the queue from the node list would queue that id twice, take one decrement
-  // too many off each of its successors, and release them before their own predecessors
-  // had settled.
-  const distinct = [...new Set(nodes.map((node) => node.id))]
+function columns(stepIds: readonly string[], forward: PlanFlowEdge[]): Map<string, number> {
+  const out = edgesByFrom(forward)
+  const pending = new Map(stepIds.map((id) => [id, 0]))
+  for (const edge of forward) pending.set(edge.to, (pending.get(edge.to) as number) + 1)
 
-  const out = new Map<string, PlanFlowEdge[]>()
-  const pending = new Map(distinct.map((id) => [id, 0]))
-  for (const edge of forward) {
-    const bucket = out.get(edge.from)
-    if (bucket) bucket.push(edge)
-    else out.set(edge.from, [edge])
-    pending.set(edge.to, (pending.get(edge.to) as number) + 1)
-  }
-
-  const column = new Map(distinct.map((id) => [id, 0]))
-  const ready = distinct.filter((id) => pending.get(id) === 0)
+  const column = new Map(stepIds.map((id) => [id, 0]))
+  // Declaration order among the ready steps, so the placement is the plan's order.
+  const ready = stepIds.filter((id) => pending.get(id) === 0)
   for (let at = 0; at < ready.length; at += 1) {
     const id = ready[at]
     for (const edge of out.get(id) ?? []) {
@@ -125,10 +126,15 @@ function columns(nodes: PlanFlowNode[], forward: PlanFlowEdge[]): Map<string, nu
 
 export function layoutPlanFlows(plan: PlanDraft): PlanFlowLayout[] {
   return plan.flows.map((flow) => {
-    const edges = declaredEdges(flow)
-    const back = backEdges(flow.nodes, edges)
-    const forward = edges.filter((edge) => !back.has(edge))
-    const column = columns(flow.nodes, forward)
+    // Derived once and handed down. A flow may declare one id twice (§2 reports it, and
+    // a finding does not stop the page rendering), and everything below is keyed by id.
+    const stepIds = [...new Set(flow.nodes.map((node) => node.id))]
+    const edges = declaredEdges(stepIds, flow.edges)
+    const back = backEdges(stepIds, edges)
+    const column = columns(
+      stepIds,
+      edges.filter((edge) => !back.has(edge)),
+    )
 
     const filled = new Map<number, number>()
     const nodes: PlanFlowLayoutNode[] = flow.nodes.map((node) => {
@@ -145,11 +151,9 @@ export function layoutPlanFlows(plan: PlanDraft): PlanFlowLayout[] {
       change: flow.change.kind,
       nodes,
       edges: edges.map((edge) => ({ ...edge, back: back.has(edge) })),
-      // Folded, never spread: a spread passes one argument per element, and the argument
-      // limit is its own ceiling. 120,000 throws under Node and Bun carries a million,
-      // so spreading here would let the runtime decide what a flow may contain.
-      columns: nodes.reduce((widest, node) => Math.max(widest, node.column), 0) + 1,
-      rows: [...filled.values()].reduce((tallest, count) => Math.max(tallest, count), 0),
+      // `filled` is keyed by column and counts the steps in it, so it carries both.
+      columns: widest(filled.keys()) + 1,
+      rows: widest(filled.values()),
     }
   })
 }
