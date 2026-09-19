@@ -174,6 +174,8 @@
 
       a {
         color: var(--g-accent-text);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
       }
 
       .lede {
@@ -361,8 +363,13 @@
       }
 
       .card.sub {
-        background: var(--g-raised);
-        margin-bottom: 8px;
+        border: 0;
+        border-left: 2px solid var(--g-line);
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        padding: 10px 0 10px 16px;
+        margin: 0 0 4px;
       }
 
       .card:target {
@@ -382,12 +389,36 @@
         font-size: 0.8rem;
       }
 
+      /* A question mark is a badge like any other state: the kit has four, and this is
+         the warn one. It was a dashed outline, which belonged to no part of the kit. */
       .depends {
-        font-size: 0.75rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 2px 9px;
+        font: 500 12px/1.6 var(--g-font-mono);
         color: var(--g-warn);
-        border: 1px dashed currentColor;
-        border-radius: 6px;
-        padding: 0 6px;
+        background: var(--g-warn-tint);
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .depends::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      .facts {
+        display: block;
+        margin-top: 6px;
+        font-family: var(--g-font-mono);
+        font-size: 12.5px;
+        color: var(--g-text-2);
+        white-space: pre-wrap;
       }
 
       .kv {
@@ -406,29 +437,24 @@
         margin: 0;
       }
 
-      .chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-top: 8px;
+      .referenced-by {
+        margin: 10px 0 0;
       }
 
-      .chip {
-        font-size: 0.78rem;
-        border: 1px solid var(--g-line);
-        border-radius: 6px;
-        padding: 1px 7px;
-        background: var(--g-raised);
+      .referenced-by .label {
+        font: 500 11.5px/1.6 var(--g-font-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--g-muted);
+        margin-right: 10px;
       }
 
       .review {
         display: flex;
         flex-wrap: wrap;
-        align-items: flex-start;
+        align-items: center;
         gap: 8px;
-        margin-top: 10px;
-        padding-top: 10px;
-        border-top: 1px dashed var(--g-line);
+        margin-top: 12px;
       }
 
       .review .verdicts {
@@ -467,8 +493,17 @@
         background: var(--g-danger-tint);
       }
 
-      .review label {
+      .review textarea {
         flex: 1 1 220px;
+        min-height: 0;
+        padding: 5px 11px;
+        font-size: 13px;
+      }
+
+      /* Quiet until someone is using it: the page is a plan, not a form. */
+      .review textarea:not(:focus):placeholder-shown {
+        background: transparent;
+        border-color: var(--g-line);
       }
 
       fieldset.bare {
@@ -505,8 +540,10 @@
         padding-top: 2px;
       }
 
+      /* Never scaled up: a collapsed two-table diagram stretched to the panel width
+         reads as empty boxes. It still shrinks to fit a narrow screen. */
       .er {
-        width: 100%;
+        max-width: 100%;
         height: auto;
         overflow: visible;
       }
@@ -895,18 +932,16 @@
           syncVerdicts()
           wrap.appendChild(verdicts)
 
-          var label = el('label')
-          label.appendChild(el('span', 'note', 'Comment'))
           var box = el('textarea')
           box.rows = 1
           box.value = stored.comment
+          box.placeholder = 'Comment'
           box.setAttribute('aria-label', 'Comment on ' + id)
           box.addEventListener('input', function () {
             entryFor(id).comment = box.value
             saveReview()
           })
-          label.appendChild(box)
-          wrap.appendChild(label)
+          wrap.appendChild(box)
           return wrap
         }
 
@@ -994,21 +1029,21 @@
 
           if (options.body) node.appendChild(options.body)
 
-          var related = outgoing[options.id] || []
+          // Only the reverse direction: what an element references is already written
+          // where it belongs — a validator under Body, a policy under Policy, a target
+          // in its relationship line — and repeating it as chips said it twice.
           var back = incoming[options.id] || []
-          if (related.length || back.length) {
-            var chips = el('div', 'chips')
-            related.forEach(function (edge) {
-              var chip = link(edge.to, edge.label + ' -> ' + edge.to)
-              chip.className = 'chip'
-              chips.appendChild(chip)
-            })
+          if (back.length) {
+            var seen = idMap()
+            var referrers = el('p', 'note referenced-by')
+            referrers.appendChild(el('span', 'label', 'Referenced by'))
             back.forEach(function (edge) {
-              var chip = link(edge.from, edge.from + ' -> ' + edge.label)
-              chip.className = 'chip'
-              chips.appendChild(chip)
+              if (seen[edge.from]) return
+              seen[edge.from] = true
+              if (referrers.childNodes.length > 1) referrers.appendChild(document.createTextNode(', '))
+              referrers.appendChild(link(edge.from))
             })
-            node.appendChild(chips)
+            node.appendChild(referrers)
           }
 
           if (!options.noReview) node.appendChild(reviewControls(options.id))
@@ -1127,6 +1162,8 @@
           var totalHeight = Math.max(top - gapY, headerHeight)
           var svg = svgEl('svg', {
             class: 'er',
+            width: totalWidth,
+            height: totalHeight,
             viewBox: '0 0 ' + totalWidth + ' ' + totalHeight,
             role: 'img',
             'aria-label': 'Entity relationship diagram of the plan',
@@ -1192,6 +1229,33 @@
 
         var diagramHost = null
 
+        /**
+         * A column as one mono line, the way the diagram already writes one: the type,
+         * then only the facts that are true. Five rows reading `no` said less than this.
+         */
+        function columnFacts(column) {
+          var facts = [column.type + (column.precision ? '(' + column.precision + ',' + (column.scale || 0) + ')' : '')]
+          if (column.primaryKey) facts.push('pk')
+          if (column.nullable) facts.push('null')
+          if (column.unique) facts.push('uniq')
+          if (column.index) facts.push('idx')
+          if (column.withTimezone) facts.push('tz')
+          if (column.default !== undefined) facts.push('default ' + column.default)
+          if (column.columnName !== undefined) facts.push('as ' + column.columnName)
+
+          var parts = [facts.join('  ')]
+          if (column.references) {
+            parts.push('  references ')
+            parts.push(link(column.references.model))
+            parts.push(
+              '.' + column.references.column + (column.references.onDelete ? ' on delete ' + column.references.onDelete : ''),
+            )
+          }
+          var line = span(parts)
+          line.className = 'facts'
+          return line
+        }
+
         function renderModels(host) {
           var diagramPanel = el('div', 'panel')
           diagramPanel.appendChild(el('h2', null, 'Entity relationships'))
@@ -1225,31 +1289,20 @@
               var columnsHost = el('div')
               columnsHost.appendChild(el('h4', null, 'Columns'))
               model.columns.forEach(function (column) {
-                var columnBody = kv([
-                  ['Type', column.type + (column.precision ? '(' + column.precision + ',' + (column.scale || 0) + ')' : '')],
-                  ['Column', column.columnName],
-                  ['Nullable', column.nullable ? 'yes' : 'no'],
-                  ['Unique', column.unique ? 'yes' : 'no'],
-                  ['Index', column.index ? 'yes' : 'no'],
-                  ['Primary key', column.primaryKey ? 'yes' : null],
-                  ['Time zone', column.withTimezone === undefined ? null : column.withTimezone ? 'yes' : 'no'],
-                  ['Default', column.default],
-                  [
-                    'References',
-                    column.references
-                      ? span([
-                          link(column.references.model),
-                          '.' +
-                            column.references.column +
-                            (column.references.onDelete ? ' on delete ' + column.references.onDelete : ''),
-                        ])
-                      : null,
-                  ],
-                  [
-                    'Data migration',
-                    column.dataMigration ? column.dataMigration.kind + ': ' + (column.dataMigration.reason || column.dataMigration.description) : null,
-                  ],
-                ])
+                var columnBody = el('div')
+                columnBody.appendChild(columnFacts(column))
+                if (column.dataMigration) {
+                  columnBody.appendChild(
+                    el(
+                      'p',
+                      'note',
+                      'Data migration — ' +
+                        column.dataMigration.kind +
+                        ': ' +
+                        (column.dataMigration.reason || column.dataMigration.description),
+                    ),
+                  )
+                }
                 columnsHost.appendChild(
                   card({ id: column.id, title: column.name, change: column.change, body: columnBody, sub: true, parent: node }),
                 )
@@ -1476,11 +1529,16 @@
 
         function renderTasks(host) {
           plan.tasks.forEach(function (task) {
-            var node = card({
-              id: task.id,
-              title: task.entity + ' - ' + task.summary,
-              body: kv([['Entity', task.entity], ['Covers', task.covers.length + ' elements']]),
+            var covers = el('p', 'note referenced-by')
+            covers.appendChild(el('span', 'label', 'Covers'))
+            task.covers.forEach(function (elementId, index) {
+              if (index) covers.appendChild(document.createTextNode(', '))
+              covers.appendChild(link(elementId))
             })
+            var taskBody = el('div')
+            taskBody.appendChild(kv([['Entity', task.entity]]))
+            taskBody.appendChild(covers)
+            var node = card({ id: task.id, title: task.entity + ' - ' + task.summary, body: taskBody })
             task.acceptance.forEach(function (acceptance) {
               node.appendChild(
                 card({
@@ -1642,13 +1700,12 @@
             body.appendChild(answerLabel)
 
             if (question.affects.length) {
-              var affects = el('div', 'chips')
-              question.affects.forEach(function (affected) {
-                var chip = link(affected)
-                chip.className = 'chip'
-                affects.appendChild(chip)
+              var affects = el('p', 'note referenced-by')
+              affects.appendChild(el('span', 'label', 'Affects'))
+              question.affects.forEach(function (elementId, index) {
+                if (index) affects.appendChild(document.createTextNode(', '))
+                affects.appendChild(link(elementId))
               })
-              body.appendChild(el('h4', null, 'Affects'))
               body.appendChild(affects)
             }
 
