@@ -8,6 +8,7 @@
  * checks that would have read it: an unread scanner never passes and never fails.
  */
 
+import { authMiddlewareVerdict } from '../audit'
 import { describeMethod } from '../http-methods'
 import { tableNameFor } from '../inflect'
 import type { CheckResult, CheckStatus } from '../check-result'
@@ -31,9 +32,13 @@ export interface PlanCheckResult extends CheckResult {
   section?: PlanElementSection
 }
 
-/** Middleware that authorizes is tested first: `authorize` starts with `auth` too. */
+/**
+ * Authentication is judged by `guren audit`'s own name rule, so a plan and an audit
+ * of the built application cannot disagree about a middleware called `sessionAuth`.
+ * Authorization has no such rule for a plan — audit reads a live route's stamped
+ * capabilities — so it is matched here, and first: `authorize` is an `auth` name too.
+ */
 const AUTHORIZATION_MIDDLEWARE = /^(can|authoriz|policy|gate|requireabilit)/i
-const AUTHENTICATION_MIDDLEWARE = /^(auth|requireauth|signedin|requiresignedin)/i
 
 /** Which column changes a model's own change admits. An `alter` model admits every kind. */
 const COLUMN_CHANGES_BY_MODEL: Record<PlanChange['kind'], ReadonlyArray<PlanChange['kind']> | null> = {
@@ -302,6 +307,11 @@ interface TargetCheck {
   noun: string
   /** What the name belongs to, e.g. ` of table "comments"`. */
   scope?: string
+  /**
+   * The reader answers a lower bound, so an absent name is unconfirmed rather than
+   * missing: the result warns and says why. A collision is positive evidence either way.
+   */
+  lowerBound?: string
 }
 
 function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, results: PlanCheckResult[]): void {
@@ -321,10 +331,11 @@ function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, resul
   const missing = (name: string): void => {
     results.push(
       result(
-        'plan:app-missing',
+        target.lowerBound ? 'plan:app-unjudged' : 'plan:app-missing',
         'Plan against the application',
-        'fail',
-        `The ${target.noun} "${name}"${target.scope ?? ''} does not exist in this application, but the plan's change is "${target.kind}".`,
+        target.lowerBound ? 'warn' : 'fail',
+        `The ${target.noun} "${name}"${target.scope ?? ''} was not found in this application, and the plan's change is "${target.kind}".`
+          + (target.lowerBound ? ` ${target.lowerBound}` : ''),
         target.id,
         target.section,
       ),
@@ -394,6 +405,29 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
     }
   }
 
+  if (!isUnreadable(app.actions)) {
+    for (const controller of plan.controllers) {
+      // An action's identity is `Class.action`, which is how a route names one; a
+      // controller the plan renames is looked up under the name it has today.
+      const className = renameFrom(controller.change) ?? controller.className
+      for (const action of controller.actions) {
+        checkTarget(
+          {
+            id: action.id,
+            section: 'actions',
+            current: `${className}.${action.name}`,
+            previous: renameFrom(action.change) && `${className}.${renameFrom(action.change)}`,
+            kind: action.change.kind,
+            noun: 'action',
+          },
+          app.actions,
+          results,
+        )
+      }
+    }
+  }
+
+  checkNamedSection(plan.validators, 'validators', 'validator', app.validators, results)
   checkNamedSection(plan.resources, 'resources', 'resource', app.resources, results)
   checkNamedSection(plan.policies, 'policies', 'policy', app.policies, results)
 
@@ -481,6 +515,7 @@ function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<{ identi
         kind: column.change.kind,
         noun: 'column',
         scope: ` of table "${table.tableName ?? table.identifier}"`,
+        lowerBound: 'The schema parser reports a table\'s columns as a lower bound: a spread column goes unreported.',
       },
       table.columns,
       results,
@@ -498,6 +533,7 @@ function reportUnreadable(app: PlanAppState, results: PlanCheckResult[]): void {
     ['controllers', app.controllers],
     ['resources', app.resources],
     ['policies', app.policies],
+    ['actions', app.actions],
     ['pages', app.pages],
     ['validators', app.validators],
     ['routes', app.routes],
@@ -534,13 +570,12 @@ function checkInflectedNames(plan: PlanDraft, results: PlanCheckResult[]): void 
 }
 
 function classifyMiddleware(names: ReadonlyArray<string>): { authenticates: boolean; authorizes: boolean } {
-  let authenticates = false
-  let authorizes = false
-  for (const name of names) {
-    if (AUTHORIZATION_MIDDLEWARE.test(name)) authorizes = true
-    else if (AUTHENTICATION_MIDDLEWARE.test(name)) authenticates = true
+  const authorizing = names.filter((name) => AUTHORIZATION_MIDDLEWARE.test(name))
+  const rest = names.filter((name) => !AUTHORIZATION_MIDDLEWARE.test(name))
+  return {
+    authenticates: authMiddlewareVerdict({ middlewareNames: rest, capabilities: undefined }) !== 'none',
+    authorizes: authorizing.length > 0,
   }
-  return { authenticates, authorizes }
 }
 
 function checkRouteAuthorization(plan: PlanDraft, index: PlanIndex, results: PlanCheckResult[]): void {

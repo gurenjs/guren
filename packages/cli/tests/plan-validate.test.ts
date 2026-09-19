@@ -17,6 +17,7 @@ function appState(overrides: Partial<PlanAppState> = {}): PlanAppState {
   return {
     models: ['Post', 'User'],
     controllers: ['PostController'],
+    actions: ['PostController.index', 'PostController.show'],
     resources: ['PostResource'],
     policies: ['PostPolicy'],
     pages: ['posts/Index', 'posts/Show'],
@@ -86,6 +87,7 @@ describe('validatePlan', () => {
 
     const result = find(validatePlan(draft, appState()), 'plan:reference', 'view.posts.show')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('The form field "title"')
   })
 
@@ -104,6 +106,7 @@ describe('validatePlan', () => {
 
     const result = find(validatePlan(draft, appState()), 'plan:reference', 'Q-delete')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('model.ghost')
   })
 
@@ -113,6 +116,7 @@ describe('validatePlan', () => {
 
     const result = find(validatePlan(draft, appState()), 'plan:reference', 'task.comments')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('view.ghost')
   })
 
@@ -140,6 +144,7 @@ describe('validatePlan', () => {
 
     const result = find(results, 'plan:app-collision', 'model.comment')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('The model class "Comment"')
   })
 
@@ -151,6 +156,7 @@ describe('validatePlan', () => {
 
     const result = find(results, 'plan:app-collision', 'route.comments.store')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('The route name "comments.store"')
   })
 
@@ -162,6 +168,7 @@ describe('validatePlan', () => {
 
     const result = find(results, 'plan:app-collision', 'route.comments.store')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('POST /posts/:postId/comments')
   })
 
@@ -172,6 +179,54 @@ describe('validatePlan', () => {
 
     expect(result?.status).toBe('warn')
     expect(result?.message).toContain('Table "posts" was not found')
+    expect(find(results, 'plan:app-missing', 'column.post.id')).toBeUndefined()
+  })
+
+  test('should fail an added action the controller already declares', () => {
+    const results = validatePlan(plan(), appState({ actions: ['CommentController.store'] }))
+
+    const result = find(results, 'plan:app-collision', 'action.comments.store')
+
+    expect(result?.status).toBe('fail')
+    expect(result?.message).toContain('CommentController.store')
+  })
+
+  test('should fail an existing action no controller declares', () => {
+    const draft = plan()
+    draft.controllers[0].change = { kind: 'existing' }
+    draft.controllers[0].actions[0].change = { kind: 'existing' }
+    draft.controllers[0].actions[1].change = { kind: 'existing' }
+
+    const results = validatePlan(draft, appState({ controllers: ['PostController', 'CommentController'] }))
+
+    expect(find(results, 'plan:app-missing', 'action.comments.store')?.status).toBe('fail')
+  })
+
+  test('should not judge actions when the controller scan was partial', () => {
+    const results = validatePlan(plan(), appState({ actions: { unreadable: '1 controller file did not parse' } }))
+
+    expect(find(results, 'plan:app-collision', 'action.comments.store')).toBeUndefined()
+    expect(find(results, 'plan:app-missing', 'action.comments.store')).toBeUndefined()
+    expect(find(results, 'plan:app-unreadable')?.message).toContain('did not parse')
+  })
+
+  test('should treat a validator section a caller supplies as readable', () => {
+    const results = validatePlan(plan(), appState({ validators: ['CommentPayloadSchema'] }))
+
+    const result = find(results, 'plan:app-collision', 'validator.comment')
+
+    expect(result?.status).toBe('fail')
+  })
+
+  test('should count an authentication middleware guren audit would count', () => {
+    const draft = plan()
+    draft.controllers[0].actions[1].authorization.middleware = ['sessionAuth']
+    draft.controllers[0].actions[1].authorization.policy = undefined
+    draft.routes[1].middleware = []
+
+    const result = find(validatePlan(draft, appState()), 'plan:route-authorization', 'route.comments.destroy')
+
+    expect(result?.status).toBe('warn')
   })
 
   test('should fail an altered model the application does not have', () => {
@@ -179,18 +234,22 @@ describe('validatePlan', () => {
 
     const result = find(results, 'plan:app-missing', 'model.post')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('The model class "Post"')
   })
 
-  test('should fail an existing column the application table does not declare', () => {
+  test('should warn rather than fail for a column the table parser did not report', () => {
     const results = validatePlan(
       plan(),
       appState({ tables: [{ identifier: 'posts', tableName: 'posts', columns: ['title'] }] }),
     )
 
-    const result = find(results, 'plan:app-missing', 'column.post.id')
+    const result = find(results, 'plan:app-unjudged', 'column.post.id')
 
+    expect(result?.status).toBe('warn')
     expect(result?.message).toContain('of table "posts"')
+    expect(result?.message).toContain('lower bound')
+    expect(find(results, 'plan:app-missing', 'column.post.id')).toBeUndefined()
   })
 
   test('should fail an added table the application already declares', () => {
@@ -206,6 +265,7 @@ describe('validatePlan', () => {
 
     const result = find(results, 'plan:app-collision', 'model.comment')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('The table "comments"')
   })
 
@@ -216,7 +276,7 @@ describe('validatePlan', () => {
 
     const results = validatePlan(draft, appState({ models: ['Article', 'User'] }))
 
-    expect(find(results, 'plan:app-missing', 'model.post')).toBeUndefined()
+    expect(results.filter((entry) => entry.elementId === 'model.post' && entry.status === 'fail')).toEqual([])
   })
 
   test('should not judge a section the scanners could not read', () => {
@@ -224,6 +284,7 @@ describe('validatePlan', () => {
 
     expect(find(results, 'plan:app-missing', 'model.post')).toBeUndefined()
     expect(find(results, 'plan:app-collision', 'model.comment')).toBeUndefined()
+    expect(find(results, 'plan:app-unreadable')?.status).toBe('warn')
     expect(find(results, 'plan:app-unreadable')?.message).toContain('app/Models would not open')
   })
 
@@ -234,6 +295,7 @@ describe('validatePlan', () => {
 
     const result = find(validatePlan(draft, appState()), 'plan:change-consistency', 'column.post.id')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('whose change is "existing"')
   })
 
@@ -284,6 +346,7 @@ describe('validatePlan', () => {
 
     const result = find(validatePlan(draft, appState()), 'plan:route-body', 'route.comments.store')
 
+    expect(result?.status).toBe('warn')
     expect(result?.message).toContain('names no body validator')
   })
 
@@ -314,6 +377,7 @@ describe('validatePlan', () => {
 
     const result = find(validatePlan(draft, appState()), 'plan:data-migration', 'model.post')
 
+    expect(result?.status).toBe('fail')
     expect(result?.message).toContain('articles')
   })
 
