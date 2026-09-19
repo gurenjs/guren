@@ -5,10 +5,19 @@ import type {
   File,
   Node,
   ObjectExpression,
-  ObjectProperty,
   Statement,
 } from '@babel/types'
-import { literalString, memberKeyName, objectLiteral, propertyValue, topLevelDeclaration, unwrapTypeAssertion, walk } from './ast-walk'
+import {
+  literalString,
+  memberKeyName,
+  nodeText,
+  objectLiteral,
+  propertyValue,
+  staticProperty,
+  topLevelDeclaration,
+  unwrapTypeAssertion,
+  walk,
+} from './ast-walk'
 import { listAppRoots } from './discovery'
 import { parseSourceFile } from './parse-cache'
 
@@ -73,6 +82,13 @@ function collectDrizzleImports(body: Statement[]): DrizzleImports {
     }
   }
   return imports
+}
+
+/** The drizzle export a callee names, through a local alias or a namespace member. */
+function drizzleName(callee: Node, imports: DrizzleImports): string | undefined {
+  if (callee.type === 'Identifier') return imports.named.get(callee.name)
+  const member = memberName(callee)
+  return member && imports.namespaces.has(member.object) ? member.property : undefined
 }
 
 /** The dialect a table factory call declares, or undefined if it isn't one. */
@@ -301,7 +317,7 @@ function unwrapColumnChain(
   while (current.type === 'CallExpression') {
     const callee = current.callee
     if (callee.type === 'Identifier') {
-      return { type: callee.name, builder: current, methods, rooted: imports.named.has(callee.name) }
+      return { type: callee.name, builder: current, methods, rooted: drizzleName(callee, imports) !== undefined }
     }
     if (callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') {
       break
@@ -310,16 +326,12 @@ function unwrapColumnChain(
     if (!methods.has(callee.property.name)) methods.set(callee.property.name, current)
     const object = unwrapTypeAssertion(callee.object)
     if (object.type !== 'CallExpression') {
-      return { methods, rooted: object.type === 'Identifier' && imports.namespaces.has(object.name) }
+      return { methods, rooted: drizzleName(callee, imports) !== undefined }
     }
     current = object
   }
 
   return { methods, rooted: false }
-}
-
-function propertyKeyName(property: ObjectProperty): string | undefined {
-  return memberKeyName(property)
 }
 
 /**
@@ -363,7 +375,7 @@ function booleanOption(builder: CallExpression | undefined, option: string): boo
   if (!options) return undefined
 
   for (const prop of options.properties) {
-    if (prop.type !== 'ObjectProperty' || propertyKeyName(prop) !== option) continue
+    if (prop.type !== 'ObjectProperty' || memberKeyName(prop) !== option) continue
     const value = unwrapTypeAssertion(prop.value)
     return value.type === 'BooleanLiteral' ? value.value : undefined
   }
@@ -398,26 +410,19 @@ function extractReference(call: CallExpression | undefined): SchemaColumnReferen
   return { table: returned.object.name, column: returned.property.name }
 }
 
-function sourceText(source: string, node: Node): string {
-  return source.slice(node.start!, node.end!)
-}
-
 function isSqlTemplate(node: Node, imports: DrizzleImports): boolean {
   if (node.type !== 'TaggedTemplateExpression') return false
   const tag = unwrapTypeAssertion(node.tag)
-  if (tag.type === 'Identifier') return tag.name === 'sql' || imports.named.get(tag.name) === 'sql'
-  const member = memberName(tag)
-  return member !== undefined && imports.namespaces.has(member.object) && member.property === 'sql'
+  return (tag.type === 'Identifier' && tag.name === 'sql') || drizzleName(tag, imports) === 'sql'
 }
 
 function extractDefault(methods: Map<string, CallExpression>, source: string, imports: DrizzleImports): SchemaColumnDefault | undefined {
   for (const [method, call] of methods) {
     if (method === 'defaultNow') return { kind: 'now' }
     if (method === 'defaultRandom') return { kind: 'random' }
-    const written = method === 'default' ? call.arguments[0] : undefined
-    if (written) {
-      return { kind: isSqlTemplate(unwrapTypeAssertion(written), imports) ? 'sql' : 'value', text: sourceText(source, written) }
-    }
+    const written = call.arguments[0]
+    if (method !== 'default' || !written) continue
+    return { kind: isSqlTemplate(unwrapTypeAssertion(written), imports) ? 'sql' : 'value', text: nodeText(source, written) }
   }
   return undefined
 }
@@ -427,7 +432,7 @@ function columnsFromObject(columnsArg: ObjectExpression, source: string, imports
   for (const prop of columnsArg.properties) {
     if (prop.type !== 'ObjectProperty') continue
 
-    const name = propertyKeyName(prop)
+    const name = memberKeyName(prop)
     if (!name) continue
 
     const { type, builder, methods, rooted } = unwrapColumnChain(prop.value, imports)
@@ -451,7 +456,7 @@ function columnsFromObject(columnsArg: ObjectExpression, source: string, imports
       ...(hasOpaqueOptions(builder) ? { opaqueOptions: true as const } : {}),
       unique: methods.has('unique'),
       ...(columnDefault ? { default: columnDefault } : {}),
-      ...(runtimeDefault ? { runtimeDefault: sourceText(source, runtimeDefault) } : {}),
+      ...(runtimeDefault ? { runtimeDefault: nodeText(source, runtimeDefault) } : {}),
       ...(rooted ? {} : { opaqueBuilder: true as const }),
     })
   }
@@ -496,7 +501,7 @@ function ownColumn(node: Node, binding: ColumnBinding): string | undefined {
   return member && member.object === binding.table ? member.property : undefined
 }
 
-/** Resolves every node or reports the list as not fully readable. */
+/** `opaque` when the list itself is missing or any node in it does not read. */
 function readList<T>(nodes: ReadonlyArray<Node | null> | undefined, read: (node: Node) => T | undefined): { items: T[]; opaque: boolean } {
   if (!nodes) return { items: [], opaque: true }
   const items: T[] = []
@@ -515,12 +520,21 @@ function arrayElements(node: Node | undefined): ReadonlyArray<Node | null> | und
 }
 
 function constraintKind(callee: Node, imports: DrizzleImports): SchemaConstraintKind | undefined {
-  const name = callee.type === 'Identifier'
-    ? imports.named.get(callee.name)
-    : imports.namespaces.has(memberName(callee)?.object ?? '')
-      ? memberName(callee)?.property
-      : undefined
-  return CONSTRAINT_BUILDERS.has(name as SchemaConstraintKind) ? (name as SchemaConstraintKind) : undefined
+  const name = drizzleName(callee, imports) as SchemaConstraintKind | undefined
+  return name && CONSTRAINT_BUILDERS.has(name) ? name : undefined
+}
+
+function constraintColumnNodes(
+  kind: SchemaConstraintKind,
+  root: CallExpression,
+  options: ObjectExpression | null,
+  methods: Map<string, CallExpression>,
+): ReadonlyArray<Node | null> | undefined {
+  if (kind === 'check') return []
+  if (options) return arrayElements(propertyValue(options, 'columns'))
+  if (kind === 'primaryKey') return root.arguments
+  // `.using(method, ...columns)` is Postgres's spelling of `.on(...columns)`.
+  return (methods.get('on') ?? methods.get('onOnly'))?.arguments ?? methods.get('using')?.arguments.slice(1)
 }
 
 /** One extra-config entry, or undefined when it is not a drizzle constraint builder chain. */
@@ -530,8 +544,8 @@ function readConstraint(entry: Node, binding: ColumnBinding, table: string, impo
   let kind: SchemaConstraintKind | undefined
 
   while (current.type === 'CallExpression') {
-    kind = constraintKind(current.callee, imports)
     const callee = current.callee
+    kind = constraintKind(callee, imports)
     if (kind || callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') break
     methods.set(callee.property.name, current)
     current = unwrapTypeAssertion(callee.object)
@@ -542,24 +556,18 @@ function readConstraint(entry: Node, binding: ColumnBinding, table: string, impo
   const nameNode = options ? propertyValue(options, 'name') : kind === 'primaryKey' ? undefined : current.arguments[0]
   const name = literalString(nameNode) ?? undefined
 
-  let columnNodes: ReadonlyArray<Node | null> | undefined
-  if (kind === 'check') columnNodes = []
-  else if (options) columnNodes = arrayElements(propertyValue(options, 'columns'))
-  else if (kind === 'primaryKey') columnNodes = current.arguments
-  // `.using(method, ...columns)` is Postgres's spelling of `.on(...columns)`.
-  else columnNodes = (methods.get('on') ?? methods.get('onOnly'))?.arguments ?? methods.get('using')?.arguments.slice(1)
-
-  const columns = readList(columnNodes, (node) => ownColumn(node, binding))
+  const columns = readList(constraintColumnNodes(kind, current, options, methods), (node) => ownColumn(node, binding))
   const constraint: SchemaConstraint = { kind, ...(name ? { name } : {}), columns: columns.items }
-  // A spread or computed key may override any option, and `primaryKey(OPTIONS)` may carry a name.
-  const hiddenOptions = options
-    ? options.properties.some((property) => property.type !== 'ObjectProperty' || property.computed)
-    : (kind === 'primaryKey' || kind === 'foreignKey') && columns.opaque
-  if ((nameNode && !name) || hiddenOptions) constraint.opaqueName = true
+  // A spread or computed key may override any option.
+  const hiddenOptions = options?.properties.some((property) => !staticProperty(property)) ?? false
+  // `primaryKey(OPTIONS)` reads as one unreadable positional column, and may carry a name.
+  const hiddenName = hiddenOptions || (!options && (kind === 'primaryKey' || kind === 'foreignKey') && columns.opaque)
+  if ((nameNode && !name) || hiddenName) constraint.opaqueName = true
   let opaque = columns.opaque || hiddenOptions
 
   if (kind === 'foreignKey') {
-    const targets = readList(arrayElements(options ? propertyValue(options, 'foreignColumns') : undefined), (node) => memberName(unwrapTypeAssertion(node)))
+    const foreignColumns = options ? propertyValue(options, 'foreignColumns') : undefined
+    const targets = readList(arrayElements(foreignColumns), (node) => memberName(unwrapTypeAssertion(node)))
     const tables = new Set(targets.items.map((target) => (target.object === binding.table ? table : target.object)))
     if (tables.size === 1) constraint.references = { table: [...tables][0], columns: targets.items.map((target) => target.property) }
     opaque ||= targets.opaque || tables.size !== 1
@@ -567,6 +575,13 @@ function readConstraint(entry: Node, binding: ColumnBinding, table: string, impo
 
   if (opaque) constraint.opaqueColumns = true
   return constraint
+}
+
+/** The entries of the array form or the object form; a hidden key is a null entry. */
+function constraintEntries(returned: Node | undefined): Array<Node | null> | undefined {
+  if (returned?.type === 'ArrayExpression') return returned.elements
+  if (returned?.type !== 'ObjectExpression') return undefined
+  return returned.properties.map((property) => staticProperty(property)?.value ?? null)
 }
 
 function readConstraints(
@@ -578,15 +593,11 @@ function readConstraints(
 
   const callback = unwrapTypeAssertion(extraConfig)
   // A block with anything beside its `return` may branch or bind the names the literal uses.
-  const isCallback = callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression'
-  const straight = !isCallback || callback.body.type !== 'BlockStatement' || callback.body.body.length === 1
-  const returned = straight ? returnedExpression(callback) : undefined
-  const entries: Array<Node | null> | undefined =
-    returned?.type === 'ArrayExpression'
-      ? returned.elements
-      : returned?.type === 'ObjectExpression'
-        ? returned.properties.map((property) => (property.type === 'ObjectProperty' && !property.computed ? property.value : null))
-        : undefined
+  const busyBlock =
+    (callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression')
+    && callback.body.type === 'BlockStatement'
+    && callback.body.body.length !== 1
+  const entries = busyBlock ? undefined : constraintEntries(returnedExpression(callback))
 
   const binding = columnBinding(callback)
   const { items, opaque } = readList(entries, (entry) => readConstraint(entry, binding, table, imports))
@@ -616,7 +627,8 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
   for (const { identifier, call, dialect } of tableDeclarations(ast)) {
     // Columns passed as an identifier rather than a literal: this reader exists to
     // report them, so a table it cannot read contributes nothing.
-    const columnsArg = firstObjectArgument(call)
+    const columnsIndex = call.arguments.findIndex((argument) => objectLiteral(argument))
+    const columnsArg = objectLiteral(call.arguments[columnsIndex])
     if (!columnsArg) continue
 
     tables.push({
@@ -625,10 +637,8 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
       columns: columnsFromObject(columnsArg, source, imports),
       module,
       dialect,
-      ...readConstraints(call.arguments[call.arguments.findIndex((arg) => objectLiteral(arg) === columnsArg) + 1], identifier, imports),
-      ...(columnsArg.properties.some((property) => property.type !== 'ObjectProperty' || property.computed)
-        ? { opaqueColumns: true as const }
-        : {}),
+      ...readConstraints(call.arguments[columnsIndex + 1], identifier, imports),
+      ...(columnsArg.properties.some((property) => !staticProperty(property)) ? { opaqueColumns: true as const } : {}),
     })
   }
 
