@@ -4,11 +4,11 @@ import type { DiscoveredModel, ModelInfo, ModelRelationship } from '../src/model
 import type { SchemaColumn, SchemaTable } from '../src/schema-parser'
 
 function column(name: string, overrides: Partial<SchemaColumn> = {}): SchemaColumn {
-  return { name, type: 'text', notNull: false, primaryKey: false, ...overrides }
+  return { name, type: 'text', notNull: false, primaryKey: false, unique: false, ...overrides }
 }
 
 function table(identifier: string, columns: SchemaColumn[], overrides: Partial<SchemaTable> = {}): SchemaTable {
-  return { identifier, columns, module: null, dialect: 'pg', ...overrides }
+  return { identifier, columns, module: null, dialect: 'pg', constraints: [], ...overrides }
 }
 
 function model(
