@@ -17,7 +17,11 @@ export class PlanCanonicalizationError extends Error {
   }
 }
 
-/** Accepts what `JSON.parse` can produce and nothing else; anything richer would hash ambiguously. */
+/**
+ * Accepts what `JSON.parse` can produce and nothing else; anything richer would hash ambiguously.
+ * Same byte rule as `canonicalizeAgentApprovalInput()` in `@guren/server`, which lacks these
+ * refusals; both name durable records, so a change to the rule belongs in both.
+ */
 export function canonicalJson(value: unknown): string {
   return write(value, '', new Set())
 }

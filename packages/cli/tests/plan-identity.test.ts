@@ -1,17 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 
 import { canonicalJson, PlanCanonicalizationError, planHash } from '../src/plan/identity'
 import { PlanSchema, type Plan } from '../src/plan/schema'
-
-function loadRaw(): Record<string, unknown> {
-  const text = readFileSync(join(import.meta.dir, 'fixtures/plan/comments.plan.json'), 'utf8')
-  return JSON.parse(text) as Record<string, unknown>
-}
+import { loadCommentsPlan, TEST_BASELINE } from './plan-fixture'
 
 function validPlan(): Plan {
-  return PlanSchema.parse({ ...loadRaw(), baseline: { rev: '6445bc71', contextHash: { 'model.post': 'ab12' } } })
+  return PlanSchema.parse({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
 }
 
 function reverseKeys(value: unknown): unknown {
@@ -35,11 +29,11 @@ describe('canonicalJson', () => {
   })
 
   test('should escape strings the way JSON does', () => {
-    expect(canonicalJson({ text: 'line\n"quoted"  ' })).toBe(JSON.stringify({ text: 'line\n"quoted"  ' }))
+    expect(canonicalJson({ text: 'line\n"quoted" \u2028' })).toBe(JSON.stringify({ text: 'line\n"quoted" \u2028' }))
   })
 
   test('should keep NFC and NFD text apart, as the files that hold them are', () => {
-    expect(canonicalJson('ガ')).not.toBe(canonicalJson('ガ'))
+    expect(canonicalJson('\u30AC')).not.toBe(canonicalJson('\u30AB\u3099'))
   })
 
   test('should accept an object with no prototype', () => {
@@ -124,9 +118,14 @@ describe('planHash', () => {
   })
 
   test('should name a document that omits an empty section like one that spells it out', () => {
-    const baseline = { rev: '6445bc71', contextHash: {} }
-    const omitted = PlanSchema.parse({ ...loadRaw(), baseline })
-    const spelled = PlanSchema.parse({ ...loadRaw(), sideEffects: [], commands: [], hints: [], baseline })
+    const omitted = PlanSchema.parse({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
+    const spelled = PlanSchema.parse({
+      ...loadCommentsPlan(),
+      sideEffects: [],
+      commands: [],
+      hints: [],
+      baseline: TEST_BASELINE,
+    })
 
     expect(planHash(spelled)).toBe(planHash(omitted))
   })

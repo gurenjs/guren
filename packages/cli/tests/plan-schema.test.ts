@@ -1,6 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 
 import {
   findDuplicatePlanIds,
@@ -10,30 +8,27 @@ import {
   PlanSchema,
   type PlanDraft,
 } from '../src/plan/schema'
-
-function loadFixture(): unknown {
-  return JSON.parse(readFileSync(join(import.meta.dir, 'fixtures/plan/comments.plan.json'), 'utf8'))
-}
+import { loadCommentsPlan, TEST_BASELINE } from './plan-fixture'
 
 function validDraft(): PlanDraft {
-  return PlanDraftSchema.parse(loadFixture())
+  return PlanDraftSchema.parse(loadCommentsPlan())
 }
 
 describe('PlanDraftSchema', () => {
   test('should accept the comments fixture', () => {
-    const result = PlanDraftSchema.safeParse(loadFixture())
+    const result = PlanDraftSchema.safeParse(loadCommentsPlan())
 
     expect(result.success).toBe(true)
   })
 
   test('should reject a key the schema does not declare', () => {
-    const draft = { ...(loadFixture() as Record<string, unknown>), notes: 'free text' }
+    const draft = { ...loadCommentsPlan(), notes: 'free text' }
 
     expect(PlanDraftSchema.safeParse(draft).success).toBe(false)
   })
 
   test('should reject an undeclared key on a nested element rather than strip it', () => {
-    const draft = structuredClone(validDraft()) as unknown as {
+    const draft = validDraft() as unknown as {
       models: Array<{ relationships: Array<Record<string, unknown>> }>
     }
     draft.models[1]!.relationships[0]!.foreignKey = 'post_id'
@@ -42,17 +37,16 @@ describe('PlanDraftSchema', () => {
   })
 
   test('should reject a baseline, which only Guren stamps', () => {
-    const draft = { ...(loadFixture() as Record<string, unknown>), baseline: { rev: 'abc', contextHash: {} } }
+    const draft = { ...loadCommentsPlan(), baseline: { rev: 'abc', contextHash: {} } }
 
     expect(PlanDraftSchema.safeParse(draft).success).toBe(false)
   })
 
   test('should reject a rename that does not say what it renames', () => {
-    const draft = validDraft()
-    const broken = structuredClone(draft) as unknown as { models: Array<{ change: unknown }> }
-    broken.models[1]!.change = { kind: 'rename' }
+    const draft = validDraft() as unknown as { models: Array<{ change: unknown }> }
+    draft.models[1]!.change = { kind: 'rename' }
 
-    expect(PlanDraftSchema.safeParse(broken).success).toBe(false)
+    expect(PlanDraftSchema.safeParse(draft).success).toBe(false)
   })
 
   test('should reject an acceptance input whose value is not JSON text', () => {
@@ -78,7 +72,7 @@ describe('PlanDraftSchema', () => {
   })
 
   test('should reject a column without an id, since a revision addresses it by one', () => {
-    const draft = structuredClone(validDraft()) as unknown as { models: Array<{ columns: Array<{ id?: string }> }> }
+    const draft = validDraft() as unknown as { models: Array<{ columns: Array<{ id?: string }> }> }
     delete draft.models[1]!.columns[1]!.id
 
     expect(PlanDraftSchema.safeParse(draft).success).toBe(false)
@@ -121,7 +115,7 @@ describe('PlanSchema', () => {
 
     expect(PlanSchema.safeParse(draft).success).toBe(false)
     expect(
-      PlanSchema.safeParse({ ...draft, baseline: { rev: '6445bc71', contextHash: { 'model.post': 'ab12' } } }).success,
+      PlanSchema.safeParse({ ...draft, baseline: TEST_BASELINE }).success,
     ).toBe(true)
   })
 })
@@ -129,6 +123,7 @@ describe('PlanSchema', () => {
 describe('planDraftJsonSchema', () => {
   test('should close every object, as a structured-output producer requires', () => {
     const open: string[] = []
+    let objects = 0
     const visit = (node: unknown, path: string): void => {
       if (Array.isArray(node)) {
         node.forEach((item, index) => visit(item, `${path}[${index}]`))
@@ -136,20 +131,14 @@ describe('planDraftJsonSchema', () => {
       }
       if (node === null || typeof node !== 'object') return
       const record = node as Record<string, unknown>
-      if (record.type === 'object' && record.additionalProperties !== false) open.push(path)
+      if (record.type === 'object') {
+        objects++
+        if (record.additionalProperties !== false) open.push(path)
+      }
       for (const [key, value] of Object.entries(record)) visit(value, `${path}.${key}`)
     }
 
-    let objects = 0
-    const count = (node: unknown): void => {
-      if (Array.isArray(node)) return node.forEach(count)
-      if (node === null || typeof node !== 'object') return
-      if ((node as Record<string, unknown>).type === 'object') objects++
-      Object.values(node).forEach(count)
-    }
-    const schema = planDraftJsonSchema()
-    count(schema)
-    visit(schema, '$')
+    visit(planDraftJsonSchema(), '$')
 
     // An empty traversal would pass the closed-object assertion without checking anything.
     expect(objects).toBeGreaterThan(30)

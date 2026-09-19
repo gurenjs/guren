@@ -10,6 +10,8 @@ import { z } from 'zod'
 
 export const PLAN_VERSION = 1
 
+const NonEmptySchema = z.string().min(1)
+
 const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 
 // `constructor` and `toString` match the pattern, and any consumer that keys a plain
@@ -28,19 +30,19 @@ const ChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('existing') }),
   z.strictObject({ kind: z.literal('add') }),
   z.strictObject({ kind: z.literal('alter') }),
-  z.strictObject({ kind: z.literal('rename'), from: z.string().min(1) }),
-  z.strictObject({ kind: z.literal('drop'), reason: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('rename'), from: NonEmptySchema }),
+  z.strictObject({ kind: z.literal('drop'), reason: NonEmptySchema }),
 ])
 
 const DataMigrationSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('none'), reason: z.string().min(1) }),
-  z.strictObject({ kind: z.literal('backfill'), description: z.string().min(1) }),
-  z.strictObject({ kind: z.literal('manual'), description: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('none'), reason: NonEmptySchema }),
+  z.strictObject({ kind: z.literal('backfill'), description: NonEmptySchema }),
+  z.strictObject({ kind: z.literal('manual'), description: NonEmptySchema }),
 ])
 
 /** A named value whose content is JSON text, e.g. `{ name: 'published', json: 'true' }`. */
 const PlanJsonValueSchema = z.strictObject({
-  name: z.string().min(1),
+  name: NonEmptySchema,
   json: z.string().refine(isJsonText, { message: 'must be valid JSON text' }),
 })
 
@@ -60,8 +62,8 @@ export const PLAN_COLUMN_TYPES = [
 const PlanColumnSchema = z.strictObject({
   id: IdSchema,
   /** The model property. `columnName` is the SQL name where the two differ. */
-  name: z.string().min(1),
-  columnName: z.string().min(1).optional(),
+  name: NonEmptySchema,
+  columnName: NonEmptySchema.optional(),
   change: ChangeSchema,
   type: z.enum(PLAN_COLUMN_TYPES),
   /** `decimal` only. */
@@ -78,7 +80,7 @@ const PlanColumnSchema = z.strictObject({
   references: z
     .strictObject({
       model: IdSchema,
-      column: z.string().min(1),
+      column: NonEmptySchema,
       onDelete: z.enum(['cascade', 'restrict', 'set null', 'no action']).optional(),
     })
     .optional(),
@@ -86,7 +88,7 @@ const PlanColumnSchema = z.strictObject({
 })
 
 const PlanRelationshipSchema = z.strictObject({
-  name: z.string().min(1),
+  name: NonEmptySchema,
   type: z.enum(['hasOne', 'hasMany', 'belongsTo', 'belongsToMany']),
   target: IdSchema,
 })
@@ -94,15 +96,15 @@ const PlanRelationshipSchema = z.strictObject({
 const PlanModelSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
-  name: z.string().min(1),
-  table: z.string().min(1),
-  tableRenamedFrom: z.string().min(1).optional(),
+  name: NonEmptySchema,
+  table: NonEmptySchema,
+  tableRenamedFrom: NonEmptySchema.optional(),
   module: z.string().optional(),
   /** On an `existing` or `alter` model, only the columns the plan touches or references. */
   columns: z.array(PlanColumnSchema),
   /** Constraints spanning columns; a single-column one is the column's own `unique` / `index`. */
   indexes: z
-    .array(z.strictObject({ columns: z.array(z.string().min(1)).min(2), unique: z.boolean() }))
+    .array(z.strictObject({ columns: z.array(NonEmptySchema).min(2), unique: z.boolean() }))
     .default([]),
   relationships: z.array(PlanRelationshipSchema),
   fillable: z.array(z.string()),
@@ -112,11 +114,11 @@ const PlanModelSchema = z.strictObject({
 const PlanValidatorSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
-  name: z.string().min(1),
+  name: NonEmptySchema,
   module: z.string().optional(),
   fields: z.array(
     z.strictObject({
-      name: z.string().min(1),
+      name: NonEmptySchema,
       type: z.enum(PLAN_COLUMN_TYPES),
       required: z.boolean(),
       rules: z.array(z.string()),
@@ -126,22 +128,22 @@ const PlanValidatorSchema = z.strictObject({
 
 const PlanResponseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('inertia'), view: IdSchema }),
-  z.strictObject({ kind: z.literal('redirect'), to: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('redirect'), to: NonEmptySchema }),
   z.strictObject({ kind: z.literal('resource'), resource: IdSchema }),
-  z.strictObject({ kind: z.literal('json'), description: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('json'), description: NonEmptySchema }),
   z.strictObject({ kind: z.literal('empty') }),
 ])
 
 const PlanActionSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
-  name: z.string().min(1),
+  name: NonEmptySchema,
   params: IdSchema.optional(),
   query: IdSchema.optional(),
   body: IdSchema.optional(),
   authorization: z.strictObject({
     middleware: z.array(z.string()),
-    policy: z.strictObject({ id: IdSchema, ability: z.string().min(1) }).optional(),
+    policy: z.strictObject({ id: IdSchema, ability: NonEmptySchema }).optional(),
   }),
   response: PlanResponseSchema,
   rules: z.array(z.string()),
@@ -150,7 +152,7 @@ const PlanActionSchema = z.strictObject({
 const PlanControllerSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
-  className: z.string().min(1),
+  className: NonEmptySchema,
   module: z.string().optional(),
   actions: z.array(PlanActionSchema),
 })
@@ -162,22 +164,22 @@ const PlanRouteSchema = z.strictObject({
   change: ChangeSchema,
   method: z.enum(PLAN_HTTP_METHODS),
   path: z.string().startsWith('/'),
-  name: z.string().min(1),
+  name: NonEmptySchema,
   action: IdSchema,
   middleware: z.array(z.string()),
   /** `key` is the lookup column; absent means the primary key. */
-  bind: z.array(z.strictObject({ param: z.string().min(1), model: IdSchema, key: z.string().min(1).optional() })),
-  agent: z.strictObject({ toolName: z.string().min(1), readOnly: z.boolean() }).optional(),
+  bind: z.array(z.strictObject({ param: NonEmptySchema, model: IdSchema, key: NonEmptySchema.optional() })),
+  agent: z.strictObject({ toolName: NonEmptySchema, readOnly: z.boolean() }).optional(),
 })
 
 const PlanViewSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
-  page: z.string().min(1),
+  page: NonEmptySchema,
   module: z.string().optional(),
-  purpose: z.string().min(1),
+  purpose: NonEmptySchema,
   props: z.array(
-    z.strictObject({ name: z.string().min(1), type: z.string().min(1), resource: IdSchema.optional() }),
+    z.strictObject({ name: NonEmptySchema, type: NonEmptySchema, resource: IdSchema.optional() }),
   ),
   form: z
     .strictObject({
@@ -185,14 +187,14 @@ const PlanViewSchema = z.strictObject({
       submitsTo: IdSchema,
       fields: z.array(
         z.strictObject({
-          field: z.string().min(1),
-          label: z.string().min(1),
+          field: NonEmptySchema,
+          label: NonEmptySchema,
           input: z.enum(['text', 'textarea', 'number', 'checkbox', 'select', 'date', 'datetime', 'file', 'hidden']),
         }),
       ),
     })
     .optional(),
-  actions: z.array(z.strictObject({ label: z.string().min(1), route: IdSchema })),
+  actions: z.array(z.strictObject({ label: NonEmptySchema, route: IdSchema })),
   states: z.strictObject({
     empty: z.string().optional(),
     error: z.string().optional(),
@@ -203,35 +205,35 @@ const PlanViewSchema = z.strictObject({
 const PlanResourceSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
-  name: z.string().min(1),
+  name: NonEmptySchema,
   module: z.string().optional(),
   model: IdSchema,
-  fields: z.array(z.strictObject({ name: z.string().min(1), type: z.string().min(1) })),
+  fields: z.array(z.strictObject({ name: NonEmptySchema, type: NonEmptySchema })),
 })
 
 const PlanPolicySchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
-  name: z.string().min(1),
+  name: NonEmptySchema,
   module: z.string().optional(),
   model: IdSchema,
-  abilities: z.array(z.strictObject({ name: z.string().min(1), rule: z.string().min(1) })),
+  abilities: z.array(z.strictObject({ name: NonEmptySchema, rule: NonEmptySchema })),
 })
 
 const PlanSideEffectSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   kind: z.enum(['job', 'event', 'listener', 'mail', 'notification']),
-  name: z.string().min(1),
+  name: NonEmptySchema,
   module: z.string().optional(),
-  trigger: z.string().min(1),
-  description: z.string().min(1),
+  trigger: NonEmptySchema,
+  description: NonEmptySchema,
 })
 
 const PlanCommandSchema = z.strictObject({
   id: IdSchema,
-  command: z.string().min(1),
-  reason: z.string().min(1),
+  command: NonEmptySchema,
+  reason: NonEmptySchema,
 })
 
 export const ACCEPTANCE_KINDS = [
@@ -245,9 +247,9 @@ export const ACCEPTANCE_KINDS = [
 
 const AcceptanceSchema = z.strictObject({
   id: IdSchema,
-  description: z.string().min(1),
+  description: NonEmptySchema,
   kind: z.enum(ACCEPTANCE_KINDS),
-  actor: z.string().min(1),
+  actor: NonEmptySchema,
   route: IdSchema,
   given: z.array(z.string()),
   input: z.array(PlanJsonValueSchema).optional(),
@@ -259,7 +261,7 @@ const AcceptanceSchema = z.strictObject({
     database: z
       .array(
         z.strictObject({
-          table: z.string().min(1),
+          table: NonEmptySchema,
           has: z.array(PlanJsonValueSchema).optional(),
           missing: z.array(PlanJsonValueSchema).optional(),
         }),
@@ -270,25 +272,25 @@ const AcceptanceSchema = z.strictObject({
 
 const PlanTaskIntentSchema = z.strictObject({
   id: IdSchema,
-  entity: z.string().min(1),
-  summary: z.string().min(1),
+  entity: NonEmptySchema,
+  summary: NonEmptySchema,
   covers: z.array(IdSchema),
   acceptance: z.array(AcceptanceSchema),
 })
 
 const PlanQuestionSchema = z.strictObject({
   id: IdSchema,
-  question: z.string().min(1),
-  options: z.array(z.strictObject({ label: z.string().min(1), consequence: z.string().min(1) })).min(2),
-  assumed: z.string().min(1),
+  question: NonEmptySchema,
+  options: z.array(z.strictObject({ label: NonEmptySchema, consequence: NonEmptySchema })).min(2),
+  assumed: NonEmptySchema,
   affects: z.array(IdSchema),
 })
 
 // Sections default to [], so parsing normalizes an omitted section and an empty one to the same plan.
 const draftShape = {
   planVersion: z.literal(PLAN_VERSION),
-  title: z.string().min(1),
-  summary: z.string().min(1),
+  title: NonEmptySchema,
+  summary: NonEmptySchema,
   scope: z.strictObject({ goals: z.array(z.string()), nonGoals: z.array(z.string()) }),
   assumptions: z.array(z.string()).default([]),
   questions: z.array(PlanQuestionSchema).default([]),
@@ -309,7 +311,7 @@ const draftShape = {
 export const PlanDraftSchema = z.strictObject(draftShape)
 
 export const PlanBaselineSchema = z.strictObject({
-  rev: z.string().min(1),
+  rev: NonEmptySchema,
   contextHash: z.record(z.string(), z.string()),
 })
 
@@ -374,12 +376,12 @@ export function listPlanElements(plan: PlanDraft): PlanElementRef[] {
 
   push('questions', plan.questions)
   for (const model of plan.models) {
-    refs.push({ id: model.id, section: 'models' })
+    push('models', [model])
     push('columns', model.columns)
   }
   push('validators', plan.validators)
   for (const controller of plan.controllers) {
-    refs.push({ id: controller.id, section: 'controllers' })
+    push('controllers', [controller])
     push('actions', controller.actions)
   }
   push('routes', plan.routes)
@@ -389,7 +391,7 @@ export function listPlanElements(plan: PlanDraft): PlanElementRef[] {
   push('sideEffects', plan.sideEffects)
   push('commands', plan.commands)
   for (const task of plan.tasks) {
-    refs.push({ id: task.id, section: 'tasks' })
+    push('tasks', [task])
     push('acceptance', task.acceptance)
   }
   return refs
