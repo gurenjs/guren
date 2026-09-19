@@ -16,7 +16,7 @@ import {
 } from '../src/plan/render'
 import { PlanDraftSchema, PlanSchema, type PlanDraft } from '../src/plan/schema'
 import { parsePlanDocument, planOutputPath, renderPlanFile, type RenderPlanFileOptions } from '../src/plan-render'
-import { loadCommentsPlan, planAppState, planDataBlock, planPageData, TEST_BASELINE } from './plan-fixture'
+import { loadCommentsPlan, PAYLOADS, planAppState, planDataBlock, planPageData, TEST_BASELINE } from './plan-fixture'
 
 function draft(): PlanDraft {
   return PlanDraftSchema.parse(loadCommentsPlan())
@@ -63,17 +63,6 @@ function hostilePlan(payload: string): PlanDraft {
     })),
   })
 }
-
-const PAYLOADS = [
-  '</script><script>alert(1)</script>',
-  '<!--',
-  '<img src=x onerror=alert(1)>',
-  'javascript:alert(1)',
-  'line\u2028separator\u2029paragraph',
-  'dollars: $` and $& and $\' and $0',
-  ']]>',
-  '&lt;&amp;&gt;',
-]
 
 describe('renderPlanHtml', () => {
   test('should embed the payload so that it parses back to the plan it was given', () => {
