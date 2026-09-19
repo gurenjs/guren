@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -138,6 +138,21 @@ describe('readPlanFeedback', () => {
 
     await expect(readPlanFeedback(await writeFeedback(tooBig))).rejects.toThrow(/over the 5 MiB limit/)
     await expect(fromStdin(tooBig)).rejects.toThrow(/over the 5 MiB limit/)
+  })
+
+  test('should hold a source whose size cannot be read to the limit all the same', async () => {
+    const fifo = join(dir, 'feedback.fifo')
+    expect(Bun.spawnSync(['mkfifo', fifo]).exitCode, 'mkfifo').toBe(0)
+    // 6 MiB with nobody draining it: the writer only gets through what is read.
+    const writer = Bun.spawn(['sh', '-c', `head -c 6291456 /dev/zero | tr '\\0' 'x' > '${fifo}'`])
+
+    const refused = readPlanFeedback(fifo)
+
+    await expect(refused).rejects.toThrow(/over the 5 MiB limit/)
+    // A size taken before the read would have let all 6 MiB through: a FIFO has none.
+    expect(statSync(fifo).size).toBe(0)
+    // The writer outlived no reader, which is the file half of the case below.
+    expect(await writer.exited).not.toBe(0)
   })
 
   test('should stop reading a pipe at the limit rather than at its end', async () => {

@@ -7,7 +7,7 @@
  * pipe replace the file with.
  */
 
-import { readFile, stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { z } from 'zod'
@@ -61,8 +61,11 @@ function overSizeMessage(origin: string): string {
 }
 
 /**
- * A pipe counted as it arrives: throwing out of the loop closes the iterator, so a
- * stream that would not end costs the cap rather than everything it has to offer.
+ * Every source counted as it arrives: throwing out of the loop closes the iterator,
+ * so a stream that would not end costs the cap rather than everything it has to
+ * offer. A file is read the same way rather than measured first, since a size read
+ * before the open describes whatever the path pointed at then, and a FIFO or a
+ * `/proc` file reports none at all.
  */
 async function readWithinLimit(chunks: AsyncIterable<Uint8Array>, origin: string): Promise<string> {
   const decoder = new TextDecoder()
@@ -79,12 +82,6 @@ async function readWithinLimit(chunks: AsyncIterable<Uint8Array>, origin: string
   return parts.join('')
 }
 
-/** The file's size, which answers the cap without opening it. */
-async function readFileWithinLimit(path: string): Promise<string> {
-  if ((await stat(path)).size > FEEDBACK_MAX_BYTES) throw new CliError(overSizeMessage(path))
-  return readFile(path, 'utf8')
-}
-
 /** The feedback document, or a CliError naming what about it could not be read. */
 export async function readPlanFeedback(source: string, options: ReadPlanFeedbackOptions = {}): Promise<PlanFeedback> {
   const fromStdin = source === FEEDBACK_STDIN
@@ -92,9 +89,8 @@ export async function readPlanFeedback(source: string, options: ReadPlanFeedback
 
   let raw: string
   try {
-    raw = fromStdin
-      ? await readWithinLimit((options.stdin ?? (() => process.stdin))(), origin)
-      : await readFileWithinLimit(origin)
+    const chunks = fromStdin ? (options.stdin ?? (() => process.stdin))() : createReadStream(origin)
+    raw = await readWithinLimit(chunks, origin)
   } catch (error) {
     // The cap is already an answer about the feedback; only a failed read needs one.
     if (error instanceof CliError) throw error
