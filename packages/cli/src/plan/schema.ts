@@ -14,6 +14,11 @@ const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 
 const IdSchema = z.string().regex(ID_PATTERN)
 
+/**
+ * `rename.from` is the previous value of the element's primary name: a model's class
+ * `name`, a column's property `name`, a route's `name`. A table renamed under an
+ * unchanged class says so with `PlanModel.tableRenamedFrom`.
+ */
 const ChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('existing') }),
   z.strictObject({ kind: z.literal('add') }),
@@ -48,9 +53,17 @@ export const PLAN_COLUMN_TYPES = [
 ] as const
 
 const PlanColumnSchema = z.strictObject({
+  id: IdSchema,
+  /** The model property. `columnName` is the SQL name where the two differ. */
   name: z.string().min(1),
+  columnName: z.string().min(1).optional(),
   change: ChangeSchema,
   type: z.enum(PLAN_COLUMN_TYPES),
+  /** `decimal` only. */
+  precision: z.number().int().positive().optional(),
+  scale: z.number().int().nonnegative().optional(),
+  /** `datetime` only; Postgres stores the two as different column types. */
+  withTimezone: z.boolean().optional(),
   nullable: z.boolean(),
   unique: z.boolean(),
   index: z.boolean(),
@@ -78,8 +91,14 @@ const PlanModelSchema = z.strictObject({
   change: ChangeSchema,
   name: z.string().min(1),
   table: z.string().min(1),
+  tableRenamedFrom: z.string().min(1).optional(),
   module: z.string().optional(),
+  /** On an `existing` or `alter` model, only the columns the plan touches or references. */
   columns: z.array(PlanColumnSchema),
+  /** Constraints spanning columns; a single-column one is the column's own `unique` / `index`. */
+  indexes: z
+    .array(z.strictObject({ columns: z.array(z.string().min(1)).min(2), unique: z.boolean() }))
+    .default([]),
   relationships: z.array(PlanRelationshipSchema),
   fillable: z.array(z.string()),
   dataMigration: DataMigrationSchema.optional(),
@@ -89,6 +108,7 @@ const PlanValidatorSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: z.string().min(1),
+  module: z.string().optional(),
   fields: z.array(
     z.strictObject({
       name: z.string().min(1),
@@ -140,7 +160,8 @@ const PlanRouteSchema = z.strictObject({
   name: z.string().min(1),
   action: IdSchema,
   middleware: z.array(z.string()),
-  bind: z.array(z.strictObject({ param: z.string().min(1), model: IdSchema })),
+  /** `key` is the lookup column; absent means the primary key. */
+  bind: z.array(z.strictObject({ param: z.string().min(1), model: IdSchema, key: z.string().min(1).optional() })),
   agent: z.strictObject({ toolName: z.string().min(1), readOnly: z.boolean() }).optional(),
 })
 
@@ -148,6 +169,7 @@ const PlanViewSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   page: z.string().min(1),
+  module: z.string().optional(),
   purpose: z.string().min(1),
   props: z.array(
     z.strictObject({ name: z.string().min(1), type: z.string().min(1), resource: IdSchema.optional() }),
@@ -177,6 +199,7 @@ const PlanResourceSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: z.string().min(1),
+  module: z.string().optional(),
   model: IdSchema,
   fields: z.array(z.strictObject({ name: z.string().min(1), type: z.string().min(1) })),
 })
@@ -185,6 +208,7 @@ const PlanPolicySchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: z.string().min(1),
+  module: z.string().optional(),
   model: IdSchema,
   abilities: z.array(z.strictObject({ name: z.string().min(1), rule: z.string().min(1) })),
 })
@@ -194,6 +218,7 @@ const PlanSideEffectSchema = z.strictObject({
   change: ChangeSchema,
   kind: z.enum(['job', 'event', 'listener', 'mail', 'notification']),
   name: z.string().min(1),
+  module: z.string().optional(),
   trigger: z.string().min(1),
   description: z.string().min(1),
 })
@@ -254,24 +279,25 @@ const PlanQuestionSchema = z.strictObject({
   affects: z.array(IdSchema),
 })
 
+// Sections default to [], so parsing normalizes an omitted section and an empty one to the same plan.
 const draftShape = {
   planVersion: z.literal(PLAN_VERSION),
   title: z.string().min(1),
   summary: z.string().min(1),
   scope: z.strictObject({ goals: z.array(z.string()), nonGoals: z.array(z.string()) }),
-  assumptions: z.array(z.string()),
-  questions: z.array(PlanQuestionSchema),
-  models: z.array(PlanModelSchema),
-  validators: z.array(PlanValidatorSchema),
-  controllers: z.array(PlanControllerSchema),
-  routes: z.array(PlanRouteSchema),
-  views: z.array(PlanViewSchema),
-  resources: z.array(PlanResourceSchema),
-  policies: z.array(PlanPolicySchema),
-  sideEffects: z.array(PlanSideEffectSchema),
-  commands: z.array(PlanCommandSchema),
-  tasks: z.array(PlanTaskIntentSchema),
-  hints: z.array(z.string()),
+  assumptions: z.array(z.string()).default([]),
+  questions: z.array(PlanQuestionSchema).default([]),
+  models: z.array(PlanModelSchema).default([]),
+  validators: z.array(PlanValidatorSchema).default([]),
+  controllers: z.array(PlanControllerSchema).default([]),
+  routes: z.array(PlanRouteSchema).default([]),
+  views: z.array(PlanViewSchema).default([]),
+  resources: z.array(PlanResourceSchema).default([]),
+  policies: z.array(PlanPolicySchema).default([]),
+  sideEffects: z.array(PlanSideEffectSchema).default([]),
+  commands: z.array(PlanCommandSchema).default([]),
+  tasks: z.array(PlanTaskIntentSchema).default([]),
+  hints: z.array(z.string()).default([]),
 }
 
 /** What a producer emits. `baseline` is absent: Guren stamps it, a model never does. */
@@ -305,11 +331,13 @@ export type PlanJsonValue = z.infer<typeof PlanJsonValueSchema>
 
 /** The JSON Schema a producer is held to. Draft-07 is what structured outputs validate with. */
 export function planDraftJsonSchema(): Record<string, unknown> {
-  return z.toJSONSchema(PlanDraftSchema, { target: 'draft-7' }) as Record<string, unknown>
+  // `input`: a producer may omit a defaulted section. `.refine()` checks have no JSON Schema form and are enforced on parse only.
+  return z.toJSONSchema(PlanDraftSchema, { target: 'draft-7', io: 'input' }) as Record<string, unknown>
 }
 
 export type PlanElementSection =
   | 'models'
+  | 'columns'
   | 'validators'
   | 'controllers'
   | 'actions'
@@ -340,7 +368,10 @@ export function listPlanElements(plan: PlanDraft): PlanElementRef[] {
   }
 
   push('questions', plan.questions)
-  push('models', plan.models)
+  for (const model of plan.models) {
+    refs.push({ id: model.id, section: 'models' })
+    push('columns', model.columns)
+  }
   push('validators', plan.validators)
   for (const controller of plan.controllers) {
     refs.push({ id: controller.id, section: 'controllers' })
