@@ -461,6 +461,21 @@ describe('flows', () => {
     expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('view.nowhere')
   })
 
+  test('should name the missing step when an edge loops to one that does not exist', () => {
+    // Reporting the loop first said "Flow step "typo" loops to itself", which asserts
+    // that `typo` is a step of the flow, and downgraded a typo from a fail to a warn.
+    const results = validatePlan(planWithFlow([step], [{ from: 'typo', to: 'typo' }]), appState())
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('no step of this flow')
+    expect(find(results, 'plan:flow-self-loop', 'flow.comment')).toBeUndefined()
+  })
+
+  test('should say it once, not once per end, when both ends name the same missing step', () => {
+    const results = validatePlan(planWithFlow([step], [{ from: 'typo', to: 'typo' }]), appState())
+
+    expect(results.filter((result) => result.key === 'plan:reference' && result.elementId === 'flow.comment')).toHaveLength(1)
+  })
+
   test('should say when a step loops to itself, which the layout cannot draw', () => {
     const results = validatePlan(planWithFlow([step], [{ from: 'form', to: 'form' }]), appState())
 

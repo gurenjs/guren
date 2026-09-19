@@ -92,8 +92,15 @@ function backEdges(nodes: PlanFlowNode[], edges: PlanFlowEdge[]): Set<PlanFlowEd
  * its end produces one.
  */
 function columns(nodes: PlanFlowNode[], forward: PlanFlowEdge[]): Map<string, number> {
+  // By distinct id, in declaration order. A flow may declare one id twice (§2 reports
+  // it, and rendering is not blocked by a finding), and everything here is keyed by id:
+  // seeding the queue from the node list would queue that id twice, take one decrement
+  // too many off each of its successors, and release them before their own predecessors
+  // had settled.
+  const distinct = [...new Set(nodes.map((node) => node.id))]
+
   const out = new Map<string, PlanFlowEdge[]>()
-  const pending = new Map(nodes.map((node) => [node.id, 0]))
+  const pending = new Map(distinct.map((id) => [id, 0]))
   for (const edge of forward) {
     const bucket = out.get(edge.from)
     if (bucket) bucket.push(edge)
@@ -101,9 +108,8 @@ function columns(nodes: PlanFlowNode[], forward: PlanFlowEdge[]): Map<string, nu
     pending.set(edge.to, (pending.get(edge.to) as number) + 1)
   }
 
-  const column = new Map(nodes.map((node) => [node.id, 0]))
-  // Declaration order among the ready nodes, so the placement is the plan's order.
-  const ready = nodes.filter((node) => pending.get(node.id) === 0).map((node) => node.id)
+  const column = new Map(distinct.map((id) => [id, 0]))
+  const ready = distinct.filter((id) => pending.get(id) === 0)
   for (let at = 0; at < ready.length; at += 1) {
     const id = ready[at]
     for (const edge of out.get(id) ?? []) {

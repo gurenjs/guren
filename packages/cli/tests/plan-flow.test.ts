@@ -223,6 +223,25 @@ describe('layoutPlanFlows on graphs that are not a clean chain', () => {
     expect(layoutPlanFlows(planWith({ nodes, edges }))[0].columns).toBe(120000)
   })
 
+  test('should place the steps after a duplicated id where a single one would put them', () => {
+    // A flow may declare one id twice: §2 reports it, and a finding does not stop the
+    // page rendering. Everything in the layout is keyed by id, so queueing the node list
+    // rather than the distinct ids took one decrement too many off each successor and
+    // released `c` before `x` had settled, placing it in `b`'s own column.
+    const steps = ['a', 'p', 'x', 'b', 'c'].map((id) => ({ id, label: id, kind: 'action' as const }))
+    const edges = [
+      { from: 'a', to: 'b' },
+      { from: 'p', to: 'x' },
+      { from: 'x', to: 'b' },
+      { from: 'b', to: 'c' },
+    ]
+    const once = planWith({ nodes: steps, edges })
+    const twice = planWith({ nodes: [steps[0], { ...steps[0] }, ...steps.slice(1)], edges })
+
+    expect(placed(twice).c).toEqual(placed(once).c)
+    expect(placed(twice).c).toEqual([3, 0])
+  })
+
   test('should place a chain declared back to front without paying a pass per edge', () => {
     // A model writing a flow from its end declares its edges in reverse. Relaxing until
     // the edge list settles costs a pass each: 1,930 ms at 8,000 steps, measured.
