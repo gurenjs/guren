@@ -1,69 +1,57 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { planTemplatePath } from '../src/plan/render'
-import { pageFunctionSource } from './plan-page-dom'
+import { PageDocument, pageFunctionSource, type PageNode } from './plan-page-dom'
 import { comparePlanDictionaries, loadPlanDictionaries, PLAN_LOCALES, type PlanDictionary } from '../src/plan/locales'
 
-interface FakeNode {
-  nodeType: number
-  tag?: string
-  href?: string
-  children: FakeNode[]
-  text?: string
-  readonly textContent: string
-  appendChild(child: FakeNode): FakeNode
-  cloneNode(deep: boolean): FakeNode
-}
+const page = new PageDocument()
+const fakeNode = (): PageNode => page.createElement('span')
 
-function fakeNode(nodeType: number, init: { tag?: string; text?: string; href?: string } = {}): FakeNode {
-  return {
-    nodeType,
-    ...init,
-    children: [],
-    get textContent(): string {
-      return this.nodeType === 3 ? (this.text ?? '') : this.children.map((child) => child.textContent).join('')
-    },
-    appendChild(child) {
-      this.children.push(child)
-      return child
-    },
-    cloneNode() {
-      const copy = fakeNode(this.nodeType, { tag: this.tag, text: this.text, href: this.href })
-      for (const child of this.children) copy.appendChild(child.cloneNode(true))
-      return copy
-    },
-  }
-}
-
-const fakeDocument = { createTextNode: (text: string) => fakeNode(3, { text }) }
-
-function fakeLink(id: string): FakeNode {
-  const anchor = fakeNode(1, { tag: 'a', href: `#el-${id}` })
-  anchor.appendChild(fakeNode(3, { text: id }))
+function fakeLink(id: string): PageNode {
+  const anchor = page.createElement('a')
+  anchor.href = `#el-${id}`
+  anchor.textContent = id
   return anchor
 }
 
 type Values = Record<string, unknown>
 interface Formatter {
-  formatInto(host: FakeNode, template: string, values?: Values): FakeNode
+  formatInto(host: PageNode, template: string, values?: Values): PageNode
   formatText(template: string, values?: Values): string
 }
 
 const pageSource = readFileSync(planTemplatePath(), 'utf8')
+const rendererSource = readFileSync(join(import.meta.dir, '../src/plan/render.ts'), 'utf8')
 
 // oxlint-disable-next-line no-new-func -- the page is a classic script with no module to import
 const formatter = new Function(
   'document',
-  `${['walkTemplate', 'formatInto', 'formatText'].map((name) => pageFunctionSource(pageSource, name)).join('\n')}
+  `${['el', 'own', 'formatInto', 'formatText'].map((name) => pageFunctionSource(pageSource, name)).join('\n')}
 return { formatInto: formatInto, formatText: formatText }`,
-)(fakeDocument) as Formatter
+)(page) as Formatter
 
 const dictionaries = loadPlanDictionaries()
 
 describe('the plan dictionaries', () => {
   test.each(PLAN_LOCALES.filter((locale) => locale !== 'en'))('should give %s the keys and placeholders en has', (locale) => {
     expect(comparePlanDictionaries(dictionaries.en, dictionaries[locale])).toEqual([])
+  })
+
+  test('should hold every key the renderer hands the page', () => {
+    const named = [...rendererSource.matchAll(/'(breaking\.[A-Za-z]+)'/g)].map((match) => match[1]!)
+
+    expect(named.length).toBeGreaterThan(0)
+    expect(named.filter((key) => !Object.hasOwn(dictionaries.en, key))).toEqual([])
+  })
+
+  test('should hold no key that neither the page nor the renderer names', () => {
+    const unused = Object.keys(dictionaries.en).filter(
+      (key) => !pageSource.includes(`'${key}'`) && !rendererSource.includes(`'${key}'`),
+    )
+
+    expect(unused).toEqual([])
   })
 
   const broken = (edit: (copy: PlanDictionary) => void): PlanDictionary => {
@@ -123,8 +111,8 @@ describe('the plan page formatter', () => {
   test('should follow the order of the template, not of the values', () => {
     const values = (): Values => ({ actor: 'guest', route: fakeLink('route.posts.store') })
 
-    const en = formatter.formatInto(fakeNode(1), dictionaries.en['acceptance.calls']!, values())
-    const ja = formatter.formatInto(fakeNode(1), dictionaries.ja['acceptance.calls']!, values())
+    const en = formatter.formatInto(fakeNode(), dictionaries.en['acceptance.calls']!, values())
+    const ja = formatter.formatInto(fakeNode(), dictionaries.ja['acceptance.calls']!, values())
 
     expect(en.textContent).toBe('a guest calls route.posts.store')
     expect(ja.textContent).toBe('guest が route.posts.store を呼ぶ')
@@ -133,15 +121,15 @@ describe('the plan page formatter', () => {
   test('should append a node placeholder as that node, inside the sentence', () => {
     const route = fakeLink('route.posts.store')
 
-    const host = formatter.formatInto(fakeNode(1), dictionaries.ja['acceptance.calls']!, { actor: 'guest', route })
+    const host = formatter.formatInto(fakeNode(), dictionaries.ja['acceptance.calls']!, { actor: 'guest', route })
 
-    expect(host.children.map((child) => child.nodeType)).toEqual([3, 3, 1, 3])
-    expect(host.children[2]).toBe(route)
-    expect(host.children[2]!.href).toBe('#el-route.posts.store')
+    expect(host.childNodes.map((child) => child.nodeType)).toEqual([3, 3, 1, 3])
+    expect(host.childNodes[2]).toBe(route)
+    expect(host.childNodes[2]!.href).toBe('#el-route.posts.store')
   })
 
   test('should leave an unknown placeholder on the page as written', () => {
-    expect(formatter.formatInto(fakeNode(1), 'a {actor} calls {route}', { actor: 'guest' }).textContent).toBe(
+    expect(formatter.formatInto(fakeNode(), 'a {actor} calls {route}', { actor: 'guest' }).textContent).toBe(
       'a guest calls {route}',
     )
     expect(formatter.formatText('{shown} of {total}', { shown: 1, total: null })).toBe('1 of {total}')
@@ -152,7 +140,7 @@ describe('the plan page formatter', () => {
   })
 
   test('should write a value spelling a placeholder as text, never expand it', () => {
-    const host = formatter.formatInto(fakeNode(1), 'a {actor} calls {route}', { actor: '{route}', route: 'r' })
+    const host = formatter.formatInto(fakeNode(), 'a {actor} calls {route}', { actor: '{route}', route: 'r' })
 
     expect(host.textContent).toBe('a {route} calls r')
   })
@@ -160,12 +148,12 @@ describe('the plan page formatter', () => {
   test('should keep both sites when a template names one node twice', () => {
     const route = fakeLink('route.posts.store')
 
-    const host = formatter.formatInto(fakeNode(1), '{route} then {route}', { route })
+    const host = formatter.formatInto(fakeNode(), '{route} then {route}', { route })
 
     expect(host.textContent).toBe('route.posts.store then route.posts.store')
-    expect(host.children[0]).toBe(route)
-    expect(host.children[2]).not.toBe(route)
-    expect(host.children[2]!.href).toBe('#el-route.posts.store')
+    expect(host.childNodes[0]).toBe(route)
+    expect(host.childNodes[2]).not.toBe(route)
+    expect(host.childNodes[2]!.href).toBe('#el-route.posts.store')
   })
 
   test('should write braces in a value as text', () => {

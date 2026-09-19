@@ -9,20 +9,11 @@
  * holds both halves of that to the output.
  */
 
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-
+import { readPlanAsset, type PlanAsset } from './assets'
 import { planDiagram, type PlanDiagram } from './diagram'
 import { layoutPlanFlows, type PlanFlowLayout } from './flow'
 import { planHash } from './identity'
-import {
-  formatPlanPhrase,
-  loadPlanDictionaries,
-  loadPlanDictionary,
-  matchPlanLocale,
-  type PlanDictionary,
-  type PlanLocale,
-} from './locales'
+import { loadPlanDictionaries, matchPlanLocale, type PlanDictionary, type PlanLocale } from './locales'
 import { listPlanElements, type Plan, type PlanDraft, type PlanElementSection } from './schema'
 
 /**
@@ -53,8 +44,7 @@ export interface PlanBreakingChange {
   elementId: string
   section: PlanElementSection
   title: string
-  /** English, for a caller that prints it. The page writes `reasonKey` in its own locale. */
-  reason: string
+  /** A `breaking.*` key of the page's dictionaries: the page says it in whichever locale it speaks. */
   reasonKey: string
   reasonValues: Record<string, string>
 }
@@ -101,32 +91,7 @@ const DATA_PLACEHOLDER = '__GUREN_PLAN_DATA__'
 /** A bare file name with no shell metacharacter, no quote, no space and no path segment. */
 export const PLAN_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
-let cachedTemplate: { path: string; source: string } | undefined
-
-/**
- * The chunk this module is bundled into sits at `dist/`, one hop below the package
- * root; the source sits at `src/plan/`, two. Both are tried rather than probed with
- * `existsSync`, which reports a permission error on a parent as absence.
- */
-const TEMPLATE_CANDIDATES = ['../assets/plan/index.html', '../../assets/plan/index.html'] as const
-
-function template(): { path: string; source: string } {
-  if (cachedTemplate !== undefined) return cachedTemplate
-
-  const tried: string[] = []
-  for (const candidate of TEMPLATE_CANDIDATES) {
-    const path = fileURLToPath(new URL(candidate, import.meta.url))
-    try {
-      cachedTemplate = { path, source: readFileSync(path, 'utf8') }
-      return cachedTemplate
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      tried.push(path)
-    }
-  }
-
-  throw new Error(`Could not locate the plan page shipped with @guren/cli. Tried:\n  ${tried.join('\n  ')}`)
-}
+const template = (): PlanAsset => readPlanAsset('index.html')
 
 /** Exported for the source-level test that holds the page to its forbidden sinks. */
 export function planTemplatePath(): string {
@@ -193,13 +158,12 @@ function entityIndex(plan: PlanDraft): Map<string, string> {
  */
 export function planBreakingChanges(plan: PlanDraft): PlanBreakingChange[] {
   const breaking: PlanBreakingChange[] = []
-  const english = loadPlanDictionary('en')
   const add = (
     element: Pick<PlanBreakingChange, 'elementId' | 'section' | 'title'>,
     reasonKey: string,
     reasonValues: Record<string, string> = {},
   ): void => {
-    breaking.push({ ...element, reason: formatPlanPhrase(english[reasonKey] ?? reasonKey, reasonValues), reasonKey, reasonValues })
+    breaking.push({ ...element, reasonKey, reasonValues })
   }
 
   for (const model of plan.models) {

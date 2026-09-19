@@ -14,5 +14,6 @@ check results and the column fact line (`pk`, `null`, `references`) stay as
 written. `<html lang>` follows the plan, and every translated element carries the
 `lang` of the language it is in.
 
-`planBreakingChanges()` results gain `reasonKey` and `reasonValues` beside the
-English `reason`, which is how the page words a breaking change in either language.
+`planBreakingChanges()` results name their reason as a dictionary key (`reasonKey`,
+`reasonValues`) in place of an English sentence, which is how the page words a
+breaking change in either language.

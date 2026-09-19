@@ -4,11 +4,9 @@
  * evaluated here; what a test reads is what that script built.
  */
 
-type Listener = (event: PageEvent) => void
-export interface PageEvent {
-  key?: string
-  preventDefault(): void
-}
+import { planDataBlock } from './plan-fixture'
+
+type Listener = (event: { preventDefault(): void }) => void
 
 /** `function name(...) { ... }` as the page spells it, by brace matching. */
 export function pageFunctionSource(source: string, name: string): string {
@@ -36,8 +34,7 @@ export class PageNode {
   text = ''
   value = ''
   checked = false
-  hidden = false
-  focused = false;
+  hidden = false;
   [property: string]: unknown
 
   constructor(
@@ -61,14 +58,6 @@ export class PageNode {
 
   set className(value: string) {
     this.attributes.class = value
-  }
-
-  get lang(): string {
-    return this.attributes.lang ?? ''
-  }
-
-  set lang(value: string) {
-    this.attributes.lang = value
   }
 
   get href(): string {
@@ -117,10 +106,6 @@ export class PageNode {
     return this.attributes[name] ?? null
   }
 
-  removeAttribute(name: string): void {
-    delete this.attributes[name]
-  }
-
   appendChild(child: PageNode): PageNode {
     if (child.parentNode) child.parentNode.removeChild(child)
     child.parentNode = this
@@ -151,17 +136,15 @@ export class PageNode {
     ;(this.listeners[type] ??= []).push(listener)
   }
 
-  dispatch(type: string, event: Partial<PageEvent> = {}): void {
-    for (const listener of this.listeners[type] ?? []) listener({ preventDefault() {}, ...event })
+  dispatch(type: string): void {
+    for (const listener of this.listeners[type] ?? []) listener({ preventDefault() {} })
   }
 
   click(): void {
     this.dispatch('click')
   }
 
-  focus(): void {
-    this.focused = true
-  }
+  focus(): void {}
 
   scrollIntoView(): void {}
 
@@ -261,11 +244,9 @@ export function openPlanPage(html: string, options: PageOptions = {}): Page {
   const lang = /<html lang="([^"]*)"/.exec(html)
   if (lang) document.documentElement.setAttribute('lang', lang[1]!)
   // The data block is markup like the rest, but its text is JSON and must not be re-spaced.
-  const dataBlock = /<script type="application\/json" id="plan-data">([\s\S]*?)<\/script>/.exec(html)!
-  const data = document.body.appendChild(document.createElement('script'))
-  data.id = 'plan-data'
-  data.textContent = dataBlock[1]!
-  parseMarkup(html.slice(bodyStart, scriptStart).replace(dataBlock[0], ''), document, document.body)
+  const dataBlock = planDataBlock(html)
+  parseMarkup(html.slice(bodyStart, scriptStart).replace(dataBlock, ''), document, document.body)
+  document.getElementById('plan-data')!.textContent = dataBlock
   const wrap = document.querySelector('.wrap')
   if (wrap) wrap.clientWidth = options.width ?? 1100
 
@@ -324,8 +305,8 @@ export function pageWords(root: PageNode, skip: (node: PageNode) => boolean = ()
       return
     }
     // The accessible name either way, so naming a region by its heading reads as the label it replaced.
-    const labelledBy = root.all().find((other) => other.id !== '' && other.id === node.attributes['aria-labelledby'])
-    if (labelledBy) lines.push(`@aria-label ${labelledBy.textContent}`)
+    const labelledBy = node.attributes['aria-labelledby']
+    if (labelledBy) lines.push(`@aria-label ${root.all().find((other) => other.id === labelledBy)?.textContent ?? ''}`)
     for (const name of WORDED_ATTRIBUTES) {
       const value = node.attributes[name] ?? (typeof node[name] === 'string' ? (node[name] as string) : undefined)
       if (value) lines.push(`@${name} ${value}`)
