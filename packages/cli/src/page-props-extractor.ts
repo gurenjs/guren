@@ -4,6 +4,16 @@
  * plus the local types either references transitively.
  */
 import { readFile } from 'node:fs/promises'
+import type {
+  File,
+  Statement,
+  TSInterfaceDeclaration,
+  TSType,
+  TSTypeAliasDeclaration,
+  TSTypeElement,
+  TSTypeReference,
+} from '@babel/types'
+import { memberKeyName } from './ast-walk'
 import { parseSourceFile } from './parse-cache'
 
 export interface ExtractedPageProps {
@@ -99,53 +109,125 @@ export function extractPagePropsFromSource(
     return heritage.length > 0 ? `${heritage.join(' & ')} & ${body}` : body
   }
 
-  for (const node of ast.program.body) {
-    if (node.type === 'TSInterfaceDeclaration' && node.id.name === 'Props') {
-      result.rawType = interfaceRawType(node)
-      result.localTypes = collectReferencedLocalTypes(result.rawType, localTypeMap, importedNames)
-      return result
-    }
-    if (node.type === 'TSTypeAliasDeclaration' && node.id.name === 'Props') {
-      result.rawType = source.slice(node.typeAnnotation.start!, node.typeAnnotation.end!)
-      result.localTypes = collectReferencedLocalTypes(result.rawType, localTypeMap, importedNames)
-      return result
-    }
-    if (node.type === 'ExportNamedDeclaration' && node.declaration) {
-      const decl = node.declaration
-      if (decl.type === 'TSInterfaceDeclaration' && decl.id.name === 'Props') {
-        result.rawType = interfaceRawType(decl)
-        result.localTypes = collectReferencedLocalTypes(result.rawType, localTypeMap, importedNames)
-        return result
-      }
-      if (decl.type === 'TSTypeAliasDeclaration' && decl.id.name === 'Props') {
-        result.rawType = source.slice(decl.typeAnnotation.start!, decl.typeAnnotation.end!)
-        result.localTypes = collectReferencedLocalTypes(result.rawType, localTypeMap, importedNames)
-        return result
-      }
-    }
-  }
+  const located = locatePropsType(ast)
+  if (!located) return result
 
-  // Fallback: the default export function's first parameter annotation.
-  for (const node of ast.program.body) {
-    if (node.type !== 'ExportDefaultDeclaration') continue
-    const decl = node.declaration
-    if (decl.type !== 'FunctionDeclaration') continue
-    const param = decl.params[0]
-    if (!param) continue
-
-    const annotation =
-      param.type === 'ObjectPattern' || param.type === 'Identifier'
-        ? (param as { typeAnnotation?: { type: string; typeAnnotation?: { start?: number | null; end?: number | null } } }).typeAnnotation
-        : undefined
-
-    if (annotation?.type === 'TSTypeAnnotation' && annotation.typeAnnotation?.start != null && annotation.typeAnnotation?.end != null) {
-      result.rawType = source.slice(annotation.typeAnnotation.start, annotation.typeAnnotation.end)
-      result.localTypes = collectReferencedLocalTypes(result.rawType, localTypeMap, importedNames)
-      return result
-    }
-  }
-
+  result.rawType = located.kind === 'interface'
+    ? interfaceRawType(located.node)
+    : source.slice(located.node.start!, located.node.end!)
+  result.localTypes = collectReferencedLocalTypes(result.rawType, localTypeMap, importedNames)
   return result
+}
+
+type LocatedPropsType =
+  | { kind: 'interface'; node: TSInterfaceDeclaration }
+  | { kind: 'type'; node: TSType }
+
+function typeDeclaration(node: Statement): TSInterfaceDeclaration | TSTypeAliasDeclaration | undefined {
+  const declaration = node.type === 'ExportNamedDeclaration' ? node.declaration : node
+  return declaration?.type === 'TSInterfaceDeclaration' || declaration?.type === 'TSTypeAliasDeclaration'
+    ? declaration
+    : undefined
+}
+
+/**
+ * Where a page declares its props: the first `Props` interface or alias, exported or not,
+ * else the default export function's first parameter annotation. The one rule behind the
+ * raw type codegen emits and the keys a plan is compared with.
+ */
+function locatePropsType(ast: File): LocatedPropsType | undefined {
+  for (const node of ast.program.body) {
+    const declaration = typeDeclaration(node)
+    if (declaration?.id.name !== 'Props') continue
+    return declaration.type === 'TSInterfaceDeclaration'
+      ? { kind: 'interface', node: declaration }
+      : { kind: 'type', node: declaration.typeAnnotation }
+  }
+
+  for (const node of ast.program.body) {
+    if (node.type !== 'ExportDefaultDeclaration' || node.declaration.type !== 'FunctionDeclaration') continue
+    const param = node.declaration.params[0]
+    if (param?.type !== 'ObjectPattern' && param?.type !== 'Identifier') continue
+    const annotation = param.typeAnnotation
+    if (annotation?.type === 'TSTypeAnnotation') return { kind: 'type', node: annotation.typeAnnotation }
+  }
+  return undefined
+}
+
+export interface PagePropKey {
+  name: string
+  optional: boolean
+  /** The member's type as written, collapsed to one line; absent for an unannotated member. */
+  type?: string
+}
+
+/**
+ * `unreadable` is a declaration whose key set this reader cannot close (an imported type,
+ * an intersection, `extends`, a generic, an index signature): it is not an empty key list,
+ * and `undeclared` is not either, since a page may take its props some other way.
+ */
+export type PagePropKeys =
+  | { status: 'keys'; keys: PagePropKey[] }
+  | { status: 'unreadable'; reason: string }
+  | { status: 'undeclared' }
+
+export async function extractPagePropKeys(filePath: string): Promise<PagePropKeys> {
+  return extractPagePropKeysFromSource(await readFile(filePath, 'utf-8'), filePath)
+}
+
+export function extractPagePropKeysFromSource(source: string, filePath = 'page.tsx'): PagePropKeys {
+  const ast = parseSourceFile(source, filePath)
+  if (!ast) return { status: 'unreadable', reason: 'the page does not parse' }
+
+  let located = locatePropsType(ast)
+  if (!located) return { status: 'undeclared' }
+
+  const followed = new Set<string>()
+  while (located.kind === 'type' && located.node.type === 'TSTypeReference') {
+    const reference: TSTypeReference = located.node
+    const text = source.slice(reference.start!, reference.end!)
+    if (reference.typeName.type !== 'Identifier' || reference.typeParameters) {
+      return { status: 'unreadable', reason: `\`${text}\` is a generic or qualified type` }
+    }
+    const name = reference.typeName.name
+    const declaration = ast.program.body.map(typeDeclaration).find((candidate) => candidate?.id.name === name)
+    if (!declaration) return { status: 'unreadable', reason: `\`${name}\` is not declared in the page file` }
+    if (followed.has(name)) return { status: 'unreadable', reason: `\`${name}\` refers to itself` }
+    followed.add(name)
+    if (declaration.typeParameters) return { status: 'unreadable', reason: `\`${name}\` is generic` }
+    located = declaration.type === 'TSInterfaceDeclaration'
+      ? { kind: 'interface', node: declaration }
+      : { kind: 'type', node: declaration.typeAnnotation }
+  }
+
+  if (located.kind === 'interface') {
+    if (located.node.extends?.length) {
+      return { status: 'unreadable', reason: `\`${located.node.id.name}\` extends another type` }
+    }
+    return memberKeys(located.node.body.body, source)
+  }
+  if (located.node.type === 'TSTypeLiteral') return memberKeys(located.node.members, source)
+  return { status: 'unreadable', reason: `the props type is not an object type (${located.node.type})` }
+}
+
+function memberKeys(members: TSTypeElement[], source: string): PagePropKeys {
+  const keys: PagePropKey[] = []
+  for (const member of members) {
+    if ((member.type !== 'TSPropertySignature' && member.type !== 'TSMethodSignature') || !memberKeyName(member)) {
+      const text = source.slice(member.start!, member.end!).replace(/\s+/g, ' ')
+      return { status: 'unreadable', reason: `\`${text}\` is not a named member` }
+    }
+    // A method signature has no single type node: its text runs from the parameter list on.
+    const type = member.type === 'TSPropertySignature'
+      ? member.typeAnnotation && source.slice(member.typeAnnotation.typeAnnotation.start!, member.typeAnnotation.typeAnnotation.end!)
+      : source.slice(member.key.end! + (member.optional ? 1 : 0), member.end!).replace(/[;,]$/, '')
+    keys.push({
+      name: memberKeyName(member)!,
+      optional: Boolean(member.optional),
+      ...(type ? { type: type.replace(/\s+/g, ' ').trim() } : {}),
+    })
+  }
+  return { status: 'keys', keys }
 }
 
 /** Local types referenced from `typeBody`, in dependency order. */

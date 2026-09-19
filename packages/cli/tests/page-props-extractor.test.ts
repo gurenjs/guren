@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { extractPagePropsFromSource } from '../src/page-props-extractor'
+import { extractPagePropKeysFromSource, extractPagePropsFromSource } from '../src/page-props-extractor'
 
 describe('extractPagePropsFromSource', () => {
   it('extracts interface Props', () => {
@@ -161,5 +161,100 @@ export default function Page(props: Props) { return null }
   count: number
 }`)
     expect(result.localTypes).toHaveLength(2)
+  })
+})
+
+describe('extractPagePropKeysFromSource', () => {
+  it('should list the keys of a Props interface with optionality and type text', () => {
+    const result = extractPagePropKeysFromSource(`
+      import type { PostData } from '@/types'
+      interface Props {
+        posts: PostData[]
+        filters?: {
+          q: string
+          tag?: string
+        }
+        'data-id': number
+        onSelect(id: number): void
+        untyped
+      }
+      export default function Index({ posts }: Props) { return null }
+    `)
+
+    expect(result).toEqual({
+      status: 'keys',
+      keys: [
+        { name: 'posts', optional: false, type: 'PostData[]' },
+        { name: 'filters', optional: true, type: '{ q: string tag?: string }' },
+        { name: 'data-id', optional: false, type: 'number' },
+        { name: 'onSelect', optional: false, type: '(id: number): void' },
+        { name: 'untyped', optional: false },
+      ],
+    })
+  })
+
+  it('should list the keys of an exported inline object alias', () => {
+    const result = extractPagePropKeysFromSource(`
+      export type Props = { title: string; draft?: boolean }
+      export default function Show(props: Props) { return null }
+    `)
+
+    expect(result).toEqual({
+      status: 'keys',
+      keys: [
+        { name: 'title', optional: false, type: 'string' },
+        { name: 'draft', optional: true, type: 'boolean' },
+      ],
+    })
+  })
+
+  it('should read an inline parameter annotation and one naming a same-file interface', () => {
+    expect(extractPagePropKeysFromSource(`
+      export default function Show({ title }: { title: string }) { return null }
+    `)).toEqual({ status: 'keys', keys: [{ name: 'title', optional: false, type: 'string' }] })
+
+    expect(extractPagePropKeysFromSource(`
+      interface ShowProps { title: string }
+      type Alias = ShowProps
+      export default function Show({ title }: Alias) { return null }
+    `)).toEqual({ status: 'keys', keys: [{ name: 'title', optional: false, type: 'string' }] })
+  })
+
+  it('should report an empty object type as zero keys, not as unreadable', () => {
+    expect(extractPagePropKeysFromSource('interface Props {}\nexport default function P(_: Props) { return null }'))
+      .toEqual({ status: 'keys', keys: [] })
+  })
+
+  it('should report a page with no props declaration as undeclared', () => {
+    expect(extractPagePropKeysFromSource('export default function Home() { return null }'))
+      .toEqual({ status: 'undeclared' })
+  })
+
+  const UNREADABLE: Array<[string, string]> = [
+    ['an imported type', `import type { PageProps } from '@/types'\ntype Props = PageProps`],
+    ['an intersection', `type Props = { a: string } & { b: string }`],
+    ['a union', `type Props = { a: string } | { b: string }`],
+    ['a generic reference', `type Props = Paginated<Post>`],
+    ['a same-file generic declaration', `interface Box<T> { value: T }\ntype Props = Box`],
+    ['a qualified name', `type Props = Types.PageProps`],
+    ['an interface with a heritage clause', `interface Base { a: string }\ninterface Props extends Base { b: string }`],
+    ['an index signature', `interface Props { a: string; [key: string]: unknown }`],
+    ['a computed key', `interface Props { [KEY]: string }`],
+    ['a mapped type', `type Props = { [K in Keys]: string }`],
+    ['a self-referring alias', `type A = B\ntype B = A\ntype Props = A`],
+    ['an imported parameter annotation', `import type { PageProps } from '@/types'\nexport default function P(props: PageProps) { return null }`],
+  ]
+
+  for (const [label, source] of UNREADABLE) {
+    it(`should report ${label} as unreadable, never as an empty key list`, () => {
+      const result = extractPagePropKeysFromSource(source)
+
+      expect(result.status).toBe('unreadable')
+      expect(result).toHaveProperty('reason')
+    })
+  }
+
+  it('should report a page that does not parse as unreadable', () => {
+    expect(extractPagePropKeysFromSource('interface Props {{{').status).toBe('unreadable')
   })
 })

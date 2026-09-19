@@ -1,6 +1,6 @@
 import { resolve, relative } from 'node:path'
 import { fileExists, collectFiles } from './discovery'
-import { extractPageProps } from './page-props-extractor'
+import { extractPagePropKeys, extractPageProps, type PagePropKeys } from './page-props-extractor'
 
 export interface InertiaPageRef {
   /** Page ID relative to the pages directory, e.g. `posts/Index`. */
@@ -85,6 +85,21 @@ export async function describeInertiaPage(cwd: string, id: string): Promise<Iner
   }
 
   return { id, filePath, props }
+}
+
+/**
+ * The prop keys a page declares, or null when the page has no component file. A parse or
+ * read failure is `unreadable`: a caller comparing keys must not take it for "no props".
+ */
+export async function describeInertiaPagePropKeys(cwd: string, id: string): Promise<PagePropKeys | null> {
+  const filePath = await resolveInertiaPageFile(cwd, id)
+  if (!filePath) return null
+
+  try {
+    return await extractPagePropKeys(resolve(cwd, filePath))
+  } catch (error) {
+    return { status: 'unreadable', reason: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 const PAGE_COMPONENT_EXTENSIONS = new Set(['.tsx', '.jsx', '.ts', '.js'])
