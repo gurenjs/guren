@@ -179,8 +179,7 @@ export class PageNode {
 
   /** Whether this node or an ancestor is hidden, as the `hidden` attribute reads on screen. */
   get shown(): boolean {
-    for (let node: PageNode | null = this; node; node = node.parentNode) if (node.hidden) return false
-    return true
+    return !this.hidden && (this.parentNode === null || this.parentNode.shown)
   }
 }
 
