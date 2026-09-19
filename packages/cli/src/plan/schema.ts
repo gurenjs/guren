@@ -230,6 +230,42 @@ const PlanSideEffectSchema = z.strictObject({
   description: NonEmptySchema,
 })
 
+export const PLAN_FLOW_NODE_KINDS = ['actor', 'page', 'route', 'action', 'job', 'store', 'external', 'decision'] as const
+
+/**
+ * A step in a flow. `element` points at the plan element the step is, which is what
+ * makes a flow part of the document rather than a picture beside it: the page links
+ * the node to that element's card, and §2 checks the id resolves.
+ */
+const PlanFlowNodeSchema = z.strictObject({
+  id: IdSchema,
+  label: NonEmptySchema,
+  kind: z.enum(PLAN_FLOW_NODE_KINDS),
+  element: IdSchema.optional(),
+})
+
+const PlanFlowEdgeSchema = z.strictObject({
+  from: IdSchema,
+  to: IdSchema,
+  label: z.string().optional(),
+  /** `async` is a step the caller does not wait for: a queued job, an event. */
+  kind: z.enum(['sync', 'async']).default('sync'),
+})
+
+/**
+ * A flow the plan describes, as a graph rather than as diagram source. Guren draws it,
+ * so a plan cannot carry markup or a layout, and one flow renders the same everywhere
+ * (RFC 0030 §3: no Mermaid, and no CDN).
+ */
+const PlanFlowSchema = z.strictObject({
+  id: IdSchema,
+  change: ChangeSchema,
+  title: NonEmptySchema,
+  description: z.string().optional(),
+  nodes: z.array(PlanFlowNodeSchema).min(1),
+  edges: z.array(PlanFlowEdgeSchema),
+})
+
 const PlanCommandSchema = z.strictObject({
   id: IdSchema,
   command: NonEmptySchema,
@@ -302,6 +338,7 @@ const draftShape = {
   resources: z.array(PlanResourceSchema).default([]),
   policies: z.array(PlanPolicySchema).default([]),
   sideEffects: z.array(PlanSideEffectSchema).default([]),
+  flows: z.array(PlanFlowSchema).default([]),
   commands: z.array(PlanCommandSchema).default([]),
   tasks: z.array(PlanTaskIntentSchema).default([]),
   hints: z.array(z.string()).default([]),
@@ -330,6 +367,9 @@ export type PlanView = z.infer<typeof PlanViewSchema>
 export type PlanResource = z.infer<typeof PlanResourceSchema>
 export type PlanPolicy = z.infer<typeof PlanPolicySchema>
 export type PlanSideEffect = z.infer<typeof PlanSideEffectSchema>
+export type PlanFlow = z.infer<typeof PlanFlowSchema>
+export type PlanFlowNode = z.infer<typeof PlanFlowNodeSchema>
+export type PlanFlowEdge = z.infer<typeof PlanFlowEdgeSchema>
 export type PlanCommand = z.infer<typeof PlanCommandSchema>
 export type PlanTaskIntent = z.infer<typeof PlanTaskIntentSchema>
 export type PlanAcceptance = z.infer<typeof AcceptanceSchema>
@@ -353,6 +393,7 @@ export type PlanElementSection =
   | 'resources'
   | 'policies'
   | 'sideEffects'
+  | 'flows'
   | 'commands'
   | 'tasks'
   | 'acceptance'
@@ -389,6 +430,7 @@ export function listPlanElements(plan: PlanDraft): PlanElementRef[] {
   push('resources', plan.resources)
   push('policies', plan.policies)
   push('sideEffects', plan.sideEffects)
+  push('flows', plan.flows)
   push('commands', plan.commands)
   for (const task of plan.tasks) {
     push('tasks', [task])

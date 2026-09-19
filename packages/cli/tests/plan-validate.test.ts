@@ -429,3 +429,153 @@ describe('validatePlan', () => {
     expectResult(results, 'plan:api-only-view', 'view.posts.show', 'fail')
   })
 })
+
+describe('flows', () => {
+  function planWithFlows(...flows: unknown[]): PlanDraft {
+    return PlanDraftSchema.parse({ ...loadCommentsPlan(), flows })
+  }
+
+  function planWithFlow(nodes: unknown[], edges: unknown[]): PlanDraft {
+    return planWithFlows({ id: 'flow.comment', change: { kind: 'add' }, title: 'Leaving a comment', nodes, edges })
+  }
+
+  const step = { id: 'form', label: 'The comment form', kind: 'page' }
+
+  test('should accept a step naming an element the plan declares', () => {
+    const results = validatePlan(
+      planWithFlow([{ ...step, element: 'view.posts.show' }], []),
+      appState(),
+    )
+
+    expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
+  })
+
+  test('should accept a step that names no element, since an actor is not one', () => {
+    const results = validatePlan(planWithFlow([{ id: 'reader', label: 'A reader', kind: 'actor' }], []), appState())
+
+    expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
+  })
+
+  test('should refuse a step naming an element the plan does not declare', () => {
+    const results = validatePlan(planWithFlow([{ ...step, element: 'view.nowhere' }], []), appState())
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('view.nowhere')
+  })
+
+  test('should name the missing step when an edge loops to one that does not exist', () => {
+    // Reporting the loop first said "Flow step "typo" loops to itself", which asserts
+    // that `typo` is a step of the flow, and downgraded a typo from a fail to a warn.
+    const results = validatePlan(planWithFlow([step], [{ from: 'typo', to: 'typo' }]), appState())
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('no step of this flow')
+    expect(find(results, 'plan:flow-self-loop', 'flow.comment')).toBeUndefined()
+  })
+
+  test('should say it once, not once per end, when both ends name the same missing step', () => {
+    const results = validatePlan(planWithFlow([step], [{ from: 'typo', to: 'typo' }]), appState())
+
+    expect(results.filter((result) => result.key === 'plan:reference' && result.elementId === 'flow.comment')).toHaveLength(1)
+  })
+
+  test('should say when a step loops to itself, which the layout cannot draw', () => {
+    const results = validatePlan(planWithFlow([step], [{ from: 'form', to: 'form' }]), appState())
+
+    expect(expectResult(results, 'plan:flow-self-loop', 'flow.comment', 'warn').message).toContain('form')
+  })
+
+  test('should refuse an edge naming a step this flow does not have', () => {
+    const results = validatePlan(planWithFlow([step], [{ from: 'form', to: 'nowhere' }]), appState())
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('no step of this flow')
+  })
+
+  test('should refuse an edge naming a plan element rather than a step of the flow', () => {
+    // `route.comments.store` is a real element of this plan, which says nothing about
+    // whether the flow has a step by that name. Only the flow's own steps are edge ends.
+    const results = validatePlan(planWithFlow([step], [{ from: 'form', to: 'route.comments.store' }]), appState())
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('no step of this flow')
+  })
+
+  test('should refuse a step id declared twice in one flow', () => {
+    const results = validatePlan(
+      planWithFlow([step, { ...step, label: 'The same id again' }], []),
+      appState(),
+    )
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('declared twice')
+  })
+
+  test('should accept the same step id in two different flows', () => {
+    const plan = planWithFlows(
+      { id: 'flow.one', change: { kind: 'add' }, title: 'One', nodes: [step], edges: [] },
+      { id: 'flow.two', change: { kind: 'add' }, title: 'Two', nodes: [step], edges: [] },
+    )
+
+    expect(failures(validatePlan(plan, appState())).filter((r) => r.key === 'plan:reference')).toEqual([])
+  })
+
+  test.each([
+    ['route', 'route.comments.store'],
+    ['action', 'action.comments.store'],
+    ['page', 'view.posts.show'],
+  ])('should accept a %s step naming an element of that section', (kind, element) => {
+    const results = validatePlan(planWithFlow([{ ...step, kind, element }], []), appState())
+
+    expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
+  })
+
+  test('should refuse a route step that names a view', () => {
+    const results = validatePlan(
+      planWithFlow([{ ...step, kind: 'route', element: 'view.posts.show' }], []),
+      appState(),
+    )
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('is a views element')
+  })
+
+  test.each([
+    // The pairs the comment on FLOW_KIND_SECTIONS claims are legitimate, so the test
+    // says what the freedom is for rather than only that it exists.
+    ['store', 'model.comment'],
+    ['store', 'resource.comment'],
+    ['decision', 'validator.comment'],
+    ['decision', 'policy.comment'],
+    ['job', 'route.comments.store'],
+    ['actor', 'model.comment'],
+    ['external', 'route.comments.destroy'],
+  ])('should leave a %s step free to name %s, since its kind names no section', (kind, element) => {
+    const results = validatePlan(planWithFlow([{ ...step, kind, element }], []), appState())
+
+    expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
+  })
+
+  test('should give every flow finding a title of its own', () => {
+    // A finding falls back to its own key when `TITLES` has no entry, so a new check
+    // renders `plan:flow-self-loop` where a sentence belongs. This flow trips both.
+    const results = validatePlan(planWithFlow([step, step], [{ from: 'form', to: 'form' }]), appState())
+    const flow = results.filter((result) => result.elementId === 'flow.comment')
+
+    expect(flow.map((result) => result.key)).toEqual(['plan:reference', 'plan:flow-self-loop'])
+    for (const result of flow) expect(result.title).not.toBe(result.key)
+  })
+
+  test('should judge an edge against its own flow, since a step id is the flow\'s own', () => {
+    const plan = planWithFlows(
+      { id: 'flow.one', change: { kind: 'add' }, title: 'One', nodes: [step], edges: [] },
+      {
+        id: 'flow.two',
+        change: { kind: 'add' },
+        title: 'Two',
+        nodes: [{ id: 'other', label: 'Other', kind: 'page' }],
+        // `form` is a step of flow.one, which says nothing about flow.two.
+        edges: [{ from: 'other', to: 'form' }],
+      },
+    )
+
+    const results = validatePlan(plan, appState())
+
+    expect(find(failures(results), 'plan:reference', 'flow.one')).toBeUndefined()
+    expect(expectResult(results, 'plan:reference', 'flow.two', 'fail').message).toContain('"form"')
+  })
+})
