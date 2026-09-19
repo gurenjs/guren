@@ -380,7 +380,7 @@
       .card-head {
         display: flex;
         flex-wrap: wrap;
-        align-items: baseline;
+        align-items: center;
         gap: 8px;
       }
 
@@ -449,12 +449,91 @@
         margin-right: 10px;
       }
 
+      /* Quiet until it carries something: the page is a plan, and a card that nobody
+         has reviewed should show no review state at all. */
+      .mark {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 0;
+        border-radius: 999px;
+        padding: 2px 9px;
+        background: transparent;
+        color: var(--g-muted);
+        font: 500 12px/1.6 var(--g-font-mono);
+      }
+
+      .mark::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: 0.45;
+      }
+
+      .mark:hover {
+        color: var(--g-text-2);
+        background: var(--g-raised);
+      }
+
+      /*
+       * An element nobody has reviewed shows nothing until the pointer is on its card.
+       * Guarded by `hover`, because a touch screen has no pointer to reveal it with, and
+       * still reachable by keyboard: an element at `opacity: 0` is focusable, and taking
+       * focus brings it back.
+       */
+      @media (hover: hover) {
+        .mark-clean {
+          opacity: 0;
+        }
+
+        /* `:focus`, not `:focus-visible`: focus arriving from a script — following a
+           link to an element, restoring a position — has to reveal it too. */
+        .card:hover > .card-head > .mark-clean,
+        .mark-clean:focus,
+        .mark-clean[aria-expanded='true'] {
+          opacity: 1;
+        }
+      }
+
+      .mark[aria-expanded='true'] {
+        background: var(--g-raised);
+      }
+
+      .mark-approve,
+      .mark-approve:hover {
+        color: var(--g-ok);
+        background: var(--g-ok-tint);
+      }
+
+      .mark-changes,
+      .mark-changes:hover {
+        color: var(--g-danger);
+        background: var(--g-danger-tint);
+      }
+
+      .mark-noted,
+      .mark-noted:hover {
+        color: var(--g-text-2);
+        background: var(--g-raised);
+      }
+
+      .mark-approve::before,
+      .mark-changes::before,
+      .mark-noted::before {
+        opacity: 1;
+      }
+
       .review {
         display: flex;
         flex-wrap: wrap;
-        align-items: center;
+        align-items: flex-start;
         gap: 8px;
         margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--g-line);
       }
 
       .review .verdicts {
@@ -494,16 +573,10 @@
       }
 
       .review textarea {
-        flex: 1 1 220px;
+        flex: 1 1 260px;
         min-height: 0;
-        padding: 5px 11px;
+        padding: 6px 11px;
         font-size: 13px;
-      }
-
-      /* Quiet until someone is using it: the page is a plan, not a form. */
-      .review textarea:not(:focus):placeholder-shown {
-        background: transparent;
-        border-color: var(--g-line);
       }
 
       fieldset.bare {
@@ -723,6 +796,7 @@
         .tabs,
         .controls,
         .review,
+        .mark,
         .footer,
         .er + .note {
           display: none !important;
@@ -823,8 +897,8 @@
         <button type="button" class="secondary" id="export">Download feedback.json</button>
         <span class="note" id="export-status" role="status" aria-live="polite"></span>
         <p class="note footer-note">
-          This page never writes to the project and makes no network request. Put the feedback beside
-          the plan and run:
+          Comment on any element from the mark in its heading. This page never writes to the project
+          and makes no network request — put the feedback beside the plan and run:
         </p>
         <pre class="command" id="revise-command"></pre>
       </div>
@@ -1024,15 +1098,37 @@
           return review[id]
         }
 
+        var MARK_LABELS = { approve: 'approved', changes: 'changes', noted: 'commented', clean: 'comment' }
+
+        /**
+         * A mark in the card's heading, and the controls behind it. RFC 0030 §4 makes a
+         * verdict part of the protocol — an approved element is locked, and an op on it
+         * must say it reopens — so the verdict stays; what goes is a permanent row of
+         * controls on every element, which was most of what the page showed.
+         */
         function reviewControls(id) {
-          var stored = review[id] || { verdict: null, comment: '' }
-          var wrap = el('div', 'review')
+          var panel = el('div', 'review')
+          panel.hidden = true
           var verdicts = el('div', 'verdicts')
           var buttons = []
+          var mark = el('button', 'mark')
+          mark.type = 'button'
+          mark.setAttribute('aria-expanded', 'false')
+          mark.setAttribute('aria-label', 'Review ' + id)
 
-          function syncVerdicts() {
+          function state() {
+            var entry = review[id]
+            if (!entry) return 'clean'
+            if (entry.verdict) return entry.verdict
+            return entry.comment ? 'noted' : 'clean'
+          }
+
+          function sync() {
+            var now = state()
+            mark.className = 'mark mark-' + now
+            mark.textContent = MARK_LABELS[now]
             buttons.forEach(function (pair) {
-              pair.button.setAttribute('aria-pressed', (review[id] || stored).verdict === pair.key ? 'true' : 'false')
+              pair.button.setAttribute('aria-pressed', now === pair.key ? 'true' : 'false')
             })
           }
 
@@ -1042,26 +1138,34 @@
             button.addEventListener('click', function () {
               var entry = entryFor(id)
               entry.verdict = entry.verdict === verdict.key ? null : verdict.key
-              syncVerdicts()
+              sync()
               saveReview()
             })
             buttons.push({ key: verdict.key, button: button })
             verdicts.appendChild(button)
           })
-          syncVerdicts()
-          wrap.appendChild(verdicts)
+          panel.appendChild(verdicts)
 
           var box = el('textarea')
-          box.rows = 1
-          box.value = stored.comment
-          box.placeholder = 'Comment'
+          box.rows = 2
+          box.value = (review[id] || { comment: '' }).comment
+          box.placeholder = 'Comment on this element'
           box.setAttribute('aria-label', 'Comment on ' + id)
           box.addEventListener('input', function () {
             entryFor(id).comment = box.value
+            sync()
             saveReview()
           })
-          wrap.appendChild(box)
-          return wrap
+          panel.appendChild(box)
+
+          mark.addEventListener('click', function () {
+            panel.hidden = !panel.hidden
+            mark.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true')
+            if (!panel.hidden) box.focus()
+          })
+
+          sync()
+          return { mark: mark, panel: panel }
         }
 
         /* ---------- indexes ---------- */
@@ -1165,7 +1269,11 @@
             node.appendChild(referrers)
           }
 
-          if (!options.noReview) node.appendChild(reviewControls(options.id))
+          if (!options.noReview) {
+            var controls = reviewControls(options.id)
+            head.appendChild(controls.mark)
+            node.appendChild(controls.panel)
+          }
 
           // A question is not filtered: it sits above the tabs and asks about every
           // entity it affects, so an entity filter would hide the thing being asked.
