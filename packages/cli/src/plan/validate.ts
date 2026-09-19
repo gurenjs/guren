@@ -29,6 +29,7 @@ import {
   type PlanDraft,
   type PlanElementSection,
   type PlanModel,
+  type PlanFlowNode,
   type PlanRoute,
 } from './schema'
 
@@ -149,6 +150,17 @@ function checkDuplicateIds(plan: PlanDraft, results: PlanCheckResult[]): void {
   }
 }
 
+/**
+ * The section a step's kind commits it to. The kinds left out are deliberately
+ * unconstrained: a `store` step may reasonably name a model or a resource, a `decision`
+ * a validator or a policy, and an `actor` names nothing at all.
+ */
+const FLOW_KIND_SECTIONS: Partial<Record<PlanFlowNode['kind'], PlanElementSection>> = {
+  route: 'routes',
+  action: 'actions',
+  page: 'views',
+}
+
 function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: PlanCheckResult[]): void {
   const expect = (
     from: string,
@@ -197,17 +209,44 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
   }
 
   for (const flow of plan.flows) {
-    const nodes = new Set(flow.nodes.map((node) => node.id))
+    const nodes = new Set<string>()
     for (const node of flow.nodes) {
+      // A step id is the flow's own, so a duplicate is only a duplicate here — and it
+      // is what makes an edge end ambiguous.
+      if (nodes.has(node.id)) {
+        results.push(
+          finding('plan:reference', 'fail', `Flow step "${node.id}" is declared twice, so an edge naming it is ambiguous.`, {
+            elementId: flow.id,
+            section: 'flows',
+          }),
+        )
+      }
+      nodes.add(node.id)
+
       // A node need not name an element — an actor and an external service are not plan
       // elements — but one that does is a reference like any other.
       if (!node.element) continue
-      if (index.byId.has(node.element)) continue
+      const section = index.byId.get(node.element)
+      if (section === undefined) {
+        results.push(
+          finding('plan:reference', 'fail', `Flow step "${node.label}" names element "${node.element}", which the plan does not declare.`, {
+            elementId: flow.id,
+            section: 'flows',
+          }),
+        )
+        continue
+      }
+      // Where a step's kind names a section, the element has to be in it: a step drawn
+      // as a route and pointing at a page reads as a route in the picture.
+      const expected = FLOW_KIND_SECTIONS[node.kind]
+      if (expected === undefined || section === expected) continue
       results.push(
-        finding('plan:reference', 'fail', `Flow step "${node.label}" names element "${node.element}", which the plan does not declare.`, {
-          elementId: flow.id,
-          section: 'flows',
-        }),
+        finding(
+          'plan:reference',
+          'fail',
+          `Flow step "${node.label}" is a ${node.kind} step but names "${node.element}", which is a ${section} element.`,
+          { elementId: flow.id, section: 'flows' },
+        ),
       )
     }
     for (const edge of flow.edges) {

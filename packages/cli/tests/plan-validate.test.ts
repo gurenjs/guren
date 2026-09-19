@@ -475,6 +475,58 @@ describe('flows', () => {
     expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('no step of this flow')
   })
 
+  test('should refuse a step id declared twice in one flow', () => {
+    const results = validatePlan(
+      planWithFlow([step, { ...step, label: 'The same id again' }], []),
+      appState(),
+    )
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('declared twice')
+  })
+
+  test('should accept the same step id in two different flows', () => {
+    const plan = PlanDraftSchema.parse({
+      ...loadCommentsPlan(),
+      flows: [
+        { id: 'flow.one', change: { kind: 'add' }, title: 'One', nodes: [step], edges: [] },
+        { id: 'flow.two', change: { kind: 'add' }, title: 'Two', nodes: [step], edges: [] },
+      ],
+    })
+
+    expect(failures(validatePlan(plan, appState())).filter((r) => r.key === 'plan:reference')).toEqual([])
+  })
+
+  test.each([
+    ['route', 'route.comments.store'],
+    ['action', 'action.comments.store'],
+    ['page', 'view.posts.show'],
+  ])('should accept a %s step naming an element of that section', (kind, element) => {
+    const results = validatePlan(planWithFlow([{ ...step, kind, element }], []), appState())
+
+    expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
+  })
+
+  test('should refuse a route step that names a view', () => {
+    const results = validatePlan(
+      planWithFlow([{ ...step, kind: 'route', element: 'view.posts.show' }], []),
+      appState(),
+    )
+
+    expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('is a views element')
+  })
+
+  test.each(['actor', 'store', 'decision', 'job', 'external'])(
+    'should leave a %s step free to name any element, since its kind names no section',
+    (kind) => {
+      const results = validatePlan(
+        planWithFlow([{ ...step, kind, element: 'route.comments.store' }], []),
+        appState(),
+      )
+
+      expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
+    },
+  )
+
   test('should judge an edge against its own flow, since a step id is the flow\'s own', () => {
     const plan = PlanDraftSchema.parse({
       ...loadCommentsPlan(),
