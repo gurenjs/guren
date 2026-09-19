@@ -23,6 +23,11 @@ import { listPlanElements, type Plan, type PlanDraft, type PlanElementSection } 
  */
 export interface PlanCheckResult extends CheckResult {
   elementId?: string
+  /**
+   * Declared so a finding from `validatePlan()` passes through unchanged. The page
+   * does not read it: the element the finding names carries its own section.
+   */
+  section?: PlanElementSection
 }
 
 export interface RenderPlanInput {
@@ -286,7 +291,10 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
     diagram: planDiagram(plan),
     elements,
     links: planLinks(plan),
-    entities: [...new Set(plan.tasks.map((task) => task.entity))].sort(),
+    // From the elements rather than from `tasks[].entity`: a model names its own
+    // entity, so a plan with no tasks would otherwise assign entities the filter
+    // cannot offer.
+    entities: [...new Set(elements.map((element) => element.entity))].filter((entity) => entity !== null).sort(),
     status: input.status ?? null,
   }
 }

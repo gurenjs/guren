@@ -220,11 +220,75 @@ describe('the plan template', () => {
     expect(source.match(/__GUREN_PLAN_DATA__/g)).toHaveLength(1)
   })
 
+  test.each([
+    'review',
+    'touched',
+    'entityOf',
+    'outgoing',
+    'incoming',
+    'dependsOn',
+    'dependsMarks',
+    'checksFor',
+    'breakingFor',
+    'expanded',
+    'placed',
+    'answers',
+  ])('should key %s on a null prototype', (name) => {
+    // `constructor`, `toString` and `valueOf` all match the schema's id pattern, so a
+    // plain object reads each back as an inherited function rather than as absent.
+    expect(source).toContain(`var ${name} = Object.create(null)`)
+    expect(source).not.toContain(`var ${name} = {}`)
+  })
+
+  test('should forbid a form action and a base element as well', () => {
+    // Neither falls back to `default-src`, so `'none'` has to be spelled for both.
+    expect(source).toContain("form-action 'none'")
+    expect(source).toContain("base-uri 'none'")
+  })
+
   test('should resolve from the directory the published package ships', () => {
     const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8'))
 
     expect(planTemplatePath()).toBe(join(import.meta.dir, '..', 'templates', 'plan', 'index.html'))
     expect(manifest.files).toContain('templates')
+  })
+})
+
+describe('a plan whose ids name Object.prototype members', () => {
+  function shadowingPlan(): PlanDraft {
+    const fixture = loadFixture()
+    const raw = JSON.stringify(fixture)
+      .replaceAll('model.post', 'constructor')
+      .replaceAll('route.comments.store', 'toString')
+      .replaceAll('validator.comment', 'hasOwnProperty')
+    return PlanDraftSchema.parse(JSON.parse(raw))
+  }
+
+  test('should be accepted by the schema, which is why the page must survive it', () => {
+    expect(shadowingPlan().models[0].id).toBe('constructor')
+  })
+
+  test('should keep every link, so the page indexes them like any other id', () => {
+    const links = planLinks(shadowingPlan())
+
+    expect(links).toContainEqual({ from: 'toString', to: 'action.comments.store', label: 'action' })
+    expect(links).toContainEqual({ from: 'action.comments.store', to: 'hasOwnProperty', label: 'body' })
+  })
+
+  test('should draw the foreign key to a model whose id shadows a prototype member', () => {
+    expect(planDiagram(shadowingPlan()).edges).toContainEqual({
+      id: 'fk:column.comment.postId',
+      from: 'model.comment',
+      to: 'constructor',
+      label: 'postId',
+      kind: 'foreignKey',
+    })
+  })
+
+  test('should render and round-trip', () => {
+    const plan = shadowingPlan()
+
+    expect(JSON.parse(dataBlock(renderPlanHtml({ plan }))).plan).toEqual(plan)
   })
 })
 
@@ -335,6 +399,13 @@ describe('buildPlanPayload', () => {
     const payload = buildPlanPayload({ plan: draft() })
 
     expect(payload.elements.find((element) => element.id === 'column.comment.body')?.entity).toBe('Comment')
+  })
+
+  test('should offer an entity the models name even when no task covers them', () => {
+    const plan = draft()
+    plan.tasks = []
+
+    expect(buildPlanPayload({ plan }).entities).toEqual(['Comment', 'Post'])
   })
 
   test('should list every element the plan declares', () => {

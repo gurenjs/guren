@@ -6,11 +6,12 @@
     <!--
       The plan is hostile input. `default-src 'none'` is what makes the page unable to
       load or post anywhere; the two 'unsafe-inline' allowances cover this file's own
-      style and script, which are the only ones it has.
+      style and script, which are the only ones it has. `form-action` and `base-uri`
+      fall back to nothing rather than to `default-src`, so both are named.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'"
     />
     <title>Implementation plan</title>
     <style>
@@ -598,15 +599,15 @@
         /* ---------- review state ---------- */
 
         var storageKey = data.planHash ? 'guren.plan.review.' + data.planHash : null
-        var review = {}
+        var review = Object.create(null)
 
         function loadReview() {
           if (!storageKey) return
           try {
             var raw = window.localStorage.getItem(storageKey)
-            if (raw) review = JSON.parse(raw) || {}
+            if (raw) review = Object.assign(Object.create(null), JSON.parse(raw))
           } catch (error) {
-            review = {}
+            review = Object.create(null)
           }
         }
 
@@ -621,7 +622,7 @@
 
         /** Only the elements someone touched; rendering seeds an entry for every id. */
         function reviewed() {
-          var touched = {}
+          var touched = Object.create(null)
           Object.keys(review).forEach(function (id) {
             if (review[id].verdict || review[id].comment) touched[id] = review[id]
           })
@@ -674,32 +675,38 @@
 
         /* ---------- indexes ---------- */
 
-        var entityOf = {}
+        // Every map keyed by a plan id has a null prototype: `constructor`, `toString`
+        // and `valueOf` are all legal ids under the schema's pattern, and on a plain
+        // object each would read back as the inherited function rather than as absent.
+        var entityOf = Object.create(null)
         data.elements.forEach(function (element) {
           entityOf[element.id] = element.entity
         })
 
-        var outgoing = {}
-        var incoming = {}
+        var outgoing = Object.create(null)
+        var incoming = Object.create(null)
         data.links.forEach(function (edge) {
           ;(outgoing[edge.from] = outgoing[edge.from] || []).push(edge)
           ;(incoming[edge.to] = incoming[edge.to] || []).push(edge)
         })
 
-        var dependsOn = {}
+        var dependsOn = Object.create(null)
+        // The marks each question put on the elements it affects: RFC 0030 §3 shows them
+        // "until the question is answered", so answering has to be able to take them off.
+        var dependsMarks = Object.create(null)
         plan.questions.forEach(function (question) {
           question.affects.forEach(function (affected) {
             ;(dependsOn[affected] = dependsOn[affected] || []).push(question.id)
           })
         })
 
-        var checksFor = {}
+        var checksFor = Object.create(null)
         data.checks.forEach(function (result) {
           if (!result.elementId) return
           ;(checksFor[result.elementId] = checksFor[result.elementId] || []).push(result)
         })
 
-        var breakingFor = {}
+        var breakingFor = Object.create(null)
         data.breaking.forEach(function (item) {
           ;(breakingFor[item.elementId] = breakingFor[item.elementId] || []).push(item)
         })
@@ -707,6 +714,9 @@
         /* ---------- cards ---------- */
 
         var cards = []
+        // A sub-card is nested inside its parent's element, so hiding the parent hides
+        // it whatever the filter decided about it. Keyed by node: an id may repeat.
+        var cardOf = new Map()
 
         function card(options) {
           var node = el('article', 'card' + (options.sub ? ' sub' : ''))
@@ -727,6 +737,7 @@
             var mark = link(questionId, 'depends on ' + questionId)
             mark.className = 'depends'
             head.appendChild(mark)
+            ;(dependsMarks[questionId] = dependsMarks[questionId] || []).push(mark)
           })
           node.appendChild(head)
 
@@ -764,18 +775,21 @@
           // A question is not filtered: it sits above the tabs and asks about every
           // entity it affects, so an entity filter would hide the thing being asked.
           if (!options.noFilter) {
-            cards.push({
+            var entry = {
               node: node,
+              parent: options.parent ? cardOf.get(options.parent) : null,
               entity: entityOf[options.id] || null,
               existing: options.change ? options.change.kind === 'existing' : false,
-            })
+            }
+            cards.push(entry)
+            cardOf.set(node, entry)
           }
           return node
         }
 
         /* ---------- ER diagram ---------- */
 
-        var expanded = {}
+        var expanded = Object.create(null)
 
         function svgEl(tag, attributes) {
           var node = document.createElementNS('http://www.w3.org/2000/svg', tag)
@@ -834,7 +848,7 @@
           var rowHeight = 22
           var headerHeight = 44
 
-          var placed = {}
+          var placed = Object.create(null)
           var rowTops = []
           var top = 0
           for (var index = 0; index < tables.length; index += columns) {
@@ -999,7 +1013,9 @@
                     column.dataMigration ? column.dataMigration.kind + ': ' + (column.dataMigration.reason || column.dataMigration.description) : null,
                   ],
                 ])
-                columnsHost.appendChild(card({ id: column.id, title: column.name, change: column.change, body: columnBody, sub: true }))
+                columnsHost.appendChild(
+                  card({ id: column.id, title: column.name, change: column.change, body: columnBody, sub: true, parent: node }),
+                )
               })
               node.appendChild(columnsHost)
             }
@@ -1108,7 +1124,7 @@
                 body.appendChild(el('h4', null, 'Business rules'))
                 body.appendChild(list(action.rules))
               }
-              node.appendChild(card({ id: action.id, title: action.name, change: action.change, body: body, sub: true }))
+              node.appendChild(card({ id: action.id, title: action.name, change: action.change, body: body, sub: true, parent: node }))
             })
             host.appendChild(node)
           })
@@ -1270,6 +1286,7 @@
                   id: acceptance.id,
                   title: acceptance.description,
                   sub: true,
+                  parent: node,
                   extraBadges: [el('span', 'badge badge-kind', acceptance.kind)],
                   body: renderAcceptance(acceptance),
                 }),
@@ -1352,7 +1369,9 @@
           })
         }
 
-        var answers = {}
+        var answers = Object.create(null)
+        // Run once the cards exist: a question's marks live on the elements it affects.
+        var pendingQuestions = []
         var questionsHost = document.getElementById('questions')
         if (plan.questions.length) {
           var questionsPanel = el('section', 'panel')
@@ -1361,7 +1380,22 @@
             el('p', 'note', 'Each was written under the assumed answer. Changing one changes the elements it affects.'),
           )
           plan.questions.forEach(function (question) {
-            answers[question.id] = { option: question.assumed, text: '' }
+            // `option` stays null until someone picks one: the assumed answer is
+            // preselected so the plan reads the way it was written, and RFC 0030 §4 is
+            // explicit that silence is not an answer. `answered()` is what the export
+            // and the "depends on" marks go by.
+            var answer = { option: null, text: '' }
+            answers[question.id] = answer
+            var unanswered = el('span', 'badge badge-alter', 'unanswered')
+
+            function settle() {
+              var answered = answer.option !== null || answer.text !== ''
+              unanswered.hidden = answered
+              ;(dependsMarks[question.id] || []).forEach(function (mark) {
+                mark.hidden = answered
+              })
+            }
+
             var body = el('div')
             var fieldset = el('fieldset', 'bare')
             var legend = el('legend', 'note', 'Options')
@@ -1372,9 +1406,15 @@
               radio.type = 'radio'
               radio.name = 'question-' + question.id
               radio.checked = option.label === question.assumed
-              radio.addEventListener('change', function () {
-                if (radio.checked) answers[question.id].option = option.label
-              })
+              var choose = function () {
+                if (!radio.checked) return
+                answer.option = option.label
+                settle()
+              }
+              // `click` as well as `change`: clicking the preselected option is how
+              // someone confirms the assumption, and that fires no `change`.
+              radio.addEventListener('change', choose)
+              radio.addEventListener('click', choose)
               label.appendChild(radio)
               label.appendChild(document.createTextNode(' ' + option.label))
               if (option.label === question.assumed) {
@@ -1392,7 +1432,8 @@
             answerBox.rows = 2
             answerBox.setAttribute('aria-label', 'Answer to ' + question.id)
             answerBox.addEventListener('input', function () {
-              answers[question.id].text = answerBox.value
+              answer.text = answerBox.value
+              settle()
             })
             answerLabel.appendChild(answerBox)
             body.appendChild(answerLabel)
@@ -1408,7 +1449,17 @@
               body.appendChild(affects)
             }
 
-            questionsPanel.appendChild(card({ id: question.id, title: question.question, body: body, noReview: true, noFilter: true }))
+            questionsPanel.appendChild(
+              card({
+                id: question.id,
+                title: question.question,
+                body: body,
+                extraBadges: [unanswered],
+                noReview: true,
+                noFilter: true,
+              }),
+            )
+            pendingQuestions.push(settle)
           })
           questionsHost.appendChild(questionsPanel)
         }
@@ -1444,6 +1495,10 @@
           if (!items.length) panel.appendChild(el('p', 'note', 'Nothing in this section.'))
           panels.appendChild(panel)
           panelNodes[section.key] = panel
+        })
+
+        pendingQuestions.forEach(function (settle) {
+          settle()
         })
 
         // Drawn once the panels are in the document: the layout is measured, and nothing
@@ -1491,9 +1546,19 @@
           var only = changesOnly.checked
           var shown = 0
           cards.forEach(function (item) {
-            var hide = (entity && item.entity !== entity) || (only && item.existing)
-            item.node.hidden = hide
-            if (!hide) shown += 1
+            item.keep = !((entity && item.entity !== entity) || (only && item.existing))
+            if (item.keep) shown += 1
+          })
+          // A matching card is unreachable while an ancestor is hidden, so every
+          // ancestor of a match is kept. Kept-for-a-child cards are not counted.
+          cards.forEach(function (item) {
+            if (!item.keep) return
+            for (var ancestor = item.parent; ancestor && !ancestor.keep; ancestor = ancestor.parent) {
+              ancestor.keep = true
+            }
+          })
+          cards.forEach(function (item) {
+            item.node.hidden = !item.keep
           })
           visibleCount.textContent = shown + ' of ' + cards.length + ' elements shown'
         }
@@ -1506,9 +1571,19 @@
 
         document.getElementById('export').addEventListener('click', function () {
           var feedback = {
-            answers: Object.keys(answers).map(function (questionId) {
-              return { questionId: questionId, option: answers[questionId].option, text: answers[questionId].text }
-            }),
+            // Only what someone actually answered. An assumption nobody confirmed would
+            // otherwise reach `plan --revise` as a decision (RFC 0030 §4).
+            answers: Object.keys(answers)
+              .filter(function (questionId) {
+                return answers[questionId].option !== null || answers[questionId].text !== ''
+              })
+              .map(function (questionId) {
+                var given = answers[questionId]
+                var answer = { questionId: questionId }
+                if (given.option !== null) answer.option = given.option
+                if (given.text !== '') answer.text = given.text
+                return answer
+              }),
             elements: Object.keys(reviewed()).map(function (id) {
               return { elementId: id, verdict: review[id].verdict, comment: review[id].comment }
             }),
