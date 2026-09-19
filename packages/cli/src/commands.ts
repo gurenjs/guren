@@ -39,6 +39,7 @@ import { makeAdr } from './make-adr'
 import { ISSUE_REF_FORMS, isRepoSlug, splitIssueList } from './issue-refs'
 import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
+import { renderPlanFile } from './plan-render'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -192,6 +193,34 @@ const specGenerateCommand = defineCommand({
   },
   async run({ args }) {
     await writeSpecArtifacts({ cwd: args.app, routesFile: args.routes })
+  },
+})
+
+const planRenderCommand = defineCommand({
+  meta: {
+    name: 'plan:render',
+    description: 'Render an implementation plan as one self-contained interactive HTML file (RFC 0030).',
+  },
+  args: {
+    plan: {
+      type: 'positional',
+      description: 'Path to the plan JSON file',
+      required: true,
+      valueHint: 'comments.plan.json',
+    },
+    output: {
+      type: 'string',
+      description: 'Where to write the HTML. Defaults to the plan path with a .html extension.',
+      alias: 'o',
+      valueHint: 'plan.html',
+    },
+  },
+  async run({ args }) {
+    const rendered = await renderPlanFile(args.plan, { output: args.output })
+    for (const id of rendered.duplicateIds) {
+      consola.warn(`Element id '${id}' is declared more than once; its links point at the first one.`)
+    }
+    console.log(rendered.path)
   },
 })
 
@@ -3570,6 +3599,7 @@ export const builtinSubCommands = {
   'make:validator': makeValidatorCommand,
   'spec:generate': specGenerateCommand,
   'docs:graph': docsGraphCommand,
+  'plan:render': planRenderCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
   'make:ai-agent': makeAiAgentCommand,

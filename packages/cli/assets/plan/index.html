@@ -1,0 +1,2136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      The plan is hostile input. `default-src 'none'` is what makes the page unable to
+      load or post anywhere; the two 'unsafe-inline' allowances cover this file's own
+      style and script, which are the only ones it has. `form-action` and `base-uri`
+      fall back to nothing rather than to `default-src`, so both are named.
+      `require-trusted-types-for` is for the version of this page that does not exist
+      yet: where it is enforced, a markup-writing sink someone adds later throws rather
+      than parsing a plan string as HTML.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'; require-trusted-types-for 'script'"
+    />
+    <title>Implementation plan</title>
+    <script>
+      // Guren UI switches themes on a `.dark` class rather than a media query, so that
+      // an app can drive it. A file opened from disk has no app, so it follows the OS.
+      ;(function () {
+        var dark = window.matchMedia('(prefers-color-scheme: dark)')
+        var apply = function () {
+          document.documentElement.classList.toggle('dark', dark.matches)
+        }
+        apply()
+        dark.addEventListener('change', apply)
+      })()
+    </script>
+    <style>
+      /*
+       * Guren UI's own tokens, copied from its `tokens.css`. Light is the docs light
+       * theme (white + crimson), dark the rose-pine-moon ground with the rose accent.
+       * The two font families are the one part not adopted: this page may make no
+       * request, so a face it cannot supply is a face some machine renders differently.
+       */
+      :root {
+        color-scheme: light;
+        --g-font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+        --g-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+        --g-page: #ffffff;
+        --g-panel: #ffffff;
+        --g-raised: #fffafa;
+        --g-ink: #1a1212;
+        --g-line: #e5e7eb;
+        --g-line-strong: #d1d5db;
+
+        --g-heading: #111827;
+        --g-text: #1f2937;
+        --g-text-2: #4b5563;
+        --g-muted: #9ca3af;
+
+        --g-accent: #db1b1b;
+        --g-accent-down: #b91c1c;
+        --g-accent-text: #991b1b;
+        --g-accent-tint: #fff1f2;
+        --g-on-accent: #fff5f5;
+
+        --g-ok: #286983;
+        --g-ok-chip: #56949f;
+        --g-ok-tint: rgba(86, 148, 159, 0.12);
+        --g-warn: #b45309;
+        --g-warn-chip: #ea9d34;
+        --g-warn-tint: rgba(234, 157, 52, 0.14);
+        --g-danger: #b91c1c;
+        --g-danger-chip: #f23a3a;
+        --g-danger-tint: #fff1f2;
+
+        --g-tick: linear-gradient(180deg, #ff3c28, #8b0000);
+
+        --g-r-ctl: 8px;
+        --g-r-card: 12px;
+        --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+      }
+
+      :root.dark,
+      .dark {
+        color-scheme: dark;
+        --g-page: #1a1a2e;
+        --g-panel: #1e1e34;
+        --g-raised: #232340;
+        --g-line: #2e2e4a;
+        --g-line-strong: #3d3d5c;
+
+        --g-heading: #e0def4;
+        --g-text: #e0def4;
+        --g-text-2: #908caa;
+        --g-muted: #6e6a86;
+
+        --g-accent-text: #eb6f92;
+        --g-accent-tint: rgba(235, 111, 146, 0.12);
+
+        --g-ok: #9ccfd8;
+        --g-ok-chip: #9ccfd8;
+        --g-ok-tint: rgba(156, 207, 216, 0.1);
+        --g-warn: #f6c177;
+        --g-warn-chip: #f6c177;
+        --g-warn-tint: rgba(246, 193, 119, 0.1);
+        --g-danger: #ffa5a5;
+        --g-danger-chip: #f23a3a;
+        --g-danger-tint: rgba(242, 58, 58, 0.12);
+
+        --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+        --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0 16px 64px;
+        background: var(--g-page);
+        color: var(--g-text);
+        font: 400 14px/1.6 var(--g-font-sans);
+        -webkit-font-smoothing: antialiased;
+        overflow-wrap: anywhere;
+      }
+
+      .wrap {
+        max-width: 1040px;
+        margin: 0 auto;
+      }
+
+      code,
+      .mono {
+        font-family: var(--g-font-mono);
+        font-size: 0.92em;
+      }
+
+      h1 {
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--g-heading);
+        margin: 28px 0 8px;
+      }
+
+      h2 {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--g-heading);
+        margin: 0 0 8px;
+      }
+
+      h3 {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--g-heading);
+        margin: 0;
+      }
+
+      h4 {
+        font: 500 11.5px/1.6 var(--g-font-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--g-muted);
+        margin: 14px 0 6px;
+      }
+
+      p {
+        margin: 0 0 10px;
+      }
+
+      ul {
+        margin: 0 0 10px;
+        padding-left: 20px;
+      }
+
+      a {
+        color: var(--g-accent-text);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
+      }
+
+      .lede {
+        color: var(--g-text-2);
+        font-size: 14px;
+        line-height: 1.7;
+        max-width: 56em;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+        color: var(--g-muted);
+        font-size: 0.85rem;
+        margin-bottom: 16px;
+      }
+
+      .panel,
+      .card {
+        background: var(--g-panel);
+        border: 1px solid var(--g-line);
+        border-radius: var(--g-r-card);
+        box-shadow: var(--g-shadow-card);
+      }
+
+      .panel {
+        padding: 14px 16px;
+        margin-bottom: 16px;
+      }
+
+      .grid2 {
+        display: grid;
+        gap: 0 24px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      /*
+       * Guren UI ships four badge kinds and says so: when four are not enough, grow the
+       * label vocabulary rather than the palette. `rename` therefore shares `alter`'s
+       * warn, and the label carries the distinction.
+       */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 2px 9px;
+        font: 500 12px/1.6 var(--g-font-mono);
+        white-space: nowrap;
+      }
+
+      .badge::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      .badge-add,
+      .badge-pass {
+        color: var(--g-ok);
+        background: var(--g-ok-tint);
+      }
+      .badge-alter,
+      .badge-rename,
+      .badge-warn {
+        color: var(--g-warn);
+        background: var(--g-warn-tint);
+      }
+      .badge-drop,
+      .badge-fail {
+        color: var(--g-danger);
+        background: var(--g-danger-tint);
+      }
+      .badge-existing,
+      .badge-kind {
+        color: var(--g-text-2);
+        background: var(--g-raised);
+        box-shadow: inset 0 0 0 1px var(--g-line);
+      }
+
+      .pinned {
+        border-left: 4px solid var(--g-danger);
+      }
+
+      .pinned-item {
+        padding: 8px 0;
+        border-top: 1px solid var(--g-line);
+      }
+
+      .pinned-item:first-of-type {
+        border-top: 0;
+      }
+
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin: 20px 0 12px;
+        border-bottom: 1px solid var(--g-line);
+      }
+
+      .tabs button {
+        position: relative;
+        padding: 9px 14px;
+        border: 0;
+        background: transparent;
+        color: var(--g-text-2);
+        font: 500 13.5px/1.45 var(--g-font-sans);
+        cursor: pointer;
+      }
+
+      .tabs button:hover {
+        color: var(--g-heading);
+      }
+
+      .tabs button[aria-selected='true'] {
+        color: var(--g-heading);
+        font-weight: 700;
+      }
+
+      /* The ember tick marks the current place. Guren UI allows it on the page title
+         or the active nav item and not on both, so the heading above stays plain. */
+      .tabs button[aria-selected='true']::after {
+        content: '';
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: -1px;
+        height: 3px;
+        border-radius: 2px 2px 0 0;
+        background: var(--g-tick);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 16px;
+        margin-bottom: 14px;
+        font-size: 0.9rem;
+      }
+
+      select,
+      textarea,
+      input {
+        color: var(--g-text);
+        background: var(--g-panel);
+        border: 1px solid var(--g-line-strong);
+        border-radius: var(--g-r-ctl);
+        padding: 8px 12px;
+        font: 400 14px/1.5 var(--g-font-sans);
+        max-width: 100%;
+      }
+
+      select:focus,
+      textarea:focus,
+      input:focus {
+        outline: 2px solid var(--g-accent);
+        outline-offset: -1px;
+        border-color: transparent;
+      }
+
+      input[type='checkbox'],
+      input[type='radio'] {
+        accent-color: var(--g-accent);
+        padding: 0;
+      }
+
+      textarea {
+        width: 100%;
+        resize: vertical;
+        min-height: 2.2em;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .card {
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+
+      .card.sub {
+        border: 0;
+        border-left: 2px solid var(--g-line);
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        padding: 10px 0 10px 16px;
+        margin: 0 0 4px;
+      }
+
+      .card:target {
+        outline: 2px solid var(--g-accent);
+        outline-offset: 2px;
+      }
+
+      .card-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .card-id {
+        color: var(--g-muted);
+        font-size: 0.8rem;
+      }
+
+      /* A question mark is a badge like any other state: the kit has four, and this is
+         the warn one. It was a dashed outline, which belonged to no part of the kit. */
+      .depends {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 2px 9px;
+        font: 500 12px/1.6 var(--g-font-mono);
+        color: var(--g-warn);
+        background: var(--g-warn-tint);
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .depends::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      .facts {
+        display: block;
+        margin-top: 6px;
+        font-family: var(--g-font-mono);
+        font-size: 12.5px;
+        color: var(--g-text-2);
+        white-space: pre-wrap;
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 2px 12px;
+        font-size: 0.9rem;
+        margin: 8px 0 0;
+      }
+
+      .kv dt {
+        color: var(--g-muted);
+      }
+
+      .kv dd {
+        margin: 0;
+      }
+
+      .referenced-by {
+        margin: 10px 0 0;
+      }
+
+      .referenced-by .label {
+        font: 500 11.5px/1.6 var(--g-font-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--g-muted);
+        margin-right: 10px;
+      }
+
+      /* Quiet until it carries something: the page is a plan, and a card that nobody
+         has reviewed should show no review state at all. */
+      .mark {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 0;
+        border-radius: 999px;
+        padding: 2px 9px;
+        background: transparent;
+        color: var(--g-muted);
+        font: 500 12px/1.6 var(--g-font-mono);
+      }
+
+      .mark::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: 0.45;
+      }
+
+      .mark:hover {
+        color: var(--g-text-2);
+        background: var(--g-raised);
+      }
+
+      /*
+       * An element nobody has reviewed shows nothing until the pointer is on its card.
+       * Guarded by `hover`, because a touch screen has no pointer to reveal it with, and
+       * still reachable by keyboard: an element at `opacity: 0` is focusable, and taking
+       * focus brings it back.
+       */
+      @media (hover: hover) {
+        .mark-clean {
+          opacity: 0;
+        }
+
+        /* `:focus`, not `:focus-visible`: focus arriving from a script — following a
+           link to an element, restoring a position — has to reveal it too. */
+        .card:hover > .card-head > .mark-clean,
+        .mark-clean:focus,
+        .mark-clean[aria-expanded='true'] {
+          opacity: 1;
+        }
+      }
+
+      .mark[aria-expanded='true'] {
+        background: var(--g-raised);
+      }
+
+      .mark-approve,
+      .mark-approve:hover {
+        color: var(--g-ok);
+        background: var(--g-ok-tint);
+      }
+
+      .mark-changes,
+      .mark-changes:hover {
+        color: var(--g-danger);
+        background: var(--g-danger-tint);
+      }
+
+      .mark-noted,
+      .mark-noted:hover {
+        color: var(--g-text-2);
+        background: var(--g-raised);
+      }
+
+      .mark-approve::before,
+      .mark-changes::before,
+      .mark-noted::before {
+        opacity: 1;
+      }
+
+      .review {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--g-line);
+      }
+
+      .review .verdicts {
+        display: flex;
+        gap: 6px;
+      }
+
+      .review button {
+        display: inline-flex;
+        align-items: center;
+        padding: 5px 11px;
+        border-radius: var(--g-r-ctl);
+        border: 1px solid var(--g-line-strong);
+        background: var(--g-panel);
+        color: var(--g-text);
+        font: 700 12.5px/1.45 var(--g-font-sans);
+      }
+
+      .review button:hover {
+        border-color: var(--g-muted);
+      }
+
+      .review button[aria-pressed='true'] {
+        border-color: currentColor;
+      }
+
+      .review button.approve[aria-pressed='true'] {
+        color: var(--g-ok);
+        background: var(--g-ok-tint);
+      }
+
+      /* Outline, not a fill: the kit spends its one red fill per screen on the primary
+         action, and a destructive control gets an explicit verb instead. */
+      .review button.changes[aria-pressed='true'] {
+        color: var(--g-danger);
+        background: var(--g-danger-tint);
+      }
+
+      .review textarea {
+        flex: 1 1 260px;
+        min-height: 0;
+        padding: 6px 11px;
+        font-size: 13px;
+      }
+
+      fieldset.bare {
+        border: 0;
+        padding: 0;
+        margin: 0;
+      }
+
+      .question-option {
+        display: block;
+        padding: 6px 0;
+      }
+
+      .question-option .consequence {
+        display: block;
+        margin-left: 26px;
+        color: var(--g-muted);
+        font-size: 0.88rem;
+      }
+
+      .given-when-then {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 12px;
+        margin-top: 8px;
+        font-size: 0.9rem;
+      }
+
+      .given-when-then .label {
+        color: var(--g-muted);
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.04em;
+        padding-top: 2px;
+      }
+
+      /* Never scaled up: a collapsed two-table diagram stretched to the panel width
+         reads as empty boxes. It still shrinks to fit a narrow screen. */
+      .er {
+        max-width: 100%;
+        height: auto;
+        overflow: visible;
+      }
+
+      .er .box {
+        fill: var(--g-raised);
+        stroke: var(--g-line);
+      }
+
+      .er .box.add {
+        stroke: var(--g-ok);
+        stroke-width: 2;
+      }
+
+      .er .box.alter {
+        stroke: var(--g-warn);
+        stroke-width: 2;
+      }
+
+      .er .box.rename {
+        stroke: var(--g-warn);
+        stroke-width: 2;
+      }
+
+      .er .box.drop {
+        stroke: var(--g-danger);
+        stroke-width: 2;
+      }
+
+      .er .box.existing {
+        opacity: 0.6;
+      }
+
+      .er text {
+        fill: var(--g-text);
+        font-size: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .er text.title {
+        font-weight: 700;
+        font-family: inherit;
+      }
+
+      .er text.muted,
+      .er text.edge-label {
+        fill: var(--g-muted);
+        font-size: 11px;
+      }
+
+      .er line {
+        stroke: var(--g-muted);
+      }
+
+      .er line.relationship {
+        stroke-dasharray: 4 3;
+      }
+
+      .er g.table {
+        cursor: pointer;
+      }
+
+      .footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--g-line);
+      }
+
+      /* The page's one primary action, which is where the kit spends its red fill. */
+      .footer-note {
+        flex: 1 0 100%;
+        margin: 0;
+      }
+
+      .command {
+        flex: 1 0 100%;
+        margin: 0;
+        padding: 14px 18px;
+        border-radius: var(--g-r-card);
+        background: var(--g-ink);
+        color: #fff5f5;
+        font: 400 12.5px/1.75 var(--g-font-mono);
+        overflow-x: auto;
+      }
+
+      .footer button.secondary {
+        background: var(--g-panel);
+        border-color: var(--g-line-strong);
+        color: var(--g-text);
+      }
+
+      .footer button.secondary:hover {
+        background: var(--g-raised);
+        border-color: var(--g-muted);
+      }
+
+      .footer button {
+        padding: 8px 16px;
+        border-radius: var(--g-r-ctl);
+        border: 1px solid transparent;
+        background: var(--g-accent);
+        color: var(--g-on-accent);
+        font: 700 13.5px/1.45 var(--g-font-sans);
+      }
+
+      .footer button:hover {
+        background: var(--g-accent-down);
+      }
+
+      .note {
+        color: var(--g-text-2);
+        font-size: 12.5px;
+        line-height: 1.7;
+      }
+
+      /* Machine-issued values are mono in this kit: ids, counts, badge labels. */
+      #visible-count,
+      .card-id,
+      .meta {
+        font-family: var(--g-font-mono);
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--g-accent);
+        outline-offset: 2px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      .section-title {
+        display: none;
+      }
+
+      /*
+       * Print is the document, not a screenshot of the review tool. Every section is
+       * shown and starts a page, the filter and the review controls go, and the ground
+       * is white whatever the screen theme is.
+       */
+      @media print {
+        @page {
+          size: A4;
+          margin: 18mm 16mm;
+        }
+
+        :root,
+        :root.dark {
+          color-scheme: light;
+          --g-page: #ffffff;
+          --g-panel: #ffffff;
+          --g-raised: #ffffff;
+          --g-line: #d1d5db;
+          --g-line-strong: #9ca3af;
+          --g-heading: #111827;
+          --g-text: #1f2937;
+          --g-text-2: #4b5563;
+          --g-muted: #6b7280;
+          --g-accent-text: #991b1b;
+          --g-shadow-card: none;
+        }
+
+        body {
+          padding: 0;
+          font-size: 10.5pt;
+        }
+
+        .wrap {
+          max-width: none;
+        }
+
+        /* Interactive furniture: none of it means anything on paper. */
+        .tabs,
+        .controls,
+        .review,
+        .mark,
+        .footer,
+        .er + .note {
+          display: none !important;
+        }
+
+        /* Every section prints, whichever tab the reviewer left open, and the filter
+           does not decide what a printed plan contains. */
+        [role='tabpanel'][hidden],
+        .card[hidden] {
+          display: block !important;
+        }
+
+        [role='tabpanel'],
+        #questions > .panel {
+          break-before: page;
+        }
+
+        /* A section the plan left empty is a blank page in a printed document. */
+        [role='tabpanel'].empty {
+          display: none !important;
+        }
+
+        /* An empty box to write in belongs to the review tool. The printed document
+           carries the question, its options and the one the plan assumed; a reviewer's
+           own answer travels in feedback.json. */
+        .question-answer {
+          display: none !important;
+        }
+
+        .section-title {
+          display: block;
+          margin: 0 0 14px;
+          padding-bottom: 6px;
+          border-bottom: 2px solid var(--g-line-strong);
+          font-size: 15pt;
+        }
+
+        header {
+          break-after: page;
+        }
+
+        .panel,
+        .card {
+          border-color: var(--g-line);
+          box-shadow: none;
+          break-inside: avoid;
+        }
+
+        .card.sub {
+          break-inside: avoid;
+        }
+
+        h2,
+        h3,
+        h4 {
+          break-after: avoid;
+        }
+
+        /* A badge carries the change kind, which is the one colour a printed plan
+           cannot do without. */
+        .badge,
+        .er .box {
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+        }
+
+        a {
+          text-decoration: none;
+        }
+
+        .er {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <script type="application/json" id="plan-data">__GUREN_PLAN_DATA__</script>
+    <div class="wrap">
+      <header>
+        <h1 id="plan-title"></h1>
+        <p class="lede" id="plan-summary"></p>
+        <div class="meta" id="plan-meta"></div>
+        <div class="panel grid2" id="plan-scope"></div>
+      </header>
+      <section class="panel pinned" id="pinned" hidden aria-label="Blocking findings"></section>
+      <section id="questions"></section>
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Plan sections"></nav>
+      <div class="controls">
+        <label for="entity-filter">Entity</label>
+        <select id="entity-filter"></select>
+        <label><input type="checkbox" id="changes-only" /> Changes only</label>
+        <span class="note" id="visible-count"></span>
+      </div>
+      <main id="panels"></main>
+      <div class="footer">
+        <button type="button" id="copy">Copy feedback</button>
+        <button type="button" class="secondary" id="export">Download feedback.json</button>
+        <span class="note" id="export-status" role="status" aria-live="polite"></span>
+        <p class="note footer-note">
+          Comment on any element from the mark in its heading. This page never writes to the project
+          and makes no network request — put the feedback beside the plan and run:
+        </p>
+        <pre class="command" id="revise-command"></pre>
+      </div>
+    </div>
+    <script>
+      (function () {
+        'use strict'
+
+        var data = JSON.parse(document.getElementById('plan-data').textContent)
+        var plan = data.plan
+        // The schema's own id pattern. Anchors are built from ids that match it and
+        // from nothing else, so no plan string ever reaches an href.
+        var ID_RE = /^[A-Za-z][A-Za-z0-9_.:-]*$/
+        // The renderers are named here rather than in a second map keyed the same way:
+        // function declarations hoist, and a section added to one list only would
+        // otherwise render an empty panel or throw.
+        var SECTIONS = [
+          { key: 'models', label: 'Models', render: renderModels },
+          { key: 'views', label: 'Views', render: renderViews },
+          { key: 'controllers', label: 'Controllers', render: renderControllers },
+          { key: 'routes', label: 'Routes', render: renderRoutes },
+          { key: 'validators', label: 'Validators', render: renderValidators },
+          { key: 'resources', label: 'Resources', render: renderResources },
+          { key: 'policies', label: 'Policies', render: renderPolicies },
+          { key: 'sideEffects', label: 'Side effects', render: renderSideEffects },
+          { key: 'commands', label: 'Commands', render: renderCommands },
+          { key: 'tasks', label: 'Tasks & acceptance', render: renderTasks },
+        ]
+
+        /**
+         * Every map keyed by a plan id is built here and nowhere else. `constructor`,
+         * `toString` and `valueOf` all match the schema's id pattern, and on a plain
+         * object each reads back as the inherited function rather than as absent. The
+         * The source test asserts this factory holds the file's only null-prototype
+         * construction, so a map added later is covered without anyone listing it.
+         */
+        function idMap() {
+          return Object.create(null)
+        }
+
+        /** An id-keyed multimap: the one place the `(m[k] = m[k] || []).push(v)` idiom lives. */
+        function groupBy(items, keyOf, valueOf) {
+          var map = idMap()
+          items.forEach(function (item) {
+            var key = keyOf(item)
+            if (key === undefined || key === null) return
+            var bucket = map[key]
+            if (bucket === undefined) map[key] = bucket = []
+            bucket.push(valueOf ? valueOf(item) : item)
+          })
+          return map
+        }
+
+        function el(tag, className, text) {
+          var node = document.createElement(tag)
+          if (className) node.className = className
+          if (text !== undefined && text !== null) node.textContent = String(text)
+          return node
+        }
+
+        function anchorId(id) {
+          return ID_RE.test(id) ? 'el-' + id : null
+        }
+
+        function link(id, text) {
+          var anchor = anchorId(id)
+          if (!anchor) return el('code', 'mono', id)
+          var node = el('a', 'mono', text === undefined ? id : text)
+          node.setAttribute('href', '#' + anchor)
+          return node
+        }
+
+        /** A span of strings and nodes in order. A string is always text, never markup. */
+        function span(parts) {
+          var node = el('span')
+          parts.forEach(function (part) {
+            if (part === null || part === undefined) return
+            node.appendChild(part.nodeType ? part : document.createTextNode(String(part)))
+          })
+          return node
+        }
+
+        /** An `h4` and the list under it. The emptiness rule is the caller's: three
+         * sections show their heading with an empty list. */
+        function group(host, heading, items, mapper) {
+          host.appendChild(el('h4', null, heading))
+          host.appendChild(list(items, mapper))
+        }
+
+        function list(items, mapper) {
+          var ul = el('ul')
+          items.forEach(function (item) {
+            var li = el('li')
+            var content = mapper ? mapper(item) : el('span', null, item)
+            if (typeof content === 'string') li.textContent = content
+            else li.appendChild(content)
+            ul.appendChild(li)
+          })
+          return ul
+        }
+
+        function kv(pairs) {
+          var dl = el('dl', 'kv')
+          pairs.forEach(function (pair) {
+            if (pair[1] === undefined || pair[1] === null || pair[1] === '') return
+            dl.appendChild(el('dt', null, pair[0]))
+            var dd = el('dd')
+            if (typeof pair[1] === 'object' && pair[1].nodeType) dd.appendChild(pair[1])
+            else dd.textContent = String(pair[1])
+            dl.appendChild(dd)
+          })
+          return dl
+        }
+
+        function changeBadge(change) {
+          if (!change) return null
+          var badge = el('span', 'badge badge-' + change.kind, change.kind)
+          if (change.kind === 'rename') badge.textContent = 'rename from ' + change.from
+          if (change.kind === 'drop') badge.title = change.reason
+          return badge
+        }
+
+        /* ---------- review state ---------- */
+
+        var storageKey = data.planHash ? 'guren.plan.review.' + data.planHash : null
+        var review = idMap()
+
+        var VERDICTS = [
+          { key: 'approve', label: 'Approve' },
+          { key: 'changes', label: 'Request changes' },
+        ]
+
+        function isVerdict(value) {
+          return VERDICTS.some(function (verdict) {
+            return verdict.key === value
+          })
+        }
+
+        /**
+         * What comes back from storage is not this page's output: another document on the
+         * same origin can write the key, and an older version of this page may have
+         * written a different shape. Entries that are not `{ verdict, comment }` are
+         * dropped rather than carried into the export.
+         */
+        function restore(stored) {
+          var record = idMap()
+          if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return record
+          Object.keys(stored).forEach(function (id) {
+            var entry = stored[id]
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
+            var verdict = isVerdict(entry.verdict) ? entry.verdict : null
+            var comment = typeof entry.comment === 'string' ? entry.comment : ''
+            if (verdict === null && comment === '') return
+            record[id] = { verdict: verdict, comment: comment }
+          })
+          return record
+        }
+
+        function loadReview() {
+          if (!storageKey) return
+          try {
+            var raw = window.localStorage.getItem(storageKey)
+            if (raw) review = restore(JSON.parse(raw))
+          } catch (error) {
+            review = idMap()
+          }
+        }
+
+        function saveReview() {
+          if (!storageKey) return
+          try {
+            window.localStorage.setItem(storageKey, JSON.stringify(reviewed()))
+          } catch (error) {
+            /* A page that cannot persist still works; the export is the durable output. */
+          }
+        }
+
+        /**
+         * Only the elements someone touched. An entry emptied again during this session
+         * is dropped here, which is the same rule `restore()` applies on the way in.
+         */
+        function reviewed() {
+          var touched = idMap()
+          Object.keys(review).forEach(function (id) {
+            if (review[id].verdict || review[id].comment) touched[id] = review[id]
+          })
+          return touched
+        }
+
+        /**
+         * The record holds an entry from the first time someone touches that element.
+         * Seeding one per card instead would make every keystroke in any comment box
+         * walk every element on the page.
+         */
+        function entryFor(id) {
+          if (!review[id]) review[id] = { verdict: null, comment: '' }
+          return review[id]
+        }
+
+        var MARK_LABELS = { approve: 'approved', changes: 'changes', noted: 'commented', clean: 'comment' }
+
+        /**
+         * A mark in the card's heading, and the controls behind it. RFC 0030 §4 makes a
+         * verdict part of the protocol — an approved element is locked, and an op on it
+         * must say it reopens — so the verdict stays; what goes is a permanent row of
+         * controls on every element, which was most of what the page showed.
+         */
+        function reviewControls(id) {
+          var panel = el('div', 'review')
+          panel.hidden = true
+          var verdicts = el('div', 'verdicts')
+          var buttons = []
+          var mark = el('button', 'mark')
+          mark.type = 'button'
+          mark.setAttribute('aria-expanded', 'false')
+          mark.setAttribute('aria-label', 'Review ' + id)
+
+          function state() {
+            var entry = review[id]
+            if (!entry) return 'clean'
+            if (entry.verdict) return entry.verdict
+            return entry.comment ? 'noted' : 'clean'
+          }
+
+          function sync() {
+            var now = state()
+            mark.className = 'mark mark-' + now
+            mark.textContent = MARK_LABELS[now]
+            buttons.forEach(function (pair) {
+              pair.button.setAttribute('aria-pressed', now === pair.key ? 'true' : 'false')
+            })
+          }
+
+          VERDICTS.forEach(function (verdict) {
+            var button = el('button', verdict.key, verdict.label)
+            button.type = 'button'
+            button.addEventListener('click', function () {
+              var entry = entryFor(id)
+              entry.verdict = entry.verdict === verdict.key ? null : verdict.key
+              sync()
+              saveReview()
+            })
+            buttons.push({ key: verdict.key, button: button })
+            verdicts.appendChild(button)
+          })
+          panel.appendChild(verdicts)
+
+          var box = el('textarea')
+          box.rows = 2
+          box.value = (review[id] || { comment: '' }).comment
+          box.placeholder = 'Comment on this element'
+          box.setAttribute('aria-label', 'Comment on ' + id)
+          box.addEventListener('input', function () {
+            entryFor(id).comment = box.value
+            sync()
+            saveReview()
+          })
+          panel.appendChild(box)
+
+          mark.addEventListener('click', function () {
+            panel.hidden = !panel.hidden
+            mark.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true')
+            if (!panel.hidden) box.focus()
+          })
+
+          sync()
+          return { mark: mark, panel: panel }
+        }
+
+        /* ---------- indexes ---------- */
+
+        var entityOf = idMap()
+        data.elements.forEach(function (element) {
+          entityOf[element.id] = element.entity
+        })
+
+        var outgoing = groupBy(data.links, function (edge) {
+          return edge.from
+        })
+        var incoming = groupBy(data.links, function (edge) {
+          return edge.to
+        })
+
+        var affected = []
+        plan.questions.forEach(function (question) {
+          question.affects.forEach(function (elementId) {
+            affected.push({ elementId: elementId, questionId: question.id })
+          })
+        })
+        var dependsOn = groupBy(
+          affected,
+          function (entry) {
+            return entry.elementId
+          },
+          function (entry) {
+            return entry.questionId
+          },
+        )
+        // The marks each question put on the elements it affects: RFC 0030 §3 shows them
+        // "until the question is answered", so answering has to be able to take them off.
+        var dependsMarks = idMap()
+
+        var checksFor = groupBy(data.checks, function (result) {
+          return result.elementId
+        })
+        var breakingFor = groupBy(data.breaking, function (item) {
+          return item.elementId
+        })
+
+        /* ---------- cards ---------- */
+
+        var cards = []
+        // A sub-card is nested inside its parent's element, so hiding the parent hides
+        // it whatever the filter decided about it. Keyed by node: an id may repeat.
+        var cardOf = new Map()
+
+        function card(options) {
+          var node = el('article', 'card' + (options.sub ? ' sub' : ''))
+          var anchor = anchorId(options.id)
+          if (anchor) node.id = anchor
+
+          var head = el('div', 'card-head')
+          head.appendChild(el('h3', null, options.title))
+          var badge = changeBadge(options.change)
+          if (badge) head.appendChild(badge)
+          if (options.extraBadges) {
+            options.extraBadges.forEach(function (extra) {
+              head.appendChild(extra)
+            })
+          }
+          head.appendChild(el('code', 'card-id', options.id))
+          ;(dependsOn[options.id] || []).forEach(function (questionId) {
+            var mark = link(questionId, 'depends on ' + questionId)
+            mark.className = 'depends'
+            head.appendChild(mark)
+            var marks = dependsMarks[questionId]
+            if (marks === undefined) dependsMarks[questionId] = marks = []
+            marks.push(mark)
+          })
+          node.appendChild(head)
+
+          ;(breakingFor[options.id] || []).forEach(function (item) {
+            node.appendChild(el('p', 'note', 'Breaking: ' + item.reason))
+          })
+          ;(checksFor[options.id] || []).forEach(function (result) {
+            var line = el('p', 'note')
+            line.appendChild(el('span', 'badge badge-' + result.status, result.status))
+            line.appendChild(document.createTextNode(' ' + result.title + ': ' + result.message))
+            node.appendChild(line)
+          })
+
+          if (options.body) node.appendChild(options.body)
+
+          // Only the reverse direction: what an element references is already written
+          // where it belongs — a validator under Body, a policy under Policy, a target
+          // in its relationship line — and repeating it as chips said it twice.
+          var back = incoming[options.id] || []
+          if (back.length) {
+            var seen = idMap()
+            var referrers = el('p', 'note referenced-by')
+            referrers.appendChild(el('span', 'label', 'Referenced by'))
+            back.forEach(function (edge) {
+              if (seen[edge.from]) return
+              seen[edge.from] = true
+              if (referrers.childNodes.length > 1) referrers.appendChild(document.createTextNode(', '))
+              referrers.appendChild(link(edge.from))
+            })
+            node.appendChild(referrers)
+          }
+
+          if (!options.noReview) {
+            var controls = reviewControls(options.id)
+            head.appendChild(controls.mark)
+            node.appendChild(controls.panel)
+          }
+
+          // A question is not filtered: it sits above the tabs and asks about every
+          // entity it affects, so an entity filter would hide the thing being asked.
+          if (!options.noFilter) {
+            var entry = {
+              node: node,
+              parent: options.parent ? cardOf.get(options.parent) : null,
+              entity: entityOf[options.id] || null,
+              existing: options.change ? options.change.kind === 'existing' : false,
+            }
+            cards.push(entry)
+            cardOf.set(node, entry)
+          }
+          return node
+        }
+
+        /* ---------- ER diagram ---------- */
+
+        var expanded = idMap()
+
+        function svgEl(tag, attributes) {
+          var node = document.createElementNS('http://www.w3.org/2000/svg', tag)
+          Object.keys(attributes || {}).forEach(function (key) {
+            node.setAttribute(key, String(attributes[key]))
+          })
+          return node
+        }
+
+        function svgText(x, y, text, className) {
+          var node = svgEl('text', { x: x, y: y })
+          if (className) node.setAttribute('class', className)
+          node.textContent = text
+          return node
+        }
+
+        function columnLine(column) {
+          var parts = [column.name, column.type]
+          if (column.primaryKey) parts.push('pk')
+          if (column.nullable) parts.push('null')
+          if (column.unique) parts.push('uniq')
+          if (column.index) parts.push('idx')
+          return parts.join(' ')
+        }
+
+        /** Where the segment between two boxes leaves the first, so a label lands in the gap. */
+        function borderPoint(box, towards) {
+          var cx = box.x + box.w / 2
+          var cy = box.y + box.h / 2
+          var dx = towards.x + towards.w / 2 - cx
+          var dy = towards.y + towards.h / 2 - cy
+          if (dx === 0 && dy === 0) return [cx, cy]
+          var scale = Math.min(
+            dx === 0 ? Infinity : box.w / 2 / Math.abs(dx),
+            dy === 0 ? Infinity : box.h / 2 / Math.abs(dy),
+          )
+          return [cx + dx * scale, cy + dy * scale]
+        }
+
+        var BOX_WIDTH = 230
+        var GAP_X = 76
+        var drawnColumns = null
+
+        /**
+         * `.wrap` rather than the diagram's own host: the host's panel is hidden on every
+         * tab but the first, and a hidden element measures 0, which would lay the diagram
+         * out for a width no one is looking at.
+         */
+        function diagramColumns(tableCount) {
+          var width = document.querySelector('.wrap').clientWidth - 32
+          return Math.max(1, Math.min(3, Math.floor((width + GAP_X) / (BOX_WIDTH + GAP_X)), tableCount || 1))
+        }
+
+        function drawDiagram(host) {
+          while (host.firstChild) host.removeChild(host.firstChild)
+          var tables = data.diagram.tables
+          if (!tables.length) {
+            host.appendChild(el('p', 'note', 'The plan declares no models.'))
+            return
+          }
+
+          var boxWidth = BOX_WIDTH
+          var gapX = GAP_X
+          var gapY = 36
+          var columns = diagramColumns(tables.length)
+          drawnColumns = columns
+          var rowHeight = 22
+          var headerHeight = 44
+
+          var placed = idMap()
+          var rowTops = []
+          var top = 0
+          for (var index = 0; index < tables.length; index += columns) {
+            var row = tables.slice(index, index + columns)
+            var tallest = 0
+            row.forEach(function (table, offset) {
+              var open = expanded[table.id]
+              var height = headerHeight + (open ? table.columns.length * rowHeight + 8 : 0)
+              placed[table.id] = {
+                table: table,
+                x: offset * (boxWidth + gapX),
+                y: top,
+                w: boxWidth,
+                h: height,
+                open: open,
+              }
+              if (height > tallest) tallest = height
+            })
+            rowTops.push(top)
+            top += tallest + gapY
+          }
+
+          var totalWidth = columns * boxWidth + (columns - 1) * gapX
+          var totalHeight = Math.max(top - gapY, headerHeight)
+          var svg = svgEl('svg', {
+            class: 'er',
+            width: totalWidth,
+            height: totalHeight,
+            viewBox: '0 0 ' + totalWidth + ' ' + totalHeight,
+            role: 'img',
+            'aria-label': 'Entity relationship diagram of the plan',
+          })
+
+          var edgeLabels = []
+          data.diagram.edges.forEach(function (edge) {
+            var from = placed[edge.from]
+            var to = placed[edge.to]
+            if (!from || !to) return
+            var start = borderPoint(from, to)
+            var end = borderPoint(to, from)
+            var x1 = start[0]
+            var y1 = start[1]
+            var x2 = end[0]
+            var y2 = end[1]
+            var line = svgEl('line', { x1: x1, y1: y1, x2: x2, y2: y2 })
+            if (edge.kind === 'relationship') line.setAttribute('class', 'relationship')
+            svg.appendChild(line)
+            var label = svgText((x1 + x2) / 2, (y1 + y2) / 2 - 4, edge.label, 'edge-label')
+            label.setAttribute('text-anchor', 'middle')
+            // Appended after the boxes: an opaque box drawn later would paint over it.
+            edgeLabels.push(label)
+          })
+
+          tables.forEach(function (table) {
+            var box = placed[table.id]
+            var group = svgEl('g', { class: 'table', tabindex: '0', role: 'button' })
+            group.setAttribute('aria-expanded', box.open ? 'true' : 'false')
+            var rect = svgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, rx: 8 })
+            rect.setAttribute('class', 'box ' + table.change)
+            group.appendChild(rect)
+            group.appendChild(svgText(box.x + 12, box.y + 20, table.table, 'title'))
+            group.appendChild(svgText(box.x + 12, box.y + 36, table.model + ' - ' + table.change, 'muted'))
+            if (box.open) {
+              table.columns.forEach(function (column, index) {
+                group.appendChild(svgText(box.x + 12, box.y + headerHeight + 14 + index * rowHeight, columnLine(column)))
+              })
+            }
+            var toggle = function () {
+              expanded[table.id] = !expanded[table.id]
+              drawDiagram(host)
+            }
+            group.addEventListener('click', toggle)
+            group.addEventListener('keydown', function (event) {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                toggle()
+              }
+            })
+            svg.appendChild(group)
+          })
+
+          edgeLabels.forEach(function (label) {
+            svg.appendChild(label)
+          })
+
+          host.appendChild(svg)
+          host.appendChild(el('p', 'note', 'Click a table to show its columns. Dashed edges are declared relationships.'))
+        }
+
+        /* ---------- section renderers ---------- */
+
+        var diagramHost = null
+
+        /**
+         * A column as one mono line, the way the diagram already writes one: the type,
+         * then only the facts that are true. Five rows reading `no` said less than this.
+         */
+        function columnFacts(column) {
+          var facts = [column.type + (column.precision ? '(' + column.precision + ',' + (column.scale || 0) + ')' : '')]
+          if (column.primaryKey) facts.push('pk')
+          if (column.nullable) facts.push('null')
+          if (column.unique) facts.push('uniq')
+          if (column.index) facts.push('idx')
+          if (column.withTimezone) facts.push('tz')
+          if (column.default !== undefined) facts.push('default ' + column.default)
+          if (column.columnName !== undefined) facts.push('as ' + column.columnName)
+
+          var parts = [facts.join('  ')]
+          if (column.references) {
+            parts.push('  references ')
+            parts.push(link(column.references.model))
+            parts.push(
+              '.' + column.references.column + (column.references.onDelete ? ' on delete ' + column.references.onDelete : ''),
+            )
+          }
+          var line = span(parts)
+          line.className = 'facts'
+          return line
+        }
+
+        function renderModels(host) {
+          var diagramPanel = el('div', 'panel')
+          diagramPanel.appendChild(el('h2', null, 'Entity relationships'))
+          diagramHost = el('div')
+          diagramPanel.appendChild(diagramHost)
+          host.appendChild(diagramPanel)
+
+          plan.models.forEach(function (model) {
+            var body = el('div')
+            body.appendChild(
+              kv([
+                ['Table', model.tableRenamedFrom ? model.table + ' (renamed from ' + model.tableRenamedFrom + ')' : model.table],
+                ['Module', model.module],
+                ['Fillable', model.fillable.join(', ')],
+                ['Data migration', model.dataMigration ? model.dataMigration.kind + ': ' + (model.dataMigration.reason || model.dataMigration.description) : null],
+              ]),
+            )
+            if (model.relationships.length) {
+              group(body, 'Relationships', model.relationships, function (relationship) {
+                return span([relationship.name + ' ' + relationship.type + ' ', link(relationship.target)])
+              })
+            }
+            if (model.indexes.length) {
+              group(body, 'Indexes', model.indexes, function (index) {
+                return (index.unique ? 'unique ' : '') + index.columns.join(', ')
+              })
+            }
+            var node = card({ id: model.id, title: model.name, change: model.change, body: body })
+
+            if (model.columns.length) {
+              var columnsHost = el('div')
+              columnsHost.appendChild(el('h4', null, 'Columns'))
+              model.columns.forEach(function (column) {
+                var columnBody = el('div')
+                columnBody.appendChild(columnFacts(column))
+                if (column.dataMigration) {
+                  columnBody.appendChild(
+                    el(
+                      'p',
+                      'note',
+                      'Data migration — ' +
+                        column.dataMigration.kind +
+                        ': ' +
+                        (column.dataMigration.reason || column.dataMigration.description),
+                    ),
+                  )
+                }
+                columnsHost.appendChild(
+                  card({ id: column.id, title: column.name, change: column.change, body: columnBody, sub: true, parent: node }),
+                )
+              })
+              node.appendChild(columnsHost)
+            }
+            host.appendChild(node)
+          })
+        }
+
+        function renderViews(host) {
+          plan.views.forEach(function (view) {
+            var body = el('div')
+            body.appendChild(kv([['Page', view.page], ['Module', view.module], ['Purpose', view.purpose]]))
+            if (view.props.length) {
+              group(body, 'Props', view.props, function (prop) {
+                return span([
+                  prop.name + ': ' + prop.type,
+                  prop.resource ? ' from ' : null,
+                  prop.resource ? link(prop.resource) : null,
+                ])
+              })
+            }
+            if (view.form) {
+              body.appendChild(el('h4', null, 'Form'))
+              var form = el('div')
+              var formMeta = span(['validated by ', link(view.form.validator), ', submits to ', link(view.form.submitsTo)])
+              formMeta.className = 'note'
+              form.appendChild(formMeta)
+              form.appendChild(
+                list(view.form.fields, function (field) {
+                  return field.label + ' (' + field.field + ', ' + field.input + ')'
+                }),
+              )
+              body.appendChild(form)
+            }
+            if (view.actions.length) {
+              group(body, 'Actions', view.actions, function (action) {
+                return span([action.label + ' -> ', link(action.route)])
+              })
+            }
+            body.appendChild(kv([['Empty', view.states.empty], ['Error', view.states.error], ['Loading', view.states.loading]]))
+            host.appendChild(card({ id: view.id, title: view.page, change: view.change, body: body }))
+          })
+        }
+
+        function renderControllers(host) {
+          plan.controllers.forEach(function (controller) {
+            var node = card({
+              id: controller.id,
+              title: controller.className,
+              change: controller.change,
+              body: kv([['Module', controller.module]]),
+            })
+            controller.actions.forEach(function (action) {
+              var body = el('div')
+              var response = action.response
+              var responseCell =
+                response.kind === 'inertia'
+                  ? link(response.view, 'renders ' + response.view)
+                  : response.kind === 'resource'
+                    ? link(response.resource, 'returns ' + response.resource)
+                    : response.kind === 'redirect'
+                      ? 'redirect to ' + response.to
+                      : response.kind === 'json'
+                        ? 'json: ' + response.description
+                        : 'empty'
+              body.appendChild(
+                kv([
+                  ['Params', action.params ? link(action.params) : null],
+                  ['Query', action.query ? link(action.query) : null],
+                  ['Body', action.body ? link(action.body) : null],
+                  ['Middleware', action.authorization.middleware.join(', ')],
+                  [
+                    'Policy',
+                    action.authorization.policy
+                      ? span([link(action.authorization.policy.id), ' can ' + action.authorization.policy.ability])
+                      : null,
+                  ],
+                  ['Response', responseCell],
+                ]),
+              )
+              if (action.rules.length) {
+                group(body, 'Business rules', action.rules)
+              }
+              node.appendChild(card({ id: action.id, title: action.name, change: action.change, body: body, sub: true, parent: node }))
+            })
+            host.appendChild(node)
+          })
+        }
+
+        function renderRoutes(host) {
+          plan.routes.forEach(function (route) {
+            var body = el('div')
+            body.appendChild(
+              kv([
+                ['Path', route.method + ' ' + route.path],
+                ['Action', link(route.action)],
+                ['Middleware', route.middleware.join(', ')],
+                [
+                  'Bind',
+                  route.bind.length
+                    ? (function () {
+                        var line = el('span')
+                        route.bind.forEach(function (binding, index) {
+                          if (index) line.appendChild(document.createTextNode(', '))
+                          line.appendChild(document.createTextNode(binding.param + ': '))
+                          line.appendChild(link(binding.model))
+                          if (binding.key) line.appendChild(document.createTextNode(' by ' + binding.key))
+                        })
+                        return line
+                      })()
+                    : null,
+                ],
+                ['Agent tool', route.agent ? route.agent.toolName + (route.agent.readOnly ? ' (read-only)' : '') : null],
+              ]),
+            )
+            host.appendChild(card({ id: route.id, title: route.name, change: route.change, body: body }))
+          })
+        }
+
+        function renderValidators(host) {
+          plan.validators.forEach(function (validator) {
+            var body = el('div')
+            body.appendChild(kv([['Module', validator.module]]))
+            group(body, 'Fields', validator.fields, function (field) {
+              var suffix = field.rules.length ? ' - ' + field.rules.join(', ') : ''
+              return field.name + ': ' + field.type + (field.required ? ' (required)' : ' (optional)') + suffix
+            })
+            host.appendChild(card({ id: validator.id, title: validator.name, change: validator.change, body: body }))
+          })
+        }
+
+        function renderResources(host) {
+          plan.resources.forEach(function (resource) {
+            var body = el('div')
+            body.appendChild(kv([['Module', resource.module], ['Model', link(resource.model)]]))
+            group(body, 'Fields', resource.fields, function (field) {
+              return field.name + ': ' + field.type
+            })
+            host.appendChild(card({ id: resource.id, title: resource.name, change: resource.change, body: body }))
+          })
+        }
+
+        function renderPolicies(host) {
+          plan.policies.forEach(function (policy) {
+            var body = el('div')
+            body.appendChild(kv([['Module', policy.module], ['Model', link(policy.model)]]))
+            group(body, 'Abilities', policy.abilities, function (ability) {
+              return ability.name + ': ' + ability.rule
+            })
+            host.appendChild(card({ id: policy.id, title: policy.name, change: policy.change, body: body }))
+          })
+        }
+
+        function renderSideEffects(host) {
+          plan.sideEffects.forEach(function (effect) {
+            var body = kv([
+              ['Kind', effect.kind],
+              ['Module', effect.module],
+              ['Trigger', effect.trigger],
+              ['Description', effect.description],
+            ])
+            host.appendChild(card({ id: effect.id, title: effect.name, change: effect.change, body: body }))
+          })
+        }
+
+        function renderCommands(host) {
+          plan.commands.forEach(function (command) {
+            var body = el('div')
+            body.appendChild(el('p', 'mono', command.command))
+            body.appendChild(el('p', 'note', command.reason))
+            host.appendChild(card({ id: command.id, title: command.command, body: body }))
+          })
+        }
+
+        function jsonValues(values) {
+          return values
+            .map(function (value) {
+              return value.name + ' = ' + value.json
+            })
+            .join(', ')
+        }
+
+        function renderAcceptance(acceptance) {
+          var body = el('div')
+          var gwt = el('div', 'given-when-then')
+
+          gwt.appendChild(el('div', 'label', 'Given'))
+          var given = el('div')
+          if (acceptance.given.length) given.appendChild(list(acceptance.given))
+          else given.appendChild(el('span', 'note', 'nothing in particular'))
+          gwt.appendChild(given)
+
+          gwt.appendChild(el('div', 'label', 'When'))
+          gwt.appendChild(
+            span([
+              'a ' + acceptance.actor + ' calls ',
+              link(acceptance.route),
+              acceptance.input && acceptance.input.length ? ' with ' + jsonValues(acceptance.input) : null,
+            ]),
+          )
+
+          gwt.appendChild(el('div', 'label', 'Then'))
+          var then = el('div')
+          var expectations = []
+          if (acceptance.expect.status !== undefined) expectations.push('status ' + acceptance.expect.status)
+          if (acceptance.expect.redirect !== undefined) expectations.push('redirect to ' + acceptance.expect.redirect)
+          if (acceptance.expect.errors) expectations.push('errors on ' + acceptance.expect.errors.join(', '))
+          ;(acceptance.expect.database || []).forEach(function (row) {
+            if (row.has) expectations.push(row.table + ' has ' + jsonValues(row.has))
+            if (row.missing) expectations.push(row.table + ' has no ' + jsonValues(row.missing))
+          })
+          if (expectations.length) then.appendChild(list(expectations))
+          if (acceptance.expect.inertia) {
+            var page = span(['renders ', link(acceptance.expect.inertia)])
+            page.className = 'note'
+            then.appendChild(page)
+          }
+          gwt.appendChild(then)
+          body.appendChild(gwt)
+          return body
+        }
+
+        function renderTasks(host) {
+          plan.tasks.forEach(function (task) {
+            var covers = el('p', 'note referenced-by')
+            covers.appendChild(el('span', 'label', 'Covers'))
+            task.covers.forEach(function (elementId, index) {
+              if (index) covers.appendChild(document.createTextNode(', '))
+              covers.appendChild(link(elementId))
+            })
+            var taskBody = el('div')
+            taskBody.appendChild(kv([['Entity', task.entity]]))
+            taskBody.appendChild(covers)
+            var node = card({ id: task.id, title: task.entity + ' - ' + task.summary, body: taskBody })
+            task.acceptance.forEach(function (acceptance) {
+              node.appendChild(
+                card({
+                  id: acceptance.id,
+                  title: acceptance.description,
+                  sub: true,
+                  parent: node,
+                  extraBadges: [el('span', 'badge badge-kind', acceptance.kind)],
+                  body: renderAcceptance(acceptance),
+                }),
+              )
+            })
+            host.appendChild(node)
+          })
+        }
+
+        /* ---------- header, pinned findings, questions ---------- */
+
+        document.getElementById('plan-title').textContent = plan.title
+        document.title = plan.title
+        document.getElementById('plan-summary').textContent = plan.summary
+
+        var meta = document.getElementById('plan-meta')
+        if (data.planHash) {
+          meta.appendChild(el('span', 'mono', 'plan ' + data.planHash.slice(0, 12)))
+          if (plan.baseline) meta.appendChild(el('span', 'mono', 'baseline ' + plan.baseline.rev))
+        } else {
+          meta.appendChild(el('span', null, 'Draft: no baseline, so no plan hash yet.'))
+        }
+
+        var scope = document.getElementById('plan-scope')
+        function scopeBlock(title, items) {
+          var block = el('div')
+          block.appendChild(el('h4', null, title))
+          if (items.length) block.appendChild(list(items))
+          else block.appendChild(el('p', 'note', 'none'))
+          return block
+        }
+        scope.appendChild(scopeBlock('Goals', plan.scope.goals))
+        scope.appendChild(scopeBlock('Non-goals', plan.scope.nonGoals))
+        scope.appendChild(scopeBlock('Assumptions', plan.assumptions))
+        if (plan.hints.length) scope.appendChild(scopeBlock('Hints', plan.hints))
+
+        var pinned = document.getElementById('pinned')
+        var blocking = data.checks.filter(function (result) {
+          return result.status !== 'pass'
+        })
+        if (blocking.length || data.breaking.length) {
+          pinned.hidden = false
+          pinned.appendChild(el('h2', null, 'Needs attention'))
+          blocking.forEach(function (result) {
+            var item = el('div', 'pinned-item')
+            item.appendChild(
+              span([
+                el('span', 'badge badge-' + result.status, result.status),
+                ' ' + result.title,
+                result.elementId ? ' on ' : null,
+                result.elementId ? link(result.elementId) : null,
+              ]),
+            )
+            item.appendChild(el('p', 'note', result.message))
+            if (result.suggestion) item.appendChild(el('p', 'note', result.suggestion))
+            pinned.appendChild(item)
+          })
+          data.breaking.forEach(function (item) {
+            var node = el('div', 'pinned-item')
+            node.appendChild(span([el('span', 'badge badge-drop', 'breaking'), ' ' + item.title + ' ', link(item.elementId)]))
+            node.appendChild(el('p', 'note', item.reason))
+            pinned.appendChild(node)
+          })
+        }
+
+        // A list, not a map keyed by the question id: two questions may declare the same
+        // id (`guren check` reports it, and the page still renders), and a map would keep
+        // one of them while both sets of handlers went on writing to their own.
+        var answers = []
+
+        /** RFC 0030 §4: an assumption nobody confirmed is not an answer. */
+        function answered(answer) {
+          return answer.option !== null || answer.text !== ''
+        }
+
+        /**
+         * The badge and the "depends on" marks are derived from the answers, so they are
+         * refreshed rather than updated. Also called once after the cards exist, since a
+         * question's marks live on the elements it affects and those render later.
+         */
+        function refreshAnswers() {
+          answers.forEach(function (answer) {
+            var settled = answered(answer)
+            answer.badge.hidden = settled
+            ;(dependsMarks[answer.questionId] || []).forEach(function (mark) {
+              mark.hidden = settled
+            })
+          })
+        }
+        var questionsHost = document.getElementById('questions')
+        if (plan.questions.length) {
+          var questionsPanel = el('section', 'panel')
+          questionsPanel.appendChild(el('h2', null, 'Questions the plan could not decide'))
+          questionsPanel.appendChild(
+            el('p', 'note', 'Each was written under the assumed answer. Changing one changes the elements it affects.'),
+          )
+          plan.questions.forEach(function (question, questionIndex) {
+            // `option` stays null until someone picks one: the assumed answer is
+            // preselected so the plan reads the way it was written, and RFC 0030 §4 is
+            // explicit that silence is not an answer. `answered()` is what the export
+            // and the "depends on" marks go by.
+            var answer = {
+              questionId: question.id,
+              option: null,
+              text: '',
+              badge: el('span', 'badge badge-alter', 'unanswered'),
+            }
+            answers.push(answer)
+
+            var body = el('div')
+            var fieldset = el('fieldset', 'bare')
+            var legend = el('legend', 'note', 'Options')
+            fieldset.appendChild(legend)
+            question.options.forEach(function (option) {
+              var label = el('label', 'question-option')
+              var radio = el('input')
+              radio.type = 'radio'
+              // The index, not the id: two questions sharing an id would otherwise put
+              // their options in one radio group and answer each other.
+              radio.name = 'question-' + questionIndex
+              radio.checked = option.label === question.assumed
+              var choose = function () {
+                if (!radio.checked) return
+                answer.option = option.label
+                refreshAnswers()
+              }
+              // `click` as well as `change`: clicking the preselected option is how
+              // someone confirms the assumption, and that fires no `change`.
+              radio.addEventListener('change', choose)
+              radio.addEventListener('click', choose)
+              label.appendChild(radio)
+              label.appendChild(document.createTextNode(' ' + option.label))
+              if (option.label === question.assumed) {
+                label.appendChild(document.createTextNode(' '))
+                label.appendChild(el('span', 'badge badge-existing', 'assumed'))
+              }
+              label.appendChild(el('span', 'consequence', option.consequence))
+              fieldset.appendChild(label)
+            })
+            body.appendChild(fieldset)
+
+            var answerLabel = el('label', 'question-answer')
+            answerLabel.appendChild(el('span', 'note', 'Answer'))
+            var answerBox = el('textarea')
+            answerBox.rows = 2
+            answerBox.setAttribute('aria-label', 'Answer to ' + question.id)
+            answerBox.addEventListener('input', function () {
+              answer.text = answerBox.value
+              refreshAnswers()
+            })
+            answerLabel.appendChild(answerBox)
+            body.appendChild(answerLabel)
+
+            if (question.affects.length) {
+              var affects = el('p', 'note referenced-by')
+              affects.appendChild(el('span', 'label', 'Affects'))
+              question.affects.forEach(function (elementId, index) {
+                if (index) affects.appendChild(document.createTextNode(', '))
+                affects.appendChild(link(elementId))
+              })
+              body.appendChild(affects)
+            }
+
+            questionsPanel.appendChild(
+              card({
+                id: question.id,
+                title: question.question,
+                body: body,
+                extraBadges: [answer.badge],
+                noReview: true,
+                noFilter: true,
+              }),
+            )
+          })
+          questionsHost.appendChild(questionsPanel)
+        }
+
+        /* ---------- tabs, filters ---------- */
+
+        loadReview()
+
+        var tabs = document.getElementById('tabs')
+        var panels = document.getElementById('panels')
+        var tabEntries = []
+
+        SECTIONS.forEach(function (section, index) {
+          var items = plan[section.key] || []
+          var button = el('button', null, section.label + ' (' + items.length + ')')
+          button.type = 'button'
+          button.setAttribute('role', 'tab')
+          button.setAttribute('aria-selected', index === 0 ? 'true' : 'false')
+          button.setAttribute('aria-controls', 'panel-' + section.key)
+          button.addEventListener('click', function () {
+            selectTab(section.key)
+          })
+          tabs.appendChild(button)
+
+          var panel = el('section')
+          panel.id = 'panel-' + section.key
+          panel.setAttribute('role', 'tabpanel')
+          panel.setAttribute('aria-label', section.label)
+          panel.hidden = index !== 0
+          // The tab names the section on screen; on paper there are no tabs.
+          panel.appendChild(el('h2', 'section-title', section.label))
+          section.render(panel)
+          if (!items.length) {
+            panel.className = 'empty'
+            panel.appendChild(el('p', 'note', 'Nothing in this section.'))
+          }
+          panels.appendChild(panel)
+          tabEntries.push({ key: section.key, button: button, panel: panel })
+        })
+
+        refreshAnswers()
+
+        // Drawn once the panels are in the document: the layout is measured, and nothing
+        // in this file measures an element it has not yet appended.
+        if (diagramHost) drawDiagram(diagramHost)
+
+        // Coalesced into one frame, and skipped when the column count has not moved: the
+        // width read is a synchronous layout of the whole document, and the column count
+        // is the only width-dependent quantity, so an unchanged one redraws the same SVG.
+        var resizePending = false
+        window.addEventListener('resize', function () {
+          if (!diagramHost || resizePending) return
+          resizePending = true
+          window.requestAnimationFrame(function () {
+            resizePending = false
+            if (diagramColumns(data.diagram.tables.length) !== drawnColumns) drawDiagram(diagramHost)
+          })
+        })
+
+        function selectTab(key) {
+          tabEntries.forEach(function (entry) {
+            var selected = entry.key === key
+            entry.button.setAttribute('aria-selected', selected ? 'true' : 'false')
+            entry.panel.hidden = !selected
+          })
+        }
+
+        // An in-page link may point into a hidden panel or at a card the filter hides;
+        // show the panel that holds it, then re-filter so the card itself survives.
+        function revealHash() {
+          var node = document.getElementById(window.location.hash.slice(1))
+          if (!node) return
+          tabEntries.forEach(function (entry) {
+            if (entry.panel.contains(node)) selectTab(entry.key)
+          })
+          applyFilters()
+          node.scrollIntoView()
+        }
+        window.addEventListener('hashchange', revealHash)
+
+        var entityFilter = document.getElementById('entity-filter')
+        var changesOnly = document.getElementById('changes-only')
+        var visibleCount = document.getElementById('visible-count')
+        var allOption = el('option', null, 'All')
+        allOption.value = ''
+        entityFilter.appendChild(allOption)
+        data.entities.forEach(function (entity) {
+          var option = el('option', null, entity)
+          option.value = entity
+          entityFilter.appendChild(option)
+        })
+
+        function applyFilters() {
+          var entity = entityFilter.value
+          var only = changesOnly.checked
+          // Read rather than cached: the link target is whatever the hash says right now,
+          // so nothing has to decide when to re-run this.
+          var linked = window.location.hash.slice(1)
+          cards.forEach(function (item) {
+            // A link to a filtered-out element would otherwise land on a hidden card:
+            // the filter is a view, not a claim that the element is gone.
+            item.keep = item.node.id === linked || !((entity && item.entity !== entity) || (only && item.existing))
+          })
+          // A matching card is unreachable while an ancestor is hidden, so every
+          // ancestor of a match is kept too.
+          cards.forEach(function (item) {
+            if (!item.keep) return
+            for (var ancestor = item.parent; ancestor && !ancestor.keep; ancestor = ancestor.parent) {
+              ancestor.keep = true
+            }
+          })
+          var shown = 0
+          cards.forEach(function (item) {
+            item.node.hidden = !item.keep
+            if (item.keep) shown += 1
+          })
+          visibleCount.textContent = shown + ' of ' + cards.length + ' elements shown'
+        }
+        entityFilter.addEventListener('change', applyFilters)
+        changesOnly.addEventListener('change', applyFilters)
+        applyFilters()
+        revealHash()
+
+        /* ---------- feedback ---------- */
+
+        function feedbackJson() {
+          var feedback = {
+            // Only what someone actually answered. An assumption nobody confirmed would
+            // otherwise reach `plan --revise` as a decision (RFC 0030 §4).
+            answers: answers.filter(answered).map(function (given) {
+              var answer = { questionId: given.questionId }
+              if (given.option !== null) answer.option = given.option
+              if (given.text !== '') answer.text = given.text
+              return answer
+            }),
+            elements: Object.keys(reviewed()).map(function (id) {
+              return { elementId: id, verdict: review[id].verdict, comment: review[id].comment }
+            }),
+          }
+          if (data.planHash) feedback.planHash = data.planHash
+          return JSON.stringify(feedback, null, 2)
+        }
+
+        var exportStatus = document.getElementById('export-status')
+        var statusTimer = null
+
+        function say(message) {
+          exportStatus.textContent = message
+          if (statusTimer) window.clearTimeout(statusTimer)
+          statusTimer = window.setTimeout(function () {
+            exportStatus.textContent = ''
+          }, 4000)
+        }
+
+        // `planFile` is already held to a bare name with no shell metacharacter, because
+        // this line exists to be pasted into a shell.
+        document.getElementById('revise-command').textContent =
+          'bunx guren plan --revise ' + (data.planFile || '<plan.json>') + ' --feedback feedback.json'
+
+        document.getElementById('copy').addEventListener('click', function () {
+          // Clipboard, not the network: `file://` is a secure context, and no policy
+          // directive governs it. A refusal (permission, or an older engine) says so.
+          window.navigator.clipboard.writeText(feedbackJson()).then(
+            function () {
+              say('Copied. Save it as feedback.json beside the plan.')
+            },
+            function () {
+              say('The browser refused the clipboard. Use Download instead.')
+            },
+          )
+        })
+
+        document.getElementById('export').addEventListener('click', function () {
+          var blob = new Blob([feedbackJson()], { type: 'application/json' })
+          var url = URL.createObjectURL(blob)
+          var anchor = el('a')
+          anchor.href = url
+          anchor.download = 'feedback.json'
+          document.body.appendChild(anchor)
+          anchor.click()
+          document.body.removeChild(anchor)
+          URL.revokeObjectURL(url)
+          say('Downloaded feedback.json.')
+        })
+      })()
+    </script>
+  </body>
+</html>
