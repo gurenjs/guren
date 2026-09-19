@@ -91,6 +91,22 @@ describe('PlanDraftSchema', () => {
     expect(PlanDraftSchema.safeParse(draft).success).toBe(true)
   })
 
+  test('should reject an id that names an Object.prototype member', () => {
+    for (const id of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+      const draft = validDraft()
+      draft.views[0]!.id = id
+
+      expect(PlanDraftSchema.safeParse(draft).success).toBe(false)
+    }
+  })
+
+  test('should accept an id that merely contains such a name', () => {
+    const draft = validDraft()
+    draft.views[0]!.id = 'view.constructor'
+
+    expect(PlanDraftSchema.safeParse(draft).success).toBe(true)
+  })
+
   test('should reject a route path that is not absolute', () => {
     const draft = validDraft()
     draft.routes[0]!.path = 'posts/:postId/comments'

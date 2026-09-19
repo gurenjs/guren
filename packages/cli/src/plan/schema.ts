@@ -12,7 +12,12 @@ export const PLAN_VERSION = 1
 
 const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 
-const IdSchema = z.string().regex(ID_PATTERN)
+// `constructor` and `toString` match the pattern, and any consumer that keys a plain
+// object by id reads the inherited function back instead of `undefined`.
+const IdSchema = z
+  .string()
+  .regex(ID_PATTERN)
+  .refine((id) => !(id in Object.prototype), { message: 'must not name an Object.prototype member' })
 
 /**
  * `rename.from` is the previous value of the element's primary name: a model's class
