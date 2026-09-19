@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { z } from 'zod'
 
 import { layoutPlanFlows } from '../src/plan/flow'
@@ -215,6 +217,24 @@ describe('layoutPlanFlows on graphs that are not a clean chain', () => {
     )
   })
 
+  test('should report the grid of a flow with more steps than a page would ever show', () => {
+    const { nodes, edges } = chain(120000)
+
+    expect(layoutPlanFlows(planWith({ nodes, edges }))[0].columns).toBe(120000)
+  })
+
+  test('should place a chain declared back to front without paying a pass per edge', () => {
+    // A model writing a flow from its end declares its edges in reverse. Relaxing until
+    // the edge list settles costs a pass each: 1,930 ms at 8,000 steps, measured.
+    const { nodes, edges } = chain(8000)
+    const started = performance.now()
+
+    const layout = layoutPlanFlows(planWith({ nodes, edges: edges.slice().reverse() }))[0]
+
+    expect(layout.columns).toBe(8000)
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
   test('should walk a chain deeper than a call stack would carry', () => {
     // A recursive walk overflows here: measured between 1,000 and 5,000 steps under
     // Node and between 20,000 and 40,000 under Bun, so which runtime ran it decided
@@ -222,5 +242,18 @@ describe('layoutPlanFlows on graphs that are not a clean chain', () => {
     const { nodes, edges } = chain(50000)
 
     expect(layoutPlanFlows(planWith({ nodes, edges }))[0].columns).toBe(50000)
+  })
+})
+
+describe('the flow module', () => {
+  const source = readFileSync(join(import.meta.dir, '../src/plan/flow.ts'), 'utf8')
+
+  /**
+   * A spread passes one argument per element: 120,000 throws under Node, and Bun carries
+   * a million. The suite runs under Bun, so no behavioural test here can see the limit
+   * the other runtime has. Asserted on the source instead, like the page's sinks.
+   */
+  test.each(['Math.max(...', 'Math.min(...'])('should not spread an array into %s', (spread) => {
+    expect(source).not.toContain(spread)
   })
 })

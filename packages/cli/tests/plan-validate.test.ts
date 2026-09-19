@@ -461,6 +461,12 @@ describe('flows', () => {
     expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('view.nowhere')
   })
 
+  test('should say when a step loops to itself, which the layout cannot draw', () => {
+    const results = validatePlan(planWithFlow([step], [{ from: 'form', to: 'form' }]), appState())
+
+    expect(expectResult(results, 'plan:flow-self-loop', 'flow.comment', 'warn').message).toContain('form')
+  })
+
   test('should refuse an edge naming a step this flow does not have', () => {
     const results = validatePlan(planWithFlow([step], [{ from: 'form', to: 'nowhere' }]), appState())
 
@@ -515,17 +521,21 @@ describe('flows', () => {
     expect(expectResult(results, 'plan:reference', 'flow.comment', 'fail').message).toContain('is a views element')
   })
 
-  test.each(['actor', 'store', 'decision', 'job', 'external'])(
-    'should leave a %s step free to name any element, since its kind names no section',
-    (kind) => {
-      const results = validatePlan(
-        planWithFlow([{ ...step, kind, element: 'route.comments.store' }], []),
-        appState(),
-      )
+  test.each([
+    // The pairs the comment on FLOW_KIND_SECTIONS claims are legitimate, so the test
+    // says what the freedom is for rather than only that it exists.
+    ['store', 'model.comment'],
+    ['store', 'resource.comment'],
+    ['decision', 'validator.comment'],
+    ['decision', 'policy.comment'],
+    ['job', 'route.comments.store'],
+    ['actor', 'model.comment'],
+    ['external', 'route.comments.destroy'],
+  ])('should leave a %s step free to name %s, since its kind names no section', (kind, element) => {
+    const results = validatePlan(planWithFlow([{ ...step, kind, element }], []), appState())
 
-      expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
-    },
-  )
+    expect(find(failures(results), 'plan:reference', 'flow.comment')).toBeUndefined()
+  })
 
   test('should judge an edge against its own flow, since a step id is the flow\'s own', () => {
     const plan = PlanDraftSchema.parse({

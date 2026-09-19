@@ -250,6 +250,18 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
       )
     }
     for (const edge of flow.edges) {
+      // The layout drops a self-loop, because a line from a box to itself draws nothing.
+      // Saying so is the point: a plan that describes a retry on one step should not
+      // find out from a picture that quietly left it out.
+      if (edge.from === edge.to) {
+        results.push(
+          finding('plan:flow-self-loop', 'warn', `Flow step "${edge.from}" loops to itself, which the diagram does not draw.`, {
+            elementId: flow.id,
+            section: 'flows',
+          }),
+        )
+        continue
+      }
       // Node ids are the flow's own, so an edge is checked against its own flow rather
       // than against the plan: two flows may both have a node called `start`.
       for (const [end, id] of [['from', edge.from], ['to', edge.to]] as const) {
