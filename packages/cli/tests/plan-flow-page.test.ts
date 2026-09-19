@@ -115,7 +115,7 @@ class FakeNode {
  * The page's own `drawFlow()`, run against the few DOM calls it makes. The closure is
  * assembled from the page source, so a change to the drawing is a change to what runs here.
  */
-const { drawFlow, flowBlocked, wrapSvgText } = (() => {
+const { drawFlow: drawFlowWith, flowBlocked, wrapSvgText } = (() => {
   const constants = source.match(/^\s*var (FLOW_[A-Z_]+|ID_RE) = .+$/gm) ?? []
   const functions = [
     'idMap',
@@ -139,11 +139,18 @@ const { drawFlow, flowBlocked, wrapSvgText } = (() => {
     `'use strict'\n${constants.join('\n')}\n${functions.join('\n')}\nreturn { drawFlow: drawFlow, flowBlocked: flowBlocked, wrapSvgText: wrapSvgText }`,
   )
   return build(document) as {
-    drawFlow: (flow: PlanFlowLayout) => FakeNode
+    drawFlow: (flow: PlanFlowLayout, declared: object) => FakeNode
     flowBlocked: (start: number[], end: number[], cells: object, from: object, to: object) => boolean
     wrapSvgText: (text: string, limit: number, most: number) => string[]
   }
 })()
+
+/** Every element id of the fixture plan, as the page's own index holds them. */
+const DECLARED = Object.fromEntries(buildPlanPayload({ plan: planWithFlows() }).elements.map((element) => [element.id, true]))
+
+function drawFlow(flow: PlanFlowLayout, declared: object = DECLARED): FakeNode {
+  return drawFlowWith(flow, declared)
+}
 
 function laneOf(edge: FakeNode): number {
   const match = edge.attributes.d.match(/ V ([\d.]+) H /)
@@ -182,7 +189,7 @@ describe('drawFlow', () => {
   const [comment, moderate] = payloadOf(planWithFlows()).flows
 
   test('should draw one svg per flow', () => {
-    const drawn = [comment, moderate].map(drawFlow)
+    const drawn = [comment, moderate].map((flow) => drawFlow(flow))
 
     expect(drawn.map((svg) => svg.tag)).toEqual(['svg', 'svg'])
     expect(drawn.map((svg) => svg.attributes['aria-label'])).toEqual(['Flow: Leaving a comment', 'Flow: Moderating'])
@@ -215,6 +222,15 @@ describe('drawFlow', () => {
     expect(anchors.every((anchor) => anchor.children[0].attributes.class === 'node')).toBe(true)
   })
 
+  test('should not link a node to an element the plan does not declare', () => {
+    const svg = drawFlow({
+      ...comment,
+      nodes: comment.nodes.map((node) => ({ ...node, element: 'route.not.declared' })),
+    })
+
+    expect(svg.withTag('a')).toEqual([])
+  })
+
   test('should leave a node with no element as plain text', () => {
     const svg = drawFlow(comment)
     const direct = svg.children.filter((child) => child.attributes.class === 'node')
@@ -223,10 +239,9 @@ describe('drawFlow', () => {
   })
 
   test('should not link an element id the anchor gate refuses', () => {
-    const svg = drawFlow({
-      ...comment,
-      nodes: comment.nodes.map((node) => ({ ...node, element: 'javascript:alert(1)//" onload="' })),
-    })
+    // Declared, so the gate is the only thing between this id and an href.
+    const hostile = 'javascript:alert(1)//" onload="'
+    const svg = drawFlow({ ...comment, nodes: comment.nodes.map((node) => ({ ...node, element: hostile })) }, { [hostile]: true })
 
     expect(svg.withTag('a')).toEqual([])
     expect(svg.withClass('node')).toHaveLength(7)
@@ -450,7 +465,7 @@ describe('the flow drawing in the page source', () => {
   })
 
   test('should take the flow anchor from the gate every other anchor goes through', () => {
-    expect(functionSource('drawFlow')).toContain('var anchor = node.element ? anchorId(node.element) : null')
+    expect(functionSource('drawFlow')).toContain('var anchor = node.element && node.element in declared ? anchorId(node.element) : null')
   })
 
   /**

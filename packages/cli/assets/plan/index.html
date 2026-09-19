@@ -1881,7 +1881,7 @@
          * that value's to say, so it is the same here, in print, and in any later view.
          * How an edge gets between two steps is the page's: it depends on the sizes above.
          */
-        function drawFlow(flow) {
+        function drawFlow(flow, declared) {
           var at = idMap()
           var cells = idMap()
           flow.nodes.forEach(function (node) {
@@ -1978,9 +1978,10 @@
             wrapSvgText(node.label, 20, 2).forEach(function (piece, index) {
               group.appendChild(svgText(box.x + 10, box.y + 34 + index * 13, piece, 'title'))
             })
-            // A node that names an element is a link into the rest of the document,
-            // through the same gate every other anchor goes through.
-            var anchor = node.element ? anchorId(node.element) : null
+            // A node that names an element is a link into the rest of the document, through
+            // the same gate every other anchor goes through. One naming an element the plan
+            // does not declare is a finding on the card, and a link to nowhere if drawn as one.
+            var anchor = node.element && node.element in declared ? anchorId(node.element) : null
             if (anchor) {
               var a = svgEl('a', { href: '#' + anchor })
               a.appendChild(group)
@@ -2058,7 +2059,7 @@
             var body = el('div')
             if (flow.description) body.appendChild(el('p', null, flow.description))
             var scroll = el('div', 'flow-scroll')
-            scroll.appendChild(drawFlow(flow))
+            scroll.appendChild(drawFlow(flow, entityOf))
             body.appendChild(scroll)
             // The layout keeps a change's kind; the badge also reads what a rename was
             // from and why a drop, which only the plan's own flow carries.
