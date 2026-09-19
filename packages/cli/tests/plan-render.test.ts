@@ -409,7 +409,6 @@ describe('planBreakingChanges', () => {
       elementId: 'column.comment.body',
       section: 'columns',
       title: 'comments.body',
-      reason: 'The column is dropped.',
       reasonKey: 'breaking.columnDropped',
       reasonValues: {},
     })
@@ -427,8 +426,8 @@ describe('planBreakingChanges', () => {
     plan.routes[0].change = { kind: 'alter' }
     plan.routes[0].agent = { toolName: 'comments_store', readOnly: false }
 
-    expect(planBreakingChanges(plan).map((item) => item.reason)).toContain(
-      'The published agent tool comments_store changes.',
+    expect(planBreakingChanges(plan)).toContainEqual(
+      expect.objectContaining({ reasonKey: 'breaking.agentToolChanges', reasonValues: { tool: 'comments_store' } }),
     )
   })
 })

@@ -4,17 +4,12 @@
  * check results are never looked up here.
  */
 
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-
 import { extractPlaceholders } from '../i18n-check'
+import { readPlanAsset } from './assets'
 
 export const PLAN_LOCALES = ['en', 'ja'] as const
 export type PlanLocale = (typeof PLAN_LOCALES)[number]
 export type PlanDictionary = Record<string, string>
-
-// Same two hops as the template in `render.ts`: `dist/` is one below the package root, `src/plan/` two.
-const LANG_CANDIDATES = ['../assets/plan/lang/', '../../assets/plan/lang/'] as const
 
 export function isPlanLocale(value: string): value is PlanLocale {
   return (PLAN_LOCALES as readonly string[]).includes(value)
@@ -24,13 +19,6 @@ export function isPlanLocale(value: string): value is PlanLocale {
 export function matchPlanLocale(tag: string | undefined): PlanLocale | undefined {
   const language = tag?.split('-')[0]?.toLowerCase()
   return language !== undefined && isPlanLocale(language) ? language : undefined
-}
-
-/** A dictionary value with string values only, as a caller outside the page prints it. */
-export function formatPlanPhrase(template: string, values: Record<string, string>): string {
-  return template.replace(/\{([A-Za-z_][A-Za-z0-9_.-]*)\}/g, (whole, name: string) =>
-    Object.hasOwn(values, name) ? values[name]! : whole,
-  )
 }
 
 export function parsePlanDictionary(locale: string, raw: string): PlanDictionary {
@@ -44,24 +32,8 @@ export function parsePlanDictionary(locale: string, raw: string): PlanDictionary
   return parsed as PlanDictionary
 }
 
-const cached = new Map<PlanLocale, PlanDictionary>()
-
 export function loadPlanDictionary(locale: PlanLocale): PlanDictionary {
-  const hit = cached.get(locale)
-  if (hit !== undefined) return hit
-  const tried: string[] = []
-  for (const candidate of LANG_CANDIDATES) {
-    const path = fileURLToPath(new URL(`${candidate}${locale}.json`, import.meta.url))
-    try {
-      const dictionary = parsePlanDictionary(locale, readFileSync(path, 'utf8'))
-      cached.set(locale, dictionary)
-      return dictionary
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      tried.push(path)
-    }
-  }
-  throw new Error(`Could not locate the ${locale} plan dictionary shipped with @guren/cli. Tried:\n  ${tried.join('\n  ')}`)
+  return parsePlanDictionary(locale, readPlanAsset(`lang/${locale}.json`).source)
 }
 
 export function loadPlanDictionaries(): Record<PlanLocale, PlanDictionary> {

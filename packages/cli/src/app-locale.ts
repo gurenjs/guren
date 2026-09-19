@@ -3,27 +3,20 @@
  * running it. Positive evidence only: an option built elsewhere, or no `i18n` at all,
  * is no answer rather than a guessed one.
  */
-import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { Node } from '@babel/types'
 
 import { literalString, objectLiteral, propertyValue, unwrapTypeAssertion } from './ast-walk'
 import { createAppOptions } from './config-check'
-import { parseSourceFile } from './parse-cache'
+import { ParseCache } from './parse-cache'
 import { resolveAppEntry } from './provider-registrar'
 
 export async function readAppDefaultLocale(cwd: string): Promise<string | undefined> {
   const entry = await resolveAppEntry(cwd)
   if (entry === null) return undefined
 
-  let source: string
-  try {
-    source = await readFile(resolve(cwd, entry), 'utf8')
-  } catch {
-    return undefined
-  }
-  const ast = parseSourceFile(source, entry)
-  const i18n = ast ? objectLiteral(propertyValue(createAppOptions(ast.program), 'i18n')) : null
+  const parsed = await new ParseCache().get(resolve(cwd, entry))
+  const i18n = parsed ? objectLiteral(propertyValue(createAppOptions(parsed.ast.program), 'i18n')) : null
   if (!i18n) return undefined
 
   // A spread may carry a `fallback` this cannot see, and one that is not a literal names

@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { loadPlanDictionaries } from '../src/plan/locales'
-import { planTemplatePath, renderPlanHtml, type RenderPlanInput } from '../src/plan/render'
-import { planPageData } from './plan-fixture'
+import { escapeJsonForScript, planTemplatePath, renderPlanHtml, type RenderPlanInput } from '../src/plan/render'
+import { planDataBlock, planPageData } from './plan-fixture'
 import { openPlanPage, pageSentences, type Page, type PageNode, type PageOptions } from './plan-page-dom'
 import { RICH_CHECKS, richPlan } from './plan-page-rich'
 
@@ -263,11 +263,17 @@ describe('the plan page source', () => {
   })
 
   test('should take a template from the shipped dictionaries and from nowhere else', () => {
-    // `phrase()` is the one reader of a dictionary, and the two formatter calls take what it returns.
-    expect(source.match(/formatInto\(/g)).toHaveLength(2)
-    expect(source.match(/formatText\(/g)).toHaveLength(2)
-    expect(source).toContain('formatInto(node, phrase(key), resolve(values))')
-    expect(source).toContain('return formatText(phrase(key), resolve(values))')
+    // `phrase()` is the one reader of a dictionary; the third call is `formatText` handing on its own argument.
+    const calls = source
+      .split('\n')
+      .filter((line) => /format(Into|Text)\(/.test(line) && !line.includes('function '))
+      .map((line) => line.trim())
+
+    expect(calls).toEqual([
+      "return formatInto(el('span'), template, values).textContent",
+      'return formatText(phrase(key), resolve(values))',
+      'formatInto(node, phrase(key), resolve(values))',
+    ])
   })
 
   test('should write a plan string that spells a placeholder as text', () => {
@@ -284,7 +290,7 @@ describe('the plan page source', () => {
     const data = planPageData(html)
     delete (data.i18n.dictionaries.en as Record<string, string>)['footer.copy']
     delete (data.i18n.dictionaries.ja as Record<string, string>)['footer.copy']
-    const page = openPlanPage(html.replace(/(<script type="application\/json" id="plan-data">)[\s\S]*?(<\/script>)/, (_all, a: string, b: string) => a + JSON.stringify(data) + b))
+    const page = openPlanPage(html.replace(planDataBlock(html), () => escapeJsonForScript(JSON.stringify(data))))
 
     expect(page.byId('copy').textContent).toBe('{footer.copy}')
   })
@@ -293,7 +299,7 @@ describe('the plan page source', () => {
     const html = renderPlanHtml({ plan: richPlan(), uiLocale: 'ja' })
     const data = planPageData(html)
     delete (data.i18n.dictionaries.ja as Record<string, string>)['footer.copy']
-    const page = openPlanPage(html.replace(/(<script type="application\/json" id="plan-data">)[\s\S]*?(<\/script>)/, (_all, a: string, b: string) => a + JSON.stringify(data) + b))
+    const page = openPlanPage(html.replace(planDataBlock(html), () => escapeJsonForScript(JSON.stringify(data))))
 
     expect(page.byId('copy').textContent).toBe('Copy feedback')
   })

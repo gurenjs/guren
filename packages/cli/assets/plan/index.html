@@ -1105,57 +1105,34 @@
          * A value is only ever text or a node, never a template, so a plan string
          * spelling `{route}` is written out as those seven characters.
          */
-        function walkTemplate(template, values, onText, onNode) {
+        function formatInto(host, template, values) {
           var pattern = /\{([A-Za-z_][A-Za-z0-9_.-]*)\}/g
           var last = 0
           var match
           // A node has one parent: appended twice it would move, and the first site go blank.
           var placed = []
+          var text = function (value) {
+            host.appendChild(document.createTextNode(value))
+          }
           while ((match = pattern.exec(template)) !== null) {
-            if (match.index > last) onText(template.slice(last, match.index))
-            var known = values !== undefined && values !== null && Object.prototype.hasOwnProperty.call(values, match[1])
-            var value = known ? values[match[1]] : undefined
+            if (match.index > last) text(template.slice(last, match.index))
+            var value = values && own(values, match[1]) ? values[match[1]] : undefined
             // An unknown placeholder stays on the page as written: a blank would read as a
             // finished sentence with a word missing.
-            if (value === undefined || value === null) onText(match[0])
+            if (value === undefined || value === null) text(match[0])
             else if (typeof value === 'object' && value.nodeType) {
-              onNode(placed.indexOf(value) === -1 ? value : value.cloneNode(true))
+              host.appendChild(placed.indexOf(value) === -1 ? value : value.cloneNode(true))
               placed.push(value)
-            }
-            else onText(String(value))
+            } else text(String(value))
             last = pattern.lastIndex
           }
-          if (last < template.length) onText(template.slice(last))
-        }
-
-        function formatInto(host, template, values) {
-          walkTemplate(
-            template,
-            values,
-            function (text) {
-              host.appendChild(document.createTextNode(text))
-            },
-            function (node) {
-              host.appendChild(node)
-            },
-          )
+          if (last < template.length) text(template.slice(last))
           return host
         }
 
         /** For the places that take a string: an attribute, an `option`, a placeholder. */
         function formatText(template, values) {
-          var out = ''
-          walkTemplate(
-            template,
-            values,
-            function (text) {
-              out += text
-            },
-            function (node) {
-              out += node.textContent
-            },
-          )
-          return out
+          return formatInto(el('span'), template, values).textContent
         }
 
         var i18n = data.i18n
@@ -1244,7 +1221,7 @@
           var ul = el('ul')
           items.forEach(function (item) {
             var li = el('li')
-            var content = mapper ? mapper(item) : el('span', null, item)
+            var content = mapper ? mapper(item) : item.nodeType ? item : el('span', null, item)
             if (typeof content === 'string') li.textContent = content
             else li.appendChild(content)
             ul.appendChild(li)
@@ -2304,13 +2281,7 @@
             if (row.has) expecting('acceptance.has', { table: row.table, values: jsonValues(row.has) })
             if (row.missing) expecting('acceptance.hasNo', { table: row.table, values: jsonValues(row.missing) })
           })
-          if (expectations.length) {
-            then.appendChild(
-              list(expectations, function (expectation) {
-                return expectation
-              }),
-            )
-          }
+          if (expectations.length) then.appendChild(list(expectations))
           if (acceptance.expect.inertia) {
             var page = tel('span', 'note', 'acceptance.renders', { page: link(acceptance.expect.inertia) })
             then.appendChild(page)
@@ -2411,12 +2382,7 @@
                 element: link(item.elementId),
               }),
             )
-            var reason = el('p', 'note')
-            localise(function () {
-              reason.setAttribute('lang', uiLocale)
-              reason.textContent = t(item.reasonKey, item.reasonValues)
-            })
-            node.appendChild(reason)
+            node.appendChild(tel('p', 'note', item.reasonKey, item.reasonValues))
             pinned.appendChild(node)
           })
         }
@@ -2578,7 +2544,12 @@
 
         // Drawn once the panels are in the document: the layout is measured, and nothing
         // in this file measures an element it has not yet appended.
-        if (diagramHost) drawDiagram(diagramHost)
+        // Bound like any worded node: the drawing says three things in the page's language.
+        if (diagramHost) {
+          localise(function () {
+            drawDiagram(diagramHost)
+          })
+        }
 
         // Coalesced into one frame, and skipped when the column count has not moved: the
         // width read is a synchronous layout of the whole document, and the column count
@@ -2745,7 +2716,6 @@
           })
           // A status line is a sentence in the locale it was said in.
           exportStatus.textContent = ''
-          if (diagramHost) drawDiagram(diagramHost)
         }
 
         localise(function () {
