@@ -8,10 +8,13 @@
       load or post anywhere; the two 'unsafe-inline' allowances cover this file's own
       style and script, which are the only ones it has. `form-action` and `base-uri`
       fall back to nothing rather than to `default-src`, so both are named.
+      `require-trusted-types-for` is for the version of this page that does not exist
+      yet: where it is enforced, a markup-writing sink someone adds later throws rather
+      than parsing a plan string as HTML.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'; require-trusted-types-for 'script'"
     />
     <title>Implementation plan</title>
     <style>
@@ -601,11 +604,33 @@
         var storageKey = data.planHash ? 'guren.plan.review.' + data.planHash : null
         var review = Object.create(null)
 
+        var VERDICTS = ['approve', 'changes']
+
+        /**
+         * What comes back from storage is not this page's output: another document on the
+         * same origin can write the key, and an older version of this page may have
+         * written a different shape. Entries that are not `{ verdict, comment }` are
+         * dropped rather than carried into the export.
+         */
+        function restore(stored) {
+          var record = Object.create(null)
+          if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return record
+          Object.keys(stored).forEach(function (id) {
+            var entry = stored[id]
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
+            var verdict = VERDICTS.indexOf(entry.verdict) === -1 ? null : entry.verdict
+            var comment = typeof entry.comment === 'string' ? entry.comment : ''
+            if (verdict === null && comment === '') return
+            record[id] = { verdict: verdict, comment: comment }
+          })
+          return record
+        }
+
         function loadReview() {
           if (!storageKey) return
           try {
             var raw = window.localStorage.getItem(storageKey)
-            if (raw) review = Object.assign(Object.create(null), JSON.parse(raw))
+            if (raw) review = restore(JSON.parse(raw))
           } catch (error) {
             review = Object.create(null)
           }
@@ -1369,7 +1394,10 @@
           })
         }
 
-        var answers = Object.create(null)
+        // A list, not a map keyed by the question id: two questions may declare the same
+        // id (`guren check` reports it, and the page still renders), and a map would keep
+        // one of them while both sets of handlers went on writing to their own.
+        var answers = []
         // Run once the cards exist: a question's marks live on the elements it affects.
         var pendingQuestions = []
         var questionsHost = document.getElementById('questions')
@@ -1379,13 +1407,13 @@
           questionsPanel.appendChild(
             el('p', 'note', 'Each was written under the assumed answer. Changing one changes the elements it affects.'),
           )
-          plan.questions.forEach(function (question) {
+          plan.questions.forEach(function (question, questionIndex) {
             // `option` stays null until someone picks one: the assumed answer is
             // preselected so the plan reads the way it was written, and RFC 0030 §4 is
             // explicit that silence is not an answer. `answered()` is what the export
             // and the "depends on" marks go by.
-            var answer = { option: null, text: '' }
-            answers[question.id] = answer
+            var answer = { questionId: question.id, option: null, text: '' }
+            answers.push(answer)
             var unanswered = el('span', 'badge badge-alter', 'unanswered')
 
             function settle() {
@@ -1404,7 +1432,9 @@
               var label = el('label', 'question-option')
               var radio = el('input')
               radio.type = 'radio'
-              radio.name = 'question-' + question.id
+              // The index, not the id: two questions sharing an id would otherwise put
+              // their options in one radio group and answer each other.
+              radio.name = 'question-' + questionIndex
               radio.checked = option.label === question.assumed
               var choose = function () {
                 if (!radio.checked) return
@@ -1516,7 +1546,10 @@
           })
         }
 
-        // An in-page link may point into a hidden panel; show the panel that holds it.
+        // An in-page link may point into a hidden panel or at a card the filter hides;
+        // show the panel that holds it, and keep the card itself through the filter.
+        var revealed = null
+
         function revealHash() {
           var target = window.location.hash.slice(1)
           if (!target) return
@@ -1525,6 +1558,11 @@
           SECTIONS.forEach(function (section) {
             if (panelNodes[section.key].contains(node)) selectTab(section.key)
           })
+          var entry = cardOf.get(node)
+          if (entry !== revealed) {
+            revealed = entry || null
+            applyFilters()
+          }
           node.scrollIntoView()
         }
         window.addEventListener('hashchange', revealHash)
@@ -1544,21 +1582,23 @@
         function applyFilters() {
           var entity = entityFilter.value
           var only = changesOnly.checked
-          var shown = 0
           cards.forEach(function (item) {
-            item.keep = !((entity && item.entity !== entity) || (only && item.existing))
-            if (item.keep) shown += 1
+            // A link to a filtered-out element would otherwise land on a hidden card:
+            // the filter is a view, not a claim that the element is gone.
+            item.keep = item === revealed || !((entity && item.entity !== entity) || (only && item.existing))
           })
           // A matching card is unreachable while an ancestor is hidden, so every
-          // ancestor of a match is kept. Kept-for-a-child cards are not counted.
+          // ancestor of a match is kept too.
           cards.forEach(function (item) {
             if (!item.keep) return
             for (var ancestor = item.parent; ancestor && !ancestor.keep; ancestor = ancestor.parent) {
               ancestor.keep = true
             }
           })
+          var shown = 0
           cards.forEach(function (item) {
             item.node.hidden = !item.keep
+            if (item.keep) shown += 1
           })
           visibleCount.textContent = shown + ' of ' + cards.length + ' elements shown'
         }
@@ -1573,13 +1613,12 @@
           var feedback = {
             // Only what someone actually answered. An assumption nobody confirmed would
             // otherwise reach `plan --revise` as a decision (RFC 0030 §4).
-            answers: Object.keys(answers)
-              .filter(function (questionId) {
-                return answers[questionId].option !== null || answers[questionId].text !== ''
+            answers: answers
+              .filter(function (given) {
+                return given.option !== null || given.text !== ''
               })
-              .map(function (questionId) {
-                var given = answers[questionId]
-                var answer = { questionId: questionId }
+              .map(function (given) {
+                var answer = { questionId: given.questionId }
                 if (given.option !== null) answer.option = given.option
                 if (given.text !== '') answer.text = given.text
                 return answer

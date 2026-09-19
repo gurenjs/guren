@@ -232,7 +232,6 @@ describe('the plan template', () => {
     'breakingFor',
     'expanded',
     'placed',
-    'answers',
   ])('should key %s on a null prototype', (name) => {
     // `constructor`, `toString` and `valueOf` all match the schema's id pattern, so a
     // plain object reads each back as an inherited function rather than as absent.
@@ -244,6 +243,12 @@ describe('the plan template', () => {
     // Neither falls back to `default-src`, so `'none'` has to be spelled for both.
     expect(source).toContain("form-action 'none'")
     expect(source).toContain("base-uri 'none'")
+    expect(source).toContain("require-trusted-types-for 'script'")
+  })
+
+  test('should hold the answers it exports in a list, not a map keyed by question id', () => {
+    // Two questions may declare one id; a map would keep one and lose the other's answer.
+    expect(source).toContain('var answers = []')
   })
 
   test('should resolve from the directory the published package ships', () => {
