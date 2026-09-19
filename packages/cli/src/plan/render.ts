@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import { planDiagram, type PlanDiagram } from './diagram'
+import { layoutPlanFlows, type PlanFlowLayout } from './flow'
 import { planHash } from './identity'
 import { listPlanElements, type Plan, type PlanDraft, type PlanElementSection } from './schema'
 
@@ -65,6 +66,8 @@ export interface PlanPagePayload {
   checks: PlanCheckResult[]
   breaking: PlanBreakingChange[]
   diagram: PlanDiagram
+  /** Placed here rather than in the page: a flow's layout is the same everywhere it is drawn. */
+  flows: PlanFlowLayout[]
   /** Absent when no name was given, or the given one is not safe to spell in a command. */
   planFile: string | null
   elements: PlanElementEntry[]
@@ -261,6 +264,10 @@ export function planLinks(plan: PlanDraft): PlanLink[] {
     for (const action of view.actions) link(view.id, action.route, action.label)
   }
 
+  for (const flow of plan.flows) {
+    for (const node of flow.nodes) link(flow.id, node.element, node.label)
+  }
+
   for (const resource of plan.resources) link(resource.id, resource.model, 'model')
   for (const policy of plan.policies) link(policy.id, policy.model, 'model')
 
@@ -289,6 +296,7 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
     checks: [...(input.checks ?? [])],
     breaking: planBreakingChanges(plan),
     diagram: planDiagram(plan),
+    flows: layoutPlanFlows(plan),
     planFile: input.planFile !== undefined && PLAN_FILE_PATTERN.test(input.planFile) ? input.planFile : null,
     elements,
     links: planLinks(plan),
