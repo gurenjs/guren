@@ -25,10 +25,11 @@ export interface ErEdge {
   foreignKeyColumns: string[]
 }
 
+/** Both arrays are ordered by {@link buildErGraph} and readonly so a consumer cannot resort them. */
 export interface ErGraph {
-  /** Tables as parsed, never a projection: fields added to `SchemaColumn` flow through. */
-  tables: SchemaTable[]
-  edges: ErEdge[]
+  /** Never projected, so fields added to `SchemaColumn` reach consumers untouched. */
+  tables: readonly SchemaTable[]
+  edges: readonly ErEdge[]
 }
 
 const RELATIONSHIP_CARDINALITY: Record<ModelRelationship['type'], ErCardinality | undefined> = {
@@ -92,7 +93,7 @@ export function buildErGraph(
   }
 
   const edges: ErEdge[] = []
-  const relationshipPairs = new Set<string>()
+  const declaredPerPair = new Map<string, ErEdge[]>()
 
   for (const model of sortedModels) {
     const from = model.info.tableName
@@ -102,7 +103,7 @@ export function buildErGraph(
       if (!cardinality || !rel.relatedModel) continue
       const to = resolveTargetTable(model, modelsByClass.get(rel.relatedModel) ?? [])
       if (!to) continue
-      edges.push({
+      const edge: ErEdge = {
         from,
         to,
         cardinality,
@@ -110,19 +111,24 @@ export function buildErGraph(
         source: 'relationship',
         relationship: rel,
         foreignKeyColumns: [],
-      })
-      relationshipPairs.add(pairKey(from, to))
+      }
+      edges.push(edge)
+      const declared = declaredPerPair.get(pairKey(from, to))
+      if (declared) declared.push(edge)
+      else declaredPerPair.set(pairKey(from, to), [edge])
     }
   }
 
-  const backingColumns = new Map<string, string[]>()
   for (const table of sortedTables) {
     for (const column of table.columns) {
       const reference = column.references
       if (!reference) continue
-      const key = pairKey(table.identifier, reference.table)
-      if (relationshipPairs.has(key)) {
-        backingColumns.set(key, [...(backingColumns.get(key) ?? []), column.name])
+      const declared = declaredPerPair.get(pairKey(table.identifier, reference.table))
+      if (declared) {
+        for (const edge of declared) {
+          edge.source = 'both'
+          edge.foreignKeyColumns.push(column.name)
+        }
         continue
       }
       edges.push({
@@ -134,14 +140,6 @@ export function buildErGraph(
         foreignKeyColumns: [column.name],
       })
     }
-  }
-
-  // Keys here are relationship pairs by construction, so no `foreignKey` edge can match.
-  for (const edge of edges) {
-    const columns = backingColumns.get(pairKey(edge.from, edge.to))
-    if (!columns) continue
-    edge.source = 'both'
-    edge.foreignKeyColumns = [...columns]
   }
 
   edges.sort(
@@ -211,8 +209,7 @@ export function renderErSpec(graph: ErGraph): SpecArtifact {
 }
 
 export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
-  const tables = await parseSchemaTables(cwd)
-  const models = await discoverParsedModels(cwd)
+  const [tables, models] = await Promise.all([parseSchemaTables(cwd), discoverParsedModels(cwd)])
   return renderErSpec(buildErGraph(tables, models))
 }
 
