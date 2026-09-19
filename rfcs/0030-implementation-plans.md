@@ -140,6 +140,21 @@ type Change =
   | { kind: 'drop'; reason: string }
 ```
 
+**Amended in implementation:** ~~`{ kind: 'alter'; from: string }`~~ `alter` carries
+no `from`. An alter targets the element it is declared on, so there was nothing
+for `from` to name. `rename.from` is the previous value of the element's primary
+name (a model's class, a column's property, a route's name), and a table renamed
+under an unchanged class says so with `tableRenamedFrom` on the model.
+
+**Amended in implementation:** columns carry an `id` like every other element,
+and are listed among the plan's elements. A revision (§4) and a question's
+`affects` address an element by id alone, and a column renamed by the plan
+could not be addressed by its name. Ids are one namespace across all sections,
+and an id may not name an `Object.prototype` member: `constructor` and
+`toString` fit the id pattern, and a consumer that keys a plain object by id
+reads the inherited function back for them. The rendered page went blank on
+such a plan before both the page and the schema were closed.
+
 A headless producer cannot stop and ask. A question is therefore data, and the
 model keeps going on a stated assumption:
 
@@ -167,6 +182,21 @@ The sections, in the terms of a conventional design document:
 | Validator | one definition per payload; views and controllers reference it by id |
 | Resource / Policy | output shape; abilities and who holds them |
 | Task intent | entity or story, `acceptance[]` (below), element ids it covers |
+
+**Amended in implementation:** the shipped schema carries more than this table
+names. A column has `columnName` (the SQL name where it differs from the
+property), `precision` / `scale` for `decimal`, and `withTimezone` for
+`datetime`, which Postgres stores as a different column type. A model has
+composite `indexes`; a single-column one stays the column's own `unique` /
+`index`. A binding has an optional `key`, since `Router` binds by
+`[Model, column]` as well as by primary key. Validators, views, resources,
+policies and side effects carry an optional `module`, as models and
+controllers do. Column types are an abstract vocabulary (`string`, `text`,
+`integer`, `number`, `decimal`, `boolean`, `date`, `datetime`, `json`, `uuid`),
+not `--fields` types and not Drizzle builder names; the projection onto each
+belongs to the scaffold and status slices, and a type with no projection is
+reported as unsupported there, never coerced. Composite foreign keys are not
+expressible.
 
 Validators are their own section because a form field and a request body that
 each describe the same rule are two descriptions that drift.
@@ -203,9 +233,23 @@ Each `expect` key maps onto an assertion `@guren/testing` already has
 `assertForbidden`, the database assertions). The tests a plan leaves behind
 are its durable form: the plan is archived at `plan:close`, the tests stay.
 
-Every section is optional. A plan that adds one column and one form field is
-four elements long, and `guren plan` may answer "this needs no plan" with a
-one-line reason instead of a document (the docs' one-sentence-diff rule).
+**Amended in implementation:** ~~`input?: Record<string, unknown>`~~ and the
+`has` / `missing` of `expect.database` are arrays of `{ name, json }`, the
+value carried as JSON text and checked to be valid JSON on parse. A
+structured-output producer needs `additionalProperties: false` on every
+object, which an open record cannot satisfy, and a closed union of primitives
+could not carry a nested request body.
+
+Every section is optional. **Amended in implementation:** as sections that
+default to `[]` on parse. The JSON Schema handed to a producer is the input
+form, so a producer may omit a section; the hash (§4) is taken of the parsed
+plan, so a document that omits a section and one that spells it out empty name
+the same plan. `planHash()` therefore takes a parsed `Plan` only, and a draft
+without a `baseline` has no identity.
+
+A plan that adds one column and one form field is four elements long, and
+`guren plan` may answer "this needs no plan" with a one-line reason instead of
+a document (the docs' one-sentence-diff rule).
 
 ### 2. Reference checks
 
