@@ -580,6 +580,33 @@
       }
 
       /* The page's one primary action, which is where the kit spends its red fill. */
+      .footer-note {
+        flex: 1 0 100%;
+        margin: 0;
+      }
+
+      .command {
+        flex: 1 0 100%;
+        margin: 0;
+        padding: 14px 18px;
+        border-radius: var(--g-r-card);
+        background: var(--g-ink);
+        color: #fff5f5;
+        font: 400 12.5px/1.75 var(--g-font-mono);
+        overflow-x: auto;
+      }
+
+      .footer button.secondary {
+        background: var(--g-panel);
+        border-color: var(--g-line-strong);
+        color: var(--g-text);
+      }
+
+      .footer button.secondary:hover {
+        background: var(--g-raised);
+        border-color: var(--g-muted);
+      }
+
       .footer button {
         padding: 8px 16px;
         border-radius: var(--g-r-ctl);
@@ -636,10 +663,14 @@
       </div>
       <main id="panels"></main>
       <div class="footer">
-        <button type="button" id="export">Export feedback</button>
-        <span class="note" id="export-note"
-          >Downloads feedback.json. This page never writes to the project and makes no network request.</span
-        >
+        <button type="button" id="copy">Copy feedback</button>
+        <button type="button" class="secondary" id="export">Download feedback.json</button>
+        <span class="note" id="export-status" role="status" aria-live="polite"></span>
+        <p class="note footer-note">
+          This page never writes to the project and makes no network request. Put the feedback beside
+          the plan and run:
+        </p>
+        <pre class="command" id="revise-command"></pre>
       </div>
     </div>
     <script>
@@ -1749,26 +1780,57 @@
         applyFilters()
         revealHash()
 
-        /* ---------- feedback export ---------- */
+        /* ---------- feedback ---------- */
 
-        document.getElementById('export').addEventListener('click', function () {
+        function feedbackJson() {
           var feedback = {
             // Only what someone actually answered. An assumption nobody confirmed would
             // otherwise reach `plan --revise` as a decision (RFC 0030 §4).
-            answers: answers
-              .filter(answered)
-              .map(function (given) {
-                var answer = { questionId: given.questionId }
-                if (given.option !== null) answer.option = given.option
-                if (given.text !== '') answer.text = given.text
-                return answer
-              }),
+            answers: answers.filter(answered).map(function (given) {
+              var answer = { questionId: given.questionId }
+              if (given.option !== null) answer.option = given.option
+              if (given.text !== '') answer.text = given.text
+              return answer
+            }),
             elements: Object.keys(reviewed()).map(function (id) {
               return { elementId: id, verdict: review[id].verdict, comment: review[id].comment }
             }),
           }
           if (data.planHash) feedback.planHash = data.planHash
-          var blob = new Blob([JSON.stringify(feedback, null, 2)], { type: 'application/json' })
+          return JSON.stringify(feedback, null, 2)
+        }
+
+        var exportStatus = document.getElementById('export-status')
+        var statusTimer = null
+
+        function say(message) {
+          exportStatus.textContent = message
+          if (statusTimer) window.clearTimeout(statusTimer)
+          statusTimer = window.setTimeout(function () {
+            exportStatus.textContent = ''
+          }, 4000)
+        }
+
+        // `planFile` is already held to a bare name with no shell metacharacter, because
+        // this line exists to be pasted into a shell.
+        document.getElementById('revise-command').textContent =
+          'bunx guren plan --revise ' + (data.planFile || '<plan.json>') + ' --feedback feedback.json'
+
+        document.getElementById('copy').addEventListener('click', function () {
+          // Clipboard, not the network: `file://` is a secure context, and no policy
+          // directive governs it. A refusal (permission, or an older engine) says so.
+          window.navigator.clipboard.writeText(feedbackJson()).then(
+            function () {
+              say('Copied. Save it as feedback.json beside the plan.')
+            },
+            function () {
+              say('The browser refused the clipboard. Use Download instead.')
+            },
+          )
+        })
+
+        document.getElementById('export').addEventListener('click', function () {
+          var blob = new Blob([feedbackJson()], { type: 'application/json' })
           var url = URL.createObjectURL(blob)
           var anchor = el('a')
           anchor.href = url
@@ -1777,6 +1839,7 @@
           anchor.click()
           document.body.removeChild(anchor)
           URL.revokeObjectURL(url)
+          say('Downloaded feedback.json.')
         })
       })()
     </script>

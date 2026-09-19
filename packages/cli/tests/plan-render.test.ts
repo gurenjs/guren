@@ -179,6 +179,40 @@ describe('renderPlanHtml', () => {
   })
 })
 
+describe('the plan file name the page prints in a command', () => {
+  test('should carry a plain name through', () => {
+    expect(payloadOf({ plan: draft(), planFile: 'comments.plan.json' }).planFile).toBe('comments.plan.json')
+  })
+
+  test('should be absent when none is given', () => {
+    expect(payloadOf({ plan: draft() }).planFile).toBeNull()
+  })
+
+  test.each([
+    'plan.json; rm -rf ~',
+    'plan.json && curl evil.example',
+    '$(id).json',
+    '`id`.json',
+    "plan'.json",
+    'plan".json',
+    'plan .json',
+    '../secrets.json',
+    '/etc/passwd',
+    '-rf',
+    '',
+  ])('should drop %p, which the page would otherwise print for someone to paste', (name) => {
+    // The command line is shown to be copied into a shell, so the name in it is held
+    // to a bare file name rather than merely escaped for HTML.
+    expect(payloadOf({ plan: draft(), planFile: name }).planFile).toBeNull()
+  })
+
+  test('should be printed by the page as the revise command', () => {
+    const html = renderPlanHtml({ plan: draft(), planFile: 'comments.plan.json' })
+
+    expect(html).toContain("'bunx guren plan --revise ' + (data.planFile || '<plan.json>')")
+  })
+})
+
 describe('escapeJsonForScript', () => {
   test('should escape every character that could close the block or break a line', () => {
     expect(escapeJsonForScript('"</a>&\u2028\u2029"')).toBe('"\\u003c/a\\u003e\\u0026\\u2028\\u2029"')

@@ -33,6 +33,12 @@ export interface PlanCheckResult extends CheckResult {
 export interface RenderPlanInput {
   plan: PlanDraft | Plan
   checks?: readonly PlanCheckResult[]
+  /**
+   * The plan file's name, for the revise command the page prints. A name is dropped
+   * unless it is {@link PLAN_FILE_PATTERN}: the page shows that line for someone to
+   * paste into a shell, so a name carrying `;` or a quote would be pasted with it.
+   */
+  planFile?: string
   /** Derived task status (RFC 0030 §6). Reserved: an absent value renders nothing. */
   status?: unknown
 }
@@ -64,6 +70,8 @@ export interface PlanPagePayload {
   checks: PlanCheckResult[]
   breaking: PlanBreakingChange[]
   diagram: PlanDiagram
+  /** Absent when no name was given, or the given one is not safe to spell in a command. */
+  planFile: string | null
   elements: PlanElementEntry[]
   links: PlanLink[]
   entities: string[]
@@ -71,6 +79,9 @@ export interface PlanPagePayload {
 }
 
 const DATA_PLACEHOLDER = '__GUREN_PLAN_DATA__'
+
+/** A bare file name with no shell metacharacter, no quote, no space and no path segment. */
+export const PLAN_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 let cachedTemplate: { path: string; source: string } | undefined
 
@@ -283,6 +294,7 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
     checks: [...(input.checks ?? [])],
     breaking: planBreakingChanges(plan),
     diagram: planDiagram(plan),
+    planFile: input.planFile !== undefined && PLAN_FILE_PATTERN.test(input.planFile) ? input.planFile : null,
     elements,
     links: planLinks(plan),
     // From the elements rather than from `tasks[].entity`: a model names its own

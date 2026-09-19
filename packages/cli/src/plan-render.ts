@@ -5,7 +5,7 @@
  */
 
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 
 import type { z } from 'zod'
 
@@ -67,7 +67,7 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
   }
 
   const plan = parsePlanDocument(document)
-  const html = renderPlanHtml({ plan, checks: options.checks })
+  const html = renderPlanHtml({ plan, checks: options.checks, planFile: basename(absolutePlan) })
   const target = options.output ? resolve(cwd, options.output) : planOutputPath(absolutePlan)
 
   // The package's own writer: it creates the directory, so `-o build/plan.html` works
