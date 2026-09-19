@@ -75,6 +75,8 @@ describe('the locale plan:render opens the page in', () => {
       ['an option built elsewhere', 'i18n: i18nOptions'],
       ['a computed list', 'i18n: { supported: locales }'],
       ['a computed first entry', 'i18n: { supported: [first] }'],
+      ['a fallback it cannot read', "i18n: { supported: ['ja', 'en'], fallback: preferred }"],
+      ['a spread that may carry the fallback', "i18n: { supported: ['ja', 'en'], ...overrides }"],
     ])('should give no answer for %s', async (_name, i18n) => {
       await writeWorkspaceFiles(workspace.dir, appEntry(i18n))
 

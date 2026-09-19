@@ -323,6 +323,9 @@ export function pageWords(root: PageNode, skip: (node: PageNode) => boolean = ()
       if (node.text !== '') lines.push(node.text)
       return
     }
+    // The accessible name either way, so naming a region by its heading reads as the label it replaced.
+    const labelledBy = root.all().find((other) => other.id !== '' && other.id === node.attributes['aria-labelledby'])
+    if (labelledBy) lines.push(`@aria-label ${labelledBy.textContent}`)
     for (const name of WORDED_ATTRIBUTES) {
       const value = node.attributes[name] ?? (typeof node[name] === 'string' ? (node[name] as string) : undefined)
       if (value) lines.push(`@${name} ${value}`)

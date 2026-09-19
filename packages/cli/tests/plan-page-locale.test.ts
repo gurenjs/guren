@@ -136,6 +136,16 @@ describe('the languages of the plan page', () => {
     expect(card.withClass('review')[0]!.getAttribute('lang')).toBe('ja')
   })
 
+  test('should name a panel by a heading in the language the page speaks, not by a label in the plan\'s', () => {
+    const page = open({ uiLocale: 'ja' })
+    const panel = page.byId('panel-routes')
+    const heading = page.byId(panel.getAttribute('aria-labelledby')!)
+
+    expect(panel.getAttribute('aria-label')).toBeNull()
+    expect(panel.getAttribute('lang')).toBeNull()
+    expect([heading.textContent, heading.getAttribute('lang')]).toEqual(['ルート', 'ja'])
+  })
+
   test('should leave plan prose in the document language', () => {
     const page = open({ uiLocale: 'ja' })
 
