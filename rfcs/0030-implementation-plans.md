@@ -308,6 +308,12 @@ plan and the application's current context (`generateContext()`,
   and a flow edge whose end is not a step of that flow; a flow edge from a
   step to itself is a warning, since the diagram draws no such line and a
   plan should not lose a statement in silence.
+- (amended, PR #920) a flow step whose id another step of the same flow
+  already took, which leaves an edge naming it ambiguous; a flow step whose
+  kind names a section (`route`, `action`, `page`) and whose element is not in
+  it. The other kinds are deliberately unconstrained: a `store` step may name
+  a model or a resource, a `decision` a validator or a policy, and an `actor`
+  names nothing at all.
 
 **Existing tests are read as the baseline.** A static scan of the test files
 collects which routes they exercise (`app.get('/posts')`, `app.post(...)` on a
