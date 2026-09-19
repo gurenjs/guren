@@ -522,7 +522,8 @@ describe('the flow drawing in the page source', () => {
   })
 
   test('should name the SVG namespace once, as a constant and not a request', () => {
-    expect(script.match(/http:\/\/www\.w3\.org\/2000\/svg/g)).toHaveLength(1)
-    expect(script.match(/https?:\/\//g)).toHaveLength(1)
+    // Every URL the script spells, compared whole: a pattern naming the host would also
+    // match `www.w3.org.evil.example`, and a count would not say which URL it counted.
+    expect(script.match(/https?:\/\/[^\s'"`)]+/g)).toEqual(['http://www.w3.org/2000/svg'])
   })
 })
