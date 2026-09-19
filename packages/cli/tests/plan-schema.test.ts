@@ -101,6 +101,18 @@ describe('PlanDraftSchema', () => {
     expect(PlanDraftSchema.safeParse(draft).success).toBe(true)
   })
 
+  test('should require a locale and hold it to the BCP 47 shape', () => {
+    const draft = loadCommentsPlan()
+
+    expect(PlanDraftSchema.safeParse({ ...draft, locale: undefined }).success).toBe(false)
+    for (const locale of ['en', 'ja', 'pt-BR', 'zh-Hant-TW']) {
+      expect(PlanDraftSchema.safeParse({ ...draft, locale }).success).toBe(true)
+    }
+    for (const locale of ['', 'english', 'en_US', 'e', '-en']) {
+      expect(PlanDraftSchema.safeParse({ ...draft, locale }).success).toBe(false)
+    }
+  })
+
   test('should reject a route path that is not absolute', () => {
     const draft = validDraft()
     draft.routes[0]!.path = 'posts/:postId/comments'
@@ -156,7 +168,7 @@ describe('planDraftJsonSchema', () => {
   test('should let a producer omit a section and still require the ones with no default', () => {
     const schema = planDraftJsonSchema() as { required?: string[] }
 
-    expect(schema.required).toEqual(['planVersion', 'title', 'summary', 'scope'])
+    expect(schema.required).toEqual(['planVersion', 'title', 'summary', 'scope', 'locale'])
   })
 })
 

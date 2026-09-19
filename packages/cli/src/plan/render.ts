@@ -12,7 +12,6 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import type { CheckResult } from '../check-result'
 import { planDiagram, type PlanDiagram } from './diagram'
 import { planHash } from './identity'
 import { listPlanElements, type Plan, type PlanDraft, type PlanElementSection } from './schema'
@@ -21,14 +20,10 @@ import { listPlanElements, type Plan, type PlanDraft, type PlanElementSection } 
  * A `guren check` result that names the plan element it concerns. `elementId` is
  * optional: a finding about the plan as a whole still belongs in the banner.
  */
-export interface PlanCheckResult extends CheckResult {
-  elementId?: string
-  /**
-   * Declared so a finding from `validatePlan()` passes through unchanged. The page
-   * does not read it: the element the finding names carries its own section.
-   */
-  section?: PlanElementSection
-}
+// The one definition lives with the checks; re-exported so a caller of the renderer
+// need not import the validator to name its input.
+export type { PlanCheckResult } from './validate'
+import type { PlanCheckResult } from './validate'
 
 export interface RenderPlanInput {
   plan: PlanDraft | Plan
