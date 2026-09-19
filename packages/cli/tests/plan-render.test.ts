@@ -15,30 +15,15 @@ import {
   type PlanPagePayload,
 } from '../src/plan/render'
 import { PlanDraftSchema, PlanSchema, type PlanDraft } from '../src/plan/schema'
-import { parsePlanDocument, planOutputPath, renderPlanFile } from '../src/plan-render'
-import { loadCommentsPlan, TEST_BASELINE } from './plan-fixture'
+import { parsePlanDocument, planOutputPath, renderPlanFile, type RenderPlanFileOptions } from '../src/plan-render'
+import { loadCommentsPlan, planAppState, planDataBlock, planPageData, TEST_BASELINE } from './plan-fixture'
 
 function draft(): PlanDraft {
   return PlanDraftSchema.parse(loadCommentsPlan())
 }
 
-/**
- * The page's data block, taken out of the rendered document the way a consumer
- * would. Asserting on this string rather than on the whole file is what lets the
- * escaping tests fail: the document's own script and style are full of `<` and `&`.
- */
-function dataBlock(html: string): string {
-  const opening = '<script type="application/json" id="plan-data">'
-  const start = html.indexOf(opening)
-  expect(start).toBeGreaterThan(-1)
-  const end = html.indexOf('</script>', start)
-  expect(end).toBeGreaterThan(start)
-  return html.slice(start + opening.length, end)
-}
-
-/** The page's data block, parsed back: what the page will actually read. */
 function payloadOf(input: Parameters<typeof renderPlanHtml>[0]): PlanPagePayload {
-  return JSON.parse(dataBlock(renderPlanHtml(input)))
+  return planPageData(renderPlanHtml(input))
 }
 
 /**
@@ -111,7 +96,7 @@ describe('renderPlanHtml', () => {
 
   test('should write no raw markup character into the data block', () => {
     for (const payload of PAYLOADS) {
-      const block = dataBlock(renderPlanHtml({ plan: hostilePlan(payload) }))
+      const block = planDataBlock(renderPlanHtml({ plan: hostilePlan(payload) }))
 
       expect(block).not.toContain('<')
       expect(block).not.toContain('>')
@@ -206,10 +191,14 @@ describe('the plan file name the page prints in a command', () => {
     expect(payloadOf({ plan: draft(), planFile: name }).planFile).toBeNull()
   })
 
-  test('should be printed by the page as the revise command', () => {
+  test('should be printed by the page in both revise commands', () => {
     const html = renderPlanHtml({ plan: draft(), planFile: 'comments.plan.json' })
 
-    expect(html).toContain("'bunx guren plan --revise ' + (data.planFile || '<plan.json>')")
+    expect(html).toContain("var reviseCommand = 'bunx guren plan --revise ' + (data.planFile || '<plan.json>')")
+    expect(html).toContain("reviseCommand + ' --feedback feedback.json'")
+    // The stdin form the page's "Copy feedback" feeds (RFC 0030 §4): the pipe that
+    // writes it is the reader's, since the clipboard command differs per system.
+    expect(html).toContain("reviseCommand + ' --feedback -'")
   })
 })
 
@@ -283,6 +272,20 @@ describe('the plan template', () => {
     // closed rule, so this assertion covers maps nobody has written yet.
     expect(source.match(/Object\.create\(null\)/g)).toHaveLength(1)
     expect(source).toContain('function idMap() {')
+  })
+
+  test('should address only elements the document declares', () => {
+    // A closed rule rather than a list of ids: the script reaches every static node
+    // this way, so an element removed or an id renamed on one side alone fails here
+    // instead of throwing in a browser nobody watched.
+    const declared = new Set(source.match(/\bid="([^"]+)"/g)?.map((attribute) => attribute.slice(4, -1)))
+    const addressed = [...source.matchAll(/getElementById\('([^']+)'\)/g)].map((match) => match[1])
+
+    expect(addressed.filter((id) => !declared.has(id))).toEqual([])
+    // And back: a command block the script never fills would print nothing at all.
+    const commands = [...source.matchAll(/<pre class="command" id="([^"]+)"/g)].map((match) => match[1])
+    expect(commands.filter((id) => !addressed.includes(id))).toEqual([])
+    expect(commands.length).toBeGreaterThan(1)
   })
 
   test('should hold the answers it exports in a list, not a map keyed by question id', () => {
@@ -470,6 +473,10 @@ describe('buildPlanPayload', () => {
 })
 
 describe('renderPlanFile', () => {
+  /** The application is the subject of two cases below and noise in the rest. */
+  const render = (path: string, options: Partial<RenderPlanFileOptions> = {}) =>
+    renderPlanFile(path, { app: planAppState(), ...options })
+
   async function fixtureDir(document: unknown = loadCommentsPlan()): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), 'guren-plan-render-'))
     await writeFile(join(dir, 'comments.plan.json'), JSON.stringify(document), 'utf8')
@@ -479,7 +486,7 @@ describe('renderPlanFile', () => {
   test('should write the page beside the plan', async () => {
     const dir = await fixtureDir()
 
-    const result = await renderPlanFile(join(dir, 'comments.plan.json'))
+    const result = await render(join(dir, 'comments.plan.json'))
 
     expect(result.path).toBe(join(dir, 'comments.plan.html'))
     expect(await readFile(result.path, 'utf8')).toContain('plan-data')
@@ -488,7 +495,7 @@ describe('renderPlanFile', () => {
   test('should write to the path -o names', async () => {
     const dir = await fixtureDir()
 
-    const result = await renderPlanFile(join(dir, 'comments.plan.json'), { output: join(dir, 'review.html') })
+    const result = await render(join(dir, 'comments.plan.json'), { output: join(dir, 'review.html') })
 
     expect(result.path).toBe(join(dir, 'review.html'))
   })
@@ -496,7 +503,7 @@ describe('renderPlanFile', () => {
   test('should resolve a relative output against the working directory it is given', async () => {
     const dir = await fixtureDir()
 
-    const result = await renderPlanFile(join(dir, 'comments.plan.json'), { output: 'review.html', cwd: dir })
+    const result = await render(join(dir, 'comments.plan.json'), { output: 'review.html', cwd: dir })
 
     expect(result.path).toBe(join(dir, 'review.html'))
   })
@@ -505,7 +512,7 @@ describe('renderPlanFile', () => {
     const dir = await fixtureDir()
     const planPath = join(dir, 'comments.plan.json')
 
-    await expect(renderPlanFile(planPath, { output: planPath })).rejects.toThrow(/over the plan itself/)
+    await expect(render(planPath, { output: planPath })).rejects.toThrow(/over the plan itself/)
     // The plan is the input every later step reads, and nothing here keeps a copy.
     expect(JSON.parse(await readFile(planPath, 'utf8')).planVersion).toBe(1)
   })
@@ -516,7 +523,7 @@ describe('renderPlanFile', () => {
     const alias = join(dir, 'alias.plan.json')
     await symlink(planPath, alias)
 
-    await expect(renderPlanFile(planPath, { output: alias })).rejects.toThrow(/over the plan itself/)
+    await expect(render(planPath, { output: alias })).rejects.toThrow(/over the plan itself/)
     expect(JSON.parse(await readFile(planPath, 'utf8')).planVersion).toBe(1)
   })
 
@@ -524,7 +531,7 @@ describe('renderPlanFile', () => {
     const dir = await fixtureDir()
     await mkdir(join(dir, 'out'))
 
-    await expect(renderPlanFile(join(dir, 'comments.plan.json'), { output: join(dir, 'out') })).rejects.toThrow(
+    await expect(render(join(dir, 'comments.plan.json'), { output: join(dir, 'out') })).rejects.toThrow(
       /Cannot write the page to .*out/,
     )
   })
@@ -532,31 +539,47 @@ describe('renderPlanFile', () => {
   test('should report a schema failure with the path that failed', async () => {
     const dir = await fixtureDir({ ...loadCommentsPlan(), title: 42 })
 
-    await expect(renderPlanFile(join(dir, 'comments.plan.json'))).rejects.toThrow(/title/)
+    await expect(render(join(dir, 'comments.plan.json'))).rejects.toThrow(/title/)
   })
 
   test('should report a file that is not JSON', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'guren-plan-render-'))
     await writeFile(join(dir, 'comments.plan.json'), 'not json', 'utf8')
 
-    await expect(renderPlanFile(join(dir, 'comments.plan.json'))).rejects.toThrow(/not valid JSON/)
+    await expect(render(join(dir, 'comments.plan.json'))).rejects.toThrow(/not valid JSON/)
   })
 
   test('should report a plan that is not there', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'guren-plan-render-'))
 
-    await expect(renderPlanFile(join(dir, 'missing.plan.json'))).rejects.toThrow(/Cannot read the plan/)
+    await expect(render(join(dir, 'missing.plan.json'))).rejects.toThrow(/Cannot read the plan/)
   })
 
-  test('should name every id the plan declares twice', async () => {
-    const fixture = loadCommentsPlan()
-    const models = fixture.models as Array<{ id: string }>
-    models[1].id = models[0].id
-    const dir = await fixtureDir(fixture)
+  test('should not scan the application for a plan it cannot read', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'guren-plan-render-'))
+    let scans = 0
 
-    const result = await renderPlanFile(join(dir, 'comments.plan.json'))
+    const missing = render(join(dir, 'missing.plan.json'), {
+      app: async () => {
+        scans += 1
+        return planAppState()
+      },
+    })
 
-    expect(result.duplicateIds).toEqual(['model.post'])
+    await expect(missing).rejects.toThrow(/Cannot read the plan/)
+    expect(scans).toBe(0)
+  })
+
+  test('should render a plan that fails its checks, carrying them', async () => {
+    const dir = await fixtureDir()
+
+    const result = await render(join(dir, 'comments.plan.json'), { app: planAppState({ models: [] }) })
+
+    // `model.post` is an `alter` of a model this application does not declare.
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({ key: 'plan:app-missing', elementId: 'model.post', status: 'fail' }),
+    )
+    expect(planPageData(await readFile(result.path, 'utf8')).checks).toEqual(result.checks)
   })
 })
 
