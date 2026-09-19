@@ -40,6 +40,7 @@ import { ISSUE_REF_FORMS, isRepoSlug, splitIssueList } from './issue-refs'
 import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { renderPlanFile } from './plan-render'
+import { loadPlanAppState } from './plan/app-state'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -214,12 +215,18 @@ const planRenderCommand = defineCommand({
       alias: 'o',
       valueHint: 'plan.html',
     },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
   },
   async run({ args }) {
-    const rendered = await renderPlanFile(args.plan, { output: args.output })
-    for (const id of rendered.duplicateIds) {
-      consola.warn(`Element id '${id}' is declared more than once; its links point at the first one.`)
-    }
+    // The application the plan is checked against, which the plan file need not sit
+    // in: a plan is reviewed from wherever it was written. Scanned only once the plan
+    // itself has parsed.
+    const app = () => loadPlanAppState(args.app ?? process.cwd())
+    const rendered = await renderPlanFile(args.plan, { output: args.output, app })
+
     console.log(rendered.path)
   },
 })
