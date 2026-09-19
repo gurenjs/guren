@@ -449,6 +449,13 @@ message. It does not resume the producing session: the plan is the state, and
 a session is gone by the time someone returns to a plan days later or on
 another machine.
 
+**Amended after acceptance (2026-09-19):** exporting a file and typing a
+command is three steps, two of them handing a file around. `--feedback -`
+reads the document from standard input, so the page's "Copy feedback" and a
+pipe (`pbpaste | guren plan --revise comments --feedback -`) replace the file;
+and under the served mode of §8, `--revise` reads the feedback the page has
+already saved, so `--feedback` is only ever needed for a file made elsewhere.
+
 Before approval, editing `plan.json` by hand is as legitimate as a revision:
 it is a JSON file, and `plan:render` re-validates it. Renaming a column does
 not need a model.
@@ -823,6 +830,32 @@ leaves a structural choice open. The second call resumes the first
 Every producer call, first draft, `--ask` and each revise, records its
 `total_cost_usd` in state, so the price of a plan is the sum of its rounds and
 visible as such.
+
+**Amended after acceptance (2026-09-19), the served mode.** Besides the file,
+the page can be served by the development server, the way the `_guren/docs`
+viewer is: dev-only, opt-in, behind the same loopback guard, never mounted in
+production. The static file stays the base and the offline, shareable and
+printable form; the served mode is a thin layer that injects live data at the
+one placeholder `renderPlanHtml()` fills. What it changes:
+
+- Review state is saved as it happens. Each verdict, comment and answer is
+  posted to the server and written to `.guren/plans/<slug>.feedback.json`;
+  the export button remains for a reviewer without the server.
+- `guren plan --revise <slug>` reads that saved feedback by default, and the
+  `plan-implement` skill runs it when asked, so the person's whole loop is to
+  mark the page and say so.
+- A revision can be requested from the page. The button writes a request
+  marker beside the feedback and nothing else; the agent loop (§7) or a
+  person picks it up. The server never runs a command: a page that could
+  start `--revise` would turn any later injection defect into a model call
+  and file writes under the reviewer's account.
+- `plan:status` and `plan:verify` results reach the page live (§6), which
+  is the reason the mode waits for Part 2.
+- The page's policy gains `connect-src 'self'` in this mode only; the static
+  file's policy does not change. The server accepts one kind of write, the
+  feedback and its request marker, under `.guren/` and never under `docs/`.
+  Approval stays a CLI act (`plan:approve`), so a compromised page cannot
+  approve a plan.
 
 Like `ai:eval`, `guren plan` is opt-in, costs money, and is never part of
 `check` or `gate`. `guren check --plan` is advisory: it reports approved plans
