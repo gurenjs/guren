@@ -112,3 +112,15 @@ export function planDataBlock(html: string): string {
 export function planPageData(html: string): PlanPagePayload {
   return JSON.parse(planDataBlock(html)) as PlanPagePayload
 }
+
+/** Strings a plan may carry in any free-text field; every one must come out as text. */
+export const PAYLOADS = [
+  '</script><script>alert(1)</script>',
+  '<!--',
+  '<img src=x onerror=alert(1)>',
+  'javascript:alert(1)',
+  'line\u2028separator\u2029paragraph',
+  'dollars: $` and $& and $\' and $0',
+  ']]>',
+  '&lt;&amp;&gt;',
+]

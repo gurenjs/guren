@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import type { PlanFlowLayout } from '../src/plan/flow'
 import { buildPlanPayload, planLinks, planTemplatePath, renderPlanHtml, type PlanPagePayload } from '../src/plan/render'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
-import { loadCommentsPlan } from './plan-fixture'
+import { loadCommentsPlan, PAYLOADS, planPageData } from './plan-fixture'
 
 const source = readFileSync(planTemplatePath(), 'utf8')
 
@@ -59,10 +59,12 @@ function planWithFlows(flows: unknown[] = [FLOW, SECOND_FLOW]): PlanDraft {
 }
 
 function payloadOf(plan: PlanDraft): PlanPagePayload {
-  const html = renderPlanHtml({ plan })
-  const opening = '<script type="application/json" id="plan-data">'
-  const start = html.indexOf(opening) + opening.length
-  return JSON.parse(html.slice(start, html.indexOf('</script>', start)))
+  return planPageData(renderPlanHtml({ plan }))
+}
+
+/** One flow as the page is handed it. */
+function layoutOf(flow: unknown): PlanFlowLayout {
+  return buildPlanPayload({ plan: planWithFlows([flow]) }).flows[0]
 }
 
 /** `function name(...) { ... }` as the page spells it, by brace matching. */
@@ -100,6 +102,10 @@ class FakeNode {
     return [this, ...this.children.flatMap((child) => child.all())]
   }
 
+  withTag(tag: string): FakeNode[] {
+    return this.all().filter((node) => node.tag === tag)
+  }
+
   withClass(name: string): FakeNode[] {
     return this.all().filter((node) => (node.attributes.class ?? '').split(' ').includes(name))
   }
@@ -109,7 +115,7 @@ class FakeNode {
  * The page's own `drawFlow()`, run against the few DOM calls it makes. The closure is
  * assembled from the page source, so a change to the drawing is a change to what runs here.
  */
-const pageFunctions = (() => {
+const { drawFlow, flowBlocked, wrapSvgText } = (() => {
   const constants = source.match(/^\s*var (FLOW_[A-Z_]+|ID_RE) = .+$/gm) ?? []
   const functions = [
     'idMap',
@@ -130,7 +136,7 @@ const pageFunctions = (() => {
   // oxlint-disable-next-line no-new-func -- the page is a classic script with no module to import
   const build = new Function(
     'document',
-    `${constants.join('\n')}\n${functions.join('\n')}\nreturn { drawFlow: drawFlow, flowBlocked: flowBlocked, wrapSvgText: wrapSvgText }`,
+    `'use strict'\n${constants.join('\n')}\n${functions.join('\n')}\nreturn { drawFlow: drawFlow, flowBlocked: flowBlocked, wrapSvgText: wrapSvgText }`,
   )
   return build(document) as {
     drawFlow: (flow: PlanFlowLayout) => FakeNode
@@ -138,7 +144,6 @@ const pageFunctions = (() => {
     wrapSvgText: (text: string, limit: number, most: number) => string[]
   }
 })()
-const { drawFlow, flowBlocked, wrapSvgText } = pageFunctions
 
 function laneOf(edge: FakeNode): number {
   const match = edge.attributes.d.match(/ V ([\d.]+) H /)
@@ -198,7 +203,7 @@ describe('drawFlow', () => {
 
   test('should link a node that names an element to that element card', () => {
     const svg = drawFlow(comment)
-    const anchors = svg.all().filter((node) => node.tag === 'a')
+    const anchors = svg.withTag('a')
 
     expect(anchors.map((anchor) => anchor.attributes.href)).toEqual([
       '#el-view.posts.show',
@@ -223,7 +228,7 @@ describe('drawFlow', () => {
       nodes: comment.nodes.map((node) => ({ ...node, element: 'javascript:alert(1)//" onload="' })),
     })
 
-    expect(svg.all().filter((node) => node.tag === 'a')).toEqual([])
+    expect(svg.withTag('a')).toEqual([])
     expect(svg.withClass('node')).toHaveLength(7)
   })
 
@@ -252,7 +257,7 @@ describe('drawFlow', () => {
     const back = svg.withClass('edge').filter((edge) => edge.attributes.class.includes('back'))
     const forward = svg.withClass('edge').filter((edge) => !edge.attributes.class.includes('back'))
     const lowest = Math.max(
-      ...svg.all().filter((node) => node.tag === 'rect').map((rect) => Number(rect.attributes.y) + Number(rect.attributes.height)),
+      ...svg.withTag('rect').map((rect) => Number(rect.attributes.y) + Number(rect.attributes.height)),
     )
 
     expect(back).toHaveLength(1)
@@ -272,17 +277,13 @@ describe('drawFlow', () => {
 
   test('should run the stems of a routed edge between the columns, through no box', () => {
     // `c` and `d` stand under `a` and `b`, where a stem dropped from a box centre would cross them.
-    const [stacked] = payloadOf(
-      planWithFlows([
-        {
+    const stacked = layoutOf({
           ...SECOND_FLOW,
           nodes: [...SECOND_FLOW.nodes, { id: 'd', label: 'Below', kind: 'job' }, { id: 'e', label: 'Below too', kind: 'job' }],
           edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }, { from: 'd', to: 'e' }],
-        },
-      ]),
-    ).flows
+        })
     const svg = drawFlow(stacked)
-    const rects = svg.all().filter((node) => node.tag === 'rect')
+    const rects = svg.withTag('rect')
     const stems = [...svg.withClass('back')[0].attributes.d.matchAll(/H ([\d.]+) V/g)].map((match) => Number(match[1]))
 
     expect(stems).toHaveLength(2)
@@ -294,12 +295,10 @@ describe('drawFlow', () => {
   })
 
   test('should route a forward edge over the grid when a box stands in its way', () => {
-    const [bypass] = payloadOf(
-      planWithFlows([{ ...SECOND_FLOW, edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'a', to: 'c', label: 'skips' }] }]),
-    ).flows
+    const bypass = layoutOf({ ...SECOND_FLOW, edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'a', to: 'c', label: 'skips' }] })
     const svg = drawFlow(bypass)
     const routed = svg.withClass('edge').filter((edge) => edge.tag === 'path')
-    const highest = Math.min(...svg.all().filter((node) => node.tag === 'rect').map((rect) => Number(rect.attributes.y)))
+    const highest = Math.min(...svg.withTag('rect').map((rect) => Number(rect.attributes.y)))
 
     expect(routed).toHaveLength(1)
     expect(routed[0].attributes.class).toBe('edge')
@@ -310,7 +309,7 @@ describe('drawFlow', () => {
 
   test('should say so when a label is cut, and keep the whole of it as the tip', () => {
     const label = 'Check that the account is active before sending any payment'
-    const [long] = payloadOf(planWithFlows([{ ...SECOND_FLOW, nodes: [{ id: 'a', label, kind: 'decision' }], edges: [] }])).flows
+    const long = layoutOf({ ...SECOND_FLOW, nodes: [{ id: 'a', label, kind: 'decision' }], edges: [] })
     const node = drawFlow(long).withClass('node')[0]
 
     expect(node.children[1].textContent).toBe(label)
@@ -322,6 +321,11 @@ describe('drawFlow', () => {
 
     expect(lines).toEqual(['コメントを投稿すると', 'き、本文が空でない\u2026'])
     expect(wrapSvgText('a😀'.repeat(12), 20, 2).join('')).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/)
+  })
+
+  test('should join words by their width, so two wide words do not share a line they overflow', () => {
+    expect(wrapSvgText('コメント投稿 本文検証', 20, 2)).toEqual(['コメント投稿', '本文検証'])
+    expect(wrapSvgText('Comment posted', 20, 2)).toEqual(['Comment posted'])
   })
 
   test('should break a single word longer than a line instead of dropping its tail', () => {
@@ -342,7 +346,7 @@ describe('drawFlow', () => {
   })
 
   test('should leave no room for a lane in a flow with no cycle', () => {
-    const straight = payloadOf(planWithFlows([{ ...FLOW, edges: FLOW.edges.slice(0, 3) }])).flows[0]
+    const straight = layoutOf({ ...FLOW, edges: FLOW.edges.slice(0, 3) })
     const rows = Math.max(...straight.nodes.map((node) => node.row)) + 1
 
     const size = (name: string) => Number(source.match(new RegExp(`var ${name} = (\\d+)`))?.[1])
@@ -358,10 +362,8 @@ describe('drawFlow', () => {
   })
 
   test('should place two steps that declare one id apart', () => {
-    const [duplicated] = payloadOf(
-      planWithFlows([{ ...FLOW, nodes: [...FLOW.nodes, { id: 'reader', label: 'Again', kind: 'actor' }], edges: [] }]),
-    ).flows
-    const rects = drawFlow(duplicated).all().filter((node) => node.tag === 'rect')
+    const duplicated = layoutOf({ ...FLOW, nodes: [...FLOW.nodes, { id: 'reader', label: 'Again', kind: 'actor' }], edges: [] })
+    const rects = drawFlow(duplicated).withTag('rect')
     const places = new Set(rects.map((rect) => `${rect.attributes.x},${rect.attributes.y}`))
 
     expect(places.size).toBe(8)
@@ -369,12 +371,6 @@ describe('drawFlow', () => {
 })
 
 describe('a flow whose strings are hostile', () => {
-  const HOSTILE = [
-    '</script><script>alert(1)</script>',
-    '<img src=x onerror=alert(1)>',
-    'line separator paragraph',
-  ]
-
   function hostileFlows(payload: string): PlanDraft {
     return planWithFlows([
       {
@@ -387,14 +383,14 @@ describe('a flow whose strings are hostile', () => {
     ])
   }
 
-  test.each(HOSTILE)('should round-trip %j through the data block', (payload) => {
+  test.each(PAYLOADS)('should round-trip %j through the data block', (payload) => {
     const plan = hostileFlows(payload)
 
     expect(payloadOf(plan).plan).toEqual(plan)
     expect(payloadOf(plan).flows[0].edges[0].label).toBe(payload)
   })
 
-  test.each(HOSTILE)('should leave no closing script tag for %j', (payload) => {
+  test.each(PAYLOADS)('should leave no closing script tag for %j', (payload) => {
     const html = renderPlanHtml({ plan: hostileFlows(payload) })
     const closers = html.match(/<\/script/gi) ?? []
 
@@ -402,7 +398,7 @@ describe('a flow whose strings are hostile', () => {
     expect(html).not.toContain(' ')
   })
 
-  test.each(HOSTILE)('should draw %j as text and as nothing else', (payload) => {
+  test.each(PAYLOADS)('should draw %j as text and as nothing else', (payload) => {
     const svg = drawFlow(payloadOf(hostileFlows(payload)).flows[0])
     const tags = new Set(svg.all().map((node) => node.tag))
     const written = svg.all().filter((node) => node.textContent !== '')
@@ -443,6 +439,14 @@ describe('the flow drawing in the page source', () => {
       "var a = svgEl('a', { href: '#' + anchor })",
       'anchor.href = url',
     ])
+  })
+
+  // The line patterns above know three spellings. This one fails closed on any other:
+  // a quoted key, `setAttributeNS`, `href.baseVal`, a call broken over two lines.
+  test('should not spell href anywhere the three sites and their one comment do not', () => {
+    expect(script.match(/href/gi)).toHaveLength(4)
+    expect(script).not.toContain('setAttributeNS')
+    expect(script).not.toContain('baseVal')
   })
 
   test('should take the flow anchor from the gate every other anchor goes through', () => {
@@ -499,7 +503,7 @@ describe('the flow drawing in the page source', () => {
     expect(render).toContain('data.flows.forEach(')
     expect(render).toContain('card({ id: flow.id, title: flow.title, change: change, body: body })')
     // `rename` carries `from` and `drop` a `reason`; the layout keeps the kind alone.
-    expect(render).toContain('declared && declared.id === flow.id ? declared.change : { kind: flow.change }')
+    expect(render).toContain('declared[flow.id] ? declared[flow.id].change : { kind: flow.change }')
   })
 
   test('should name the SVG namespace once, as a constant and not a request', () => {
