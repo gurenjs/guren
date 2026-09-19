@@ -358,6 +358,16 @@ The backlog is visible from the CLI too. `guren context` lists the routes still 
 bunx guren context | grep -A 8 'Prototype backlog'
 ```
 
+The new routes changed `docs/spec/screens.md`, so regenerate the spec views before the gate looks at them:
+
+```bash run
+bunx guren spec:generate
+```
+
+```bash run
+bunx guren gate
+```
+
 ```bash run
 git add -A
 git commit -m "feat: prototype the announcements feature"
