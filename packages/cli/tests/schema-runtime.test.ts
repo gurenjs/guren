@@ -1,9 +1,10 @@
-import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { parseSchemaTables } from '../src/schema-parser'
 import { readSchemaAtRuntime, readSchemaTables, type SourcedSchemaTable } from '../src/schema-runtime'
+import { writeWorkspaceFiles } from './helpers'
 
 // The copy `@guren/orm` pins. A temp app outside the repo resolves `drizzle-orm` from
 // Bun's global cache or not at all, so each fixture links this one explicitly.
@@ -18,10 +19,7 @@ afterAll(async () => {
 async function createApp(files: Record<string, string>, options: { drizzle?: boolean } = {}): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'guren-schema-runtime-')))
   created.push(dir)
-  for (const [path, content] of Object.entries(files)) {
-    await mkdir(dirname(join(dir, path)), { recursive: true })
-    await writeFile(join(dir, path), content)
-  }
+  await writeWorkspaceFiles(dir, files)
   if (options.drizzle !== false) {
     await mkdir(join(dir, 'node_modules'), { recursive: true })
     await symlink(WORKSPACE_DRIZZLE, join(dir, 'node_modules', 'drizzle-orm'), 'dir')
@@ -167,8 +165,15 @@ export const notes = mysqlTable('notes', {
 
 describe('readSchemaTables', () => {
   describe('pg shapes the static reader marks opaque', () => {
+    let app: string
+    let tables: SourcedSchemaTable[]
+
+    beforeAll(async () => {
+      app = await createApp({ 'db/schema.ts': PG_SCHEMA })
+      tables = (await readSchemaTables(app)).tables
+    })
+
     test('should load the drizzle copy the fixture links, not another one', async () => {
-      const app = await createApp({ 'db/schema.ts': PG_SCHEMA })
       const [file] = await readSchemaAtRuntime(app)
 
       if (file?.status !== 'read') throw new Error(`expected a runtime read, got ${JSON.stringify(file)}`)
@@ -176,10 +181,7 @@ describe('readSchemaTables', () => {
     })
 
     // A module namespace lists its exports alphabetically, not in source order.
-    test('should report every exported table as runtime and skip exports that are not tables', async () => {
-      const app = await createApp({ 'db/schema.ts': PG_SCHEMA })
-      const { tables } = await readSchemaTables(app)
-
+    test('should report every exported table as runtime and skip exports that are not tables', () => {
       expect(tables.map((table) => [table.identifier, table.source, table.dialect])).toEqual([
         ['members', 'runtime', 'pg'],
         ['notes', 'runtime', 'pg'],
@@ -188,9 +190,8 @@ describe('readSchemaTables', () => {
       expect(tables.some((table) => table.opaqueColumns || table.opaqueConstraints)).toBe(false)
     })
 
-    test('should read spread columns, a helper builder and a helper-built extra config', async () => {
-      const app = await createApp({ 'db/schema.ts': PG_SCHEMA })
-      const orgs = tableOf((await readSchemaTables(app)).tables, 'orgs')
+    test('should read spread columns, a helper builder and a helper-built extra config', () => {
+      const orgs = tableOf(tables, 'orgs')
 
       expect(orgs.columns.map((column) => column.name)).toEqual(['id', 'slug', 'createdAt', 'updatedAt'])
       expect(columnOf(orgs, 'slug')).toMatchObject({ columnName: 'slug', notNull: true, unique: true, sqlType: 'text' })
@@ -199,17 +200,14 @@ describe('readSchemaTables', () => {
       expect(orgs.constraints).toEqual([{ kind: 'index', name: 'orgs_created_idx', columns: ['createdAt'] }])
     })
 
-    test('should keep the builder name from the static reader only where it was drizzle\'s own', async () => {
-      const app = await createApp({ 'db/schema.ts': PG_SCHEMA })
-      const orgs = tableOf((await readSchemaTables(app)).tables, 'orgs')
+    test('should keep the builder name from the static reader only where it was drizzle\'s own', () => {
+      const orgs = tableOf(tables, 'orgs')
 
       expect(columnOf(orgs, 'id').type).toBe('serial')
       expect(columnOf(orgs, 'slug').type).toBeUndefined()
     })
 
-    test('should report defaults as drizzle holds them without calling user functions', async () => {
-      const app = await createApp({ 'db/schema.ts': PG_SCHEMA })
-      const { tables } = await readSchemaTables(app)
+    test('should report defaults as drizzle holds them without calling user functions', () => {
       const members = tableOf(tables, 'members')
 
       expect(columnOf(tableOf(tables, 'orgs'), 'createdAt').default).toEqual({ kind: 'sql', text: 'now()' })
@@ -221,9 +219,8 @@ describe('readSchemaTables', () => {
       expect(columnOf(members, 'role').runtimeDefault).toBeUndefined()
     })
 
-    test('should read the columns callback form and its composite primary key', async () => {
-      const app = await createApp({ 'db/schema.ts': PG_SCHEMA })
-      const members = tableOf((await readSchemaTables(app)).tables, 'members')
+    test('should read the columns callback form and its composite primary key', () => {
+      const members = tableOf(tables, 'members')
 
       expect(members.columns.map((column) => [column.name, column.columnName])).toEqual([
         ['orgId', 'org_id'],
@@ -237,9 +234,8 @@ describe('readSchemaTables', () => {
       ])
     })
 
-    test('should read composite and self-referencing foreign keys by property name', async () => {
-      const app = await createApp({ 'db/schema.ts': PG_SCHEMA })
-      const notes = tableOf((await readSchemaTables(app)).tables, 'notes')
+    test('should read composite and self-referencing foreign keys by property name', () => {
+      const notes = tableOf(tables, 'notes')
 
       expect(notes.constraints.filter((entry) => entry.kind === 'foreignKey')).toEqual([
         { kind: 'foreignKey', name: 'notes_parent_fk', columns: ['parentId'], references: { table: 'notes', columns: ['id'] } },
@@ -254,9 +250,8 @@ describe('readSchemaTables', () => {
       expect(columnOf(notes, 'orgId').references).toBeUndefined()
     })
 
-    test('should read uniqueIndex, unique().on() and check, and mark an expression index opaque', async () => {
-      const app = await createApp({ 'db/schema.ts': PG_SCHEMA })
-      const notes = tableOf((await readSchemaTables(app)).tables, 'notes')
+    test('should read uniqueIndex, unique().on() and check, and mark an expression index opaque', () => {
+      const notes = tableOf(tables, 'notes')
       const others = notes.constraints.filter((entry) => entry.kind !== 'foreignKey')
 
       expect(others).toEqual([
@@ -273,10 +268,13 @@ describe('readSchemaTables', () => {
     ['mysql', MYSQL_SCHEMA, '(now())'],
   ] as const) {
     describe(`${dialect} shapes the static reader marks opaque`, () => {
-      test('should pick the dialect and read spread, helper and callback columns', async () => {
-        const app = await createApp({ 'db/schema.ts': source })
-        const { tables } = await readSchemaTables(app)
+      let tables: SourcedSchemaTable[]
 
+      beforeAll(async () => {
+        tables = (await readSchemaTables(await createApp({ 'db/schema.ts': source }))).tables
+      })
+
+      test('should pick the dialect and read spread, helper and callback columns', () => {
         expect(tables.map((table) => [table.identifier, table.source, table.dialect])).toEqual([
           ['members', 'runtime', dialect],
           ['notes', 'runtime', dialect],
@@ -293,9 +291,7 @@ describe('readSchemaTables', () => {
         expect(columnOf(members, 'orgId').references).toEqual({ table: 'orgs', column: 'id' })
       })
 
-      test('should read composite keys, unique constraints and checks', async () => {
-        const app = await createApp({ 'db/schema.ts': source })
-        const { tables } = await readSchemaTables(app)
+      test('should read composite keys, unique constraints and checks', () => {
         const notes = tableOf(tables, 'notes')
         const byKind = (kind: string) => notes.constraints.filter((entry) => entry.kind === kind)
 
@@ -350,8 +346,8 @@ const extras = () => []
 export const posts = pgTable('posts', { id: serial('id').primaryKey(), ...timestamps }, () => extras())
 `
 
-    async function expectStaticFallback(app: string, reason: RegExp): Promise<void> {
-      const { tables, files } = await readSchemaTables(app)
+    async function expectStaticFallback(app: string, reason: RegExp, options = {}): Promise<void> {
+      const { tables, files } = await readSchemaTables(app, options)
       const staticTables = await parseSchemaTables(app)
 
       expect(files).toHaveLength(1)
@@ -371,12 +367,17 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey(), ...timest
       const app = await createApp({
         'db/schema.ts': `${OPAQUE_SCHEMA}\nif (!process.env.GUREN_SCHEMA_RUNTIME_TEST_URL) throw new Error('DATABASE_URL is required')\n`,
       })
-      await expectStaticFallback(app, /db\/schema\.ts threw on import: DATABASE_URL is required/)
+      await expectStaticFallback(app, /db\/schema\.ts could not be imported: DATABASE_URL is required/)
     })
 
     test('should fall back to the static reader when the schema imports a module that does not exist', async () => {
       const app = await createApp({ 'db/schema.ts': `import '../config/database'\n${OPAQUE_SCHEMA}` })
-      await expectStaticFallback(app, /db\/schema\.ts threw on import/)
+      await expectStaticFallback(app, /db\/schema\.ts could not be imported/)
+    })
+
+    test('should fall back to the static reader when the import never settles', async () => {
+      const app = await createApp({ 'db/schema.ts': `${OPAQUE_SCHEMA}\nawait new Promise(() => {})\n` })
+      await expectStaticFallback(app, /could not be imported: the import did not finish within 50ms/, { importTimeoutMs: 50 })
     })
 
     test('should fall back to the static reader when the app has no drizzle-orm', async () => {
@@ -406,6 +407,23 @@ export const lookalike = { name: 'posts', columns: [] }
       ])
       expect(tableOf(tables, 'drafts').opaqueColumns).toBe(true)
       expect(tableOf(tables, 'drafts').runtimeUnreadable).toMatch(/does not export drafts as a drizzle table/)
+    })
+
+    test('should read a pgSchema table and report an aliased export under each name', async () => {
+      const app = await createApp({
+        'db/schema.ts': `import { pgSchema, pgTable, integer, serial } from 'drizzle-orm/pg-core'
+export const posts = pgTable('posts', { id: serial('id').primaryKey() })
+export { posts as articles }
+export const events = pgSchema('audit').table('events', { id: serial('id').primaryKey(), postId: integer('post_id').references(() => posts.id) })
+`,
+      })
+      const { tables } = await readSchemaTables(app)
+
+      expect(tables.map((table) => [table.identifier, table.tableName, table.source])).toEqual([
+        ['articles', 'posts', 'runtime'],
+        ['events', 'events', 'runtime'],
+        ['posts', 'posts', 'runtime'],
+      ])
     })
 
     test('should report nothing for an app with no schema file', async () => {

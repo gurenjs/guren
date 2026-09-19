@@ -98,6 +98,11 @@ const DIALECT_SUBPATHS: { dialect: SchemaDialect; subpath: string; tableClass: s
 // A schema awaiting a connection at top level never settles; the static reader answers instead.
 const IMPORT_TIMEOUT_MS = 5000
 
+export interface SchemaRuntimeOptions {
+  /** How long one `db/schema.ts` may take to import. Defaults to 5000. */
+  importTimeoutMs?: number
+}
+
 /**
  * Resolves with the ESM conditions the schema's own `import` gets, so both land on one
  * module instance. `createRequire` alone would name the `.cjs` build, a second copy.
@@ -120,22 +125,19 @@ async function loadDrizzle(schemaDir: string): Promise<DrizzleCopy> {
   const entry = resolveDrizzle('drizzle-orm', schemaDir)
   const core = (await import(pathToFileURL(entry).href)) as { is: DrizzleCopy['is'] }
 
-  const dialects: DialectModule[] = []
-  for (const { dialect, subpath, tableClass } of DIALECT_SUBPATHS) {
-    const loaded = (await import(pathToFileURL(resolveDrizzle(subpath, schemaDir)).href)) as Record<string, unknown>
-    dialects.push({
-      dialect,
-      tableClass: loaded[tableClass],
-      getTableConfig: loaded.getTableConfig as DialectModule['getTableConfig'],
-    })
-  }
+  const dialects = await Promise.all(
+    DIALECT_SUBPATHS.map(async ({ dialect, subpath, tableClass }): Promise<DialectModule> => {
+      const loaded = (await import(pathToFileURL(resolveDrizzle(subpath, schemaDir)).href)) as Record<string, unknown>
+      return { dialect, tableClass: loaded[tableClass], getTableConfig: loaded.getTableConfig as DialectModule['getTableConfig'] }
+    }),
+  )
   return { entry, is: core.is, dialects }
 }
 
-function withTimeout<T>(work: Promise<T>, what: string): Promise<T> {
+function withImportTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const expiry = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what} did not finish within ${IMPORT_TIMEOUT_MS}ms`)), IMPORT_TIMEOUT_MS)
+    timer = setTimeout(() => reject(new Error(`the import did not finish within ${timeoutMs}ms`)), timeoutMs)
   })
   return Promise.race([work, expiry]).finally(() => clearTimeout(timer))
 }
@@ -286,7 +288,7 @@ interface LoadedSchema {
   entries: TableEntry[]
 }
 
-async function loadSchemaFile(appRoot: string, module: string | null): Promise<LoadedSchema | RuntimeSchemaFile | null> {
+async function loadSchemaFile(appRoot: string, module: string | null, timeoutMs: number): Promise<LoadedSchema | RuntimeSchemaFile | null> {
   const path = schemaPathFor(module)
   const file = resolve(appRoot, path)
   if (!(await fileExists(appRoot, path))) return null
@@ -302,9 +304,9 @@ async function loadSchemaFile(appRoot: string, module: string | null): Promise<L
   let exports: Record<string, unknown>
   try {
     // The module cache keeps the first import for the life of the process.
-    exports = await withTimeout(import(pathToFileURL(file).href) as Promise<Record<string, unknown>>, `importing ${path}`)
+    exports = await withImportTimeout(import(pathToFileURL(file).href) as Promise<Record<string, unknown>>, timeoutMs)
   } catch (error) {
-    return unreadable(`${path} threw on import: ${reasonOf(error)}`)
+    return unreadable(`${path} could not be imported: ${reasonOf(error)}`)
   }
 
   const entries: TableEntry[] = []
@@ -325,9 +327,10 @@ async function loadSchemaFile(appRoot: string, module: string | null): Promise<L
 }
 
 /** One result per `db/schema.ts` that exists, the root's and each module's. Never throws. */
-export async function readSchemaAtRuntime(appRoot: string): Promise<RuntimeSchemaFile[]> {
+export async function readSchemaAtRuntime(appRoot: string, options: SchemaRuntimeOptions = {}): Promise<RuntimeSchemaFile[]> {
   const roots = await listAppRoots(appRoot)
-  const loaded = (await Promise.all(roots.map((root) => loadSchemaFile(appRoot, root.module)))).filter((file) => file !== null)
+  const timeoutMs = options.importTimeoutMs ?? IMPORT_TIMEOUT_MS
+  const loaded = (await Promise.all(roots.map((root) => loadSchemaFile(appRoot, root.module, timeoutMs)))).filter((file) => file !== null)
 
   // A foreign key may point into another root's schema, so targets resolve across all of them.
   const all = loaded.flatMap((file) => ('entries' in file ? file.entries : []))
@@ -361,24 +364,23 @@ function withStaticType(table: RuntimeSchemaTable, staticTable: SchemaTable | un
  * intact) otherwise, each table saying which. A table only the static reader found, one
  * the file does not export, stays `static` beside its file's runtime tables.
  */
-export async function readSchemaTables(appRoot: string): Promise<SchemaRead> {
-  const [files, staticTables] = await Promise.all([readSchemaAtRuntime(appRoot), parseSchemaTables(appRoot)])
+export async function readSchemaTables(appRoot: string, options: SchemaRuntimeOptions = {}): Promise<SchemaRead> {
+  const [files, staticTables] = await Promise.all([readSchemaAtRuntime(appRoot, options), parseSchemaTables(appRoot)])
   const tables: SourcedSchemaTable[] = []
-  const seen = new Set<SchemaTable>()
-  const findStatic = (module: string | null, identifier: string): SchemaTable | undefined =>
-    staticTables.find((table) => table.module === module && table.identifier === identifier)
+  const unmatched = [...staticTables]
+  const claimStatic = (module: string | null, identifier: string): SchemaTable | undefined => {
+    const index = unmatched.findIndex((table) => table.module === module && table.identifier === identifier)
+    return index === -1 ? undefined : unmatched.splice(index, 1)[0]
+  }
 
   for (const file of files) {
     if (file.status !== 'read') continue
     for (const table of file.tables) {
-      const staticTable = findStatic(file.module, table.identifier)
-      if (staticTable) seen.add(staticTable)
-      tables.push({ ...withStaticType(table, staticTable), source: 'runtime' })
+      tables.push({ ...withStaticType(table, claimStatic(file.module, table.identifier)), source: 'runtime' })
     }
   }
 
-  for (const table of staticTables) {
-    if (seen.has(table)) continue
+  for (const table of unmatched) {
     const file = files.find((candidate) => candidate.module === table.module)
     const runtimeUnreadable =
       file?.status === 'unreadable' ? file.reason : `${schemaPathFor(table.module)} does not export ${table.identifier} as a drizzle table`
