@@ -312,6 +312,10 @@
         background: var(--g-tick);
       }
 
+      .locale-switch {
+        margin-left: auto;
+      }
+
       .controls {
         display: flex;
         flex-wrap: wrap;
@@ -989,27 +993,28 @@
         <div class="meta" id="plan-meta"></div>
         <div class="panel grid2" id="plan-scope"></div>
       </header>
-      <section class="panel pinned" id="pinned" hidden aria-label="Blocking findings"></section>
+      <section class="panel pinned" id="pinned" hidden></section>
       <section id="questions"></section>
-      <nav class="tabs" id="tabs" role="tablist" aria-label="Plan sections"></nav>
-      <div class="controls">
-        <label for="entity-filter">Entity</label>
+      <nav class="tabs" id="tabs" role="tablist"></nav>
+      <div class="controls" id="controls">
+        <label for="entity-filter" id="entity-filter-label"></label>
         <select id="entity-filter"></select>
-        <label><input type="checkbox" id="changes-only" /> Changes only</label>
+        <label><input type="checkbox" id="changes-only" /> <span id="changes-only-label"></span></label>
         <span class="note" id="visible-count"></span>
+        <label class="locale-switch" id="locale-switch" hidden>
+          <span id="locale-switch-label"></span>
+          <select id="locale-select"></select>
+        </label>
       </div>
       <main id="panels"></main>
-      <div class="footer">
-        <button type="button" id="copy">Copy feedback</button>
-        <button type="button" class="secondary" id="export">Download feedback.json</button>
+      <div class="footer" id="footer">
+        <button type="button" id="copy"></button>
+        <button type="button" class="secondary" id="export"></button>
         <span class="note" id="export-status" role="status" aria-live="polite"></span>
-        <p class="note footer-note">
-          Comment on any element from the mark in its heading. This page never writes to the project
-          and makes no network request.
-        </p>
-        <p class="note footer-note">Download the feedback beside the plan, then run:</p>
+        <p class="note footer-note" id="footer-note"></p>
+        <p class="note footer-note" id="footer-file-note"></p>
         <pre class="command" id="revise-file-command"></pre>
-        <p class="note footer-note">Or copy it and pipe it into:</p>
+        <p class="note footer-note" id="footer-stdin-note"></p>
         <pre class="command" id="revise-stdin-command"></pre>
       </div>
     </div>
@@ -1026,17 +1031,17 @@
         // function declarations hoist, and a section added to one list only would
         // otherwise render an empty panel or throw.
         var SECTIONS = [
-          { key: 'models', label: 'Models', render: renderModels },
-          { key: 'views', label: 'Views', render: renderViews },
-          { key: 'controllers', label: 'Controllers', render: renderControllers },
-          { key: 'routes', label: 'Routes', render: renderRoutes },
-          { key: 'validators', label: 'Validators', render: renderValidators },
-          { key: 'resources', label: 'Resources', render: renderResources },
-          { key: 'policies', label: 'Policies', render: renderPolicies },
-          { key: 'sideEffects', label: 'Side effects', render: renderSideEffects },
-          { key: 'flows', label: 'Flows', render: renderFlows },
-          { key: 'commands', label: 'Commands', render: renderCommands },
-          { key: 'tasks', label: 'Tasks & acceptance', render: renderTasks },
+          { key: 'models', label: 'sections.models', render: renderModels },
+          { key: 'views', label: 'sections.views', render: renderViews },
+          { key: 'controllers', label: 'sections.controllers', render: renderControllers },
+          { key: 'routes', label: 'sections.routes', render: renderRoutes },
+          { key: 'validators', label: 'sections.validators', render: renderValidators },
+          { key: 'resources', label: 'sections.resources', render: renderResources },
+          { key: 'policies', label: 'sections.policies', render: renderPolicies },
+          { key: 'sideEffects', label: 'sections.sideEffects', render: renderSideEffects },
+          { key: 'flows', label: 'sections.flows', render: renderFlows },
+          { key: 'commands', label: 'sections.commands', render: renderCommands },
+          { key: 'tasks', label: 'sections.tasks', render: renderTasks },
         ]
 
         /**
@@ -1092,10 +1097,146 @@
           return node
         }
 
+        /* ---------- the page's own words ---------- */
+
+        /**
+         * A dictionary value is a template, and the template decides the order:
+         * `a {actor} calls {route}` and `{actor} が {route} を呼ぶ` take the same values.
+         * A value is only ever text or a node, never a template, so a plan string
+         * spelling `{route}` is written out as those seven characters.
+         */
+        function walkTemplate(template, values, onText, onNode) {
+          var pattern = /\{([A-Za-z_][A-Za-z0-9_.-]*)\}/g
+          var last = 0
+          var match
+          // A node has one parent: appended twice it would move, and the first site go blank.
+          var placed = []
+          while ((match = pattern.exec(template)) !== null) {
+            if (match.index > last) onText(template.slice(last, match.index))
+            var known = values !== undefined && values !== null && Object.prototype.hasOwnProperty.call(values, match[1])
+            var value = known ? values[match[1]] : undefined
+            // An unknown placeholder stays on the page as written: a blank would read as a
+            // finished sentence with a word missing.
+            if (value === undefined || value === null) onText(match[0])
+            else if (typeof value === 'object' && value.nodeType) {
+              onNode(placed.indexOf(value) === -1 ? value : value.cloneNode(true))
+              placed.push(value)
+            }
+            else onText(String(value))
+            last = pattern.lastIndex
+          }
+          if (last < template.length) onText(template.slice(last))
+        }
+
+        function formatInto(host, template, values) {
+          walkTemplate(
+            template,
+            values,
+            function (text) {
+              host.appendChild(document.createTextNode(text))
+            },
+            function (node) {
+              host.appendChild(node)
+            },
+          )
+          return host
+        }
+
+        /** For the places that take a string: an attribute, an `option`, a placeholder. */
+        function formatText(template, values) {
+          var out = ''
+          walkTemplate(
+            template,
+            values,
+            function (text) {
+              out += text
+            },
+            function (node) {
+              out += node.textContent
+            },
+          )
+          return out
+        }
+
+        var i18n = data.i18n
+        // Page-wide, unlike the review: which language someone reads is not a fact about one plan.
+        var LOCALE_KEY = 'guren.plan.locale'
+        var uiLocale = i18n.initial
+        try {
+          var remembered = window.localStorage.getItem(LOCALE_KEY)
+          if (supported(remembered)) uiLocale = remembered
+        } catch (error) {
+          /* Storage is refused on some `file://` origins; the initial locale stands. */
+        }
+        var localised = []
+
+        function own(object, key) {
+          return Object.prototype.hasOwnProperty.call(object, key)
+        }
+
+        function supported(locale) {
+          return typeof locale === 'string' && own(i18n.dictionaries, locale)
+        }
+
+        /**
+         * Only the shipped dictionaries answer, so nothing a plan says is ever a template.
+         * A key neither locale has comes back spelled out rather than blank.
+         */
+        function phrase(key) {
+          if (own(i18n.dictionaries[uiLocale], key)) return i18n.dictionaries[uiLocale][key]
+          if (own(i18n.dictionaries.en, key)) return i18n.dictionaries.en[key]
+          return '{' + key + '}'
+        }
+
+        function resolve(values) {
+          return typeof values === 'function' ? values() : values
+        }
+
+        function t(key, values) {
+          return formatText(phrase(key), resolve(values))
+        }
+
+        /** Runs now, and again whenever the locale changes. */
+        function localise(apply) {
+          localised.push(apply)
+          apply()
+        }
+
+        /**
+         * `node` says `key` in the current locale, and carries that locale's `lang`: the
+         * document's own `lang` is the plan's, which need not be the one the page speaks.
+         */
+        function words(node, key, values) {
+          localise(function () {
+            node.setAttribute('lang', uiLocale)
+            while (node.firstChild) node.removeChild(node.firstChild)
+            formatInto(node, phrase(key), resolve(values))
+          })
+          return node
+        }
+
+        function tel(tag, className, key, values) {
+          return words(el(tag, className), key, values)
+        }
+
+        /** For what is redrawn on a locale change anyway: binding it would keep every discarded copy alive. */
+        function spoken(tag, className, key) {
+          var node = el(tag, className, t(key))
+          node.setAttribute('lang', uiLocale)
+          return node
+        }
+
+        /** The attribute is named here, not passed in: the page sets none by a computed name. */
+        function ariaLabel(node, key, values) {
+          localise(function () {
+            node.setAttribute('aria-label', t(key, values))
+          })
+        }
+
         /** An `h4` and the list under it. The emptiness rule is the caller's: three
          * sections show their heading with an empty list. */
         function group(host, heading, items, mapper) {
-          host.appendChild(el('h4', null, heading))
+          host.appendChild(tel('h4', null, heading))
           host.appendChild(list(items, mapper))
         }
 
@@ -1115,7 +1256,7 @@
           var dl = el('dl', 'kv')
           pairs.forEach(function (pair) {
             if (pair[1] === undefined || pair[1] === null || pair[1] === '') return
-            dl.appendChild(el('dt', null, pair[0]))
+            dl.appendChild(tel('dt', null, pair[0]))
             var dd = el('dd')
             if (typeof pair[1] === 'object' && pair[1].nodeType) dd.appendChild(pair[1])
             else dd.textContent = String(pair[1])
@@ -1127,7 +1268,7 @@
         function changeBadge(change) {
           if (!change) return null
           var badge = el('span', 'badge badge-' + change.kind, change.kind)
-          if (change.kind === 'rename') badge.textContent = 'rename from ' + change.from
+          if (change.kind === 'rename') words(badge, 'badge.renameFrom', { from: change.from })
           if (change.kind === 'drop') badge.title = change.reason
           return badge
         }
@@ -1138,8 +1279,8 @@
         var review = idMap()
 
         var VERDICTS = [
-          { key: 'approve', label: 'Approve' },
-          { key: 'changes', label: 'Request changes' },
+          { key: 'approve', label: 'review.approve' },
+          { key: 'changes', label: 'review.requestChanges' },
         ]
 
         function isVerdict(value) {
@@ -1209,7 +1350,7 @@
           return review[id]
         }
 
-        var MARK_LABELS = { approve: 'approved', changes: 'changes', noted: 'commented', clean: 'comment' }
+        var MARK_LABELS = { approve: 'mark.approve', changes: 'mark.changes', noted: 'mark.noted', clean: 'mark.clean' }
 
         /**
          * A mark in the card's heading, and the controls behind it. RFC 0030 §4 makes a
@@ -1225,7 +1366,7 @@
           var mark = el('button', 'mark')
           mark.type = 'button'
           mark.setAttribute('aria-expanded', 'false')
-          mark.setAttribute('aria-label', 'Review ' + id)
+          ariaLabel(mark, 'review.open', { id: id })
 
           function state() {
             var entry = review[id]
@@ -1237,14 +1378,14 @@
           function sync() {
             var now = state()
             mark.className = 'mark mark-' + now
-            mark.textContent = MARK_LABELS[now]
+            mark.textContent = t(MARK_LABELS[now])
             buttons.forEach(function (pair) {
               pair.button.setAttribute('aria-pressed', now === pair.key ? 'true' : 'false')
             })
           }
 
           VERDICTS.forEach(function (verdict) {
-            var button = el('button', verdict.key, verdict.label)
+            var button = tel('button', verdict.key, verdict.label)
             button.type = 'button'
             button.addEventListener('click', function () {
               var entry = entryFor(id)
@@ -1260,8 +1401,10 @@
           var box = el('textarea')
           box.rows = 2
           box.value = (review[id] || { comment: '' }).comment
-          box.placeholder = 'Comment on this element'
-          box.setAttribute('aria-label', 'Comment on ' + id)
+          localise(function () {
+            box.placeholder = t('review.placeholder')
+          })
+          ariaLabel(box, 'review.commentOn', { id: id })
           box.addEventListener('input', function () {
             entryFor(id).comment = box.value
             sync()
@@ -1275,7 +1418,12 @@
             if (!panel.hidden) box.focus()
           })
 
-          sync()
+          // The mark's word depends on the state, so it is re-read rather than bound to one key.
+          localise(function () {
+            mark.setAttribute('lang', uiLocale)
+            panel.setAttribute('lang', uiLocale)
+            sync()
+          })
           return { mark: mark, panel: panel }
         }
 
@@ -1342,7 +1490,7 @@
           }
           head.appendChild(el('code', 'card-id', options.id))
           ;(dependsOn[options.id] || []).forEach(function (questionId) {
-            var mark = link(questionId, 'depends on ' + questionId)
+            var mark = words(link(questionId, ''), 'card.dependsOn', { question: questionId })
             mark.className = 'depends'
             head.appendChild(mark)
             var marks = dependsMarks[questionId]
@@ -1352,7 +1500,11 @@
           node.appendChild(head)
 
           ;(breakingFor[options.id] || []).forEach(function (item) {
-            node.appendChild(el('p', 'note', 'Breaking: ' + item.reason))
+            node.appendChild(
+              tel('p', 'note', 'card.breaking', function () {
+                return { reason: t(item.reasonKey, item.reasonValues) }
+              }),
+            )
           })
           ;(checksFor[options.id] || []).forEach(function (result) {
             var line = el('p', 'note')
@@ -1370,7 +1522,7 @@
           if (back.length) {
             var seen = idMap()
             var referrers = el('p', 'note referenced-by')
-            referrers.appendChild(el('span', 'label', 'Referenced by'))
+            referrers.appendChild(tel('span', 'label', 'card.referencedBy'))
             back.forEach(function (edge) {
               if (seen[edge.from]) return
               seen[edge.from] = true
@@ -1468,7 +1620,7 @@
           while (host.firstChild) host.removeChild(host.firstChild)
           var tables = data.diagram.tables
           if (!tables.length) {
-            host.appendChild(el('p', 'note', 'The plan declares no models.'))
+            host.appendChild(spoken('p', 'note', 'diagram.empty'))
             return
           }
 
@@ -1511,7 +1663,7 @@
             height: totalHeight,
             viewBox: '0 0 ' + totalWidth + ' ' + totalHeight,
             role: 'img',
-            'aria-label': 'Entity relationship diagram of the plan',
+            'aria-label': t('diagram.label'),
           })
 
           var edgeLabels = []
@@ -1567,7 +1719,7 @@
           })
 
           host.appendChild(svg)
-          host.appendChild(el('p', 'note', 'Click a table to show its columns. Dashed edges are declared relationships.'))
+          host.appendChild(spoken('p', 'note', 'diagram.hint'))
         }
 
         /* ---------- section renderers ---------- */
@@ -1603,7 +1755,7 @@
 
         function renderModels(host) {
           var diagramPanel = el('div', 'panel')
-          diagramPanel.appendChild(el('h2', null, 'Entity relationships'))
+          diagramPanel.appendChild(tel('h2', null, 'diagram.heading'))
           diagramHost = el('div')
           diagramPanel.appendChild(diagramHost)
           host.appendChild(diagramPanel)
@@ -1612,40 +1764,46 @@
             var body = el('div')
             body.appendChild(
               kv([
-                ['Table', model.tableRenamedFrom ? model.table + ' (renamed from ' + model.tableRenamedFrom + ')' : model.table],
-                ['Module', model.module],
-                ['Fillable', model.fillable.join(', ')],
-                ['Data migration', model.dataMigration ? model.dataMigration.kind + ': ' + (model.dataMigration.reason || model.dataMigration.description) : null],
+                [
+                  'models.table',
+                  model.tableRenamedFrom
+                    ? tel('span', null, 'models.tableRenamed', { table: model.table, from: model.tableRenamedFrom })
+                    : model.table,
+                ],
+                ['label.module', model.module],
+                ['models.fillable', model.fillable.join(', ')],
+                ['models.dataMigration', model.dataMigration ? model.dataMigration.kind + ': ' + (model.dataMigration.reason || model.dataMigration.description) : null],
               ]),
             )
             if (model.relationships.length) {
-              group(body, 'Relationships', model.relationships, function (relationship) {
-                return span([relationship.name + ' ' + relationship.type + ' ', link(relationship.target)])
+              group(body, 'models.relationships', model.relationships, function (relationship) {
+                return tel('span', null, 'models.relationship', {
+                  name: relationship.name,
+                  type: relationship.type,
+                  target: link(relationship.target),
+                })
               })
             }
             if (model.indexes.length) {
-              group(body, 'Indexes', model.indexes, function (index) {
-                return (index.unique ? 'unique ' : '') + index.columns.join(', ')
+              group(body, 'models.indexes', model.indexes, function (index) {
+                var columns = index.columns.join(', ')
+                return index.unique ? tel('span', null, 'models.uniqueIndex', { columns: columns }) : columns
               })
             }
             var node = card({ id: model.id, title: model.name, change: model.change, body: body })
 
             if (model.columns.length) {
               var columnsHost = el('div')
-              columnsHost.appendChild(el('h4', null, 'Columns'))
+              columnsHost.appendChild(tel('h4', null, 'models.columns'))
               model.columns.forEach(function (column) {
                 var columnBody = el('div')
                 columnBody.appendChild(columnFacts(column))
                 if (column.dataMigration) {
                   columnBody.appendChild(
-                    el(
-                      'p',
-                      'note',
-                      'Data migration — ' +
-                        column.dataMigration.kind +
-                        ': ' +
-                        (column.dataMigration.reason || column.dataMigration.description),
-                    ),
+                    tel('p', 'note', 'models.columnDataMigration', {
+                      kind: column.dataMigration.kind,
+                      detail: column.dataMigration.reason || column.dataMigration.description,
+                    }),
                   )
                 }
                 columnsHost.appendChild(
@@ -1661,35 +1819,37 @@
         function renderViews(host) {
           plan.views.forEach(function (view) {
             var body = el('div')
-            body.appendChild(kv([['Page', view.page], ['Module', view.module], ['Purpose', view.purpose]]))
+            body.appendChild(kv([['views.page', view.page], ['label.module', view.module], ['views.purpose', view.purpose]]))
             if (view.props.length) {
-              group(body, 'Props', view.props, function (prop) {
-                return span([
-                  prop.name + ': ' + prop.type,
-                  prop.resource ? ' from ' : null,
-                  prop.resource ? link(prop.resource) : null,
-                ])
+              group(body, 'views.props', view.props, function (prop) {
+                return prop.resource
+                  ? tel('span', null, 'views.propFrom', { name: prop.name, type: prop.type, resource: link(prop.resource) })
+                  : tel('span', null, 'views.prop', { name: prop.name, type: prop.type })
               })
             }
             if (view.form) {
-              body.appendChild(el('h4', null, 'Form'))
+              body.appendChild(tel('h4', null, 'views.form'))
               var form = el('div')
-              var formMeta = span(['validated by ', link(view.form.validator), ', submits to ', link(view.form.submitsTo)])
-              formMeta.className = 'note'
+              var formMeta = tel('span', 'note', 'views.formMeta', {
+                validator: link(view.form.validator),
+                route: link(view.form.submitsTo),
+              })
               form.appendChild(formMeta)
               form.appendChild(
                 list(view.form.fields, function (field) {
-                  return field.label + ' (' + field.field + ', ' + field.input + ')'
+                  return tel('span', null, 'views.formField', { label: field.label, field: field.field, input: field.input })
                 }),
               )
               body.appendChild(form)
             }
             if (view.actions.length) {
-              group(body, 'Actions', view.actions, function (action) {
-                return span([action.label + ' -> ', link(action.route)])
+              group(body, 'views.actions', view.actions, function (action) {
+                return tel('span', null, 'views.action', { label: action.label, route: link(action.route) })
               })
             }
-            body.appendChild(kv([['Empty', view.states.empty], ['Error', view.states.error], ['Loading', view.states.loading]]))
+            body.appendChild(
+              kv([['views.empty', view.states.empty], ['views.error', view.states.error], ['views.loading', view.states.loading]]),
+            )
             host.appendChild(card({ id: view.id, title: view.page, change: view.change, body: body }))
           })
         }
@@ -1700,38 +1860,41 @@
               id: controller.id,
               title: controller.className,
               change: controller.change,
-              body: kv([['Module', controller.module]]),
+              body: kv([['label.module', controller.module]]),
             })
             controller.actions.forEach(function (action) {
               var body = el('div')
               var response = action.response
               var responseCell =
                 response.kind === 'inertia'
-                  ? link(response.view, 'renders ' + response.view)
+                  ? words(link(response.view, ''), 'controllers.renders', { view: response.view })
                   : response.kind === 'resource'
-                    ? link(response.resource, 'returns ' + response.resource)
+                    ? words(link(response.resource, ''), 'controllers.returns', { resource: response.resource })
                     : response.kind === 'redirect'
-                      ? 'redirect to ' + response.to
+                      ? tel('span', null, 'controllers.redirect', { target: response.to })
                       : response.kind === 'json'
-                        ? 'json: ' + response.description
-                        : 'empty'
+                        ? tel('span', null, 'controllers.json', { description: response.description })
+                        : tel('span', null, 'controllers.emptyResponse')
               body.appendChild(
                 kv([
-                  ['Params', action.params ? link(action.params) : null],
-                  ['Query', action.query ? link(action.query) : null],
-                  ['Body', action.body ? link(action.body) : null],
-                  ['Middleware', action.authorization.middleware.join(', ')],
+                  ['controllers.params', action.params ? link(action.params) : null],
+                  ['controllers.query', action.query ? link(action.query) : null],
+                  ['controllers.body', action.body ? link(action.body) : null],
+                  ['controllers.middleware', action.authorization.middleware.join(', ')],
                   [
-                    'Policy',
+                    'controllers.policy',
                     action.authorization.policy
-                      ? span([link(action.authorization.policy.id), ' can ' + action.authorization.policy.ability])
+                      ? tel('span', null, 'controllers.policyAbility', {
+                          policy: link(action.authorization.policy.id),
+                          ability: action.authorization.policy.ability,
+                        })
                       : null,
                   ],
-                  ['Response', responseCell],
+                  ['controllers.response', responseCell],
                 ]),
               )
               if (action.rules.length) {
-                group(body, 'Business rules', action.rules)
+                group(body, 'controllers.rules', action.rules)
               }
               node.appendChild(card({ id: action.id, title: action.name, change: action.change, body: body, sub: true, parent: node }))
             })
@@ -1744,25 +1907,36 @@
             var body = el('div')
             body.appendChild(
               kv([
-                ['Path', route.method + ' ' + route.path],
-                ['Action', link(route.action)],
-                ['Middleware', route.middleware.join(', ')],
+                ['routes.path', route.method + ' ' + route.path],
+                ['routes.action', link(route.action)],
+                ['routes.middleware', route.middleware.join(', ')],
                 [
-                  'Bind',
+                  'routes.bind',
                   route.bind.length
                     ? (function () {
                         var line = el('span')
                         route.bind.forEach(function (binding, index) {
                           if (index) line.appendChild(document.createTextNode(', '))
-                          line.appendChild(document.createTextNode(binding.param + ': '))
-                          line.appendChild(link(binding.model))
-                          if (binding.key) line.appendChild(document.createTextNode(' by ' + binding.key))
+                          line.appendChild(
+                            tel('span', null, binding.key ? 'routes.bindingBy' : 'routes.binding', {
+                              param: binding.param,
+                              model: link(binding.model),
+                              key: binding.key,
+                            }),
+                          )
                         })
                         return line
                       })()
                     : null,
                 ],
-                ['Agent tool', route.agent ? route.agent.toolName + (route.agent.readOnly ? ' (read-only)' : '') : null],
+                [
+                  'routes.agentTool',
+                  route.agent
+                    ? route.agent.readOnly
+                      ? tel('span', null, 'routes.agentReadOnly', { tool: route.agent.toolName })
+                      : route.agent.toolName
+                    : null,
+                ],
               ]),
             )
             host.appendChild(card({ id: route.id, title: route.name, change: route.change, body: body }))
@@ -1772,10 +1946,19 @@
         function renderValidators(host) {
           plan.validators.forEach(function (validator) {
             var body = el('div')
-            body.appendChild(kv([['Module', validator.module]]))
-            group(body, 'Fields', validator.fields, function (field) {
-              var suffix = field.rules.length ? ' - ' + field.rules.join(', ') : ''
-              return field.name + ': ' + field.type + (field.required ? ' (required)' : ' (optional)') + suffix
+            body.appendChild(kv([['label.module', validator.module]]))
+            group(body, 'label.fields', validator.fields, function (field) {
+              var described = function () {
+                return {
+                  name: field.name,
+                  type: field.type,
+                  requirement: t(field.required ? 'validators.required' : 'validators.optional'),
+                }
+              }
+              if (!field.rules.length) return tel('span', null, 'validators.field', described)
+              return tel('span', null, 'validators.fieldRules', function () {
+                return { field: t('validators.field', described), rules: field.rules.join(', ') }
+              })
             })
             host.appendChild(card({ id: validator.id, title: validator.name, change: validator.change, body: body }))
           })
@@ -1784,8 +1967,8 @@
         function renderResources(host) {
           plan.resources.forEach(function (resource) {
             var body = el('div')
-            body.appendChild(kv([['Module', resource.module], ['Model', link(resource.model)]]))
-            group(body, 'Fields', resource.fields, function (field) {
+            body.appendChild(kv([['label.module', resource.module], ['label.model', link(resource.model)]]))
+            group(body, 'label.fields', resource.fields, function (field) {
               return field.name + ': ' + field.type
             })
             host.appendChild(card({ id: resource.id, title: resource.name, change: resource.change, body: body }))
@@ -1795,8 +1978,8 @@
         function renderPolicies(host) {
           plan.policies.forEach(function (policy) {
             var body = el('div')
-            body.appendChild(kv([['Module', policy.module], ['Model', link(policy.model)]]))
-            group(body, 'Abilities', policy.abilities, function (ability) {
+            body.appendChild(kv([['label.module', policy.module], ['label.model', link(policy.model)]]))
+            group(body, 'policies.abilities', policy.abilities, function (ability) {
               return ability.name + ': ' + ability.rule
             })
             host.appendChild(card({ id: policy.id, title: policy.name, change: policy.change, body: body }))
@@ -1806,10 +1989,10 @@
         function renderSideEffects(host) {
           plan.sideEffects.forEach(function (effect) {
             var body = kv([
-              ['Kind', effect.kind],
-              ['Module', effect.module],
-              ['Trigger', effect.trigger],
-              ['Description', effect.description],
+              ['sideEffects.kind', effect.kind],
+              ['label.module', effect.module],
+              ['sideEffects.trigger', effect.trigger],
+              ['sideEffects.description', effect.description],
             ])
             host.appendChild(card({ id: effect.id, title: effect.name, change: effect.change, body: body }))
           })
@@ -1881,7 +2064,7 @@
          * that value's to say, so it is the same here, in print, and in any later view.
          * How an edge gets between two steps is the page's: it depends on the sizes above.
          */
-        function drawFlow(flow, declared) {
+        function drawFlow(flow, declared, label) {
           var at = idMap()
           var cells = idMap()
           flow.nodes.forEach(function (node) {
@@ -1922,7 +2105,7 @@
             viewBox: '0 0 ' + width + ' ' + height,
             // Not `img`: that makes the node links inside presentational.
             role: 'group',
-            'aria-label': 'Flow: ' + flow.title,
+            'aria-label': label,
           })
 
           var labels = []
@@ -2059,7 +2242,9 @@
             var body = el('div')
             if (flow.description) body.appendChild(el('p', null, flow.description))
             var scroll = el('div', 'flow-scroll')
-            scroll.appendChild(drawFlow(flow, entityOf))
+            var drawing = drawFlow(flow, entityOf, '')
+            ariaLabel(drawing, 'flows.label', { title: flow.title })
+            scroll.appendChild(drawing)
             body.appendChild(scroll)
             // The layout keeps a change's kind; the badge also reads what a rename was
             // from and why a drop, which only the plan's own flow carries.
@@ -2089,35 +2274,45 @@
           var body = el('div')
           var gwt = el('div', 'given-when-then')
 
-          gwt.appendChild(el('div', 'label', 'Given'))
+          gwt.appendChild(tel('div', 'label', 'acceptance.given'))
           var given = el('div')
           if (acceptance.given.length) given.appendChild(list(acceptance.given))
-          else given.appendChild(el('span', 'note', 'nothing in particular'))
+          else given.appendChild(tel('span', 'note', 'acceptance.givenNothing'))
           gwt.appendChild(given)
 
-          gwt.appendChild(el('div', 'label', 'When'))
+          gwt.appendChild(tel('div', 'label', 'acceptance.when'))
           gwt.appendChild(
-            span([
-              'a ' + acceptance.actor + ' calls ',
-              link(acceptance.route),
-              acceptance.input && acceptance.input.length ? ' with ' + jsonValues(acceptance.input) : null,
-            ]),
+            acceptance.input && acceptance.input.length
+              ? tel('span', null, 'acceptance.callsWith', {
+                  actor: acceptance.actor,
+                  route: link(acceptance.route),
+                  input: jsonValues(acceptance.input),
+                })
+              : tel('span', null, 'acceptance.calls', { actor: acceptance.actor, route: link(acceptance.route) }),
           )
 
-          gwt.appendChild(el('div', 'label', 'Then'))
+          gwt.appendChild(tel('div', 'label', 'acceptance.then'))
           var then = el('div')
           var expectations = []
-          if (acceptance.expect.status !== undefined) expectations.push('status ' + acceptance.expect.status)
-          if (acceptance.expect.redirect !== undefined) expectations.push('redirect to ' + acceptance.expect.redirect)
-          if (acceptance.expect.errors) expectations.push('errors on ' + acceptance.expect.errors.join(', '))
+          var expecting = function (key, values) {
+            expectations.push(tel('span', null, key, values))
+          }
+          if (acceptance.expect.status !== undefined) expecting('acceptance.status', { status: acceptance.expect.status })
+          if (acceptance.expect.redirect !== undefined) expecting('acceptance.redirect', { target: acceptance.expect.redirect })
+          if (acceptance.expect.errors) expecting('acceptance.errors', { fields: acceptance.expect.errors.join(', ') })
           ;(acceptance.expect.database || []).forEach(function (row) {
-            if (row.has) expectations.push(row.table + ' has ' + jsonValues(row.has))
-            if (row.missing) expectations.push(row.table + ' has no ' + jsonValues(row.missing))
+            if (row.has) expecting('acceptance.has', { table: row.table, values: jsonValues(row.has) })
+            if (row.missing) expecting('acceptance.hasNo', { table: row.table, values: jsonValues(row.missing) })
           })
-          if (expectations.length) then.appendChild(list(expectations))
+          if (expectations.length) {
+            then.appendChild(
+              list(expectations, function (expectation) {
+                return expectation
+              }),
+            )
+          }
           if (acceptance.expect.inertia) {
-            var page = span(['renders ', link(acceptance.expect.inertia)])
-            page.className = 'note'
+            var page = tel('span', 'note', 'acceptance.renders', { page: link(acceptance.expect.inertia) })
             then.appendChild(page)
           }
           gwt.appendChild(then)
@@ -2128,13 +2323,13 @@
         function renderTasks(host) {
           plan.tasks.forEach(function (task) {
             var covers = el('p', 'note referenced-by')
-            covers.appendChild(el('span', 'label', 'Covers'))
+            covers.appendChild(tel('span', 'label', 'tasks.covers'))
             task.covers.forEach(function (elementId, index) {
               if (index) covers.appendChild(document.createTextNode(', '))
               covers.appendChild(link(elementId))
             })
             var taskBody = el('div')
-            taskBody.appendChild(kv([['Entity', task.entity]]))
+            taskBody.appendChild(kv([['tasks.entity', task.entity]]))
             taskBody.appendChild(covers)
             var node = card({ id: task.id, title: task.entity + ' - ' + task.summary, body: taskBody })
             task.acceptance.forEach(function (acceptance) {
@@ -2155,6 +2350,12 @@
 
         /* ---------- header, pinned findings, questions ---------- */
 
+        // The prose is most of the page, so the document's language is the plan's: it governs
+        // line breaking and the font the system picks. The page's own words carry their own.
+        if (/^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/.test(plan.locale)) {
+          document.documentElement.setAttribute('lang', plan.locale)
+        }
+
         document.getElementById('plan-title').textContent = plan.title
         document.title = plan.title
         document.getElementById('plan-summary').textContent = plan.summary
@@ -2164,38 +2365,38 @@
           meta.appendChild(el('span', 'mono', 'plan ' + data.planHash.slice(0, 12)))
           if (plan.baseline) meta.appendChild(el('span', 'mono', 'baseline ' + plan.baseline.rev))
         } else {
-          meta.appendChild(el('span', null, 'Draft: no baseline, so no plan hash yet.'))
+          meta.appendChild(tel('span', null, 'header.draft'))
         }
 
         var scope = document.getElementById('plan-scope')
         function scopeBlock(title, items) {
           var block = el('div')
-          block.appendChild(el('h4', null, title))
+          block.appendChild(tel('h4', null, title))
           if (items.length) block.appendChild(list(items))
-          else block.appendChild(el('p', 'note', 'none'))
+          else block.appendChild(tel('p', 'note', 'scope.none'))
           return block
         }
-        scope.appendChild(scopeBlock('Goals', plan.scope.goals))
-        scope.appendChild(scopeBlock('Non-goals', plan.scope.nonGoals))
-        scope.appendChild(scopeBlock('Assumptions', plan.assumptions))
-        if (plan.hints.length) scope.appendChild(scopeBlock('Hints', plan.hints))
+        scope.appendChild(scopeBlock('scope.goals', plan.scope.goals))
+        scope.appendChild(scopeBlock('scope.nonGoals', plan.scope.nonGoals))
+        scope.appendChild(scopeBlock('scope.assumptions', plan.assumptions))
+        if (plan.hints.length) scope.appendChild(scopeBlock('scope.hints', plan.hints))
 
         var pinned = document.getElementById('pinned')
+        ariaLabel(pinned, 'aria.pinned')
         var blocking = data.checks.filter(function (result) {
           return result.status !== 'pass'
         })
         if (blocking.length || data.breaking.length) {
           pinned.hidden = false
-          pinned.appendChild(el('h2', null, 'Needs attention'))
+          pinned.appendChild(tel('h2', null, 'pinned.heading'))
           blocking.forEach(function (result) {
             var item = el('div', 'pinned-item')
             item.appendChild(
-              span([
-                el('span', 'badge badge-' + result.status, result.status),
-                ' ' + result.title,
-                result.elementId ? ' on ' : null,
-                result.elementId ? link(result.elementId) : null,
-              ]),
+              tel('span', null, result.elementId ? 'pinned.checkOn' : 'pinned.check', {
+                status: el('span', 'badge badge-' + result.status, result.status),
+                title: result.title,
+                element: result.elementId ? link(result.elementId) : null,
+              }),
             )
             item.appendChild(el('p', 'note', result.message))
             if (result.suggestion) item.appendChild(el('p', 'note', result.suggestion))
@@ -2203,8 +2404,19 @@
           })
           data.breaking.forEach(function (item) {
             var node = el('div', 'pinned-item')
-            node.appendChild(span([el('span', 'badge badge-drop', 'breaking'), ' ' + item.title + ' ', link(item.elementId)]))
-            node.appendChild(el('p', 'note', item.reason))
+            node.appendChild(
+              tel('span', null, 'pinned.breaking', {
+                badge: tel('span', 'badge badge-drop', 'badge.breaking'),
+                title: item.title,
+                element: link(item.elementId),
+              }),
+            )
+            var reason = el('p', 'note')
+            localise(function () {
+              reason.setAttribute('lang', uiLocale)
+              reason.textContent = t(item.reasonKey, item.reasonValues)
+            })
+            node.appendChild(reason)
             pinned.appendChild(node)
           })
         }
@@ -2236,10 +2448,8 @@
         var questionsHost = document.getElementById('questions')
         if (plan.questions.length) {
           var questionsPanel = el('section', 'panel')
-          questionsPanel.appendChild(el('h2', null, 'Questions the plan could not decide'))
-          questionsPanel.appendChild(
-            el('p', 'note', 'Each was written under the assumed answer. Changing one changes the elements it affects.'),
-          )
+          questionsPanel.appendChild(tel('h2', null, 'questions.heading'))
+          questionsPanel.appendChild(tel('p', 'note', 'questions.note'))
           plan.questions.forEach(function (question, questionIndex) {
             // `option` stays null until someone picks one: the assumed answer is
             // preselected so the plan reads the way it was written, and RFC 0030 §4 is
@@ -2249,13 +2459,13 @@
               questionId: question.id,
               option: null,
               text: '',
-              badge: el('span', 'badge badge-alter', 'unanswered'),
+              badge: tel('span', 'badge badge-alter', 'badge.unanswered'),
             }
             answers.push(answer)
 
             var body = el('div')
             var fieldset = el('fieldset', 'bare')
-            var legend = el('legend', 'note', 'Options')
+            var legend = tel('legend', 'note', 'questions.options')
             fieldset.appendChild(legend)
             question.options.forEach(function (option) {
               var label = el('label', 'question-option')
@@ -2278,7 +2488,7 @@
               label.appendChild(document.createTextNode(' ' + option.label))
               if (option.label === question.assumed) {
                 label.appendChild(document.createTextNode(' '))
-                label.appendChild(el('span', 'badge badge-existing', 'assumed'))
+                label.appendChild(tel('span', 'badge badge-existing', 'badge.assumed'))
               }
               label.appendChild(el('span', 'consequence', option.consequence))
               fieldset.appendChild(label)
@@ -2286,10 +2496,10 @@
             body.appendChild(fieldset)
 
             var answerLabel = el('label', 'question-answer')
-            answerLabel.appendChild(el('span', 'note', 'Answer'))
+            answerLabel.appendChild(tel('span', 'note', 'questions.answer'))
             var answerBox = el('textarea')
             answerBox.rows = 2
-            answerBox.setAttribute('aria-label', 'Answer to ' + question.id)
+            ariaLabel(answerBox, 'questions.answerTo', { id: question.id })
             answerBox.addEventListener('input', function () {
               answer.text = answerBox.value
               refreshAnswers()
@@ -2299,7 +2509,7 @@
 
             if (question.affects.length) {
               var affects = el('p', 'note referenced-by')
-              affects.appendChild(el('span', 'label', 'Affects'))
+              affects.appendChild(tel('span', 'label', 'questions.affects'))
               question.affects.forEach(function (elementId, index) {
                 if (index) affects.appendChild(document.createTextNode(', '))
                 affects.appendChild(link(elementId))
@@ -2326,12 +2536,15 @@
         loadReview()
 
         var tabs = document.getElementById('tabs')
+        ariaLabel(tabs, 'aria.tabs')
         var panels = document.getElementById('panels')
         var tabEntries = []
 
         SECTIONS.forEach(function (section, index) {
           var items = plan[section.key] || []
-          var button = el('button', null, section.label + ' (' + items.length + ')')
+          var button = tel('button', null, 'sections.tab', function () {
+            return { label: t(section.label), count: items.length }
+          })
           button.type = 'button'
           button.setAttribute('role', 'tab')
           button.setAttribute('aria-selected', index === 0 ? 'true' : 'false')
@@ -2344,14 +2557,14 @@
           var panel = el('section')
           panel.id = 'panel-' + section.key
           panel.setAttribute('role', 'tabpanel')
-          panel.setAttribute('aria-label', section.label)
+          ariaLabel(panel, section.label)
           panel.hidden = index !== 0
           // The tab names the section on screen; on paper there are no tabs.
-          panel.appendChild(el('h2', 'section-title', section.label))
+          panel.appendChild(tel('h2', 'section-title', section.label))
           section.render(panel)
           if (!items.length) {
             panel.className = 'empty'
-            panel.appendChild(el('p', 'note', 'Nothing in this section.'))
+            panel.appendChild(tel('p', 'note', 'sections.empty'))
           }
           panels.appendChild(panel)
           tabEntries.push({ key: section.key, button: button, panel: panel })
@@ -2400,7 +2613,9 @@
         var entityFilter = document.getElementById('entity-filter')
         var changesOnly = document.getElementById('changes-only')
         var visibleCount = document.getElementById('visible-count')
-        var allOption = el('option', null, 'All')
+        words(document.getElementById('entity-filter-label'), 'filter.entity')
+        words(document.getElementById('changes-only-label'), 'filter.changesOnly')
+        var allOption = tel('option', null, 'filter.all')
         allOption.value = ''
         entityFilter.appendChild(allOption)
         data.entities.forEach(function (entity) {
@@ -2433,11 +2648,12 @@
             item.node.hidden = !item.keep
             if (item.keep) shown += 1
           })
-          visibleCount.textContent = shown + ' of ' + cards.length + ' elements shown'
+          visibleCount.textContent = t('filter.count', { shown: shown, total: cards.length })
         }
         entityFilter.addEventListener('change', applyFilters)
         changesOnly.addEventListener('change', applyFilters)
-        applyFilters()
+        // The count is a sentence in the current locale, and the filter is what knows it.
+        localise(applyFilters)
         revealHash()
 
         /* ---------- feedback ---------- */
@@ -2463,8 +2679,8 @@
         var exportStatus = document.getElementById('export-status')
         var statusTimer = null
 
-        function say(message) {
-          exportStatus.textContent = message
+        function say(key) {
+          exportStatus.textContent = t(key)
           if (statusTimer) window.clearTimeout(statusTimer)
           statusTimer = window.setTimeout(function () {
             exportStatus.textContent = ''
@@ -2473,6 +2689,12 @@
 
         // `planFile` is already held to a bare name with no shell metacharacter, because
         // these lines exist to be pasted into a shell.
+        words(document.getElementById('copy'), 'footer.copy')
+        words(document.getElementById('export'), 'footer.download')
+        words(document.getElementById('footer-note'), 'footer.note')
+        words(document.getElementById('footer-file-note'), 'footer.fileCommand')
+        words(document.getElementById('footer-stdin-note'), 'footer.stdinCommand')
+
         var reviseCommand = 'bunx guren plan --revise ' + (data.planFile || '<plan.json>')
         document.getElementById('revise-file-command').textContent = reviseCommand + ' --feedback feedback.json'
         document.getElementById('revise-stdin-command').textContent = reviseCommand + ' --feedback -'
@@ -2482,10 +2704,10 @@
           // directive governs it. A refusal (permission, or an older engine) says so.
           window.navigator.clipboard.writeText(feedbackJson()).then(
             function () {
-              say('Copied. Pipe it into the second command below.')
+              say('footer.copied')
             },
             function () {
-              say('The browser refused the clipboard. Use Download instead.')
+              say('footer.clipboardRefused')
             },
           )
         })
@@ -2500,8 +2722,54 @@
           anchor.click()
           document.body.removeChild(anchor)
           URL.revokeObjectURL(url)
-          say('Downloaded feedback.json.')
+          say('footer.downloaded')
         })
+
+        /* ---------- locale ----------  */
+
+        var CHROME = ['tabs', 'controls', 'footer']
+
+        /**
+         * Nothing is rebuilt: every worded node re-reads its phrase in place, so the open
+         * tab, the filter, the hash, the answers and the review are what they were.
+         */
+        function setLocale(locale) {
+          if (!supported(locale)) return
+          uiLocale = locale
+          localised.forEach(function (apply) {
+            apply()
+          })
+          // A status line is a sentence in the locale it was said in.
+          exportStatus.textContent = ''
+          if (diagramHost) drawDiagram(diagramHost)
+        }
+
+        localise(function () {
+          CHROME.forEach(function (id) {
+            document.getElementById(id).setAttribute('lang', uiLocale)
+          })
+        })
+
+        var localeSelect = document.getElementById('locale-select')
+        words(document.getElementById('locale-switch-label'), 'locale.switch')
+        Object.keys(i18n.dictionaries).forEach(function (locale) {
+          // Each language is named in itself, whichever one the page is speaking.
+          var option = el('option', null, own(i18n.dictionaries[locale], 'locale.name') ? i18n.dictionaries[locale]['locale.name'] : locale)
+          option.value = locale
+          option.setAttribute('lang', locale)
+          localeSelect.appendChild(option)
+        })
+        document.getElementById('locale-switch').hidden = localeSelect.childNodes.length < 2
+        localeSelect.addEventListener('change', function () {
+          setLocale(localeSelect.value)
+          try {
+            window.localStorage.setItem(LOCALE_KEY, uiLocale)
+          } catch (error) {
+            /* The switch still works for this visit. */
+          }
+        })
+
+        localeSelect.value = uiLocale
       })()
     </script>
   </body>

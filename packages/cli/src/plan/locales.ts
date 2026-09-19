@@ -20,6 +20,19 @@ export function isPlanLocale(value: string): value is PlanLocale {
   return (PLAN_LOCALES as readonly string[]).includes(value)
 }
 
+/** The supported locale a BCP 47 tag falls under by its language: `ja-JP` is `ja`, `fr` is none. */
+export function matchPlanLocale(tag: string | undefined): PlanLocale | undefined {
+  const language = tag?.split('-')[0]?.toLowerCase()
+  return language !== undefined && isPlanLocale(language) ? language : undefined
+}
+
+/** A dictionary value with string values only, as a caller outside the page prints it. */
+export function formatPlanPhrase(template: string, values: Record<string, string>): string {
+  return template.replace(/\{([A-Za-z_][A-Za-z0-9_.-]*)\}/g, (whole, name: string) =>
+    Object.hasOwn(values, name) ? values[name]! : whole,
+  )
+}
+
 export function parsePlanDictionary(locale: string, raw: string): PlanDictionary {
   const parsed: unknown = JSON.parse(raw)
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -31,12 +44,18 @@ export function parsePlanDictionary(locale: string, raw: string): PlanDictionary
   return parsed as PlanDictionary
 }
 
+const cached = new Map<PlanLocale, PlanDictionary>()
+
 export function loadPlanDictionary(locale: PlanLocale): PlanDictionary {
+  const hit = cached.get(locale)
+  if (hit !== undefined) return hit
   const tried: string[] = []
   for (const candidate of LANG_CANDIDATES) {
     const path = fileURLToPath(new URL(`${candidate}${locale}.json`, import.meta.url))
     try {
-      return parsePlanDictionary(locale, readFileSync(path, 'utf8'))
+      const dictionary = parsePlanDictionary(locale, readFileSync(path, 'utf8'))
+      cached.set(locale, dictionary)
+      return dictionary
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       tried.push(path)

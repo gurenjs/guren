@@ -410,6 +410,8 @@ describe('planBreakingChanges', () => {
       section: 'columns',
       title: 'comments.body',
       reason: 'The column is dropped.',
+      reasonKey: 'breaking.columnDropped',
+      reasonValues: {},
     })
   })
 
