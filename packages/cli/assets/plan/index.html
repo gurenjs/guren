@@ -710,9 +710,15 @@
         text-transform: uppercase;
       }
 
+      /* A routed edge's stem shares the gap a label sits in; the halo keeps the label
+         readable where the two cross. */
       .flow text.edge-label {
         text-transform: none;
         letter-spacing: 0;
+        paint-order: stroke;
+        stroke: var(--g-panel);
+        stroke-width: 4px;
+        stroke-linejoin: round;
       }
 
       .flow .box {
@@ -760,6 +766,11 @@
         fill: var(--g-warn-chip);
       }
 
+      .flow a:focus {
+        outline: none;
+      }
+
+      .flow a:focus-visible .box,
       .flow a:hover .box {
         stroke: var(--g-accent);
         stroke-width: 2;
@@ -1834,18 +1845,34 @@
           return head
         }
 
-        /** Whether the straight line between two boxes runs through a third. */
-        function flowBlocked(start, end, boxes, from, to) {
-          var steps = Math.ceil(Math.max(Math.abs(end[0] - start[0]), Math.abs(end[1] - start[1])) / 6)
-          return boxes.some(function (box) {
-            if (box === from || box === to) return false
-            for (var step = 1; step < steps; step += 1) {
-              var x = start[0] + ((end[0] - start[0]) * step) / steps
-              var y = start[1] + ((end[1] - start[1]) * step) / steps
-              if (x > box.x - 3 && x < box.x + box.w + 3 && y > box.y - 3 && y < box.y + box.h + 3) return true
+        /**
+         * Whether the straight line between two boxes runs through a third. It asks only
+         * the cells the line passes over, so the cost is the edge's span and not the flow's
+         * size. The test is the bounding box of the line within a column: it may route an
+         * edge that would have grazed a corner, never draw one through a box.
+         */
+        function flowBlocked(start, end, cells, from, to) {
+          var pitchX = FLOW_NODE_W + FLOW_GAP_X
+          var pitchY = FLOW_NODE_H + FLOW_GAP_Y
+          var minX = Math.min(start[0], end[0])
+          var maxX = Math.max(start[0], end[0])
+          function yAt(x) {
+            return end[0] === start[0] ? start[1] : start[1] + ((end[1] - start[1]) * (x - start[0])) / (end[0] - start[0])
+          }
+          var lastColumn = Math.floor((maxX - FLOW_PAD_X) / pitchX)
+          for (var column = Math.max(0, Math.floor((minX - FLOW_PAD_X) / pitchX)); column <= lastColumn; column += 1) {
+            var left = Math.max(minX, FLOW_PAD_X + column * pitchX - 3)
+            var right = Math.min(maxX, FLOW_PAD_X + column * pitchX + FLOW_NODE_W + 3)
+            if (left > right) continue
+            var ys = end[0] === start[0] ? [start[1], end[1]] : [yAt(left), yAt(right)]
+            var low = Math.min(ys[0], ys[1]) - 3
+            var high = Math.max(ys[0], ys[1]) + 3
+            for (var row = Math.max(0, Math.floor((low - FLOW_NODE_H) / pitchY)); row * pitchY <= high; row += 1) {
+              var box = cells[column + ',' + row]
+              if (box && box !== from && box !== to && box.y <= high && box.y + box.h >= low) return true
             }
-            return false
-          })
+          }
+          return false
         }
 
         /**
@@ -1855,9 +1882,9 @@
          */
         function drawFlow(flow) {
           var at = idMap()
-          var boxes = []
+          var cells = idMap()
           flow.nodes.forEach(function (node) {
-            boxes.push((at[node.id] = flowBox(node, 0)))
+            cells[node.column + ',' + node.row] = at[node.id] = flowBox(node, 0)
           })
 
           // An edge a straight line cannot show is routed instead: out of the side of its
@@ -1872,7 +1899,7 @@
             if (!from || !to || edge.from === edge.to) return
             var start = borderPoint(from, to)
             var end = borderPoint(to, from)
-            var lane = edge.back ? 'under' : flowBlocked(start, end, boxes, from, to) ? 'over' : null
+            var lane = edge.back ? 'under' : flowBlocked(start, end, cells, from, to) ? 'over' : null
             routes.push({ edge: edge, from: from, to: to, start: start, end: end, lane: lane })
           })
           function lanes(side) {
@@ -1892,7 +1919,8 @@
             width: width,
             height: height,
             viewBox: '0 0 ' + width + ' ' + height,
-            role: 'img',
+            // Not `img`: that makes the node links inside presentational.
+            role: 'group',
             'aria-label': 'Flow: ' + flow.title,
           })
 
@@ -1971,23 +1999,55 @@
           return svg
         }
 
-        /** Greedy wrap to `limit` characters and `most` lines; a label cut short says so. */
+        /** Width in Latin characters: an East Asian character is about two of them wide. */
+        function textUnits(text) {
+          var units = 0
+          for (var index = 0; index < text.length; index += 1) units += text.charCodeAt(index) > 0x2e7f ? 2 : 1
+          return units
+        }
+
+        /** The longest prefix of `text` within `limit` units, never ending inside a surrogate pair. */
+        function fitPrefix(text, limit) {
+          var units = 0
+          var index = 0
+          while (index < text.length) {
+            var code = text.charCodeAt(index)
+            var pair = code >= 0xd800 && code <= 0xdbff ? 2 : 1
+            var next = units + textUnits(text.slice(index, index + pair))
+            if (next > limit && index > 0) break
+            units = next
+            index += pair
+          }
+          return index
+        }
+
+        /**
+         * Greedy wrap to `limit` units and `most` lines. A word too long for a line is
+         * broken, which is every line of a language written without spaces; a label cut
+         * short says so.
+         */
         function wrapSvgText(text, limit, most) {
           var lines = []
           var line = ''
           text.split(/\s+/).forEach(function (word) {
-            if (line === '') line = word
-            else if (line.length + 1 + word.length <= limit) line += ' ' + word
-            else {
-              lines.push(line)
-              line = word
+            if (word === '') return
+            if (line !== '' && textUnits(line) + 1 + textUnits(word) <= limit) {
+              line += ' ' + word
+              return
+            }
+            if (line !== '') lines.push(line)
+            line = word
+            while (textUnits(line) > limit) {
+              var cut = fitPrefix(line, limit)
+              lines.push(line.slice(0, cut))
+              line = line.slice(cut)
             }
           })
           if (line !== '') lines.push(line)
-          var kept = lines.slice(0, most).map(function (piece) {
-            return piece.length > limit ? piece.slice(0, limit - 1) + '…' : piece
-          })
-          if (lines.length > most && kept[most - 1].slice(-1) !== '…') kept[most - 1] += '…'
+          if (lines.length <= most) return lines
+          var kept = lines.slice(0, most)
+          var last = kept[most - 1]
+          kept[most - 1] = last.slice(0, fitPrefix(last, limit - 1)) + '\u2026'
           return kept
         }
 

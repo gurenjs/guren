@@ -109,7 +109,7 @@ class FakeNode {
  * The page's own `drawFlow()`, run against the few DOM calls it makes. The closure is
  * assembled from the page source, so a change to the drawing is a change to what runs here.
  */
-const drawFlow = (() => {
+const pageFunctions = (() => {
   const constants = source.match(/^\s*var (FLOW_[A-Z_]+|ID_RE) = .+$/gm) ?? []
   const functions = [
     'idMap',
@@ -121,14 +121,24 @@ const drawFlow = (() => {
     'flowBox',
     'flowArrow',
     'flowBlocked',
+    'textUnits',
+    'fitPrefix',
     'wrapSvgText',
     'drawFlow',
   ].map(functionSource)
   const document = { createElementNS: (_namespace: string, tag: string) => new FakeNode(tag) }
   // oxlint-disable-next-line no-new-func -- the page is a classic script with no module to import
-  const build = new Function('document', `${constants.join('\n')}\n${functions.join('\n')}\nreturn drawFlow`)
-  return build(document) as (flow: PlanFlowLayout) => FakeNode
+  const build = new Function(
+    'document',
+    `${constants.join('\n')}\n${functions.join('\n')}\nreturn { drawFlow: drawFlow, flowBlocked: flowBlocked, wrapSvgText: wrapSvgText }`,
+  )
+  return build(document) as {
+    drawFlow: (flow: PlanFlowLayout) => FakeNode
+    flowBlocked: (start: number[], end: number[], cells: object, from: object, to: object) => boolean
+    wrapSvgText: (text: string, limit: number, most: number) => string[]
+  }
 })()
+const { drawFlow, flowBlocked, wrapSvgText } = pageFunctions
 
 function laneOf(edge: FakeNode): number {
   const match = edge.attributes.d.match(/ V ([\d.]+) H /)
@@ -307,6 +317,30 @@ describe('drawFlow', () => {
     expect(node.children.slice(3).map((piece) => piece.textContent)).toEqual(['Check that the', 'account is active\u2026'])
   })
 
+  test('should wrap a label written without spaces by its width, not by its words', () => {
+    const lines = wrapSvgText('コメントを投稿するとき、本文が空でないことを検証する', 20, 2)
+
+    expect(lines).toEqual(['コメントを投稿すると', 'き、本文が空でない\u2026'])
+    expect(wrapSvgText('a😀'.repeat(12), 20, 2).join('')).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/)
+  })
+
+  test('should break a single word longer than a line instead of dropping its tail', () => {
+    expect(wrapSvgText('CommentControllerStoreAction', 20, 2)).toEqual(['CommentControllerSto', 'reAction'])
+  })
+
+  test('should ask only the cells an edge passes over whether one blocks it', () => {
+    let asked = 0
+    const cells = new Proxy({}, { get: () => ((asked += 1), undefined) })
+
+    // Two columns apart in a flow of any width: the cost is the span.
+    expect(flowBlocked([170, 28], [436, 28], cells, {}, {})).toBe(false)
+    expect(asked).toBeLessThan(10)
+  })
+
+  test('should expose the node links to assistive technology', () => {
+    expect(drawFlow(comment).attributes.role).toBe('group')
+  })
+
   test('should leave no room for a lane in a flow with no cycle', () => {
     const straight = payloadOf(planWithFlows([{ ...FLOW, edges: FLOW.edges.slice(0, 3) }])).flows[0]
     const rows = Math.max(...straight.nodes.map((node) => node.row)) + 1
@@ -447,7 +481,9 @@ describe('the flow drawing in the page source', () => {
   })
 
   test('should write flow text through svgText and by no other path', () => {
-    const drawing = ['drawFlow', 'flowArrow', 'flowBox', 'flowBlocked', 'wrapSvgText'].map(functionSource).join('\n')
+    const drawing = ['drawFlow', 'flowArrow', 'flowBox', 'flowBlocked', 'textUnits', 'fitPrefix', 'wrapSvgText']
+      .map(functionSource)
+      .join('\n')
 
     expect(drawing).not.toContain('textContent')
     expect(drawing).not.toMatch(/\bdocument\./)
