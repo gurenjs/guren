@@ -126,6 +126,8 @@ interface Plan {
   commands: PlanCommand[]        // `guren add attachments` and the like
   tasks: PlanTaskIntent[]        // what each slice must do; never its order
   hints: string[]                // ordering advice Guren may ignore
+  flows: PlanFlow[]              // amended: how a request moves through what the plan adds
+  locale: string                 // amended: BCP 47 tag of the language the prose is written in
 }
 ```
 
@@ -139,6 +141,57 @@ type Change =
   | { kind: 'rename'; from: string }
   | { kind: 'drop'; reason: string }
 ```
+
+**Amended in implementation:** ~~`{ kind: 'alter'; from: string }`~~ `alter` carries
+no `from`. An alter targets the element it is declared on, so there was nothing
+for `from` to name. `rename.from` is the previous value of the element's primary
+name (a model's class, a column's property, a route's name), and a table renamed
+under an unchanged class says so with `tableRenamedFrom` on the model.
+
+**Amended in implementation:** columns carry an `id` like every other element,
+and are listed among the plan's elements. A revision (§4) and a question's
+`affects` address an element by id alone, and a column renamed by the plan
+could not be addressed by its name. Ids are one namespace across all sections,
+and an id may not name an `Object.prototype` member: `constructor` and
+`toString` fit the id pattern, and a consumer that keys a plain object by id
+reads the inherited function back for them. The rendered page went blank on
+such a plan before both the page and the schema were closed.
+
+**Amended after acceptance (2026-09-19, PR #920):** a plan may carry flows, as
+graphs and never as diagram source:
+
+```typescript
+interface PlanFlow {
+  id: string
+  change: Change
+  title: string
+  description?: string
+  nodes: Array<{
+    id: string                   // the flow's own namespace, not the plan's
+    label: string
+    kind: 'actor' | 'page' | 'route' | 'action' | 'job' | 'store' | 'external' | 'decision'
+    element?: string             // the plan element this step is, when it is one
+  }>
+  edges: Array<{ from: string; to: string; label?: string; kind: 'sync' | 'async' }>
+}
+```
+
+A flow's `id` is in the plan's namespace, so a revision op and a question's
+`affects` can name one. A step's `id` is not: it belongs to its flow, and two
+flows may both have a step called `start`. A step that names an `element` is
+what makes a flow part of the document rather than a picture beside it: the
+page links it to that element, and §2 holds the id to the same rule as every
+other reference.
+
+**Amended after acceptance (2026-09-19), language.** A plan's prose (summary,
+descriptions, labels, rules, acceptance descriptions) is written in the language
+of the request, and the plan says which in `locale`, a BCP 47 tag the producer
+prompt asks for. The page puts it on `<html lang>`, which is what governs line
+breaking and the font stack for Japanese, and `plan:close` writes the entity
+document's blocks in that language. Check results (`PlanCheckResult` titles and
+messages) stay English: they are CLI output at the same layer as `guren check`,
+and a translated page text that differs from the terminal would be two
+statements of one finding.
 
 A headless producer cannot stop and ask. A question is therefore data, and the
 model keeps going on a stated assumption:
@@ -167,6 +220,21 @@ The sections, in the terms of a conventional design document:
 | Validator | one definition per payload; views and controllers reference it by id |
 | Resource / Policy | output shape; abilities and who holds them |
 | Task intent | entity or story, `acceptance[]` (below), element ids it covers |
+
+**Amended in implementation:** the shipped schema carries more than this table
+names. A column has `columnName` (the SQL name where it differs from the
+property), `precision` / `scale` for `decimal`, and `withTimezone` for
+`datetime`, which Postgres stores as a different column type. A model has
+composite `indexes`; a single-column one stays the column's own `unique` /
+`index`. A binding has an optional `key`, since `Router` binds by
+`[Model, column]` as well as by primary key. Validators, views, resources,
+policies and side effects carry an optional `module`, as models and
+controllers do. Column types are an abstract vocabulary (`string`, `text`,
+`integer`, `number`, `decimal`, `boolean`, `date`, `datetime`, `json`, `uuid`),
+not `--fields` types and not Drizzle builder names; the projection onto each
+belongs to the scaffold and status slices, and a type with no projection is
+reported as unsupported there, never coerced. Composite foreign keys are not
+expressible.
 
 Validators are their own section because a form field and a request body that
 each describe the same rule are two descriptions that drift.
@@ -203,9 +271,23 @@ Each `expect` key maps onto an assertion `@guren/testing` already has
 `assertForbidden`, the database assertions). The tests a plan leaves behind
 are its durable form: the plan is archived at `plan:close`, the tests stay.
 
-Every section is optional. A plan that adds one column and one form field is
-four elements long, and `guren plan` may answer "this needs no plan" with a
-one-line reason instead of a document (the docs' one-sentence-diff rule).
+**Amended in implementation:** ~~`input?: Record<string, unknown>`~~ and the
+`has` / `missing` of `expect.database` are arrays of `{ name, json }`, the
+value carried as JSON text and checked to be valid JSON on parse. A
+structured-output producer needs `additionalProperties: false` on every
+object, which an open record cannot satisfy, and a closed union of primitives
+could not carry a nested request body.
+
+Every section is optional. **Amended in implementation:** as sections that
+default to `[]` on parse. The JSON Schema handed to a producer is the input
+form, so a producer may omit a section; the hash (§4) is taken of the parsed
+plan, so a document that omits a section and one that spells it out empty name
+the same plan. `planHash()` therefore takes a parsed `Plan` only, and a draft
+without a `baseline` has no identity.
+
+A plan that adds one column and one form field is four elements long, and
+`guren plan` may answer "this needs no plan" with a one-line reason instead of
+a document (the docs' one-sentence-diff rule).
 
 ### 2. Reference checks
 
@@ -232,7 +314,17 @@ plan and the application's current context (`generateContext()`,
   route, since nothing else can judge a change that alters no shape;
 - an added or altered route with a validator and no `validation` behaviour,
   with authentication and no `unauthenticated` behaviour, or with a policy and
-  no `forbidden` behaviour.
+  no `forbidden` behaviour;
+- (amended, PR #920) a flow step naming an element the plan does not declare,
+  and a flow edge whose end is not a step of that flow; a flow edge from a
+  step to itself is a warning, since the diagram draws no such line and a
+  plan should not lose a statement in silence.
+- (amended, PR #920) a flow step whose id another step of the same flow
+  already took, which leaves an edge naming it ambiguous; a flow step whose
+  kind names a section (`route`, `action`, `page`) and whose element is not in
+  it. The other kinds are deliberately unconstrained: a `store` step may name
+  a model or a resource, a `decision` a validator or a policy, and an `actor`
+  names nothing at all.
 
 **Existing tests are read as the baseline.** A static scan of the test files
 collects which routes they exercise (`app.get('/posts')`, `app.post(...)` on a
@@ -275,6 +367,16 @@ style and nothing else (`default-src 'none'`), so a plan cannot load or post
 anywhere. The diagram is drawn by the template's own SVG code for the same
 reason: no Mermaid, and no CDN.
 
+**Amended after acceptance (2026-09-19, PR #920):** a flow is drawn the same
+way and for the same reason. The plan carries it as a graph, never as diagram
+source: `guren` places it (longest-path layering, so a step sits after its
+furthest predecessor) and the page draws the positions it is handed, so one
+flow is one picture wherever it is drawn. A plan may describe a loop (a
+redirect back to a form, a retry), so the edge that closes a cycle is marked
+and routed apart rather than refused. Measured against mermaid 11.17.2: 3.57 MB
+for the entry bundle alone, a lazily fetched chunk per diagram type that
+`default-src 'none'` refuses, and seven `innerHTML` writes.
+
 - Tabs per section, a filter per entity, and a "changes only" toggle that
   hides `existing` elements.
 - Every id is a link: route → action → validator → page → model and back.
@@ -293,6 +395,14 @@ reason: no Mermaid, and no CDN.
   (`{ answers: { questionId, option?, text? }[], elements: { elementId, verdict, comment }[] }`),
   which `guren plan --revise` takes as input. The page never writes to the
   project.
+- **Amended (2026-09-19):** the page's own words (tabs, buttons, badges,
+  headings, the empty and error states) come from a dictionary the CLI ships
+  beside the template, in `en` and `ja`. Every locale is embedded and the page
+  switches between them; `plan:render --locale` picks the initial one, falling
+  back to the plan's `locale`, then the application's default locale, then
+  `en`. The two dictionaries are held to key parity and matching placeholders
+  by a test, the rule `check --i18n` applies to an application's `lang/`.
+  Plan text and check results are never translated by the page.
 
 ### 4. Approval and revisions
 
@@ -338,6 +448,13 @@ Each revise is a fresh call given the current plan, the feedback and the
 message. It does not resume the producing session: the plan is the state, and
 a session is gone by the time someone returns to a plan days later or on
 another machine.
+
+**Amended after acceptance (2026-09-19):** exporting a file and typing a
+command is three steps, two of them handing a file around. `--feedback -`
+reads the document from standard input, so the page's "Copy feedback" and a
+pipe (`pbpaste | guren plan --revise comments --feedback -`) replace the file;
+and under the served mode of §8, `--revise` reads the feedback the page has
+already saved, so `--feedback` is only ever needed for a file made elsewhere.
 
 Before approval, editing `plan.json` by hand is as legitimate as a revision:
 it is a JSON file, and `plan:render` re-validates it. Renaming a column does
@@ -604,6 +721,57 @@ waiver with a reason, offers `make:adr` for each recorded deviation, archives
 the plan, and leaves `spec:generate` as the description of record. A plan is a
 proposal with an end, not a second specification to keep in sync.
 
+**Amended after acceptance (2026-09-19):** what `plan:close` leaves behind has
+two layers, and the plan feeds one of them. The *generated* layer is
+`docs/spec/`, regenerated from code under the existing drift gate, and it gains
+nothing from a plan. The *curated* layer is one OKF document per entity
+(`docs/entities/<Entity>.md`, `entities:` naming it) holding what code cannot
+say: purpose, business rules, decisions, non-goals, and the plans and PRs that
+touched it. `plan:close` inserts a draft block per section, fenced by
+`<!-- guren:plan <hash> -->` markers, and never rewrites text outside them.
+A rule cites the acceptance id that verifies it (`… (AC-comments-4)`); the doc
+never restates a column or a route, which the generated layer already holds,
+and a rule with no id, or an id no test carries, is a `check --docs` finding.
+
+A committed `docs/spec/behaviours.md` was considered and dropped (Open
+Question 9). Behaviours are derived data instead: `guren context <Entity>`
+gains a Behaviours section read from id-tagged test titles, and the plan page
+already shows them per element. A report command may write a catalogue on
+demand; nothing commits one.
+
+**Amended after acceptance (2026-09-19), the docs graph.** What `plan:close`
+leaves behind joins the graph `guren docs:graph` already draws (nodes `doc`,
+`entity`, `code`; relations `governs` from frontmatter, `links` from body
+links, `derives` from a spec view's source; a verdict per edge from
+`check --docs`), through the mechanisms it already has plus one new one:
+
+- The archived plan is a doc node. `plan:close` writes `docs/plans/<slug>.md`
+  beside the JSON, with `type: plan`, `entities:` (what it touched),
+  `related:` (the ADRs it produced), `status: closed` and
+  `generated: { by: process:guren-plan-close }`. Plan → entity is then a
+  `governs` edge and plan → ADR a `related` one, drawn by code that exists;
+  the entity document's History section links back.
+- An acceptance behaviour is a node. The graph gains the node kind `test` and
+  the relation `verifies`: a rule's `(AC-comments-4)` in an entity document
+  is a doc → test edge, and the test's entity comes from the id's
+  `<entity>` segment. An id no test carries, or a test whose id no document
+  cites, is a `check --docs` verdict on that edge. The reader is the one
+  `guren check` uses for the id grammar; there is no second one. This is the
+  trace link the evidence in Open Question 9 supports, and the only new
+  mechanism here.
+- Code reaches the document without hand work. The scaffold step writes
+  `@docs docs/entities/<Entity>.md` into the controller, model and test files
+  it generates, which is the existing code → doc edge, so
+  `guren context <Entity>` lists them.
+- The trust tiers are the existing ones. A block `plan:close` inserted is
+  `generated`; the approver's sign-off is a `verified` event; a rule whose
+  cited test passes reads as machine-confirmed, one whose test is absent or
+  failing as unverified.
+
+`guren docs:graph --entity Comment` then answers with one graph: the entity
+document, its ADRs, the plans that touched it, the tests that verify its rules
+and, through `@docs`, the code. All of it is Part 4 work with `plan:close`.
+
 ### 8. Producers
 
 The schema, the checks, the renderer and the status derivation involve no
@@ -662,6 +830,32 @@ leaves a structural choice open. The second call resumes the first
 Every producer call, first draft, `--ask` and each revise, records its
 `total_cost_usd` in state, so the price of a plan is the sum of its rounds and
 visible as such.
+
+**Amended after acceptance (2026-09-19), the served mode.** Besides the file,
+the page can be served by the development server, the way the `_guren/docs`
+viewer is: dev-only, opt-in, behind the same loopback guard, never mounted in
+production. The static file stays the base and the offline, shareable and
+printable form; the served mode is a thin layer that injects live data at the
+one placeholder `renderPlanHtml()` fills. What it changes:
+
+- Review state is saved as it happens. Each verdict, comment and answer is
+  posted to the server and written to `.guren/plans/<slug>.feedback.json`;
+  the export button remains for a reviewer without the server.
+- `guren plan --revise <slug>` reads that saved feedback by default, and the
+  `plan-implement` skill runs it when asked, so the person's whole loop is to
+  mark the page and say so.
+- A revision can be requested from the page. The button writes a request
+  marker beside the feedback and nothing else; the agent loop (§7) or a
+  person picks it up. The server never runs a command: a page that could
+  start `--revise` would turn any later injection defect into a model call
+  and file writes under the reviewer's account.
+- `plan:status` and `plan:verify` results reach the page live (§6), which
+  is the reason the mode waits for Part 2.
+- The page's policy gains `connect-src 'self'` in this mode only; the static
+  file's policy does not change. The server accepts one kind of write, the
+  feedback and its request marker, under `.guren/` and never under `docs/`.
+  Approval stays a CLI act (`plan:approve`), so a compromised page cannot
+  approve a plan.
 
 Like `ai:eval`, `guren plan` is opt-in, costs money, and is never part of
 `check` or `gate`. `guren check --plan` is advisory: it reports approved plans
@@ -818,9 +1012,21 @@ code and never from an earlier plan.
    paths in a way the static scan cannot read? If most do, the
    characterization rule fires on nothing and needs a runtime source instead
    (route hits recorded by `TestApp` during a test run).
-9. **A behaviours view.** Id-tagged test titles are enough to generate
+9. ~~**A behaviours view.** Id-tagged test titles are enough to generate
    `docs/spec/behaviours.md` per entity, deterministically, under the existing
-   drift gate. In this RFC, or a follow-up once plans have produced such tests?
+   drift gate. In this RFC, or a follow-up once plans have produced such tests?~~
+   **Resolved (2026-09-19):** not committed. Every living-documentation tool
+   surveyed (Cucumber, Serenity, Reqnroll, Pickles, Concordion, Gauge, Spring
+   REST Docs, the rspec and mocha reporters) emits a build report and commits
+   nothing; the one committed, CI-gated catalogue found had been dropped
+   because a forgotten regeneration reddened every open PR and PRs conflicted
+   in a file none of them wrote. No study measures whether a generated view is
+   read. What the evidence does support is the id itself: maintained trace
+   links help (a 2015 experiment: 24% faster, 50% more correct), and manual
+   upkeep is what kills them, which an id in the test title avoids. So the id
+   grammar stays, `guren check` enforces it, and behaviours surface where a
+   reader exists (§7 amendment). Revisited if a catalogue turns out to be
+   opened.
 10. **Producer confinement.** §8 relies on deny rules holding for `Read` in
     `--bare` headless mode. That has to be tested, not assumed; if they do not
     hold, the producer needs an OS-level sandbox or a copy of the tree with the
