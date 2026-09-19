@@ -2557,10 +2557,14 @@
           var panel = el('section')
           panel.id = 'panel-' + section.key
           panel.setAttribute('role', 'tabpanel')
-          ariaLabel(panel, section.label)
           panel.hidden = index !== 0
           // The tab names the section on screen; on paper there are no tabs.
-          panel.appendChild(tel('h2', 'section-title', section.label))
+          // Named by its heading rather than by an `aria-label`: the heading carries the
+          // language it is written in, and a label on the panel would borrow the plan's.
+          var heading = tel('h2', 'section-title', section.label)
+          heading.id = 'panel-title-' + section.key
+          panel.setAttribute('aria-labelledby', heading.id)
+          panel.appendChild(heading)
           section.render(panel)
           if (!items.length) {
             panel.className = 'empty'

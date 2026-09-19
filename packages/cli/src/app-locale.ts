@@ -26,9 +26,12 @@ export async function readAppDefaultLocale(cwd: string): Promise<string | undefi
   const i18n = ast ? objectLiteral(propertyValue(createAppOptions(ast.program), 'i18n')) : null
   if (!i18n) return undefined
 
+  // A spread may carry a `fallback` this cannot see, and one that is not a literal names
+  // a locale this cannot read: either way `supported[0]` would be a guess.
+  if (i18n.properties.some((property) => property.type !== 'ObjectProperty')) return undefined
+  const declared = propertyValue(i18n, 'fallback')
+  if (declared !== undefined) return literalString(declared) ?? undefined
   // `fallback` defaults to the first supported locale at runtime, so the same order here.
-  const fallback = literalString(propertyValue(i18n, 'fallback'))
-  if (fallback !== null) return fallback
   const supported = propertyValue(i18n, 'supported')
   const first = supported ? unwrapTypeAssertion(supported) : undefined
   if (first?.type !== 'ArrayExpression') return undefined
