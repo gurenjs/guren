@@ -470,12 +470,23 @@ be as fine as its reader:
 | Planned property | Reader today | Gap |
 |---|---|---|
 | column type, `notNull`, primary key, single-column FK | `SchemaColumn` | |
-| column default, unique, index, composite constraints | none | Part 1 extends `schema-parser.ts` |
+| column default, unique, index, composite constraints | ~~none~~ runtime `getTableConfig()` (`schema-runtime.ts`), static reader as fallback | ~~Part 1 extends `schema-parser.ts`~~ a table read statically keeps its opaque markers, which stay unknown |
 | options passed as an expression | `opaqueOptions` marks them not visible | stays unknown |
 | relationship name, type, target; fillable | `model-parser.ts` | key configuration is not read |
 | action exists on the controller | `classActionMembers` | what it validates and returns comes from the body scan, as a verdict and not a contract |
 | route method, joined path, name, action | registered definitions (`loadRouteDefinitions()`) | |
 | page `Props` | `describeInertiaPage()` returns the type as one line of text | Part 1 resolves it to keys through the codegen extraction it wraps |
+
+**Amended in implementation:** the static reader cannot follow a spread column
+set, a helper builder, the columns callback, `pgTableCreator` or an extra
+config built elsewhere, and can only mark them not visible. So the comparison
+imports `db/schema.ts` and asks the app's own drizzle copy, as
+`loadRouteDefinitions()` executes the registrar and drizzle-kit reads a schema.
+The trade-off is that importing runs the app's code: a schema that reads env,
+opens a connection or throws is reported per file as unreadable at runtime and
+its tables fall back to the static reading, each table naming its source.
+`guren check`, the spec views and the scaffolders stay on the static reader,
+which needs source positions and must not execute app code on an edit hook.
 
 A property with no reader is **unknown**. Unknown never counts towards
 `present`, never satisfies a `drop`, and is listed on the page as "planned,
