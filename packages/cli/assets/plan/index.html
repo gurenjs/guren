@@ -679,6 +679,92 @@
         cursor: pointer;
       }
 
+      /* The layout fixes a flow's width, so a narrow screen scrolls the picture inside
+         its card rather than shrinking the labels past reading. */
+      .flow-scroll {
+        overflow-x: auto;
+        margin-top: 10px;
+        padding: 2px;
+      }
+
+      .flow {
+        display: block;
+        overflow: visible;
+      }
+
+      .flow text {
+        fill: var(--g-text);
+        font-size: 12px;
+        font-family: var(--g-font-sans);
+      }
+
+      .flow text.title {
+        font-weight: 700;
+      }
+
+      .flow text.muted,
+      .flow text.edge-label {
+        fill: var(--g-muted);
+        font: 500 10px/1.4 var(--g-font-mono);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .flow text.edge-label {
+        text-transform: none;
+        letter-spacing: 0;
+      }
+
+      .flow .box {
+        fill: var(--g-raised);
+        stroke: var(--g-line-strong);
+      }
+
+      /* An actor is who starts the flow and a store is where it lands; the middle is
+         the application. Three weights, not eight colours. */
+      .flow .box.actor,
+      .flow .box.external {
+        stroke: var(--g-text-2);
+        stroke-dasharray: 5 3;
+      }
+
+      .flow .box.store {
+        fill: var(--g-panel);
+        stroke: var(--g-ok-chip);
+      }
+
+      .flow .box.decision {
+        stroke: var(--g-warn-chip);
+      }
+
+      .flow .edge {
+        fill: none;
+        stroke: var(--g-muted);
+      }
+
+      .flow .edge.async {
+        stroke-dasharray: 4 3;
+      }
+
+      /* The edge that closes a loop, which took no part in the placement. */
+      .flow .edge.back {
+        stroke: var(--g-warn-chip);
+        stroke-dasharray: 2 3;
+      }
+
+      .flow .arrow {
+        fill: var(--g-muted);
+      }
+
+      .flow .arrow.back {
+        fill: var(--g-warn-chip);
+      }
+
+      .flow a:hover .box {
+        stroke: var(--g-accent);
+        stroke-width: 2;
+      }
+
       .footer {
         display: flex;
         flex-wrap: wrap;
@@ -870,6 +956,16 @@
         .er {
           break-inside: avoid;
         }
+
+        /* Paper does not scroll. */
+        .flow-scroll {
+          overflow: visible;
+        }
+
+        .flow {
+          max-width: 100%;
+          height: auto;
+        }
       }
     </style>
   </head>
@@ -927,6 +1023,7 @@
           { key: 'resources', label: 'Resources', render: renderResources },
           { key: 'policies', label: 'Policies', render: renderPolicies },
           { key: 'sideEffects', label: 'Side effects', render: renderSideEffects },
+          { key: 'flows', label: 'Flows', render: renderFlows },
           { key: 'commands', label: 'Commands', render: renderCommands },
           { key: 'tasks', label: 'Tasks & acceptance', render: renderTasks },
         ]
@@ -1697,6 +1794,157 @@
               ['Description', effect.description],
             ])
             host.appendChild(card({ id: effect.id, title: effect.name, change: effect.change, body: body }))
+          })
+        }
+
+        var FLOW_NODE_W = 150
+        var FLOW_NODE_H = 56
+        var FLOW_GAP_X = 58
+        var FLOW_GAP_Y = 18
+        var FLOW_BACK_FIRST = 24
+        var FLOW_BACK_LANE = 16
+        var FLOW_ARROW = 7
+
+        function flowBox(node) {
+          return {
+            x: node.column * (FLOW_NODE_W + FLOW_GAP_X),
+            y: node.row * (FLOW_NODE_H + FLOW_GAP_Y),
+            w: FLOW_NODE_W,
+            h: FLOW_NODE_H,
+          }
+        }
+
+        /** A filled head at the end of an edge, drawn as geometry: a `marker` is a `url()` reference. */
+        function flowArrow(x, y, angle, back) {
+          var points = [0, Math.PI - 0.4, Math.PI + 0.4].map(function (turn, index) {
+            var reach = index === 0 ? 0 : FLOW_ARROW
+            return (x + reach * Math.cos(angle + turn)).toFixed(1) + ',' + (y + reach * Math.sin(angle + turn)).toFixed(1)
+          })
+          var head = svgEl('polygon', { points: points.join(' ') })
+          head.setAttribute('class', 'arrow' + (back ? ' back' : ''))
+          return head
+        }
+
+        /**
+         * A flow, from the placement `layoutPlanFlows()` computed. The page draws and
+         * links; it decides nothing about where a node goes, so the same flow is the
+         * same picture here, in print, and in any later view built on that value.
+         */
+        function drawFlow(flow) {
+          var width = flow.columns * FLOW_NODE_W + (flow.columns - 1) * FLOW_GAP_X
+          var grid = flow.rows * FLOW_NODE_H + (flow.rows - 1) * FLOW_GAP_Y
+          // Each back edge runs in a lane of its own under the grid, so two loops in one
+          // flow do not draw as one line and neither crosses the boxes between its ends.
+          var lanes = flow.edges.filter(function (edge) {
+            return edge.back
+          }).length
+          var height = grid + (lanes ? FLOW_BACK_FIRST + (lanes - 1) * FLOW_BACK_LANE + 8 : 0)
+          var svg = svgEl('svg', {
+            class: 'flow',
+            width: width,
+            height: height,
+            viewBox: '0 0 ' + width + ' ' + height,
+            role: 'img',
+            'aria-label': 'Flow: ' + flow.title,
+          })
+
+          var at = idMap()
+          flow.nodes.forEach(function (node) {
+            at[node.id] = flowBox(node)
+          })
+
+          var labels = []
+          var lane = 0
+          flow.edges.forEach(function (edge) {
+            var from = at[edge.from]
+            var to = at[edge.to]
+            // The layout drops these already; a payload built elsewhere may not have.
+            if (!from || !to || edge.from === edge.to) return
+            var shape
+            var head
+            var labelAt
+            if (edge.back) {
+              var laneY = grid + FLOW_BACK_FIRST + lane * FLOW_BACK_LANE
+              lane += 1
+              var x1 = from.x + from.w / 2
+              var x2 = to.x + to.w / 2
+              var y2 = to.y + to.h
+              shape = svgEl('path', {
+                d: 'M ' + x1 + ' ' + (from.y + from.h) + ' V ' + laneY + ' H ' + x2 + ' V ' + y2,
+              })
+              head = flowArrow(x2, y2, -Math.PI / 2, true)
+              labelAt = [(x1 + x2) / 2, laneY - 4]
+            } else {
+              var start = borderPoint(from, to)
+              var end = borderPoint(to, from)
+              shape = svgEl('line', { x1: start[0], y1: start[1], x2: end[0], y2: end[1] })
+              head = flowArrow(end[0], end[1], Math.atan2(end[1] - start[1], end[0] - start[0]), false)
+              labelAt = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2 - 5]
+            }
+            shape.setAttribute('class', 'edge' + (edge.kind === 'async' ? ' async' : '') + (edge.back ? ' back' : ''))
+            svg.appendChild(shape)
+            svg.appendChild(head)
+            if (!edge.label) return
+            var label = svgText(labelAt[0], labelAt[1], edge.label, 'edge-label')
+            label.setAttribute('text-anchor', 'middle')
+            labels.push(label)
+          })
+
+          flow.nodes.forEach(function (node) {
+            // From the node, not from `at`: two steps declaring one id (a §2 finding) are
+            // placed apart, and the map keeps only the last.
+            var box = flowBox(node)
+            var group = svgEl('g', { class: 'node' })
+            var rect = svgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, rx: 8 })
+            rect.setAttribute('class', 'box ' + node.kind)
+            group.appendChild(rect)
+            group.appendChild(svgText(box.x + 10, box.y + 19, node.kind, 'muted'))
+            // Wrapped by hand: SVG text does not wrap, and a label is short prose.
+            wrapSvgText(node.label, 20).forEach(function (piece, index) {
+              group.appendChild(svgText(box.x + 10, box.y + 34 + index * 13, piece, 'title'))
+            })
+            // A node that names an element is a link into the rest of the document,
+            // through the same gate every other anchor goes through.
+            var anchor = node.element ? anchorId(node.element) : null
+            if (anchor) {
+              var a = svgEl('a', { href: '#' + anchor })
+              a.appendChild(group)
+              svg.appendChild(a)
+            } else {
+              svg.appendChild(group)
+            }
+          })
+
+          labels.forEach(function (label) {
+            svg.appendChild(label)
+          })
+          return svg
+        }
+
+        /** Greedy wrap to `limit` characters, so a label keeps its words. */
+        function wrapSvgText(text, limit) {
+          var lines = []
+          var line = ''
+          text.split(/\s+/).forEach(function (word) {
+            if (line === '') line = word
+            else if (line.length + 1 + word.length <= limit) line += ' ' + word
+            else {
+              lines.push(line)
+              line = word
+            }
+          })
+          if (line !== '') lines.push(line)
+          return lines.slice(0, 2)
+        }
+
+        function renderFlows(host) {
+          data.flows.forEach(function (flow) {
+            var body = el('div')
+            if (flow.description) body.appendChild(el('p', null, flow.description))
+            var scroll = el('div', 'flow-scroll')
+            scroll.appendChild(drawFlow(flow))
+            body.appendChild(scroll)
+            host.appendChild(card({ id: flow.id, title: flow.title, change: { kind: flow.change }, body: body }))
           })
         }
 
