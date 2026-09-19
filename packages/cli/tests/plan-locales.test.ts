@@ -12,6 +12,7 @@ interface FakeNode {
   text?: string
   readonly textContent: string
   appendChild(child: FakeNode): FakeNode
+  cloneNode(deep: boolean): FakeNode
 }
 
 function fakeNode(nodeType: number, init: { tag?: string; text?: string; href?: string } = {}): FakeNode {
@@ -25,6 +26,11 @@ function fakeNode(nodeType: number, init: { tag?: string; text?: string; href?: 
     appendChild(child) {
       this.children.push(child)
       return child
+    },
+    cloneNode() {
+      const copy = fakeNode(this.nodeType, { tag: this.tag, text: this.text, href: this.href })
+      for (const child of this.children) copy.appendChild(child.cloneNode(true))
+      return copy
     },
   }
 }
@@ -144,6 +150,23 @@ describe('the plan page formatter', () => {
     const host = formatter.formatInto(fakeNode(1), 'a {actor} calls {route}', { actor: '{route}', route: 'r' })
 
     expect(host.textContent).toBe('a {route} calls r')
+  })
+
+  test('should keep both sites when a template names one node twice', () => {
+    const route = fakeLink('route.posts.store')
+
+    const host = formatter.formatInto(fakeNode(1), '{route} then {route}', { route })
+
+    expect(host.textContent).toBe('route.posts.store then route.posts.store')
+    expect(host.children[0]).toBe(route)
+    expect(host.children[2]).not.toBe(route)
+    expect(host.children[2]!.href).toBe('#el-route.posts.store')
+  })
+
+  test('should write braces in a value as text', () => {
+    expect(formatter.formatText('{table} has {values}', { table: 'posts', values: 'meta = {"a":{}}' })).toBe(
+      'posts has meta = {"a":{}}',
+    )
   })
 
   test('should write falsy values rather than drop them', () => {

@@ -8,6 +8,8 @@ function walkTemplate(template, values, onText, onNode) {
   var pattern = /\{([A-Za-z_][A-Za-z0-9_.-]*)\}/g
   var last = 0
   var match
+  // A node has one parent: appended twice it would move, and the first site go blank.
+  var placed = []
   while ((match = pattern.exec(template)) !== null) {
     if (match.index > last) onText(template.slice(last, match.index))
     var known = values !== undefined && values !== null && Object.prototype.hasOwnProperty.call(values, match[1])
@@ -15,7 +17,10 @@ function walkTemplate(template, values, onText, onNode) {
     // An unknown placeholder stays on the page as written: a blank would read as a
     // finished sentence with a word missing.
     if (value === undefined || value === null) onText(match[0])
-    else if (typeof value === 'object' && value.nodeType) onNode(value)
+    else if (typeof value === 'object' && value.nodeType) {
+      onNode(placed.indexOf(value) === -1 ? value : value.cloneNode(true))
+      placed.push(value)
+    }
     else onText(String(value))
     last = pattern.lastIndex
   }
