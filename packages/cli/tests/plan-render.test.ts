@@ -260,17 +260,24 @@ describe('the plan template', () => {
 })
 
 describe('a plan whose ids name Object.prototype members', () => {
+  /**
+   * Not parsed: the schema refuses these ids (the test below), and this is the page's
+   * own half of that rule. `renderPlanHtml()` is a pure function anyone may call with a
+   * document that never reached `PlanDraftSchema`, so the page keeps its null-prototype
+   * maps whatever the schema does.
+   */
   function shadowingPlan(): PlanDraft {
-    const fixture = loadFixture()
-    const raw = JSON.stringify(fixture)
+    // Parsed first so the defaulted sections are there, then renamed: parsing afterwards
+    // is what the schema now refuses.
+    const raw = JSON.stringify(draft())
       .replaceAll('model.post', 'constructor')
       .replaceAll('route.comments.store', 'toString')
       .replaceAll('validator.comment', 'hasOwnProperty')
-    return PlanDraftSchema.parse(JSON.parse(raw))
+    return JSON.parse(raw) as PlanDraft
   }
 
-  test('should be accepted by the schema, which is why the page must survive it', () => {
-    expect(shadowingPlan().models[0].id).toBe('constructor')
+  test('should be refused by the schema, which is the first of the two defences', () => {
+    expect(PlanDraftSchema.safeParse(shadowingPlan()).success).toBe(false)
   })
 
   test('should keep every link, so the page indexes them like any other id', () => {
