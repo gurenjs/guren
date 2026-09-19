@@ -52,10 +52,11 @@ describe('validatePlan', () => {
   test('should raise exactly the fixture\'s three warnings', () => {
     const warns = validatePlan(plan(), appState()).filter((result) => result.status === 'warn')
 
-    expect(warns.map((warn) => [warn.key, warn.elementId])).toEqual([
-      ['plan:app-unreadable', undefined],
-      ['plan:route-authorization', 'route.comments.store'],
-      ['plan:acceptance', 'route.comments.destroy'],
+    // Sorted: the order is an artifact of the call sequence in validatePlan, not a contract.
+    expect(warns.map((warn) => `${warn.key} ${warn.elementId ?? ''}`).sort()).toEqual([
+      'plan:acceptance route.comments.destroy',
+      'plan:app-unreadable ',
+      'plan:route-authorization route.comments.store',
     ])
   })
 
@@ -162,6 +163,15 @@ describe('validatePlan', () => {
     const result = find(results, 'plan:app-collision', 'route.comments.store')
 
     expect(result?.message).toContain('POST /posts/:postId/comments')
+  })
+
+  test('should warn that columns went unjudged when their table was not found', () => {
+    const results = validatePlan(plan(), appState({ tables: [{ identifier: 'users', columns: ['id'] }] }))
+
+    const result = find(results, 'plan:app-unjudged', 'model.post')
+
+    expect(result?.status).toBe('warn')
+    expect(result?.message).toContain('Table "posts" was not found')
   })
 
   test('should fail an altered model the application does not have', () => {

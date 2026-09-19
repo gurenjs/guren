@@ -455,7 +455,22 @@ function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<{ identi
   if (model.change.kind === 'add') return
   const lookup = model.tableRenamedFrom ?? model.table
   const table = tables.find((candidate) => candidate.identifier === lookup || candidate.tableName === lookup)
-  if (!table) return
+  if (!table) {
+    // The table has its own result; without this one, its columns would go unjudged in silence.
+    if (model.columns.length > 0) {
+      results.push(
+        result(
+          'plan:app-unjudged',
+          'Plan against the application',
+          'warn',
+          `Table "${lookup}" was not found, so the ${model.columns.length} planned column(s) of "${model.name}" were neither confirmed nor refuted.`,
+          model.id,
+          'models',
+        ),
+      )
+    }
+    return
+  }
   for (const column of model.columns) {
     checkTarget(
       {
