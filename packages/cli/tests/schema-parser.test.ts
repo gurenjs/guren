@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { parseSchemaTables, parseSchemaTableColumns } from '../src/schema-parser'
+import { parseSchemaTables, parseSchemaTableColumns, type SchemaConstraint } from '../src/schema-parser'
 import { createTempWorkspace } from './helpers'
 
 const ROOT_SCHEMA = `import { pgTable, serial, text, integer } from 'drizzle-orm/pg-core'
@@ -579,7 +579,7 @@ export const memberships = ${factory}('memberships', {
 ])
 `
 
-  const EXPECTED = [
+  const EXPECTED: SchemaConstraint[] = [
     { kind: 'primaryKey', name: 'memberships_pk', columns: ['userId', 'teamId'] },
     { kind: 'index', name: 'memberships_role_idx', columns: ['role'] },
     { kind: 'uniqueIndex', name: 'memberships_email_idx', columns: ['email', 'teamId'] },
