@@ -666,6 +666,39 @@ gains a Behaviours section read from id-tagged test titles, and the plan page
 already shows them per element. A report command may write a catalogue on
 demand; nothing commits one.
 
+**Amended after acceptance (2026-09-19), the docs graph.** What `plan:close`
+leaves behind joins the graph `guren docs:graph` already draws (nodes `doc`,
+`entity`, `code`; relations `governs` from frontmatter, `links` from body
+links, `derives` from a spec view's source; a verdict per edge from
+`check --docs`), through the mechanisms it already has plus one new one:
+
+- The archived plan is a doc node. `plan:close` writes `docs/plans/<slug>.md`
+  beside the JSON, with `type: plan`, `entities:` (what it touched),
+  `related:` (the ADRs it produced), `status: closed` and
+  `generated: { by: process:guren-plan-close }`. Plan → entity is then a
+  `governs` edge and plan → ADR a `related` one, drawn by code that exists;
+  the entity document's History section links back.
+- An acceptance behaviour is a node. The graph gains the node kind `test` and
+  the relation `verifies`: a rule's `(AC-comments-4)` in an entity document
+  is a doc → test edge, and the test's entity comes from the id's
+  `<entity>` segment. An id no test carries, or a test whose id no document
+  cites, is a `check --docs` verdict on that edge. The reader is the one
+  `guren check` uses for the id grammar; there is no second one. This is the
+  trace link the evidence in Open Question 9 supports, and the only new
+  mechanism here.
+- Code reaches the document without hand work. The scaffold step writes
+  `@docs docs/entities/<Entity>.md` into the controller, model and test files
+  it generates, which is the existing code → doc edge, so
+  `guren context <Entity>` lists them.
+- The trust tiers are the existing ones. A block `plan:close` inserted is
+  `generated`; the approver's sign-off is a `verified` event; a rule whose
+  cited test passes reads as machine-confirmed, one whose test is absent or
+  failing as unverified.
+
+`guren docs:graph --entity Comment` then answers with one graph: the entity
+document, its ADRs, the plans that touched it, the tests that verify its rules
+and, through `@docs`, the code. All of it is Part 4 work with `plan:close`.
+
 ### 8. Producers
 
 The schema, the checks, the renderer and the status derivation involve no
