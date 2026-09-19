@@ -2,21 +2,51 @@ import { discoverParsedModels, type DiscoveredModel, type ModelRelationship } fr
 import { parseSchemaTables, type SchemaTable } from './schema-parser'
 import { specHeader, compareStrings, mermaidToken, type SpecArtifact } from './spec-artifact'
 
-interface ErEdge {
+/** How the two tables of an edge relate, independent of any diagram syntax. */
+export type ErCardinality = 'oneToOne' | 'oneToMany' | 'manyToOne' | 'manyToMany'
+
+/** What produced an edge; `both` is a model relationship a declared FK also backs. */
+export type ErEdgeSource = 'relationship' | 'foreignKey' | 'both'
+
+export interface ErEdge {
+  /** Schema identifier of the table the edge starts at, not its SQL name. */
   from: string
   to: string
-  cardinality: string
+  cardinality: ErCardinality
+  /** Relationship name on a model edge, FK column name on a schema edge. */
   label: string
+  source: ErEdgeSource
+  /**
+   * The declaration behind a `relationship` or `both` edge. `hasMany`, `hasManyThrough`
+   * and `morphMany` share one cardinality, so the type is not recoverable from it.
+   */
+  relationship?: ModelRelationship
+  /** FK columns on `from` pointing at `to`; empty when no FK backs the edge. */
+  foreignKeyColumns: string[]
 }
 
-const RELATIONSHIP_CARDINALITY: Record<ModelRelationship['type'], string | undefined> = {
-  belongsTo: '}o--||',
-  hasMany: '||--o{',
-  hasOne: '||--o|',
-  belongsToMany: '}o--o{',
-  hasManyThrough: '||--o{',
-  morphMany: '||--o{',
+/** Both arrays are ordered by {@link buildErGraph} and readonly so a consumer cannot resort them. */
+export interface ErGraph {
+  /** Never projected, so fields added to `SchemaColumn` reach consumers untouched. */
+  tables: readonly SchemaTable[]
+  edges: readonly ErEdge[]
+}
+
+const RELATIONSHIP_CARDINALITY: Record<ModelRelationship['type'], ErCardinality | undefined> = {
+  belongsTo: 'manyToOne',
+  hasMany: 'oneToMany',
+  hasOne: 'oneToOne',
+  belongsToMany: 'manyToMany',
+  hasManyThrough: 'oneToMany',
+  morphMany: 'oneToMany',
   morphTo: undefined, // target is polymorphic — no single table to draw an edge to
+}
+
+const MERMAID_CARDINALITY: Record<ErCardinality, string> = {
+  manyToOne: '}o--||',
+  oneToMany: '||--o{',
+  oneToOne: '||--o|',
+  manyToMany: '}o--o{',
 }
 
 /**
@@ -35,30 +65,37 @@ function resolveTargetTable(owner: DiscoveredModel, candidates: DiscoveredModel[
   return preferred?.info.tableName
 }
 
-/**
- * ER view of the database: entities and attributes from the parsed Drizzle schema, edges
- * from model relationship declarations plus explicit `.references()` FKs. Scaffolded
- * schemas emit no FK constraints, so the model layer is the reliable edge source.
- */
-export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
-  const tables = (await parseSchemaTables(cwd)).sort((a, b) =>
-    compareStrings(a.identifier, b.identifier),
-  )
+function pairKey(from: string, to: string): string {
+  return `${from}->${to}`
+}
 
-  const models = (await discoverParsedModels(cwd)).sort(
+/**
+ * ER graph of the database: entities and attributes from the parsed Drizzle schema, edges
+ * from model relationship declarations plus explicit `.references()` FKs. Scaffolded
+ * schemas emit no FK constraints, so the model layer is the reliable edge source. An FK
+ * whose pair a relationship already covers annotates that relationship instead of adding
+ * an edge of its own, so one link never draws twice.
+ */
+export function buildErGraph(
+  tables: readonly SchemaTable[],
+  models: readonly DiscoveredModel[],
+): ErGraph {
+  const sortedTables = [...tables].sort((a, b) => compareStrings(a.identifier, b.identifier))
+
+  const sortedModels = [...models].sort(
     (a, b) => compareStrings(a.info.className, b.info.className) || compareStrings(a.relPath, b.relPath),
   )
   const modelsByClass = new Map<string, DiscoveredModel[]>()
-  for (const model of models) {
+  for (const model of sortedModels) {
     const list = modelsByClass.get(model.info.className) ?? []
     list.push(model)
     modelsByClass.set(model.info.className, list)
   }
 
   const edges: ErEdge[] = []
-  const coveredPairs = new Set<string>()
+  const declaredPerPair = new Map<string, ErEdge[]>()
 
-  for (const model of models) {
+  for (const model of sortedModels) {
     const from = model.info.tableName
     if (!from) continue
     for (const rel of model.info.relationships) {
@@ -66,25 +103,57 @@ export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
       if (!cardinality || !rel.relatedModel) continue
       const to = resolveTargetTable(model, modelsByClass.get(rel.relatedModel) ?? [])
       if (!to) continue
-      edges.push({ from, to, cardinality, label: rel.name })
-      coveredPairs.add(`${from}->${to}`)
+      const edge: ErEdge = {
+        from,
+        to,
+        cardinality,
+        label: rel.name,
+        source: 'relationship',
+        relationship: rel,
+        foreignKeyColumns: [],
+      }
+      edges.push(edge)
+      const declared = declaredPerPair.get(pairKey(from, to))
+      if (declared) declared.push(edge)
+      else declaredPerPair.set(pairKey(from, to), [edge])
     }
   }
 
-  for (const table of tables) {
+  for (const table of sortedTables) {
     for (const column of table.columns) {
       const reference = column.references
       if (!reference) continue
-      if (coveredPairs.has(`${table.identifier}->${reference.table}`)) continue
+      const declared = declaredPerPair.get(pairKey(table.identifier, reference.table))
+      if (declared) {
+        for (const edge of declared) {
+          edge.source = 'both'
+          edge.foreignKeyColumns.push(column.name)
+        }
+        continue
+      }
       edges.push({
         from: table.identifier,
         to: reference.table,
-        cardinality: '}o--||',
+        cardinality: 'manyToOne',
         label: column.name,
+        source: 'foreignKey',
+        foreignKeyColumns: [column.name],
       })
     }
   }
 
+  edges.sort(
+    (a, b) => compareStrings(a.from, b.from) || compareStrings(a.to, b.to) || compareStrings(a.label, b.label),
+  )
+  return { tables: sortedTables, edges }
+}
+
+/**
+ * The Mermaid ER view of a graph. Ordering comes from {@link buildErGraph}; re-sorting
+ * here would let the two disagree, and `check --spec` byte-compares this output.
+ */
+export function renderErSpec(graph: ErGraph): SpecArtifact {
+  const { tables, edges } = graph
   const lines: string[] = specHeader('ER Diagram', 'Entities, attributes, and relationship edges derived from the schema and models.')
   lines.push(
     'Entities and attributes are derived from `db/schema.ts` (and every module schema); edges from model relationship declarations and explicit `.references()` foreign keys.',
@@ -111,11 +180,9 @@ export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
     }
     lines.push('  }')
   }
-  for (const edge of edges.sort(
-    (a, b) => compareStrings(a.from, b.from) || compareStrings(a.to, b.to) || compareStrings(a.label, b.label),
-  )) {
+  for (const edge of edges) {
     lines.push(
-      `  ${mermaidToken(edge.from)} ${edge.cardinality} ${mermaidToken(edge.to)} : ${mermaidToken(edge.label)}`,
+      `  ${mermaidToken(edge.from)} ${MERMAID_CARDINALITY[edge.cardinality]} ${mermaidToken(edge.to)} : ${mermaidToken(edge.label)}`,
     )
   }
   lines.push('```', '')
@@ -139,6 +206,11 @@ export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
   }
 
   return { fileName: 'er.md', content: lines.join('\n') }
+}
+
+export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
+  const [tables, models] = await Promise.all([parseSchemaTables(cwd), discoverParsedModels(cwd)])
+  return renderErSpec(buildErGraph(tables, models))
 }
 
 function renderTableOrigin(table: SchemaTable): string {
