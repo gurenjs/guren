@@ -306,6 +306,14 @@ describe('derivePlanTasks', () => {
       expect(result.notes.map((note) => [note.kind, note.ids])).toEqual([['element-unassigned', ['effect.digest']]])
     })
 
+    test('should not report an existing element, which is nobody\'s work', () => {
+      const result = deriveFrom({
+        sideEffects: [{ id: 'effect.digest', change: { kind: 'existing' }, kind: 'job', name: 'WeeklyDigest', trigger: 'cron', description: 'Mails a digest.' }],
+      })
+
+      expect(result).toEqual({ tasks: [], notes: [] })
+    })
+
     test('should produce no work for a plan whose elements are all existing', () => {
       const result = deriveFrom({ models: [model('Post', [], { kind: 'existing' })] })
 

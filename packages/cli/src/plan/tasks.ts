@@ -218,9 +218,10 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
   }
 
   const decide = (
-    id: string,
+    element: { id: string; change: PlanChange },
     evidence: { models?: string[]; users?: Array<TaskDraft | undefined>; className?: string; collection?: string },
   ): TaskDraft => {
+    const { id } = element
     const covered = coveredOnce(id)
     if (covered) return covered
 
@@ -243,6 +244,8 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     const named = modelNamedBy(plan.models, evidence)
     if (named !== undefined) return entityDraft(named)
 
+    // An `existing` element is nobody's work, so where it lands is nobody's question.
+    if (element.change.kind === 'existing') return drafts.get(FOUNDATION_TASK_ID) as TaskDraft
     notes.push({
       kind: 'element-unassigned',
       message: `"${id}" is covered by no single task, references no model and is named after none, so it is Foundation work. Cover it from one task to place it.`,
@@ -280,11 +283,11 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
   }
 
   for (const resource of plan.resources) {
-    const task = decide(resource.id, { models: [resource.model], className: resource.name })
+    const task = decide(resource, { models: [resource.model], className: resource.name })
     place(task, { id: resource.id, step: 'http', change: resource.change.kind, file: resource.id, scaffoldable: true })
   }
   for (const policy of plan.policies) {
-    const task = decide(policy.id, { models: [policy.model], className: policy.name })
+    const task = decide(policy, { models: [policy.model], className: policy.name })
     place(task, { id: policy.id, step: 'http', change: policy.change.kind, file: policy.id, scaffoldable: true })
   }
 
@@ -307,7 +310,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
         for (const modelId of viewModels.get(action.response.view) ?? []) models.push(modelId)
       }
     }
-    const task = decide(controller.id, { models: distinct(models), className: controller.className })
+    const task = decide(controller, { models: distinct(models), className: controller.className })
     place(task, { id: controller.id, step: 'http', change: controller.change.kind, file: controller.id, scaffoldable: true })
     for (const action of controller.actions) {
       place(task, { id: action.id, step: 'http', change: action.change.kind, file: controller.id, scaffoldable: true })
@@ -325,7 +328,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
   for (const route of plan.routes) {
     const dispatchesTo = owner.get(route.action)
     // A nested route binds its parent's model too, so binds speak only when the action is not in the plan.
-    const task = decide(route.id, {
+    const task = decide(route, {
       models: dispatchesTo ? [] : route.bind.map((bind) => bind.model),
       users: [dispatchesTo],
       collection: route.name.split('.')[0],
@@ -335,18 +338,18 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
 
   for (const view of plan.views) {
     const group = view.page.split('/')[0]
-    const task = decide(view.id, { models: viewModels.get(view.id), users: renderedBy.get(view.id), collection: group })
+    const task = decide(view, { models: viewModels.get(view.id), users: renderedBy.get(view.id), collection: group })
     place(task, { id: view.id, step: 'pages', change: view.change.kind, file: view.id, scaffoldable: true, group })
     uses(view.form?.validator, task)
   }
 
   for (const validator of plan.validators) {
-    const task = decide(validator.id, { users: validatorUsers.get(validator.id), className: validator.name })
+    const task = decide(validator, { users: validatorUsers.get(validator.id), className: validator.name })
     place(task, { id: validator.id, step: 'http', change: validator.change.kind, file: validator.id, scaffoldable: true })
   }
 
   for (const effect of plan.sideEffects) {
-    const task = decide(effect.id, { className: effect.name })
+    const task = decide(effect, { className: effect.name })
     place(task, { id: effect.id, step: 'http', change: effect.change.kind, file: effect.id, scaffoldable: false })
   }
 
@@ -366,7 +369,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     if (!live(task)) {
       notes.push({
         kind: 'intent-empty',
-        message: `Task "${intent.id}" covers nothing the plan changes and states no behaviour, so no derived task answers it.`,
+        message: `Task "${intent.id}" brings no work of its own and states no behaviour, so no derived task answers it.`,
         ids: [intent.id],
       })
     } else if (task.title.kind === 'story') {
