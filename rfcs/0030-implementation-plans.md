@@ -530,6 +530,56 @@ behaviours. Guren supplies the breakdown and the order, in
 The same plan always yields the same tasks. `hints[]` may reorder tasks that
 the dependency graph leaves unordered, and nothing else.
 
+**Amended in implementation (task derivation):** the list above left open what
+decides a task, so `tasks.ts` fixes it:
+
+- **Ownership.** Every element that is not `existing` is owned by exactly one
+  step, the one whose verification completes it: models and columns by `data`,
+  validators, controllers, actions, routes, resources, policies and side
+  effects by `http`, views by `pages`, commands by a `commands` step in
+  Foundation (verify: codegen, `typecheck`). `scaffold` and `tests` own
+  nothing and complete on their commands; `scaffold` lists what it `generates`.
+  A step kind with no work is left out. Flows are descriptions and are nobody's
+  work.
+- **Which task.** A column follows its model and an action its controller.
+  For the rest, in this order: the one task intent that `covers` it; the models
+  it references (a resource's or policy's `model`, a view's prop resources, a
+  controller's policies, resources and pages); what uses it (a route its
+  action's controller, a validator the actions and forms naming it, a view the
+  actions rendering it); the model it is named after, through `inflect.ts`.
+  Several referenced models that the name does not settle make a cross-entity
+  task; several users make it Foundation; no evidence is Foundation with a
+  note. A route's `bind` is read only when its action is not in the plan, since
+  a nested route binds its parent too. An `add`, `rename` or `drop` model is
+  always its own slice; an altered one that exactly one other slice covers is
+  that slice's edit (the `hasMany` a new child needs).
+- **Intents.** `tasks[].entity` names a model by class, id or table, and the
+  intent's acceptance goes to that slice: on `tests`, and on the last `http`
+  step, where the behaviours must pass. An `entity` that names no model is a
+  story and becomes a task of its own, which waits for the tasks owning what it
+  covers and the routes its behaviours name. Both that and an intent that
+  brings neither work nor behaviour are reported.
+- **Order.** A task waits for the task doing the work of whatever its elements
+  reference, foreign keys first among them; an `existing` target is already
+  there. Tables are dropped child first. Relationships order nothing: a
+  `hasMany` mirrors the foreign key pointing back and would close a cycle with
+  it. A real cycle (mutual foreign keys) is cut at its first member in document
+  order, which stops waiting, and reported; a self-reference is not one.
+  Document order breaks every tie.
+- **Hints** are `<task> before <task>` or `<task> after <task>`, a task being a
+  derived id, a `tasks[]` id, or a model's id, class or table. Anything else is
+  reported as unreadable. A hint is never a dependency, and one that a
+  dependency or an earlier hint answers the other way is dropped and reported.
+- **Ids.** `task/foundation`, `task/entity/<model id>`, `task/story/<intent id>`,
+  `task/cross/<model ids joined by +>`, and `<task id>/<step kind>` with `/<n>`
+  appended when the kind was split. No plan id can contain `/`.
+- **Splitting** counts files: a column is its model's file, an action its
+  controller's, and a slice's routes are one registrar. Parts fill in document
+  order; a screen group (the page's first path segment) moves to the next part
+  whole unless it is wider than a part. `scaffold` and `tests` are not split.
+- A slice is scaffolded only when it adds its own model and the application is
+  not API-only, and `generates` holds its `add` elements only.
+
 **Scaffolding is step one, and it is not the agent's.** One slice is around
 ten files, which is past the width at which agent success rates fall, so
 whatever can be generated is generated before an agent starts.
