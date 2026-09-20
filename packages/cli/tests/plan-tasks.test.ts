@@ -509,7 +509,11 @@ describe('derivePlanTasks', () => {
 
       expect(story.title).toEqual({ kind: 'story', intent: 'task.moderation', name: 'Moderation queue' })
       expect(story.dependsOn).toEqual(['task/entity/model.comment'])
-      expect(story.steps.map((step) => [step.kind, step.acceptanceIds])).toEqual([['tests', ['AC-moderation-1']]])
+      // Nothing is implemented after these tests, so they must pass rather than fail first.
+      expect(story.steps.map((step) => [step.kind, step.acceptanceIds, step.verify])).toEqual([
+        ['tests', ['AC-moderation-1'], ['tests']],
+      ])
+      expect(stepsOfKind(result, COMMENT_SLICE, 'tests')[0].verify).toEqual(['tests:fail'])
       expect(result.notes.map((note) => [note.kind, note.ids])).toEqual([['intent-story', ['task.moderation']]])
     })
 

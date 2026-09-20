@@ -718,7 +718,12 @@ function stepsOf(
     const generates = task.elements.filter((element) => element.scaffoldable && element.change === 'add')
     steps.push(step('scaffold', { generates: generates.map((element) => element.id) }))
   }
-  if (task.acceptanceIds.length > 0) steps.push(step('tests', { acceptanceIds: [...task.acceptanceIds] }))
+  if (task.acceptanceIds.length > 0) {
+    // Failing first detects a test emptied to pass, which needs an implementation still to come.
+    // With none, what the tests exercise is done by the tasks waited for, so they must pass.
+    const verify: PlanVerifyCommand[] = task.elements.length > 0 ? [...PLAN_STEP_VERIFY.tests] : ['tests']
+    steps.push(step('tests', { acceptanceIds: [...task.acceptanceIds], verify }))
+  }
 
   for (const kind of STEP_ORDER) {
     const parts = split(

@@ -566,10 +566,13 @@ decides a task, so `tasks.ts` fixes it:
   behaviours must pass, which is the last `http` step, or the task's last step
   when it has none. That step's verify always includes the tests, so a slice
   of `data` or `pages` alone still runs them. A task with behaviours and no
-  work has the `tests` step only. An `entity` that names no model is a
-  story and becomes a task of its own, which waits for the tasks owning what it
-  covers and the routes its behaviours name. Both that and an intent that
-  brings neither work nor behaviour are reported.
+  work has the `tests` step only, run after the tasks it waits for and
+  verified by the tests *passing*: failing first is tamper detection, which
+  means something only where an implementation step comes after the tests.
+  An `entity` that names no model is a story and becomes a task of its own,
+  which waits for the tasks owning what it covers and the routes its
+  behaviours name. Both that and an intent that brings neither work nor
+  behaviour are reported.
 - **Order.** A task waits for the task doing the work of whatever its elements
   reference, foreign keys first among them; an `existing` target is already
   there. Tables are dropped child first. Relationships order nothing: a
