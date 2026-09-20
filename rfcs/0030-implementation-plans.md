@@ -478,6 +478,41 @@ Two rules follow from review state:
 - An answered question is removed by the revision that applies its answer,
   together with the marks on what it affected.
 
+**Amended in implementation (`plan/revision.ts`), what an op is.** The text
+above leaves the op shape open, and these are the choices the code makes:
+
+- An op addresses an element by id alone, nested elements (columns, actions,
+  acceptance behaviours) included. `modify` also names the `section`, which
+  selects the shape its `element` is held to; a section that is not the id's
+  own is rejected.
+- `modify` carries the element's own fields whole. Its shape has no `id` and
+  no nested list, so an op cannot rename what it names, and a column changes
+  only through an op naming that column. An id changes by `remove` and `add`.
+  A merge patch was not taken: it needs a partial copy of every element schema
+  and a way to say "unset", which closed objects do not have.
+- Array order is part of the hash, so an `add` says where it goes: `before` a
+  sibling, or at the end without one. A nested `add` names its `parent`.
+  `remove` takes nested elements along. An element moves by `remove` then
+  `add`; any other second op on one id in a revision is rejected, and so is a
+  `modify` that changes nothing.
+- The title, summary, scope, assumptions, hints and locale have no id. They
+  are addressed as `modify` on the section `plan`, which carries all of them.
+- `baseline` and `planVersion` are out of an op's reach. A revision carries
+  `baseline` over from its parent, so the hash moves through ops alone. What
+  stamps `contextHash` for an element a revision newly references is left to
+  the Freshness work.
+- A `remove` that leaves another element naming the id is rejected. That is
+  the one reference rule applied here, because the op itself creates the
+  defect; every other reference stays a §2 finding.
+- Approval of a parent covers what it holds: an op on a column of an approved
+  model, and an `add` under it, need `reopens`. `reopens` on an element nobody
+  locked is ignored.
+- With feedback that answers a question, a revision that does not `remove`
+  that question is rejected. The "depends on" marks are derived from
+  `affects`, so removing the question is what removes them. Feedback given on
+  another plan hash, or naming an id the parent lacks, is rejected too: a lock
+  that names nothing is a lock silently not applied.
+
 Each revise is a fresh call given the current plan, the feedback and the
 message. It does not resume the producing session: the plan is the state, and
 a session is gone by the time someone returns to a plan days later or on
