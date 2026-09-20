@@ -425,51 +425,74 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
   }
 
   /**
-   * Foundation waits for nothing, so nothing in it may need another task's work. What
-   * does joins the slice it needs, or the cross-entity task of the slices it needs, and
-   * whatever in Foundation needed *it* follows on the next pass. Each move empties
-   * Foundation by one unit, which is what ends the loop.
+   * Foundation waits for nothing, so nothing in it may need another task's work. A unit
+   * (an element and what shares its fate) joins the slice it needs, or the cross-entity
+   * task of those slices, read through Foundation as a whole: needing a neighbour that
+   * needs a slice is needing that slice, so placement does not follow scan order.
+   * A story task is no slice to join, and the note below is the edge ordering then drops.
    */
-  const pinned = new Set<string>()
-  for (let moved = true; moved; ) {
-    moved = false
-    const units = new Map<string, WorkElement[]>()
-    for (const element of foundation.elements) push(units, follows.get(element.id) ?? element.id, element)
+  const units = new Map<string, WorkElement[]>()
+  for (const element of foundation.elements) push(units, follows.get(element.id) ?? element.id, element)
+  const unitOf = new Map<string, string>()
+  for (const [head, unit] of units) {
+    for (const element of unit) unitOf.set(element.id, head)
+  }
 
-    for (const [head, unit] of units) {
-      if (pinned.has(head)) continue
-      const targets = distinct(unit.flatMap((element) => needs.get(element.id) ?? [])).filter(
-        (target) => owner.get(target) !== foundation,
-      )
-      if (targets.length === 0) continue
-
-      const needed = distinct(targets.map((target) => owner.get(target)))
-      const models: string[] = []
-      for (const task of needed) {
-        if (task.title.kind === 'entity') models.push(task.title.model)
-        if (task.title.kind === 'cross') for (const modelId of task.title.models) models.push(modelId)
+  /** Unit head → the models of the slices it needs, which travel; a task that names none is no destination. */
+  const slices = new Map<string, Set<string>>()
+  /** Unit head → the Foundation units it reads, its own when the target is nobody's unit. */
+  const neighbours = new Map<string, Set<string>>()
+  for (const [head, unit] of units) {
+    const models = new Set<string>()
+    const read = new Set<string>()
+    for (const element of unit) {
+      for (const target of needs.get(element.id) ?? []) {
+        const title = owner.get(target)?.title
+        if (title === undefined || title.kind === 'foundation') read.add(unitOf.get(target) ?? head)
+        else if (title.kind === 'entity') models.add(title.model)
+        else if (title.kind === 'cross') for (const modelId of title.models) models.add(modelId)
       }
-      // A story is no slice and has no models to name a cross-entity task after.
-      if (needed.some((task) => task.title.kind === 'story')) {
-        pinned.add(head)
-        notes.push({
-          kind: 'foundation-reference',
-          message: `"${head}" is Foundation work, and needs ${targets.map((id) => `"${id}"`).join(', ')}, which a story task owns. Foundation waits for nothing, so that order is not kept. Cover "${head}" from one task to place it.`,
-          ids: [head, ...targets],
-        })
-        continue
-      }
-
-      const to = distinct(models).length === 1 ? entityDraft(models[0]) : crossDraft(distinct(models))
-      foundation.elements = foundation.elements.filter((element) => !unit.includes(element))
-      for (const element of unit) {
-        to.elements.push(element)
-        owner.set(element.id, to)
-      }
-      if (owner.get(head) === foundation) owner.set(head, to)
-      moved = true
-      break
     }
+    slices.set(head, models)
+    neighbours.set(head, read)
+  }
+  // Each round adds a model to some unit or ends the loop, and the models are finite.
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const [head, read] of neighbours) {
+      const models = slices.get(head) as Set<string>
+      for (const neighbour of read) {
+        for (const modelId of slices.get(neighbour) as Set<string>) {
+          if (models.has(modelId)) continue
+          models.add(modelId)
+          grew = true
+        }
+      }
+    }
+  }
+
+  for (const [head, unit] of units) {
+    const models = [...(slices.get(head) as Set<string>)]
+    if (models.length === 0) continue
+    const to = models.length === 1 ? entityDraft(models[0]) : crossDraft(models)
+    for (const element of unit) {
+      to.elements.push(element)
+      owner.set(element.id, to)
+    }
+  }
+  foundation.elements = foundation.elements.filter((element) => owner.get(element.id) === foundation)
+
+  for (const [head, unit] of units) {
+    if ((slices.get(head) as Set<string>).size > 0) continue
+    const targets = distinct(unit.flatMap((element) => needs.get(element.id) ?? [])).filter(
+      (target) => owner.get(target) !== foundation,
+    )
+    if (targets.length === 0) continue
+    notes.push({
+      kind: 'foundation-reference',
+      message: `"${head}" carries Foundation work that needs ${targets.map((id) => `"${id}"`).join(', ')}, which a story task owns. Foundation waits for nothing, so that order is not kept. Cover "${head}" from one task to place it.`,
+      ids: [head, ...targets],
+    })
   }
 
   for (const id of unassigned) {
@@ -501,13 +524,12 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     }
   }
 
+  // Foundation waits for nothing: the edges this drops out of it are the notes above.
   const depend = (task: TaskDraft | undefined, on: TaskDraft | undefined): void => {
-    if (live(task) && live(on) && task !== on) task.dependsOn.add(on.id)
+    if (live(task) && live(on) && task !== on && task !== foundation) task.dependsOn.add(on.id)
   }
 
   for (const [from, targets] of needs) {
-    // The only edges left out of Foundation are the pinned ones, each reported above.
-    if (owner.get(from) === foundation) continue
     for (const target of targets) depend(owner.get(from), owner.get(target))
   }
   const routeIds = new Set(plan.routes.map((route) => route.id))
@@ -521,7 +543,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
 
   const tasks = [...drafts.values()].filter(live)
   for (const task of tasks) {
-    if (task !== foundation) depend(task, foundation)
+    depend(task, foundation)
     // A cross-entity task waits for every slice it reads, whether or not the element it reads changes.
     if (task.title.kind === 'cross') {
       for (const modelId of task.title.models) depend(task, drafts.get(entityTaskId(modelId)))

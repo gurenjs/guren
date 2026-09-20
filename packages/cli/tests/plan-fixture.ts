@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import type { z } from 'zod'
 
 import type { PlanAppState } from '../src/plan/app-state'
-import type { PlanDraftSchema } from '../src/plan/schema'
+import type { PlanDraft, PlanDraftSchema } from '../src/plan/schema'
 import type { PlanPagePayload } from '../src/plan/render'
+import { FOUNDATION_TASK_ID, type PlanTaskDerivation } from '../src/plan/tasks'
 
 export const TEST_BASELINE = { rev: '6445bc71', contextHash: { 'model.post': 'ab12' } }
 
@@ -122,6 +123,68 @@ export function planDataBlock(html: string): string {
 /** The page's data block, parsed back: what the page will actually read. */
 export function planPageData(html: string): PlanPagePayload {
   return JSON.parse(planDataBlock(html)) as PlanPagePayload
+}
+
+/** What each element needs, read from the plan independently of the module under test. */
+function planReferences(plan: PlanDraft): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  const add = (from: string, ...targets: Array<string | undefined>): void => {
+    out.set(from, [...(out.get(from) ?? []), ...targets.filter((target) => target !== undefined)])
+  }
+  for (const entry of plan.resources) add(entry.id, entry.model)
+  for (const entry of plan.policies) add(entry.id, entry.model)
+  for (const controller of plan.controllers) {
+    for (const action of controller.actions) {
+      // An existing action is nobody's work, so what it reads is nobody's obligation.
+      if (action.change.kind === 'existing') continue
+      const response = action.response
+      add(controller.id, action.body, action.params, action.query, action.authorization.policy?.id)
+      add(controller.id, response.kind === 'inertia' ? response.view : undefined, response.kind === 'resource' ? response.resource : undefined)
+      add(action.id, ...(out.get(controller.id) ?? []))
+    }
+  }
+  for (const route of plan.routes) add(route.id, route.action, ...route.bind.map((bind) => bind.model))
+  for (const entry of plan.views) {
+    add(entry.id, entry.form?.validator, entry.form?.submitsTo, ...entry.actions.map((action) => action.route), ...entry.props.map((prop) => prop.resource))
+  }
+  return out
+}
+
+/**
+ * Where Foundation fails to stand alone: it waits for nothing, so an element it owns
+ * that needs another task's work is an order the derivation dropped. A
+ * `foundation-reference` note excuses the targets it names, under the element it names,
+ * and nothing else. Empty is the property; a string names the pair that breaks it.
+ * It returns them rather than asserting, so a sweep over generated plans reads it too.
+ */
+export function foundationViolations(plan: PlanDraft, result: PlanTaskDerivation): string[] {
+  const foundation = result.tasks.find((task) => task.id === FOUNDATION_TASK_ID)
+  if (!foundation) return []
+
+  const violations: string[] = []
+  if (foundation.dependsOn.length > 0) violations.push(`${FOUNDATION_TASK_ID} waits for "${foundation.dependsOn.join('", "')}"`)
+  if (result.tasks[0]?.id !== FOUNDATION_TASK_ID) violations.push(`${FOUNDATION_TASK_ID} is not the first task`)
+
+  const elsewhere = new Set(
+    result.tasks.filter((task) => task !== foundation).flatMap((task) => task.steps.flatMap((step) => step.elementIds)),
+  )
+  const excused = new Map(
+    result.notes
+      .filter((note) => note.kind === 'foundation-reference')
+      .map((note) => [note.ids[0], new Set(note.ids.slice(1))]),
+  )
+  // An action shares its controller's fate, so the exception is reported on the controller.
+  const controllerOf = new Map(
+    plan.controllers.flatMap((controller) => controller.actions.map((action) => [action.id, controller.id] as const)),
+  )
+  const references = planReferences(plan)
+  for (const id of foundation.steps.flatMap((step) => step.elementIds)) {
+    const allowed = excused.get(controllerOf.get(id) ?? id)
+    for (const target of references.get(id) ?? []) {
+      if (elsewhere.has(target) && allowed?.has(target) !== true) violations.push(`"${id}" needs "${target}"`)
+    }
+  }
+  return violations
 }
 
 /** Strings a plan may carry in any free-text field; every one must come out as text. */

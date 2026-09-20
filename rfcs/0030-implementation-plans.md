@@ -553,14 +553,20 @@ decides a task, so `tasks.ts` fixes it:
   a nested route binds its parent too. An `add`, `rename` or `drop` model is
   always its own slice; an altered one that exactly one other slice covers is
   that slice's edit (the `hasMany` a new child needs). In a class name a digit
-  continues the word, so `Post2Controller` is not `Post`'s.
+  continues the word, so `Post2Controller` is not `Post`'s. Two models whose
+  collection is spelled the same, one by its slug and one by its table, are
+  settled by the plan: the one declared first wins.
 - **Foundation stands alone.** It waits for nothing, so nothing it owns may
   need another task's work. An element that lands there and does (a page two
   controllers share, submitting to one slice's route) joins the slice it
   needs, or the cross-entity task of the slices it needs when there are
   several; what in Foundation needed *it* follows, an action moving with its
-  controller. The one case with nowhere to go, work owned by a story task, is
-  reported and that order is not kept.
+  controller. What it needs is read through Foundation as a whole, so needing
+  a neighbour that needs a slice is needing that slice, whatever order the two
+  were placed in. A story task is no slice to join: work needing one of those
+  and nothing else stays in Foundation and is reported, which is the one order
+  not kept; work that also needs a slice joins it, and the story becomes an
+  ordinary dependency.
 - **Intents.** `tasks[].entity` names a model by class, id or table, and the
   intent's acceptance goes to that slice: on `tests`, and on the step where the
   behaviours must pass, which is the last `http` step, or the task's last step

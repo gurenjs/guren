@@ -11,7 +11,7 @@ import {
   type PlanStepKind,
   type PlanTaskDerivation,
 } from '../src/plan/tasks'
-import { loadCommentsPlanInput, type PlanInput } from './plan-fixture'
+import { foundationViolations, loadCommentsPlanInput, type PlanInput } from './plan-fixture'
 
 type ModelInput = NonNullable<PlanInput['models']>[number]
 type ChangeInput = ModelInput['change']
@@ -168,46 +168,8 @@ function expectEveryElementOnce(plan: PlanDraft, result: PlanTaskDerivation): vo
   expect(owned).toEqual(expected)
 }
 
-/** What each element needs, read from the plan independently of the module under test. */
-function referencesOf(plan: PlanDraft): Map<string, string[]> {
-  const out = new Map<string, string[]>()
-  const add = (from: string, ...targets: Array<string | undefined>): void => {
-    out.set(from, [...(out.get(from) ?? []), ...targets.filter((target) => target !== undefined)])
-  }
-  for (const entry of plan.resources) add(entry.id, entry.model)
-  for (const entry of plan.policies) add(entry.id, entry.model)
-  for (const controller of plan.controllers) {
-    for (const action of controller.actions) {
-      const response = action.response
-      add(controller.id, action.body, action.params, action.query, action.authorization.policy?.id)
-      add(controller.id, response.kind === 'inertia' ? response.view : undefined, response.kind === 'resource' ? response.resource : undefined)
-      add(action.id, ...(out.get(controller.id) ?? []))
-    }
-  }
-  for (const route of plan.routes) add(route.id, route.action, ...route.bind.map((bind) => bind.model))
-  for (const entry of plan.views) {
-    add(entry.id, entry.form?.validator, entry.form?.submitsTo, ...entry.actions.map((action) => action.route), ...entry.props.map((prop) => prop.resource))
-  }
-  return out
-}
-
-/** Foundation waits for nothing, and owns nothing that needs another task's work, short of a reported exception. */
 function expectFoundationStandsAlone(plan: PlanDraft, result: PlanTaskDerivation): void {
-  const foundation = result.tasks.find((candidate) => candidate.id === FOUNDATION_TASK_ID)
-  if (!foundation) return
-  expect(foundation.dependsOn).toEqual([])
-  expect(result.tasks[0].id).toBe(FOUNDATION_TASK_ID)
-
-  const mine = new Set(foundation.steps.flatMap((step) => step.elementIds))
-  const elsewhere = new Set(result.tasks.filter((other) => other !== foundation).flatMap((other) => other.steps.flatMap((step) => step.elementIds)))
-  const reported = new Set(result.notes.filter((note) => note.kind === 'foundation-reference').map((note) => note.ids[0]))
-  const references = referencesOf(plan)
-  // An action shares its controller's fate, so the exception is reported on the controller.
-  const controllerOf = new Map(plan.controllers.flatMap((controller) => controller.actions.map((action) => [action.id, controller.id] as const)))
-  for (const id of mine) {
-    if (reported.has(controllerOf.get(id) ?? id)) continue
-    expect((references.get(id) ?? []).filter((target) => elsewhere.has(target)), id).toEqual([])
-  }
+  expect(foundationViolations(plan, result)).toEqual([])
 }
 
 /** Two controllers named after no model render one page, which submits to the Post slice. */
@@ -233,6 +195,46 @@ function sharedFormPlan(): PlanDraft {
     routes: [{ id: 'route.posts.store', change: ADD, method: 'POST', path: '/posts', name: 'posts.store', action: 'action.posts.store', middleware: [], bind: [] }],
     validators: [{ id: 'validator.post', change: ADD, name: 'PostPayloadSchema', fields: [] }],
     views: [{ ...view('shared/Form'), id: 'view.shared', form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [] } }],
+  })
+}
+
+/**
+ * A hub named after no model renders two pages: one a task covers, one that submits to
+ * the Post slice's route and is Foundation's until it moves. The hub is placed before
+ * that page is, so what it needs is only readable through the page.
+ */
+function hubPlan(covering: { entity: string; models?: ModelInput[] }): PlanDraft {
+  const renders = (id: string, view: string): object => ({
+    id,
+    change: ADD,
+    name: 'show',
+    authorization: { middleware: [] },
+    response: { kind: 'inertia', view },
+    rules: [],
+  })
+  return planFrom({
+    models: [model('Post'), ...(covering.models ?? [])],
+    validators: [{ id: 'validator.post', change: ADD, name: 'PostPayloadSchema', fields: [] }],
+    controllers: [
+      {
+        id: 'controller.posts',
+        change: ADD,
+        className: 'PostController',
+        actions: [{ id: 'action.posts.store', change: ADD, name: 'store', authorization: { middleware: [] }, response: { kind: 'empty' }, rules: [] }],
+      },
+      {
+        id: 'controller.hub',
+        change: ADD,
+        className: 'HubController',
+        actions: [renders('action.hub.covered', 'view.covered'), renders('action.hub.shared', 'view.shared')],
+      },
+    ] as PlanInput['controllers'],
+    routes: [{ id: 'route.posts.store', change: ADD, method: 'POST', path: '/posts', name: 'posts.store', action: 'action.posts.store', middleware: [], bind: [] }],
+    views: [
+      { ...view('covered/Index'), id: 'view.covered' },
+      { ...view('shared/Form'), id: 'view.shared', form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [] } },
+    ],
+    tasks: [{ id: 'task.covered', entity: covering.entity, summary: 'A page of its own.', covers: ['view.covered'], acceptance: [] }],
   })
 }
 
@@ -424,6 +426,40 @@ describe('derivePlanTasks', () => {
       expectFoundationStandsAlone(plan, result)
     })
 
+    test('should read what Foundation work needs through the Foundation work it needs', () => {
+      const plan = hubPlan({ entity: 'Tag', models: [model('Tag')] })
+      const result = derivePlanTasks(plan)
+      const cross = 'task/cross/model.post+model.tag'
+
+      // The hub renders the Tag page and the page submitting to the Post route, so it needs both slices.
+      expect(stepsOfKind(result, cross, 'http')[0].elementIds).toEqual(['controller.hub', 'action.hub.covered', 'action.hub.shared'])
+      expect(stepsOfKind(result, 'task/entity/model.post', 'pages')[0].elementIds).toEqual(['view.shared'])
+      expect(result.notes).toEqual([])
+      expectEveryElementOnce(plan, result)
+      expectFoundationStandsAlone(plan, result)
+    })
+
+    test('should place Foundation work a story owns part of by the rest of what it needs', () => {
+      const plan = hubPlan({ entity: 'Reporting' })
+      const result = derivePlanTasks(plan)
+      const slice = 'task/entity/model.post'
+
+      // One page is the story's, the other needs the Post route: the hub joins the slice it can.
+      expect(stepsOfKind(result, slice, 'http')[0].elementIds).toEqual([
+        'controller.posts',
+        'action.posts.store',
+        'controller.hub',
+        'action.hub.covered',
+        'action.hub.shared',
+        'route.posts.store',
+      ])
+      expect(stepsOfKind(result, slice, 'pages')[0].elementIds).toEqual(['view.shared'])
+      expect(task(result, slice).dependsOn).toContain('task/story/task.covered')
+      expect(result.notes.map((note) => [note.kind, note.ids])).toEqual([['intent-story', ['task.covered']]])
+      expectEveryElementOnce(plan, result)
+      expectFoundationStandsAlone(plan, result)
+    })
+
     test('should report Foundation work that needs a story task, which no slice can take', () => {
       const plan = planFrom({
         validators: [{ id: 'validator.report', change: ADD, name: 'ReportPayloadSchema', fields: [] }],
@@ -466,6 +502,29 @@ describe('derivePlanTasks', () => {
 
       expect(stepsOfKind(result, FOUNDATION_TASK_ID, 'http').map((step) => step.elementIds)).toEqual([['controller.post2']])
       expect(result.notes.map((note) => [note.kind, note.ids])).toEqual([['element-unassigned', ['controller.post2']]])
+    })
+
+    test('should settle a collection two models spell alike by the order the plan declares them', () => {
+      // `Tag`'s collection and `Label`'s table are both `tags`, and the binds name Label first.
+      const label: ModelInput = { ...model('Label'), table: 'tags' }
+      const routes: PlanInput['routes'] = [
+        {
+          id: 'route.tags.show',
+          change: ADD,
+          method: 'GET',
+          path: '/tags/:tag',
+          name: 'tags.show',
+          action: 'action.absent',
+          middleware: [],
+          bind: [{ param: 'label', model: 'model.label' }, { param: 'tag', model: 'model.tag' }],
+        },
+      ]
+
+      for (const models of [[model('Tag'), label], [label, model('Tag')]]) {
+        const result = deriveFrom({ models, routes })
+        const owner = result.tasks.find((derived) => derived.steps.some((step) => step.elementIds.includes('route.tags.show')))
+        expect(owner?.id, models[0].id).toBe(`task/entity/${models[0].id}`)
+      }
     })
 
     test('should report an element with no evidence and keep it in Foundation', () => {
