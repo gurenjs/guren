@@ -767,6 +767,28 @@ its tables fall back to the static reading, each table naming its source.
 `guren check`, the spec views and the scaffolders stay on the static reader,
 which needs source positions and must not execute app code on an edit hook.
 
+**Amended in implementation (`plan:status`):** the readers the comparison ended
+up with, beyond the table above. A validator is found by its exported schema
+symbol (`app/Http/Validators/**`), and its fields have no reader: reading them
+would mean evaluating the schema. So have none: a resource's fields, a policy's
+abilities, a foreign key's `onDelete`, a binding's lookup `key`, a page's form,
+actions and states, and the target of a relationship written as a lazy
+`import()` (the blog's own idiom; its name and type are read). An abstract
+column type is compared through the drizzle builder, and a builder that may
+carry the type under a `mode` option (`integer` for a SQLite boolean) is
+unknown, never a match. What an action's body is scanned for (the page it
+returns, the schema it validates with, the resource and ability it names)
+yields `match` or `unknown`, and `differ` only where the body names a different
+page or ability: a miss may be a helper's work. A planned `body` / `params` /
+`query` validator is read off the `this.validateBody` / `validateQuery` /
+`validateParams` call that takes it, the same reading the validator's own
+`wired` evidence uses, and never off a mention: an action whose only planned
+property is a validator its body merely names is `unjudged`, not `wired`.
+Prose (`purpose`, `rules`, a description) is not
+a planned property and is not counted as one. Flows, tasks, behaviours and
+questions are not judged; a `command` and a `mail` / `notification` class are
+`unjudged`, since nothing reads whether one was run or discovers the other.
+
 A property with no reader is **unknown**. Unknown never counts towards
 `present`, never satisfies a `drop`, and is listed on the page as "planned,
 not checkable". An element whose every planned property is unknown is
@@ -784,6 +806,58 @@ the entry registrar) and evidence that the owning module or registrar is one
 the application registers. A page is `wired` when an action returns it; a
 validator when a route contract or an action body references it. Where that
 evidence cannot be read, the state is `present` with a note, never `wired`.
+
+**Amended in implementation (`plan:status`):** the evidence is the application
+entry's own `createApp({ routes, modules })`. A route the entry registrar
+declared is `wired` when `routes` is an import of the routes file the CLI
+loaded *and* of the export the loader picks from it; a module's route when
+`modules` lists an import of `modules/<name>`. Options that are not a literal,
+a spread, or an element this cannot trace to a file leave the route `present`
+with the reason. An action is `wired` when such a route dispatches to it, and a
+page when such an action returns it. A model, a column, a controller, a
+resource, a policy and a side effect have no mount point a static reader can
+name: they complete at `present`, and the Completion table below reads
+"`wired` where the kind has one".
+
+For a validator the evidence has to be a *use*, not a mention. A symbol can be
+named by an import whose call was deleted, in a type position, in an object
+nobody passes, in a function nobody calls or in a branch nothing reaches, and
+none of those wires anything; a bare mention therefore leaves the element
+`present` and only supplies the note. "An action body references it" is read as
+`this.validateBody` / `validateQuery` / `validateParams` (and their `Safe`
+variants) taking it, in an action a mounted route dispatches to. "A route
+contract references it" is read off the *registered* definitions rather than
+the source: the registrar ran, so a schema reached `schemas.body` through a
+call the application made, and matching it against the validator file's
+exported schema by object identity names the symbol without asking which source
+shapes register a route. The route's own mount then decides, so a module's
+contract is evidence exactly when that module is mounted. What this reading
+costs is a contract whose schema is not the exported symbol itself — an inline
+`z.object({…})`, a `Schema.extend(…)` — and a validator file that will not
+import; both leave the element `present` with the reason, which is the side to
+be wrong on. The files are imported only when a registered route carries a
+contract at all, and a file that throws makes its own symbols unmatchable, not
+the validator section unreadable.
+
+**Amended in implementation (`plan:status`):** an element's optional `module`
+is compared, in both directions. Every discovered model, controller, action,
+validator, resource, policy and side-effect class is tagged with the app root
+its file sits in, and satisfies a plan element only when the two agree — so a
+root `app/Models/Invoice.ts` does not satisfy a model planned for
+`modules/billing`, and a class only a module declares does not satisfy one
+planned for the project root. A model's table is resolved within that same
+root, which is what scopes its columns. Where nothing reports the root the
+element is `blocked`, never matched on the name. Pages are the exception and
+need no tag: a module's pages are not colocated, they live in the project's
+own `resources/js/pages` namespaced by the module, so a discovered page is
+positively the project's. A view naming a module whose prefix its page id does
+not carry is `blocked`.
+
+Two readings the table left open. An `alter` whose every *readable* planned
+property differs is `planned`, not `drifted`: nothing of the change is in the
+code yet, which is what `planned` means, and `drifted` is kept for a change
+that is partly there. An `existing` element that is missing is `planned` with a
+note, and the report lists it apart from the elements the plan changes.
 
 **Acceptance behaviours** have a status of their own, set by `verify` from
 `bun test --reporter=junit`: `pending` (no test carries the id), `failing`,
