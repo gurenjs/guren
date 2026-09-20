@@ -203,6 +203,11 @@ describe('acceptanceStatus rules', () => {
     expect(read(suites(testcase('[GET] /posts [admin] [1, 2]')), ['AC-a-1']).errors).toEqual([])
   })
 
+  test('should hold an undeclared token to the id grammar of the schema', () => {
+    const junit = suites(testcase('[AC-ok.id:1_x] [AC-bad id] [AC-bad/1] [AC-é]'))
+    expect(read(junit, ['AC-a-1']).errors.map((error) => error.id)).toEqual(['AC-ok.id:1_x'])
+  })
+
   test('should stay linear on a title of open brackets', () => {
     const title = '['.repeat(JUNIT_MAX_ATTRIBUTE_CHARS - 16) + '[AC-a-1]'
     const started = performance.now()
