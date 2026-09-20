@@ -123,14 +123,9 @@ export interface PlanAppClassDetail {
   module: PlanAppScope
 }
 
+/** A routes file and what it names, for the note on an element nothing wired. */
 export interface PlanAppRouteFile {
   file: string
-  /**
-   * The routes file the CLI loaded, which is the only one `mounts.entry` is evidence
-   * about: a module's registrar is named by `defineModule({ routes })`, and picking
-   * its entry by filename would be a guess.
-   */
-  entry: boolean
   /** Identifiers outside the import and re-export statements: a mention, not a use. */
   identifiers: string[]
 }
@@ -476,11 +471,7 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
   for (const file of files) {
     const parsed = await cache.get(resolve(root, file))
     if (!parsed) continue
-    details.push({
-      file,
-      entry: file === routesFile,
-      identifiers: statementIdentifiers(parsed.source, parsed.ast),
-    })
+    details.push({ file, identifiers: statementIdentifiers(parsed.source, parsed.ast) })
   }
   return details
 }

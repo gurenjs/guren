@@ -178,12 +178,11 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.mounts.entry).toEqual({ unconfirmed: expect.stringContaining('object literal') })
   })
 
-  test('should call only the routes file it loaded the entry, and hold a module’s single-file routes entry too', async () => {
+  test('should read every routes file of the application, a module’s single-file entry included', async () => {
     const detail = await detailOf('routefiles', { 'src/app.ts': entry('{ routes: registerWebRoutes }') })
 
-    const entries = Object.fromEntries(detail.routeFiles.map((file) => [file.file, file.entry]))
     // `modules/billing/routes.ts` is what `make:module` scaffolds, and no `routes/` directory scan reaches it.
-    expect(entries).toEqual({ 'routes/web.ts': true, 'routes/admin.ts': false, 'routes/orphan.ts': false, 'modules/billing/routes.ts': false })
+    expect(detail.routeFiles.map((file) => file.file).sort()).toEqual(['modules/billing/routes.ts', 'routes/admin.ts', 'routes/orphan.ts', 'routes/web.ts'])
 
     const web = detail.routeFiles.find((file) => file.file === 'routes/web.ts')!
     expect(web.identifiers).toContain('PostPayloadSchema')

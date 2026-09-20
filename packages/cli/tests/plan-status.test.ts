@@ -84,7 +84,7 @@ function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
     validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null }],
     resources: [{ className: 'PostResource', module: null }],
     policies: [{ className: 'PostPolicy', module: null }],
-    routeFiles: [{ file: 'routes/web.ts', entry: true, identifiers: ['PostController', 'PostPayloadSchema'] }],
+    routeFiles: [{ file: 'routes/web.ts', identifiers: ['PostController', 'PostPayloadSchema'] }],
     sideEffects: { job: [{ className: 'SendDigest', module: null }], event: [], listener: [] },
     ...overrides,
   } as PlanAppDetail
@@ -217,7 +217,7 @@ const CASES: Case[] = [
   {
     name: 'a validator no registered route contract holds, named in the entry routes file only',
     plan: validator(ADD),
-    app: app({ routeFiles: [{ file: 'routes/web.ts', entry: true, identifiers: ['PostPayloadSchema'] }] }),
+    app: app({ routeFiles: [{ file: 'routes/web.ts', identifiers: ['PostPayloadSchema'] }] }),
     id: 'val',
     state: 'present',
   },
