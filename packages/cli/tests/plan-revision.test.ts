@@ -7,19 +7,17 @@ import {
   createPlanRevision,
   diffPlans,
   PLAN_REFERENCE_PATHS,
+  PLAN_TOP_SECTIONS,
+  PlanHeadSchema,
   PlanRevisionOpsSchema,
   planRevisionOpsJsonSchema,
   type PlanRevision,
   type PlanRevisionRejectionKind,
 } from '../src/plan/revision'
-import { planDraftJsonSchema, PlanSchema, type Plan } from '../src/plan/schema'
-import { loadCommentsPlan, TEST_BASELINE } from './plan-fixture'
+import { planDraftJsonSchema, PlanColumnSchema, PlanSchema, type Plan } from '../src/plan/schema'
+import { loadParsedCommentsPlan as commentsPlan } from './plan-fixture'
 
 type Json = Record<string, unknown>
-
-function commentsPlan(): Plan {
-  return PlanSchema.parse({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
-}
 
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
@@ -38,6 +36,8 @@ const DELETED_AT = {
   unique: false,
   index: false,
 }
+
+const DELETED_AT_COLUMN = PlanColumnSchema.parse(DELETED_AT)
 
 const ADD_DELETED_AT = {
   op: 'add',
@@ -126,11 +126,19 @@ describe('PlanRevisionOpsSchema', () => {
   })
 
   test('should refuse a MODIFY that carries nested elements, which have ids of their own', () => {
-    const task = (loadCommentsPlan().tasks as Json[])[0] as Json
+    const plan = commentsPlan()
+    const parents = [
+      ['models', 'columns', plan.models[1]],
+      ['controllers', 'actions', plan.controllers[0]],
+      ['tasks', 'acceptance', plan.tasks[0]],
+    ] as const
 
-    expect(parses({ op: 'modify', section: 'models', id: 'model.comment', element: own(model()), reason: 'r' })).toBe(false)
-    expect(parses({ op: 'modify', section: 'tasks', id: 'task.comments', element: own(task), reason: 'r' })).toBe(false)
-    expect(parses({ op: 'modify', section: 'tasks', id: 'task.comments', element: own(task, 'acceptance'), reason: 'r' })).toBe(true)
+    for (const [section, nested, element] of parents) {
+      const { id } = element as { id: string }
+      expect((element as Json)[nested]).not.toHaveLength(0)
+      expect(parses({ op: 'modify', section, id, element: own(element as Json), reason: 'r' })).toBe(false)
+      expect(parses({ op: 'modify', section, id, element: own(element as Json, nested), reason: 'r' })).toBe(true)
+    }
   })
 
   test('should refuse a model MODIFY that omits a defaulted list, which would read as emptying it', () => {
@@ -153,7 +161,14 @@ describe('PlanRevisionOpsSchema', () => {
     expect(parses({ op: 'remove', id: 'constructor', reason: 'r' })).toBe(false)
     expect(parses({ op: 'remove', id: '9lives', reason: 'r' })).toBe(false)
     expect(parses(silent)).toBe(false)
-    expect(PlanRevisionOpsSchema.safeParse({ ops: [] }).success).toBe(false)
+  })
+})
+
+describe('what a revision can reach', () => {
+  test('should cover every key of the plan but planVersion and baseline', () => {
+    const reachable = [...Object.keys(PlanHeadSchema.shape), ...PLAN_TOP_SECTIONS, 'planVersion', 'baseline']
+
+    expect(reachable.sort()).toEqual(Object.keys(PlanSchema.shape).sort())
   })
 })
 
@@ -306,6 +321,16 @@ describe('applyRevision', () => {
     ])
   })
 
+  test('should reject an ADD whose own nested elements share an id', () => {
+    const parent = commentsPlan()
+    const model = parent.models[1] as Plan['models'][number]
+    const twin = { ...model, id: 'model.reply', columns: [DELETED_AT_COLUMN, DELETED_AT_COLUMN] }
+
+    expect(rejectionsOf(parent, [{ op: 'add', section: 'models', element: twin, reason: 'r' }])).toEqual([
+      ['duplicate-id', DELETED_AT.id],
+    ])
+  })
+
   test('should reject a parent that declares an id twice, since no op could address it', () => {
     const parent = commentsPlan()
     parent.routes.push(structuredClone(parent.routes[0]) as Plan['routes'][number])
@@ -345,6 +370,32 @@ describe('applyRevision', () => {
     expect(rejectionsOf(parent, [{ op: 'modify', section: 'plan', element: headOf(parent), reason: 'r' }])).toEqual([
       ['unchanged', 'plan'],
     ])
+  })
+
+  test('should reject ops that cancel out and leave the plan as it was', () => {
+    const parent = commentsPlan()
+    const last = parent.routes.at(-1) as Plan['routes'][number]
+    const retitled = { op: 'modify', section: 'plan', element: { ...headOf(parent), title: 'Another title' }, reason: 'r' }
+    const restored = { op: 'modify', section: 'plan', element: headOf(parent), reason: 'r' }
+    const putBack = [
+      { op: 'remove', id: last.id, reason: 'r' },
+      { op: 'add', section: 'routes', element: last, reason: 'r' },
+    ]
+
+    expect(rejectionsOf(parent, [retitled, restored])).toEqual([['unchanged', undefined]])
+    expect(rejectionsOf(parent, putBack)).toEqual([['unchanged', undefined]])
+    expect(rejectionsOf(parent, [retitled])).toEqual([])
+  })
+
+  test('should reject a revision with no ops as unchanged, in a stored revision too', () => {
+    const parent = commentsPlan()
+    const hash = planHash(parent)
+
+    expect(rejectionsOf(parent, [])).toEqual([['unchanged', undefined]])
+    expect(applyRevision(parent, { parent: hash, ops: [], result: hash })).toMatchObject({
+      ok: false,
+      rejections: [{ kind: 'unchanged' }],
+    })
   })
 
   test('should reject a REMOVE that leaves another element naming the id', () => {
@@ -488,6 +539,15 @@ describe('review state', () => {
     expect(rejectionsOf(parent, [{ ...ADD_DELETED_AT, reopens: 'soft delete needs the column' }], feedback)).toEqual([])
   })
 
+  test('should let an ADD go before an approved sibling, since approval covers an element and not its place', () => {
+    const parent = commentsPlan()
+    const feedback = feedbackOn(parent, { elements: approve('column.comment.createdAt') })
+
+    const created = createPlanRevision(parent, { ops: [ADD_DELETED_AT] }, { feedback })
+
+    expect(created).toMatchObject({ ok: true, reopened: [] })
+  })
+
   test('should hold a REMOVE of a parent to the locks on what it holds', () => {
     const parent = commentsPlan()
     const feedback = feedbackOn(parent, { elements: approve('AC-comments-1') })
@@ -547,7 +607,7 @@ describe('diffPlans', () => {
     draft.assumptions.push('Deleted comments stay in the table')
     draft.questions = []
     comment.fillable = []
-    comment.columns.splice(3, 0, PlanSchema.shape.models.unwrap().element.shape.columns.element.parse(DELETED_AT))
+    comment.columns.splice(3, 0, DELETED_AT_COLUMN)
     comment.columns.reverse()
     ;(draft.controllers[0] as Plan['controllers'][number]).actions.reverse()
     draft.routes.reverse()
@@ -565,7 +625,7 @@ describe('diffPlans', () => {
   test('should yield the fewest ops: one per changed element and none for the rest', () => {
     const parent = commentsPlan()
     const draft = structuredClone(parent) as Plan
-    ;(draft.models[1] as Plan['models'][number]).columns.splice(3, 0, DELETED_AT as Plan['models'][number]['columns'][number])
+    ;(draft.models[1] as Plan['models'][number]).columns.splice(3, 0, DELETED_AT_COLUMN)
     ;(draft.routes[1] as Plan['routes'][number]).path = '/comments/:comment'
     const child = PlanSchema.parse(draft)
 
@@ -574,6 +634,7 @@ describe('diffPlans', () => {
       { op: 'add', section: 'columns', parent: 'model.comment', before: 'column.comment.createdAt' },
     ])
     expect(diffPlans(parent, commentsPlan(), { reason: 'r' })).toEqual([])
+    expect(rejectionsOf(parent, diffPlans(parent, commentsPlan(), { reason: 'r' }))).toEqual([['unchanged', undefined]])
   })
 
   test('should move one element rather than rewrite the list around it', () => {

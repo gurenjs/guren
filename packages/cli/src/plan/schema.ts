@@ -12,7 +12,7 @@ import { PLAN_VERSION } from './version'
 
 export { PLAN_VERSION }
 
-const NonEmptySchema = z.string().min(1)
+export const NonEmptySchema = z.string().min(1)
 
 // BCP 47 in its common shape (`en`, `ja`, `pt-BR`, `zh-Hant-TW`); the page puts it on `<html lang>`.
 const LocaleSchema = z.string().regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/)
@@ -21,7 +21,7 @@ export const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 
 // `constructor` and `toString` match the pattern, and any consumer that keys a plain
 // object by id reads the inherited function back instead of `undefined`.
-const IdSchema = z
+export const IdSchema = z
   .string()
   .regex(ID_PATTERN)
   .refine((id) => !(id in Object.prototype), { message: 'must not name an Object.prototype member' })
@@ -64,7 +64,7 @@ export const PLAN_COLUMN_TYPES = [
   'uuid',
 ] as const
 
-const PlanColumnSchema = z.strictObject({
+export const PlanColumnSchema = z.strictObject({
   id: IdSchema,
   /** The model property. `columnName` is the SQL name where the two differ. */
   name: NonEmptySchema,
@@ -98,7 +98,7 @@ const PlanRelationshipSchema = z.strictObject({
   target: IdSchema,
 })
 
-const PlanModelSchema = z.strictObject({
+export const PlanModelSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: NonEmptySchema,
@@ -116,7 +116,7 @@ const PlanModelSchema = z.strictObject({
   dataMigration: DataMigrationSchema.optional(),
 })
 
-const PlanValidatorSchema = z.strictObject({
+export const PlanValidatorSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: NonEmptySchema,
@@ -139,7 +139,7 @@ const PlanResponseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('empty') }),
 ])
 
-const PlanActionSchema = z.strictObject({
+export const PlanActionSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: NonEmptySchema,
@@ -154,7 +154,7 @@ const PlanActionSchema = z.strictObject({
   rules: z.array(z.string()),
 })
 
-const PlanControllerSchema = z.strictObject({
+export const PlanControllerSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   className: NonEmptySchema,
@@ -164,7 +164,7 @@ const PlanControllerSchema = z.strictObject({
 
 export const PLAN_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'QUERY'] as const
 
-const PlanRouteSchema = z.strictObject({
+export const PlanRouteSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   method: z.enum(PLAN_HTTP_METHODS),
@@ -177,7 +177,7 @@ const PlanRouteSchema = z.strictObject({
   agent: z.strictObject({ toolName: NonEmptySchema, readOnly: z.boolean() }).optional(),
 })
 
-const PlanViewSchema = z.strictObject({
+export const PlanViewSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   page: NonEmptySchema,
@@ -207,7 +207,7 @@ const PlanViewSchema = z.strictObject({
   }),
 })
 
-const PlanResourceSchema = z.strictObject({
+export const PlanResourceSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: NonEmptySchema,
@@ -216,7 +216,7 @@ const PlanResourceSchema = z.strictObject({
   fields: z.array(z.strictObject({ name: NonEmptySchema, type: NonEmptySchema })),
 })
 
-const PlanPolicySchema = z.strictObject({
+export const PlanPolicySchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: NonEmptySchema,
@@ -225,7 +225,7 @@ const PlanPolicySchema = z.strictObject({
   abilities: z.array(z.strictObject({ name: NonEmptySchema, rule: NonEmptySchema })),
 })
 
-const PlanSideEffectSchema = z.strictObject({
+export const PlanSideEffectSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   kind: z.enum(['job', 'event', 'listener', 'mail', 'notification']),
@@ -262,7 +262,7 @@ const PlanFlowEdgeSchema = z.strictObject({
  * so a plan cannot carry markup or a layout, and one flow renders the same everywhere
  * (RFC 0030 §3: no Mermaid, and no CDN).
  */
-const PlanFlowSchema = z.strictObject({
+export const PlanFlowSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   title: NonEmptySchema,
@@ -271,7 +271,7 @@ const PlanFlowSchema = z.strictObject({
   edges: z.array(PlanFlowEdgeSchema),
 })
 
-const PlanCommandSchema = z.strictObject({
+export const PlanCommandSchema = z.strictObject({
   id: IdSchema,
   command: NonEmptySchema,
   reason: NonEmptySchema,
@@ -286,7 +286,7 @@ export const ACCEPTANCE_KINDS = [
   'state',
 ] as const
 
-const AcceptanceSchema = z.strictObject({
+export const AcceptanceSchema = z.strictObject({
   id: IdSchema,
   description: NonEmptySchema,
   kind: z.enum(ACCEPTANCE_KINDS),
@@ -311,7 +311,7 @@ const AcceptanceSchema = z.strictObject({
   }),
 })
 
-const PlanTaskIntentSchema = z.strictObject({
+export const PlanTaskIntentSchema = z.strictObject({
   id: IdSchema,
   entity: NonEmptySchema,
   summary: NonEmptySchema,
@@ -319,7 +319,7 @@ const PlanTaskIntentSchema = z.strictObject({
   acceptance: z.array(AcceptanceSchema),
 })
 
-const PlanQuestionSchema = z.strictObject({
+export const PlanQuestionSchema = z.strictObject({
   id: IdSchema,
   question: NonEmptySchema,
   options: z.array(z.strictObject({ label: NonEmptySchema, consequence: NonEmptySchema })).min(2),

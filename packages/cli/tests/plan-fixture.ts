@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { z } from 'zod'
 
 import type { PlanAppState } from '../src/plan/app-state'
-import type { PlanDraft, PlanDraftSchema } from '../src/plan/schema'
+import { PlanSchema, type Plan, type PlanDraft, type PlanDraftSchema } from '../src/plan/schema'
 import type { PlanPagePayload } from '../src/plan/render'
 import { FOUNDATION_TASK_ID, type PlanTaskDerivation } from '../src/plan/tasks'
 
@@ -22,6 +22,11 @@ export type PlanInput = z.input<typeof PlanDraftSchema>
 /** The comments fixture typed as a document, for a test that edits it section by section. */
 export function loadCommentsPlanInput(): PlanInput {
   return loadCommentsPlan() as unknown as PlanInput
+}
+
+/** The fixture as a plan with an identity: parsed, under {@link TEST_BASELINE}. */
+export function loadParsedCommentsPlan(): Plan {
+  return PlanSchema.parse({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
 }
 
 /** An application the comments fixture is a clean delta against. */

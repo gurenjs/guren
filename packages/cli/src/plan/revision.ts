@@ -13,28 +13,33 @@ import { z } from 'zod'
 import { formatSchemaIssues } from '../cli-error'
 import type { PlanFeedback } from './feedback'
 import { canonicalJson, planHash } from './identity'
-import { findDuplicatePlanIds, listPlanElements, PlanSchema, type Plan, type PlanElementSection } from './schema'
+import {
+  AcceptanceSchema,
+  findDuplicatePlanIds,
+  IdSchema,
+  listPlanElements,
+  NonEmptySchema,
+  PlanActionSchema,
+  PlanColumnSchema,
+  PlanCommandSchema,
+  PlanControllerSchema,
+  PlanFlowSchema,
+  PlanModelSchema,
+  PlanPolicySchema,
+  PlanQuestionSchema,
+  PlanResourceSchema,
+  PlanRouteSchema,
+  PlanSchema,
+  PlanSideEffectSchema,
+  PlanTaskIntentSchema,
+  PlanValidatorSchema,
+  PlanViewSchema,
+  type Plan,
+  type PlanElementSection,
+} from './schema'
 
 const shape = PlanSchema.shape
 
-const Question = shape.questions.unwrap().element
-const Model = shape.models.unwrap().element
-const Column = Model.shape.columns.element
-const Validator = shape.validators.unwrap().element
-const Controller = shape.controllers.unwrap().element
-const Action = Controller.shape.actions.element
-const Route = shape.routes.unwrap().element
-const View = shape.views.unwrap().element
-const Resource = shape.resources.unwrap().element
-const Policy = shape.policies.unwrap().element
-const SideEffect = shape.sideEffects.unwrap().element
-const Flow = shape.flows.unwrap().element
-const Command = shape.commands.unwrap().element
-const Task = shape.tasks.unwrap().element
-const Acceptance = Task.shape.acceptance.element
-
-const IdSchema = Question.shape.id
-const NonEmptySchema = z.string().min(1)
 const HashSchema = z.string().regex(/^[0-9a-f]{64}$/)
 
 /** `reopens` is what an op on an approved element must say; it is ignored where nothing is locked. */
@@ -42,9 +47,9 @@ const note = { reason: NonEmptySchema, reopens: NonEmptySchema.optional() }
 
 /** The section a nested element lives under. The list key on the parent is the nested section's own name. */
 const PARENT_SECTION = { columns: 'models', actions: 'controllers', acceptance: 'tasks' } as const
-const NESTED_KEY = { models: 'columns', controllers: 'actions', tasks: 'acceptance' } as const
+const NESTED_KEY: Partial<Record<string, PlanElementSection>> = { models: 'columns', controllers: 'actions', tasks: 'acceptance' }
 
-const TOP_SECTIONS = [
+export const PLAN_TOP_SECTIONS = [
   'questions',
   'models',
   'validators',
@@ -77,26 +82,26 @@ const modify = <S extends string, E extends z.ZodType>(section: S, element: E) =
   z.strictObject({ op: z.literal('modify'), section: z.literal(section), id: IdSchema, element, ...note })
 
 const AddOpSchema = z.discriminatedUnion('section', [
-  add('questions', Question),
-  add('models', Model),
-  addUnder('columns', Column),
-  add('validators', Validator),
-  add('controllers', Controller),
-  addUnder('actions', Action),
-  add('routes', Route),
-  add('views', View),
-  add('resources', Resource),
-  add('policies', Policy),
-  add('sideEffects', SideEffect),
-  add('flows', Flow),
-  add('commands', Command),
-  add('tasks', Task),
-  addUnder('acceptance', Acceptance),
+  add('questions', PlanQuestionSchema),
+  add('models', PlanModelSchema),
+  addUnder('columns', PlanColumnSchema),
+  add('validators', PlanValidatorSchema),
+  add('controllers', PlanControllerSchema),
+  addUnder('actions', PlanActionSchema),
+  add('routes', PlanRouteSchema),
+  add('views', PlanViewSchema),
+  add('resources', PlanResourceSchema),
+  add('policies', PlanPolicySchema),
+  add('sideEffects', PlanSideEffectSchema),
+  add('flows', PlanFlowSchema),
+  add('commands', PlanCommandSchema),
+  add('tasks', PlanTaskIntentSchema),
+  addUnder('acceptance', AcceptanceSchema),
 ])
 
 // The title and the other unnamed fields have no id, so the document head is addressed as the section `plan`.
 // Defaulted lists are required here: a MODIFY replaces, and an omitted list would read as an emptied one.
-const PlanHeadSchema = z.strictObject({
+export const PlanHeadSchema = z.strictObject({
   title: shape.title,
   summary: shape.summary,
   scope: shape.scope,
@@ -107,21 +112,21 @@ const PlanHeadSchema = z.strictObject({
 
 const ModifyOpSchema = z.discriminatedUnion('section', [
   z.strictObject({ op: z.literal('modify'), section: z.literal('plan'), element: PlanHeadSchema, reason: NonEmptySchema }),
-  modify('questions', Question.omit({ id: true })),
-  modify('models', Model.omit({ id: true, columns: true }).extend({ indexes: Model.shape.indexes.unwrap() })),
-  modify('columns', Column.omit({ id: true })),
-  modify('validators', Validator.omit({ id: true })),
-  modify('controllers', Controller.omit({ id: true, actions: true })),
-  modify('actions', Action.omit({ id: true })),
-  modify('routes', Route.omit({ id: true })),
-  modify('views', View.omit({ id: true })),
-  modify('resources', Resource.omit({ id: true })),
-  modify('policies', Policy.omit({ id: true })),
-  modify('sideEffects', SideEffect.omit({ id: true })),
-  modify('flows', Flow.omit({ id: true })),
-  modify('commands', Command.omit({ id: true })),
-  modify('tasks', Task.omit({ id: true, acceptance: true })),
-  modify('acceptance', Acceptance.omit({ id: true })),
+  modify('questions', PlanQuestionSchema.omit({ id: true })),
+  modify('models', PlanModelSchema.omit({ id: true, columns: true }).extend({ indexes: PlanModelSchema.shape.indexes.unwrap() })),
+  modify('columns', PlanColumnSchema.omit({ id: true })),
+  modify('validators', PlanValidatorSchema.omit({ id: true })),
+  modify('controllers', PlanControllerSchema.omit({ id: true, actions: true })),
+  modify('actions', PlanActionSchema.omit({ id: true })),
+  modify('routes', PlanRouteSchema.omit({ id: true })),
+  modify('views', PlanViewSchema.omit({ id: true })),
+  modify('resources', PlanResourceSchema.omit({ id: true })),
+  modify('policies', PlanPolicySchema.omit({ id: true })),
+  modify('sideEffects', PlanSideEffectSchema.omit({ id: true })),
+  modify('flows', PlanFlowSchema.omit({ id: true })),
+  modify('commands', PlanCommandSchema.omit({ id: true })),
+  modify('tasks', PlanTaskIntentSchema.omit({ id: true, acceptance: true })),
+  modify('acceptance', AcceptanceSchema.omit({ id: true })),
 ])
 
 /** Removing a parent removes what it holds. An id changes by REMOVE and ADD, which says so twice. */
@@ -130,7 +135,7 @@ const RemoveOpSchema = z.strictObject({ op: z.literal('remove'), id: IdSchema, .
 export const PlanRevisionOpSchema = z.discriminatedUnion('op', [AddOpSchema, ModifyOpSchema, RemoveOpSchema])
 
 /** What a producer emits. */
-export const PlanRevisionOpsSchema = z.strictObject({ ops: z.array(PlanRevisionOpSchema).min(1) })
+export const PlanRevisionOpsSchema = z.strictObject({ ops: z.array(PlanRevisionOpSchema) })
 
 export const PlanRevisionSchema = z.strictObject({
   parent: HashSchema,
@@ -213,11 +218,11 @@ export interface PlanRevisionOptions {
 
 export type ApplyRevisionResult =
   | { ok: true; plan: Plan; hash: string; reopened: PlanReopenedElement[] }
-  | { ok: false; rejections: PlanRevisionRejection[] }
+  | PlanRevisionRefusal
 
 export type CreateRevisionResult =
   | { ok: true; revision: PlanRevision; plan: Plan; reopened: PlanReopenedElement[] }
-  | { ok: false; rejections: PlanRevisionRejection[] }
+  | PlanRevisionRefusal
 
 type Element = Record<string, unknown> & { id: string }
 type Holder = Record<string, unknown>
@@ -230,11 +235,11 @@ interface Located {
 }
 
 function locate(plan: Holder, id: string): Located | undefined {
-  for (const section of TOP_SECTIONS) {
+  for (const section of PLAN_TOP_SECTIONS) {
     const list = plan[section] as Element[]
     for (const [index, element] of list.entries()) {
       if (element.id === id) return { section, list, index, element }
-      const key = nestedKey(section)
+      const key = NESTED_KEY[section]
       if (!key) continue
       const nested = element[key] as Element[]
       const at = nested.findIndex((child) => child.id === id)
@@ -244,19 +249,15 @@ function locate(plan: Holder, id: string): Located | undefined {
   return undefined
 }
 
-function nestedKey(section: string): PlanElementSection | undefined {
-  return (NESTED_KEY as Record<string, PlanElementSection | undefined>)[section]
-}
-
 function withNested(section: string, element: Element): string[] {
-  const key = nestedKey(section)
+  const key = NESTED_KEY[section]
   return [element.id, ...(key ? (element[key] as Element[]).map((child) => child.id) : [])]
 }
 
 function ownFields(section: string, element: Holder): Holder {
   const own = { ...element }
   delete own.id
-  const key = nestedKey(section)
+  const key = NESTED_KEY[section]
   if (key) delete own[key]
   return own
 }
@@ -279,19 +280,34 @@ function collect(value: unknown, path: string): unknown[] {
   return found
 }
 
-function referencesTo(plan: Holder, id: string): string[] {
-  const owners: string[] = []
+/** Who names whom, read once: target id to the ids of the elements naming it. */
+function referencesTo(plan: Holder): Map<string, Set<string>> {
+  const owners = new Map<string, Set<string>>()
   for (const [ownerPath, path] of PLAN_REFERENCE_PATHS) {
     for (const owner of collect(plan, ownerPath) as Element[]) {
-      if (collect(owner, path).includes(id)) owners.push(owner.id)
+      for (const target of collect(owner, path) as string[]) {
+        const named = owners.get(target) ?? new Set<string>()
+        named.add(owner.id)
+        owners.set(target, named)
+      }
     }
   }
   return owners
 }
 
+export interface PlanRevisionRefusal {
+  ok: false
+  rejections: PlanRevisionRejection[]
+}
+
+function refuse(kind: PlanRevisionRejectionKind, message: string): PlanRevisionRefusal {
+  return { ok: false, rejections: [{ kind, message }] }
+}
+
 /** An approved parent was approved with what it holds, so its nested elements are locked with it. */
-function lockedIds(parent: Plan, feedback: PlanFeedback | undefined, rejections: PlanRevisionRejection[]): Set<string> {
+function lockedIds(parent: Plan, feedback: PlanFeedback | undefined): { locked: Set<string>; rejections: PlanRevisionRejection[] } {
   const locked = new Set<string>()
+  const rejections: PlanRevisionRejection[] = []
   for (const entry of feedback?.elements ?? []) {
     const found = locate(parent, entry.elementId)
     if (!found) {
@@ -305,28 +321,33 @@ function lockedIds(parent: Plan, feedback: PlanFeedback | undefined, rejections:
     if (entry.verdict !== 'approve') continue
     for (const id of withNested(found.section, found.element)) locked.add(id)
   }
-  return locked
+  return { locked, rejections }
 }
 
 function applyOps(
   parent: Plan,
+  parentHash: string,
   ops: ReadonlyArray<PlanRevisionOp>,
   feedback: PlanFeedback | undefined,
-): { plan: Plan; reopened: PlanReopenedElement[] } | PlanRevisionRejection[] {
-  const rejections: PlanRevisionRejection[] = []
-
+): { ok: true; plan: Plan; hash: string; reopened: PlanReopenedElement[] } | PlanRevisionRefusal {
   // A lock that names another plan's elements is a lock silently not applied.
-  if (feedback?.planHash !== undefined && feedback.planHash !== planHash(parent)) {
-    return [{ kind: 'feedback-mismatch', message: `The feedback was given on plan ${feedback.planHash}, not on the parent.` }]
+  if (feedback?.planHash !== undefined && feedback.planHash !== parentHash) {
+    return refuse('feedback-mismatch', `The feedback was given on plan ${feedback.planHash}, not on the parent.`)
   }
-  for (const id of findDuplicatePlanIds(parent)) {
-    rejections.push({ kind: 'duplicate-id', id, message: `The parent declares "${id}" twice, so no op can address it.` })
+  const twice = findDuplicatePlanIds(parent)
+  if (twice.length > 0) {
+    const rejections = twice.map((id) => ({
+      kind: 'duplicate-id' as const,
+      id,
+      message: `The parent declares "${id}" twice, so no op can address it.`,
+    }))
+    return { ok: false, rejections }
   }
-  if (rejections.length > 0) return rejections
 
-  const locked = lockedIds(parent, feedback, rejections)
+  const { locked, rejections } = lockedIds(parent, feedback)
   // `baseline` is carried over untouched: no op names it, so the hash moves through ops alone.
   const plan = structuredClone(parent) as Plan & Holder
+  const declared = new Set(listPlanElements(parent).map((ref) => ref.id))
   const reopened: PlanReopenedElement[] = []
   const targeted = new Map<string, PlanRevisionOp['op']>()
   const removedBy = new Map<string, number>()
@@ -356,7 +377,10 @@ function applyOps(
       if (!claim(ids)) return
       touch(ids)
       found.list.splice(found.index, 1)
-      for (const id of ids) removedBy.set(id, index)
+      for (const id of ids) {
+        declared.delete(id)
+        removedBy.set(id, index)
+      }
       return
     }
 
@@ -378,7 +402,7 @@ function applyOps(
       if (canonicalJson(ownFields(op.section, found.element)) === canonicalJson(op.element)) {
         return reject('unchanged', op.id, `"${op.id}" already reads this way.`)
       }
-      const key = nestedKey(op.section)
+      const key = NESTED_KEY[op.section]
       found.list[found.index] = { id: op.id, ...op.element, ...(key ? { [key]: found.element[key] } : {}) }
       return
     }
@@ -394,20 +418,24 @@ function applyOps(
       touch([op.parent])
       list = holder.element[op.section] as Element[]
     }
+    // Approval covers an element, not its place: an ADD before a locked sibling needs no `reopens`.
     const at = op.before === undefined ? list.length : list.findIndex((sibling) => sibling.id === op.before)
     if (at < 0) return reject('unknown-id', op.before as string, `\`before\` "${op.before}" is not among the siblings.`)
-    if (!claim(withNested(op.section, op.element))) return
+    const ids = withNested(op.section, op.element)
+    if (!claim(ids)) return
+    const duplicates = new Set(ids.filter((id, position) => declared.has(id) || ids.indexOf(id) !== position))
+    if (duplicates.size > 0) {
+      for (const id of [...duplicates].sort()) reject('duplicate-id', id, `"${id}" is already declared.`)
+      return
+    }
     list.splice(at, 0, op.element)
-    const duplicates = findDuplicatePlanIds(plan)
-    if (duplicates.length === 0) return
-    list.splice(at, 1)
-    for (const id of duplicates) reject('duplicate-id', id, `"${id}" is already declared.`)
+    for (const id of ids) declared.add(id)
   })
 
-  const remaining = new Set(listPlanElements(plan).map((ref) => ref.id))
-  for (const [id, index] of removedBy) {
-    if (remaining.has(id)) continue
-    for (const owner of new Set(referencesTo(plan, id))) {
+  const gone = [...removedBy].filter(([id]) => !declared.has(id))
+  const owners = gone.length > 0 ? referencesTo(plan) : new Map<string, Set<string>>()
+  for (const [id, index] of gone) {
+    for (const owner of owners.get(id) ?? []) {
       rejections.push({
         kind: 'dangling-reference',
         op: index,
@@ -426,7 +454,7 @@ function applyOps(
         id: answer.questionId,
         message: `The feedback answers "${answer.questionId}", which is no question of the parent plan.`,
       })
-    } else if (plan.questions.some((question) => question.id === answer.questionId)) {
+    } else if (declared.has(answer.questionId)) {
       rejections.push({
         kind: 'answered-question-kept',
         id: answer.questionId,
@@ -435,48 +463,44 @@ function applyOps(
     }
   }
 
-  if (rejections.length > 0) return rejections
+  if (rejections.length > 0) return { ok: false, rejections }
 
   const parsed = PlanSchema.safeParse(plan)
-  if (!parsed.success) return [{ kind: 'invalid-result', message: formatSchemaIssues(parsed.error) }]
-  return { plan: parsed.data, reopened }
-}
+  if (!parsed.success) return refuse('invalid-result', formatSchemaIssues(parsed.error))
 
-function parseFailure(error: z.ZodError): { ok: false; rejections: PlanRevisionRejection[] } {
-  return { ok: false, rejections: [{ kind: 'invalid-revision', message: formatSchemaIssues(error) }] }
+  // Ops that cancel out, and no ops at all, would chain a revision whose result names its own parent.
+  const hash = planHash(parsed.data)
+  if (hash === parentHash) return refuse('unchanged', 'The ops leave the plan as it was, so there is nothing to revise.')
+  return { ok: true, plan: parsed.data, hash, reopened }
 }
 
 /** Stamps `parent` and `result` on a producer's ops. `document` is model output, so it is parsed here. */
 export function createPlanRevision(parent: Plan, document: unknown, options: PlanRevisionOptions = {}): CreateRevisionResult {
   const parsed = PlanRevisionOpsSchema.safeParse(document)
-  if (!parsed.success) return parseFailure(parsed.error)
+  if (!parsed.success) return refuse('invalid-revision', formatSchemaIssues(parsed.error))
 
-  const applied = applyOps(parent, parsed.data.ops, options.feedback)
-  if (Array.isArray(applied)) return { ok: false, rejections: applied }
-  const revision = { parent: planHash(parent), ops: parsed.data.ops, result: planHash(applied.plan) }
-  return { ok: true, revision, ...applied }
+  const parentHash = planHash(parent)
+  const applied = applyOps(parent, parentHash, parsed.data.ops, options.feedback)
+  if (!applied.ok) return applied
+  const revision = { parent: parentHash, ops: parsed.data.ops, result: applied.hash }
+  return { ok: true, revision, plan: applied.plan, reopened: applied.reopened }
 }
 
 /** The plan a revision yields, or why it is refused. Never mutates `parent`. */
 export function applyRevision(parent: Plan, revision: unknown, options: PlanRevisionOptions = {}): ApplyRevisionResult {
   const parsed = PlanRevisionSchema.safeParse(revision)
-  if (!parsed.success) return parseFailure(parsed.error)
+  if (!parsed.success) return refuse('invalid-revision', formatSchemaIssues(parsed.error))
 
-  const actual = planHash(parent)
-  if (parsed.data.parent !== actual) {
-    const message = `The revision was written against plan ${parsed.data.parent}; this plan is ${actual}.`
-    return { ok: false, rejections: [{ kind: 'parent-mismatch', message }] }
+  const parentHash = planHash(parent)
+  if (parsed.data.parent !== parentHash) {
+    return refuse('parent-mismatch', `The revision was written against plan ${parsed.data.parent}; this plan is ${parentHash}.`)
   }
 
-  const applied = applyOps(parent, parsed.data.ops, options.feedback)
-  if (Array.isArray(applied)) return { ok: false, rejections: applied }
-
-  const hash = planHash(applied.plan)
-  if (hash !== parsed.data.result) {
-    const message = `The ops yield plan ${hash}, not the ${parsed.data.result} the revision names.`
-    return { ok: false, rejections: [{ kind: 'result-mismatch', message }] }
+  const applied = applyOps(parent, parentHash, parsed.data.ops, options.feedback)
+  if (applied.ok && applied.hash !== parsed.data.result) {
+    return refuse('result-mismatch', `The ops yield plan ${applied.hash}, not the ${parsed.data.result} the revision names.`)
   }
-  return { ok: true, hash, ...applied }
+  return applied
 }
 
 export interface DiffPlansOptions {
@@ -488,6 +512,7 @@ export interface DiffPlansOptions {
 /**
  * The fewest ops that turn `parent` into `child`, for a plan edited by hand. An element
  * that changed place is a REMOVE and an ADD. Throws where no op could express the edit.
+ * Equal plans yield `[]`, which `createPlanRevision()` refuses as `unchanged`.
  */
 export function diffPlans(parent: Plan, child: Plan, options: DiffPlansOptions): PlanRevisionOp[] {
   if (canonicalJson(parent.baseline) !== canonicalJson(child.baseline)) {
@@ -520,18 +545,19 @@ export function diffPlans(parent: Plan, child: Plan, options: DiffPlansOptions):
       if (canonicalJson(ownFields(section, previous)) !== canonicalJson(own)) {
         modifies.push({ op: 'modify', section, id: element.id, element: own, ...stamp })
       }
-      const key = nestedKey(section)
+      const key = NESTED_KEY[section]
       if (key) diffList(key, previous[key] as Element[], element[key] as Element[], element.id)
     })
   }
 
-  for (const section of TOP_SECTIONS) diffList(section, parent[section], child[section])
+  for (const section of PLAN_TOP_SECTIONS) diffList(section, parent[section], child[section])
   // Removes first: an element that moved is free to be added again, and every `before` names a kept sibling.
   return z.array(PlanRevisionOpSchema).parse([...removes, ...modifies, ...adds])
 }
 
 /** The ids of a longest common subsequence: the elements that did not move. */
 function commonOrder(before: string[], after: string[]): Set<string> {
+  if (before.length === after.length && before.every((id, index) => id === after[index])) return new Set(before)
   const lengths = Array.from({ length: before.length + 1 }, () => Array.from({ length: after.length + 1 }, () => 0))
   for (let i = before.length - 1; i >= 0; i--) {
     for (let j = after.length - 1; j >= 0; j--) {

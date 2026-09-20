@@ -495,6 +495,9 @@ above leaves the op shape open, and these are the choices the code makes:
   `remove` takes nested elements along. An element moves by `remove` then
   `add`; any other second op on one id in a revision is rejected, and so is a
   `modify` that changes nothing.
+- A revision whose ops yield the parent's own hash is rejected as a whole:
+  ops that cancel out, and no ops at all, would chain a revision that names
+  its parent as its result.
 - The title, summary, scope, assumptions, hints and locale have no id. They
   are addressed as `modify` on the section `plan`, which carries all of them.
 - `baseline` and `planVersion` are out of an op's reach. A revision carries
@@ -506,7 +509,8 @@ above leaves the op shape open, and these are the choices the code makes:
   defect; every other reference stays a §2 finding.
 - Approval of a parent covers what it holds: an op on a column of an approved
   model, and an `add` under it, need `reopens`. `reopens` on an element nobody
-  locked is ignored.
+  locked is ignored. Approval covers an element and not its place in the
+  list, so an `add` placed `before` an approved sibling needs none.
 - With feedback that answers a question, a revision that does not `remove`
   that question is rejected. The "depends on" marks are derived from
   `affects`, so removing the question is what removes them. Feedback given on
