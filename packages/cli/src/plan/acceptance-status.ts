@@ -188,6 +188,8 @@ function allowedChildren(parent: XmlElement): XmlElement[] {
 }
 
 function readJunitCases(text: string): JunitCase[] {
+  // The name length and the reference span are left to `XML_SUBSET_LIMITS`: the report
+  // format bounds neither, so this reader would only be restating the reader's own value.
   const root = parseXmlSubset(text, {
     maxChars: JUNIT_MAX_CHARS,
     maxAttributeChars: JUNIT_MAX_ATTRIBUTE_CHARS,
