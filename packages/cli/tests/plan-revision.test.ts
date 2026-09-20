@@ -493,6 +493,10 @@ describe('the ids a revision tracks', () => {
       rejectionsOf(parent, [{ op: 'remove', id, reason: 'r' }]).some(([kind]) => kind === 'unknown-id'),
     )
 
+    // A refusal ahead of the ops loop would report every id as reachable without an op ever naming one.
+    expect(rejectionsOf(parent, [{ op: 'remove', id: 'no.such.element', reason: 'r' }])).toEqual([
+      ['unknown-id', 'no.such.element'],
+    ])
     // A fixture with no nested elements would pass the reachability assertion without checking a nested list.
     expect([...new Set(declared.map((ref) => ref.section))]).toEqual(
       expect.arrayContaining(['columns', 'actions', 'acceptance']),
