@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
-import { mkdir, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -10,10 +10,11 @@ import type { PlanStatusReport } from '../src/plan-status'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 import { loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
 
-// A fixed root cleaned at the start: `bun test` fires no exit handler to clean a random one.
+// `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own, since Bun keys an imported routes file on
 // its path and a second test would read the first one's route graph back.
-const ROOT = join(tmpdir(), 'guren-plan-status-command')
+const ROOT_PREFIX = 'guren-plan-status-command-'
+let ROOT: string
 const WORKSPACE_DRIZZLE = resolve(import.meta.dir, '../../orm/node_modules/drizzle-orm')
 
 const APP_ENTRY = `import { createApp } from '@guren/core'
@@ -100,8 +101,9 @@ describe('plan:status', () => {
   const log = spyOn(console, 'log')
 
   beforeAll(async () => {
-    await rm(ROOT, { recursive: true, force: true })
-    await mkdir(ROOT, { recursive: true })
+    const stale = (await readdir(tmpdir())).filter((name) => name.startsWith(ROOT_PREFIX))
+    await Promise.all(stale.map((name) => rm(join(tmpdir(), name), { recursive: true, force: true })))
+    ROOT = await mkdtemp(join(tmpdir(), ROOT_PREFIX))
   })
 
   afterEach(() => {
