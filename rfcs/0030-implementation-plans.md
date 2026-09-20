@@ -672,6 +672,41 @@ evidence cannot be read, the state is `present` with a note, never `wired`.
 - the same id in two test files, or an id no behaviour declares, is an error;
 - no junit file, or one that does not parse, is `blocked`.
 
+**Amended in implementation:** what Bun's reporter writes settled four points
+the list left open (`packages/cli/src/plan/acceptance-status.ts`).
+
+- ~~zero executed cases is `pending`~~ `pending` is "no case carries the id". A
+  behaviour whose only case is skipped or todo is `failing`, by the rule before
+  it. "Executed" cannot be read from `time`: Bun writes `time="0"` for a fast
+  passing case. It is the absence of `<skipped>`, which Bun also writes for a
+  case a `-t` filter left out, so `plan:verify` selects by file and never by
+  `-t`.
+- The full title is the chain of nested `<testsuite>` names, one per `describe`,
+  under the suite Bun writes per test file. `classname` is not read: Bun writes
+  it innermost first, with a separator escaped twice. "Two test files" compares
+  the `file` attribute of the cases as written, relative to where `bun test`
+  ran. A case naming two declared ids counts for both.
+- An undeclared id is a bracketed token in the plan's id grammar that starts
+  with `AC-`. Without the prefix, `[GET]` in any unrelated title would be an
+  error. A plan whose ids drop the prefix loses the typo report and nothing
+  else: the mistyped behaviour stays `pending`.
+- Two failures never reach the report. A test file that throws while loading is
+  absent from it, and a test behind a throwing `beforeAll` is replaced by one
+  failed `(unnamed)` case. Their behaviours read `pending`, and the failure
+  shows only in the exit code of `bun test`, which `plan:verify` has to judge
+  beside the report.
+
+A report carrying an error verifies nothing, and its type says so: verdicts
+exist only on a report with no error, and one with errors hands over what was
+seen under another name, for display. An undeclared id is reported once per id
+and file. The reader is strict about structure and refuses a DOCTYPE, an unknown
+entity, an element outside the junit vocabulary, a report over 32 × 2²⁰
+characters, an attribute over 2²⁰ characters and 64 levels of nesting, each as
+`blocked` with the reason. The caps count UTF-16 units, which is what the text
+handed over measures in, and never bytes. It is looser than XML 1.0 in one
+place: Bun writes a control character in a title both raw and as `&#1;`, and
+both pass.
+
 An element is `verified` when its step's verify commands pass *and* every
 behaviour naming it is `passing`; the page shows the behaviours under the
 element they cover.

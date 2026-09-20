@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="6" assertions="1" failures="2" skipped="2" time="0.025694">
+  <testsuite name="tests/probe-c.test.ts" file="tests/probe-c.test.ts" tests="6" assertions="1" failures="2" skipped="2" time="0" hostname="host">
+    <testsuite name="[AC-c-1] skipped suite" file="tests/probe-c.test.ts" line="2" tests="1" assertions="0" failures="0" skipped="1" time="0" hostname="host">
+      <testcase name="inner" classname="[AC-c-1] skipped suite" time="0" file="tests/probe-c.test.ts" line="2" assertions="0">
+        <skipped />
+      </testcase>
+    </testsuite>
+    <testcase name="[AC-c-2] expected failure" classname="" time="0.000095" file="tests/probe-c.test.ts" line="3" assertions="1" />
+    <testcase name="[AC-c-3] conditional" classname="" time="0" file="tests/probe-c.test.ts" line="4" assertions="0">
+      <skipped />
+    </testcase>
+    <testsuite name="hook dies" file="tests/probe-c.test.ts" line="5" tests="1" assertions="0" failures="1" skipped="0" time="0" hostname="host">
+      <testcase name="(unnamed)" classname="hook dies" time="0.000077" file="tests/probe-c.test.ts" assertions="0">
+        <failure type="AssertionError" />
+      </testcase>
+    </testsuite>
+    <testcase name="[AC-c-5] async reject" classname="" time="0.000111" file="tests/probe-c.test.ts" line="6" assertions="0">
+      <failure type="AssertionError" />
+    </testcase>
+    <testcase name="&#10;&#9;[AC-c-6] newline
+and	tab" classname="" time="0.000007" file="tests/probe-c.test.ts" line="7" assertions="0" />
+  </testsuite>
+</testsuites>

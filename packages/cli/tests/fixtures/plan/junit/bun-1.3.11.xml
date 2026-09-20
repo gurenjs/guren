@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="13" assertions="4" failures="2" skipped="2" time="0.135432">
+  <testsuite name="tests/probe-a.test.ts" file="tests/probe-a.test.ts" tests="12" assertions="4" failures="2" skipped="2" time="0" hostname="host">
+    <testsuite name="comments" file="tests/probe-a.test.ts" line="3" tests="11" assertions="4" failures="2" skipped="2" time="0.003" hostname="host">
+      <testsuite name="[AC-comments-1] store" file="tests/probe-a.test.ts" line="4" tests="3" assertions="3" failures="0" skipped="0" time="0.001" hostname="host">
+        <testcase name="creates a comment" classname="[AC-comments-1] store &amp;gt; comments" time="0.00123" file="tests/probe-a.test.ts" line="5" assertions="1" />
+        <testcase name="[AC-comments-2] accepts 1" classname="[AC-comments-1] store &amp;gt; comments" time="0.000373" file="tests/probe-a.test.ts" line="8" assertions="1" />
+        <testcase name="[AC-comments-2] accepts 2" classname="[AC-comments-1] store &amp;gt; comments" time="0" file="tests/probe-a.test.ts" line="8" assertions="1" />
+      </testsuite>
+      <testcase name="[AC-comments-3] skipped" classname="comments" time="0" file="tests/probe-a.test.ts" line="12" assertions="0">
+        <skipped />
+      </testcase>
+      <testcase name="[AC-comments-4] todo" classname="comments" time="0" file="tests/probe-a.test.ts" line="13" assertions="0">
+        <skipped message="TODO" />
+      </testcase>
+      <testcase name="[AC-comments-5] fails" classname="comments" time="0.003307" file="tests/probe-a.test.ts" line="14" assertions="1">
+        <failure type="AssertionError" />
+      </testcase>
+      <testcase name="[AC-comments-6] errors" classname="comments" time="0.000049" file="tests/probe-a.test.ts" line="17" assertions="0">
+        <failure type="AssertionError" />
+      </testcase>
+      <testcase name="[AC-comments-7] title with &lt;tag&gt; &amp; &quot;quotes&quot; and &apos;apos&apos; ]]&gt;&#1; é 日本語  end" classname="comments" time="0.000005" file="tests/probe-a.test.ts" line="20" assertions="0" />
+      <testcase name="[AC-x-1] twice [AC-x-1]" classname="comments" time="0" file="tests/probe-a.test.ts" line="21" assertions="0" />
+      <testcase name="[AC-x-2] and [AC-x-3] two ids" classname="comments" time="0" file="tests/probe-a.test.ts" line="22" assertions="0" />
+      <testcase name="[AC-comments-10] ten" classname="comments" time="0.00001" file="tests/probe-a.test.ts" line="23" assertions="0" />
+    </testsuite>
+    <testcase name="[AC-top-1] top level" classname="" time="0" file="tests/probe-a.test.ts" line="26" assertions="0" />
+  </testsuite>
+  <testsuite name="tests/probe-b.test.ts" file="tests/probe-b.test.ts" tests="1" assertions="0" failures="0" skipped="0" time="0" hostname="host">
+    <testsuite name="other file" file="tests/probe-b.test.ts" line="3" tests="1" assertions="0" failures="0" skipped="0" time="0" hostname="host">
+      <testcase name="[AC-comments-1] same id elsewhere" classname="other file" time="0.000041" file="tests/probe-b.test.ts" line="4" assertions="0" />
+    </testsuite>
+  </testsuite>
+</testsuites>
