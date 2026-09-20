@@ -8,7 +8,9 @@
 
 import { z } from 'zod'
 
-export const PLAN_VERSION = 1
+import { PLAN_VERSION } from './version'
+
+export { PLAN_VERSION }
 
 const NonEmptySchema = z.string().min(1)
 

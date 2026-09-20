@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { loadPlanDictionaries } from '../src/plan/locales'
-import { escapeJsonForScript, planTemplatePath, renderPlanHtml, type RenderPlanInput } from '../src/plan/render'
+import { escapeJsonForScript, planTemplateSource, renderPlanHtml, type RenderPlanInput } from '../src/plan/render'
 import { planDataBlock, planPageData } from './plan-fixture'
-import { openPlanPage, pageSentences, type Page, type PageNode, type PageOptions } from './plan-page-dom'
+import { openPlanPage, pageSentences, planPageSource, type Page, type PageNode, type PageOptions } from './plan-page-dom'
 import { RICH_CHECKS, richPlan } from './plan-page-rich'
 
 const LOCALE_KEY = 'guren.plan.locale'
@@ -252,7 +252,7 @@ describe('switching the locale', () => {
 })
 
 describe('the plan page source', () => {
-  const source = readFileSync(planTemplatePath(), 'utf8')
+  const source = planTemplateSource()
 
   test('should hide the locale switch in print with the rest of the controls', () => {
     const print = source.slice(source.indexOf('@media print'))
@@ -264,7 +264,7 @@ describe('the plan page source', () => {
 
   test('should take a template from the shipped dictionaries and from nowhere else', () => {
     // `phrase()` is the one reader of a dictionary; the third call is `formatText` handing on its own argument.
-    const calls = source
+    const calls = planPageSource()
       .split('\n')
       .filter((line) => /format(Into|Text)\(/.test(line) && !line.includes('function '))
       .map((line) => line.trim())

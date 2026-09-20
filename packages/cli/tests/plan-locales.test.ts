@@ -1,9 +1,9 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { planTemplatePath } from '../src/plan/render'
-import { PageDocument, pageFunctionSource, type PageNode } from './plan-page-dom'
+import { formatInto, formatText } from '../src/plan/page/locale'
+import { PageDocument, planPageSource, type PageNode } from './plan-page-dom'
 import { comparePlanDictionaries, loadPlanDictionaries, PLAN_LOCALES, type PlanDictionary } from '../src/plan/locales'
 
 const page = new PageDocument()
@@ -22,15 +22,20 @@ interface Formatter {
   formatText(template: string, values?: Values): string
 }
 
-const pageSource = readFileSync(planTemplatePath(), 'utf8')
+const pageSource = planPageSource()
 const rendererSource = readFileSync(join(import.meta.dir, '../src/plan/render.ts'), 'utf8')
 
-// oxlint-disable-next-line no-new-func -- the page is a classic script with no module to import
-const formatter = new Function(
-  'document',
-  `${['el', 'own', 'formatInto', 'formatText'].map((name) => pageFunctionSource(pageSource, name)).join('\n')}
-return { formatInto: formatInto, formatText: formatText }`,
-)(page) as Formatter
+// The page's own functions, handed the nodes this file can read back.
+const formatter = { formatInto, formatText } as unknown as Formatter
+
+// Installed for this file only: every suite of the package shares one process.
+beforeAll(() => {
+  Object.assign(globalThis, { document: page })
+})
+
+afterAll(() => {
+  delete (globalThis as { document?: unknown }).document
+})
 
 const dictionaries = loadPlanDictionaries()
 

@@ -10,13 +10,14 @@ import {
   escapeJsonForScript,
   planBreakingChanges,
   planLinks,
-  planTemplatePath,
+  planTemplateSource,
   renderPlanHtml,
   type PlanPagePayload,
 } from '../src/plan/render'
 import { PlanDraftSchema, PlanSchema, type PlanDraft } from '../src/plan/schema'
 import { parsePlanDocument, planOutputPath, renderPlanFile, type RenderPlanFileOptions } from '../src/plan-render'
 import { loadCommentsPlan, PAYLOADS, planAppState, planDataBlock, planPageData, TEST_BASELINE } from './plan-fixture'
+import { openPlanPage, planPageModule, planPageSource } from './plan-page-dom'
 
 function draft(): PlanDraft {
   return PlanDraftSchema.parse(loadCommentsPlan())
@@ -181,13 +182,18 @@ describe('the plan file name the page prints in a command', () => {
   })
 
   test('should be printed by the page in both revise commands', () => {
-    const html = renderPlanHtml({ plan: draft(), planFile: 'comments.plan.json' })
+    const page = openPlanPage(renderPlanHtml({ plan: draft(), planFile: 'comments.plan.json' }))
 
-    expect(html).toContain("var reviseCommand = 'bunx guren plan --revise ' + (data.planFile || '<plan.json>')")
-    expect(html).toContain("reviseCommand + ' --feedback feedback.json'")
+    expect(page.byId('revise-file-command').textContent).toBe('bunx guren plan --revise comments.plan.json --feedback feedback.json')
     // The stdin form the page's "Copy feedback" feeds (RFC 0030 §4): the pipe that
     // writes it is the reader's, since the clipboard command differs per system.
-    expect(html).toContain("reviseCommand + ' --feedback -'")
+    expect(page.byId('revise-stdin-command').textContent).toBe('bunx guren plan --revise comments.plan.json --feedback -')
+  })
+
+  test('should print a stand-in where no safe name was given', () => {
+    const page = openPlanPage(renderPlanHtml({ plan: draft(), planFile: 'plan.json; rm -rf ~' }))
+
+    expect(page.byId('revise-file-command').textContent).toBe('bunx guren plan --revise <plan.json> --feedback feedback.json')
   })
 })
 
@@ -204,7 +210,9 @@ describe('escapeJsonForScript', () => {
 })
 
 describe('the plan template', () => {
-  const source = readFileSync(planTemplatePath(), 'utf8')
+  // The document as it ships: the markup, the style, and the script the modules bundle into.
+  const source = planTemplateSource()
+  const modules = planPageSource()
 
   test.each([
     'innerHTML',
@@ -217,6 +225,7 @@ describe('the plan template', () => {
     'srcdoc',
   ])('should use no %s sink', (sink) => {
     expect(source).not.toContain(sink)
+    expect(modules).not.toContain(sink)
   })
 
   /**
@@ -230,16 +239,16 @@ describe('the plan template', () => {
     return match[1].split(';').map((directive) => directive.trim())
   })()
 
-  test.each([
-    "default-src 'none'",
-    "script-src 'unsafe-inline'",
-    "style-src 'unsafe-inline'",
-    'img-src data:',
-    "form-action 'none'",
-    "base-uri 'none'",
-    "require-trusted-types-for 'script'",
-  ])('should declare %s and nothing wider', (directive) => {
-    expect(policy).toContain(directive)
+  test('should declare these directives and nothing wider', () => {
+    expect(policy).toEqual([
+      "default-src 'none'",
+      "script-src 'unsafe-inline'",
+      "style-src 'unsafe-inline'",
+      'img-src data:',
+      "form-action 'none'",
+      "base-uri 'none'",
+      "require-trusted-types-for 'script'",
+    ])
   })
 
   test('should load nothing over the network', () => {
@@ -249,18 +258,20 @@ describe('the plan template', () => {
     expect(source).not.toMatch(/url\(\s*["']?(https?:)?\/\//)
     expect(source).not.toContain('fetch(')
     expect(source).not.toContain('XMLHttpRequest')
+    expect(source).not.toMatch(/<script[^>]*\ssrc=|<link\b|\bimport\s*\(/)
   })
 
-  test('should carry the data placeholder exactly once', () => {
-    expect(source.match(/__GUREN_PLAN_DATA__/g)).toHaveLength(1)
+  test('should carry the data placeholder exactly once, and no other', () => {
+    expect(source.match(/__GUREN_PLAN_[A-Z_]+__/g)).toEqual(['__GUREN_PLAN_DATA__'])
   })
 
   test('should build every id-keyed map through one factory', () => {
-    // A list of this file's variable names is an open roster: it grows whenever someone
+    // A list of the page's variable names is an open roster: it grows whenever someone
     // edits the page, and a map added without a row would be unguarded. One factory is a
     // closed rule, so this assertion covers maps nobody has written yet.
+    expect(modules.match(/Object\.create\(null\)/g)).toHaveLength(1)
     expect(source.match(/Object\.create\(null\)/g)).toHaveLength(1)
-    expect(source).toContain('function idMap() {')
+    expect(planPageModule('dom.ts')).toContain('export function idMap<T>(): IdMap<T> {')
   })
 
   test('should address only elements the document declares', () => {
@@ -268,9 +279,19 @@ describe('the plan template', () => {
     // this way, so an element removed or an id renamed on one side alone fails here
     // instead of throwing in a browser nobody watched.
     const declared = new Set(source.match(/\bid="([^"]+)"/g)?.map((attribute) => attribute.slice(4, -1)))
-    const addressed = [...source.matchAll(/getElementById\('([^']+)'\)/g)].map((match) => match[1])
+    const literal = [...modules.matchAll(/\bbyId(?:<[A-Za-z]+>)?\('([^']+)'\)/g)].map((match) => match[1])
+    // The two loops over a list of ids, which are read from the list they loop over.
+    const listed = [...modules.matchAll(/const (?:CHROME|REFUSED_CHROME) = \[([^\]]*)\]/g)].flatMap((match) =>
+      [...match[1]!.matchAll(/'([^']+)'/g)].map((id) => id[1]),
+    )
+    const addressed = [...literal, ...listed]
 
+    expect(literal.length).toBeGreaterThan(20)
+    expect(listed.length).toBeGreaterThan(3)
+    expect(modules.match(/\bbyId(?:<[A-Za-z]+>)?\((?!')[^)]*\)/g)).toEqual(['byId(id)', 'byId(id)'])
     expect(addressed.filter((id) => !declared.has(id))).toEqual([])
+    // `byId()` itself, and the hash an in-page link names: no third lookup goes around the rule above.
+    expect(modules.match(/getElementById\(/g)).toHaveLength(2)
     // And back: a command block the script never fills would print nothing at all.
     const commands = [...source.matchAll(/<pre class="command" id="([^"]+)"/g)].map((match) => match[1])
     expect(commands.filter((id) => !addressed.includes(id))).toEqual([])
@@ -279,16 +300,18 @@ describe('the plan template', () => {
 
   test('should hold the answers it exports in a list, not a map keyed by question id', () => {
     // Two questions may declare one id; a map would keep one and lose the other's answer.
-    expect(source).toContain('var answers = []')
+    expect(planPageModule('questions.ts')).toContain('const answers: Answer[] = []')
   })
 
   // `assets/`, not `templates/`: nothing copies this page into an application, and
   // CLAUDE.md's scaffold-template gates key on `packages/cli/templates/**`.
-  test('should resolve from the directory the published package ships', () => {
+  test('should be built into the directory the published package ships', () => {
     const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8'))
+    const build = readFileSync(join(import.meta.dir, '../scripts/build-plan-page.ts'), 'utf8')
 
-    expect(planTemplatePath()).toBe(join(import.meta.dir, '..', 'assets', 'plan', 'index.html'))
     expect(manifest.files).toContain('assets')
+    expect(manifest.scripts.build).toContain('scripts/build-plan-page.ts')
+    expect(build).toContain("join(packageRoot, 'assets/plan')")
   })
 })
 

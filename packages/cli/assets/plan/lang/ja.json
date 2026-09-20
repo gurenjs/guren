@@ -52,6 +52,9 @@
   "card.breaking": "破壊的変更: {reason}",
   "card.referencedBy": "参照元",
 
+  "version.heading": "このページではこのプランを表示できません",
+  "version.unsupported": "プランの planVersion は {found} ですが、このページは planVersion {supported} 用に作られています。プランを書き出したバージョンの guren で、もう一度レンダリングしてください。",
+
   "header.draft": "ドラフトです。ベースラインがないため、プランのハッシュはまだありません。",
   "scope.goals": "ゴール",
   "scope.nonGoals": "対象外",

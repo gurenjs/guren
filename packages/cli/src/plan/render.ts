@@ -9,12 +9,12 @@
  * holds both halves of that to the output.
  */
 
-import { readPlanAsset, type PlanAsset } from './assets'
-import { planDiagram, type PlanDiagram } from './diagram'
-import { layoutPlanFlows, type PlanFlowLayout } from './flow'
+import { readPlanTemplate } from './assets'
+import { planDiagram } from './diagram'
+import { layoutPlanFlows } from './flow'
 import { planHash } from './identity'
-import { loadPlanDictionaries, matchPlanLocale, type PlanDictionary, type PlanLocale } from './locales'
-import { listPlanElements, type Plan, type PlanDraft, type PlanElementSection } from './schema'
+import { loadPlanDictionaries, matchPlanLocale, type PlanLocale } from './locales'
+import { listPlanElements, type Plan, type PlanDraft } from './schema'
 
 /**
  * A `guren check` result that names the plan element it concerns. `elementId` is
@@ -40,62 +40,18 @@ export interface RenderPlanInput {
   uiLocale?: PlanLocale
 }
 
-export interface PlanBreakingChange {
-  elementId: string
-  section: PlanElementSection
-  title: string
-  /** A `breaking.*` key of the page's dictionaries: the page says it in whichever locale it speaks. */
-  reasonKey: string
-  reasonValues: Record<string, string>
-}
-
-/** The page's own words in every locale it can switch to, and the one it opens in. */
-export interface PlanPageI18n {
-  initial: PlanLocale
-  dictionaries: Record<PlanLocale, PlanDictionary>
-}
-
-/** One element in the page's own index: which entity's filter shows it. */
-export interface PlanElementEntry {
-  id: string
-  entity: string | null
-}
-
-/** One id referencing another, so the page can show a card's outgoing and incoming links. */
-export interface PlanLink {
-  from: string
-  to: string
-  label: string
-}
-
-export interface PlanPagePayload {
-  plan: PlanDraft | Plan
-  /** Absent for a draft: identity covers the baseline, which a draft does not have. */
-  planHash: string | null
-  checks: PlanCheckResult[]
-  breaking: PlanBreakingChange[]
-  diagram: PlanDiagram
-  /** Placed here rather than in the page: a flow's layout is the same everywhere it is drawn. */
-  flows: PlanFlowLayout[]
-  /** Absent when no name was given, or the given one is not safe to spell in a command. */
-  planFile: string | null
-  elements: PlanElementEntry[]
-  links: PlanLink[]
-  entities: string[]
-  status: unknown
-  i18n: PlanPageI18n
-}
+// Declared beside the page that reads them, so the two sides share one definition.
+export type { PlanBreakingChange, PlanElementEntry, PlanLink, PlanPageI18n, PlanPagePayload } from './page/payload'
+import type { PlanBreakingChange, PlanElementEntry, PlanLink, PlanPagePayload } from './page/payload'
 
 const DATA_PLACEHOLDER = '__GUREN_PLAN_DATA__'
 
 /** A bare file name with no shell metacharacter, no quote, no space and no path segment. */
 export const PLAN_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
-const template = (): PlanAsset => readPlanAsset('index.html')
-
-/** Exported for the source-level test that holds the page to its forbidden sinks. */
-export function planTemplatePath(): string {
-  return template().path
+/** The template a plan is rendered into, script included. Exported for the tests that hold the document to its rules. */
+export function planTemplateSource(): string {
+  return readPlanTemplate().source
 }
 
 /**
@@ -294,5 +250,5 @@ export function renderPlanHtml(input: RenderPlanInput): string {
   const payload = escapeJsonForScript(JSON.stringify(buildPlanPayload(input)))
   // A replacement *function*, never a string: `$&`, "$`" and `$'` anywhere in the plan
   // would otherwise be expanded by `replace` and corrupt the document.
-  return template().source.replace(DATA_PLACEHOLDER, () => payload)
+  return planTemplateSource().replace(DATA_PLACEHOLDER, () => payload)
 }
