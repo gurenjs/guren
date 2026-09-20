@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
 
 import type { PlanFlowLayout } from '../src/plan/flow'
-import { buildPlanPayload, planLinks, planTemplatePath, renderPlanHtml, type PlanPagePayload } from '../src/plan/render'
+import * as flowPage from '../src/plan/page/flow'
+import { buildPlanPayload, planLinks, planTemplateSource, renderPlanHtml, type PlanPagePayload } from '../src/plan/render'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { loadCommentsPlan, PAYLOADS, planPageData } from './plan-fixture'
-import { pageFunctionSource } from './plan-page-dom'
+import { pageFunctionSource, planPageSource, usePageDocument } from './plan-page-dom'
 
-const source = readFileSync(planTemplatePath(), 'utf8')
+const script = planPageSource()
 
 // Added here rather than to `comments.plan.json`: the schema, identity and validate
 // tests read that file too. One cycle (validate -> page), one async edge, one self-loop.
@@ -68,7 +68,7 @@ function layoutOf(flow: unknown): PlanFlowLayout {
   return buildPlanPayload({ plan: planWithFlows([flow]) }).flows[0]
 }
 
-const functionSource = (name: string): string => pageFunctionSource(source, name)
+const functionSource = (name: string): string => pageFunctionSource(script, name)
 
 class FakeNode {
   readonly attributes: Record<string, string> = {}
@@ -99,45 +99,16 @@ class FakeNode {
   }
 }
 
-/**
- * The page's own `drawFlow()`, run against the few DOM calls it makes. The closure is
- * assembled from the page source, so a change to the drawing is a change to what runs here.
- */
-const { drawFlow: drawFlowWith, flowBlocked, wrapSvgText } = (() => {
-  const constants = source.match(/^\s*var (FLOW_[A-Z_]+|ID_RE) = .+$/gm) ?? []
-  const functions = [
-    'idMap',
-    'anchorId',
-    'svgEl',
-    'svgText',
-    'svgTip',
-    'borderPoint',
-    'flowBox',
-    'flowArrow',
-    'flowBlocked',
-    'textUnits',
-    'fitPrefix',
-    'wrapSvgText',
-    'drawFlow',
-  ].map(functionSource)
-  const document = { createElementNS: (_namespace: string, tag: string) => new FakeNode(tag) }
-  // oxlint-disable-next-line no-new-func -- the page is a classic script with no module to import
-  const build = new Function(
-    'document',
-    `'use strict'\n${constants.join('\n')}\n${functions.join('\n')}\nreturn { drawFlow: drawFlow, flowBlocked: flowBlocked, wrapSvgText: wrapSvgText }`,
-  )
-  return build(document) as {
-    drawFlow: (flow: PlanFlowLayout, declared: object, label: string) => FakeNode
-    flowBlocked: (start: number[], end: number[], cells: object, from: object, to: object) => boolean
-    wrapSvgText: (text: string, limit: number, most: number) => string[]
-  }
-})()
+// The page's own drawing, imported; this answers the one DOM call it makes.
+usePageDocument({ createElementNS: (_namespace: string, tag: string) => new FakeNode(tag) })
+
+const { flowBlocked, wrapSvgText, FLOW_NODE_H, FLOW_GAP_Y } = flowPage
 
 /** Every element id of the fixture plan, as the page's own index holds them. */
 const DECLARED = Object.fromEntries(buildPlanPayload({ plan: planWithFlows() }).elements.map((element) => [element.id, true]))
 
 function drawFlow(flow: PlanFlowLayout, declared: object = DECLARED): FakeNode {
-  return drawFlowWith(flow, declared, `Flow: ${flow.title}`)
+  return flowPage.drawFlow(flow, declared, `Flow: ${flow.title}`) as unknown as FakeNode
 }
 
 function laneOf(edge: FakeNode): number {
@@ -339,8 +310,10 @@ describe('drawFlow', () => {
     let asked = 0
     const cells = new Proxy({}, { get: () => ((asked += 1), undefined) })
 
+    const box = { x: 0, y: 0, w: 0, h: 0 }
+
     // Two columns apart in a flow of any width: the cost is the span.
-    expect(flowBlocked([170, 28], [436, 28], cells, {}, {})).toBe(false)
+    expect(flowBlocked([170, 28], [436, 28], cells, box, { ...box })).toBe(false)
     expect(asked).toBeLessThan(10)
   })
 
@@ -352,9 +325,7 @@ describe('drawFlow', () => {
     const straight = layoutOf({ ...FLOW, edges: FLOW.edges.slice(0, 3) })
     const rows = Math.max(...straight.nodes.map((node) => node.row)) + 1
 
-    const size = (name: string) => Number(source.match(new RegExp(`var ${name} = (\\d+)`))?.[1])
-
-    expect(Number(drawFlow(straight).attributes.height)).toBe(rows * size('FLOW_NODE_H') + (rows - 1) * size('FLOW_GAP_Y'))
+    expect(Number(drawFlow(straight).attributes.height)).toBe(rows * FLOW_NODE_H + (rows - 1) * FLOW_GAP_Y)
   })
 
   test('should point one arrow head per drawn edge', () => {
@@ -397,7 +368,7 @@ describe('a flow whose strings are hostile', () => {
     const html = renderPlanHtml({ plan: hostileFlows(payload) })
     const closers = html.match(/<\/script/gi) ?? []
 
-    expect(closers).toHaveLength(source.match(/<\/script/gi)?.length ?? 0)
+    expect(closers).toHaveLength(planTemplateSource().match(/<\/script/gi)?.length ?? 0)
     expect(html).not.toContain(' ')
   })
 
@@ -424,8 +395,6 @@ describe('a flow whose strings are hostile', () => {
 })
 
 describe('the flow drawing in the page source', () => {
-  const script = source.slice(source.indexOf("'use strict'"))
-
   /**
    * Every site that writes an `href`. The two anchors take `'#' + anchor`, where `anchor`
    * came out of `anchorId()`; the third is the export's blob URL. A fourth is a new way
@@ -439,8 +408,8 @@ describe('the flow drawing in the page source', () => {
 
     expect(sites).toEqual([
       "node.setAttribute('href', '#' + anchor)",
-      "var a = svgEl('a', { href: '#' + anchor })",
       'anchor.href = url',
+      "const a = svgEl('a', { href: '#' + anchor })",
     ])
   })
 
@@ -453,7 +422,7 @@ describe('the flow drawing in the page source', () => {
   })
 
   test('should take the flow anchor from the gate every other anchor goes through', () => {
-    expect(functionSource('drawFlow')).toContain('var anchor = node.element && node.element in declared ? anchorId(node.element) : null')
+    expect(functionSource('drawFlow')).toContain('const anchor = node.element && node.element in declared ? anchorId(node.element) : null')
   })
 
   /**
@@ -503,10 +472,10 @@ describe('the flow drawing in the page source', () => {
     const render = functionSource('renderFlows')
 
     expect(render.match(/drawFlow\(/g)).toHaveLength(1)
-    expect(render).toContain('data.flows.forEach(')
+    expect(render).toContain('for (const flow of data.flows) {')
     expect(render).toContain('card({ id: flow.id, title: flow.title, change: change, body: body })')
     // `rename` carries `from` and `drop` a `reason`; the layout keeps the kind alone.
-    expect(render).toContain('declared[flow.id] ? declared[flow.id].change : { kind: flow.change }')
+    expect(render).toContain('declared[flow.id]?.change ?? { kind: flow.change }')
   })
 
   test('should name the SVG namespace once, as a constant and not a request', () => {

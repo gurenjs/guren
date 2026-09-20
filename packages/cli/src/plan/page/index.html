@@ -1,0 +1,1023 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      The plan is hostile input. `default-src 'none'` is what makes the page unable to
+      load or post anywhere; the two 'unsafe-inline' allowances cover this file's own
+      style and script, which are the only ones it has. `form-action` and `base-uri`
+      fall back to nothing rather than to `default-src`, so both are named.
+      `require-trusted-types-for` is for the version of this page that does not exist
+      yet: where it is enforced, a markup-writing sink someone adds later throws rather
+      than parsing a plan string as HTML.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'; require-trusted-types-for 'script'"
+    />
+    <title>Implementation plan</title>
+    <script>
+      // Guren UI switches themes on a `.dark` class rather than a media query, so that
+      // an app can drive it. A file opened from disk has no app, so it follows the OS.
+      ;(function () {
+        var dark = window.matchMedia('(prefers-color-scheme: dark)')
+        var apply = function () {
+          document.documentElement.classList.toggle('dark', dark.matches)
+        }
+        apply()
+        dark.addEventListener('change', apply)
+      })()
+    </script>
+    <style>
+      /*
+       * Guren UI's own tokens, copied from its `tokens.css`. Light is the docs light
+       * theme (white + crimson), dark the rose-pine-moon ground with the rose accent.
+       * The two font families are the one part not adopted: this page may make no
+       * request, so a face it cannot supply is a face some machine renders differently.
+       */
+      :root {
+        color-scheme: light;
+        --g-font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+        --g-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+        --g-page: #ffffff;
+        --g-panel: #ffffff;
+        --g-raised: #fffafa;
+        --g-ink: #1a1212;
+        --g-line: #e5e7eb;
+        --g-line-strong: #d1d5db;
+
+        --g-heading: #111827;
+        --g-text: #1f2937;
+        --g-text-2: #4b5563;
+        --g-muted: #9ca3af;
+
+        --g-accent: #db1b1b;
+        --g-accent-down: #b91c1c;
+        --g-accent-text: #991b1b;
+        --g-accent-tint: #fff1f2;
+        --g-on-accent: #fff5f5;
+
+        --g-ok: #286983;
+        --g-ok-chip: #56949f;
+        --g-ok-tint: rgba(86, 148, 159, 0.12);
+        --g-warn: #b45309;
+        --g-warn-chip: #ea9d34;
+        --g-warn-tint: rgba(234, 157, 52, 0.14);
+        --g-danger: #b91c1c;
+        --g-danger-chip: #f23a3a;
+        --g-danger-tint: #fff1f2;
+
+        --g-tick: linear-gradient(180deg, #ff3c28, #8b0000);
+
+        --g-r-ctl: 8px;
+        --g-r-card: 12px;
+        --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+      }
+
+      :root.dark,
+      .dark {
+        color-scheme: dark;
+        --g-page: #1a1a2e;
+        --g-panel: #1e1e34;
+        --g-raised: #232340;
+        --g-line: #2e2e4a;
+        --g-line-strong: #3d3d5c;
+
+        --g-heading: #e0def4;
+        --g-text: #e0def4;
+        --g-text-2: #908caa;
+        --g-muted: #6e6a86;
+
+        --g-accent-text: #eb6f92;
+        --g-accent-tint: rgba(235, 111, 146, 0.12);
+
+        --g-ok: #9ccfd8;
+        --g-ok-chip: #9ccfd8;
+        --g-ok-tint: rgba(156, 207, 216, 0.1);
+        --g-warn: #f6c177;
+        --g-warn-chip: #f6c177;
+        --g-warn-tint: rgba(246, 193, 119, 0.1);
+        --g-danger: #ffa5a5;
+        --g-danger-chip: #f23a3a;
+        --g-danger-tint: rgba(242, 58, 58, 0.12);
+
+        --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+        --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0 16px 64px;
+        background: var(--g-page);
+        color: var(--g-text);
+        font: 400 14px/1.6 var(--g-font-sans);
+        -webkit-font-smoothing: antialiased;
+        overflow-wrap: anywhere;
+      }
+
+      .wrap {
+        max-width: 1040px;
+        margin: 0 auto;
+      }
+
+      code,
+      .mono {
+        font-family: var(--g-font-mono);
+        font-size: 0.92em;
+      }
+
+      h1 {
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--g-heading);
+        margin: 28px 0 8px;
+      }
+
+      h2 {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--g-heading);
+        margin: 0 0 8px;
+      }
+
+      h3 {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--g-heading);
+        margin: 0;
+      }
+
+      h4 {
+        font: 500 11.5px/1.6 var(--g-font-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--g-muted);
+        margin: 14px 0 6px;
+      }
+
+      p {
+        margin: 0 0 10px;
+      }
+
+      ul {
+        margin: 0 0 10px;
+        padding-left: 20px;
+      }
+
+      a {
+        color: var(--g-accent-text);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
+      }
+
+      .lede {
+        color: var(--g-text-2);
+        font-size: 14px;
+        line-height: 1.7;
+        max-width: 56em;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+        color: var(--g-muted);
+        font-size: 0.85rem;
+        margin-bottom: 16px;
+      }
+
+      .panel,
+      .card {
+        background: var(--g-panel);
+        border: 1px solid var(--g-line);
+        border-radius: var(--g-r-card);
+        box-shadow: var(--g-shadow-card);
+      }
+
+      .panel {
+        padding: 14px 16px;
+        margin-bottom: 16px;
+      }
+
+      .grid2 {
+        display: grid;
+        gap: 0 24px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      /*
+       * Guren UI ships four badge kinds and says so: when four are not enough, grow the
+       * label vocabulary rather than the palette. `rename` therefore shares `alter`'s
+       * warn, and the label carries the distinction.
+       */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 2px 9px;
+        font: 500 12px/1.6 var(--g-font-mono);
+        white-space: nowrap;
+      }
+
+      .badge::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      .badge-add,
+      .badge-pass {
+        color: var(--g-ok);
+        background: var(--g-ok-tint);
+      }
+      .badge-alter,
+      .badge-rename,
+      .badge-warn {
+        color: var(--g-warn);
+        background: var(--g-warn-tint);
+      }
+      .badge-drop,
+      .badge-fail {
+        color: var(--g-danger);
+        background: var(--g-danger-tint);
+      }
+      .badge-existing,
+      .badge-kind {
+        color: var(--g-text-2);
+        background: var(--g-raised);
+        box-shadow: inset 0 0 0 1px var(--g-line);
+      }
+
+      .pinned {
+        border-left: 4px solid var(--g-danger);
+      }
+
+      .pinned-item {
+        padding: 8px 0;
+        border-top: 1px solid var(--g-line);
+      }
+
+      .pinned-item:first-of-type {
+        border-top: 0;
+      }
+
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin: 20px 0 12px;
+        border-bottom: 1px solid var(--g-line);
+      }
+
+      .tabs button {
+        position: relative;
+        padding: 9px 14px;
+        border: 0;
+        background: transparent;
+        color: var(--g-text-2);
+        font: 500 13.5px/1.45 var(--g-font-sans);
+        cursor: pointer;
+      }
+
+      .tabs button:hover {
+        color: var(--g-heading);
+      }
+
+      .tabs button[aria-selected='true'] {
+        color: var(--g-heading);
+        font-weight: 700;
+      }
+
+      /* The ember tick marks the current place. Guren UI allows it on the page title
+         or the active nav item and not on both, so the heading above stays plain. */
+      .tabs button[aria-selected='true']::after {
+        content: '';
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: -1px;
+        height: 3px;
+        border-radius: 2px 2px 0 0;
+        background: var(--g-tick);
+      }
+
+      .locale-switch {
+        margin-left: auto;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 16px;
+        margin-bottom: 14px;
+        font-size: 0.9rem;
+      }
+
+      select,
+      textarea,
+      input {
+        color: var(--g-text);
+        background: var(--g-panel);
+        border: 1px solid var(--g-line-strong);
+        border-radius: var(--g-r-ctl);
+        padding: 8px 12px;
+        font: 400 14px/1.5 var(--g-font-sans);
+        max-width: 100%;
+      }
+
+      select:focus,
+      textarea:focus,
+      input:focus {
+        outline: 2px solid var(--g-accent);
+        outline-offset: -1px;
+        border-color: transparent;
+      }
+
+      input[type='checkbox'],
+      input[type='radio'] {
+        accent-color: var(--g-accent);
+        padding: 0;
+      }
+
+      textarea {
+        width: 100%;
+        resize: vertical;
+        min-height: 2.2em;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .card {
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+
+      .card.sub {
+        border: 0;
+        border-left: 2px solid var(--g-line);
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        padding: 10px 0 10px 16px;
+        margin: 0 0 4px;
+      }
+
+      .card:target {
+        outline: 2px solid var(--g-accent);
+        outline-offset: 2px;
+      }
+
+      .card-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .card-id {
+        color: var(--g-muted);
+        font-size: 0.8rem;
+      }
+
+      /* A question mark is a badge like any other state: the kit has four, and this is
+         the warn one. It was a dashed outline, which belonged to no part of the kit. */
+      .depends {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 2px 9px;
+        font: 500 12px/1.6 var(--g-font-mono);
+        color: var(--g-warn);
+        background: var(--g-warn-tint);
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .depends::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      .facts {
+        display: block;
+        margin-top: 6px;
+        font-family: var(--g-font-mono);
+        font-size: 12.5px;
+        color: var(--g-text-2);
+        white-space: pre-wrap;
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 2px 12px;
+        font-size: 0.9rem;
+        margin: 8px 0 0;
+      }
+
+      .kv dt {
+        color: var(--g-muted);
+      }
+
+      .kv dd {
+        margin: 0;
+      }
+
+      .referenced-by {
+        margin: 10px 0 0;
+      }
+
+      .referenced-by .label {
+        font: 500 11.5px/1.6 var(--g-font-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--g-muted);
+        margin-right: 10px;
+      }
+
+      /* Quiet until it carries something: the page is a plan, and a card that nobody
+         has reviewed should show no review state at all. */
+      .mark {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 0;
+        border-radius: 999px;
+        padding: 2px 9px;
+        background: transparent;
+        color: var(--g-muted);
+        font: 500 12px/1.6 var(--g-font-mono);
+      }
+
+      .mark::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: 0.45;
+      }
+
+      .mark:hover {
+        color: var(--g-text-2);
+        background: var(--g-raised);
+      }
+
+      /*
+       * An element nobody has reviewed shows nothing until the pointer is on its card.
+       * Guarded by `hover`, because a touch screen has no pointer to reveal it with, and
+       * still reachable by keyboard: an element at `opacity: 0` is focusable, and taking
+       * focus brings it back.
+       */
+      @media (hover: hover) {
+        .mark-clean {
+          opacity: 0;
+        }
+
+        /* `:focus`, not `:focus-visible`: focus arriving from a script — following a
+           link to an element, restoring a position — has to reveal it too. */
+        .card:hover > .card-head > .mark-clean,
+        .mark-clean:focus,
+        .mark-clean[aria-expanded='true'] {
+          opacity: 1;
+        }
+      }
+
+      .mark[aria-expanded='true'] {
+        background: var(--g-raised);
+      }
+
+      .mark-approve,
+      .mark-approve:hover {
+        color: var(--g-ok);
+        background: var(--g-ok-tint);
+      }
+
+      .mark-changes,
+      .mark-changes:hover {
+        color: var(--g-danger);
+        background: var(--g-danger-tint);
+      }
+
+      .mark-noted,
+      .mark-noted:hover {
+        color: var(--g-text-2);
+        background: var(--g-raised);
+      }
+
+      .mark-approve::before,
+      .mark-changes::before,
+      .mark-noted::before {
+        opacity: 1;
+      }
+
+      .review {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--g-line);
+      }
+
+      .review .verdicts {
+        display: flex;
+        gap: 6px;
+      }
+
+      .review button {
+        display: inline-flex;
+        align-items: center;
+        padding: 5px 11px;
+        border-radius: var(--g-r-ctl);
+        border: 1px solid var(--g-line-strong);
+        background: var(--g-panel);
+        color: var(--g-text);
+        font: 700 12.5px/1.45 var(--g-font-sans);
+      }
+
+      .review button:hover {
+        border-color: var(--g-muted);
+      }
+
+      .review button[aria-pressed='true'] {
+        border-color: currentColor;
+      }
+
+      .review button.approve[aria-pressed='true'] {
+        color: var(--g-ok);
+        background: var(--g-ok-tint);
+      }
+
+      /* Outline, not a fill: the kit spends its one red fill per screen on the primary
+         action, and a destructive control gets an explicit verb instead. */
+      .review button.changes[aria-pressed='true'] {
+        color: var(--g-danger);
+        background: var(--g-danger-tint);
+      }
+
+      .review textarea {
+        flex: 1 1 260px;
+        min-height: 0;
+        padding: 6px 11px;
+        font-size: 13px;
+      }
+
+      fieldset.bare {
+        border: 0;
+        padding: 0;
+        margin: 0;
+      }
+
+      .question-option {
+        display: block;
+        padding: 6px 0;
+      }
+
+      .question-option .consequence {
+        display: block;
+        margin-left: 26px;
+        color: var(--g-muted);
+        font-size: 0.88rem;
+      }
+
+      .given-when-then {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 12px;
+        margin-top: 8px;
+        font-size: 0.9rem;
+      }
+
+      .given-when-then .label {
+        color: var(--g-muted);
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.04em;
+        padding-top: 2px;
+      }
+
+      /* Never scaled up: a collapsed two-table diagram stretched to the panel width
+         reads as empty boxes. It still shrinks to fit a narrow screen. */
+      .er {
+        max-width: 100%;
+        height: auto;
+        overflow: visible;
+      }
+
+      .er .box {
+        fill: var(--g-raised);
+        stroke: var(--g-line);
+      }
+
+      .er .box.add {
+        stroke: var(--g-ok);
+        stroke-width: 2;
+      }
+
+      .er .box.alter {
+        stroke: var(--g-warn);
+        stroke-width: 2;
+      }
+
+      .er .box.rename {
+        stroke: var(--g-warn);
+        stroke-width: 2;
+      }
+
+      .er .box.drop {
+        stroke: var(--g-danger);
+        stroke-width: 2;
+      }
+
+      .er .box.existing {
+        opacity: 0.6;
+      }
+
+      .er text {
+        fill: var(--g-text);
+        font-size: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .er text.title {
+        font-weight: 700;
+        font-family: inherit;
+      }
+
+      .er text.muted,
+      .er text.edge-label {
+        fill: var(--g-muted);
+        font-size: 11px;
+      }
+
+      .er line {
+        stroke: var(--g-muted);
+      }
+
+      .er line.relationship {
+        stroke-dasharray: 4 3;
+      }
+
+      .er g.table {
+        cursor: pointer;
+      }
+
+      /* The layout fixes a flow's width, so a narrow screen scrolls the picture inside
+         its card rather than shrinking the labels past reading. */
+      .flow-scroll {
+        overflow-x: auto;
+        margin-top: 10px;
+        padding: 2px;
+      }
+
+      .flow {
+        display: block;
+        overflow: visible;
+      }
+
+      .flow text {
+        fill: var(--g-text);
+        font-size: 12px;
+        font-family: var(--g-font-sans);
+      }
+
+      .flow text.title {
+        font-weight: 700;
+      }
+
+      .flow text.muted,
+      .flow text.edge-label {
+        fill: var(--g-muted);
+        font: 500 10px/1.4 var(--g-font-mono);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      /* A routed edge's stem shares the gap a label sits in; the halo keeps the label
+         readable where the two cross. */
+      .flow text.edge-label {
+        text-transform: none;
+        letter-spacing: 0;
+        paint-order: stroke;
+        stroke: var(--g-panel);
+        stroke-width: 4px;
+        stroke-linejoin: round;
+      }
+
+      .flow .box {
+        fill: var(--g-raised);
+        stroke: var(--g-line-strong);
+      }
+
+      /* An actor is who starts the flow and a store is where it lands; the middle is
+         the application. Three weights, not eight colours. */
+      .flow .box.actor,
+      .flow .box.external {
+        stroke: var(--g-text-2);
+        stroke-dasharray: 5 3;
+      }
+
+      .flow .box.store {
+        fill: var(--g-panel);
+        stroke: var(--g-ok-chip);
+      }
+
+      .flow .box.decision {
+        stroke: var(--g-warn-chip);
+      }
+
+      .flow .edge {
+        fill: none;
+        stroke: var(--g-muted);
+      }
+
+      .flow .edge.async {
+        stroke-dasharray: 4 3;
+      }
+
+      /* The edge that closes a loop, which took no part in the placement. */
+      .flow .edge.back {
+        stroke: var(--g-warn-chip);
+        stroke-dasharray: 2 3;
+      }
+
+      .flow .arrow {
+        fill: var(--g-muted);
+      }
+
+      .flow .arrow.back {
+        fill: var(--g-warn-chip);
+      }
+
+      .flow a:focus {
+        outline: none;
+      }
+
+      .flow a:focus-visible .box,
+      .flow a:hover .box {
+        stroke: var(--g-accent);
+        stroke-width: 2;
+      }
+
+      .footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--g-line);
+      }
+
+      /* The page's one primary action, which is where the kit spends its red fill. */
+      .footer-note {
+        flex: 1 0 100%;
+        margin: 0;
+      }
+
+      .command {
+        flex: 1 0 100%;
+        margin: 0;
+        padding: 14px 18px;
+        border-radius: var(--g-r-card);
+        background: var(--g-ink);
+        color: #fff5f5;
+        font: 400 12.5px/1.75 var(--g-font-mono);
+        overflow-x: auto;
+      }
+
+      .footer button.secondary {
+        background: var(--g-panel);
+        border-color: var(--g-line-strong);
+        color: var(--g-text);
+      }
+
+      .footer button.secondary:hover {
+        background: var(--g-raised);
+        border-color: var(--g-muted);
+      }
+
+      .footer button {
+        padding: 8px 16px;
+        border-radius: var(--g-r-ctl);
+        border: 1px solid transparent;
+        background: var(--g-accent);
+        color: var(--g-on-accent);
+        font: 700 13.5px/1.45 var(--g-font-sans);
+      }
+
+      .footer button:hover {
+        background: var(--g-accent-down);
+      }
+
+      .note {
+        color: var(--g-text-2);
+        font-size: 12.5px;
+        line-height: 1.7;
+      }
+
+      /* Machine-issued values are mono in this kit: ids, counts, badge labels. */
+      #visible-count,
+      .card-id,
+      .meta {
+        font-family: var(--g-font-mono);
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--g-accent);
+        outline-offset: 2px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      .section-title {
+        display: none;
+      }
+
+      /*
+       * Print is the document, not a screenshot of the review tool. Every section is
+       * shown and starts a page, the filter and the review controls go, and the ground
+       * is white whatever the screen theme is.
+       */
+      @media print {
+        @page {
+          size: A4;
+          margin: 18mm 16mm;
+        }
+
+        :root,
+        :root.dark {
+          color-scheme: light;
+          --g-page: #ffffff;
+          --g-panel: #ffffff;
+          --g-raised: #ffffff;
+          --g-line: #d1d5db;
+          --g-line-strong: #9ca3af;
+          --g-heading: #111827;
+          --g-text: #1f2937;
+          --g-text-2: #4b5563;
+          --g-muted: #6b7280;
+          --g-accent-text: #991b1b;
+          --g-shadow-card: none;
+        }
+
+        body {
+          padding: 0;
+          font-size: 10.5pt;
+        }
+
+        .wrap {
+          max-width: none;
+        }
+
+        /* Interactive furniture: none of it means anything on paper. */
+        .tabs,
+        .controls,
+        .review,
+        .mark,
+        .footer,
+        .er + .note {
+          display: none !important;
+        }
+
+        /* Every section prints, whichever tab the reviewer left open, and the filter
+           does not decide what a printed plan contains. */
+        [role='tabpanel'][hidden],
+        .card[hidden] {
+          display: block !important;
+        }
+
+        [role='tabpanel'],
+        #questions > .panel {
+          break-before: page;
+        }
+
+        /* A section the plan left empty is a blank page in a printed document. */
+        [role='tabpanel'].empty {
+          display: none !important;
+        }
+
+        /* An empty box to write in belongs to the review tool. The printed document
+           carries the question, its options and the one the plan assumed; a reviewer's
+           own answer travels in feedback.json. */
+        .question-answer {
+          display: none !important;
+        }
+
+        .section-title {
+          display: block;
+          margin: 0 0 14px;
+          padding-bottom: 6px;
+          border-bottom: 2px solid var(--g-line-strong);
+          font-size: 15pt;
+        }
+
+        header {
+          break-after: page;
+        }
+
+        .panel,
+        .card {
+          border-color: var(--g-line);
+          box-shadow: none;
+          break-inside: avoid;
+        }
+
+        .card.sub {
+          break-inside: avoid;
+        }
+
+        h2,
+        h3,
+        h4 {
+          break-after: avoid;
+        }
+
+        /* A badge carries the change kind, which is the one colour a printed plan
+           cannot do without. */
+        .badge,
+        .er .box {
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+        }
+
+        a {
+          text-decoration: none;
+        }
+
+        .er {
+          break-inside: avoid;
+        }
+
+        /* Paper does not scroll. */
+        .flow-scroll {
+          overflow: visible;
+        }
+
+        .flow {
+          max-width: 100%;
+          height: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <script type="application/json" id="plan-data">__GUREN_PLAN_DATA__</script>
+    <div class="wrap">
+      <header>
+        <h1 id="plan-title"></h1>
+        <p class="lede" id="plan-summary"></p>
+        <div class="meta" id="plan-meta"></div>
+        <div class="panel grid2" id="plan-scope"></div>
+      </header>
+      <section class="panel pinned" id="pinned" hidden></section>
+      <section id="questions"></section>
+      <nav class="tabs" id="tabs" role="tablist"></nav>
+      <div class="controls" id="controls">
+        <label for="entity-filter" id="entity-filter-label"></label>
+        <select id="entity-filter"></select>
+        <label><input type="checkbox" id="changes-only" /> <span id="changes-only-label"></span></label>
+        <span class="note" id="visible-count"></span>
+        <label class="locale-switch" id="locale-switch" hidden>
+          <span id="locale-switch-label"></span>
+          <select id="locale-select"></select>
+        </label>
+      </div>
+      <main id="panels"></main>
+      <div class="footer" id="footer">
+        <button type="button" id="copy"></button>
+        <button type="button" class="secondary" id="export"></button>
+        <span class="note" id="export-status" role="status" aria-live="polite"></span>
+        <p class="note footer-note" id="footer-note"></p>
+        <p class="note footer-note" id="footer-file-note"></p>
+        <pre class="command" id="revise-file-command"></pre>
+        <p class="note footer-note" id="footer-stdin-note"></p>
+        <pre class="command" id="revise-stdin-command"></pre>
+      </div>
+    </div>
+    <script>__GUREN_PLAN_SCRIPT__</script>
+  </body>
+</html>

@@ -52,6 +52,9 @@
   "card.breaking": "Breaking: {reason}",
   "card.referencedBy": "Referenced by",
 
+  "version.heading": "This page cannot show this plan",
+  "version.unsupported": "The plan declares planVersion {found}, and this page was built for planVersion {supported}. Render it again with the guren release that wrote the plan.",
+
   "header.draft": "Draft: no baseline, so no plan hash yet.",
   "scope.goals": "Goals",
   "scope.nonGoals": "Non-goals",

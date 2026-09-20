@@ -37,3 +37,6 @@ packages/plugin-agents/tests/workers/app/.cloudflare/
 # An in-memory SQLite URL reaching a driver that opens it as a path: the file
 # lands in the repo root, and the `:` in the name makes the checkout fail on Windows.
 file::memory:*
+
+# The plan page with its script bundled in, written by `packages/cli/scripts/build-plan-page.ts`.
+packages/cli/assets/plan/index.html

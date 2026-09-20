@@ -59,7 +59,7 @@
     "guren": "./dist/bin.js"
   },
   "scripts": {
-    "build": "bun --bun tsdown",
+    "build": "bun --bun tsdown && bun scripts/build-plan-page.ts",
     "dev": "bun --watch src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
