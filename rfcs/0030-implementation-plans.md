@@ -353,9 +353,43 @@ they concern, and `guren plan:approve` refuses while any remain.
 ### 3. The rendered plan
 
 `guren plan:render <plan>` writes one HTML file: a fixed template under
-`packages/cli/templates/plan/`, with the plan, the check results and (later)
+~~`packages/cli/templates/plan/`~~, with the plan, the check results and (later)
 the status inlined as `<script type="application/json">`. No network, no build
 step, opens from disk.
+
+**Amended in implementation (PR #915):** the template lives in
+`packages/cli/assets/plan/`. `templates/` holds what a scaffolder copies into
+an application, and the gates that read that tree (the scaffold typecheck, the
+starter audits) have nothing to say about a page the CLI renders itself.
+
+**Amended in implementation (PR #924):** `plan:render` runs the §2 checks
+itself, so the page never shows an unchecked plan as clean. `--app <dir>` names
+the application they read, the working directory by default.
+
+**Amended after acceptance (2026-09-20), the page's script is TypeScript.** The
+first page shipped as one HTML file holding some 2,700 lines of untyped script.
+Nothing ties that script to the schema: a field added to a plan, or renamed in
+one, is a field the page silently does not draw, and no gate notices. The
+script moves to `packages/cli/src/plan/page/*.ts`, typed against `Plan`,
+`PlanCheckResult` and the layout types, so a schema change the page has not
+followed fails `tsc`. The CLI's build bundles it into one classic script and
+writes it into the template, so `plan:render` still emits a single file with no
+external reference, and the CSP does not change. Three rules come with it:
+
+- The page refuses a `planVersion` it was not built for, and says so, rather
+  than drawing the parts it happens to understand.
+- A test walks `planDraftJsonSchema()` and fails on a property the page never
+  reads, with an explicit list for the ones it has no reason to show. The type
+  check catches a renamed field; only this catches an added one.
+- The security rules above stay rules about the page's source, and their tests
+  read the TypeScript modules: `textContent` only, the same three `href`
+  writes, one injection point for the data.
+
+React was considered and not taken. The page reads a document once and keeps
+almost no state; a runtime embedded in every rendered plan buys nothing for
+that, and the `textContent`-only guarantee would have to be restated through a
+dependency's renderer. JSX over the page's own DOM helper stays possible later
+and changes none of the above.
 
 Every string in a plan is model output, and under the `github` store some of
 it passed through an editable issue, so the page treats all of it as hostile:
@@ -455,6 +489,10 @@ reads the document from standard input, so the page's "Copy feedback" and a
 pipe (`pbpaste | guren plan --revise comments --feedback -`) replace the file;
 and under the served mode of §8, `--revise` reads the feedback the page has
 already saved, so `--feedback` is only ever needed for a file made elsewhere.
+The page shows both commands, the file form and the pipe, beside the buttons
+that produce their input. Feedback is read through one counting reader, file
+and standard input alike, and refused past 5 MiB: a size checked with `stat()`
+before the open is a race between the check and the read.
 
 Before approval, editing `plan.json` by hand is as legitimate as a revision:
 it is a JSON file, and `plan:render` re-validates it. Renaming a column does
@@ -903,7 +941,7 @@ The rendered HTML is never committed under either store.
 
 ### Package boundaries
 
-Everything lives in `@guren/cli` (`src/plan/`, `templates/plan/`, the harness
+Everything lives in `@guren/cli` (`src/plan/`, `assets/plan/`, the harness
 skill and hook). No runtime package changes. `zod` 4 is already a CLI
 dependency. `claude` and `gh` are optional external binaries: their absence is
 a clear error on the one command that needs them, and `plan:render`,
