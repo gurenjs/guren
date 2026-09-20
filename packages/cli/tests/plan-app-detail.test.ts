@@ -12,11 +12,16 @@ const ROOT_PREFIX = 'guren-plan-app-detail-'
 let ROOT: string
 
 const CONTROLLER = `import { Controller } from '@guren/core'
+import { PostPayloadSchema } from '../Validators/PostValidator.js'
 
 export class PostController extends Controller {
   async index() {
     // this.inertia('posts/Commented', {})
     return this.inertia('posts/Index', { posts: [] })
+  }
+  async store() {
+    await this.validateBody(PostPayloadSchema)
+    return this.redirect('/posts')
   }
   async destroy() {
     await this.authorize('delete', null)
@@ -25,12 +30,15 @@ export class PostController extends Controller {
 }
 `
 
+// `OrphanPayloadSchema` is imported and never used: the leftover a deleted call leaves.
 const WEB_ROUTES = `import type { Router } from '@guren/core'
 import { PostController } from '../app/Http/Controllers/PostController.js'
+import { OrphanPayloadSchema, PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
 import { registerAdminRoutes } from './admin.js'
 
 export function registerWebRoutes(router: Router): void {
   router.get('/posts', [PostController, 'index']).name('posts.index')
+  router.post('/posts', { name: 'posts.store', body: PostPayloadSchema }, [PostController, 'store'])
   registerAdminRoutes(router)
 }
 `
@@ -64,9 +72,20 @@ const FILES: Record<string, string> = {
   'routes/web.ts': WEB_ROUTES,
   'routes/admin.ts': ROUTE_FILE('registerAdminRoutes', 'AdminSchema'),
   'routes/orphan.ts': ROUTE_FILE('registerOrphanRoutes', 'OrphanSchema'),
-  'app/Http/Validators/PostValidator.ts': 'export const PostPayloadSchema = 1\nexport function helper() {}\nconst hidden = 2\nvoid hidden\n',
+  'app/Http/Validators/PostValidator.ts':
+    'export const PostPayloadSchema = { safeParse: () => ({ success: true, data: {} }) }\nexport const OrphanPayloadSchema = 2\nexport function helper() {}\nconst hidden = 3\nvoid hidden\n',
   'app/Models/Broken.ts': 'export const notAModel = 1\n',
   ...BILLING_MODULE,
+}
+
+/** The same kinds of file inside a module, for the app root each detail entry reports. */
+const BILLING_FILES: Record<string, string> = {
+  'modules/billing/app/Models/Invoice.ts': "import { defineModel } from '@guren/core'\nimport { invoices } from '../../db/schema'\n\nexport class Invoice extends defineModel(invoices) {}\n",
+  'modules/billing/app/Http/Controllers/InvoiceController.ts': "import { Controller } from '@guren/core'\n\nexport class InvoiceController extends Controller {\n  async index() {}\n}\n",
+  'modules/billing/app/Http/Validators/InvoiceValidator.ts': 'export const InvoicePayloadSchema = 1\n',
+  'modules/billing/app/Http/Resources/InvoiceResource.ts': 'export class InvoiceResource {}\n',
+  'modules/billing/app/Policies/InvoicePolicy.ts': 'export class InvoicePolicy {}\n',
+  'modules/billing/app/Jobs/ChargeInvoice.ts': 'export class ChargeInvoice {}\n',
 }
 
 function entry(options: string, imports = "import { registerWebRoutes } from '../routes/web.js'\nimport billing from '../modules/billing/index.js'\n"): string {
@@ -102,6 +121,7 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.mounts).toEqual({ entry: 'mounted', modules: { billing: 'mounted' } })
     expect(detail.routes).toMatchObject([
       { name: 'posts.index', action: 'PostController.index', module: null },
+      { name: 'posts.store', action: 'PostController.store', module: null },
       { name: 'invoices.index', module: 'billing' },
     ])
   })
@@ -136,20 +156,25 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.mounts.entry).toEqual({ unconfirmed: expect.stringContaining('object literal') })
   })
 
-  test('should mark a routes file reached only when the entry calls its registrar', async () => {
-    const detail = await detailOf('reached', { 'src/app.ts': entry('{ routes: registerWebRoutes }') })
+  test('should call only the routes file it loaded the entry, and leave a leftover import out of a file its identifiers', async () => {
+    const detail = await detailOf('routefiles', { 'src/app.ts': entry('{ routes: registerWebRoutes }') })
 
-    const reached = Object.fromEntries(detail.routeFiles.map((file) => [file.file, file.reached]))
-    expect(reached).toMatchObject({ 'routes/web.ts': true, 'routes/admin.ts': true, 'routes/orphan.ts': false })
-    expect(detail.routeFiles.find((file) => file.file === 'routes/orphan.ts')!.identifiers).toContain('OrphanSchema')
+    const entries = Object.fromEntries(detail.routeFiles.map((file) => [file.file, file.entry]))
+    expect(entries).toMatchObject({ 'routes/web.ts': true, 'routes/admin.ts': false, 'routes/orphan.ts': false })
+
+    const web = detail.routeFiles.find((file) => file.file === 'routes/web.ts')!
+    expect(web.contractIdentifiers).toEqual(['PostPayloadSchema'])
+    expect(web.identifiers).toContain('PostPayloadSchema')
+    expect(web.identifiers).not.toContain('OrphanPayloadSchema')
   })
 
-  test('should read an action body without its comments', async () => {
+  test('should read an action body without its comments, and the schemas it validates with', async () => {
     const detail = await detailOf('actions', { 'src/app.ts': entry('{ routes: registerWebRoutes }') })
 
     expect(detail.actions).toMatchObject([
-      { key: 'PostController.index', pages: ['posts/Index'], calls: ['inertia'], abilities: [] },
-      { key: 'PostController.destroy', pages: [], calls: ['authorize', 'redirect'], abilities: ['delete'] },
+      { key: 'PostController.index', pages: ['posts/Index'], calls: ['inertia'], abilities: [], validates: [] },
+      { key: 'PostController.store', calls: ['validateBody', 'redirect'], validates: ['PostPayloadSchema'] },
+      { key: 'PostController.destroy', pages: [], calls: ['authorize', 'redirect'], abilities: ['delete'], validates: [] },
     ])
   })
 
@@ -157,10 +182,26 @@ describe('loadPlanAppState({ detail: true })', () => {
     const detail = await detailOf('names', { 'src/app.ts': entry('{ routes: registerWebRoutes }') })
 
     expect(detail.validators).toEqual([
-      { name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts' },
-      { name: 'helper', file: 'app/Http/Validators/PostValidator.ts' },
+      { name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null },
+      { name: 'OrphanPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null },
+      { name: 'helper', file: 'app/Http/Validators/PostValidator.ts', module: null },
     ])
     expect(detail.unparsedModelFiles).toEqual(['app/Models/Broken.ts'])
+  })
+
+  test('should report the app root every discovered element came from', async () => {
+    const detail = await detailOf('roots', { ...BILLING_FILES, 'src/app.ts': entry('{ routes: registerWebRoutes, modules: [billing] }') })
+
+    expect(detail.models).toContainEqual(expect.objectContaining({ className: 'Invoice', module: 'billing' }))
+    expect(detail.controllers).toEqual([
+      { className: 'PostController', module: null },
+      { className: 'InvoiceController', module: 'billing' },
+    ])
+    expect(detail.actions).toContainEqual(expect.objectContaining({ key: 'InvoiceController.index', module: 'billing' }))
+    expect(detail.validators).toContainEqual({ name: 'InvoicePayloadSchema', file: 'modules/billing/app/Http/Validators/InvoiceValidator.ts', module: 'billing' })
+    expect(detail.resources).toEqual([{ className: 'InvoiceResource', module: 'billing' }])
+    expect(detail.policies).toEqual([{ className: 'InvoicePolicy', module: 'billing' }])
+    expect(detail.sideEffects.job).toEqual([{ className: 'ChargeInvoice', module: 'billing' }])
   })
 
   test('should report the validators unreadable when a file re-exports names it does not declare', async () => {

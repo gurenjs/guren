@@ -9,7 +9,7 @@
 import { relative, resolve } from 'node:path'
 import type { File, Node, Statement } from '@babel/types'
 
-import { unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
+import { unwrapTypeAssertion, propertyValue, topLevelDeclaration, walk, memberKeyName } from '../ast-walk'
 import { createAppOptions } from '../config-check'
 import type { ContextRoute } from '../context-route'
 import { blankCommentsAndStrings, type ControllerMethodScan } from '../controller-methods'
@@ -20,12 +20,13 @@ import {
   discoverListenerFiles,
   discoverModelFiles,
   discoverModuleRoutesFiles,
+  discoverPolicyFiles,
+  discoverResourceFiles,
   discoverRoutesFiles,
   discoverValidatorFiles,
   excludeBarrelFiles,
-  findFirstExisting,
+  moduleNameFor,
   moduleNameFromRelPath,
-  moduleRoutesEntryCandidates,
   toPosixRelative,
 } from '../discovery'
 import { extractInertiaPageRefs, describeInertiaPagePropKeys } from '../inertia-pages'
@@ -34,13 +35,19 @@ import type { PagePropKeys } from '../page-props-extractor'
 import { ParseCache } from '../parse-cache'
 import { resolveAppEntry } from '../provider-registrar'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../route-registrar'
-import { checkRouteRegistrarWiring, ROUTE_REGISTRAR_KEY_PREFIX } from '../routes-check'
 import { importsByLocal, specifierBase } from '../schema-binding'
 import { readSchemaTables, type SourcedSchemaTable } from '../schema-runtime'
 import type { PlanAppUnreadable } from './app-state'
 
 /** `mounted`, or why this command could not confirm it. Absence of evidence is never `mounted`. */
 export type PlanAppMount = 'mounted' | { unconfirmed: string }
+
+/**
+ * The app root a file sits in: a module name, or `null` for the project root. A plan
+ * element names the same thing with its optional `module`, and comparing the two is
+ * what keeps a same-named element in another root from satisfying it.
+ */
+export type PlanAppScope = string | null
 
 export interface PlanAppRouteDetail {
   name?: string
@@ -62,6 +69,7 @@ export interface PlanAppRouteDetail {
 
 export interface PlanAppModelDetail {
   className: string
+  module: PlanAppScope
   /** The table identifier the class binds, when the parser could read it. */
   table?: string
   relationships: ModelRelationship[]
@@ -71,14 +79,17 @@ export interface PlanAppModelDetail {
 export interface PlanAppActionDetail {
   /** `ClassName.action`. */
   key: string
+  module: PlanAppScope
   /** Inertia page ids the body returns. */
   pages: string[]
   /** `this.<member>(` calls in the body, comments and strings excluded. */
   calls: string[]
   /** Abilities passed to `this.authorize()` / `this.can()` as a string literal. */
   abilities: string[]
-  /** Identifiers the body mentions, comments and strings excluded. */
+  /** Identifiers the body mentions, comments and strings excluded: a mention, not a use. */
   identifiers: string[]
+  /** Schemas handed to `this.validateBody/Query/Params(`, which is a use. */
+  validates: string[]
 }
 
 export interface PlanAppPageDetail {
@@ -90,14 +101,27 @@ export interface PlanAppValidatorDetail {
   /** The exported schema symbol, which is how a plan names a validator. */
   name: string
   file: string
+  module: PlanAppScope
+}
+
+/** A class a plan names and a directory scan discovers, for the kinds with no other reader. */
+export interface PlanAppClassDetail {
+  className: string
+  module: PlanAppScope
 }
 
 export interface PlanAppRouteFile {
   file: string
-  module: string | null
-  /** The file is its scope's entry, or `guren check` found its registrar called from it. */
-  reached: boolean
+  /**
+   * The routes file the CLI loaded, which is the only one `mounts.entry` is evidence
+   * about: a module's registrar is named by `defineModule({ routes })`, and picking
+   * its entry by filename would be a guess.
+   */
+  entry: boolean
+  /** Identifiers outside the import and re-export statements: a mention, not a use. */
   identifiers: string[]
+  /** Schemas a route contract's `body` / `params` / `query` names, which is a use. */
+  contractIdentifiers: string[]
 }
 
 export type PlanAppSideEffectKind = 'job' | 'event' | 'listener'
@@ -112,12 +136,15 @@ export interface PlanAppDetail {
   /** Files under a models directory that yielded no model class, app-relative. */
   unparsedModelFiles: string[]
   actions: PlanAppActionDetail[] | PlanAppUnreadable
+  controllers: PlanAppClassDetail[] | PlanAppUnreadable
   /** Controller class names two files declare: a route names a class, never a file. */
   controllerCollisions: string[]
   pages: PlanAppPageDetail[] | PlanAppUnreadable
   validators: PlanAppValidatorDetail[] | PlanAppUnreadable
+  resources: PlanAppClassDetail[]
+  policies: PlanAppClassDetail[]
   routeFiles: PlanAppRouteFile[]
-  sideEffects: Record<PlanAppSideEffectKind, string[]>
+  sideEffects: Record<PlanAppSideEffectKind, PlanAppClassDetail[]>
 }
 
 /** What `loadPlanAppState()` already holds when it asks for the detail. */
@@ -136,6 +163,10 @@ export interface PlanAppDetailInput {
 const IDENTIFIER_PATTERN = /[A-Za-z_$][\w$]*/g
 const MEMBER_CALL_PATTERN = /\bthis\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g
 const ABILITY_PATTERN = /\bthis\s*\.\s*(?:authorize|can)\s*\(\s*(['"`])([^'"`]+)\1/g
+const VALIDATE_CALL_PATTERN = /\bthis\s*\.\s*validate(?:Body|Query|Params)\s*\(\s*([A-Za-z_$][\w$]*)/g
+
+/** Route contract keys (`RouteContractOptions`) whose value is a schema. */
+const CONTRACT_SCHEMA_KEYS = new Set(['body', 'params', 'query'])
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -149,11 +180,13 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
   const { root } = input
   const cache = new ParseCache()
 
-  const [tables, models, pages, validators, routeFiles, sideEffects, mounts] = await Promise.all([
+  const [tables, models, pages, validators, resources, policies, routeFiles, sideEffects, mounts] = await Promise.all([
     tableDetail(root),
     modelDetail(root, input.models),
     pageDetail(root, input.pages),
     validatorDetail(root, cache),
+    classDetail(root, discoverResourceFiles),
+    classDetail(root, discoverPolicyFiles),
     routeFileDetail(root, cache, input.routesFile),
     sideEffectDetail(root),
     mountDetail(root, cache, input),
@@ -165,9 +198,11 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     mounts,
     tables,
     ...models,
-    ...actionDetail(input.controllers),
+    ...actionDetail(root, input.controllers),
     pages,
     validators,
+    resources,
+    policies,
     routeFiles,
     sideEffects,
   }
@@ -216,8 +251,9 @@ async function modelDetail(
     const [models, files] = await Promise.all([discoverParsedModels(root), discoverModelFiles(root)])
     const parsed = new Set(models.map((model) => model.relPath))
     return {
-      models: models.map(({ info }) => ({
+      models: models.map(({ info, module }) => ({
         className: info.className,
+        module,
         table: info.tableName,
         relationships: info.relationships,
         fillable: info.fillable,
@@ -230,22 +266,35 @@ async function modelDetail(
 }
 
 function actionDetail(
+  root: string,
   controllers: ControllerMethodScan | PlanAppUnreadable,
-): Pick<PlanAppDetail, 'actions' | 'controllerCollisions'> {
-  if (!('methods' in controllers)) return { actions: controllers, controllerCollisions: [] }
+): Pick<PlanAppDetail, 'actions' | 'controllers' | 'controllerCollisions'> {
+  if (!('methods' in controllers)) return { actions: controllers, controllers, controllerCollisions: [] }
   const actions = [...controllers.methods].map(([key, info]): PlanAppActionDetail => {
     // A page id and an ability are string contents, which only the raw body holds; the
     // blanked body, offsets preserved, says whether a match there is code or a comment.
     const isCode = (index: number): boolean => info.body.startsWith('this', index)
     return {
       key,
+      module: moduleNameFor(root, resolve(root, info.filePath)),
       pages: extractInertiaPageRefs(info.rawBody, isCode).map((ref) => ref.id),
       calls: unique([...info.body.matchAll(MEMBER_CALL_PATTERN)].map((match) => match[1]!)),
       abilities: unique([...info.rawBody.matchAll(ABILITY_PATTERN)].filter((match) => isCode(match.index)).map((match) => match[2]!)),
       identifiers: unique(info.body.match(IDENTIFIER_PATTERN) ?? []),
+      validates: unique([...info.body.matchAll(VALIDATE_CALL_PATTERN)].map((match) => match[1]!)),
     }
   })
-  return { actions, controllerCollisions: unique(controllers.collisions.map((collision) => collision.className)) }
+  return {
+    actions,
+    controllers: [...controllers.classFiles].map(([className, relPath]) => ({ className, module: moduleNameFor(root, resolve(root, relPath)) })),
+    controllerCollisions: unique(controllers.collisions.map((collision) => collision.className)),
+  }
+}
+
+/** Classes a directory scan discovers, each tagged with the app root it came from. */
+async function classDetail(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<PlanAppClassDetail[]> {
+  const files = excludeBarrelFiles(await discover(root).catch((): string[] => []))
+  return files.map((file) => ({ className: classNameFromPath(file), module: moduleNameFor(root, file) }))
 }
 
 async function pageDetail(root: string, pages: string[] | PlanAppUnreadable): Promise<PlanAppDetail['pages']> {
@@ -287,31 +336,48 @@ async function validatorDetail(root: string, cache: ParseCache): Promise<PlanApp
     const names = parsed ? exportedNames(parsed.ast) : null
     // One unread file makes every absent name unprovable, as with the controller scan.
     if (names === null) return { unreadable: `${file} could not be read for its exported schemas` }
-    validators.push(...names.filter((name) => name !== 'default').map((name) => ({ name, file })))
+    const module = moduleNameFromRelPath(file)
+    validators.push(...names.filter((name) => name !== 'default').map((name) => ({ name, file, module })))
   }
   return validators
 }
 
+/**
+ * Identifiers outside the import and re-export statements, the split `routes-check.ts`
+ * makes for the same reason: a leftover import naming a symbol is not a use of it.
+ */
+function statementIdentifiers(source: string, ast: File): string[] {
+  const scrubbed = blankCommentsAndStrings(source, ast)
+  const statements = ast.program.body.filter(
+    (node) =>
+      node.type !== 'ImportDeclaration'
+      && node.type !== 'ExportAllDeclaration'
+      && !(node.type === 'ExportNamedDeclaration' && node.source),
+  )
+  return unique(statements.flatMap((node) => scrubbed.slice(node.start ?? 0, node.end ?? 0).match(IDENTIFIER_PATTERN) ?? []))
+}
+
+/**
+ * Schemas a route contract names. The object literal is not required to be a route
+ * option argument: `resource()` expansions and option objects built by a helper carry
+ * the same keys, and a narrower test would miss them.
+ */
+function contractIdentifiers(ast: File): string[] {
+  const names: string[] = []
+  walk(ast.program, (node) => {
+    if (node.type !== 'ObjectProperty') return
+    const key = memberKeyName(node as unknown as { computed?: boolean; key: { type: string; name?: string; value?: unknown } })
+    if (key === undefined || !CONTRACT_SCHEMA_KEYS.has(key)) return
+    const value = unwrapTypeAssertion(node.value as Node)
+    if (value.type === 'Identifier') names.push(value.name)
+  })
+  return unique(names)
+}
+
 async function routeFileDetail(root: string, cache: ParseCache, routesFile: string | undefined): Promise<PlanAppRouteFile[]> {
   const moduleRoutes = await discoverModuleRoutesFiles(root)
-  const moduleEntries = await Promise.all(
-    moduleRoutes.map(({ dir }) => findFirstExisting(root, moduleRoutesEntryCandidates(toPosixRelative(root, dir)))),
-  )
-  const entries = new Set([routesFile, ...moduleEntries].filter((file): file is string => typeof file === 'string'))
-
-  let reachedByCheck = new Set<string>()
-  try {
-    const results = await checkRouteRegistrarWiring({ cwd: root, cache, routesFile })
-    const prefix = ROUTE_REGISTRAR_KEY_PREFIX
-    reachedByCheck = new Set(
-      results.filter((result) => result.status === 'pass' && result.key.startsWith(prefix)).map((result) => result.key.slice(prefix.length)),
-    )
-  } catch {
-    // Without the wiring check no file beyond an entry counts as reached.
-  }
-
   const files = unique([
-    ...entries,
+    ...(routesFile === undefined ? [] : [routesFile]),
     ...(await discoverRoutesFiles(root)).map((file) => toPosixRelative(root, file)),
     ...moduleRoutes.flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
   ])
@@ -320,21 +386,22 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
   for (const file of files) {
     const parsed = await cache.get(resolve(root, file))
     if (!parsed) continue
-    const scrubbed = blankCommentsAndStrings(parsed.source, parsed.ast)
     details.push({
       file,
-      module: moduleNameFromRelPath(file),
-      reached: entries.has(file) || reachedByCheck.has(file),
-      identifiers: unique(scrubbed.match(IDENTIFIER_PATTERN) ?? []),
+      entry: file === routesFile,
+      identifiers: statementIdentifiers(parsed.source, parsed.ast),
+      contractIdentifiers: contractIdentifiers(parsed.ast),
     })
   }
   return details
 }
 
 async function sideEffectDetail(root: string): Promise<PlanAppDetail['sideEffects']> {
-  const named = async (discover: (appRoot: string) => Promise<string[]>): Promise<string[]> =>
-    excludeBarrelFiles(await discover(root).catch((): string[] => [])).map(classNameFromPath)
-  const [job, event, listener] = await Promise.all([named(discoverJobFiles), named(discoverEventFiles), named(discoverListenerFiles)])
+  const [job, event, listener] = await Promise.all([
+    classDetail(root, discoverJobFiles),
+    classDetail(root, discoverEventFiles),
+    classDetail(root, discoverListenerFiles),
+  ])
   return { job, event, listener }
 }
 

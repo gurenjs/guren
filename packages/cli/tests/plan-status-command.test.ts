@@ -212,6 +212,42 @@ throw new Error('DATABASE_URL is not set')
     expect(output).toContain('Planned, not checkable:')
   })
 
+  test('should never call a validator wired on a leftover import in the routes file', async () => {
+    const app = await createApp('leftover-import', {
+      ...COMMENTS_APP,
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+import { CommentPayloadSchema } from '../app/Http/Validators/CommentValidator.js'
+import { registerCommentRoutes } from './comments.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostController, 'index']).name('posts.index')
+  registerCommentRoutes(router)
+}
+`,
+      'app/Http/Controllers/CommentController.ts': "import { Controller } from '@guren/core'\n\nexport class CommentController extends Controller {\n  async store() {\n    return this.redirect('/posts')\n  }\n}\n",
+    })
+
+    const result = await report(await writePlan('leftover-import.plan.json'), app)
+
+    expect(states(result)['action.comments.store']).toBe('wired')
+    expect(states(result)['validator.comment']).toBe('present')
+    expect(result.elements.find((element) => element.id === 'validator.comment')!.notes).toEqual([
+      expect.stringContaining('no route contract names it and no action body validates with it'),
+    ])
+  })
+
+  test('should never call an element the plan puts in a module present on a same-named one at the project root', async () => {
+    const document = loadCommentsPlan()
+    const models = document.models as Array<Record<string, unknown>>
+    models.find((model) => model.id === 'model.comment')!.module = 'billing'
+
+    const result = await report(await writePlan('module.plan.json', document), await createApp('module-scope', COMMENTS_APP))
+
+    expect(states(result)['model.comment']).toBe('planned')
+    expect(states(result)['column.comment.id']).toBe('blocked')
+  })
+
   test('should fail only when the plan cannot be read', async () => {
     const app = await createApp('unreadable-plan', BASE_APP)
 

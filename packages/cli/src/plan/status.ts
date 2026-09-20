@@ -185,6 +185,32 @@ function inSection(section: PlanAppNames, name: string, what: string): Existence
   return section.includes(name) ? 'yes' : 'no'
 }
 
+/**
+ * Narrows a name match to the app root the plan puts the element in: `modules/<name>`,
+ * or the project root when the plan states none. `found` is what the scan found under
+ * that name, `undefined` meaning no reader says where any of it came from — which is
+ * unknown whichever root the plan names, since a match either way would be a guess.
+ */
+function inScope(
+  exists: Existence,
+  declared: string | undefined,
+  found: ReadonlyArray<{ module: string | null }> | undefined,
+  what: string,
+): Existence {
+  if (exists !== 'yes') return exists
+  if (found === undefined) return { unknown: `nothing reads which app root each ${what} sits in` }
+  return found.some((entry) => entry.module === (declared ?? null)) ? 'yes' : 'no'
+}
+
+/** The entries of a detail section a name matches, or `undefined` when the section could not be read. */
+function matching<T>(section: T[] | PlanAppUnreadable | undefined, match: (entry: T) => boolean): T[] | undefined {
+  return section === undefined || isUnreadable(section) ? undefined : section.filter(match)
+}
+
+function scopeName(module: string | undefined): string {
+  return module ? `modules/${module}` : 'the project root'
+}
+
 function tableUnread(table: SourcedSchemaTable | PlanAppUnreadable | undefined): table is PlanAppUnreadable {
   return table !== undefined && 'unreadable' in table
 }
@@ -206,8 +232,8 @@ export function judgePlan(plan: PlanDraft, app: PlanAppState): PlanStatus {
     ]),
     ...plan.routes.map((route) => context.route(route)),
     ...plan.views.map((view) => context.view(view)),
-    ...plan.resources.map((resource) => context.named('resources', resource, resource.name, app.resources, 'resources', resource.fields.length > 0 ? ['fields'] : [])),
-    ...plan.policies.map((policy) => context.named('policies', policy, policy.name, app.policies, 'policies', policy.abilities.length > 0 ? ['abilities'] : [])),
+    ...plan.resources.map((resource) => context.named('resources', resource, app.resources, 'resources', resource.fields.length > 0 ? ['fields'] : [])),
+    ...plan.policies.map((policy) => context.named('policies', policy, app.policies, 'policies', policy.abilities.length > 0 ? ['abilities'] : [])),
     ...plan.sideEffects.map((effect) => context.sideEffect(effect)),
     ...plan.commands.map((command): PlanElementStatus =>
       conclude({ id: command.id, section: 'commands', change: { kind: 'add' }, label: command.command, exists: 'no', unjudged: 'Nothing reads whether a command has been run.' }),
@@ -304,42 +330,56 @@ class StatusContext {
     this.namesById = new Map([...plan.validators, ...plan.resources, ...plan.policies].map((element) => [element.id, element.name]))
   }
 
-  private section<K extends 'routes' | 'tables' | 'models' | 'actions' | 'pages' | 'validators'>(key: K): PlanAppDetail[K] | PlanAppUnreadable {
+  private section<K extends 'routes' | 'tables' | 'models' | 'actions' | 'controllers' | 'pages' | 'validators'>(key: K): PlanAppDetail[K] | PlanAppUnreadable {
     return this.detail ? this.detail[key] : NO_DETAIL
   }
 
   named(
     section: PlanElementSection,
-    element: { id: string; change: PlanChange },
-    name: string,
+    element: { id: string; change: PlanChange; name: string; module?: string },
     names: PlanAppNames,
     what: string,
     unread: string[],
   ): PlanElementStatus {
+    const classes = section === 'resources' ? this.detail?.resources : this.detail?.policies
+    const find = (name: string): Existence =>
+      inScope(inSection(names, name, what), element.module, matching(classes, (entry) => entry.className === name), what.replace(/s$/, ''))
     return conclude({
       id: element.id,
       section,
       change: element.change,
-      label: name,
-      exists: inSection(names, name, what),
-      previous: previousOf(element.change, (from) => inSection(names, from, what)),
+      label: element.name,
+      exists: find(element.name),
+      previous: previousOf(element.change, find),
       properties: () => unread.map((property) => unknown(property, 'as planned', `nothing reads a ${section.replace(/s$/, '')}'s ${property}`)),
     })
   }
 
+  /**
+   * The table the model binds, looked up in the app root the plan puts the model in.
+   * A same-named table in another root is a different table, and judging columns
+   * against it is how a model nobody wrote reads as written.
+   */
   private tableOf(model: PlanModel): SourcedSchemaTable | undefined | PlanAppUnreadable {
     const tables = this.section('tables')
     if (isUnreadable(tables)) return tables
-    const byName = (name: string): SourcedSchemaTable | undefined =>
-      tables.find((table) => table.tableName === name) ?? tables.find((table) => table.tableName === undefined && table.identifier === name)
-    return byName(model.table) ?? (model.tableRenamedFrom ? byName(model.tableRenamedFrom) : undefined)
+    const scope = tables.filter((table) => table.module === (model.module ?? null))
+    const byName = (within: ReadonlyArray<SourcedSchemaTable>, name: string): SourcedSchemaTable | undefined =>
+      within.find((table) => table.tableName === name) ?? within.find((table) => table.tableName === undefined && table.identifier === name)
+    const find = (within: ReadonlyArray<SourcedSchemaTable>): SourcedSchemaTable | undefined =>
+      byName(within, model.table) ?? (model.tableRenamedFrom ? byName(within, model.tableRenamedFrom) : undefined)
+
+    const found = find(scope)
+    if (found || !find(tables)) return found
+    return { unreadable: `no table named "${model.table}" is declared in ${scopeName(model.module)}, and another app root declares one` }
   }
 
   /** A file named after the class that yielded no model is a class this cannot call absent. */
-  private modelExistence(name: string): Existence {
+  private modelExistence(name: string, module: string | undefined): Existence {
     const found = inSection(this.app.models, name, 'models')
     const unparsed = this.detail?.unparsedModelFiles.find((file) => file.replace(/^.*\//, '').replace(/\.[^.]+$/, '') === name)
-    return found === 'no' && unparsed ? { unknown: `${unparsed} exists and no model class could be read from it` } : found
+    if (found === 'no' && unparsed) return { unknown: `${unparsed} exists and no model class could be read from it` }
+    return inScope(found, module, matching(this.section('models'), (entry) => entry.className === name), 'model')
   }
 
   model(model: PlanModel): PlanElementStatus {
@@ -348,8 +388,8 @@ class StatusContext {
       section: 'models',
       change: model.change,
       label: model.name,
-      exists: this.modelExistence(model.name),
-      previous: previousOf(model.change, (from) => this.modelExistence(from)),
+      exists: this.modelExistence(model.name, model.module),
+      previous: previousOf(model.change, (from) => this.modelExistence(from, model.module)),
       properties: () => this.modelProperties(model),
     })
   }
@@ -358,11 +398,13 @@ class StatusContext {
     const properties: PlanPropertyStatus[] = []
     const models = this.section('models')
     const tables = this.section('tables')
-    const actual = isUnreadable(models) ? undefined : models.find((candidate) => candidate.className === model.name)
+    const actual = isUnreadable(models)
+      ? undefined
+      : models.find((candidate) => candidate.className === model.name && candidate.module === (model.module ?? null))
     const whyNoModel = isUnreadable(models) ? `the models could not be read (${models.unreadable})` : 'the model class did not parse'
 
     if (model.change.kind !== 'alter' || model.tableRenamedFrom) {
-      const bound = actual?.table && !isUnreadable(tables) ? tables.find((table) => table.identifier === actual.table) : undefined
+      const bound = actual?.table && !isUnreadable(tables) ? tables.find((table) => table.identifier === actual.table && table.module === actual.module) : undefined
       const boundName = bound ? (bound.tableName ?? bound.identifier) : undefined
       properties.push(compare('table', model.table, boundName, isUnreadable(tables) ? `the schema could not be read (${tables.unreadable})` : 'the table the class binds was not found in the schema'))
     }
@@ -400,7 +442,7 @@ class StatusContext {
     for (const index of model.indexes) {
       const property = `${index.unique ? 'unique index' : 'index'} (${index.columns.join(', ')})`
       if (!table || tableUnread(table)) {
-        properties.push(unknown(property, 'declared', table ? `the schema could not be read (${table.unreadable})` : 'the table was not found in the schema'))
+        properties.push(unknown(property, 'declared', table ? `the table could not be resolved (${table.unreadable})` : 'the table was not found in the schema'))
         continue
       }
       const found = hasIndex(table, index.columns, index.unique ? ['uniqueIndex', 'unique'] : ['index'])
@@ -412,7 +454,7 @@ class StatusContext {
   column(model: PlanModel, column: PlanColumn): PlanElementStatus {
     const table = this.tableOf(model)
     const find = (name: string): Existence => {
-      if (tableUnread(table)) return { unknown: `the schema could not be read (${table.unreadable})` }
+      if (tableUnread(table)) return { unknown: `the table could not be resolved (${table.unreadable})` }
       if (!table) return 'no'
       if (table.columns.some((candidate) => candidate.name === name)) return 'yes'
       return table.opaqueColumns ? { unknown: `the columns of "${table.identifier}" hold a spread or a computed key, and the schema did not import (${table.runtimeUnreadable ?? 'no reason given'})` } : 'no'
@@ -514,23 +556,26 @@ class StatusContext {
   validator(validator: PlanDraft['validators'][number]): PlanElementStatus {
     const validators = this.section('validators')
     const names = isUnreadable(validators) ? validators : validators.map((candidate) => candidate.name)
+    const find = (name: string): Existence =>
+      inScope(inSection(names, name, 'validators'), validator.module, matching(validators, (entry) => entry.name === name), 'validator')
     return conclude({
       id: validator.id,
       section: 'validators',
       change: validator.change,
       label: validator.name,
-      exists: inSection(names, validator.name, 'validators'),
-      previous: previousOf(validator.change, (from) => inSection(names, from, 'validators')),
+      exists: find(validator.name),
+      previous: previousOf(validator.change, find),
       properties: () => (validator.fields.length > 0 ? [unknown('fields', 'as planned', "nothing reads a schema's fields without evaluating it")] : []),
       mount: () => this.referenceMount(validator.name),
     })
   }
 
-  private controllerExistence(className: string): Existence {
+  private controllerExistence(className: string, module: string | undefined): Existence {
     if (this.detail?.controllerCollisions.includes(className)) {
       return { unknown: `two controller files declare "${className}", and a route names a class, never a file` }
     }
-    return inSection(this.app.controllers, className, 'controllers')
+    const found = inSection(this.app.controllers, className, 'controllers')
+    return inScope(found, module, matching(this.section('controllers'), (entry) => entry.className === className), 'controller')
   }
 
   controller(controller: PlanController): PlanElementStatus {
@@ -539,16 +584,20 @@ class StatusContext {
       section: 'controllers',
       change: controller.change,
       label: controller.className,
-      exists: this.controllerExistence(controller.className),
-      previous: previousOf(controller.change, (from) => this.controllerExistence(from)),
+      exists: this.controllerExistence(controller.className, controller.module),
+      previous: previousOf(controller.change, (from) => this.controllerExistence(from, controller.module)),
     })
   }
 
   action(controller: PlanController, action: PlanAction): PlanElementStatus {
     const key = `${controller.className}.${action.name}`
+    // An action has no app root of its own: it is declared by its controller's class.
     const find = (name: string): Existence => {
-      const owner = this.controllerExistence(controller.className)
-      return typeof owner === 'object' ? owner : inSection(this.app.actions, `${controller.className}.${name}`, 'controller actions')
+      const owner = this.controllerExistence(controller.className, controller.module)
+      if (typeof owner === 'object') return owner
+      const actionKey = `${controller.className}.${name}`
+      const found = inSection(this.app.actions, actionKey, 'controller actions')
+      return inScope(found, controller.module, matching(this.section('actions'), (entry) => entry.key === actionKey), 'controller')
     }
     return conclude({
       id: action.id,
@@ -620,28 +669,42 @@ class StatusContext {
     return mounts.includes('mounted') ? 'mounted' : mounts[0]!
   }
 
-  /** Mounted when a wired action's body, or a routes file the application reaches, names the symbol. */
+  /**
+   * Mounted when a mounted action validates with the symbol, or the entry routes file
+   * names it in a route contract. A bare mention is not evidence: an identifier can be
+   * named by a leftover import, in a type position or in a branch nothing reaches, and
+   * none of those is a use. Such a mention only explains why this stayed unconfirmed.
+   */
   private referenceMount(symbol: string): PlanAppMount {
     if (!this.detail) return { unconfirmed: NO_DETAIL.unreadable }
     const actions = this.section('actions')
     const reasons: string[] = []
+    const mentions: string[] = []
+
     for (const action of isUnreadable(actions) ? [] : actions) {
-      if (!action.identifiers.includes(symbol)) continue
-      const mount = this.actionMount(action.key)
-      if (mount === 'mounted') return 'mounted'
-      reasons.push(`${action.key} names it, and ${mount.unconfirmed}`)
-    }
-    for (const file of this.detail.routeFiles) {
-      if (!file.identifiers.includes(symbol)) continue
-      if (!file.reached) {
-        reasons.push(`${file.file} names it, and nothing calls that file's registrar`)
+      if (!action.validates.includes(symbol)) {
+        if (action.identifiers.includes(symbol)) mentions.push(`${action.key} mentions it without validating with it`)
         continue
       }
-      const mount = file.module === null ? this.detail.mounts.entry : (this.detail.mounts.modules[file.module] ?? { unconfirmed: `nothing was read about modules/${file.module}` })
+      const mount = this.actionMount(action.key)
       if (mount === 'mounted') return 'mounted'
-      reasons.push(`${file.file} names it, and ${mount.unconfirmed}`)
+      reasons.push(`${action.key} validates with it, and ${mount.unconfirmed}`)
     }
-    return { unconfirmed: reasons[0] ?? 'no route contract and no action body names it' }
+
+    for (const file of this.detail.routeFiles) {
+      if (!file.contractIdentifiers.includes(symbol)) {
+        if (file.identifiers.includes(symbol)) mentions.push(`${file.file} mentions it outside a route contract`)
+        continue
+      }
+      if (!file.entry) {
+        reasons.push(`${file.file} names it in a route contract, and only the routes file the application loads is evidence of mounting`)
+        continue
+      }
+      if (this.detail.mounts.entry === 'mounted') return 'mounted'
+      reasons.push(`${file.file} names it in a route contract, and ${this.detail.mounts.entry.unconfirmed}`)
+    }
+
+    return { unconfirmed: reasons[0] ?? mentions[0] ?? 'no route contract names it and no action body validates with it' }
   }
 
   route(route: PlanRoute): PlanElementStatus {
@@ -697,13 +760,22 @@ class StatusContext {
   }
 
   view(view: PlanView): PlanElementStatus {
+    // A module's pages are not colocated: they live in the project's own
+    // resources/js/pages under the module's name, which the page id then carries.
+    // So a page the scan found is positively the project's, and only a plan that
+    // names a module without that prefix is one this cannot place.
+    const find = (page: string): Existence => {
+      const found = inSection(this.app.pages, page, 'pages')
+      if (found !== 'yes' || view.module === undefined || page.startsWith(`${view.module}/`)) return found
+      return { unknown: `the plan puts the page in modules/${view.module}, and a module's pages are namespaced as "${view.module}/${page}" under the project's own resources/js/pages` }
+    }
     return conclude({
       id: view.id,
       section: 'views',
       change: view.change,
       label: view.page,
-      exists: inSection(this.app.pages, view.page, 'pages'),
-      previous: previousOf(view.change, (from) => inSection(this.app.pages, from, 'pages')),
+      exists: find(view.page),
+      previous: previousOf(view.change, find),
       properties: () => this.viewProperties(view),
       mount: () => this.viewMount(view.page),
     })
@@ -740,11 +812,14 @@ class StatusContext {
     const base = { id: effect.id, section: 'sideEffects' as const, change: effect.change, label: effect.name }
     const readable: ReadonlyArray<string> = ['job', 'event', 'listener'] satisfies PlanAppSideEffectKind[]
     if (!readable.includes(effect.kind)) return conclude({ ...base, exists: 'no', unjudged: `Nothing discovers a ${effect.kind} class.` })
-    const names = this.detail ? this.detail.sideEffects[effect.kind as PlanAppSideEffectKind] : NO_DETAIL
+    const classes = this.detail?.sideEffects[effect.kind as PlanAppSideEffectKind]
+    const names: PlanAppNames = classes ? classes.map((entry) => entry.className) : NO_DETAIL
+    const find = (name: string): Existence =>
+      inScope(inSection(names, name, `${effect.kind} classes`), effect.module, matching(classes, (entry) => entry.className === name), effect.kind)
     return conclude({
       ...base,
-      exists: inSection(names, effect.name, `${effect.kind} classes`),
-      previous: previousOf(effect.change, (from) => inSection(names, from, `${effect.kind} classes`)),
+      exists: find(effect.name),
+      previous: previousOf(effect.change, find),
     })
   }
 }

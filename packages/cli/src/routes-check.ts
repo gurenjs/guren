@@ -20,9 +20,6 @@ import { check, type CheckResult } from './check-result'
 /** The directory whose files this check asks about, per scope. */
 const ROUTES_DIR = 'routes'
 
-/** Key prefix of the per-file verdict, followed by the app-relative path; `plan:status` reads a `pass` as "reached". */
-export const ROUTE_REGISTRAR_KEY_PREFIX = 'route-registrar:'
-
 /**
  * A path that can move a module scope's answer: its descriptor (where
  * `defineModule({ routes })` names the registrar), its routes entry, or its routes/.
@@ -540,7 +537,7 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
     const name = candidateFacts.registrarExports.find((exported) => exported !== 'default')
 
     return check(
-      `${ROUTE_REGISTRAR_KEY_PREFIX}${relPath}`,
+      `route-registrar:${relPath}`,
       `${relPath} wiring`,
       isMounted ? 'pass' : 'warn',
       isMounted

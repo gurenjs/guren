@@ -67,22 +67,25 @@ function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
     mounts: { entry: 'mounted', modules: {} },
     tables: [POSTS_TABLE, USERS_TABLE],
     models: [
-      { className: 'Post', table: 'posts', relationships: [{ name: 'author', type: 'belongsTo', relatedModel: 'User' }], fillable: ['title'] },
-      { className: 'User', table: 'users', relationships: [], fillable: null },
+      { className: 'Post', module: null, table: 'posts', relationships: [{ name: 'author', type: 'belongsTo', relatedModel: 'User' }], fillable: ['title'] },
+      { className: 'User', module: null, table: 'users', relationships: [], fillable: null },
     ],
     unparsedModelFiles: [],
     actions: [
-      { key: 'PostController.index', pages: ['posts/Index'], calls: ['inertia'], abilities: [], identifiers: ['Post', 'pages'] },
-      { key: 'PostController.show', pages: ['posts/Show'], calls: ['inertia', 'authorize'], abilities: ['view'], identifiers: ['Post', 'PostResource'] },
+      { key: 'PostController.index', module: null, pages: ['posts/Index'], calls: ['inertia'], abilities: [], identifiers: ['Post', 'pages'], validates: [] },
+      { key: 'PostController.show', module: null, pages: ['posts/Show'], calls: ['inertia', 'authorize'], abilities: ['view'], identifiers: ['Post', 'PostResource'], validates: [] },
     ],
+    controllers: [{ className: 'PostController', module: null }],
     controllerCollisions: [],
     pages: [
       { id: 'posts/Index', props: { status: 'keys', keys: [{ name: 'posts', type: 'Post[]', optional: false }] } },
       { id: 'posts/Show', props: { status: 'undeclared' } },
     ],
-    validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts' }],
-    routeFiles: [{ file: 'routes/web.ts', module: null, reached: true, identifiers: ['PostController', 'PostPayloadSchema'] }],
-    sideEffects: { job: ['SendDigest'], event: [], listener: [] },
+    validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null }],
+    resources: [{ className: 'PostResource', module: null }],
+    policies: [{ className: 'PostPolicy', module: null }],
+    routeFiles: [{ file: 'routes/web.ts', entry: true, identifiers: ['PostController', 'PostPayloadSchema'], contractIdentifiers: ['PostPayloadSchema'] }],
+    sideEffects: { job: [{ className: 'SendDigest', module: null }], event: [], listener: [] },
     ...overrides,
   } as PlanAppDetail
 }
@@ -122,16 +125,16 @@ function action(change: Change, extra: Record<string, unknown> = {}): Record<str
   return { id: 'a', change, name: 'index', authorization: { middleware: [] }, response: { kind: 'empty' }, rules: [], ...extra }
 }
 
-function controller(change: Change, actions: Array<Record<string, unknown>> = [], className = 'PostController'): Record<string, unknown> {
-  return { id: 'ctl', change, className, actions }
+function controller(change: Change, actions: Array<Record<string, unknown>> = [], className = 'PostController', extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id: 'ctl', change, className, actions, ...extra }
 }
 
 function view(change: Change, extra: Record<string, unknown> = {}): PlanDraft {
   return plan({ views: [{ id: 'v', change, page: 'posts/Index', purpose: 'List posts.', props: [], actions: [], states: {}, ...extra }] })
 }
 
-function validator(change: Change, name = 'PostPayloadSchema'): PlanDraft {
-  return plan({ validators: [{ id: 'val', change, name, fields: [] }] })
+function validator(change: Change, name = 'PostPayloadSchema', extra: Record<string, unknown> = {}): PlanDraft {
+  return plan({ validators: [{ id: 'val', change, name, fields: [], ...extra }] })
 }
 
 interface Case {
@@ -181,23 +184,54 @@ const CASES: Case[] = [
   { name: 'an added validator nothing exports', plan: validator(ADD, 'CommentSchema'), app: app(), id: 'val', state: 'planned' },
   { name: 'a validator a reached routes file names', plan: validator(ADD), app: app(), id: 'val', state: 'wired' },
   {
-    name: 'a validator named only by a routes file nothing calls',
+    name: 'a validator a route contract names in a routes file the application does not load',
     plan: validator(ADD),
-    app: app({ routeFiles: [{ file: 'routes/orphan.ts', module: null, reached: false, identifiers: ['PostPayloadSchema'] }] }),
+    app: app({ routeFiles: [{ file: 'routes/orphan.ts', entry: false, identifiers: ['PostPayloadSchema'], contractIdentifiers: ['PostPayloadSchema'] }] }),
     id: 'val',
     state: 'present',
   },
   {
-    name: 'a validator a wired action names',
+    name: 'a validator only a leftover import in the entry routes file names',
+    plan: validator(ADD),
+    app: app({ routeFiles: [{ file: 'routes/web.ts', entry: true, identifiers: ['PostPayloadSchema'], contractIdentifiers: [] }] }),
+    id: 'val',
+    state: 'present',
+  },
+  {
+    name: 'a validator a wired action validates with',
     plan: validator(ADD),
     app: app({
       routeFiles: [],
-      actions: [{ key: 'PostController.index', pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'] }],
+      actions: [{ key: 'PostController.index', module: null, pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: ['PostPayloadSchema'] }],
     }),
     id: 'val',
     state: 'wired',
   },
+  {
+    name: 'a validator a wired action mentions without validating with it',
+    plan: validator(ADD),
+    app: app({
+      routeFiles: [],
+      actions: [{ key: 'PostController.index', module: null, pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: [] }],
+    }),
+    id: 'val',
+    state: 'present',
+  },
   { name: 'a validator when a validator file did not parse', plan: validator(ADD), app: app({ validators: UNREADABLE }), id: 'val', state: 'blocked' },
+  {
+    name: 'a validator the plan puts in a module and only the project root exports',
+    plan: validator(ADD, 'PostPayloadSchema', { module: 'billing' }),
+    app: app(),
+    id: 'val',
+    state: 'planned',
+  },
+  {
+    name: 'a validator the plan puts at the project root and only a module exports',
+    plan: validator(ADD),
+    app: app({ validators: [{ name: 'PostPayloadSchema', file: 'modules/billing/app/Http/Validators/PostValidator.ts', module: 'billing' }] }),
+    id: 'val',
+    state: 'planned',
+  },
 
   // controllers and actions
   { name: 'an added controller with no class', plan: plan({ controllers: [controller(ADD, [], 'CommentController')] }), app: app(), id: 'ctl', state: 'planned' },
@@ -265,6 +299,14 @@ const CASES: Case[] = [
   { name: 'an added page missing a planned prop', plan: view(ADD, { props: [{ name: 'filters', type: 'Filters' }] }), app: app(), id: 'v', state: 'drifted' },
   { name: 'an altered page that changes only what it renders', plan: view(ALTER, { states: { empty: 'No posts.' } }), app: app(), id: 'v', state: 'unjudged' },
   { name: 'a page when the pages directory would not open', plan: view(ADD), app: app({}, { pages: UNREADABLE }), id: 'v', state: 'blocked' },
+  { name: 'a page the plan puts in a module whose name the page id does not carry', plan: view(ADD, { module: 'billing' }), app: app(), id: 'v', state: 'blocked' },
+  {
+    name: "a page the plan puts in a module and names under that module's own prefix",
+    plan: view(ADD, { page: 'billing/posts/Index', module: 'billing' }),
+    app: app({}, { pages: ['billing/posts/Index'] }),
+    id: 'v',
+    state: 'present',
+  },
 
   // resources, policies, side effects, commands
   { name: 'an added resource with no file', plan: plan({ resources: [{ id: 'res', change: ADD, name: 'CommentResource', model: 'm', fields: [] }] }), app: app(), id: 'res', state: 'planned' },
@@ -275,6 +317,48 @@ const CASES: Case[] = [
   { name: 'an added job with no file', plan: plan({ sideEffects: [{ id: 'job', change: ADD, kind: 'job', name: 'Reindex', trigger: 't', description: 'd' }] }), app: app(), id: 'job', state: 'planned' },
   { name: 'a mail class, which nothing discovers', plan: plan({ sideEffects: [{ id: 'mail', change: ADD, kind: 'mail', name: 'Welcome', trigger: 't', description: 'd' }] }), app: app(), id: 'mail', state: 'unjudged' },
   { name: 'a command', plan: plan({ commands: [{ id: 'cmd', command: 'guren add attachments', reason: 'covers' }] }), app: app(), id: 'cmd', state: 'unjudged' },
+
+  // the app root each element sits in, both ways round
+  { name: 'a model the plan puts in a module and only the project root declares', plan: plan({ models: [model(ADD, { module: 'billing' })] }), app: app(), id: 'm', state: 'planned' },
+  {
+    name: 'a model the plan puts at the project root and only a module declares',
+    plan: plan({ models: [model(ADD)] }),
+    app: app({ models: [{ className: 'Post', module: 'billing', table: 'posts', relationships: [], fillable: ['title'] }] }),
+    id: 'm',
+    state: 'planned',
+  },
+  { name: 'a controller the plan puts in a module and only the project root declares', plan: plan({ controllers: [controller(ADD, [], 'PostController', { module: 'billing' })] }), app: app(), id: 'ctl', state: 'planned' },
+  {
+    name: 'a controller the plan puts at the project root and only a module declares',
+    plan: plan({ controllers: [controller(ADD)] }),
+    app: app({ controllers: [{ className: 'PostController', module: 'billing' }] }),
+    id: 'ctl',
+    state: 'planned',
+  },
+  {
+    name: "an action whose controller the plan puts in a module the class is not in",
+    plan: plan({ controllers: [controller(EXISTING, [action(ADD)], 'PostController', { module: 'billing' })] }),
+    id: 'a',
+    app: app(),
+    state: 'planned',
+  },
+  { name: 'a resource the plan puts in a module and only the project root declares', plan: plan({ resources: [{ id: 'res', change: ADD, name: 'PostResource', model: 'm', fields: [], module: 'billing' }] }), app: app(), id: 'res', state: 'planned' },
+  {
+    name: 'a policy the plan puts at the project root and only a module declares',
+    plan: plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [] }] }),
+    app: app({ policies: [{ className: 'PostPolicy', module: 'billing' }] }),
+    id: 'pol',
+    state: 'planned',
+  },
+  { name: 'a job the plan puts in a module and only the project root declares', plan: plan({ sideEffects: [{ id: 'job', change: ADD, kind: 'job', name: 'SendDigest', trigger: 't', description: 'd', module: 'billing' }] }), app: app(), id: 'job', state: 'planned' },
+  {
+    name: 'a job the plan puts at the project root and only a module declares',
+    plan: plan({ sideEffects: [{ id: 'job', change: ADD, kind: 'job', name: 'SendDigest', trigger: 't', description: 'd' }] }),
+    app: app({ sideEffects: { job: [{ className: 'SendDigest', module: 'billing' }], event: [], listener: [] } }),
+    id: 'job',
+    state: 'planned',
+  },
+  { name: 'a model when nothing says which app root each class came from', plan: plan({ models: [model(ADD)] }), app: planAppState(), id: 'm', state: 'blocked' },
 ]
 
 describe('judgePlan', () => {
