@@ -10,25 +10,40 @@ import {
   JUNIT_MAX_DEPTH,
   acceptanceStatus,
   planAcceptanceIds,
-  type AcceptanceReport,
+  type AcceptanceBehaviourStatus,
+  type AcceptanceError,
 } from '../src/plan/acceptance-status'
 import { PlanSchema } from '../src/plan/schema'
 import { TEST_BASELINE, loadCommentsPlan } from './plan-fixture'
-
-type ReadReport = Extract<AcceptanceReport, { state: 'read' }>
 
 function fixture(name: string): string {
   return readFileSync(join(import.meta.dir, 'fixtures/plan/junit', name), 'utf8')
 }
 
-function read(junit: string, ids: readonly string[]): ReadReport {
+function judged(junit: string, ids: readonly string[]): AcceptanceBehaviourStatus[] {
   const report = acceptanceStatus(junit, ids)
-  if (report.state !== 'read') throw new Error(`blocked: ${report.reason}`)
+  if (report.state !== 'judged') throw new Error(`expected verdicts, got ${JSON.stringify(report).slice(0, 300)}`)
+  return report.behaviours
+}
+
+function invalid(junit: string, ids: readonly string[]): { errors: AcceptanceError[]; observed: AcceptanceBehaviourStatus[] } {
+  const report = acceptanceStatus(junit, ids)
+  if (report.state !== 'invalid') throw new Error(`expected errors, got the state ${report.state}`)
   return report
 }
 
-function statuses(report: ReadReport): Record<string, string> {
-  return Object.fromEntries(report.behaviours.map((behaviour) => [behaviour.id, behaviour.status]))
+function statuses(behaviours: readonly AcceptanceBehaviourStatus[]): Record<string, string> {
+  return Object.fromEntries(behaviours.map((behaviour) => [behaviour.id, behaviour.status]))
+}
+
+function behaviourOf(behaviours: readonly AcceptanceBehaviourStatus[], id: string): AcceptanceBehaviourStatus {
+  const found = behaviours.find((behaviour) => behaviour.id === id)
+  if (!found) throw new Error(`no behaviour ${id}`)
+  return found
+}
+
+function titlesOf(behaviours: readonly AcceptanceBehaviourStatus[], id: string): string[] {
+  return behaviourOf(behaviours, id).cases.map((entry) => entry.title)
 }
 
 function blockedReason(junit: string | undefined, ids: readonly string[] = ['AC-a-1']): string {
@@ -64,65 +79,70 @@ const MAIN_IDS = [
 // Written by the Bun named in the file; only `hostname` and the probe's directory were edited.
 for (const name of ['bun-1.3.14.xml', 'bun-1.3.11.xml']) {
   describe(`acceptanceStatus on ${name}`, () => {
-    const report = read(fixture(name), MAIN_IDS)
-    const byId = new Map(report.behaviours.map((behaviour) => [behaviour.id, behaviour]))
+    // Two probe files carry AC-comments-1, so the whole report is invalid and its statuses are `observed`.
+    const report = invalid(fixture(name), MAIN_IDS)
+    const observed = (id: string) => behaviourOf(report.observed, id)
+
+    test('should hand over no verdicts while an error stands', () => {
+      expect(acceptanceStatus(fixture(name), MAIN_IDS)).not.toHaveProperty('behaviours')
+    })
 
     test('should match an id carried by a describe name for every case under it', () => {
-      const titles = byId.get('AC-comments-1')?.cases.map((entry) => entry.title)
+      const titles = titlesOf(report.observed, 'AC-comments-1')
       expect(titles).toContain('comments > [AC-comments-1] store > creates a comment')
       expect(titles).toContain('comments > [AC-comments-1] store > [AC-comments-2] accepts 1')
     })
 
     test('should collect every test.each case under the one id', () => {
-      expect(byId.get('AC-comments-2')?.cases).toHaveLength(2)
-      expect(byId.get('AC-comments-2')?.status).toBe('passing')
+      expect(observed('AC-comments-2').cases).toHaveLength(2)
+      expect(observed('AC-comments-2').status).toBe('passing')
     })
 
     test('should count a skipped case as failing', () => {
-      expect(byId.get('AC-comments-3')?.cases[0]?.outcome).toBe('skipped')
-      expect(byId.get('AC-comments-3')?.status).toBe('failing')
+      expect(observed('AC-comments-3').cases[0]?.outcome).toBe('skipped')
+      expect(observed('AC-comments-3').status).toBe('failing')
     })
 
     test('should count a todo case as failing', () => {
-      expect(byId.get('AC-comments-4')?.status).toBe('failing')
+      expect(observed('AC-comments-4').status).toBe('failing')
     })
 
     test('should report a failed expectation as failing', () => {
-      expect(byId.get('AC-comments-5')?.status).toBe('failing')
+      expect(observed('AC-comments-5').status).toBe('failing')
     })
 
     test('should report a thrown error as failing', () => {
-      expect(byId.get('AC-comments-6')?.cases[0]?.outcome).toBe('failed')
+      expect(observed('AC-comments-6').cases[0]?.outcome).toBe('failed')
     })
 
     test('should decode the escaped characters of a title', () => {
-      const title = byId.get('AC-comments-7')?.cases[0]?.title ?? ''
+      const title = observed('AC-comments-7').cases[0]?.title ?? ''
       expect(title).toContain(`title with <tag> & "quotes" and 'apos' ]]>`)
       expect(title).toContain('é 日本語')
     })
 
     test('should count a case once when its title repeats the id', () => {
-      expect(byId.get('AC-x-1')?.cases).toHaveLength(1)
+      expect(observed('AC-x-1').cases).toHaveLength(1)
     })
 
     test('should count a case naming two ids for both', () => {
-      expect(byId.get('AC-x-2')?.status).toBe('passing')
-      expect(byId.get('AC-x-3')?.status).toBe('passing')
-      expect(byId.get('AC-x-2')?.cases[0]?.title).toBe(byId.get('AC-x-3')?.cases[0]?.title)
+      expect(observed('AC-x-2').status).toBe('passing')
+      expect(observed('AC-x-3').status).toBe('passing')
+      expect(observed('AC-x-2').cases[0]?.title).toBe(observed('AC-x-3').cases[0]?.title)
     })
 
     test('should keep AC-comments-1 out of [AC-comments-10]', () => {
-      const titles = byId.get('AC-comments-1')?.cases.map((entry) => entry.title) ?? []
+      const titles = titlesOf(report.observed, 'AC-comments-1')
       expect(titles.some((title) => title.includes('ten'))).toBe(false)
-      expect(byId.get('AC-comments-10')?.cases).toHaveLength(1)
+      expect(observed('AC-comments-10').cases).toHaveLength(1)
     })
 
     test('should read a test outside any describe', () => {
-      expect(byId.get('AC-top-1')?.cases[0]?.title).toBe('[AC-top-1] top level')
+      expect(observed('AC-top-1').cases[0]?.title).toBe('[AC-top-1] top level')
     })
 
     test('should leave a behaviour no test carries pending', () => {
-      expect(byId.get('AC-never-written')).toEqual({ id: 'AC-never-written', status: 'pending', cases: [] })
+      expect(observed('AC-never-written')).toEqual({ id: 'AC-never-written', status: 'pending', cases: [] })
     })
 
     test('should report an id carried by two test files', () => {
@@ -132,7 +152,7 @@ for (const name of ['bun-1.3.14.xml', 'bun-1.3.11.xml']) {
     })
 
     test('should report an id no behaviour declares', () => {
-      const narrowed = read(fixture(name), ['AC-comments-2'])
+      const narrowed = invalid(fixture(name), ['AC-comments-2'])
       const undeclared = narrowed.errors.filter((error) => error.kind === 'undeclared-id').map((error) => error.id)
       expect(undeclared).toContain('AC-top-1')
       expect(undeclared).toContain('AC-comments-10')
@@ -143,10 +163,8 @@ for (const name of ['bun-1.3.14.xml', 'bun-1.3.11.xml']) {
 
 describe('acceptanceStatus on bun-1.3.14-edge.xml', () => {
   const ids = ['AC-c-1', 'AC-c-2', 'AC-c-3', 'AC-c-4', 'AC-c-5', 'AC-c-6']
-  const report = read(fixture('bun-1.3.14-edge.xml'), ids)
-
   test('should judge each edge the way Bun reported it', () => {
-    expect(statuses(report)).toEqual({
+    expect(statuses(judged(fixture('bun-1.3.14-edge.xml'), ids))).toEqual({
       'AC-c-1': 'failing', // describe.skip
       'AC-c-2': 'passing', // test.failing that failed as expected
       'AC-c-3': 'failing', // test.if(false)
@@ -154,64 +172,82 @@ describe('acceptanceStatus on bun-1.3.14-edge.xml', () => {
       'AC-c-5': 'failing', // rejected promise
       'AC-c-6': 'passing', // newline and tab in the title
     })
-    expect(report.errors).toEqual([])
   })
 })
 
 describe('acceptanceStatus rules', () => {
   test('should call a case with time="0" and no <skipped> executed', () => {
     const junit = suites('<testcase name="[AC-a-1] fast" time="0" file="a.test.ts" />')
-    expect(statuses(read(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'passing' })
+    expect(statuses(judged(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'passing' })
   })
 
   test('should fail a behaviour when one of its cases fails', () => {
     const junit = suites(testcase('[AC-a-1] one') + testcase('[AC-a-1] two', '<failure type="AssertionError" />'))
-    expect(statuses(read(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'failing' })
+    expect(statuses(judged(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'failing' })
   })
 
   test('should read an <error> child as a failed case', () => {
     const junit = suites(testcase('[AC-a-1] one', '<error message="boom">trace</error>'))
-    expect(statuses(read(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'failing' })
+    expect(statuses(judged(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'failing' })
   })
 
   test('should match an id holding a dot literally', () => {
     const junit = suites(testcase('[AC-aXb-1] other'))
-    const report = read(junit, ['AC-a.b-1'])
-    expect(statuses(report)).toEqual({ 'AC-a.b-1': 'pending' })
+    const report = invalid(junit, ['AC-a.b-1'])
+    expect(statuses(report.observed)).toEqual({ 'AC-a.b-1': 'pending' })
     expect(report.errors.map((error) => error.id)).toEqual(['AC-aXb-1'])
   })
 
   test('should match an id inside doubled brackets', () => {
-    expect(statuses(read(suites(testcase('[[AC-a-1]] x')), ['AC-a-1']))).toEqual({ 'AC-a-1': 'passing' })
+    expect(statuses(judged(suites(testcase('[[AC-a-1]] x')), ['AC-a-1']))).toEqual({ 'AC-a-1': 'passing' })
   })
 
   test('should not match an id without its brackets', () => {
-    expect(statuses(read(suites(testcase('AC-a-1 bare, [AC-a-1 open')), ['AC-a-1']))).toEqual({ 'AC-a-1': 'pending' })
+    expect(statuses(judged(suites(testcase('AC-a-1 bare, [AC-a-1 open')), ['AC-a-1']))).toEqual({ 'AC-a-1': 'pending' })
   })
 
   test('should not take the file name for part of the title', () => {
     const junit = `<testsuites><testsuite name="[AC-a-1].test.ts" file="x"><testcase name="t" file="x" /></testsuite></testsuites>`
-    expect(statuses(read(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'pending' })
+    expect(statuses(judged(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'pending' })
   })
 
   test('should not take classname for part of the title', () => {
     const junit = suites('<testcase name="t" classname="[AC-a-1] store" file="a.test.ts" />')
-    expect(statuses(read(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'pending' })
+    expect(statuses(judged(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'pending' })
   })
 
   test('should leave a bracketed word outside the AC- prefix alone', () => {
-    expect(read(suites(testcase('[GET] /posts [admin] [1, 2]')), ['AC-a-1']).errors).toEqual([])
+    expect(acceptanceStatus(suites(testcase('[GET] /posts [admin] [1, 2]')), ['AC-a-1']).state).toBe('judged')
   })
 
   test('should hold an undeclared token to the id grammar of the schema', () => {
     const junit = suites(testcase('[AC-ok.id:1_x] [AC-bad id] [AC-bad/1] [AC-é]'))
-    expect(read(junit, ['AC-a-1']).errors.map((error) => error.id)).toEqual(['AC-ok.id:1_x'])
+    expect(invalid(junit, ['AC-a-1']).errors.map((error) => error.id)).toEqual(['AC-ok.id:1_x'])
+  })
+
+  test('should report an undeclared id once per file however many cases carry it', () => {
+    const junit = suites(
+      testcase('[AC-typo-1] one') + testcase('[AC-typo-1] two') + testcase('[AC-typo-1] three', '', 'b.test.ts'),
+    )
+    expect(invalid(junit, ['AC-a-1']).errors).toEqual([
+      { kind: 'undeclared-id', id: 'AC-typo-1', file: 'a.test.ts', title: '[AC-typo-1] one' },
+      { kind: 'undeclared-id', id: 'AC-typo-1', file: 'b.test.ts', title: '[AC-typo-1] three' },
+    ])
+  })
+
+  test('should match a declared id longer than 256 characters', () => {
+    const id = `AC-${'long-'.repeat(80)}1`
+    expect(statuses(judged(suites(testcase(`[${id}] x`)), [id]))).toEqual({ [id]: 'passing' })
+  })
+
+  test('should take a declared id once when the plan lists it twice', () => {
+    expect(judged(suites(testcase('[AC-a-1] x')), ['AC-a-1', 'AC-a-1'])).toHaveLength(1)
   })
 
   test('should stay linear on a title of open brackets', () => {
     const title = '['.repeat(JUNIT_MAX_ATTRIBUTE_CHARS - 16) + '[AC-a-1]'
     const started = performance.now()
-    expect(statuses(read(suites(testcase(title)), ['AC-a-1']))).toEqual({ 'AC-a-1': 'passing' })
+    expect(statuses(judged(suites(testcase(title)), ['AC-a-1']))).toEqual({ 'AC-a-1': 'passing' })
     expect(performance.now() - started).toBeLessThan(2000)
   })
 
@@ -219,7 +255,7 @@ describe('acceptanceStatus rules', () => {
     const junit = suites(
       `<!-- note --><testcase name="&#91;AC-a-1&#x5D; x" file="a.test.ts"><system-out><![CDATA[</testcase> <oops>]]></system-out></testcase>`,
     )
-    expect(statuses(read(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'passing' })
+    expect(statuses(judged(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'passing' })
   })
 
   test('should collect the acceptance ids of a plan', () => {
@@ -241,7 +277,7 @@ describe('acceptanceStatus blocked', () => {
 
   test('should block on a truncated file', () => {
     const whole = fixture('bun-1.3.14.xml')
-    expect(blockedReason(whole.slice(0, whole.length / 2))).toContain('the report ends inside')
+    expect(blockedReason(whole.slice(0, whole.length / 2))).toContain('the document ends inside')
   })
 
   test('should block on a file that ends before its closing tags', () => {
@@ -255,6 +291,21 @@ describe('acceptanceStatus blocked', () => {
 
   test('should block on mismatched tags', () => {
     expect(blockedReason('<testsuites><testsuite name="a" file="a"></testsuites></testsuite>')).toContain('closes <testsuite>')
+  })
+
+  test('should block on a testcase outside any test file', () => {
+    const junit = '<testsuites><testcase name="[AC-a-1] x" file="a.test.ts" /></testsuites>'
+    expect(blockedReason(junit)).toBe('<testcase> inside <testsuites> is not part of the report format')
+  })
+
+  test('should tell an overlong entity reference from an unterminated one', () => {
+    expect(blockedReason(suites(testcase('[AC-a-1] &#x0010FFFF;')))).toContain('longer than any')
+    expect(blockedReason(suites(testcase('[AC-a-1] &amp')))).toContain('unterminated')
+  })
+
+  test('should read the longest reference there is', () => {
+    const title = titlesOf(judged(suites(testcase('[AC-a-1] &#x10FFFF;')), ['AC-a-1']), 'AC-a-1')[0]
+    expect(title).toBe(`[AC-a-1] ${String.fromCodePoint(0x10ffff)}`)
   })
 
   test('should block on an unknown entity', () => {
@@ -346,8 +397,8 @@ describe('outer', () => {
         await child.exited
 
         const ids = ['AC-live-1', 'AC-live-2', 'AC-live-3', 'AC-live-4', 'AC-live-5', 'AC-live-6', 'AC-live-7']
-        const report = read(await readFile(outfile, 'utf8'), ids)
-        expect(statuses(report)).toEqual({
+        const behaviours = judged(await readFile(outfile, 'utf8'), ids)
+        expect(statuses(behaviours)).toEqual({
           'AC-live-1': 'passing',
           'AC-live-2': 'passing',
           'AC-live-3': 'failing',
@@ -356,10 +407,9 @@ describe('outer', () => {
           'AC-live-6': 'failing',
           'AC-live-7': 'pending',
         })
-        expect(report.behaviours[0]?.cases.map((entry) => entry.title)).toContain('outer > [AC-live-1] inner > passes')
-        expect(report.behaviours[1]?.cases).toHaveLength(2)
-        expect(report.behaviours[5]?.cases[0]?.title).toBe('outer > [AC-live-6] throws <&> "q"')
-        expect(report.errors).toEqual([])
+        expect(titlesOf(behaviours, 'AC-live-1')).toContain('outer > [AC-live-1] inner > passes')
+        expect(titlesOf(behaviours, 'AC-live-2')).toHaveLength(2)
+        expect(titlesOf(behaviours, 'AC-live-6')).toEqual(['outer > [AC-live-6] throws <&> "q"'])
       } finally {
         await rm(dir, { recursive: true, force: true })
       }

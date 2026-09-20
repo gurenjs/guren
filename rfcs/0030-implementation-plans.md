@@ -696,12 +696,16 @@ the list left open (`packages/cli/src/plan/acceptance-status.ts`).
   shows only in the exit code of `bun test`, which `plan:verify` has to judge
   beside the report.
 
-Errors stand beside the statuses and do not replace them; a report carrying any
-verifies nothing. The reader is strict about structure and refuses a DOCTYPE, an
-unknown entity, an element outside the junit vocabulary, 32 MiB of report, a
-1 MiB attribute and 64 levels of nesting, each as `blocked` with the reason. It
-is looser than XML 1.0 in one place: Bun writes a control character in a title
-both raw and as `&#1;`, and both pass.
+A report carrying an error verifies nothing, and its type says so: verdicts
+exist only on a report with no error, and one with errors hands over what was
+seen under another name, for display. An undeclared id is reported once per id
+and file. The reader is strict about structure and refuses a DOCTYPE, an unknown
+entity, an element outside the junit vocabulary, a report over 32 × 2²⁰
+characters, an attribute over 2²⁰ characters and 64 levels of nesting, each as
+`blocked` with the reason. The caps count UTF-16 units, which is what the text
+handed over measures in, and never bytes. It is looser than XML 1.0 in one
+place: Bun writes a control character in a title both raw and as `&#1;`, and
+both pass.
 
 An element is `verified` when its step's verify commands pass *and* every
 behaviour naming it is `passing`; the page shows the behaviours under the
