@@ -5,6 +5,7 @@ import type { PlanFlowLayout } from '../src/plan/flow'
 import { buildPlanPayload, planLinks, planTemplatePath, renderPlanHtml, type PlanPagePayload } from '../src/plan/render'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { loadCommentsPlan, PAYLOADS, planPageData } from './plan-fixture'
+import { pageFunctionSource } from './plan-page-dom'
 
 const source = readFileSync(planTemplatePath(), 'utf8')
 
@@ -67,20 +68,7 @@ function layoutOf(flow: unknown): PlanFlowLayout {
   return buildPlanPayload({ plan: planWithFlows([flow]) }).flows[0]
 }
 
-/** `function name(...) { ... }` as the page spells it, by brace matching. */
-function functionSource(name: string): string {
-  const start = source.indexOf(`function ${name}(`)
-  if (start < 0) throw new Error(`the page declares no ${name}()`)
-  let depth = 0
-  for (let at = source.indexOf('{', start); at < source.length; at += 1) {
-    if (source[at] === '{') depth += 1
-    else if (source[at] === '}') {
-      depth -= 1
-      if (depth === 0) return source.slice(start, at + 1)
-    }
-  }
-  throw new Error(`${name}() never closes`)
-}
+const functionSource = (name: string): string => pageFunctionSource(source, name)
 
 class FakeNode {
   readonly attributes: Record<string, string> = {}
@@ -139,7 +127,7 @@ const { drawFlow: drawFlowWith, flowBlocked, wrapSvgText } = (() => {
     `'use strict'\n${constants.join('\n')}\n${functions.join('\n')}\nreturn { drawFlow: drawFlow, flowBlocked: flowBlocked, wrapSvgText: wrapSvgText }`,
   )
   return build(document) as {
-    drawFlow: (flow: PlanFlowLayout, declared: object) => FakeNode
+    drawFlow: (flow: PlanFlowLayout, declared: object, label: string) => FakeNode
     flowBlocked: (start: number[], end: number[], cells: object, from: object, to: object) => boolean
     wrapSvgText: (text: string, limit: number, most: number) => string[]
   }
@@ -149,7 +137,7 @@ const { drawFlow: drawFlowWith, flowBlocked, wrapSvgText } = (() => {
 const DECLARED = Object.fromEntries(buildPlanPayload({ plan: planWithFlows() }).elements.map((element) => [element.id, true]))
 
 function drawFlow(flow: PlanFlowLayout, declared: object = DECLARED): FakeNode {
-  return drawFlowWith(flow, declared)
+  return drawFlowWith(flow, declared, `Flow: ${flow.title}`)
 }
 
 function laneOf(edge: FakeNode): number {
