@@ -64,7 +64,8 @@ export interface PlanElementStatus<S extends PlanElementState = PlanStatusState>
 export interface PlanStatusSummary {
   /** Elements the plan changes, per state. `existing` elements are counted apart. */
   states: Record<PlanStatusState, number>
-  existing: { found: number; missing: string[] }
+  /** `unread` holds the ones whose section could not be read, which are neither found nor missing. */
+  existing: { found: number; missing: string[]; unread: string[] }
   properties: Record<PlanPropertyVerdict, number>
   /** Planned, not checkable: the `unknown` properties of each element, by id. */
   notCheckable: Array<{ id: string; properties: string[] }>
@@ -218,14 +219,14 @@ export function judgePlan(plan: PlanDraft, app: PlanAppState): PlanStatus {
 export function summarize(elements: ReadonlyArray<PlanElementStatus>): PlanStatusSummary {
   const states = Object.fromEntries(PLAN_STATUS_STATES.map((state) => [state, 0])) as Record<PlanStatusState, number>
   const properties: Record<PlanPropertyVerdict, number> = { match: 0, differ: 0, unknown: 0 }
-  const existing = { found: 0, missing: [] as string[] }
+  const existing = { found: 0, missing: [] as string[], unread: [] as string[] }
   const notCheckable: PlanStatusSummary['notCheckable'] = []
 
   for (const element of elements) {
     if (element.change === 'existing') {
       if (element.state === 'planned') existing.missing.push(element.id)
       else if (element.state === 'present') existing.found += 1
-      else states[element.state] += 1
+      else existing.unread.push(element.id)
       continue
     }
     states[element.state] += 1

@@ -11,7 +11,6 @@ import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
-import type { PlanElementSection } from './plan/schema'
 import { judgePlan, PLAN_STATUS_SECTIONS, PLAN_STATUS_STATES, type PlanElementStatus, type PlanStatus } from './plan/status'
 
 /** Bumped when a field of {@link PlanStatusReport} changes meaning or goes away; additions do not bump it. */
@@ -73,7 +72,7 @@ export function formatPlanStatus(report: PlanStatusReport): string {
   }
 
   for (const section of PLAN_STATUS_SECTIONS) {
-    const elements = report.elements.filter((element) => element.section === (section as PlanElementSection))
+    const elements = report.elements.filter((element) => element.section === section)
     if (elements.length === 0) continue
     lines.push(SECTION_TITLES[section])
     for (const element of elements) lines.push(...elementLines(element, widths))
@@ -84,7 +83,10 @@ export function formatPlanStatus(report: PlanStatusReport): string {
   const changed = PLAN_STATUS_STATES.reduce((total, state) => total + states[state], 0)
   lines.push(`Elements the plan changes: ${changed}`)
   lines.push(`  ${PLAN_STATUS_STATES.map((state) => `${state} ${states[state]}`).join(', ')}`)
-  lines.push(`Existing elements referenced: ${existing.found} found, ${existing.missing.length} missing${existing.missing.length > 0 ? ` (${existing.missing.join(', ')})` : ''}`)
+  const named = (ids: string[]): string => (ids.length > 0 ? ` (${ids.join(', ')})` : '')
+  lines.push(
+    `Existing elements referenced: ${existing.found} found, ${existing.missing.length} missing${named(existing.missing)}, ${existing.unread.length} not readable${named(existing.unread)}`,
+  )
 
   const compared = properties.match + properties.differ + properties.unknown
   lines.push(`Planned properties compared: ${compared} (match ${properties.match}, differ ${properties.differ}, not checkable ${properties.unknown})`)

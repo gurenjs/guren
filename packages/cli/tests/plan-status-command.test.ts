@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
 import { mkdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -108,6 +108,10 @@ describe('plan:status', () => {
     log.mockClear()
   })
 
+  afterAll(() => {
+    log.mockRestore()
+  })
+
   async function run(plan: string, app: string, ...flags: string[]): Promise<string> {
     log.mockImplementation(() => {})
     await runCommand(builtinSubCommands['plan:status'], { rawArgs: [plan, '--app', app, ...flags] })
@@ -127,7 +131,7 @@ describe('plan:status', () => {
 
     const added = result.elements.filter((element) => element.change === 'add')
     expect(added.map((element) => element.state)).toEqual(added.map(() => 'planned'))
-    expect(result.summary.existing).toEqual({ found: 1, missing: [] })
+    expect(result.summary.existing).toEqual({ found: 1, missing: [], unread: [] })
   })
 
   test('should keep the JSON report to its documented shape', async () => {

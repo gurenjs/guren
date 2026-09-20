@@ -411,8 +411,15 @@ describe('judgePlan', () => {
 
       const { summary } = judgePlan(document, app())
 
-      expect(summary.existing).toEqual({ found: 1, missing: ['ghost'] })
+      expect(summary.existing).toEqual({ found: 1, missing: ['ghost'], unread: [] })
       expect(summary.states).toEqual({ planned: 1, present: 0, wired: 0, drifted: 0, unjudged: 0, blocked: 0 })
+    })
+
+    test('should keep an existing element nobody could read out of both the found and the changed counts', () => {
+      const { summary } = judgePlan(plan({ models: [model(EXISTING)] }), app({}, { models: UNREADABLE }))
+
+      expect(summary.existing).toEqual({ found: 0, missing: [], unread: ['m'] })
+      expect(summary.states.blocked).toBe(0)
     })
 
     test('should judge the comments fixture without calling anything it adds present', () => {
