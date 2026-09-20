@@ -251,6 +251,21 @@ describe('loadPlanAppState({ detail: true })', () => {
     ])
   })
 
+  test('should leave a validator file that throws on import unmatchable rather than the section unreadable', async () => {
+    const detail = await detailOf('throwing-validator', {
+      'src/app.ts': entry('{ routes: registerWebRoutes }'),
+      'app/Http/Validators/Throws.ts': "export const ThrowsSchema = {}\nthrow new Error('boom')\n",
+    })
+
+    expect(detail.validators).toContainEqual({
+      name: 'ThrowsSchema',
+      file: 'app/Http/Validators/Throws.ts',
+      module: null,
+      unimported: expect.stringContaining('boom'),
+    })
+    expect(detail.validators).toContainEqual({ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null })
+  })
+
   test('should report the validators unreadable when a file outside a barrel re-exports everything', async () => {
     const detail = await detailOf('starexport', {
       'src/app.ts': entry('{ routes: registerWebRoutes }'),

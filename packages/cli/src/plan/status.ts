@@ -392,6 +392,8 @@ class StatusContext {
   /** A file named after the class that yielded no model is a class this cannot call absent. */
   private modelExistence(name: string, module: string | undefined): Existence {
     const found = existsInScope(this.app.models, name, NOUNS.models, module, this.section('models'), (entry) => entry.className === name)
+    // `no` also covers a class only another app root declares, and an unparsed file
+    // carries no root, so such a file makes that answer unknown too.
     const unparsed = this.detail?.unparsedModelFiles.find((file) => file.replace(/^.*\//, '').replace(/\.[^.]+$/, '') === name)
     if (found === 'no' && unparsed) return { unknown: `${unparsed} exists and no model class could be read from it` }
     return found
