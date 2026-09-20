@@ -3,7 +3,7 @@
  * a plan says is formatted; a worded node re-reads its phrase when the locale changes.
  */
 
-import type { PlanDictionary } from '../locales'
+import type { PlanLocale } from '../locales'
 import { byId, clear, el, isNode, own } from './dom'
 import type { PlanPageI18n } from './payload'
 
@@ -16,7 +16,7 @@ const LOCALE_KEY = 'guren.plan.locale'
 const CHROME = ['tabs', 'controls', 'footer']
 
 let i18n: PlanPageI18n
-let uiLocale: string
+let uiLocale: PlanLocale
 const localised: Array<() => void> = []
 
 /**
@@ -55,13 +55,8 @@ export function formatText(template: string, values?: PhraseValues): string {
   return formatInto(el('span'), template, values).textContent
 }
 
-function supported(locale: unknown): locale is string {
+function supported(locale: unknown): locale is PlanLocale {
   return typeof locale === 'string' && own(i18n.dictionaries, locale)
-}
-
-function dictionary(locale: string): PlanDictionary {
-  const dictionaries: Record<string, PlanDictionary> = i18n.dictionaries
-  return dictionaries[locale]
 }
 
 export function initLocale(given: PlanPageI18n): void {
@@ -75,13 +70,13 @@ export function initLocale(given: PlanPageI18n): void {
   }
 }
 
-export function currentLocale(): string {
+export function currentLocale(): PlanLocale {
   return uiLocale
 }
 
 /** A key neither locale has comes back spelled out rather than blank. */
 function phrase(key: string): string {
-  if (own(dictionary(uiLocale), key)) return dictionary(uiLocale)[key]
+  if (own(i18n.dictionaries[uiLocale], key)) return i18n.dictionaries[uiLocale][key]
   if (own(i18n.dictionaries.en, key)) return i18n.dictionaries.en[key]
   return '{' + key + '}'
 }
@@ -153,9 +148,9 @@ export function mountLocaleSwitch(): void {
 
   const localeSelect = byId<HTMLSelectElement>('locale-select')
   words(byId('locale-switch-label'), 'locale.switch')
-  for (const locale of Object.keys(i18n.dictionaries)) {
+  for (const [locale, dictionary] of Object.entries(i18n.dictionaries)) {
     // Each language is named in itself, whichever one the page is speaking.
-    const option = el('option', null, own(dictionary(locale), 'locale.name') ? dictionary(locale)['locale.name'] : locale)
+    const option = el('option', null, own(dictionary, 'locale.name') ? dictionary['locale.name'] : locale)
     option.value = locale
     option.setAttribute('lang', locale)
     localeSelect.appendChild(option)

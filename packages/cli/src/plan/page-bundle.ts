@@ -4,19 +4,26 @@
  * both come through here, so a build and a test run cannot bundle it two ways.
  */
 
-import { basename, dirname } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export const PLAN_SCRIPT_PLACEHOLDER = '__GUREN_PLAN_SCRIPT__'
+
+/** Where the composed page is written and read back, relative to the package root; `files` ships it. */
+export const PLAN_ASSET_DIR = 'assets/plan'
+export const PLAN_TEMPLATE_FILE = 'index.html'
+const PLAN_PAGE_ENTRY = 'main.ts'
 
 /**
  * Identifiers are left alone and nothing is minified: the page is read by whoever
  * opens its source, and a rendered plan is small either way.
  */
-export function bundlePlanPage(entry: string): string {
+function bundlePlanPage(pageDir: string): string {
   if (typeof Bun === 'undefined') throw new Error('The plan page is bundled with Bun; run this from a Bun process.')
-  const built = Bun.spawnSync([process.execPath, 'build', basename(entry), '--format=iife', '--target=browser'], {
+  // Spawned rather than `Bun.build()`, which is async: `renderPlanHtml()` is synchronous and reaches this from source.
+  const built = Bun.spawnSync([process.execPath, 'build', PLAN_PAGE_ENTRY, '--format=iife', '--target=browser'], {
     // The bundler names each module in a comment, relative to here: any other directory would write the caller's into the page.
-    cwd: dirname(entry),
+    cwd: pageDir,
     stdout: 'pipe',
     stderr: 'pipe',
     env: { ...process.env, NO_COLOR: '1' },
@@ -32,4 +39,10 @@ export function composePlanTemplate(html: string, script: string): string {
   const sites = html.split(PLAN_SCRIPT_PLACEHOLDER).length - 1
   if (sites !== 1) throw new Error(`The plan template names its script ${sites} times; it must name it once.`)
   return html.replace(PLAN_SCRIPT_PLACEHOLDER, () => script.trimEnd())
+}
+
+/** The template under `pageDir` with its entry bundled in. A missing template surfaces as the read's own `ENOENT`. */
+export function composePlanPage(pageDir: string): string {
+  const html = readFileSync(join(pageDir, PLAN_TEMPLATE_FILE), 'utf8')
+  return composePlanTemplate(html, bundlePlanPage(pageDir))
 }

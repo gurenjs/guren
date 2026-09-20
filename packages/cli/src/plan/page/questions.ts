@@ -2,8 +2,8 @@
 
 import type { PlanFeedback } from '../feedback'
 import type { PlanQuestion } from '../schema'
-import { card, dependsMarks } from './card'
-import { byId, el, link } from './dom'
+import { card, dependsMarks, linkLine } from './card'
+import { byId, el } from './dom'
 import { ariaLabel, tel } from './locale'
 
 interface Answer {
@@ -101,15 +101,7 @@ function questionCard(question: PlanQuestion, questionIndex: number): HTMLElemen
   answerLabel.appendChild(answerBox)
   body.appendChild(answerLabel)
 
-  if (question.affects.length) {
-    const affects = el('p', 'note referenced-by')
-    affects.appendChild(tel('span', 'label', 'questions.affects'))
-    question.affects.forEach((elementId, index) => {
-      if (index) affects.appendChild(document.createTextNode(', '))
-      affects.appendChild(link(elementId))
-    })
-    body.appendChild(affects)
-  }
+  if (question.affects.length) body.appendChild(linkLine('questions.affects', question.affects))
 
   return card({
     id: question.id,

@@ -4,10 +4,12 @@
  * a browser would have been handed.
  */
 
+import { afterAll, beforeAll } from 'bun:test'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { planDataBlock } from './plan-fixture'
+import { escapeJsonForScript, type PlanPagePayload } from '../src/plan/render'
+import { planDataBlock, planPageData } from './plan-fixture'
 
 const PAGE_DIR = join(import.meta.dir, '../src/plan/page')
 
@@ -254,11 +256,44 @@ export interface Page {
   byId(id: string): PageNode
 }
 
-export function openPlanPage(html: string, options: PageOptions = {}): Page {
+/** Where the body's one classic script starts and ends; the data block before it is typed, so it is not `<script>`. */
+function scriptSpan(html: string): { bodyStart: number; start: number; end: number } {
   const bodyStart = html.indexOf('<body>') + '<body>'.length
-  const scriptStart = html.indexOf('<script>', bodyStart)
-  const scriptEnd = html.lastIndexOf('</script>')
-  if (bodyStart < 0 || scriptStart < 0 || scriptEnd < 0) throw new Error('the page is not shaped as the template ships it')
+  const start = html.indexOf('<script>', bodyStart)
+  const end = html.lastIndexOf('</script>')
+  if (bodyStart < '<body>'.length || start < 0 || end < start) throw new Error('the page is not shaped as the template ships it')
+  return { bodyStart, start, end }
+}
+
+/** The script a document ships, as the browser is handed it. */
+export function planPageScript(html: string): string {
+  const { start, end } = scriptSpan(html)
+  return html.slice(start + '<script>'.length, end)
+}
+
+/**
+ * `document` as the global the imported page modules call. `bun test` run from this
+ * package keeps one process for every file (the monorepo run passes `--isolate`), so
+ * the global is taken down again with the file that put it up.
+ */
+export function usePageDocument(document: object): void {
+  beforeAll(() => {
+    Object.assign(globalThis, { document })
+  })
+  afterAll(() => {
+    delete (globalThis as { document?: unknown }).document
+  })
+}
+
+/** The page opened on a payload `mutate` has rewritten: what a renderer other than this one might embed. */
+export function openPlanPageWith(html: string, mutate: (data: PlanPagePayload) => void, options?: PageOptions): Page {
+  const data = planPageData(html)
+  mutate(data)
+  return openPlanPage(html.replace(planDataBlock(html), () => escapeJsonForScript(JSON.stringify(data))), options)
+}
+
+export function openPlanPage(html: string, options: PageOptions = {}): Page {
+  const { bodyStart, start: scriptStart } = scriptSpan(html)
 
   const document = new PageDocument()
   const lang = /<html lang="([^"]*)"/.exec(html)
@@ -289,7 +324,7 @@ export function openPlanPage(html: string, options: PageOptions = {}): Page {
   })
 
   // oxlint-disable-next-line no-new-func -- the page ships as a classic script, and this runs the one it ships
-  new Function('window', 'document', 'URL', 'Blob', 'JSON', html.slice(scriptStart + '<script>'.length, scriptEnd))(
+  new Function('window', 'document', 'URL', 'Blob', 'JSON', planPageScript(html))(
     window,
     document,
     { createObjectURL: () => 'blob:plan', revokeObjectURL() {} },

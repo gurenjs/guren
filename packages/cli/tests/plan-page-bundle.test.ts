@@ -1,18 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
 import { composePlanTemplate, PLAN_SCRIPT_PLACEHOLDER } from '../src/plan/page-bundle'
-import { escapeJsonForScript, planTemplateSource, renderPlanHtml } from '../src/plan/render'
+import { planTemplateSource, renderPlanHtml } from '../src/plan/render'
 import { PLAN_VERSION } from '../src/plan/schema'
-import { planDataBlock, planPageData } from './plan-fixture'
-import { openPlanPage, pageSentences, type Page } from './plan-page-dom'
+import { openPlanPageWith, pageSentences, planPageScript, type Page } from './plan-page-dom'
 import { richPlan } from './plan-page-rich'
 
-/** The script the template ships, as the browser is handed it. */
-const bundle = (() => {
-  const source = planTemplateSource()
-  const start = source.lastIndexOf('<script>') + '<script>'.length
-  return source.slice(start, source.lastIndexOf('</script>'))
-})()
+const bundle = planPageScript(planTemplateSource())
 
 describe('the plan page bundle', () => {
   test('should be one classic script in strict mode, with no module syntax left', () => {
@@ -65,10 +59,9 @@ describe('composePlanTemplate', () => {
 
 describe('a plan of a version the page was not built for', () => {
   function openWithVersion(version: unknown, uiLocale: 'en' | 'ja' = 'en'): Page {
-    const html = renderPlanHtml({ plan: richPlan(), uiLocale })
-    const data = planPageData(html)
-    ;(data.plan as { planVersion: unknown }).planVersion = version
-    return openPlanPage(html.replace(planDataBlock(html), () => escapeJsonForScript(JSON.stringify(data))))
+    return openPlanPageWith(renderPlanHtml({ plan: richPlan(), uiLocale }), (data) => {
+      ;(data.plan as { planVersion: unknown }).planVersion = version
+    })
   }
 
   test('should say so, naming both versions', () => {

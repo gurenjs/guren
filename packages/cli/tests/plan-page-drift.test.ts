@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { beforeAll, describe, expect, test } from 'bun:test'
 
 import { renderPlanHtml } from '../src/plan/render'
 import { planDraftJsonSchema } from '../src/plan/schema'
@@ -78,6 +78,8 @@ function rewrite(value: Loose, name: string, to: (old: Loose) => Loose): Loose {
  * The rich plan, then the same plan once per branch a single document cannot take
  * twice: a change is one kind, and a data migration says `reason` or `description`.
  */
+const UNDECLARED = 'zzUndeclared'
+
 function everyBranch(): Loose[] {
   const plan: Loose = structuredClone(richPlan())
   plan.models[0].columns.push({
@@ -91,6 +93,10 @@ function everyBranch(): Loose[] {
     unique: false,
     index: false,
   })
+  // The negative control: no schema names these, so a page that reads them is walking
+  // the plan rather than reading it, and every other path it "read" means nothing.
+  plan[UNDECLARED] = { nested: true }
+  plan.models[0][UNDECLARED] = 'unread'
   plan.flows = [
     {
       id: 'flow.comment',
@@ -124,7 +130,15 @@ const NOT_READ: Record<string, string> = {}
 describe('the plan page against the plan schema', () => {
   const declared = schemaPaths(planDraftJsonSchema() as JsonSchema)
   const reads = new Set<string>()
-  for (const plan of everyBranch()) planReads(renderPlanHtml({ plan, checks: RICH_CHECKS }), reads)
+
+  beforeAll(() => {
+    for (const plan of everyBranch()) planReads(renderPlanHtml({ plan, checks: RICH_CHECKS }), reads)
+  })
+
+  test('should read the plan property by property, never walk it whole', () => {
+    expect(reads.size).toBeGreaterThan(declared.size / 2)
+    expect([...reads].filter((path) => path.includes(UNDECLARED))).toEqual([])
+  })
 
   test('should read every property a plan can carry, or say why it does not', () => {
     expect([...declared].filter((path) => !reads.has(path) && !Object.hasOwn(NOT_READ, path)).sort()).toEqual([])

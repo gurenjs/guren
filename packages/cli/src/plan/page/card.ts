@@ -50,15 +50,10 @@ export function indexPlan(data: PlanPagePayload): void {
 
   incoming = groupBy(data.links, (edge) => edge.to)
 
-  const affected: Array<{ elementId: string; questionId: string }> = []
+  dependsOn = idMap()
   for (const question of data.plan.questions) {
-    for (const elementId of question.affects) affected.push({ elementId: elementId, questionId: question.id })
+    for (const elementId of question.affects) (dependsOn[elementId] ??= []).push(question.id)
   }
-  dependsOn = groupBy(
-    affected,
-    (entry) => entry.elementId,
-    (entry) => entry.questionId,
-  )
 
   checksFor = groupBy(data.checks, (result) => result.elementId)
   breakingFor = groupBy(data.breaking, (item) => item.elementId)
@@ -84,6 +79,17 @@ export function kv(pairs: ReadonlyArray<readonly [key: string, value: string | N
     dl.appendChild(dd)
   }
   return dl
+}
+
+/** A label and the elements it names, each a link, in the order given. */
+export function linkLine(labelKey: string, ids: readonly string[]): HTMLParagraphElement {
+  const line = el('p', 'note referenced-by')
+  line.appendChild(tel('span', 'label', labelKey))
+  ids.forEach((id, index) => {
+    if (index) line.appendChild(document.createTextNode(', '))
+    line.appendChild(link(id))
+  })
+  return line
 }
 
 function changeBadge(change: CardChange | undefined): HTMLElement | null {
@@ -128,19 +134,8 @@ export function card(options: CardOptions): HTMLElement {
   // Only the reverse direction: what an element references is already written
   // where it belongs (a validator under Body, a policy under Policy, a target
   // in its relationship line), and repeating it as chips said it twice.
-  const back = incoming[options.id] ?? []
-  if (back.length) {
-    const seen = idMap<boolean>()
-    const referrers = el('p', 'note referenced-by')
-    referrers.appendChild(tel('span', 'label', 'card.referencedBy'))
-    for (const edge of back) {
-      if (seen[edge.from]) continue
-      seen[edge.from] = true
-      if (referrers.childNodes.length > 1) referrers.appendChild(document.createTextNode(', '))
-      referrers.appendChild(link(edge.from))
-    }
-    node.appendChild(referrers)
-  }
+  const referrers = [...new Set((incoming[options.id] ?? []).map((edge) => edge.from))]
+  if (referrers.length) node.appendChild(linkLine('card.referencedBy', referrers))
 
   if (!options.noReview) {
     const controls = reviewControls(options.id)

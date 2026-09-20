@@ -21,24 +21,12 @@ export function idMap<T>(): IdMap<T> {
 }
 
 /** An id-keyed multimap: the one place the `(m[k] = m[k] || []).push(v)` idiom lives. */
-export function groupBy<T>(items: readonly T[], keyOf: (item: T) => string | null | undefined): IdMap<T[]>
-export function groupBy<T, V>(
-  items: readonly T[],
-  keyOf: (item: T) => string | null | undefined,
-  valueOf: (item: T) => V,
-): IdMap<V[]>
-export function groupBy<T, V>(
-  items: readonly T[],
-  keyOf: (item: T) => string | null | undefined,
-  valueOf?: (item: T) => V,
-): IdMap<Array<T | V>> {
-  const map = idMap<Array<T | V>>()
+export function groupBy<T>(items: readonly T[], keyOf: (item: T) => string | null | undefined): IdMap<T[]> {
+  const map = idMap<T[]>()
   for (const item of items) {
     const key = keyOf(item)
     if (key === undefined || key === null) continue
-    let bucket = map[key]
-    if (bucket === undefined) map[key] = bucket = []
-    bucket.push(valueOf ? valueOf(item) : item)
+    ;(map[key] ??= []).push(item)
   }
   return map
 }

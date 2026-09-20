@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { loadPlanDictionaries } from '../src/plan/locales'
-import { escapeJsonForScript, planTemplateSource, renderPlanHtml, type RenderPlanInput } from '../src/plan/render'
-import { planDataBlock, planPageData } from './plan-fixture'
-import { openPlanPage, pageSentences, planPageSource, type Page, type PageNode, type PageOptions } from './plan-page-dom'
+import { planTemplateSource, renderPlanHtml, type RenderPlanInput } from '../src/plan/render'
+import { planPageData } from './plan-fixture'
+import { openPlanPage, openPlanPageWith, pageSentences, planPageSource, type Page, type PageNode, type PageOptions } from './plan-page-dom'
 import { RICH_CHECKS, richPlan } from './plan-page-rich'
 
 const LOCALE_KEY = 'guren.plan.locale'
@@ -286,20 +286,18 @@ describe('the plan page source', () => {
   })
 
   test('should spell out a key no dictionary has', () => {
-    const html = renderPlanHtml({ plan: richPlan() })
-    const data = planPageData(html)
-    delete (data.i18n.dictionaries.en as Record<string, string>)['footer.copy']
-    delete (data.i18n.dictionaries.ja as Record<string, string>)['footer.copy']
-    const page = openPlanPage(html.replace(planDataBlock(html), () => escapeJsonForScript(JSON.stringify(data))))
+    const page = openPlanPageWith(renderPlanHtml({ plan: richPlan() }), (data) => {
+      delete (data.i18n.dictionaries.en as Record<string, string>)['footer.copy']
+      delete (data.i18n.dictionaries.ja as Record<string, string>)['footer.copy']
+    })
 
     expect(page.byId('copy').textContent).toBe('{footer.copy}')
   })
 
   test('should fall back to en for a key only ja lacks', () => {
-    const html = renderPlanHtml({ plan: richPlan(), uiLocale: 'ja' })
-    const data = planPageData(html)
-    delete (data.i18n.dictionaries.ja as Record<string, string>)['footer.copy']
-    const page = openPlanPage(html.replace(planDataBlock(html), () => escapeJsonForScript(JSON.stringify(data))))
+    const page = openPlanPageWith(renderPlanHtml({ plan: richPlan(), uiLocale: 'ja' }), (data) => {
+      delete (data.i18n.dictionaries.ja as Record<string, string>)['footer.copy']
+    })
 
     expect(page.byId('copy').textContent).toBe('Copy feedback')
   })

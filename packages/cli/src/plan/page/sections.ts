@@ -1,7 +1,8 @@
 /** One renderer per plan section. Each reads the plan's own fields, typed by the schema. */
 
 import type { PlanAcceptance, PlanColumn, PlanFlow, PlanModel, PlanRoute } from '../schema'
-import { card, entityOf, group, kv } from './card'
+import { card, entityOf, group, kv, linkLine } from './card'
+import { columnFlags } from './diagram'
 import { el, idMap, link, list, span } from './dom'
 import { drawFlow } from './flow'
 import { ariaLabel, t, tel, words, type PhraseValues } from './locale'
@@ -51,10 +52,7 @@ export let diagramHost: HTMLElement | null = null
  */
 function columnFacts(column: PlanColumn): HTMLSpanElement {
   const facts = [column.type + (column.precision ? '(' + column.precision + ',' + (column.scale || 0) + ')' : '')]
-  if (column.primaryKey) facts.push('pk')
-  if (column.nullable) facts.push('null')
-  if (column.unique) facts.push('uniq')
-  if (column.index) facts.push('idx')
+  facts.push(...columnFlags(column))
   if (column.withTimezone) facts.push('tz')
   if (column.default !== undefined) facts.push('default ' + column.default)
   if (column.columnName !== undefined) facts.push('as ' + column.columnName)
@@ -387,15 +385,9 @@ function renderAcceptance(acceptance: PlanAcceptance): HTMLDivElement {
 
 function renderTasks(host: HTMLElement, { plan }: PlanPagePayload): void {
   for (const task of plan.tasks) {
-    const covers = el('p', 'note referenced-by')
-    covers.appendChild(tel('span', 'label', 'tasks.covers'))
-    task.covers.forEach((elementId, index) => {
-      if (index) covers.appendChild(document.createTextNode(', '))
-      covers.appendChild(link(elementId))
-    })
     const taskBody = el('div')
     taskBody.appendChild(kv([['tasks.entity', task.entity]]))
-    taskBody.appendChild(covers)
+    taskBody.appendChild(linkLine('tasks.covers', task.covers))
     const node = card({ id: task.id, title: task.entity + ' - ' + task.summary, body: taskBody })
     for (const acceptance of task.acceptance) {
       node.appendChild(

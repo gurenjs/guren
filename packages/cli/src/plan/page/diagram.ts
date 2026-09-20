@@ -18,13 +18,18 @@ interface PlacedTable extends Box {
 const expanded = idMap<boolean>()
 let drawnColumns: number | null = null
 
+/** The facts about a column that are true, in the order the page always writes them. */
+export function columnFlags(column: { primaryKey?: boolean; nullable: boolean; unique: boolean; index: boolean }): string[] {
+  const flags: string[] = []
+  if (column.primaryKey) flags.push('pk')
+  if (column.nullable) flags.push('null')
+  if (column.unique) flags.push('uniq')
+  if (column.index) flags.push('idx')
+  return flags
+}
+
 function columnLine(column: PlanDiagramColumn): string {
-  const parts = [column.name, column.type]
-  if (column.primaryKey) parts.push('pk')
-  if (column.nullable) parts.push('null')
-  if (column.unique) parts.push('uniq')
-  if (column.index) parts.push('idx')
-  return parts.join(' ')
+  return [column.name, column.type, ...columnFlags(column)].join(' ')
 }
 
 /**

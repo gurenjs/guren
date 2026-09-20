@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { readPlanAsset, readPlanTemplate } from '../src/plan/assets'
 import { planDiagram } from '../src/plan/diagram'
+import { PLAN_ASSET_DIR, PLAN_TEMPLATE_FILE } from '../src/plan/page-bundle'
 import {
   buildPlanPayload,
   escapeJsonForScript,
@@ -305,13 +307,52 @@ describe('the plan template', () => {
 
   // `assets/`, not `templates/`: nothing copies this page into an application, and
   // CLAUDE.md's scaffold-template gates key on `packages/cli/templates/**`.
-  test('should be built into the directory the published package ships', () => {
-    const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8'))
-    const build = readFileSync(join(import.meta.dir, '../scripts/build-plan-page.ts'), 'utf8')
+  test('should be built into the directory the published package ships and the reader reads', () => {
+    const packageRoot = join(import.meta.dir, '..')
+    const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
 
-    expect(manifest.files).toContain('assets')
+    expect(manifest.files).toContain(PLAN_ASSET_DIR.split('/')[0])
     expect(manifest.scripts.build).toContain('scripts/build-plan-page.ts')
-    expect(build).toContain("join(packageRoot, 'assets/plan')")
+    expect(readPlanAsset('lang/en.json').path).toBe(join(packageRoot, PLAN_ASSET_DIR, 'lang/en.json'))
+  })
+})
+
+describe('readPlanTemplate', () => {
+  const built = join(import.meta.dir, '..', PLAN_ASSET_DIR, PLAN_TEMPLATE_FILE)
+
+  // What an installed package does, which has no `page/`. The built file exists once
+  // the package has been built and not before, and either answer comes from the reader
+  // of built assets: composing would have thrown the missing template's own error.
+  test('should read the built page where there is no page directory', async () => {
+    const nowhere = join(await mkdtemp(join(tmpdir(), 'guren-plan-page-')), 'page')
+    let expected: string | null = null
+    try {
+      expected = readFileSync(built, 'utf8')
+    } catch {
+      expected = null
+    }
+
+    if (expected === null) expect(() => readPlanTemplate(nowhere)).toThrow(`Could not locate ${PLAN_TEMPLATE_FILE}`)
+    else expect(readPlanTemplate(nowhere)).toEqual({ path: built, source: expected })
+  })
+
+  test('should not let the built page answer for the one composed from source', async () => {
+    // The same sources under a path this process has not composed yet, so only the
+    // asset cache could answer early.
+    const page = join(await mkdtemp(join(tmpdir(), 'guren-plan-page-')), 'page')
+    await symlink(join(import.meta.dir, '../src/plan/page'), page)
+    try {
+      readPlanAsset(PLAN_TEMPLATE_FILE)
+    } catch {
+      // Not built yet: there is then no built page to answer in its place.
+    }
+
+    expect(readPlanTemplate(page)).toEqual({ path: join(page, PLAN_TEMPLATE_FILE), source: planTemplateSource() })
+  })
+
+  test('should report a page directory it cannot read rather than fall back', () => {
+    // A file where the directory should be: `ENOTDIR`, which is not absence.
+    expect(() => readPlanTemplate(join(import.meta.dir, 'plan-fixture.ts'))).toThrow('ENOTDIR')
   })
 })
 

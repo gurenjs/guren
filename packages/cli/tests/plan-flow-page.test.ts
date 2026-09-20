@@ -1,11 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 
 import type { PlanFlowLayout } from '../src/plan/flow'
 import * as flowPage from '../src/plan/page/flow'
 import { buildPlanPayload, planLinks, planTemplateSource, renderPlanHtml, type PlanPagePayload } from '../src/plan/render'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { loadCommentsPlan, PAYLOADS, planPageData } from './plan-fixture'
-import { pageFunctionSource, planPageSource } from './plan-page-dom'
+import { pageFunctionSource, planPageSource, usePageDocument } from './plan-page-dom'
 
 const script = planPageSource()
 
@@ -99,15 +99,8 @@ class FakeNode {
   }
 }
 
-// The page's own drawing, imported; `document` answers the one DOM call it makes.
-// Installed for this file only: every suite of the package shares one process.
-beforeAll(() => {
-  Object.assign(globalThis, { document: { createElementNS: (_namespace: string, tag: string) => new FakeNode(tag) } })
-})
-
-afterAll(() => {
-  delete (globalThis as { document?: unknown }).document
-})
+// The page's own drawing, imported; this answers the one DOM call it makes.
+usePageDocument({ createElementNS: (_namespace: string, tag: string) => new FakeNode(tag) })
 
 const { flowBlocked, wrapSvgText, FLOW_NODE_H, FLOW_GAP_Y } = flowPage
 

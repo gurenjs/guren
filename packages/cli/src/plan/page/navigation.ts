@@ -28,7 +28,7 @@ export function mountTabs(data: PlanPagePayload): void {
   const panels = byId('panels')
 
   SECTIONS.forEach((section, index) => {
-    const items = data.plan[section.key] || []
+    const items = data.plan[section.key]
     const button = tel('button', null, 'sections.tab', () => ({ label: t(section.label), count: items.length }))
     button.type = 'button'
     button.setAttribute('role', 'tab')
