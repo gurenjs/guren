@@ -777,8 +777,10 @@ entity, an element outside the junit vocabulary, a report over 32 × 2²⁰
 characters, an attribute over 2²⁰ characters and 64 levels of nesting, each as
 `blocked` with the reason. The caps count UTF-16 units, which is what the text
 handed over measures in, and never bytes. It is looser than XML 1.0 in one
-place: Bun writes a control character in a title both raw and as `&#1;`, and
-both pass.
+place and stricter in another. Bun writes a control character in a title both
+raw and as `&#1;`, and both pass. A numeric reference padded past the span of
+`&#x10FFFF;` is refused however legal it is, so a zero-padded `&#x0010FFFF;`
+reads as blocked rather than as the character it names.
 
 An element is `verified` when its step's verify commands pass *and* every
 behaviour naming it is `passing`; the page shows the behaviours under the

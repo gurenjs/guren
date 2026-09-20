@@ -18,6 +18,17 @@ export const JUNIT_MAX_DEPTH = 64
 // A bracketed token no behaviour declares is an error only under this prefix: `[GET]` is not a mistyped id.
 const ACCEPTANCE_ID_PREFIX = 'AC-'
 
+/** A token comes from a test title, which no plan rule bounds, and an error's id is shown to a reader. */
+const MAX_REPORTED_ID_CHARS = 256
+
+/** A failure of the junit vocabulary, as against one the XML reader raises; both reach the caller as `blocked`. */
+class JunitReportError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'JunitReportError'
+  }
+}
+
 export type AcceptanceStatus = 'pending' | 'failing' | 'passing'
 export type AcceptanceCaseOutcome = 'passed' | 'failed' | 'skipped'
 
@@ -37,7 +48,7 @@ export interface AcceptanceBehaviourStatus {
 
 export type AcceptanceError =
   | { kind: 'id-in-several-files'; id: string; files: string[] }
-  /** One per id and file; `title` is the first case that carried it. */
+  /** One per id and file; `title` is the first case that carried it. `id` is cut short past 256 characters. */
   | { kind: 'undeclared-id'; id: string; file: string; title: string }
 
 /**
@@ -49,8 +60,9 @@ export type AcceptanceReport =
   | { state: 'invalid'; errors: AcceptanceError[]; observed: AcceptanceBehaviourStatus[] }
   | { state: 'judged'; behaviours: AcceptanceBehaviourStatus[] }
 
+/** Distinct, in the order the tasks declare them: an id under two tasks is `validate`'s to report, not a second behaviour. */
 export function planAcceptanceIds(plan: Pick<Plan, 'tasks'>): string[] {
-  return plan.tasks.flatMap((task) => task.acceptance.map((behaviour) => behaviour.id))
+  return [...new Set(plan.tasks.flatMap((task) => task.acceptance.map((behaviour) => behaviour.id)))]
 }
 
 /**
@@ -66,7 +78,9 @@ export function acceptanceStatus(junit: string | undefined, declaredIds: readonl
   try {
     cases = readJunitCases(junit)
   } catch (error) {
-    if (error instanceof XmlSubsetError) return { state: 'blocked', reason: error.message }
+    if (error instanceof XmlSubsetError || error instanceof JunitReportError) {
+      return { state: 'blocked', reason: error.message }
+    }
     throw error
   }
 
@@ -75,21 +89,23 @@ export function acceptanceStatus(junit: string | undefined, declaredIds: readonl
   const undeclared = new Map<string, AcceptanceError>()
 
   for (const junitCase of cases) {
-    let entry: AcceptanceCase | undefined
+    let title: string | undefined
     for (const token of junitCase.tokens) {
       const isDeclared = declared.has(token)
       if (!isDeclared && !(token.startsWith(ACCEPTANCE_ID_PREFIX) && ID_PATTERN.test(token))) continue
 
-      entry ??= { title: junitCase.title(), file: junitCase.file, outcome: junitCase.outcome }
+      title ??= junitCase.title()
       if (isDeclared) {
+        // A behaviour's own object, since `cases` reaches a caller and every field is writable.
+        const entry: AcceptanceCase = { title, file: junitCase.file, outcome: junitCase.outcome }
         const list = casesById.get(token)
         if (list) list.push(entry)
         else casesById.set(token, [entry])
       } else {
         // A NUL cannot occur in a plan id, so the key cannot collide across (id, file) pairs.
-        const key = `${token}\0${entry.file}`
+        const key = `${token}\0${junitCase.file}`
         if (!undeclared.has(key)) {
-          undeclared.set(key, { kind: 'undeclared-id', id: token, file: entry.file, title: entry.title })
+          undeclared.set(key, { kind: 'undeclared-id', id: reportedId(token), file: junitCase.file, title })
         }
       }
     }
@@ -104,6 +120,11 @@ export function acceptanceStatus(junit: string | undefined, declaredIds: readonl
   })
 
   return errors.length > 0 ? { state: 'invalid', errors, observed: behaviours } : { state: 'judged', behaviours }
+}
+
+// `…` is outside the id grammar, so a cut id can never be read back as one.
+function reportedId(token: string): string {
+  return token.length > MAX_REPORTED_ID_CHARS ? `${token.slice(0, MAX_REPORTED_ID_CHARS)}…` : token
 }
 
 function statusOf(cases: readonly AcceptanceCase[]): AcceptanceStatus {
@@ -141,30 +162,40 @@ interface JunitCase {
 
 const REPORT_EXTRAS = ['properties', 'system-out', 'system-err']
 
-/** What each element this reader walks may hold; an element with no entry is not walked. */
-const CHILDREN_OF: Record<string, ReadonlySet<string>> = {
-  testsuites: new Set(['testsuite', ...REPORT_EXTRAS]),
-  testsuite: new Set(['testsuite', 'testcase', ...REPORT_EXTRAS]),
-  testcase: new Set(['failure', 'error', 'skipped', ...REPORT_EXTRAS]),
-}
+/**
+ * What each element this reader walks may hold; an element with no entry is not walked.
+ * The page's `idMap()` is the one null-prototype map keyed by a plan id; this is a second
+ * one, keyed by an element name the report chose, where `<constructor>` would otherwise
+ * read back as an inherited function and pass for a vocabulary this never declared.
+ */
+const CHILDREN_OF: Record<string, ReadonlySet<string>> = Object.assign(
+  Object.create(null) as Record<string, ReadonlySet<string>>,
+  {
+    testsuites: new Set(['testsuite', ...REPORT_EXTRAS]),
+    testsuite: new Set(['testsuite', 'testcase', ...REPORT_EXTRAS]),
+    testcase: new Set(['failure', 'error', 'skipped', ...REPORT_EXTRAS]),
+  },
+)
 
 function allowedChildren(parent: XmlElement): XmlElement[] {
   const allowed = CHILDREN_OF[parent.name]
   for (const child of parent.children) {
     if (!allowed?.has(child.name)) {
-      throw new XmlSubsetError(`<${child.name}> inside <${parent.name}> is not part of the report format`)
+      throw new JunitReportError(`<${child.name}> inside <${parent.name}> is not part of the report format`)
     }
   }
   return parent.children
 }
 
 function readJunitCases(text: string): JunitCase[] {
+  // The name length and the reference span are left to `XML_SUBSET_LIMITS`: the report
+  // format bounds neither, so this reader would only be restating the reader's own value.
   const root = parseXmlSubset(text, {
     maxChars: JUNIT_MAX_CHARS,
     maxAttributeChars: JUNIT_MAX_ATTRIBUTE_CHARS,
     maxDepth: JUNIT_MAX_DEPTH,
   })
-  if (root.name !== 'testsuites') throw new XmlSubsetError(`the root element is <${root.name}>, not <testsuites>`)
+  if (root.name !== 'testsuites') throw new JunitReportError(`the root element is <${root.name}>, not <testsuites>`)
 
   const cases: JunitCase[] = []
   const visit = (suite: XmlElement, describes: readonly string[], inherited: ReadonlySet<string>): void => {
@@ -202,6 +233,6 @@ function readCase(element: XmlElement, describes: readonly string[], inherited: 
 
 function requiredAttribute(element: XmlElement, name: string): string {
   const value = element.attributes.get(name)
-  if (value === undefined) throw new XmlSubsetError(`a <${element.name}> has no ${name} attribute`)
+  if (value === undefined) throw new JunitReportError(`a <${element.name}> has no ${name} attribute`)
   return value
 }
