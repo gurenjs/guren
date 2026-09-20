@@ -809,12 +809,37 @@ loaded *and* of the export the loader picks from it; a module's route when
 `modules` lists an import of `modules/<name>`. Options that are not a literal,
 a spread, or an element this cannot trace to a file leave the route `present`
 with the reason. An action is `wired` when such a route dispatches to it, and a
-page when such an action returns it. For a validator, "a route contract
-references it" is read as a routes file naming the symbol, and only a file
-`guren check`'s registrar wiring rule finds called from its entry counts. A
-model, a column, a controller, a resource, a policy and a side effect have no
-mount point a static reader can name: they complete at `present`, and the
-Completion table below reads "`wired` where the kind has one".
+page when such an action returns it. A model, a column, a controller, a
+resource, a policy and a side effect have no mount point a static reader can
+name: they complete at `present`, and the Completion table below reads
+"`wired` where the kind has one".
+
+For a validator the evidence has to be a *use*, not a mention. A symbol can be
+named by an import whose call was deleted, in a type position, or in a branch
+nothing reaches, and none of those wires anything; a bare mention therefore
+leaves the element `present` and only supplies the note. "An action body
+references it" is read as `this.validateBody` / `validateQuery` /
+`validateParams` taking it, in an action a mounted route dispatches to; "a
+route contract references it" as a `body` / `params` / `query` key of an
+object literal naming it, in the routes file the CLI loaded — the one file
+`createApp({ routes })` is checked against. A contract in any other routes
+file is not evidence: which file a module mounts is named by
+`defineModule({ routes })`, and `routes-check.ts`'s own "is this registrar
+called" test matches the name anywhere in the file, comments included.
+
+**Amended in implementation (`plan:status`):** an element's optional `module`
+is compared, in both directions. Every discovered model, controller, action,
+validator, resource, policy and side-effect class is tagged with the app root
+its file sits in, and satisfies a plan element only when the two agree — so a
+root `app/Models/Invoice.ts` does not satisfy a model planned for
+`modules/billing`, and a class only a module declares does not satisfy one
+planned for the project root. A model's table is resolved within that same
+root, which is what scopes its columns. Where nothing reports the root the
+element is `blocked`, never matched on the name. Pages are the exception and
+need no tag: a module's pages are not colocated, they live in the project's
+own `resources/js/pages` namespaced by the module, so a discovered page is
+positively the project's. A view naming a module whose prefix its page id does
+not carry is `blocked`.
 
 Two readings the table left open. An `alter` whose every *readable* planned
 property differs is `planned`, not `drifted`: nothing of the change is in the
