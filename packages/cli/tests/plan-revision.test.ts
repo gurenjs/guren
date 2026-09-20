@@ -14,7 +14,14 @@ import {
   type PlanRevision,
   type PlanRevisionRejectionKind,
 } from '../src/plan/revision'
-import { planDraftJsonSchema, PlanColumnSchema, PlanSchema, type Plan } from '../src/plan/schema'
+import {
+  findDuplicatePlanIds,
+  listPlanElements,
+  planDraftJsonSchema,
+  PlanColumnSchema,
+  PlanSchema,
+  type Plan,
+} from '../src/plan/schema'
 import { loadParsedCommentsPlan as commentsPlan } from './plan-fixture'
 
 type Json = Record<string, unknown>
@@ -108,6 +115,12 @@ describe('planRevisionOpsJsonSchema', () => {
     expect(schema.$schema).toContain('draft-07')
     expect(Object.keys(schema.properties ?? {})).toEqual(['ops'])
     expect(schema.required).toEqual(['ops'])
+  })
+
+  test('should ask for one op at least, rather than round-trip a refusal of the empty list', () => {
+    const schema = planRevisionOpsJsonSchema() as { properties: { ops: { minItems?: number } } }
+
+    expect(schema.properties.ops.minItems).toBe(1)
   })
 })
 
@@ -382,20 +395,62 @@ describe('applyRevision', () => {
       { op: 'add', section: 'routes', element: last, reason: 'r' },
     ]
 
-    expect(rejectionsOf(parent, [retitled, restored])).toEqual([['unchanged', undefined]])
-    expect(rejectionsOf(parent, putBack)).toEqual([['unchanged', undefined]])
+    expect(rejectionsOf(parent, [retitled, restored])).toEqual([['revision-changes-nothing', undefined]])
+    expect(rejectionsOf(parent, putBack)).toEqual([['revision-changes-nothing', undefined]])
     expect(rejectionsOf(parent, [retitled])).toEqual([])
   })
 
-  test('should reject a revision with no ops as unchanged, in a stored revision too', () => {
+  test('should tell the op that changes nothing from the revision that changes nothing', () => {
+    const parent = commentsPlan()
+    const route = parent.routes[0] as Plan['routes'][number]
+    const retitled = { op: 'modify', section: 'plan', element: { ...headOf(parent), title: 'Another title' }, reason: 'r' }
+    const only = (ops: unknown[]): Json => {
+      const created = createPlanRevision(parent, { ops })
+      if (created.ok) throw new Error('the ops were accepted')
+      return created.rejections[0] as unknown as Json
+    }
+
+    // A consumer reads `op` to point at the operation at fault, so the kind that has none must not be the same kind.
+    expect(only([{ op: 'modify', section: 'routes', id: route.id, element: own(route), reason: 'r' }])).toEqual({
+      kind: 'unchanged',
+      op: 0,
+      id: route.id,
+      message: expect.any(String),
+    })
+    expect(only([retitled, { op: 'modify', section: 'plan', element: headOf(parent), reason: 'r' }])).toEqual({
+      kind: 'revision-changes-nothing',
+      message: expect.any(String),
+    })
+  })
+
+  test('should hold a producer to one op and still take a stored revision with none', () => {
     const parent = commentsPlan()
     const hash = planHash(parent)
 
-    expect(rejectionsOf(parent, [])).toEqual([['unchanged', undefined]])
+    expect(rejectionsOf(parent, [])).toEqual([['invalid-revision', undefined]])
     expect(applyRevision(parent, { parent: hash, ops: [], result: hash })).toMatchObject({
       ok: false,
-      rejections: [{ kind: 'unchanged' }],
+      rejections: [{ kind: 'revision-changes-nothing' }],
     })
+  })
+
+  test('should diagnose a stored revision that misses its own result as a mismatch', () => {
+    const parent = commentsPlan()
+    const hash = planHash(parent)
+    const last = parent.routes.at(-1) as Plan['routes'][number]
+    const cancelling = [
+      { op: 'remove', id: last.id, reason: 'r' },
+      { op: 'add', section: 'routes', element: last, reason: 'r' },
+    ]
+    const bogus = 'f'.repeat(64)
+    const kindsOf = (revision: unknown): string[] => {
+      const applied = applyRevision(parent, revision)
+      return applied.ok ? [] : applied.rejections.map((rejection) => rejection.kind)
+    }
+
+    expect(kindsOf({ parent: hash, ops: cancelling, result: hash })).toEqual(['revision-changes-nothing'])
+    expect(kindsOf({ parent: hash, ops: cancelling, result: bogus })).toEqual(['result-mismatch'])
+    expect(kindsOf({ parent: hash, ops: [], result: bogus })).toEqual(['result-mismatch'])
   })
 
   test('should reject a REMOVE that leaves another element naming the id', () => {
@@ -425,6 +480,56 @@ function headOf(plan: Plan): Json {
   const { title, summary, scope, assumptions, hints, locale } = plan
   return { title, summary, scope, assumptions, hints, locale }
 }
+
+describe('the ids a revision tracks', () => {
+  /**
+   * The ids an op may address come from `PLAN_TOP_SECTIONS` and the nested-list map,
+   * the declared ones from `listPlanElements`; nothing else holds the three together.
+   */
+  test('should reach every id the plan declares, nested lists included', () => {
+    const parent = commentsPlan()
+    const declared = listPlanElements(parent)
+    const missed = declared.filter(({ id }) =>
+      rejectionsOf(parent, [{ op: 'remove', id, reason: 'r' }]).some(([kind]) => kind === 'unknown-id'),
+    )
+
+    // A fixture with no nested elements would pass the reachability assertion without checking a nested list.
+    expect([...new Set(declared.map((ref) => ref.section))]).toEqual(
+      expect.arrayContaining(['columns', 'actions', 'acceptance']),
+    )
+    expect(missed).toEqual([])
+  })
+
+  test('should count the nested ids an ADD brings and the ones a REMOVE takes along', () => {
+    const parent = commentsPlan()
+    const model = parent.models[1] as Plan['models'][number]
+    const controller = parent.controllers[0] as Plan['controllers'][number]
+    const task = parent.tasks[0] as Plan['tasks'][number]
+    const twins = [
+      ['models', { ...model, id: 'model.reply' }, model.columns],
+      ['controllers', { ...controller, id: 'controller.replies' }, controller.actions],
+      ['tasks', { ...task, id: 'task.replies' }, task.acceptance],
+    ] as const
+
+    // Nothing in the plan schema refuses a duplicated id, so one an ADD brought uncounted would ship in the result.
+    for (const [section, element, nested] of twins) {
+      expect(rejectionsOf(parent, [{ op: 'add', section, element, reason: 'r' }])).toEqual(
+        nested
+          .map((child) => child.id)
+          .sort()
+          .map((id) => ['duplicate-id', id]),
+      )
+    }
+
+    const moved = revise(parent, [
+      { op: 'remove', id: task.id, reason: 'r' },
+      { op: 'add', section: 'tasks', element: { ...task, id: 'task.replies' }, reason: 'r' },
+    ])
+
+    expect(findDuplicatePlanIds(moved.plan)).toEqual([])
+    expect(listPlanElements(moved.plan).map((ref) => ref.id)).toContain(task.acceptance[0]?.id)
+  })
+})
 
 describe('nested elements and document order', () => {
   test('should put a nested ADD before the sibling it names, and at the end without one', () => {
@@ -578,6 +683,23 @@ describe('review state', () => {
     expect(rejectionsOf(parent, [ADD_DELETED_AT])).toEqual([])
   })
 
+  test('should let the revision reuse the id of the question it removes in another section', () => {
+    const parent = commentsPlan()
+    const feedback = feedbackOn(parent, { answers: [{ questionId: 'Q-delete', option: 'soft delete' }] })
+    const reused = [
+      REMOVE_QUESTION,
+      {
+        op: 'add',
+        section: 'commands',
+        element: { id: 'Q-delete', command: 'bun run db:migrate', reason: 'run the migration' },
+        reason: 'r',
+      },
+    ]
+
+    expect(rejectionsOf(parent, reused, feedback)).toEqual([])
+    expect(rejectionsOf(parent, reused)).toEqual([])
+  })
+
   test('should not let a question removed and added again count as removed', () => {
     const parent = commentsPlan()
     const feedback = feedbackOn(parent, { answers: [{ questionId: 'Q-delete', text: 'soft' }] })
@@ -634,7 +756,7 @@ describe('diffPlans', () => {
       { op: 'add', section: 'columns', parent: 'model.comment', before: 'column.comment.createdAt' },
     ])
     expect(diffPlans(parent, commentsPlan(), { reason: 'r' })).toEqual([])
-    expect(rejectionsOf(parent, diffPlans(parent, commentsPlan(), { reason: 'r' }))).toEqual([['unchanged', undefined]])
+    expect(rejectionsOf(parent, diffPlans(parent, commentsPlan(), { reason: 'r' }))).toEqual([['invalid-revision', undefined]])
   })
 
   test('should move one element rather than rewrite the list around it', () => {

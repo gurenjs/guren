@@ -495,9 +495,18 @@ above leaves the op shape open, and these are the choices the code makes:
   `remove` takes nested elements along. An element moves by `remove` then
   `add`; any other second op on one id in a revision is rejected, and so is a
   `modify` that changes nothing.
-- A revision whose ops yield the parent's own hash is rejected as a whole:
-  ops that cancel out, and no ops at all, would chain a revision that names
-  its parent as its result.
+- A revision whose ops yield the parent's own hash is rejected as a whole,
+  under a kind of its own: ops that cancel out, and no ops at all, would
+  chain a revision that names its parent as its result. The kind a `modify`
+  that changes nothing carries names the op at fault, and this one names no
+  op, so the two are not one kind. The producer's schema asks for one op at
+  least, which is cheaper than refusing the empty list after the fact; a
+  stored revision carries its `ops` unconstrained, since a record with none
+  is a record to diagnose rather than a malformed document.
+- A stored revision whose ops do not reach its own `result` is reported as a
+  mismatch, ahead of any account of what the ops do: a record that does not
+  reproduce its own hash was written against other code, whatever else is
+  true of it.
 - The title, summary, scope, assumptions, hints and locale have no id. They
   are addressed as `modify` on the section `plan`, which carries all of them.
 - `baseline` and `planVersion` are out of an op's reach. A revision carries
@@ -512,8 +521,11 @@ above leaves the op shape open, and these are the choices the code makes:
   locked is ignored. Approval covers an element and not its place in the
   list, so an `add` placed `before` an approved sibling needs none.
 - With feedback that answers a question, a revision that does not `remove`
-  that question is rejected. The "depends on" marks are derived from
-  `affects`, so removing the question is what removes them. Feedback given on
+  that question is rejected. The question is looked for among the questions
+  of the result and not among its ids at large, so a revision may remove the
+  question and give its id to an element of another section. The "depends
+  on" marks are derived from `affects`, so removing the question is what
+  removes them. Feedback given on
   another plan hash, or naming an id the parent lacks, is rejected too: a lock
   that names nothing is a lock silently not applied.
 

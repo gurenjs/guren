@@ -47,7 +47,11 @@ const note = { reason: NonEmptySchema, reopens: NonEmptySchema.optional() }
 
 /** The section a nested element lives under. The list key on the parent is the nested section's own name. */
 const PARENT_SECTION = { columns: 'models', actions: 'controllers', acceptance: 'tasks' } as const
-const NESTED_KEY: Partial<Record<string, PlanElementSection>> = { models: 'columns', controllers: 'actions', tasks: 'acceptance' }
+const NESTED_KEY: Partial<Record<string, PlanElementSection>> = {
+  models: 'columns',
+  controllers: 'actions',
+  tasks: 'acceptance',
+}
 
 export const PLAN_TOP_SECTIONS = [
   'questions',
@@ -134,12 +138,13 @@ const RemoveOpSchema = z.strictObject({ op: z.literal('remove'), id: IdSchema, .
 
 export const PlanRevisionOpSchema = z.discriminatedUnion('op', [AddOpSchema, ModifyOpSchema, RemoveOpSchema])
 
-/** What a producer emits. */
-export const PlanRevisionOpsSchema = z.strictObject({ ops: z.array(PlanRevisionOpSchema) })
+/** What a producer emits. `minItems` keeps it from emitting the empty list its own contract would refuse. */
+export const PlanRevisionOpsSchema = z.strictObject({ ops: z.array(PlanRevisionOpSchema).min(1) })
 
+// A stored revision takes its `ops` unconstrained: an empty list there is a record to diagnose, not a malformed document.
 export const PlanRevisionSchema = z.strictObject({
   parent: HashSchema,
-  ops: PlanRevisionOpsSchema.shape.ops,
+  ops: z.array(PlanRevisionOpSchema),
   result: HashSchema,
 })
 
@@ -189,7 +194,10 @@ export type PlanRevisionRejectionKind =
   | 'section-mismatch'
   | 'duplicate-id'
   | 'repeated-id'
+  /** One op changes nothing; it carries the `ops` index and the id. */
   | 'unchanged'
+  /** The ops together leave the plan as it was; no one op is at fault, so neither field is set. */
+  | 'revision-changes-nothing'
   | 'locked'
   | 'answered-question-kept'
   | 'dangling-reference'
@@ -202,6 +210,11 @@ export interface PlanRevisionRejection {
   /** Index into `ops`, where one op is at fault. */
   op?: number
   id?: string
+}
+
+export interface PlanRevisionRefusal {
+  ok: false
+  rejections: PlanRevisionRejection[]
 }
 
 /** A locked element an op touched with `reopens`; the page lists these apart from the rest. */
@@ -295,11 +308,6 @@ function referencesTo(plan: Holder): Map<string, Set<string>> {
   return owners
 }
 
-export interface PlanRevisionRefusal {
-  ok: false
-  rejections: PlanRevisionRejection[]
-}
-
 function refuse(kind: PlanRevisionRejectionKind, message: string): PlanRevisionRefusal {
   return { ok: false, rejections: [{ kind, message }] }
 }
@@ -329,6 +337,8 @@ function applyOps(
   parentHash: string,
   ops: ReadonlyArray<PlanRevisionOp>,
   feedback: PlanFeedback | undefined,
+  /** The hash a stored revision names. Absent where the revision is being written and has none yet. */
+  storedResult?: string,
 ): { ok: true; plan: Plan; hash: string; reopened: PlanReopenedElement[] } | PlanRevisionRefusal {
   // A lock that names another plan's elements is a lock silently not applied.
   if (feedback?.planHash !== undefined && feedback.planHash !== parentHash) {
@@ -454,7 +464,8 @@ function applyOps(
         id: answer.questionId,
         message: `The feedback answers "${answer.questionId}", which is no question of the parent plan.`,
       })
-    } else if (declared.has(answer.questionId)) {
+      // The id alone would answer for another section: a revision may remove the question and reuse its id elsewhere.
+    } else if (plan.questions.some((question) => question.id === answer.questionId)) {
       rejections.push({
         kind: 'answered-question-kept',
         id: answer.questionId,
@@ -468,9 +479,15 @@ function applyOps(
   const parsed = PlanSchema.safeParse(plan)
   if (!parsed.success) return refuse('invalid-result', formatSchemaIssues(parsed.error))
 
-  // Ops that cancel out, and no ops at all, would chain a revision whose result names its own parent.
   const hash = planHash(parsed.data)
-  if (hash === parentHash) return refuse('unchanged', 'The ops leave the plan as it was, so there is nothing to revise.')
+  // A record whose ops miss its own `result` is corrupt, and that is the diagnosis, ahead of any account of what the ops do.
+  if (storedResult !== undefined && hash !== storedResult) {
+    return refuse('result-mismatch', `The ops yield plan ${hash}, not the ${storedResult} the revision names.`)
+  }
+  // Ops that cancel out, and no ops at all, would chain a revision whose result names its own parent.
+  if (hash === parentHash) {
+    return refuse('revision-changes-nothing', 'The ops leave the plan as it was, so there is nothing to revise.')
+  }
   return { ok: true, plan: parsed.data, hash, reopened }
 }
 
@@ -496,11 +513,7 @@ export function applyRevision(parent: Plan, revision: unknown, options: PlanRevi
     return refuse('parent-mismatch', `The revision was written against plan ${parsed.data.parent}; this plan is ${parentHash}.`)
   }
 
-  const applied = applyOps(parent, parentHash, parsed.data.ops, options.feedback)
-  if (applied.ok && applied.hash !== parsed.data.result) {
-    return refuse('result-mismatch', `The ops yield plan ${applied.hash}, not the ${parsed.data.result} the revision names.`)
-  }
-  return applied
+  return applyOps(parent, parentHash, parsed.data.ops, options.feedback, parsed.data.result)
 }
 
 export interface DiffPlansOptions {
@@ -512,7 +525,7 @@ export interface DiffPlansOptions {
 /**
  * The fewest ops that turn `parent` into `child`, for a plan edited by hand. An element
  * that changed place is a REMOVE and an ADD. Throws where no op could express the edit.
- * Equal plans yield `[]`, which `createPlanRevision()` refuses as `unchanged`.
+ * Equal plans yield `[]`, which is below the one op a producer's schema asks for.
  */
 export function diffPlans(parent: Plan, child: Plan, options: DiffPlansOptions): PlanRevisionOp[] {
   if (canonicalJson(parent.baseline) !== canonicalJson(child.baseline)) {
