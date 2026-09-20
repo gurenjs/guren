@@ -186,6 +186,31 @@ describe('acceptanceStatus rules', () => {
     expect(statuses(judged(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'failing' })
   })
 
+  test('should carry an id down to a case two describes below the one that declares it', () => {
+    const junit = `<testsuites><testsuite name="f.test.ts"><testsuite name="[AC-a-1] outer">
+      <testsuite name="middle"><testsuite name="inner">
+        <testcase name="deep" file="f.test.ts"><failure type="AssertionError" /></testcase>
+      </testsuite></testsuite>
+      <testcase name="shallow" file="f.test.ts" />
+    </testsuite></testsuite></testsuites>`
+    const behaviour = behaviourOf(judged(junit, ['AC-a-1']), 'AC-a-1')
+
+    expect(behaviour.cases.map((entry) => entry.title)).toEqual([
+      '[AC-a-1] outer > middle > inner > deep',
+      '[AC-a-1] outer > shallow',
+    ])
+    expect(behaviour.status).toBe('failing')
+  })
+
+  test('should give each behaviour of a case naming two ids its own record', () => {
+    const behaviours = judged(suites(testcase('[AC-a-1] [AC-b-1] both')), ['AC-a-1', 'AC-b-1'])
+    const first = behaviourOf(behaviours, 'AC-a-1').cases[0]
+    const second = behaviourOf(behaviours, 'AC-b-1').cases[0]
+
+    expect(first).toEqual(second)
+    expect(first).not.toBe(second)
+  })
+
   test('should read an <error> child as a failed case', () => {
     const junit = suites(testcase('[AC-a-1] one', '<error message="boom">trace</error>'))
     expect(statuses(judged(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'failing' })
@@ -240,6 +265,13 @@ describe('acceptanceStatus rules', () => {
     expect(statuses(judged(suites(testcase(`[${id}] x`)), [id]))).toEqual({ [id]: 'passing' })
   })
 
+  test('should cut an undeclared id to what a reader can be shown', () => {
+    const token = `AC-${'a'.repeat(100_000)}`
+    const { errors } = invalid(suites(testcase(`[${token}] x`)), ['AC-a-1'])
+
+    expect(errors.map((error) => error.id)).toEqual([`${token.slice(0, 256)}…`])
+  })
+
   test('should take a declared id once when the plan lists it twice', () => {
     expect(judged(suites(testcase('[AC-a-1] x')), ['AC-a-1', 'AC-a-1'])).toHaveLength(1)
   })
@@ -258,11 +290,21 @@ describe('acceptanceStatus rules', () => {
     expect(statuses(judged(junit, ['AC-a-1']))).toEqual({ 'AC-a-1': 'passing' })
   })
 
-  test('should collect the acceptance ids of a plan', () => {
+  test('should collect the acceptance ids of a plan in the order its tasks declare them', () => {
     const plan = PlanSchema.parse({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
     const ids = planAcceptanceIds(plan)
     expect(ids.length).toBeGreaterThan(0)
-    expect(ids).toEqual(plan.tasks.flatMap((task) => task.acceptance.map((behaviour) => behaviour.id)))
+    expect(ids).toEqual([...new Set(plan.tasks.flatMap((task) => task.acceptance.map((behaviour) => behaviour.id)))])
+  })
+
+  test('should collect an id two tasks both declare once', () => {
+    const plan = PlanSchema.parse({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
+    const repeated = plan.tasks[0]
+    if (!repeated) throw new Error('the fixture plan declares no task')
+    const withRepeat = planAcceptanceIds({ tasks: [...plan.tasks, repeated] })
+
+    expect(withRepeat).toEqual(planAcceptanceIds(plan))
+    expect(new Set(withRepeat).size).toBe(withRepeat.length)
   })
 })
 
@@ -306,6 +348,17 @@ describe('acceptanceStatus blocked', () => {
   test('should read the longest reference there is', () => {
     const title = titlesOf(judged(suites(testcase('[AC-a-1] &#x10FFFF;')), ['AC-a-1']), 'AC-a-1')[0]
     expect(title).toBe(`[AC-a-1] ${String.fromCodePoint(0x10ffff)}`)
+  })
+
+  test('should read the longest decimal reference there is', () => {
+    const title = titlesOf(judged(suites(testcase('[AC-a-1] &#1114111;')), ['AC-a-1']), 'AC-a-1')[0]
+    expect(title).toBe(`[AC-a-1] ${String.fromCodePoint(0x10ffff)}`)
+  })
+
+  // One character of padding past the longest, in each notation: both decode under a wider span.
+  test('should refuse a legal reference one character longer than that', () => {
+    expect(blockedReason(suites(testcase('[AC-a-1] &#01114111;')))).toContain('longer than any')
+    expect(blockedReason(suites(testcase('[AC-a-1] &#x0010FFF;')))).toContain('longer than any')
   })
 
   test('should block on an unknown entity', () => {
