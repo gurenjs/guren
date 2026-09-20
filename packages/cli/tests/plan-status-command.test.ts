@@ -212,13 +212,34 @@ throw new Error('DATABASE_URL is not set')
     expect(output).toContain('Planned, not checkable:')
   })
 
-  test('should never call a validator wired on a leftover import in the routes file', async () => {
+  test('should call a validator wired on a contract of a routes file the entry registrar calls', async () => {
+    const app = await createApp('module-contract', {
+      ...COMMENTS_APP,
+      'routes/comments.ts': `import type { Router } from '@guren/core'
+import { CommentController } from '../app/Http/Controllers/CommentController.js'
+import { CommentPayloadSchema } from '../app/Http/Validators/CommentValidator.js'
+
+export function registerCommentRoutes(router: Router): void {
+  router.post('/posts/:postId/comments', { name: 'comments.store', body: CommentPayloadSchema }, [CommentController, 'store'])
+}
+`,
+      'app/Http/Controllers/CommentController.ts': "import { Controller } from '@guren/core'\n\nexport class CommentController extends Controller {\n  async store() {\n    return this.redirect('/posts')\n  }\n}\n",
+    })
+
+    const result = await report(await writePlan('module-contract.plan.json'), app)
+
+    expect(states(result)['validator.comment']).toBe('wired')
+  })
+
+  test('should never call a validator wired on an object that carries a body key and registers nothing', async () => {
     const app = await createApp('leftover-import', {
       ...COMMENTS_APP,
       'routes/web.ts': `import type { Router } from '@guren/core'
 import { PostController } from '../app/Http/Controllers/PostController.js'
 import { CommentPayloadSchema } from '../app/Http/Validators/CommentValidator.js'
 import { registerCommentRoutes } from './comments.js'
+
+export const mailDefaults = { subject: 'hi', body: CommentPayloadSchema }
 
 export function registerWebRoutes(router: Router): void {
   router.get('/posts', [PostController, 'index']).name('posts.index')
@@ -233,7 +254,7 @@ export function registerWebRoutes(router: Router): void {
     expect(states(result)['action.comments.store']).toBe('wired')
     expect(states(result)['validator.comment']).toBe('present')
     expect(result.elements.find((element) => element.id === 'validator.comment')!.notes).toEqual([
-      expect.stringContaining('no route contract names it and no action body validates with it'),
+      expect.stringContaining('routes/web.ts mentions it, and no registered route contract holds it'),
     ])
   })
 

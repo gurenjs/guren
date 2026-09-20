@@ -777,9 +777,14 @@ actions and states, and the target of a relationship written as a lazy
 column type is compared through the drizzle builder, and a builder that may
 carry the type under a `mode` option (`integer` for a SQLite boolean) is
 unknown, never a match. What an action's body is scanned for (the page it
-returns, the validator, resource and ability it names) yields `match` or
-`unknown`, and `differ` only where the body names a different page or ability:
-a miss may be a helper's work. Prose (`purpose`, `rules`, a description) is not
+returns, the schema it validates with, the resource and ability it names)
+yields `match` or `unknown`, and `differ` only where the body names a different
+page or ability: a miss may be a helper's work. A planned `body` / `params` /
+`query` validator is read off the `this.validateBody` / `validateQuery` /
+`validateParams` call that takes it, the same reading the validator's own
+`wired` evidence uses, and never off a mention: an action whose only planned
+property is a validator its body merely names is `unjudged`, not `wired`.
+Prose (`purpose`, `rules`, a description) is not
 a planned property and is not counted as one. Flows, tasks, behaviours and
 questions are not judged; a `command` and a `mail` / `notification` class are
 `unjudged`, since nothing reads whether one was run or discovers the other.
@@ -815,17 +820,24 @@ name: they complete at `present`, and the Completion table below reads
 "`wired` where the kind has one".
 
 For a validator the evidence has to be a *use*, not a mention. A symbol can be
-named by an import whose call was deleted, in a type position, or in a branch
-nothing reaches, and none of those wires anything; a bare mention therefore
-leaves the element `present` and only supplies the note. "An action body
-references it" is read as `this.validateBody` / `validateQuery` /
-`validateParams` taking it, in an action a mounted route dispatches to; "a
-route contract references it" as a `body` / `params` / `query` key of an
-object literal naming it, in the routes file the CLI loaded — the one file
-`createApp({ routes })` is checked against. A contract in any other routes
-file is not evidence: which file a module mounts is named by
-`defineModule({ routes })`, and `routes-check.ts`'s own "is this registrar
-called" test matches the name anywhere in the file, comments included.
+named by an import whose call was deleted, in a type position, in an object
+nobody passes, in a function nobody calls or in a branch nothing reaches, and
+none of those wires anything; a bare mention therefore leaves the element
+`present` and only supplies the note. "An action body references it" is read as
+`this.validateBody` / `validateQuery` / `validateParams` (and their `Safe`
+variants) taking it, in an action a mounted route dispatches to. "A route
+contract references it" is read off the *registered* definitions rather than
+the source: the registrar ran, so a schema reached `schemas.body` through a
+call the application made, and matching it against the validator file's
+exported schema by object identity names the symbol without asking which source
+shapes register a route. The route's own mount then decides, so a module's
+contract is evidence exactly when that module is mounted. What this reading
+costs is a contract whose schema is not the exported symbol itself — an inline
+`z.object({…})`, a `Schema.extend(…)` — and a validator file that will not
+import; both leave the element `present` with the reason, which is the side to
+be wrong on. The files are imported only when a registered route carries a
+contract at all, and a file that throws makes its own symbols unmatchable, not
+the validator section unreadable.
 
 **Amended in implementation (`plan:status`):** an element's optional `module`
 is compared, in both directions. Every discovered model, controller, action,

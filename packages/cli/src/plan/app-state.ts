@@ -11,6 +11,7 @@
 
 import { readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import type { RouteDefinition } from '@guren/core'
 import {
   classNameFromPath,
   discoverModelFiles,
@@ -142,6 +143,7 @@ export async function loadPlanAppState(
     root,
     routesFile: routes.file,
     routes: routes.routes,
+    definitions: routes.definitions,
     provenance: routes.provenance,
     moduleWarnings: routes.moduleWarnings,
     controllers: controllers.scan,
@@ -228,6 +230,8 @@ async function controllerSections(
 
 interface RouteSection {
   routes: ContextRoute[] | PlanAppUnreadable
+  /** What `routes` was rendered from, in the same order; the detail needs the live schemas. */
+  definitions: RouteDefinition[] | undefined
   /** The entry that was loaded, app-relative; `undefined` when the app has none. */
   file: string | undefined
   /** One entry per route, in order: the module that declared it, or `null` for the entry registrar. */
@@ -237,12 +241,12 @@ interface RouteSection {
 
 async function routeSection(cwd: string, routesFile: string | undefined): Promise<RouteSection> {
   const target = await resolveRoutesFile(cwd, routesFile)
-  const section: RouteSection = { routes: [], file: undefined, provenance: [], moduleWarnings: [] }
+  const section: RouteSection = { routes: [], definitions: undefined, file: undefined, provenance: [], moduleWarnings: [] }
   if (target.silentlyAbsent) return section
 
   try {
     const definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd, section.moduleWarnings, section.provenance)
-    return { ...section, file: target.path, routes: definitions.map(routeDefinitionToContextRoute) }
+    return { ...section, file: target.path, definitions, routes: definitions.map(routeDefinitionToContextRoute) }
   } catch (error) {
     // Presence, not truthiness: `new Error()` carries '', and a discarded error reports
     // the routes file as an app with no routes rather than as one nobody could read.

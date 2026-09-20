@@ -23,7 +23,10 @@ export interface PlanStatusReport extends PlanStatus {
 }
 
 export interface PlanStatusFileOptions {
-  /** Loaded with `detail`, or every comparison past a name reads as not checkable. Resolved after the plan parses. */
+  /**
+   * Loaded with `detail`, or nothing reads which app root an element sits in and every
+   * element is `blocked`. Resolved after the plan parses.
+   */
   app: PlanAppState | (() => Promise<PlanAppState>)
   cwd?: string
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { PlanAppDetail } from '../src/plan/app-detail'
+import type { PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
 import type { PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { judgePlan, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
@@ -61,8 +61,8 @@ const USERS_TABLE: SourcedSchemaTable = {
 function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
   return {
     routes: [
-      { name: 'posts.index', method: 'GET', path: '/posts', action: 'PostController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null },
-      { name: 'posts.show', method: 'GET', path: '/posts/:id', action: 'PostController.show', middleware: ['auth'], hasInlineMiddleware: false, bindings: { id: 'Post' }, module: null },
+      { name: 'posts.index', method: 'GET', path: '/posts', action: 'PostController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null, contractSchemas: [] },
+      { name: 'posts.show', method: 'GET', path: '/posts/:id', action: 'PostController.show', middleware: ['auth'], hasInlineMiddleware: false, bindings: { id: 'Post' }, module: null, contractSchemas: [] },
     ],
     mounts: { entry: 'mounted', modules: {} },
     tables: [POSTS_TABLE, USERS_TABLE],
@@ -84,7 +84,7 @@ function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
     validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null }],
     resources: [{ className: 'PostResource', module: null }],
     policies: [{ className: 'PostPolicy', module: null }],
-    routeFiles: [{ file: 'routes/web.ts', entry: true, identifiers: ['PostController', 'PostPayloadSchema'], contractIdentifiers: ['PostPayloadSchema'] }],
+    routeFiles: [{ file: 'routes/web.ts', entry: true, identifiers: ['PostController', 'PostPayloadSchema'] }],
     sideEffects: { job: [{ className: 'SendDigest', module: null }], event: [], listener: [] },
     ...overrides,
   } as PlanAppDetail
@@ -137,6 +137,21 @@ function validator(change: Change, name = 'PostPayloadSchema', extra: Record<str
   return plan({ validators: [{ id: 'val', change, name, fields: [], ...extra }] })
 }
 
+/** A registered route whose contract schema is the object `PostPayloadSchema` is exported as. */
+function contractRoute(module: string | null): PlanAppRouteDetail {
+  return {
+    name: 'posts.store',
+    method: 'POST',
+    path: '/posts',
+    action: 'PostController.store',
+    middleware: [],
+    hasInlineMiddleware: false,
+    bindings: {},
+    module,
+    contractSchemas: ['PostPayloadSchema'],
+  }
+}
+
 interface Case {
   name: string
   plan: PlanDraft
@@ -182,18 +197,36 @@ const CASES: Case[] = [
 
   // validators
   { name: 'an added validator nothing exports', plan: validator(ADD, 'CommentSchema'), app: app(), id: 'val', state: 'planned' },
-  { name: 'a validator a reached routes file names', plan: validator(ADD), app: app(), id: 'val', state: 'wired' },
   {
-    name: 'a validator a route contract names in a routes file the application does not load',
+    name: 'a validator a mounted route registered as its contract schema',
     plan: validator(ADD),
-    app: app({ routeFiles: [{ file: 'routes/orphan.ts', entry: false, identifiers: ['PostPayloadSchema'], contractIdentifiers: ['PostPayloadSchema'] }] }),
+    app: app({ routes: [contractRoute(null)] }),
+    id: 'val',
+    state: 'wired',
+  },
+  {
+    name: 'a validator only a route of an unmounted module registered as its contract schema',
+    plan: validator(ADD),
+    app: app({
+      routes: [contractRoute('billing')],
+      mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } } },
+    }),
     id: 'val',
     state: 'present',
   },
   {
-    name: 'a validator only a leftover import in the entry routes file names',
+    name: 'a validator no registered route contract holds, named in the entry routes file only',
     plan: validator(ADD),
-    app: app({ routeFiles: [{ file: 'routes/web.ts', entry: true, identifiers: ['PostPayloadSchema'], contractIdentifiers: [] }] }),
+    app: app({ routeFiles: [{ file: 'routes/web.ts', entry: true, identifiers: ['PostPayloadSchema'] }] }),
+    id: 'val',
+    state: 'present',
+  },
+  {
+    name: 'a validator whose file would not import, so no contract could be matched to it',
+    plan: validator(ADD),
+    app: app({
+      validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, unimported: 'it threw' }],
+    }),
     id: 'val',
     state: 'present',
   },
@@ -263,6 +296,30 @@ const CASES: Case[] = [
     state: 'drifted',
   },
   { name: 'an altered action that changes business rules only', plan: plan({ controllers: [controller(EXISTING, [action(ALTER, { rules: ['Drafts are hidden.'] })])] }), app: app(), id: 'a', state: 'unjudged' },
+  {
+    name: 'an altered action whose only planned property is a validator its body mentions without validating with it',
+    plan: plan({
+      controllers: [controller(EXISTING, [action(ALTER, { body: 'val' })])],
+      validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
+    }),
+    app: app({
+      actions: [{ key: 'PostController.index', module: null, pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: [] }],
+    }),
+    id: 'a',
+    state: 'unjudged',
+  },
+  {
+    name: 'an altered action whose planned validator its body validates with',
+    plan: plan({
+      controllers: [controller(EXISTING, [action(ALTER, { body: 'val' })])],
+      validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
+    }),
+    app: app({
+      actions: [{ key: 'PostController.index', module: null, pages: [], calls: [], abilities: [], identifiers: [], validates: ['PostPayloadSchema'] }],
+    }),
+    id: 'a',
+    state: 'wired',
+  },
   {
     name: 'an action of a class two files declare',
     plan: plan({ controllers: [controller(EXISTING, [action(ADD)])] }),
@@ -415,6 +472,48 @@ describe('judgePlan', () => {
     })
   })
 
+  describe('the app root a lookup is scoped to', () => {
+    test('should look for the table a model was renamed from in the model’s own app root', () => {
+      const billing = { ...POSTS_TABLE, identifier: 'legacyPosts', tableName: 'legacy_posts', module: 'billing' }
+      const document = plan({ models: [model(ALTER, { tableRenamedFrom: 'legacy_posts' })] })
+
+      const element = only(judgePlan(document, app({ tables: [POSTS_TABLE, USERS_TABLE, billing] })), 'm')
+
+      expect(element.properties.find((property) => property.property === 'previous table removed')).toMatchObject({ verdict: 'match', actual: 'absent' })
+    })
+
+    test('should name a policy in the singular it is written with, never one derived from "policies"', () => {
+      const document = plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [{ name: 'view', rule: 'anyone' }] }] })
+
+      const reasons = only(judgePlan(document, app()), 'pol').properties.map((property) => property.reason)
+      const scoped = only(judgePlan(document, planAppState({ policies: ['PostPolicy'] })), 'pol').reason
+
+      expect(reasons).toEqual(["nothing reads a policy's abilities"])
+      expect(scoped).toBe('nothing reads which app root each policy sits in')
+    })
+  })
+
+  describe('a validator’s evidence of mounting', () => {
+    test('should say a file would not import rather than that no contract holds the symbol', () => {
+      const unimported = app({ validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, unimported: 'it threw' }] })
+
+      expect(only(judgePlan(validator(ADD), unimported), 'val').notes).toEqual([
+        'Not confirmed as wired: app/Http/Validators/PostValidator.ts would not import, so no route contract could be matched to it (it threw).',
+      ])
+    })
+
+    test('should name the route whose contract holds it when that route is not mounted', () => {
+      const unmounted = app({
+        routes: [contractRoute('billing')],
+        mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } } },
+      })
+
+      expect(only(judgePlan(validator(ADD), unmounted), 'val').notes).toEqual([
+        'Not confirmed as wired: the contract of posts.store holds it, and createApp() in src/app.ts lists no modules.',
+      ])
+    })
+  })
+
   describe('column properties', () => {
     test('should compare a foreign key by the table the planned model names', () => {
       const document = plan({
@@ -454,7 +553,7 @@ describe('judgePlan', () => {
 
   describe('routes', () => {
     test('should require the module that declared a route to be one createApp() lists', () => {
-      const routes = [{ name: 'invoices.index', method: 'GET', path: '/billing/invoices', action: 'InvoiceController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: 'billing' }]
+      const routes = [{ name: 'invoices.index', method: 'GET', path: '/billing/invoices', action: 'InvoiceController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: 'billing', contractSchemas: [] }]
       const document = plan({
         controllers: [controller(EXISTING, [action(EXISTING)], 'InvoiceController')],
         routes: [{ id: 'r', change: ADD, method: 'GET', path: '/billing/invoices', name: 'invoices.index', action: 'a', middleware: [], bind: [] }],
@@ -467,7 +566,7 @@ describe('judgePlan', () => {
     })
 
     test('should call a planned middleware unknown when the route carries an inline one', () => {
-      const routes = [{ name: 'posts.index', method: 'GET', path: '/posts', action: 'PostController.index', middleware: [], hasInlineMiddleware: true, bindings: {}, module: null }]
+      const routes = [{ name: 'posts.index', method: 'GET', path: '/posts', action: 'PostController.index', middleware: [], hasInlineMiddleware: true, bindings: {}, module: null, contractSchemas: [] }]
 
       const element = only(judgePlan(route(ADD, { middleware: ['auth'] }), app({ routes })), 'r')
 
@@ -475,13 +574,13 @@ describe('judgePlan', () => {
     })
 
     test('should block on two registered routes sharing the planned name', () => {
-      const duplicate = { name: 'posts.index', method: 'GET', path: '/p', action: 'PostController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null }
+      const duplicate = { name: 'posts.index', method: 'GET', path: '/p', action: 'PostController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null, contractSchemas: [] }
 
       expect(only(judgePlan(route(ADD), app({ routes: [duplicate, duplicate] })), 'r').state).toBe('blocked')
     })
 
     test('should report a route still on its prototype fixture as differing from its planned action', () => {
-      const routes = [{ name: 'posts.index', method: 'GET', path: '/posts', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null, prototype: true as const }]
+      const routes = [{ name: 'posts.index', method: 'GET', path: '/posts', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null, contractSchemas: [], prototype: true as const }]
 
       expect(only(judgePlan(route(ADD), app({ routes })), 'r').state).toBe('drifted')
     })

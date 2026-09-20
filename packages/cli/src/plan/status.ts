@@ -14,6 +14,7 @@ import type {
   PlanAppMount,
   PlanAppRouteDetail,
   PlanAppSideEffectKind,
+  PlanAppValidatorDetail,
 } from './app-detail'
 import { isUnreadable, type PlanAppNames, type PlanAppState, type PlanAppUnreadable } from './app-state'
 import type {
@@ -180,31 +181,45 @@ function conclude(judgement: Judgement): PlanElementStatus {
   return result('present')
 }
 
-function inSection(section: PlanAppNames, name: string, what: string): Existence {
-  if (isUnreadable(section)) return { unknown: `the application's ${what} could not be read (${section.unreadable})` }
+/** How a kind of element is named in a message. Both forms are spelled: deriving one gives "policie". */
+interface PlanNoun {
+  plural: string
+  singular: string
+}
+
+const NOUNS = {
+  models: { plural: 'models', singular: 'model' },
+  controllers: { plural: 'controllers', singular: 'controller' },
+  actions: { plural: 'controller actions', singular: 'controller' },
+  validators: { plural: 'validators', singular: 'validator' },
+  resources: { plural: 'resources', singular: 'resource' },
+  policies: { plural: 'policies', singular: 'policy' },
+} as const satisfies Record<string, PlanNoun>
+
+function inSection(section: PlanAppNames, name: string, plural: string): Existence {
+  if (isUnreadable(section)) return { unknown: `the application's ${plural} could not be read (${section.unreadable})` }
   return section.includes(name) ? 'yes' : 'no'
 }
 
 /**
- * Narrows a name match to the app root the plan puts the element in: `modules/<name>`,
- * or the project root when the plan states none. `found` is what the scan found under
- * that name, `undefined` meaning no reader says where any of it came from — which is
- * unknown whichever root the plan names, since a match either way would be a guess.
+ * Whether the application holds this name, in the app root the plan puts it in:
+ * `modules/<name>`, or the project root when the plan states none. `entries` is what
+ * the detail scan found under that name, `undefined` meaning no reader says where any
+ * of it came from — which is unknown whichever root the plan names, since a match
+ * either way would be a guess.
  */
-function inScope(
-  exists: Existence,
+function existsInScope<T extends { module: string | null }>(
+  names: PlanAppNames,
+  name: string,
+  noun: PlanNoun,
   declared: string | undefined,
-  found: ReadonlyArray<{ module: string | null }> | undefined,
-  what: string,
+  entries: T[] | PlanAppUnreadable | undefined,
+  matches: (entry: T) => boolean,
 ): Existence {
-  if (exists !== 'yes') return exists
-  if (found === undefined) return { unknown: `nothing reads which app root each ${what} sits in` }
-  return found.some((entry) => entry.module === (declared ?? null)) ? 'yes' : 'no'
-}
-
-/** The entries of a detail section a name matches, or `undefined` when the section could not be read. */
-function matching<T>(section: T[] | PlanAppUnreadable | undefined, match: (entry: T) => boolean): T[] | undefined {
-  return section === undefined || isUnreadable(section) ? undefined : section.filter(match)
+  const found = inSection(names, name, noun.plural)
+  if (found !== 'yes') return found
+  if (entries === undefined || isUnreadable(entries)) return { unknown: `nothing reads which app root each ${noun.singular} sits in` }
+  return entries.some((entry) => matches(entry) && entry.module === (declared ?? null)) ? 'yes' : 'no'
 }
 
 function scopeName(module: string | undefined): string {
@@ -232,8 +247,8 @@ export function judgePlan(plan: PlanDraft, app: PlanAppState): PlanStatus {
     ]),
     ...plan.routes.map((route) => context.route(route)),
     ...plan.views.map((view) => context.view(view)),
-    ...plan.resources.map((resource) => context.named('resources', resource, app.resources, 'resources', resource.fields.length > 0 ? ['fields'] : [])),
-    ...plan.policies.map((policy) => context.named('policies', policy, app.policies, 'policies', policy.abilities.length > 0 ? ['abilities'] : [])),
+    ...plan.resources.map((resource) => context.named('resources', resource, app.resources, NOUNS.resources, resource.fields.length > 0 ? ['fields'] : [])),
+    ...plan.policies.map((policy) => context.named('policies', policy, app.policies, NOUNS.policies, policy.abilities.length > 0 ? ['abilities'] : [])),
     ...plan.sideEffects.map((effect) => context.sideEffect(effect)),
     ...plan.commands.map((command): PlanElementStatus =>
       conclude({ id: command.id, section: 'commands', change: { kind: 'add' }, label: command.command, exists: 'no', unjudged: 'Nothing reads whether a command has been run.' }),
@@ -338,12 +353,12 @@ class StatusContext {
     section: PlanElementSection,
     element: { id: string; change: PlanChange; name: string; module?: string },
     names: PlanAppNames,
-    what: string,
+    noun: PlanNoun,
     unread: string[],
   ): PlanElementStatus {
     const classes = section === 'resources' ? this.detail?.resources : this.detail?.policies
     const find = (name: string): Existence =>
-      inScope(inSection(names, name, what), element.module, matching(classes, (entry) => entry.className === name), what.replace(/s$/, ''))
+      existsInScope(names, name, noun, element.module, classes, (entry) => entry.className === name)
     return conclude({
       id: element.id,
       section,
@@ -351,7 +366,7 @@ class StatusContext {
       label: element.name,
       exists: find(element.name),
       previous: previousOf(element.change, find),
-      properties: () => unread.map((property) => unknown(property, 'as planned', `nothing reads a ${section.replace(/s$/, '')}'s ${property}`)),
+      properties: () => unread.map((property) => unknown(property, 'as planned', `nothing reads a ${noun.singular}'s ${property}`)),
     })
   }
 
@@ -376,10 +391,10 @@ class StatusContext {
 
   /** A file named after the class that yielded no model is a class this cannot call absent. */
   private modelExistence(name: string, module: string | undefined): Existence {
-    const found = inSection(this.app.models, name, 'models')
+    const found = existsInScope(this.app.models, name, NOUNS.models, module, this.section('models'), (entry) => entry.className === name)
     const unparsed = this.detail?.unparsedModelFiles.find((file) => file.replace(/^.*\//, '').replace(/\.[^.]+$/, '') === name)
     if (found === 'no' && unparsed) return { unknown: `${unparsed} exists and no model class could be read from it` }
-    return inScope(found, module, matching(this.section('models'), (entry) => entry.className === name), 'model')
+    return found
   }
 
   model(model: PlanModel): PlanElementStatus {
@@ -409,7 +424,9 @@ class StatusContext {
       properties.push(compare('table', model.table, boundName, isUnreadable(tables) ? `the schema could not be read (${tables.unreadable})` : 'the table the class binds was not found in the schema'))
     }
     if (model.tableRenamedFrom && !isUnreadable(tables)) {
-      const old = tables.some((table) => (table.tableName ?? table.identifier) === model.tableRenamedFrom)
+      // Scoped like the table the model binds: a same-named table in another app root is a different table.
+      const scope = tables.filter((table) => table.module === (model.module ?? null))
+      const old = scope.some((table) => (table.tableName ?? table.identifier) === model.tableRenamedFrom)
       properties.push(old ? differ('previous table removed', model.tableRenamedFrom, 'still present') : match('previous table removed', model.tableRenamedFrom, 'absent'))
     }
 
@@ -557,7 +574,10 @@ class StatusContext {
     const validators = this.section('validators')
     const names = isUnreadable(validators) ? validators : validators.map((candidate) => candidate.name)
     const find = (name: string): Existence =>
-      inScope(inSection(names, name, 'validators'), validator.module, matching(validators, (entry) => entry.name === name), 'validator')
+      existsInScope(names, name, NOUNS.validators, validator.module, validators, (entry) => entry.name === name)
+    const found = isUnreadable(validators)
+      ? undefined
+      : validators.find((entry) => entry.name === validator.name && entry.module === (validator.module ?? null))
     return conclude({
       id: validator.id,
       section: 'validators',
@@ -566,7 +586,7 @@ class StatusContext {
       exists: find(validator.name),
       previous: previousOf(validator.change, find),
       properties: () => (validator.fields.length > 0 ? [unknown('fields', 'as planned', "nothing reads a schema's fields without evaluating it")] : []),
-      mount: () => this.referenceMount(validator.name),
+      mount: () => this.referenceMount(validator.name, found),
     })
   }
 
@@ -574,8 +594,7 @@ class StatusContext {
     if (this.detail?.controllerCollisions.includes(className)) {
       return { unknown: `two controller files declare "${className}", and a route names a class, never a file` }
     }
-    const found = inSection(this.app.controllers, className, 'controllers')
-    return inScope(found, module, matching(this.section('controllers'), (entry) => entry.className === className), 'controller')
+    return existsInScope(this.app.controllers, className, NOUNS.controllers, module, this.section('controllers'), (entry) => entry.className === className)
   }
 
   controller(controller: PlanController): PlanElementStatus {
@@ -596,8 +615,7 @@ class StatusContext {
       const owner = this.controllerExistence(controller.className, controller.module)
       if (typeof owner === 'object') return owner
       const actionKey = `${controller.className}.${name}`
-      const found = inSection(this.app.actions, actionKey, 'controller actions')
-      return inScope(found, controller.module, matching(this.section('actions'), (entry) => entry.key === actionKey), 'controller')
+      return existsInScope(this.app.actions, actionKey, NOUNS.actions, controller.module, this.section('actions'), (entry) => entry.key === actionKey)
     }
     return conclude({
       id: action.id,
@@ -626,9 +644,15 @@ class StatusContext {
       properties.push(body?.identifiers.includes(name) ? match(property, name) : unknown(property, name, NOT_IN_BODY))
     }
 
+    // A mention is not a use, here as for the validator's own mount: a symbol can be
+    // named by a leftover import or in a type position, and neither validates anything.
+    const NOT_VALIDATED = 'the action body validates with no such schema, and a helper or the route contract may'
     for (const field of ['params', 'query', 'body'] as const) {
       const id = action[field]
-      if (id) mentions(`${field} validator`, id)
+      if (!id) continue
+      const property = `${field} validator`
+      const name = this.namesById.get(id) ?? id
+      properties.push(body?.validates.includes(name) ? match(property, name) : unknown(property, name, NOT_VALIDATED))
     }
     const policy = action.authorization.policy
     if (policy) {
@@ -670,14 +694,16 @@ class StatusContext {
   }
 
   /**
-   * Mounted when a mounted action validates with the symbol, or the entry routes file
-   * names it in a route contract. A bare mention is not evidence: an identifier can be
-   * named by a leftover import, in a type position or in a branch nothing reaches, and
-   * none of those is a use. Such a mention only explains why this stayed unconfirmed.
+   * Mounted when a mounted action validates with the symbol, or a mounted route's own
+   * contract holds it. The contract half is object identity against the registered
+   * definitions: a `body` key in an object nobody passes, in a function nobody calls
+   * or in a branch nobody reaches registered nothing and is not evidence. Nor is a
+   * bare mention, which only explains why this stayed unconfirmed.
    */
-  private referenceMount(symbol: string): PlanAppMount {
+  private referenceMount(symbol: string, validator: PlanAppValidatorDetail | undefined): PlanAppMount {
     if (!this.detail) return { unconfirmed: NO_DETAIL.unreadable }
     const actions = this.section('actions')
+    const routes = this.section('routes')
     const reasons: string[] = []
     const mentions: string[] = []
 
@@ -691,20 +717,22 @@ class StatusContext {
       reasons.push(`${action.key} validates with it, and ${mount.unconfirmed}`)
     }
 
-    for (const file of this.detail.routeFiles) {
-      if (!file.contractIdentifiers.includes(symbol)) {
-        if (file.identifiers.includes(symbol)) mentions.push(`${file.file} mentions it outside a route contract`)
-        continue
-      }
-      if (!file.entry) {
-        reasons.push(`${file.file} names it in a route contract, and only the routes file the application loads is evidence of mounting`)
-        continue
-      }
-      if (this.detail.mounts.entry === 'mounted') return 'mounted'
-      reasons.push(`${file.file} names it in a route contract, and ${this.detail.mounts.entry.unconfirmed}`)
+    for (const route of isUnreadable(routes) ? [] : routes) {
+      if (!route.contractSchemas.includes(symbol)) continue
+      const mount = this.routeMount(route)
+      if (mount === 'mounted') return 'mounted'
+      reasons.push(`the contract of ${route.name ?? `${route.method} ${route.path}`} holds it, and ${mount.unconfirmed}`)
     }
 
-    return { unconfirmed: reasons[0] ?? mentions[0] ?? 'no route contract names it and no action body validates with it' }
+    for (const file of this.detail.routeFiles) {
+      if (file.identifiers.includes(symbol)) mentions.push(`${file.file} mentions it, and no registered route contract holds it`)
+    }
+
+    if (reasons.length > 0) return { unconfirmed: reasons[0]! }
+    if (validator?.unimported) {
+      return { unconfirmed: `${validator.file} would not import, so no route contract could be matched to it (${validator.unimported})` }
+    }
+    return { unconfirmed: mentions[0] ?? 'no route contract holds it and no action body validates with it' }
   }
 
   route(route: PlanRoute): PlanElementStatus {
@@ -814,8 +842,9 @@ class StatusContext {
     if (!readable.includes(effect.kind)) return conclude({ ...base, exists: 'no', unjudged: `Nothing discovers a ${effect.kind} class.` })
     const classes = this.detail?.sideEffects[effect.kind as PlanAppSideEffectKind]
     const names: PlanAppNames = classes ? classes.map((entry) => entry.className) : NO_DETAIL
+    const noun = { plural: `${effect.kind} classes`, singular: effect.kind }
     const find = (name: string): Existence =>
-      inScope(inSection(names, name, `${effect.kind} classes`), effect.module, matching(classes, (entry) => entry.className === name), effect.kind)
+      existsInScope(names, name, noun, effect.module, classes, (entry) => entry.className === name)
     return conclude({
       ...base,
       exists: find(effect.name),

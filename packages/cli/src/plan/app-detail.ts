@@ -7,12 +7,14 @@
  */
 
 import { relative, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import type { RouteDefinition } from '@guren/core'
 import type { File, Node, Statement } from '@babel/types'
 
-import { unwrapTypeAssertion, propertyValue, topLevelDeclaration, walk, memberKeyName } from '../ast-walk'
+import { unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
 import { createAppOptions } from '../config-check'
 import type { ContextRoute } from '../context-route'
-import { blankCommentsAndStrings, type ControllerMethodScan } from '../controller-methods'
+import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
 import {
   classNameFromPath,
   discoverEventFiles,
@@ -25,8 +27,11 @@ import {
   discoverRoutesFiles,
   discoverValidatorFiles,
   excludeBarrelFiles,
+  findFirstExisting,
+  listModuleNames,
   moduleNameFor,
   moduleNameFromRelPath,
+  moduleRoutesEntryCandidates,
   toPosixRelative,
 } from '../discovery'
 import { extractInertiaPageRefs, describeInertiaPagePropKeys } from '../inertia-pages'
@@ -36,7 +41,7 @@ import { ParseCache } from '../parse-cache'
 import { resolveAppEntry } from '../provider-registrar'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../route-registrar'
 import { importsByLocal, specifierBase } from '../schema-binding'
-import { readSchemaTables, type SourcedSchemaTable } from '../schema-runtime'
+import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
 import type { PlanAppUnreadable } from './app-state'
 
 /** `mounted`, or why this command could not confirm it. Absence of evidence is never `mounted`. */
@@ -65,6 +70,12 @@ export interface PlanAppRouteDetail {
   prototype?: true
   /** The module whose registrar declared the route, or `null` for the entry registrar. */
   module: string | null
+  /**
+   * Exported validator symbols this registered route's contract schemas *are*, matched
+   * by object identity rather than by name: the registrar ran, so a schema reached here
+   * only from a call the application made.
+   */
+  contractSchemas: string[]
 }
 
 export interface PlanAppModelDetail {
@@ -102,6 +113,8 @@ export interface PlanAppValidatorDetail {
   name: string
   file: string
   module: PlanAppScope
+  /** Why the file would not import, which leaves the symbol unmatchable against a route contract. */
+  unimported?: string
 }
 
 /** A class a plan names and a directory scan discovers, for the kinds with no other reader. */
@@ -120,8 +133,6 @@ export interface PlanAppRouteFile {
   entry: boolean
   /** Identifiers outside the import and re-export statements: a mention, not a use. */
   identifiers: string[]
-  /** Schemas a route contract's `body` / `params` / `query` names, which is a use. */
-  contractIdentifiers: string[]
 }
 
 export type PlanAppSideEffectKind = 'job' | 'event' | 'listener'
@@ -153,6 +164,8 @@ export interface PlanAppDetailInput {
   /** The entry routes file that was loaded, app-relative; `undefined` when the app has none. */
   routesFile: string | undefined
   routes: ContextRoute[] | PlanAppUnreadable
+  /** The definitions `routes` was rendered from, in the same order, for the live contract schemas. */
+  definitions: RouteDefinition[] | undefined
   provenance: Array<string | null>
   moduleWarnings: string[]
   controllers: ControllerMethodScan | PlanAppUnreadable
@@ -163,10 +176,27 @@ export interface PlanAppDetailInput {
 const IDENTIFIER_PATTERN = /[A-Za-z_$][\w$]*/g
 const MEMBER_CALL_PATTERN = /\bthis\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g
 const ABILITY_PATTERN = /\bthis\s*\.\s*(?:authorize|can)\s*\(\s*(['"`])([^'"`]+)\1/g
-const VALIDATE_CALL_PATTERN = /\bthis\s*\.\s*validate(?:Body|Query|Params)\s*\(\s*([A-Za-z_$][\w$]*)/g
+
+/** Spelled through `ControllerMemberName`, so a rename in `Controller.ts` fails to compile. */
+const VALIDATE_MEMBERS = [
+  'validateBody',
+  'validateBodySafe',
+  'validateQuery',
+  'validateQuerySafe',
+  'validateParams',
+  'validateParamsSafe',
+] as const satisfies readonly ControllerMemberName[]
+
+const VALIDATE_CALL_PATTERN = new RegExp(
+  `\\bthis\\s*\\.\\s*${accessorCallPattern(VALIDATE_MEMBERS)}\\s*([A-Za-z_$][\\w$]*)`,
+  'g',
+)
 
 /** Route contract keys (`RouteContractOptions`) whose value is a schema. */
-const CONTRACT_SCHEMA_KEYS = new Set(['body', 'params', 'query'])
+const CONTRACT_SCHEMA_KEYS = ['body', 'params', 'query'] as const
+
+/** A validator file is imported only to match a contract schema, so it gets the schema reader's budget. */
+const VALIDATOR_IMPORT_TIMEOUT_MS = 5000
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -180,11 +210,11 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
   const { root } = input
   const cache = new ParseCache()
 
-  const [tables, models, pages, validators, resources, policies, routeFiles, sideEffects, mounts] = await Promise.all([
+  const [tables, models, pages, validatorRead, resources, policies, routeFiles, sideEffects, mounts] = await Promise.all([
     tableDetail(root),
     modelDetail(root, input.models),
     pageDetail(root, input.pages),
-    validatorDetail(root, cache),
+    validatorDetail(root, cache, contractSchemaObjects(input.definitions)),
     classDetail(root, discoverResourceFiles),
     classDetail(root, discoverPolicyFiles),
     routeFileDetail(root, cache, input.routesFile),
@@ -193,14 +223,14 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
   ])
 
   return {
-    routes: routeDetail(input),
+    routes: routeDetail(input, validatorRead.symbols),
     ...(input.moduleWarnings.length > 0 ? { routesIncomplete: input.moduleWarnings.join(' ') } : {}),
     mounts,
     tables,
     ...models,
     ...actionDetail(root, input.controllers),
     pages,
-    validators,
+    validators: validatorRead.validators,
     resources,
     policies,
     routeFiles,
@@ -208,7 +238,19 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
   }
 }
 
-function routeDetail(input: PlanAppDetailInput): PlanAppDetail['routes'] {
+/** The live contract schemas of every registered route, whatever a plan calls them. */
+function contractSchemaObjects(definitions: RouteDefinition[] | undefined): Set<object> {
+  const objects = new Set<object>()
+  for (const definition of definitions ?? []) {
+    for (const key of CONTRACT_SCHEMA_KEYS) {
+      const schema = definition.schemas?.[key]
+      if (schema !== null && typeof schema === 'object') objects.add(schema)
+    }
+  }
+  return objects
+}
+
+function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanAppDetail['routes'] {
   if (!Array.isArray(input.routes)) return input.routes
   return input.routes.map((route, index) => ({
     name: route.name,
@@ -221,7 +263,19 @@ function routeDetail(input: PlanAppDetailInput): PlanAppDetail['routes'] {
     ...(route.agent ? { agent: { toolName: route.agent.toolName, readOnly: route.agent.readOnlyHint } } : {}),
     ...(route.prototype ? { prototype: true as const } : {}),
     module: input.provenance[index] ?? null,
+    contractSchemas: contractSymbols(input.definitions?.[index], symbols),
   }))
+}
+
+function contractSymbols(definition: RouteDefinition | undefined, symbols: SchemaSymbols): string[] {
+  const schemas = definition?.schemas
+  if (!schemas) return []
+  return unique(
+    CONTRACT_SCHEMA_KEYS.flatMap((key) => {
+      const schema = schemas[key]
+      return schema !== null && typeof schema === 'object' ? (symbols.get(schema) ?? []) : []
+    }),
+  )
 }
 
 /**
@@ -307,15 +361,22 @@ async function pageDetail(root: string, pages: string[] | PlanAppUnreadable): Pr
   )
 }
 
-/** Names a module exports with `export const` / `export function`; `null` when an export form hides some. */
-function exportedNames(ast: File): string[] | null {
+/**
+ * Names a module exports, or `null` when an export form hides some. `'this file'` drops
+ * a name re-exported from elsewhere: the symbol is declared in that other file, and the
+ * app root it sits in is that file's, not this one's. The runtime export list holds both,
+ * which is why {@link registrarExport} asks for `'anywhere'`.
+ */
+function exportedNames(ast: File, declaredIn: 'anywhere' | 'this file'): string[] | null {
   const names: string[] = []
   for (const node of ast.program.body) {
     if (node.type === 'ExportAllDeclaration') return null
     if (node.type === 'ExportDefaultDeclaration') names.push('default')
     if (node.type !== 'ExportNamedDeclaration') continue
-    for (const specifier of node.specifiers) {
-      if (specifier.type === 'ExportSpecifier') names.push(specifierName(specifier.exported))
+    if (!(node.source && declaredIn === 'this file')) {
+      for (const specifier of node.specifiers) {
+        if (specifier.type === 'ExportSpecifier') names.push(specifierName(specifier.exported))
+      }
     }
     const declaration = node.declaration
     if (declaration?.type === 'FunctionDeclaration' && declaration.id) names.push(declaration.id.name)
@@ -327,19 +388,51 @@ function exportedNames(ast: File): string[] | null {
   return names
 }
 
-async function validatorDetail(root: string, cache: ParseCache): Promise<PlanAppDetail['validators']> {
-  const files = await discoverValidatorFiles(root)
+/** Every exported object of the validator files, to the names it is exported under. */
+type SchemaSymbols = Map<object, string[]>
+
+interface ValidatorRead {
+  validators: PlanAppDetail['validators']
+  symbols: SchemaSymbols
+}
+
+/**
+ * Validators by exported symbol, plus the identity of the objects those symbols hold,
+ * which answers "is this the schema a route registered". Identity costs an import, so
+ * the files are imported only when a registered route carries a contract; one that
+ * would not import leaves its own symbols unmatchable, never the section unreadable.
+ * Barrels are excluded as for models: a re-export belongs to the file that declares it.
+ */
+async function validatorDetail(root: string, cache: ParseCache, contracts: Set<object>): Promise<ValidatorRead> {
+  const files = excludeBarrelFiles(await discoverValidatorFiles(root))
+  const symbols: SchemaSymbols = new Map()
   const validators: PlanAppValidatorDetail[] = []
   for (const filePath of files) {
     const file = toPosixRelative(root, filePath)
     const parsed = await cache.get(filePath)
-    const names = parsed ? exportedNames(parsed.ast) : null
+    const names = parsed ? exportedNames(parsed.ast, 'this file') : null
     // One unread file makes every absent name unprovable, as with the controller scan.
-    if (names === null) return { unreadable: `${file} could not be read for its exported schemas` }
+    if (names === null) return { validators: { unreadable: `${file} could not be read for its exported schemas` }, symbols }
     const module = moduleNameFromRelPath(file)
-    validators.push(...names.filter((name) => name !== 'default').map((name) => ({ name, file, module })))
+    const unimported = contracts.size === 0 ? undefined : await readSchemaIdentities(filePath, contracts, symbols)
+    validators.push(...names.filter((name) => name !== 'default').map((name) => ({ name, file, module, ...(unimported ? { unimported } : {}) })))
   }
-  return validators
+  return { validators, symbols }
+}
+
+/** Imports one validator file for the identity of the schemas it exports, or answers why it would not. */
+async function readSchemaIdentities(filePath: string, contracts: Set<object>, symbols: SchemaSymbols): Promise<string | undefined> {
+  let exports: Record<string, unknown>
+  try {
+    exports = await withImportTimeout(import(pathToFileURL(filePath).href) as Promise<Record<string, unknown>>, VALIDATOR_IMPORT_TIMEOUT_MS)
+  } catch (error) {
+    return reasonOf(error)
+  }
+  for (const [name, value] of Object.entries(exports)) {
+    if (value === null || typeof value !== 'object' || !contracts.has(value)) continue
+    symbols.set(value, [...(symbols.get(value) ?? []), name])
+  }
+  return undefined
 }
 
 /**
@@ -358,28 +451,25 @@ function statementIdentifiers(source: string, ast: File): string[] {
 }
 
 /**
- * Schemas a route contract names. The object literal is not required to be a route
- * option argument: `resource()` expansions and option objects built by a helper carry
- * the same keys, and a narrower test would miss them.
+ * Every routes file of the application: the project's, each module's `routes/` directory
+ * and each module's single-file `routes.ts` entry, which `discoverModuleRoutesFiles`
+ * drops and `make:module` scaffolds — the set `discoverRoutePathFiles` reads for the
+ * same reason.
  */
-function contractIdentifiers(ast: File): string[] {
-  const names: string[] = []
-  walk(ast.program, (node) => {
-    if (node.type !== 'ObjectProperty') return
-    const key = memberKeyName(node as unknown as { computed?: boolean; key: { type: string; name?: string; value?: unknown } })
-    if (key === undefined || !CONTRACT_SCHEMA_KEYS.has(key)) return
-    const value = unwrapTypeAssertion(node.value as Node)
-    if (value.type === 'Identifier') names.push(value.name)
-  })
-  return unique(names)
-}
-
 async function routeFileDetail(root: string, cache: ParseCache, routesFile: string | undefined): Promise<PlanAppRouteFile[]> {
-  const moduleRoutes = await discoverModuleRoutesFiles(root)
+  const [moduleRoutes, projectFiles, moduleNames] = await Promise.all([
+    discoverModuleRoutesFiles(root),
+    discoverRoutesFiles(root),
+    listModuleNames(root).catch((): string[] => []),
+  ])
+  const moduleEntries = await Promise.all(
+    moduleNames.map((name) => findFirstExisting(root, moduleRoutesEntryCandidates(`modules/${name}`))),
+  )
   const files = unique([
     ...(routesFile === undefined ? [] : [routesFile]),
-    ...(await discoverRoutesFiles(root)).map((file) => toPosixRelative(root, file)),
+    ...projectFiles.map((file) => toPosixRelative(root, file)),
     ...moduleRoutes.flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
+    ...moduleEntries.filter((entry): entry is string => entry !== null),
   ])
 
   const details: PlanAppRouteFile[] = []
@@ -390,7 +480,6 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
       file,
       entry: file === routesFile,
       identifiers: statementIdentifiers(parsed.source, parsed.ast),
-      contractIdentifiers: contractIdentifiers(parsed.ast),
     })
   }
   return details
@@ -407,7 +496,7 @@ async function sideEffectDetail(root: string): Promise<PlanAppDetail['sideEffect
 
 /** The export `resolveRegistrar()` would pick from a routes file, by the loader's own order. */
 function registrarExport(ast: File): string | null {
-  const names = exportedNames(ast)
+  const names = exportedNames(ast, 'anywhere')
   if (names === null) return null
   return (
     REGISTRAR_EXPORT_NAMES.find((name) => names.includes(name))

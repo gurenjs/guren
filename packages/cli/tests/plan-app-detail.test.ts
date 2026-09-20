@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { PlanAppDetail } from '../src/plan/app-detail'
+import type { PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 
@@ -12,7 +12,7 @@ const ROOT_PREFIX = 'guren-plan-app-detail-'
 let ROOT: string
 
 const CONTROLLER = `import { Controller } from '@guren/core'
-import { PostPayloadSchema } from '../Validators/PostValidator.js'
+import { OrphanPayloadSchema, PostPayloadSchema } from '../Validators/PostValidator.js'
 
 export class PostController extends Controller {
   async index() {
@@ -23,6 +23,11 @@ export class PostController extends Controller {
     await this.validateBody(PostPayloadSchema)
     return this.redirect('/posts')
   }
+  async update() {
+    await this.validateBodySafe(PostPayloadSchema)
+    this.validateQuery<{ page: number }>(OrphanPayloadSchema)
+    return this.redirect('/posts')
+  }
   async destroy() {
     await this.authorize('delete', null)
     return this.redirect('/posts')
@@ -30,15 +35,31 @@ export class PostController extends Controller {
 }
 `
 
-// `OrphanPayloadSchema` is imported and never used: the leftover a deleted call leaves.
+/**
+ * `OrphanPayloadSchema` is named by four shapes that register nothing: an object that is
+ * no route contract at all, one nobody passes, a function nobody calls, and a branch
+ * nobody reaches. Each carries a `body` key, and none of them wires anything.
+ */
 const WEB_ROUTES = `import type { Router } from '@guren/core'
 import { PostController } from '../app/Http/Controllers/PostController.js'
 import { OrphanPayloadSchema, PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
 import { registerAdminRoutes } from './admin.js'
 
+export const mailDefaults = { subject: 'hi', body: OrphanPayloadSchema }
+const unusedOptions = { name: 'posts.unused', body: OrphanPayloadSchema }
+
+function registerUncalledRoutes(router: Router): void {
+  router.post('/uncalled', { name: 'posts.uncalled', body: OrphanPayloadSchema }, [PostController, 'store'])
+}
+
 export function registerWebRoutes(router: Router): void {
   router.get('/posts', [PostController, 'index']).name('posts.index')
   router.post('/posts', { name: 'posts.store', body: PostPayloadSchema }, [PostController, 'store'])
+  if (Number('0') === 1) {
+    router.post('/never', { name: 'posts.never', body: OrphanPayloadSchema }, [PostController, 'store'])
+  }
+  void unusedOptions
+  void registerUncalledRoutes
   registerAdminRoutes(router)
 }
 `
@@ -72,8 +93,9 @@ const FILES: Record<string, string> = {
   'routes/web.ts': WEB_ROUTES,
   'routes/admin.ts': ROUTE_FILE('registerAdminRoutes', 'AdminSchema'),
   'routes/orphan.ts': ROUTE_FILE('registerOrphanRoutes', 'OrphanSchema'),
+  // Both schemas are objects, so identity is what separates them, not their shape.
   'app/Http/Validators/PostValidator.ts':
-    'export const PostPayloadSchema = { safeParse: () => ({ success: true, data: {} }) }\nexport const OrphanPayloadSchema = 2\nexport function helper() {}\nconst hidden = 3\nvoid hidden\n',
+    'export const PostPayloadSchema = { safeParse: () => ({ success: true, data: {} }) }\nexport const OrphanPayloadSchema = { safeParse: () => ({ success: true, data: {} }) }\nexport function helper() {}\nconst hidden = 3\nvoid hidden\n',
   'app/Models/Broken.ts': 'export const notAModel = 1\n',
   ...BILLING_MODULE,
 }
@@ -156,16 +178,22 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.mounts.entry).toEqual({ unconfirmed: expect.stringContaining('object literal') })
   })
 
-  test('should call only the routes file it loaded the entry, and leave a leftover import out of a file its identifiers', async () => {
+  test('should call only the routes file it loaded the entry, and hold a module’s single-file routes entry too', async () => {
     const detail = await detailOf('routefiles', { 'src/app.ts': entry('{ routes: registerWebRoutes }') })
 
     const entries = Object.fromEntries(detail.routeFiles.map((file) => [file.file, file.entry]))
-    expect(entries).toMatchObject({ 'routes/web.ts': true, 'routes/admin.ts': false, 'routes/orphan.ts': false })
+    // `modules/billing/routes.ts` is what `make:module` scaffolds, and no `routes/` directory scan reaches it.
+    expect(entries).toEqual({ 'routes/web.ts': true, 'routes/admin.ts': false, 'routes/orphan.ts': false, 'modules/billing/routes.ts': false })
 
     const web = detail.routeFiles.find((file) => file.file === 'routes/web.ts')!
-    expect(web.contractIdentifiers).toEqual(['PostPayloadSchema'])
     expect(web.identifiers).toContain('PostPayloadSchema')
-    expect(web.identifiers).not.toContain('OrphanPayloadSchema')
+  })
+
+  test('should read a contract schema only off a route the registrar actually registered', async () => {
+    const detail = await detailOf('contracts', { 'src/app.ts': entry('{ routes: registerWebRoutes }') })
+
+    const contracts = Object.fromEntries((detail.routes as PlanAppRouteDetail[]).map((route) => [route.name, route.contractSchemas]))
+    expect(contracts).toEqual({ 'posts.index': [], 'posts.store': ['PostPayloadSchema'], 'invoices.index': [] })
   })
 
   test('should read an action body without its comments, and the schemas it validates with', async () => {
@@ -174,6 +202,9 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.actions).toMatchObject([
       { key: 'PostController.index', pages: ['posts/Index'], calls: ['inertia'], abilities: [], validates: [] },
       { key: 'PostController.store', calls: ['validateBody', 'redirect'], validates: ['PostPayloadSchema'] },
+      // The `Safe` variants and the generic form are validation too, and every one of the
+      // six helpers is declared generic in `Controller.ts`.
+      { key: 'PostController.update', validates: ['PostPayloadSchema', 'OrphanPayloadSchema'] },
       { key: 'PostController.destroy', pages: [], calls: ['authorize', 'redirect'], abilities: ['delete'], validates: [] },
     ])
   })
@@ -204,12 +235,28 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.sideEffects.job).toEqual([{ className: 'ChargeInvoice', module: 'billing' }])
   })
 
-  test('should report the validators unreadable when a file re-exports names it does not declare', async () => {
+  test('should leave a barrel out, so a re-export does not enter a symbol under the forwarding file’s app root', async () => {
     const detail = await detailOf('reexport', {
       'src/app.ts': entry('{ routes: registerWebRoutes }'),
       'app/Http/Validators/index.ts': "export * from './PostValidator.js'\n",
+      'modules/billing/app/Http/Validators/InvoiceValidator.ts': 'export const InvoicePayloadSchema = {}\n',
+      'app/Http/Validators/Forwarded.ts': "export { InvoicePayloadSchema } from '../../../modules/billing/app/Http/Validators/InvoiceValidator.js'\n",
     })
 
-    expect(detail.validators).toEqual({ unreadable: expect.stringContaining('app/Http/Validators/index.ts') })
+    expect(detail.validators).toEqual([
+      { name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null },
+      { name: 'OrphanPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null },
+      { name: 'helper', file: 'app/Http/Validators/PostValidator.ts', module: null },
+      { name: 'InvoicePayloadSchema', file: 'modules/billing/app/Http/Validators/InvoiceValidator.ts', module: 'billing' },
+    ])
+  })
+
+  test('should report the validators unreadable when a file outside a barrel re-exports everything', async () => {
+    const detail = await detailOf('starexport', {
+      'src/app.ts': entry('{ routes: registerWebRoutes }'),
+      'app/Http/Validators/All.ts': "export * from './PostValidator.js'\n",
+    })
+
+    expect(detail.validators).toEqual({ unreadable: expect.stringContaining('app/Http/Validators/All.ts') })
   })
 })
