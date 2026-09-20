@@ -552,10 +552,21 @@ decides a task, so `tasks.ts` fixes it:
   note. A route's `bind` is read only when its action is not in the plan, since
   a nested route binds its parent too. An `add`, `rename` or `drop` model is
   always its own slice; an altered one that exactly one other slice covers is
-  that slice's edit (the `hasMany` a new child needs).
+  that slice's edit (the `hasMany` a new child needs). In a class name a digit
+  continues the word, so `Post2Controller` is not `Post`'s.
+- **Foundation stands alone.** It waits for nothing, so nothing it owns may
+  need another task's work. An element that lands there and does (a page two
+  controllers share, submitting to one slice's route) joins the slice it
+  needs, or the cross-entity task of the slices it needs when there are
+  several; what in Foundation needed *it* follows, an action moving with its
+  controller. The one case with nowhere to go, work owned by a story task, is
+  reported and that order is not kept.
 - **Intents.** `tasks[].entity` names a model by class, id or table, and the
-  intent's acceptance goes to that slice: on `tests`, and on the last `http`
-  step, where the behaviours must pass. An `entity` that names no model is a
+  intent's acceptance goes to that slice: on `tests`, and on the step where the
+  behaviours must pass, which is the last `http` step, or the task's last step
+  when it has none. That step's verify always includes the tests, so a slice
+  of `data` or `pages` alone still runs them. A task with behaviours and no
+  work has the `tests` step only. An `entity` that names no model is a
   story and becomes a task of its own, which waits for the tasks owning what it
   covers and the routes its behaviours name. Both that and an intent that
   brings neither work nor behaviour are reported.
@@ -577,6 +588,9 @@ decides a task, so `tasks.ts` fixes it:
   controller's, and a slice's routes are one registrar. Parts fill in document
   order; a screen group (the page's first path segment) moves to the next part
   whole unless it is wider than a part. `scaffold` and `tests` are not split.
+  A part's id is stable and its content is not: a revision that adds an
+  element ahead of others shifts them into the next part under the same ids,
+  so progress is keyed by element and a step id names a position.
 - A slice is scaffolded only when it adds its own model and the application is
   not API-only, and `generates` holds its `add` elements only.
 

@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import type { z } from 'zod'
+
 import type { PlanAppState } from '../src/plan/app-state'
+import type { PlanDraftSchema } from '../src/plan/schema'
 import type { PlanPagePayload } from '../src/plan/render'
 
 export const TEST_BASELINE = { rev: '6445bc71', contextHash: { 'model.post': 'ab12' } }
@@ -10,6 +13,14 @@ export const TEST_BASELINE = { rev: '6445bc71', contextHash: { 'model.post': 'ab
 export function loadCommentsPlan(): Record<string, unknown> {
   const text = readFileSync(join(import.meta.dir, 'fixtures/plan/comments.plan.json'), 'utf8')
   return JSON.parse(text) as Record<string, unknown>
+}
+
+/** What a plan *document* spells, before parsing fills the defaults in. */
+export type PlanInput = z.input<typeof PlanDraftSchema>
+
+/** The comments fixture typed as a document, for a test that edits it section by section. */
+export function loadCommentsPlanInput(): PlanInput {
+  return loadCommentsPlan() as unknown as PlanInput
 }
 
 /** An application the comments fixture is a clean delta against. */

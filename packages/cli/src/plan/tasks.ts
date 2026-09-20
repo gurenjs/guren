@@ -9,7 +9,7 @@
  */
 
 import { collectionName, collectionSlug } from '../inflect'
-import { listPlanElements, type PlanChange, type PlanDraft, type PlanModel } from './schema'
+import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSection, type PlanModel } from './schema'
 
 export type PlanStepKind = 'commands' | 'scaffold' | 'tests' | 'data' | 'http' | 'pages'
 
@@ -64,6 +64,7 @@ export type PlanTaskNoteKind =
   | 'intent-story'
   | 'intent-empty'
   | 'element-unassigned'
+  | 'foundation-reference'
   | 'dependency-cycle'
   | 'hint-unreadable'
   | 'hint-contradiction'
@@ -89,9 +90,41 @@ export interface DerivePlanTasksOptions {
 
 type ChangeKind = PlanChange['kind']
 
+const STEP_ORDER = ['commands', 'data', 'http', 'pages'] as const
+type WorkStep = (typeof STEP_ORDER)[number]
+
+/**
+ * Which step completes an element of each section, and whether `make:feature` and the
+ * emitters can write its first version. Total over the sections, so a new one fails
+ * the type check here until it is given a step or a reason to have none.
+ */
+export const PLAN_SECTION_STEP: Record<PlanElementSection, { step: WorkStep; scaffoldable: boolean } | null> = {
+  models: { step: 'data', scaffoldable: true },
+  columns: { step: 'data', scaffoldable: true },
+  validators: { step: 'http', scaffoldable: true },
+  controllers: { step: 'http', scaffoldable: true },
+  actions: { step: 'http', scaffoldable: true },
+  routes: { step: 'http', scaffoldable: true },
+  resources: { step: 'http', scaffoldable: true },
+  policies: { step: 'http', scaffoldable: true },
+  // No generator writes a job, an event or a mail from a plan.
+  sideEffects: { step: 'http', scaffoldable: false },
+  views: { step: 'pages', scaffoldable: true },
+  commands: { step: 'commands', scaffoldable: false },
+  // A flow describes the elements above and is no file of its own.
+  flows: null,
+  // A question is settled by a revision before approval, never by a step.
+  questions: null,
+  // An intent is what tasks are derived from.
+  tasks: null,
+  // A behaviour travels as `acceptanceIds`; its test belongs to the `tests` step.
+  acceptance: null,
+}
+
 interface WorkElement {
   id: string
-  step: Exclude<PlanStepKind, 'scaffold' | 'tests'>
+  section: PlanElementSection
+  step: WorkStep
   change: ChangeKind
   /** Elements sharing a file share a key: a column its model's, an action its controller's, routes one registrar. */
   file: string
@@ -112,27 +145,43 @@ interface TaskDraft {
 
 // Routes share one registrar per slice. The `/` keeps the key apart from every element id.
 const ROUTES_FILE = '/routes'
-const STEP_ORDER = ['commands', 'data', 'http', 'pages'] as const
 
 const entityTaskId = (modelId: string): string => `task/entity/${modelId}`
 const storyTaskId = (intentId: string): string => `task/story/${intentId}`
 const crossTaskId = (modelIds: readonly string[]): string => `task/cross/${modelIds.join('+')}`
 
-function distinct(values: Iterable<string | undefined>): string[] {
-  const seen = new Set<string>()
+function distinct<T>(values: Iterable<T | undefined>): T[] {
+  const seen = new Set<T>()
   for (const value of values) {
     if (value !== undefined) seen.add(value)
   }
   return [...seen]
 }
 
-/** The model a task intent's `entity` names: by class, then by id, then by table. */
-function modelOfIntent(models: readonly PlanModel[], entity: string): PlanModel | undefined {
+function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const bucket = map.get(key)
+  if (bucket) bucket.push(value)
+  else map.set(key, [value])
+}
+
+/** The model a name spells out: by class, then by id, then by table. An intent's `entity` and a hint both name one this way. */
+function modelNamed(models: readonly PlanModel[], name: string): PlanModel | undefined {
   return (
-    models.find((model) => model.name === entity) ??
-    models.find((model) => model.id === entity) ??
-    models.find((model) => model.table === entity)
+    models.find((model) => model.name === name) ??
+    models.find((model) => model.id === name) ??
+    models.find((model) => model.table === name)
   )
+}
+
+/** Lower-cased collection spelling → the models it may mean, in document order. */
+function collectionSpellings(models: readonly PlanModel[]): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  for (const model of models) {
+    for (const spelling of distinct([collectionSlug(model.name), collectionName(model.name), model.table])) {
+      push(out, spelling.toLowerCase(), model.id)
+    }
+  }
+  return out
 }
 
 /**
@@ -140,26 +189,24 @@ function modelOfIntent(models: readonly PlanModel[], entity: string): PlanModel 
  * route `comments.store` and the page `comments/Index` start with its collection. The
  * longest class name wins, so `PostCommentPolicy` is `PostComment`'s where both exist.
  */
-function modelNamedBy(models: readonly PlanModel[], names: { className?: string; collection?: string }): string | undefined {
+function modelNamedBy(
+  models: readonly PlanModel[],
+  spellings: ReadonlyMap<string, string[]>,
+  names: { className?: string; collection?: string },
+): string | undefined {
   let best: PlanModel | undefined
   const className = names.className
   if (className !== undefined) {
     for (const model of models) {
       if (!className.startsWith(model.name)) continue
-      // `Postcard` is not `Post`'s: the class name must end where the next word starts.
-      if (/^[a-z]/u.test(className.slice(model.name.length))) continue
+      // `Postcard` and `Post2Controller` are not `Post`'s: the name must end where the next word starts.
+      if (/^[a-z0-9]/u.test(className.slice(model.name.length))) continue
       if (!best || model.name.length > best.name.length) best = model
     }
   }
-  const collection = names.collection?.toLowerCase()
-  if (!best && collection !== undefined) {
-    best = models.find((model) =>
-      [collectionSlug(model.name), collectionName(model.name), model.table].some(
-        (spelling) => spelling.toLowerCase() === collection,
-      ),
-    )
-  }
-  return best?.id
+  if (best || names.collection === undefined) return best?.id
+  const candidates = spellings.get(names.collection.toLowerCase()) ?? []
+  return candidates.find((id) => models.some((model) => model.id === id))
 }
 
 export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions = {}): PlanTaskDerivation {
@@ -167,6 +214,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
   const notes: PlanTaskNote[] = []
   const drafts = new Map<string, TaskDraft>()
   const modelById = new Map(plan.models.map((model) => [model.id, model]))
+  const spellings = collectionSpellings(plan.models)
 
   const draft = (id: string, title: PlanTaskTitle): TaskDraft => {
     let found = drafts.get(id)
@@ -180,78 +228,85 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     const model = modelById.get(modelId) as PlanModel
     return draft(entityTaskId(modelId), { kind: 'entity', model: modelId, name: model.name })
   }
+  const crossDraft = (modelIds: readonly string[]): TaskDraft => {
+    const sorted = [...modelIds].sort()
+    return draft(crossTaskId(sorted), { kind: 'cross', models: sorted })
+  }
 
   // Declared first, so document order among tasks is: Foundation, the models' slices, then the rest.
-  draft(FOUNDATION_TASK_ID, { kind: 'foundation' })
+  const foundation = draft(FOUNDATION_TASK_ID, { kind: 'foundation' })
   for (const model of plan.models) entityDraft(model.id)
 
   /** Element id → the tasks of the intents covering it. */
-  const coveredBy = new Map<string, Set<string>>()
+  const coveredBy = new Map<string, Set<TaskDraft>>()
   const intentTask = new Map<string, TaskDraft>()
   for (const intent of plan.tasks) {
-    const model = modelOfIntent(plan.models, intent.entity)
+    const model = modelNamed(plan.models, intent.entity)
     const task = model
       ? entityDraft(model.id)
       : draft(storyTaskId(intent.id), { kind: 'story', intent: intent.id, name: intent.entity })
     intentTask.set(intent.id, task)
+    task.intentIds.push(intent.id)
+    for (const behaviour of intent.acceptance) task.acceptanceIds.push(behaviour.id)
     for (const covered of intent.covers) {
       const bucket = coveredBy.get(covered)
-      if (bucket) bucket.add(task.id)
-      else coveredBy.set(covered, new Set([task.id]))
+      if (bucket) bucket.add(task)
+      else coveredBy.set(covered, new Set([task]))
     }
   }
 
   /** Element id → its task, for every element including `existing` ones: a changed action follows an existing controller. */
   const owner = new Map<string, TaskDraft>()
   const hasWork = new Set<string>()
+  /** Element id → the element it shares a fate with: an action its controller. */
+  const follows = new Map<string, string>()
 
-  const place = (task: TaskDraft, element: WorkElement): void => {
+  const place = (
+    task: TaskDraft,
+    section: PlanElementSection,
+    element: { id: string; change?: PlanChange },
+    where: { file?: string; group?: string } = {},
+  ): void => {
+    const row = PLAN_SECTION_STEP[section]
     owner.set(element.id, task)
-    if (element.change === 'existing') return
+    // A command has no `change`: naming it is asking for it to be run.
+    const change = element.change?.kind ?? 'add'
+    if (row === null || change === 'existing') return
     hasWork.add(element.id)
-    task.elements.push(element)
+    task.elements.push({ id: element.id, section, ...row, change, file: where.file ?? element.id, group: where.group })
   }
 
   const coveredOnce = (id: string): TaskDraft | undefined => {
     const tasks = coveredBy.get(id)
-    return tasks?.size === 1 ? drafts.get(tasks.values().next().value as string) : undefined
+    return tasks?.size === 1 ? tasks.values().next().value : undefined
   }
 
+  const unassigned: string[] = []
   const decide = (
     element: { id: string; change: PlanChange },
-    evidence: { models?: string[]; users?: Array<TaskDraft | undefined>; className?: string; collection?: string },
+    evidence: { models?: string[]; users?: TaskDraft[]; className?: string; collection?: string },
   ): TaskDraft => {
-    const { id } = element
-    const covered = coveredOnce(id)
+    const covered = coveredOnce(element.id)
     if (covered) return covered
 
     const models = distinct(evidence.models ?? []).filter((modelId) => modelById.has(modelId))
     if (models.length === 1) return entityDraft(models[0])
     if (models.length > 1) {
-      const named = modelNamedBy(
-        models.map((modelId) => modelById.get(modelId) as PlanModel),
-        evidence,
-      )
-      if (named !== undefined) return entityDraft(named)
-      const sorted = [...models].sort()
-      return draft(crossTaskId(sorted), { kind: 'cross', models: sorted })
+      const candidates = models.map((modelId) => modelById.get(modelId) as PlanModel)
+      const named = modelNamedBy(candidates, spellings, evidence)
+      return named !== undefined ? entityDraft(named) : crossDraft(models)
     }
 
-    const users = distinct((evidence.users ?? []).map((task) => task?.id))
-    if (users.length === 1) return drafts.get(users[0]) as TaskDraft
-    if (users.length > 1) return drafts.get(FOUNDATION_TASK_ID) as TaskDraft
+    const users = distinct(evidence.users ?? [])
+    if (users.length === 1) return users[0]
+    if (users.length > 1) return foundation
 
-    const named = modelNamedBy(plan.models, evidence)
+    const named = modelNamedBy(plan.models, spellings, evidence)
     if (named !== undefined) return entityDraft(named)
 
     // An `existing` element is nobody's work, so where it lands is nobody's question.
-    if (element.change.kind === 'existing') return drafts.get(FOUNDATION_TASK_ID) as TaskDraft
-    notes.push({
-      kind: 'element-unassigned',
-      message: `"${id}" is covered by no single task, references no model and is named after none, so it is Foundation work. Cover it from one task to place it.`,
-      ids: [id],
-    })
-    return drafts.get(FOUNDATION_TASK_ID) as TaskDraft
+    if (element.change.kind !== 'existing') unassigned.push(element.id)
+    return foundation
   }
 
   const resourceModel = new Map(plan.resources.map((resource) => [resource.id, resource.model]))
@@ -260,15 +315,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     plan.views.map((view) => [view.id, distinct(view.props.map((prop) => resourceModel.get(prop.resource ?? '')))]),
   )
 
-  for (const command of plan.commands) {
-    place(drafts.get(FOUNDATION_TASK_ID) as TaskDraft, {
-      id: command.id,
-      step: 'commands',
-      change: 'add',
-      file: command.id,
-      scaffoldable: false,
-    })
-  }
+  for (const command of plan.commands) place(foundation, 'commands', command)
 
   for (const model of plan.models) {
     // An altered table one other slice covers is that slice's edit (the `hasMany` a new child needs);
@@ -276,29 +323,22 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     const covered = coveredOnce(model.id)
     const movable = model.change.kind === 'alter' || model.change.kind === 'existing'
     const task = movable && covered ? covered : entityDraft(model.id)
-    place(task, { id: model.id, step: 'data', change: model.change.kind, file: model.id, scaffoldable: true })
-    for (const column of model.columns) {
-      place(task, { id: column.id, step: 'data', change: column.change.kind, file: model.id, scaffoldable: true })
-    }
+    place(task, 'models', model)
+    for (const column of model.columns) place(task, 'columns', column, { file: model.id })
   }
 
   for (const resource of plan.resources) {
-    const task = decide(resource, { models: [resource.model], className: resource.name })
-    place(task, { id: resource.id, step: 'http', change: resource.change.kind, file: resource.id, scaffoldable: true })
+    place(decide(resource, { models: [resource.model], className: resource.name }), 'resources', resource)
   }
   for (const policy of plan.policies) {
-    const task = decide(policy, { models: [policy.model], className: policy.name })
-    place(task, { id: policy.id, step: 'http', change: policy.change.kind, file: policy.id, scaffoldable: true })
+    place(decide(policy, { models: [policy.model], className: policy.name }), 'policies', policy)
   }
 
-  /** View id → the controllers rendering it, filled as controllers are placed. */
+  /** View id → the tasks of the controllers rendering it, filled as controllers are placed. */
   const renderedBy = new Map<string, TaskDraft[]>()
-  const validatorUsers = new Map<string, Array<TaskDraft | undefined>>()
-  const uses = (validator: string | undefined, task: TaskDraft | undefined): void => {
-    if (validator === undefined) return
-    const bucket = validatorUsers.get(validator)
-    if (bucket) bucket.push(task)
-    else validatorUsers.set(validator, [task])
+  const validatorUsers = new Map<string, TaskDraft[]>()
+  const uses = (validator: string | undefined, task: TaskDraft): void => {
+    if (validator !== undefined) push(validatorUsers, validator, task)
   }
 
   for (const controller of plan.controllers) {
@@ -311,17 +351,14 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
       }
     }
     const task = decide(controller, { models: distinct(models), className: controller.className })
-    place(task, { id: controller.id, step: 'http', change: controller.change.kind, file: controller.id, scaffoldable: true })
+    place(task, 'controllers', controller)
     for (const action of controller.actions) {
-      place(task, { id: action.id, step: 'http', change: action.change.kind, file: controller.id, scaffoldable: true })
+      place(task, 'actions', action, { file: controller.id })
+      follows.set(action.id, controller.id)
       uses(action.body, task)
       uses(action.params, task)
       uses(action.query, task)
-      if (action.response.kind === 'inertia') {
-        const bucket = renderedBy.get(action.response.view)
-        if (bucket) bucket.push(task)
-        else renderedBy.set(action.response.view, [task])
-      }
+      if (action.response.kind === 'inertia') push(renderedBy, action.response.view, task)
     }
   }
 
@@ -330,64 +367,28 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     // A nested route binds its parent's model too, so binds speak only when the action is not in the plan.
     const task = decide(route, {
       models: dispatchesTo ? [] : route.bind.map((bind) => bind.model),
-      users: [dispatchesTo],
+      users: dispatchesTo ? [dispatchesTo] : [],
       collection: route.name.split('.')[0],
     })
-    place(task, { id: route.id, step: 'http', change: route.change.kind, file: ROUTES_FILE, scaffoldable: true })
+    place(task, 'routes', route, { file: ROUTES_FILE })
   }
 
   for (const view of plan.views) {
     const group = view.page.split('/')[0]
     const task = decide(view, { models: viewModels.get(view.id), users: renderedBy.get(view.id), collection: group })
-    place(task, { id: view.id, step: 'pages', change: view.change.kind, file: view.id, scaffoldable: true, group })
+    place(task, 'views', view, { group })
     uses(view.form?.validator, task)
   }
 
   for (const validator of plan.validators) {
-    const task = decide(validator, { users: validatorUsers.get(validator.id), className: validator.name })
-    place(task, { id: validator.id, step: 'http', change: validator.change.kind, file: validator.id, scaffoldable: true })
+    place(decide(validator, { users: validatorUsers.get(validator.id), className: validator.name }), 'validators', validator)
   }
+  for (const effect of plan.sideEffects) place(decide(effect, { className: effect.name }), 'sideEffects', effect)
 
-  for (const effect of plan.sideEffects) {
-    const task = decide(effect, { className: effect.name })
-    place(task, { id: effect.id, step: 'http', change: effect.change.kind, file: effect.id, scaffoldable: false })
-  }
-
-  const routeIds = new Set(plan.routes.map((route) => route.id))
-  for (const intent of plan.tasks) {
-    const task = intentTask.get(intent.id) as TaskDraft
-    task.intentIds.push(intent.id)
-    for (const behaviour of intent.acceptance) task.acceptanceIds.push(behaviour.id)
-
-  }
-
-  const live = (task: TaskDraft | undefined): task is TaskDraft =>
-    task !== undefined && (task.elements.length > 0 || task.acceptanceIds.length > 0)
-
-  for (const intent of plan.tasks) {
-    const task = intentTask.get(intent.id) as TaskDraft
-    if (!live(task)) {
-      notes.push({
-        kind: 'intent-empty',
-        message: `Task "${intent.id}" brings no work of its own and states no behaviour, so no derived task answers it.`,
-        ids: [intent.id],
-      })
-    } else if (task.title.kind === 'story') {
-      notes.push({
-        kind: 'intent-story',
-        message: `Task "${intent.id}" names "${intent.entity}", which is no model of the plan. It is derived as a task of its own, after every task it reads.`,
-        ids: [intent.id],
-      })
-    }
-  }
-
-  const depend = (task: TaskDraft | undefined, on: TaskDraft | undefined): void => {
-    if (!live(task) || !live(on) || task === on || task.id === FOUNDATION_TASK_ID) return
-    task.dependsOn.add(on.id)
-  }
-  /** `from` waits for the task doing `target`'s work; an `existing` target is already there. */
+  /** Element id → the elements whose work it needs done first. An `existing` target is already there. */
+  const needs = new Map<string, string[]>()
   const reads = (from: string, target: string | undefined): void => {
-    if (target !== undefined && hasWork.has(target)) depend(owner.get(from), owner.get(target))
+    if (target !== undefined && hasWork.has(target)) push(needs, from, target)
   }
 
   for (const model of plan.models) {
@@ -422,17 +423,105 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     reads(view.id, view.form?.submitsTo)
     for (const action of view.actions) reads(view.id, action.route)
   }
+
+  /**
+   * Foundation waits for nothing, so nothing in it may need another task's work. What
+   * does joins the slice it needs, or the cross-entity task of the slices it needs, and
+   * whatever in Foundation needed *it* follows on the next pass. Each move empties
+   * Foundation by one unit, which is what ends the loop.
+   */
+  const pinned = new Set<string>()
+  for (let moved = true; moved; ) {
+    moved = false
+    const units = new Map<string, WorkElement[]>()
+    for (const element of foundation.elements) push(units, follows.get(element.id) ?? element.id, element)
+
+    for (const [head, unit] of units) {
+      if (pinned.has(head)) continue
+      const targets = distinct(unit.flatMap((element) => needs.get(element.id) ?? [])).filter(
+        (target) => owner.get(target) !== foundation,
+      )
+      if (targets.length === 0) continue
+
+      const needed = distinct(targets.map((target) => owner.get(target)))
+      const models: string[] = []
+      for (const task of needed) {
+        if (task.title.kind === 'entity') models.push(task.title.model)
+        if (task.title.kind === 'cross') for (const modelId of task.title.models) models.push(modelId)
+      }
+      // A story is no slice and has no models to name a cross-entity task after.
+      if (needed.some((task) => task.title.kind === 'story')) {
+        pinned.add(head)
+        notes.push({
+          kind: 'foundation-reference',
+          message: `"${head}" is Foundation work, and needs ${targets.map((id) => `"${id}"`).join(', ')}, which a story task owns. Foundation waits for nothing, so that order is not kept. Cover "${head}" from one task to place it.`,
+          ids: [head, ...targets],
+        })
+        continue
+      }
+
+      const to = distinct(models).length === 1 ? entityDraft(models[0]) : crossDraft(distinct(models))
+      foundation.elements = foundation.elements.filter((element) => !unit.includes(element))
+      for (const element of unit) {
+        to.elements.push(element)
+        owner.set(element.id, to)
+      }
+      if (owner.get(head) === foundation) owner.set(head, to)
+      moved = true
+      break
+    }
+  }
+
+  for (const id of unassigned) {
+    if (owner.get(id) !== foundation) continue
+    notes.push({
+      kind: 'element-unassigned',
+      message: `"${id}" is covered by no single task, references no model and is named after none, so it is Foundation work. Cover it from one task to place it.`,
+      ids: [id],
+    })
+  }
+
+  const live = (task: TaskDraft | undefined): task is TaskDraft =>
+    task !== undefined && (task.elements.length > 0 || task.acceptanceIds.length > 0)
+
   for (const intent of plan.tasks) {
-    const task = intentTask.get(intent.id)
+    const task = intentTask.get(intent.id) as TaskDraft
+    if (!live(task)) {
+      notes.push({
+        kind: 'intent-empty',
+        message: `Task "${intent.id}" brings no work of its own and states no behaviour, so no derived task answers it.`,
+        ids: [intent.id],
+      })
+    } else if (task.title.kind === 'story') {
+      notes.push({
+        kind: 'intent-story',
+        message: `Task "${intent.id}" names "${intent.entity}", which is no model of the plan. It is derived as a task of its own, after every task it reads.`,
+        ids: [intent.id],
+      })
+    }
+  }
+
+  const depend = (task: TaskDraft | undefined, on: TaskDraft | undefined): void => {
+    if (live(task) && live(on) && task !== on) task.dependsOn.add(on.id)
+  }
+
+  for (const [from, targets] of needs) {
+    // The only edges left out of Foundation are the pinned ones, each reported above.
+    if (owner.get(from) === foundation) continue
+    for (const target of targets) depend(owner.get(from), owner.get(target))
+  }
+  const routeIds = new Set(plan.routes.map((route) => route.id))
+  for (const intent of plan.tasks) {
     for (const behaviour of intent.acceptance) {
-      if (routeIds.has(behaviour.route) && hasWork.has(behaviour.route)) depend(task, owner.get(behaviour.route))
+      if (routeIds.has(behaviour.route) && hasWork.has(behaviour.route)) {
+        depend(intentTask.get(intent.id), owner.get(behaviour.route))
+      }
     }
   }
 
   const tasks = [...drafts.values()].filter(live)
-  const foundation = drafts.get(FOUNDATION_TASK_ID) as TaskDraft
   for (const task of tasks) {
-    depend(task, foundation)
+    if (task !== foundation) depend(task, foundation)
     // A cross-entity task waits for every slice it reads, whether or not the element it reads changes.
     if (task.title.kind === 'cross') {
       for (const modelId of task.title.models) depend(task, drafts.get(entityTaskId(modelId)))
@@ -440,7 +529,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
   }
 
   breakCycles(tasks, notes)
-  const ordered = order(tasks, hintEdges(plan, tasks, drafts, intentTask, notes))
+  const ordered = order(tasks, hintEdges(plan, tasks, intentTask, notes))
   const position = new Map(ordered.map((task, index) => [task.id, index]))
   const documentOrder = new Map(listPlanElements(plan).map((ref, index) => [ref.id, index]))
   for (const task of tasks) {
@@ -509,16 +598,29 @@ function breakCycles(tasks: readonly TaskDraft[], notes: PlanTaskNote[]): void {
 
 const HINT_PATTERN = /^\s*(\S+)\s+(before|after)\s+(\S+)\s*$/iu
 
+export interface PlanHint {
+  left: string
+  relation: 'before' | 'after'
+  right: string
+}
+
 /**
  * A hint is `<task> before <task>` or `<task> after <task>`, a task being a derived task
- * id, a `tasks[]` id, a model id, a model class or a table. Each accepted hint is an
- * ordering edge and never a dependency. One that a dependency, or an earlier hint,
- * already answers the other way is reported and dropped.
+ * id, a `tasks[]` id, a model id, a model class or a table. Anything else orders nothing.
+ */
+export function parsePlanHint(hint: string): PlanHint | undefined {
+  const match = HINT_PATTERN.exec(hint)
+  if (!match) return undefined
+  return { left: match[1], relation: match[2].toLowerCase() as PlanHint['relation'], right: match[3] }
+}
+
+/**
+ * Each accepted hint is an ordering edge and never a dependency. One that a dependency,
+ * or an earlier hint, already answers the other way is reported and dropped.
  */
 function hintEdges(
   plan: PlanDraft,
   tasks: readonly TaskDraft[],
-  drafts: ReadonlyMap<string, TaskDraft>,
   intentTask: ReadonlyMap<string, TaskDraft>,
   notes: PlanTaskNote[],
 ): Map<string, Set<string>> {
@@ -526,8 +628,9 @@ function hintEdges(
   const after = new Map(tasks.map((task) => [task.id, new Set(task.dependsOn)]))
 
   const resolve = (name: string): string | undefined => {
-    const model = modelOfIntent(plan.models, name)
-    const id = drafts.get(name)?.id ?? intentTask.get(name)?.id ?? (model ? entityTaskId(model.id) : undefined)
+    if (live.has(name)) return name
+    const model = modelNamed(plan.models, name)
+    const id = intentTask.get(name)?.id ?? (model ? entityTaskId(model.id) : undefined)
     return id !== undefined && live.has(id) ? id : undefined
   }
   /** Whether `from` already has to come after `target`, by any chain of edges. */
@@ -548,10 +651,10 @@ function hintEdges(
   }
 
   for (const hint of plan.hints) {
-    const match = HINT_PATTERN.exec(hint)
-    const left = match ? resolve(match[1]) : undefined
-    const right = match ? resolve(match[3]) : undefined
-    if (!match || left === undefined || right === undefined || left === right) {
+    const parsed = parsePlanHint(hint)
+    const left = parsed ? resolve(parsed.left) : undefined
+    const right = parsed ? resolve(parsed.right) : undefined
+    if (!parsed || left === undefined || right === undefined || left === right) {
       notes.push({
         kind: 'hint-unreadable',
         message: `The hint "${hint}" is not "<task> before <task>" or "<task> after <task>" between two derived tasks, so it orders nothing.`,
@@ -559,7 +662,7 @@ function hintEdges(
       })
       continue
     }
-    const [first, second] = match[2].toLowerCase() === 'before' ? [left, right] : [right, left]
+    const [first, second] = parsed.relation === 'before' ? [left, right] : [right, left]
     if (waitsFor(first, second)) {
       notes.push({
         kind: 'hint-contradiction',
@@ -634,12 +737,16 @@ function stepsOf(
     })
   }
 
-  // The behaviours are judged where the routes are finished: the last `http` step, or the task's last step without one.
+  // The behaviours are judged where the routes are finished: the last `http` step, or the task's last work step without one.
   let verifies: PlanDerivedStep | undefined
   for (const candidate of steps) {
     if (candidate.kind === 'http' || verifies?.kind !== 'http') verifies = candidate
   }
-  if (verifies && verifies.kind !== 'tests') verifies.acceptanceIds = [...task.acceptanceIds]
+  if (verifies && verifies.kind !== 'tests' && task.acceptanceIds.length > 0) {
+    verifies.acceptanceIds = [...task.acceptanceIds]
+    // Without an `http` step nothing else would run them: `data` and `pages` verify by type alone.
+    if (!verifies.verify.includes('tests')) verifies.verify.push('tests')
+  }
   return steps
 }
 
@@ -649,17 +756,16 @@ function stepsOf(
  * straddle two, unless it is wider than a part by itself.
  */
 function split(elements: readonly WorkElement[], threshold: number): WorkElement[][] {
-  const groups: Array<{ key: string; files: Map<string, WorkElement[]> }> = []
+  /** Screen group → file → its elements, both in the order first seen. */
+  const groups = new Map<string, Map<string, WorkElement[]>>()
   for (const element of elements) {
     const key = element.group ?? ''
-    let group = groups.find((candidate) => candidate.key === key)
-    if (!group) {
-      group = { key, files: new Map() }
-      groups.push(group)
+    let files = groups.get(key)
+    if (!files) {
+      files = new Map()
+      groups.set(key, files)
     }
-    const file = group.files.get(element.file)
-    if (file) file.push(element)
-    else group.files.set(element.file, [element])
+    push(files, element.file, element)
   }
 
   const parts: WorkElement[][] = []
@@ -671,9 +777,9 @@ function split(elements: readonly WorkElement[], threshold: number): WorkElement
     used = 0
   }
 
-  for (const group of groups) {
-    if (used > 0 && used + group.files.size > threshold) close()
-    for (const file of group.files.values()) {
+  for (const files of groups.values()) {
+    if (used > 0 && used + files.size > threshold) close()
+    for (const file of files.values()) {
       if (used === threshold) close()
       for (const element of file) current.push(element)
       used += 1

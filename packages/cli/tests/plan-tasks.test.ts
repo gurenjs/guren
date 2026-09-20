@@ -1,33 +1,41 @@
 import { describe, expect, test } from 'bun:test'
-import type { z } from 'zod'
-
 import { listPlanElements, PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import {
   derivePlanTasks,
   FOUNDATION_TASK_ID,
+  parsePlanHint,
+  PLAN_SECTION_STEP,
   type DerivePlanTasksOptions,
+  type PlanDerivedStep,
   type PlanDerivedTask,
+  type PlanStepKind,
   type PlanTaskDerivation,
 } from '../src/plan/tasks'
-import { loadCommentsPlan } from './plan-fixture'
+import { loadCommentsPlanInput, type PlanInput } from './plan-fixture'
 
-type PlanInput = z.input<typeof PlanDraftSchema>
 type ModelInput = NonNullable<PlanInput['models']>[number]
 type ChangeInput = ModelInput['change']
 
 const ADD: ChangeInput = { kind: 'add' }
 
-function derive(edit: (plan: PlanInput) => void = () => {}, options?: DerivePlanTasksOptions): PlanTaskDerivation {
-  const plan = loadCommentsPlan() as unknown as PlanInput
+function parsePlan(edit: (plan: PlanInput) => void = () => {}): PlanDraft {
+  const plan = loadCommentsPlanInput()
   edit(plan)
-  return derivePlanTasks(PlanDraftSchema.parse(plan), options)
+  return PlanDraftSchema.parse(plan)
+}
+
+function derive(edit?: (plan: PlanInput) => void, options?: DerivePlanTasksOptions): PlanTaskDerivation {
+  return derivePlanTasks(parsePlan(edit), options)
 }
 
 /** A plan holding nothing but what the test puts in it. */
+function planFrom(sections: Partial<PlanInput>): PlanDraft {
+  const { planVersion, title, summary, locale, scope } = loadCommentsPlanInput()
+  return PlanDraftSchema.parse({ planVersion, title, summary, locale, scope, ...sections })
+}
+
 function deriveFrom(sections: Partial<PlanInput>, options?: DerivePlanTasksOptions): PlanTaskDerivation {
-  return derive((plan) => {
-    Object.assign(plan, { questions: [], models: [], validators: [], controllers: [], routes: [], views: [], resources: [], policies: [], tasks: [] }, sections)
-  }, options)
+  return derivePlanTasks(planFrom(sections), options)
 }
 
 /** A model whose only columns are its key and one foreign key per `references` entry. */
@@ -83,6 +91,23 @@ function task(result: PlanTaskDerivation, id: string): PlanDerivedTask {
 
 const stepIds = (derived: PlanDerivedTask): string[] => derived.steps.map((step) => step.id)
 
+function stepsOfKind(result: PlanTaskDerivation, taskId: string, kind: PlanStepKind): PlanDerivedStep[] {
+  return task(result, taskId).steps.filter((step) => step.kind === kind)
+}
+
+const COMMENT_SLICE = 'task/entity/model.comment'
+
+const COMMENT_HTTP = [
+  'validator.comment',
+  'controller.comments',
+  'action.comments.store',
+  'action.comments.destroy',
+  'route.comments.store',
+  'route.comments.destroy',
+  'resource.comment',
+  'policy.comment',
+]
+
 /** A dashboard over posts and comments, plus a command and a validator two slices share. */
 function busyPlan(plan: PlanInput): void {
   plan.models = [model('Post'), model('Comment', ['post'])]
@@ -111,12 +136,10 @@ function busyPlan(plan: PlanInput): void {
   ]
 }
 
-/** Every element that is work, against every element a step owns. */
-function expectEveryElementOnce(plan: PlanDraft, result: PlanTaskDerivation): void {
-  const work = new Set(['models', 'columns', 'validators', 'controllers', 'actions', 'routes', 'views', 'resources', 'policies', 'sideEffects', 'commands'])
-  const changes = new Map<string, string>()
+function changeKinds(plan: PlanDraft): Map<string, string> {
+  const kinds = new Map<string, string>()
   const record = (element: { id: string; change?: { kind: string } }): void => {
-    changes.set(element.id, element.change?.kind ?? 'add')
+    kinds.set(element.id, element.change?.kind ?? 'add')
   }
   for (const entry of plan.models) {
     record(entry)
@@ -129,32 +152,97 @@ function expectEveryElementOnce(plan: PlanDraft, result: PlanTaskDerivation): vo
   for (const section of [plan.validators, plan.routes, plan.views, plan.resources, plan.policies, plan.sideEffects, plan.commands]) {
     section.forEach(record)
   }
+  return kinds
+}
 
+/** Every element the section table calls work is owned once, by a step of the kind its row names. */
+function expectEveryElementOnce(plan: PlanDraft, result: PlanTaskDerivation): void {
+  const kinds = changeKinds(plan)
   const expected = listPlanElements(plan)
-    .filter((ref) => work.has(ref.section) && changes.get(ref.id) !== 'existing')
-    .map((ref) => ref.id)
+    .filter((ref) => PLAN_SECTION_STEP[ref.section] !== null && kinds.get(ref.id) !== 'existing')
+    .map((ref) => `${PLAN_SECTION_STEP[ref.section]?.step} ${ref.id}`)
     .sort()
-  const owned = result.tasks.flatMap((derived) => derived.steps.flatMap((step) => step.elementIds)).sort()
+  const owned = result.tasks
+    .flatMap((derived) => derived.steps.flatMap((step) => step.elementIds.map((id) => `${step.kind} ${id}`)))
+    .sort()
   expect(owned).toEqual(expected)
+}
+
+/** What each element needs, read from the plan independently of the module under test. */
+function referencesOf(plan: PlanDraft): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  const add = (from: string, ...targets: Array<string | undefined>): void => {
+    out.set(from, [...(out.get(from) ?? []), ...targets.filter((target) => target !== undefined)])
+  }
+  for (const entry of plan.resources) add(entry.id, entry.model)
+  for (const entry of plan.policies) add(entry.id, entry.model)
+  for (const controller of plan.controllers) {
+    for (const action of controller.actions) {
+      const response = action.response
+      add(controller.id, action.body, action.params, action.query, action.authorization.policy?.id)
+      add(controller.id, response.kind === 'inertia' ? response.view : undefined, response.kind === 'resource' ? response.resource : undefined)
+      add(action.id, ...(out.get(controller.id) ?? []))
+    }
+  }
+  for (const route of plan.routes) add(route.id, route.action, ...route.bind.map((bind) => bind.model))
+  for (const entry of plan.views) {
+    add(entry.id, entry.form?.validator, entry.form?.submitsTo, ...entry.actions.map((action) => action.route), ...entry.props.map((prop) => prop.resource))
+  }
+  return out
+}
+
+/** Foundation waits for nothing, and owns nothing that needs another task's work, short of a reported exception. */
+function expectFoundationStandsAlone(plan: PlanDraft, result: PlanTaskDerivation): void {
+  const foundation = result.tasks.find((candidate) => candidate.id === FOUNDATION_TASK_ID)
+  if (!foundation) return
+  expect(foundation.dependsOn).toEqual([])
+  expect(result.tasks[0].id).toBe(FOUNDATION_TASK_ID)
+
+  const mine = new Set(foundation.steps.flatMap((step) => step.elementIds))
+  const elsewhere = new Set(result.tasks.filter((other) => other !== foundation).flatMap((other) => other.steps.flatMap((step) => step.elementIds)))
+  const reported = new Set(result.notes.filter((note) => note.kind === 'foundation-reference').map((note) => note.ids[0]))
+  const references = referencesOf(plan)
+  // An action shares its controller's fate, so the exception is reported on the controller.
+  const controllerOf = new Map(plan.controllers.flatMap((controller) => controller.actions.map((action) => [action.id, controller.id] as const)))
+  for (const id of mine) {
+    if (reported.has(controllerOf.get(id) ?? id)) continue
+    expect((references.get(id) ?? []).filter((target) => elsewhere.has(target)), id).toEqual([])
+  }
+}
+
+/** Two controllers named after no model render one page, which submits to the Post slice. */
+function sharedFormPlan(): PlanDraft {
+  const renders = (id: string): object => ({
+    id: `controller.${id}`,
+    change: ADD,
+    className: `${id}Controller`,
+    actions: [{ id: `action.${id}.show`, change: ADD, name: 'show', authorization: { middleware: [] }, response: { kind: 'inertia', view: 'view.shared' }, rules: [] }],
+  })
+  return planFrom({
+    models: [model('Post')],
+    controllers: [
+      renders('Landing'),
+      renders('Welcome'),
+      {
+        id: 'controller.posts',
+        change: ADD,
+        className: 'PostController',
+        actions: [{ id: 'action.posts.store', change: ADD, name: 'store', authorization: { middleware: [] }, response: { kind: 'empty' }, rules: [] }],
+      },
+    ] as PlanInput['controllers'],
+    routes: [{ id: 'route.posts.store', change: ADD, method: 'POST', path: '/posts', name: 'posts.store', action: 'action.posts.store', middleware: [], bind: [] }],
+    validators: [{ id: 'validator.post', change: ADD, name: 'PostPayloadSchema', fields: [] }],
+    views: [{ ...view('shared/Form'), id: 'view.shared', form: { validator: 'validator.post', submitsTo: 'route.posts.store', fields: [] } }],
+  })
 }
 
 describe('derivePlanTasks', () => {
   describe('the comments fixture', () => {
     test('should derive one slice with the five fixed steps', () => {
-      const slice = 'task/entity/model.comment'
+      const slice = COMMENT_SLICE
+      const http = COMMENT_HTTP
       const behaviours = ['AC-comments-1', 'AC-comments-2', 'AC-comments-3', 'AC-comments-4']
       const columns = ['column.comment.id', 'column.comment.body', 'column.comment.postId', 'column.comment.createdAt']
-      const http = [
-        'validator.comment',
-        'controller.comments',
-        'action.comments.store',
-        'action.comments.destroy',
-        'route.comments.store',
-        'route.comments.destroy',
-        'resource.comment',
-        'policy.comment',
-      ]
-
       expect(derive()).toEqual({
         notes: [],
         tasks: [
@@ -176,12 +264,13 @@ describe('derivePlanTasks', () => {
     })
 
     test('should own every changed element in exactly one step', () => {
-      const plan = PlanDraftSchema.parse(loadCommentsPlan())
+      const plan = parsePlan()
       expectEveryElementOnce(plan, derivePlanTasks(plan))
+      expectFoundationStandsAlone(plan, derivePlanTasks(plan))
     })
 
     test('should derive ids no plan element can carry', () => {
-      const plan = loadCommentsPlan() as unknown as PlanInput
+      const plan = loadCommentsPlanInput()
       busyPlan(plan)
       const result = derivePlanTasks(PlanDraftSchema.parse(plan), { splitThreshold: 1 })
       const derived = result.tasks.flatMap((entry) => [entry.id, ...stepIds(entry)])
@@ -207,16 +296,7 @@ describe('derivePlanTasks', () => {
       expect(task(result, 'task/entity/model.post').steps.map((step) => step.elementIds)).toEqual([['model.post']])
       const comment = task(result, 'task/entity/model.comment')
       expect(comment.dependsOn).toEqual(['task/entity/model.post'])
-      expect(comment.steps.find((step) => step.kind === 'http')?.elementIds).toEqual([
-        'validator.comment',
-        'controller.comments',
-        'action.comments.store',
-        'action.comments.destroy',
-        'route.comments.store',
-        'route.comments.destroy',
-        'resource.comment',
-        'policy.comment',
-      ])
+      expect(stepsOfKind(result, COMMENT_SLICE, 'http').map((step) => step.elementIds)).toEqual([COMMENT_HTTP])
       expect(comment.steps.find((step) => step.kind === 'pages')?.elementIds).toEqual(['view.posts.show'])
       expect(result.notes).toEqual([])
     })
@@ -290,11 +370,102 @@ describe('derivePlanTasks', () => {
     })
 
     test('should own every changed element once across Foundation, slices and a cross-entity task', () => {
-      const input = loadCommentsPlan() as unknown as PlanInput
-      busyPlan(input)
-      const plan = PlanDraftSchema.parse(input)
-      expectEveryElementOnce(plan, derivePlanTasks(plan))
-      expectEveryElementOnce(plan, derivePlanTasks(plan, { splitThreshold: 1, apiOnly: true }))
+      const plan = parsePlan(busyPlan)
+      for (const options of [{}, { splitThreshold: 1, apiOnly: true }]) {
+        expectEveryElementOnce(plan, derivePlanTasks(plan, options))
+        expectFoundationStandsAlone(plan, derivePlanTasks(plan, options))
+      }
+    })
+
+    test('should move Foundation work that needs a slice into that slice, and what needed it after it', () => {
+      const plan = sharedFormPlan()
+      const result = derivePlanTasks(plan)
+
+      // The page needs the Post route, the two controllers need the page, and the validator needs nothing.
+      expect(ids(result)).toEqual([FOUNDATION_TASK_ID, 'task/entity/model.post'])
+      expect(task(result, FOUNDATION_TASK_ID).steps.map((step) => step.elementIds)).toEqual([['validator.post']])
+      expect(stepsOfKind(result, 'task/entity/model.post', 'pages').map((step) => step.elementIds)).toEqual([['view.shared']])
+      expect(stepsOfKind(result, 'task/entity/model.post', 'http')[0].elementIds).toEqual([
+        'controller.Landing',
+        'action.Landing.show',
+        'controller.Welcome',
+        'action.Welcome.show',
+        'controller.posts',
+        'action.posts.store',
+        'route.posts.store',
+      ])
+      expect(result.notes).toEqual([])
+      expectEveryElementOnce(plan, result)
+      expectFoundationStandsAlone(plan, result)
+    })
+
+    test('should move Foundation work that needs several slices into their cross-entity task', () => {
+      const plan = parsePlan((input) => {
+        busyPlan(input)
+        // Named after no model and showing no resource, so it starts out in Foundation; it links into two slices.
+        const hub = { ...view('hub/Index'), actions: [{ label: 'Posts', route: 'route.posts.index' }, { label: 'Comments', route: 'route.comments.index' }] }
+        input.views?.push(hub)
+        input.controllers?.push({
+          id: 'controller.landing',
+          change: ADD,
+          className: 'LandingController',
+          actions: [{ id: 'action.landing.show', change: ADD, name: 'show', authorization: { middleware: [] }, response: { kind: 'inertia', view: hub.id }, rules: [] }],
+        })
+        for (const name of ['posts', 'comments']) {
+          input.routes?.push({ id: `route.${name}.index`, change: ADD, method: 'GET', path: `/${name}`, name: `${name}.index`, action: `action.${name}.index`, middleware: [], bind: [] })
+        }
+      })
+      const result = derivePlanTasks(plan)
+
+      expect(stepsOfKind(result, 'task/cross/model.comment+model.post', 'pages')[0].elementIds).toContain('view.hub.index')
+      expect(stepsOfKind(result, 'task/cross/model.comment+model.post', 'http')[0].elementIds).toContain('action.landing.show')
+      expect(result.notes).toEqual([])
+      expectEveryElementOnce(plan, result)
+      expectFoundationStandsAlone(plan, result)
+    })
+
+    test('should report Foundation work that needs a story task, which no slice can take', () => {
+      const plan = planFrom({
+        validators: [{ id: 'validator.report', change: ADD, name: 'ReportPayloadSchema', fields: [] }],
+        views: [
+          { ...view('landing/Index'), form: { validator: 'validator.report', submitsTo: 'route.none', fields: [] } },
+          { ...view('welcome/Index'), form: { validator: 'validator.report', submitsTo: 'route.none', fields: [] } },
+          view('reports/Index'),
+        ],
+        tasks: [
+          { id: 'task.reports', entity: 'Reporting', summary: 'Report a page.', covers: ['view.reports.index'], acceptance: [] },
+          { id: 'task.landing', entity: 'Landing', summary: 'Land.', covers: ['view.landing.index'], acceptance: [] },
+          { id: 'task.welcome', entity: 'Welcome', summary: 'Welcome.', covers: ['view.welcome.index'], acceptance: [] },
+        ],
+        sideEffects: [],
+        controllers: [
+          {
+            id: 'controller.home',
+            change: ADD,
+            className: 'HomeController',
+            actions: [{ id: 'action.home.index', change: ADD, name: 'index', body: 'validator.report', authorization: { middleware: [] }, response: { kind: 'inertia', view: 'view.reports.index' }, rules: [] }],
+          },
+        ],
+      })
+      const result = derivePlanTasks(plan)
+
+      expect(task(result, FOUNDATION_TASK_ID).dependsOn).toEqual([])
+      expect(result.notes.filter((note) => note.kind !== 'intent-story').map((note) => [note.kind, note.ids])).toEqual([
+        ['foundation-reference', ['controller.home', 'view.reports.index']],
+        ['element-unassigned', ['controller.home']],
+      ])
+      expectEveryElementOnce(plan, result)
+      expectFoundationStandsAlone(plan, result)
+    })
+
+    test('should not read a digit after a model name as the start of the next word', () => {
+      const result = deriveFrom({
+        models: [model('Post')],
+        controllers: [{ id: 'controller.post2', change: ADD, className: 'Post2Controller', actions: [] }],
+      })
+
+      expect(stepsOfKind(result, FOUNDATION_TASK_ID, 'http').map((step) => step.elementIds)).toEqual([['controller.post2']])
+      expect(result.notes.map((note) => [note.kind, note.ids])).toEqual([['element-unassigned', ['controller.post2']]])
     })
 
     test('should report an element with no evidence and keep it in Foundation', () => {
@@ -357,6 +528,74 @@ describe('derivePlanTasks', () => {
           if (plan.tasks?.[0]) plan.tasks[0].entity = entity
         })
         expect(task(result, 'task/entity/model.comment').intentIds, entity).toEqual(['task.comments'])
+      }
+    })
+  })
+
+  describe('behaviours without an http step', () => {
+    const behaviour = (id: string): NonNullable<PlanInput['tasks']>[number]['acceptance'][number] => ({
+      id,
+      description: 'It holds.',
+      kind: 'state',
+      actor: 'user',
+      route: 'route.elsewhere',
+      given: [],
+      expect: { status: 200 },
+    })
+
+    test('should run the tests from the data step of a slice that has no http step', () => {
+      const result = deriveFrom({
+        models: [model('Tag')],
+        tasks: [{ id: 'task.tags', entity: 'Tag', summary: 'Tags.', covers: [], acceptance: [behaviour('AC-tags-1')] }],
+      })
+
+      expect(task(result, 'task/entity/model.tag').steps.map((step) => [step.kind, step.acceptanceIds, step.verify])).toEqual([
+        ['scaffold', [], ['codegen', 'typecheck']],
+        ['tests', ['AC-tags-1'], ['tests:fail']],
+        ['data', ['AC-tags-1'], ['db:migrate', 'typecheck', 'tests']],
+      ])
+    })
+
+    test('should run the tests from the pages step of a slice that is pages only', () => {
+      const result = deriveFrom({
+        models: [model('Tag', [], { kind: 'existing' })],
+        views: [{ ...view('tags/Index'), change: { kind: 'alter' } }],
+        tasks: [{ id: 'task.tags', entity: 'Tag', summary: 'Tags.', covers: ['view.tags.index'], acceptance: [behaviour('AC-tags-1')] }],
+      })
+
+      expect(task(result, 'task/entity/model.tag').steps.map((step) => [step.kind, step.acceptanceIds, step.verify])).toEqual([
+        ['tests', ['AC-tags-1'], ['tests:fail']],
+        ['pages', ['AC-tags-1'], ['typecheck', 'check', 'tests']],
+      ])
+    })
+
+    test('should put a step that runs the tests on every task that has behaviours and work', () => {
+      for (const result of [derive(), derive(busyPlan), derive(undefined, { splitThreshold: 1 })]) {
+        for (const derived of result.tasks) {
+          const judged = derived.steps.filter((step) => step.kind !== 'tests' && step.acceptanceIds.length > 0)
+          const expected = derived.steps.some((step) => step.kind === 'tests') && derived.steps.some((step) => step.elementIds.length > 0) ? 1 : 0
+          expect(judged.length, derived.id).toBe(expected)
+          for (const step of judged) expect(step.verify, step.id).toContain('tests')
+        }
+      }
+    })
+
+    test('should not add the tests to a step that carries no behaviour', () => {
+      const result = deriveFrom({ models: [model('Tag')] })
+
+      expect(stepsOfKind(result, 'task/entity/model.tag', 'data')[0].verify).toEqual(['db:migrate', 'typecheck'])
+    })
+  })
+
+  describe('parsePlanHint', () => {
+    test('should read both relations, whatever their case and spacing', () => {
+      expect(parsePlanHint('  Category   BEFORE Tag ')).toEqual({ left: 'Category', relation: 'before', right: 'Tag' })
+      expect(parsePlanHint('model.tag after task/entity/model.category')).toEqual({ left: 'model.tag', relation: 'after', right: 'task/entity/model.category' })
+    })
+
+    test('should read nothing else as a hint', () => {
+      for (const hint of ['do the hard part first', 'Tag before', 'before Tag', 'Tag before Category please', '']) {
+        expect(parsePlanHint(hint), hint).toBeUndefined()
       }
     })
   })
@@ -558,7 +797,7 @@ describe('derivePlanTasks', () => {
     }
 
     test('should derive the same tasks from the same plan spelled with another key order', () => {
-      const input = loadCommentsPlan() as unknown as PlanInput
+      const input = loadCommentsPlanInput()
       busyPlan(input)
       input.hints = ['Comment before Post', 'dashboard last']
       const shuffled = JSON.parse(JSON.stringify(reversedKeys(input))) as unknown
