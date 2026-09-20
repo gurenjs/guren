@@ -41,6 +41,7 @@ import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { renderPlanFile } from './plan-render'
 import { loadPlanAppState } from './plan/app-state'
+import { formatPlanStatus, planStatusFile } from './plan-status'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -240,6 +241,36 @@ const planRenderCommand = defineCommand({
     })
 
     console.log(rendered.path)
+  },
+})
+
+const planStatusCommand = defineCommand({
+  meta: {
+    name: 'plan:status',
+    description:
+      'Report which elements of an implementation plan exist in the code (RFC 0030). Observational: it exits 0 whatever the status, and non-zero only when the plan cannot be read.',
+  },
+  args: {
+    plan: {
+      type: 'positional',
+      description: 'Path to the plan JSON file',
+      required: true,
+      valueHint: 'comments.plan.json',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print the report as JSON.',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const appRoot = args.app ?? process.cwd()
+    const report = await planStatusFile(args.plan, { app: () => loadPlanAppState(appRoot, { detail: true }) })
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanStatus(report))
   },
 })
 
@@ -3619,6 +3650,7 @@ export const builtinSubCommands = {
   'spec:generate': specGenerateCommand,
   'docs:graph': docsGraphCommand,
   'plan:render': planRenderCommand,
+  'plan:status': planStatusCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
   'make:ai-agent': makeAiAgentCommand,

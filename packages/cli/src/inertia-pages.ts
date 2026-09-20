@@ -18,13 +18,15 @@ const MANIFEST_SEGMENT_REGEX = /\.\w+|\[['"][^'"]+['"]\]/g
  * The one rule for how a controller references a page, shared by `guren check`
  * and the entity context: the string-literal and typed-manifest forms of
  * `this.inertia(...)`, including bracket segments (`pages['sales-admin']`).
- * Regex-based by design, so a call inside a comment is a false positive.
+ * Regex-based by design, so a call inside a comment is a false positive unless the
+ * caller passes `isCode`, which is asked about the offset each match starts at.
  */
-export function extractInertiaPageRefs(source: string): InertiaPageRef[] {
+export function extractInertiaPageRefs(source: string, isCode?: (index: number) => boolean): InertiaPageRef[] {
   const seen = new Set<string>()
   const refs: InertiaPageRef[] = []
   let match: RegExpExecArray | null
   while ((match = INERTIA_CALL_REGEX.exec(source)) !== null) {
+    if (isCode && !isCode(match.index)) continue
     let id: string | undefined
     let form: InertiaPageRef['form']
     if (match[1]) {

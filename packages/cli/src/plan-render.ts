@@ -77,8 +77,8 @@ export function planOutputPath(planPath: string): string {
   return planPath.endsWith('.json') ? `${planPath.slice(0, -'.json'.length)}.html` : `${planPath}.html`
 }
 
-export async function renderPlanFile(planPath: string, options: RenderPlanFileOptions): Promise<RenderedPlanFile> {
-  const cwd = options.cwd ?? process.cwd()
+/** Reads and parses a plan file, every failure a `CliError` naming the path. Shared by the commands that take a plan. */
+export async function readPlanFile(planPath: string, cwd: string = process.cwd()): Promise<{ path: string; plan: PlanDraft | Plan }> {
   const absolutePlan = resolve(cwd, planPath)
 
   let raw: string
@@ -95,7 +95,12 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
     throw new CliError(`${absolutePlan} is not valid JSON: ${(error as Error).message}`)
   }
 
-  const plan = parsePlanDocument(document)
+  return { path: absolutePlan, plan: parsePlanDocument(document) }
+}
+
+export async function renderPlanFile(planPath: string, options: RenderPlanFileOptions): Promise<RenderedPlanFile> {
+  const cwd = options.cwd ?? process.cwd()
+  const { path: absolutePlan, plan } = await readPlanFile(planPath, cwd)
   const app = typeof options.app === 'function' ? await options.app() : options.app
   // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to render nothing.
   const checks = validatePlan(plan, app)

@@ -767,6 +767,23 @@ its tables fall back to the static reading, each table naming its source.
 `guren check`, the spec views and the scaffolders stay on the static reader,
 which needs source positions and must not execute app code on an edit hook.
 
+**Amended in implementation (`plan:status`):** the readers the comparison ended
+up with, beyond the table above. A validator is found by its exported schema
+symbol (`app/Http/Validators/**`), and its fields have no reader: reading them
+would mean evaluating the schema. So have none: a resource's fields, a policy's
+abilities, a foreign key's `onDelete`, a binding's lookup `key`, a page's form,
+actions and states, and the target of a relationship written as a lazy
+`import()` (the blog's own idiom; its name and type are read). An abstract
+column type is compared through the drizzle builder, and a builder that may
+carry the type under a `mode` option (`integer` for a SQLite boolean) is
+unknown, never a match. What an action's body is scanned for (the page it
+returns, the validator, resource and ability it names) yields `match` or
+`unknown`, and `differ` only where the body names a different page or ability:
+a miss may be a helper's work. Prose (`purpose`, `rules`, a description) is not
+a planned property and is not counted as one. Flows, tasks, behaviours and
+questions are not judged; a `command` and a `mail` / `notification` class are
+`unjudged`, since nothing reads whether one was run or discovers the other.
+
 A property with no reader is **unknown**. Unknown never counts towards
 `present`, never satisfies a `drop`, and is listed on the page as "planned,
 not checkable". An element whose every planned property is unknown is
@@ -784,6 +801,26 @@ the entry registrar) and evidence that the owning module or registrar is one
 the application registers. A page is `wired` when an action returns it; a
 validator when a route contract or an action body references it. Where that
 evidence cannot be read, the state is `present` with a note, never `wired`.
+
+**Amended in implementation (`plan:status`):** the evidence is the application
+entry's own `createApp({ routes, modules })`. A route the entry registrar
+declared is `wired` when `routes` is an import of the routes file the CLI
+loaded *and* of the export the loader picks from it; a module's route when
+`modules` lists an import of `modules/<name>`. Options that are not a literal,
+a spread, or an element this cannot trace to a file leave the route `present`
+with the reason. An action is `wired` when such a route dispatches to it, and a
+page when such an action returns it. For a validator, "a route contract
+references it" is read as a routes file naming the symbol, and only a file
+`guren check`'s registrar wiring rule finds called from its entry counts. A
+model, a column, a controller, a resource, a policy and a side effect have no
+mount point a static reader can name: they complete at `present`, and the
+Completion table below reads "`wired` where the kind has one".
+
+Two readings the table left open. An `alter` whose every *readable* planned
+property differs is `planned`, not `drifted`: nothing of the change is in the
+code yet, which is what `planned` means, and `drifted` is kept for a change
+that is partly there. An `existing` element that is missing is `planned` with a
+note, and the report lists it apart from the elements the plan changes.
 
 **Acceptance behaviours** have a status of their own, set by `verify` from
 `bun test --reporter=junit`: `pending` (no test carries the id), `failing`,

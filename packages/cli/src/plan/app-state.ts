@@ -24,12 +24,14 @@ import {
   RESOURCES_DIR,
   type AppRoot,
 } from '../discovery'
-import { loadContextRoutes } from '../context-route'
-import { parseControllerMethods } from '../controller-methods'
+import { routeDefinitionToContextRoute, type ContextRoute } from '../context-route'
+import { parseControllerMethods, type ControllerMethodScan } from '../controller-methods'
 import { listInertiaPageIds } from '../inertia-pages'
 import { parseModelFile } from '../model-parser'
 import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
+import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
+import { loadPlanAppDetail, type PlanAppDetail } from './app-detail'
 
 const POLICIES_DIR = 'app/Policies'
 
@@ -86,6 +88,8 @@ export interface PlanAppState {
    * is "not established", never "this app renders pages".
    */
   apiOnly: boolean
+  /** What `plan:status` compares against; present only when the loader was asked for it. */
+  detail?: PlanAppDetail
 }
 
 export function isUnreadable<T>(section: T[] | PlanAppUnreadable): section is PlanAppUnreadable {
@@ -101,7 +105,11 @@ const VALIDATOR_SECTION_REASON =
  * `generateContext()`, which walks the controller tree a second time and Babel-parses
  * every console command for sections no check here reads.
  */
-export async function loadPlanAppState(cwd: string, options: { routesFile?: string } = {}): Promise<PlanAppState> {
+export async function loadPlanAppState(
+  cwd: string,
+  /** `detail` also imports `db/schema.ts` (RFC 0030 §6), which `plan:render` has no reason to run. */
+  options: { routesFile?: string; detail?: boolean } = {},
+): Promise<PlanAppState> {
   const root = resolve(cwd)
   const roots = await listAppRoots(root).catch((): AppRoot[] => [])
 
@@ -116,7 +124,7 @@ export async function loadPlanAppState(cwd: string, options: { routesFile?: stri
     tableSection(root, roots),
   ])
 
-  return {
+  const state: PlanAppState = {
     models,
     controllers: controllers.classes,
     actions: controllers.actions,
@@ -124,10 +132,23 @@ export async function loadPlanAppState(cwd: string, options: { routesFile?: stri
     policies,
     pages,
     validators: { unreadable: VALIDATOR_SECTION_REASON },
-    routes,
+    routes: isUnreadable(routes.routes) ? routes.routes : routes.routes.map(({ name, method, path }) => ({ name, method, path })),
     tables,
     apiOnly,
   }
+  if (!options.detail) return state
+
+  const detail = await loadPlanAppDetail({
+    root,
+    routesFile: routes.file,
+    routes: routes.routes,
+    provenance: routes.provenance,
+    moduleWarnings: routes.moduleWarnings,
+    controllers: controllers.scan,
+    pages,
+    models: isUnreadable(models) ? models : undefined,
+  })
+  return { ...state, detail }
 }
 
 /**
@@ -184,13 +205,15 @@ async function pageSection(cwd: string): Promise<PlanAppNames> {
  * class missing because its file did not parse is indistinguishable from one the
  * app does not have.
  */
-async function controllerSections(cwd: string): Promise<{ classes: PlanAppNames; actions: PlanAppNames }> {
-  let scan: Awaited<ReturnType<typeof parseControllerMethods>>
+async function controllerSections(
+  cwd: string,
+): Promise<{ classes: PlanAppNames; actions: PlanAppNames; scan: ControllerMethodScan | PlanAppUnreadable }> {
+  let scan: ControllerMethodScan
   try {
     scan = await parseControllerMethods(cwd)
   } catch (error) {
     const unreadable = { unreadable: error instanceof Error ? error.message : String(error) }
-    return { classes: unreadable, actions: unreadable }
+    return { classes: unreadable, actions: unreadable, scan: unreadable }
   }
 
   const skipped = [...scan.unreadableFiles, ...scan.unparsedFiles]
@@ -198,18 +221,34 @@ async function controllerSections(cwd: string): Promise<{ classes: PlanAppNames;
     const unreadable = {
       unreadable: `${skipped.length} controller file(s) did not parse: ${formatTruncatedList(skipped)}`,
     }
-    return { classes: unreadable, actions: unreadable }
+    return { classes: unreadable, actions: unreadable, scan: unreadable }
   }
-  return { classes: [...scan.classFiles.keys()], actions: [...scan.methods.keys()] }
+  return { classes: [...scan.classFiles.keys()], actions: [...scan.methods.keys()], scan }
 }
 
-async function routeSection(cwd: string, routesFile: string | undefined): Promise<PlanAppState['routes']> {
-  const loadErrors: string[] = []
-  const routes = await loadContextRoutes(cwd, routesFile, loadErrors)
-  // Presence, not truthiness: `new Error()` pushes '', and a discarded error reports
-  // the routes file as an app with no routes rather than as one nobody could read.
-  if (loadErrors.length > 0) return { unreadable: loadErrors[0] || 'the routes file threw without a message' }
-  return routes.map((route) => ({ name: route.name, method: route.method, path: route.path }))
+interface RouteSection {
+  routes: ContextRoute[] | PlanAppUnreadable
+  /** The entry that was loaded, app-relative; `undefined` when the app has none. */
+  file: string | undefined
+  /** One entry per route, in order: the module that declared it, or `null` for the entry registrar. */
+  provenance: Array<string | null>
+  moduleWarnings: string[]
+}
+
+async function routeSection(cwd: string, routesFile: string | undefined): Promise<RouteSection> {
+  const target = await resolveRoutesFile(cwd, routesFile)
+  const section: RouteSection = { routes: [], file: undefined, provenance: [], moduleWarnings: [] }
+  if (target.silentlyAbsent) return section
+
+  try {
+    const definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd, section.moduleWarnings, section.provenance)
+    return { ...section, file: target.path, routes: definitions.map(routeDefinitionToContextRoute) }
+  } catch (error) {
+    // Presence, not truthiness: `new Error()` carries '', and a discarded error reports
+    // the routes file as an app with no routes rather than as one nobody could read.
+    const reason = (error instanceof Error ? error.message : String(error)) || 'the routes file threw without a message'
+    return { ...section, file: target.path, routes: { unreadable: reason } }
+  }
 }
 
 /**
