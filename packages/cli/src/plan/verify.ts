@@ -41,8 +41,8 @@ export interface PlanVerifierOptions {
   /** What every record of this verifier names as the plan it ran against. */
   planDigest: string
   /**
-   * The plan's status, asked for once, after the first verified step's `codegen` has run:
-   * judged earlier it reads a tree with no generated files, which blocks what imports them.
+   * The plan's status, asked for once, after `codegen` has run: judged earlier it reads a
+   * tree with no generated files, which blocks what imports them.
    */
   status: () => Promise<PlanStatus>
   exec: CapturedExec
@@ -202,13 +202,15 @@ export class PlanVerifier {
     this.now = options.now ?? (() => new Date())
   }
 
-  /** The status the steps were judged against, or a fresh judgement when none ran. */
+  /** The status the steps were judged against, or one judged now, after a `codegen` of its own when no step ran one. */
   status(): Promise<PlanStatus> {
     return this.load().then((judged) => judged.status)
   }
 
   private load(): Promise<{ status: PlanStatus; elements: Map<string, PlanElementStatus> }> {
-    this.judged ??= this.options.status().then((status) => ({ status, elements: new Map(status.elements.map((element) => [element.id, element])) }))
+    this.judged ??= memoized(this.commands, 'codegen', () => this.runCommand('codegen'))
+      .then(() => this.options.status())
+      .then((status) => ({ status, elements: new Map(status.elements.map((element) => [element.id, element])) }))
     return this.judged
   }
 
@@ -280,7 +282,7 @@ export class PlanVerifier {
     return memoized(this.commands, key, () => this.runCommand(command, step))
   }
 
-  private async runCommand(command: PlanVerifyCommand, step: PlanDerivedStep): Promise<PlanCommandRecord> {
+  private async runCommand(command: PlanVerifyCommand, step?: PlanDerivedStep): Promise<PlanCommandRecord> {
     const started = performance.now()
     let outcome: CommandOutcome
     try {
@@ -291,7 +293,7 @@ export class PlanVerifier {
     return { command, durationMs: Math.round(performance.now() - started), ...outcome }
   }
 
-  private dispatch(command: PlanVerifyCommand, step: PlanDerivedStep): Promise<CommandOutcome> {
+  private dispatch(command: PlanVerifyCommand, step?: PlanDerivedStep): Promise<CommandOutcome> {
     switch (command) {
       case 'codegen':
         return this.script('codegen', codegenFallback(), OUTPUT_ERROR_PATTERN)
@@ -303,6 +305,7 @@ export class PlanVerifier {
         return this.runCheck()
       case 'tests':
       case 'tests:fail':
+        if (!step) throw new Error(`${command} runs for a step`)
         return this.tests(command, step)
     }
   }

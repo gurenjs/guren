@@ -9,6 +9,8 @@ import { planDigest, planSlug, PLAN_STATE_VERSION, readPlanState, writePlanStepR
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
 import { applyVerification, hashFiles, recordStillHolds, sha256 } from '../src/plan/verification'
+import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
+import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
 import type { CapturedExec, CapturedRun } from '../src/subprocess'
 import { loadCommentsPlan, planAppState } from './plan-fixture'
@@ -203,6 +205,21 @@ describe('PlanVerifier', () => {
     expect(askedAfter.filter((call) => call[2] === 'codegen')).toHaveLength(1)
     expect(askedAfter.length).toBeGreaterThan(0)
     expect(askedAfter.length).toBe(new Set(askedAfter).size)
+  })
+
+  test('should run codegen before judging when no step ran one', async () => {
+    const fake = fakeExec()
+    let askedAfter: string[][] = []
+
+    const status = await verifier(statusOf(), fake, {
+      status: async () => {
+        askedAfter = [...fake.calls]
+        return statusOf()
+      },
+    }).status()
+
+    expect(askedAfter.map((call) => call[2])).toEqual(['codegen'])
+    expect(status.elements.length).toBeGreaterThan(0)
   })
 
   test('should record the tests command blocked, not throw, when the test spawn itself rejects', async () => {
@@ -593,5 +610,28 @@ describe('plan state', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe('formatPlanVerify', () => {
+  test('should say when the status was judged behind a failed codegen', () => {
+    const failed = record({ outcome: 'failed', commands: [{ command: 'codegen', label: 'bun run codegen', status: 'fail', durationMs: 3, reason: '`bun run codegen` exited 1', findings: ['error: no'] }] })
+    const passed = record({ commands: [{ command: 'codegen', label: 'bun run codegen', status: 'pass', durationMs: 3, findings: [] }] })
+    const report = (steps: Array<[string, PlanStepRecord]>): PlanVerifyReport => ({
+      reportVersion: PLAN_STATUS_REPORT_VERSION,
+      plan: { file: 'comments.plan.json', title: 'Comments', hash: null },
+      elements: [],
+      summary: summarize([]),
+      verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [] },
+      steps: steps.map(([stepId, entry]) => ({ stepId, taskId: 'task/entity/model.comment', record: entry })),
+      skipped: [],
+    })
+
+    const behind = formatPlanVerify(report([[DATA, failed], [HTTP, passed]]))
+    const clean = formatPlanVerify(report([[HTTP, passed]]))
+
+    expect(behind).toContain(`codegen did not pass in ${DATA}, so the status below was judged without the generated files.`)
+    expect(behind).toContain('  fail     codegen     bun run codegen\n      `bun run codegen` exited 1\n      error: no')
+    expect(clean).not.toContain('judged without the generated files')
   })
 })

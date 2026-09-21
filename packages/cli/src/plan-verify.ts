@@ -34,7 +34,7 @@ export interface PlanVerifyReport extends PlanStatusReport {
 }
 
 export interface PlanVerifyFileOptions {
-  /** Loaded with `detail`; a function is called once, after the first step's `codegen`. */
+  /** Loaded with `detail`; a function is called once, after `codegen` has run. */
   app: PlanAppState | (() => Promise<PlanAppState>)
   /** The application root: where the commands run and the state is written. */
   appRoot: string

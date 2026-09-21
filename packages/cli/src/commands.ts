@@ -270,7 +270,7 @@ const planStatusCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const appRoot = args.app ?? process.cwd()
+    const appRoot = resolve(args.app ?? process.cwd())
     const report = await planStatusFile(args.plan, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanStatus(report))
   },
