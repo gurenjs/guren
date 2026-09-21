@@ -959,15 +959,17 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   of the implementation's to fix.
 - A whole-plan run (no `--step`) leaves alone a step whose record is `verified`
   against this plan digest and whose fingerprint still matches, and reports it
-  as skipped. A verified record fingerprints nothing only when the step had
-  nothing file-shaped to watch (`scaffold`, a `drop`, an element no reader
-  finds a file for), so it stands on the plan digest alone: a step that could
-  never stand would keep the loop of §7 from ending. That is what lets the `tests`
-  step stand in the checkout that ran it: it must see the tests fail before the
-  implementation exists, and cannot pass again once the `http` step has made
-  them pass. The record is git-ignored, so a fresh checkout has nothing to keep
-  and its whole-plan `--ci` reports the `tests` step `failed`; whole-plan `--ci`
-  is the incremental loop's (§7), not a fresh checkout's.
+  as skipped. That is what lets the `tests` step stand in the checkout that ran
+  it: it must see the tests fail before the implementation exists, and cannot
+  pass again once the `http` step has made them pass. A verified record
+  fingerprints nothing only when the step had nothing file-shaped to watch
+  (`scaffold`, a `drop`, an element no reader finds a file for), so it stands
+  on the plan digest alone, or a step that could never stand would keep the
+  loop of §7 from ending; a `drop` is lifted on that record, an element with no
+  reader never is, and `plan:next` names such steps when it reports the plan
+  done. The record is git-ignored, so a fresh checkout has nothing to keep and
+  its whole-plan `--ci` reports the `tests` step `failed`; whole-plan `--ci` is
+  the incremental loop's (§7), not a fresh checkout's.
 - A step is `verified` when every command passed *and* every element it owns is
   at the state its kind completes at (`wired` where it has a mount point,
   `present` otherwise and for every `drop`, or `unjudged`); the behaviours are

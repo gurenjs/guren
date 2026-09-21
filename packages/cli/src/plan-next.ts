@@ -16,7 +16,7 @@ import { readPlanFile } from './plan-render'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
-import { ensurePlanStateIgnored, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
+import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskTitle } from './plan/tasks'
 import { hashFiles, recordStillHolds } from './plan/verification'
 
@@ -46,6 +46,8 @@ export interface PlanNextReport {
   plan: { file: string; title: string; hash: string | null }
   /** Steps whose record still holds, in task order. */
   verified: string[]
+  /** The verified steps whose record fingerprinted nothing: done on their commands, their elements never lifted by `plan:status`. */
+  onCommandsAlone: string[]
   /** `null` when every step is verified. */
   step: PlanNextStep | null
   /** Relative to the application root, POSIX separators. */
@@ -93,17 +95,23 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
 
   const verified: string[] = []
+  const onCommandsAlone: string[] = []
   let next: { task: PlanDerivedTask; step: PlanDerivedStep } | undefined
   for (const entry of listPlanSteps(derivation)) {
     const record = records[entry.step.id]
-    if (record && recordStillHolds(record, digest, hashes)) verified.push(entry.step.id)
-    else next ??= entry
+    if (!(record && recordStillHolds(record, digest, hashes))) {
+      next ??= entry
+      continue
+    }
+    verified.push(entry.step.id)
+    if (Object.keys(record.fingerprint.files).length === 0) onCommandsAlone.push(entry.step.id)
   }
 
   const head = {
     reportVersion: PLAN_NEXT_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
     verified,
+    onCommandsAlone,
     stateFile: toPosixRelative(root, planStatePath(root, slug)),
   } satisfies Omit<PlanNextReport, 'step'>
   if (next === undefined) {
@@ -112,10 +120,11 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   }
   const { task, step } = next
 
-  // The state directory is git-ignored before the tree is read, so neither an earlier run's
-  // files nor the mark this call writes make it dirty.
+  // The state directory is git-ignored before the tree is read, and left out of the reading for
+  // a checkout that tracked it before: neither an earlier run's files nor the mark make it dirty.
   await ensurePlanStateIgnored(root)
-  const dirty = (await runGit(root, ['status', '--porcelain', '--', '.'])) ?? []
+  // `runGit` trims the lines, so the path follows the status code rather than sitting at column 3.
+  const dirty = ((await runGit(root, ['status', '--porcelain', '--', '.'])) ?? []).filter((line) => !line.replace(/^\S+\s+/u, '').startsWith(`${PLAN_STATE_DIR}/`))
   if (dirty.length > 0 && previous?.step !== step.id) {
     throw new CliError(
       `The working tree under ${root} has uncommitted changes, and one step is one commit. Commit or discard them first:\n${dirty
@@ -185,6 +194,9 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
   const step = report.step
   if (step === null) {
     lines.push('Every step is verified. Nothing is left to implement.')
+    if (report.onCommandsAlone.length > 0) {
+      lines.push(`${report.onCommandsAlone.join(', ')}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
+    }
     return lines.join('\n')
   }
   const part = step.part ? ` (part ${step.part.index} of ${step.part.of})` : ''

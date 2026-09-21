@@ -122,6 +122,7 @@ describe('plan:next', () => {
     const report = await planNextFile(plan, { appRoot: app, now: NOW })
 
     expect(report.verified).toEqual([SCAFFOLD])
+    expect(report.onCommandsAlone).toEqual([SCAFFOLD])
     expect(report.step!.id).toBe(TESTS)
   })
 
@@ -141,6 +142,7 @@ describe('plan:next', () => {
     expect(report.verified).toEqual(STEPS)
     expect((await readState(app)).active).toBeUndefined()
     expect(formatPlanNext(report, 'comments.plan.json')).toContain('Every step is verified.')
+    expect(formatPlanNext({ ...report, onCommandsAlone: [SCAFFOLD] }, 'comments.plan.json')).toContain(`${SCAFFOLD}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
   })
 
   test('should refuse uncommitted changes unless they are the marked step\'s own', async () => {
@@ -149,8 +151,12 @@ describe('plan:next', () => {
     git(app, 'add', '-A')
     git(app, 'commit', '-q', '-m', 'init')
 
-    // A clean tree, and the state the mark writes, are not changes; nor is a state `.gitignore` an earlier run left untracked.
+    // A clean tree, and the state the mark writes, are not changes; nor is a state `.gitignore` an earlier run left untracked or tracked.
     await writeWorkspaceFiles(app, { '.guren/plans/.gitignore': '*.state.json\n' })
+    await planNextFile(plan, { appRoot: app, now: NOW })
+    await writeFile(join(app, '.guren/plans/.gitignore'), '*.state.json\n', 'utf8')
+    git(app, 'add', '-f', '.guren/plans/.gitignore')
+    git(app, 'commit', '-q', '-m', 'tracked state ignore')
     await planNextFile(plan, { appRoot: app, now: NOW })
     await writeFile(join(app, 'lib.ts'), 'export const a = 2\n', 'utf8')
     // The dirty tree is the marked step's, so asking for it again is allowed.

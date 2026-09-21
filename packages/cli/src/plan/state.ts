@@ -22,7 +22,7 @@ import { PLAN_VERIFY_COMMANDS } from './tasks'
 export const PLAN_STATE_VERSION = 1
 
 /** Where state lives under the application root. `plan:verify` writes the `.gitignore` there. */
-const PLAN_STATE_DIR = '.guren/plans'
+export const PLAN_STATE_DIR = '.guren/plans'
 const STATE_SUFFIX = '.state.json'
 export const PLAN_STATE_GITIGNORE = '*.state.json\n.gitignore\n'
 

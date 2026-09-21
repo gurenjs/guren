@@ -92,7 +92,7 @@ export function planStepIds(derivation: PlanTaskDerivation): string[] {
   return derivation.tasks.flatMap((task) => task.steps.map((step) => step.id))
 }
 
-/** Every step in task order, with its task. */
+/** Every step in task order, with its task: the walk `plan:next` and the whole-plan verify share. */
 export function listPlanSteps(derivation: PlanTaskDerivation): Array<{ task: PlanDerivedTask; step: PlanDerivedStep }> {
   return derivation.tasks.flatMap((task) => task.steps.map((step) => ({ task, step })))
 }

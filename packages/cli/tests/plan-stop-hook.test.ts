@@ -129,6 +129,9 @@ describe('planStopHookFindings', () => {
     expect(await planStopHookFindings(stalled, { stopHookActive: false }, { verify })).toEqual({ block: false })
     const holding = await createApp('holding', { steps: { [HTTP]: record({ outcome: 'verified', incomplete: [] }) }, active: active() })
     expect(await planStopHookFindings(holding, { stopHookActive: false }, { verify })).toEqual({ block: false })
+    const empty = record({ outcome: 'verified', incomplete: [], fingerprint: { files: {}, environment: ENVIRONMENT } })
+    const onCommands = await createApp('on-commands', { steps: { [SCAFFOLD]: empty }, active: active({ step: SCAFFOLD }) })
+    expect(await planStopHookFindings(onCommands, { stopHookActive: false }, { verify })).toEqual({ block: false })
     expect(verified).toBe(0)
   })
 
