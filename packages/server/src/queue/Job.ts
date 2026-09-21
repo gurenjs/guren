@@ -140,6 +140,17 @@ export abstract class Job<T = unknown> {
   static backoff: 'exponential' | 'linear' | number = 'exponential'
 
   private container?: ContainerLike
+  private executionSignal = new AbortController().signal
+
+  /** Aborted when the worker times out or loses its reservation. Pass it to cancellable I/O. */
+  protected get signal(): AbortSignal {
+    return this.executionSignal
+  }
+
+  /** @internal Installed by the worker before handle(). */
+  setExecutionSignal(signal: AbortSignal): void {
+    this.executionSignal = signal
+  }
 
   /** @internal Called by the Worker with the container of the app it drains, before `handle()`. */
   setContainer(container: ContainerLike): void {

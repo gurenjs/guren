@@ -1,3 +1,4 @@
+import { DEFAULT_DELIVERY_ROUTE_NAME } from '@guren/server/internal/app-conventions'
 import { createHash } from 'node:crypto'
 import { Model, type PlainObject } from '@guren/orm'
 import {
@@ -195,7 +196,7 @@ export const ATTACHMENT_OBJECT_PREFIX = 'attachments'
 export const ATTACHMENTS_BINDING = 'attachments'
 
 export const DEFAULT_DELIVERY_PREFIX = '/attachments'
-export const DEFAULT_DELIVERY_ROUTE_NAME = 'attachments.show'
+export { DEFAULT_DELIVERY_ROUTE_NAME } from '@guren/server/internal/app-conventions'
 
 /**
  * The inner (presigned) TTL behind a redirect. Fixed, not derived from

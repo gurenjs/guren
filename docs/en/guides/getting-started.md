@@ -11,7 +11,7 @@ The instructions target macOS and Linux, and also work on Windows with WSL2.
 
 ### Prerequisites
 
-- **Bun 1.1 or later**: that is all.
+- **Bun 1.3.14**: that is all.
 
 ```bash
 curl -fsSL https://bun.sh/install | bash

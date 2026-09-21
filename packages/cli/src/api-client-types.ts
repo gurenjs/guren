@@ -4,7 +4,7 @@
  * Guren APIs with end-to-end types.
  */
 import { resolve } from 'node:path'
-import type { ResourceResponseShape } from '@guren/core'
+import type { ResourceResponseShape } from '@guren/server'
 import { escapeSingleQuoted as escapeSingleQuotes, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { PATH_PARAM_RUNTIME_HELPERS, PATH_PARAM_TYPE_HELPERS } from './routes-types-fragments'
 import { schemaToTypeString } from './schema-type-extractor'

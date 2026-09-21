@@ -364,10 +364,8 @@ jobs:
       - name: Packed artifact audit
         run: bun run smoke:starter:packed
 
-      # Upgrade smoke temporarily skipped: template deps reference 1.0.0-rc.9
-      # which is not yet on npm. Re-enable after first RC publish.
-      # - name: Upgrade existing app smoke
-      #   run: bun run smoke:upgrade-existing-app
+      - name: Upgrade existing app smoke
+        run: bun run smoke:upgrade-existing-app
 
       - name: Golden path smoke test
         run: bun run smoke:golden-path

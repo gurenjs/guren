@@ -1,7 +1,8 @@
 import { readdir, readlink, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { CallExpression, ConditionalExpression, ObjectExpression, ObjectProperty } from '@babel/types'
-import { AttachmentDeliveryController, DEFAULT_DELIVERY_ROUTE_NAME, type RouteDefinition } from '@guren/core'
+import type { RouteDefinition } from '@guren/server'
+import { ATTACHMENT_DELIVERY_CONTROLLER_NAME, DEFAULT_DELIVERY_ROUTE_NAME } from '@guren/server/internal/app-conventions'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { SCHEMA_SPECIFIER_PATTERN, schemaModuleFor } from './schema-binding'
@@ -672,7 +673,7 @@ export async function checkAttachmentsDelivery(options: {
 
     const mounted =
       definitions?.some(
-        (definition) => definition.controller?.name === AttachmentDeliveryController.name,
+        (definition) => definition.controller?.name === ATTACHMENT_DELIVERY_CONTROLLER_NAME,
       ) ?? false
 
     if (mounted) {

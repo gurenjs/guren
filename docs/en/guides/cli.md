@@ -769,7 +769,7 @@ bunx create-guren-app my-app
 The CLI copies the default template, updates metadata, and prompts for a rendering mode. Choose **SSR** (default) to keep server-side rendering enabled via `autoConfigureInertiaAssets`, or pick **SPA** to disable SSR. Skip the prompt with `--mode ssr` or `--mode spa`, and overwrite a non-empty directory with `--force`.
 
 ## Troubleshooting
-- `command not found: bunx`: Your Bun version may be outdated. Upgrade to 1.1 or later.
+- `command not found: bunx`: Your Bun version may be outdated. Install the supported Bun 1.3.14 baseline.
 - `Error: Port already in use`: The development server (default port 3333) is occupied. Update `PORT` in `.env` and restart.
 - `Database connection failed`: Make sure your Postgres instance is reachable and that `.env` points to `postgres://guren:guren@localhost:54322/guren`.
 

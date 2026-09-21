@@ -9,7 +9,7 @@
  * `@guren/plugin-mcp` resolves the store per request rather than at boot.
  */
 import { consola } from 'consola'
-import { createApiToken, MemoryApiTokenStore } from '@guren/core'
+import { createApiToken, MemoryApiTokenStore } from '@guren/server'
 import { loadBootedApplication } from './runtime'
 import { parseUserId } from './token-issue'
 

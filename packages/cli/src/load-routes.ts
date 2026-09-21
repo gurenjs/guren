@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
-import { Router, mountModuleRoutes, type GurenModule, type RouteDefinition } from '@guren/core'
+import { Router, mountModuleRoutes, type GurenModule, type RouteDefinition } from '@guren/server'
 import { isDefinitelyAbsent, listModuleNames } from './discovery'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, routesEntryOrDefault } from './route-registrar'
 

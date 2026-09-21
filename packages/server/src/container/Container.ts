@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type {
   ServiceFactory,
   ServiceBinding,
@@ -18,7 +19,7 @@ export class Container {
   protected tags: Map<string, Set<string>> = new Map()
   protected contextualBindings: ContextualBinding[] = []
   protected resolvingStack: string[] = []
-  protected scopedInstances: Map<string, unknown>[] = []
+  private readonly scope = new AsyncLocalStorage<Map<string, unknown>>()
   protected fakes: Map<string, unknown> = new Map()
 
   /**
@@ -90,8 +91,8 @@ export class Container {
       return binding.instance
     }
 
-    if (this.scopedInstances.length > 0) {
-      const currentScope = this.scopedInstances[this.scopedInstances.length - 1]
+    const currentScope = this.scope.getStore()
+    if (currentScope) {
       if (currentScope.has(resolvedKey)) {
         return currentScope.get(resolvedKey)
       }
@@ -109,10 +110,7 @@ export class Container {
         binding.instance = instance
       }
 
-      if (this.scopedInstances.length > 0 && !binding.singleton) {
-        const currentScope = this.scopedInstances[this.scopedInstances.length - 1]
-        currentScope.set(resolvedKey, instance)
-      }
+      if (!binding.singleton) currentScope?.set(resolvedKey, instance)
 
       return instance
     } finally {
@@ -233,23 +231,11 @@ export class Container {
 
   /** Services resolved inside the callback are cached for the scope and released when it ends. */
   scoped<T>(callback: () => T): T {
-    this.scopedInstances.push(new Map())
-
-    try {
-      return callback()
-    } finally {
-      this.scopedInstances.pop()
-    }
+    return this.scope.run(new Map(), callback)
   }
 
   async scopedAsync<T>(callback: () => Promise<T>): Promise<T> {
-    this.scopedInstances.push(new Map())
-
-    try {
-      return await callback()
-    } finally {
-      this.scopedInstances.pop()
-    }
+    return this.scope.run(new Map(), callback)
   }
 
   /**

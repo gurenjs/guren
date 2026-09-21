@@ -2,7 +2,7 @@ import { consola } from 'consola'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { isDefinitelyAbsent } from './discovery'
-import { createScheduler, matchesCron, parseCron, toTimezone, type ParsedCron, type Scheduler } from '@guren/core'
+import { createScheduler, matchesCron, parseCron, toTimezone, type ParsedCron, type Scheduler } from '@guren/server'
 
 export interface ScheduleOptions {
   appRoot?: string

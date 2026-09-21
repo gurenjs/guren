@@ -1,5 +1,22 @@
 # Upgrading Guren
 
+## Unreleased: queue cancellation and reservations
+
+Jobs now receive a cancellation signal through `this.signal`. Pass it to `fetch`
+and other cancellable I/O. A timeout requests cancellation; the worker waits for
+`handle()` to settle before retrying. Handlers that ignore the signal can exceed
+the timeout, so keep a process supervisor for hard termination of stuck workers.
+
+Redis workers renew their reservations and fence late acknowledgements. Restart
+all workers when deploying this update so older workers do not bypass ownership
+checks. Queue keys and stored payloads remain compatible. External side effects
+still require idempotency keys because delivery is at least once.
+
+Custom drivers may implement `heartbeatInterval` and `extendReservation(job)`.
+The optional second argument to `delete()` carries the reservation token; existing
+drivers remain compatible. A driver failure resets worker state and rejects
+`start()`, allowing a supervisor to restart it with backoff.
+
 Use this guide for minor-to-minor upgrades.
 
 ## Upgrade Workflow (Required)

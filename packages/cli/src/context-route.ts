@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
+import type { AgentRouteMetadata, RouteDefinition } from '@guren/server'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { schemaToTypeString } from './schema-type-extractor'
 

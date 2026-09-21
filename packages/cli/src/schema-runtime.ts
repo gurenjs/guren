@@ -103,6 +103,8 @@ const IMPORT_TIMEOUT_MS = 5000
 export interface SchemaRuntimeOptions {
   /** How long one `db/schema.ts` may take to import. Defaults to 5000. */
   importTimeoutMs?: number
+  /** @internal Import boundary for deterministic timeout and failure tests. */
+  importSchema?: (url: string) => Promise<Record<string, unknown>>
 }
 
 /**
@@ -140,7 +142,7 @@ async function loadDrizzle(schemaDir: string): Promise<DrizzleCopy> {
   return { entry, is: core.is, dialects }
 }
 
-/** Exported for its test: Bun on Linux resolves a dynamic import whose top-level await is still pending. */
+/** Bound the wait independently of the module loader's top-level-await behavior. */
 export function withImportTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const expiry = new Promise<never>((_, reject) => {
@@ -309,7 +311,7 @@ interface LoadedSchema {
   entries: TableEntry[]
 }
 
-async function loadSchemaFile(appRoot: string, module: string | null, timeoutMs: number): Promise<LoadedSchema | RuntimeSchemaFile | null> {
+async function loadSchemaFile(appRoot: string, module: string | null, timeoutMs: number, importSchema: NonNullable<SchemaRuntimeOptions['importSchema']>): Promise<LoadedSchema | RuntimeSchemaFile | null> {
   const path = schemaPathFor(module)
   const file = resolve(appRoot, path)
   if (!(await fileExists(appRoot, path))) return null
@@ -324,7 +326,7 @@ async function loadSchemaFile(appRoot: string, module: string | null, timeoutMs:
 
   let exports: Record<string, unknown>
   try {
-    exports = await withImportTimeout(import(pathToFileURL(file).href) as Promise<Record<string, unknown>>, timeoutMs)
+    exports = await withImportTimeout(importSchema(pathToFileURL(file).href), timeoutMs)
   } catch (error) {
     return unreadable(`${path} could not be imported: ${reasonOf(error)}`)
   }
@@ -398,7 +400,7 @@ async function readRuntimeFiles(appRoot: string, options: SchemaRuntimeOptions, 
   // Evicted together and before any import: a module schema importing the root's must not
   // pin the old root instance, whose tables a foreign key would then fail to match.
   await Promise.all(roots.map((root) => evictIfChanged(resolve(appRoot, schemaPathFor(root.module)))))
-  const loaded = (await Promise.all(roots.map((root) => loadSchemaFile(appRoot, root.module, timeoutMs)))).filter((file) => file !== null)
+  const loaded = (await Promise.all(roots.map((root) => loadSchemaFile(appRoot, root.module, timeoutMs, options.importSchema ?? ((url) => import(url)))))).filter((file) => file !== null)
 
   const readable = loaded.filter((file): file is LoadedSchema => 'entries' in file)
   dropReexports(readable, staticTables)

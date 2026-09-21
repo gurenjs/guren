@@ -101,5 +101,6 @@ async function readPackageMetadata(appRoot: string): Promise<PackageMetadata> {
 }
 
 async function defaultOpenApiImporter(): Promise<OpenApiModule> {
-  return import('@guren/openapi')
+  const specifier = '@guren/openapi'
+  return import(specifier)
 }

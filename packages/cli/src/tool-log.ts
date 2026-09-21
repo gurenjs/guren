@@ -19,7 +19,7 @@ import {
   parseAuditRecord,
   type AgentAuditRecord,
   type AgentSurface,
-} from '@guren/core'
+} from '@guren/server'
 
 /** How many records `-n` shows when it is not given. */
 const DEFAULT_LIMIT = 50

@@ -16,9 +16,10 @@ From `1.0`, breaking changes ship only in major releases; minors and patches are
 
 | Runtime | Supported | Notes |
 | --- | --- | --- |
-| Bun `1.3.x` | Yes (primary) | CI and release workflows run on Bun `1.3.1` |
-| Node.js `20.x` | Tooling compatibility only | For docs/build tooling where applicable |
-| Node.js `22.x` | Tooling compatibility only | For docs/build tooling where applicable |
+| Bun `1.3.14` | Primary | Development, tests, CLI and self-hosted production; pinned in CI and release workflows |
+| Bun `1.4.2` | Trial | Non-blocking CI lane; not the release baseline |
+| Node.js | Deployment adapters | AWS Lambda and Vercel builds use their adapter's supported runtime; development and CLI still require Bun |
+| Cloudflare Workers | Deployment adapter | Requires the Cloudflare plugin and its generated compatibility settings |
 
 If the matrix changes, update this guide and `CHANGELOG.md` in the same PR.
 

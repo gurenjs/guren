@@ -415,7 +415,7 @@ describe('resolvePathLike', () => {
 })
 
 describe('the built artifact', () => {
-  test('should import nothing but node builtins', () => {
+  test('should import only node builtins and shared application conventions', () => {
     // Importing it must not drag the framework runtime into a developer's build.
     // That holds only while this entry shares no code with core's others: the
     // day one does, ESM splitting emits a chunk and nothing else would notice.
@@ -433,7 +433,7 @@ describe('the built artifact', () => {
 
     expect(specifiers.length).toBeGreaterThan(0)
     for (const specifier of specifiers) {
-      expect(isBuiltin(specifier)).toBe(true)
+      expect(isBuiltin(specifier) || specifier === '@guren/server/internal/app-conventions').toBe(true)
     }
   })
 })

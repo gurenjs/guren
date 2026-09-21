@@ -14,7 +14,7 @@ import {
 import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
 // The runtime warning in the session middleware names the target by the same label.
-import { SERVERLESS_RUNTIME_LABELS } from '@guren/core'
+import { SERVERLESS_RUNTIME_LABELS } from '@guren/server'
 
 /**
  * Deploy targets whose runtime invalidates one or more of Guren's Bun-first

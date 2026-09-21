@@ -1,4 +1,4 @@
-import { PORTABLE_AGENT_TOOL_NAME_PATTERN } from '@guren/core'
+import { PORTABLE_AGENT_TOOL_NAME_PATTERN } from '@guren/server'
 import { AI_PLUGIN_PACKAGE } from './add-ai'
 import { CliError } from './cli-error'
 import { appDependsOn, readIfExists } from './discovery'

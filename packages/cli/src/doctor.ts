@@ -31,7 +31,7 @@ import { parseSourceFile } from './parse-cache'
 import { resolveRoutesEntry } from './route-registrar'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { appDeclaresPrototypeRoutes } from './prototype-check'
-import type { RouteDefinition } from '@guren/core'
+import type { RouteDefinition } from '@guren/server'
 import { analyzeDeployRuntime, judgeDeployRuntime } from './deploy-runtime'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
 

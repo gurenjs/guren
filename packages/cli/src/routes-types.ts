@@ -1,5 +1,5 @@
 import { relative, resolve } from 'node:path'
-import type { RouteDefinition as ServerRouteDefinition } from '@guren/core'
+import type { RouteDefinition as ServerRouteDefinition } from '@guren/server'
 import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import {

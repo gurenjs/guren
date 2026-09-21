@@ -5,8 +5,8 @@ import {
   isReservedAgentToolName,
   PORTABLE_AGENT_TOOL_NAME_PATTERN,
   RESERVED_AGENT_TOOL_NAMES,
-} from '@guren/core'
-import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
+} from '@guren/server'
+import type { AgentRouteMetadata, RouteDefinition } from '@guren/server'
 import { check, type CheckResult } from './check-result'
 import {
   mutatesRecords,

@@ -7,7 +7,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { EnvVar } from '@guren/core'
+import type { EnvVar } from '@guren/server'
 import { check, type CheckResult } from './check-result'
 import { fileExists, formatTruncatedList, readIfExists } from './discovery'
 import { ensureNamedImports, insertCallOptions } from './patch-helpers'

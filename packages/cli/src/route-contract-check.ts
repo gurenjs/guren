@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import type { RouteDefinition } from '@guren/core'
+import type { RouteDefinition } from '@guren/server'
 import {
   isZod3Schema,
   objectShape,
@@ -8,7 +8,7 @@ import {
   unwrapSingleChild,
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
-} from '@guren/core/internal/zod-compat'
+} from '@guren/server/internal/zod-compat'
 import { check, type CheckResult } from './check-result'
 import { fileExists } from './discovery'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'

@@ -4,7 +4,7 @@
  * `appTools()`. Emitted only for an app depending on the plugin, since
  * TypeScript rejects augmenting an uninstalled module (TS2664).
  */
-import type { DerivedAgentTool } from '@guren/core'
+import type { DerivedAgentTool } from '@guren/server'
 import type { RouteDefinitionLike } from './api-client-types'
 import { schemaPropertyTypes, schemaToTypeString } from './schema-type-extractor'
 import { escapeSingleQuoted, quoteObjectKey } from './utils'

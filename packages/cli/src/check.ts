@@ -37,7 +37,7 @@ import { checkPrototypeRoutes } from './prototype-check'
 import { checkDeployRuntime } from './deploy-runtime'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
-import type { RouteDefinition } from '@guren/core'
+import type { RouteDefinition } from '@guren/server'
 
 /**
  * Any file that could hold a route's params schema — which is any importable

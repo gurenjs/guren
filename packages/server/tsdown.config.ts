@@ -41,6 +41,7 @@ export default defineConfig({
     // @guren/cli and @guren/testing share one Zod → JSON Schema rule and one
     // request-body rule. A path in package.json `exports` but missing here emits
     // a .d.ts with no .js.
+    'src/internal/app-conventions.ts',
     'src/internal/request.ts',
     'src/internal/route-path.ts',
     'src/internal/testing.ts',

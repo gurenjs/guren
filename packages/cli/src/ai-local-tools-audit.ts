@@ -8,7 +8,7 @@
  * by the reviewer reading it, not by this scan.
  */
 import { resolve } from 'node:path'
-import { deriveAgentTools, type RouteDefinition } from '@guren/core'
+import { deriveAgentTools, type RouteDefinition } from '@guren/server'
 import { scanAiAgents } from './ai-agent-scan'
 import { LOCAL_TOOL_WRITE_PATTERN, type ControllerMethodInfo } from './controller-methods'
 import { discoverModelFiles } from './discovery'

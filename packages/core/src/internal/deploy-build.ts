@@ -1,7 +1,7 @@
 /**
  * Build-time helpers shared by the deploy plugins (cloudflare, lambda, vercel).
  * Internal (`contributing/api-stability.md`): deep import only, never re-exported
- * from `@guren/core`. Imports only `node:` builtins so a plugin build never drags
+ * from `@guren/core`. Imports only builtins and shared constants so a plugin build never drags
  * the runtime in; `deploy-build.test.ts` asserts that of the built artifact.
  * Platform decisions (messages, stub delivery, whether a missing `build` script is
  * fatal, SSR renderer verification) stay per-plugin. A helper that *relates* two
@@ -19,7 +19,7 @@ export type PathLike = string | URL
  * reads it to generate the worker's Durable Object exports, so a second spelling
  * is a deploy exporting no agents while the check calls them registered.
  */
-export const AGENTS_CONFIG_FILE = 'config/agents.ts'
+export { AGENTS_CONFIG_FILE } from '@guren/server/internal/app-conventions'
 
 export type ManifestEntry = {
   file?: string

@@ -22,6 +22,9 @@ export interface QueuedJob<T = unknown> {
   reservedAt: Date | null
 
   lastError?: string
+
+  /** Opaque reservation owner, supplied by drivers that fence stale workers. */
+  reservationToken?: string
 }
 
 /** Failed job record. */
@@ -45,7 +48,11 @@ export interface QueueDriver {
    */
   release(job: QueuedJob, delayMs?: number): Promise<void>
 
-  delete(jobId: string): Promise<void>
+  delete(jobId: string, reservationToken?: string): Promise<void>
+
+  /** Drivers with expiring reservations renew them while handle() is still running. */
+  readonly heartbeatInterval?: number
+  extendReservation?(job: QueuedJob): Promise<boolean>
 
   fail(job: QueuedJob, error: Error): Promise<void>
 
@@ -110,7 +117,7 @@ export interface WorkerOptions {
   maxJobs?: number
 
   /**
-   * Timeout for each job in milliseconds.
+   * Requests cancellation after this many milliseconds. Retries wait for handle() to settle.
    * @default 60000
    */
   timeout?: number

@@ -83,7 +83,7 @@ The effect is measured. [Agents on Guren](https://github.com/gurenjs/agents-on-g
 - **Laravel-style MVC.** A route points at a controller, the controller validates input and returns an Inertia page, and an Eloquent-inspired Model API rides on Drizzle ORM.
 - **No API layer to babysit.** Inertia.js hands controller props straight to your React components, so there is no REST or GraphQL glue to keep in sync.
 - **End-to-end type safety.** `bunx guren codegen` turns routes, page props and resources into compile-time contracts. Rename a route and the build fails instead of your users.
-- **Secure by default.** Mass assignment is blocked structurally, CSRF protection mounts with sessions, and security headers and same-origin CORS are on before you configure anything.
+- **Secure by default.** Credential hash and remember-token fields reject mass assignment; use model `fillable` lists to restrict other attributes. CSRF protection mounts with sessions, and security headers and same-origin CORS are on before you configure anything.
 - **Batteries included.** Auth, sessions, queues, mail, cache, notifications, storage, attachments, events, broadcasting, scheduling and i18n are first-party subsystems, not a shopping list of npm packages.
 - **Bun-first, deploy anywhere.** Develop on the Bun toolchain, then self-host on a Bun server or ship the same app to Cloudflare Workers, Vercel or AWS Lambda with first-party plugins. [guren.dev](https://guren.dev/) is a Guren app running on Workers.
 - **PostgreSQL, MySQL or SQLite.** One ORM adapter covers all three, and SQLite needs no server for local work.
@@ -158,7 +158,7 @@ const post = await Post.findOrFail(1)
 
 ## Requirements
 
-- [Bun](https://bun.sh/) v1.1 or later
+- [Bun](https://bun.sh/) v1.3.14 (the primary supported version; newer versions are trial-tested in CI)
 - Docker only if you want the bundled PostgreSQL or MySQL container. SQLite is the default and needs nothing.
 
 ---
