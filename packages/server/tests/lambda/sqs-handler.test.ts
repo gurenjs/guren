@@ -14,6 +14,20 @@ class SuccessJob extends Job<{ value: number }> {
 
 let failedCallPayload: unknown = null
 
+/** Every reported record logs its reason, so each describe collects them. */
+const errorLogs: string[] = []
+let realConsoleError: typeof console.error
+
+function captureErrors(): void {
+  errorLogs.length = 0
+  realConsoleError = console.error
+  console.error = (message: string) => errorLogs.push(String(message))
+}
+
+function restoreErrors(): void {
+  console.error = realConsoleError
+}
+
 class FailingJob extends Job<{ id: string }> {
   static maxAttempts = 1
 
@@ -57,9 +71,11 @@ describe('createSqsHandler', () => {
     registerJob(FailingJob)
     failedCallPayload = null
     handled.length = 0
+    captureErrors()
   })
 
   afterEach(() => {
+    restoreErrors()
     clearJobRegistry()
   })
 
@@ -158,8 +174,12 @@ describe('SQS delivery semantics', () => {
     failedCallPayload = null
     registerJob(SuccessJob)
     registerJob(FailingJob)
+    captureErrors()
   })
-  afterEach(() => clearJobRegistry())
+  afterEach(() => {
+    restoreErrors()
+    clearJobRegistry()
+  })
 
   test('uses the receive count across invocations and stops handle at maxAttempts', async () => {
     let calls = 0
@@ -176,10 +196,38 @@ describe('SQS delivery semantics', () => {
       expect(await createSqsHandler()({ Records: [record] })).toEqual({
         batchItemFailures: [{ itemIdentifier: 'retry' }],
       })
-      expect(errors).toHaveLength(Math.max(0, delivery - 2))
+      expect(errors).toHaveLength(delivery < 3 ? 0 : 1)
     }
     expect(calls).toBe(3)
-    expect(errors).toEqual(['original failure', 'SQS job exceeded maxAttempts (3).', 'SQS job exceeded maxAttempts (3).'])
+    // Worker.handleFailedJob runs the hook once, with the error that spent the
+    // last attempt; redeliveries past the budget must not run it again.
+    expect(errors).toEqual(['original failure'])
+  })
+
+  test('skips handle and failed on a delivery past the budget', async () => {
+    // What a FIFO record left unprocessed behind an earlier failure looks like:
+    // its deliveries were spent elsewhere, so handle() never ran.
+    const record = createSqsRecord({ name: 'FailingJob', payload: { id: 'starved' }, maxAttempts: 1 }, 'starved')
+    record.attributes.ApproximateReceiveCount = '2'
+    expect(await createSqsHandler()({ Records: [record] })).toEqual({
+      batchItemFailures: [{ itemIdentifier: 'starved' }],
+    })
+    expect(failedCallPayload).toBeNull()
+  })
+
+  test('logs the reason for every record it reports', async () => {
+    const records = [
+      createSqsRecord({ name: 'SuccessJob', payload: { value: 1 } }, 'ok'),
+      createSqsRecord({ name: 'SuccessJob', payload: { value: -1 } }, 'boom'),
+      createSqsRecord({ name: 'MissingJob', payload: {} }, 'unregistered'),
+    ]
+    await createSqsHandler()({ Records: records })
+    // Standard batches run concurrently, so the log order is not the batch order.
+    const logged = errorLogs.map(line => JSON.parse(line)).sort((a, b) => a.messageId.localeCompare(b.messageId))
+    expect(logged.map(entry => entry.messageId)).toEqual(['boom', 'unregistered'])
+    expect(logged[0]).toMatchObject({ level: 'error', job: 'SuccessJob', attempt: 1, maxAttempts: 3, error: 'negative value' })
+    // A record rejected before it reaches a job still names itself.
+    expect(logged[1]).toMatchObject({ messageId: 'unregistered', error: 'Job class not found: MissingJob' })
   })
 
   test('retains the initial attempts offset in the message body', async () => {

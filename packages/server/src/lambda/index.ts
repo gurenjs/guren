@@ -72,35 +72,67 @@ export function createSqsHandler(): (event: SqsEvent) => Promise<SqsBatchRespons
 }
 
 async function processSqsRecord(record: SqsRecord): Promise<void> {
-  const job = deserializeSqsJob(record.body)
-  const JobClass = getJob(job.name)
-  if (!JobClass) throw new Error(`Job class not found: ${job.name}`)
-
-  const receiveCount = Number(record.attributes.ApproximateReceiveCount)
-  if (!Number.isSafeInteger(receiveCount) || receiveCount < 1) {
-    throw new Error('SQS records require a positive ApproximateReceiveCount.')
-  }
-  if (!Number.isSafeInteger(job.attempts) || job.attempts < 0
-    || !Number.isSafeInteger(job.maxAttempts) || job.maxAttempts < 1
-    || !Number.isSafeInteger(job.attempts + receiveCount)) {
-    throw new Error('SQS jobs require valid attempts and maxAttempts counts.')
-  }
-  // Body is unchanged on redelivery; the AWS attribute survives invocations.
-  job.attempts += receiveCount
-  const instance = new JobClass()
+  let job: SqsJobBody | undefined
   try {
+    job = deserializeSqsJob(record.body)
+    const JobClass = getJob(job.name)
+    if (!JobClass) throw new Error(`Job class not found: ${job.name}`)
+
+    const receiveCount = Number(record.attributes.ApproximateReceiveCount)
+    if (!Number.isSafeInteger(receiveCount) || receiveCount < 1) {
+      throw new Error('SQS records require a positive ApproximateReceiveCount.')
+    }
+    if (!Number.isSafeInteger(job.attempts) || job.attempts < 0
+      || !Number.isSafeInteger(job.maxAttempts) || job.maxAttempts < 1
+      || !Number.isSafeInteger(job.attempts + receiveCount)) {
+      throw new Error('SQS jobs require valid attempts and maxAttempts counts.')
+    }
+    // Body is unchanged on redelivery; the AWS attribute survives invocations.
+    job.attempts += receiveCount
+
+    // Past the budget the message is only waiting for the queue's redrive
+    // policy. failed() is not called here: either it already ran on the
+    // delivery that spent the last attempt, or the deliveries were spent
+    // elsewhere (a FIFO record left unprocessed) and handle() never ran.
     if (job.attempts > job.maxAttempts) {
       throw new Error(`SQS job exceeded maxAttempts (${job.maxAttempts}).`)
     }
-    await instance.handle(job.payload)
-  } catch (error) {
-    if (job.attempts >= job.maxAttempts && instance.failed) {
-      try {
-        await instance.failed(job.payload, error as Error)
-      } catch {
-        // Keep the original failure in the partial batch response for redrive.
+
+    const instance = new JobClass()
+    try {
+      await instance.handle(job.payload)
+    } catch (error) {
+      // Only the delivery that spends the last attempt, so failed() runs once
+      // with the real error, as Worker.handleFailedJob does.
+      if (job.attempts >= job.maxAttempts && instance.failed) {
+        try {
+          await instance.failed(job.payload, error as Error)
+        } catch (hookError) {
+          // Keep the original failure in the partial batch response for redrive.
+          console.error(JSON.stringify({
+            level: 'error',
+            msg: `Error in job.failed() handler: ${job.name}`,
+            messageId: record.messageId,
+            job: job.name,
+            error: (hookError as Error).message,
+          }))
+        }
       }
+      throw error
     }
+  } catch (error) {
+    // batchItemFailures carries message ids only, so this is the one place a
+    // record's failure reason is visible before the queue's redrive policy.
+    console.error(JSON.stringify({
+      level: 'error',
+      msg: `SQS job failed: ${job?.name ?? 'unknown'}`,
+      messageId: record.messageId,
+      job: job?.name,
+      queue: job?.queue,
+      attempt: job?.attempts,
+      maxAttempts: job?.maxAttempts,
+      error: (error as Error).message,
+    }))
     throw error
   }
 }
@@ -173,9 +205,21 @@ export interface LambdaRuntimeContext {
   tmpDir: string
 }
 
+/** The queued job a message body carries; validated before it is trusted. */
+interface SqsJobBody {
+  name: string
+  payload: unknown
+  queue: string
+  attempts: number
+  maxAttempts: number
+  availableAt: Date
+  createdAt: Date
+  reservedAt: Date | null
+}
+
 /** Deserialize a JSON SQS message body into a QueuedJob-like object. */
-function deserializeSqsJob(body: string) {
-  const raw = JSON.parse(body)
+function deserializeSqsJob(body: string): SqsJobBody {
+  const raw = JSON.parse(body) as SqsJobBody
   return {
     ...raw,
     availableAt: new Date(raw.availableAt),
