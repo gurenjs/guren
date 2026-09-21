@@ -14,10 +14,9 @@ import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
-import { readPlanDecisions } from './plan/decisions'
 import { listPlanStates, planDigest, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
 import { derivePlanTasks, findPlanStep } from './plan/tasks'
-import { hashFiles, planWaivers, recordStillHolds, sha256 } from './plan/verification'
+import { hashFiles, readPlanWaivers, recordStillHolds, sha256 } from './plan/verification'
 
 /** Stops the hook blocks on one step before it gives up. */
 export const MAX_STEP_CONTINUATIONS = 3
@@ -92,8 +91,13 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     return { block: false, message: `${heading}: the plan no longer derives this step, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` for the next one.` }
   }
   const record = records[active.step]
-  const waived = new Set(planWaivers(plan, (await readPlanDecisions(planPath)).decisions).waivers.keys())
-  if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)), waived)) return { block: false }
+  const log = await readPlanWaivers(planPath, plan)
+  // A log nobody could read is judged as if no waiver were taken, which may be what holds the step.
+  const notice = log.unreadable ? `${heading}: ${log.unreadable}\nNo waiver was applied, so the step is judged as if none were taken.` : undefined
+  const say = (verdict: PlanStopHookVerdict): PlanStopHookVerdict =>
+    notice === undefined ? verdict : { ...verdict, message: verdict.message ? `${notice}\n${verdict.message}` : notice }
+
+  if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)), log.waived)) return say({ block: false })
 
   let report: PlanVerifyReport
   try {
@@ -101,30 +105,30 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   } catch (error) {
     // A run that could not judge the step is not a reason to hold the session: the hook says so and lets it stop.
     const reason = error instanceof CliError ? error.message : error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-    return { block: false, message: `${heading}: could not verify the step: ${reason}` }
+    return say({ block: false, message: `${heading}: could not verify the step: ${reason}` })
   }
   const verification = report.steps.find((candidate) => candidate.stepId === active.step)
-  if (!verification) return { block: false, message: `${heading}: the run did not cover the step.` }
+  if (!verification) return say({ block: false, message: `${heading}: the run did not cover the step.` })
   const owned = new Set(step.elementIds)
   const blockedElements = report.elements.filter((element) => owned.has(element.id) && element.state === 'blocked')
   const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive)
-  if (judgement.kind === 'verified') return { block: false }
+  if (judgement.kind === 'verified') return say({ block: false })
 
   const output = formatPlanStepRecord(active.step, verification.record).join('\n')
   if (judgement.kind === 'stalled') {
     const at = (deps.now ?? (() => new Date()))().toISOString()
     await writePlanActiveStep(appRoot, slug, { ...active, lastSignature: judgement.signature, stalled: { at, reason: judgement.reason, output } })
-    return {
+    return say({
       block: false,
-      message: `${heading}: giving up, ${judgement.reason}.\n${output}\nThe step is recorded as stalled. Fix the environment or revise the plan, then \`bunx guren plan:next ${active.plan}\` returns it again.`,
-    }
+      message: `${heading}: giving up, ${judgement.reason}.\n${output}\nThe step is recorded as stalled. Fix the environment, revise the plan, or waive an element with \`bunx guren plan:waive ${active.plan} <element-id> --reason "<why>"\`; \`bunx guren plan:next ${active.plan}\` then returns it again.`,
+    })
   }
   const continuations = active.continuations + 1
   await writePlanActiveStep(appRoot, slug, { ...active, continuations, lastSignature: judgement.signature })
-  return {
+  return say({
     block: true,
     message: `${heading}: the step is ${verification.record.outcome}, so this turn is not done (continuation ${continuations} of ${MAX_STEP_CONTINUATIONS}).\n${output}\nFinish the step: it is done when \`bunx guren plan:verify ${active.plan} --step ${active.step}\` reports it verified.`,
-  }
+  })
 }
 
 /** Every marked step under the application root, verified; one message covers them all. */

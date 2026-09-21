@@ -389,8 +389,12 @@ const planWaiveCommand = defineCommand({
     },
     remove: {
       type: 'boolean',
-      description: 'Delete the waivers of the named elements instead of writing them.',
+      description: 'Delete the waivers of the named elements instead of writing them. Asks nothing of the plan, so a revision can withdraw a waiver of an element it dropped.',
       default: false,
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory: what the reported decision-log path is relative to. The plan is read from its own path either way.',
     },
     json: {
       type: 'boolean',
@@ -401,7 +405,7 @@ const planWaiveCommand = defineCommand({
   async run({ args }) {
     // citty collects the trailing positionals in `_`, with the first two bound above.
     const ids = [args.elements, ...args._.slice(2)].filter((id) => id.length > 0)
-    const report = await planWaiveFile(args.plan, { elementIds: ids, reason: args.reason, remove: args.remove })
+    const report = await planWaiveFile(args.plan, { elementIds: ids, reason: args.reason, remove: args.remove, app: args.app })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanWaive(report))
   },
 })

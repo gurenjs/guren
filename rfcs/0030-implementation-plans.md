@@ -1143,11 +1143,19 @@ with these readings (`packages/cli/src/plan-waive.ts`, `plan/decisions.ts`).
   waived verifies, which is how the loop of §7 gets past a stall. That record
   stops standing once the waiver is withdrawn, so `plan:next` returns the
   step again rather than skipping it forever.
+- A waiver lifts an element and nothing else, so it only carries a step that
+  is `incomplete`. A behaviour that fails makes its `tests` command fail and
+  the step is `failed`, whatever is waived: a behaviour the code will not
+  satisfy is a revision. `plan:next` lists a step's waived elements apart from
+  the ones to implement, and a log that will not read is reported by
+  `plan:next` and the Stop hook, which then judge as if no waiver were taken.
 - The command refuses an element the plan does not declare, one in a section
   `plan:status` does not judge (flows, tasks, behaviours, questions), an
   `existing` element, which the table above keeps out of completion, a
   missing `--reason`, and a draft, which has no hash a waiver could name.
-  `--remove` deletes a waiver. Out of scope here: `plan:close`, which is what
+  `--remove` deletes a waiver and asks none of that: it matches on the element
+  id alone, since withdrawing the waiver of an element a revision dropped is
+  exactly what it is for. Out of scope here: `plan:close`, which is what
   reads the log to decide a plan is finished, and any waiver of a whole step
   or task, since completion is defined per element.
 

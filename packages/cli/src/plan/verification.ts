@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
-import { planDecisionsPath, planWaiverHash, readPlanDecisions, waivedElements, type PlanDecisions, type PlanWaiver } from './decisions'
+import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
 import type { Plan, PlanDraft } from './schema'
 import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from './status'
@@ -125,12 +125,23 @@ export function applyWaivers(status: PlanStatus<PlanElementState>, waivers: Read
 /** The waivers of `decisions` that name this plan, by element id, and the ones that do not. */
 export function planWaivers(plan: PlanDraft | Plan, decisions: PlanDecisions | undefined): { waivers: Map<string, PlanWaiver>; stale: PlanWaiver[] } {
   const hash = planWaiverHash(plan)
-  const { waived, stale } = waivedElements(decisions, hash)
   const waivers = new Map<string, PlanWaiver>()
+  const stale: PlanWaiver[] = []
   for (const waiver of decisions?.waivers ?? []) {
-    if (waived.has(waiver.elementId) && !waivers.has(waiver.elementId)) waivers.set(waiver.elementId, waiver)
+    if (hash === undefined || waiver.planHash !== hash) stale.push(waiver)
+    else if (!waivers.has(waiver.elementId)) waivers.set(waiver.elementId, waiver)
   }
   return { waivers, stale }
+}
+
+/** The log beside the plan, matched against it: what a command asks for the ids a waiver covers. */
+export async function readPlanWaivers(
+  planPath: string,
+  plan: PlanDraft | Plan,
+): Promise<{ waivers: Map<string, PlanWaiver>; waived: Set<string>; stale: PlanWaiver[]; unreadable?: string }> {
+  const log = await readPlanDecisions(planPath)
+  const { waivers, stale } = planWaivers(plan, log.decisions)
+  return { waivers, waived: new Set(waivers.keys()), stale, ...(log.unreadable ? { unreadable: log.unreadable } : {}) }
 }
 
 /**
@@ -153,16 +164,15 @@ export async function overlayVerification(
   const files = Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files))
   const applied = applyVerification(status, derivation, records, planDigest(plan), await hashFiles(root, files))
   const unreadable = read.unreadable ?? (replacedUnreadable ? `${replacedUnreadable}; this run replaced it, and its other records are gone` : undefined)
-  const log = await readPlanDecisions(planPath)
-  const { waivers, stale } = planWaivers(plan, log.decisions)
+  const log = await readPlanWaivers(planPath, plan)
   return {
-    status: applyWaivers(applied.status, waivers),
+    status: applyWaivers(applied.status, log.waivers),
     verification: {
       stateFile: toPosixRelative(root, planStatePath(root, slug)),
       staleSteps: applied.staleSteps,
       ...(unreadable ? { unreadable } : {}),
       decisionsFile: toPosixRelative(root, planDecisionsPath(planPath)),
-      staleWaivers: stale,
+      staleWaivers: log.stale,
       ...(log.unreadable ? { decisionsUnreadable: log.unreadable } : {}),
     },
   }
@@ -180,7 +190,7 @@ function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string
  * and every element it rested on a waiver for still waived. A record fingerprints nothing only
  * where the step had nothing file-shaped to watch (`scaffold`, a `drop`, an element no reader
  * finds a file for), so it stands on the plan digest alone, or the loop (§7) could never end.
- * `waived` defaults to none: a caller that reads no decision log retires such a record.
+ * `waived` defaults to none, which retires a record resting on one rather than keeping it.
  */
 export function recordStillHolds(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>, waived: ReadonlySet<string> = new Set()): boolean {
   if (record.outcome !== 'verified' || record.planDigest !== digest) return false

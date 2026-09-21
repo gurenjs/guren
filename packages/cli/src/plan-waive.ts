@@ -6,9 +6,10 @@
  * hook report it through the one overlay.
  */
 
-import { basename } from 'node:path'
+import { basename, resolve } from 'node:path'
 
 import { CliError } from './cli-error'
+import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { planDecisionsPath, planWaiverHash, removePlanWaiver, writePlanWaiver, type PlanWaiver } from './plan/decisions'
 import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSection } from './plan/schema'
@@ -20,8 +21,9 @@ export const PLAN_WAIVE_REPORT_VERSION = 1
 /** What `--json` prints. */
 export interface PlanWaiveReport {
   reportVersion: typeof PLAN_WAIVE_REPORT_VERSION
-  plan: { file: string; title: string; hash: string }
-  /** Absolute path of the decision log beside the plan. */
+  /** `hash` is `null` only under `--remove`, which a draft's log may need as much as an approved one's. */
+  plan: { file: string; title: string; hash: string | null }
+  /** The decision log beside the plan, relative to the application root, POSIX separators. */
   decisionsFile: string
   waived: PlanWaiver[]
   /** Waivers of the same elements this run replaced, in the order they were given. */
@@ -35,6 +37,8 @@ export interface PlanWaiveFileOptions {
   /** Required unless `remove` is set: a waiver with no reason is not a decision. */
   reason?: string
   remove?: boolean
+  /** What `decisionsFile` is reported relative to; the plan is not read from it. Defaults to `cwd`. */
+  app?: string
   cwd?: string
   now?: () => Date
   /** How `git config` is asked who is waiving; absent authorship is not an error. */
@@ -58,43 +62,55 @@ async function waiverAuthor(cwd: string, exec: CapturedExec): Promise<string | u
   return name ?? email
 }
 
-function sectionOf(plan: PlanDraft): Map<string, PlanElementSection> {
-  return new Map(listPlanElements(plan).map((element) => [element.id, element.section]))
-}
-
 /**
  * The `existing` elements, which are nobody's work and so have no state a waiver could lift.
- * The sections listed here are the ones `plan/schema.ts` gives a `change`; a console command
- * declares none and is never one. A section that gains one belongs here too, or its `existing`
- * elements take a waiver that `applyWaivers()` then declines to apply.
+ * Gathered here are the judged sections `plan/schema.ts` gives a `change`: a console command
+ * declares none, and a flow declares one but is not judged. A judged section that gains a
+ * `change` belongs here too, or its `existing` elements take a waiver that `applyWaivers()`
+ * then declines to apply.
  */
 function existingIds(plan: PlanDraft): Set<string> {
-  const ids = new Set<string>()
-  const add = (items: ReadonlyArray<{ id: string; change: PlanChange }>): void => {
-    for (const item of items) if (item.change.kind === 'existing') ids.add(item.id)
-  }
-  for (const model of plan.models) {
-    add([model])
-    add(model.columns)
-  }
-  for (const controller of plan.controllers) {
-    add([controller])
-    add(controller.actions)
-  }
-  add(plan.validators)
-  add(plan.routes)
-  add(plan.views)
-  add(plan.resources)
-  add(plan.policies)
-  add(plan.sideEffects)
-  return ids
+  const changed: ReadonlyArray<{ id: string; change: PlanChange }> = [
+    ...plan.models,
+    ...plan.models.flatMap((model) => model.columns),
+    ...plan.controllers,
+    ...plan.controllers.flatMap((controller) => controller.actions),
+    ...plan.validators,
+    ...plan.routes,
+    ...plan.views,
+    ...plan.resources,
+    ...plan.policies,
+    ...plan.sideEffects,
+  ]
+  return new Set(changed.filter((element) => element.change.kind === 'existing').map((element) => element.id))
 }
 
 const JUDGED = new Set<PlanElementSection>(PLAN_STATUS_SECTIONS)
 
+// A waiver only lifts an element, so it only carries a step that is `incomplete`. A behaviour
+// that fails makes its `tests` command fail, and the step is then `failed` whatever is waived.
+const ACCEPTANCE_ADVICE = ' A behaviour that fails leaves the step failed whatever is waived, so a behaviour the code will not satisfy is a revision, not a waiver.'
+
 export async function planWaiveFile(planPath: string, options: PlanWaiveFileOptions): Promise<PlanWaiveReport> {
-  const { path, plan } = await readPlanFile(planPath, options.cwd)
   if (options.elementIds.length === 0) throw new CliError('Name at least one element id to waive.')
+  const { path, plan } = await readPlanFile(planPath, options.cwd)
+  const root = resolve(options.app ?? options.cwd ?? process.cwd())
+  const head = {
+    reportVersion: PLAN_WAIVE_REPORT_VERSION,
+    plan: { file: basename(path), title: plan.title, hash: planWaiverHash(plan) ?? null },
+    decisionsFile: toPosixRelative(root, planDecisionsPath(path)),
+  } satisfies Pick<PlanWaiveReport, 'reportVersion' | 'plan' | 'decisionsFile'>
+
+  // Removal matches on the element id and ignores the hash, so it asks none of the questions
+  // below: withdrawing the waiver of an element a revision dropped is what it is for.
+  if (options.remove) {
+    const removed: PlanWaiver[] = []
+    for (const id of options.elementIds) {
+      const result = await removePlanWaiver(path, id)
+      if (result.removed) removed.push(result.removed)
+    }
+    return { ...head, waived: [], replaced: [], removed }
+  }
 
   const hash = planWaiverHash(plan)
   if (hash === undefined) {
@@ -103,7 +119,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
     )
   }
 
-  const sections = sectionOf(plan)
+  const sections = new Map(listPlanElements(plan).map((element) => [element.id, element.section]))
   const existing = existingIds(plan)
   for (const id of options.elementIds) {
     const section = sections.get(id)
@@ -112,27 +128,12 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
     }
     if (!JUDGED.has(section)) {
       throw new CliError(
-        `"${id}" is a ${section} element, which plan:status does not judge, so it has no state a waiver could lift. Waive the elements it covers instead.`,
+        `"${id}" is a ${section} element, which plan:status does not judge, so it has no state a waiver could lift.${section === 'acceptance' ? ACCEPTANCE_ADVICE : ' Waive the elements it covers instead.'}`,
       )
     }
     if (existing.has(id)) {
       throw new CliError(`"${id}" is an existing element, which the plan changes nothing about, so it is no part of completion and there is nothing to waive.`)
     }
-  }
-
-  const head = {
-    reportVersion: PLAN_WAIVE_REPORT_VERSION,
-    plan: { file: basename(path), title: plan.title, hash },
-    decisionsFile: planDecisionsPath(path),
-  } satisfies Pick<PlanWaiveReport, 'reportVersion' | 'plan' | 'decisionsFile'>
-
-  if (options.remove) {
-    const removed: PlanWaiver[] = []
-    for (const id of options.elementIds) {
-      const result = await removePlanWaiver(path, id)
-      if (result.removed) removed.push(result.removed)
-    }
-    return { ...head, waived: [], replaced: [], removed }
   }
 
   const reason = options.reason?.trim()

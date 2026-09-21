@@ -75,6 +75,10 @@ bunx guren plan:waive docs/plans/<slug>/plan.json <element-id> --reason "<why>"
 which writes the reason into the decision log beside the plan, committed with
 it. A waived element is left out of the step's judgement, so the loop moves on.
 
+A waiver only lifts an element. A behaviour that fails makes its `tests`
+command fail, and the step stays `failed` whatever is waived, so a behaviour
+the code will not satisfy is a revision rather than a waiver.
+
 The waiver is the person's decision, never yours. Report the stall, say which
 of the three you think it needs and why, and wait to be told. Do not run
 `plan:waive` to get past a step, and do not work around a stall in the code.

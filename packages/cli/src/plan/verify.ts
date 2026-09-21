@@ -234,7 +234,7 @@ export class PlanVerifier {
     const { elements } = await this.load()
 
     // An owned id the status did not judge can never verify: listing it keeps a new section from reading as green.
-    // A waiver is asked first: a person's decision outranks what the readers found, or did not find.
+    // A waiver outranks both, since a person's decision does not wait on what a reader found.
     const incomplete: string[] = []
     const waived: string[] = []
     const owned: PlanElementStatus[] = []

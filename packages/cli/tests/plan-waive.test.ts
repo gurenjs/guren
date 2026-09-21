@@ -10,7 +10,7 @@ import { planWaiveFile, type PlanWaiveFileOptions, type PlanWaiveReport } from '
 import { planDecisionsPath, readPlanDecisions, type PlanDecisions } from '../src/plan/decisions'
 import { planHash } from '../src/plan/identity'
 import type { CapturedExec } from '../src/subprocess'
-import { loadCommentsPlan, loadParsedCommentsPlan, TEST_BASELINE } from './plan-fixture'
+import { loadApprovedCommentsPlan, loadCommentsPlan, loadParsedCommentsPlan } from './plan-fixture'
 
 let ROOT: string
 const HASH = planHash(loadParsedCommentsPlan())
@@ -19,9 +19,7 @@ const NOW = (): Date => new Date('2026-09-21T12:00:00.000Z')
 /** `git config` answering nothing, so a waiver's authorship is not what a test turns on. */
 const noAuthor: CapturedExec = async () => ({ exitCode: 1, stdout: '', stderr: '' })
 
-const approved = (): Record<string, unknown> => ({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
-
-async function writePlan(name: string, document: unknown = approved()): Promise<string> {
+async function writePlan(name: string, document: unknown = loadApprovedCommentsPlan()): Promise<string> {
   const path = join(ROOT, name)
   await mkdir(join(path, '..'), { recursive: true })
   await writeFile(path, typeof document === 'string' ? document : JSON.stringify(document), 'utf8')
@@ -35,7 +33,7 @@ async function decisionsOf(planPath: string): Promise<PlanDecisions> {
 }
 
 function waive(planPath: string, ids: string[], options: Partial<PlanWaiveFileOptions> = {}): Promise<PlanWaiveReport> {
-  return planWaiveFile(planPath, { elementIds: ids, reason: 'the redesign lands in the next plan', now: NOW, exec: noAuthor, ...options })
+  return planWaiveFile(planPath, { elementIds: ids, reason: 'the redesign lands in the next plan', now: NOW, exec: noAuthor, app: ROOT, ...options })
 }
 
 describe('plan:waive', () => {
@@ -60,7 +58,7 @@ describe('plan:waive', () => {
     const report = await waive(plan, ['model.comment', 'column.comment.body'])
 
     expect(report.plan.hash).toBe(HASH)
-    expect(report.decisionsFile).toBe(join(ROOT, 'write.decisions.json'))
+    expect(report.decisionsFile).toBe('write.decisions.json')
     expect(await decisionsOf(plan)).toEqual({
       decisionsVersion: 1,
       waivers: [
@@ -97,10 +95,26 @@ describe('plan:waive', () => {
     const plan = await writePlan('remove.plan.json')
     await waive(plan, ['model.comment', 'column.comment.body'])
 
-    const report = await planWaiveFile(plan, { elementIds: ['model.comment', 'column.comment.id'], remove: true })
+    const report = await planWaiveFile(plan, { elementIds: ['model.comment', 'column.comment.id'], remove: true, app: ROOT })
 
     expect(report.removed.map((waiver) => waiver.elementId)).toEqual(['model.comment'])
     expect((await decisionsOf(plan)).waivers.map((waiver) => waiver.elementId)).toEqual(['column.comment.body'])
+  })
+
+  test('should remove a waiver whatever the plan now says, since a revision is what withdraws one', async () => {
+    const plan = await writePlan('revised.plan.json')
+    await waive(plan, ['policy.comment'])
+    // The revision drops the element and the baseline with it, which every check but removal refuses.
+    const revised = loadCommentsPlan()
+    revised.policies = []
+    await writeFile(plan, JSON.stringify(revised), 'utf8')
+
+    await expect(waive(plan, ['policy.comment'])).rejects.toThrow('has no baseline')
+    const report = await planWaiveFile(plan, { elementIds: ['policy.comment'], remove: true, app: ROOT })
+
+    expect(report.plan.hash).toBeNull()
+    expect(report.removed.map((waiver) => waiver.elementId)).toEqual(['policy.comment'])
+    expect((await decisionsOf(plan)).waivers).toEqual([])
   })
 
   test('should keep the decision log of the §9 layout beside the plan as decisions.json', async () => {
@@ -109,7 +123,8 @@ describe('plan:waive', () => {
     const report = await waive(plan, ['model.comment'])
 
     expect(planDecisionsPath(plan)).toBe(join(ROOT, 'docs/plans/comments/decisions.json'))
-    expect(report.decisionsFile).toBe(join(ROOT, 'docs/plans/comments/decisions.json'))
+    // Reported the way plan:status reports the state file: relative to the application root.
+    expect(report.decisionsFile).toBe('docs/plans/comments/decisions.json')
     expect((await decisionsOf(plan)).waivers).toHaveLength(1)
   })
 
@@ -118,7 +133,7 @@ describe('plan:waive', () => {
 
     await expect(planWaiveFile(plan, { elementIds: ['model.comment'] })).rejects.toThrow('--reason is required')
     await expect(waive(plan, ['model.nope'])).rejects.toThrow('No element "model.nope" is declared by this plan')
-    await expect(waive(plan, ['AC-comments-1'])).rejects.toThrow('which plan:status does not judge')
+    await expect(waive(plan, ['AC-comments-1'])).rejects.toThrow('a behaviour the code will not satisfy is a revision, not a waiver')
     await expect(waive(plan, ['column.post.id'])).rejects.toThrow('is an existing element')
     await expect(waive(plan, [])).rejects.toThrow('Name at least one element id')
     expect(await readPlanDecisions(plan)).toEqual({ decisions: undefined })
@@ -137,7 +152,7 @@ describe('plan:waive', () => {
     await writeFile(logPath, '{ "decisionsVersion": 2 }\n', 'utf8')
 
     await expect(waive(plan, ['model.comment'])).rejects.toThrow('will not replace it')
-    await expect(planWaiveFile(plan, { elementIds: ['model.comment'], remove: true })).rejects.toThrow('will not replace it')
+    await expect(planWaiveFile(plan, { elementIds: ['model.comment'], remove: true, app: ROOT })).rejects.toThrow('will not replace it')
     expect(await readFile(logPath, 'utf8')).toBe('{ "decisionsVersion": 2 }\n')
   })
 
@@ -145,19 +160,19 @@ describe('plan:waive', () => {
     const plan = await writePlan('command.plan.json')
     log.mockImplementation(() => {})
 
-    await runCommand(builtinSubCommands['plan:waive'], { rawArgs: [plan, 'model.comment', 'column.comment.body', '--reason', 'the redesign lands in the next plan'] })
+    await runCommand(builtinSubCommands['plan:waive'], { rawArgs: [plan, 'model.comment', 'column.comment.body', '--reason', 'the redesign lands in the next plan', '--app', ROOT] })
     const printed = log.mock.calls.map((call) => String(call[0])).join('\n')
 
     expect((await decisionsOf(plan)).waivers.map((waiver) => waiver.elementId)).toEqual(['column.comment.body', 'model.comment'])
     expect(printed).toContain('Waived model.comment: the redesign lands in the next plan')
-    expect(printed).toContain(`Recorded in ${planDecisionsPath(plan)}`)
+    expect(printed).toContain('Recorded in command.decisions.json')
   })
 
   test('should print the report as JSON with --json, and remove through the command line', async () => {
     const plan = await writePlan('command-json.plan.json')
     log.mockImplementation(() => {})
 
-    await runCommand(builtinSubCommands['plan:waive'], { rawArgs: [plan, 'model.comment', '--reason', 'later', '--json'] })
+    await runCommand(builtinSubCommands['plan:waive'], { rawArgs: [plan, 'model.comment', '--reason', 'later', '--json', '--app', ROOT] })
     const report = JSON.parse(log.mock.calls.map((call) => String(call[0])).join('\n')) as PlanWaiveReport
     await runCommand(builtinSubCommands['plan:waive'], { rawArgs: [plan, 'model.comment', '--remove'] })
 

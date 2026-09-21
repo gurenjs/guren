@@ -8,7 +8,9 @@ import { runCommand } from 'citty'
 import { builtinSubCommands } from '../src/commands'
 import type { PlanStatusReport } from '../src/plan-status'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
+import { planHash } from '../src/plan/identity'
+import { PlanSchema } from '../src/plan/schema'
+import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own, since Bun keys an imported routes file on
@@ -134,6 +136,27 @@ describe('plan:status', () => {
     const added = result.elements.filter((element) => element.change === 'add')
     expect(added.map((element) => element.state)).toEqual(added.map(() => 'planned'))
     expect(result.summary.existing).toEqual({ found: 1, missing: [], unread: [] })
+  })
+
+  test('should read the decision log beside the plan and report a waived element as waived', async () => {
+    const approved = loadApprovedCommentsPlan()
+    const plan = await writePlan('waived.plan.json', approved)
+    const app = await createApp('waived', BASE_APP)
+    const waiver = { elementId: 'policy.comment', planHash: planHash(PlanSchema.parse(approved)), reason: 'the policy lands in the next plan', at: '2026-09-21T12:00:00.000Z' }
+    // A waiver of another revision lifts nothing and is reported apart.
+    const staleWaiver = { ...waiver, elementId: 'resource.comment', planHash: 'another-revision' }
+    await writeWorkspaceFiles(ROOT, { 'waived.decisions.json': JSON.stringify({ decisionsVersion: 1, waivers: [waiver, staleWaiver] }) })
+
+    const result = await report(plan, app)
+    const text = await run(plan, app)
+
+    expect(states(result)['policy.comment']).toBe('waived')
+    expect(states(result)['resource.comment']).toBe('planned')
+    expect(result.summary.states.waived).toBe(1)
+    expect(result.elements.find((element) => element.id === 'policy.comment')!.notes).toEqual(['Waived 2026-09-21T12:00:00.000Z: the policy lands in the next plan'])
+    expect(result.verification!.staleWaivers).toEqual([staleWaiver])
+    expect(text).toContain('Waivers read from ../waived.decisions.json')
+    expect(text).toContain('Waived against another plan or revision, so not counted: resource.comment')
   })
 
   test('should keep the JSON report to its documented shape', async () => {

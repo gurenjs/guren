@@ -19,6 +19,11 @@ export function loadCommentsPlan(): Record<string, unknown> {
   return JSON.parse(text) as Record<string, unknown>
 }
 
+/** The fixture as an approved plan *document*: what a command reads off disk and parses itself. */
+export function loadApprovedCommentsPlan(): Record<string, unknown> {
+  return { ...loadCommentsPlan(), baseline: TEST_BASELINE }
+}
+
 /** What a plan *document* spells, before parsing fills the defaults in. */
 export type PlanInput = z.input<typeof PlanDraftSchema>
 
@@ -29,7 +34,7 @@ export function loadCommentsPlanInput(): PlanInput {
 
 /** The fixture as a plan with an identity: parsed, under {@link TEST_BASELINE}. */
 export function loadParsedCommentsPlan(): Plan {
-  return PlanSchema.parse({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
+  return PlanSchema.parse(loadApprovedCommentsPlan())
 }
 
 /** An application the comments fixture is a clean delta against. */

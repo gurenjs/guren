@@ -13,7 +13,7 @@ import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
 import { planWaiveFile } from '../src/plan-waive'
-import { loadCommentsPlan, planAppState, TEST_BASELINE } from './plan-fixture'
+import { loadApprovedCommentsPlan, loadCommentsPlan, planAppState } from './plan-fixture'
 
 // The verification itself is faked here (`verify`); the shipped hooks run it for real in
 // agent-hook-gate.test.ts. What this covers is the decision and what it writes to state.
@@ -166,7 +166,9 @@ describe('planStopHookFindings', () => {
 
     expect(verdict.block).toBe(false)
     expect(verdict.message).toContain(`plan:verify on stop (comments.plan.json, ${HTTP}): giving up, nothing about the step changed since the last continuation.\n${HTTP}: incomplete (3 ms)`)
-    expect(verdict.message).toContain('The step is recorded as stalled. Fix the environment or revise the plan, then `bunx guren plan:next comments.plan.json` returns it again.')
+    expect(verdict.message).toContain(
+      'The step is recorded as stalled. Fix the environment, revise the plan, or waive an element with `bunx guren plan:waive comments.plan.json <element-id> --reason "<why>"`; `bunx guren plan:next comments.plan.json` then returns it again.',
+    )
     const state = await readState(app)
     expect(state.active).toMatchObject({ continuations: 1, stalled: { at: '2026-09-21T10:00:00.000Z', reason: 'nothing about the step changed since the last continuation' } })
     expect(state.active!.stalled!.output).toContain('  not at its completion state: action.comments.destroy: planned')
@@ -187,7 +189,7 @@ describe('planStopHookFindings', () => {
   })
 
   test('should hold a record resting on a waiver, and re-verify it once the waiver is gone', async () => {
-    const approved = { ...loadCommentsPlan(), baseline: TEST_BASELINE }
+    const approved = loadApprovedCommentsPlan()
     const resting = record({ outcome: 'verified', incomplete: [], waived: ['policy.comment'], planDigest: planDigest(parsePlanDocument(approved)) })
     const app = await createApp('waived', { steps: { [HTTP]: resting }, active: active() }, approved)
     const plan = join(app, 'comments.plan.json')
@@ -204,6 +206,18 @@ describe('planStopHookFindings', () => {
 
     expect(verified).toBe(1)
     expect(withdrawn.block).toBe(true)
+  })
+
+  test('should say a decision log it could not read applied no waiver, beside the verdict', async () => {
+    const app = await createApp('unreadable-log', { active: active() })
+    await writeWorkspaceFiles(app, { 'comments.decisions.json': '{ "decisionsVersion": 2 }\n' })
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => report(HTTP, record()), now: NOW })
+
+    expect(verdict.block).toBe(true)
+    expect(verdict.message).toContain('does not match the decision log schema')
+    expect(verdict.message).toContain('No waiver was applied, so the step is judged as if none were taken.')
+    expect(verdict.message).toContain('so this turn is not done (continuation 1 of')
   })
 
   test('should let a verified step through silently', async () => {

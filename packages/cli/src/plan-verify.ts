@@ -15,11 +15,10 @@ import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } f
 import type { PlanAppState } from './plan/app-state'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
-import { readPlanDecisions } from './plan/decisions'
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
 import { judgePlan } from './plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
-import { hashFiles, overlayVerification, planWaivers, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
+import { hashFiles, overlayVerification, readPlanWaivers, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
 import { PlanVerifier, type PlanStepVerification } from './plan/verify'
 import { runCaptured } from './subprocess'
 
@@ -57,7 +56,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const slug = planSlug(path)
 
   const before = await readPlanState(root, slug)
-  const waived = new Set(planWaivers(plan, (await readPlanDecisions(path)).decisions).waivers.keys())
+  const { waived } = await readPlanWaivers(path, plan)
   let stepIds: string[]
   const skipped: string[] = []
   if (options.step === undefined) {

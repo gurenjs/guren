@@ -3,8 +3,7 @@
  * overlay reads. It lives beside the plan and is committed, unlike `.guren/plans/`: a
  * waiver is a person's decision about an approved plan, not a result a machine can
  * rebuild. A waiver names the plan hash it was taken against, so a revision does not
- * inherit it. A log that will not read is never replaced, which is what a record of
- * decisions costs over a cache.
+ * inherit it.
  */
 
 import { readFile, writeFile } from 'node:fs/promises'
@@ -81,17 +80,6 @@ export async function readPlanDecisions(planPath: string): Promise<PlanDecisions
   const parsed = PlanDecisionsSchema.safeParse(document)
   if (!parsed.success) return { decisions: undefined, unreadable: `${path} does not match the decision log schema:\n${formatSchemaIssues(parsed.error)}` }
   return { decisions: parsed.data }
-}
-
-/** Element ids a log waives at `hash`, and the waivers of another hash, which lift nothing. */
-export function waivedElements(decisions: PlanDecisions | undefined, hash: string | undefined): { waived: Set<string>; stale: PlanWaiver[] } {
-  const waived = new Set<string>()
-  const stale: PlanWaiver[] = []
-  for (const waiver of decisions?.waivers ?? []) {
-    if (hash !== undefined && waiver.planHash === hash) waived.add(waiver.elementId)
-    else stale.push(waiver)
-  }
-  return { waived, stale }
 }
 
 /**

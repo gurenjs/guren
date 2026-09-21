@@ -13,7 +13,7 @@ import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { planWaiveFile } from '../src/plan-waive'
 import { writeWorkspaceFiles } from './helpers'
-import { loadCommentsPlan, TEST_BASELINE } from './plan-fixture'
+import { loadApprovedCommentsPlan, loadCommentsPlan } from './plan-fixture'
 
 // The command never loads the application, so an app here is a directory with a plan.
 const PLAN = parsePlanDocument(loadCommentsPlan())
@@ -207,6 +207,8 @@ describe('plan:next', () => {
     const text = formatPlanNext(report, 'comments.plan.json')
     expect(text).toContain('Stalled 2026-09-21T09:00:00.000Z: 3 continuations on this step')
     expect(text).toContain('    fail     typecheck   bun run typecheck')
+    expect(text).toContain('A stall is a person\u2019s decision: fix the environment, revise the plan, or accept an element incomplete with')
+    expect(text).toContain('  bunx guren plan:waive comments.plan.json <element-id> --reason "<why>"')
     // The mark it wrote is a fresh one, so the next run is a plain step.
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.stalled).toBeUndefined()
   })
@@ -221,7 +223,7 @@ describe('plan:next', () => {
   })
 
   test('should let a waiver carry a step whose record rests on one, and return that step again once the waiver is gone', async () => {
-    const approved = { ...loadCommentsPlan(), baseline: TEST_BASELINE }
+    const approved = loadApprovedCommentsPlan()
     const app = join(ROOT, 'waived')
     await writeWorkspaceFiles(app, {
       'package.json': JSON.stringify({ name: 'waived', type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
@@ -241,6 +243,38 @@ describe('plan:next', () => {
     expect(carried.step?.id).toBe(TESTS)
     expect(withdrawn.verified).toEqual([])
     expect(withdrawn.step?.id).toBe(SCAFFOLD)
+  })
+
+  test('should mark a step\u2019s waived elements apart from the ones to implement', async () => {
+    const approved = loadApprovedCommentsPlan()
+    const { app, plan } = await createApp('waived-elements')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) }
+    await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: record, [DATA]: record } })
+    // `git config` faked away, so the waiver's authorship is not this machine's.
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], reason: 'the policy lands in the next plan', now: NOW, exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }) })
+
+    const report = await planNextFile(plan, { appRoot: app, now: NOW })
+    const text = formatPlanNext(report, 'comments.plan.json')
+
+    expect(report.step!.id).toBe(HTTP)
+    const waived = report.step!.elements.filter((element) => element.waived)
+    expect(waived.map((element) => element.id)).toEqual(['policy.comment'])
+    expect(waived[0]!.waived).toEqual({ reason: 'the policy lands in the next plan', at: '2026-09-21T10:00:00.000Z' })
+    expect(report.step!.elements.find((element) => element.id === 'action.comments.store')!.waived).toBeUndefined()
+    expect(text).toContain('Waived, not to be implemented:\n  policy.comment (policies): the policy lands in the next plan (2026-09-21T10:00:00.000Z)')
+    expect(text).toContain('The step verifies without them')
+    expect(text).not.toContain('  policy.comment (policies)\n')
+  })
+
+  test('should report a decision log it could not read, having applied no waiver', async () => {
+    const { app, plan } = await createApp('unreadable-log')
+    await writeWorkspaceFiles(app, { 'comments.decisions.json': '{ "decisionsVersion": 2 }\n' })
+
+    const report = await planNextFile(plan, { appRoot: app, now: NOW })
+
+    expect(report.decisionsUnreadable).toContain('does not match the decision log schema')
+    expect(formatPlanNext(report, 'comments.plan.json')).toContain('Decision log not read, so no waiver was applied:')
   })
 
   describe('formatting', () => {
