@@ -1,6 +1,8 @@
 import {
   readFile,
   lstat,
+  readlink,
+  realpath,
   writeFile,
   unlink,
   stat,
@@ -13,9 +15,41 @@ import {
 } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { Readable } from 'node:stream'
-import { join, dirname, resolve, relative, sep } from 'node:path'
+import { join, dirname, basename, resolve, relative, sep } from 'node:path'
 import type { StorageDriver, LocalDriverOptions, PutOptions, FileMetadata, GetStreamOptions } from '../types'
 import { warnOnce } from '../../support/warn-once'
+
+/** POSIX SYMLOOP_MAX; a cycle below the root would otherwise spin here. */
+const MAX_LINK_HOPS = 40
+
+async function canonicalize(path: string): Promise<string | undefined> {
+  try {
+    return await realpath(path)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The canonical path a link target names. `realpath()` refuses a dangling link
+ * and a cycle, so canonicalize the deepest ancestor that does resolve and
+ * rejoin the rest: comparing an uncanonicalized path against the canonical
+ * root is what would let a link routed through another link read as inside.
+ */
+async function canonicalizeLeaf(target: string): Promise<string> {
+  const missing: string[] = []
+  let current = target
+
+  while (true) {
+    const real = await canonicalize(current)
+    if (real !== undefined) return join(real, ...missing)
+
+    const parent = dirname(current)
+    if (parent === current) return target
+    missing.unshift(basename(current))
+    current = parent
+  }
+}
 
 export class LocalDriver implements StorageDriver {
   private readonly root: string
@@ -34,22 +68,50 @@ export class LocalDriver implements StorageDriver {
     if (candidate !== root && !candidate.startsWith(root + sep)) {
       throw new Error(`LocalDriver: path escapes the storage root: "${path}"`)
     }
-    // The configured root is trusted (and may itself be a symlink). Refuse
-    // symlinks below it, including dangling links and links to other disk files.
-    let current = root
+    await this.assertNoEscapingLink(root, candidate, path)
+    return candidate
+  }
+
+  /**
+   * `resolve()` collapses `..` without following links, so the lexical check
+   * above still accepts `<root>/link/secret`, and every reader below follows
+   * the link. Each component is resolved instead of refused: a link that stays
+   * inside the disk is legitimate. A dangling link is judged by its target,
+   * which is where a write would land.
+   */
+  private async assertNoEscapingLink(root: string, candidate: string, path: string): Promise<void> {
+    // The configured root may itself be a link (`/var` -> `/private/var` is
+    // routine), so both sides are compared canonicalized.
+    const realRoot = await canonicalize(root)
+    if (realRoot === undefined) return
+
+    let current = realRoot
+    let hops = 0
     for (const part of relative(root, candidate).split(sep).filter(Boolean)) {
       current = join(current, part)
-      try {
-        if ((await lstat(current)).isSymbolicLink()) {
-          throw new Error(`LocalDriver: symbolic links are not allowed in storage paths: "${path}"`)
+
+      while (true) {
+        let link: string
+        try {
+          if (!(await lstat(current)).isSymbolicLink()) break
+          link = await readlink(current)
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code
+          // Nothing exists here, so nothing deeper does either.
+          if (code === 'ENOENT' || code === 'ENOTDIR') return
+          throw error
         }
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code
-        if (code === 'ENOENT' || code === 'ENOTDIR') break
-        throw error
+        if (++hops > MAX_LINK_HOPS) {
+          throw new Error(`LocalDriver: too many symbolic links resolving: "${path}"`)
+        }
+        // Canonicalized before the comparison: a link inside the disk may
+        // still spell its target through another link (`/var` on macOS).
+        current = await canonicalizeLeaf(resolve(dirname(current), link))
+        if (current !== realRoot && !current.startsWith(realRoot + sep)) {
+          throw new Error(`LocalDriver: path escapes the storage root through a symbolic link: "${path}"`)
+        }
       }
     }
-    return candidate
   }
 
   private async ensureDirectory(filePath: string): Promise<void> {
@@ -232,9 +294,10 @@ export class LocalDriver implements StorageDriver {
   async allFiles(directory: string): Promise<string[]> {
     const files: string[] = []
 
-    const scan = async (dir: string): Promise<void> => {
-      const fullPath = await this.fullPath(dir)
-
+    // The full path is carried down rather than re-derived: validating it
+    // re-walks every ancestor, and `isDirectory()` is false for a link, so
+    // recursion never enters one.
+    const scan = async (dir: string, fullPath: string): Promise<void> => {
       if (!existsSync(fullPath)) {
         return
       }
@@ -246,12 +309,12 @@ export class LocalDriver implements StorageDriver {
         if (entry.isFile()) {
           files.push(entryPath)
         } else if (entry.isDirectory()) {
-          await scan(entryPath)
+          await scan(entryPath, join(fullPath, entry.name))
         }
       }
     }
 
-    await scan(directory)
+    await scan(directory, await this.fullPath(directory))
     return files
   }
 

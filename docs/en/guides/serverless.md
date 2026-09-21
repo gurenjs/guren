@@ -88,7 +88,7 @@ Jobs are dispatched the same way as on the server: `await SendEmailJob.dispatch(
 
 `guren queue:work` can also consume SQS through `SqsDriver`. The built-in adapter requests `ApproximateReceiveCount` so retry counts survive redelivery and worker restarts. Successful jobs and jobs that reach `maxAttempts` are deleted from SQS; grant the worker `sqs:DeleteMessage` permission. Failed-job records remain in process memory, so use application monitoring or persistent error reporting if they must survive a restart. Deleting a terminal failure does not move it to an SQS dead-letter queue.
 
-Custom adapters used by polling workers must implement `deleteMessage({ queueUrl, receiptHandle })` and return a positive `receiveCount` from `receiveMessage()`, sourced from SQS `ApproximateReceiveCount`. Adapters used only to dispatch jobs can omit these additions. Lambda event-source processing continues to use `createSqsHandler()` and AWS batch acknowledgement.
+Custom adapters used by polling workers should implement `deleteMessage({ queueUrl, receiptHandle })` and return `receiveCount` from `receiveMessage()`, sourced from SQS `ApproximateReceiveCount`. An adapter that omits either one warns once and keeps its previous behaviour: acknowledged jobs stay on the queue, and retry counts restart from the message body on every redelivery. Adapters used only to dispatch jobs need neither. `MessageSystemAttributeNames` reaches the API only through an `@aws-sdk/client-sqs` release that models it (3.577.0 and later); an older client takes the same warning path. Lambda event-source processing continues to use `createSqsHandler()` and AWS batch acknowledgement.
 
 ### Schedule — `createScheduleHandler(scheduler)`
 

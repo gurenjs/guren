@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalDriver } from '../../src/storage/drivers/LocalDriver'
@@ -33,7 +33,7 @@ describe('LocalDriver storage boundary', () => {
       () => driver.size(path), () => driver.lastModified(path), () => driver.metadata(path),
       () => driver.files('escape'), () => driver.directories('escape'), () => driver.allFiles('escape'),
     ]) {
-      await expect(operation()).rejects.toThrow('symbolic links')
+      await expect(operation()).rejects.toThrow('through a symbolic link')
     }
   })
 
@@ -46,17 +46,43 @@ describe('LocalDriver storage boundary', () => {
       () => driver.copy(path, 'copy.txt'), () => driver.copy('source.txt', path),
       () => driver.move(path, 'moved.txt'), () => driver.move('source.txt', path),
     ]) {
-      await expect(operation()).rejects.toThrow('symbolic links')
+      await expect(operation()).rejects.toThrow('through a symbolic link')
     }
     expect(await readFile(join(outside, 'sentinel.txt'), 'utf8')).toBe('untouched')
     expect(await driver.getAsString('source.txt')).toBe('source')
   })
 
-  test('rejects final-component and dangling symlinks', async () => {
+  test('rejects escaping final-component and dangling symlinks', async () => {
     await symlink(join(outside, 'sentinel.txt'), join(root, 'file-link'))
     await symlink(join(outside, 'missing.txt'), join(root, 'dangling'))
-    await expect(driver.get('file-link')).rejects.toThrow('symbolic links')
-    await expect(driver.put('dangling', 'created')).rejects.toThrow('symbolic links')
+    await expect(driver.get('file-link')).rejects.toThrow('through a symbolic link')
+    await expect(driver.put('dangling', 'created')).rejects.toThrow('through a symbolic link')
+  })
+
+  test('allows links that stay inside the disk', async () => {
+    await mkdir(join(root, 'real'))
+    await writeFile(join(root, 'real', 'a.txt'), 'inside')
+    await symlink(join(root, 'real'), join(root, 'inside-dir'))
+    await symlink(join(root, 'real', 'a.txt'), join(root, 'inside-file'))
+    expect(await driver.getAsString('inside-dir/a.txt')).toBe('inside')
+    expect(await driver.getAsString('inside-file')).toBe('inside')
+    expect(await driver.exists('inside-dir/a.txt')).toBe(true)
+    await driver.put('inside-dir/written.txt', 'written')
+    expect(await readFile(join(root, 'real', 'written.txt'), 'utf8')).toBe('written')
+  })
+
+  test('rejects a link whose target is routed through another escaping link', async () => {
+    // Spelled with the canonical root so the target reads as inside the disk
+    // until `escape` is resolved, and with a missing directory below it.
+    await symlink(join(await realpath(root), 'escape', 'new', 'x.txt'), join(root, 'indirect'))
+    await expect(driver.put('indirect', 'x')).rejects.toThrow('through a symbolic link')
+    await expect(driver.get('indirect')).rejects.toThrow('through a symbolic link')
+  })
+
+  test('rejects a link cycle rather than spinning', async () => {
+    await symlink(join(root, 'loop-b'), join(root, 'loop-a'))
+    await symlink(join(root, 'loop-a'), join(root, 'loop-b'))
+    await expect(driver.get('loop-a')).rejects.toThrow('too many symbolic links')
   })
 
   test('allows a configured root symlink and creates missing nested directories', async () => {

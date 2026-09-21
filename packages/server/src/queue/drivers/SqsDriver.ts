@@ -14,6 +14,11 @@ export interface SqsAdapter {
     messageDeduplicationId?: string
   }): Promise<void>
 
+  /**
+   * `receiveCount` is the SQS `ApproximateReceiveCount`; polling workers count
+   * retries with it, since the message body is never rewritten on redelivery.
+   * Omitting it warns once and falls back to the count in the body.
+   */
   receiveMessage(params: {
     queueUrl: string
     waitTimeSeconds?: number
@@ -87,10 +92,13 @@ export function createSqsAdapter(client: { send(command: unknown): Promise<unkno
 
       const msg = result.Messages?.[0]
       if (!msg?.Body || !msg.ReceiptHandle) return null
+      // Absent on a client older than the ReceiveMessage model that carries
+      // MessageSystemAttributeNames, which drops the parameter silently.
+      const receiveCount = Number(msg.Attributes?.ApproximateReceiveCount)
       return {
         body: msg.Body,
         receiptHandle: msg.ReceiptHandle,
-        receiveCount: Number(msg.Attributes?.ApproximateReceiveCount),
+        receiveCount: Number.isSafeInteger(receiveCount) ? receiveCount : undefined,
       }
     },
 
@@ -209,14 +217,20 @@ export class SqsDriver implements QueueDriver {
 
     if (!result) return null
 
-    const receiveCount = result.receiveCount
-    if (receiveCount === undefined || !Number.isSafeInteger(receiveCount) || receiveCount < 1) {
-      throw new Error('SQS polling requires a positive receiveCount from ApproximateReceiveCount.')
-    }
     const job = deserializeJob(result.body)
-    // The worker increments once before handle(). SQS owns the count across
-    // redeliveries and process restarts; changing visibility never edits Body.
-    job.attempts += receiveCount - 1
+    const receiveCount = result.receiveCount
+    if (receiveCount !== undefined && Number.isSafeInteger(receiveCount) && receiveCount >= 1) {
+      // The worker increments once before handle(). SQS owns the count across
+      // redeliveries and process restarts; changing visibility never edits Body.
+      job.attempts += receiveCount - 1
+    } else {
+      warnOnce(
+        'sqs-adapter-missing-receive-count',
+        '[guren] The SqsAdapter returned no receiveCount: retry counts restart from the message body on every '
+          + 'redelivery, so a failing job retries until the queue drops it. Return ApproximateReceiveCount as '
+          + 'receiveCount from receiveMessage(), or build the adapter with createSqsAdapter().',
+      )
+    }
     this.reservations.set(job.id, { receiptHandle: result.receiptHandle, queueUrl })
     job.reservedAt = new Date()
     return job

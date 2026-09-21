@@ -456,12 +456,17 @@ describe('SqsDriver polling lifecycle', () => {
     expect((await driver.pop('default'))!.attempts).toBe(3)
   })
 
-  test('requires a valid receive count rather than resetting retry limits', async () => {
+  test('warns and keeps the body count when the adapter reports no receive count', async () => {
     for (const receiveCount of [undefined, 0, -1, 1.5, NaN]) {
+      resetWarnOnce()
       const adapter = createMockAdapter()
-      adapter.receiveMessage = async () => ({ body: JSON.stringify(createTestJob()), receiptHandle: 'receipt', receiveCount })
+      adapter.receiveMessage = async () => ({ body: JSON.stringify(createTestJob({ attempts: 2 })), receiptHandle: 'receipt', receiveCount })
       const driver = new SqsDriver(adapter, { queueUrl })
-      await expect(driver.pop('default')).rejects.toThrow('ApproximateReceiveCount')
+      let job: QueuedJob | null = null
+      const warnings = await captureWarnings(async () => { job = await driver.pop('default') })
+      expect(job!.attempts).toBe(2)
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain('receiveCount')
     }
   })
 })

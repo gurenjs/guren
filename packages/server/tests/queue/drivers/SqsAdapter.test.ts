@@ -32,6 +32,17 @@ describe('createSqsAdapter', () => {
     })
   })
 
+  test('reports no receive count when the client returns no attributes', async () => {
+    const adapter = createSqsAdapter({
+      async send() {
+        return { Messages: [{ Body: '{}', ReceiptHandle: 'receipt' }] }
+      },
+    })
+    expect(await adapter.receiveMessage({ queueUrl: 'https://example.test/queue' })).toEqual({
+      body: '{}', receiptHandle: 'receipt', receiveCount: undefined,
+    })
+  })
+
   test('sends DeleteMessage with the queue URL and receipt handle', async () => {
     const commands: unknown[] = []
     const adapter = createSqsAdapter({ async send(command) { commands.push(command); return {} } })
