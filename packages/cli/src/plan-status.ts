@@ -44,13 +44,13 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   const app = typeof options.app === 'function' ? await options.app() : options.app
   const status = judgePlan(plan, app)
-  const overlaid = options.appRoot === undefined ? undefined : await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }))
-  return {
+  const head = {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
-    ...(overlaid?.status ?? status),
-    ...(overlaid ? { verification: overlaid.verification } : {}),
-  }
+  } satisfies Partial<PlanStatusReport>
+  if (options.appRoot === undefined) return { ...head, ...status }
+  const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }))
+  return { ...head, ...overlaid.status, verification: overlaid.verification }
 }
 
 const SECTION_TITLES: Record<(typeof PLAN_STATUS_SECTIONS)[number], string> = {

@@ -8,11 +8,20 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { cliEntry } from './cli-entry'
 import { bunExecutable } from './subprocess'
 
 /** Findings a stage may report before the rest collapses into one "and N more" line. */
-export const MAX_FINDINGS = 40
-export const OUTPUT_TAIL_LINES = 20
+const MAX_FINDINGS = 40
+const OUTPUT_TAIL_LINES = 20
+
+/** A line of any tool's output that reports a failure, for commands with no pattern of their own. */
+export const OUTPUT_ERROR_PATTERN = /error|Error|failed/u
+
+/** `guren codegen` from this CLI, for an app whose `package.json` declares no `codegen` script. */
+export function codegenFallback(): [label: string, command: string[]] {
+  return ['guren codegen', [bunExecutable(), cliEntry(), 'codegen']]
+}
 
 /** The app's `package.json` scripts, or none when the manifest cannot be read. */
 export async function readScripts(cwd: string): Promise<Record<string, string>> {
@@ -41,7 +50,7 @@ export function resolveScriptCommand(
   return fallback ? { label: fallback[0], command: fallback[1] } : undefined
 }
 
-export function nonEmptyLines(text: string): string[] {
+function nonEmptyLines(text: string): string[] {
   return text
     .split('\n')
     .map((line) => line.trimEnd())
@@ -53,9 +62,13 @@ export function capFindings(findings: string[]): string[] {
   return [...findings.slice(0, MAX_FINDINGS), `... and ${findings.length - MAX_FINDINGS} more`]
 }
 
+/** The last lines of a tool's output, for a failure no pattern explains. */
+export function outputTail(output: string): string[] {
+  return nonEmptyLines(output).slice(-OUTPUT_TAIL_LINES)
+}
+
 /** The output lines matching `pattern`, or the tail of the output when none do. */
 export function outputFindings(output: string, pattern: RegExp): string[] {
-  const lines = nonEmptyLines(output)
-  const matched = lines.filter((line) => pattern.test(line))
-  return capFindings(matched.length > 0 ? matched : lines.slice(-OUTPUT_TAIL_LINES))
+  const matched = nonEmptyLines(output).filter((line) => pattern.test(line))
+  return capFindings(matched.length > 0 ? matched : outputTail(output))
 }

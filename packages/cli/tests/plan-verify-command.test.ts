@@ -183,6 +183,7 @@ describe('plan:verify', () => {
     ])
     expect(record.fingerprint.files['app/Http/Controllers/CommentController.ts']).toBe(sha256(APP['app/Http/Controllers/CommentController.ts']!))
     expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [] })
+    expect(result.skipped).toEqual([])
 
     const state = JSON.parse(await readFile(join(app, '.guren/plans/http.state.json'), 'utf8')) as { stateVersion: number; steps: Record<string, PlanStepRecord> }
     expect(state.stateVersion).toBe(PLAN_STATE_VERSION)
@@ -217,6 +218,17 @@ describe('plan:verify', () => {
     expect(states(after)).toMatchObject({ 'column.comment.id': 'drifted', 'column.comment.createdAt': 'drifted' })
     expect(after.elements.find((element) => element.id === 'column.comment.id')!.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}; changed since: db/schema.ts.`])
     expect(after.summary.states.verified).toBe(0)
+
+    // A whole-plan run leaves a step alone while its record stands, and redoes it once a fingerprinted file changed.
+    await writeFile(join(app, '.guren/plans/lift.state.json'), JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [DATA]: { ...record, fingerprint: { ...record.fingerprint, files: { 'db/schema.ts': sha256(`${SCHEMA}\n// touched\n`) } } } } }), 'utf8')
+    const whole = await verify(plan, app)
+    expect(whole.skipped).toEqual([DATA])
+    expect(whole.steps.map((step) => step.stepId)).toEqual(['task/entity/model.comment/scaffold', 'task/entity/model.comment/tests', HTTP, 'task/entity/model.comment/pages'])
+    await writeFile(join(app, 'db/schema.ts'), `${SCHEMA}\n// touched twice\n`, 'utf8')
+    const redone = await verify(plan, app)
+    // The scaffold and pages steps verified in the run before and still stand; the data step is redone.
+    expect(redone.skipped).toEqual(['task/entity/model.comment/scaffold', 'task/entity/model.comment/pages'])
+    expect(redone.steps.map((step) => step.stepId)).toContain(DATA)
 
     const revised = await writePlan('lift-revised.plan.json', { ...loadCommentsPlan(), title: 'Revised' })
     await writeFile(join(app, '.guren/plans/lift-revised.state.json'), JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [DATA]: record } }), 'utf8')

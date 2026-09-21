@@ -6,7 +6,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
@@ -43,10 +43,10 @@ export interface PlanVerificationSummary {
 
 /**
  * An element its step verified is `verified` while every fingerprinted file still hashes
- * the same, and `drifted` once one does not or cannot be read. Only an element at its
- * completion state, or `unjudged`, is lifted, and only when the fingerprint covers its own
- * files: a record that fingerprinted nothing of it could never expire. A record from
- * another plan digest is stale and lifts nothing. `hashes` is what the files hash to now.
+ * the same, and `drifted` once one does not or cannot be read. Lifted: an element at its
+ * completion state or `unjudged`, and one that exists in files only when the record covers
+ * them, since a result nothing could expire is not one; a `drop` and an `unjudged` element
+ * have no file, the readers re-reading their absence. A record of another digest is stale.
  */
 export function applyVerification(
   status: PlanStatus,
@@ -70,17 +70,19 @@ export function applyVerification(
       const changed = Object.entries(recorded)
         .filter(([file, hash]) => hash === null || hashes.get(file) !== hash)
         .map(([file]) => file)
+      const verifiedBy = `Verified ${record.ranAt} by ${step.id}`
       for (const id of step.elementIds) {
         const element = lifted.get(id)
         if (!element) continue
-        const verifiedBy = `Verified ${record.ranAt} by ${step.id}`
+        const uncovered = element.files.filter((file) => !(file in recorded))
+        const fileless = element.change === 'drop' || element.state === 'unjudged'
         if (!awaitsVerification(element)) {
           element.notes.push(`${verifiedBy}, and no longer at the state that completes it.`)
-        } else if (element.files.length === 0) {
+        } else if (element.files.length === 0 && !fileless) {
           element.notes.push(`${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
-        } else if (element.files.some((file) => !(file in recorded))) {
+        } else if (uncovered.length > 0) {
           element.state = 'drifted'
-          element.notes.push(`${verifiedBy}; now in a file that run did not fingerprint: ${element.files.filter((file) => !(file in recorded)).join(', ')}.`)
+          element.notes.push(`${verifiedBy}; now in a file that run did not fingerprint: ${uncovered.join(', ')}.`)
         } else if (changed.length === 0) {
           element.state = 'verified'
         } else {
@@ -105,27 +107,27 @@ export async function overlayVerification(
   plan: PlanDraft | Plan,
   status: PlanStatus,
   derivation: PlanTaskDerivation,
+  /** A state file that would not read before this command replaced it, which a fresh read cannot show. */
+  replacedUnreadable?: string,
 ): Promise<{ status: PlanStatus<PlanElementState>; verification: PlanVerificationSummary }> {
   const slug = planSlug(planPath)
   const read = await readPlanState(root, slug)
   const records = read.state?.steps ?? {}
   const files = Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files))
   const applied = applyVerification(status, derivation, records, planDigest(plan), await hashFiles(root, files))
+  const unreadable = read.unreadable ?? (replacedUnreadable ? `${replacedUnreadable}; this run replaced it, and its other records are gone` : undefined)
   return {
     status: applied.status,
     verification: {
       stateFile: toPosixRelative(root, planStatePath(root, slug)),
       staleSteps: applied.staleSteps,
-      ...(read.unreadable ? { unreadable: read.unreadable } : {}),
+      ...(unreadable ? { unreadable } : {}),
     },
   }
 }
 
-/** Whether `path` names a readable file, for a caller that must not treat a directory as one. */
-export async function isReadableFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile()
-  } catch {
-    return false
-  }
+/** Whether a verified record still stands: same plan, and every fingerprinted file hashing as it did. */
+export function recordStillHolds(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>): boolean {
+  if (record.outcome !== 'verified' || record.planDigest !== digest) return false
+  return Object.entries(record.fingerprint.files).every(([file, hash]) => hash !== null && hashes.get(file) === hash)
 }

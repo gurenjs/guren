@@ -15,8 +15,7 @@ import { runAudit } from './audit'
 import { getChangedFiles, runGit } from './changed-files'
 import { runCheck } from './check'
 import { formatFinding, gatingResults } from './check-result'
-import { cliEntry } from './cli-entry'
-import { capFindings, nonEmptyLines, OUTPUT_TAIL_LINES, outputFindings, readScripts, resolveScriptCommand } from './command-output'
+import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
 import { isLintable, runOxlint } from './lint-run'
 import { bunExecutable, runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
 
@@ -127,7 +126,7 @@ async function lintStage(ctx: StageContext): Promise<StageOutcome> {
     return {
       status: 'fail',
       reason: `oxlint exited ${run.exitCode} without linting`,
-      findings: nonEmptyLines(run.output).slice(-OUTPUT_TAIL_LINES),
+      findings: outputTail(run.output),
     }
   }
   // Warnings do not fail (the CI `bun run lint` rule) but are reported: the
@@ -165,7 +164,7 @@ async function auditStage(ctx: StageContext): Promise<StageOutcome> {
 }
 
 const STAGE_RUNNERS: Record<GateStageName, (ctx: StageContext) => Promise<StageOutcome>> = {
-  codegen: (ctx) => scriptStage(ctx, 'codegen', ['guren codegen', [bunExecutable(), cliEntry(), 'codegen']], /error|Error|failed/u),
+  codegen: (ctx) => scriptStage(ctx, 'codegen', codegenFallback(), OUTPUT_ERROR_PATTERN),
   typecheck: (ctx) => scriptStage(ctx, 'typecheck', null, /error TS\d+/u),
   lint: lintStage,
   check: checkStage,

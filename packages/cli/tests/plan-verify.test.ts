@@ -6,12 +6,12 @@ import { dirname, join } from 'node:path'
 import type { CheckReport } from '../src/check-result'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { planDigest, planSlug, PLAN_STATE_VERSION, readPlanState, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
-import { summarize, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
+import { judgePlan, summarize, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
 import { applyVerification, hashFiles, sha256 } from '../src/plan/verification'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
 import type { CapturedExec, CapturedRun } from '../src/subprocess'
-import { loadCommentsPlan } from './plan-fixture'
+import { loadCommentsPlan, planAppState } from './plan-fixture'
 
 const HTTP = 'task/entity/model.comment/http'
 const DATA = 'task/entity/model.comment/data'
@@ -47,20 +47,22 @@ afterAll(async () => {
 
 type ElementOverride = Partial<Pick<PlanElementStatus, 'state' | 'files'>>
 
+/** The file an element of the fixture would be found in, were it written. */
+function filesFor(id: string): string[] {
+  if (id.startsWith('column.')) return ['db/schema.ts']
+  if (id.startsWith('model.')) return ['app/Models/Comment.ts']
+  return ['app/Http/Controllers/CommentController.ts']
+}
+
 /**
- * One element per id a step owns, at the state its kind completes at unless `overrides`
- * says otherwise. The verifier reads `state`, `completesAt`, `change` and `files` and
- * nothing else; what `judgePlan()` puts in them is `plan-status.test.ts`'s to pin.
+ * The fixture as `judgePlan()` judges it against the fixture app, every element then
+ * moved to the state its kind completes at, with files as if written, unless `overrides`
+ * says otherwise. `completesAt` and `change` are the judge's own, not a second copy.
  */
 function statusOf(overrides: Record<string, ElementOverride> = {}): PlanStatus {
-  const elements: PlanElementStatus[] = derivation.tasks.flatMap((task) =>
-    task.steps.flatMap((step) =>
-      step.elementIds.map((id): PlanElementStatus => {
-        const completesAt = id.startsWith('route.') || id.startsWith('action.') || id.startsWith('validator.') || id.startsWith('view.') ? 'wired' : 'present'
-        const files = id.startsWith('column.') ? ['db/schema.ts'] : id.startsWith('model.') ? ['app/Models/Comment.ts'] : ['app/Http/Controllers/CommentController.ts']
-        return { id, section: 'models', change: id === 'model.post' ? 'existing' : 'add', label: id, state: completesAt, completesAt, properties: [], notes: [], files, ...overrides[id] }
-      }),
-    ),
+  const judged = judgePlan(plan, planAppState())
+  const elements = judged.elements.map(
+    (element): PlanElementStatus => ({ ...element, state: element.completesAt, files: filesFor(element.id), notes: [], ...overrides[element.id] }),
   )
   return { elements, summary: summarize(elements) }
 }
@@ -104,9 +106,10 @@ function checkReport(checks: CheckReport['checks']): CheckReport {
 }
 
 function verifier(status: PlanStatus, fake: FakeExec, overrides: Partial<PlanVerifierOptions> = {}): PlanVerifier {
-  return new PlanVerifier(plan, status, derivation, {
+  return new PlanVerifier(plan, derivation, {
     root: ROOT,
     planDigest: 'digest',
+    status: async () => status,
     exec: fake.exec,
     timeoutMs: 1000,
     scripts: { codegen: 'guren codegen', typecheck: 'tsc --noEmit', 'db:migrate': 'guren db:migrate' },
@@ -226,6 +229,29 @@ describe('PlanVerifier', () => {
     expect(blocked.record.outcome).toBe('blocked')
     expect(commandsOf(failed)['db:migrate']).toBe('fail')
     expect(failed.record.outcome).toBe('failed')
+  })
+
+  test('should call a step failed when a command failed, whatever else was blocked', async () => {
+    const fake = fakeExec({ 'run db:migrate': { exitCode: 1, stderr: 'ECONNREFUSED\n' }, 'run typecheck': { exitCode: 2, stdout: 'a.ts(1,1): error TS1\n' } })
+
+    const step = await verifier(statusOf(), fake).verify(DATA)
+
+    expect(commandsOf(step)).toEqual({ codegen: 'pass', 'db:migrate': 'blocked', typecheck: 'fail' })
+    expect(step.record.outcome).toBe('failed')
+  })
+
+  test('should not run what reads the generated files once codegen did not pass', async () => {
+    const fake = fakeExec({ 'run codegen': { exitCode: 1, stderr: 'error: pages/Bad.tsx has no default export\n' } })
+
+    const step = await verifier(statusOf(), fake).verify(HTTP)
+
+    expect(step.record.outcome).toBe('failed')
+    expect(step.record.commands.map((command) => [command.command, command.status, command.reason])).toEqual([
+      ['codegen', 'fail', '`bun run codegen` exited 1'],
+      ['check', 'blocked', '`bun run codegen` did not pass, so this did not run'],
+      ['tests', 'blocked', '`bun run codegen` did not pass, so this did not run'],
+    ])
+    expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
   })
 
   test('should block a command that timed out', async () => {
@@ -368,9 +394,9 @@ describe('applyVerification', () => {
     const states = Object.fromEntries(status.elements.map((element) => [element.id, element.state]))
     expect(states['column.comment.id']).toBe('verified')
     expect(states['model.comment']).toBe('verified')
-    expect(states['model.post']).toBe('present')
+    expect(states['model.post']).toBe('verified')
     expect(states['route.comments.store']).toBe('wired')
-    expect(status.summary.states.verified).toBe(5)
+    expect(status.summary.states.verified).toBe(6)
     expect(staleSteps).toEqual([])
   })
 
@@ -394,6 +420,19 @@ describe('applyVerification', () => {
 
     expect(missing.status.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('drifted')
     expect(unread.status.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('drifted')
+  })
+
+  test('should lift a drop and an unjudged element, which have no file to cover', async () => {
+    const hashes = await hashFiles(ROOT, DATA_FILES)
+    const status = statusOf({ 'column.comment.id': { files: [] }, 'column.comment.body': { state: 'unjudged', files: [] } })
+    const dropped = status.elements.find((element) => element.id === 'column.comment.id')!
+    dropped.change = 'drop'
+    dropped.completesAt = 'present'
+
+    const { status: lifted } = applyVerification(status, derivation, { [DATA]: record() }, 'digest', hashes)
+
+    expect(lifted.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('verified')
+    expect(lifted.elements.find((element) => element.id === 'column.comment.body')!.state).toBe('verified')
   })
 
   test('should lift nothing of an element the fingerprint does not cover', async () => {

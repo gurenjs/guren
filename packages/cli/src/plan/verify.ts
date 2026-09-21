@@ -4,7 +4,7 @@
  * step's elements. `bun test` boots the application and `db:migrate` opens the configured
  * database, so this runs where those can. What cannot run here (no script, no tool, no
  * database reachable, a timeout) is `blocked`, never a failed implementation.
- * Subprocesses go through `exec`, the seam tests fake.
+ * Subprocesses go through `exec`, the seam tests fake. Callers verify one step at a time.
  */
 
 import { readFile, rm } from 'node:fs/promises'
@@ -13,8 +13,7 @@ import { join } from 'node:path'
 
 import { runCheck } from '../check'
 import { formatFinding, gatingResults, type CheckReport } from '../check-result'
-import { cliEntry } from '../cli-entry'
-import { capFindings, nonEmptyLines, OUTPUT_TAIL_LINES, outputFindings, resolveScriptCommand } from '../command-output'
+import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, resolveScriptCommand } from '../command-output'
 import { discoverTestFiles, toPosixRelative } from '../discovery'
 import { bunExecutable, type CapturedExec, type CapturedRun } from '../subprocess'
 import {
@@ -41,7 +40,11 @@ export interface PlanVerifierOptions {
   root: string
   /** What every record of this verifier names as the plan it ran against. */
   planDigest: string
-  /** Defaults to a real subprocess. */
+  /**
+   * The plan's status, asked for once, after the first step's `codegen` has run: judged
+   * earlier it reads a tree with no generated files, which `blocked`s what imports them.
+   */
+  status: () => Promise<PlanStatus>
   exec: CapturedExec
   /** Per command. A child killed for it is `blocked`. */
   timeoutMs: number
@@ -78,7 +81,6 @@ const MISSING_TOOL_EXIT_CODE = 127
 const MISSING_TOOL_PATTERN = /command not found/iu
 
 const TYPECHECK_PATTERN = /error TS\d+/u
-const CODEGEN_PATTERN = /error|Error|failed/u
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -110,9 +112,10 @@ export async function acceptanceTestFiles(root: string, files: readonly string[]
   return matched.sort()
 }
 
+/** A failed command is the implementation's whatever else was blocked, so it names the outcome first. */
 function stepOutcome(commands: readonly PlanCommandRecord[], incomplete: readonly string[]): PlanStepRecord['outcome'] {
-  if (commands.some((command) => command.status === 'blocked')) return 'blocked'
   if (commands.some((command) => command.status === 'fail')) return 'failed'
+  if (commands.some((command) => command.status === 'blocked')) return 'blocked'
   return incomplete.length > 0 ? 'incomplete' : 'verified'
 }
 
@@ -150,12 +153,15 @@ function notFailing(ids: readonly string[], behaviours: readonly AcceptanceBehav
   return findings
 }
 
-interface TestRun {
+interface TestSelection {
   /** App-relative, sorted: what `bun test` is given. */
   files: string[]
   label: string
-  /** Set once a tests command ran the files. */
-  result?: CapturedRun
+}
+
+interface TestOutcome extends TestSelection {
+  result: CapturedRun
+  /** Absent when the run timed out. */
   report?: AcceptanceReport
 }
 
@@ -163,31 +169,50 @@ interface TestRun {
  * Runs steps of one plan against one application. A command runs once per verifier and
  * its result is reused, since a verifier lives for one invocation and every step's list
  * opens with `codegen`, so nothing is judged before the generated files exist. One
- * `bun test` runs per file set; `tests` and `tests:fail` judge the same run differently.
+ * `bun test` runs per acceptance-id set; `tests` and `tests:fail` judge the same run.
  */
 export class PlanVerifier {
   private readonly commands = new Map<string, Promise<PlanCommandRecord>>()
-  /** Keyed by the step's acceptance ids: the selected files, then the run over them. */
-  private readonly testRuns = new Map<string, Promise<TestRun>>()
-  private readonly elements: Map<string, PlanElementStatus>
+  private readonly selections = new Map<string, Promise<TestSelection>>()
+  private readonly outcomes = new Map<string, Promise<TestOutcome>>()
   private readonly declaredIds: string[]
+  private readonly check: () => Promise<CheckReport>
+  private readonly testFiles: () => Promise<string[]>
+  private readonly now: () => Date
+  private statusPromise: Promise<Map<string, PlanElementStatus>> | undefined
   private testFilesPromise: Promise<string[]> | undefined
 
   constructor(
     plan: PlanDraft | Plan,
-    status: PlanStatus,
     private readonly derivation: PlanTaskDerivation,
     private readonly options: PlanVerifierOptions,
   ) {
-    this.elements = new Map(status.elements.map((element) => [element.id, element]))
     this.declaredIds = planAcceptanceIds(plan)
+    this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true }))
+    this.testFiles = options.testFiles ?? (() => discoverTestFiles(options.root))
+    this.now = options.now ?? (() => new Date())
+  }
+
+  /** The status the steps were judged against, or a fresh judgement when none ran. */
+  status(): Promise<PlanStatus> {
+    return this.elements().then((elements) => ({ elements: [...elements.values()], summary: this.summary! }))
+  }
+
+  private summary: PlanStatus['summary'] | undefined
+
+  private elements(): Promise<Map<string, PlanElementStatus>> {
+    this.statusPromise ??= this.options.status().then((status) => {
+      this.summary = status.summary
+      return new Map(status.elements.map((element) => [element.id, element]))
+    })
+    return this.statusPromise
   }
 
   async verify(stepId: string): Promise<PlanStepVerification> {
     const found = findPlanStep(this.derivation, stepId)
     if (!found) throw new Error(`no step ${stepId} is derived from this plan`)
     const started = performance.now()
-    const ranAt = (this.options.now ?? (() => new Date()))().toISOString()
+    const ranAt = this.now().toISOString()
     const run = await this.runStep(found.step)
     return {
       stepId,
@@ -197,30 +222,50 @@ export class PlanVerifier {
   }
 
   private async runStep(step: PlanDerivedStep): Promise<Omit<PlanStepRecord, 'planDigest' | 'ranAt' | 'durationMs'>> {
-    const commands: PlanCommandRecord[] = []
-    // Sequential on purpose: codegen writes what typecheck, check and the tests read.
-    for (const command of step.verify) commands.push(await this.command(command, step))
+    const commands = await this.runCommands(step)
+    const elements = await this.elements()
 
     // An owned id the status did not judge can never verify: listing it keeps a new section from reading as green.
     const incomplete: string[] = []
     const owned: PlanElementStatus[] = []
     for (const id of step.elementIds) {
-      const element = this.elements.get(id)
+      const element = elements.get(id)
       if (!element) incomplete.push(`${id}: not judged by plan:status`)
       else if (!awaitsVerification(element)) incomplete.push(`${id}: ${element.state}`)
       else owned.push(element)
     }
 
-    const tests = await this.testRun(step)
-    const files = [...new Set([...owned.flatMap((element) => element.files), ...tests.files])].sort()
+    const selection = await this.selection(step)
+    const files = [...new Set([...owned.flatMap((element) => element.files), ...selection.files])].sort()
     const fingerprint: PlanFingerprint = {
       files: Object.fromEntries(await hashFiles(this.options.root, files)),
       environment: currentEnvironment(),
     }
 
-    const behaviours = tests.report?.state === 'judged' ? tests.report.behaviours : []
+    const report = (await this.outcomes.get(this.testKey(step)))?.report
+    const behaviours = report?.state === 'judged' ? report.behaviours : []
     const acceptance = step.acceptanceIds.map((id) => ({ id, status: behaviours.find((behaviour) => behaviour.id === id)?.status ?? ('pending' as const) }))
     return { outcome: stepOutcome(commands, incomplete), commands, acceptance, incomplete, fingerprint }
+  }
+
+  /**
+   * Sequential on purpose: codegen writes what typecheck, check and the tests read. Once
+   * codegen has not passed, the rest is not run: its findings would blame the code for
+   * the generated files it lacks.
+   */
+  private async runCommands(step: PlanDerivedStep): Promise<PlanCommandRecord[]> {
+    const commands: PlanCommandRecord[] = []
+    let stopped: PlanCommandRecord | undefined
+    for (const command of step.verify) {
+      if (stopped) {
+        commands.push({ command, label: command, status: 'blocked', reason: `\`${stopped.label}\` did not pass, so this did not run`, durationMs: 0, findings: [] })
+        continue
+      }
+      const record = await this.command(command, step)
+      commands.push(record)
+      if (command === 'codegen' && record.status !== 'pass') stopped = record
+    }
+    return commands
   }
 
   private command(command: PlanVerifyCommand, step: PlanDerivedStep): Promise<PlanCommandRecord> {
@@ -247,13 +292,13 @@ export class PlanVerifier {
   private dispatch(command: PlanVerifyCommand, step: PlanDerivedStep): Promise<CommandOutcome> {
     switch (command) {
       case 'codegen':
-        return this.script('codegen', ['guren codegen', [bunExecutable(), cliEntry(), 'codegen']], CODEGEN_PATTERN)
+        return this.script('codegen', codegenFallback(), OUTPUT_ERROR_PATTERN)
       case 'typecheck':
         return this.script('typecheck', null, TYPECHECK_PATTERN)
       case 'db:migrate':
-        return this.script('db:migrate', null, /error|Error|failed/u, DATABASE_SIGNATURES)
+        return this.script('db:migrate', null, OUTPUT_ERROR_PATTERN, DATABASE_SIGNATURES)
       case 'check':
-        return this.check()
+        return this.runCheck()
       case 'tests':
       case 'tests:fail':
         return this.tests(command, step)
@@ -287,11 +332,11 @@ export class PlanVerifier {
     return { label, status: 'fail', reason: `\`${label}\` exited ${result.exitCode}`, findings }
   }
 
-  private async check(): Promise<CommandOutcome> {
+  private async runCheck(): Promise<CommandOutcome> {
     const label = 'guren check'
     let report: CheckReport
     try {
-      report = await (this.options.check ?? (() => runCheck({ cwd: this.options.root, json: true })))()
+      report = await this.check()
     } catch (error) {
       return { label, status: 'blocked', reason: `could not run: ${reasonOf(error)}`, findings: [] }
     }
@@ -303,31 +348,43 @@ export class PlanVerifier {
     return [...step.acceptanceIds].sort().join('\0')
   }
 
-  /** The step's test files, and with `run` the one run over them, whichever tests command asked first. */
-  private testRun(step: PlanDerivedStep, run = false): Promise<TestRun> {
+  private selection(step: PlanDerivedStep): Promise<TestSelection> {
     const key = this.testKey(step)
-    const selected = this.testRuns.get(key) ?? this.selectTests(step)
-    const pending = run ? selected.then((entry) => (entry.result ? entry : this.runTests(entry))) : selected
-    this.testRuns.set(key, pending)
+    let pending = this.selections.get(key)
+    if (!pending) {
+      pending = this.selectTests(step)
+      this.selections.set(key, pending)
+    }
     return pending
   }
 
-  private async selectTests(step: PlanDerivedStep): Promise<TestRun> {
-    this.testFilesPromise ??= (this.options.testFiles ?? (() => discoverTestFiles(this.options.root)))().catch((): string[] => [])
+  private async selectTests(step: PlanDerivedStep): Promise<TestSelection> {
+    this.testFilesPromise ??= this.testFiles().catch((): string[] => [])
     const files = await acceptanceTestFiles(this.options.root, await this.testFilesPromise, step.acceptanceIds)
     return { files, label: `bun test ${files.join(' ')}`.trimEnd() }
+  }
+
+  /** The one run over the step's files, memoized as a promise so two commands on one key share it. */
+  private outcome(step: PlanDerivedStep): Promise<TestOutcome> {
+    const key = this.testKey(step)
+    let pending = this.outcomes.get(key)
+    if (!pending) {
+      pending = this.selection(step).then((selection) => this.runTests(selection))
+      this.outcomes.set(key, pending)
+    }
+    return pending
   }
 
   /**
    * `bun test` on the selected files, never `-t`: a filtered-out case is written as
    * skipped, which reads as failing. The junit report is read before the outfile goes.
    */
-  private async runTests(entry: TestRun): Promise<TestRun> {
+  private async runTests(selection: TestSelection): Promise<TestOutcome> {
     const outfile = join(tmpdir(), `guren-plan-verify-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.xml`)
     try {
-      const result = await this.exec([bunExecutable(), 'test', ...entry.files, '--reporter=junit', `--reporter-outfile=${outfile}`])
+      const result = await this.exec([bunExecutable(), 'test', ...selection.files, '--reporter=junit', `--reporter-outfile=${outfile}`])
       const junit = await readFile(outfile, 'utf8').catch(() => undefined)
-      return { ...entry, result, ...(result.timedOut ? {} : { report: acceptanceStatus(junit, this.declaredIds) }) }
+      return { ...selection, result, ...(result.timedOut ? {} : { report: acceptanceStatus(junit, this.declaredIds) }) }
     } finally {
       await rm(outfile, { force: true })
     }
@@ -342,15 +399,15 @@ export class PlanVerifier {
   private async tests(command: 'tests' | 'tests:fail', step: PlanDerivedStep): Promise<CommandOutcome> {
     const ids = step.acceptanceIds
     if (ids.length === 0) return { label: 'bun test', status: 'pass', reason: 'the step has no acceptance behaviours', findings: [] }
-    const selected = await this.testRun(step)
-    if (selected.files.length === 0) {
+    const { files } = await this.selection(step)
+    if (files.length === 0) {
       return { label: 'bun test', status: 'fail', reason: `no test file carries ${ids.map((id) => `[${id}]`).join(', ')} as a literal token`, findings: [] }
     }
 
-    const { label, result, report } = await this.testRun(step, true)
-    if (!result || result.timedOut) return { label, status: 'blocked', reason: `\`${label}\` timed out after ${this.options.timeoutMs} ms`, findings: [] }
-    const tail = capFindings(nonEmptyLines(`${result.stdout}\n${result.stderr}`).slice(-OUTPUT_TAIL_LINES))
-    if (!report || report.state === 'blocked') return { label, status: 'blocked', reason: report?.reason ?? 'no junit report was read', findings: tail }
+    const { label, result, report } = await this.outcome(step)
+    if (!report) return { label, status: 'blocked', reason: `\`${label}\` timed out after ${this.options.timeoutMs} ms`, findings: [] }
+    const tail = outputTail(`${result.stdout}\n${result.stderr}`)
+    if (report.state === 'blocked') return { label, status: 'blocked', reason: report.reason, findings: tail }
     if (report.state === 'invalid') {
       return { label, status: 'fail', reason: 'the test report names behaviours the plan does not, or one behaviour in several files', findings: capFindings(report.errors.map(describeAcceptanceError)) }
     }
