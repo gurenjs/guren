@@ -217,6 +217,28 @@ describe('SqsDriver', () => {
     })
   })
 
+  test('should extend visibility on the queue the message was received on', async () => {
+    const driverWithUrls = new SqsDriver(adapter, {
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/default',
+      queueUrls: { emails: 'https://sqs.us-east-1.amazonaws.com/123/emails' },
+    })
+    adapter.receiveMessage = async () => ({
+      body: JSON.stringify(createTestJob({ queue: 'default' })),
+      receiptHandle: 'receipt-emails',
+    })
+
+    const popped = await driverWithUrls.pop('emails')
+    await driverWithUrls.release(popped!, 5000)
+
+    const visibility = adapter.calls.filter((call) => call.method === 'changeMessageVisibility')
+    expect(visibility).toHaveLength(1)
+    expect(visibility[0].params).toEqual({
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/emails',
+      receiptHandle: 'receipt-emails',
+      visibilityTimeout: 5,
+    })
+  })
+
   test('should delete the popped message when a job fails permanently', async () => {
     const testJob = createTestJob()
     adapter.receiveMessage = async () => ({
