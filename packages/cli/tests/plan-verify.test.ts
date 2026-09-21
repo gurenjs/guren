@@ -627,6 +627,17 @@ describe('applyWaivers', () => {
     expect(lifted.summary.states.waived).toBe(0)
   })
 
+  test('should leave an existing element alone, which a hand-edited log is the only way to waive', () => {
+    const status = statusOf({ 'column.post.id': { state: 'present' } })
+
+    const lifted = applyWaivers(status, new Map([['column.post.id', waiver('column.post.id')]]))
+
+    const column = elementOf(lifted, 'column.post.id')
+    expect(column.state).toBe('present')
+    expect(column.notes).toContain('Waived 2026-09-21T12:00:00.000Z: the redesign lands in the next plan. It is an existing element, no part of completion, so the waiver is not needed.')
+    expect(lifted.summary.states.waived).toBe(0)
+  })
+
   test('should not touch the status it was given', () => {
     const status = statusOf({ 'policy.comment': { state: 'planned' } })
     const before = JSON.stringify(status)

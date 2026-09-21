@@ -367,7 +367,7 @@ const planWaiveCommand = defineCommand({
   meta: {
     name: 'plan:waive',
     description:
-      "Accept elements of an approved plan incomplete, with a reason, in the decision log beside the plan (RFC 0030 §6). The log is committed; a waiver names the plan's hash, so a revision does not inherit it. Runs nothing and loads no application.",
+      "Accept elements of an approved plan incomplete, with a reason, in the decision log beside the plan (RFC 0030 §6). The log is committed; a waiver names the plan's hash, so a revision does not inherit it. Loads no application, and runs nothing but `git config` to name who waived.",
   },
   args: {
     plan: {

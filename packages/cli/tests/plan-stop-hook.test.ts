@@ -12,7 +12,8 @@ import { judgePlan, type PlanElementState, type PlanElementStatus } from '../src
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
-import { loadCommentsPlan, planAppState } from './plan-fixture'
+import { planWaiveFile } from '../src/plan-waive'
+import { loadCommentsPlan, planAppState, TEST_BASELINE } from './plan-fixture'
 
 // The verification itself is faked here (`verify`); the shipped hooks run it for real in
 // agent-hook-gate.test.ts. What this covers is the decision and what it writes to state.
@@ -183,6 +184,26 @@ describe('planStopHookFindings', () => {
     // An element of another step being blocked is not this step's stall.
     const other = await createApp('blocked-elsewhere', { active: active() })
     expect((await planStopHookFindings(other, { stopHookActive: false }, { verify: async () => report(HTTP, record(), ['model.comment']) })).block).toBe(true)
+  })
+
+  test('should hold a record resting on a waiver, and re-verify it once the waiver is gone', async () => {
+    const approved = { ...loadCommentsPlan(), baseline: TEST_BASELINE }
+    const resting = record({ outcome: 'verified', incomplete: [], waived: ['policy.comment'], planDigest: planDigest(parsePlanDocument(approved)) })
+    const app = await createApp('waived', { steps: { [HTTP]: resting }, active: active() }, approved)
+    const plan = join(app, 'comments.plan.json')
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], reason: 'the policy lands in the next plan', now: NOW })
+    let verified = 0
+    const verify = async (): Promise<PlanVerifyReport> => {
+      verified += 1
+      return report(HTTP, record())
+    }
+
+    expect(await planStopHookFindings(app, { stopHookActive: false }, { verify })).toEqual({ block: false })
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], remove: true })
+    const withdrawn = await planStopHookFindings(app, { stopHookActive: false }, { verify })
+
+    expect(verified).toBe(1)
+    expect(withdrawn.block).toBe(true)
   })
 
   test('should let a verified step through silently', async () => {

@@ -104,8 +104,10 @@ export function applyVerification(
 
 /**
  * A waiver lifts an element to `waived` whatever the readers found, since a person accepted
- * it incomplete (RFC 0030 §6). An element its step verified keeps `verified`: the waiver is
- * then unnecessary and the note says so, so removing it costs nothing.
+ * it incomplete (RFC 0030 §6). Two elements keep their state, with a note saying the waiver
+ * is not needed: one its step verified, a stronger answer than acceptance, and an `existing`
+ * one, which the plan changes nothing about and which `plan:waive` refuses. The second is
+ * reached only through a hand-edited log.
  */
 export function applyWaivers(status: PlanStatus<PlanElementState>, waivers: ReadonlyMap<string, PlanWaiver>): PlanStatus<PlanElementState> {
   if (waivers.size === 0) return status
@@ -114,6 +116,7 @@ export function applyWaivers(status: PlanStatus<PlanElementState>, waivers: Read
     if (!waiver) return element
     const taken = `Waived ${waiver.at}${waiver.by ? ` by ${waiver.by}` : ''}: ${waiver.reason}`
     if (element.state === 'verified') return { ...element, notes: [...element.notes, `${taken}. It is verified, so the waiver is not needed.`] }
+    if (element.change === 'existing') return { ...element, notes: [...element.notes, `${taken}. It is an existing element, no part of completion, so the waiver is not needed.`] }
     return { ...element, state: 'waived', notes: [...element.notes, taken] }
   })
   return { elements, summary: summarize(elements) }

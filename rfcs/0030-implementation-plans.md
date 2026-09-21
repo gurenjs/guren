@@ -1144,7 +1144,8 @@ with these readings (`packages/cli/src/plan-waive.ts`, `plan/decisions.ts`).
   stops standing once the waiver is withdrawn, so `plan:next` returns the
   step again rather than skipping it forever.
 - The command refuses an element the plan does not declare, one in a section
-  `plan:status` does not judge (flows, tasks, behaviours, questions), a
+  `plan:status` does not judge (flows, tasks, behaviours, questions), an
+  `existing` element, which the table above keeps out of completion, a
   missing `--reason`, and a draft, which has no hash a waiver could name.
   `--remove` deletes a waiver. Out of scope here: `plan:close`, which is what
   reads the log to decide a plan is finished, and any waiver of a whole step

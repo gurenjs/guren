@@ -1,8 +1,9 @@
 /**
  * `guren plan:waive` (RFC 0030 §6, §7): accept one element of an approved plan incomplete,
- * with a reason, in the decision log beside the plan. It runs nothing and loads no
- * application: a waiver is a person's decision, and the readers have already said what they
- * find. `plan:status`, `plan:verify` and the Stop hook report it through the one overlay.
+ * with a reason, in the decision log beside the plan. It loads no application and runs
+ * nothing but `git config`, which names who waived: a waiver is a person's decision, and
+ * the readers have already said what they find. `plan:status`, `plan:verify` and the Stop
+ * hook report it through the one overlay.
  */
 
 import { basename } from 'node:path'
@@ -10,7 +11,7 @@ import { basename } from 'node:path'
 import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { planDecisionsPath, planWaiverHash, removePlanWaiver, writePlanWaiver, type PlanWaiver } from './plan/decisions'
-import { listPlanElements, type PlanDraft, type PlanElementSection } from './plan/schema'
+import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { PLAN_STATUS_SECTIONS } from './plan/status'
 import { runCaptured, type CapturedExec } from './subprocess'
 
@@ -61,6 +62,29 @@ function sectionOf(plan: PlanDraft): Map<string, PlanElementSection> {
   return new Map(listPlanElements(plan).map((element) => [element.id, element.section]))
 }
 
+/** The `existing` elements, which are nobody's work and so have no state a waiver could lift. A console command declares no change and is never one. */
+function existingIds(plan: PlanDraft): Set<string> {
+  const ids = new Set<string>()
+  const add = (items: ReadonlyArray<{ id: string; change: PlanChange }>): void => {
+    for (const item of items) if (item.change.kind === 'existing') ids.add(item.id)
+  }
+  for (const model of plan.models) {
+    add([model])
+    add(model.columns)
+  }
+  for (const controller of plan.controllers) {
+    add([controller])
+    add(controller.actions)
+  }
+  add(plan.validators)
+  add(plan.routes)
+  add(plan.views)
+  add(plan.resources)
+  add(plan.policies)
+  add(plan.sideEffects)
+  return ids
+}
+
 const JUDGED = new Set<PlanElementSection>(PLAN_STATUS_SECTIONS)
 
 export async function planWaiveFile(planPath: string, options: PlanWaiveFileOptions): Promise<PlanWaiveReport> {
@@ -75,6 +99,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   }
 
   const sections = sectionOf(plan)
+  const existing = existingIds(plan)
   for (const id of options.elementIds) {
     const section = sections.get(id)
     if (section === undefined) {
@@ -84,6 +109,9 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
       throw new CliError(
         `"${id}" is a ${section} element, which plan:status does not judge, so it has no state a waiver could lift. Waive the elements it covers instead.`,
       )
+    }
+    if (existing.has(id)) {
+      throw new CliError(`"${id}" is an existing element, which the plan changes nothing about, so it is no part of completion and there is nothing to waive.`)
     }
   }
 

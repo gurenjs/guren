@@ -119,6 +119,7 @@ describe('plan:waive', () => {
     await expect(planWaiveFile(plan, { elementIds: ['model.comment'] })).rejects.toThrow('--reason is required')
     await expect(waive(plan, ['model.nope'])).rejects.toThrow('No element "model.nope" is declared by this plan')
     await expect(waive(plan, ['AC-comments-1'])).rejects.toThrow('which plan:status does not judge')
+    await expect(waive(plan, ['column.post.id'])).rejects.toThrow('is an existing element')
     await expect(waive(plan, [])).rejects.toThrow('Name at least one element id')
     expect(await readPlanDecisions(plan)).toEqual({ decisions: undefined })
   })
