@@ -94,6 +94,17 @@ describe('loadPlanAppState', () => {
     expect(state.tables).toEqual([{ identifier: 'posts', tableName: 'posts', module: null, columns: ['id', 'title'] }])
   })
 
+  test("should tag a module's table with the module that declares it", async () => {
+    await writeWorkspaceFiles(cwd, {
+      'modules/billing/index.ts': 'export default {}\n',
+      'modules/billing/db/schema.ts': SCHEMA.replace(/posts/g, 'invoices'),
+    })
+
+    const state = await loadPlanAppState(cwd)
+
+    expect(state.tables).toEqual([{ identifier: 'invoices', tableName: 'invoices', module: 'billing', columns: ['id', 'title'] }])
+  })
+
   test('should report tables as unreadable when a present schema yields none', async () => {
     await writeWorkspaceFiles(cwd, { 'db/schema.ts': 'export const nothing = 1\n' })
 

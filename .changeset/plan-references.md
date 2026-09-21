@@ -15,4 +15,6 @@ another root no longer satisfies an `existing` nor collides with an `add`, and t
 finding names the root. A table name still collides across every root, since each
 module's schema is re-exported from the project's own `db/schema.ts` and lands in one
 migration set. Pages keep being judged by their id, since a module's pages sit in the
-project's own `resources/js/pages` under the module's name.
+project's own `resources/js/pages` under the module's name. An element's `module` must
+be a non-empty string: `""` never named an app root, and a plan carrying one now fails
+to parse.

@@ -335,6 +335,8 @@ interface TargetCheck {
    * sits in. Absent means the root's own names answer both questions.
    */
   collidesWith?: ReadonlyArray<PlanAppName>
+  /** Why a name another app root declares leaves this element unjudged rather than missing. */
+  unjudgedElsewhere?: string
   /**
    * Why an absent name is unconfirmed rather than missing, when the reader answers a
    * lower bound: the result warns and quotes this. A collision is positive evidence either way.
@@ -346,7 +348,10 @@ function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, resul
   const has = (name: string): boolean => existing.includes(name)
   const where = { elementId: target.id, section: target.section }
   const root = target.root === undefined ? 'this application' : scopeName(target.root)
-  const taken = (name: string): PlanAppName | undefined => target.collidesWith?.find((entry) => entry.name === name)
+  // The element's own root first: a name two roots declare collides where the plan puts it.
+  const taken = (name: string): PlanAppName | undefined =>
+    target.collidesWith?.find((entry) => entry.name === name && entry.module === (target.root ?? null))
+    ?? target.collidesWith?.find((entry) => entry.name === name)
   const collides = (name: string): boolean => (target.collidesWith ? taken(name) !== undefined : has(name))
   const collision = (name: string): void => {
     const owner = taken(name)
@@ -362,15 +367,15 @@ function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, resul
     )
   }
   const missing = (name: string): void => {
-    const unconfirmed = target.unconfirmedBecause
     const others = target.elsewhere?.(name) ?? []
+    const unconfirmed = (others.length > 0 ? target.unjudgedElsewhere : undefined) ?? target.unconfirmedBecause
     results.push(
       finding(
         unconfirmed ? 'plan:app-unjudged' : 'plan:app-missing',
         unconfirmed ? 'warn' : 'fail',
         `The ${target.noun} "${name}"${target.scope ?? ''} was not found in ${root}, and the plan's change is "${target.kind}".`
-          + (unconfirmed ? ` ${unconfirmed}` : '')
-          + (others.length > 0 ? ` This application declares one in ${others.join(', ')}.` : ''),
+          + (others.length > 0 ? ` This application declares one in ${others.join(', ')}.` : '')
+          + (unconfirmed ? ` ${unconfirmed}` : ''),
         where,
       ),
     )
@@ -484,6 +489,7 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
           noun: 'table',
           ...scoped,
           collidesWith: declared,
+          unjudgedElsewhere: SHARED_SCHEMA,
         },
         names,
         results,
