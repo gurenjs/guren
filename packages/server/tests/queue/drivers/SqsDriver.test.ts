@@ -1,6 +1,8 @@
-import { describe, test, expect, beforeEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 
 import { SqsDriver, type SqsAdapter } from '../../../src/queue/drivers/SqsDriver'
+import { Job, registerJob, getRegisteredJobs } from '../../../src/queue/Job'
+import { Worker } from '../../../src/queue/Worker'
 import type { QueuedJob } from '../../../src/queue/types'
 import { resetWarnOnce } from '../../../src/support/warn-once'
 import { captureWarnings } from '../../support/warnings'
@@ -54,7 +56,7 @@ function stubMessages(
   receiptHandle: string,
   nextJob: () => QueuedJob = createTestJob,
 ): void {
-  adapter.receiveMessage = async () => ({ body: JSON.stringify(nextJob()), receiptHandle })
+  adapter.receiveMessage = async () => ({ body: JSON.stringify(nextJob()), receiptHandle, receiveCount: 1 })
 }
 
 describe('SqsDriver', () => {
@@ -308,6 +310,7 @@ describe('SqsDriver', () => {
     adapterWithMessage.receiveMessage = async () => ({
       body: JSON.stringify(testJob),
       receiptHandle: 'receipt-123',
+      receiveCount: 1,
     })
 
     const driverWithMessage = new SqsDriver(adapterWithMessage, {
@@ -358,5 +361,107 @@ describe('SqsDriver', () => {
       adapter.changeMessageVisibility = async () => { throw new Error('connection reset') }
       await expect(instance.extendReservation(job)).rejects.toThrow('connection reset')
     })
+  })
+})
+
+describe('SqsDriver polling lifecycle', () => {
+  const queueUrl = 'https://example.test/queue'
+
+  function redeliveryAdapter(job: QueuedJob) {
+    const adapter = createMockAdapter()
+    const body = JSON.stringify(job)
+    let receiveCount = 0
+    let deleted = false
+    adapter.receiveMessage = async () => deleted ? null : {
+      body,
+      receiptHandle: `receipt-${++receiveCount}`,
+      receiveCount,
+    }
+    adapter.deleteMessage = async (params) => {
+      adapter.calls.push({ method: 'deleteMessage', params })
+      deleted = true
+    }
+    return adapter
+  }
+
+  test('retains the receipt when acknowledgement fails so it can be retried', async () => {
+    const adapter = redeliveryAdapter(createTestJob())
+    const driver = new SqsDriver(adapter, { queueUrl })
+    const job = (await driver.pop('default'))!
+    const acknowledge = adapter.deleteMessage!
+    adapter.deleteMessage = async () => { throw new Error('connection lost') }
+    await expect(driver.delete(job.id)).rejects.toThrow('connection lost')
+    adapter.deleteMessage = acknowledge
+    await driver.delete(job.id)
+    expect(await driver.pop('default')).toBeNull()
+  })
+
+  test('counts retries across driver restarts and removes terminal failures', async () => {
+    const adapter = redeliveryAdapter(createTestJob())
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const driver = new SqsDriver(adapter, { queueUrl })
+      const job = (await driver.pop('default'))!
+      job.attempts++ // Worker increments before executing handle().
+      expect(job.attempts).toBe(attempt)
+      if (job.attempts < job.maxAttempts) {
+        await driver.release(job, 2000)
+      } else {
+        await driver.fail(job, new Error('terminal failure'))
+        expect((await driver.getFailedJobs())[0].attempts).toBe(3)
+        expect(await driver.pop('default')).toBeNull()
+      }
+    }
+    expect(adapter.calls.map((call) => call.method)).toEqual([
+      'changeMessageVisibility', 'changeMessageVisibility', 'deleteMessage',
+    ])
+  })
+
+  afterEach(() => {
+    getRegisteredJobs().delete('SqsLifecycleSuccess')
+    getRegisteredJobs().delete('SqsLifecycleFailure')
+  })
+
+  test('a polling worker executes a successful message only once', async () => {
+    let handled = 0
+    class SqsLifecycleSuccess extends Job {
+      async handle() { handled++ }
+    }
+    registerJob(SqsLifecycleSuccess)
+    const adapter = redeliveryAdapter(createTestJob({ name: 'SqsLifecycleSuccess' }))
+    const driver = new SqsDriver(adapter, { queueUrl })
+    await new Worker(driver, { stopWhenEmpty: true, maxJobs: 5 }).start()
+    expect(handled).toBe(1)
+  })
+
+  test('a polling worker stops at maxAttempts and invokes failed once', async () => {
+    let handled = 0
+    let failed = 0
+    class SqsLifecycleFailure extends Job {
+      async handle() { handled++; throw new Error('expected failure') }
+      async failed() { failed++ }
+    }
+    registerJob(SqsLifecycleFailure)
+    const adapter = redeliveryAdapter(createTestJob({ name: 'SqsLifecycleFailure' }))
+    const driver = new SqsDriver(adapter, { queueUrl })
+    await new Worker(driver, { stopWhenEmpty: true, maxJobs: 5 }).start()
+    expect(handled).toBe(3)
+    expect(failed).toBe(1)
+    expect((await driver.getFailedJobs())[0].attempts).toBe(3)
+  })
+
+  test('adds deliveries to an existing attempt count in the body', async () => {
+    const adapter = redeliveryAdapter(createTestJob({ attempts: 2 }))
+    const driver = new SqsDriver(adapter, { queueUrl })
+    expect((await driver.pop('default'))!.attempts).toBe(2)
+    expect((await driver.pop('default'))!.attempts).toBe(3)
+  })
+
+  test('requires a valid receive count rather than resetting retry limits', async () => {
+    for (const receiveCount of [undefined, 0, -1, 1.5, NaN]) {
+      const adapter = createMockAdapter()
+      adapter.receiveMessage = async () => ({ body: JSON.stringify(createTestJob()), receiptHandle: 'receipt', receiveCount })
+      const driver = new SqsDriver(adapter, { queueUrl })
+      await expect(driver.pop('default')).rejects.toThrow('ApproximateReceiveCount')
+    }
   })
 })

@@ -213,6 +213,8 @@ Apps that configure storage in a service provider keep working; see [Apps with s
 | `url` | `''` | Base URL for public file access |
 | `visibility` | `'private'` | Default visibility for new files |
 
+Local disks reject symbolic links anywhere below `root`, including dangling links. The configured root itself may be a symbolic link. Keep the root and its parent directories under trusted ownership: path checks do not protect against another process replacing directories during an operation.
+
 **S3 Driver:**
 | Option | Default | Description |
 |--------|---------|-------------|

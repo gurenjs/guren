@@ -17,7 +17,7 @@ export interface SqsAdapter {
   receiveMessage(params: {
     queueUrl: string
     waitTimeSeconds?: number
-  }): Promise<{ body: string; receiptHandle: string } | null>
+  }): Promise<{ body: string; receiptHandle: string; receiveCount?: number } | null>
 
   /**
    * Optional so adapters written before this method keep compiling; without it
@@ -80,13 +80,18 @@ export function createSqsAdapter(client: { send(command: unknown): Promise<unkno
         new ReceiveMessageCommand({
           QueueUrl: params.queueUrl,
           MaxNumberOfMessages: 1,
+          MessageSystemAttributeNames: ['ApproximateReceiveCount'],
           WaitTimeSeconds: params.waitTimeSeconds ?? 5,
         } as any),
-      )) as { Messages?: Array<{ Body?: string; ReceiptHandle?: string }> }
+      )) as { Messages?: Array<{ Body?: string; ReceiptHandle?: string; Attributes?: Record<string, string> }> }
 
       const msg = result.Messages?.[0]
       if (!msg?.Body || !msg.ReceiptHandle) return null
-      return { body: msg.Body, receiptHandle: msg.ReceiptHandle }
+      return {
+        body: msg.Body,
+        receiptHandle: msg.ReceiptHandle,
+        receiveCount: Number(msg.Attributes?.ApproximateReceiveCount),
+      }
     },
 
     async deleteMessage(params) {
@@ -204,7 +209,14 @@ export class SqsDriver implements QueueDriver {
 
     if (!result) return null
 
+    const receiveCount = result.receiveCount
+    if (receiveCount === undefined || !Number.isSafeInteger(receiveCount) || receiveCount < 1) {
+      throw new Error('SQS polling requires a positive receiveCount from ApproximateReceiveCount.')
+    }
     const job = deserializeJob(result.body)
+    // The worker increments once before handle(). SQS owns the count across
+    // redeliveries and process restarts; changing visibility never edits Body.
+    job.attempts += receiveCount - 1
     this.reservations.set(job.id, { receiptHandle: result.receiptHandle, queueUrl })
     job.reservedAt = new Date()
     return job

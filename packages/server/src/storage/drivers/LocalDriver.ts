@@ -1,5 +1,6 @@
 import {
   readFile,
+  lstat,
   writeFile,
   unlink,
   stat,
@@ -12,7 +13,7 @@ import {
 } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { Readable } from 'node:stream'
-import { join, dirname, resolve, sep } from 'node:path'
+import { join, dirname, resolve, relative, sep } from 'node:path'
 import type { StorageDriver, LocalDriverOptions, PutOptions, FileMetadata, GetStreamOptions } from '../types'
 import { warnOnce } from '../../support/warn-once'
 
@@ -27,11 +28,26 @@ export class LocalDriver implements StorageDriver {
     this.defaultVisibility = options.visibility ?? 'private'
   }
 
-  private fullPath(path: string): string {
+  private async fullPath(path: string): Promise<string> {
     const root = resolve(this.root)
     const candidate = resolve(root, path)
     if (candidate !== root && !candidate.startsWith(root + sep)) {
       throw new Error(`LocalDriver: path escapes the storage root: "${path}"`)
+    }
+    // The configured root is trusted (and may itself be a symlink). Refuse
+    // symlinks below it, including dangling links and links to other disk files.
+    let current = root
+    for (const part of relative(root, candidate).split(sep).filter(Boolean)) {
+      current = join(current, part)
+      try {
+        if ((await lstat(current)).isSymbolicLink()) {
+          throw new Error(`LocalDriver: symbolic links are not allowed in storage paths: "${path}"`)
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'ENOENT' || code === 'ENOTDIR') break
+        throw error
+      }
     }
     return candidate
   }
@@ -47,7 +63,7 @@ export class LocalDriver implements StorageDriver {
     if (options?.visibility) {
       this.warnUnsupportedVisibility(options.visibility, 'put')
     }
-    const fullPath = this.fullPath(path)
+    const fullPath = await this.fullPath(path)
     await this.ensureDirectory(fullPath)
 
     const buffer = typeof content === 'string' ? Buffer.from(content) : content
@@ -62,7 +78,7 @@ export class LocalDriver implements StorageDriver {
   }
 
   async get(path: string): Promise<Buffer | null> {
-    const fullPath = this.fullPath(path)
+    const fullPath = await this.fullPath(path)
 
     try {
       return await readFile(fullPath)
@@ -77,7 +93,7 @@ export class LocalDriver implements StorageDriver {
   }
 
   async getStream(path: string, options?: GetStreamOptions): Promise<ReadableStream<Uint8Array> | null> {
-    const fullPath = this.fullPath(path)
+    const fullPath = await this.fullPath(path)
 
     // A bare createReadStream() fails its open asynchronously, which cannot
     // honour the contract's `null` for a missing file.
@@ -104,11 +120,11 @@ export class LocalDriver implements StorageDriver {
   }
 
   async exists(path: string): Promise<boolean> {
-    return existsSync(this.fullPath(path))
+    return existsSync(await this.fullPath(path))
   }
 
   async delete(path: string): Promise<boolean> {
-    const fullPath = this.fullPath(path)
+    const fullPath = await this.fullPath(path)
 
     try {
       await unlink(fullPath)
@@ -131,8 +147,8 @@ export class LocalDriver implements StorageDriver {
   }
 
   async copy(from: string, to: string): Promise<string> {
-    const fromPath = this.fullPath(from)
-    const toPath = this.fullPath(to)
+    const fromPath = await this.fullPath(from)
+    const toPath = await this.fullPath(to)
 
     await this.ensureDirectory(toPath)
     await copyFile(fromPath, toPath)
@@ -141,8 +157,8 @@ export class LocalDriver implements StorageDriver {
   }
 
   async move(from: string, to: string): Promise<string> {
-    const fromPath = this.fullPath(from)
-    const toPath = this.fullPath(to)
+    const fromPath = await this.fullPath(from)
+    const toPath = await this.fullPath(to)
 
     await this.ensureDirectory(toPath)
     await rename(fromPath, toPath)
@@ -160,19 +176,19 @@ export class LocalDriver implements StorageDriver {
   }
 
   async size(path: string): Promise<number> {
-    const fullPath = this.fullPath(path)
+    const fullPath = await this.fullPath(path)
     const stats = await stat(fullPath)
     return stats.size
   }
 
   async lastModified(path: string): Promise<Date> {
-    const fullPath = this.fullPath(path)
+    const fullPath = await this.fullPath(path)
     const stats = await stat(fullPath)
     return stats.mtime
   }
 
   async metadata(path: string): Promise<FileMetadata | null> {
-    const fullPath = this.fullPath(path)
+    const fullPath = await this.fullPath(path)
 
     try {
       const stats = await stat(fullPath)
@@ -188,7 +204,7 @@ export class LocalDriver implements StorageDriver {
   }
 
   async files(directory: string): Promise<string[]> {
-    const fullPath = this.fullPath(directory)
+    const fullPath = await this.fullPath(directory)
 
     if (!existsSync(fullPath)) {
       return []
@@ -201,7 +217,7 @@ export class LocalDriver implements StorageDriver {
   }
 
   async directories(directory: string): Promise<string[]> {
-    const fullPath = this.fullPath(directory)
+    const fullPath = await this.fullPath(directory)
 
     if (!existsSync(fullPath)) {
       return []
@@ -217,7 +233,7 @@ export class LocalDriver implements StorageDriver {
     const files: string[] = []
 
     const scan = async (dir: string): Promise<void> => {
-      const fullPath = this.fullPath(dir)
+      const fullPath = await this.fullPath(dir)
 
       if (!existsSync(fullPath)) {
         return
@@ -240,12 +256,12 @@ export class LocalDriver implements StorageDriver {
   }
 
   async makeDirectory(path: string): Promise<void> {
-    const fullPath = this.fullPath(path)
+    const fullPath = await this.fullPath(path)
     await mkdir(fullPath, { recursive: true })
   }
 
   async deleteDirectory(path: string): Promise<void> {
-    const fullPath = this.fullPath(path)
+    const fullPath = await this.fullPath(path)
 
     if (existsSync(fullPath)) {
       await rm(fullPath, { recursive: true, force: true })
