@@ -439,9 +439,9 @@ describe('requireVerifiedEmail', () => {
 class LenientEmailVerificationStore extends MemoryEmailVerificationStore {
   last: EmailVerificationToken | null = null
 
-  async store(token: EmailVerificationToken): Promise<void> {
-    await super.store(token)
-    this.last = token
+  override async replace(token: EmailVerificationToken): Promise<void> {
+    await super.replace(token)
+    this.last = await super.findByTokenId(token.tokenId)
   }
 
   only(): EmailVerificationToken {

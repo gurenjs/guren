@@ -71,6 +71,24 @@ describe('ResetPasswordController', () => {
     expect(response.headers.get('Location')).toBe('/login')
   })
 
+  it('accepts only one of two concurrent resets using the same token', async () => {
+    mockUserWhere.mockResolvedValue([{ id: 1, email: 'ada@example.com' }])
+    mockUserUpdate.mockResolvedValue(undefined)
+    const { token } = await createPasswordResetToken('ada@example.com', passwordResetStore)
+    const results = await Promise.allSettled([0, 1].map(async () => {
+      const controller = new ResetPasswordController()
+      controller.setContext(createControllerContext('http://blog.test/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ token, password: 'newpassword123', passwordConfirmation: 'newpassword123' }),
+        headers: { 'Content-Type': 'application/json' },
+      }) as unknown as Context)
+      return controller.store()
+    }))
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
+    expect(mockUserUpdate).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects an invalid or expired token', async () => {
     const controller = new ResetPasswordController()
     const ctx = createControllerContext('http://blog.test/reset-password', {

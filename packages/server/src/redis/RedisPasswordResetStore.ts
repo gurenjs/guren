@@ -1,6 +1,7 @@
 import type { Redis } from 'ioredis'
 import type { PasswordResetTokenStore } from '../auth/password-reset'
 import { scanKeys } from './scan-keys'
+import { REPLACE_AUTH_TOKEN, CONSUME_AUTH_TOKEN } from './auth-token-scripts'
 import { toDate } from '../support/expiry'
 
 export interface RedisPasswordResetStoreOptions {
@@ -38,6 +39,24 @@ export class RedisPasswordResetStore implements PasswordResetTokenStore {
     pipeline.sadd(emailKey, tokenId)
     pipeline.pexpire(emailKey, ttlMs + 60000) // Add buffer to email set expiration
     await pipeline.exec()
+  }
+
+  async replace(tokenId: string, email: string, expiresAt: Date): Promise<void> {
+    email = email.toLowerCase()
+    const data = JSON.stringify({ email, expiresAt: expiresAt.toISOString() })
+    await this.redis.eval(
+      REPLACE_AUTH_TOKEN, 2,
+      `${this.prefix}email:${email}`, `${this.prefix}${tokenId}`,
+      this.prefix, tokenId, data, Math.max(0, expiresAt.getTime() - Date.now()),
+    )
+  }
+
+  async consume(tokenId: string, email: string): Promise<boolean> {
+    return await this.redis.eval(
+      CONSUME_AUTH_TOKEN, 2,
+      `${this.prefix}${tokenId}`, `${this.prefix}email:${email.toLowerCase()}`,
+      email, tokenId,
+    ) === 1
   }
 
   async find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null> {

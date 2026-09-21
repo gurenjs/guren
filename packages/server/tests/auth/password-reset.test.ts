@@ -281,6 +281,19 @@ class LenientPasswordResetStore implements PasswordResetTokenStore {
     this.records.set(tokenId, { email, expiresAt })
   }
 
+  async replace(tokenId: string, email: string, expiresAt: Date): Promise<void> {
+    for (const [id, record] of this.records) {
+      if (record.email === email) this.records.delete(id)
+    }
+    this.records.set(tokenId, { email, expiresAt })
+  }
+
+  async consume(tokenId: string, email: string): Promise<boolean> {
+    if (this.records.get(tokenId)?.email !== email) return false
+    this.records.delete(tokenId)
+    return true
+  }
+
   async find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null> {
     return this.records.get(tokenId) ?? null
   }

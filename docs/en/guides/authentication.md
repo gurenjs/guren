@@ -43,7 +43,7 @@ bunx guren make:auth --install --minimal
 
 ### Password reset
 
-Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `verifyPasswordResetToken` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store, so swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_MAILER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
+Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `completePasswordReset` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store, so swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_MAILER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
 
 ### Email verification
 
@@ -88,6 +88,14 @@ Like plain `--oauth` without `--verify`, the profile email is read-only in this 
 `make:auth` only writes the files it scaffolds; it never deletes. Converting an existing password app with `--oauth-only --force` therefore leaves the old registration and reset files behind, and the scaffold prints the list. Delete them: the stale `db/seeders/UsersSeeder.ts` in particular is picked up by `db:seed` rather than by the route table, so a dead `routes/auth.ts` does not neutralize it.
 
 This is the recommended shape for CPU-metered runtimes such as the Cloudflare Workers free tier, where a single password hash exceeds the per-request CPU budget no matter which hashing algorithm you pick.
+
+### One-time token stores
+
+Password reset and email verification use atomic store operations. `replace()` revokes the email's previous tokens and stores the new one in a single operation. `consume(tokenId, email)` compares the stored email and deletes the token atomically, returning `true` to exactly one caller. The memory and Redis stores implement both methods. Issuance normalizes email addresses to lowercase before replacement.
+
+Custom `PasswordResetTokenStore` and `EmailVerificationTokenStore` implementations must add these methods before using the issuance and completion helpers. Password reset stores accept `replace(tokenId, email, expiresAt)`; email verification stores accept `replace(token)`. The methods are optional in the interfaces for source compatibility, but the helpers reject stores that lack the required operation. A process-local lock around separate reads and deletes does not protect a store shared by several workers; use a transaction or an atomic database command.
+
+`completePasswordReset()` and `completeEmailVerification()` consume the token before calling application code. If the update fails, request a new token; the consumed token is not restored. `verifyPasswordResetToken()` and `verifyEmailToken()` only inspect validity and do not reserve or consume a token. Use the completion helpers for updates. Existing scaffolded password reset controllers should migrate their separate verify/update/delete sequence to `completePasswordReset()`. Upgrade `@guren/core` and `@guren/cli` together, and restart all instances that issue or complete tokens; older instances still run the non-atomic sequence.
 
 ## OAuth / Social login
 

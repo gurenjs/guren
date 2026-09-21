@@ -24,6 +24,12 @@ export interface EmailVerificationTokenStore {
   /** Store a new verification token. */
   store(token: EmailVerificationToken): Promise<void>
 
+  /** Atomically replace every token for this email. Required by token issuance. */
+  replace?(token: EmailVerificationToken): Promise<void>
+
+  /** Atomically delete this token only if its stored email matches. Required by completion. */
+  consume?(tokenId: string, email: string): Promise<boolean>
+
   /** Find a token by its opaque token ID. */
   findByTokenId(tokenId: string): Promise<EmailVerificationToken | null>
 
@@ -40,6 +46,21 @@ export class MemoryEmailVerificationStore implements EmailVerificationTokenStore
 
   async store(token: EmailVerificationToken): Promise<void> {
     this.tokens.set(token.tokenId, token)
+  }
+
+  async replace(token: EmailVerificationToken): Promise<void> {
+    const email = token.email.toLowerCase()
+    for (const [id, record] of this.tokens) {
+      if (record.email.toLowerCase() === email) this.tokens.delete(id)
+    }
+    this.tokens.set(token.tokenId, { ...token, email })
+  }
+
+  async consume(tokenId: string, email: string): Promise<boolean> {
+    const record = this.tokens.get(tokenId)
+    if (!record || record.email !== email) return false
+    this.tokens.delete(tokenId)
+    return true
   }
 
   async findByTokenId(tokenId: string): Promise<EmailVerificationToken | null> {
@@ -121,7 +142,9 @@ export async function createEmailVerificationToken(
 ): Promise<EmailVerificationTokenResult> {
   const { expiresIn, tokenLength } = { ...DEFAULT_CONFIG, ...config }
 
-  await store.deleteForEmail(email)
+  if (!store.replace) {
+    throw new Error('Email verification token issuance requires an atomic store.replace() implementation.')
+  }
 
   const tokenId = generateId()
   const now = new Date()
@@ -139,7 +162,7 @@ export async function createEmailVerificationToken(
     },
   )
 
-  await store.store({
+  await store.replace({
     email: email.toLowerCase(),
     tokenId,
     expiresAt,
@@ -201,11 +224,13 @@ export async function completeEmailVerification<T>(
     return null
   }
 
-  const result = await markVerified(storedToken.email)
+  if (!store.consume) {
+    throw new Error('Email verification completion requires an atomic store.consume() implementation.')
+  }
+  if (!await store.consume(claims.id, storedToken.email)) return null
 
-  await store.delete(claims.id)
-
-  return result
+  // Consume before side effects; a failed callback requires a new token.
+  return markVerified(storedToken.email)
 }
 
 /** Build a verification URL. */

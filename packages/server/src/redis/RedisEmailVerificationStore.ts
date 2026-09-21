@@ -4,6 +4,7 @@ import type {
   EmailVerificationTokenStore,
   EmailVerificationToken,
 } from '../auth/email-verification'
+import { REPLACE_AUTH_TOKEN, CONSUME_AUTH_TOKEN } from './auth-token-scripts'
 import { toDate } from '../support/expiry'
 
 export interface RedisEmailVerificationStoreOptions {
@@ -46,6 +47,25 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
     pipeline.sadd(emailKey, token.tokenId)
     pipeline.pexpire(emailKey, ttlMs + 60000) // Add buffer to email set expiration
     await pipeline.exec()
+  }
+
+  async replace(token: EmailVerificationToken): Promise<void> {
+    const { tokenId, expiresAt } = token
+    const email = token.email.toLowerCase()
+    const data = JSON.stringify({ ...token, email })
+    await this.redis.eval(
+      REPLACE_AUTH_TOKEN, 2,
+      `${this.prefix}email:${email}`, `${this.prefix}${tokenId}`,
+      this.prefix, tokenId, data, Math.max(0, expiresAt.getTime() - Date.now()),
+    )
+  }
+
+  async consume(tokenId: string, email: string): Promise<boolean> {
+    return await this.redis.eval(
+      CONSUME_AUTH_TOKEN, 2,
+      `${this.prefix}${tokenId}`, `${this.prefix}email:${email.toLowerCase()}`,
+      email, tokenId,
+    ) === 1
   }
 
   async findByTokenId(tokenId: string): Promise<EmailVerificationToken | null> {

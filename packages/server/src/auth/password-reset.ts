@@ -1,4 +1,4 @@
-import type { Authenticatable, UserProvider } from './types'
+import type { UserProvider } from './types'
 import { generateId, buildTokenUrl, parseTokenUrl } from './utils'
 import { readSignedTokenClaims } from './signed-token'
 import { MessageSigner } from '../encryption/MessageSigner'
@@ -23,6 +23,10 @@ export interface PasswordResetConfig {
 export interface PasswordResetTokenStore {
   /** Store a token ID with associated email and expiration */
   store(tokenId: string, email: string, expiresAt: Date): Promise<void>
+  /** Atomically replace every token for this email. Required by token issuance. */
+  replace?(tokenId: string, email: string, expiresAt: Date): Promise<void>
+  /** Atomically delete this token only if its stored email matches. Required by completion. */
+  consume?(tokenId: string, email: string): Promise<boolean>
   /** Find email by token ID, returns null if not found or already dropped */
   find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null>
   /** Delete a token ID from storage */
@@ -37,6 +41,21 @@ export class MemoryPasswordResetStore implements PasswordResetTokenStore {
 
   async store(tokenId: string, email: string, expiresAt: Date): Promise<void> {
     this.tokens.set(tokenId, { email, expiresAt })
+  }
+
+  async replace(tokenId: string, email: string, expiresAt: Date): Promise<void> {
+    const normalizedEmail = email.toLowerCase()
+    for (const [id, record] of this.tokens) {
+      if (record.email.toLowerCase() === normalizedEmail) this.tokens.delete(id)
+    }
+    this.tokens.set(tokenId, { email: normalizedEmail, expiresAt })
+  }
+
+  async consume(tokenId: string, email: string): Promise<boolean> {
+    const record = this.tokens.get(tokenId)
+    if (!record || record.email !== email) return false
+    this.tokens.delete(tokenId)
+    return true
   }
 
   async find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null> {
@@ -55,7 +74,7 @@ export class MemoryPasswordResetStore implements PasswordResetTokenStore {
 
   async deleteForEmail(email: string): Promise<void> {
     for (const [hash, record] of this.tokens) {
-      if (record.email === email) {
+      if (record.email.toLowerCase() === email.toLowerCase()) {
         this.tokens.delete(hash)
       }
     }
@@ -94,7 +113,9 @@ export async function createPasswordResetToken(
   const expiresIn = config.expiresIn ?? DEFAULT_EXPIRES_IN
   const tokenLength = config.tokenLength ?? DEFAULT_TOKEN_LENGTH
 
-  await store.deleteForEmail(email)
+  if (!store.replace) {
+    throw new Error('Password reset token issuance requires an atomic store.replace() implementation.')
+  }
 
   const tokenId = generateId()
   const expiresAt = new Date(Date.now() + expiresIn)
@@ -111,7 +132,7 @@ export async function createPasswordResetToken(
     },
   )
 
-  await store.store(tokenId, email.toLowerCase(), expiresAt)
+  await store.replace(tokenId, email.toLowerCase(), expiresAt)
 
   return { token, tokenId, expiresAt }
 }
@@ -141,11 +162,11 @@ export async function verifyPasswordResetToken(
  * Complete a password reset: update the user's password and invalidate the
  * token. Returns the user, or `null` when the token is invalid.
  */
-export async function completePasswordReset<T extends Authenticatable>(
+export async function completePasswordReset<T>(
   token: string,
   newPassword: string,
   store: PasswordResetTokenStore,
-  provider: UserProvider<T>,
+  provider: Pick<UserProvider<T>, 'retrieveByCredentials'>,
   updatePassword: (user: T, password: string) => Promise<void>,
 ): Promise<T | null> {
   const claims = await readSignedTokenClaims(
@@ -171,9 +192,13 @@ export async function completePasswordReset<T extends Authenticatable>(
     return null
   }
 
-  await updatePassword(user, newPassword)
+  if (!store.consume) {
+    throw new Error('Password reset completion requires an atomic store.consume() implementation.')
+  }
+  if (!await store.consume(claims.id, record.email)) return null
 
-  await store.delete(claims.id)
+  // Consume before side effects; a failed callback requires a new token.
+  await updatePassword(user, newPassword)
 
   return user
 }
