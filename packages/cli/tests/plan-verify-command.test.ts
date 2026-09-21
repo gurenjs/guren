@@ -237,6 +237,39 @@ describe('plan:verify', () => {
     expect(stale.summary.states.verified).toBe(0)
   })
 
+  test('should judge the status after codegen on a fresh clone, whose controllers import the generated files', async () => {
+    const { '.guren/routes.gen.ts': _routes, '.guren/pages.gen.ts': _pages, '.guren/data.gen.ts': _data, ...withoutGenerated } = APP
+    const app = await createApp('fresh', {
+      ...withoutGenerated,
+      'package.json': JSON.stringify({
+        name: 'verify-app',
+        type: 'module',
+        scripts: {
+          codegen: "mkdir -p .guren && for f in routes pages data; do printf 'export {}\\n' > .guren/$f.gen.ts; done",
+          typecheck: 'exit 0',
+          'db:migrate': 'exit 0',
+        },
+      }),
+      'app/Http/Controllers/CommentController.ts': `import { Controller } from '@guren/core'
+import { CommentPayloadSchema } from '../Validators/CommentValidator.js'
+import '../../../.guren/pages.gen.js'
+
+export class CommentController extends Controller {
+  async store() {
+    await this.validateBody(CommentPayloadSchema)
+    return this.redirect('/posts')
+  }
+}
+`,
+    })
+    const plan = await writePlan('fresh.plan.json')
+
+    const result = await verify(plan, app, '--step', HTTP)
+
+    expect(result.steps[0]!.record.commands.map((command) => [command.command, command.status])).toEqual([['codegen', 'pass'], ['check', 'pass'], ['tests', 'pass']])
+    expect(states(result)).toMatchObject({ 'action.comments.store': 'wired', 'route.comments.store': 'drifted', 'validator.comment': 'wired' })
+  })
+
   test('should say when it replaced a state file it could not read', async () => {
     const app = await createApp('corrupt')
     const plan = await writePlan('corrupt.plan.json')

@@ -52,7 +52,7 @@ export const PlanStepRecordSchema = z.object({
   durationMs: z.number().int().nonnegative(),
   commands: z.array(PlanCommandRecordSchema),
   acceptance: z.array(z.object({ id: z.string(), status: z.enum(['pending', 'failing', 'passing']) })),
-  /** Elements the step owns that were not at their completion state, `id: state`. */
+  /** Elements the step owns that were not at their completion state, `id: state`; empty when a command failed or was blocked. */
   incomplete: z.array(z.string()),
   fingerprint: PlanFingerprintSchema,
 })

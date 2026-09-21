@@ -46,7 +46,7 @@ export interface PlanVerificationSummary {
  * the same, `drifted` once one does not or cannot be read. Lifted: an element at its
  * completion state or `unjudged`; one existing in files only when the record covers them,
  * since a result nothing could expire is not one. A `drop` has no file, its absence re-read
- * per status; an `unjudged` element rests on its step's behaviours, so it needs a step with some.
+ * per status; an `unjudged` element with none rests on its step's behaviours, so it needs some.
  */
 export function applyVerification(
   status: PlanStatus,
@@ -73,10 +73,10 @@ export function applyVerification(
         const element = lifted.get(id)
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
-        const fileless = element.change === 'drop' || (element.state === 'unjudged' && step.acceptanceIds.length > 0)
+        const needsNoFiles = element.change === 'drop' || (element.state === 'unjudged' && step.acceptanceIds.length > 0)
         if (!awaitsVerification(element)) {
           element.notes.push(`${verifiedBy}, and no longer at the state that completes it.`)
-        } else if (element.files.length === 0 && !fileless) {
+        } else if (element.files.length === 0 && !needsNoFiles) {
           element.notes.push(`${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
           element.state = 'drifted'

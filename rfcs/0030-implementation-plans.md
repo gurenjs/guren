@@ -949,9 +949,12 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   which a fresh clone lacks, and a step verified on its own must not fail for
   the environment's sake. Each command then runs once per invocation across the
   steps, and nothing is judged before the generated files exist: the status
-  the steps are judged against is read after the first `codegen`, and once
-  `codegen` has not passed the rest of the list is not run, since its findings
-  would blame the code for the generated files it lacks. A failed command names
+  the steps are judged against is read after the first `codegen`, and nothing
+  imports the application before it, since Bun keeps a failed import of a
+  generated file for the whole process. Once `codegen` has not passed the rest
+  of the list is not run, since its findings would blame the code for the
+  generated files it lacks; the status is still judged, and the report says
+  it was judged without them. A failed command names
   the step `failed` whatever else was `blocked`, since there is then something
   of the implementation's to fix.
 - A whole-plan run (no `--step`) leaves alone a step whose record is `verified`
@@ -1014,10 +1017,13 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   none of which the record covers is not lifted, with a note: a verification
   nothing could expire is not one. A `drop` has no file to cover and is lifted
   on the step alone, since the readers re-read its absence on every status. An
-  `unjudged` element is verified on its step's behaviours, whose test files the
-  record covers, so it is lifted only from a step that has behaviours; a
-  `commands` step has none, and its elements stay `unjudged` with a note. An
-  element the code has since lost keeps what
+  `unjudged` element with no file of its own is verified on its step's
+  behaviours, whose test files the record covers, so it is lifted only from a
+  step that has behaviours; a `commands` step has none, and its elements stay
+  `unjudged` with a note. A skipped step is not a promise that its elements
+  lifted: the skip is decided on the record's files before the status exists,
+  and an element that has since moved into a file the record does not cover
+  reads `drifted` beneath it. An element the code has since lost keeps what
   the readers say, with a note. For that the status report carries each
   element's `files` and `completesAt`, and its summary counts all eight states.
 - The per-step metrics of §7 (`total_cost_usd`, continuations, files touched,

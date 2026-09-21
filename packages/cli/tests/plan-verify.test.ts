@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import type { CheckReport } from '../src/check-result'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { planDigest, planSlug, PLAN_STATE_VERSION, readPlanState, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
-import { judgePlan, summarize, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
+import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
 import { applyVerification, hashFiles, recordStillHolds, sha256 } from '../src/plan/verification'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
@@ -105,7 +105,7 @@ function checkReport(checks: CheckReport['checks']): CheckReport {
   return { cwd: ROOT, checks, passCount: 0, warnCount: 0, failCount: checks.length }
 }
 
-function verifier(status: PlanStatus, fake: FakeExec, overrides: Partial<PlanVerifierOptions> = {}): PlanVerifier {
+function verifier(status: PlanStatus, fake: Pick<FakeExec, 'exec'>, overrides: Partial<PlanVerifierOptions> = {}): PlanVerifier {
   return new PlanVerifier(plan, derivation, {
     root: ROOT,
     planDigest: 'digest',
@@ -119,7 +119,7 @@ function verifier(status: PlanStatus, fake: FakeExec, overrides: Partial<PlanVer
   })
 }
 
-function elementOf(status: PlanStatus<PlanElementStatus['state'] | 'verified' | 'waived'>, id: string): PlanElementStatus<PlanElementStatus['state'] | 'verified' | 'waived'> {
+function elementOf(status: PlanStatus<PlanElementState>, id: string): PlanElementStatus<PlanElementState> {
   const found = status.elements.find((element) => element.id === id)
   if (!found) throw new Error(`no element ${id}`)
   return found
@@ -212,7 +212,7 @@ describe('PlanVerifier', () => {
       return fake.exec(command, cwd, options)
     }
 
-    const step = await verifier(statusOf(), { exec: rejecting, calls: fake.calls }).verify(HTTP)
+    const step = await verifier(statusOf(), { exec: rejecting }).verify(HTTP)
 
     expect(step.record.outcome).toBe('blocked')
     expect(commandOf(step, 'tests')).toMatchObject({ status: 'blocked', reason: 'could not run: spawn bun ENOENT' })
@@ -281,14 +281,15 @@ describe('PlanVerifier', () => {
   test('should not run what reads the generated files once codegen did not pass', async () => {
     const fake = fakeExec({ 'run codegen': { exitCode: 1, stderr: 'error: pages/Bad.tsx has no default export\n' } })
 
-    const step = await verifier(statusOf(), fake).verify(HTTP)
+    const step = await verifier(statusOf({ 'action.comments.destroy': { state: 'planned' } }), fake).verify(HTTP)
 
     expect(step.record.outcome).toBe('failed')
-    expect(step.record.commands.map((command) => [command.command, command.status, command.reason])).toEqual([
-      ['codegen', 'fail', '`bun run codegen` exited 1'],
-      ['check', 'blocked', '`bun run codegen` did not pass, so this did not run'],
-      ['tests', 'blocked', '`bun run codegen` did not pass, so this did not run'],
+    expect(step.record.commands.map((command) => [command.command, command.status, command.label, command.reason])).toEqual([
+      ['codegen', 'fail', 'bun run codegen', '`bun run codegen` exited 1'],
+      ['check', 'blocked', 'not run', '`bun run codegen` did not pass, so this did not run'],
+      ['tests', 'blocked', 'not run', '`bun run codegen` did not pass, so this did not run'],
     ])
+    // A status judged behind a failed codegen would blame the code, so the record lists no incomplete element.
     expect(step.record.incomplete).toEqual([])
     expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
   })

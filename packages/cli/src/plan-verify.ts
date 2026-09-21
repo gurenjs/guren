@@ -7,6 +7,7 @@
 
 import { basename } from 'node:path'
 
+import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
 import { readScripts } from './command-output'
 import { readPlanFile } from './plan-render'
@@ -33,7 +34,7 @@ export interface PlanVerifyReport extends PlanStatusReport {
 }
 
 export interface PlanVerifyFileOptions {
-  /** Loaded with `detail`, and after the first step's `codegen` when a function. */
+  /** Loaded with `detail`; a function is called once, after the first step's `codegen`. */
   app: PlanAppState | (() => Promise<PlanAppState>)
   /** The application root: where the commands run and the state is written. */
   appRoot: string
@@ -48,8 +49,9 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const app = options.app
   const loadApp = typeof app === 'function' ? app : async () => app
   const root = options.appRoot
-  // Read once for what the derivation needs; the status the steps are judged against is read again after codegen.
-  const derivation = derivePlanTasks(plan, { apiOnly: (await loadApp()).apiOnly })
+  // The app is not loaded before the first codegen: a load imports the routes file, and Bun
+  // caches a failed import of a generated file for the process, codegen or no codegen.
+  const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(root).catch(() => false) })
   const digest = planDigest(plan)
   const slug = planSlug(path)
 
@@ -104,6 +106,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
 
 export function formatPlanVerify(report: PlanVerifyReport): string {
   const lines: string[] = []
+  const codegenFailed = report.steps.filter(({ record }) => record.commands.some((command) => command.command === 'codegen' && command.status !== 'pass'))
   for (const { stepId, record } of report.steps) {
     lines.push(`${stepId}: ${record.outcome} (${record.durationMs} ms)`)
     for (const command of record.commands) {
@@ -118,6 +121,9 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   for (const stepId of report.skipped) lines.push(`${stepId}: verified before, and nothing it fingerprinted has changed`)
   if (report.skipped.length > 0) lines.push('')
   lines.push(`Recorded in ${report.verification.stateFile}`, '')
+  if (codegenFailed.length > 0) {
+    lines.push(`codegen did not pass in ${codegenFailed.map((step) => step.stepId).join(', ')}, so the status below was judged without the generated files.`, '')
+  }
   lines.push(formatPlanStatus(report))
   return lines.join('\n')
 }
