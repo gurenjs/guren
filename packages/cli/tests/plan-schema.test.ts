@@ -113,6 +113,22 @@ describe('PlanDraftSchema', () => {
     }
   })
 
+  test('should reject an empty module, which reads as an app root of its own', () => {
+    // `""` is not the project root: every reader compares `module ?? null`, so an empty
+    // string is a root nothing declares and the element goes missing wherever it sits.
+    const draft = validDraft() as unknown as { models: Array<Record<string, unknown>> }
+    draft.models[0]!.module = ''
+
+    expect(PlanDraftSchema.safeParse(draft).success).toBe(false)
+  })
+
+  test('should accept a module naming an app root', () => {
+    const draft = validDraft() as unknown as { models: Array<Record<string, unknown>> }
+    draft.models[0]!.module = 'billing'
+
+    expect(PlanDraftSchema.safeParse(draft).success).toBe(true)
+  })
+
   test('should reject a route path that is not absolute', () => {
     const draft = validDraft()
     draft.routes[0]!.path = 'posts/:postId/comments'

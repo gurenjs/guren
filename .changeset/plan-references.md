@@ -10,7 +10,9 @@ and a test holds the table to the plan schema's id-typed fields, so a reference 
 to the schema cannot go unchecked in one of the three.
 
 The checks against the application now read the app root a plan element names with
-`module`: a same-named model, table, controller, action, validator, resource or policy
-in another root no longer satisfies an `existing` nor collides with an `add`, and the
-finding names the root. Pages keep being judged by their id, since a module's pages sit
-in the project's own `resources/js/pages` under the module's name.
+`module`: a same-named model, controller, action, validator, resource or policy in
+another root no longer satisfies an `existing` nor collides with an `add`, and the
+finding names the root. A table name still collides across every root, since each
+module's schema is re-exported from the project's own `db/schema.ts` and lands in one
+migration set. Pages keep being judged by their id, since a module's pages sit in the
+project's own `resources/js/pages` under the module's name.

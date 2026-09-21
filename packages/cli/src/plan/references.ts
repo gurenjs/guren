@@ -16,14 +16,8 @@ import {
 
 type Holder = Record<string, unknown>
 
-/** The sections whose elements name other elements. */
-export type PlanReferenceOwner = Extract<
-  PlanElementSection,
-  'questions' | 'models' | 'columns' | 'actions' | 'routes' | 'views' | 'resources' | 'policies' | 'flows' | 'tasks' | 'acceptance'
->
-
 /** Where each owner sits in the document, as the drift test spells a path. */
-export const PLAN_REFERENCE_OWNER_PATHS: Record<PlanReferenceOwner, string> = {
+export const PLAN_REFERENCE_OWNER_PATHS = {
   questions: 'questions[]',
   models: 'models[]',
   columns: 'models[].columns[]',
@@ -35,7 +29,9 @@ export const PLAN_REFERENCE_OWNER_PATHS: Record<PlanReferenceOwner, string> = {
   flows: 'flows[]',
   tasks: 'tasks[]',
   acceptance: 'tasks[].acceptance[]',
-}
+} satisfies Partial<Record<PlanElementSection, string>>
+
+export type PlanReferenceOwner = keyof typeof PLAN_REFERENCE_OWNER_PATHS
 
 export type PlanReferenceField =
   | 'question.affects'
@@ -74,7 +70,6 @@ interface PlanReferenceDefinition {
   label: (site: Holder, owner: Holder) => string
 }
 
-/** One reference an element makes. */
 export interface PlanReference {
   from: PlanElementRef
   /** The id named, which need not be declared. */
@@ -98,8 +93,6 @@ const definition = (
   label: typeof label === 'string' ? () => label : label,
 })
 
-const quoted = (value: unknown): string => `"${String(value)}"`
-
 /**
  * Every reference path, with the section its target belongs to. Order is the order a
  * reader sees an owner's references in, which is what puts the §2 findings of one
@@ -107,19 +100,19 @@ const quoted = (value: unknown): string => `"${String(value)}"`
  */
 export const PLAN_REFERENCES: ReadonlyArray<PlanReferenceDefinition> = [
   definition('question.affects', 'questions', 'affects[]', null, 'The question affects'),
-  definition('model.relationship', 'models', 'relationships[].target', 'models', (site) => `Relationship ${quoted(site.name)}`),
-  definition('column.references', 'columns', 'references.model', 'models', (_site, owner) => `The foreign key on ${quoted(owner.name)}`),
+  definition('model.relationship', 'models', 'relationships[].target', 'models', (site) => `Relationship "${site.name}"`),
+  definition('column.references', 'columns', 'references.model', 'models', (_site, owner) => `The foreign key on "${owner.name}"`),
   definition('action.params', 'actions', 'params', 'validators', 'The params validator'),
   definition('action.query', 'actions', 'query', 'validators', 'The query validator'),
   definition('action.body', 'actions', 'body', 'validators', 'The body validator'),
   definition('action.policy', 'actions', 'authorization.policy.id', 'policies', 'The policy'),
   definition('action.view', 'actions', 'response.view', 'views', 'The response page'),
   definition('action.resource', 'actions', 'response.resource', 'resources', 'The response resource'),
-  definition('flow.node', 'flows', 'nodes[].element', null, (site) => `Flow step ${quoted(site.label)}`),
+  definition('flow.node', 'flows', 'nodes[].element', null, (site) => `Flow step "${site.label}"`),
   definition('route.action', 'routes', 'action', 'actions', 'The route action'),
-  definition('route.bind', 'routes', 'bind[].model', 'models', (site) => `The binding for ":${String(site.param)}"`),
-  definition('view.propResource', 'views', 'props[].resource', 'resources', (site) => `The resource of prop ${quoted(site.name)}`),
-  definition('view.actionRoute', 'views', 'actions[].route', 'routes', (site) => `The route of action ${quoted(site.label)}`),
+  definition('route.bind', 'routes', 'bind[].model', 'models', (site) => `The binding for ":${site.param}"`),
+  definition('view.propResource', 'views', 'props[].resource', 'resources', (site) => `The resource of prop "${site.name}"`),
+  definition('view.actionRoute', 'views', 'actions[].route', 'routes', (site) => `The route of action "${site.label}"`),
   definition('view.formValidator', 'views', 'form.validator', 'validators', 'The form validator'),
   definition('view.formSubmitsTo', 'views', 'form.submitsTo', 'routes', 'The form target'),
   definition('resource.model', 'resources', 'model', 'models', 'The resource model'),

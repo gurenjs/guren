@@ -611,9 +611,8 @@ class StatusContext {
 
   validator(validator: PlanDraft['validators'][number]): PlanElementStatus {
     const validators = this.section('validators')
-    const names = isUnreadable(validators) ? validators : validators.map(({ name, module }) => ({ name, module }))
     const find = (name: string): Existence =>
-      existsInScope(names, name, NOUNS.validators, validator.module, validators, (entry) => entry.name === name)
+      existsInScope(validators, name, NOUNS.validators, validator.module, validators, (entry) => entry.name === name)
     const found = isUnreadable(validators)
       ? undefined
       : validators.find((entry) => entry.name === validator.name && entry.module === (validator.module ?? null))

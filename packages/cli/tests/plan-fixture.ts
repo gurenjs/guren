@@ -41,7 +41,14 @@ export function loadParsedCommentsPlan(): Plan {
 
 /** A section as a test spells it: a bare name sits at the project root. */
 type NameInput = Array<string | PlanAppName> | PlanAppUnreadable
-type TableInput = Array<Omit<PlanAppTable, 'module'> & { module?: PlanAppScope }> | PlanAppUnreadable
+type TableEntry = Omit<PlanAppTable, 'module'> & { module?: PlanAppScope }
+type TableInput = TableEntry[] | PlanAppUnreadable
+
+/** The tables {@link planAppState} declares, for a test that moves one to another app root. */
+export const PLAN_APP_TABLES: TableEntry[] = [
+  { identifier: 'posts', tableName: 'posts', columns: ['id', 'title', 'body'] },
+  { identifier: 'users', tableName: 'users', columns: ['id', 'email'] },
+]
 
 type ScopedSection = 'models' | 'controllers' | 'actions' | 'resources' | 'policies' | 'pages' | 'validators'
 
@@ -71,12 +78,7 @@ export function planAppState(overrides: PlanAppStateInput = {}): PlanAppState {
       { name: 'posts.index', method: 'GET', path: '/posts' },
       { name: 'posts.show', method: 'GET', path: '/posts/:id' },
     ],
-    tables: tables(
-      tableInput ?? [
-        { identifier: 'posts', tableName: 'posts', columns: ['id', 'title', 'body'] },
-        { identifier: 'users', tableName: 'users', columns: ['id', 'email'] },
-      ],
-    ),
+    tables: tables(tableInput ?? PLAN_APP_TABLES),
     apiOnly: false,
     ...rest,
   }

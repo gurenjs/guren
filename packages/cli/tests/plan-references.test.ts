@@ -103,6 +103,7 @@ describe('listPlanReferences', () => {
     draft.controllers[0].actions[0].params = 'validator.comment'
     draft.controllers[0].actions[0].query = 'validator.comment'
     draft.controllers[0].actions[1].response = { kind: 'inertia', view: 'view.posts.show' }
+    draft.controllers[0].actions[0].response = { kind: 'resource', resource: 'resource.comment' }
     draft.tasks[0].acceptance[0].expect.inertia = 'view.posts.show'
     draft.flows = [
       {
@@ -116,11 +117,21 @@ describe('listPlanReferences', () => {
 
     const fields = new Map(listPlanReferences(draft).map((reference) => [reference.field, reference]))
 
-    expect(fields.get('action.params')?.to).toBe('validator.comment')
-    expect(fields.get('action.query')?.label).toBe('The query validator')
-    expect(fields.get('action.view')?.expected).toBe('views')
+    // `from` is asserted beside the value: an owner and a path split at the wrong
+    // boundary join to the same document path, so only attribution tells the two apart.
+    const action = { id: 'action.comments.store', section: 'actions' }
+    expect(fields.get('action.params')).toMatchObject({ from: action, to: 'validator.comment' })
+    expect(fields.get('action.query')).toMatchObject({ from: action, label: 'The query validator' })
+    expect(fields.get('action.view')).toMatchObject({
+      from: { id: 'action.comments.destroy', section: 'actions' },
+      expected: 'views',
+    })
+    expect(fields.get('action.resource')).toMatchObject({ from: action, expected: 'resources' })
     expect(fields.get('acceptance.inertia')?.from).toEqual({ id: 'AC-comments-1', section: 'acceptance' })
-    expect(fields.get('flow.node')?.label).toBe('Flow step "The form"')
+    expect(fields.get('flow.node')).toMatchObject({
+      from: { id: 'flow.comment', section: 'flows' },
+      label: 'Flow step "The form"',
+    })
   })
 
   test('should report a reference to an id no element declares, since that is what a check refuses', () => {

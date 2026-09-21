@@ -222,7 +222,7 @@ async function classSection(
   if (probe) return { unreadable: probe }
   return excludeBarrelFiles(files)
     .map((file) => ({ name: classNameFromPath(file), module: moduleNameFor(cwd, file) }))
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 }
 
 async function pageSection(cwd: string): Promise<PlanAppNames> {

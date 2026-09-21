@@ -104,7 +104,7 @@ export const PlanModelSchema = z.strictObject({
   name: NonEmptySchema,
   table: NonEmptySchema,
   tableRenamedFrom: NonEmptySchema.optional(),
-  module: z.string().optional(),
+  module: NonEmptySchema.optional(),
   /** On an `existing` or `alter` model, only the columns the plan touches or references. */
   columns: z.array(PlanColumnSchema),
   /** Constraints spanning columns; a single-column one is the column's own `unique` / `index`. */
@@ -120,7 +120,7 @@ export const PlanValidatorSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: NonEmptySchema,
-  module: z.string().optional(),
+  module: NonEmptySchema.optional(),
   fields: z.array(
     z.strictObject({
       name: NonEmptySchema,
@@ -158,7 +158,7 @@ export const PlanControllerSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   className: NonEmptySchema,
-  module: z.string().optional(),
+  module: NonEmptySchema.optional(),
   actions: z.array(PlanActionSchema),
 })
 
@@ -181,7 +181,7 @@ export const PlanViewSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   page: NonEmptySchema,
-  module: z.string().optional(),
+  module: NonEmptySchema.optional(),
   purpose: NonEmptySchema,
   props: z.array(
     z.strictObject({ name: NonEmptySchema, type: NonEmptySchema, resource: IdSchema.optional() }),
@@ -211,7 +211,7 @@ export const PlanResourceSchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: NonEmptySchema,
-  module: z.string().optional(),
+  module: NonEmptySchema.optional(),
   model: IdSchema,
   fields: z.array(z.strictObject({ name: NonEmptySchema, type: NonEmptySchema })),
 })
@@ -220,7 +220,7 @@ export const PlanPolicySchema = z.strictObject({
   id: IdSchema,
   change: ChangeSchema,
   name: NonEmptySchema,
-  module: z.string().optional(),
+  module: NonEmptySchema.optional(),
   model: IdSchema,
   abilities: z.array(z.strictObject({ name: NonEmptySchema, rule: NonEmptySchema })),
 })
@@ -230,7 +230,7 @@ export const PlanSideEffectSchema = z.strictObject({
   change: ChangeSchema,
   kind: z.enum(['job', 'event', 'listener', 'mail', 'notification']),
   name: NonEmptySchema,
-  module: z.string().optional(),
+  module: NonEmptySchema.optional(),
   trigger: NonEmptySchema,
   description: NonEmptySchema,
 })

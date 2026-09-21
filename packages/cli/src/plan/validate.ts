@@ -331,6 +331,11 @@ interface TargetCheck {
   /** The other app roots declaring a name, which is what makes an absence a placement. */
   elsewhere?: (name: string) => string[]
   /**
+   * Where the name may not be taken at all, when that is wider than the root the element
+   * sits in. Absent means the root's own names answer both questions.
+   */
+  collidesWith?: ReadonlyArray<PlanAppName>
+  /**
    * Why an absent name is unconfirmed rather than missing, when the reader answers a
    * lower bound: the result warns and quotes this. A collision is positive evidence either way.
    */
@@ -341,12 +346,17 @@ function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, resul
   const has = (name: string): boolean => existing.includes(name)
   const where = { elementId: target.id, section: target.section }
   const root = target.root === undefined ? 'this application' : scopeName(target.root)
+  const taken = (name: string): PlanAppName | undefined => target.collidesWith?.find((entry) => entry.name === name)
+  const collides = (name: string): boolean => (target.collidesWith ? taken(name) !== undefined : has(name))
   const collision = (name: string): void => {
+    const owner = taken(name)
+    const other = owner && owner.module !== (target.root ?? null) ? scopeName(owner.module) : undefined
     results.push(
       finding(
         'plan:app-collision',
         'fail',
-        `The ${target.noun} "${name}"${target.scope ?? ''} already exists in ${root}.`,
+        `The ${target.noun} "${name}"${target.scope ?? ''} already exists in ${other ?? root}.`
+          + (other ? ` ${SHARED_SCHEMA}` : ''),
         where,
       ),
     )
@@ -367,24 +377,36 @@ function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, resul
   }
 
   if (target.kind === 'add') {
-    if (has(target.current)) collision(target.current)
+    if (collides(target.current)) collision(target.current)
     return
   }
   if (target.kind === 'rename') {
     const previous = target.previous ?? target.current
     if (!has(previous)) missing(previous)
-    else if (previous !== target.current && has(target.current)) collision(target.current)
+    else if (previous !== target.current && collides(target.current)) collision(target.current)
     return
   }
   if (!has(target.current)) missing(target.current)
 }
 
 /**
+ * Why a table name is the application's rather than one app root's: `make:module` writes
+ * `export * from '../modules/<name>/db/schema'` into the project's own `db/schema.ts`,
+ * which is the file drizzle-kit reads, so two roots declaring one name are one SQL table
+ * in one migration set and two identical exports of it.
+ */
+const SHARED_SCHEMA =
+  "Every app root's schema is re-exported from the project's own db/schema.ts, so one name is one SQL table."
+
+/**
  * A section as one app root sees it: the names declared there, and where else the same
  * name is declared. A plan element states its root with `module`, and a same-named
  * element in another root neither satisfies an `existing` nor collides with an `add`.
  */
-function inRoot(entries: ReadonlyArray<PlanAppName>, module: string | undefined): Pick<TargetCheck, 'root' | 'elsewhere'> & { names: string[] } {
+function inRoot(
+  entries: ReadonlyArray<PlanAppName>,
+  module: string | undefined,
+): { root: PlanAppScope; names: string[]; elsewhere: (name: string) => string[] } {
   const root = module ?? null
   return {
     root,
@@ -461,11 +483,12 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
           kind: model.tableRenamedFrom ? 'rename' : model.change.kind === 'rename' ? 'existing' : model.change.kind,
           noun: 'table',
           ...scoped,
+          collidesWith: declared,
         },
         names,
         results,
       )
-      checkColumnsAgainstApp(model, tables, results)
+      checkColumnsAgainstApp(model, tables, scoped.elsewhere, results)
     }
   },
   (reason) => {
@@ -557,7 +580,12 @@ function checkNamedSection<T extends { id: string; change: PlanChange }>(
   })
 }
 
-function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<PlanAppTable>, results: PlanCheckResult[]): void {
+function checkColumnsAgainstApp(
+  model: PlanModel,
+  tables: ReadonlyArray<PlanAppTable>,
+  elsewhere: (name: string) => string[],
+  results: PlanCheckResult[],
+): void {
   if (model.change.kind === 'add') return
   const lookup = model.tableRenamedFrom ?? model.table
   const table = tables.find(
@@ -566,7 +594,13 @@ function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<PlanAppT
   )
   if (!table) {
     if (model.columns.length > 0) {
-      reportUnjudgedColumns(model, `table "${lookup}" was not found in ${scopeName(model.module ?? null)}`, results)
+      const other = elsewhere(lookup)
+      reportUnjudgedColumns(
+        model,
+        `table "${lookup}" was not found in ${scopeName(model.module ?? null)}`
+          + (other.length > 0 ? `, though this application declares one in ${other.join(', ')}` : ''),
+        results,
+      )
     }
     return
   }
