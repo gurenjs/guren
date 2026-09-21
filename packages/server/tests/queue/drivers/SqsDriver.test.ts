@@ -2,6 +2,8 @@ import { describe, test, expect, beforeEach } from 'bun:test'
 
 import { SqsDriver, type SqsAdapter } from '../../../src/queue/drivers/SqsDriver'
 import type { QueuedJob } from '../../../src/queue/types'
+import { resetWarnOnce } from '../../../src/support/warn-once'
+import { captureWarnings } from '../../support/warnings'
 
 interface MockCall {
   method: string
@@ -18,6 +20,9 @@ function createMockAdapter(): SqsAdapter & { calls: MockCall[] } {
     async receiveMessage(params) {
       calls.push({ method: 'receiveMessage', params })
       return null
+    },
+    async deleteMessage(params) {
+      calls.push({ method: 'deleteMessage', params })
     },
     async changeMessageVisibility(params) {
       calls.push({ method: 'changeMessageVisibility', params })
@@ -42,6 +47,14 @@ function createTestJob(overrides: Partial<QueuedJob> = {}): QueuedJob {
     reservedAt: null,
     ...overrides,
   }
+}
+
+function stubMessages(
+  adapter: SqsAdapter,
+  receiptHandle: string,
+  nextJob: () => QueuedJob = createTestJob,
+): void {
+  adapter.receiveMessage = async () => ({ body: JSON.stringify(nextJob()), receiptHandle })
 }
 
 describe('SqsDriver', () => {
@@ -169,6 +182,124 @@ describe('SqsDriver', () => {
     const params = adapter.calls[0].params as any
     expect(params.messageGroupId).toBe('my-group')
     expect(params.messageDeduplicationId).toBe('job-1')
+  })
+
+  test('should delete the popped message when a job completes', async () => {
+    stubMessages(adapter, 'receipt-123')
+
+    await driver.pop('default')
+    await driver.delete('job-1')
+
+    const deletes = adapter.calls.filter((call) => call.method === 'deleteMessage')
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].params).toEqual({
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+      receiptHandle: 'receipt-123',
+    })
+
+    await driver.delete('job-1')
+    expect(adapter.calls.filter((call) => call.method === 'deleteMessage')).toHaveLength(1)
+  })
+
+  test('should delete the popped message from the queue it was received on', async () => {
+    const driverWithUrls = new SqsDriver(adapter, {
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/default',
+      queueUrls: { emails: 'https://sqs.us-east-1.amazonaws.com/123/emails' },
+    })
+    stubMessages(adapter, 'receipt-emails', () => createTestJob({ queue: 'default' }))
+
+    await driverWithUrls.pop('emails')
+    await driverWithUrls.delete('job-1')
+
+    const deletes = adapter.calls.filter((call) => call.method === 'deleteMessage')
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].params).toEqual({
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/emails',
+      receiptHandle: 'receipt-emails',
+    })
+  })
+
+  test('should extend visibility on the queue the message was received on', async () => {
+    const driverWithUrls = new SqsDriver(adapter, {
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/default',
+      queueUrls: { emails: 'https://sqs.us-east-1.amazonaws.com/123/emails' },
+    })
+    stubMessages(adapter, 'receipt-emails', () => createTestJob({ queue: 'default' }))
+
+    const popped = await driverWithUrls.pop('emails')
+    await driverWithUrls.release(popped!, 5000)
+
+    const visibility = adapter.calls.filter((call) => call.method === 'changeMessageVisibility')
+    expect(visibility).toHaveLength(1)
+    expect(visibility[0].params).toEqual({
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/emails',
+      receiptHandle: 'receipt-emails',
+      visibilityTimeout: 5,
+    })
+  })
+
+  test('should delete the popped message when a job fails permanently', async () => {
+    stubMessages(adapter, 'receipt-456')
+
+    const popped = await driver.pop('default')
+    await driver.fail(popped!, new Error('permanent'))
+
+    const deletes = adapter.calls.filter((call) => call.method === 'deleteMessage')
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].params).toEqual({
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+      receiptHandle: 'receipt-456',
+    })
+    expect(await driver.getFailedJobs()).toHaveLength(1)
+  })
+
+  test('should still record a failed job when the message cannot be deleted', async () => {
+    stubMessages(adapter, 'receipt-789')
+    adapter.deleteMessage = async () => {
+      throw new Error('RequestThrottled')
+    }
+
+    const popped = await driver.pop('default')
+
+    const errors: string[] = []
+    const originalError = console.error
+    console.error = (message: string) => errors.push(message)
+    try {
+      await driver.fail(popped!, new Error('permanent'))
+    } finally {
+      console.error = originalError
+    }
+
+    expect(await driver.getFailedJobs()).toHaveLength(1)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('RequestThrottled')
+  })
+
+  test('should not delete a message for a job it never popped', async () => {
+    await driver.fail(createTestJob(), new Error('never reserved'))
+    await driver.delete('job-1')
+
+    expect(adapter.calls.filter((call) => call.method === 'deleteMessage')).toHaveLength(0)
+  })
+
+  test('should warn once for an adapter without deleteMessage', async () => {
+    const legacyAdapter = createMockAdapter()
+    delete (legacyAdapter as { deleteMessage?: unknown }).deleteMessage
+    stubMessages(legacyAdapter, 'receipt-legacy', () => createTestJob({ id: crypto.randomUUID() }))
+    const legacyDriver = new SqsDriver(legacyAdapter, {
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/queue',
+    })
+
+    resetWarnOnce()
+    const warnings = await captureWarnings(async () => {
+      for (let i = 0; i < 2; i++) {
+        const job = await legacyDriver.pop('default')
+        await legacyDriver.delete(job!.id)
+      }
+    })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('deleteMessage')
   })
 
   test('should pop job when adapter returns message', async () => {
