@@ -102,7 +102,7 @@ describe('plan:verify', () => {
       'tests/comments.test.ts',
     ])
     expect(record.fingerprint.files['app/Http/Controllers/CommentController.ts']).toBe(sha256(APP['app/Http/Controllers/CommentController.ts']!))
-    expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [] })
+    expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [], decisionsFile: '../http.decisions.json', staleWaivers: [] })
     expect(result.skipped).toEqual([])
 
     const state = JSON.parse(await readFile(join(app, '.guren/plans/http.state.json'), 'utf8')) as { stateVersion: number; steps: Record<string, PlanStepRecord> }
@@ -123,6 +123,7 @@ describe('plan:verify', () => {
       commands: [],
       acceptance: [],
       incomplete: [],
+      waived: [],
       fingerprint: { files: { 'db/schema.ts': sha256(SCHEMA), 'app/Models/Comment.ts': sha256(APP['app/Models/Comment.ts']!) }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' } },
     }
     await mkdir(join(app, '.guren/plans'), { recursive: true })
@@ -153,7 +154,7 @@ describe('plan:verify', () => {
     const revised = await writePlan('lift-revised.plan.json', { ...loadCommentsPlan(), title: 'Revised' })
     await writeFile(join(app, '.guren/plans/lift-revised.state.json'), JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [DATA]: record } }), 'utf8')
     const stale = await status(revised, app)
-    expect(stale.verification).toEqual({ stateFile: '.guren/plans/lift-revised.state.json', staleSteps: [DATA] })
+    expect(stale.verification).toEqual({ stateFile: '.guren/plans/lift-revised.state.json', staleSteps: [DATA], decisionsFile: '../lift-revised.decisions.json', staleWaivers: [] })
     expect(stale.summary.states.verified).toBe(0)
   })
 

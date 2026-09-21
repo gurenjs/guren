@@ -57,6 +57,11 @@ export const PlanStepRecordSchema = z.object({
   acceptance: z.array(z.object({ id: z.string(), status: z.enum(['pending', 'failing', 'passing']) })),
   /** Elements the step owns that were not at their completion state, `id: state`; empty when a command failed or was blocked. */
   incomplete: z.array(z.string()),
+  /**
+   * Elements the step owns that a waiver covered, so they were neither judged nor fingerprinted
+   * (RFC 0030 §6). Defaulted: a state file written before the field existed is still a state file.
+   */
+  waived: z.array(z.string()).default([]),
   fingerprint: PlanFingerprintSchema,
 })
 

@@ -143,7 +143,8 @@ describe('plan:status', () => {
     expect(result.reportVersion).toBe(1)
     expect(result.plan).toEqual({ file: 'shape.plan.json', title: 'Comments on posts', hash: null })
     expect(Object.keys(result.elements[0]!).sort()).toEqual(['change', 'completesAt', 'files', 'id', 'label', 'notes', 'properties', 'section', 'state'])
-    expect(result.verification).toEqual({ stateFile: '.guren/plans/shape.state.json', staleSteps: [] })
+    // The plan sits beside the application here rather than inside it, and the decision log follows the plan.
+    expect(result.verification).toEqual({ stateFile: '.guren/plans/shape.state.json', staleSteps: [], decisionsFile: '../shape.decisions.json', staleWaivers: [] })
     expect(Object.keys(result.summary).sort()).toEqual(['existing', 'notCheckable', 'properties', 'states'])
   })
 

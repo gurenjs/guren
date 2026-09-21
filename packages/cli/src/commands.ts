@@ -44,6 +44,7 @@ import { loadPlanAppState } from './plan/app-state'
 import { formatPlanStatus, planStatusFile } from './plan-status'
 import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from './plan-verify'
 import { formatPlanNext, planNextFile } from './plan-next'
+import { formatPlanWaive, planWaiveFile } from './plan-waive'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -359,6 +360,49 @@ const planNextCommand = defineCommand({
     const appRoot = resolve(args.app ?? process.cwd())
     const report = await planNextFile(args.plan, { appRoot })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanNext(report, args.plan))
+  },
+})
+
+const planWaiveCommand = defineCommand({
+  meta: {
+    name: 'plan:waive',
+    description:
+      "Accept elements of an approved plan incomplete, with a reason, in the decision log beside the plan (RFC 0030 §6). The log is committed; a waiver names the plan's hash, so a revision does not inherit it. Runs nothing and loads no application.",
+  },
+  args: {
+    plan: {
+      type: 'positional',
+      description: 'Path to the plan JSON file',
+      required: true,
+      valueHint: 'comments.plan.json',
+    },
+    elements: {
+      type: 'positional',
+      description: 'One or more element ids the plan declares (plan:status lists them).',
+      required: true,
+      valueHint: 'view.comments.index',
+    },
+    reason: {
+      type: 'string',
+      description: 'Why the element is accepted incomplete. Required unless --remove is given.',
+      valueHint: 'the redesign lands in the next plan',
+    },
+    remove: {
+      type: 'boolean',
+      description: 'Delete the waivers of the named elements instead of writing them.',
+      default: false,
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print the report as JSON.',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    // citty collects the trailing positionals in `_`, with the first two bound above.
+    const ids = [args.elements, ...args._.slice(2)].filter((id) => id.length > 0)
+    const report = await planWaiveFile(args.plan, { elementIds: ids, reason: args.reason, remove: args.remove })
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanWaive(report))
   },
 })
 
@@ -3741,6 +3785,7 @@ export const builtinSubCommands = {
   'plan:status': planStatusCommand,
   'plan:verify': planVerifyCommand,
   'plan:next': planNextCommand,
+  'plan:waive': planWaiveCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
   'make:ai-agent': makeAiAgentCommand,

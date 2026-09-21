@@ -11,8 +11,9 @@ import { parsePlanDocument } from '../src/plan-render'
 import { planDigest, PLAN_STATE_VERSION, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
+import { planWaiveFile } from '../src/plan-waive'
 import { writeWorkspaceFiles } from './helpers'
-import { loadCommentsPlan } from './plan-fixture'
+import { loadCommentsPlan, TEST_BASELINE } from './plan-fixture'
 
 // The command never loads the application, so an app here is a directory with a plan.
 const PLAN = parsePlanDocument(loadCommentsPlan())
@@ -38,6 +39,7 @@ async function holding(app: string): Promise<PlanStepRecord> {
     commands: [],
     acceptance: [],
     incomplete: [],
+    waived: [],
     fingerprint: { files: { 'lib.ts': sha256(await readFile(join(app, 'lib.ts'))) }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' } },
   }
 }
@@ -216,6 +218,29 @@ describe('plan:next', () => {
     await planNextFile(plan, { appRoot: app, now: NOW })
 
     expect((await readState(app)).active).toEqual(active)
+  })
+
+  test('should let a waiver carry a step whose record rests on one, and return that step again once the waiver is gone', async () => {
+    const approved = { ...loadCommentsPlan(), baseline: TEST_BASELINE }
+    const app = join(ROOT, 'waived')
+    await writeWorkspaceFiles(app, {
+      'package.json': JSON.stringify({ name: 'waived', type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
+      'lib.ts': 'export const a = 1\n',
+      'comments.plan.json': JSON.stringify(approved),
+    })
+    const plan = join(app, 'comments.plan.json')
+    const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)), waived: ['policy.comment'] }
+    await writeState(app, { steps: { [SCAFFOLD]: record } })
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], reason: 'the policy lands in the next plan', now: NOW })
+
+    const carried = await planNextFile(plan, { appRoot: app, now: NOW })
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], remove: true })
+    const withdrawn = await planNextFile(plan, { appRoot: app, now: NOW })
+
+    expect(carried.verified).toEqual([SCAFFOLD])
+    expect(carried.step?.id).toBe(TESTS)
+    expect(withdrawn.verified).toEqual([])
+    expect(withdrawn.step?.id).toBe(SCAFFOLD)
   })
 
   describe('formatting', () => {

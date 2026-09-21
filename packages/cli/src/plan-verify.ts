@@ -15,10 +15,11 @@ import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } f
 import type { PlanAppState } from './plan/app-state'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
+import { readPlanDecisions } from './plan/decisions'
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
 import { judgePlan } from './plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
-import { hashFiles, overlayVerification, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
+import { hashFiles, overlayVerification, planWaivers, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
 import { PlanVerifier, type PlanStepVerification } from './plan/verify'
 import { runCaptured } from './subprocess'
 
@@ -56,6 +57,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const slug = planSlug(path)
 
   const before = await readPlanState(root, slug)
+  const waived = new Set(planWaivers(plan, (await readPlanDecisions(path)).decisions).waivers.keys())
   let stepIds: string[]
   const skipped: string[] = []
   if (options.step === undefined) {
@@ -66,7 +68,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
     stepIds = planStepIds(derivation).filter((id) => {
       const record = records[id]
-      if (record && recordStillHolds(record, digest, hashes)) {
+      if (record && recordStillHolds(record, digest, hashes, waived)) {
         skipped.push(id)
         return false
       }
@@ -85,6 +87,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     exec: runCaptured,
     timeoutMs: options.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
     scripts: await readScripts(root),
+    waived,
   })
   const steps: PlanStepVerification[] = []
   for (const stepId of stepIds) {
@@ -114,6 +117,7 @@ export function formatPlanStepRecord(stepId: string, record: PlanStepRecord): st
   }
   for (const behaviour of record.acceptance) lines.push(`  ${behaviour.status.padEnd('pending'.length)}  [${behaviour.id}]`)
   for (const element of record.incomplete) lines.push(`  not at its completion state: ${element}`)
+  for (const element of record.waived) lines.push(`  waived, so not judged here: ${element}`)
   return lines
 }
 

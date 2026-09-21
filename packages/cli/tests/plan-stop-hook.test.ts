@@ -36,6 +36,7 @@ function record(overrides: Partial<PlanStepRecord> = {}): PlanStepRecord {
     ],
     acceptance: [{ id: 'AC-comments-1', status: 'passing' }],
     incomplete: ['action.comments.destroy: planned'],
+    waived: [],
     fingerprint: { files: { 'lib.ts': sha256('export const a = 1\n') }, environment: ENVIRONMENT },
     ...overrides,
   }
@@ -58,7 +59,7 @@ function report(stepId: string, stepRecord: PlanStepRecord, blocked: string[] = 
     plan: { file: 'comments.plan.json', title: PLAN.title, hash: null },
     elements,
     summary: status.summary,
-    verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [] },
+    verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
     steps: [{ stepId, taskId: 'task/entity/model.comment', record: stepRecord }],
     skipped: [],
   }

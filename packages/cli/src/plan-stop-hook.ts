@@ -14,9 +14,10 @@ import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
+import { readPlanDecisions } from './plan/decisions'
 import { listPlanStates, planDigest, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
 import { derivePlanTasks, findPlanStep } from './plan/tasks'
-import { hashFiles, recordStillHolds, sha256 } from './plan/verification'
+import { hashFiles, planWaivers, recordStillHolds, sha256 } from './plan/verification'
 
 /** Stops the hook blocks on one step before it gives up. */
 export const MAX_STEP_CONTINUATIONS = 3
@@ -91,7 +92,8 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     return { block: false, message: `${heading}: the plan no longer derives this step, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` for the next one.` }
   }
   const record = records[active.step]
-  if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)))) return { block: false }
+  const waived = new Set(planWaivers(plan, (await readPlanDecisions(planPath)).decisions).waivers.keys())
+  if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)), waived)) return { block: false }
 
   let report: PlanVerifyReport
   try {

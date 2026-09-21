@@ -13,12 +13,13 @@ import { runGit } from './changed-files'
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
+import { readPlanDecisions } from './plan/decisions'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskTitle } from './plan/tasks'
-import { hashFiles, recordStillHolds } from './plan/verification'
+import { hashFiles, planWaivers, recordStillHolds } from './plan/verification'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
 
@@ -93,13 +94,14 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const records = state?.steps ?? {}
   const previous = state?.active
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
+  const waived = new Set(planWaivers(plan, (await readPlanDecisions(path)).decisions).waivers.keys())
 
   const verified: string[] = []
   const onCommandsAlone: string[] = []
   let next: { task: PlanDerivedTask; step: PlanDerivedStep } | undefined
   for (const entry of listPlanSteps(derivation)) {
     const record = records[entry.step.id]
-    if (!(record && recordStillHolds(record, digest, hashes))) {
+    if (!(record && recordStillHolds(record, digest, hashes, waived))) {
       next ??= entry
       continue
     }
