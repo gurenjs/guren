@@ -62,7 +62,12 @@ function sectionOf(plan: PlanDraft): Map<string, PlanElementSection> {
   return new Map(listPlanElements(plan).map((element) => [element.id, element.section]))
 }
 
-/** The `existing` elements, which are nobody's work and so have no state a waiver could lift. A console command declares no change and is never one. */
+/**
+ * The `existing` elements, which are nobody's work and so have no state a waiver could lift.
+ * The sections listed here are the ones `plan/schema.ts` gives a `change`; a console command
+ * declares none and is never one. A section that gains one belongs here too, or its `existing`
+ * elements take a waiver that `applyWaivers()` then declines to apply.
+ */
 function existingIds(plan: PlanDraft): Set<string> {
   const ids = new Set<string>()
   const add = (items: ReadonlyArray<{ id: string; change: PlanChange }>): void => {
