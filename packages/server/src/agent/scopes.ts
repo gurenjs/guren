@@ -11,9 +11,7 @@
 
 /**
  * The MCP tool-name grammar (SEP-986), which a `tool:` scope names and a
- * `tools:<prefix>.*` scope must stay inside. `packages/cli/src/agent-route-check.ts`
- * holds the same pattern; collapsing the two needs a built server, so it waits
- * for the PR doing that build-order work. `*` is not in the charset, so
+ * `tools:<prefix>.*` scope must stay inside. `*` is not in the charset, so
  * `tool:posts.*` is rejected with no special case.
  */
 export const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/

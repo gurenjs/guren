@@ -10,6 +10,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
+import { AGENTS_CONFIG_FILE } from '@guren/server/internal/app-conventions'
 
 import type { File, Node, ObjectExpression } from '@babel/types'
 
@@ -27,7 +28,6 @@ import { specifierName } from './route-registrar'
 import { resourceName, writeRoot, writeScaffoldFile, type WriterOptions } from './utils'
 
 const AGENT_DIR = 'app/Agents'
-const CONFIG_FILE = 'config/agents.ts'
 const BINDINGS_FILE = 'config/bindings.ts'
 /** Where `make:agent` wrote `Env` before `config/env.ts` became the env schema (RFC 0027 §1). */
 const LEGACY_BINDINGS_FILE = 'config/env.ts'
@@ -266,17 +266,17 @@ async function registerAgent(
   options: WriterOptions,
 ): Promise<MakeAgentPatch> {
   const snippet = registrationEntry(agentName, className)
-  const existing = await readIfExists(cwd, CONFIG_FILE)
+  const existing = await readIfExists(cwd, AGENTS_CONFIG_FILE)
 
   if (existing === null) {
-    await writeScaffoldFile(CONFIG_FILE, configTemplate(agentName, className), options)
-    return { file: CONFIG_FILE, status: 'created' }
+    await writeScaffoldFile(AGENTS_CONFIG_FILE, configTemplate(agentName, className), options)
+    return { file: AGENTS_CONFIG_FILE, status: 'created' }
   }
 
-  const ast = parseSourceFile(existing, CONFIG_FILE)
+  const ast = parseSourceFile(existing, AGENTS_CONFIG_FILE)
   if (ast === null) {
     return {
-      file: CONFIG_FILE,
+      file: AGENTS_CONFIG_FILE,
       status: 'refused',
       reason: 'the file could not be parsed',
       snippet,
@@ -286,7 +286,7 @@ async function registerAgent(
   const agents = findAgentsObject(ast)
   if (agents === null) {
     return {
-      file: CONFIG_FILE,
+      file: AGENTS_CONFIG_FILE,
       status: 'refused',
       reason:
         'it does not export a default defineAgentsConfig({ agents: { … } }) with a literal '
@@ -298,15 +298,15 @@ async function registerAgent(
 
   if (agents.keys.has(agentName)) {
     return {
-      file: CONFIG_FILE,
+      file: AGENTS_CONFIG_FILE,
       status: 'skipped',
       reason: `\`${agentName}\` is already registered`,
     }
   }
 
   const patched = `${existing.slice(0, agents.insertAt)}\n${snippet}${existing.slice(agents.insertAt)}`
-  await writeFile(resolve(cwd, CONFIG_FILE), patched, 'utf8')
-  return { file: CONFIG_FILE, status: 'patched' }
+  await writeFile(resolve(cwd, AGENTS_CONFIG_FILE), patched, 'utf8')
+  return { file: AGENTS_CONFIG_FILE, status: 'patched' }
 }
 
 interface AgentsObject {

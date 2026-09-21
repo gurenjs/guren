@@ -19,7 +19,7 @@ export class Container {
   protected tags: Map<string, Set<string>> = new Map()
   protected contextualBindings: ContextualBinding[] = []
   protected resolvingStack: string[] = []
-  private readonly scope = new AsyncLocalStorage<Map<string, unknown>>()
+  private scope?: AsyncLocalStorage<Map<string, unknown>>
   protected fakes: Map<string, unknown> = new Map()
 
   /**
@@ -91,7 +91,7 @@ export class Container {
       return binding.instance
     }
 
-    const currentScope = this.scope.getStore()
+    const currentScope = this.scope?.getStore()
     if (currentScope) {
       if (currentScope.has(resolvedKey)) {
         return currentScope.get(resolvedKey)
@@ -229,13 +229,18 @@ export class Container {
     }
   }
 
-  /** Services resolved inside the callback are cached for the scope and released when it ends. */
+  /**
+   * Services resolved inside the callback are cached for the scope. The cache lives
+   * as long as the async context: work detached inside the scope (a timer, an
+   * un-awaited promise) keeps it and every cached instance reachable.
+   */
   scoped<T>(callback: () => T): T {
+    this.scope ??= new AsyncLocalStorage()
     return this.scope.run(new Map(), callback)
   }
 
-  async scopedAsync<T>(callback: () => Promise<T>): Promise<T> {
-    return this.scope.run(new Map(), callback)
+  scopedAsync<T>(callback: () => Promise<T>): Promise<T> {
+    return this.scoped(callback)
   }
 
   /**

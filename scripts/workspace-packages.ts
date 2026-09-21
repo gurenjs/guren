@@ -21,7 +21,10 @@ export interface WorkspacePackage {
   /** Path relative to the repo root, e.g. `packages/server`. */
   relativeDir: string
   scripts: Record<string, string>
+  /** In-workspace build-order edges: `dependencies`, required peers, and the optional peers that close no cycle. */
   dependencies: string[]
+  /** Optional peers (`peerDependenciesMeta.optional`): soft edges, dropped only where they would close a cycle. */
+  optionalDependencies?: string[]
 }
 
 /**
@@ -93,17 +96,53 @@ export async function collectPackages(root: string = repoRoot): Promise<Workspac
       dirName: entry.name,
       relativeDir: `packages/${entry.name}`,
       scripts: manifest.scripts ?? {},
-      dependencies: Object.keys({
-        ...manifest.dependencies,
-        // Optional integrations are loaded only when invoked; they must not
-        // force a build of plugins which themselves depend on the CLI facade.
-        ...Object.fromEntries(Object.entries(manifest.peerDependencies ?? {})
-          .filter(([name]) => !manifest.peerDependenciesMeta?.[name]?.optional)),
-      }),
+      dependencies: Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies }),
+      optionalDependencies: Object.keys(manifest.peerDependencies ?? {})
+        .filter((name) => manifest.peerDependenciesMeta?.[name]?.optional),
     })
   }
 
-  return packages.sort((a, b) => a.name.localeCompare(b.name))
+  return pruneSoftCycles(packages.sort((a, b) => a.name.localeCompare(b.name)))
+}
+
+/**
+ * An optional peer orders the build when it can, so the dependent's declarations
+ * resolve the sibling's built `.d.ts` under `paths: {}`, and gives way where it
+ * closes a cycle (`@guren/cli` → `@guren/openapi` → `@guren/core` → `@guren/cli`).
+ * Only edges between packages on a cycle are dropped; a cycle of required
+ * dependencies is left for `sortByDependencies` to report.
+ */
+function pruneSoftCycles(packages: WorkspacePackage[]): WorkspacePackage[] {
+  for (;;) {
+    const cyclic = cyclicPackages(packages)
+    let pruned = false
+    for (const pkg of packages) {
+      if (!cyclic.has(pkg.name)) continue
+      const soft = (pkg.optionalDependencies ?? []).filter((dep) => cyclic.has(dep) && pkg.dependencies.includes(dep))
+      if (soft.length === 0) continue
+      pkg.dependencies = pkg.dependencies.filter((dep) => !soft.includes(dep))
+      pruned = true
+    }
+    if (!pruned) return packages
+  }
+}
+
+/** Names of the packages that can reach themselves through in-workspace edges. */
+function cyclicPackages(packages: WorkspacePackage[]): Set<string> {
+  const byName = new Map(packages.map((pkg) => [pkg.name, pkg]))
+  const cyclic = new Set<string>()
+  for (const pkg of packages) {
+    const seen = new Set<string>()
+    const stack = pkg.dependencies.filter((dep) => byName.has(dep))
+    while (stack.length > 0) {
+      const name = stack.pop()!
+      if (name === pkg.name) { cyclic.add(pkg.name); break }
+      if (seen.has(name)) continue
+      seen.add(name)
+      stack.push(...byName.get(name)!.dependencies.filter((dep) => byName.has(dep)))
+    }
+  }
+  return cyclic
 }
 
 /**

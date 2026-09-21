@@ -1,14 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Isolate concurrent dependency-injection scopes and reset worker state after failures.
-- Make Redis queue transitions atomic, fence stale reservations, and renew active leases.
-- Request job cancellation through `this.signal`; wait for handlers to settle before retrying.
-- Remove the CLI's runtime dependency on the core facade and the build-cycle exception.
-- Clarify mass-assignment protection and align runtime documentation with the CI baseline (Bun 1.3.14; Bun 1.4.2 remains a trial).
-
-
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

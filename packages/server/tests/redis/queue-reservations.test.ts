@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
-import Redis from 'ioredis'
 import { randomUUID } from 'node:crypto'
+import { createRedisClient, type Redis } from '../../src/redis'
 import { RedisDriver } from '../../src/queue/drivers/RedisDriver'
 import { Job, enqueueJob, registerJob } from '../../src/queue/Job'
 import { Worker } from '../../src/queue/Worker'
@@ -14,7 +14,7 @@ describeRedis('Redis queue reservations', () => {
   class ExampleJob extends Job { handle() {} }
 
   beforeEach(async () => {
-    redis ??= new Redis(process.env.REDIS_URL!)
+    redis ??= createRedisClient({ url: process.env.REDIS_URL })
     driver = new RedisDriver(redis, { prefix, visibilityTimeout: 60 })
     await driver.clear()
     registerJob(ExampleJob)
@@ -69,37 +69,37 @@ describeRedis('Redis queue reservations', () => {
     expect(await redis.exists(`${prefix}job:${id}`)).toBe(1)
   })
 
-  test('renews reservations while a timed-out handler drains', async () => {
-    let start!: () => void
-    const started = new Promise<void>((resolve) => { start = resolve })
-    let finish!: () => void
-    const drain = new Promise<void>((resolve) => { finish = resolve })
+  test('renews reservations while a timed-out handler drains, then acknowledges it', async () => {
+    const started = Promise.withResolvers<void>()
+    const drain = Promise.withResolvers<void>()
     class DrainingJob extends Job {
-      async handle() { start(); await drain }
+      async handle() { started.resolve(); await drain.promise }
     }
     registerJob(DrainingJob)
-    await enqueueJob(driver, DrainingJob, {}, { maxAttempts: 1 })
+    const id = await enqueueJob(driver, DrainingJob, {}, { maxAttempts: 1 })
     const worker = new Worker(driver, { timeout: 5, stopWhenEmpty: true })
     const running = worker.start()
     try {
-      await started
+      await started.promise
       await new Promise((resolve) => setTimeout(resolve, 150))
       expect(await driver.pop('default')).toBeNull()
       expect(worker.isRunning()).toBe(true)
-    } finally { finish(); await running }
-    expect(await driver.getFailedJobs('default')).toHaveLength(1)
+    } finally { drain.resolve(); await running }
+    expect(await driver.getFailedJobs('default')).toHaveLength(0)
+    expect(await redis.exists(`${prefix}job:${id}`)).toBe(0)
   })
 
   test('reservation uses one server-side operation even when the reply is lost', async () => {
     const id = await enqueueJob(driver, ExampleJob, {})
-    // Execute the command, then lose its reply: the state must still be recoverable.
-    const evalCommand = redis.eval.bind(redis)
-    redis.eval = (async (...args: Parameters<typeof redis.eval>) => {
-      await evalCommand(...args)
-      throw new Error('reply lost')
-    }) as unknown as typeof redis.eval
+    // Execute the script, then lose its reply: the state must still be recoverable.
+    const send = redis.sendCommand.bind(redis)
+    redis.sendCommand = (async (command, stream) => {
+      const reply = await send(command, stream)
+      if (command.name === 'evalsha' || command.name === 'eval') throw new Error('reply lost')
+      return reply
+    }) as typeof redis.sendCommand
     try { await expect(driver.pop('default')).rejects.toThrow('reply lost') }
-    finally { redis.eval = evalCommand }
+    finally { redis.sendCommand = send }
     expect(await redis.zcard(`${prefix}default:reserved`)).toBe(1)
     await redis.zadd(`${prefix}default:reserved`, 0, id)
     expect((await driver.pop('default'))?.id).toBe(id)

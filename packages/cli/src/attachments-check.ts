@@ -2,7 +2,6 @@ import { readdir, readlink, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { CallExpression, ConditionalExpression, ObjectExpression, ObjectProperty } from '@babel/types'
 import type { RouteDefinition } from '@guren/server'
-import { ATTACHMENT_DELIVERY_CONTROLLER_NAME, DEFAULT_DELIVERY_ROUTE_NAME } from '@guren/server/internal/app-conventions'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { SCHEMA_SPECIFIER_PATTERN, schemaModuleFor } from './schema-binding'
@@ -13,7 +12,13 @@ import { parseModelSource } from './model-parser'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
 
-
+/**
+ * The route `registerAttachmentRoutes()` mounts, by the name and controller class it
+ * registers. Literals rather than imports, since the CLI does not depend on `@guren/core`;
+ * `scripts/workspace-boundaries.test.ts` pins both to the runtime's values.
+ */
+export const DEFAULT_DELIVERY_ROUTE_NAME = 'attachments.show'
+export const ATTACHMENT_DELIVERY_CONTROLLER_NAME = 'AttachmentDeliveryController'
 
 interface AttachmentsImportScan {
   /** The local binding `configureAttachments` (from `@guren/core`) is bound to, or null. */

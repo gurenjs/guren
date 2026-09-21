@@ -396,11 +396,12 @@ function dropReexports(loaded: LoadedSchema[], staticTables: SchemaTable[]): voi
 async function readRuntimeFiles(appRoot: string, options: SchemaRuntimeOptions, staticTables: SchemaTable[]): Promise<RuntimeSchemaFile[]> {
   const roots = await listAppRoots(appRoot)
   const timeoutMs = options.importTimeoutMs ?? IMPORT_TIMEOUT_MS
+  const importSchema = options.importSchema ?? ((url: string) => import(url))
 
   // Evicted together and before any import: a module schema importing the root's must not
   // pin the old root instance, whose tables a foreign key would then fail to match.
   await Promise.all(roots.map((root) => evictIfChanged(resolve(appRoot, schemaPathFor(root.module)))))
-  const loaded = (await Promise.all(roots.map((root) => loadSchemaFile(appRoot, root.module, timeoutMs, options.importSchema ?? ((url) => import(url)))))).filter((file) => file !== null)
+  const loaded = (await Promise.all(roots.map((root) => loadSchemaFile(appRoot, root.module, timeoutMs, importSchema)))).filter((file) => file !== null)
 
   const readable = loaded.filter((file): file is LoadedSchema => 'entries' in file)
   dropReexports(readable, staticTables)

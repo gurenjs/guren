@@ -140,11 +140,12 @@ export abstract class Job<T = unknown> {
   static backoff: 'exponential' | 'linear' | number = 'exponential'
 
   private container?: ContainerLike
-  private executionSignal = new AbortController().signal
+  private executionSignal?: AbortSignal
 
   /** Aborted when the worker times out or loses its reservation. Pass it to cancellable I/O. */
   protected get signal(): AbortSignal {
-    return this.executionSignal
+    // Outside a worker (SyncDriver, a direct `handle()` call) nothing aborts it.
+    return this.executionSignal ??= new AbortController().signal
   }
 
   /** @internal Installed by the worker before handle(). */

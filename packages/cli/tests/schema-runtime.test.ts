@@ -375,9 +375,14 @@ export const posts = pgTable('posts', { id: serial('id').primaryKey(), ...timest
       await expectStaticFallback(app, /db\/schema\.ts could not be imported/)
     })
 
-    test('should fall back to the static reader when the import never settles', async () => {
-      // Some Bun loaders resolve dynamic imports before top-level await settles.
-      // Inject the import boundary so every platform exercises the fallback itself.
+    // Measured: Bun 1.3.14 on Linux resolves a dynamic import while its top-level await is
+    // still pending, so there the schema reads as a table in ~10ms and the timeout never fires.
+    test.skipIf(process.platform === 'linux')('should fall back to the static reader when the real import never settles', async () => {
+      const app = await createApp({ 'db/schema.ts': `${OPAQUE_SCHEMA}\nawait new Promise((done) => setTimeout(done, 10_000))\n` })
+      await expectStaticFallback(app, /could not be imported: the import did not finish within 50ms/, { importTimeoutMs: 50 })
+    })
+
+    test('should fall back to the static reader when the injected import never settles', async () => {
       const app = await createApp({ 'db/schema.ts': OPAQUE_SCHEMA })
       await expectStaticFallback(app, /could not be imported: the import did not finish within 10ms/, {
         importTimeoutMs: 10,

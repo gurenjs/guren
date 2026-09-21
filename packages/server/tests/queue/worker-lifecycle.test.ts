@@ -1,27 +1,47 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { Job, enqueueJob, registerJob } from '../../src/queue/Job'
 import { Worker } from '../../src/queue/Worker'
 import { MemoryDriver } from '../../src/queue/drivers/MemoryDriver'
+import { resetQueueState } from './helpers'
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 describe('worker cancellation and recovery', () => {
+  afterEach(resetQueueState)
+
   test('waits for an uncooperative handler before retrying and stopping', async () => {
     let active = 0, peak = 0, completed = 0
-    class SlowJob extends Job {
+    class SlowFailingJob extends Job {
       static backoff = 0
       async handle() {
         active++; peak = Math.max(peak, active)
         await sleep(25)
         completed++; active--
+        throw new Error('late failure')
       }
+    }
+    registerJob(SlowFailingJob)
+    const driver = new MemoryDriver()
+    await enqueueJob(driver, SlowFailingJob, {}, { maxAttempts: 2 })
+    await new Worker(driver, { timeout: 5, stopWhenEmpty: true }).start()
+    expect({ peak, completed, active }).toEqual({ peak: 1, completed: 2, active: 0 })
+    const failed = await driver.getFailedJobs()
+    expect(failed).toHaveLength(1)
+    expect(failed[0]?.error).toContain('timed out')
+  })
+
+  test('acknowledges a handler that ignores the timeout but settles successfully', async () => {
+    let runs = 0
+    class SlowJob extends Job {
+      async handle() { runs++; await sleep(25) }
     }
     registerJob(SlowJob)
     const driver = new MemoryDriver()
     await enqueueJob(driver, SlowJob, {}, { maxAttempts: 2 })
     await new Worker(driver, { timeout: 5, stopWhenEmpty: true }).start()
-    expect({ peak, completed, active }).toEqual({ peak: 1, completed: 2, active: 0 })
-    expect(await driver.getFailedJobs()).toHaveLength(1)
+    expect(runs).toBe(1)
+    expect(await driver.size('default')).toBe(0)
+    expect(await driver.getFailedJobs()).toHaveLength(0)
   })
 
   test('passes cancellation to cooperative I/O before applying failure policy', async () => {
@@ -67,8 +87,40 @@ describe('worker cancellation and recovery', () => {
     registerJob(LeaseJob)
     const driver = new LeaseDriver()
     await enqueueJob(driver, LeaseJob, {})
-    const worker = new Worker(driver, { stopWhenEmpty: true })
-    await expect(worker.start()).rejects.toThrow('reservation could not be renewed')
+    const reported: Array<[string, boolean]> = []
+    const worker = new Worker(driver, { stopWhenEmpty: true }, {
+      jobFailed: (_job, error, willRetry) => { reported.push([error.message, willRetry]) },
+    })
+    // A lost lease is the job's outcome, not the worker's: the loop goes on to the next job.
+    await worker.start()
+    expect(reported).toEqual([['Job reservation now belongs to another worker', true]])
     expect(worker.isRunning()).toBe(false)
+  })
+
+  test('retries a rejected renewal at the next heartbeat instead of dropping the lease', async () => {
+    let aborted = false
+    class LeaseJob extends Job {
+      async handle() {
+        this.signal.addEventListener('abort', () => { aborted = true }, { once: true })
+        await sleep(25)
+      }
+    }
+    class FlakyLeaseDriver extends MemoryDriver {
+      readonly heartbeatInterval = 1
+      renewals = 0
+      async extendReservation() {
+        this.renewals++
+        if (this.renewals === 1) throw new Error('connection reset')
+        return true
+      }
+    }
+    registerJob(LeaseJob)
+    const driver = new FlakyLeaseDriver()
+    await enqueueJob(driver, LeaseJob, {})
+    await new Worker(driver, { stopWhenEmpty: true }).start()
+    expect(aborted).toBe(false)
+    expect(driver.renewals).toBeGreaterThan(1)
+    expect(await driver.size('default')).toBe(0)
+    expect(await driver.getFailedJobs()).toHaveLength(0)
   })
 })

@@ -273,7 +273,8 @@ async function attachFrameworkHelpers(context: Record<string, unknown>): Promise
   const provided: string[] = []
 
   try {
-    const frameworkExports = await import('@guren/core')
+    // The app's runtime copy; core re-exports these same classes, so server is the leaf to reach for.
+    const frameworkExports = await import('@guren/server')
 
     if (Object.prototype.hasOwnProperty.call(frameworkExports, 'Router')) {
       context.Router = frameworkExports.Router
@@ -285,7 +286,7 @@ async function attachFrameworkHelpers(context: Record<string, unknown>): Promise
       provided.push('Controller')
     }
   } catch (error) {
-    consola.debug('Unable to load @guren/core helpers:', error)
+    consola.debug('Unable to load @guren/server helpers:', error)
   }
 
   try {

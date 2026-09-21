@@ -27,7 +27,7 @@ describe('attachment delivery route name default', () => {
 
     // Nothing at runtime distinguishes a name read from the constant from one
     // re-typed as a literal, so the source form is what is pinned.
-    const declaration = "import { DEFAULT_DELIVERY_ROUTE_NAME } from '@guren/server/internal/app-conventions'"
+    const declaration = `export const DEFAULT_DELIVERY_ROUTE_NAME = '${DEFAULT_DELIVERY_ROUTE_NAME}'`
     expect(code).toContain(declaration)
     for (const quote of ["'", '"']) {
       expect(code.replace(declaration, '')).not.toContain(

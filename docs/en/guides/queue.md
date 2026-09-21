@@ -290,23 +290,27 @@ async handle(payload: { url: string }) {
 ```
 
 The worker waits for `handle()` to settle before retrying or marking the job failed.
-A handler that ignores cancellation can therefore exceed the timeout. JavaScript
+A handler that ignores cancellation can therefore exceed the timeout; if it then
+completes, the job is acknowledged rather than retried. JavaScript
 cannot forcibly stop arbitrary in-process code; use a process supervisor to terminate
 a stuck worker. `stop()` requests shutdown and waits up to the worker timeout;
 `start()` settles only after the active handler has finished.
 
 Redis reservations are renewed while the handler runs, including during cancellation.
-A lost reservation aborts the signal and stops the worker after the handler settles;
-the driver then recovers the job through its visibility timeout. A stale worker
+A renewal that fails with a driver error is retried at the next heartbeat. A reservation
+another worker now owns aborts the signal; once the handler settles, the worker neither
+acknowledges nor releases the job, reports it through `jobFailed`, and moves on. The
+driver recovers the job through its visibility timeout. A stale worker
 cannot acknowledge, release or fail a reservation now owned by another worker.
 Redis state transitions are atomic. Use a standalone Redis instance, or a shared
 hash tag in the prefix when using Redis Cluster so all queue keys occupy one slot.
 
 Delivery is at least once: a process can fail after an external effect but before
 acknowledging it. Use idempotency keys for payments, emails and other external writes.
-Custom queue drivers with expiring reservations should implement `heartbeatInterval`
-and `extendReservation(job)`; otherwise configure their visibility timeout to cover
-the complete execution, including cancellation. If `start()` rejects on a driver
+`SqsDriver` renews through `ChangeMessageVisibility`; pass the queue's `visibilityTimeout`
+in seconds so the renewal matches the queue attribute. Custom queue drivers with expiring
+reservations should implement `heartbeatInterval` and `extendReservation(job)`; otherwise
+configure their visibility timeout to cover the complete execution, including cancellation. If `start()` rejects on a driver
 error, its running state is reset; a supervisor may restart it with backoff.
 
 ### Programmatic Worker

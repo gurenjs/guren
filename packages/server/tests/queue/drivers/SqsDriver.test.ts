@@ -188,4 +188,44 @@ describe('SqsDriver', () => {
     expect(result!.name).toBe('TestJob')
     expect(result!.reservedAt).toBeInstanceOf(Date)
   })
+
+  describe('reservation renewal', () => {
+    async function popWithReceipt(adapterInstance: ReturnType<typeof createMockAdapter>, options: { visibilityTimeout?: number } = {}) {
+      adapterInstance.receiveMessage = async () => ({ body: JSON.stringify(createTestJob()), receiptHandle: 'receipt-123' })
+      const instance = new SqsDriver(adapterInstance, { queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/queue', ...options })
+      return { instance, job: (await instance.pop('default'))! }
+    }
+
+    test('should renew a third of the visibility timeout at a time', async () => {
+      expect(driver.heartbeatInterval).toBe(10_000)
+      expect(new SqsDriver(adapter, { queueUrl: 'https://q', visibilityTimeout: 120 }).heartbeatInterval).toBe(40_000)
+    })
+
+    test('should re-apply the visibility timeout to the in-flight receipt handle', async () => {
+      const { instance, job } = await popWithReceipt(adapter, { visibilityTimeout: 90 })
+      expect(await instance.extendReservation(job)).toBe(true)
+      expect(adapter.calls.at(-1)).toEqual({
+        method: 'changeMessageVisibility',
+        params: { queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/queue', receiptHandle: 'receipt-123', visibilityTimeout: 90 },
+      })
+    })
+
+    test('should report a reservation it no longer holds as lost', async () => {
+      expect(await driver.extendReservation(createTestJob())).toBe(false)
+      const { instance, job } = await popWithReceipt(adapter)
+      adapter.changeMessageVisibility = async () => false
+      expect(await instance.extendReservation(job)).toBe(false)
+    })
+
+    test('should treat an adapter written before the boolean return as owning the receipt', async () => {
+      const { instance, job } = await popWithReceipt(adapter)
+      expect(await instance.extendReservation(job)).toBe(true)
+    })
+
+    test('should surface other adapter errors so the worker retries the renewal', async () => {
+      const { instance, job } = await popWithReceipt(adapter)
+      adapter.changeMessageVisibility = async () => { throw new Error('connection reset') }
+      await expect(instance.extendReservation(job)).rejects.toThrow('connection reset')
+    })
+  })
 })
