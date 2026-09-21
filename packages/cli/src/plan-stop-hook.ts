@@ -1,0 +1,141 @@
+/**
+ * The plan half of the harness Stop hook (RFC 0030 §7): verify the step `plan:next` marked
+ * and block the stop while it is not, giving up where a continuation cannot help: the step or
+ * an element it owns is `blocked` (the environment's), the record is the one the last
+ * continuation was blocked on, or three continuations. A stall is recorded in state and
+ * sticks until the next `plan:next`, so a session that gave up is not asked again on every
+ * stop. `verify` is the seam the unit tests fake; the shipped hooks run `plan:verify`.
+ */
+
+import { resolve } from 'node:path'
+
+import { isConfirmedApiOnlyApp } from './app-surface'
+import { CliError } from './cli-error'
+import { readPlanFile } from './plan-render'
+import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
+import { loadPlanAppState } from './plan/app-state'
+import { listPlanStates, planDigest, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
+import { derivePlanTasks, findPlanStep } from './plan/tasks'
+import { hashFiles, recordStillHolds, sha256 } from './plan/verification'
+
+/** Stops the hook blocks on one step before it gives up. */
+export const MAX_STEP_CONTINUATIONS = 3
+
+export interface PlanStopHookInput {
+  /** Whether this stop already follows one a Stop hook blocked. */
+  stopHookActive: boolean
+}
+
+export interface PlanStopHookVerdict {
+  /** Exit 2 for Claude Code and Codex, a follow-up for Cursor. */
+  block: boolean
+  message?: string
+}
+
+export interface PlanStopHookDeps {
+  verify?: (planPath: string, appRoot: string, stepId: string) => Promise<PlanVerifyReport>
+  now?: () => Date
+}
+
+export type StopHookJudgement = { kind: 'verified' } | { kind: 'continue'; signature: string } | { kind: 'stalled'; reason: string; signature: string }
+
+/** What of a record a continuation could change; timings and the environment are not it. */
+export function recordSignature(record: PlanStepRecord): string {
+  return sha256(
+    JSON.stringify({
+      outcome: record.outcome,
+      commands: record.commands.map(({ command, status, reason, findings }) => ({ command, status, reason, findings })),
+      acceptance: record.acceptance,
+      incomplete: record.incomplete,
+      files: record.fingerprint.files,
+    }),
+  )
+}
+
+/** Pure: whether the stop is blocked, let through as verified, or given up on, and why. */
+export function judgeStopHook(active: PlanActiveStep, record: PlanStepRecord, blockedElements: ReadonlyArray<{ id: string; reason?: string }>, stopHookActive: boolean): StopHookJudgement {
+  if (record.outcome === 'verified') return { kind: 'verified' }
+  const signature = recordSignature(record)
+  const stalled = (reason: string): StopHookJudgement => ({ kind: 'stalled', reason, signature })
+  if (record.outcome === 'blocked') {
+    const reasons = record.commands.filter((command) => command.status === 'blocked').map((command) => `${command.command}: ${command.reason ?? 'blocked'}`)
+    return stalled(`the step is blocked (${reasons.join('; ')})`)
+  }
+  if (blockedElements.length > 0) {
+    return stalled(blockedElements.map((element) => `${element.id} is blocked${element.reason ? ` (${element.reason})` : ''}`).join('; '))
+  }
+  if (stopHookActive && active.lastSignature === signature) return stalled('nothing about the step changed since the last continuation')
+  if (active.continuations >= MAX_STEP_CONTINUATIONS) return stalled(`${MAX_STEP_CONTINUATIONS} continuations on this step`)
+  return { kind: 'continue', signature }
+}
+
+function defaultVerify(planPath: string, appRoot: string, stepId: string): Promise<PlanVerifyReport> {
+  return planVerifyFile(planPath, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot, step: stepId })
+}
+
+async function verifyActiveStep(appRoot: string, slug: string, records: Readonly<Record<string, PlanStepRecord>>, active: PlanActiveStep, stopHookActive: boolean, deps: PlanStopHookDeps): Promise<PlanStopHookVerdict> {
+  const planPath = resolve(appRoot, active.plan)
+  const heading = `plan:verify on stop (${active.plan}, ${active.step})`
+  let plan
+  try {
+    plan = (await readPlanFile(planPath)).plan
+  } catch (error) {
+    // The mark outlived its plan: nothing to verify against, and the next plan:next rewrites it.
+    return { block: false, message: `${heading}: ${error instanceof Error ? error.message : String(error)}\nRun \`bunx guren plan:next ${active.plan}\` again once the plan is back.` }
+  }
+  const digest = planDigest(plan)
+  const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false) })
+  const step = findPlanStep(derivation, active.step)?.step
+  if (!step) {
+    await writePlanActiveStep(appRoot, slug, undefined)
+    return { block: false, message: `${heading}: the plan no longer derives this step, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` for the next one.` }
+  }
+  const record = records[active.step]
+  if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)))) return { block: false }
+
+  let report: PlanVerifyReport
+  try {
+    report = await (deps.verify ?? defaultVerify)(planPath, appRoot, active.step)
+  } catch (error) {
+    // A run that could not judge the step is not a reason to hold the session: the hook says so and lets it stop.
+    const reason = error instanceof CliError ? error.message : error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    return { block: false, message: `${heading}: could not verify the step: ${reason}` }
+  }
+  const verification = report.steps.find((candidate) => candidate.stepId === active.step)
+  if (!verification) return { block: false, message: `${heading}: the run did not cover the step.` }
+  const owned = new Set(step.elementIds)
+  const blockedElements = report.elements.filter((element) => owned.has(element.id) && element.state === 'blocked')
+  const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive)
+  if (judgement.kind === 'verified') return { block: false }
+
+  const output = formatPlanStepRecord(active.step, verification.record).join('\n')
+  if (judgement.kind === 'stalled') {
+    const at = (deps.now ?? (() => new Date()))().toISOString()
+    await writePlanActiveStep(appRoot, slug, { ...active, lastSignature: judgement.signature, stalled: { at, reason: judgement.reason, output } })
+    return {
+      block: false,
+      message: `${heading}: giving up, ${judgement.reason}.\n${output}\nThe step is recorded as stalled. Fix the environment or revise the plan, then \`bunx guren plan:next ${active.plan}\` returns it again.`,
+    }
+  }
+  const continuations = active.continuations + 1
+  await writePlanActiveStep(appRoot, slug, { ...active, continuations, lastSignature: judgement.signature })
+  return {
+    block: true,
+    message: `${heading}: the step is ${verification.record.outcome}, so this turn is not done (continuation ${continuations} of ${MAX_STEP_CONTINUATIONS}).\n${output}\nFinish the step: it is done when \`bunx guren plan:verify ${active.plan} --step ${active.step}\` reports it verified.`,
+  }
+}
+
+/** Every marked step under the application root, verified; one message covers them all. */
+export async function planStopHookFindings(appRoot: string, input: PlanStopHookInput, deps: PlanStopHookDeps = {}): Promise<PlanStopHookVerdict> {
+  const messages: string[] = []
+  let block = false
+  for (const { slug, state, unreadable } of await listPlanStates(appRoot)) {
+    if (unreadable) messages.push(`plan:verify on stop: ${unreadable}\nThe next plan:verify replaces it, and its mark is gone: run \`bunx guren plan:next <plan>\` again.`)
+    const active = state?.active
+    if (!active || active.stalled) continue
+    const verdict = await verifyActiveStep(appRoot, slug, state.steps, active, input.stopHookActive, deps)
+    if (verdict.message) messages.push(verdict.message)
+    block ||= verdict.block
+  }
+  return messages.length > 0 ? { block, message: messages.join('\n\n') } : { block }
+}

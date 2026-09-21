@@ -39,6 +39,8 @@ export type RuntimeSchemaFile =
 
 export interface SourcedSchemaTable extends RuntimeSchemaTable {
   source: SchemaSource
+  /** The schema file that declares it, app-relative. */
+  file: string
   /** `static` only: why the runtime reader did not report this table. */
   runtimeUnreadable?: string
 }
@@ -456,7 +458,7 @@ export async function readSchemaTables(appRoot: string, options: SchemaRuntimeOp
   for (const file of files) {
     if (file.status !== 'read') continue
     for (const table of file.tables) {
-      tables.push({ ...withStaticType(table, claimStatic(file.module, table.identifier)), source: 'runtime' })
+      tables.push({ ...withStaticType(table, claimStatic(file.module, table.identifier)), source: 'runtime', file: file.path })
     }
   }
 
@@ -464,7 +466,7 @@ export async function readSchemaTables(appRoot: string, options: SchemaRuntimeOp
     const file = files.find((candidate) => candidate.module === table.module)
     const runtimeUnreadable =
       file?.status === 'unreadable' ? file.reason : `${schemaPathFor(table.module)} does not export ${table.identifier} as a drizzle table`
-    tables.push({ ...table, source: 'static', runtimeUnreadable })
+    tables.push({ ...table, source: 'static', file: schemaPathFor(table.module), runtimeUnreadable })
   }
 
   return { tables, files }

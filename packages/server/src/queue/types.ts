@@ -11,6 +11,7 @@ export interface QueuedJob<T = unknown> {
 
   queue: string
 
+  /** Deliveries already completed; the worker adds one for the run it starts. */
   attempts: number
 
   maxAttempts: number
@@ -40,6 +41,11 @@ export interface FailedJob<T = unknown> extends QueuedJob<T> {
 export interface QueueDriver {
   push(job: QueuedJob): Promise<void>
 
+  /**
+   * Reconcile `attempts` here when the backend counts redeliveries itself:
+   * a driver that leaves the body's count alone restarts the retry limit on
+   * every redelivery, since nothing rewrites a message already on the queue.
+   */
   pop(queue: string): Promise<QueuedJob | null>
 
   /**

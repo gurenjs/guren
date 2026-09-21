@@ -34,7 +34,7 @@ export type PlanElementState = 'planned' | 'present' | 'wired' | 'verified' | 'd
 
 export type PlanStatusState = Exclude<PlanElementState, 'verified' | 'waived'>
 
-export const PLAN_STATUS_STATES = ['planned', 'present', 'wired', 'drifted', 'unjudged', 'blocked'] as const satisfies readonly PlanStatusState[]
+export const PLAN_ELEMENT_STATES = ['planned', 'present', 'wired', 'verified', 'drifted', 'unjudged', 'blocked', 'waived'] as const satisfies readonly PlanElementState[]
 
 export type PlanPropertyVerdict = 'match' | 'differ' | 'unknown'
 
@@ -60,11 +60,18 @@ export interface PlanElementStatus<S extends PlanElementState = PlanStatusState>
   reason?: string
   properties: PlanPropertyStatus[]
   notes: string[]
+  /**
+   * The state this element completes at before verification (RFC 0030 §6, Completion):
+   * `wired` for a kind with a mount point, `present` for the rest and for a `drop`.
+   */
+  completesAt: 'present' | 'wired'
+  /** App-relative files the readers found the element in; what `plan:verify` fingerprints. Empty until it exists. */
+  files: string[]
 }
 
 export interface PlanStatusSummary {
   /** Elements the plan changes, per state. `existing` elements are counted apart. */
-  states: Record<PlanStatusState, number>
+  states: Record<PlanElementState, number>
   /** `unread` holds the ones whose section could not be read, which are neither found nor missing. */
   existing: { found: number; missing: string[]; unread: string[] }
   properties: Record<PlanPropertyVerdict, number>
@@ -106,9 +113,21 @@ interface Judgement {
   properties?: () => PlanPropertyStatus[]
   /** Asked only of an element that is `present`; absent for a kind with no mount point. */
   mount?: () => PlanAppMount
+  /** Asked only once the element exists. */
+  files?: () => string[]
   /** No reader exists for this kind of element at all. */
   unjudged?: string
   notes?: string[]
+}
+
+/**
+ * Whether `plan:verify` may lift this element to `verified`: it is at the state its kind
+ * completes at, or has no static signal and is verified on its behaviours alone (RFC 0030
+ * §6, Completion). An `existing` element is never part of completion.
+ */
+export function awaitsVerification(element: PlanElementStatus<PlanElementState>): boolean {
+  if (element.change === 'existing') return false
+  return element.state === 'unjudged' || element.state === element.completesAt
 }
 
 const match = (property: string, planned: string, actual = planned): PlanPropertyStatus => ({ property, verdict: 'match', planned, actual })
@@ -121,8 +140,15 @@ function compare(property: string, planned: string, actual: string | undefined, 
 }
 
 function conclude(judgement: Judgement): PlanElementStatus {
-  const { id, section, change, label } = judgement
-  const base = { id, section, change: change.kind, label }
+  const { id, section, change, label, exists } = judgement
+  const base = {
+    id,
+    section,
+    change: change.kind,
+    label,
+    completesAt: change.kind !== 'drop' && judgement.mount ? ('wired' as const) : ('present' as const),
+    files: exists === 'yes' ? (judgement.files?.() ?? []) : [],
+  }
   const notes = [...(judgement.notes ?? [])]
   const done = (state: PlanStatusState, extra: Partial<PlanElementStatus> = {}): PlanElementStatus => ({
     ...base,
@@ -133,7 +159,6 @@ function conclude(judgement: Judgement): PlanElementStatus {
   })
 
   if (judgement.unjudged) return done('unjudged', { reason: judgement.unjudged })
-  const { exists } = judgement
   if (typeof exists === 'object') return done('blocked', { reason: exists.unknown })
 
   if (change.kind === 'drop') return done(exists === 'yes' ? 'planned' : 'present')
@@ -226,6 +251,16 @@ function scopeName(module: string | undefined): string {
   return module ? `modules/${module}` : 'the project root'
 }
 
+/** The file of the discovered class matching a name in the plan's app root, as a list for `files`. */
+function classFiles(
+  classes: ReadonlyArray<{ className: string; module: string | null; file: string }> | undefined,
+  name: string,
+  module: string | undefined,
+): string[] {
+  const found = classes?.find((entry) => entry.className === name && entry.module === (module ?? null))
+  return found ? [found.file] : []
+}
+
 function tableUnread(table: SourcedSchemaTable | PlanAppUnreadable | undefined): table is PlanAppUnreadable {
   return table !== undefined && 'unreadable' in table
 }
@@ -257,8 +292,8 @@ export function judgePlan(plan: PlanDraft, app: PlanAppState): PlanStatus {
   return { elements, summary: summarize(elements) }
 }
 
-export function summarize(elements: ReadonlyArray<PlanElementStatus>): PlanStatusSummary {
-  const states = Object.fromEntries(PLAN_STATUS_STATES.map((state) => [state, 0])) as Record<PlanStatusState, number>
+export function summarize(elements: ReadonlyArray<PlanElementStatus<PlanElementState>>): PlanStatusSummary {
+  const states = Object.fromEntries(PLAN_ELEMENT_STATES.map((state) => [state, 0])) as Record<PlanElementState, number>
   const properties: Record<PlanPropertyVerdict, number> = { match: 0, differ: 0, unknown: 0 }
   const existing = { found: 0, missing: [] as string[], unread: [] as string[] }
   const notCheckable: PlanStatusSummary['notCheckable'] = []
@@ -367,6 +402,7 @@ class StatusContext {
       exists: find(element.name),
       previous: previousOf(element.change, find),
       properties: () => unread.map((property) => unknown(property, 'as planned', `nothing reads a ${noun.singular}'s ${property}`)),
+      files: () => classFiles(classes, element.name, element.module),
     })
   }
 
@@ -408,6 +444,10 @@ class StatusContext {
       exists: this.modelExistence(model.name, model.module),
       previous: previousOf(model.change, (from) => this.modelExistence(from, model.module)),
       properties: () => this.modelProperties(model),
+      files: () => {
+        const models = this.section('models')
+        return classFiles(isUnreadable(models) ? undefined : models, model.name, model.module)
+      },
     })
   }
 
@@ -486,6 +526,7 @@ class StatusContext {
       exists: find(column.name),
       previous: previousOf(column.change, find),
       properties: () => this.columnProperties(column, table as SourcedSchemaTable),
+      files: () => [(table as SourcedSchemaTable).file],
     })
   }
 
@@ -589,6 +630,7 @@ class StatusContext {
       previous: previousOf(validator.change, find),
       properties: () => (validator.fields.length > 0 ? [unknown('fields', 'as planned', "nothing reads a schema's fields without evaluating it")] : []),
       mount: () => this.referenceMount(validator.name, found),
+      files: () => (found ? [found.file] : []),
     })
   }
 
@@ -607,7 +649,13 @@ class StatusContext {
       label: controller.className,
       exists: this.controllerExistence(controller.className, controller.module),
       previous: previousOf(controller.change, (from) => this.controllerExistence(from, controller.module)),
+      files: () => this.controllerFiles(controller.className, controller.module),
     })
+  }
+
+  private controllerFiles(className: string, module: string | undefined): string[] {
+    const controllers = this.section('controllers')
+    return classFiles(isUnreadable(controllers) ? undefined : controllers, className, module)
   }
 
   action(controller: PlanController, action: PlanAction): PlanElementStatus {
@@ -628,6 +676,7 @@ class StatusContext {
       previous: previousOf(action.change, find),
       properties: () => this.actionProperties(action, key),
       mount: () => this.actionMount(key),
+      files: () => this.controllerFiles(controller.className, controller.module),
     })
   }
 
@@ -756,7 +805,15 @@ class StatusContext {
       previous: previousOf(route.change, find),
       properties: () => this.routeProperties(route, actual()),
       mount: () => this.routeMount(actual()),
+      files: () => this.routeFiles(actual()),
     })
+  }
+
+  /** The entry file for an entry route; every routes file of its module for a module's, since nothing says which declared it. */
+  private routeFiles(route: PlanAppRouteDetail): string[] {
+    if (route.module === null) return route.file === undefined ? [] : [route.file]
+    const prefix = `modules/${route.module}/`
+    return (this.detail?.routeFiles ?? []).map((entry) => entry.file).filter((file) => file.startsWith(prefix))
   }
 
   private routeProperties(route: PlanRoute, actual: PlanAppRouteDetail): PlanPropertyStatus[] {
@@ -808,6 +865,11 @@ class StatusContext {
       previous: previousOf(view.change, find),
       properties: () => this.viewProperties(view),
       mount: () => this.viewMount(view.page),
+      files: () => {
+        const pages = this.section('pages')
+        const file = isUnreadable(pages) ? undefined : pages.find((candidate) => candidate.id === view.page)?.file
+        return file === undefined ? [] : [file]
+      },
     })
   }
 
@@ -851,6 +913,7 @@ class StatusContext {
       ...base,
       exists: find(effect.name),
       previous: previousOf(effect.change, find),
+      files: () => classFiles(classes, effect.name, effect.module),
     })
   }
 }

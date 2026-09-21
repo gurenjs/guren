@@ -14,15 +14,21 @@ import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSect
 export type PlanStepKind = 'commands' | 'scaffold' | 'tests' | 'data' | 'http' | 'pages'
 
 /** A verify command by name. `plan:verify` owns what each one spawns; a plan string never does (§8). */
-export type PlanVerifyCommand = 'codegen' | 'typecheck' | 'db:migrate' | 'check' | 'tests' | 'tests:fail'
+export const PLAN_VERIFY_COMMANDS = ['codegen', 'typecheck', 'db:migrate', 'check', 'tests', 'tests:fail'] as const
 
+export type PlanVerifyCommand = (typeof PLAN_VERIFY_COMMANDS)[number]
+
+/**
+ * Every list opens with `codegen`: typecheck, check and the tests read `.guren/*.gen.ts`,
+ * which a fresh clone lacks, and a step verified on its own must not fail for that.
+ */
 export const PLAN_STEP_VERIFY: Record<PlanStepKind, readonly PlanVerifyCommand[]> = {
   commands: ['codegen', 'typecheck'],
   scaffold: ['codegen', 'typecheck'],
-  tests: ['tests:fail'],
-  data: ['db:migrate', 'typecheck'],
-  http: ['check', 'codegen', 'tests'],
-  pages: ['typecheck', 'check'],
+  tests: ['codegen', 'tests:fail'],
+  data: ['codegen', 'db:migrate', 'typecheck'],
+  http: ['codegen', 'check', 'tests'],
+  pages: ['codegen', 'typecheck', 'check'],
 }
 
 export const DEFAULT_SPLIT_THRESHOLD = 5
@@ -79,6 +85,24 @@ export interface PlanTaskNote {
 export interface PlanTaskDerivation {
   tasks: PlanDerivedTask[]
   notes: PlanTaskNote[]
+}
+
+/** Every step id in task order: what `plan:verify` runs when no `--step` narrows it. */
+export function planStepIds(derivation: PlanTaskDerivation): string[] {
+  return derivation.tasks.flatMap((task) => task.steps.map((step) => step.id))
+}
+
+/** Every step in task order, with its task: the walk `plan:next` and the whole-plan verify share. */
+export function listPlanSteps(derivation: PlanTaskDerivation): Array<{ task: PlanDerivedTask; step: PlanDerivedStep }> {
+  return derivation.tasks.flatMap((task) => task.steps.map((step) => ({ task, step })))
+}
+
+export function findPlanStep(derivation: PlanTaskDerivation, stepId: string): { task: PlanDerivedTask; step: PlanDerivedStep } | undefined {
+  for (const task of derivation.tasks) {
+    const step = task.steps.find((candidate) => candidate.id === stepId)
+    if (step) return { task, step }
+  }
+  return undefined
 }
 
 export interface DerivePlanTasksOptions {
@@ -743,7 +767,7 @@ function stepsOf(
   if (task.acceptanceIds.length > 0) {
     // Failing first detects a test emptied to pass, which needs an implementation still to come.
     // With none, what the tests exercise is done by the tasks waited for, so they must pass.
-    const verify: PlanVerifyCommand[] = task.elements.length > 0 ? [...PLAN_STEP_VERIFY.tests] : ['tests']
+    const verify: PlanVerifyCommand[] = task.elements.length > 0 ? [...PLAN_STEP_VERIFY.tests] : ['codegen', 'tests']
     steps.push(step('tests', { acceptanceIds: [...task.acceptanceIds], verify }))
   }
 

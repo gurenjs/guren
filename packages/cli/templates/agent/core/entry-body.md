@@ -68,6 +68,11 @@ bun run db:seed                    # run seeders
 bun run build
 bun run test
 bunx guren gate                    # every CI stage (codegen, typecheck, lint, check, audit, test); exit 0 = done
+
+# Implementation plans (a *.plan.json approved for this app; the plan-implement skill runs the loop)
+bunx guren plan:next <plan>                  # the next step to implement, with its elements, behaviours and verify commands
+bunx guren plan:verify <plan> --step <id>    # run the step's verify commands and tests, record the verdict under .guren/plans/
+bunx guren plan:status <plan>                # which plan elements exist in the code, and which are verified
 ```
 
 ## MCP Server (AI Agent Integration)

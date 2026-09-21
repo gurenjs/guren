@@ -224,14 +224,14 @@ describe('loadPlanAppState({ detail: true })', () => {
 
     expect(detail.models).toContainEqual(expect.objectContaining({ className: 'Invoice', module: 'billing' }))
     expect(detail.controllers).toEqual([
-      { className: 'PostController', module: null },
-      { className: 'InvoiceController', module: 'billing' },
+      { className: 'PostController', module: null, file: 'app/Http/Controllers/PostController.ts' },
+      { className: 'InvoiceController', module: 'billing', file: 'modules/billing/app/Http/Controllers/InvoiceController.ts' },
     ])
     expect(detail.actions).toContainEqual(expect.objectContaining({ key: 'InvoiceController.index', module: 'billing' }))
     expect(detail.validators).toContainEqual({ name: 'InvoicePayloadSchema', file: 'modules/billing/app/Http/Validators/InvoiceValidator.ts', module: 'billing' })
-    expect(detail.resources).toEqual([{ className: 'InvoiceResource', module: 'billing' }])
-    expect(detail.policies).toEqual([{ className: 'InvoicePolicy', module: 'billing' }])
-    expect(detail.sideEffects.job).toEqual([{ className: 'ChargeInvoice', module: 'billing' }])
+    expect(detail.resources).toEqual([{ className: 'InvoiceResource', module: 'billing', file: 'modules/billing/app/Http/Resources/InvoiceResource.ts' }])
+    expect(detail.policies).toEqual([{ className: 'InvoicePolicy', module: 'billing', file: 'modules/billing/app/Policies/InvoicePolicy.ts' }])
+    expect(detail.sideEffects.job).toEqual([{ className: 'ChargeInvoice', module: 'billing', file: 'modules/billing/app/Jobs/ChargeInvoice.ts' }])
   })
 
   test('should leave a barrel out, so a re-export does not enter a symbol under the forwarding file’s app root', async () => {

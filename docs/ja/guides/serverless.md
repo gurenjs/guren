@@ -88,6 +88,12 @@ export default defineQueueConfig((env) => ({
 
 ジョブのディスパッチはサーバー上と同じです（`await SendEmailJob.dispatch({ to: 'user@example.com' })`）。`SqsDriver` がジョブを SQS にシリアライズし、Lambda ハンドラーがデシリアライズして実行します。
 
+### SQS を通常のワーカーで処理する
+
+`guren queue:work` は `SqsDriver` 経由で SQS を処理します。標準アダプターは `ApproximateReceiveCount` を取得し、再配信やワーカー再起動後も試行回数を引き継ぎます。成功したジョブと `maxAttempts` に達したジョブは SQS から削除するため、ワーカーに `sqs:DeleteMessage` 権限が必要です。失敗記録はプロセスのメモリに保存します。再起動後も記録が必要な場合は、監視や永続化するエラー記録をアプリ側に用意してください。最終失敗時の削除では SQS のデッドレターキューに移動しません。
+
+通常のワーカーで独自アダプターを使う場合は、`deleteMessage({ queueUrl, receiptHandle })` を実装し、`receiveMessage()` から SQS の `ApproximateReceiveCount` に基づく `receiveCount` を返してください。どちらかを省いたアダプターは警告を1回出し、従来どおりに動きます。削除したジョブはキューに残り、試行回数は再配信のたびにメッセージ本文の値から数え直します。ジョブの送信だけに使うアダプターでは、どちらも不要です。`MessageSystemAttributeNames` は、このパラメーターを持つ `@aws-sdk/client-sqs`（3.577.0 以降）でのみ API に届きます。それより古いクライアントも同じ警告の経路に入ります。Lambda のイベントソース経由では、引き続き `createSqsHandler()` と AWS のバッチ処理結果を使います。
+
 ### スケジュール — `createScheduleHandler(scheduler)`
 
 EventBridge から呼び出されたときに実行予定のタスクを処理します。`rate(1 minute)` の EventBridge ルールでこのハンドラーをトリガーしてください。既存の `Scheduler` とタスク定義は変更なしで動作します。

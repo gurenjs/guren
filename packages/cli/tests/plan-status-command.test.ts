@@ -139,10 +139,11 @@ describe('plan:status', () => {
   test('should keep the JSON report to its documented shape', async () => {
     const result = await report(await writePlan('shape.plan.json'), await createApp('shape', BASE_APP))
 
-    expect(Object.keys(result).sort()).toEqual(['elements', 'plan', 'reportVersion', 'summary'])
+    expect(Object.keys(result).sort()).toEqual(['elements', 'plan', 'reportVersion', 'summary', 'verification'])
     expect(result.reportVersion).toBe(1)
     expect(result.plan).toEqual({ file: 'shape.plan.json', title: 'Comments on posts', hash: null })
-    expect(Object.keys(result.elements[0]!).sort()).toEqual(['change', 'id', 'label', 'notes', 'properties', 'section', 'state'])
+    expect(Object.keys(result.elements[0]!).sort()).toEqual(['change', 'completesAt', 'files', 'id', 'label', 'notes', 'properties', 'section', 'state'])
+    expect(result.verification).toEqual({ stateFile: '.guren/plans/shape.state.json', staleSteps: [] })
     expect(Object.keys(result.summary).sort()).toEqual(['existing', 'notCheckable', 'properties', 'states'])
   })
 
@@ -208,7 +209,7 @@ throw new Error('DATABASE_URL is not set')
     expect(output).toContain('Routes\n')
     expect(output).toMatch(/drifted\s+add\s+comments\.store\s+route\.comments\.store/)
     expect(output).toContain('differs: middleware auth (planned applied, found not applied)')
-    expect(output).toMatch(/planned \d+, present \d+, wired \d+, drifted \d+, unjudged \d+, blocked \d+/)
+    expect(output).toMatch(/planned \d+, present \d+, wired \d+, verified \d+, drifted \d+, unjudged \d+, blocked \d+, waived \d+/)
     expect(output).toContain('Planned, not checkable:')
   })
 
