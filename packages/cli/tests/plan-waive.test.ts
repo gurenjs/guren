@@ -6,9 +6,26 @@ import { join } from 'node:path'
 import { runCommand } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
-import { planWaiveFile, type PlanWaiveFileOptions, type PlanWaiveReport } from '../src/plan-waive'
+import { formatPlanWaive, planWaiveFile, type PlanWaiveFileOptions, type PlanWaiveReport } from '../src/plan-waive'
 import { planDecisionsPath, readPlanDecisions, type PlanDecisions } from '../src/plan/decisions'
 import { planHash } from '../src/plan/identity'
+import {
+  listPlanElements,
+  PlanColumnSchema,
+  PlanCommandSchema,
+  PlanControllerSchema,
+  PlanModelSchema,
+  PlanPolicySchema,
+  PlanResourceSchema,
+  PlanRouteSchema,
+  PlanSideEffectSchema,
+  PlanValidatorSchema,
+  PlanViewSchema,
+  PlanActionSchema,
+  PlanSchema,
+  type PlanElementSection,
+} from '../src/plan/schema'
+import { PLAN_STATUS_SECTIONS } from '../src/plan/status'
 import type { CapturedExec } from '../src/subprocess'
 import { loadApprovedCommentsPlan, loadCommentsPlan, loadParsedCommentsPlan } from './plan-fixture'
 
@@ -117,6 +134,71 @@ describe('plan:waive', () => {
     expect((await decisionsOf(plan)).waivers).toEqual([])
   })
 
+  test('should leave no log behind where a removal finds none', async () => {
+    const plan = await writePlan('no-log.plan.json')
+
+    const report = await planWaiveFile(plan, { elementIds: ['model.comment'], remove: true, app: ROOT })
+
+    expect(report.written).toBe(false)
+    expect(report.removed).toEqual([])
+    expect(await readPlanDecisions(plan)).toEqual({ decisions: undefined })
+    expect(formatPlanWaive(report)).toContain('There is no decision log at no-log.decisions.json, and nothing to record, so none was created.')
+  })
+
+  test('should refuse an existing element of every judged section whose schema carries a change', async () => {
+    // Restated here on purpose: a judged section gaining a `change` must be added to both this
+    // table and `existingIds()`, and a mismatch between the two is what fails.
+    const SECTION_SCHEMAS: Record<(typeof PLAN_STATUS_SECTIONS)[number], { shape: Record<string, unknown> }> = {
+      models: PlanModelSchema,
+      columns: PlanColumnSchema,
+      validators: PlanValidatorSchema,
+      controllers: PlanControllerSchema,
+      actions: PlanActionSchema,
+      routes: PlanRouteSchema,
+      views: PlanViewSchema,
+      resources: PlanResourceSchema,
+      policies: PlanPolicySchema,
+      sideEffects: PlanSideEffectSchema,
+      commands: PlanCommandSchema,
+    }
+    const document = loadApprovedCommentsPlan()
+    document.sideEffects = [
+      { id: 'side.comment.notify', change: { kind: 'add' }, kind: 'notification', name: 'CommentPosted', trigger: 'a comment is created', description: 'notifies the post author' },
+    ]
+    // Every `change` in the document, found by shape rather than by naming a section.
+    const changed = new Set<string>()
+    const markExisting = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        for (const item of value) markExisting(item)
+        return
+      }
+      if (value === null || typeof value !== 'object') return
+      const entry = value as Record<string, unknown>
+      if (typeof entry.id === 'string' && entry.change) {
+        entry.change = { kind: 'existing' }
+        changed.add(entry.id)
+      }
+      for (const member of Object.values(entry)) markExisting(member)
+    }
+    markExisting(document)
+    const plan = await writePlan('existing-everywhere.plan.json', document)
+    const judged = new Set<string>(PLAN_STATUS_SECTIONS)
+    const sections = new Map(listPlanElements(PlanSchema.parse(document)).map((element) => [element.id, element.section]))
+
+    const refused = new Set<PlanElementSection>()
+    for (const id of changed) {
+      const section = sections.get(id)
+      if (section === undefined || !judged.has(section)) continue
+      await expect(waive(plan, [id])).rejects.toThrow('is an existing element')
+      refused.add(section)
+    }
+
+    const carryChange = PLAN_STATUS_SECTIONS.filter((section) => 'change' in SECTION_SCHEMAS[section].shape)
+    expect([...refused].sort()).toEqual([...carryChange].sort())
+    expect(carryChange).not.toContain('commands')
+    expect(await readPlanDecisions(plan)).toEqual({ decisions: undefined })
+  })
+
   test('should keep the decision log of the §9 layout beside the plan as decisions.json', async () => {
     const plan = await writePlan('docs/plans/comments/plan.json')
 
@@ -134,6 +216,8 @@ describe('plan:waive', () => {
     await expect(planWaiveFile(plan, { elementIds: ['model.comment'] })).rejects.toThrow('--reason is required')
     await expect(waive(plan, ['model.nope'])).rejects.toThrow('No element "model.nope" is declared by this plan')
     await expect(waive(plan, ['AC-comments-1'])).rejects.toThrow('a behaviour the code will not satisfy is a revision, not a waiver')
+    // A question covers no elements, so it is not told to waive the ones it covers.
+    await expect(waive(plan, ['Q-delete'])).rejects.toThrow(/questions element, which plan:status does not judge, so it has no state a waiver could lift\.$/)
     await expect(waive(plan, ['column.post.id'])).rejects.toThrow('is an existing element')
     await expect(waive(plan, [])).rejects.toThrow('Name at least one element id')
     expect(await readPlanDecisions(plan)).toEqual({ decisions: undefined })

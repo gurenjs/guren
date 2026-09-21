@@ -134,11 +134,16 @@ export function planWaivers(plan: PlanDraft | Plan, decisions: PlanDecisions | u
   return { waivers, stale }
 }
 
+export interface PlanWaiversRead {
+  waivers: Map<string, PlanWaiver>
+  /** The ids of `waivers`, for the callers that ask nothing else of them. */
+  waived: Set<string>
+  stale: PlanWaiver[]
+  unreadable?: string
+}
+
 /** The log beside the plan, matched against it: what a command asks for the ids a waiver covers. */
-export async function readPlanWaivers(
-  planPath: string,
-  plan: PlanDraft | Plan,
-): Promise<{ waivers: Map<string, PlanWaiver>; waived: Set<string>; stale: PlanWaiver[]; unreadable?: string }> {
+export async function readPlanWaivers(planPath: string, plan: PlanDraft | Plan): Promise<PlanWaiversRead> {
   const log = await readPlanDecisions(planPath)
   const { waivers, stale } = planWaivers(plan, log.decisions)
   return { waivers, waived: new Set(waivers.keys()), stale, ...(log.unreadable ? { unreadable: log.unreadable } : {}) }
@@ -155,16 +160,21 @@ export async function overlayVerification(
   plan: PlanDraft | Plan,
   status: PlanStatus,
   derivation: PlanTaskDerivation,
-  /** A state file that would not read before this command replaced it, which a fresh read cannot show. */
-  replacedUnreadable?: string,
+  options: {
+    /** A state file that would not read before this command replaced it, which a fresh read cannot show. */
+    replacedUnreadable?: string
+    /** The log this run already read, so a command judges and reports through one reading of it. */
+    waivers?: PlanWaiversRead
+  } = {},
 ): Promise<{ status: PlanStatus<PlanElementState>; verification: PlanVerificationSummary }> {
   const slug = planSlug(planPath)
   const read = await readPlanState(root, slug)
   const records = read.state?.steps ?? {}
   const files = Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files))
   const applied = applyVerification(status, derivation, records, planDigest(plan), await hashFiles(root, files))
-  const unreadable = read.unreadable ?? (replacedUnreadable ? `${replacedUnreadable}; this run replaced it, and its other records are gone` : undefined)
-  const log = await readPlanWaivers(planPath, plan)
+  const unreadable =
+    read.unreadable ?? (options.replacedUnreadable ? `${options.replacedUnreadable}; this run replaced it, and its other records are gone` : undefined)
+  const log = options.waivers ?? (await readPlanWaivers(planPath, plan))
   return {
     status: applyWaivers(applied.status, log.waivers),
     verification: {

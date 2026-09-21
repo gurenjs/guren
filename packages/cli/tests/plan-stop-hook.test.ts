@@ -220,6 +220,19 @@ describe('planStopHookFindings', () => {
     expect(verdict.message).toContain('so this turn is not done (continuation 1 of')
   })
 
+  test('should say a log it could not read applied no waiver even where it verifies nothing', async () => {
+    // The record stands, so the hook returns before it runs anything: the notice must still reach the session.
+    const app = await createApp('unreadable-log-holding', { steps: { [HTTP]: record({ outcome: 'verified', incomplete: [] }) }, active: active() })
+    await writeWorkspaceFiles(app, { 'comments.decisions.json': '{ "decisionsVersion": 2 }\n' })
+    let verified = 0
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => { verified += 1; return report(HTTP, record()) } })
+
+    expect(verified).toBe(0)
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain('No waiver was applied, so the step is judged as if none were taken.')
+  })
+
   test('should let a verified step through silently', async () => {
     const app = await createApp('verified', { active: active({ continuations: 2 }) })
 

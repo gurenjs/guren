@@ -56,7 +56,9 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const slug = planSlug(path)
 
   const before = await readPlanState(root, slug)
-  const { waived } = await readPlanWaivers(path, plan)
+  // Read once: the elements this run leaves out of a record and the ones its report lifts
+  // must be the same set, and a second read could answer differently.
+  const log = await readPlanWaivers(path, plan)
   let stepIds: string[]
   const skipped: string[] = []
   if (options.step === undefined) {
@@ -67,7 +69,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
     stepIds = planStepIds(derivation).filter((id) => {
       const record = records[id]
-      if (record && recordStillHolds(record, digest, hashes, waived)) {
+      if (record && recordStillHolds(record, digest, hashes, log.waived)) {
         skipped.push(id)
         return false
       }
@@ -86,7 +88,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     exec: runCaptured,
     timeoutMs: options.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
     scripts: await readScripts(root),
-    waived,
+    waived: log.waived,
   })
   const steps: PlanStepVerification[] = []
   for (const stepId of stepIds) {
@@ -95,7 +97,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     steps.push(verification)
   }
 
-  const overlaid = await overlayVerification(root, path, plan, await verifier.status(), derivation, before.unreadable)
+  const overlaid = await overlayVerification(root, path, plan, await verifier.status(), derivation, { replacedUnreadable: before.unreadable, waivers: log })
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },

@@ -87,36 +87,37 @@ export async function readPlanDecisions(planPath: string): Promise<PlanDecisions
  * rather than replaced: it is a committed record of decisions people took, and a run that
  * overwrites it destroys them where a state file would only lose a result it can redo.
  */
-async function updatePlanDecisions(planPath: string, mutate: (decisions: PlanDecisions) => void): Promise<string> {
+async function updatePlanDecisions(planPath: string, mutate: (decisions: PlanDecisions) => void): Promise<boolean> {
   const read = await readPlanDecisions(planPath)
   if (read.unreadable) {
     throw new CliError(`${read.unreadable}\nThe decision log is a committed record, so this command will not replace it. Fix the file, then run this again.`)
   }
   const decisions: PlanDecisions = read.decisions ?? { decisionsVersion: PLAN_DECISIONS_VERSION, waivers: [] }
   mutate(decisions)
+  // A removal against an app that never waived anything would otherwise commit an empty log.
+  if (read.decisions === undefined && decisions.waivers.length === 0) return false
   // Sorted, so two runs over one log write the same bytes into the same commit.
   decisions.waivers.sort((left, right) => (left.elementId < right.elementId ? -1 : left.elementId > right.elementId ? 1 : 0))
-  const path = planDecisionsPath(planPath)
-  await writeFile(path, `${JSON.stringify(decisions, null, 2)}\n`, 'utf8')
-  return path
+  await writeFile(planDecisionsPath(planPath), `${JSON.stringify(decisions, null, 2)}\n`, 'utf8')
+  return true
 }
 
 /** One waiver per element: a second one replaces it, and the replaced one is returned. */
-export async function writePlanWaiver(planPath: string, waiver: PlanWaiver): Promise<{ path: string; replaced?: PlanWaiver }> {
+export async function writePlanWaiver(planPath: string, waiver: PlanWaiver): Promise<{ written: boolean; replaced?: PlanWaiver }> {
   let replaced: PlanWaiver | undefined
-  const path = await updatePlanDecisions(planPath, (decisions) => {
+  const written = await updatePlanDecisions(planPath, (decisions) => {
     replaced = decisions.waivers.find((candidate) => candidate.elementId === waiver.elementId)
     decisions.waivers = [...decisions.waivers.filter((candidate) => candidate.elementId !== waiver.elementId), waiver]
   })
-  return { path, ...(replaced ? { replaced } : {}) }
+  return { written, ...(replaced ? { replaced } : {}) }
 }
 
 /** Removes the waiver of one element, whatever hash it names; absent is not an error. */
-export async function removePlanWaiver(planPath: string, elementId: string): Promise<{ path: string; removed?: PlanWaiver }> {
+export async function removePlanWaiver(planPath: string, elementId: string): Promise<{ written: boolean; removed?: PlanWaiver }> {
   let removed: PlanWaiver | undefined
-  const path = await updatePlanDecisions(planPath, (decisions) => {
+  const written = await updatePlanDecisions(planPath, (decisions) => {
     removed = decisions.waivers.find((candidate) => candidate.elementId === elementId)
     decisions.waivers = decisions.waivers.filter((candidate) => candidate.elementId !== elementId)
   })
-  return { path, ...(removed ? { removed } : {}) }
+  return { written, ...(removed ? { removed } : {}) }
 }

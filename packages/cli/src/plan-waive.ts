@@ -30,6 +30,8 @@ export interface PlanWaiveReport {
   replaced: PlanWaiver[]
   /** With `--remove`: the waivers taken out; an element with none is not an error. */
   removed: PlanWaiver[]
+  /** False where a removal found no log at all, which is left uncreated rather than committed empty. */
+  written: boolean
 }
 
 export interface PlanWaiveFileOptions {
@@ -87,9 +89,16 @@ function existingIds(plan: PlanDraft): Set<string> {
 
 const JUDGED = new Set<PlanElementSection>(PLAN_STATUS_SECTIONS)
 
-// A waiver only lifts an element, so it only carries a step that is `incomplete`. A behaviour
-// that fails makes its `tests` command fail, and the step is then `failed` whatever is waived.
-const ACCEPTANCE_ADVICE = ' A behaviour that fails leaves the step failed whatever is waived, so a behaviour the code will not satisfy is a revision, not a waiver.'
+/**
+ * What to do instead, per section `plan:status` does not judge. A behaviour that fails makes its
+ * `tests` command fail and the step is then `failed` whatever is waived, so waiving is not the
+ * answer to one. A question covers no elements, so there is nothing to point at.
+ */
+const UNJUDGED_ADVICE: Partial<Record<PlanElementSection, string>> = {
+  acceptance: ' A behaviour that fails leaves the step failed whatever is waived, so a behaviour the code will not satisfy is a revision, not a waiver.',
+  flows: ' Waive the elements it covers instead.',
+  tasks: ' Waive the elements it covers instead.',
+}
 
 export async function planWaiveFile(planPath: string, options: PlanWaiveFileOptions): Promise<PlanWaiveReport> {
   if (options.elementIds.length === 0) throw new CliError('Name at least one element id to waive.')
@@ -105,11 +114,13 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   // below: withdrawing the waiver of an element a revision dropped is what it is for.
   if (options.remove) {
     const removed: PlanWaiver[] = []
+    let written = false
     for (const id of options.elementIds) {
       const result = await removePlanWaiver(path, id)
       if (result.removed) removed.push(result.removed)
+      written ||= result.written
     }
-    return { ...head, waived: [], replaced: [], removed }
+    return { ...head, waived: [], replaced: [], removed, written }
   }
 
   const hash = planWaiverHash(plan)
@@ -127,9 +138,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
       throw new CliError(`No element "${id}" is declared by this plan. The elements are:\n${[...sections.keys()].map((known) => `  ${known}`).join('\n')}`)
     }
     if (!JUDGED.has(section)) {
-      throw new CliError(
-        `"${id}" is a ${section} element, which plan:status does not judge, so it has no state a waiver could lift.${section === 'acceptance' ? ACCEPTANCE_ADVICE : ' Waive the elements it covers instead.'}`,
-      )
+      throw new CliError(`"${id}" is a ${section} element, which plan:status does not judge, so it has no state a waiver could lift.${UNJUDGED_ADVICE[section] ?? ''}`)
     }
     if (existing.has(id)) {
       throw new CliError(`"${id}" is an existing element, which the plan changes nothing about, so it is no part of completion and there is nothing to waive.`)
@@ -149,7 +158,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
     waived.push(waiver)
     if (result.replaced) replaced.push(result.replaced)
   }
-  return { ...head, waived, replaced, removed: [] }
+  return { ...head, waived, replaced, removed: [], written: true }
 }
 
 export function formatPlanWaive(report: PlanWaiveReport): string {
@@ -163,7 +172,9 @@ export function formatPlanWaive(report: PlanWaiveReport): string {
   }
   lines.push(
     '',
-    `Recorded in ${report.decisionsFile}`,
+    report.written
+      ? `Recorded in ${report.decisionsFile}`
+      : `There is no decision log at ${report.decisionsFile}, and nothing to record, so none was created.`,
     'The decision log is committed with the plan. A waiver names this plan hash, so a revision does not inherit it.',
   )
   return lines.join('\n')
