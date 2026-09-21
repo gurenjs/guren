@@ -14,10 +14,15 @@ export interface SqsAdapter {
     messageDeduplicationId?: string
   }): Promise<void>
 
+  /**
+   * `receiveCount` is the SQS `ApproximateReceiveCount`; polling workers count
+   * retries with it, since the message body is never rewritten on redelivery.
+   * Omitting it warns once and falls back to the count in the body.
+   */
   receiveMessage(params: {
     queueUrl: string
     waitTimeSeconds?: number
-  }): Promise<{ body: string; receiptHandle: string } | null>
+  }): Promise<{ body: string; receiptHandle: string; receiveCount?: number } | null>
 
   /**
    * Optional so adapters written before this method keep compiling; without it
@@ -57,6 +62,11 @@ export interface SqsDriverOptions {
 
 const EXPIRED_RECEIPT_ERRORS = new Set(['ReceiptHandleIsInvalid', 'MessageNotInflight'])
 
+/** SQS counts deliveries from 1; anything else is an adapter reporting none. */
+function toReceiveCount(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 1 ? (value as number) : undefined
+}
+
 /** Builds an SqsAdapter over an @aws-sdk/client-sqs SQSClient. */
 export function createSqsAdapter(client: { send(command: unknown): Promise<unknown> }): SqsAdapter {
   return {
@@ -80,13 +90,20 @@ export function createSqsAdapter(client: { send(command: unknown): Promise<unkno
         new ReceiveMessageCommand({
           QueueUrl: params.queueUrl,
           MaxNumberOfMessages: 1,
+          MessageSystemAttributeNames: ['ApproximateReceiveCount'],
           WaitTimeSeconds: params.waitTimeSeconds ?? 5,
         } as any),
-      )) as { Messages?: Array<{ Body?: string; ReceiptHandle?: string }> }
+      )) as { Messages?: Array<{ Body?: string; ReceiptHandle?: string; Attributes?: Record<string, string> }> }
 
       const msg = result.Messages?.[0]
       if (!msg?.Body || !msg.ReceiptHandle) return null
-      return { body: msg.Body, receiptHandle: msg.ReceiptHandle }
+      // Absent on a client older than the ReceiveMessage model that carries
+      // MessageSystemAttributeNames, which drops the parameter silently.
+      return {
+        body: msg.Body,
+        receiptHandle: msg.ReceiptHandle,
+        receiveCount: toReceiveCount(Number(msg.Attributes?.ApproximateReceiveCount)),
+      }
     },
 
     async deleteMessage(params) {
@@ -205,6 +222,19 @@ export class SqsDriver implements QueueDriver {
     if (!result) return null
 
     const job = deserializeJob(result.body)
+    const receiveCount = toReceiveCount(result.receiveCount)
+    if (receiveCount !== undefined) {
+      // The worker increments once before handle(). SQS owns the count across
+      // redeliveries and process restarts; changing visibility never edits Body.
+      job.attempts += receiveCount - 1
+    } else {
+      warnOnce(
+        'sqs-adapter-missing-receive-count',
+        '[guren] The SqsAdapter returned no receiveCount: retry counts restart from the message body on every '
+          + 'redelivery, so a failing job retries until the queue drops it. Return ApproximateReceiveCount as '
+          + 'receiveCount from receiveMessage(), or build the adapter with createSqsAdapter().',
+      )
+    }
     this.reservations.set(job.id, { receiptHandle: result.receiptHandle, queueUrl })
     job.reservedAt = new Date()
     return job

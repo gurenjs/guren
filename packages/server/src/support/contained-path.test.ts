@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { isPathWithin, isRealPathWithin } from './contained-path'
+import { isPathWithin, isRealPathWithin, realPathOfNearestExisting } from './contained-path'
 
 describe('isPathWithin', () => {
   it('accepts a path below the root', () => {
@@ -100,5 +100,42 @@ describe('isRealPathWithin', () => {
     const missingRoot = join(tmpRoot, 'missing-root')
 
     expect(await isRealPathWithin(missingRoot, join(missingRoot, 'inside.txt'))).toBe(false)
+  })
+})
+
+describe('realPathOfNearestExisting', () => {
+  let tmpRoot: string
+  let root: string
+
+  beforeEach(async () => {
+    tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'nearest-')))
+    root = join(tmpRoot, 'root')
+    await mkdir(join(root, 'real'), { recursive: true })
+    await writeFile(join(root, 'real', 'file.txt'), 'x')
+  })
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('canonicalizes a path that exists', async () => {
+    symlinkSync(join(root, 'real'), join(root, 'link'))
+
+    expect(await realPathOfNearestExisting(join(root, 'link', 'file.txt')))
+      .toBe(join(root, 'real', 'file.txt'))
+  })
+
+  it('canonicalizes the deepest ancestor and rejoins the missing tail', async () => {
+    symlinkSync(join(root, 'real'), join(root, 'link'))
+
+    expect(await realPathOfNearestExisting(join(root, 'link', 'gone', 'new.txt')))
+      .toBe(join(root, 'real', 'gone', 'new.txt'))
+  })
+
+  it('reports a link cycle as unresolvable rather than as its lexical path', async () => {
+    symlinkSync(join(root, 'b'), join(root, 'a'))
+    symlinkSync(join(root, 'a'), join(root, 'b'))
+
+    expect(await realPathOfNearestExisting(join(root, 'a'))).toBeUndefined()
   })
 })
