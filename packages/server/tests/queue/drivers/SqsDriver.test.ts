@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 
 import { SqsDriver, type SqsAdapter } from '../../../src/queue/drivers/SqsDriver'
-import { Job, registerJob, getRegisteredJobs } from '../../../src/queue/Job'
+import { Job, registerJob, clearJobRegistry } from '../../../src/queue/Job'
 import { Worker } from '../../../src/queue/Worker'
 import type { QueuedJob } from '../../../src/queue/types'
 import { resetWarnOnce } from '../../../src/support/warn-once'
@@ -367,6 +367,9 @@ describe('SqsDriver', () => {
 describe('SqsDriver polling lifecycle', () => {
   const queueUrl = 'https://example.test/queue'
 
+  // getRegisteredJobs() hands back a copy, so deleting from it registers nothing.
+  afterEach(() => { clearJobRegistry() })
+
   function redeliveryAdapter(job: QueuedJob) {
     const adapter = createMockAdapter()
     const body = JSON.stringify(job)
@@ -416,11 +419,6 @@ describe('SqsDriver polling lifecycle', () => {
     ])
   })
 
-  afterEach(() => {
-    getRegisteredJobs().delete('SqsLifecycleSuccess')
-    getRegisteredJobs().delete('SqsLifecycleFailure')
-  })
-
   test('a polling worker executes a successful message only once', async () => {
     let handled = 0
     class SqsLifecycleSuccess extends Job {
@@ -456,8 +454,9 @@ describe('SqsDriver polling lifecycle', () => {
     expect((await driver.pop('default'))!.attempts).toBe(3)
   })
 
-  test('warns and keeps the body count when the adapter reports no receive count', async () => {
-    for (const receiveCount of [undefined, 0, -1, 1.5, NaN]) {
+  test.each([undefined, 0, -1, 1.5, NaN])(
+    'warns and keeps the body count when the adapter reports receiveCount %p',
+    async (receiveCount) => {
       resetWarnOnce()
       const adapter = createMockAdapter()
       adapter.receiveMessage = async () => ({ body: JSON.stringify(createTestJob({ attempts: 2 })), receiptHandle: 'receipt', receiveCount })
@@ -467,6 +466,6 @@ describe('SqsDriver polling lifecycle', () => {
       expect(job!.attempts).toBe(2)
       expect(warnings).toHaveLength(1)
       expect(warnings[0]).toContain('receiveCount')
-    }
-  })
+    },
+  )
 })

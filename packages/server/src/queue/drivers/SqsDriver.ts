@@ -62,6 +62,11 @@ export interface SqsDriverOptions {
 
 const EXPIRED_RECEIPT_ERRORS = new Set(['ReceiptHandleIsInvalid', 'MessageNotInflight'])
 
+/** SQS counts deliveries from 1; anything else is an adapter reporting none. */
+function toReceiveCount(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 1 ? (value as number) : undefined
+}
+
 /** Builds an SqsAdapter over an @aws-sdk/client-sqs SQSClient. */
 export function createSqsAdapter(client: { send(command: unknown): Promise<unknown> }): SqsAdapter {
   return {
@@ -94,11 +99,10 @@ export function createSqsAdapter(client: { send(command: unknown): Promise<unkno
       if (!msg?.Body || !msg.ReceiptHandle) return null
       // Absent on a client older than the ReceiveMessage model that carries
       // MessageSystemAttributeNames, which drops the parameter silently.
-      const receiveCount = Number(msg.Attributes?.ApproximateReceiveCount)
       return {
         body: msg.Body,
         receiptHandle: msg.ReceiptHandle,
-        receiveCount: Number.isSafeInteger(receiveCount) ? receiveCount : undefined,
+        receiveCount: toReceiveCount(Number(msg.Attributes?.ApproximateReceiveCount)),
       }
     },
 
@@ -218,8 +222,8 @@ export class SqsDriver implements QueueDriver {
     if (!result) return null
 
     const job = deserializeJob(result.body)
-    const receiveCount = result.receiveCount
-    if (receiveCount !== undefined && Number.isSafeInteger(receiveCount) && receiveCount >= 1) {
+    const receiveCount = toReceiveCount(result.receiveCount)
+    if (receiveCount !== undefined) {
       // The worker increments once before handle(). SQS owns the count across
       // redeliveries and process restarts; changing visibility never edits Body.
       job.attempts += receiveCount - 1
