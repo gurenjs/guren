@@ -56,7 +56,11 @@ Wraps the app's fetch handler for API Gateway v1/v2 and ALB. Routes, controllers
 
 ### Queue — `createSqsHandler()`
 
-Processes SQS messages as Guren jobs. Supports **partial batch failure**: only failed messages are returned to SQS for retry.
+Processes SQS messages as Guren jobs. Enable `ReportBatchItemFailures` on the Lambda event source mapping (the bundled CDK construct does this). Standard queue batches run concurrently and report individual failures. FIFO queues, identified by their `.fifo` ARN, run sequentially; after the first failure, the response includes that record and every unprocessed record so SQS preserves order.
+
+Attempts are the count already in the job body plus AWS `ApproximateReceiveCount`. Records without a positive receive count are reported as failures. When an attempt fails at the job's `maxAttempts`, the handler calls `failed()`. Later deliveries skip `handle()` and call `failed()` with an exhaustion error. Terminal messages remain in `batchItemFailures` so the queue's redrive policy can move them to its dead-letter queue. Configure that policy; `maxAttempts` does not delete messages or create a dead-letter queue.
+
+Both callbacks must tolerate redelivery, including repeated calls to `failed()`. The limit counts AWS deliveries, which can include FIFO records left unprocessed after an earlier failure. Set the queue's `maxReceiveCount` with that behavior in mind; a lower redrive threshold can move a job before its `maxAttempts` callback runs.
 
 Configure the SQS driver in the `config/queue.ts` that `guren add queue` scaffolds, and list it in `createApp({ config })`:
 

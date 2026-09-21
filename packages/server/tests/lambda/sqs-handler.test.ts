@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 
-import { createSqsHandler, type SqsEvent } from '../../src/lambda'
+import { createSqsHandler, type SqsEvent, type SqsRecord } from '../../src/lambda'
 import { Job, registerJob, clearJobRegistry } from '../../src/queue/Job'
 
 const handled: Array<{ value: number }> = []
@@ -26,7 +26,7 @@ class FailingJob extends Job<{ id: string }> {
   }
 }
 
-function createSqsRecord(job: { name: string; payload: unknown; attempts?: number; maxAttempts?: number }, messageId: string) {
+function createSqsRecord(job: { name: string; payload: unknown; attempts?: number; maxAttempts?: number }, messageId: string): SqsRecord {
   return {
     messageId,
     receiptHandle: `receipt-${messageId}`,
@@ -41,7 +41,7 @@ function createSqsRecord(job: { name: string; payload: unknown; attempts?: numbe
       createdAt: new Date().toISOString(),
       reservedAt: null,
     }),
-    attributes: {},
+    attributes: { ApproximateReceiveCount: '1' },
     messageAttributes: {},
     md5OfBody: '',
     eventSource: 'aws:sqs',
@@ -148,5 +148,122 @@ describe('createSqsHandler', () => {
     await handler(event)
 
     expect(failedCallPayload).toBeNull()
+  })
+})
+
+describe('SQS delivery semantics', () => {
+  beforeEach(() => {
+    clearJobRegistry()
+    handled.length = 0
+    failedCallPayload = null
+    registerJob(SuccessJob)
+    registerJob(FailingJob)
+  })
+  afterEach(() => clearJobRegistry())
+
+  test('uses the receive count across invocations and stops handle at maxAttempts', async () => {
+    let calls = 0
+    const errors: string[] = []
+    class DeliveryFailure extends Job {
+      async handle() { calls++; throw new Error('original failure') }
+      async failed(_payload: unknown, error: Error) { errors.push(error.message) }
+    }
+    registerJob(DeliveryFailure)
+    for (let delivery = 1; delivery <= 5; delivery++) {
+      const record = createSqsRecord({ name: 'DeliveryFailure', payload: {}, maxAttempts: 3 }, 'retry')
+      record.attributes.ApproximateReceiveCount = String(delivery)
+      // A fresh handler cannot rely on state from an earlier invocation.
+      expect(await createSqsHandler()({ Records: [record] })).toEqual({
+        batchItemFailures: [{ itemIdentifier: 'retry' }],
+      })
+      expect(errors).toHaveLength(Math.max(0, delivery - 2))
+    }
+    expect(calls).toBe(3)
+    expect(errors).toEqual(['original failure', 'SQS job exceeded maxAttempts (3).', 'SQS job exceeded maxAttempts (3).'])
+  })
+
+  test('retains the initial attempts offset in the message body', async () => {
+    const record = createSqsRecord({ name: 'FailingJob', payload: { id: 'offset' }, attempts: 1, maxAttempts: 3 }, 'offset')
+    record.attributes.ApproximateReceiveCount = '2'
+    await createSqsHandler()({ Records: [record] })
+    expect(failedCallPayload).toEqual({ id: 'offset' })
+  })
+
+  test('rejects missing or malformed counts before invoking application code', async () => {
+    for (const receiveCount of [undefined, '', '0', '-1', '1.5', 'NaN', 'Infinity']) {
+      const record = createSqsRecord({ name: 'SuccessJob', payload: { value: 1 } }, 'invalid')
+      record.attributes = receiveCount === undefined ? {} : { ApproximateReceiveCount: receiveCount }
+      expect(await createSqsHandler()({ Records: [record] })).toEqual({
+        batchItemFailures: [{ itemIdentifier: 'invalid' }],
+      })
+    }
+    expect(handled).toEqual([])
+  })
+
+  test('keeps terminal messages eligible for redrive even when failed() throws', async () => {
+    class BrokenFailureHook extends Job {
+      async handle() { throw new Error('handler error') }
+      async failed() { throw new Error('hook error') }
+    }
+    registerJob(BrokenFailureHook)
+    const record = createSqsRecord({ name: 'BrokenFailureHook', payload: {}, maxAttempts: 1 }, 'terminal')
+    expect(await createSqsHandler()({ Records: [record] })).toEqual({
+      batchItemFailures: [{ itemIdentifier: 'terminal' }],
+    })
+  })
+
+  test('awaits each FIFO record and returns failed plus unprocessed records', async () => {
+    const order: number[] = []
+    class OrderedJob extends Job<{ step: number }> {
+      async handle({ step }: { step: number }) {
+        if (step === 1) await new Promise(resolve => setTimeout(resolve, 10))
+        order.push(step)
+        if (step === 2) throw new Error('stop here')
+      }
+    }
+    registerJob(OrderedJob)
+    const records = [1, 2, 3, 4].map(step => ({
+      ...createSqsRecord({ name: 'OrderedJob', payload: { step } }, `msg-${step}`),
+      eventSourceARN: 'arn:aws:sqs:us-east-1:123456789012:jobs.fifo',
+      attributes: { ApproximateReceiveCount: '1', MessageGroupId: step === 4 ? 'other' : 'same' },
+    }))
+    expect(await createSqsHandler()({ Records: records })).toEqual({
+      batchItemFailures: ['msg-2', 'msg-3', 'msg-4'].map(itemIdentifier => ({ itemIdentifier })),
+    })
+    expect(order).toEqual([1, 2])
+  })
+
+  test('acknowledges a completely successful FIFO batch', async () => {
+    const records = [1, 2].map(value => ({
+      ...createSqsRecord({ name: 'SuccessJob', payload: { value } }, String(value)),
+      eventSourceARN: 'arn:aws:sqs:us-east-1:123456789012:jobs.fifo',
+    }))
+    expect(await createSqsHandler()({ Records: records })).toEqual({ batchItemFailures: [] })
+    expect(handled).toEqual([{ value: 1 }, { value: 2 }])
+  })
+
+  test('stops a FIFO batch after malformed JSON without executing later records', async () => {
+    const first = createSqsRecord({ name: 'SuccessJob', payload: { value: 1 } }, 'first')
+    first.eventSourceARN += '.fifo'
+    first.body = '{broken'
+    const next = { ...first, ...createSqsRecord({ name: 'SuccessJob', payload: { value: 2 } }, 'next'), eventSourceARN: first.eventSourceARN }
+    expect(await createSqsHandler()({ Records: [first, next] })).toEqual({
+      batchItemFailures: [{ itemIdentifier: 'first' }, { itemIdentifier: 'next' }],
+    })
+    expect(handled).toEqual([])
+  })
+
+  test('keeps standard queue processing concurrent', async () => {
+    let release!: () => void
+    const ready = new Promise<void>(resolve => { release = resolve })
+    class ConcurrentJob extends Job<{ step: number }> {
+      async handle({ step }: { step: number }) {
+        if (step === 1) await ready
+        else release()
+      }
+    }
+    registerJob(ConcurrentJob)
+    const records = [1, 2].map(step => createSqsRecord({ name: 'ConcurrentJob', payload: { step } }, String(step)))
+    expect(await createSqsHandler()({ Records: records })).toEqual({ batchItemFailures: [] })
   })
 })

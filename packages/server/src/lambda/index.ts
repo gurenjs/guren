@@ -47,42 +47,61 @@ export function createLambdaHandler(app: Application) {
  */
 export function createSqsHandler(): (event: SqsEvent) => Promise<SqsBatchResponse> {
   return async (event: SqsEvent): Promise<SqsBatchResponse> => {
-    const failures: SqsBatchItemFailure[] = []
-
-    const results = await Promise.allSettled(
-      event.Records.map(async (record) => {
-        const job = deserializeSqsJob(record.body)
-
-        const JobClass = getJob(job.name)
-        if (!JobClass) {
-          throw new Error(`Job class not found: ${job.name}`)
-        }
-
-        const instance = new JobClass()
-        job.attempts++
-
+    // AWS FIFO batches must stop after the first failure, including records
+    // from other groups. Unprocessed records stay on SQS with the failed one.
+    if (event.Records.some((record) => record.eventSourceARN.endsWith('.fifo'))) {
+      for (let index = 0; index < event.Records.length; index++) {
         try {
-          await instance.handle(job.payload)
-        } catch (error) {
-          if (job.attempts >= job.maxAttempts && instance.failed) {
-            try {
-              await instance.failed(job.payload, error as Error)
-            } catch {
-              // The original error is what the batch reports.
-            }
+          await processSqsRecord(event.Records[index])
+        } catch {
+          return {
+            batchItemFailures: event.Records.slice(index).map((record) => ({ itemIdentifier: record.messageId })),
           }
-          throw error
         }
-      }),
-    )
-
-    for (let i = 0; i < results.length; i++) {
-      if (results[i].status === 'rejected') {
-        failures.push({ itemIdentifier: event.Records[i].messageId })
       }
+      return { batchItemFailures: [] }
     }
 
-    return { batchItemFailures: failures }
+    const results = await Promise.allSettled(event.Records.map(processSqsRecord))
+    return {
+      batchItemFailures: event.Records
+        .filter((_, index) => results[index].status === 'rejected')
+        .map((record) => ({ itemIdentifier: record.messageId })),
+    }
+  }
+}
+
+async function processSqsRecord(record: SqsRecord): Promise<void> {
+  const job = deserializeSqsJob(record.body)
+  const JobClass = getJob(job.name)
+  if (!JobClass) throw new Error(`Job class not found: ${job.name}`)
+
+  const receiveCount = Number(record.attributes.ApproximateReceiveCount)
+  if (!Number.isSafeInteger(receiveCount) || receiveCount < 1) {
+    throw new Error('SQS records require a positive ApproximateReceiveCount.')
+  }
+  if (!Number.isSafeInteger(job.attempts) || job.attempts < 0
+    || !Number.isSafeInteger(job.maxAttempts) || job.maxAttempts < 1
+    || !Number.isSafeInteger(job.attempts + receiveCount)) {
+    throw new Error('SQS jobs require valid attempts and maxAttempts counts.')
+  }
+  // Body is unchanged on redelivery; the AWS attribute survives invocations.
+  job.attempts += receiveCount
+  const instance = new JobClass()
+  try {
+    if (job.attempts > job.maxAttempts) {
+      throw new Error(`SQS job exceeded maxAttempts (${job.maxAttempts}).`)
+    }
+    await instance.handle(job.payload)
+  } catch (error) {
+    if (job.attempts >= job.maxAttempts && instance.failed) {
+      try {
+        await instance.failed(job.payload, error as Error)
+      } catch {
+        // Keep the original failure in the partial batch response for redrive.
+      }
+    }
+    throw error
   }
 }
 
