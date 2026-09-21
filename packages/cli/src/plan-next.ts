@@ -17,7 +17,7 @@ import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
-import { derivePlanTasks, planStepIds, type PlanDerivedStep, type PlanTaskTitle } from './plan/tasks'
+import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskTitle } from './plan/tasks'
 import { hashFiles, recordStillHolds } from './plan/verification'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
@@ -58,13 +58,25 @@ export interface PlanNextFileOptions {
   now?: () => Date
 }
 
+/** The items a section holds; three sections are nested inside another's items. */
+function sectionItems(plan: PlanDraft, section: PlanElementSection): ReadonlyArray<{ id: string }> {
+  switch (section) {
+    case 'columns':
+      return plan.models.flatMap((model) => model.columns)
+    case 'actions':
+      return plan.controllers.flatMap((controller) => controller.actions)
+    case 'acceptance':
+      return plan.tasks.flatMap((task) => task.acceptance)
+    default:
+      return plan[section]
+  }
+}
+
 function elementsOf(plan: PlanDraft, ids: readonly string[]): PlanNextElement[] {
   const wanted = new Set(ids)
   const found: PlanNextElement[] = []
   for (const { id, section } of listPlanElements(plan)) {
-    if (!wanted.has(id)) continue
-    const items = section === 'columns' ? plan.models.flatMap((model) => model.columns) : section === 'actions' ? plan.controllers.flatMap((controller) => controller.actions) : (plan[section as keyof PlanDraft] as ReadonlyArray<{ id: string }>)
-    found.push({ id, section, element: items.find((item) => item.id === id) })
+    if (wanted.has(id)) found.push({ id, section, element: sectionItems(plan, section).find((item) => item.id === id) })
   }
   return found
 }
@@ -80,23 +92,11 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
 
   const verified: string[] = []
-  let nextId: string | undefined
-  for (const id of planStepIds(derivation)) {
-    const record = records[id]
-    if (record && recordStillHolds(record, digest, hashes)) verified.push(id)
-    else nextId ??= id
-  }
-
-  const previous = state?.active
-  // The state is git-ignored, so the mark this call writes never makes the tree dirty.
-  const dirty = (await runGit(root, ['status', '--porcelain', '--', '.'])) ?? []
-  if (dirty.length > 0 && !(previous && previous.step === nextId)) {
-    throw new CliError(
-      `The working tree under ${root} has uncommitted changes, and one step is one commit. Commit or discard them first:\n${dirty
-        .slice(0, 10)
-        .map((line) => `  ${line}`)
-        .join('\n')}${dirty.length > 10 ? `\n  … and ${dirty.length - 10} more` : ''}`,
-    )
+  let next: { task: PlanDerivedTask; step: PlanDerivedStep } | undefined
+  for (const entry of listPlanSteps(derivation)) {
+    const record = records[entry.step.id]
+    if (record && recordStillHolds(record, digest, hashes, entry.step)) verified.push(entry.step.id)
+    else next ??= entry
   }
 
   const head = {
@@ -105,13 +105,24 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     verified,
     stateFile: toPosixRelative(root, planStatePath(root, slug)),
   } satisfies Omit<PlanNextReport, 'step'>
-  if (nextId === undefined) {
+  const previous = state?.active
+  if (next === undefined) {
     if (previous) await writePlanActiveStep(root, slug, undefined)
     return { ...head, step: null }
   }
+  const { task, step } = next
 
-  const task = derivation.tasks.find((candidate) => candidate.steps.some((step) => step.id === nextId))!
-  const step = task.steps.find((candidate) => candidate.id === nextId)!
+  // The state is git-ignored, so the mark this call writes never makes the tree dirty.
+  const dirty = (await runGit(root, ['status', '--porcelain', '--', '.'])) ?? []
+  if (dirty.length > 0 && previous?.step !== step.id) {
+    throw new CliError(
+      `The working tree under ${root} has uncommitted changes, and one step is one commit. Commit or discard them first:\n${dirty
+        .slice(0, 10)
+        .map((line) => `  ${line}`)
+        .join('\n')}${dirty.length > 10 ? `\n  … and ${dirty.length - 10} more` : ''}`,
+    )
+  }
+
   const behaviours = new Set(step.acceptanceIds)
   // A stall is what the last session ended on: reported once, then the hook is asked again.
   const resumed = previous && previous.step === step.id && !previous.stalled ? previous : undefined

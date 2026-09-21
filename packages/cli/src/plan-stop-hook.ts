@@ -10,7 +10,6 @@
 import { resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
-import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
@@ -62,7 +61,7 @@ export function judgeStopHook(active: PlanActiveStep, record: PlanStepRecord, bl
     return stalled(`the step is blocked (${reasons.join('; ')})`)
   }
   if (blockedElements.length > 0) {
-    return stalled(`${blockedElements.map((element) => `${element.id} is blocked${element.reason ? ` (${element.reason})` : ''}`).join('; ')}`)
+    return stalled(blockedElements.map((element) => `${element.id} is blocked${element.reason ? ` (${element.reason})` : ''}`).join('; '))
   }
   if (stopHookActive && active.lastSignature === signature) return stalled('nothing about the step changed since the last continuation')
   if (active.continuations >= MAX_STEP_CONTINUATIONS) return stalled(`${MAX_STEP_CONTINUATIONS} continuations on this step`)
@@ -73,7 +72,7 @@ function defaultVerify(planPath: string, appRoot: string, stepId: string): Promi
   return planVerifyFile(planPath, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot, step: stepId })
 }
 
-async function verifyActiveStep(appRoot: string, slug: string, records: Readonly<Record<string, PlanStepRecord>>, active: PlanActiveStep, input: PlanStopHookInput, deps: PlanStopHookDeps): Promise<PlanStopHookVerdict> {
+async function verifyActiveStep(appRoot: string, slug: string, records: Readonly<Record<string, PlanStepRecord>>, active: PlanActiveStep, stopHookActive: boolean, deps: PlanStopHookDeps): Promise<PlanStopHookVerdict> {
   const planPath = resolve(appRoot, active.plan)
   const heading = `plan:verify on stop (${active.plan}, ${active.step})`
   let plan
@@ -84,32 +83,30 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     return { block: false, message: `${heading}: ${error instanceof Error ? error.message : String(error)}\nRun \`bunx guren plan:next\` again once the plan is back.` }
   }
   const digest = planDigest(plan)
-  const record = records[active.step]
-  if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)))) return { block: false }
-
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false) })
   const step = findPlanStep(derivation, active.step)?.step
   if (!step) {
     await writePlanActiveStep(appRoot, slug, undefined)
     return { block: false, message: `${heading}: the plan no longer derives this step, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` for the next one.` }
   }
+  const record = records[active.step]
+  if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)), step)) return { block: false }
 
   let report: PlanVerifyReport
   try {
     report = await (deps.verify ?? defaultVerify)(planPath, appRoot, active.step)
   } catch (error) {
-    if (!(error instanceof CliError)) throw error
-    return { block: false, message: `${heading}: ${error.message}` }
+    // A run that could not judge the step is not a reason to hold the session: the hook says so and lets it stop.
+    return { block: false, message: `${heading}: could not verify the step: ${error instanceof Error ? error.message : String(error)}` }
   }
   const verification = report.steps.find((candidate) => candidate.stepId === active.step)
   if (!verification) return { block: false, message: `${heading}: the run did not cover the step.` }
   const owned = new Set(step.elementIds)
   const blockedElements = report.elements.filter((element) => owned.has(element.id) && element.state === 'blocked')
-  const judgement = judgeStopHook(active, verification.record, blockedElements, input.stopHookActive)
+  const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive)
   if (judgement.kind === 'verified') return { block: false }
 
   const output = formatPlanStepRecord(active.step, verification.record).join('\n')
-  const verifyCommand = `bunx guren plan:verify ${active.plan} --step ${active.step}`
   if (judgement.kind === 'stalled') {
     const at = (deps.now ?? (() => new Date()))().toISOString()
     await writePlanActiveStep(appRoot, slug, { ...active, lastSignature: judgement.signature, stalled: { at, reason: judgement.reason, output } })
@@ -122,7 +119,7 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   await writePlanActiveStep(appRoot, slug, { ...active, continuations, lastSignature: judgement.signature })
   return {
     block: true,
-    message: `${heading}: the step is ${verification.record.outcome}, so this turn is not done (continuation ${continuations} of ${MAX_STEP_CONTINUATIONS}).\n${output}\nFinish the step: it is done when \`${verifyCommand}\` reports it verified.`,
+    message: `${heading}: the step is ${verification.record.outcome}, so this turn is not done (continuation ${continuations} of ${MAX_STEP_CONTINUATIONS}).\n${output}\nFinish the step: it is done when \`bunx guren plan:verify ${active.plan} --step ${active.step}\` reports it verified.`,
   }
 }
 
@@ -130,10 +127,11 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
 export async function planStopHookFindings(appRoot: string, input: PlanStopHookInput, deps: PlanStopHookDeps = {}): Promise<PlanStopHookVerdict> {
   const messages: string[] = []
   let block = false
-  for (const { slug, state } of await listPlanStates(appRoot)) {
+  for (const { slug, state, unreadable } of await listPlanStates(appRoot)) {
+    if (unreadable) messages.push(`plan:verify on stop: ${unreadable}\nThe next plan:verify replaces it, and its mark is gone: run \`bunx guren plan:next\` again.`)
     const active = state?.active
     if (!active || active.stalled) continue
-    const verdict = await verifyActiveStep(appRoot, slug, state.steps, active, input, deps)
+    const verdict = await verifyActiveStep(appRoot, slug, state.steps, active, input.stopHookActive, deps)
     if (verdict.message) messages.push(verdict.message)
     block ||= verdict.block
   }

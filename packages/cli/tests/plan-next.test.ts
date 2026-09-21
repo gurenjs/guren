@@ -42,14 +42,18 @@ async function holding(app: string): Promise<PlanStepRecord> {
   }
 }
 
+async function writeState(app: string, state: Partial<PlanState>): Promise<void> {
+  await writeWorkspaceFiles(app, { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: {}, ...state }) })
+}
+
 async function createApp(name: string, state?: Partial<PlanState>): Promise<{ app: string; plan: string }> {
   const app = join(ROOT, name)
   await writeWorkspaceFiles(app, {
     'package.json': JSON.stringify({ name, type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
     'lib.ts': 'export const a = 1\n',
     'comments.plan.json': JSON.stringify(loadCommentsPlan()),
-    ...(state ? { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: {}, ...state }) } : {}),
   })
+  if (state) await writeState(app, state)
   return { app, plan: join(app, 'comments.plan.json') }
 }
 
@@ -76,17 +80,20 @@ describe('plan:next', () => {
     expect(report.step!.generates).toContain('model.comment')
     expect(report.stateFile).toBe('.guren/plans/comments.state.json')
     expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0 })
-    // The mark's `.gitignore` ignores itself, so a plan loop leaves no untracked file behind.
+    // The mark's `.gitignore` ignores itself, so a plan loop leaves no untracked file behind; one that does not is rewritten.
+    expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n.gitignore\n')
+    await writeFile(join(app, '.guren/plans/.gitignore'), '*.state.json\n', 'utf8')
+    await planNextFile(plan, { appRoot: app, now: NOW })
     expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n.gitignore\n')
 
-    const tests = await planNextFile(plan, { appRoot: app, now: NOW })
-    expect(tests.step!.id).toBe(SCAFFOLD)
+    const again = await planNextFile(plan, { appRoot: app, now: NOW })
+    expect(again.step!.id).toBe(SCAFFOLD)
   })
 
   test('should skip the steps whose record still holds and carry the elements of the one it returns', async () => {
     const { app, plan } = await createApp('holding')
     const record = await holding(app)
-    await writeWorkspaceFiles(app, { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [SCAFFOLD]: record, [TESTS]: record, [DATA]: record } }) })
+    await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: record, [DATA]: record } })
 
     const report = await planNextFile(plan, { appRoot: app, now: NOW })
 
@@ -107,10 +114,28 @@ describe('plan:next', () => {
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
   })
 
-  test('should report that every step is verified and clear the mark', async () => {
-    const { app, plan } = await createApp('done', { active: { plan: 'comments.plan.json', step: HTTP, startedAt: 't', continuations: 1 } })
+  test('should count a scaffold step done on its record alone, which fingerprints nothing', async () => {
+    const { app, plan } = await createApp('scaffold')
+    const record = { ...(await holding(app)), fingerprint: { files: {}, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' } } }
+    await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: record } })
+
+    const report = await planNextFile(plan, { appRoot: app, now: NOW })
+
+    // The tests step owns behaviours, so an empty fingerprint of it is a run that saw no test file: redone.
+    expect(report.verified).toEqual([SCAFFOLD])
+    expect(report.step!.id).toBe(TESTS)
+  })
+
+  test('should report that every step is verified and clear the mark, uncommitted work or not', async () => {
+    const { app, plan } = await createApp('done')
     const record = await holding(app)
-    await writeWorkspaceFiles(app, { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: Object.fromEntries(STEPS.map((id) => [id, record])), active: { plan: 'comments.plan.json', step: HTTP, startedAt: 't', continuations: 1 } }) })
+    await writeState(app, { steps: Object.fromEntries(STEPS.map((id) => [id, record])), active: { plan: 'comments.plan.json', step: HTTP, startedAt: 't', continuations: 1 } })
+
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    await writeFile(join(app, 'extra.ts'), 'export const b = 2\n', 'utf8')
+    await writeState(app, { steps: Object.fromEntries(STEPS.map((id) => [id, record])), active: { plan: 'comments.plan.json', step: HTTP, startedAt: 't', continuations: 1 } })
 
     const report = await planNextFile(plan, { appRoot: app, now: NOW })
 
@@ -134,7 +159,7 @@ describe('plan:next', () => {
 
     // Once that step holds, the leftover would land in the next step's commit.
     const record = await holding(app)
-    await writeWorkspaceFiles(app, { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [SCAFFOLD]: record }, active: { plan: 'comments.plan.json', step: SCAFFOLD, startedAt: 't', continuations: 0 } }) })
+    await writeState(app, { steps: { [SCAFFOLD]: record }, active: { plan: 'comments.plan.json', step: SCAFFOLD, startedAt: 't', continuations: 0 } })
     await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/uncommitted changes, and one step is one commit\. Commit or discard them first:\n {2}M lib\.ts/)
   })
 
@@ -176,7 +201,7 @@ describe('plan:next', () => {
     test('should print the step for a person and the structure for --json', async () => {
       const { app, plan } = await createApp('format')
       const record = await holding(app)
-      await writeWorkspaceFiles(app, { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [SCAFFOLD]: record } }) })
+      await writeState(app, { steps: { [SCAFFOLD]: record } })
       log.mockImplementation(() => {})
 
       await runCommand(builtinSubCommands['plan:next'] as CommandDef, { rawArgs: [plan, '--app', app] })

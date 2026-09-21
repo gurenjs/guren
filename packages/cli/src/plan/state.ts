@@ -177,11 +177,9 @@ async function updatePlanState(appRoot: string, slug: string, mutate: (state: Pl
   const dir = join(appRoot, PLAN_STATE_DIR)
   await mkdir(dir, { recursive: true })
   const ignore = join(dir, '.gitignore')
-  try {
-    await readFile(ignore, 'utf8')
-  } catch {
-    await writeFile(ignore, PLAN_STATE_GITIGNORE, 'utf8')
-  }
+  // Rewritten when it does not ignore itself: an earlier write left it untracked, which would read as a dirty tree.
+  const current = await readFile(ignore, 'utf8').catch(() => '')
+  if (!current.split('\n').includes('.gitignore')) await writeFile(ignore, PLAN_STATE_GITIGNORE, 'utf8')
   const path = planStatePath(appRoot, slug)
   await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
   return path

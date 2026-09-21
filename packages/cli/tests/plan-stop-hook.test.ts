@@ -48,9 +48,11 @@ function active(overrides: Partial<PlanActiveStep> = {}): PlanActiveStep {
 /** A verify report over the fixture app state, with the step's record as given and no blocked element unless asked. */
 function report(stepId: string, stepRecord: PlanStepRecord, blocked: string[] = []): PlanVerifyReport {
   const status = judgePlan(PLAN, planAppState())
-  const elements: PlanElementStatus<PlanElementState>[] = status.elements.map((element) =>
-    blocked.includes(element.id) ? { ...element, state: 'blocked', reason: 'the reader failed' } : element.state === 'blocked' ? { ...element, state: 'planned', reason: undefined } : element,
-  )
+  const elements: PlanElementStatus<PlanElementState>[] = status.elements.map((element) => {
+    if (blocked.includes(element.id)) return { ...element, state: 'blocked', reason: 'the reader failed' }
+    if (element.state === 'blocked') return { ...element, state: 'planned', reason: undefined }
+    return element
+  })
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: 'comments.plan.json', title: PLAN.title, hash: null },
@@ -184,6 +186,18 @@ describe('planStopHookFindings', () => {
 
     expect(await planStopHookFindings(app, { stopHookActive: true }, { verify: async () => report(HTTP, record({ outcome: 'verified', incomplete: [] })) })).toEqual({ block: false })
     expect((await readState(app)).active).toEqual(active({ continuations: 2 }))
+  })
+
+  test('should let the stop through with the reason when the verification itself throws, and name an unreadable state file', async () => {
+    const app = await createApp('throws', { active: active() })
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => { throw new TypeError('boom') } })
+    expect(verdict).toEqual({ block: false, message: `plan:verify on stop (comments.plan.json, ${HTTP}): could not verify the step: boom` })
+    expect((await readState(app)).active).toEqual(active())
+
+    await writeWorkspaceFiles(app, { '.guren/plans/comments.state.json': '{' })
+    const unreadable = await planStopHookFindings(app, { stopHookActive: false })
+    expect(unreadable.block).toBe(false)
+    expect(unreadable.message).toMatch(/^plan:verify on stop: .*comments\.state\.json is not valid JSON/)
   })
 
   test('should not block on a mark whose plan is gone or no longer derives the step', async () => {

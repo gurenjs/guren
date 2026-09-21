@@ -146,9 +146,9 @@ describe('plan:verify', () => {
     expect(whole.steps.map((step) => step.stepId)).toEqual(['task/entity/model.comment/scaffold', 'task/entity/model.comment/tests', HTTP, 'task/entity/model.comment/pages'])
     await writeFile(join(app, 'db/schema.ts'), `${SCHEMA}\n// touched twice\n`, 'utf8')
     const redone = await verify(plan, app)
-    // The pages step verified in the run before and still stands; the scaffold step fingerprinted nothing and is redone with the data step.
-    expect(redone.skipped).toEqual(['task/entity/model.comment/pages'])
-    expect(redone.steps.map((step) => step.stepId)).toEqual(expect.arrayContaining([DATA, 'task/entity/model.comment/scaffold']))
+    // The pages step verified in the run before and still stands, and the scaffold step, which fingerprints nothing, stands on its commands.
+    expect(redone.skipped).toEqual(['task/entity/model.comment/scaffold', 'task/entity/model.comment/pages'])
+    expect(redone.steps.map((step) => step.stepId)).toContain(DATA)
 
     const revised = await writePlan('lift-revised.plan.json', { ...loadCommentsPlan(), title: 'Revised' })
     await writeFile(join(app, '.guren/plans/lift-revised.state.json'), JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [DATA]: record } }), 'utf8')
