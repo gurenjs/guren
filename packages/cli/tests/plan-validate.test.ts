@@ -476,32 +476,6 @@ describe('app roots', () => {
     expect(result.message).toContain('already exists in modules/billing')
   })
 
-  test('should read a table in another app root as a collision, since one schema file declares them all', () => {
-    const draft = plan()
-    draft.models[1].module = 'billing'
-
-    const results = validatePlan(
-      draft,
-      appState({ tables: [POSTS, USERS, { identifier: 'comments', tableName: 'comments', columns: ['id'] }] }),
-    )
-
-    const result = expectResult(results, 'plan:app-collision', 'model.comment', 'fail')
-    expect(result.message).toContain('The table "comments" already exists in the project root')
-    expect(result.message).toContain("re-exported from the project's own db/schema.ts")
-  })
-
-  test('should read a table identifier in another app root as a collision too', () => {
-    const draft = plan()
-    draft.models[1].module = 'billing'
-
-    const results = validatePlan(
-      draft,
-      appState({ tables: [POSTS, USERS, { identifier: 'comments', tableName: 'app_comments', columns: ['id'] }] }),
-    )
-
-    expect(expectResult(results, 'plan:app-collision', 'model.comment', 'fail').message).toContain('"comments"')
-  })
-
   test('should judge an action in the app root its controller sits in', () => {
     const draft = plan()
     draft.controllers[0].module = 'billing'
@@ -524,7 +498,6 @@ describe('app roots', () => {
     const draft = plan()
     draft.models[0].module = 'billing'
 
-    // The table itself is unjudged below, and that warning names this element too.
     const result = unjudged(validatePlan(draft, appState()), 'planned column(s)')
 
     expect(result?.message).toContain('table "posts" was not found in modules/billing')
@@ -537,7 +510,6 @@ describe('app roots', () => {
 
     const results = validatePlan(draft, appState())
 
-    // One schema file declares them all, so the class here may well bind the table there.
     const result = unjudged(results, 'The table')
     expect(result?.status).toBe('warn')
     expect(result?.message).toContain('This application declares one in the project root.')
@@ -576,18 +548,20 @@ describe('app roots', () => {
     expect(result.message).toContain("re-exported from the project's own db/schema.ts")
   })
 
-  test('should read another module\'s table as a collision', () => {
+  test('should read another module\'s table as a collision, down to its identifier', () => {
     const draft = plan()
     draft.models[1].module = 'billing'
 
     const results = validatePlan(
       draft,
-      appState({ tables: [POSTS, USERS, { identifier: 'comments', tableName: 'comments', module: 'invoicing', columns: ['id'] }] }),
+      appState({
+        tables: [POSTS, USERS, { identifier: 'comments', tableName: 'invoicing_comments', module: 'invoicing', columns: ['id'] }],
+      }),
     )
 
-    expect(expectResult(results, 'plan:app-collision', 'model.comment', 'fail').message).toContain(
-      'already exists in modules/invoicing',
-    )
+    const result = expectResult(results, 'plan:app-collision', 'model.comment', 'fail')
+    expect(result.message).toContain('The table "comments" already exists in modules/invoicing')
+    expect(result.message).toContain("re-exported from the project's own db/schema.ts")
   })
 
   test('should refuse a table renamed into a name another app root declares', () => {

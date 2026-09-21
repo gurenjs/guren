@@ -211,6 +211,12 @@ async function modelSection(cwd: string, roots: ReadonlyArray<AppRoot>): Promise
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/** Code-unit order, which is what `sort()` gives bare names. */
+function byName(a: PlanAppName, b: PlanAppName): number {
+  if (a.name === b.name) return 0
+  return a.name < b.name ? -1 : 1
+}
+
 /** A section named after the class each discovered file declares, as `guren context` names them. */
 async function classSection(
   cwd: string,
@@ -222,7 +228,7 @@ async function classSection(
   if (probe) return { unreadable: probe }
   return excludeBarrelFiles(files)
     .map((file) => ({ name: classNameFromPath(file), module: moduleNameFor(cwd, file) }))
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .sort(byName)
 }
 
 async function pageSection(cwd: string): Promise<PlanAppNames> {

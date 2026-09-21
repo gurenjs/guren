@@ -257,6 +257,15 @@ function classFiles(
   return found ? [found.file] : []
 }
 
+/**
+ * Why a table name the plan's own app root does not declare is no answer either way:
+ * every root's schema is re-exported from one `db/schema.ts`, so the table another root
+ * declares may well be this one.
+ */
+function tableElsewhere(name: string, module: string | undefined): string {
+  return `no table named "${name}" is declared in ${scopeName(module)}, and another app root declares one`
+}
+
 function tableUnread(table: SourcedSchemaTable | PlanAppUnreadable | undefined): table is PlanAppUnreadable {
   return table !== undefined && 'unreadable' in table
 }
@@ -404,8 +413,8 @@ class StatusContext {
 
   /**
    * The table the model binds, looked up in the app root the plan puts the model in.
-   * A same-named table in another root is a different table, and judging columns
-   * against it is how a model nobody wrote reads as written.
+   * Another root's may be the same SQL table, which is why that answers nothing rather
+   * than matching: judging columns against it is how a model nobody wrote reads as written.
    */
   private tableOf(model: PlanModel): SourcedSchemaTable | undefined | PlanAppUnreadable {
     const tables = this.section('tables')
@@ -418,7 +427,7 @@ class StatusContext {
 
     const found = find(scope)
     if (found || !find(tables)) return found
-    return { unreadable: `no table named "${model.table}" is declared in ${scopeName(model.module)}, and another app root declares one` }
+    return { unreadable: tableElsewhere(model.table, model.module) }
   }
 
   /** A file named after the class that yielded no model is a class this cannot call absent. */
@@ -462,10 +471,14 @@ class StatusContext {
       properties.push(compare('table', model.table, boundName, isUnreadable(tables) ? `the schema could not be read (${tables.unreadable})` : 'the table the class binds was not found in the schema'))
     }
     if (model.tableRenamedFrom && !isUnreadable(tables)) {
-      // Scoped like the table the model binds: a same-named table in another app root is a different table.
+      const named = (within: ReadonlyArray<SourcedSchemaTable>): boolean =>
+        within.some((table) => (table.tableName ?? table.identifier) === model.tableRenamedFrom)
+      const property = 'previous table removed'
       const scope = tables.filter((table) => table.module === (model.module ?? null))
-      const old = scope.some((table) => (table.tableName ?? table.identifier) === model.tableRenamedFrom)
-      properties.push(old ? differ('previous table removed', model.tableRenamedFrom, 'still present') : match('previous table removed', model.tableRenamedFrom, 'absent'))
+      // Scoped like the table the model binds, and hedged for the same reason.
+      if (named(scope)) properties.push(differ(property, model.tableRenamedFrom, 'still present'))
+      else if (named(tables)) properties.push(unknown(property, model.tableRenamedFrom, tableElsewhere(model.tableRenamedFrom, model.module)))
+      else properties.push(match(property, model.tableRenamedFrom, 'absent'))
     }
 
     for (const relationship of model.relationships) {

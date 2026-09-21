@@ -17,4 +17,5 @@ module's schema is re-exported from the project's own `db/schema.ts` and lands i
 migration set. Pages keep being judged by their id, since a module's pages sit in the
 project's own `resources/js/pages` under the module's name. An element's `module` must
 be a non-empty string: `""` never named an app root, and a plan carrying one now fails
-to parse.
+to parse. An `existing`, `alter`, `rename` or `drop` table the plan's own root does not
+declare is left unjudged, with its columns, rather than judged against another root's.

@@ -331,12 +331,11 @@ interface TargetCheck {
   /** The other app roots declaring a name, which is what makes an absence a placement. */
   elsewhere?: (name: string) => string[]
   /**
-   * Where the name may not be taken at all, when that is wider than the root the element
-   * sits in. Absent means the root's own names answer both questions.
+   * Why the name is the application's rather than one app root's: it then collides with
+   * any root's, and where only another root declares it the element is unjudged rather
+   * than missing. The finding quotes this. Absent means the root's own names answer both.
    */
-  collidesWith?: ReadonlyArray<PlanAppName>
-  /** Why a name another app root declares leaves this element unjudged rather than missing. */
-  unjudgedElsewhere?: string
+  shared?: string
   /**
    * Why an absent name is unconfirmed rather than missing, when the reader answers a
    * lower bound: the result warns and quotes this. A collision is positive evidence either way.
@@ -346,29 +345,25 @@ interface TargetCheck {
 
 function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, results: PlanCheckResult[]): void {
   const has = (name: string): boolean => existing.includes(name)
+  const elsewhere = (name: string): string[] => target.elsewhere?.(name) ?? []
   const where = { elementId: target.id, section: target.section }
   const root = target.root === undefined ? 'this application' : scopeName(target.root)
-  // The element's own root first: a name two roots declare collides where the plan puts it.
-  const taken = (name: string): PlanAppName | undefined =>
-    target.collidesWith?.find((entry) => entry.name === name && entry.module === (target.root ?? null))
-    ?? target.collidesWith?.find((entry) => entry.name === name)
-  const collides = (name: string): boolean => (target.collidesWith ? taken(name) !== undefined : has(name))
+  const collides = (name: string): boolean => has(name) || (target.shared !== undefined && elsewhere(name).length > 0)
   const collision = (name: string): void => {
-    const owner = taken(name)
-    const other = owner && owner.module !== (target.root ?? null) ? scopeName(owner.module) : undefined
+    const other = has(name) ? undefined : elsewhere(name)[0]
     results.push(
       finding(
         'plan:app-collision',
         'fail',
         `The ${target.noun} "${name}"${target.scope ?? ''} already exists in ${other ?? root}.`
-          + (other ? ` ${SHARED_SCHEMA}` : ''),
+          + (other ? ` ${target.shared}` : ''),
         where,
       ),
     )
   }
   const missing = (name: string): void => {
-    const others = target.elsewhere?.(name) ?? []
-    const unconfirmed = (others.length > 0 ? target.unjudgedElsewhere : undefined) ?? target.unconfirmedBecause
+    const others = elsewhere(name)
+    const unconfirmed = (others.length > 0 ? target.shared : undefined) ?? target.unconfirmedBecause
     results.push(
       finding(
         unconfirmed ? 'plan:app-unjudged' : 'plan:app-missing',
@@ -395,10 +390,9 @@ function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, resul
 }
 
 /**
- * Why a table name is the application's rather than one app root's: `make:module` writes
- * `export * from '../modules/<name>/db/schema'` into the project's own `db/schema.ts`,
- * which is the file drizzle-kit reads, so two roots declaring one name are one SQL table
- * in one migration set and two identical exports of it.
+ * `make:module` writes `export * from '../modules/<name>/db/schema'` into the project's
+ * own `db/schema.ts`, which is the file drizzle-kit reads, so two roots declaring one
+ * name are one SQL table in one migration set and two identical exports of it.
  */
 const SHARED_SCHEMA =
   "Every app root's schema is re-exported from the project's own db/schema.ts, so one name is one SQL table."
@@ -488,8 +482,7 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
           kind: model.tableRenamedFrom ? 'rename' : model.change.kind === 'rename' ? 'existing' : model.change.kind,
           noun: 'table',
           ...scoped,
-          collidesWith: declared,
-          unjudgedElsewhere: SHARED_SCHEMA,
+          shared: SHARED_SCHEMA,
         },
         names,
         results,

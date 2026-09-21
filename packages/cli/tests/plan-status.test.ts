@@ -3,7 +3,13 @@ import { describe, expect, test } from 'bun:test'
 import type { PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
 import type { PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
-import { awaitsVerification, judgePlan, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
+import {
+  awaitsVerification,
+  judgePlan,
+  type PlanElementStatus,
+  type PlanPropertyStatus,
+  type PlanStatusState,
+} from '../src/plan/status'
 import type { SourcedSchemaTable } from '../src/schema-runtime'
 import { loadCommentsPlan, planAppState, type PlanAppStateInput } from './plan-fixture'
 
@@ -475,13 +481,35 @@ describe('judgePlan', () => {
   })
 
   describe('the app root a lookup is scoped to', () => {
-    test('should look for the table a model was renamed from in the model’s own app root', () => {
+    /** A model renamed from `legacy_posts`, in `module` and judged against `tables`. */
+    function previousTable(tables: SourcedSchemaTable[], module?: string): PlanPropertyStatus | undefined {
+      const document = plan({ models: [model(ALTER, { tableRenamedFrom: 'legacy_posts', ...(module ? { module } : {}) })] })
+      // The class has to exist in that root, or the element is `planned` and no property is judged.
+      const classes = [{ className: 'Post', module: module ?? null, file: 'app/Models/Post.ts', table: 'posts', relationships: [], fillable: ['title'] }]
+      const element = only(judgePlan(document, app({ tables, models: classes })), 'm')
+      return element.properties.find((property) => property.property === 'previous table removed')
+    }
+
+    test('should call the table a model was renamed from absent when no app root declares it', () => {
+      expect(previousTable([POSTS_TABLE, USERS_TABLE])).toMatchObject({ verdict: 'match', actual: 'absent' })
+    })
+
+    test('should not call it absent when another app root declares the name it was renamed from', () => {
       const billing = { ...POSTS_TABLE, identifier: 'legacyPosts', tableName: 'legacy_posts', module: 'billing' }
-      const document = plan({ models: [model(ALTER, { tableRenamedFrom: 'legacy_posts' })] })
 
-      const element = only(judgePlan(document, app({ tables: [POSTS_TABLE, USERS_TABLE, billing] })), 'm')
+      expect(previousTable([POSTS_TABLE, USERS_TABLE, billing])).toMatchObject({
+        verdict: 'unknown',
+        reason: 'no table named "legacy_posts" is declared in the project root, and another app root declares one',
+      })
+    })
 
-      expect(element.properties.find((property) => property.property === 'previous table removed')).toMatchObject({ verdict: 'match', actual: 'absent' })
+    test('should call it still present when the model’s own app root declares it', () => {
+      const billing = { ...POSTS_TABLE, identifier: 'legacyPosts', tableName: 'legacy_posts', module: 'billing' }
+
+      expect(previousTable([POSTS_TABLE, USERS_TABLE, billing], 'billing')).toMatchObject({
+        verdict: 'differ',
+        actual: 'still present',
+      })
     })
 
     test('should name a policy in the singular it is written with, never one derived from "policies"', () => {
