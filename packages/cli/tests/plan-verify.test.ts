@@ -7,8 +7,9 @@ import type { CheckReport } from '../src/check-result'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { planDigest, planSlug, PLAN_STATE_VERSION, readPlanState, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
 import { summarize, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
-import { derivePlanTasks, type PlanTaskDerivation } from '../src/plan/tasks'
-import { acceptanceTestFiles, applyVerification, hashFiles, PlanVerifier, sha256, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
+import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
+import { applyVerification, hashFiles, sha256 } from '../src/plan/verification'
+import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
 import type { CapturedExec, CapturedRun } from '../src/subprocess'
 import { loadCommentsPlan } from './plan-fixture'
 
@@ -44,14 +45,20 @@ afterAll(async () => {
   await rm(ROOT, { recursive: true, force: true })
 })
 
-/** One element per id a step owns, at the state its kind completes at unless `states` says otherwise. */
-function statusOf(states: Record<string, PlanElementStatus['state']> = {}): PlanStatus {
+type ElementOverride = Partial<Pick<PlanElementStatus, 'state' | 'files'>>
+
+/**
+ * One element per id a step owns, at the state its kind completes at unless `overrides`
+ * says otherwise. The verifier reads `state`, `completesAt`, `change` and `files` and
+ * nothing else; what `judgePlan()` puts in them is `plan-status.test.ts`'s to pin.
+ */
+function statusOf(overrides: Record<string, ElementOverride> = {}): PlanStatus {
   const elements: PlanElementStatus[] = derivation.tasks.flatMap((task) =>
     task.steps.flatMap((step) =>
       step.elementIds.map((id): PlanElementStatus => {
         const completesAt = id.startsWith('route.') || id.startsWith('action.') || id.startsWith('validator.') || id.startsWith('view.') ? 'wired' : 'present'
         const files = id.startsWith('column.') ? ['db/schema.ts'] : id.startsWith('model.') ? ['app/Models/Comment.ts'] : ['app/Http/Controllers/CommentController.ts']
-        return { id, section: 'models', change: id === 'model.post' ? 'existing' : 'add', label: id, state: states[id] ?? completesAt, completesAt, properties: [], notes: [], files }
+        return { id, section: 'models', change: id === 'model.post' ? 'existing' : 'add', label: id, state: completesAt, completesAt, properties: [], notes: [], files, ...overrides[id] }
       }),
     ),
   )
@@ -92,28 +99,31 @@ function fakeExec(answers: Record<string, Partial<CapturedRun>> = {}, report: st
   return { exec, calls }
 }
 
-function verifier(
-  status: PlanStatus,
-  fake: FakeExec,
-  overrides: Partial<PlanVerifierOptions> = {},
-): PlanVerifier {
+function checkReport(checks: CheckReport['checks']): CheckReport {
+  return { cwd: ROOT, checks, passCount: 0, warnCount: 0, failCount: checks.length }
+}
+
+function verifier(status: PlanStatus, fake: FakeExec, overrides: Partial<PlanVerifierOptions> = {}): PlanVerifier {
   return new PlanVerifier(plan, status, derivation, {
     root: ROOT,
+    planDigest: 'digest',
     exec: fake.exec,
     timeoutMs: 1000,
-    scripts: { typecheck: 'tsc --noEmit', 'db:migrate': 'guren db:migrate' },
+    scripts: { codegen: 'guren codegen', typecheck: 'tsc --noEmit', 'db:migrate': 'guren db:migrate' },
     check: async () => checkReport([]),
     now: () => new Date('2026-09-21T00:00:00Z'),
     ...overrides,
   })
 }
 
-function checkReport(checks: CheckReport['checks']): CheckReport {
-  return { cwd: ROOT, checks, passCount: 0, warnCount: 0, failCount: checks.length }
+function commandsOf(step: PlanStepVerification): Record<string, string> {
+  return Object.fromEntries(step.record.commands.map((command) => [command.command, command.status]))
 }
 
-function commandsOf(step: PlanStepVerification): Record<string, string> {
-  return Object.fromEntries(step.commands.map((command) => [command.command, command.status]))
+function commandOf(step: PlanStepVerification, command: string): PlanStepRecord['commands'][number] {
+  const found = step.record.commands.find((candidate) => candidate.command === command)
+  if (!found) throw new Error(`no ${command} command in ${step.stepId}`)
+  return found
 }
 
 describe('acceptanceTestFiles', () => {
@@ -130,94 +140,110 @@ describe('PlanVerifier', () => {
   test('should verify a step whose commands pass and whose elements are at their completion state', async () => {
     const fake = fakeExec()
 
-    const step = await verifier(statusOf(), fake).verify(HTTP, 'digest')
+    const step = await verifier(statusOf(), fake).verify(HTTP)
 
-    expect(step.outcome).toBe('verified')
+    expect(step.record.outcome).toBe('verified')
     expect(step.taskId).toBe('task/entity/model.comment')
-    expect(commandsOf(step)).toEqual({ check: 'pass', codegen: 'pass', tests: 'pass' })
-    expect(step.acceptance).toEqual(IDS.map((id) => ({ id, status: 'passing' })))
-    expect(step.incomplete).toEqual([])
-    expect(step.planDigest).toBe('digest')
-    expect(step.ranAt).toBe('2026-09-21T00:00:00.000Z')
+    expect(commandsOf(step)).toEqual({ codegen: 'pass', check: 'pass', tests: 'pass' })
+    expect(step.record.acceptance).toEqual(IDS.map((id) => ({ id, status: 'passing' })))
+    expect(step.record.incomplete).toEqual([])
+    expect(step.record.planDigest).toBe('digest')
+    expect(step.record.ranAt).toBe('2026-09-21T00:00:00.000Z')
     const testCall = fake.calls.find((call) => call[1] === 'test')!
     expect(testCall.slice(2, 3)).toEqual(['tests/comments.test.ts'])
     expect(testCall).toContain('--reporter=junit')
     expect(testCall.some((arg) => arg.startsWith('--reporter-outfile='))).toBe(true)
   })
 
-  test('should fingerprint the files that hold the elements and the tests, by their bytes', async () => {
-    const step = await verifier(statusOf(), fakeExec()).verify(HTTP, 'digest')
+  test('should fingerprint the files that hold the elements and the tests by their bytes, keeping one it cannot read as null', async () => {
+    const status = statusOf({ 'controller.comments': { files: ['app/Http/Controllers/CommentController.ts', 'app/Http/Controllers/Gone.ts'] } })
 
-    expect(Object.keys(step.fingerprint.files)).toEqual(['app/Http/Controllers/CommentController.ts', 'tests/comments.test.ts'])
-    expect(step.fingerprint.files['tests/comments.test.ts']).toBe(sha256(FILES['tests/comments.test.ts']!))
-    expect(step.fingerprint.environment.runtime).toMatch(/^bun /)
+    const step = await verifier(status, fakeExec()).verify(HTTP)
+
+    expect(step.record.fingerprint.files).toEqual({
+      'app/Http/Controllers/CommentController.ts': sha256(FILES['app/Http/Controllers/CommentController.ts']!),
+      'app/Http/Controllers/Gone.ts': null,
+      'tests/comments.test.ts': sha256(FILES['tests/comments.test.ts']!),
+    })
+    expect(step.record.fingerprint.environment.runtime).toMatch(/^bun /)
   })
 
-  test('should report a step incomplete when an element it owns is not at its completion state', async () => {
-    const step = await verifier(statusOf({ 'action.comments.destroy': 'planned', 'route.comments.store': 'present' }), fakeExec()).verify(HTTP, 'digest')
+  test('should report a step incomplete when an element it owns is not at its completion state, or was never judged', async () => {
+    const status = statusOf({ 'action.comments.destroy': { state: 'planned' }, 'route.comments.store': { state: 'present' } })
+    status.elements = status.elements.filter((element) => element.id !== 'policy.comment')
 
-    expect(step.outcome).toBe('incomplete')
-    expect(step.incomplete).toEqual(['action.comments.destroy: planned', 'route.comments.store: present'])
+    const step = await verifier(status, fakeExec()).verify(HTTP)
+
+    expect(step.record.outcome).toBe('incomplete')
+    expect(step.record.incomplete).toEqual(['action.comments.destroy: planned', 'route.comments.store: present', 'policy.comment: not judged by plan:status'])
   })
 
   test('should verify an unjudged element on its commands and behaviours alone', async () => {
-    const step = await verifier(statusOf({ 'view.posts.show': 'unjudged' }), fakeExec()).verify(PAGES, 'digest')
+    const step = await verifier(statusOf({ 'view.posts.show': { state: 'unjudged' } }), fakeExec()).verify(PAGES)
 
-    expect(step.outcome).toBe('verified')
+    expect(step.record.outcome).toBe('verified')
   })
 
   test('should block a command whose script the app lacks, and run the fallback where one exists', async () => {
     const fake = fakeExec()
 
-    const step = await verifier(statusOf(), fake, { scripts: {} }).verify(DATA, 'digest')
+    const step = await verifier(statusOf(), fake, { scripts: {} }).verify(DATA)
 
-    expect(step.outcome).toBe('blocked')
-    expect(commandsOf(step)).toEqual({ 'db:migrate': 'blocked', typecheck: 'blocked' })
-    expect(step.commands.map((command) => command.reason)).toEqual(['no "db:migrate" script in package.json', 'no "typecheck" script in package.json'])
-    const http = await verifier(statusOf(), fake, { scripts: {} }).verify(HTTP, 'digest')
+    expect(step.record.outcome).toBe('blocked')
+    expect(commandsOf(step)).toEqual({ codegen: 'pass', 'db:migrate': 'blocked', typecheck: 'blocked' })
+    expect(step.record.commands.map((command) => command.reason)).toEqual([undefined, 'no "db:migrate" script in package.json', 'no "typecheck" script in package.json'])
     expect(fake.calls.some((call) => call[2] === 'codegen' && call[1].endsWith('bin.ts'))).toBe(true)
-    expect(commandsOf(http).codegen).toBe('pass')
   })
 
   test('should fail typecheck with the compiler errors as findings', async () => {
     const fake = fakeExec({ 'run typecheck': { exitCode: 2, stdout: 'app/Models/Comment.ts(3,1): error TS2322: no\nFound 1 error.\n' } })
 
-    const step = await verifier(statusOf(), fake).verify(DATA, 'digest')
+    const step = await verifier(statusOf(), fake).verify(DATA)
 
-    expect(step.outcome).toBe('failed')
-    const typecheck = step.commands.find((command) => command.command === 'typecheck')!
-    expect(typecheck).toMatchObject({ status: 'fail', label: 'bun run typecheck', reason: '`bun run typecheck` exited 2', findings: ['app/Models/Comment.ts(3,1): error TS2322: no'] })
+    expect(step.record.outcome).toBe('failed')
+    expect(commandOf(step, 'typecheck')).toMatchObject({ status: 'fail', label: 'bun run typecheck', reason: '`bun run typecheck` exited 2', findings: ['app/Models/Comment.ts(3,1): error TS2322: no'] })
+  })
+
+  test('should block, not fail, a command whose tool the shell cannot find', async () => {
+    const byCode = fakeExec({ 'run typecheck': { exitCode: 127, stderr: 'sh: tsc: command not found\n' } })
+    const byText = fakeExec({ 'run codegen': { exitCode: 1, stderr: 'zsh: command not found: guren\n' } })
+
+    const typecheck = await verifier(statusOf(), byCode).verify(DATA)
+    const codegen = await verifier(statusOf(), byText).verify(DATA)
+
+    expect(commandOf(typecheck, 'typecheck')).toMatchObject({ status: 'blocked', reason: '`bun run typecheck` exited 127: a tool it needs is not installed' })
+    expect(commandOf(codegen, 'codegen')).toMatchObject({ status: 'blocked', reason: '`bun run codegen` exited 1: a tool it needs is not installed' })
   })
 
   test('should block, not fail, a migration whose output says the database is unreachable', async () => {
     const unreachable = fakeExec({ 'run db:migrate': { exitCode: 1, stderr: 'error: connect ECONNREFUSED 127.0.0.1:54322\n' } })
     const broken = fakeExec({ 'run db:migrate': { exitCode: 1, stderr: 'error: relation "comments" already exists\n' } })
 
-    const blocked = await verifier(statusOf(), unreachable).verify(DATA, 'digest')
-    const failed = await verifier(statusOf(), broken).verify(DATA, 'digest')
+    const blocked = await verifier(statusOf(), unreachable).verify(DATA)
+    const failed = await verifier(statusOf(), broken).verify(DATA)
 
     expect(commandsOf(blocked)['db:migrate']).toBe('blocked')
-    expect(blocked.outcome).toBe('blocked')
+    expect(blocked.record.outcome).toBe('blocked')
     expect(commandsOf(failed)['db:migrate']).toBe('fail')
-    expect(failed.outcome).toBe('failed')
+    expect(failed.record.outcome).toBe('failed')
   })
 
   test('should block a command that timed out', async () => {
     const fake = fakeExec({ 'run typecheck': { exitCode: 1, timedOut: true } })
 
-    const step = await verifier(statusOf(), fake).verify(DATA, 'digest')
+    const step = await verifier(statusOf(), fake).verify(DATA)
 
-    expect(step.commands.find((command) => command.command === 'typecheck')).toMatchObject({ status: 'blocked', reason: '`bun run typecheck` timed out after 1000 ms' })
+    expect(commandOf(step, 'typecheck')).toMatchObject({ status: 'blocked', reason: '`bun run typecheck` timed out after 1000 ms' })
   })
 
   test('should fail check on a gating finding and block it when the checker throws', async () => {
     const failing = checkReport([{ key: 'routes', title: 'Routes', status: 'fail', message: 'PostController.destroy is not defined' }])
 
-    const failed = await verifier(statusOf(), fakeExec(), { check: async () => failing }).verify(HTTP, 'digest')
-    const blocked = await verifier(statusOf(), fakeExec(), { check: async () => { throw new Error('routes/web.ts threw') } }).verify(HTTP, 'digest')
+    const failed = await verifier(statusOf(), fakeExec(), { check: async () => failing }).verify(HTTP)
+    const blocked = await verifier(statusOf(), fakeExec(), { check: async () => { throw new Error('routes/web.ts threw') } }).verify(HTTP)
 
-    expect(failed.commands.find((command) => command.command === 'check')).toMatchObject({ status: 'fail', findings: [expect.stringContaining('PostController.destroy')] })
-    expect(blocked.commands.find((command) => command.command === 'check')).toMatchObject({ status: 'blocked', reason: 'could not run: routes/web.ts threw' })
+    expect(commandOf(failed, 'check')).toMatchObject({ status: 'fail', findings: [expect.stringContaining('PostController.destroy')] })
+    expect(commandOf(blocked, 'check')).toMatchObject({ status: 'blocked', reason: 'could not run: routes/web.ts threw' })
   })
 
   test('should fail the tests command on a behaviour that is not passing, naming its cases', async () => {
@@ -227,15 +253,15 @@ describe('PlanVerifier', () => {
       { name: '[AC-comments-3] x', inner: '<skipped/>' },
     ])
 
-    const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, report)).verify(HTTP, 'digest')
+    const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, report)).verify(HTTP)
 
-    expect(step.outcome).toBe('failed')
-    expect(step.commands.find((command) => command.command === 'tests')).toMatchObject({
+    expect(step.record.outcome).toBe('failed')
+    expect(commandOf(step, 'tests')).toMatchObject({
       status: 'fail',
       reason: 'a behaviour is not passing',
       findings: ['[AC-comments-2] is failing: failed "[AC-comments-2] x"', '[AC-comments-3] is failing: skipped "[AC-comments-3] x"', '[AC-comments-4] is pending'],
     })
-    expect(step.acceptance).toEqual([
+    expect(step.record.acceptance).toEqual([
       { id: 'AC-comments-1', status: 'passing' },
       { id: 'AC-comments-2', status: 'failing' },
       { id: 'AC-comments-3', status: 'failing' },
@@ -244,74 +270,76 @@ describe('PlanVerifier', () => {
   })
 
   test('should fail the tests command when bun test exits non-zero with every behaviour passing', async () => {
-    const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1, stderr: 'error: Cannot find module "./setup"\n' } })).verify(HTTP, 'digest')
+    const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1, stderr: 'error: Cannot find module "./setup"\n' } })).verify(HTTP)
 
-    expect(step.commands.find((command) => command.command === 'tests')).toMatchObject({
+    expect(commandOf(step, 'tests')).toMatchObject({
       status: 'fail',
       reason: expect.stringContaining('exited 1 with every behaviour passing'),
       findings: ['error: Cannot find module "./setup"'],
     })
   })
 
-  test('should fail the tests command when no test file carries the behaviours', async () => {
+  test('should fail the tests command when no test file carries the behaviours, and when the test files cannot be listed', async () => {
     const fake = fakeExec()
 
-    const step = await verifier(statusOf(), fake, { testFiles: async () => [join(ROOT, 'tests/posts.test.ts')] }).verify(HTTP, 'digest')
+    const none = await verifier(statusOf(), fake, { testFiles: async () => [join(ROOT, 'tests/posts.test.ts')] }).verify(HTTP)
+    const unlisted = await verifier(statusOf(), fake, { testFiles: async () => { throw new Error('EACCES') } }).verify(HTTP)
 
-    expect(step.commands.find((command) => command.command === 'tests')).toMatchObject({ status: 'fail', reason: 'no test file carries [AC-comments-1], [AC-comments-2], [AC-comments-3], [AC-comments-4]' })
+    expect(commandOf(none, 'tests')).toMatchObject({ status: 'fail', reason: 'no test file carries [AC-comments-1], [AC-comments-2], [AC-comments-3], [AC-comments-4] as a literal token' })
+    expect(commandOf(unlisted, 'tests')).toMatchObject({ status: 'fail' })
     expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
-    expect(step.acceptance.map((behaviour) => behaviour.status)).toEqual(['pending', 'pending', 'pending', 'pending'])
+    expect(none.record.acceptance.map((behaviour) => behaviour.status)).toEqual(['pending', 'pending', 'pending', 'pending'])
   })
 
-  test('should fail the tests command on an id the plan does not declare', async () => {
+  test('should fail the tests command on an id the plan does not declare, recording its behaviours as pending', async () => {
     const report = junit([...IDS.map((id) => ({ name: `[${id}] x` })), { name: '[AC-comments-9] a typo' }])
 
-    const step = await verifier(statusOf(), fakeExec({}, report)).verify(HTTP, 'digest')
+    const step = await verifier(statusOf(), fakeExec({}, report)).verify(HTTP)
 
-    expect(step.commands.find((command) => command.command === 'tests')).toMatchObject({
+    expect(commandOf(step, 'tests')).toMatchObject({
       status: 'fail',
       findings: ['[AC-comments-9] in tests/comments.test.ts ("[AC-comments-9] a typo") is not a behaviour of the plan'],
     })
+    expect(step.record.acceptance.map((behaviour) => behaviour.status)).toEqual(['pending', 'pending', 'pending', 'pending'])
   })
 
   test('should block the tests command when no report was written', async () => {
-    const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1, stderr: 'bun: command failed\n' } }, null)).verify(HTTP, 'digest')
+    const step = await verifier(statusOf(), fakeExec({ test: { exitCode: 1, stderr: 'bun: command failed\n' } }, null)).verify(HTTP)
 
-    expect(step.commands.find((command) => command.command === 'tests')).toMatchObject({ status: 'blocked', reason: 'no junit report was written', findings: ['bun: command failed'] })
+    expect(commandOf(step, 'tests')).toMatchObject({ status: 'blocked', reason: 'no junit report was written', findings: ['bun: command failed'] })
   })
 
   test('should verify the tests step only when every behaviour has a case and each case failed', async () => {
-    const allFailed = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, FAILING)).verify(TESTS, 'digest')
-    const onePassed = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, junit([{ name: '[AC-comments-1] x' }, ...IDS.slice(1).map((id) => ({ name: `[${id}] x`, inner: '<failure/>' }))]))).verify(TESTS, 'digest')
-    const oneSkipped = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, junit([{ name: '[AC-comments-1] x', inner: '<skipped/>' }, ...IDS.slice(1).map((id) => ({ name: `[${id}] x`, inner: '<failure/>' }))]))).verify(TESTS, 'digest')
-    const oneMissing = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, junit(IDS.slice(1).map((id) => ({ name: `[${id}] x`, inner: '<failure/>' }))))).verify(TESTS, 'digest')
+    const allFailed = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, FAILING)).verify(TESTS)
+    const onePassed = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, junit([{ name: '[AC-comments-1] x' }, ...IDS.slice(1).map((id) => ({ name: `[${id}] x`, inner: '<failure/>' }))]))).verify(TESTS)
+    const oneSkipped = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, junit([{ name: '[AC-comments-1] x', inner: '<skipped/>' }, ...IDS.slice(1).map((id) => ({ name: `[${id}] x`, inner: '<failure/>' }))]))).verify(TESTS)
+    const oneMissing = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, junit(IDS.slice(1).map((id) => ({ name: `[${id}] x`, inner: '<failure/>' }))))).verify(TESTS)
 
-    expect(allFailed.outcome).toBe('verified')
-    expect(allFailed.commands).toEqual([expect.objectContaining({ command: 'tests:fail', status: 'pass' })])
-    expect(onePassed.commands[0]).toMatchObject({ status: 'fail', reason: 'a behaviour is not failing', findings: ['[AC-comments-1] must fail before its implementation exists: passed "[AC-comments-1] x"'] })
-    expect(oneSkipped.commands[0]).toMatchObject({ status: 'fail', findings: ['[AC-comments-1] must fail before its implementation exists: skipped "[AC-comments-1] x"'] })
-    expect(oneMissing.commands[0]).toMatchObject({ status: 'fail', findings: ['[AC-comments-1] has no test'] })
+    expect(allFailed.record.outcome).toBe('verified')
+    expect(commandOf(allFailed, 'tests:fail').status).toBe('pass')
+    expect(commandOf(onePassed, 'tests:fail')).toMatchObject({ status: 'fail', reason: 'a behaviour is not failing', findings: ['[AC-comments-1] must fail before its implementation exists: passed "[AC-comments-1] x"'] })
+    expect(commandOf(oneSkipped, 'tests:fail')).toMatchObject({ status: 'fail', findings: ['[AC-comments-1] must fail before its implementation exists: skipped "[AC-comments-1] x"'] })
+    expect(commandOf(oneMissing, 'tests:fail')).toMatchObject({ status: 'fail', findings: ['[AC-comments-1] has no test'] })
   })
 
   test('should run a command once per verifier and reuse the result across steps', async () => {
     const fake = fakeExec()
     const run = verifier(statusOf(), fake)
 
-    await run.verify(DATA, 'digest')
-    await run.verify(PAGES, 'digest')
-    await run.verify(HTTP, 'digest')
-    await run.verify(TESTS, 'digest')
+    await run.verify(DATA)
+    await run.verify(PAGES)
+    await run.verify(HTTP)
+    await run.verify(TESTS)
 
+    expect(fake.calls.filter((call) => call[2] === 'codegen')).toHaveLength(1)
     expect(fake.calls.filter((call) => call[2] === 'typecheck')).toHaveLength(1)
     expect(fake.calls.filter((call) => call[1] === 'test')).toHaveLength(1)
   })
 
-  test('should list every step in task order and refuse one the plan does not derive', async () => {
-    const run = verifier(statusOf(), fakeExec())
-
-    expect(run.stepIds()).toEqual(['task/entity/model.comment/scaffold', TESTS, DATA, HTTP, PAGES])
-    expect(run.findStep('task/nope')).toBeUndefined()
-    await expect(run.verify('task/nope', 'digest')).rejects.toThrow('no step task/nope is derived from this plan')
+  test('should refuse a step the plan does not derive', async () => {
+    expect(planStepIds(derivation)).toEqual(['task/entity/model.comment/scaffold', TESTS, DATA, HTTP, PAGES])
+    expect(findPlanStep(derivation, 'task/nope')).toBeUndefined()
+    await expect(verifier(statusOf(), fakeExec()).verify('task/nope')).rejects.toThrow('no step task/nope is derived from this plan')
   })
 })
 
@@ -324,16 +352,18 @@ function record(overrides: Partial<PlanStepRecord> = {}): PlanStepRecord {
     commands: [],
     acceptance: [],
     incomplete: [],
-    fingerprint: { files: { 'db/schema.ts': sha256(FILES['db/schema.ts']!) }, environment: { runtime: 'bun 1.3.14', platform: 'darwin', arch: 'arm64', hostname: 'h' } },
+    fingerprint: { files: { 'db/schema.ts': sha256(FILES['db/schema.ts']!), 'app/Models/Comment.ts': sha256(FILES['app/Models/Comment.ts']!) }, environment: { runtime: 'bun 1.3.14', platform: 'darwin', arch: 'arm64', hostname: 'h' } },
     ...overrides,
   }
 }
 
+const DATA_FILES = ['db/schema.ts', 'app/Models/Comment.ts']
+
 describe('applyVerification', () => {
   test('should lift the elements of a verified step while its fingerprint still matches', async () => {
-    const hashes = await hashFiles(ROOT, ['db/schema.ts'])
+    const hashes = await hashFiles(ROOT, DATA_FILES)
 
-    const { status, notes } = applyVerification(statusOf(), derivation, { [DATA]: record() }, 'digest', hashes)
+    const { status, staleSteps } = applyVerification(statusOf(), derivation, { [DATA]: record() }, 'digest', hashes)
 
     const states = Object.fromEntries(status.elements.map((element) => [element.id, element.state]))
     expect(states['column.comment.id']).toBe('verified')
@@ -341,11 +371,11 @@ describe('applyVerification', () => {
     expect(states['model.post']).toBe('present')
     expect(states['route.comments.store']).toBe('wired')
     expect(status.summary.states.verified).toBe(5)
-    expect(notes.staleSteps).toEqual([])
+    expect(staleSteps).toEqual([])
   })
 
   test('should mark the elements drifted, naming the file, once a fingerprinted file changes', async () => {
-    const hashes = new Map([['db/schema.ts', sha256('export const comments = { body: 1 }\n')]])
+    const hashes = new Map([['db/schema.ts', sha256('export const comments = { body: 1 }\n')], ['app/Models/Comment.ts', sha256(FILES['app/Models/Comment.ts']!)]])
 
     const { status } = applyVerification(statusOf(), derivation, { [DATA]: record() }, 'digest', hashes)
 
@@ -354,28 +384,51 @@ describe('applyVerification', () => {
     expect(column.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}; changed since: db/schema.ts.`])
   })
 
-  test('should treat a fingerprinted file that cannot be read as a change', async () => {
-    const hashes = await hashFiles(ROOT, ['db/schema.ts', 'db/missing.ts'])
+  test('should treat a file unreadable now, or unreadable when it was recorded, as a change', async () => {
+    const hashes = await hashFiles(ROOT, [...DATA_FILES, 'db/missing.ts'])
+    const withMissing = record({ fingerprint: { ...record().fingerprint, files: { ...record().fingerprint.files, 'db/missing.ts': 'abc' } } })
+    const recordedNull = record({ fingerprint: { ...record().fingerprint, files: { ...record().fingerprint.files, 'db/schema.ts': null } } })
 
-    const { status } = applyVerification(statusOf(), derivation, { [DATA]: record({ fingerprint: { ...record().fingerprint, files: { 'db/schema.ts': hashes.get('db/schema.ts')!, 'db/missing.ts': 'abc' } } }) }, 'digest', hashes)
+    const missing = applyVerification(statusOf(), derivation, { [DATA]: withMissing }, 'digest', hashes)
+    const unread = applyVerification(statusOf(), derivation, { [DATA]: recordedNull }, 'digest', hashes)
 
-    expect(status.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('drifted')
+    expect(missing.status.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('drifted')
+    expect(unread.status.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('drifted')
   })
 
-  test('should lift nothing from a record of another revision of the plan, and say which step', async () => {
-    const hashes = await hashFiles(ROOT, ['db/schema.ts'])
+  test('should lift nothing of an element the fingerprint does not cover', async () => {
+    const hashes = await hashFiles(ROOT, DATA_FILES)
+    const noFiles = statusOf({ 'column.comment.id': { files: [] } })
+    const elsewhere = statusOf({ 'column.comment.id': { files: ['modules/billing/db/schema.ts'] } })
 
-    const { status, notes } = applyVerification(statusOf(), derivation, { [DATA]: record({ planDigest: 'older' }) }, 'digest', hashes)
+    const unfingerprinted = applyVerification(noFiles, derivation, { [DATA]: record() }, 'digest', hashes)
+    const moved = applyVerification(elsewhere, derivation, { [DATA]: record() }, 'digest', hashes)
+    const empty = applyVerification(statusOf(), derivation, { [DATA]: record({ fingerprint: { ...record().fingerprint, files: {} } }) }, 'digest', hashes)
+
+    const column = unfingerprinted.status.elements.find((element) => element.id === 'column.comment.id')!
+    expect(column.state).toBe('present')
+    expect(column.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`])
+    expect(unfingerprinted.status.elements.find((element) => element.id === 'model.comment')!.state).toBe('verified')
+    const movedColumn = moved.status.elements.find((element) => element.id === 'column.comment.id')!
+    expect(movedColumn.state).toBe('drifted')
+    expect(movedColumn.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}; now in a file that run did not fingerprint: modules/billing/db/schema.ts.`])
+    expect(empty.status.summary.states.verified).toBe(0)
+  })
+
+  test('should lift nothing from a record of another plan digest, and say which step', async () => {
+    const hashes = await hashFiles(ROOT, DATA_FILES)
+
+    const { status, staleSteps } = applyVerification(statusOf(), derivation, { [DATA]: record({ planDigest: 'older' }) }, 'digest', hashes)
 
     expect(status.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('present')
-    expect(notes.staleSteps).toEqual([DATA])
+    expect(staleSteps).toEqual([DATA])
   })
 
   test('should lift nothing from a record that did not verify, and leave an element the code has lost with a note', async () => {
-    const hashes = await hashFiles(ROOT, ['db/schema.ts'])
+    const hashes = await hashFiles(ROOT, DATA_FILES)
 
     const failed = applyVerification(statusOf(), derivation, { [DATA]: record({ outcome: 'failed' }) }, 'digest', hashes)
-    const lost = applyVerification(statusOf({ 'column.comment.id': 'planned' }), derivation, { [DATA]: record() }, 'digest', hashes)
+    const lost = applyVerification(statusOf({ 'column.comment.id': { state: 'planned' } }), derivation, { [DATA]: record() }, 'digest', hashes)
 
     expect(failed.status.summary.states.verified).toBe(0)
     const column = lost.status.elements.find((element) => element.id === 'column.comment.id')!
@@ -387,7 +440,7 @@ describe('applyVerification', () => {
     const status = statusOf()
     const before = JSON.stringify(status)
 
-    applyVerification(status, derivation, { [DATA]: record() }, 'digest', await hashFiles(ROOT, ['db/schema.ts']))
+    applyVerification(status, derivation, { [DATA]: record() }, 'digest', await hashFiles(ROOT, DATA_FILES))
 
     expect(JSON.stringify(status)).toBe(before)
   })

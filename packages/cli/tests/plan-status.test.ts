@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import type { PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
 import type { PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
-import { judgePlan, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
+import { awaitsVerification, judgePlan, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
 import type { SourcedSchemaTable } from '../src/schema-runtime'
 import { loadCommentsPlan, planAppState } from './plan-fixture'
 
@@ -63,8 +63,8 @@ const USERS_TABLE: SourcedSchemaTable = {
 function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
   return {
     routes: [
-      { name: 'posts.index', method: 'GET', path: '/posts', action: 'PostController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null, contractSchemas: [] },
-      { name: 'posts.show', method: 'GET', path: '/posts/:id', action: 'PostController.show', middleware: ['auth'], hasInlineMiddleware: false, bindings: { id: 'Post' }, module: null, contractSchemas: [] },
+      { name: 'posts.index', method: 'GET', path: '/posts', action: 'PostController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null, file: 'routes/web.ts', contractSchemas: [] },
+      { name: 'posts.show', method: 'GET', path: '/posts/:id', action: 'PostController.show', middleware: ['auth'], hasInlineMiddleware: false, bindings: { id: 'Post' }, module: null, file: 'routes/web.ts', contractSchemas: [] },
     ],
     mounts: { entry: 'mounted', modules: {} },
     tables: [POSTS_TABLE, USERS_TABLE],
@@ -613,6 +613,63 @@ describe('judgePlan', () => {
       const added = status.elements.filter((element) => element.change === 'add')
       expect(added.length).toBeGreaterThan(0)
       expect(added.every((element) => element.state === 'planned')).toBe(true)
+    })
+  })
+
+  describe('completion and files, what plan:verify reads', () => {
+    test('should complete a kind with a mount point at wired, the rest at present', () => {
+      expect(only(judgePlan(route(ADD), app()), 'r').completesAt).toBe('wired')
+      expect(only(judgePlan(plan({ controllers: [controller(ADD, [action(ADD)])] }), app()), 'a').completesAt).toBe('wired')
+      expect(only(judgePlan(view(ADD), app()), 'v').completesAt).toBe('wired')
+      expect(only(judgePlan(plan({ models: [model(ADD)] }), app()), 'm').completesAt).toBe('present')
+      expect(only(judgePlan(withColumn(ADD), app()), 'c').completesAt).toBe('present')
+      expect(only(judgePlan(plan({ controllers: [controller(ADD)] }), app()), 'ctl').completesAt).toBe('present')
+    })
+
+    test('should complete a drop at present whatever its kind, so a removed route awaits verification', () => {
+      const dropped = only(judgePlan(route(DROP, { name: 'posts.legacy' }), app()), 'r')
+
+      expect(dropped).toMatchObject({ state: 'present', completesAt: 'present' })
+      expect(awaitsVerification(dropped)).toBe(true)
+      expect(awaitsVerification(only(judgePlan(route(DROP), app()), 'r'))).toBe(false)
+    })
+
+    test('should await verification at the completion state or unjudged, and never for an existing element', () => {
+      expect(awaitsVerification(only(judgePlan(route(EXISTING), app()), 'r'))).toBe(false)
+      expect(awaitsVerification(only(judgePlan(route(ADD), app()), 'r'))).toBe(true)
+      expect(awaitsVerification(only(judgePlan(route(ADD, { name: 'posts.missing' }), app()), 'r'))).toBe(false)
+      expect(awaitsVerification(only(judgePlan(view(ALTER), app()), 'v'))).toBe(true)
+    })
+
+    test('should name the files the readers found each element in, and none until it exists', () => {
+      const status = judgePlan(
+        plan({
+          models: [model(EXISTING, { columns: [column(EXISTING)] })],
+          validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
+          controllers: [controller(EXISTING, [action(EXISTING)])],
+          routes: [{ id: 'r', change: EXISTING, method: 'GET', path: '/posts', name: 'posts.index', action: 'a', middleware: [], bind: [] }],
+          views: [{ ...view(EXISTING, { page: 'posts/Index' }).views[0], id: 'v' }],
+          resources: [{ id: 'res', change: EXISTING, name: 'PostResource', model: 'm', fields: [] }],
+          policies: [{ id: 'pol', change: EXISTING, name: 'PostPolicy', model: 'm', abilities: [] }],
+          sideEffects: [{ id: 'job', change: EXISTING, kind: 'job', name: 'SendDigest', trigger: 't', description: 'd' }],
+        }),
+        app(),
+      )
+      const files = Object.fromEntries(status.elements.map((element) => [element.id, element.files]))
+
+      expect(files).toEqual({
+        m: ['app/Models/Post.ts'],
+        c: ['db/schema.ts'],
+        val: ['app/Http/Validators/PostValidator.ts'],
+        ctl: ['app/Http/Controllers/PostController.ts'],
+        a: ['app/Http/Controllers/PostController.ts'],
+        r: ['routes/web.ts'],
+        v: ['resources/js/pages/posts/Index.tsx'],
+        res: ['app/Http/Resources/PostResource.ts'],
+        pol: ['app/Policies/PostPolicy.ts'],
+        job: ['app/Jobs/SendDigest.ts'],
+      })
+      expect(only(judgePlan(route(ADD, { name: 'posts.missing' }), app()), 'r').files).toEqual([])
     })
   })
 })

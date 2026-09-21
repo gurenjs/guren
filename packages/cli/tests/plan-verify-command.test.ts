@@ -10,7 +10,7 @@ import { parsePlanDocument } from '../src/plan-render'
 import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { planDigest, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
-import { sha256 } from '../src/plan/verify'
+import { sha256 } from '../src/plan/verification'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 import { loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
 
@@ -165,22 +165,23 @@ describe('plan:verify', () => {
     expect(result.steps).toHaveLength(1)
     const [step] = result.steps
     expect(step!.stepId).toBe(HTTP)
-    expect(step!.commands.map((command) => [command.command, command.status, command.label])).toEqual([
-      ['check', 'pass', 'guren check'],
+    const { record } = step!
+    expect(record.commands.map((command) => [command.command, command.status, command.label])).toEqual([
       ['codegen', 'pass', 'bun run codegen'],
+      ['check', 'pass', 'guren check'],
       ['tests', 'pass', 'bun test tests/comments.test.ts'],
     ])
-    expect(step!.acceptance.map((behaviour) => behaviour.status)).toEqual(['passing', 'passing', 'passing', 'passing'])
+    expect(record.acceptance.map((behaviour) => behaviour.status)).toEqual(['passing', 'passing', 'passing', 'passing'])
     // The plan's destroy action, route, resource and policy are not written, so the step cannot verify.
-    expect(step!.outcome).toBe('incomplete')
-    expect(step!.incomplete).toEqual(expect.arrayContaining(['action.comments.destroy: planned', 'route.comments.destroy: planned', 'resource.comment: planned', 'policy.comment: planned']))
-    expect(Object.keys(step!.fingerprint.files)).toEqual([
+    expect(record.outcome).toBe('incomplete')
+    expect(record.incomplete).toEqual(expect.arrayContaining(['action.comments.destroy: planned', 'route.comments.destroy: planned', 'resource.comment: planned', 'policy.comment: planned']))
+    // The store route is drifted, so nothing of it would be lifted and its file is not fingerprinted.
+    expect(Object.keys(record.fingerprint.files)).toEqual([
       'app/Http/Controllers/CommentController.ts',
       'app/Http/Validators/CommentValidator.ts',
-      'routes/web.ts',
       'tests/comments.test.ts',
     ])
-    expect(step!.fingerprint.files['routes/web.ts']).toBe(sha256(APP['routes/web.ts']!))
+    expect(record.fingerprint.files['app/Http/Controllers/CommentController.ts']).toBe(sha256(APP['app/Http/Controllers/CommentController.ts']!))
     expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [] })
 
     const state = JSON.parse(await readFile(join(app, '.guren/plans/http.state.json'), 'utf8')) as { stateVersion: number; steps: Record<string, PlanStepRecord> }
@@ -239,7 +240,7 @@ describe('plan:verify', () => {
     const output = await run('plan:verify', plan, app, '--step', HTTP, '--ci')
 
     expect(process.exitCode).toBe(1)
-    expect(output).toMatch(new RegExp(`^${HTTP}: incomplete \\(\\d+ ms\\)\n  pass     check       guren check\n`))
+    expect(output).toMatch(new RegExp(`^${HTTP}: incomplete \\(\\d+ ms\\)\n  pass     codegen     bun run codegen\n  pass     check       guren check\n`))
     expect(output).toContain('  passing  [AC-comments-1]')
     expect(output).toContain('  not at its completion state: action.comments.destroy: planned')
     expect(output).toContain('Recorded in .guren/plans/ci.state.json')

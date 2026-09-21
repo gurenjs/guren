@@ -5,16 +5,15 @@
  * so a plan with nothing implemented is as successful a run as a finished one.
  */
 
-import { basename, relative } from 'node:path'
+import { basename } from 'node:path'
 
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
-import { planDigest, planSlug, planStatePath, readPlanState } from './plan/state'
 import { judgePlan, PLAN_ELEMENT_STATES, PLAN_STATUS_SECTIONS, type PlanElementState, type PlanElementStatus, type PlanStatus } from './plan/status'
 import { derivePlanTasks } from './plan/tasks'
-import { applyVerification, hashFiles } from './plan/verify'
+import { overlayVerification, type PlanVerificationSummary } from './plan/verification'
 
 /** Bumped when a field of {@link PlanStatusReport} changes meaning or goes away; additions do not bump it. */
 export const PLAN_STATUS_REPORT_VERSION = 1
@@ -27,14 +26,7 @@ export interface PlanStatusReport extends PlanStatus<PlanElementState> {
    * What `plan:verify` recorded under the application root, laid over the elements
    * (RFC 0030 §6). Absent when the command was given no application root to read it from.
    */
-  verification?: {
-    /** Relative to the application root; it need not exist. */
-    stateFile: string
-    /** Steps whose record ran against another revision of the plan, and so lifted nothing. */
-    staleSteps: string[]
-    /** Set when a state file exists and could not be read, which lifts nothing either. */
-    unreadable?: string
-  }
+  verification?: PlanVerificationSummary
 }
 
 export interface PlanStatusFileOptions {
@@ -52,26 +44,12 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   const app = typeof options.app === 'function' ? await options.app() : options.app
   const status = judgePlan(plan, app)
-  const head: Pick<PlanStatusReport, 'reportVersion' | 'plan'> = {
+  const overlaid = options.appRoot === undefined ? undefined : await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }))
+  return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
-  }
-  if (options.appRoot === undefined) return { ...head, ...status }
-
-  const root = options.appRoot
-  const slug = planSlug(path)
-  const read = await readPlanState(root, slug)
-  const records = read.state?.steps ?? {}
-  const files = Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files))
-  const applied = applyVerification(status, derivePlanTasks(plan, { apiOnly: app.apiOnly }), records, planDigest(plan), await hashFiles(root, files))
-  return {
-    ...head,
-    ...applied.status,
-    verification: {
-      stateFile: relative(root, planStatePath(root, slug)),
-      staleSteps: applied.notes.staleSteps,
-      ...(read.unreadable ? { unreadable: read.unreadable } : {}),
-    },
+    ...(overlaid?.status ?? status),
+    ...(overlaid ? { verification: overlaid.verification } : {}),
   }
 }
 
@@ -135,7 +113,7 @@ export function formatPlanStatus(report: PlanStatusReport): string {
   const verification = report.verification
   if (verification?.unreadable) lines.push('', `Verification records not read: ${verification.unreadable}`)
   if (verification && verification.staleSteps.length > 0) {
-    lines.push('', `Verified against another revision of the plan, so not counted: ${verification.staleSteps.join(', ')}`)
+    lines.push('', `Verified against another plan or revision, so not counted: ${verification.staleSteps.join(', ')}`)
   }
   return lines.join('\n')
 }

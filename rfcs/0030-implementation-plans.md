@@ -571,10 +571,10 @@ behaviours. Guren supplies the breakdown and the order, in
    | Step | Work | Verify |
    |---|---|---|
    | scaffold | deterministic, no model (see below) | codegen, then `typecheck` |
-   | tests | skeletons generated from `acceptance[]` (no model); the agent fills `given` setup and what `expect` cannot express | every generated test runs and fails |
-   | data | what the scaffold's table cannot express, migration, model relationships | `db:migrate`, `typecheck` |
-   | http | validator, resource, policy, controller, routes | `guren check`, codegen, the slice's tests |
-   | pages | page components | `typecheck`, `guren check` |
+   | tests | skeletons generated from `acceptance[]` (no model); the agent fills `given` setup and what `expect` cannot express | codegen, then every generated test runs and fails |
+   | data | what the scaffold's table cannot express, migration, model relationships | codegen, `db:migrate`, `typecheck` |
+   | http | validator, resource, policy, controller, routes | codegen, `guren check`, the slice's tests |
+   | pages | page components | codegen, `typecheck`, `guren check` |
 
 3. **Cross-entity tasks** (a dashboard) depend on every slice they read.
 
@@ -944,51 +944,63 @@ when something it covers changes, and that is `drifted`.
 **Amended in implementation (`plan:verify`):** what the command settled where the
 text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
 
+- Every step's verify list opens with `codegen` (the §5 table is amended to
+  say so): `typecheck`, `guren check` and the tests read `.guren/*.gen.ts`,
+  which a fresh clone lacks, and a step verified on its own must not fail for
+  the environment's sake. Each command then runs once per invocation across the
+  steps, and nothing is judged before the generated files exist.
 - A step is `verified` when every command passed *and* every element it owns is
   at the state its kind completes at (`wired` where it has a mount point,
-  `present` otherwise, or `unjudged`); the behaviours are the step's, since the
-  derivation puts them on the step that must see them pass, so an element is not
-  lifted while a behaviour of its step fails whether or not it names the element.
-  Commands passing over an element still `planned` is `incomplete`, a fourth
-  outcome beside `verified`, `failed` and `blocked`, listing the elements.
+  `present` otherwise and for every `drop`, or `unjudged`); the behaviours are
+  the step's, since the derivation puts them on the step that must see them
+  pass, so an element is not lifted while a behaviour of its step fails whether
+  or not it names the element. Commands passing over an element still `planned`,
+  or one the status never judged, is `incomplete`, a fourth outcome beside
+  `verified`, `failed` and `blocked`, listing the elements.
 - `blocked` covers a script `package.json` lacks (`typecheck`, `db:migrate`;
-  `codegen` falls back to the CLI), a command past the per-command timeout
+  `codegen` falls back to the CLI), a tool the shell cannot find (exit 127 or
+  `command not found`, for any script), a command past the per-command timeout
   (`--timeout`, default 600 s), a check that threw, a test run that wrote no
-  report, and a migration whose output carries one of a short list of
-  infrastructure signatures (`ECONNREFUSED`, `password authentication failed`,
+  report, and a migration whose output carries one of a short list of database
+  signatures (`ECONNREFUSED`, `password authentication failed`,
   `SQLITE_CANTOPEN`, a missing `drizzle-kit`). The list is literal on purpose: a
   broader one would turn failed migrations into environment problems.
 - Tests run as `bun test <files>` on the files whose source carries a step's
-  acceptance ids as bracketed tokens; a step whose ids no file carries fails
-  its tests command with the ids named. `tests` passes when every behaviour is
-  `passing` *and* the run exited 0, since a file that fails to load shows only
-  in the exit code; `tests:fail` when every behaviour has a case and each case
-  failed, a skipped case not being a run. An id the plan does not declare fails
-  the command rather than blocking it: the test, not the environment, is wrong.
-  One `bun test` runs per file set and per invocation, and `tests` and
-  `tests:fail` judge the same run; `typecheck`, `codegen`, `check` and
-  `db:migrate` likewise run once per invocation across the steps.
+  acceptance ids as literal bracketed tokens; a step whose ids no file carries
+  fails its tests command with the ids named, as does one whose test files
+  cannot be listed. `tests` passes when every behaviour is `passing` *and* the
+  run exited 0, since a file that fails to load shows only in the exit code;
+  `tests:fail` when every behaviour has a case and each case failed, a skipped
+  case not being a run. An id the plan does not declare fails the command rather
+  than blocking it, and its behaviours are recorded `pending`: a report the
+  reader refused verifies nothing. One `bun test` runs per file set and per
+  invocation, and `tests` and `tests:fail` judge the same run.
 - The fingerprint is the SHA-256 of every file the status readers found the
   step's elements in (a model's file, the controller's for an action, the
   schema file for a column, the entry routes file for an entry route and every
   routes file of a module for a module's, the page component, a validator's
   file) plus the selected test files, and the environment (`runtime`,
-  `platform`, `arch`, `hostname`). The environment is recorded and shown, and
-  not compared: a machine is not a reason to call an element drifted.
+  `platform`, `arch`, `hostname`). A file that cannot be read at verify time is
+  recorded as `null`, which never matches. The environment is recorded and
+  shown, and not compared: a machine is not a reason to call an element drifted.
 - The state file is `.guren/plans/<slug>.state.json` under the application
   root, `<slug>` the plan file's name without `.plan.json` / `.json`, with one
   record per step id and a `.gitignore` written beside it. A record names the
   digest of the plan it ran against, the hash for a plan with a baseline and the
   same computation over a draft; `plan:status` lifts an element only from a
-  record of the plan it is reading, and reports the steps of another revision
-  as stale. A state file that will not read is reported and lifts nothing, and
-  the next write replaces it whole.
+  record of the plan it is reading, and reports the steps of another plan or
+  revision as stale. Two plan files of one name share a state file and a step
+  namespace, the later run overwriting the earlier. A state file that will not
+  read is reported and lifts nothing, and the next write replaces it whole;
+  writes take no lock.
 - `plan:status` lays the records over its result: an element of a verified
   step is `verified` while every fingerprinted file hashes the same, `drifted`
-  once one does not or cannot be read, naming the files; an element the code
-  has since lost keeps what the readers say, with a note. For that the status
-  report carries each element's `files` and `completesAt`, and its summary
-  counts all eight states.
+  once one does not or cannot be read, or once the element sits in a file that
+  run did not fingerprint, naming the files. An element none of whose files the
+  record covers is not lifted, with a note: a verification nothing could expire
+  is not one. An element the code has since lost keeps what the readers say,
+  with a note. For that the status report carries each element's `files` and
+  `completesAt`, and its summary counts all eight states.
 - The per-step metrics of §7 (`total_cost_usd`, continuations, files touched,
   lines changed) are not recorded yet; a record carries `durationMs` per
   command and per step. `--ci` exits 1 when a step the run covered did not

@@ -5,20 +5,21 @@
  * app and `db:migrate` opens the database.
  */
 
-import { basename, relative } from 'node:path'
+import { basename } from 'node:path'
 
 import { CliError } from './cli-error'
-import { readScripts } from './gate'
+import { readScripts } from './command-output'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
-import { planDigest, planSlug, planStatePath, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
+import { planDigest, planSlug, writePlanStepRecord } from './plan/state'
 import { judgePlan } from './plan/status'
-import { derivePlanTasks } from './plan/tasks'
-import { applyVerification, hashFiles, PlanVerifier, type PlanStepVerification } from './plan/verify'
-import { runCaptured, type CapturedExec } from './subprocess'
+import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
+import { overlayVerification, type PlanVerificationSummary } from './plan/verification'
+import { PlanVerifier, type PlanStepVerification } from './plan/verify'
+import { runCaptured } from './subprocess'
 
 /** Per command. A migration or a suite past this is an environment to look at, not a slow step. */
 export const DEFAULT_VERIFY_TIMEOUT_MS = 10 * 60 * 1000
@@ -26,7 +27,7 @@ export const DEFAULT_VERIFY_TIMEOUT_MS = 10 * 60 * 1000
 export interface PlanVerifyReport extends PlanStatusReport {
   /** The steps this run verified, in the order they ran. */
   steps: PlanStepVerification[]
-  verification: NonNullable<PlanStatusReport['verification']>
+  verification: PlanVerificationSummary
 }
 
 export interface PlanVerifyFileOptions {
@@ -38,8 +39,6 @@ export interface PlanVerifyFileOptions {
   /** One step id; every step in task order when absent. */
   step?: string
   timeoutMs?: number
-  /** Defaults to a real subprocess. */
-  exec?: CapturedExec
 }
 
 export async function planVerifyFile(planPath: string, options: PlanVerifyFileOptions): Promise<PlanVerifyReport> {
@@ -48,57 +47,52 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const root = options.appRoot
   const status = judgePlan(plan, app)
   const derivation = derivePlanTasks(plan, { apiOnly: app.apiOnly })
-  const verifier = new PlanVerifier(plan, status, derivation, {
-    root,
-    exec: options.exec ?? runCaptured,
-    timeoutMs: options.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
-    scripts: await readScripts(root),
-  })
 
   let stepIds: string[]
   if (options.step === undefined) {
-    stepIds = verifier.stepIds()
-  } else if (verifier.findStep(options.step)) {
+    stepIds = planStepIds(derivation)
+  } else if (findPlanStep(derivation, options.step)) {
     stepIds = [options.step]
   } else {
-    throw new CliError(`No step "${options.step}" is derived from this plan. The steps are:\n${verifier.stepIds().map((id) => `  ${id}`).join('\n')}`)
+    throw new CliError(`No step "${options.step}" is derived from this plan. The steps are:\n${planStepIds(derivation).map((id) => `  ${id}`).join('\n')}`)
   }
 
+  const verifier = new PlanVerifier(plan, status, derivation, {
+    root,
+    planDigest: planDigest(plan),
+    exec: runCaptured,
+    timeoutMs: options.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
+    scripts: await readScripts(root),
+  })
   const slug = planSlug(path)
-  const digest = planDigest(plan)
   const steps: PlanStepVerification[] = []
   for (const stepId of stepIds) {
-    const verification = await verifier.verify(stepId, digest)
-    const { stepId: _stepId, taskId: _taskId, ...record } = verification
-    await writePlanStepRecord(root, slug, stepId, record)
+    const verification = await verifier.verify(stepId)
+    await writePlanStepRecord(root, slug, stepId, verification.record)
     steps.push(verification)
   }
 
-  const read = await readPlanState(root, slug)
-  const records: Record<string, PlanStepRecord> = read.state?.steps ?? {}
-  const files = Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files))
-  const applied = applyVerification(status, derivation, records, digest, await hashFiles(root, files))
-
+  const overlaid = await overlayVerification(root, path, plan, status, derivation)
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
-    ...applied.status,
-    verification: { stateFile: relative(root, planStatePath(root, slug)), staleSteps: applied.notes.staleSteps, ...(read.unreadable ? { unreadable: read.unreadable } : {}) },
+    ...overlaid.status,
+    verification: overlaid.verification,
     steps,
   }
 }
 
 export function formatPlanVerify(report: PlanVerifyReport): string {
   const lines: string[] = []
-  for (const step of report.steps) {
-    lines.push(`${step.stepId}: ${step.outcome} (${step.durationMs} ms)`)
-    for (const command of step.commands) {
+  for (const { stepId, record } of report.steps) {
+    lines.push(`${stepId}: ${record.outcome} (${record.durationMs} ms)`)
+    for (const command of record.commands) {
       lines.push(`  ${command.status.padEnd('blocked'.length)}  ${command.command.padEnd('db:migrate'.length)}  ${command.label}`)
       if (command.reason) lines.push(`      ${command.reason}`)
       for (const finding of command.findings) lines.push(`      ${finding}`)
     }
-    for (const behaviour of step.acceptance) lines.push(`  ${behaviour.status.padEnd('pending'.length)}  [${behaviour.id}]`)
-    for (const element of step.incomplete) lines.push(`  not at its completion state: ${element}`)
+    for (const behaviour of record.acceptance) lines.push(`  ${behaviour.status.padEnd('pending'.length)}  [${behaviour.id}]`)
+    for (const element of record.incomplete) lines.push(`  not at its completion state: ${element}`)
     lines.push('')
   }
   lines.push(`Recorded in ${report.verification.stateFile}`, '')

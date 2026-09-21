@@ -9,7 +9,6 @@
  */
 
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 import { runAudit } from './audit'
@@ -17,6 +16,7 @@ import { getChangedFiles, runGit } from './changed-files'
 import { runCheck } from './check'
 import { formatFinding, gatingResults } from './check-result'
 import { cliEntry } from './cli-entry'
+import { capFindings, nonEmptyLines, OUTPUT_TAIL_LINES, outputFindings, readScripts, resolveScriptCommand } from './command-output'
 import { isLintable, runOxlint } from './lint-run'
 import { bunExecutable, runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
 
@@ -69,34 +69,6 @@ export interface RunGateOptions {
 
 type StageOutcome = Omit<GateStageResult, 'name' | 'durationMs'>
 
-/** Findings a stage may report before the rest collapses into one "and N more" line. */
-const MAX_FINDINGS = 40
-const OUTPUT_TAIL_LINES = 20
-
-/** The app's `package.json` scripts, or none when the manifest cannot be read. */
-export async function readScripts(cwd: string): Promise<Record<string, string>> {
-  try {
-    const manifest = JSON.parse(await readFile(join(cwd, 'package.json'), 'utf8')) as {
-      scripts?: Record<string, string>
-    }
-    return manifest.scripts ?? {}
-  } catch {
-    return {}
-  }
-}
-
-function nonEmptyLines(text: string): string[] {
-  return text
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim() !== '')
-}
-
-function capFindings(findings: string[]): string[] {
-  if (findings.length <= MAX_FINDINGS) return findings
-  return [...findings.slice(0, MAX_FINDINGS), `... and ${findings.length - MAX_FINDINGS} more`]
-}
-
 interface StageContext {
   cwd: string
   exec: GateExec
@@ -117,28 +89,20 @@ async function scriptStage(
   fallback: [label: string, command: string[]] | null,
   pattern: RegExp,
 ): Promise<StageOutcome> {
-  let label: string
-  let command: string[]
-  if (ctx.scripts[script]) {
-    label = `bun run ${script}`
-    command = [bunExecutable(), 'run', script]
-  } else if (fallback) {
-    ;[label, command] = fallback
-  } else {
+  const resolved = resolveScriptCommand(ctx.scripts, script, fallback)
+  if (!resolved) {
     return {
       status: 'fail',
       findings: [],
       reason: `no "${script}" script in package.json (\`bunx guren doctor\` can write it)`,
     }
   }
-  const result = await ctx.exec(command, ctx.cwd)
+  const result = await ctx.exec(resolved.command, ctx.cwd)
   if (result.exitCode === 0) return { status: 'pass', findings: [] }
-  const lines = nonEmptyLines(`${result.stdout}\n${result.stderr}`)
-  const matched = lines.filter((line) => pattern.test(line))
   return {
     status: 'fail',
-    reason: `\`${label}\` exited ${result.exitCode}`,
-    findings: capFindings(matched.length > 0 ? matched : lines.slice(-OUTPUT_TAIL_LINES)),
+    reason: `\`${resolved.label}\` exited ${result.exitCode}`,
+    findings: outputFindings(`${result.stdout}\n${result.stderr}`, pattern),
   }
 }
 

@@ -36,8 +36,6 @@ export type PlanStatusState = Exclude<PlanElementState, 'verified' | 'waived'>
 
 export const PLAN_ELEMENT_STATES = ['planned', 'present', 'wired', 'verified', 'drifted', 'unjudged', 'blocked', 'waived'] as const satisfies readonly PlanElementState[]
 
-export const PLAN_STATUS_STATES = ['planned', 'present', 'wired', 'drifted', 'unjudged', 'blocked'] as const satisfies readonly PlanStatusState[]
-
 export type PlanPropertyVerdict = 'match' | 'differ' | 'unknown'
 
 export interface PlanPropertyStatus {
@@ -148,7 +146,7 @@ function conclude(judgement: Judgement): PlanElementStatus {
     section,
     change: change.kind,
     label,
-    completesAt: judgement.mount ? ('wired' as const) : ('present' as const),
+    completesAt: change.kind !== 'drop' && judgement.mount ? ('wired' as const) : ('present' as const),
     files: exists === 'yes' ? (judgement.files?.() ?? []) : [],
   }
   const notes = [...(judgement.notes ?? [])]

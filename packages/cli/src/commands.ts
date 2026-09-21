@@ -327,7 +327,7 @@ const planVerifyCommand = defineCommand({
       timeoutMs: seconds === undefined ? undefined : seconds * 1000,
     })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanVerify(report))
-    if (args.ci && report.steps.some((step) => step.outcome !== 'verified')) process.exitCode = 1
+    if (args.ci && report.steps.some((step) => step.record.outcome !== 'verified')) process.exitCode = 1
   },
 })
 

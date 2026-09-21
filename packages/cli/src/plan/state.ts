@@ -3,7 +3,8 @@
  * clone lacks, one result per step at the fingerprint it ran at. It is git-ignored through
  * a `.gitignore` written beside it, since a committed "verified" is a claim nobody on the
  * new machine has checked. A record names the digest of the plan it ran against, which is
- * how a result from another revision is told apart from a stale one.
+ * how a result from another plan or revision is told apart from a drifted one.
+ * Writes are read-modify-write with no lock: two runs over one slug lose each other's records.
  */
 
 import { createHash } from 'node:crypto'
@@ -33,8 +34,8 @@ const PlanCommandRecordSchema = z.object({
 })
 
 const PlanFingerprintSchema = z.object({
-  /** App-relative path → SHA-256 of the file's bytes. */
-  files: z.record(z.string(), z.string()),
+  /** App-relative path → SHA-256 of the file's bytes, or `null` for a file that could not be read, which never matches. */
+  files: z.record(z.string(), z.string().nullable()),
   environment: z.object({
     runtime: z.string(),
     platform: z.string(),
@@ -74,8 +75,9 @@ export interface PlanStateRead {
 
 /**
  * The plan file's slug: `comments.plan.json` and `comments.json` are both `comments`.
- * A handle, never an identity: two plans of one slug share a state file, and their
- * records are told apart by digest.
+ * A handle, never an identity: two plans of one slug share a state file and a step-id
+ * namespace, so the later run overwrites the earlier one's records, and what is left is
+ * told apart by digest.
  */
 export function planSlug(planPath: string): string {
   return basename(planPath).replace(/(\.plan)?\.json$/u, '')
