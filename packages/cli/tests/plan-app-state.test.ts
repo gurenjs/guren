@@ -38,9 +38,12 @@ describe('loadPlanAppState', () => {
 
     const state = await loadPlanAppState(cwd)
 
-    expect(state.controllers).toEqual(['PostController'])
+    expect(state.controllers).toEqual([{ name: 'PostController', module: null }])
     // A class-field action dispatches like a method, so both forms must be listed.
-    expect(state.actions).toEqual(['PostController.index', 'PostController.store'])
+    expect(state.actions).toEqual([
+      { name: 'PostController.index', module: null },
+      { name: 'PostController.store', module: null },
+    ])
   })
 
   test('should report controllers and actions as unreadable when a file does not parse', async () => {
@@ -61,7 +64,7 @@ describe('loadPlanAppState', () => {
 
     const state = await loadPlanAppState(cwd)
 
-    expect(state.tables).toEqual([{ identifier: 'posts', tableName: 'posts', columns: ['id', 'title'] }])
+    expect(state.tables).toEqual([{ identifier: 'posts', tableName: 'posts', module: null, columns: ['id', 'title'] }])
   })
 
   test('should report tables as unreadable when a present schema yields none', async () => {

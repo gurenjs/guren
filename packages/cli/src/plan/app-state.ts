@@ -22,6 +22,7 @@ import {
   isDefinitelyAbsent,
   listAppRoots,
   MODELS_DIR,
+  moduleNameFor,
   RESOURCES_DIR,
   type AppRoot,
 } from '../discovery'
@@ -41,11 +42,35 @@ export interface PlanAppUnreadable {
   unreadable: string
 }
 
-export type PlanAppNames = string[] | PlanAppUnreadable
+/**
+ * The app root something sits in: a module name, or `null` for the project root. A plan
+ * element names the same thing with its optional `module`, and comparing the two is
+ * what keeps a same-named element in another root from satisfying it.
+ */
+export type PlanAppScope = string | null
+
+/** How a message names an app root. */
+export function scopeName(module: PlanAppScope | undefined): string {
+  return module ? `modules/${module}` : 'the project root'
+}
+
+export interface PlanAppName {
+  name: string
+  module: PlanAppScope
+}
+
+export type PlanAppNames = PlanAppName[] | PlanAppUnreadable
+
+/** The names alone, for a reader that judges a section without its app roots. */
+export function appNames(section: ReadonlyArray<PlanAppName>): string[] {
+  return section.map((entry) => entry.name)
+}
 
 export interface PlanAppTable {
   /** Exported table identifier in `db/schema.ts`. */
   identifier: string
+  /** The app root whose `db/schema.ts` declares it. */
+  module: PlanAppScope
   /** The SQL table name, when the declaration states one. */
   tableName?: string
   /** Model property names, a lower bound for {@link COLUMNS_ARE_A_LOWER_BOUND}. */
@@ -74,7 +99,11 @@ export interface PlanAppState {
   actions: PlanAppNames
   resources: PlanAppNames
   policies: PlanAppNames
-  /** Inertia page ids, e.g. `posts/Show`. */
+  /**
+   * Inertia page ids, e.g. `posts/Show`. Every page sits in the project's own
+   * `resources/js/pages`, a module's under its name, so the id carries the scope and
+   * the entry's own root is `null` throughout.
+   */
   pages: PlanAppNames
   /**
    * Always `unreadable` from {@link loadPlanAppState}: a plan names a validator by
@@ -147,7 +176,7 @@ export async function loadPlanAppState(
     provenance: routes.provenance,
     moduleWarnings: routes.moduleWarnings,
     controllers: controllers.scan,
-    pages,
+    pages: isUnreadable(pages) ? pages : appNames(pages),
     models: isUnreadable(models) ? models : undefined,
   })
   return { ...state, detail }
@@ -176,8 +205,10 @@ async function probeDirectory(roots: ReadonlyArray<AppRoot>, relativeDir: string
 async function modelSection(cwd: string, roots: ReadonlyArray<AppRoot>): Promise<PlanAppNames> {
   const [probe, files] = await Promise.all([probeDirectory(roots, MODELS_DIR), discoverModelFiles(cwd)])
   if (probe) return { unreadable: probe }
-  const parsed = await Promise.all(files.map((file) => parseModelFile(file)))
-  return parsed.flatMap((info) => (info ? [info.className] : [])).sort((a, b) => a.localeCompare(b))
+  const parsed = await Promise.all(files.map(async (file) => ({ file, info: await parseModelFile(file) })))
+  return parsed
+    .flatMap(({ file, info }) => (info ? [{ name: info.className, module: moduleNameFor(cwd, file) }] : []))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /** A section named after the class each discovered file declares, as `guren context` names them. */
@@ -189,7 +220,9 @@ async function classSection(
 ): Promise<PlanAppNames> {
   const [probe, files] = await Promise.all([probeDirectory(roots, relativeDir), discover(cwd)])
   if (probe) return { unreadable: probe }
-  return excludeBarrelFiles(files).map(classNameFromPath).sort()
+  return excludeBarrelFiles(files)
+    .map((file) => ({ name: classNameFromPath(file), module: moduleNameFor(cwd, file) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 async function pageSection(cwd: string): Promise<PlanAppNames> {
@@ -198,7 +231,7 @@ async function pageSection(cwd: string): Promise<PlanAppNames> {
     probeDirectory([{ dir: cwd, module: null }], pagesDir),
     listInertiaPageIds(cwd),
   ])
-  return probe ? { unreadable: probe } : pages
+  return probe ? { unreadable: probe } : pages.map((name) => ({ name, module: null }))
 }
 
 /**
@@ -225,7 +258,12 @@ async function controllerSections(
     }
     return { classes: unreadable, actions: unreadable, scan: unreadable }
   }
-  return { classes: [...scan.classFiles.keys()], actions: [...scan.methods.keys()], scan }
+  const scopeOf = (filePath: string): PlanAppScope => moduleNameFor(cwd, resolve(cwd, filePath))
+  return {
+    classes: [...scan.classFiles].map(([className, file]) => ({ name: className, module: scopeOf(file) })),
+    actions: [...scan.methods].map(([key, info]) => ({ name: key, module: scopeOf(info.filePath) })),
+    scan,
+  }
 }
 
 interface RouteSection {
@@ -278,6 +316,7 @@ async function tableSection(cwd: string, roots: ReadonlyArray<AppRoot>): Promise
   return parsed.map((table) => ({
     identifier: table.identifier,
     tableName: table.tableName,
+    module: table.module,
     columns: table.columns.map((column) => column.name),
   }))
 }

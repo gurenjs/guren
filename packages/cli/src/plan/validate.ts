@@ -13,12 +13,18 @@ import { describeMethod } from '../http-methods'
 import { tableNameFor } from '../inflect'
 import { check, type CheckResult, type CheckStatus } from '../check-result'
 import {
+  appNames,
   COLUMNS_ARE_A_LOWER_BOUND,
   isUnreadable,
+  scopeName,
+  type PlanAppName,
   type PlanAppNames,
+  type PlanAppScope,
   type PlanAppState,
+  type PlanAppTable,
   type PlanAppUnreadable,
 } from './app-state'
+import { listPlanReferences } from './references'
 import {
   findDuplicatePlanIds,
   listPlanElements,
@@ -168,52 +174,37 @@ const FLOW_KIND_SECTIONS: Record<PlanFlowNode['kind'], PlanElementSection | null
 }
 
 function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: PlanCheckResult[]): void {
-  const expect = (
-    from: string,
-    section: PlanElementSection,
-    target: string,
-    expected: PlanElementSection,
-    label: string,
-  ): void => {
-    const found = index.byId.get(target)
-    if (found === expected) return
+  for (const reference of listPlanReferences(plan)) {
+    // A flow step's expected section comes from its kind, and its finding belongs among
+    // that flow's own step and edge findings, which `checkFlows` keeps in order.
+    if (reference.field === 'flow.node') continue
+    const where = { elementId: reference.from.id, section: reference.from.section }
+    const found = index.byId.get(reference.to)
+    if (reference.expected === null) {
+      if (found === undefined) {
+        results.push(
+          finding('plan:reference', 'fail', `${reference.label} "${reference.to}", which no element declares.`, where),
+        )
+      }
+      continue
+    }
+    if (found === reference.expected) continue
     const what = found === undefined ? 'no plan element' : `a ${found} element`
     results.push(
-      finding('plan:reference', 'fail', `${label} names "${target}", which is ${what}; ${expected} was expected.`, {
-        elementId: from,
-        section,
-      }),
+      finding(
+        'plan:reference',
+        'fail',
+        `${reference.label} names "${reference.to}", which is ${what}; ${reference.expected} was expected.`,
+        where,
+      ),
     )
   }
 
-  for (const model of plan.models) {
-    for (const relationship of model.relationships) {
-      expect(model.id, 'models', relationship.target, 'models', `Relationship "${relationship.name}"`)
-    }
-    for (const column of model.columns) {
-      if (column.references) {
-        expect(column.id, 'columns', column.references.model, 'models', `The foreign key on "${column.name}"`)
-      }
-    }
-  }
+  checkFlows(plan, index, results)
+  checkFormFields(plan, index, results)
+}
 
-  for (const controller of plan.controllers) {
-    for (const action of controller.actions) {
-      for (const [field, id] of [['params', action.params], ['query', action.query], ['body', action.body]] as const) {
-        if (id) expect(action.id, 'actions', id, 'validators', `The ${field} validator`)
-      }
-      if (action.authorization.policy) {
-        expect(action.id, 'actions', action.authorization.policy.id, 'policies', 'The policy')
-      }
-      if (action.response.kind === 'inertia') {
-        expect(action.id, 'actions', action.response.view, 'views', 'The response page')
-      }
-      if (action.response.kind === 'resource') {
-        expect(action.id, 'actions', action.response.resource, 'resources', 'The response resource')
-      }
-    }
-  }
-
+function checkFlows(plan: PlanDraft, index: PlanIndex, results: PlanCheckResult[]): void {
   for (const flow of plan.flows) {
     const fail = (message: string): void => {
       results.push(finding('plan:reference', 'fail', message, { elementId: flow.id, section: 'flows' }))
@@ -263,26 +254,13 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
       )
     }
   }
+}
 
-  for (const route of plan.routes) {
-    expect(route.id, 'routes', route.action, 'actions', 'The route action')
-    for (const binding of route.bind) {
-      expect(route.id, 'routes', binding.model, 'models', `The binding for ":${binding.param}"`)
-    }
-  }
-
+/** A form field names a field of its validator, which is a name rather than an id. */
+function checkFormFields(plan: PlanDraft, index: PlanIndex, results: PlanCheckResult[]): void {
   for (const view of plan.views) {
-    for (const prop of view.props) {
-      if (prop.resource) expect(view.id, 'views', prop.resource, 'resources', `The resource of prop "${prop.name}"`)
-    }
-    for (const action of view.actions) {
-      expect(view.id, 'views', action.route, 'routes', `The route of action "${action.label}"`)
-    }
-    if (!view.form) continue
-    expect(view.id, 'views', view.form.validator, 'validators', 'The form validator')
-    expect(view.id, 'views', view.form.submitsTo, 'routes', 'The form target')
-    const fields = index.validatorFields.get(view.form.validator)
-    if (!fields) continue
+    const fields = view.form && index.validatorFields.get(view.form.validator)
+    if (!view.form || !fields) continue
     for (const field of view.form.fields) {
       if (fields.has(field.field)) continue
       results.push(
@@ -293,39 +271,6 @@ function checkInternalReferences(plan: PlanDraft, index: PlanIndex, results: Pla
           { elementId: view.id, section: 'views' },
         ),
       )
-    }
-  }
-
-  for (const resource of plan.resources) expect(resource.id, 'resources', resource.model, 'models', 'The resource model')
-  for (const policy of plan.policies) expect(policy.id, 'policies', policy.model, 'models', 'The policy model')
-
-  for (const question of plan.questions) {
-    for (const affected of question.affects) {
-      if (index.byId.has(affected)) continue
-      results.push(
-        finding('plan:reference', 'fail', `The question affects "${affected}", which no element declares.`, {
-          elementId: question.id,
-          section: 'questions',
-        }),
-      )
-    }
-  }
-
-  for (const task of plan.tasks) {
-    for (const covered of task.covers) {
-      if (index.byId.has(covered)) continue
-      results.push(
-        finding('plan:reference', 'fail', `The task covers "${covered}", which no element declares.`, {
-          elementId: task.id,
-          section: 'tasks',
-        }),
-      )
-    }
-    for (const behaviour of task.acceptance) {
-      expect(behaviour.id, 'acceptance', behaviour.route, 'routes', 'The behaviour route')
-      if (behaviour.expect.inertia) {
-        expect(behaviour.id, 'acceptance', behaviour.expect.inertia, 'views', 'The expected page')
-      }
     }
   }
 }
@@ -381,6 +326,10 @@ interface TargetCheck {
   noun: string
   /** What the name belongs to, e.g. ` of table "comments"`. */
   scope?: string
+  /** The app root the plan puts the element in; absent where the section is not read per root. */
+  root?: PlanAppScope
+  /** The other app roots declaring a name, which is what makes an absence a placement. */
+  elsewhere?: (name: string) => string[]
   /**
    * Why an absent name is unconfirmed rather than missing, when the reader answers a
    * lower bound: the result warns and quotes this. A collision is positive evidence either way.
@@ -391,24 +340,27 @@ interface TargetCheck {
 function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, results: PlanCheckResult[]): void {
   const has = (name: string): boolean => existing.includes(name)
   const where = { elementId: target.id, section: target.section }
+  const root = target.root === undefined ? 'this application' : scopeName(target.root)
   const collision = (name: string): void => {
     results.push(
       finding(
         'plan:app-collision',
         'fail',
-        `The ${target.noun} "${name}"${target.scope ?? ''} already exists in this application.`,
+        `The ${target.noun} "${name}"${target.scope ?? ''} already exists in ${root}.`,
         where,
       ),
     )
   }
   const missing = (name: string): void => {
     const unconfirmed = target.unconfirmedBecause
+    const others = target.elsewhere?.(name) ?? []
     results.push(
       finding(
         unconfirmed ? 'plan:app-unjudged' : 'plan:app-missing',
         unconfirmed ? 'warn' : 'fail',
-        `The ${target.noun} "${name}"${target.scope ?? ''} was not found in this application, and the plan's change is "${target.kind}".`
-          + (unconfirmed ? ` ${unconfirmed}` : ''),
+        `The ${target.noun} "${name}"${target.scope ?? ''} was not found in ${root}, and the plan's change is "${target.kind}".`
+          + (unconfirmed ? ` ${unconfirmed}` : '')
+          + (others.length > 0 ? ` This application declares one in ${others.join(', ')}.` : ''),
         where,
       ),
     )
@@ -425,6 +377,22 @@ function checkTarget(target: TargetCheck, existing: ReadonlyArray<string>, resul
     return
   }
   if (!has(target.current)) missing(target.current)
+}
+
+/**
+ * A section as one app root sees it: the names declared there, and where else the same
+ * name is declared. A plan element states its root with `module`, and a same-named
+ * element in another root neither satisfies an `existing` nor collides with an `add`.
+ */
+function inRoot(entries: ReadonlyArray<PlanAppName>, module: string | undefined): Pick<TargetCheck, 'root' | 'elsewhere'> & { names: string[] } {
+  const root = module ?? null
+  return {
+    root,
+    names: entries.filter((entry) => entry.module === root).map((entry) => entry.name),
+    elsewhere: (name) => [
+      ...new Set(entries.filter((entry) => entry.name === name && entry.module !== root).map((entry) => scopeName(entry.module))),
+    ],
+  }
 }
 
 /**
@@ -457,19 +425,32 @@ function withSection<T>(
 function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
   const named = <T extends { id: string; change: PlanChange }>(
     elements: ReadonlyArray<T>,
-    options: { section: PlanElementSection; appSection: string; noun: string; existing: PlanAppNames; nameOf: (element: T) => string },
+    options: {
+      section: PlanElementSection
+      appSection: string
+      noun: string
+      existing: PlanAppNames
+      nameOf: (element: T) => string
+      moduleOf?: (element: T) => string | undefined
+    },
   ): void => checkNamedSection(elements, options, results)
 
-  named(plan.models, { section: 'models', appSection: 'models', noun: 'model class', existing: app.models, nameOf: (m) => m.name })
-  named(plan.controllers, { section: 'controllers', appSection: 'controllers', noun: 'controller class', existing: app.controllers, nameOf: (c) => c.className })
-  named(plan.validators, { section: 'validators', appSection: 'validators', noun: 'validator', existing: app.validators, nameOf: (v) => v.name })
-  named(plan.resources, { section: 'resources', appSection: 'resources', noun: 'resource', existing: app.resources, nameOf: (r) => r.name })
-  named(plan.policies, { section: 'policies', appSection: 'policies', noun: 'policy', existing: app.policies, nameOf: (p) => p.name })
+  named(plan.models, { section: 'models', appSection: 'models', noun: 'model class', existing: app.models, nameOf: (m) => m.name, moduleOf: (m) => m.module })
+  named(plan.controllers, { section: 'controllers', appSection: 'controllers', noun: 'controller class', existing: app.controllers, nameOf: (c) => c.className, moduleOf: (c) => c.module })
+  named(plan.validators, { section: 'validators', appSection: 'validators', noun: 'validator', existing: app.validators, nameOf: (v) => v.name, moduleOf: (v) => v.module })
+  named(plan.resources, { section: 'resources', appSection: 'resources', noun: 'resource', existing: app.resources, nameOf: (r) => r.name, moduleOf: (r) => r.module })
+  named(plan.policies, { section: 'policies', appSection: 'policies', noun: 'policy', existing: app.policies, nameOf: (p) => p.name, moduleOf: (p) => p.module })
+  // A module's pages are not colocated: they live in the project's own resources/js/pages
+  // under the module's name, so the page id carries the root and the name does not.
   named(plan.views, { section: 'views', appSection: 'pages', noun: 'page', existing: app.pages, nameOf: (v) => v.page })
 
   withSection('tables', app.tables, results, (tables) => {
-    const names = tables.flatMap((table) => [table.identifier, ...(table.tableName ? [table.tableName] : [])])
+    const declared = tables.flatMap((table) => [
+      { name: table.identifier, module: table.module },
+      ...(table.tableName ? [{ name: table.tableName, module: table.module }] : []),
+    ])
     for (const model of plan.models) {
+      const { names, ...scoped } = inRoot(declared, model.module)
       checkTarget(
         {
           id: model.id,
@@ -479,6 +460,7 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
           // A class rename leaves the table alone; `tableRenamedFrom` is the only thing that moves it.
           kind: model.tableRenamedFrom ? 'rename' : model.change.kind === 'rename' ? 'existing' : model.change.kind,
           noun: 'table',
+          ...scoped,
         },
         names,
         results,
@@ -498,6 +480,8 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
       // An action's identity is `Class.action`, which is how a route names one; a
       // controller the plan renames is looked up under the name it has today.
       const className = renameFrom(controller.change) ?? controller.className
+      // An action sits in the app root its controller does.
+      const { names, ...scoped } = inRoot(actions, controller.module)
       for (const action of controller.actions) {
         const previousName = renameFrom(action.change)
         checkTarget(
@@ -508,8 +492,9 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
             previous: previousName ? `${className}.${previousName}` : undefined,
             kind: action.change.kind,
             noun: 'action',
+            ...scoped,
           },
-          actions,
+          names,
           results,
         )
       }
@@ -552,14 +537,19 @@ function checkNamedSection<T extends { id: string; change: PlanChange }>(
     noun: string
     existing: PlanAppNames
     nameOf: (element: T) => string
+    /** The app root the plan puts each element in; absent where the section is not read per root. */
+    moduleOf?: (element: T) => string | undefined
   },
   results: PlanCheckResult[],
 ): void {
-  const { section, noun, nameOf } = options
-  withSection(options.appSection, options.existing, results, (names) => {
+  const { section, noun, nameOf, moduleOf } = options
+  withSection(options.appSection, options.existing, results, (entries) => {
     for (const element of elements) {
+      const { names, ...scoped } = moduleOf
+        ? inRoot(entries, moduleOf(element))
+        : { names: appNames(entries), root: undefined, elsewhere: undefined }
       checkTarget(
-        { id: element.id, section, current: nameOf(element), previous: renameFrom(element.change), kind: element.change.kind, noun },
+        { id: element.id, section, current: nameOf(element), previous: renameFrom(element.change), kind: element.change.kind, noun, ...scoped },
         names,
         results,
       )
@@ -567,10 +557,13 @@ function checkNamedSection<T extends { id: string; change: PlanChange }>(
   })
 }
 
-function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<{ identifier: string; tableName?: string; columns: string[] }>, results: PlanCheckResult[]): void {
+function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<PlanAppTable>, results: PlanCheckResult[]): void {
   if (model.change.kind === 'add') return
   const lookup = model.tableRenamedFrom ?? model.table
-  const table = tables.find((candidate) => candidate.identifier === lookup || candidate.tableName === lookup)
+  const table = tables.find(
+    (candidate) =>
+      candidate.module === (model.module ?? null) && (candidate.identifier === lookup || candidate.tableName === lookup),
+  )
   if (!table) {
     if (model.columns.length > 0) reportUnjudgedColumns(model, `table "${lookup}" was not found`, results)
     return

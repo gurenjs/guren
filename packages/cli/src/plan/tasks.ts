@@ -9,6 +9,7 @@
  */
 
 import { collectionName, collectionSlug } from '../inflect'
+import { listPlanReferences, type PlanReference, type PlanReferenceField } from './references'
 import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSection, type PlanModel } from './schema'
 
 export type PlanStepKind = 'commands' | 'scaffold' | 'tests' | 'data' | 'http' | 'pages'
@@ -233,6 +234,40 @@ function modelNamedBy(
   return candidates.find((id) => models.some((model) => model.id === id))
 }
 
+/**
+ * Which references order the work, in the order an element reads them. `false` orders
+ * nothing: a `hasMany` mirrors the foreign key pointing back and would close a cycle
+ * with it, and a question, a task's `covers`, a behaviour and a flow step name elements
+ * rather than needing their work done first. Total, so a new reference is a decision here.
+ */
+const REFERENCE_ORDERS_WORK: Record<PlanReferenceField, boolean> = {
+  'column.references': true,
+  'resource.model': true,
+  'policy.model': true,
+  'action.body': true,
+  'action.params': true,
+  'action.query': true,
+  'action.policy': true,
+  'action.view': true,
+  'action.resource': true,
+  'route.action': true,
+  'route.bind': true,
+  'view.propResource': true,
+  'view.formValidator': true,
+  'view.formSubmitsTo': true,
+  'view.actionRoute': true,
+  'model.relationship': false,
+  'question.affects': false,
+  'flow.node': false,
+  'task.covers': false,
+  'acceptance.route': false,
+  'acceptance.inertia': false,
+}
+
+const ORDERING_FIELDS = Object.entries(REFERENCE_ORDERS_WORK)
+  .filter(([, orders]) => orders)
+  .map(([field]) => field as PlanReferenceField)
+
 export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions = {}): PlanTaskDerivation {
   const threshold = splitThreshold(options.splitThreshold)
   const notes: PlanTaskNote[] = []
@@ -415,37 +450,20 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     if (target !== undefined && hasWork.has(target)) push(needs, from, target)
   }
 
-  for (const model of plan.models) {
-    for (const column of model.columns) {
-      const target = column.references?.model
-      if (target === undefined) continue
+  const byField = new Map<PlanReferenceField, PlanReference[]>()
+  for (const reference of listPlanReferences(plan)) push(byField, reference.field, reference)
+  const columnById = new Map(plan.models.flatMap((model) => model.columns.map((column) => [column.id, column] as const)))
+
+  for (const field of ORDERING_FIELDS) {
+    for (const reference of byField.get(field) ?? []) {
+      if (field !== 'column.references') {
+        reads(reference.from.id, reference.to)
+        continue
+      }
       // Tables are dropped child first, the reverse of how they are created.
-      if (modelById.get(target)?.change.kind === 'drop') reads(target, column.id)
-      else if (column.change.kind !== 'drop') reads(column.id, target)
+      if (modelById.get(reference.to)?.change.kind === 'drop') reads(reference.to, reference.from.id)
+      else if (columnById.get(reference.from.id)?.change.kind !== 'drop') reads(reference.from.id, reference.to)
     }
-  }
-  // A relationship is left out on purpose: `hasMany` mirrors the foreign key pointing back, and would close a cycle with it.
-  for (const resource of plan.resources) reads(resource.id, resource.model)
-  for (const policy of plan.policies) reads(policy.id, policy.model)
-  for (const controller of plan.controllers) {
-    for (const action of controller.actions) {
-      reads(action.id, action.body)
-      reads(action.id, action.params)
-      reads(action.id, action.query)
-      reads(action.id, action.authorization.policy?.id)
-      if (action.response.kind === 'inertia') reads(action.id, action.response.view)
-      if (action.response.kind === 'resource') reads(action.id, action.response.resource)
-    }
-  }
-  for (const route of plan.routes) {
-    reads(route.id, route.action)
-    for (const bind of route.bind) reads(route.id, bind.model)
-  }
-  for (const view of plan.views) {
-    for (const prop of view.props) reads(view.id, prop.resource)
-    reads(view.id, view.form?.validator)
-    reads(view.id, view.form?.submitsTo)
-    for (const action of view.actions) reads(view.id, action.route)
   }
 
   /**

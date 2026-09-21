@@ -4,7 +4,14 @@ import { join, resolve } from 'node:path'
 
 import type { z } from 'zod'
 
-import type { PlanAppState } from '../src/plan/app-state'
+import type {
+  PlanAppName,
+  PlanAppNames,
+  PlanAppScope,
+  PlanAppState,
+  PlanAppTable,
+  PlanAppUnreadable,
+} from '../src/plan/app-state'
 import { PLAN_STATE_VERSION, type PlanActiveStep } from '../src/plan/state'
 import { PlanSchema, type Plan, type PlanDraft, type PlanDraftSchema } from '../src/plan/schema'
 import type { PlanPagePayload } from '../src/plan/render'
@@ -32,26 +39,46 @@ export function loadParsedCommentsPlan(): Plan {
   return PlanSchema.parse({ ...loadCommentsPlan(), baseline: TEST_BASELINE })
 }
 
+/** A section as a test spells it: a bare name sits at the project root. */
+type NameInput = Array<string | PlanAppName> | PlanAppUnreadable
+type TableInput = Array<Omit<PlanAppTable, 'module'> & { module?: PlanAppScope }> | PlanAppUnreadable
+
+type ScopedSection = 'models' | 'controllers' | 'actions' | 'resources' | 'policies' | 'pages' | 'validators'
+
+export type PlanAppStateInput = Omit<Partial<PlanAppState>, ScopedSection | 'tables'> &
+  Partial<Record<ScopedSection, NameInput>> & { tables?: TableInput }
+
+function names(input: NameInput): PlanAppNames {
+  return Array.isArray(input) ? input.map((entry) => (typeof entry === 'string' ? { name: entry, module: null } : entry)) : input
+}
+
+function tables(input: TableInput): PlanAppState['tables'] {
+  return Array.isArray(input) ? input.map((table) => ({ module: null, ...table })) : input
+}
+
 /** An application the comments fixture is a clean delta against. */
-export function planAppState(overrides: Partial<PlanAppState> = {}): PlanAppState {
+export function planAppState(overrides: PlanAppStateInput = {}): PlanAppState {
+  const { models, controllers, actions, resources, policies, pages, validators, tables: tableInput, ...rest } = overrides
   return {
-    models: ['Post', 'User'],
-    controllers: ['PostController'],
-    actions: ['PostController.index', 'PostController.show'],
-    resources: ['PostResource'],
-    policies: ['PostPolicy'],
-    pages: ['posts/Index', 'posts/Show'],
-    validators: { unreadable: 'validators are named by exported symbol' },
+    models: names(models ?? ['Post', 'User']),
+    controllers: names(controllers ?? ['PostController']),
+    actions: names(actions ?? ['PostController.index', 'PostController.show']),
+    resources: names(resources ?? ['PostResource']),
+    policies: names(policies ?? ['PostPolicy']),
+    pages: names(pages ?? ['posts/Index', 'posts/Show']),
+    validators: names(validators ?? { unreadable: 'validators are named by exported symbol' }),
     routes: [
       { name: 'posts.index', method: 'GET', path: '/posts' },
       { name: 'posts.show', method: 'GET', path: '/posts/:id' },
     ],
-    tables: [
-      { identifier: 'posts', tableName: 'posts', columns: ['id', 'title', 'body'] },
-      { identifier: 'users', tableName: 'users', columns: ['id', 'email'] },
-    ],
+    tables: tables(
+      tableInput ?? [
+        { identifier: 'posts', tableName: 'posts', columns: ['id', 'title', 'body'] },
+        { identifier: 'users', tableName: 'users', columns: ['id', 'email'] },
+      ],
+    ),
     apiOnly: false,
-    ...overrides,
+    ...rest,
   }
 }
 

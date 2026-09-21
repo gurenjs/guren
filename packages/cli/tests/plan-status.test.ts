@@ -5,7 +5,7 @@ import type { PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { awaitsVerification, judgePlan, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
 import type { SourcedSchemaTable } from '../src/schema-runtime'
-import { loadCommentsPlan, planAppState } from './plan-fixture'
+import { loadCommentsPlan, planAppState, type PlanAppStateInput } from './plan-fixture'
 
 type Change = PlanDraft['routes'][number]['change']
 const ADD: Change = { kind: 'add' }
@@ -92,7 +92,7 @@ function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
   } as PlanAppDetail
 }
 
-function app(detailOverrides: Partial<PlanAppDetail> = {}, overrides: Partial<PlanAppState> = {}): PlanAppState {
+function app(detailOverrides: Partial<PlanAppDetail> = {}, overrides: PlanAppStateInput = {}): PlanAppState {
   return planAppState({ detail: detail(detailOverrides), ...overrides })
 }
 

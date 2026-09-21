@@ -410,15 +410,25 @@ export interface PlanElementRef {
   section: PlanElementSection
 }
 
+export interface PlanElementEntry extends PlanElementRef {
+  /** The element itself, for a reader that goes on to read its own fields. */
+  element: Record<string, unknown>
+}
+
 /**
  * Every id a plan declares, in document order. Ids share one namespace: a
  * revision addresses an element by id alone, so a route and a view may not
  * both be `comments`.
  */
 export function listPlanElements(plan: PlanDraft): PlanElementRef[] {
-  const refs: PlanElementRef[] = []
-  const push = (section: PlanElementSection, items: ReadonlyArray<{ id: string }>): void => {
-    for (const item of items) refs.push({ id: item.id, section })
+  return listPlanElementEntries(plan).map(({ id, section }) => ({ id, section }))
+}
+
+/** {@link listPlanElements} with each element beside its reference. */
+export function listPlanElementEntries(plan: PlanDraft): PlanElementEntry[] {
+  const refs: PlanElementEntry[] = []
+  const push = (section: PlanElementSection, items: ReadonlyArray<Record<string, unknown> & { id: string }>): void => {
+    for (const item of items) refs.push({ id: item.id, section, element: item })
   }
 
   push('questions', plan.questions)

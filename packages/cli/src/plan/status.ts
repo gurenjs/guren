@@ -16,7 +16,7 @@ import type {
   PlanAppSideEffectKind,
   PlanAppValidatorDetail,
 } from './app-detail'
-import { isUnreadable, type PlanAppNames, type PlanAppState, type PlanAppUnreadable } from './app-state'
+import { isUnreadable, scopeName, type PlanAppNames, type PlanAppState, type PlanAppUnreadable } from './app-state'
 import type {
   PlanAction,
   PlanChange,
@@ -223,7 +223,7 @@ const NOUNS = {
 
 function inSection(section: PlanAppNames, name: string, plural: string): Existence {
   if (isUnreadable(section)) return { unknown: `the application's ${plural} could not be read (${section.unreadable})` }
-  return section.includes(name) ? 'yes' : 'no'
+  return section.some((entry) => entry.name === name) ? 'yes' : 'no'
 }
 
 /**
@@ -245,10 +245,6 @@ function existsInScope<T extends { module: string | null }>(
   if (found !== 'yes') return found
   if (entries === undefined || isUnreadable(entries)) return { unknown: `nothing reads which app root each ${noun.singular} sits in` }
   return entries.some((entry) => matches(entry) && entry.module === (declared ?? null)) ? 'yes' : 'no'
-}
-
-function scopeName(module: string | undefined): string {
-  return module ? `modules/${module}` : 'the project root'
 }
 
 /** The file of the discovered class matching a name in the plan's app root, as a list for `files`. */
@@ -615,7 +611,7 @@ class StatusContext {
 
   validator(validator: PlanDraft['validators'][number]): PlanElementStatus {
     const validators = this.section('validators')
-    const names = isUnreadable(validators) ? validators : validators.map((candidate) => candidate.name)
+    const names = isUnreadable(validators) ? validators : validators.map(({ name, module }) => ({ name, module }))
     const find = (name: string): Existence =>
       existsInScope(names, name, NOUNS.validators, validator.module, validators, (entry) => entry.name === name)
     const found = isUnreadable(validators)
@@ -905,7 +901,7 @@ class StatusContext {
     const readable: ReadonlyArray<string> = ['job', 'event', 'listener'] satisfies PlanAppSideEffectKind[]
     if (!readable.includes(effect.kind)) return conclude({ ...base, exists: 'no', unjudged: `Nothing discovers a ${effect.kind} class.` })
     const classes = this.detail?.sideEffects[effect.kind as PlanAppSideEffectKind]
-    const names: PlanAppNames = classes ? classes.map((entry) => entry.className) : NO_DETAIL
+    const names: PlanAppNames = classes ? classes.map((entry) => ({ name: entry.className, module: entry.module })) : NO_DETAIL
     const noun = { plural: `${effect.kind} classes`, singular: effect.kind }
     const find = (name: string): Existence =>
       existsInScope(names, name, noun, effect.module, classes, (entry) => entry.className === name)

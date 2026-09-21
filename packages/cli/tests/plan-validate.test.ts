@@ -406,6 +406,103 @@ describe('validatePlan', () => {
   })
 })
 
+describe('app roots', () => {
+  const POSTS = { identifier: 'posts', tableName: 'posts', columns: ['id', 'title', 'body'] }
+  const USERS = { identifier: 'users', tableName: 'users', columns: ['id', 'email'] }
+
+  test('should not let a model at the project root satisfy one the plan puts in a module', () => {
+    const draft = plan()
+    draft.models[0].module = 'billing'
+
+    const result = expectResult(validatePlan(draft, appState()), 'plan:app-missing', 'model.post', 'fail')
+
+    expect(result.message).toContain('The model class "Post" was not found in modules/billing')
+    expect(result.message).toContain('This application declares one in the project root.')
+  })
+
+  test('should accept a model the application declares in the app root the plan names', () => {
+    const draft = plan()
+    draft.models[0].module = 'billing'
+
+    const results = validatePlan(
+      draft,
+      appState({
+        models: [{ name: 'Post', module: 'billing' }, 'User'],
+        tables: [{ ...POSTS, module: 'billing' }, USERS],
+      }),
+    )
+
+    expect(failures(results).filter((entry) => entry.elementId === 'model.post')).toEqual([])
+  })
+
+  test('should not let a model in a module satisfy one the plan puts at the project root', () => {
+    const draft = plan()
+    draft.models[0].change = { kind: 'existing' }
+
+    const results = validatePlan(draft, appState({ models: [{ name: 'Post', module: 'billing' }, 'User'] }))
+
+    const result = expectResult(results, 'plan:app-missing', 'model.post', 'fail')
+    expect(result.message).toContain('was not found in the project root')
+    expect(result.message).toContain('This application declares one in modules/billing.')
+  })
+
+  test('should not read a same-named model in another app root as a collision', () => {
+    const draft = plan()
+    draft.models[1].module = 'billing'
+
+    const results = validatePlan(draft, appState({ models: ['Post', 'User', 'Comment'] }))
+
+    expect(find(results, 'plan:app-collision', 'model.comment')).toBeUndefined()
+  })
+
+  test('should still refuse an added model whose class the same app root already has', () => {
+    const draft = plan()
+    draft.models[1].module = 'billing'
+
+    const results = validatePlan(draft, appState({ models: ['Post', 'User', { name: 'Comment', module: 'billing' }] }))
+
+    const result = expectResult(results, 'plan:app-collision', 'model.comment', 'fail')
+    expect(result.message).toContain('already exists in modules/billing')
+  })
+
+  test('should not read a table in another app root as a collision', () => {
+    const draft = plan()
+    draft.models[1].module = 'billing'
+
+    const results = validatePlan(
+      draft,
+      appState({ tables: [POSTS, USERS, { identifier: 'comments', tableName: 'comments', columns: ['id'] }] }),
+    )
+
+    expect(find(results, 'plan:app-collision', 'model.comment')).toBeUndefined()
+  })
+
+  test('should judge an action in the app root its controller sits in', () => {
+    const draft = plan()
+    draft.controllers[0].module = 'billing'
+    draft.controllers[0].change = { kind: 'existing' }
+    for (const action of draft.controllers[0].actions) action.change = { kind: 'existing' }
+
+    const results = validatePlan(
+      draft,
+      appState({
+        controllers: ['CommentController'],
+        actions: ['CommentController.store', 'CommentController.destroy'],
+      }),
+    )
+
+    const result = expectResult(results, 'plan:app-missing', 'action.comments.store', 'fail')
+    expect(result.message).toContain('The action "CommentController.store" was not found in modules/billing')
+  })
+
+  test('should judge a page by its id, since a module\'s pages sit under the project root', () => {
+    const draft = plan()
+    draft.views[0].module = 'billing'
+
+    expect(find(validatePlan(draft, appState()), 'plan:app-missing', 'view.posts.show')).toBeUndefined()
+  })
+})
+
 describe('flows', () => {
   function planWithFlows(...flows: unknown[]): PlanDraft {
     return PlanDraftSchema.parse({ ...loadCommentsPlan(), flows })
