@@ -114,7 +114,7 @@ describe('plan:next', () => {
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
   })
 
-  test('should count a step done on a verified record that fingerprints nothing, as a scaffold step or a drop leaves', async () => {
+  test('should count a step done on a verified record that fingerprints nothing, as a scaffold step or a drop leaves, and name it when the plan is done', async () => {
     const { app, plan } = await createApp('scaffold')
     const record = { ...(await holding(app)), fingerprint: { files: {}, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' } } }
     await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: { ...record, outcome: 'incomplete' } } })
@@ -124,6 +124,12 @@ describe('plan:next', () => {
     expect(report.verified).toEqual([SCAFFOLD])
     expect(report.onCommandsAlone).toEqual([SCAFFOLD])
     expect(report.step!.id).toBe(TESTS)
+
+    const filed = await holding(app)
+    await writeState(app, { steps: Object.fromEntries(STEPS.map((id) => [id, id === SCAFFOLD ? record : filed])) })
+    const done = await planNextFile(plan, { appRoot: app, now: NOW })
+    expect(done.step).toBeNull()
+    expect(formatPlanNext(done, 'comments.plan.json')).toContain(`Every step is verified. Nothing is left to implement.\n${SCAFFOLD}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
   })
 
   test('should report that every step is verified and clear the mark, uncommitted work or not', async () => {
@@ -142,7 +148,6 @@ describe('plan:next', () => {
     expect(report.verified).toEqual(STEPS)
     expect((await readState(app)).active).toBeUndefined()
     expect(formatPlanNext(report, 'comments.plan.json')).toContain('Every step is verified.')
-    expect(formatPlanNext({ ...report, onCommandsAlone: [SCAFFOLD] }, 'comments.plan.json')).toContain(`${SCAFFOLD}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
   })
 
   test('should refuse uncommitted changes unless they are the marked step\'s own', async () => {
@@ -165,7 +170,26 @@ describe('plan:next', () => {
     // Once that step holds, the leftover would land in the next step's commit.
     const record = await holding(app)
     await writeState(app, { steps: { [SCAFFOLD]: record }, active: { plan: 'comments.plan.json', step: SCAFFOLD, startedAt: 't', continuations: 0 } })
-    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/uncommitted changes, and one step is one commit\. Commit or discard them first:\n {2}M lib\.ts/)
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/uncommitted changes, and one step is one commit\. Commit or discard them first:\n {2}M lib\.ts$/)
+  })
+
+  test('should leave a tracked state file out of the dirty reading, in an application below the repository root', async () => {
+    // Porcelain paths are relative to the repository root: the exclusion has to hold when that is not the app.
+    const { app, plan } = await createApp('nested/apps/web')
+    const repo = join(ROOT, 'nested')
+    await writeWorkspaceFiles(app, { '.guren/plans/.gitignore': '*.state.json\n' })
+    git(repo, 'init', '-q')
+    git(repo, 'add', '-A', '-f')
+    git(repo, 'commit', '-q', '-m', 'init')
+
+    // The only change is the line ensurePlanStateIgnored appends to the tracked file.
+    const report = await planNextFile(plan, { appRoot: app, now: NOW })
+    expect(report.step!.id).toBe(SCAFFOLD)
+
+    // A change beside the state directory is still a change.
+    await writeFile(join(app, '.guren/plans-old'), 'x\n', 'utf8')
+    await writeState(app, { steps: { [SCAFFOLD]: await holding(app) } })
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/first:\n {2}\?\? apps\/web\/\.guren\/plans-old$/)
   })
 
   test('should report a stall once and give the step a fresh mark', async () => {

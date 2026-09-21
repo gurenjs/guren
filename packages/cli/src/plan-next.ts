@@ -120,11 +120,11 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   }
   const { task, step } = next
 
-  // The state directory is git-ignored before the tree is read, and left out of the reading for
-  // a checkout that tracked it before: neither an earlier run's files nor the mark make it dirty.
+  // The state files are git-ignored before the tree is read, and excluded from the reading for a
+  // checkout that tracked them before, so neither an earlier run's write nor the mark makes it
+  // dirty. Excluded by pathspec, since porcelain paths are relative to the repository root, not to `root`.
   await ensurePlanStateIgnored(root)
-  // `runGit` trims the lines, so the path follows the status code rather than sitting at column 3.
-  const dirty = ((await runGit(root, ['status', '--porcelain', '--', '.'])) ?? []).filter((line) => !line.replace(/^\S+\s+/u, '').startsWith(`${PLAN_STATE_DIR}/`))
+  const dirty = (await runGit(root, ['status', '--porcelain', '--', '.', `:(exclude)${PLAN_STATE_DIR}/*.state.json`, `:(exclude)${PLAN_STATE_DIR}/.gitignore`])) ?? []
   if (dirty.length > 0 && previous?.step !== step.id) {
     throw new CliError(
       `The working tree under ${root} has uncommitted changes, and one step is one commit. Commit or discard them first:\n${dirty
