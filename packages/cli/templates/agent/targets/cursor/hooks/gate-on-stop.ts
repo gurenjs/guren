@@ -4,7 +4,8 @@
  * app, run `guren gate` (the CI stages: codegen, typecheck, lint, check, audit,
  * test) and hand the findings back as a `followup_message`, which Cursor submits
  * as the next user message, so the fix happens in this conversation rather than
- * in CI.
+ * in CI. Then, while `guren plan:next` has marked a plan step, verify it and follow
+ * up until it is verified or the hook gives up (RFC 0030 §7), which it says on stderr.
  */
 import { resolve } from 'node:path'
 
@@ -30,7 +31,8 @@ try {
 } catch {
   process.exit(0)
 }
-if (input.status !== 'completed' || (input.loop_count ?? 0) >= MAX_FOLLOW_UPS) {
+const loopCount = input.loop_count ?? 0
+if (input.status !== 'completed' || loopCount >= MAX_FOLLOW_UPS) {
   process.exit(0)
 }
 
@@ -43,10 +45,19 @@ try {
 }
 
 // The app root is this script's grandparent (`<app>/.cursor/hooks/`).
-const findings = await cli.stopGateFindings(resolve(import.meta.dir, '../..'))
+const root = resolve(import.meta.dir, '../..')
+const findings = await cli.stopGateFindings(root)
 // null when the tree is clean, so a turn that ends by committing is not gated
 // here: run `guren gate` before committing.
-if (findings === null) {
-  process.exit(0)
+if (findings !== null) {
+  followUp(findings)
 }
-followUp(findings)
+
+const plan = await cli.planStopHookFindings(root, { stopHookActive: loopCount > 0 })
+if (plan.block && plan.message) {
+  followUp(plan.message)
+}
+if (plan.message) {
+  console.error(plan.message)
+}
+process.exit(0)

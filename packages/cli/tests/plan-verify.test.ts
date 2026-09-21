@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 
 import type { CheckReport } from '../src/check-result'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
-import { planDigest, planSlug, PLAN_STATE_VERSION, readPlanState, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
+import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPlanState, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
 import { applyVerification, hashFiles, recordStillHolds, sha256 } from '../src/plan/verification'
@@ -501,15 +501,19 @@ describe('applyVerification', () => {
     expect(body.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`])
   })
 
-  test('should let a record stand only while it fingerprinted something that still matches', async () => {
+  test('should let a record stand while every fingerprinted file still matches, an empty fingerprint on the plan digest alone', async () => {
     const hashes = await hashFiles(ROOT, DATA_FILES)
+    const empty = record({ fingerprint: { ...FINGERPRINT, files: {} } })
 
     expect(recordStillHolds(record(), 'digest', hashes)).toBe(true)
     expect(recordStillHolds(record({ planDigest: 'older' }), 'digest', hashes)).toBe(false)
     expect(recordStillHolds(record({ outcome: 'incomplete' }), 'digest', hashes)).toBe(false)
-    expect(recordStillHolds(record({ fingerprint: { ...FINGERPRINT, files: {} } }), 'digest', hashes)).toBe(false)
     expect(recordStillHolds(record({ fingerprint: { ...FINGERPRINT, files: { ...FINGERPRINT.files, 'db/schema.ts': null } } }), 'digest', hashes)).toBe(false)
     expect(recordStillHolds(record(), 'digest', new Map([...hashes, ['db/schema.ts', 'other']]))).toBe(false)
+    // A scaffold step or a drop has nothing to fingerprint: the record stands until the plan changes, or the loop could never end.
+    expect(recordStillHolds(empty, 'digest', hashes)).toBe(true)
+    expect(recordStillHolds({ ...empty, planDigest: 'older' }, 'digest', hashes)).toBe(false)
+    expect(recordStillHolds({ ...empty, outcome: 'incomplete' }, 'digest', hashes)).toBe(false)
   })
 
   test('should lift nothing of an element the fingerprint does not cover', async () => {
@@ -583,7 +587,7 @@ describe('plan state', () => {
       await writePlanStepRecord(root, 'comments', DATA, record({ durationMs: 2 }))
 
       expect(path).toBe(join(root, '.guren/plans/comments.state.json'))
-      expect(await readFile(join(root, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n')
+      expect(await readFile(join(root, '.guren/plans/.gitignore'), 'utf8')).toBe(PLAN_STATE_GITIGNORE)
       const read = await readPlanState(root, 'comments')
       expect(read.state?.stateVersion).toBe(PLAN_STATE_VERSION)
       expect(Object.keys(read.state!.steps)).toEqual([DATA, HTTP])

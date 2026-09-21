@@ -132,11 +132,11 @@ function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string
 }
 
 /**
- * Whether a verified record still stands: same plan, something fingerprinted, and every
- * fingerprinted file hashing as it did. An empty fingerprint never holds, or the step
- * would be skipped forever.
+ * Whether a verified record still stands: same plan, and every fingerprinted file hashing
+ * as it did. A verified record fingerprints nothing only when the step had nothing file-shaped
+ * to watch (`scaffold`, a `drop`, an element no reader finds a file for), so it stands on the
+ * plan digest alone: a step that could never stand would keep the loop (§7) from ending.
  */
 export function recordStillHolds(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>): boolean {
-  if (record.outcome !== 'verified' || record.planDigest !== digest) return false
-  return Object.keys(record.fingerprint.files).length > 0 && changedFiles(record, hashes).length === 0
+  return record.outcome === 'verified' && record.planDigest === digest && changedFiles(record, hashes).length === 0
 }

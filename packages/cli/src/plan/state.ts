@@ -3,12 +3,13 @@
  * clone lacks, one result per step at the fingerprint it ran at. It is git-ignored through
  * a `.gitignore` written beside it, since a committed "verified" is a claim nobody on the
  * new machine has checked. A record names the digest of the plan it ran against, which is
- * how a result from another plan or revision is told apart from a drifted one.
- * Writes are read-modify-write with no lock: two runs over one slug lose each other's records.
+ * how a result from another plan or revision is told apart from a drifted one. It also
+ * carries the step the loop is on (§7). Writes are read-modify-write with no lock: two runs
+ * over one slug lose each other's records.
  */
 
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 import { z } from 'zod'
@@ -21,7 +22,9 @@ import { PLAN_VERIFY_COMMANDS } from './tasks'
 export const PLAN_STATE_VERSION = 1
 
 /** Where state lives under the application root. `plan:verify` writes the `.gitignore` there. */
-const PLAN_STATE_DIR = '.guren/plans'
+export const PLAN_STATE_DIR = '.guren/plans'
+const STATE_SUFFIX = '.state.json'
+export const PLAN_STATE_GITIGNORE = '*.state.json\n.gitignore\n'
 
 const PlanCommandRecordSchema = z.object({
   command: z.enum(PLAN_VERIFY_COMMANDS),
@@ -57,14 +60,41 @@ export const PlanStepRecordSchema = z.object({
   fingerprint: PlanFingerprintSchema,
 })
 
+const PlanStallSchema = z.object({
+  at: z.string(),
+  reason: z.string(),
+  /** The last failing verification, as the hook printed it. */
+  output: z.string(),
+})
+
+/**
+ * The step the implementation loop is on (RFC 0030 §7): `plan:next` marks it, the Stop hook
+ * verifies it on every stop and counts its continuations here, and `stalled` is where the
+ * hook gave up, which the next `plan:next` reports and clears.
+ */
+const PlanActiveStepSchema = z.object({
+  /** The plan file, relative to the application root, POSIX separators. */
+  plan: z.string(),
+  step: z.string(),
+  startedAt: z.string(),
+  /** Stops the hook has blocked on this step since it was marked. */
+  continuations: z.number().int().nonnegative(),
+  /** A digest of the record the last continuation was blocked on; the same one again is no progress. */
+  lastSignature: z.string().optional(),
+  stalled: PlanStallSchema.optional(),
+})
+
 export const PlanStateSchema = z.object({
   stateVersion: z.literal(PLAN_STATE_VERSION),
   steps: z.record(z.string(), PlanStepRecordSchema),
+  active: PlanActiveStepSchema.optional(),
 })
 
 export type PlanCommandRecord = z.infer<typeof PlanCommandRecordSchema>
 export type PlanFingerprint = z.infer<typeof PlanFingerprintSchema>
 export type PlanStepRecord = z.infer<typeof PlanStepRecordSchema>
+export type PlanStall = z.infer<typeof PlanStallSchema>
+export type PlanActiveStep = z.infer<typeof PlanActiveStepSchema>
 export type PlanState = z.infer<typeof PlanStateSchema>
 
 export interface PlanStateRead {
@@ -92,7 +122,7 @@ export function planDigest(plan: PlanDraft | Plan): string {
 }
 
 export function planStatePath(appRoot: string, slug: string): string {
-  return join(appRoot, PLAN_STATE_DIR, `${slug}.state.json`)
+  return join(appRoot, PLAN_STATE_DIR, `${slug}${STATE_SUFFIX}`)
 }
 
 /** Absent is `state: undefined` with no reason; a file that exists and does not parse says why. */
@@ -116,25 +146,64 @@ export async function readPlanState(appRoot: string, slug: string): Promise<Plan
   return { state: parsed.data }
 }
 
-/**
- * Replaces one step's record, keeping the others. A state file that would not read is
- * replaced whole: its records were written against other code, and keeping them beside
- * a fresh one would let the unreadable half pass for verified on a later read.
- */
-export async function writePlanStepRecord(appRoot: string, slug: string, stepId: string, record: PlanStepRecord): Promise<string> {
-  const read = await readPlanState(appRoot, slug)
-  const state: PlanState = read.state ?? { stateVersion: PLAN_STATE_VERSION, steps: {} }
-  state.steps[stepId] = record
+/** Every state file under the application root, by slug; an app with none has none. */
+export async function listPlanStates(appRoot: string): Promise<Array<PlanStateRead & { slug: string }>> {
+  let names: string[]
+  try {
+    names = await readdir(join(appRoot, PLAN_STATE_DIR))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+  const states: Array<PlanStateRead & { slug: string }> = []
+  for (const name of names.filter((candidate) => candidate.endsWith(STATE_SUFFIX)).sort()) {
+    const slug = name.slice(0, -STATE_SUFFIX.length)
+    states.push({ slug, ...(await readPlanState(appRoot, slug)) })
+  }
+  return states
+}
 
+/**
+ * The state directory with a `.gitignore` that ignores the state files and itself, so nothing
+ * here is ever untracked: a file that does not ignore itself reads as a dirty tree. The line is
+ * appended to one that lacks it, exact-line matching, so a pattern someone added beside it stays.
+ */
+export async function ensurePlanStateIgnored(appRoot: string): Promise<void> {
   const dir = join(appRoot, PLAN_STATE_DIR)
   await mkdir(dir, { recursive: true })
   const ignore = join(dir, '.gitignore')
-  try {
-    await readFile(ignore, 'utf8')
-  } catch {
-    await writeFile(ignore, '*.state.json\n', 'utf8')
-  }
+  const current = await readFile(ignore, 'utf8').catch(() => undefined)
+  if (current === undefined) await writeFile(ignore, PLAN_STATE_GITIGNORE, 'utf8')
+  else if (!current.split('\n').includes('.gitignore')) await writeFile(ignore, `${current.replace(/\n?$/u, '\n')}.gitignore\n`, 'utf8')
+}
+
+/**
+ * Read-modify-write of one slug's state. A state file that would not read is replaced
+ * whole: its records were written against other code, and keeping them beside a fresh one
+ * would let the unreadable half pass for verified on a later read.
+ */
+async function updatePlanState(appRoot: string, slug: string, mutate: (state: PlanState) => void): Promise<string> {
+  const read = await readPlanState(appRoot, slug)
+  const state: PlanState = read.state ?? { stateVersion: PLAN_STATE_VERSION, steps: {} }
+  mutate(state)
+
+  await ensurePlanStateIgnored(appRoot)
   const path = planStatePath(appRoot, slug)
   await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
   return path
+}
+
+/** Replaces one step's record, keeping the others. */
+export function writePlanStepRecord(appRoot: string, slug: string, stepId: string, record: PlanStepRecord): Promise<string> {
+  return updatePlanState(appRoot, slug, (state) => {
+    state.steps[stepId] = record
+  })
+}
+
+/** Marks the step the loop is on, or with `undefined` that it is on none. */
+export function writePlanActiveStep(appRoot: string, slug: string, active: PlanActiveStep | undefined): Promise<string> {
+  return updatePlanState(appRoot, slug, (state) => {
+    if (active === undefined) delete state.active
+    else state.active = active
+  })
 }

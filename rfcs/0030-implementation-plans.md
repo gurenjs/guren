@@ -958,14 +958,18 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   the step `failed` whatever else was `blocked`, since there is then something
   of the implementation's to fix.
 - A whole-plan run (no `--step`) leaves alone a step whose record is `verified`
-  against this plan digest, fingerprinted something, and whose fingerprint still
-  matches, and reports it as skipped; a record that fingerprinted nothing is
-  redone, or the step would be skipped forever. That is what lets the `tests`
-  step stand in the checkout that ran it: it must see the tests fail before the
-  implementation exists, and cannot pass again once the `http` step has made
-  them pass. The record is git-ignored, so a fresh checkout has nothing to keep
-  and its whole-plan `--ci` reports the `tests` step `failed`; whole-plan `--ci`
-  is the incremental loop's (§7), not a fresh checkout's.
+  against this plan digest and whose fingerprint still matches, and reports it
+  as skipped. That is what lets the `tests` step stand in the checkout that ran
+  it: it must see the tests fail before the implementation exists, and cannot
+  pass again once the `http` step has made them pass. A verified record
+  fingerprints nothing only when the step had nothing file-shaped to watch
+  (`scaffold`, a `drop`, an element no reader finds a file for), so it stands
+  on the plan digest alone, or a step that could never stand would keep the
+  loop of §7 from ending; a `drop` is lifted on that record, an element with no
+  reader never is, and `plan:next` names such steps when it reports the plan
+  done. The record is git-ignored, so a fresh checkout has nothing to keep and
+  its whole-plan `--ci` reports the `tests` step `failed`; whole-plan `--ci` is
+  the incremental loop's (§7), not a fresh checkout's.
 - A step is `verified` when every command passed *and* every element it owns is
   at the state its kind completes at (`wired` where it has a mount point,
   `present` otherwise and for every `drop`, or `unjudged`); the behaviours are
@@ -1026,10 +1030,13 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   reads `drifted` beneath it. An element the code has since lost keeps what
   the readers say, with a note. For that the status report carries each
   element's `files` and `completesAt`, and its summary counts all eight states.
-- The per-step metrics of §7 (`total_cost_usd`, continuations, files touched,
-  lines changed) are not recorded yet; a record carries `durationMs` per
-  command and per step. `--ci` exits 1 when a step the run covered did not
-  verify, which is what the §7 `Stop` hook will call.
+- Of the per-step metrics of §7, the state carries `durationMs` per command
+  and per step and the `Stop` hook's continuations; `total_cost_usd`, files
+  touched and lines changed are not recorded yet. `--ci` exits 1 when a step
+  the run covered did not verify.
+- The `.gitignore` written beside the state ignores itself as well, so a
+  verify leaves the working tree as clean as it found it, which `plan:next`
+  relies on.
 
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store
@@ -1074,6 +1081,43 @@ decides between fixing the environment, a revision, and `plan:waive`.
 On completing a task, the skill starts a reviewer in a separate context, given
 only the task's plan elements and its diff. Its findings are advisory: a
 reviewer asked for gaps reports some whether or not they exist.
+
+**Amended in implementation (`plan:next`, the `Stop` hook).** The loop is
+shipped with these readings:
+
+- `plan:next` returns the first step in task order whose record does not
+  stand (no record, another plan digest, or a fingerprinted file that changed,
+  the rule the whole-plan skip uses), which is also how a stalled step keeps
+  coming back. The context is the
+  step's elements verbatim, its behaviours, its verify commands and, for a
+  `scaffold` step, what it generates. The dependency shape through
+  `generateEntityContext()` and the freshness skip of §4 are not in it yet:
+  nothing stamps `contextHash` so far, so there is no stale element to skip.
+- The hook knows which step a session is on from a mark in the state file,
+  `active: { plan, step, startedAt, continuations, lastSignature?, stalled? }`,
+  which `plan:next` writes (the plan path relative to the application root)
+  and clears once every step is verified. A dirty tree is refused unless the
+  step it would return is the marked one: that tree is the step's own work.
+- There is one `Stop` hook, the `gate-on-stop` script the harness already
+  ships, so `agent:sync` delivers the loop to every application without an
+  edit to the user-owned hook config. The gate runs first, once per stop
+  chain as before; the marked step is verified after it, on every stop, in
+  process through `planStopHookFindings()` rather than by spawning
+  `plan:verify --ci`. A step whose record still stands is not re-run.
+- The give-up rules are the ones above, plus a step whose own outcome is
+  `blocked`, which is the same environment verdict at the command level.
+  "The step's state has not changed" is judged on a signature of the record
+  (outcome, command statuses and findings, behaviour statuses, the incomplete
+  list, the fingerprinted hashes) and only on a stop that follows a blocked
+  one; the same record on a fresh turn is a new attempt. The stall is
+  recorded on the mark with the reason and the last output, and it sticks:
+  the hook does not ask again until `plan:next` has reported it, which also
+  gives the step a fresh mark. Cursor's `loop_count` stands in for
+  `stop_hook_active` there, and a stall goes to stderr, since its hook can
+  only follow up or stay silent.
+- `plan:waive` is not shipped, so the skill tells the agent to report a stall
+  rather than route around it. The reviewer at the end of a task is the
+  harness's `code-review` subagent, given the task's elements and its diff.
 
 `plan:verify` appends to state, per step: `total_cost_usd` and duration where a
 producer reported them, stop-hook continuations, files touched, lines changed.

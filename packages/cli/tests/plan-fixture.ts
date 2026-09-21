@@ -1,12 +1,15 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdir, symlink } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 
 import type { z } from 'zod'
 
 import type { PlanAppState } from '../src/plan/app-state'
+import { PLAN_STATE_VERSION, type PlanActiveStep } from '../src/plan/state'
 import { PlanSchema, type Plan, type PlanDraft, type PlanDraftSchema } from '../src/plan/schema'
 import type { PlanPagePayload } from '../src/plan/render'
 import { FOUNDATION_TASK_ID, type PlanTaskDerivation } from '../src/plan/tasks'
+import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 
 export const TEST_BASELINE = { rev: '6445bc71', contextHash: { 'model.post': 'ab12' } }
 
@@ -203,3 +206,106 @@ export const PAYLOADS = [
   ']]>',
   '&lt;&amp;&gt;',
 ]
+
+export const PLAN_VERIFY_SCHEMA = `${PLAN_APP_FILES['db/schema.ts']}
+import { integer, timestamp } from 'drizzle-orm/pg-core'
+
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
+  body: text('body'),
+  postId: integer('post_id').notNull().references(() => posts.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+`
+
+/**
+ * The comments half of the plan written far enough for its `http` step to run, with every
+ * script a no-op: the `plan:verify` command and the Stop hook tests run the real `bun test` on it.
+ */
+export const PLAN_VERIFY_APP_FILES: Record<string, string> = {
+  ...PLAN_APP_FILES,
+  'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+
+export class PostController extends Controller {
+  async index() {
+    return this.json([])
+  }
+  async show() {
+    return this.json({})
+  }
+}
+`,
+  '.guren/routes.gen.ts': 'export {}\n',
+  '.guren/pages.gen.ts': 'export {}\n',
+  '.guren/data.gen.ts': 'export {}\n',
+  'package.json': JSON.stringify({ name: 'verify-app', type: 'module', scripts: { codegen: 'exit 0', typecheck: 'exit 0', 'db:migrate': 'exit 0' } }),
+  'bunfig.toml': '[install]\nauto = "disable"\n',
+  'db/schema.ts': PLAN_VERIFY_SCHEMA,
+  'app/Models/Comment.ts': `import { defineModel } from '@guren/core'
+import { comments } from '@/db/schema'
+
+export class Comment extends defineModel(comments, { fillable: ['body'] }) {}
+`,
+  'app/Http/Validators/CommentValidator.ts': 'export const CommentPayloadSchema = { safeParse: () => ({ success: true }) }\n',
+  'app/Http/Controllers/CommentController.ts': `import { Controller } from '@guren/core'
+import { CommentPayloadSchema } from '../Validators/CommentValidator.js'
+
+export class CommentController extends Controller {
+  async store() {
+    await this.validateBody(CommentPayloadSchema)
+    return this.redirect('/posts')
+  }
+}
+`,
+  'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+import { CommentController } from '../app/Http/Controllers/CommentController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostController, 'index']).name('posts.index')
+  router.post('/posts/:postId/comments', [CommentController, 'store']).name('comments.store')
+}
+`,
+  'src/app.ts': `import { createApp } from '@guren/core'
+import { registerWebRoutes } from '../routes/web.js'
+
+export default createApp({ routes: registerWebRoutes })
+`,
+  'tests/comments.test.ts': `import { describe, expect, test } from 'bun:test'
+
+describe('comments', () => {
+  test('[AC-comments-1] a signed-in user can comment on a post', () => {
+    expect(1).toBe(1)
+  })
+  test('[AC-comments-2] a guest is redirected', () => {
+    expect(1).toBe(1)
+  })
+  test('[AC-comments-3] an empty body is rejected', () => {
+    expect(1).toBe(1)
+  })
+  test('[AC-comments-4] the author can delete', () => {
+    expect(1).toBe(1)
+  })
+})
+`,
+}
+
+/** The step of the comments fixture that {@link PLAN_VERIFY_APP_FILES} leaves incomplete. */
+export const HTTP_STEP = 'task/entity/model.comment/http'
+
+/**
+ * {@link PLAN_VERIFY_APP_FILES} on disk at `dir`, resolvable like an install, with the comments
+ * plan beside it and, when given, a step marked for the Stop hook. `node_modules` is ignored so
+ * a committed copy reads as a clean tree.
+ */
+export async function writePlanVerifyApp(dir: string, active?: PlanActiveStep): Promise<void> {
+  await writeWorkspaceFiles(dir, {
+    ...PLAN_VERIFY_APP_FILES,
+    '.gitignore': 'node_modules\n',
+    'comments.plan.json': JSON.stringify(loadCommentsPlan()),
+    ...(active ? { '.guren/plans/.gitignore': '*.state.json\n.gitignore\n', '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: {}, active }) } : {}),
+  })
+  await linkWorkspaceCore(dir)
+  await mkdir(join(dir, 'node_modules'), { recursive: true })
+  await symlink(resolve(import.meta.dir, '../../orm/node_modules/drizzle-orm'), join(dir, 'node_modules', 'drizzle-orm'), 'dir')
+}

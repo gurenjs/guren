@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { PLAN_STATE_VERSION, type PlanState } from '../src/plan/state'
 import { gateAppFiles, initGitRepo, runAgentHook, writeWorkspaceFiles } from './helpers'
+import { HTTP_STEP, writePlanVerifyApp } from './plan-fixture'
 
 // The real gate runs against the temp app (see runAgentHook); its stage rules
 // are covered by gate.test.ts. `true`/`false` stand in for the subprocess stages.
@@ -88,6 +91,41 @@ describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain('guren gate: typecheck failed')
+  })
+
+  test('verifies the plan step plan:next marked, blocks while it is incomplete, and counts the continuation', async () => {
+    let state: PlanState | undefined
+    const result = await runAgentHook(
+      template,
+      '.claude/hooks/gate-on-stop.ts',
+      ACTIVE,
+      async (dir) => {
+        // Committed, so the gate has nothing to run and the plan step is what the stop is judged on.
+        await writePlanVerifyApp(dir, { plan: 'comments.plan.json', step: HTTP_STEP, startedAt: 't', continuations: 0 })
+        git(dir, 'init', '-q')
+        git(dir, 'add', '-A')
+        git(dir, 'commit', '-q', '-m', 'init')
+      },
+      { after: async (dir) => { state = JSON.parse(await readFile(join(dir, '.guren/plans/comments.state.json'), 'utf8')) as PlanState } },
+    )
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain(`plan:verify on stop (comments.plan.json, ${HTTP_STEP}): the step is incomplete, so this turn is not done (continuation 1 of 3).`)
+    expect(result.stderr).toContain('  not at its completion state: action.comments.destroy: planned')
+    expect(result.stderr).not.toContain('guren gate:')
+    expect(state!.stateVersion).toBe(PLAN_STATE_VERSION)
+    expect(state!.active).toMatchObject({ step: HTTP_STEP, continuations: 1 })
+    expect(state!.steps[HTTP_STEP]).toMatchObject({ outcome: 'incomplete' })
+  })
+
+  test('gives the marked step up after its continuations, letting the stop through with the reason', async () => {
+    const result = await runAgentHook(template, '.claude/hooks/gate-on-stop.ts', { stop_hook_active: true }, async (dir) => {
+      await writePlanVerifyApp(dir, { plan: 'comments.plan.json', step: HTTP_STEP, startedAt: 't', continuations: 3 })
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toContain(`plan:verify on stop (comments.plan.json, ${HTTP_STEP}): giving up, 3 continuations on this step.`)
+    expect(result.stderr).toContain('The step is recorded as stalled.')
   })
 
   test("the shipped Codex command finds the app's .codex/ upward from a subdirectory", async () => {
