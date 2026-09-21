@@ -30,7 +30,7 @@ export interface PlanWaiveReport {
   replaced: PlanWaiver[]
   /** With `--remove`: the waivers taken out; an element with none is not an error. */
   removed: PlanWaiver[]
-  /** False where a removal found no log at all, which is left uncreated rather than committed empty. */
+  /** Whether the log changed. False where there was nothing to record, and no file was touched. */
   written: boolean
 }
 
@@ -95,9 +95,9 @@ const JUDGED = new Set<PlanElementSection>(PLAN_STATUS_SECTIONS)
  * answer to one. A question covers no elements, so there is nothing to point at.
  */
 const UNJUDGED_ADVICE: Partial<Record<PlanElementSection, string>> = {
-  acceptance: ' A behaviour that fails leaves the step failed whatever is waived, so a behaviour the code will not satisfy is a revision, not a waiver.',
-  flows: ' Waive the elements it covers instead.',
-  tasks: ' Waive the elements it covers instead.',
+  acceptance: 'A behaviour that fails leaves the step failed whatever is waived, so a behaviour the code will not satisfy is a revision, not a waiver.',
+  flows: 'Waive the elements it covers instead.',
+  tasks: 'Waive the elements it covers instead.',
 }
 
 export async function planWaiveFile(planPath: string, options: PlanWaiveFileOptions): Promise<PlanWaiveReport> {
@@ -138,7 +138,8 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
       throw new CliError(`No element "${id}" is declared by this plan. The elements are:\n${[...sections.keys()].map((known) => `  ${known}`).join('\n')}`)
     }
     if (!JUDGED.has(section)) {
-      throw new CliError(`"${id}" is a ${section} element, which plan:status does not judge, so it has no state a waiver could lift.${UNJUDGED_ADVICE[section] ?? ''}`)
+      const refusal = `"${id}" is a ${section} element, which plan:status does not judge, so it has no state a waiver could lift.`
+      throw new CliError([refusal, UNJUDGED_ADVICE[section]].filter(Boolean).join(' '))
     }
     if (existing.has(id)) {
       throw new CliError(`"${id}" is an existing element, which the plan changes nothing about, so it is no part of completion and there is nothing to waive.`)
@@ -152,13 +153,15 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   const by = await waiverAuthor(options.cwd ?? process.cwd(), options.exec ?? runCaptured)
   const waived: PlanWaiver[] = []
   const replaced: PlanWaiver[] = []
+  let written = false
   for (const id of options.elementIds) {
     const waiver: PlanWaiver = { elementId: id, planHash: hash, reason, at, ...(by ? { by } : {}) }
     const result = await writePlanWaiver(path, waiver)
     waived.push(waiver)
+    written ||= result.written
     if (result.replaced) replaced.push(result.replaced)
   }
-  return { ...head, waived, replaced, removed: [], written: true }
+  return { ...head, waived, replaced, removed: [], written }
 }
 
 export function formatPlanWaive(report: PlanWaiveReport): string {
@@ -172,9 +175,7 @@ export function formatPlanWaive(report: PlanWaiveReport): string {
   }
   lines.push(
     '',
-    report.written
-      ? `Recorded in ${report.decisionsFile}`
-      : `There is no decision log at ${report.decisionsFile}, and nothing to record, so none was created.`,
+    report.written ? `Recorded in ${report.decisionsFile}` : `Nothing to record; ${report.decisionsFile} was left alone.`,
     'The decision log is committed with the plan. A waiver names this plan hash, so a revision does not inherit it.',
   )
   return lines.join('\n')

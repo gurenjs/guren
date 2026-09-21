@@ -7,9 +7,9 @@ import { runCommand } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
 import type { PlanStatusReport } from '../src/plan-status'
-import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 import { planHash } from '../src/plan/identity'
 import { PlanSchema } from '../src/plan/schema'
+import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.

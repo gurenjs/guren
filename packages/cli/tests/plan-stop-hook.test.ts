@@ -7,12 +7,12 @@ import { judgeStopHook, MAX_STEP_CONTINUATIONS, planStopHookFindings, recordSign
 import { parsePlanDocument } from '../src/plan-render'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
+import { planWaiveFile } from '../src/plan-waive'
 import { planDigest, PLAN_STATE_VERSION, type PlanActiveStep, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { judgePlan, type PlanElementState, type PlanElementStatus } from '../src/plan/status'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
-import { planWaiveFile } from '../src/plan-waive'
 import { loadApprovedCommentsPlan, loadCommentsPlan, planAppState } from './plan-fixture'
 
 // The verification itself is faked here (`verify`); the shipped hooks run it for real in

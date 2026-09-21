@@ -9,10 +9,10 @@ import { builtinSubCommands } from '../src/commands'
 import { parsePlanDocument } from '../src/plan-render'
 import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
+import { planWaiveFile } from '../src/plan-waive'
 import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
 import { sha256 } from '../src/plan/verification'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { planWaiveFile } from '../src/plan-waive'
 import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.

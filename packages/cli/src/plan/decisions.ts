@@ -83,9 +83,10 @@ export async function readPlanDecisions(planPath: string): Promise<PlanDecisions
 }
 
 /**
- * Read-modify-write of the log beside `planPath`. A log that would not read is refused
- * rather than replaced: it is a committed record of decisions people took, and a run that
- * overwrites it destroys them where a state file would only lose a result it can redo.
+ * Read-modify-write of the log beside `planPath`, `false` where it wrote nothing. A log that
+ * would not read is refused rather than replaced: it is a committed record of decisions people
+ * took, and a run that overwrites it destroys them where a state file would only lose a result
+ * it can redo.
  */
 async function updatePlanDecisions(planPath: string, mutate: (decisions: PlanDecisions) => void): Promise<boolean> {
   const read = await readPlanDecisions(planPath)
@@ -93,13 +94,19 @@ async function updatePlanDecisions(planPath: string, mutate: (decisions: PlanDec
     throw new CliError(`${read.unreadable}\nThe decision log is a committed record, so this command will not replace it. Fix the file, then run this again.`)
   }
   const decisions: PlanDecisions = read.decisions ?? { decisionsVersion: PLAN_DECISIONS_VERSION, waivers: [] }
+  // Sorted, so two runs over one log write the same bytes into the same commit, and compared
+  // sorted, so a run that changes nothing touches no file: a removal that matched no waiver,
+  // or one against an app that never waived anything, which would otherwise commit an empty log.
+  const before = JSON.stringify(sortWaivers(decisions.waivers))
   mutate(decisions)
-  // A removal against an app that never waived anything would otherwise commit an empty log.
-  if (read.decisions === undefined && decisions.waivers.length === 0) return false
-  // Sorted, so two runs over one log write the same bytes into the same commit.
-  decisions.waivers.sort((left, right) => (left.elementId < right.elementId ? -1 : left.elementId > right.elementId ? 1 : 0))
+  decisions.waivers = sortWaivers(decisions.waivers)
+  if (JSON.stringify(decisions.waivers) === before) return false
   await writeFile(planDecisionsPath(planPath), `${JSON.stringify(decisions, null, 2)}\n`, 'utf8')
   return true
+}
+
+function sortWaivers(waivers: readonly PlanWaiver[]): PlanWaiver[] {
+  return [...waivers].sort((left, right) => (left.elementId < right.elementId ? -1 : left.elementId > right.elementId ? 1 : 0))
 }
 
 /** One waiver per element: a second one replaces it, and the replaced one is returned. */

@@ -142,7 +142,20 @@ describe('plan:waive', () => {
     expect(report.written).toBe(false)
     expect(report.removed).toEqual([])
     expect(await readPlanDecisions(plan)).toEqual({ decisions: undefined })
-    expect(formatPlanWaive(report)).toContain('There is no decision log at no-log.decisions.json, and nothing to record, so none was created.')
+    expect(formatPlanWaive(report)).toContain('Nothing to record; no-log.decisions.json was left alone.')
+  })
+
+  test('should leave an existing log byte for byte where a removal matches no waiver', async () => {
+    const plan = await writePlan('untouched.plan.json')
+    await waive(plan, ['model.comment'])
+    const before = await readFile(planDecisionsPath(plan), 'utf8')
+
+    const report = await planWaiveFile(plan, { elementIds: ['policy.comment'], remove: true, app: ROOT })
+
+    expect(report.written).toBe(false)
+    expect(report.removed).toEqual([])
+    expect(await readFile(planDecisionsPath(plan), 'utf8')).toBe(before)
+    expect(formatPlanWaive(report)).toContain('Nothing to record; untouched.decisions.json was left alone.')
   })
 
   test('should refuse an existing element of every judged section whose schema carries a change', async () => {

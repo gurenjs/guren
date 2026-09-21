@@ -8,10 +8,10 @@ import { runCommand, type CommandDef } from 'citty'
 import { builtinSubCommands } from '../src/commands'
 import { formatPlanNext, planNextFile, type PlanNextReport } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
+import { planWaiveFile } from '../src/plan-waive'
 import { planDigest, PLAN_STATE_VERSION, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
-import { planWaiveFile } from '../src/plan-waive'
 import { writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, loadCommentsPlan } from './plan-fixture'
 
@@ -274,6 +274,8 @@ describe('plan:next', () => {
     const report = await planNextFile(plan, { appRoot: app, now: NOW })
 
     expect(report.decisionsUnreadable).toContain('does not match the decision log schema')
+    // Named in the report, so a --json consumer does not read the path out of the prose.
+    expect(report.decisionsFile).toBe('comments.decisions.json')
     expect(formatPlanNext(report, 'comments.plan.json')).toContain('Decision log not read, so no waiver was applied:')
   })
 

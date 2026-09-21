@@ -13,12 +13,12 @@ import { runGit } from './changed-files'
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
+import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskTitle } from './plan/tasks'
-import type { PlanWaiver } from './plan/decisions'
 import { hashFiles, readPlanWaivers, recordStillHolds } from './plan/verification'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
@@ -55,6 +55,8 @@ export interface PlanNextReport {
   step: PlanNextStep | null
   /** Relative to the application root, POSIX separators. */
   stateFile: string
+  /** The decision log beside the plan, relative to the application root; it need not exist. */
+  decisionsFile: string
   /** Set when a decision log exists and would not read, so no waiver was applied to this report. */
   decisionsUnreadable?: string
 }
@@ -106,14 +108,13 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const previous = state?.active
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
   const log = await readPlanWaivers(path, plan)
-  const waived = log.waived
 
   const verified: string[] = []
   const onCommandsAlone: string[] = []
   let next: { task: PlanDerivedTask; step: PlanDerivedStep } | undefined
   for (const entry of listPlanSteps(derivation)) {
     const record = records[entry.step.id]
-    if (!(record && recordStillHolds(record, digest, hashes, waived))) {
+    if (!(record && recordStillHolds(record, digest, hashes, log.waived))) {
       next ??= entry
       continue
     }
@@ -127,6 +128,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     verified,
     onCommandsAlone,
     stateFile: toPosixRelative(root, planStatePath(root, slug)),
+    decisionsFile: toPosixRelative(root, planDecisionsPath(path)),
     ...(log.unreadable ? { decisionsUnreadable: log.unreadable } : {}),
   } satisfies Omit<PlanNextReport, 'step'>
   if (next === undefined) {
@@ -212,38 +214,37 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     if (report.onCommandsAlone.length > 0) {
       lines.push(`${report.onCommandsAlone.join(', ')}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
     }
-    if (report.decisionsUnreadable) lines.push('', `Decision log not read, so no waiver was applied: ${report.decisionsUnreadable}`)
-    return lines.join('\n')
-  }
-  const part = step.part ? ` (part ${step.part.index} of ${step.part.of})` : ''
-  lines.push(`Next: ${step.id}${part}`, `  task: ${describeTask(step.task)} (${step.taskId})`, `  verify: ${step.verify.join(' → ')}`)
-  const waived = step.elements.filter((element) => element.waived)
-  const toImplement = step.elements.filter((element) => !element.waived)
-  if (toImplement.length > 0) {
-    lines.push('', 'Elements the step completes:')
-    for (const element of toImplement) lines.push(`  ${element.id} (${element.section})`)
-  }
-  if (waived.length > 0) {
-    lines.push('', 'Waived, not to be implemented:')
-    for (const element of waived) lines.push(`  ${element.id} (${element.section}): ${element.waived!.reason} (${element.waived!.at})`)
-    lines.push('  The step verifies without them; a waiver is the person\u2019s decision, not yours to take or to undo.')
-  }
-  if (step.generates.length > 0) lines.push('', `Generates a first version of: ${step.generates.join(', ')}`)
-  if (step.acceptance.length > 0) {
-    lines.push('', `Behaviours${step.kind === 'tests' ? ' to write, as test titles `[<id>] <description>`, failing' : ' that must pass'}:`)
-    for (const behaviour of step.acceptance) {
-      lines.push(`  [${behaviour.id}] ${behaviour.description}`)
-      lines.push(`      ${behaviour.kind}; actor ${behaviour.actor}; route ${behaviour.route}${behaviour.given.length ? `; given ${behaviour.given.join(', ')}` : ''}; expect ${describeExpectation(behaviour)}`)
+  } else {
+    const part = step.part ? ` (part ${step.part.index} of ${step.part.of})` : ''
+    lines.push(`Next: ${step.id}${part}`, `  task: ${describeTask(step.task)} (${step.taskId})`, `  verify: ${step.verify.join(' → ')}`)
+    const toImplement = step.elements.filter((element) => !element.waived)
+    const waived = step.elements.flatMap((element) => (element.waived ? [`  ${element.id} (${element.section}): ${element.waived.reason} (${element.waived.at})`] : []))
+    if (toImplement.length > 0) {
+      lines.push('', 'Elements the step completes:')
+      for (const element of toImplement) lines.push(`  ${element.id} (${element.section})`)
     }
+    if (waived.length > 0) {
+      lines.push('', 'Waived, not to be implemented:', ...waived, '  The step verifies without them; a waiver is the person\u2019s decision, not yours to take or to undo.')
+    }
+    if (step.generates.length > 0) lines.push('', `Generates a first version of: ${step.generates.join(', ')}`)
+    if (step.acceptance.length > 0) {
+      lines.push('', `Behaviours${step.kind === 'tests' ? ' to write, as test titles `[<id>] <description>`, failing' : ' that must pass'}:`)
+      for (const behaviour of step.acceptance) {
+        lines.push(`  [${behaviour.id}] ${behaviour.description}`)
+        lines.push(`      ${behaviour.kind}; actor ${behaviour.actor}; route ${behaviour.route}${behaviour.given.length ? `; given ${behaviour.given.join(', ')}` : ''}; expect ${describeExpectation(behaviour)}`)
+      }
+    }
+    if (step.stalled) {
+      lines.push(
+        '',
+        `Stalled ${step.stalled.at}: ${step.stalled.reason}`,
+        ...step.stalled.output.split('\n').map((line) => `  ${line}`),
+        'A stall is a person\u2019s decision: fix the environment, revise the plan, or accept an element incomplete with',
+        `  bunx guren plan:waive ${planArgument} <element-id> --reason "<why>"`,
+      )
+    }
+    lines.push('', `Implement this step only, then run \`bunx guren plan:verify ${planArgument} --step ${step.id}\` and commit once it is verified.`, `Marked in ${report.stateFile}`)
   }
-  if (step.stalled) {
-    lines.push('', `Stalled ${step.stalled.at}: ${step.stalled.reason}`, ...step.stalled.output.split('\n').map((line) => `  ${line}`))
-    lines.push(
-      'A stall is a person\u2019s decision: fix the environment, revise the plan, or accept an element incomplete with',
-      `  bunx guren plan:waive ${planArgument} <element-id> --reason "<why>"`,
-    )
-  }
-  lines.push('', `Implement this step only, then run \`bunx guren plan:verify ${planArgument} --step ${step.id}\` and commit once it is verified.`, `Marked in ${report.stateFile}`)
   if (report.decisionsUnreadable) lines.push('', `Decision log not read, so no waiver was applied: ${report.decisionsUnreadable}`)
   return lines.join('\n')
 }

@@ -9,7 +9,7 @@ import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPla
 import { planHash } from '../src/plan/identity'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
-import { applyVerification, applyWaivers, hashFiles, planWaivers, recordStillHolds, sha256 } from '../src/plan/verification'
+import { applyVerification, applyWaivers, hashFiles, overlayVerification, planWaivers, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
@@ -645,6 +645,20 @@ describe('applyWaivers', () => {
     applyWaivers(status, new Map([['policy.comment', waiver('policy.comment')]]))
 
     expect(JSON.stringify(status)).toBe(before)
+  })
+})
+
+describe('overlayVerification', () => {
+  test('should report the log the caller already read rather than reading it again', async () => {
+    const passed = { elementId: 'policy.comment', planHash: 'another-revision', reason: 'later', at: '2026-09-21T12:00:00.000Z' }
+    // Nothing of this is on disk under ROOT, so a second read would answer with none of it.
+    const waivers = { waivers: new Map(), waived: new Set<string>(), stale: [passed], unreadable: 'passed in' }
+
+    const overlaid = await overlayVerification(ROOT, join(ROOT, 'seam.plan.json'), plan, statusOf(), derivation, { waivers })
+
+    expect(overlaid.verification.staleWaivers).toEqual([passed])
+    expect(overlaid.verification.decisionsUnreadable).toBe('passed in')
+    expect(overlaid.verification.decisionsFile).toBe('seam.decisions.json')
   })
 })
 
