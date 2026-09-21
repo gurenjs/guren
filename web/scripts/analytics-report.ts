@@ -114,21 +114,34 @@ const queries: Array<{ title: string; sql: string }> = [
           GROUP BY token ORDER BY requests DESC LIMIT 20`,
   },
   {
-    // Reading is not trying. These three counts are the only funnel the server can
-    // see: nothing measures a click that leaves the site except the destination's
-    // own traffic view, which is why own-repository links send a referrer.
-    title: 'Reader funnel',
+    // Independent counts, not stages: tutorial pages are landed on directly, so
+    // the third column runs above the first and a ratio between them means nothing.
+    // Reading is not trying either — a click that leaves the site is visible only
+    // in the destination's own traffic view, which is why own-repository links
+    // send a referrer.
+    title: 'Reader reach by section (independent counts, not stages)',
     sql: `SELECT SUM(IF(blob1 IN ('/docs', '/docs/ja'), _sample_interval, 0)) AS docs_entry,
                  SUM(IF(blob1 LIKE '%/guides/getting-started%', _sample_interval, 0)) AS getting_started,
                  SUM(IF(blob1 LIKE '%/tutorials/%', _sample_interval, 0)) AS tutorials
           FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND ${READING}`,
   },
   {
+    // The cap has to clear every chapter in every locale plus their .md mirrors —
+    // 42 distinct paths at the time of writing, which a cap of 40 truncated
+    // silently, dropping the two chapters that sort last.
     title: 'Tutorial chapters (readers)',
     sql: `SELECT blob1 AS path, SUM(_sample_interval) AS requests
           FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND ${READING}
             AND blob1 LIKE '%/tutorials/%'
-          GROUP BY path ORDER BY path LIMIT 40`,
+          GROUP BY path ORDER BY path LIMIT 200`,
+  },
+  {
+    // `/docs/search` is out of the reading set, so this is the only place search
+    // shows up at all. Every hit is a full navigation, not an XHR.
+    title: 'Search box usage (readers)',
+    sql: `SELECT blob5 AS language, SUM(_sample_interval) AS searches
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND blob1 = '/docs/search'
+          GROUP BY language ORDER BY searches DESC LIMIT 10`,
   },
 ]
 
