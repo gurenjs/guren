@@ -1,5 +1,6 @@
 import { Link } from '@inertiajs/react'
 import { useState } from 'react'
+import { OWN_REPO_LINK_REL } from '../../../config/site.js'
 import { useColorMode } from '../pages/Docs/theme.js'
 import { GithubIcon, MenuIcon, MoonIcon, SunIcon } from './icons.js'
 import { MobileMenu } from './MobileMenu.js'
@@ -66,7 +67,7 @@ export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProp
                 <a
                   href="https://github.com/gurenjs/guren"
                   target="_blank"
-                  rel="noreferrer"
+                  rel={OWN_REPO_LINK_REL}
                   className="flex items-center gap-1.5 transition hover:text-white"
                 >
                   <GithubIcon className="size-4" />
@@ -110,7 +111,7 @@ export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProp
               <a
                 href="https://github.com/gurenjs/guren"
                 target="_blank"
-                rel="noreferrer"
+                rel={OWN_REPO_LINK_REL}
                 className="flex items-center gap-1.5 text-docs-text-muted no-underline transition hover:text-docs-accent"
               >
                 <GithubIcon className="size-4" />

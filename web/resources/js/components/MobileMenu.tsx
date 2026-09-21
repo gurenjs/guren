@@ -1,5 +1,6 @@
 import { Link } from '@inertiajs/react'
 import { useEffect } from 'react'
+import { OWN_REPO_LINK_REL } from '../../../config/site.js'
 import { GithubIcon, XIcon } from './icons.js'
 
 interface LocaleLink {
@@ -74,7 +75,7 @@ export function MobileMenu({ open, onClose, basePath, locales = [] }: MobileMenu
           <a
             href="https://github.com/gurenjs/guren"
             target="_blank"
-            rel="noreferrer"
+            rel={OWN_REPO_LINK_REL}
             className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[0.95rem] font-medium text-docs-text no-underline transition hover:bg-docs-accent-tint hover:text-docs-accent"
           >
             <GithubIcon className="size-4" />
