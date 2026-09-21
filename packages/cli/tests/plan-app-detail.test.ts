@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import type { PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
 import { loadPlanAppState } from '../src/plan/app-state'
-import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
+import { linkWorkspaceCore, PAGE_COMPONENT_FIXTURE, writeWorkspaceFiles } from './helpers'
 
 // Earlier runs' roots are removed at the start, one directory per application: see plan-status-command.test.ts.
 const ROOT_PREFIX = 'guren-plan-app-detail-'
@@ -266,11 +266,10 @@ describe('loadPlanAppState({ detail: true })', () => {
   })
 
   test('should carry the component file of a renderable page and skip a .ts sibling', async () => {
-    const component = 'export default function Page() { return null }\n'
     const detail = await detailOf('pages', {
       'src/app.ts': entry('{ routes: registerWebRoutes }'),
-      'resources/js/pages/posts/Index.tsx': component,
-      'resources/js/pages/posts/Legacy.jsx': component,
+      'resources/js/pages/posts/Index.tsx': PAGE_COMPONENT_FIXTURE,
+      'resources/js/pages/posts/Legacy.jsx': PAGE_COMPONENT_FIXTURE,
       // Neither the client glob nor pages.gen.ts registers these, so they are not pages.
       'resources/js/pages/posts/Helpers.ts': 'export const columns = []\n',
       'resources/js/pages/posts/Script.js': 'export const noop = () => {}\n',

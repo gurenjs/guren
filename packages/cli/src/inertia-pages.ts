@@ -49,17 +49,11 @@ export function extractInertiaPageRefs(source: string, isCode?: (index: number) 
 /**
  * The extensions a page component may have: the scaffolded client entry globs the
  * pages directory for `.tsx`, and codegen registers `.tsx` and `.jsx` in
- * `.guren/pages.gen.ts`. A `.ts` or `.js` file there is not a page the app can
- * render, and listing it would have `check`, `context`, `spec:generate` and
- * `plan:status` claim a page the client cannot load.
+ * `.guren/pages.gen.ts`. A `.ts` or `.js` file there is not a page the app can render.
  */
-export const PAGE_COMPONENT_EXTENSIONS = new Set(['.tsx', '.jsx'])
+export const PAGE_COMPONENT_EXTENSIONS: ReadonlySet<string> = new Set(['.tsx', '.jsx'])
 
-/**
- * Component file for a page ID, relative to `cwd`. Probes
- * {@link PAGE_COMPONENT_EXTENSIONS} in insertion order, so a `.tsx` wins over a
- * `.jsx` of the same ID.
- */
+/** Component file for a page ID, relative to `cwd`; a `.tsx` wins over a `.jsx` of the same ID. */
 export async function resolveInertiaPageFile(cwd: string, id: string): Promise<string | undefined> {
   for (const extension of PAGE_COMPONENT_EXTENSIONS) {
     const candidate = `resources/js/pages/${id}${extension}`

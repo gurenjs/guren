@@ -22,7 +22,7 @@ export const IMPORTABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.js
  */
 export async function collectFiles(
   directory: string,
-  extensions: Set<string> = SOURCE_EXTENSIONS,
+  extensions: ReadonlySet<string> = SOURCE_EXTENSIONS,
   excludeDirNames: Set<string> = new Set(),
 ): Promise<string[]> {
   const results: string[] = []

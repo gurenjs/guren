@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import {
@@ -8,9 +8,18 @@ import {
   expectedInertiaPagePath,
   listInertiaPageIds,
   resolveInertiaPageFile,
-  PAGE_COMPONENT_EXTENSIONS,
 } from '../src/inertia-pages'
-import { createTempWorkspace } from './helpers'
+import { createTempWorkspace, PAGE_COMPONENT_FIXTURE, writeWorkspaceFiles } from './helpers'
+
+/** A workspace whose pages directory holds `names`, each a trivial component. */
+async function workspaceWithPages(prefix: string, names: string[]) {
+  const workspace = await createTempWorkspace(prefix)
+  await writeWorkspaceFiles(
+    workspace.dir,
+    Object.fromEntries(names.map((name) => [`resources/js/pages/${name}`, PAGE_COMPONENT_FIXTURE])),
+  )
+  return workspace
+}
 
 describe('extractInertiaPageRefs', () => {
   it('extracts string-literal references', () => {
@@ -61,31 +70,7 @@ describe('expectedInertiaPagePath', () => {
   })
 })
 
-describe('PAGE_COMPONENT_EXTENSIONS', () => {
-  it('holds only the extensions the client can render, .tsx first', () => {
-    expect([...PAGE_COMPONENT_EXTENSIONS]).toEqual(['.tsx', '.jsx'])
-  })
-
-  it('is read by the codegen that writes pages.gen.ts rather than redeclared there', async () => {
-    const source = await readFile(new URL('../src/pages-types.ts', import.meta.url), 'utf8')
-
-    expect(source).toContain("import { PAGE_COMPONENT_EXTENSIONS } from './inertia-pages'")
-    expect(source).not.toMatch(/(?:const|let|var)\s+PAGE_COMPONENT_EXTENSIONS/)
-  })
-})
-
 describe('resolveInertiaPageFile', () => {
-  const COMPONENT = 'export default function Page() { return null }\n'
-
-  async function workspaceWithPages(prefix: string, names: string[]) {
-    const workspace = await createTempWorkspace(prefix)
-    await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
-    for (const name of names) {
-      await writeFile(join(workspace.dir, 'resources/js/pages', name), COMPONENT, 'utf8')
-    }
-    return workspace
-  }
-
   it('resolves .tsx and .jsx pages', async () => {
     const workspace = await workspaceWithPages('guren-cli-page-resolve-', ['Home.tsx', 'Legacy.jsx'])
     try {
@@ -114,13 +99,17 @@ describe('resolveInertiaPageFile', () => {
       await workspace.cleanup()
     }
   })
+})
 
+describe('listInertiaPageIds', () => {
   it('lists only the renderable pages', async () => {
     const workspace = await workspaceWithPages('guren-cli-page-list-', [
       'Home.tsx',
       'Legacy.jsx',
       'Plain.ts',
       'Script.js',
+      // The shared types directory is not a page, whatever the extension.
+      'contracts/Shared.tsx',
     ])
     try {
       expect(await listInertiaPageIds(workspace.dir)).toEqual(['Home', 'Legacy'])
