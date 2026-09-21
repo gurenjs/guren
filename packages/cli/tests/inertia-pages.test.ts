@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import {
@@ -6,6 +6,9 @@ import {
   describeInertiaPagePropKeys,
   extractInertiaPageRefs,
   expectedInertiaPagePath,
+  listInertiaPageIds,
+  resolveInertiaPageFile,
+  PAGE_COMPONENT_EXTENSIONS,
 } from '../src/inertia-pages'
 import { createTempWorkspace } from './helpers'
 
@@ -55,6 +58,75 @@ describe('extractInertiaPageRefs', () => {
 describe('expectedInertiaPagePath', () => {
   it('points at the conventional .tsx location', () => {
     expect(expectedInertiaPagePath('posts/Index')).toBe('resources/js/pages/posts/Index.tsx')
+  })
+})
+
+describe('PAGE_COMPONENT_EXTENSIONS', () => {
+  it('holds only the extensions the client can render, .tsx first', () => {
+    expect([...PAGE_COMPONENT_EXTENSIONS]).toEqual(['.tsx', '.jsx'])
+  })
+
+  it('is read by the codegen that writes pages.gen.ts rather than redeclared there', async () => {
+    const source = await readFile(new URL('../src/pages-types.ts', import.meta.url), 'utf8')
+
+    expect(source).toContain("import { PAGE_COMPONENT_EXTENSIONS } from './inertia-pages'")
+    expect(source).not.toMatch(/(?:const|let|var)\s+PAGE_COMPONENT_EXTENSIONS/)
+  })
+})
+
+describe('resolveInertiaPageFile', () => {
+  const COMPONENT = 'export default function Page() { return null }\n'
+
+  async function workspaceWithPages(prefix: string, names: string[]) {
+    const workspace = await createTempWorkspace(prefix)
+    await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
+    for (const name of names) {
+      await writeFile(join(workspace.dir, 'resources/js/pages', name), COMPONENT, 'utf8')
+    }
+    return workspace
+  }
+
+  it('resolves .tsx and .jsx pages', async () => {
+    const workspace = await workspaceWithPages('guren-cli-page-resolve-', ['Home.tsx', 'Legacy.jsx'])
+    try {
+      expect(await resolveInertiaPageFile(workspace.dir, 'Home')).toBe('resources/js/pages/Home.tsx')
+      expect(await resolveInertiaPageFile(workspace.dir, 'Legacy')).toBe('resources/js/pages/Legacy.jsx')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('prefers .tsx over a .jsx of the same id', async () => {
+    const workspace = await workspaceWithPages('guren-cli-page-resolve-order-', ['Home.jsx', 'Home.tsx'])
+    try {
+      expect(await resolveInertiaPageFile(workspace.dir, 'Home')).toBe('resources/js/pages/Home.tsx')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not resolve a .ts or .js file, which codegen never registers', async () => {
+    const workspace = await workspaceWithPages('guren-cli-page-resolve-unrenderable-', ['Plain.ts', 'Script.js'])
+    try {
+      expect(await resolveInertiaPageFile(workspace.dir, 'Plain')).toBeUndefined()
+      expect(await resolveInertiaPageFile(workspace.dir, 'Script')).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('lists only the renderable pages', async () => {
+    const workspace = await workspaceWithPages('guren-cli-page-list-', [
+      'Home.tsx',
+      'Legacy.jsx',
+      'Plain.ts',
+      'Script.js',
+    ])
+    try {
+      expect(await listInertiaPageIds(workspace.dir)).toEqual(['Home', 'Legacy'])
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })
 

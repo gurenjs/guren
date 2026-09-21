@@ -2,6 +2,7 @@ import { readdir } from 'node:fs/promises'
 import { dirname, extname, relative, resolve } from 'node:path'
 import { API_ONLY_EVIDENCE, isConfirmedApiOnlyApp } from './app-surface'
 import { fileExists } from './discovery'
+import { PAGE_COMPONENT_EXTENSIONS } from './inertia-pages'
 import { DEFAULT_ROUTES_FILE } from './route-registrar'
 import { resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { extractPageProps, type ExtractedPageProps } from './page-props-extractor'
@@ -22,7 +23,6 @@ export interface GeneratePageTypesOptions extends WriterOptions {
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
 /** The manifest's path, for everything that reports on it rather than writes it. */
 export const PAGES_MANIFEST_FILE = '.guren/pages.gen.ts'
-const PAGE_COMPONENT_EXTENSIONS = new Set(['.tsx', '.jsx'])
 
 /** Where the pages live and where the manifest goes, as `--pages` / `--pages-out` set them. */
 interface PagePathOptions {

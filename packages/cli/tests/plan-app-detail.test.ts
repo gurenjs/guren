@@ -265,6 +265,23 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.validators).toContainEqual({ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null })
   })
 
+  test('should carry the component file of a renderable page and skip a .ts sibling', async () => {
+    const component = 'export default function Page() { return null }\n'
+    const detail = await detailOf('pages', {
+      'src/app.ts': entry('{ routes: registerWebRoutes }'),
+      'resources/js/pages/posts/Index.tsx': component,
+      'resources/js/pages/posts/Legacy.jsx': component,
+      // Neither the client glob nor pages.gen.ts registers these, so they are not pages.
+      'resources/js/pages/posts/Helpers.ts': 'export const columns = []\n',
+      'resources/js/pages/posts/Script.js': 'export const noop = () => {}\n',
+    })
+
+    expect(detail.pages).toEqual([
+      { id: 'posts/Index', file: 'resources/js/pages/posts/Index.tsx', props: expect.anything() },
+      { id: 'posts/Legacy', file: 'resources/js/pages/posts/Legacy.jsx', props: expect.anything() },
+    ])
+  })
+
   test('should report the validators unreadable when a file outside a barrel re-exports everything', async () => {
     const detail = await detailOf('starexport', {
       'src/app.ts': entry('{ routes: registerWebRoutes }'),
