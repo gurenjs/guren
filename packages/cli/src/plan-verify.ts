@@ -45,7 +45,8 @@ export interface PlanVerifyFileOptions {
 
 export async function planVerifyFile(planPath: string, options: PlanVerifyFileOptions): Promise<PlanVerifyReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
-  const loadApp = typeof options.app === 'function' ? options.app : async (): Promise<PlanAppState> => options.app as PlanAppState
+  const app = options.app
+  const loadApp = typeof app === 'function' ? app : async () => app
   const root = options.appRoot
   // Read once for what the derivation needs; the status the steps are judged against is read again after codegen.
   const derivation = derivePlanTasks(plan, { apiOnly: (await loadApp()).apiOnly })
@@ -58,6 +59,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   if (options.step === undefined) {
     // A whole-plan run redoes nothing that stands: the `tests` step must fail before its
     // implementation and cannot pass again once the `http` step has made the tests pass.
+    // The record lives in this checkout only, so a fresh one has nothing to keep.
     const records = before.state?.steps ?? {}
     const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
     stepIds = planStepIds(derivation).filter((id) => {

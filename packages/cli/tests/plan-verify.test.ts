@@ -8,7 +8,7 @@ import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { planDigest, planSlug, PLAN_STATE_VERSION, readPlanState, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
 import { judgePlan, summarize, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
-import { applyVerification, hashFiles, sha256 } from '../src/plan/verification'
+import { applyVerification, hashFiles, recordStillHolds, sha256 } from '../src/plan/verification'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
 import type { CapturedExec, CapturedRun } from '../src/subprocess'
 import { loadCommentsPlan, planAppState } from './plan-fixture'
@@ -119,6 +119,12 @@ function verifier(status: PlanStatus, fake: FakeExec, overrides: Partial<PlanVer
   })
 }
 
+function elementOf(status: PlanStatus<PlanElementStatus['state'] | 'verified' | 'waived'>, id: string): PlanElementStatus<PlanElementStatus['state'] | 'verified' | 'waived'> {
+  const found = status.elements.find((element) => element.id === id)
+  if (!found) throw new Error(`no element ${id}`)
+  return found
+}
+
 function commandsOf(step: PlanStepVerification): Record<string, string> {
   return Object.fromEntries(step.record.commands.map((command) => [command.command, command.status]))
 }
@@ -179,6 +185,38 @@ describe('PlanVerifier', () => {
 
     expect(step.record.outcome).toBe('incomplete')
     expect(step.record.incomplete).toEqual(['action.comments.destroy: planned', 'route.comments.store: present', 'policy.comment: not judged by plan:status'])
+  })
+
+  test('should ask for the status once, after the first codegen has run', async () => {
+    const fake = fakeExec()
+    const askedAfter: string[][] = []
+    const run = verifier(statusOf(), fake, {
+      status: async () => {
+        askedAfter.push(...fake.calls)
+        return statusOf()
+      },
+    })
+
+    await run.verify(DATA)
+    await run.verify(PAGES)
+
+    expect(askedAfter.filter((call) => call[2] === 'codegen')).toHaveLength(1)
+    expect(askedAfter.length).toBeGreaterThan(0)
+    expect(askedAfter.length).toBe(new Set(askedAfter).size)
+  })
+
+  test('should record the tests command blocked, not throw, when the test spawn itself rejects', async () => {
+    const fake = fakeExec()
+    const rejecting: CapturedExec = async (command, cwd, options) => {
+      if (command[1] === 'test') throw new Error('spawn bun ENOENT')
+      return fake.exec(command, cwd, options)
+    }
+
+    const step = await verifier(statusOf(), { exec: rejecting, calls: fake.calls }).verify(HTTP)
+
+    expect(step.record.outcome).toBe('blocked')
+    expect(commandOf(step, 'tests')).toMatchObject({ status: 'blocked', reason: 'could not run: spawn bun ENOENT' })
+    expect(step.record.acceptance.map((behaviour) => behaviour.status)).toEqual(['pending', 'pending', 'pending', 'pending'])
   })
 
   test('should verify an unjudged element on its commands and behaviours alone', async () => {
@@ -251,6 +289,7 @@ describe('PlanVerifier', () => {
       ['check', 'blocked', '`bun run codegen` did not pass, so this did not run'],
       ['tests', 'blocked', '`bun run codegen` did not pass, so this did not run'],
     ])
+    expect(step.record.incomplete).toEqual([])
     expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
   })
 
@@ -369,6 +408,11 @@ describe('PlanVerifier', () => {
   })
 })
 
+const FINGERPRINT: PlanStepRecord['fingerprint'] = {
+  files: { 'db/schema.ts': sha256(FILES['db/schema.ts']!), 'app/Models/Comment.ts': sha256(FILES['app/Models/Comment.ts']!) },
+  environment: { runtime: 'bun 1.3.14', platform: 'darwin', arch: 'arm64', hostname: 'h' },
+}
+
 function record(overrides: Partial<PlanStepRecord> = {}): PlanStepRecord {
   return {
     outcome: 'verified',
@@ -378,7 +422,7 @@ function record(overrides: Partial<PlanStepRecord> = {}): PlanStepRecord {
     commands: [],
     acceptance: [],
     incomplete: [],
-    fingerprint: { files: { 'db/schema.ts': sha256(FILES['db/schema.ts']!), 'app/Models/Comment.ts': sha256(FILES['app/Models/Comment.ts']!) }, environment: { runtime: 'bun 1.3.14', platform: 'darwin', arch: 'arm64', hostname: 'h' } },
+    fingerprint: FINGERPRINT,
     ...overrides,
   }
 }
@@ -405,34 +449,49 @@ describe('applyVerification', () => {
 
     const { status } = applyVerification(statusOf(), derivation, { [DATA]: record() }, 'digest', hashes)
 
-    const column = status.elements.find((element) => element.id === 'column.comment.id')!
+    const column = elementOf(status, 'column.comment.id')
     expect(column.state).toBe('drifted')
     expect(column.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}; changed since: db/schema.ts.`])
   })
 
   test('should treat a file unreadable now, or unreadable when it was recorded, as a change', async () => {
     const hashes = await hashFiles(ROOT, [...DATA_FILES, 'db/missing.ts'])
-    const withMissing = record({ fingerprint: { ...record().fingerprint, files: { ...record().fingerprint.files, 'db/missing.ts': 'abc' } } })
-    const recordedNull = record({ fingerprint: { ...record().fingerprint, files: { ...record().fingerprint.files, 'db/schema.ts': null } } })
+    const withMissing = record({ fingerprint: { ...FINGERPRINT, files: { ...FINGERPRINT.files, 'db/missing.ts': 'abc' } } })
+    const recordedNull = record({ fingerprint: { ...FINGERPRINT, files: { ...FINGERPRINT.files, 'db/schema.ts': null } } })
 
     const missing = applyVerification(statusOf(), derivation, { [DATA]: withMissing }, 'digest', hashes)
     const unread = applyVerification(statusOf(), derivation, { [DATA]: recordedNull }, 'digest', hashes)
 
-    expect(missing.status.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('drifted')
-    expect(unread.status.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('drifted')
+    expect(elementOf(missing.status, 'column.comment.id').state).toBe('drifted')
+    expect(elementOf(unread.status, 'column.comment.id').state).toBe('drifted')
   })
 
-  test('should lift a drop and an unjudged element, which have no file to cover', async () => {
-    const hashes = await hashFiles(ROOT, DATA_FILES)
-    const status = statusOf({ 'column.comment.id': { files: [] }, 'column.comment.body': { state: 'unjudged', files: [] } })
-    const dropped = status.elements.find((element) => element.id === 'column.comment.id')!
+  test('should lift a drop, and an unjudged element only from a step with behaviours', async () => {
+    const hashes = await hashFiles(ROOT, [...DATA_FILES, 'tests/comments.test.ts'])
+    const status = statusOf({ 'column.comment.id': { files: [] }, 'column.comment.body': { state: 'unjudged', files: [] }, 'action.comments.store': { state: 'unjudged', files: [] } })
+    const dropped = elementOf(status, 'column.comment.id')
     dropped.change = 'drop'
     dropped.completesAt = 'present'
+    const http = record({ fingerprint: { ...FINGERPRINT, files: { 'tests/comments.test.ts': sha256(FILES['tests/comments.test.ts']!) } } })
 
-    const { status: lifted } = applyVerification(status, derivation, { [DATA]: record() }, 'digest', hashes)
+    const { status: lifted } = applyVerification(status, derivation, { [DATA]: record(), [HTTP]: http }, 'digest', hashes)
 
-    expect(lifted.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('verified')
-    expect(lifted.elements.find((element) => element.id === 'column.comment.body')!.state).toBe('verified')
+    expect(elementOf(lifted, 'column.comment.id').state).toBe('verified')
+    expect(elementOf(lifted, 'action.comments.store').state).toBe('verified')
+    const body = elementOf(lifted, 'column.comment.body')
+    expect(body.state).toBe('unjudged')
+    expect(body.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`])
+  })
+
+  test('should let a record stand only while it fingerprinted something that still matches', async () => {
+    const hashes = await hashFiles(ROOT, DATA_FILES)
+
+    expect(recordStillHolds(record(), 'digest', hashes)).toBe(true)
+    expect(recordStillHolds(record({ planDigest: 'older' }), 'digest', hashes)).toBe(false)
+    expect(recordStillHolds(record({ outcome: 'incomplete' }), 'digest', hashes)).toBe(false)
+    expect(recordStillHolds(record({ fingerprint: { ...FINGERPRINT, files: {} } }), 'digest', hashes)).toBe(false)
+    expect(recordStillHolds(record({ fingerprint: { ...FINGERPRINT, files: { ...FINGERPRINT.files, 'db/schema.ts': null } } }), 'digest', hashes)).toBe(false)
+    expect(recordStillHolds(record(), 'digest', new Map([...hashes, ['db/schema.ts', 'other']]))).toBe(false)
   })
 
   test('should lift nothing of an element the fingerprint does not cover', async () => {
@@ -442,13 +501,13 @@ describe('applyVerification', () => {
 
     const unfingerprinted = applyVerification(noFiles, derivation, { [DATA]: record() }, 'digest', hashes)
     const moved = applyVerification(elsewhere, derivation, { [DATA]: record() }, 'digest', hashes)
-    const empty = applyVerification(statusOf(), derivation, { [DATA]: record({ fingerprint: { ...record().fingerprint, files: {} } }) }, 'digest', hashes)
+    const empty = applyVerification(statusOf(), derivation, { [DATA]: record({ fingerprint: { ...FINGERPRINT, files: {} } }) }, 'digest', hashes)
 
-    const column = unfingerprinted.status.elements.find((element) => element.id === 'column.comment.id')!
+    const column = elementOf(unfingerprinted.status, 'column.comment.id')
     expect(column.state).toBe('present')
     expect(column.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`])
-    expect(unfingerprinted.status.elements.find((element) => element.id === 'model.comment')!.state).toBe('verified')
-    const movedColumn = moved.status.elements.find((element) => element.id === 'column.comment.id')!
+    expect(elementOf(unfingerprinted.status, 'model.comment').state).toBe('verified')
+    const movedColumn = elementOf(moved.status, 'column.comment.id')
     expect(movedColumn.state).toBe('drifted')
     expect(movedColumn.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}; now in a file that run did not fingerprint: modules/billing/db/schema.ts.`])
     expect(empty.status.summary.states.verified).toBe(0)
@@ -459,7 +518,7 @@ describe('applyVerification', () => {
 
     const { status, staleSteps } = applyVerification(statusOf(), derivation, { [DATA]: record({ planDigest: 'older' }) }, 'digest', hashes)
 
-    expect(status.elements.find((element) => element.id === 'column.comment.id')!.state).toBe('present')
+    expect(elementOf(status, 'column.comment.id').state).toBe('present')
     expect(staleSteps).toEqual([DATA])
   })
 
@@ -470,7 +529,7 @@ describe('applyVerification', () => {
     const lost = applyVerification(statusOf({ 'column.comment.id': { state: 'planned' } }), derivation, { [DATA]: record() }, 'digest', hashes)
 
     expect(failed.status.summary.states.verified).toBe(0)
-    const column = lost.status.elements.find((element) => element.id === 'column.comment.id')!
+    const column = elementOf(lost.status, 'column.comment.id')
     expect(column.state).toBe('planned')
     expect(column.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, and no longer at the state that completes it.`])
   })

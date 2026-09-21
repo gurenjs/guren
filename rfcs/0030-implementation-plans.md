@@ -955,10 +955,14 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   the step `failed` whatever else was `blocked`, since there is then something
   of the implementation's to fix.
 - A whole-plan run (no `--step`) leaves alone a step whose record is `verified`
-  against this plan digest and whose fingerprint still matches, and reports it
-  as skipped. That is what lets the `tests` step stand: it must see the tests
-  fail before the implementation exists, and cannot pass again once the `http`
-  step has made them pass.
+  against this plan digest, fingerprinted something, and whose fingerprint still
+  matches, and reports it as skipped; a record that fingerprinted nothing is
+  redone, or the step would be skipped forever. That is what lets the `tests`
+  step stand in the checkout that ran it: it must see the tests fail before the
+  implementation exists, and cannot pass again once the `http` step has made
+  them pass. The record is git-ignored, so a fresh checkout has nothing to keep
+  and its whole-plan `--ci` reports the `tests` step `failed`; whole-plan `--ci`
+  is the incremental loop's (§7), not a fresh checkout's.
 - A step is `verified` when every command passed *and* every element it owns is
   at the state its kind completes at (`wired` where it has a mount point,
   `present` otherwise and for every `drop`, or `unjudged`); the behaviours are
@@ -1008,9 +1012,12 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   once one does not or cannot be read, or once the element sits in a file that
   run did not fingerprint, naming the files. An element that exists in files
   none of which the record covers is not lifted, with a note: a verification
-  nothing could expire is not one. A `drop` and an `unjudged` element have no
-  file to cover and are lifted on the step alone, since the readers re-read
-  their absence on every status. An element the code has since lost keeps what
+  nothing could expire is not one. A `drop` has no file to cover and is lifted
+  on the step alone, since the readers re-read its absence on every status. An
+  `unjudged` element is verified on its step's behaviours, whose test files the
+  record covers, so it is lifted only from a step that has behaviours; a
+  `commands` step has none, and its elements stay `unjudged` with a note. An
+  element the code has since lost keeps what
   the readers say, with a note. For that the status report carries each
   element's `files` and `completesAt`, and its summary counts all eight states.
 - The per-step metrics of §7 (`total_cost_usd`, continuations, files touched,

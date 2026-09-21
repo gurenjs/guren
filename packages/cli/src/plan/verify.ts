@@ -41,8 +41,8 @@ export interface PlanVerifierOptions {
   /** What every record of this verifier names as the plan it ran against. */
   planDigest: string
   /**
-   * The plan's status, asked for once, after the first step's `codegen` has run: judged
-   * earlier it reads a tree with no generated files, which `blocked`s what imports them.
+   * The plan's status, asked for once, after the first verified step's `codegen` has run:
+   * judged earlier it reads a tree with no generated files, which blocks what imports them.
    */
   status: () => Promise<PlanStatus>
   exec: CapturedExec
@@ -112,7 +112,7 @@ export async function acceptanceTestFiles(root: string, files: readonly string[]
   return matched.sort()
 }
 
-/** A failed command is the implementation's whatever else was blocked, so it names the outcome first. */
+/** A failed command leaves the implementation something to fix whatever else was blocked, so it names the outcome. */
 function stepOutcome(commands: readonly PlanCommandRecord[], incomplete: readonly string[]): PlanStepRecord['outcome'] {
   if (commands.some((command) => command.status === 'fail')) return 'failed'
   if (commands.some((command) => command.status === 'blocked')) return 'blocked'
@@ -153,6 +153,15 @@ function notFailing(ids: readonly string[], behaviours: readonly AcceptanceBehav
   return findings
 }
 
+function memoized<T>(store: Map<string, Promise<T>>, key: string, create: () => Promise<T>): Promise<T> {
+  let pending = store.get(key)
+  if (!pending) {
+    pending = create()
+    store.set(key, pending)
+  }
+  return pending
+}
+
 interface TestSelection {
   /** App-relative, sorted: what `bun test` is given. */
   files: string[]
@@ -179,7 +188,7 @@ export class PlanVerifier {
   private readonly check: () => Promise<CheckReport>
   private readonly testFiles: () => Promise<string[]>
   private readonly now: () => Date
-  private statusPromise: Promise<Map<string, PlanElementStatus>> | undefined
+  private judged: Promise<{ status: PlanStatus; elements: Map<string, PlanElementStatus> }> | undefined
   private testFilesPromise: Promise<string[]> | undefined
 
   constructor(
@@ -195,17 +204,12 @@ export class PlanVerifier {
 
   /** The status the steps were judged against, or a fresh judgement when none ran. */
   status(): Promise<PlanStatus> {
-    return this.elements().then((elements) => ({ elements: [...elements.values()], summary: this.summary! }))
+    return this.load().then((judged) => judged.status)
   }
 
-  private summary: PlanStatus['summary'] | undefined
-
-  private elements(): Promise<Map<string, PlanElementStatus>> {
-    this.statusPromise ??= this.options.status().then((status) => {
-      this.summary = status.summary
-      return new Map(status.elements.map((element) => [element.id, element]))
-    })
-    return this.statusPromise
+  private load(): Promise<{ status: PlanStatus; elements: Map<string, PlanElementStatus> }> {
+    this.judged ??= this.options.status().then((status) => ({ status, elements: new Map(status.elements.map((element) => [element.id, element])) }))
+    return this.judged
   }
 
   async verify(stepId: string): Promise<PlanStepVerification> {
@@ -223,7 +227,7 @@ export class PlanVerifier {
 
   private async runStep(step: PlanDerivedStep): Promise<Omit<PlanStepRecord, 'planDigest' | 'ranAt' | 'durationMs'>> {
     const commands = await this.runCommands(step)
-    const elements = await this.elements()
+    const { elements } = await this.load()
 
     // An owned id the status did not judge can never verify: listing it keeps a new section from reading as green.
     const incomplete: string[] = []
@@ -242,10 +246,13 @@ export class PlanVerifier {
       environment: currentEnvironment(),
     }
 
-    const report = (await this.outcomes.get(this.testKey(step)))?.report
+    // Peeked, never asked for: asking would spawn `bun test` for a step whose tests command was blocked.
+    const report = (await this.outcomes.get(this.testKey(step))?.catch(() => undefined))?.report
     const behaviours = report?.state === 'judged' ? report.behaviours : []
     const acceptance = step.acceptanceIds.map((id) => ({ id, status: behaviours.find((behaviour) => behaviour.id === id)?.status ?? ('pending' as const) }))
-    return { outcome: stepOutcome(commands, incomplete), commands, acceptance, incomplete, fingerprint }
+    const outcome = stepOutcome(commands, incomplete)
+    // A status judged behind a failed command would blame the code for what that command left unwritten.
+    return { outcome, commands, acceptance, incomplete: outcome === 'failed' || outcome === 'blocked' ? [] : incomplete, fingerprint }
   }
 
   /**
@@ -255,27 +262,22 @@ export class PlanVerifier {
    */
   private async runCommands(step: PlanDerivedStep): Promise<PlanCommandRecord[]> {
     const commands: PlanCommandRecord[] = []
-    let stopped: PlanCommandRecord | undefined
+    let stoppedBy: string | undefined
     for (const command of step.verify) {
-      if (stopped) {
-        commands.push({ command, label: command, status: 'blocked', reason: `\`${stopped.label}\` did not pass, so this did not run`, durationMs: 0, findings: [] })
+      if (stoppedBy !== undefined) {
+        commands.push({ command, label: 'not run', status: 'blocked', reason: `\`${stoppedBy}\` did not pass, so this did not run`, durationMs: 0, findings: [] })
         continue
       }
       const record = await this.command(command, step)
       commands.push(record)
-      if (command === 'codegen' && record.status !== 'pass') stopped = record
+      if (command === 'codegen' && record.status !== 'pass') stoppedBy = record.label
     }
     return commands
   }
 
   private command(command: PlanVerifyCommand, step: PlanDerivedStep): Promise<PlanCommandRecord> {
     const key = command === 'tests' || command === 'tests:fail' ? `${command}:${this.testKey(step)}` : command
-    let pending = this.commands.get(key)
-    if (!pending) {
-      pending = this.runCommand(command, step)
-      this.commands.set(key, pending)
-    }
-    return pending
+    return memoized(this.commands, key, () => this.runCommand(command, step))
   }
 
   private async runCommand(command: PlanVerifyCommand, step: PlanDerivedStep): Promise<PlanCommandRecord> {
@@ -349,13 +351,7 @@ export class PlanVerifier {
   }
 
   private selection(step: PlanDerivedStep): Promise<TestSelection> {
-    const key = this.testKey(step)
-    let pending = this.selections.get(key)
-    if (!pending) {
-      pending = this.selectTests(step)
-      this.selections.set(key, pending)
-    }
-    return pending
+    return memoized(this.selections, this.testKey(step), () => this.selectTests(step))
   }
 
   private async selectTests(step: PlanDerivedStep): Promise<TestSelection> {
@@ -366,13 +362,7 @@ export class PlanVerifier {
 
   /** The one run over the step's files, memoized as a promise so two commands on one key share it. */
   private outcome(step: PlanDerivedStep): Promise<TestOutcome> {
-    const key = this.testKey(step)
-    let pending = this.outcomes.get(key)
-    if (!pending) {
-      pending = this.selection(step).then((selection) => this.runTests(selection))
-      this.outcomes.set(key, pending)
-    }
-    return pending
+    return memoized(this.outcomes, this.testKey(step), () => this.selection(step).then((selection) => this.runTests(selection)))
   }
 
   /**

@@ -226,15 +226,27 @@ describe('plan:verify', () => {
     expect(whole.steps.map((step) => step.stepId)).toEqual(['task/entity/model.comment/scaffold', 'task/entity/model.comment/tests', HTTP, 'task/entity/model.comment/pages'])
     await writeFile(join(app, 'db/schema.ts'), `${SCHEMA}\n// touched twice\n`, 'utf8')
     const redone = await verify(plan, app)
-    // The scaffold and pages steps verified in the run before and still stand; the data step is redone.
-    expect(redone.skipped).toEqual(['task/entity/model.comment/scaffold', 'task/entity/model.comment/pages'])
-    expect(redone.steps.map((step) => step.stepId)).toContain(DATA)
+    // The pages step verified in the run before and still stands; the scaffold step fingerprinted nothing and is redone with the data step.
+    expect(redone.skipped).toEqual(['task/entity/model.comment/pages'])
+    expect(redone.steps.map((step) => step.stepId)).toEqual(expect.arrayContaining([DATA, 'task/entity/model.comment/scaffold']))
 
     const revised = await writePlan('lift-revised.plan.json', { ...loadCommentsPlan(), title: 'Revised' })
     await writeFile(join(app, '.guren/plans/lift-revised.state.json'), JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [DATA]: record } }), 'utf8')
     const stale = await status(revised, app)
     expect(stale.verification).toEqual({ stateFile: '.guren/plans/lift-revised.state.json', staleSteps: [DATA] })
     expect(stale.summary.states.verified).toBe(0)
+  })
+
+  test('should say when it replaced a state file it could not read', async () => {
+    const app = await createApp('corrupt')
+    const plan = await writePlan('corrupt.plan.json')
+    await mkdir(join(app, '.guren/plans'), { recursive: true })
+    await writeFile(join(app, '.guren/plans/corrupt.state.json'), '{', 'utf8')
+
+    const result = await verify(plan, app, '--step', HTTP)
+
+    expect(result.verification.unreadable).toMatch(/is not valid JSON.*; this run replaced it, and its other records are gone$/s)
+    expect(Object.keys(JSON.parse(await readFile(join(app, '.guren/plans/corrupt.state.json'), 'utf8')).steps)).toEqual([HTTP])
   })
 
   test('should refuse a step the plan does not derive, naming the ones it does', async () => {

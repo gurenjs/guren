@@ -21,7 +21,7 @@ import { PLAN_VERIFY_COMMANDS } from './tasks'
 export const PLAN_STATE_VERSION = 1
 
 /** Where state lives under the application root. `plan:verify` writes the `.gitignore` there. */
-export const PLAN_STATE_DIR = '.guren/plans'
+const PLAN_STATE_DIR = '.guren/plans'
 
 const PlanCommandRecordSchema = z.object({
   command: z.enum(PLAN_VERIFY_COMMANDS),

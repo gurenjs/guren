@@ -47,7 +47,7 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
   const head = {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
-  } satisfies Partial<PlanStatusReport>
+  } satisfies Pick<PlanStatusReport, 'reportVersion' | 'plan'>
   if (options.appRoot === undefined) return { ...head, ...status }
   const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }))
   return { ...head, ...overlaid.status, verification: overlaid.verification }

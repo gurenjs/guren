@@ -43,10 +43,10 @@ export interface PlanVerificationSummary {
 
 /**
  * An element its step verified is `verified` while every fingerprinted file still hashes
- * the same, and `drifted` once one does not or cannot be read. Lifted: an element at its
- * completion state or `unjudged`, and one that exists in files only when the record covers
- * them, since a result nothing could expire is not one; a `drop` and an `unjudged` element
- * have no file, the readers re-reading their absence. A record of another digest is stale.
+ * the same, `drifted` once one does not or cannot be read. Lifted: an element at its
+ * completion state or `unjudged`; one existing in files only when the record covers them,
+ * since a result nothing could expire is not one. A `drop` has no file, its absence re-read
+ * per status; an `unjudged` element rests on its step's behaviours, so it needs a step with some.
  */
 export function applyVerification(
   status: PlanStatus,
@@ -67,15 +67,13 @@ export function applyVerification(
         continue
       }
       const recorded = record.fingerprint.files
-      const changed = Object.entries(recorded)
-        .filter(([file, hash]) => hash === null || hashes.get(file) !== hash)
-        .map(([file]) => file)
+      const changed = changedFiles(record, hashes)
       const verifiedBy = `Verified ${record.ranAt} by ${step.id}`
       for (const id of step.elementIds) {
         const element = lifted.get(id)
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
-        const fileless = element.change === 'drop' || element.state === 'unjudged'
+        const fileless = element.change === 'drop' || (element.state === 'unjudged' && step.acceptanceIds.length > 0)
         if (!awaitsVerification(element)) {
           element.notes.push(`${verifiedBy}, and no longer at the state that completes it.`)
         } else if (element.files.length === 0 && !fileless) {
@@ -126,8 +124,19 @@ export async function overlayVerification(
   }
 }
 
-/** Whether a verified record still stands: same plan, and every fingerprinted file hashing as it did. */
+/** Fingerprinted files whose hash differs from the record's; one recorded unreadable never matches. */
+function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string | null>): string[] {
+  return Object.entries(record.fingerprint.files)
+    .filter(([file, hash]) => hash === null || hashes.get(file) !== hash)
+    .map(([file]) => file)
+}
+
+/**
+ * Whether a verified record still stands: same plan, something fingerprinted, and every
+ * fingerprinted file hashing as it did. An empty fingerprint never holds, or the step
+ * would be skipped forever.
+ */
 export function recordStillHolds(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>): boolean {
   if (record.outcome !== 'verified' || record.planDigest !== digest) return false
-  return Object.entries(record.fingerprint.files).every(([file, hash]) => hash !== null && hashes.get(file) === hash)
+  return Object.keys(record.fingerprint.files).length > 0 && changedFiles(record, hashes).length === 0
 }
