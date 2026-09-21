@@ -129,7 +129,8 @@ describe('plan:verify', () => {
 
   afterEach(() => {
     log.mockClear()
-    process.exitCode = undefined
+    // Bun ignores `process.exitCode = undefined`, and a leaked 1 from the --ci test fails the whole run.
+    process.exitCode = 0
   })
 
   afterAll(() => {
