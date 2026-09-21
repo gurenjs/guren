@@ -137,7 +137,7 @@ function statusOf(cases: readonly AcceptanceCase[]): AcceptanceStatus {
  * whole and literally, which is what keeps `AC-comments-1` out of `[AC-comments-10]`
  * and a `.` in an id from matching any character.
  */
-function bracketedTokens(text: string): string[] {
+export function bracketedTokens(text: string): string[] {
   const tokens: string[] = []
   let open = -1
   for (let index = text.indexOf('['); index !== -1 && index < text.length; index++) {

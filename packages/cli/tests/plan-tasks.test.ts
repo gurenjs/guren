@@ -255,10 +255,10 @@ describe('derivePlanTasks', () => {
             dependsOn: [],
             steps: [
               { id: `${slice}/scaffold`, kind: 'scaffold', elementIds: [], generates: ['model.comment', ...columns, ...http], acceptanceIds: [], verify: ['codegen', 'typecheck'] },
-              { id: `${slice}/tests`, kind: 'tests', elementIds: [], generates: [], acceptanceIds: behaviours, verify: ['tests:fail'] },
-              { id: `${slice}/data`, kind: 'data', elementIds: ['model.post', 'model.comment', ...columns], generates: [], acceptanceIds: [], verify: ['db:migrate', 'typecheck'] },
-              { id: `${slice}/http`, kind: 'http', elementIds: http, generates: [], acceptanceIds: behaviours, verify: ['check', 'codegen', 'tests'] },
-              { id: `${slice}/pages`, kind: 'pages', elementIds: ['view.posts.show'], generates: [], acceptanceIds: [], verify: ['typecheck', 'check'] },
+              { id: `${slice}/tests`, kind: 'tests', elementIds: [], generates: [], acceptanceIds: behaviours, verify: ['codegen', 'tests:fail'] },
+              { id: `${slice}/data`, kind: 'data', elementIds: ['model.post', 'model.comment', ...columns], generates: [], acceptanceIds: [], verify: ['codegen', 'db:migrate', 'typecheck'] },
+              { id: `${slice}/http`, kind: 'http', elementIds: http, generates: [], acceptanceIds: behaviours, verify: ['codegen', 'check', 'tests'] },
+              { id: `${slice}/pages`, kind: 'pages', elementIds: ['view.posts.show'], generates: [], acceptanceIds: [], verify: ['codegen', 'typecheck', 'check'] },
             ],
           },
         ],
@@ -328,7 +328,7 @@ describe('derivePlanTasks', () => {
       expect(foundation.dependsOn).toEqual([])
       expect(foundation.steps.map((step) => [step.kind, step.elementIds, step.verify])).toEqual([
         ['commands', ['command.attachments'], ['codegen', 'typecheck']],
-        ['http', ['validator.page'], ['check', 'codegen', 'tests']],
+        ['http', ['validator.page'], ['codegen', 'check', 'tests']],
       ])
       for (const other of result.tasks.slice(1)) expect(other.dependsOn, other.id).toContain(FOUNDATION_TASK_ID)
       expect(result.notes).toEqual([])
@@ -570,9 +570,9 @@ describe('derivePlanTasks', () => {
       expect(story.dependsOn).toEqual(['task/entity/model.comment'])
       // Nothing is implemented after these tests, so they must pass rather than fail first.
       expect(story.steps.map((step) => [step.kind, step.acceptanceIds, step.verify])).toEqual([
-        ['tests', ['AC-moderation-1'], ['tests']],
+        ['tests', ['AC-moderation-1'], ['codegen', 'tests']],
       ])
-      expect(stepsOfKind(result, COMMENT_SLICE, 'tests')[0].verify).toEqual(['tests:fail'])
+      expect(stepsOfKind(result, COMMENT_SLICE, 'tests')[0].verify).toEqual(['codegen', 'tests:fail'])
       expect(result.notes.map((note) => [note.kind, note.ids])).toEqual([['intent-story', ['task.moderation']]])
     })
 
@@ -614,8 +614,8 @@ describe('derivePlanTasks', () => {
 
       expect(task(result, 'task/entity/model.tag').steps.map((step) => [step.kind, step.acceptanceIds, step.verify])).toEqual([
         ['scaffold', [], ['codegen', 'typecheck']],
-        ['tests', ['AC-tags-1'], ['tests:fail']],
-        ['data', ['AC-tags-1'], ['db:migrate', 'typecheck', 'tests']],
+        ['tests', ['AC-tags-1'], ['codegen', 'tests:fail']],
+        ['data', ['AC-tags-1'], ['codegen', 'db:migrate', 'typecheck', 'tests']],
       ])
     })
 
@@ -627,8 +627,8 @@ describe('derivePlanTasks', () => {
       })
 
       expect(task(result, 'task/entity/model.tag').steps.map((step) => [step.kind, step.acceptanceIds, step.verify])).toEqual([
-        ['tests', ['AC-tags-1'], ['tests:fail']],
-        ['pages', ['AC-tags-1'], ['typecheck', 'check', 'tests']],
+        ['tests', ['AC-tags-1'], ['codegen', 'tests:fail']],
+        ['pages', ['AC-tags-1'], ['codegen', 'typecheck', 'check', 'tests']],
       ])
     })
 
@@ -646,7 +646,7 @@ describe('derivePlanTasks', () => {
     test('should not add the tests to a step that carries no behaviour', () => {
       const result = deriveFrom({ models: [model('Tag')] })
 
-      expect(stepsOfKind(result, 'task/entity/model.tag', 'data')[0].verify).toEqual(['db:migrate', 'typecheck'])
+      expect(stepsOfKind(result, 'task/entity/model.tag', 'data')[0].verify).toEqual(['codegen', 'db:migrate', 'typecheck'])
     })
   })
 
