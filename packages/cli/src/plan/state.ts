@@ -164,22 +164,30 @@ export async function listPlanStates(appRoot: string): Promise<Array<PlanStateRe
 }
 
 /**
+ * The state directory with a `.gitignore` that ignores the state files and itself, so nothing
+ * here is ever untracked: a file that does not ignore itself reads as a dirty tree. The line is
+ * appended to one that lacks it, exact-line matching, so a pattern someone added beside it stays.
+ */
+export async function ensurePlanStateIgnored(appRoot: string): Promise<void> {
+  const dir = join(appRoot, PLAN_STATE_DIR)
+  await mkdir(dir, { recursive: true })
+  const ignore = join(dir, '.gitignore')
+  const current = await readFile(ignore, 'utf8').catch(() => undefined)
+  if (current === undefined) await writeFile(ignore, PLAN_STATE_GITIGNORE, 'utf8')
+  else if (!current.split('\n').includes('.gitignore')) await writeFile(ignore, `${current.replace(/\n?$/u, '\n')}.gitignore\n`, 'utf8')
+}
+
+/**
  * Read-modify-write of one slug's state. A state file that would not read is replaced
  * whole: its records were written against other code, and keeping them beside a fresh one
- * would let the unreadable half pass for verified on a later read. The `.gitignore` written
- * beside it ignores itself too, so a verify leaves the working tree as clean as it found it.
+ * would let the unreadable half pass for verified on a later read.
  */
 async function updatePlanState(appRoot: string, slug: string, mutate: (state: PlanState) => void): Promise<string> {
   const read = await readPlanState(appRoot, slug)
   const state: PlanState = read.state ?? { stateVersion: PLAN_STATE_VERSION, steps: {} }
   mutate(state)
 
-  const dir = join(appRoot, PLAN_STATE_DIR)
-  await mkdir(dir, { recursive: true })
-  const ignore = join(dir, '.gitignore')
-  // Rewritten when it does not ignore itself: an earlier write left it untracked, which would read as a dirty tree.
-  const current = await readFile(ignore, 'utf8').catch(() => '')
-  if (!current.split('\n').includes('.gitignore')) await writeFile(ignore, PLAN_STATE_GITIGNORE, 'utf8')
+  await ensurePlanStateIgnored(appRoot)
   const path = planStatePath(appRoot, slug)
   await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
   return path

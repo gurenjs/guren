@@ -10,6 +10,7 @@
 import { resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
+import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
@@ -80,7 +81,7 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     plan = (await readPlanFile(planPath)).plan
   } catch (error) {
     // The mark outlived its plan: nothing to verify against, and the next plan:next rewrites it.
-    return { block: false, message: `${heading}: ${error instanceof Error ? error.message : String(error)}\nRun \`bunx guren plan:next\` again once the plan is back.` }
+    return { block: false, message: `${heading}: ${error instanceof Error ? error.message : String(error)}\nRun \`bunx guren plan:next ${active.plan}\` again once the plan is back.` }
   }
   const digest = planDigest(plan)
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false) })
@@ -90,14 +91,15 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     return { block: false, message: `${heading}: the plan no longer derives this step, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` for the next one.` }
   }
   const record = records[active.step]
-  if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)), step)) return { block: false }
+  if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)))) return { block: false }
 
   let report: PlanVerifyReport
   try {
     report = await (deps.verify ?? defaultVerify)(planPath, appRoot, active.step)
   } catch (error) {
     // A run that could not judge the step is not a reason to hold the session: the hook says so and lets it stop.
-    return { block: false, message: `${heading}: could not verify the step: ${error instanceof Error ? error.message : String(error)}` }
+    const reason = error instanceof CliError ? error.message : error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    return { block: false, message: `${heading}: could not verify the step: ${reason}` }
   }
   const verification = report.steps.find((candidate) => candidate.stepId === active.step)
   if (!verification) return { block: false, message: `${heading}: the run did not cover the step.` }
@@ -128,7 +130,7 @@ export async function planStopHookFindings(appRoot: string, input: PlanStopHookI
   const messages: string[] = []
   let block = false
   for (const { slug, state, unreadable } of await listPlanStates(appRoot)) {
-    if (unreadable) messages.push(`plan:verify on stop: ${unreadable}\nThe next plan:verify replaces it, and its mark is gone: run \`bunx guren plan:next\` again.`)
+    if (unreadable) messages.push(`plan:verify on stop: ${unreadable}\nThe next plan:verify replaces it, and its mark is gone: run \`bunx guren plan:next <plan>\` again.`)
     const active = state?.active
     if (!active || active.stalled) continue
     const verdict = await verifyActiveStep(appRoot, slug, state.steps, active, input.stopHookActive, deps)

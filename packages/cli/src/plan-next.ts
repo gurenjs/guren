@@ -16,7 +16,7 @@ import { readPlanFile } from './plan-render'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
-import { planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
+import { ensurePlanStateIgnored, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskTitle } from './plan/tasks'
 import { hashFiles, recordStillHolds } from './plan/verification'
 
@@ -58,7 +58,7 @@ export interface PlanNextFileOptions {
   now?: () => Date
 }
 
-/** The items a section holds; three sections are nested inside another's items. */
+/** The items a section holds; some sections are nested inside another's items. */
 function sectionItems(plan: PlanDraft, section: PlanElementSection): ReadonlyArray<{ id: string }> {
   switch (section) {
     case 'columns':
@@ -89,13 +89,14 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const slug = planSlug(path)
   const state = (await readPlanState(root, slug)).state
   const records = state?.steps ?? {}
+  const previous = state?.active
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
 
   const verified: string[] = []
   let next: { task: PlanDerivedTask; step: PlanDerivedStep } | undefined
   for (const entry of listPlanSteps(derivation)) {
     const record = records[entry.step.id]
-    if (record && recordStillHolds(record, digest, hashes, entry.step)) verified.push(entry.step.id)
+    if (record && recordStillHolds(record, digest, hashes)) verified.push(entry.step.id)
     else next ??= entry
   }
 
@@ -105,14 +106,15 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     verified,
     stateFile: toPosixRelative(root, planStatePath(root, slug)),
   } satisfies Omit<PlanNextReport, 'step'>
-  const previous = state?.active
   if (next === undefined) {
     if (previous) await writePlanActiveStep(root, slug, undefined)
     return { ...head, step: null }
   }
   const { task, step } = next
 
-  // The state is git-ignored, so the mark this call writes never makes the tree dirty.
+  // The state directory is git-ignored before the tree is read, so neither an earlier run's
+  // files nor the mark this call writes make it dirty.
+  await ensurePlanStateIgnored(root)
   const dirty = (await runGit(root, ['status', '--porcelain', '--', '.'])) ?? []
   if (dirty.length > 0 && previous?.step !== step.id) {
     throw new CliError(

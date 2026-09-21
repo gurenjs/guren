@@ -501,21 +501,19 @@ describe('applyVerification', () => {
     expect(body.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`])
   })
 
-  test('should let a record stand only while it fingerprinted something that still matches, or for a step that completes on its commands', async () => {
+  test('should let a record stand while every fingerprinted file still matches, an empty fingerprint on the plan digest alone', async () => {
     const hashes = await hashFiles(ROOT, DATA_FILES)
-    const data = findPlanStep(derivation, DATA)!.step
-    const scaffold = findPlanStep(derivation, 'task/entity/model.comment/scaffold')!.step
     const empty = record({ fingerprint: { ...FINGERPRINT, files: {} } })
 
-    expect(recordStillHolds(record(), 'digest', hashes, data)).toBe(true)
-    expect(recordStillHolds(record({ planDigest: 'older' }), 'digest', hashes, data)).toBe(false)
-    expect(recordStillHolds(record({ outcome: 'incomplete' }), 'digest', hashes, data)).toBe(false)
-    expect(recordStillHolds(empty, 'digest', hashes, data)).toBe(false)
-    expect(recordStillHolds(record({ fingerprint: { ...FINGERPRINT, files: { ...FINGERPRINT.files, 'db/schema.ts': null } } }), 'digest', hashes, data)).toBe(false)
-    expect(recordStillHolds(record(), 'digest', new Map([...hashes, ['db/schema.ts', 'other']]), data)).toBe(false)
-    // A scaffold step owns no file and no behaviour: its record can only be empty, and stands until the plan changes.
-    expect(recordStillHolds(empty, 'digest', hashes, scaffold)).toBe(true)
-    expect(recordStillHolds({ ...empty, planDigest: 'older' }, 'digest', hashes, scaffold)).toBe(false)
+    expect(recordStillHolds(record(), 'digest', hashes)).toBe(true)
+    expect(recordStillHolds(record({ planDigest: 'older' }), 'digest', hashes)).toBe(false)
+    expect(recordStillHolds(record({ outcome: 'incomplete' }), 'digest', hashes)).toBe(false)
+    expect(recordStillHolds(record({ fingerprint: { ...FINGERPRINT, files: { ...FINGERPRINT.files, 'db/schema.ts': null } } }), 'digest', hashes)).toBe(false)
+    expect(recordStillHolds(record(), 'digest', new Map([...hashes, ['db/schema.ts', 'other']]))).toBe(false)
+    // A scaffold step or a drop has nothing to fingerprint: the record stands until the plan changes, or the loop could never end.
+    expect(recordStillHolds(empty, 'digest', hashes)).toBe(true)
+    expect(recordStillHolds({ ...empty, planDigest: 'older' }, 'digest', hashes)).toBe(false)
+    expect(recordStillHolds({ ...empty, outcome: 'incomplete' }, 'digest', hashes)).toBe(false)
   })
 
   test('should lift nothing of an element the fingerprint does not cover', async () => {

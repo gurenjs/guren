@@ -17,7 +17,7 @@ import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
 import { judgePlan } from './plan/status'
-import { derivePlanTasks, findPlanStep, listPlanSteps, planStepIds } from './plan/tasks'
+import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
 import { hashFiles, overlayVerification, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
 import { PlanVerifier, type PlanStepVerification } from './plan/verify'
 import { runCaptured } from './subprocess'
@@ -64,16 +64,14 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     // The record lives in this checkout only, so a fresh one has nothing to keep.
     const records = before.state?.steps ?? {}
     const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
-    stepIds = listPlanSteps(derivation)
-      .filter(({ step }) => {
-        const record = records[step.id]
-        if (record && recordStillHolds(record, digest, hashes, step)) {
-          skipped.push(step.id)
-          return false
-        }
-        return true
-      })
-      .map(({ step }) => step.id)
+    stepIds = planStepIds(derivation).filter((id) => {
+      const record = records[id]
+      if (record && recordStillHolds(record, digest, hashes)) {
+        skipped.push(id)
+        return false
+      }
+      return true
+    })
   } else if (findPlanStep(derivation, options.step)) {
     stepIds = [options.step]
   } else {

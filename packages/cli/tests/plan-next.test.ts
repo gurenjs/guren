@@ -80,11 +80,11 @@ describe('plan:next', () => {
     expect(report.step!.generates).toContain('model.comment')
     expect(report.stateFile).toBe('.guren/plans/comments.state.json')
     expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0 })
-    // The mark's `.gitignore` ignores itself, so a plan loop leaves no untracked file behind; one that does not is rewritten.
+    // The mark's `.gitignore` ignores itself, so a plan loop leaves no untracked file behind; one that does not gains the line.
     expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n.gitignore\n')
-    await writeFile(join(app, '.guren/plans/.gitignore'), '*.state.json\n', 'utf8')
+    await writeFile(join(app, '.guren/plans/.gitignore'), '*.state.json\nnotes/', 'utf8')
     await planNextFile(plan, { appRoot: app, now: NOW })
-    expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n.gitignore\n')
+    expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\nnotes/\n.gitignore\n')
 
     const again = await planNextFile(plan, { appRoot: app, now: NOW })
     expect(again.step!.id).toBe(SCAFFOLD)
@@ -114,14 +114,13 @@ describe('plan:next', () => {
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
   })
 
-  test('should count a scaffold step done on its record alone, which fingerprints nothing', async () => {
+  test('should count a step done on a verified record that fingerprints nothing, as a scaffold step or a drop leaves', async () => {
     const { app, plan } = await createApp('scaffold')
     const record = { ...(await holding(app)), fingerprint: { files: {}, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' } } }
-    await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: record } })
+    await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: { ...record, outcome: 'incomplete' } } })
 
     const report = await planNextFile(plan, { appRoot: app, now: NOW })
 
-    // The tests step owns behaviours, so an empty fingerprint of it is a run that saw no test file: redone.
     expect(report.verified).toEqual([SCAFFOLD])
     expect(report.step!.id).toBe(TESTS)
   })
@@ -135,7 +134,6 @@ describe('plan:next', () => {
     git(app, 'add', '-A')
     git(app, 'commit', '-q', '-m', 'init')
     await writeFile(join(app, 'extra.ts'), 'export const b = 2\n', 'utf8')
-    await writeState(app, { steps: Object.fromEntries(STEPS.map((id) => [id, record])), active: { plan: 'comments.plan.json', step: HTTP, startedAt: 't', continuations: 1 } })
 
     const report = await planNextFile(plan, { appRoot: app, now: NOW })
 
@@ -151,7 +149,8 @@ describe('plan:next', () => {
     git(app, 'add', '-A')
     git(app, 'commit', '-q', '-m', 'init')
 
-    // A clean tree, and the state the mark writes, are not changes.
+    // A clean tree, and the state the mark writes, are not changes; nor is a state `.gitignore` an earlier run left untracked.
+    await writeWorkspaceFiles(app, { '.guren/plans/.gitignore': '*.state.json\n' })
     await planNextFile(plan, { appRoot: app, now: NOW })
     await writeFile(join(app, 'lib.ts'), 'export const a = 2\n', 'utf8')
     // The dirty tree is the marked step's, so asking for it again is allowed.

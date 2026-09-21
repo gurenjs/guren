@@ -191,7 +191,7 @@ describe('planStopHookFindings', () => {
   test('should let the stop through with the reason when the verification itself throws, and name an unreadable state file', async () => {
     const app = await createApp('throws', { active: active() })
     const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => { throw new TypeError('boom') } })
-    expect(verdict).toEqual({ block: false, message: `plan:verify on stop (comments.plan.json, ${HTTP}): could not verify the step: boom` })
+    expect(verdict).toEqual({ block: false, message: `plan:verify on stop (comments.plan.json, ${HTTP}): could not verify the step: TypeError: boom` })
     expect((await readState(app)).active).toEqual(active())
 
     await writeWorkspaceFiles(app, { '.guren/plans/comments.state.json': '{' })
@@ -205,7 +205,7 @@ describe('planStopHookFindings', () => {
     const verdict = await planStopHookFindings(gone, { stopHookActive: false })
     expect(verdict.block).toBe(false)
     expect(verdict.message).toMatch(/^plan:verify on stop \(missing\.plan\.json, .*\): Cannot read the plan at .*missing\.plan\.json/)
-    expect(verdict.message).toContain('Run `bunx guren plan:next` again once the plan is back.')
+    expect(verdict.message).toContain('Run `bunx guren plan:next missing.plan.json` again once the plan is back.')
 
     const revised = await createApp('revised', { active: active({ step: 'task/entity/model.comment/nope' }) })
     const cleared = await planStopHookFindings(revised, { stopHookActive: false })

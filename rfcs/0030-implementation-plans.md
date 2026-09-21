@@ -959,10 +959,10 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   of the implementation's to fix.
 - A whole-plan run (no `--step`) leaves alone a step whose record is `verified`
   against this plan digest and whose fingerprint still matches, and reports it
-  as skipped. A record that fingerprinted nothing stands only for a step that
-  owns no element and no behaviour (`scaffold`), which is verified on its
-  commands alone; for any other step it is redone, since nothing could expire
-  it. That is what lets the `tests`
+  as skipped. A verified record fingerprints nothing only when the step had
+  nothing file-shaped to watch (`scaffold`, a `drop`, an element no reader
+  finds a file for), so it stands on the plan digest alone: a step that could
+  never stand would keep the loop of §7 from ending. That is what lets the `tests`
   step stand in the checkout that ran it: it must see the tests fail before the
   implementation exists, and cannot pass again once the `http` step has made
   them pass. The record is git-ignored, so a fresh checkout has nothing to keep
@@ -1084,9 +1084,9 @@ reviewer asked for gaps reports some whether or not they exist.
 shipped with these readings:
 
 - `plan:next` returns the first step in task order whose record does not
-  stand (no record, another plan digest, or a fingerprinted file that changed;
-  a `scaffold` step's record stands on the plan digest alone, the rule the
-  whole-plan skip uses), which is also how a stalled step keeps coming back. The context is the
+  stand (no record, another plan digest, or a fingerprinted file that changed,
+  the rule the whole-plan skip uses), which is also how a stalled step keeps
+  coming back. The context is the
   step's elements verbatim, its behaviours, its verify commands and, for a
   `scaffold` step, what it generates. The dependency shape through
   `generateEntityContext()` and the freshness skip of §4 are not in it yet:

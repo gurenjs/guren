@@ -13,7 +13,7 @@ import { toPosixRelative } from '../discovery'
 import type { Plan, PlanDraft } from './schema'
 import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from './status'
-import { stepCompletesOnCommands, type PlanDerivedStep, type PlanTaskDerivation } from './tasks'
+import type { PlanTaskDerivation } from './tasks'
 
 export function sha256(bytes: Uint8Array | string): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -133,11 +133,10 @@ function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string
 
 /**
  * Whether a verified record still stands: same plan, and every fingerprinted file hashing
- * as it did. An empty fingerprint holds only for a step that completes on its commands
- * (`stepCompletesOnCommands`): for any other, nothing could expire it, so it is redone.
+ * as it did. A verified record fingerprints nothing only when the step had nothing file-shaped
+ * to watch (`scaffold`, a `drop`, an element no reader finds a file for), so it stands on the
+ * plan digest alone: a step that could never stand would keep the loop (§7) from ending.
  */
-export function recordStillHolds(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>, step: PlanDerivedStep): boolean {
-  if (record.outcome !== 'verified' || record.planDigest !== digest) return false
-  if (Object.keys(record.fingerprint.files).length === 0) return stepCompletesOnCommands(step)
-  return changedFiles(record, hashes).length === 0
+export function recordStillHolds(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>): boolean {
+  return record.outcome === 'verified' && record.planDigest === digest && changedFiles(record, hashes).length === 0
 }

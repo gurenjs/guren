@@ -92,18 +92,9 @@ export function planStepIds(derivation: PlanTaskDerivation): string[] {
   return derivation.tasks.flatMap((task) => task.steps.map((step) => step.id))
 }
 
-/** Every step in task order, with its task: what `plan:next` walks. */
+/** Every step in task order, with its task. */
 export function listPlanSteps(derivation: PlanTaskDerivation): Array<{ task: PlanDerivedTask; step: PlanDerivedStep }> {
   return derivation.tasks.flatMap((task) => task.steps.map((step) => ({ task, step })))
-}
-
-/**
- * A step that owns no element and no behaviour (`scaffold`) is verified on its commands
- * alone, so its record fingerprints nothing and stands until the plan changes; every other
- * step's record stands on the files it fingerprinted.
- */
-export function stepCompletesOnCommands(step: PlanDerivedStep): boolean {
-  return step.elementIds.length === 0 && step.acceptanceIds.length === 0
 }
 
 export function findPlanStep(derivation: PlanTaskDerivation, stepId: string): { task: PlanDerivedTask; step: PlanDerivedStep } | undefined {
