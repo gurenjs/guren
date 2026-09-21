@@ -16,7 +16,7 @@ import {
   type ApiTokenStore,
   type CreateApiTokenResult,
   type ScopedTool,
-} from '@guren/core'
+} from '@guren/server'
 import { listTools } from './tool-list'
 import { splitCommaList } from './utils'
 import { loadBootedApplication } from './runtime'

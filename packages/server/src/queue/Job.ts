@@ -140,6 +140,18 @@ export abstract class Job<T = unknown> {
   static backoff: 'exponential' | 'linear' | number = 'exponential'
 
   private container?: ContainerLike
+  private executionSignal?: AbortSignal
+
+  /** Aborted when the worker times out or loses its reservation. Pass it to cancellable I/O. */
+  protected get signal(): AbortSignal {
+    // Outside a worker (SyncDriver, a direct `handle()` call) nothing aborts it.
+    return this.executionSignal ??= new AbortController().signal
+  }
+
+  /** @internal Installed by the worker before handle(). */
+  setExecutionSignal(signal: AbortSignal): void {
+    this.executionSignal = signal
+  }
 
   /** @internal Called by the Worker with the container of the app it drains, before `handle()`. */
   setContainer(container: ContainerLike): void {

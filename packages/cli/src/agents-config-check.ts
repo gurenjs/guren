@@ -9,9 +9,9 @@
  */
 import { resolve } from 'node:path'
 import type { ObjectExpression } from '@babel/types'
-import { classifyRegistrationScope, deriveAgentTools, expandToolScopes } from '@guren/core'
-import type { RouteDefinition, ScopedTool } from '@guren/core'
-import { AGENTS_CONFIG_FILE } from '@guren/core/internal/deploy-build'
+import { classifyRegistrationScope, deriveAgentTools, expandToolScopes } from '@guren/server'
+import type { RouteDefinition, ScopedTool } from '@guren/server'
+import { AGENTS_CONFIG_FILE } from '@guren/server/internal/app-conventions'
 
 import {
   defaultExportConfigProperty,

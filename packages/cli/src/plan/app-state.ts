@@ -11,7 +11,7 @@
 
 import { readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import type { RouteDefinition } from '@guren/core'
+import type { RouteDefinition } from '@guren/server'
 import {
   classNameFromPath,
   discoverModelFiles,

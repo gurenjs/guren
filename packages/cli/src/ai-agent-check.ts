@@ -6,7 +6,7 @@
  * `mcpPlugin()` throws at the first tool call (§2.5). Content-activated: an app
  * with no `Agent` subclass contributes nothing, and nothing loads for it.
  */
-import { deriveAgentTools, expandToolScopes, parseToolScope, type RouteDefinition } from '@guren/core'
+import { deriveAgentTools, expandToolScopes, parseToolScope, type RouteDefinition } from '@guren/server'
 import {
   AI_PLUGIN_EXPORT,
   effectiveAppToolsCalls,

@@ -22,7 +22,7 @@ import {
   type DerivedAgentTool,
   type RouteDefinition,
   type ToolCallOutcome,
-} from '@guren/core'
+} from '@guren/server'
 import { loadBootedApplication, type MaybeApplication } from './runtime'
 import { parseUserId } from './token-issue'
 

@@ -62,6 +62,18 @@ describe('workflow Bun pins', () => {
   // trialled, and that must not turn this into the check people delete.
   const primary = matrix[0]!
 
+  it('keeps the package manager and onboarding docs on the primary runtime', () => {
+    const manifest = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
+    expect(manifest.packageManager).toBe(`bun@${primary}`)
+    for (const file of ['README.md', 'docs/en/guides/getting-started.md', 'docs/ja/guides/getting-started.md']) {
+      expect(readFileSync(join(repoRoot, file), 'utf8')).toContain(primary)
+    }
+    for (const language of ['en', 'ja']) {
+      const policy = readFileSync(join(repoRoot, `docs/${language}/guides/release-policy.md`), 'utf8')
+      for (const version of matrix) expect(policy).toContain(`Bun \`${version}\``)
+    }
+  })
+
   it.each(workflowFiles().filter((file) => file !== 'ci.yml'))(
     '%s pins the Bun version CI tests first',
     (file) => {

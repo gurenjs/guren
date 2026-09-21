@@ -9,7 +9,7 @@ import {
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
-import type { RouteDefinition } from '@guren/core'
+import type { RouteDefinition } from '@guren/server'
 import {
   classifyFindingKey,
   primaryClassificationId,

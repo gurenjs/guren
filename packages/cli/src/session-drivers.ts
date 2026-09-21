@@ -1,4 +1,4 @@
-import { BUILT_IN_SESSION_DRIVERS } from '@guren/core'
+import { BUILT_IN_SESSION_DRIVERS } from '@guren/server'
 import { readInstalledPluginManifests } from './plugin-manifest'
 
 /**

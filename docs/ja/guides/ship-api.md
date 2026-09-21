@@ -7,7 +7,7 @@
 
 ## 前提条件
 
-- **Bun 1.1 以降**
+- **Bun 1.3.14**
 - **Docker Desktop (Compose v2)**: Postgres 用
 
 ## 1. API プロジェクトを作成する

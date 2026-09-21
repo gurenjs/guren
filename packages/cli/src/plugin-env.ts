@@ -4,7 +4,7 @@
  * `guren plugin` writes. One module, because validation and generation must agree
  * on what each type accepts, and the manifest is untrusted input becoming source.
  */
-import type { Env } from '@guren/core'
+import type { Env } from '@guren/server'
 import type { GurenPluginEnvEntry } from './plugin-manifest'
 import { escapeSingleQuoted } from './utils'
 

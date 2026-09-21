@@ -9,7 +9,7 @@
  * scaffold passes the config by name across modules.
  */
 import type { ObjectExpression, Node, Statement } from '@babel/types'
-import { DEFAULT_SESSION_STORE_NAME } from '@guren/core'
+import { DEFAULT_SESSION_STORE_NAME } from '@guren/server'
 import { literalString, memberKeyName, objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 
 const SESSION_CONFIG_TYPE = 'SessionConfig'

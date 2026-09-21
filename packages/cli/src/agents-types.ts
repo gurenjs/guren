@@ -9,7 +9,7 @@
  */
 import { readFile, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { deriveAgentTools, type DerivedAgentTool, type RouteDefinition } from '@guren/core'
+import { deriveAgentTools, type DerivedAgentTool, type RouteDefinition } from '@guren/server'
 import type { ResourceDefinition } from './data-types'
 import {
   describeDeclarations,

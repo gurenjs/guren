@@ -1,5 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import type { Redis } from 'ioredis'
 import type { QueueDriver, QueuedJob, FailedJob } from '../types'
+import { QUEUE_SCRIPTS, type QueueScriptName } from './redis-queue-scripts'
+
+type ScriptRunner = (...args: Array<string | number>) => Promise<unknown>
 
 export interface RedisDriverOptions {
   /** @default 'queue:' */
@@ -25,6 +29,26 @@ export class RedisDriver implements QueueDriver {
   ) {
     this.prefix = options.prefix ?? 'queue:'
     this.visibilityTimeout = options.visibilityTimeout ?? 60000
+    if (!Number.isFinite(this.visibilityTimeout) || this.visibilityTimeout < 3) {
+      throw new Error('Redis queue visibilityTimeout must be at least 3 milliseconds')
+    }
+    // EVALSHA with an EVAL fallback: the script body crosses the wire once per
+    // connection rather than on every poll.
+    for (const [name, script] of Object.entries(QUEUE_SCRIPTS)) redis.defineCommand(name, script)
+  }
+
+  private run(name: QueueScriptName, ...args: Array<string | number>): Promise<unknown> {
+    return (this.redis as unknown as Record<QueueScriptName, ScriptRunner>)[name](...args)
+  }
+
+  get heartbeatInterval(): number {
+    return Math.max(1, Math.floor(this.visibilityTimeout / 3))
+  }
+
+  async extendReservation(job: QueuedJob): Promise<boolean> {
+    if (!job.reservationToken) return false
+    return await this.run('gurenQueueExtend', this.jobKey(job.id), this.reservedKey(job.queue),
+      job.id, job.reservationToken, Date.now() + this.visibilityTimeout) === 1
   }
 
   private pendingKey(queue: string): string {
@@ -55,113 +79,33 @@ export class RedisDriver implements QueueDriver {
       createdAt: job.createdAt.toISOString(),
     }
 
-    const pipeline = this.redis.pipeline()
-    pipeline.hset(this.jobKey(job.id), jobData)
-    pipeline.zadd(this.pendingKey(job.queue), job.availableAt.getTime(), job.id)
-    await pipeline.exec()
+    await this.run('gurenQueuePush', this.jobKey(job.id), this.pendingKey(job.queue),
+      job.id, job.availableAt.getTime(), ...Object.entries(jobData).flat())
   }
 
   async pop(queue: string): Promise<QueuedJob | null> {
     const now = Date.now()
-
-    await this.releaseTimedOutJobs(queue)
-
-    const jobIds = await this.redis.zrangebyscore(
-      this.pendingKey(queue),
-      '-inf',
-      now,
-      'LIMIT',
-      0,
-      1
-    )
-
-    if (jobIds.length === 0) {
-      return null
-    }
-
-    const jobId = jobIds[0]
-
-    const removed = await this.redis.zrem(this.pendingKey(queue), jobId)
-    if (removed === 0) {
-      // Another worker got it
-      return null
-    }
-
-    const timeout = now + this.visibilityTimeout
-    await this.redis.zadd(this.reservedKey(queue), timeout, jobId)
-
-    await this.redis.hset(this.jobKey(jobId), 'reservedAt', new Date().toISOString())
-
-    const jobData = await this.redis.hgetall(this.jobKey(jobId))
-    if (!jobData || !jobData.id) {
-      await this.redis.zrem(this.reservedKey(queue), jobId)
-      return null
-    }
-
-    return this.parseJobData(jobData)
-  }
-
-  private async releaseTimedOutJobs(queue: string): Promise<void> {
-    const now = Date.now()
-
-    const timedOutIds = await this.redis.zrangebyscore(
-      this.reservedKey(queue),
-      '-inf',
-      now
-    )
-
-    for (const jobId of timedOutIds) {
-      const removed = await this.redis.zrem(this.reservedKey(queue), jobId)
-      if (removed > 0) {
-        await this.redis.zadd(this.pendingKey(queue), now, jobId)
-        await this.redis.hdel(this.jobKey(jobId), 'reservedAt')
-      }
-    }
+    const fields = await this.run('gurenQueuePop', this.pendingKey(queue), this.reservedKey(queue),
+      now, now + this.visibilityTimeout, new Date(now).toISOString(), randomUUID(), this.jobKey('')) as string[]
+    if (fields.length === 0) return null
+    const data: Record<string, string> = {}
+    for (let i = 0; i < fields.length; i += 2) data[fields[i]!] = fields[i + 1]!
+    return this.parseJobData(data)
   }
 
   async release(job: QueuedJob, delayMs: number = 0): Promise<void> {
     const availableAt = Date.now() + delayMs
-
-    await this.redis.zrem(this.reservedKey(job.queue), job.id)
-
-    const updates: Record<string, string> = {
-      attempts: String(job.attempts),
-      availableAt: new Date(availableAt).toISOString(),
-    }
-    if (job.lastError) {
-      updates.lastError = job.lastError
-    }
-    await this.redis.hset(this.jobKey(job.id), updates)
-    await this.redis.hdel(this.jobKey(job.id), 'reservedAt')
-
-    await this.redis.zadd(this.pendingKey(job.queue), availableAt, job.id)
+    await this.run('gurenQueueRelease', this.jobKey(job.id), this.pendingKey(job.queue), this.reservedKey(job.queue),
+      job.id, job.reservationToken ?? '', job.attempts, new Date(availableAt).toISOString(), job.lastError ?? '', availableAt)
   }
 
-  async delete(jobId: string): Promise<void> {
-    const jobData = await this.redis.hgetall(this.jobKey(jobId))
-    if (jobData && jobData.queue) {
-      const pipeline = this.redis.pipeline()
-      pipeline.zrem(this.pendingKey(jobData.queue), jobId)
-      pipeline.zrem(this.reservedKey(jobData.queue), jobId)
-      pipeline.del(this.jobKey(jobId))
-      await pipeline.exec()
-    } else {
-      await this.redis.del(this.jobKey(jobId))
-    }
+  async delete(jobId: string, reservationToken?: string): Promise<void> {
+    await this.run('gurenQueueDelete', this.jobKey(jobId), jobId, reservationToken ?? '', this.prefix)
   }
 
   async fail(job: QueuedJob, error: Error): Promise<void> {
-    const failedData = {
-      failedAt: new Date().toISOString(),
-      error: error.message,
-      stack: error.stack ?? '',
-    }
-    await this.redis.hset(this.jobKey(job.id), failedData)
-
-    const pipeline = this.redis.pipeline()
-    pipeline.zrem(this.reservedKey(job.queue), job.id)
-    pipeline.lpush(this.failedKey(job.queue), job.id)
-    await pipeline.exec()
+    await this.run('gurenQueueFail', this.jobKey(job.id), this.pendingKey(job.queue), this.reservedKey(job.queue), this.failedKey(job.queue),
+      job.id, job.reservationToken ?? '', new Date().toISOString(), error.message, error.stack ?? '', job.attempts)
   }
 
   async size(queue: string): Promise<number> {
@@ -214,32 +158,14 @@ export class RedisDriver implements QueueDriver {
   }
 
   async retryFailedJob(jobId: string): Promise<void> {
-    const jobData = await this.redis.hgetall(this.jobKey(jobId))
-    if (!jobData || !jobData.queue) {
+    const now = new Date()
+    if (await this.run('gurenQueueRetry', this.jobKey(jobId), jobId, now.toISOString(), now.getTime(), this.prefix) === 0) {
       throw new Error(`Failed job not found: ${jobId}`)
     }
-
-    const queue = jobData.queue
-
-    await this.redis.lrem(this.failedKey(queue), 1, jobId)
-
-    const now = new Date()
-    await this.redis.hset(this.jobKey(jobId), {
-      attempts: '0',
-      availableAt: now.toISOString(),
-      createdAt: now.toISOString(),
-    })
-    await this.redis.hdel(this.jobKey(jobId), 'reservedAt', 'failedAt', 'error', 'stack', 'lastError')
-
-    await this.redis.zadd(this.pendingKey(queue), now.getTime(), jobId)
   }
 
   async deleteFailedJob(jobId: string): Promise<void> {
-    const jobData = await this.redis.hgetall(this.jobKey(jobId))
-    if (jobData && jobData.queue) {
-      await this.redis.lrem(this.failedKey(jobData.queue), 1, jobId)
-    }
-    await this.redis.del(this.jobKey(jobId))
+    await this.run('gurenQueueDeleteFailed', this.jobKey(jobId), jobId, this.prefix)
   }
 
   /** Testing only. */
@@ -271,6 +197,7 @@ export class RedisDriver implements QueueDriver {
       createdAt: new Date(data.createdAt),
       reservedAt: data.reservedAt ? new Date(data.reservedAt) : null,
       lastError: data.lastError,
+      reservationToken: data.reservationToken,
     }
   }
 }

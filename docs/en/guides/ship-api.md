@@ -7,7 +7,7 @@ This guide walks you through building and shipping a JSON API with Guren. You wi
 
 ## Prerequisites
 
-- **Bun 1.1 or later**
+- **Bun 1.3.14**
 - **Docker Desktop (Compose v2)** for Postgres
 
 ## 1. Scaffold an API Project

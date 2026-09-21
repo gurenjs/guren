@@ -9,7 +9,7 @@
  */
 import { relative, resolve } from 'node:path'
 import type { CallExpression, File, ObjectExpression } from '@babel/types'
-import type { RouteDefinition } from '@guren/core'
+import type { RouteDefinition } from '@guren/server'
 import { memberKeyName, objectLiteral, propertyValue, walk, type BabelNode } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { fileExists, readIfExists } from './discovery'

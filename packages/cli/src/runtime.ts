@@ -2,7 +2,7 @@ import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
-import type { ApiTokenStore, RouteDefinition } from '@guren/core'
+import type { ApiTokenStore, RouteDefinition } from '@guren/server'
 
 const MAIN_ENTRY_CANDIDATES = [
   'src/main.ts',

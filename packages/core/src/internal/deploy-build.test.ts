@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   SQL_CLIENT_MODULES,
   assertOutputDirOutsideRoot,
@@ -414,8 +415,10 @@ describe('resolvePathLike', () => {
   })
 })
 
+const LEAF = '@guren/server/internal/app-conventions'
+
 describe('the built artifact', () => {
-  test('should import nothing but node builtins', () => {
+  test('should import only node builtins and shared application conventions', () => {
     // Importing it must not drag the framework runtime into a developer's build.
     // That holds only while this entry shares no code with core's others: the
     // day one does, ESM splitting emits a chunk and nothing else would notice.
@@ -433,8 +436,15 @@ describe('the built artifact', () => {
 
     expect(specifiers.length).toBeGreaterThan(0)
     for (const specifier of specifiers) {
-      expect(isBuiltin(specifier)).toBe(true)
+      expect(isBuiltin(specifier) || specifier === LEAF).toBe(true)
     }
+  })
+
+  test('the one non-builtin import stays a leaf', () => {
+    // The whitelist above holds only while the leaf itself imports nothing: the day
+    // it re-exports from a runtime module, a plugin build drags the runtime in again.
+    const leaf = readFileSync(fileURLToPath(import.meta.resolve(LEAF)), 'utf8')
+    expect(new Bun.Transpiler({ loader: 'js' }).scanImports(leaf)).toEqual([])
   })
 })
 

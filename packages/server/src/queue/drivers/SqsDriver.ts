@@ -25,11 +25,16 @@ export interface SqsAdapter {
    */
   deleteMessage?(params: { queueUrl: string; receiptHandle: string }): Promise<void>
 
+  /**
+   * Resolves `false` when SQS reports the receipt handle expired (`ReceiptHandleIsInvalid`,
+   * `MessageNotInflight`): the message is visible to other consumers again. `void` counts
+   * as success, so an adapter written before this return existed keeps working.
+   */
   changeMessageVisibility(params: {
     queueUrl: string
     receiptHandle: string
     visibilityTimeout: number
-  }): Promise<void>
+  }): Promise<void | boolean>
 
   getApproximateMessageCount(queueUrl: string): Promise<number>
 }
@@ -42,7 +47,15 @@ export interface SqsDriverOptions {
 
   /** Setting this enables FIFO mode. */
   messageGroupId?: string
+
+  /**
+   * The queue's visibility timeout in seconds, re-applied to the in-flight message
+   * while `handle()` runs. Must match the SQS queue attribute. @default 30 (the SQS default)
+   */
+  visibilityTimeout?: number
 }
+
+const EXPIRED_RECEIPT_ERRORS = new Set(['ReceiptHandleIsInvalid', 'MessageNotInflight'])
 
 /** Builds an SqsAdapter over an @aws-sdk/client-sqs SQSClient. */
 export function createSqsAdapter(client: { send(command: unknown): Promise<unknown> }): SqsAdapter {
@@ -88,13 +101,19 @@ export function createSqsAdapter(client: { send(command: unknown): Promise<unkno
 
     async changeMessageVisibility(params) {
       const { ChangeMessageVisibilityCommand } = await importSqs()
-      await client.send(
-        new ChangeMessageVisibilityCommand({
-          QueueUrl: params.queueUrl,
-          ReceiptHandle: params.receiptHandle,
-          VisibilityTimeout: params.visibilityTimeout,
-        } as any),
-      )
+      try {
+        await client.send(
+          new ChangeMessageVisibilityCommand({
+            QueueUrl: params.queueUrl,
+            ReceiptHandle: params.receiptHandle,
+            VisibilityTimeout: params.visibilityTimeout,
+          } as any),
+        )
+        return true
+      } catch (error) {
+        if (EXPIRED_RECEIPT_ERRORS.has((error as { name?: string }).name ?? '')) return false
+        throw error
+      }
     },
 
     async getApproximateMessageCount(queueUrl) {
@@ -146,6 +165,24 @@ export class SqsDriver implements QueueDriver {
     this.options = options
   }
 
+  get heartbeatInterval(): number {
+    return Math.max(1000, Math.floor((this.visibilityTimeout * 1000) / 3))
+  }
+
+  async extendReservation(job: QueuedJob): Promise<boolean> {
+    const reservation = this.reservations.get(job.id)
+    if (!reservation) return false
+    return (await this.adapter.changeMessageVisibility({
+      queueUrl: reservation.queueUrl,
+      receiptHandle: reservation.receiptHandle,
+      visibilityTimeout: this.visibilityTimeout,
+    })) !== false
+  }
+
+  private get visibilityTimeout(): number {
+    return this.options.visibilityTimeout ?? 30
+  }
+
   async push(job: QueuedJob): Promise<void> {
     const delaySeconds = Math.min(
       900,
@@ -176,6 +213,7 @@ export class SqsDriver implements QueueDriver {
   async release(job: QueuedJob, delayMs: number = 0): Promise<void> {
     const reservation = this.reservations.get(job.id)
     if (reservation) {
+      // An expired receipt means SQS already made the message visible: nothing to release.
       await this.adapter.changeMessageVisibility({
         queueUrl: reservation.queueUrl,
         receiptHandle: reservation.receiptHandle,

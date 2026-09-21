@@ -3,7 +3,7 @@
 ## Overview
 Guren is a Laravel-inspired fullstack TypeScript framework running on Bun. It combines Hono for HTTP handling, Drizzle ORM for database operations, and Inertia.js for seamless frontend integration.
 
-**Status:** Stable (v1.0). Breaking changes only in major releases.
+**Status:** Stable (v2). Breaking changes only in major releases.
 
 ## Monorepo Structure
 
@@ -68,10 +68,11 @@ bun run build:list    # print the resolved order without building
 ```
 
 Discovery and the topological sort live in `scripts/workspace-packages.ts`, shared
-with `scripts/test-packages.ts` (which backs `test:bun`). The one manual knob there
-is `ignoredEdges`: `@guren/cli` and `@guren/core` depend on each other, so core's
-edge on cli is dropped to break the cycle. Any *other* cycle fails the build with
-an explicit error.
+with `scripts/test-packages.ts` (which backs `test:bun`). Runtime dependencies
+and required peers determine build order. Optional plugin
+peers are loaded on demand and do not impose build order. The CLI reads shared
+contracts from the server package; core supplies the public facade and CLI bin.
+Any dependency cycle fails the build with an explicit error.
 
 The same module also answers "what version did this manifest declare at a git
 rev" (`manifestAtRev` / `versionOf`), which is how the release gates in

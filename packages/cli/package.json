@@ -67,7 +67,6 @@
   },
   "dependencies": {
     "@babel/parser": "^7.24.7",
-    "@guren/core": "^1.20.1",
     "@guren/orm": "^2.11.1",
     "@guren/server": "^2.25.1",
     "@modelcontextprotocol/server": "^2.0.0",
@@ -104,6 +103,7 @@
     "react": "^19.0.0",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
-    "vite": "^8.0.0"
+    "vite": "^8.0.0",
+    "@guren/core": "^1.20.1"
   }
 }

@@ -1,6 +1,8 @@
 import type { QueueDriver, QueuedJob, WorkerOptions } from './types'
 import { getJob, type Job, type JobClass } from './Job'
 
+class ReservationLostError extends Error {}
+
 export interface WorkerEvents {
   jobProcessed?: (job: QueuedJob) => void
 
@@ -48,28 +50,24 @@ export class Worker {
     this.shouldStop = false
     this.processedJobs = 0
 
-    this.events.workerStarted?.()
-
-    while (!this.shouldStop) {
-      if (this.maxJobs > 0 && this.processedJobs >= this.maxJobs) {
-        break
-      }
-
-      const job = await this.getNextJob()
-
-      if (job) {
-        await this.processJob(job)
-        this.processedJobs++
-      } else {
-        if (this.stopWhenEmpty) {
-          break
+    try {
+      this.events.workerStarted?.()
+      while (!this.shouldStop) {
+        if (this.maxJobs > 0 && this.processedJobs >= this.maxJobs) break
+        const job = await this.getNextJob()
+        if (job) {
+          await this.processJob(job)
+          this.processedJobs++
+        } else {
+          if (this.stopWhenEmpty) break
+          await this.sleepMs(this.sleep)
         }
-        await this.sleepMs(this.sleep)
       }
+    } finally {
+      this.currentJob = null
+      this.running = false
+      this.events.workerStopped?.()
     }
-
-    this.running = false
-    this.events.workerStopped?.()
   }
 
   async stop(): Promise<void> {
@@ -112,17 +110,18 @@ export class Worker {
     }
 
     try {
-      const instance = this.instantiate(JobClass)
-
-      await this.executeWithTimeout(
-        async () => instance.handle(job.payload),
-        this.timeout
-      )
-
-      await this.driver.delete(job.id)
+      await this.runHandler(this.instantiate(JobClass), job)
+      await this.driver.delete(job.id, job.reservationToken)
       this.events.jobProcessed?.(job)
     } catch (error) {
-      await this.handleFailedJob(job, error as Error, JobClass)
+      if (error instanceof ReservationLostError) {
+        // Another worker owns the job now: acknowledging or releasing it would race
+        // that worker, so the driver's visibility timeout is left to settle it.
+        console.error(JSON.stringify({ level: 'error', msg: `Job reservation lost: ${job.name}`, job: job.name, queue: job.queue, attempt: job.attempts }))
+        this.events.jobFailed?.(job, error, true)
+        return
+      }
+      await this.handleFailedJob(job, error instanceof Error ? error : new Error(String(error)), JobClass)
     } finally {
       this.currentJob = null
     }
@@ -177,25 +176,53 @@ export class Worker {
     return instance
   }
 
-  private async executeWithTimeout<T>(
-    fn: () => Promise<T>,
-    timeoutMs: number
-  ): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`Job timed out after ${timeoutMs}ms`))
-      }, timeoutMs)
+  /**
+   * Runs `handle()` under the timeout while renewing the driver's reservation. A
+   * timeout requests cancellation through the job's signal and then waits for the
+   * handler to settle, so a retry never runs beside its predecessor.
+   */
+  private async runHandler(instance: Job, job: QueuedJob): Promise<void> {
+    const cancellation = new AbortController()
+    const timeout = setTimeout(() => {
+      cancellation.abort(new Error(`Job timed out after ${this.timeout}ms`))
+    }, this.timeout)
+    // One renewal in flight at a time: the next is armed only after the previous
+    // settles, so a slow driver cannot pile up EXTEND calls.
+    const interval = this.driver.extendReservation ? this.driver.heartbeatInterval : undefined
+    let heartbeat: ReturnType<typeof setTimeout> | undefined
+    let renewal: Promise<void> | undefined
+    let reservationError: ReservationLostError | undefined
+    let settled = false
+    const renew = (): void => {
+      renewal = this.driver.extendReservation!(job).then((owned) => {
+        if (owned) return
+        reservationError = new ReservationLostError('Job reservation now belongs to another worker')
+        cancellation.abort(reservationError)
+      }, () => {
+        // A rejected renewal is a driver error, not a lost lease: the next heartbeat
+        // retries, and a lease that did expire is fenced at delete/release anyway.
+      }).finally(() => {
+        if (!settled && !reservationError && interval !== undefined) heartbeat = setTimeout(renew, interval)
+      })
+    }
+    if (interval !== undefined) heartbeat = setTimeout(renew, interval)
 
-      fn()
-        .then((result) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-        .catch((error) => {
-          clearTimeout(timer)
-          reject(error)
-        })
-    })
+    let failure: { error: unknown } | undefined
+    try {
+      instance.setExecutionSignal(cancellation.signal)
+      await instance.handle(job.payload)
+    } catch (error) {
+      failure = { error }
+    } finally {
+      settled = true
+      clearTimeout(timeout)
+      clearTimeout(heartbeat)
+      await renewal
+    }
+    if (reservationError) throw reservationError
+    // A handler that ignored the timeout but settled successfully is acknowledged:
+    // retrying a completed job is the duplicate run the timeout exists to prevent.
+    if (failure) throw cancellation.signal.aborted ? cancellation.signal.reason : failure.error
   }
 
   private sleepMs(ms: number): Promise<void> {

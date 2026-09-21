@@ -279,6 +279,40 @@ bunx guren queue:work --sleep=500 --timeout=120000 --max-jobs=100
 | `--timeout` | `60000` | Job timeout in milliseconds |
 | `--max-jobs` | `0` | Max jobs before stopping (0 = unlimited) |
 
+### Cancellation and delivery guarantees
+
+`--timeout` aborts `this.signal` on the job. Pass that signal to cancellable I/O:
+
+```typescript
+async handle(payload: { url: string }) {
+  await fetch(payload.url, { signal: this.signal })
+}
+```
+
+The worker waits for `handle()` to settle before retrying or marking the job failed.
+A handler that ignores cancellation can therefore exceed the timeout; if it then
+completes, the job is acknowledged rather than retried. JavaScript
+cannot forcibly stop arbitrary in-process code; use a process supervisor to terminate
+a stuck worker. `stop()` requests shutdown and waits up to the worker timeout;
+`start()` settles only after the active handler has finished.
+
+Redis reservations are renewed while the handler runs, including during cancellation.
+A renewal that fails with a driver error is retried at the next heartbeat. A reservation
+another worker now owns aborts the signal; once the handler settles, the worker neither
+acknowledges nor releases the job, reports it through `jobFailed`, and moves on. The
+driver recovers the job through its visibility timeout. A stale worker
+cannot acknowledge, release or fail a reservation now owned by another worker.
+Redis state transitions are atomic. Use a standalone Redis instance, or a shared
+hash tag in the prefix when using Redis Cluster so all queue keys occupy one slot.
+
+Delivery is at least once: a process can fail after an external effect but before
+acknowledging it. Use idempotency keys for payments, emails and other external writes.
+`SqsDriver` renews through `ChangeMessageVisibility`; pass the queue's `visibilityTimeout`
+in seconds so the renewal matches the queue attribute. Custom queue drivers with expiring
+reservations should implement `heartbeatInterval` and `extendReservation(job)`; otherwise
+configure their visibility timeout to cover the complete execution, including cancellation. If `start()` rejects on a driver
+error, its running state is reset; a supervisor may restart it with backoff.
+
 ### Programmatic Worker
 
 For more control, create workers programmatically:

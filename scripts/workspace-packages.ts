@@ -21,7 +21,10 @@ export interface WorkspacePackage {
   /** Path relative to the repo root, e.g. `packages/server`. */
   relativeDir: string
   scripts: Record<string, string>
+  /** In-workspace build-order edges: `dependencies`, required peers, and the optional peers that close no cycle. */
   dependencies: string[]
+  /** Optional peers (`peerDependenciesMeta.optional`): soft edges, dropped only where they would close a cycle. */
+  optionalDependencies?: string[]
 }
 
 /**
@@ -75,6 +78,7 @@ export async function collectPackages(root: string = repoRoot): Promise<Workspac
       scripts?: Record<string, string>
       dependencies?: Record<string, string>
       peerDependencies?: Record<string, string>
+      peerDependenciesMeta?: Record<string, { optional?: boolean }>
     }
     try {
       manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
@@ -92,14 +96,53 @@ export async function collectPackages(root: string = repoRoot): Promise<Workspac
       dirName: entry.name,
       relativeDir: `packages/${entry.name}`,
       scripts: manifest.scripts ?? {},
-      dependencies: Object.keys({
-        ...manifest.dependencies,
-        ...manifest.peerDependencies,
-      }),
+      dependencies: Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies }),
+      optionalDependencies: Object.keys(manifest.peerDependencies ?? {})
+        .filter((name) => manifest.peerDependenciesMeta?.[name]?.optional),
     })
   }
 
-  return packages.sort((a, b) => a.name.localeCompare(b.name))
+  return pruneSoftCycles(packages.sort((a, b) => a.name.localeCompare(b.name)))
+}
+
+/**
+ * An optional peer orders the build when it can, so the dependent's declarations
+ * resolve the sibling's built `.d.ts` under `paths: {}`, and gives way where it
+ * closes a cycle (`@guren/cli` → `@guren/openapi` → `@guren/core` → `@guren/cli`).
+ * Only edges between packages on a cycle are dropped; a cycle of required
+ * dependencies is left for `sortByDependencies` to report.
+ */
+function pruneSoftCycles(packages: WorkspacePackage[]): WorkspacePackage[] {
+  for (;;) {
+    const cyclic = cyclicPackages(packages)
+    let pruned = false
+    for (const pkg of packages) {
+      if (!cyclic.has(pkg.name)) continue
+      const soft = (pkg.optionalDependencies ?? []).filter((dep) => cyclic.has(dep) && pkg.dependencies.includes(dep))
+      if (soft.length === 0) continue
+      pkg.dependencies = pkg.dependencies.filter((dep) => !soft.includes(dep))
+      pruned = true
+    }
+    if (!pruned) return packages
+  }
+}
+
+/** Names of the packages that can reach themselves through in-workspace edges. */
+function cyclicPackages(packages: WorkspacePackage[]): Set<string> {
+  const byName = new Map(packages.map((pkg) => [pkg.name, pkg]))
+  const cyclic = new Set<string>()
+  for (const pkg of packages) {
+    const seen = new Set<string>()
+    const stack = pkg.dependencies.filter((dep) => byName.has(dep))
+    while (stack.length > 0) {
+      const name = stack.pop()!
+      if (name === pkg.name) { cyclic.add(pkg.name); break }
+      if (seen.has(name)) continue
+      seen.add(name)
+      stack.push(...byName.get(name)!.dependencies.filter((dep) => byName.has(dep)))
+    }
+  }
+  return cyclic
 }
 
 /**
@@ -130,13 +173,6 @@ export function versionOf(manifest: string | undefined): string | undefined {
   }
 }
 
-// @guren/cli and @guren/core depend on each other, so the graph has one real
-// cycle. Ignoring core's edge on cli pins cli after core, matching how the
-// published packages resolve each other.
-const ignoredEdges: Array<[dependent: string, dependency: string]> = [
-  ['@guren/core', '@guren/cli'],
-]
-
 export interface DependencySchedule {
   /** Count of unsatisfied in-workspace dependencies per package name. */
   remainingDeps: Map<string, number>
@@ -146,7 +182,7 @@ export interface DependencySchedule {
 
 /**
  * The Kahn bookkeeping shared by the topological sort and the parallel build
- * scheduler, with `ignoredEdges` removed. Returns fresh maps — callers mutate
+ * scheduler. Returns fresh maps — callers mutate
  * `remainingDeps` as packages complete. When `closureThrough` is wider than
  * `packages`, edges are followed through the unselected packages; dependencies
  * outside it entirely count as satisfied.
@@ -157,11 +193,10 @@ export function dependencySchedule(
 ): DependencySchedule {
   const selected = new Set(packages.map((pkg) => pkg.name))
   const byName = new Map(closureThrough.map((pkg) => [pkg.name, pkg]))
-  const ignored = new Set(ignoredEdges.map(([from, to]) => `${from} ${to}`))
 
   const directDeps = (pkg: WorkspacePackage): string[] =>
     pkg.dependencies.filter(
-      (dep) => byName.has(dep) && !ignored.has(`${pkg.name} ${dep}`),
+      (dep) => byName.has(dep),
     )
 
   const remainingDeps = new Map<string, number>()
@@ -196,17 +231,6 @@ export function dependencySchedule(
 export function sortByDependencies(
   packages: WorkspacePackage[],
 ): WorkspacePackage[] {
-  // Here rather than in dependencySchedule so it prints once per run.
-  const byName = new Map(packages.map((pkg) => [pkg.name, pkg]))
-  for (const [from, to] of ignoredEdges) {
-    const dependent = byName.get(from)
-    if (dependent && !dependent.dependencies.includes(to)) {
-      console.warn(
-        `[workspace] stale entry in ignoredEdges: ${from} no longer depends on ${to}`,
-      )
-    }
-  }
-
   const { remainingDeps, dependents } = dependencySchedule(packages)
 
   const queue = packages.filter((pkg) => remainingDeps.get(pkg.name) === 0)
@@ -230,7 +254,7 @@ export function sortByDependencies(
       .join(', ')
     throw new Error(
       `Dependency cycle between workspace packages: ${remaining}. ` +
-        'Add the offending edge to ignoredEdges in scripts/workspace-packages.ts.',
+        'Move shared contracts below both packages instead of bypassing the cycle.',
     )
   }
 

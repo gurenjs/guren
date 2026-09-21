@@ -13,7 +13,7 @@ import {
   type DeriveAgentToolsResult,
   type DerivedAgentTool,
   type ResourceResponseShape,
-} from '@guren/core'
+} from '@guren/server'
 import { loadAppRouteDefinitions } from './load-routes'
 
 export interface ToolListOptions {

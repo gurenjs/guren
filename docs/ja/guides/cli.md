@@ -767,7 +767,7 @@ bunx create-guren-app my-app --mode ssr
 CLI はデフォルトテンプレートをコピーし、メタデータを更新します。`--mode ssr`(既定)で SSR が有効に、`--mode spa` で無効になります。空でないディレクトリに生成する場合は `--force` を付けます。
 
 ## トラブルシューティング
-- `command not found: bunx`: Bun が古い可能性があります。1.1 以降にアップグレードしてください。
+- `command not found: bunx`: Bun が古い可能性があります。対応基準の Bun 1.3.14 をインストールしてください。
 - `Error: Port already in use`: 開発サーバー(既定 3333)が埋まっています。`.env` の `PORT` を変更して再起動してください。
 - `Database connection failed`: デフォルトは SQLite(`./data/guren.db`)です。PostgreSQL を使う場合は `.env` の `DATABASE_URL` を確認してください。
 

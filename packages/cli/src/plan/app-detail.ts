@@ -8,7 +8,7 @@
 
 import { relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { RouteDefinition } from '@guren/core'
+import type { RouteDefinition } from '@guren/server'
 import type { File, Node, Statement } from '@babel/types'
 
 import { unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'

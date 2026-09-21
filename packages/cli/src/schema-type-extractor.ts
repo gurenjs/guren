@@ -20,7 +20,7 @@ import {
   unwrapSingleChild,
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
-} from '@guren/core/internal/zod-compat'
+} from '@guren/server/internal/zod-compat'
 import { quoteObjectKey } from './utils'
 
 interface SchemaTypeOptions {
