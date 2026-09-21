@@ -170,7 +170,7 @@ describe('plan:next', () => {
     // Once that step holds, the leftover would land in the next step's commit.
     const record = await holding(app)
     await writeState(app, { steps: { [SCAFFOLD]: record }, active: { plan: 'comments.plan.json', step: SCAFFOLD, startedAt: 't', continuations: 0 } })
-    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/uncommitted changes, and one step is one commit\. Commit or discard them first:\n {2}M lib\.ts$/)
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/uncommitted changes \(paths relative to the repository root\), and one step is one commit\. Commit or discard them first:\n {2}M lib\.ts$/)
   })
 
   test('should leave a tracked state file out of the dirty reading, in an application below the repository root', async () => {
@@ -178,6 +178,8 @@ describe('plan:next', () => {
     const { app, plan } = await createApp('nested/apps/web')
     const repo = join(ROOT, 'nested')
     await writeWorkspaceFiles(app, { '.guren/plans/.gitignore': '*.state.json\n' })
+    // Tracked as well, so the state-file exclude is what keeps its rewrite out of the reading.
+    await writeState(app, { steps: {} })
     git(repo, 'init', '-q')
     git(repo, 'add', '-A', '-f')
     git(repo, 'commit', '-q', '-m', 'init')
