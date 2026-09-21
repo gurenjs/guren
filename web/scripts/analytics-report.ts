@@ -29,8 +29,9 @@ const WINDOW = `timestamp > NOW() - INTERVAL '${days}' DAY`
 // is a successful GET from a client that sends Accept-Language.
 const READER = `blob3 = 'human' AND blob7 = 'GET' AND double1 >= 200 AND double1 < 300 AND blob5 != ''`
 // `/` is fetched by clients that never open a page, so it is not reading. The feed
-// is matched by path too, since retained points may predate its class.
-const READING = `blob2 IN ('docs', 'blog', 'markdown') AND blob1 != '/blog/rss.xml'`
+// is matched by path too, since retained points may predate its class. `/docs/search`
+// is the search box's endpoint: one reader typing produces a page count per query.
+const READING = `blob2 IN ('docs', 'blog', 'markdown') AND blob1 NOT IN ('/blog/rss.xml', '/docs/search')`
 // www.guren.dev 301s to the apex, so no page there can send this referrer; only
 // clients that forge it do.
 const FORGED_REFERRER = 'www.guren.dev'
@@ -96,12 +97,38 @@ const queries: Array<{ title: string; sql: string }> = [
           GROUP BY path ORDER BY requests DESC LIMIT 15`,
   },
   {
+    // Demand, not reach: scanners send these same user agents at paths that do not
+    // exist, and every one of those requests is an error. Measured on this dataset,
+    // six tokens were 100% errors — `/.env`, `/.git/HEAD`, cloud credential files.
+    title: 'AI agent demand by user-agent token (2xx only)',
+    sql: `SELECT blob9 AS token, SUM(_sample_interval) AS requests
+          FROM ${DATASET} WHERE ${WINDOW} AND ${AGENT_OK}
+          GROUP BY token ORDER BY requests DESC LIMIT 20`,
+  },
+  {
     // A token whose requests are mostly errors is an alternative scanners match.
-    title: 'AI agent matches by user-agent token',
+    title: 'AI agent matches by user-agent token (error ratio: scanner check)',
     sql: `SELECT blob9 AS token, SUM(_sample_interval) AS requests,
                  SUM(IF(double1 >= 400, _sample_interval, 0)) AS errors
           FROM ${DATASET} WHERE ${WINDOW} AND blob3 = 'ai-agent'
           GROUP BY token ORDER BY requests DESC LIMIT 20`,
+  },
+  {
+    // Reading is not trying. These three counts are the only funnel the server can
+    // see: nothing measures a click that leaves the site except the destination's
+    // own traffic view, which is why own-repository links send a referrer.
+    title: 'Reader funnel',
+    sql: `SELECT SUM(IF(blob1 IN ('/docs', '/docs/ja'), _sample_interval, 0)) AS docs_entry,
+                 SUM(IF(blob1 LIKE '%/guides/getting-started%', _sample_interval, 0)) AS getting_started,
+                 SUM(IF(blob1 LIKE '%/tutorials/%', _sample_interval, 0)) AS tutorials
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND ${READING}`,
+  },
+  {
+    title: 'Tutorial chapters (readers)',
+    sql: `SELECT blob1 AS path, SUM(_sample_interval) AS requests
+          FROM ${DATASET} WHERE ${WINDOW} AND ${READER} AND ${READING}
+            AND blob1 LIKE '%/tutorials/%'
+          GROUP BY path ORDER BY path LIMIT 40`,
   },
 ]
 
