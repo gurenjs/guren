@@ -1,3 +1,4 @@
+import { encodeStoragePath } from '../url-path'
 import type { StorageDriver, MemoryDriverOptions, PutOptions, FileMetadata } from '../types'
 import { trimSlashes } from '../../support/trim-slashes'
 
@@ -128,7 +129,7 @@ export class MemoryDriver implements StorageDriver {
 
   url(path: string): string {
     const normalized = this.normalizePath(path)
-    return `${this.baseUrl}/${normalized}`
+    return `${this.baseUrl}/${encodeStoragePath(normalized)}`
   }
 
   async temporaryUrl(path: string, _expiration: Date): Promise<string> {

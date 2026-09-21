@@ -242,6 +242,8 @@ return from a `JsonResource.toArray()` so pages receive typed attachment
 props. `placeholder` is a ThumbHash LQIP data URL you can render while the
 real image loads.
 
+Concurrent `hasOne` replacements are serialized within a process, including engines sharing the same table object. For multiple processes or serverless instances, supply `configureAttachments({ withCollectionLock: (key, callback) => sharedLock.run(key, callback), ... })` using your shared lock service. It must hold exclusive ownership until the callback settles, renew ownership during long uploads, and release it on failure. Every writer to the same attachment table must use that service and lock namespace.
+
 ### Raw rows via relations
 
 The table follows the ORM's morph convention, so the ordinary relation

@@ -1,7 +1,7 @@
 import { and, asc, desc } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { buildDrizzleConditions, resolveColumn } from './adapters/drizzle-conditions'
-import { PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
+import { BULK_DELETE, PHYSICAL_DELETE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
 import { DEFAULT_PAGINATION_SIZE } from './Model'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { groupConditionSequence } from './where-conditions'
@@ -580,6 +580,7 @@ export class QueryBuilder<
     if (!this.adapter.update) {
       throw new Error('Configured adapter does not support update operations.')
     }
+    this.assertWriteOptions()
     this.assertFiltersSurvived('update')
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
@@ -595,7 +596,23 @@ export class QueryBuilder<
     throw new Error('Advanced conditions require an adapter that supports updateAdvanced.')
   }
 
+  private assertWriteOptions(): void {
+    if (this.options.limitValue !== undefined || this.options.offsetValue !== undefined || this.options.orderBy.length > 0) {
+      throw new Error('Bulk writes do not support limit(), offset(), or orderBy(). Select the intended IDs first and write with whereIn().')
+    }
+  }
+
   async delete(): Promise<number | PlainObject | void> {
+    this.assertWriteOptions()
+    const model = this.modelClass as typeof Model & {
+      [BULK_DELETE]?: (query: QueryBuilder<TRecord, TResult>) => Promise<number | PlainObject | void>
+    }
+    if (model[BULK_DELETE]) return model[BULK_DELETE](this)
+    return this[PHYSICAL_DELETE]()
+  }
+
+  async [PHYSICAL_DELETE](): Promise<number | PlainObject | void> {
+    this.assertWriteOptions()
     if (!this.adapter.delete) {
       throw new Error('Configured adapter does not support delete operations.')
     }

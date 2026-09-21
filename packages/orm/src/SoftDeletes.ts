@@ -1,5 +1,5 @@
 import type { Model, ModelQueryOptions, ModelWriteOptions, PlainObject } from './Model'
-import { PREPARED_UPDATE } from './internal-keys'
+import { BULK_DELETE, PHYSICAL_DELETE, PREPARED_UPDATE } from './internal-keys'
 import type { QueryBuilder } from './QueryBuilder'
 
 /** The static methods the SoftDeletes mixin adds. */
@@ -80,6 +80,12 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
     return scopedQuery(this, where, writeOptions)[PREPARED_UPDATE]({ [column]: new Date() })
   } as typeof Model.delete
 
+  Object.defineProperty(SoftDeleteModel, BULK_DELETE, {
+    value: function (this: typeof Model & SoftDeletesStatic, query: QueryBuilder<PlainObject>) {
+      return query[PREPARED_UPDATE]({ [this.deletedAtColumn]: new Date() })
+    },
+  })
+
   SoftDeleteModel.withTrashed = function (
     this: typeof Model,
     queryOptions?: ModelQueryOptions,
@@ -121,7 +127,7 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
     }
     // An unscoped hard delete is unrecoverable, so every scope but softDelete
     // has to survive; dropping that one is what reaches trashed rows too.
-    return trashedScopedQuery(this, where, writeOptions).delete()
+    return trashedScopedQuery(this, where, writeOptions)[PHYSICAL_DELETE]()
   }
 
   return SoftDeleteModel

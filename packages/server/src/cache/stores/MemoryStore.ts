@@ -63,7 +63,7 @@ export class MemoryStore implements CacheStore {
   }
 
   async set<T>(key: string, value: T, ttl?: number): Promise<void> {
-    this.evictIfNeeded()
+    if (!this.cache.has(key)) this.evictIfNeeded()
 
     const expiresAt = ttl ? this.now() + ttl * 1000 : null
 
@@ -71,6 +71,14 @@ export class MemoryStore implements CacheStore {
       value,
       expiresAt,
     })
+  }
+
+  async add<T>(key: string, value: T): Promise<boolean> {
+    const item = this.cache.get(key)
+    if (item && !this.isExpired(item)) return false
+    if (!this.cache.has(key)) this.evictIfNeeded()
+    this.cache.set(key, { value, expiresAt: null })
+    return true
   }
 
   async has(key: string): Promise<boolean> {
@@ -97,16 +105,11 @@ export class MemoryStore implements CacheStore {
   }
 
   async increment(key: string, value = 1): Promise<number> {
-    const current = await this.get<number>(key)
-    const newValue = (current ?? 0) + value
-
-    // Preserve any existing TTL.
     const item = this.cache.get(key)
-    const ttl = item?.expiresAt
-      ? Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
-      : undefined
-
-    await this.set(key, newValue, ttl)
+    const active = item && !this.isExpired(item) ? item : undefined
+    const newValue = ((active?.value as number | undefined) ?? 0) + value
+    if (!this.cache.has(key)) this.evictIfNeeded()
+    this.cache.set(key, { value: newValue, expiresAt: active?.expiresAt ?? null })
     return newValue
   }
 

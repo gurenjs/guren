@@ -1,5 +1,5 @@
 import type { TaskDefinition } from './types'
-import { isDue, isDueInTimezone } from './CronParser'
+import { isDue, isDueInTimezone, parseCron } from './CronParser'
 
 export class ScheduledTask {
   private readonly definition: TaskDefinition
@@ -12,6 +12,7 @@ export class ScheduledTask {
   private running: { token: object; startedAt: number } | null = null
 
   constructor(definition: TaskDefinition) {
+    parseCron(definition.expression)
     this.definition = definition
   }
 
@@ -27,9 +28,10 @@ export class ScheduledTask {
     return this.definition.timezone
   }
 
-  isDue(date: Date = new Date()): boolean {
-    if (this.definition.timezone) {
-      return isDueInTimezone(this.definition.expression, this.definition.timezone, date)
+  isDue(date: Date = new Date(), defaultTimezone?: string): boolean {
+    const timezone = this.definition.timezone ?? defaultTimezone
+    if (timezone) {
+      return isDueInTimezone(this.definition.expression, timezone, date)
     }
     return isDue(this.definition.expression, date)
   }

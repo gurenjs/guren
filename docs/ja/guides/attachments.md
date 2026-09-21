@@ -212,6 +212,8 @@ await Post.purgeAttachments(post.id)
 
 `AttachmentData` はリソース向けの形です: `{ id, collection, name, contentType, size, width, height, url, placeholder, variants }`。`JsonResource.toArray()` からそのまま返せるので、ページは型の付いたアタッチメント props を受け取れます。`placeholder` は ThumbHash の LQIP データ URL で、実画像のロード中に表示できます。
 
+`hasOne` の同時置換は、同じテーブルオブジェクトを使うエンジンを含め、プロセス内で直列化します。複数プロセスやサーバーレスインスタンスでは、共有ロックサービスを使って `configureAttachments({ withCollectionLock: (key, callback) => sharedLock.run(key, callback), ... })` を設定してください。コールバック終了まで排他権を維持し、長いアップロードでは更新し、失敗時にも解放する必要があります。同じ添付テーブルへのすべての書き込み元で、同じサービスとロック名前空間を使ってください。
+
 ### リレーションで生の行を扱う
 
 テーブルは ORM の morph 規約に従っているため、行そのものが欲しいときは通常のリレーション機構がそのまま使えます:

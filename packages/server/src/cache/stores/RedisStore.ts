@@ -69,6 +69,10 @@ export class RedisStore implements CacheStore {
     }
   }
 
+  async add<T>(key: string, value: T): Promise<boolean> {
+    return await this.client.set(this.prefixKey(key), this.serialize(value), 'NX') === 'OK'
+  }
+
   async has(key: string): Promise<boolean> {
     const exists = await this.client.exists(this.prefixKey(key))
     return exists > 0

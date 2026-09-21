@@ -1,3 +1,4 @@
+import { encodeStoragePath } from '../url-path'
 import type {
   StorageDriver,
   S3DriverOptions,
@@ -262,7 +263,7 @@ export class S3Driver implements StorageDriver {
   }
 
   url(path: string): string {
-    return `${this.baseUrl}/${this.prefixKey(path)}`
+    return `${this.baseUrl}/${encodeStoragePath(this.prefixKey(path))}`
   }
 
   async temporaryUrl(path: string, expiration: Date, options?: TemporaryUrlOptions): Promise<string> {

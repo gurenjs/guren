@@ -262,7 +262,11 @@ await Post.update({ id: post.id }, { title: 'Updated Title' })
 await Post.delete({ id: post.id })
 ```
 
-### Transactions
+#Bulk `update()`, `forceUpdate()`, and `delete()` reject `limit()`, `offset()`, and `orderBy()`. Select the intended IDs first, then write with `whereIn()`. On a `SoftDeletes` model, builder `delete()` also marks rows deleted; use `forceDelete()` for permanent removal.
+
+SQLite queues ordinary model reads and writes made outside an open transaction until that transaction settles. Raw Drizzle queries must wait explicitly; obtaining a raw executor from outside an active SQLite transaction throws.
+
+## Transactions
 
 Use `Model.transaction()` when multiple writes must succeed or fail together:
 

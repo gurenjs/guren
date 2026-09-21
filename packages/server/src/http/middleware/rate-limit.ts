@@ -76,7 +76,7 @@ export class MemoryRateLimitStore extends BaseMemoryStore {
       this.entries.delete(key)
       return null
     }
-    return entry
+    return { ...entry }
   }
 
   async increment(key: string, windowMs: number): Promise<RateLimitEntry> {
@@ -85,12 +85,12 @@ export class MemoryRateLimitStore extends BaseMemoryStore {
 
     if (existing && now < existing.resetAt) {
       existing.count++
-      return existing
+      return { ...existing }
     }
 
     const entry: RateLimitEntry = { count: 1, resetAt: now + windowMs }
     this.entries.set(key, entry)
-    return entry
+    return { ...entry }
   }
 
   async reset(key: string): Promise<void> {

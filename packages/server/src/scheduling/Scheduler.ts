@@ -57,7 +57,7 @@ export class Scheduler {
   }
 
   getDueTasks(date: Date = new Date()): ScheduledTask[] {
-    return this.tasks.filter((task) => task.isDue(date))
+    return this.tasks.filter((task) => task.isDue(date, this.options.timezone))
   }
 
   /**

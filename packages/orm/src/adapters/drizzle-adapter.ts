@@ -56,6 +56,8 @@ let inListSize: number | undefined
 // Only for a database whose own transaction() does not await: one connection
 // takes one transaction, so this serializes the ones this adapter drives.
 let transactionQueue: Promise<unknown> = Promise.resolve()
+const pendingOperations = new Set<Promise<unknown>>()
+let manualTransactionOpen = false
 // Outlives configure(): a new storage would lose the context of an open transaction.
 let transactionStore: Promise<TransactionStore> | undefined
 // The same storage once loaded, for the synchronous executor lookup: a callback
@@ -155,7 +157,25 @@ function resolveExecutor(options?: AdapterQueryOptions): DrizzleDatabase {
     return ambient.handle as DrizzleDatabase
   }
 
+  if (manualTransactionOpen) {
+    throw new Error('DrizzleAdapter: raw queries outside an active SQLite transaction cannot share its connection. Await the transaction first.')
+  }
   return ensureDatabase()
+}
+
+function withExecutor<T>(options: AdapterQueryOptions | undefined, callback: (db: DrizzleDatabase) => Promise<T>): Promise<T> {
+  const ambient = loadedStore?.getStore()
+  if (options?.trx || (ambient && !ambient.settled)) return callback(resolveExecutor(options))
+  const db = ensureDatabase()
+  if (transactionAwaitsCallback === false) {
+    const operation = transactionQueue.then(() => callback(db))
+    transactionQueue = operation.then(NOOP, NOOP)
+    return operation
+  }
+  const operation = callback(db)
+  pendingOperations.add(operation)
+  void operation.then(() => pendingOperations.delete(operation), () => pendingOperations.delete(operation))
+  return operation
 }
 
 async function resolveList(result: DrizzleLikeSelect): Promise<unknown[]> {
@@ -455,7 +475,11 @@ async function runOwnTransaction<TResult>(
 
   // Bound: these are methods, and a detached one loses the dialect it reads.
   const run = db.run.bind(db)
-  const slot = transactionQueue.then(() => runExclusively(db, run, store, callback))
+  const pending = [...pendingOperations]
+  const slot = transactionQueue.then(async () => {
+    await Promise.allSettled(pending)
+    return runExclusively(db, run, store, callback)
+  })
   // The queue only orders: a settled slot must neither reject the next one nor,
   // via a value-preserving `.catch`, pin its result until the next transaction.
   transactionQueue = slot.then(NOOP, NOOP)
@@ -475,9 +499,13 @@ async function runExclusively<TResult>(
   callback: (trx: unknown) => Promise<TResult>,
 ): Promise<TResult> {
   // Outside enterTransaction: a BEGIN that failed opened nothing to unwind.
-  await run(sql.raw('begin'))
-
-  return enterTransaction(db, run, store, callback, { commit: ['commit'], rollback: ['rollback'] })
+  manualTransactionOpen = true
+  try {
+    await run(sql.raw('begin'))
+    return await enterTransaction(db, run, store, callback, { commit: ['commit'], rollback: ['rollback'] })
+  } finally {
+    manualTransactionOpen = false
+  }
 }
 
 export const DrizzleAdapter: ORMAdapterAdvanced & {
@@ -489,6 +517,8 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     transactionAwaitsCallback = undefined
     inListSize = undefined
     transactionQueue = Promise.resolve()
+    pendingOperations.clear()
+    manualTransactionOpen = false
   },
 
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase {
@@ -506,34 +536,35 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     options?: FindManyOptions<TRecord>,
     queryOptions?: AdapterQueryOptions,
   ): Promise<TRecord[]> {
-    const db = resolveExecutor(queryOptions)
-    let query = db.select().from(table)
-    const { where, orderBy, limit, offset } = options ?? {}
+    return withExecutor(queryOptions, async (db) => {
+      let query = db.select().from(table)
+      const { where, orderBy, limit, offset } = options ?? {}
 
-    if (typeof query.where === 'function') {
-      const clause = resolveWhere(table, where)
-      if (clause) {
-        query = query.where(clause) as DrizzleLikeSelect
+      if (typeof query.where === 'function') {
+        const clause = resolveWhere(table, where)
+        if (clause) {
+          query = query.where(clause) as DrizzleLikeSelect
+        }
       }
-    }
 
-    if (typeof query.orderBy === 'function') {
-      const clauses = resolveOrder(table, orderBy as OrderByClause)
-      if (clauses && clauses.length > 0) {
-        query = query.orderBy(...clauses) as DrizzleLikeSelect
+      if (typeof query.orderBy === 'function') {
+        const clauses = resolveOrder(table, orderBy as OrderByClause)
+        if (clauses && clauses.length > 0) {
+          query = query.orderBy(...clauses) as DrizzleLikeSelect
+        }
       }
-    }
 
-    if (typeof query.limit === 'function' && typeof limit === 'number') {
-      query = query.limit(limit) as DrizzleLikeSelect
-    }
+      if (typeof query.limit === 'function' && typeof limit === 'number') {
+        query = query.limit(limit) as DrizzleLikeSelect
+      }
 
-    if (typeof query.offset === 'function' && typeof offset === 'number') {
-      query = query.offset(offset) as DrizzleLikeSelect
-    }
+      if (typeof query.offset === 'function' && typeof offset === 'number') {
+        query = query.offset(offset) as DrizzleLikeSelect
+      }
 
-    const rows = await resolveList(query)
-    return rows as TRecord[]
+      const rows = await resolveList(query)
+      return rows as TRecord[]
+    })
   },
 
   async count<TRecord extends PlainObject = PlainObject>(
@@ -541,18 +572,19 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     where?: WhereClause<TRecord>,
     queryOptions?: AdapterQueryOptions,
   ): Promise<number> {
-    const db = resolveExecutor(queryOptions)
-    let query = db.select({ value: count() }).from(table)
+    return withExecutor(queryOptions, async (db) => {
+      let query = db.select({ value: count() }).from(table)
 
-    if (typeof query.where === 'function') {
-      const clause = resolveWhere(table, where)
-      if (clause) {
-        query = query.where(clause) as DrizzleLikeSelect
+      if (typeof query.where === 'function') {
+        const clause = resolveWhere(table, where)
+        if (clause) {
+          query = query.where(clause) as DrizzleLikeSelect
+        }
       }
-    }
 
-    const rows = await resolveList(query)
-    return toCount((rows[0] as { value?: unknown } | undefined)?.value)
+      const rows = await resolveList(query)
+      return toCount((rows[0] as { value?: unknown } | undefined)?.value)
+    })
   },
 
   async findUnique<TRecord extends PlainObject = PlainObject>(
@@ -560,22 +592,23 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     where: WhereClause<TRecord>,
     queryOptions?: AdapterQueryOptions,
   ): Promise<TRecord | null> {
-    const db = resolveExecutor(queryOptions)
-    let query = db.select().from(table)
+    return withExecutor(queryOptions, async (db) => {
+      let query = db.select().from(table)
 
-    if (typeof query.where === 'function') {
-      const clause = resolveWhere(table, where)
-      if (clause) {
-        query = query.where(clause) as DrizzleLikeSelect
+      if (typeof query.where === 'function') {
+        const clause = resolveWhere(table, where)
+        if (clause) {
+          query = query.where(clause) as DrizzleLikeSelect
+        }
       }
-    }
 
-    const row = await resolveSingle(query)
-    if (row == null) {
-      return null
-    }
+      const row = await resolveSingle(query)
+      if (row == null) {
+        return null
+      }
 
-    return row as TRecord
+      return row as TRecord
+    })
   },
 
   async create<TRecord = PlainObject>(
@@ -583,12 +616,13 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     data: PlainObject,
     writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord> {
-    const db = resolveExecutor(writeOptions)
-    const query = db.insert(table).values(data)
-    const { usedReturning, row } = await resolveWithReturning<TRecord>(query)
-    if (usedReturning) return row as TRecord
-    const result = await resolveMutation(query)
-    return result as TRecord
+    return withExecutor(writeOptions, async (db) => {
+      const query = db.insert(table).values(data)
+      const { usedReturning, row } = await resolveWithReturning<TRecord>(query)
+      if (usedReturning) return row as TRecord
+      const result = await resolveMutation(query)
+      return result as TRecord
+    })
   },
 
   async update<TRecord extends PlainObject = PlainObject>(
@@ -597,17 +631,18 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     data: PlainObject,
     writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord> {
-    const db = resolveExecutor(writeOptions)
-    if (!db.update) {
-      throw new Error('DrizzleAdapter: configured database does not support updates.')
-    }
+    return withExecutor(writeOptions, async (db) => {
+      if (!db.update) {
+        throw new Error('DrizzleAdapter: configured database does not support updates.')
+      }
 
-    const clause = resolveWhere(table, where)
-    const finalQuery = clause ? db.update(table).set(data).where(clause) : db.update(table).set(data)
-    const { usedReturning, row } = await resolveWithReturning<TRecord>(finalQuery)
-    if (usedReturning) return row as TRecord
-    const result = await resolveMutation(finalQuery)
-    return result as TRecord
+      const clause = resolveWhere(table, where)
+      const finalQuery = clause ? db.update(table).set(data).where(clause) : db.update(table).set(data)
+      const { usedReturning, row } = await resolveWithReturning<TRecord>(finalQuery)
+      if (usedReturning) return row as TRecord
+      const result = await resolveMutation(finalQuery)
+      return result as TRecord
+    })
   },
 
   async delete<TRecord extends PlainObject = PlainObject>(
@@ -615,17 +650,18 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     where: WhereClause<TRecord>,
     writeOptions?: AdapterQueryOptions,
   ): Promise<number | PlainObject | void> {
-    const db = resolveExecutor(writeOptions)
-    if (!db.delete) {
-      throw new Error('DrizzleAdapter: configured database does not support deletes.')
-    }
+    return withExecutor(writeOptions, async (db) => {
+      if (!db.delete) {
+        throw new Error('DrizzleAdapter: configured database does not support deletes.')
+      }
 
-    const clause = resolveWhere(table, where)
-    const finalQuery = clause ? db.delete(table).where(clause) : db.delete(table)
-    const { usedReturning, row } = await resolveWithReturning<PlainObject>(finalQuery)
-    if (usedReturning) return row
-    const result = await resolveMutation(finalQuery)
-    return result as number | PlainObject | void
+      const clause = resolveWhere(table, where)
+      const finalQuery = clause ? db.delete(table).where(clause) : db.delete(table)
+      const { usedReturning, row } = await resolveWithReturning<PlainObject>(finalQuery)
+      if (usedReturning) return row
+      const result = await resolveMutation(finalQuery)
+      return result as number | PlainObject | void
+    })
   },
 
   async findManyAdvanced<TRecord extends PlainObject = PlainObject>(
@@ -639,43 +675,44 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     },
     queryOptions?: AdapterQueryOptions,
   ): Promise<TRecord[]> {
-    const db = resolveExecutor(queryOptions)
-    const tableRecord = table as DrizzleTableLike
+    return withExecutor(queryOptions, async (db) => {
+      const tableRecord = table as DrizzleTableLike
 
-    let query: DrizzleLikeSelect
-    if (options.select && options.select.length > 0) {
-      const selection: Record<string, unknown> = {}
-      for (const field of options.select) {
-        const column = tableRecord[field]
-        if (!column) {
-          throw new Error(`DrizzleAdapter: unknown column "${field}" on provided table.`)
+      let query: DrizzleLikeSelect
+      if (options.select && options.select.length > 0) {
+        const selection: Record<string, unknown> = {}
+        for (const field of options.select) {
+          const column = tableRecord[field]
+          if (!column) {
+            throw new Error(`DrizzleAdapter: unknown column "${field}" on provided table.`)
+          }
+          selection[field] = column
         }
-        selection[field] = column
+        query = db.select(selection).from(table)
+      } else {
+        query = db.select().from(table)
       }
-      query = db.select(selection).from(table)
-    } else {
-      query = db.select().from(table)
-    }
 
-    query = withConditions(query, table, conditions)
+      query = withConditions(query, table, conditions)
 
-    if (typeof query.orderBy === 'function') {
-      const clauses = resolveOrder(table, options.orderBy)
-      if (clauses && clauses.length > 0) {
-        query = query.orderBy(...clauses) as DrizzleLikeSelect
+      if (typeof query.orderBy === 'function') {
+        const clauses = resolveOrder(table, options.orderBy)
+        if (clauses && clauses.length > 0) {
+          query = query.orderBy(...clauses) as DrizzleLikeSelect
+        }
       }
-    }
 
-    if (typeof query.limit === 'function' && typeof options.limit === 'number') {
-      query = query.limit(options.limit) as DrizzleLikeSelect
-    }
+      if (typeof query.limit === 'function' && typeof options.limit === 'number') {
+        query = query.limit(options.limit) as DrizzleLikeSelect
+      }
 
-    if (typeof query.offset === 'function' && typeof options.offset === 'number') {
-      query = query.offset(options.offset) as DrizzleLikeSelect
-    }
+      if (typeof query.offset === 'function' && typeof options.offset === 'number') {
+        query = query.offset(options.offset) as DrizzleLikeSelect
+      }
 
-    const rows = await resolveList(query)
-    return rows as TRecord[]
+      const rows = await resolveList(query)
+      return rows as TRecord[]
+    })
   },
 
   // oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
@@ -684,10 +721,11 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     conditions: WhereCondition[],
     queryOptions?: AdapterQueryOptions,
   ): Promise<number> {
-    const db = resolveExecutor(queryOptions)
-    const query = withConditions(db.select({ value: count() }).from(table), table, conditions)
-    const rows = await resolveList(query)
-    return toCount((rows[0] as { value?: unknown } | undefined)?.value)
+    return withExecutor(queryOptions, async (db) => {
+      const query = withConditions(db.select({ value: count() }).from(table), table, conditions)
+      const rows = await resolveList(query)
+      return toCount((rows[0] as { value?: unknown } | undefined)?.value)
+    })
   },
 
   async aggregateAdvanced(
@@ -697,12 +735,13 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     conditions: WhereCondition[],
     queryOptions?: AdapterQueryOptions,
   ): Promise<unknown> {
-    const db = resolveExecutor(queryOptions)
-    const column = resolveColumn(table, field)
-    const expression = fn === 'min' ? min(column) : fn === 'max' ? max(column) : sql`${sql.raw(fn)}(${column})`
-    const query = withConditions(db.select({ value: expression }).from(table), table, conditions)
-    const rows = (await resolveList(query)) as Array<{ value?: unknown }>
-    return decodeAggregate(fn, column, field, rows[0]?.value ?? null)
+    return withExecutor(queryOptions, async (db) => {
+      const column = resolveColumn(table, field)
+      const expression = fn === 'min' ? min(column) : fn === 'max' ? max(column) : sql`${sql.raw(fn)}(${column})`
+      const query = withConditions(db.select({ value: expression }).from(table), table, conditions)
+      const rows = (await resolveList(query)) as Array<{ value?: unknown }>
+      return decodeAggregate(fn, column, field, rows[0]?.value ?? null)
+    })
   },
 
   executor(queryOptions?: AdapterQueryOptions): unknown {
@@ -715,21 +754,22 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     conditions: WhereCondition[],
     queryOptions?: AdapterQueryOptions,
   ): Promise<Array<{ key: unknown; count: number }>> {
-    const db = resolveExecutor(queryOptions)
-    const column = (table as DrizzleTableLike)[field]
-    if (!column) {
-      throw new Error(`DrizzleAdapter: unknown column "${field}" on provided table.`)
-    }
+    return withExecutor(queryOptions, async (db) => {
+      const column = (table as DrizzleTableLike)[field]
+      if (!column) {
+        throw new Error(`DrizzleAdapter: unknown column "${field}" on provided table.`)
+      }
 
-    let query = withConditions(db.select({ key: column, value: count() }).from(table), table, conditions)
+      let query = withConditions(db.select({ key: column, value: count() }).from(table), table, conditions)
 
-    if (typeof query.groupBy !== 'function') {
-      throw new Error('DrizzleAdapter: configured database does not support groupBy().')
-    }
-    query = query.groupBy(column)
+      if (typeof query.groupBy !== 'function') {
+        throw new Error('DrizzleAdapter: configured database does not support groupBy().')
+      }
+      query = query.groupBy(column)
 
-    const rows = (await resolveList(query)) as Array<{ key: unknown; value?: unknown }>
-    return rows.map(({ key, value }) => ({ key, count: toCount(value) }))
+      const rows = (await resolveList(query)) as Array<{ key: unknown; value?: unknown }>
+      return rows.map(({ key, value }) => ({ key, count: toCount(value) }))
+    })
   },
 
   async updateAdvanced<TRecord extends PlainObject = PlainObject>(
@@ -738,17 +778,18 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     data: PlainObject,
     writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord> {
-    const db = resolveExecutor(writeOptions)
-    if (!db.update) {
-      throw new Error('DrizzleAdapter: configured database does not support updates.')
-    }
+    return withExecutor(writeOptions, async (db) => {
+      if (!db.update) {
+        throw new Error('DrizzleAdapter: configured database does not support updates.')
+      }
 
-    const clause = buildDrizzleConditions(table, conditions)
-    const finalQuery = clause ? db.update(table).set(data).where(clause) : db.update(table).set(data)
-    const { usedReturning, row } = await resolveWithReturning<TRecord>(finalQuery)
-    if (usedReturning) return row as TRecord
-    const result = await resolveMutation(finalQuery)
-    return result as TRecord
+      const clause = buildDrizzleConditions(table, conditions)
+      const finalQuery = clause ? db.update(table).set(data).where(clause) : db.update(table).set(data)
+      const { usedReturning, row } = await resolveWithReturning<TRecord>(finalQuery)
+      if (usedReturning) return row as TRecord
+      const result = await resolveMutation(finalQuery)
+      return result as TRecord
+    })
   },
 
   // oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
@@ -757,17 +798,18 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     conditions: WhereCondition[],
     writeOptions?: AdapterQueryOptions,
   ): Promise<number | PlainObject | void> {
-    const db = resolveExecutor(writeOptions)
-    if (!db.delete) {
-      throw new Error('DrizzleAdapter: configured database does not support deletes.')
-    }
+    return withExecutor(writeOptions, async (db) => {
+      if (!db.delete) {
+        throw new Error('DrizzleAdapter: configured database does not support deletes.')
+      }
 
-    const clause = buildDrizzleConditions(table, conditions)
-    const finalQuery = clause ? db.delete(table).where(clause) : db.delete(table)
-    const { usedReturning, row } = await resolveWithReturning<PlainObject>(finalQuery)
-    if (usedReturning) return row
-    const result = await resolveMutation(finalQuery)
-    return result as number | PlainObject | void
+      const clause = buildDrizzleConditions(table, conditions)
+      const finalQuery = clause ? db.delete(table).where(clause) : db.delete(table)
+      const { usedReturning, row } = await resolveWithReturning<PlainObject>(finalQuery)
+      if (usedReturning) return row
+      const result = await resolveMutation(finalQuery)
+      return result as number | PlainObject | void
+    })
   },
 
   /**
