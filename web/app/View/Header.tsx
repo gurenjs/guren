@@ -1,7 +1,7 @@
 /** @jsxImportSource @guren/core */
 import type { FC } from '@guren/core'
 import { COLOR_MODE_TOGGLE_SCRIPT } from '../../config/document-theme.js'
-import { GITHUB_URL } from '../../config/site.js'
+import { GITHUB_URL, OWN_REPO_LINK_REL } from '../../config/site.js'
 import { GithubIcon, MenuIcon, MoonIcon, SunIcon } from './icons.js'
 
 /**
@@ -25,7 +25,7 @@ export const Header: FC = () => (
           <a
             href={GITHUB_URL}
             target="_blank"
-            rel="noreferrer"
+            rel={OWN_REPO_LINK_REL}
             class="flex items-center gap-1.5 text-docs-text-muted no-underline transition hover:text-docs-accent"
           >
             <GithubIcon class="size-4" />
@@ -55,7 +55,7 @@ export const Header: FC = () => (
             <a
               href={GITHUB_URL}
               target="_blank"
-              rel="noreferrer"
+              rel={OWN_REPO_LINK_REL}
               class="rounded-md px-3 py-2 text-docs-text-muted no-underline transition hover:text-docs-accent"
             >
               GitHub

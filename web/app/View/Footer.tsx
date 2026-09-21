@@ -1,5 +1,6 @@
 /** @jsxImportSource @guren/core */
 import type { FC } from '@guren/core'
+import { OWN_REPO_LINK_REL } from '../../config/site.js'
 import { GithubIcon, RssIcon } from './icons.js'
 
 /**
@@ -23,7 +24,7 @@ export const Footer: FC = () => (
         <a
           href="https://github.com/gurenjs/guren"
           target="_blank"
-          rel="noreferrer"
+          rel={OWN_REPO_LINK_REL}
           class="flex items-center gap-1.5 no-underline transition hover:text-docs-accent"
         >
           <GithubIcon class="size-4" />

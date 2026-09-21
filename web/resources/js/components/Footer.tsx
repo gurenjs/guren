@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react'
-import { GITHUB_URL } from '../../../config/site.js'
+import { GITHUB_URL, OWN_REPO_LINK_REL } from '../../../config/site.js'
 import { GithubIcon, RssIcon } from './icons.js'
 
 interface FooterProps {
@@ -30,7 +30,7 @@ export function Footer({ variant }: FooterProps) {
             <a
               href="https://github.com/gurenjs/guren"
               target="_blank"
-              rel="noreferrer"
+              rel={OWN_REPO_LINK_REL}
               className="flex items-center gap-1.5 no-underline transition hover:text-docs-accent"
             >
               <GithubIcon className="size-4" />
@@ -68,9 +68,9 @@ export function Footer({ variant }: FooterProps) {
         <div>
           <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-white/70">Community</h4>
           <nav className="flex flex-col gap-2.5 text-sm text-white/50">
-            <a href="https://github.com/gurenjs/guren" target="_blank" rel="noreferrer" className="no-underline transition hover:text-white">GitHub</a>
-            <a href="https://github.com/gurenjs/guren/issues" target="_blank" rel="noreferrer" className="no-underline transition hover:text-white">Issues</a>
-            <a href="https://github.com/gurenjs/guren/discussions" target="_blank" rel="noreferrer" className="no-underline transition hover:text-white">Discussions</a>
+            <a href="https://github.com/gurenjs/guren" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-white">GitHub</a>
+            <a href="https://github.com/gurenjs/guren/issues" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-white">Issues</a>
+            <a href="https://github.com/gurenjs/guren/discussions" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-white">Discussions</a>
           </nav>
         </div>
         <div>
@@ -79,7 +79,7 @@ export function Footer({ variant }: FooterProps) {
             <a
               href={`${GITHUB_URL}/blob/main/LICENSE`}
               target="_blank"
-              rel="noreferrer"
+              rel={OWN_REPO_LINK_REL}
               className="no-underline transition hover:text-white"
             >
               MIT License

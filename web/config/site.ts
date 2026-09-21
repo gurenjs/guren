@@ -6,6 +6,12 @@ export const SITE_NAME = 'Guren'
 export const GITHUB_URL = 'https://github.com/gurenjs/guren'
 export const OG_IMAGE_PATH = '/og.png'
 
+// Links to our own GitHub repositories deliberately omit `noreferrer`: the
+// referrer is what attributes a visit to guren.dev in that repository's own
+// traffic view, and nothing else can measure a click leaving the site.
+// `noopener` still closes the window.opener handle.
+export const OWN_REPO_LINK_REL = 'noopener'
+
 export const SITE_TITLE =
   'Guren — The Bun-first fullstack TypeScript framework'
 

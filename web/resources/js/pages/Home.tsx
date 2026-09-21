@@ -3,7 +3,7 @@ import { useState } from 'react'
 interface Props {
   codeExamples: Record<string, string>
 }
-import { GITHUB_URL, SITE_DESCRIPTION, SITE_TITLE } from '../../../config/site.js'
+import { GITHUB_URL, OWN_REPO_LINK_REL, SITE_DESCRIPTION, SITE_TITLE } from '../../../config/site.js'
 import { CodeBlock } from '../components/CodeBlock.js'
 import { FeatureCard } from '../components/FeatureCard.js'
 import { Footer } from '../components/Footer.js'
@@ -313,7 +313,7 @@ export default function Home({ codeExamples }: Props) {
               <a
                 href="https://github.com/gurenjs/agents-on-guren"
                 target="_blank"
-                rel="noreferrer"
+                rel={OWN_REPO_LINK_REL}
                 className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-crimson-300 transition hover:text-crimson-200"
               >
                 Benchmark report, tasks &amp; raw data
@@ -418,7 +418,7 @@ export default function Home({ codeExamples }: Props) {
               <a
                 href="https://github.com/gurenjs/framework-comparison/blob/main/BENCHMARK.md"
                 target="_blank"
-                rel="noreferrer"
+                rel={OWN_REPO_LINK_REL}
                 className="inline-flex items-center gap-1.5 font-semibold text-crimson-300 transition hover:text-crimson-200"
               >
                 Methodology &amp; reproduction
@@ -515,7 +515,7 @@ export default function Home({ codeExamples }: Props) {
               <a
                 href={GITHUB_URL}
                 target="_blank"
-                rel="noreferrer"
+                rel={OWN_REPO_LINK_REL}
                 className="inline-flex items-center gap-2 rounded-full border border-white/30 px-8 py-3.5 font-semibold text-white/90 transition hover:border-white/50 hover:text-white"
               >
                 <CodeBracketIcon className="size-4" />
