@@ -128,6 +128,12 @@ async function importSqs(): Promise<{
   }
 }
 
+/** A message this driver popped: the handle, and the queue it is valid on. */
+interface Reservation {
+  receiptHandle: string
+  queueUrl: string
+}
+
 /** AWS SQS queue driver for serverless deployments. */
 export class SqsDriver implements QueueDriver {
   private readonly adapter: SqsAdapter
@@ -195,7 +201,21 @@ export class SqsDriver implements QueueDriver {
       stack: error.stack,
     }
     this.failedJobs.set(job.id, failedJob)
-    await this.acknowledge(job.id)
+
+    // The job is already recorded as failed, so throwing here would cost the
+    // worker loop and the job's failed() hook without saving the message: SQS
+    // redelivers it once the visibility timeout expires either way.
+    try {
+      await this.acknowledge(job.id)
+    } catch (deleteError) {
+      console.error(JSON.stringify({
+        level: 'error',
+        msg: `Could not delete the SQS message for failed job: ${job.name}`,
+        job: job.name,
+        queue: job.queue,
+        error: (deleteError as Error).message,
+      }))
+    }
   }
 
   async size(queue: string): Promise<number> {
@@ -268,11 +288,6 @@ export class SqsDriver implements QueueDriver {
   private resolveQueueUrl(queue: string): string {
     return this.options.queueUrls?.[queue] ?? this.options.queueUrl
   }
-}
-
-interface Reservation {
-  receiptHandle: string
-  queueUrl: string
 }
 
 function deserializeJob(body: string): QueuedJob {
