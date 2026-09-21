@@ -495,6 +495,15 @@ describe('app roots', () => {
     expect(result.message).toContain('The action "CommentController.store" was not found in modules/billing')
   })
 
+  test('should read a table in the app root the plan puts its model in', () => {
+    const draft = plan()
+    draft.models[0].module = 'billing'
+
+    const result = expectResult(validatePlan(draft, appState()), 'plan:app-unjudged', 'model.post', 'warn')
+
+    expect(result.message).toContain('table "posts" was not found in modules/billing')
+  })
+
   test('should judge a page by its id, since a module\'s pages sit under the project root', () => {
     const draft = plan()
     draft.views[0].module = 'billing'

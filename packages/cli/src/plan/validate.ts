@@ -565,7 +565,9 @@ function checkColumnsAgainstApp(model: PlanModel, tables: ReadonlyArray<PlanAppT
       candidate.module === (model.module ?? null) && (candidate.identifier === lookup || candidate.tableName === lookup),
   )
   if (!table) {
-    if (model.columns.length > 0) reportUnjudgedColumns(model, `table "${lookup}" was not found`, results)
+    if (model.columns.length > 0) {
+      reportUnjudgedColumns(model, `table "${lookup}" was not found in ${scopeName(model.module ?? null)}`, results)
+    }
     return
   }
   for (const column of model.columns) {
