@@ -1,5 +1,5 @@
 {
-  "description": "Guren agent harness: run `guren gate` when a turn ends with uncommitted changes. The command looks for the app's .codex/ upward from the session cwd, which may be a subdirectory of the app.",
+  "description": "Guren agent harness: run `guren gate` when a turn ends with uncommitted changes, then verify the plan step `guren plan:next` marked. The command looks for the app's .codex/ upward from the session cwd, which may be a subdirectory of the app.",
   "hooks": {
     "Stop": [
       {

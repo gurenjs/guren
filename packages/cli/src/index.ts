@@ -117,6 +117,7 @@ export { parseSchemaTables, parseSchemaTableColumns, type SchemaTable, type Sche
 export { runCheck, renderCheckReport } from './check'
 export { analyzeDeployRuntime, judgeDeployRuntime, checkDeployRuntime } from './deploy-runtime'
 export { runGate, renderGateReport, describeGateFailures, stopGateFindings, GATE_STAGES } from './gate'
+export { planStopHookFindings, MAX_STEP_CONTINUATIONS, type PlanStopHookInput, type PlanStopHookVerdict } from './plan-stop-hook'
 export { gatingResults, formatFinding } from './check-result'
 export { isLintable, resolveOxlint, runOxlint, type OxlintRun } from './lint-run'
 export { generateGuidelines } from './guidelines'

@@ -749,7 +749,7 @@ export async function runAgentHook(
   installPath: string,
   input: unknown,
   setup: (dir: string) => void | Promise<void>,
-  options: { subdir?: string; argv?: string[] } = {},
+  options: { subdir?: string; argv?: string[]; after?: (dir: string) => void | Promise<void> } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'guren-hook-'))
   try {
@@ -766,6 +766,7 @@ export async function runAgentHook(
       stdout: 'pipe',
       stderr: 'pipe',
     })
+    await options.after?.(dir)
     return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() }
   } finally {
     await rm(dir, { recursive: true, force: true })

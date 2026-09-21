@@ -9,10 +9,10 @@ import { builtinSubCommands } from '../src/commands'
 import { parsePlanDocument } from '../src/plan-render'
 import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
-import { planDigest, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
+import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
 import { sha256 } from '../src/plan/verification'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
+import { loadCommentsPlan, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own, since Bun keys an imported routes file on
@@ -23,86 +23,6 @@ const WORKSPACE_DRIZZLE = resolve(import.meta.dir, '../../orm/node_modules/drizz
 
 const HTTP = 'task/entity/model.comment/http'
 const DATA = 'task/entity/model.comment/data'
-
-const SCHEMA = `${PLAN_APP_FILES['db/schema.ts']}
-import { integer, timestamp } from 'drizzle-orm/pg-core'
-
-export const comments = pgTable('comments', {
-  id: serial('id').primaryKey(),
-  body: text('body'),
-  postId: integer('post_id').notNull().references(() => posts.id),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
-`
-
-/** The comments half of the plan written far enough for its `http` step to run, with every script a no-op. */
-const APP: Record<string, string> = {
-  ...PLAN_APP_FILES,
-  'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
-
-export class PostController extends Controller {
-  async index() {
-    return this.json([])
-  }
-  async show() {
-    return this.json({})
-  }
-}
-`,
-  '.guren/routes.gen.ts': 'export {}\n',
-  '.guren/pages.gen.ts': 'export {}\n',
-  '.guren/data.gen.ts': 'export {}\n',
-  'package.json': JSON.stringify({ name: 'verify-app', type: 'module', scripts: { codegen: 'exit 0', typecheck: 'exit 0', 'db:migrate': 'exit 0' } }),
-  'bunfig.toml': '[install]\nauto = "disable"\n',
-  'db/schema.ts': SCHEMA,
-  'app/Models/Comment.ts': `import { defineModel } from '@guren/core'
-import { comments } from '@/db/schema'
-
-export class Comment extends defineModel(comments, { fillable: ['body'] }) {}
-`,
-  'app/Http/Validators/CommentValidator.ts': 'export const CommentPayloadSchema = { safeParse: () => ({ success: true }) }\n',
-  'app/Http/Controllers/CommentController.ts': `import { Controller } from '@guren/core'
-import { CommentPayloadSchema } from '../Validators/CommentValidator.js'
-
-export class CommentController extends Controller {
-  async store() {
-    await this.validateBody(CommentPayloadSchema)
-    return this.redirect('/posts')
-  }
-}
-`,
-  'routes/web.ts': `import type { Router } from '@guren/core'
-import { PostController } from '../app/Http/Controllers/PostController.js'
-import { CommentController } from '../app/Http/Controllers/CommentController.js'
-
-export function registerWebRoutes(router: Router): void {
-  router.get('/posts', [PostController, 'index']).name('posts.index')
-  router.post('/posts/:postId/comments', [CommentController, 'store']).name('comments.store')
-}
-`,
-  'src/app.ts': `import { createApp } from '@guren/core'
-import { registerWebRoutes } from '../routes/web.js'
-
-export default createApp({ routes: registerWebRoutes })
-`,
-  'tests/comments.test.ts': `import { describe, expect, test } from 'bun:test'
-
-describe('comments', () => {
-  test('[AC-comments-1] a signed-in user can comment on a post', () => {
-    expect(1).toBe(1)
-  })
-  test('[AC-comments-2] a guest is redirected', () => {
-    expect(1).toBe(1)
-  })
-  test('[AC-comments-3] an empty body is rejected', () => {
-    expect(1).toBe(1)
-  })
-  test('[AC-comments-4] the author can delete', () => {
-    expect(1).toBe(1)
-  })
-})
-`,
-}
 
 async function createApp(name: string, files: Record<string, string> = APP): Promise<string> {
   const dir = join(ROOT, name)
@@ -188,7 +108,7 @@ describe('plan:verify', () => {
     const state = JSON.parse(await readFile(join(app, '.guren/plans/http.state.json'), 'utf8')) as { stateVersion: number; steps: Record<string, PlanStepRecord> }
     expect(state.stateVersion).toBe(PLAN_STATE_VERSION)
     expect(state.steps[HTTP]).toMatchObject({ outcome: 'incomplete', planDigest: planDigest(parsePlanDocument(loadCommentsPlan())) })
-    expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n')
+    expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe(PLAN_STATE_GITIGNORE)
     expect(Object.values(states(result))).not.toContain('verified')
   })
 

@@ -15,7 +15,7 @@ import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } f
 import type { PlanAppState } from './plan/app-state'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
-import { planDigest, planSlug, readPlanState, writePlanStepRecord } from './plan/state'
+import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
 import { judgePlan } from './plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
 import { hashFiles, overlayVerification, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
@@ -104,19 +104,24 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   }
 }
 
+/** One step's record as `plan:verify` prints it; the Stop hook prints the same lines. */
+export function formatPlanStepRecord(stepId: string, record: PlanStepRecord): string[] {
+  const lines = [`${stepId}: ${record.outcome} (${record.durationMs} ms)`]
+  for (const command of record.commands) {
+    lines.push(`  ${command.status.padEnd('blocked'.length)}  ${command.command.padEnd('db:migrate'.length)}  ${command.label}`)
+    if (command.reason) lines.push(`      ${command.reason}`)
+    for (const finding of command.findings) lines.push(`      ${finding}`)
+  }
+  for (const behaviour of record.acceptance) lines.push(`  ${behaviour.status.padEnd('pending'.length)}  [${behaviour.id}]`)
+  for (const element of record.incomplete) lines.push(`  not at its completion state: ${element}`)
+  return lines
+}
+
 export function formatPlanVerify(report: PlanVerifyReport): string {
   const lines: string[] = []
   const codegenFailed = report.steps.filter(({ record }) => record.commands.some((command) => command.command === 'codegen' && command.status !== 'pass'))
   for (const { stepId, record } of report.steps) {
-    lines.push(`${stepId}: ${record.outcome} (${record.durationMs} ms)`)
-    for (const command of record.commands) {
-      lines.push(`  ${command.status.padEnd('blocked'.length)}  ${command.command.padEnd('db:migrate'.length)}  ${command.label}`)
-      if (command.reason) lines.push(`      ${command.reason}`)
-      for (const finding of command.findings) lines.push(`      ${finding}`)
-    }
-    for (const behaviour of record.acceptance) lines.push(`  ${behaviour.status.padEnd('pending'.length)}  [${behaviour.id}]`)
-    for (const element of record.incomplete) lines.push(`  not at its completion state: ${element}`)
-    lines.push('')
+    lines.push(...formatPlanStepRecord(stepId, record), '')
   }
   for (const stepId of report.skipped) lines.push(`${stepId}: verified before, and nothing it fingerprinted has changed`)
   if (report.skipped.length > 0) lines.push('')

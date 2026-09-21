@@ -43,6 +43,7 @@ import { renderPlanFile } from './plan-render'
 import { loadPlanAppState } from './plan/app-state'
 import { formatPlanStatus, planStatusFile } from './plan-status'
 import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from './plan-verify'
+import { formatPlanNext, planNextFile } from './plan-next'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -328,6 +329,36 @@ const planVerifyCommand = defineCommand({
     })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanVerify(report))
     if (args.ci && report.steps.some((step) => step.record.outcome !== 'verified')) process.exitCode = 1
+  },
+})
+
+const planNextCommand = defineCommand({
+  meta: {
+    name: 'plan:next',
+    description:
+      'Print the next step of a plan to implement (RFC 0030 §7) with what it covers: its elements, behaviours and verify commands, never the whole plan. Marks the step under .guren/plans/ so the harness Stop hook verifies it on every stop. Runs nothing and loads no app; refuses a working tree with uncommitted changes unless they are the marked step\'s own.',
+  },
+  args: {
+    plan: {
+      type: 'positional',
+      description: 'Path to the plan JSON file',
+      required: true,
+      valueHint: 'comments.plan.json',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory: where the state is read and the step is marked.',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print the report as JSON.',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const appRoot = resolve(args.app ?? process.cwd())
+    const report = await planNextFile(args.plan, { appRoot })
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanNext(report, args.plan))
   },
 })
 
@@ -3709,6 +3740,7 @@ export const builtinSubCommands = {
   'plan:render': planRenderCommand,
   'plan:status': planStatusCommand,
   'plan:verify': planVerifyCommand,
+  'plan:next': planNextCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
   'make:ai-agent': makeAiAgentCommand,
