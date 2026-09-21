@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test'
 
 import { createSqsHandler, type SqsEvent, type SqsRecord } from '../../src/lambda'
 import { Job, registerJob, clearJobRegistry } from '../../src/queue/Job'
@@ -14,19 +14,25 @@ class SuccessJob extends Job<{ value: number }> {
 
 let failedCallPayload: unknown = null
 
-/** Every reported record logs its reason, so each describe collects them. */
 const errorLogs: string[] = []
-let realConsoleError: typeof console.error
+let errorSpy: ReturnType<typeof spyOn>
 
-function captureErrors(): void {
+const FIFO_ARN = 'arn:aws:sqs:us-east-1:123456789012:jobs.fifo'
+
+beforeEach(() => {
+  clearJobRegistry()
+  registerJob(SuccessJob)
+  registerJob(FailingJob)
+  failedCallPayload = null
+  handled.length = 0
   errorLogs.length = 0
-  realConsoleError = console.error
-  console.error = (message: string) => errorLogs.push(String(message))
-}
+  errorSpy = spyOn(console, 'error').mockImplementation((message: string) => { errorLogs.push(String(message)) })
+})
 
-function restoreErrors(): void {
-  console.error = realConsoleError
-}
+afterEach(() => {
+  errorSpy.mockRestore()
+  clearJobRegistry()
+})
 
 class FailingJob extends Job<{ id: string }> {
   static maxAttempts = 1
@@ -65,20 +71,6 @@ function createSqsRecord(job: { name: string; payload: unknown; attempts?: numbe
 }
 
 describe('createSqsHandler', () => {
-  beforeEach(() => {
-    clearJobRegistry()
-    registerJob(SuccessJob)
-    registerJob(FailingJob)
-    failedCallPayload = null
-    handled.length = 0
-    captureErrors()
-  })
-
-  afterEach(() => {
-    restoreErrors()
-    clearJobRegistry()
-  })
-
   test('should process all records successfully', async () => {
     const handler = createSqsHandler()
 
@@ -168,19 +160,6 @@ describe('createSqsHandler', () => {
 })
 
 describe('SQS delivery semantics', () => {
-  beforeEach(() => {
-    clearJobRegistry()
-    handled.length = 0
-    failedCallPayload = null
-    registerJob(SuccessJob)
-    registerJob(FailingJob)
-    captureErrors()
-  })
-  afterEach(() => {
-    restoreErrors()
-    clearJobRegistry()
-  })
-
   test('uses the receive count across invocations and stops handle at maxAttempts', async () => {
     let calls = 0
     const errors: string[] = []
@@ -226,7 +205,6 @@ describe('SQS delivery semantics', () => {
     const logged = errorLogs.map(line => JSON.parse(line)).sort((a, b) => a.messageId.localeCompare(b.messageId))
     expect(logged.map(entry => entry.messageId)).toEqual(['boom', 'unregistered'])
     expect(logged[0]).toMatchObject({ level: 'error', job: 'SuccessJob', attempt: 1, maxAttempts: 3, error: 'negative value' })
-    // A record rejected before it reaches a job still names itself.
     expect(logged[1]).toMatchObject({ messageId: 'unregistered', error: 'Job class not found: MissingJob' })
   })
 
@@ -272,25 +250,24 @@ describe('SQS delivery semantics', () => {
     registerJob(OrderedJob)
     const records = [1, 2, 3, 4].map(step => ({
       ...createSqsRecord({ name: 'OrderedJob', payload: { step } }, `msg-${step}`),
-      eventSourceARN: 'arn:aws:sqs:us-east-1:123456789012:jobs.fifo',
+      eventSourceARN: FIFO_ARN,
       attributes: { ApproximateReceiveCount: '1', MessageGroupId: step === 4 ? 'other' : 'same' },
     }))
     expect(await createSqsHandler()({ Records: records })).toEqual({
       batchItemFailures: ['msg-2', 'msg-3', 'msg-4'].map(itemIdentifier => ({ itemIdentifier })),
     })
     expect(order).toEqual([1, 2])
-    // The tail is reported without ever reaching a job, so only this line
-    // records that those deliveries were spent.
-    expect(errorLogs.map(line => JSON.parse(line)).at(-1)).toMatchObject({
-      messageId: 'msg-2',
-      unprocessed: ['msg-3', 'msg-4'],
-    })
+    // The tail is reported without ever reaching a job, so these lines are the
+    // only record that those deliveries were spent.
+    const logged = errorLogs.map(line => JSON.parse(line))
+    expect(logged.map(entry => entry.messageId)).toEqual(['msg-2', 'msg-3', 'msg-4'])
+    expect(logged[1]).toMatchObject({ messageId: 'msg-3', stoppedAt: 'msg-2' })
   })
 
   test('acknowledges a completely successful FIFO batch', async () => {
     const records = [1, 2].map(value => ({
       ...createSqsRecord({ name: 'SuccessJob', payload: { value } }, String(value)),
-      eventSourceARN: 'arn:aws:sqs:us-east-1:123456789012:jobs.fifo',
+      eventSourceARN: FIFO_ARN,
     }))
     expect(await createSqsHandler()({ Records: records })).toEqual({ batchItemFailures: [] })
     expect(handled).toEqual([{ value: 1 }, { value: 2 }])
@@ -298,9 +275,9 @@ describe('SQS delivery semantics', () => {
 
   test('stops a FIFO batch after malformed JSON without executing later records', async () => {
     const first = createSqsRecord({ name: 'SuccessJob', payload: { value: 1 } }, 'first')
-    first.eventSourceARN += '.fifo'
+    first.eventSourceARN = FIFO_ARN
     first.body = '{broken'
-    const next = { ...first, ...createSqsRecord({ name: 'SuccessJob', payload: { value: 2 } }, 'next'), eventSourceARN: first.eventSourceARN }
+    const next = { ...createSqsRecord({ name: 'SuccessJob', payload: { value: 2 } }, 'next'), eventSourceARN: FIFO_ARN }
     expect(await createSqsHandler()({ Records: [first, next] })).toEqual({
       batchItemFailures: [{ itemIdentifier: 'first' }, { itemIdentifier: 'next' }],
     })

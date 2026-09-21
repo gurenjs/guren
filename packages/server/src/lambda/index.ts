@@ -4,6 +4,8 @@ import type { Application } from '../http/Application'
 import type { Scheduler } from '../scheduling/Scheduler'
 import type { ConsoleKernel } from '../console/ConsoleKernel'
 import { getJob } from '../queue/Job'
+import { deserializeQueuedJob } from '../queue/serialize'
+import type { QueuedJob } from '../queue/types'
 import { detectServerlessRuntime } from '../runtime/serverless'
 
 export type { APIGatewayProxyResult, LambdaEvent } from 'hono/aws-lambda'
@@ -55,15 +57,10 @@ export function createSqsHandler(): (event: SqsEvent) => Promise<SqsBatchRespons
           await processSqsRecord(event.Records[index])
         } catch {
           const stopped = event.Records.slice(index)
-          // The tail never reaches processSqsRecord, so its ids log here or
-          // nowhere: its deliveries still count against every job's budget.
-          if (stopped.length > 1) {
-            console.error(JSON.stringify({
-              level: 'error',
-              msg: 'SQS FIFO batch stopped before its remaining records',
-              messageId: stopped[0].messageId,
-              unprocessed: stopped.slice(1).map((record) => record.messageId),
-            }))
+          for (const record of stopped.slice(1)) {
+            // The tail never reaches processSqsRecord, so each id logs here or
+            // nowhere: its deliveries still count against that job's budget.
+            logSqsFailure({ msg: 'SQS record left unprocessed', messageId: record.messageId, stoppedAt: stopped[0].messageId })
           }
           return { batchItemFailures: stopped.map((record) => ({ itemIdentifier: record.messageId })) }
         }
@@ -72,18 +69,25 @@ export function createSqsHandler(): (event: SqsEvent) => Promise<SqsBatchRespons
     }
 
     const results = await Promise.allSettled(event.Records.map(processSqsRecord))
-    return {
-      batchItemFailures: event.Records
-        .filter((_, index) => results[index].status === 'rejected')
-        .map((record) => ({ itemIdentifier: record.messageId })),
+    const batchItemFailures: SqsBatchItemFailure[] = []
+    for (let index = 0; index < results.length; index++) {
+      if (results[index].status === 'rejected') {
+        batchItemFailures.push({ itemIdentifier: event.Records[index].messageId })
+      }
     }
+    return { batchItemFailures }
   }
 }
 
+/** The tests parse these lines, so the envelope is a contract, not formatting. */
+function logSqsFailure(fields: Record<string, unknown>): void {
+  console.error(JSON.stringify({ level: 'error', ...fields }))
+}
+
 async function processSqsRecord(record: SqsRecord): Promise<void> {
-  let job: SqsJobBody | undefined
+  let job: QueuedJob | undefined
   try {
-    job = deserializeSqsJob(record.body)
+    job = deserializeQueuedJob(record.body)
     const JobClass = getJob(job.name)
     if (!JobClass) throw new Error(`Job class not found: ${job.name}`)
 
@@ -91,9 +95,10 @@ async function processSqsRecord(record: SqsRecord): Promise<void> {
     if (!Number.isSafeInteger(receiveCount) || receiveCount < 1) {
       throw new Error('SQS records require a positive ApproximateReceiveCount.')
     }
+    // A NaN in either field leaves both comparisons below false, so the job
+    // would run past its budget and never reach failed().
     if (!Number.isSafeInteger(job.attempts) || job.attempts < 0
-      || !Number.isSafeInteger(job.maxAttempts) || job.maxAttempts < 1
-      || !Number.isSafeInteger(job.attempts + receiveCount)) {
+      || !Number.isSafeInteger(job.maxAttempts) || job.maxAttempts < 1) {
       throw new Error('SQS jobs require valid attempts and maxAttempts counts.')
     }
     // Body is unchanged on redelivery; the AWS attribute survives invocations.
@@ -118,13 +123,7 @@ async function processSqsRecord(record: SqsRecord): Promise<void> {
           await instance.failed(job.payload, error as Error)
         } catch (hookError) {
           // Keep the original failure in the partial batch response for redrive.
-          console.error(JSON.stringify({
-            level: 'error',
-            msg: `Error in job.failed() handler: ${job.name}`,
-            messageId: record.messageId,
-            job: job.name,
-            error: (hookError as Error).message,
-          }))
+          logSqsFailure({ msg: 'Error in job.failed() handler', messageId: record.messageId, job: job.name, error: (hookError as Error).message })
         }
       }
       throw error
@@ -132,16 +131,15 @@ async function processSqsRecord(record: SqsRecord): Promise<void> {
   } catch (error) {
     // batchItemFailures carries message ids only, so this is the one place a
     // record's failure reason is visible before the queue's redrive policy.
-    console.error(JSON.stringify({
-      level: 'error',
-      msg: `SQS job failed: ${job?.name ?? 'unknown'}`,
+    logSqsFailure({
+      msg: 'SQS job failed',
       messageId: record.messageId,
       job: job?.name,
       queue: job?.queue,
       attempt: job?.attempts,
       maxAttempts: job?.maxAttempts,
       error: (error as Error).message,
-    }))
+    })
     throw error
   }
 }
@@ -212,27 +210,4 @@ export interface LambdaRuntimeContext {
   logGroup?: string
   logStream?: string
   tmpDir: string
-}
-
-/** The queued job a message body carries; validated before it is trusted. */
-interface SqsJobBody {
-  name: string
-  payload: unknown
-  queue: string
-  attempts: number
-  maxAttempts: number
-  availableAt: Date
-  createdAt: Date
-  reservedAt: Date | null
-}
-
-/** Deserialize a JSON SQS message body into a QueuedJob-like object. */
-function deserializeSqsJob(body: string): SqsJobBody {
-  const raw = JSON.parse(body) as SqsJobBody
-  return {
-    ...raw,
-    availableAt: new Date(raw.availableAt),
-    createdAt: new Date(raw.createdAt),
-    reservedAt: raw.reservedAt ? new Date(raw.reservedAt) : null,
-  }
 }
