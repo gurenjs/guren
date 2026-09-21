@@ -84,6 +84,12 @@ Declare `SQS_QUEUE_URL` and `SQS_EMAILS_QUEUE_URL` in `config/env.ts` (see [Conf
 
 Jobs are dispatched the same way as on the server: `await SendEmailJob.dispatch({ to: 'user@example.com' })`. The `SqsDriver` serializes the job to SQS, and the Lambda handler deserializes and executes it.
 
+### SQS polling workers
+
+`guren queue:work` can also consume SQS through `SqsDriver`. The built-in adapter requests `ApproximateReceiveCount` so retry counts survive redelivery and worker restarts. Successful jobs and jobs that reach `maxAttempts` are deleted from SQS; grant the worker `sqs:DeleteMessage` permission. Failed-job records remain in process memory, so use application monitoring or persistent error reporting if they must survive a restart. Deleting a terminal failure does not move it to an SQS dead-letter queue.
+
+Custom adapters used by polling workers must implement `deleteMessage({ queueUrl, receiptHandle })` and return a positive `receiveCount` from `receiveMessage()`, sourced from SQS `ApproximateReceiveCount`. Adapters used only to dispatch jobs can omit these additions. Lambda event-source processing continues to use `createSqsHandler()` and AWS batch acknowledgement.
+
 ### Schedule — `createScheduleHandler(scheduler)`
 
 Runs due tasks when invoked by EventBridge. Configure an EventBridge rule with `rate(1 minute)` to trigger this handler. The existing `Scheduler` and task definitions work without changes.
