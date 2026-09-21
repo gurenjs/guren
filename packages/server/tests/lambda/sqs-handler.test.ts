@@ -279,6 +279,12 @@ describe('SQS delivery semantics', () => {
       batchItemFailures: ['msg-2', 'msg-3', 'msg-4'].map(itemIdentifier => ({ itemIdentifier })),
     })
     expect(order).toEqual([1, 2])
+    // The tail is reported without ever reaching a job, so only this line
+    // records that those deliveries were spent.
+    expect(errorLogs.map(line => JSON.parse(line)).at(-1)).toMatchObject({
+      messageId: 'msg-2',
+      unprocessed: ['msg-3', 'msg-4'],
+    })
   })
 
   test('acknowledges a completely successful FIFO batch', async () => {

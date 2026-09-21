@@ -54,9 +54,18 @@ export function createSqsHandler(): (event: SqsEvent) => Promise<SqsBatchRespons
         try {
           await processSqsRecord(event.Records[index])
         } catch {
-          return {
-            batchItemFailures: event.Records.slice(index).map((record) => ({ itemIdentifier: record.messageId })),
+          const stopped = event.Records.slice(index)
+          // The tail never reaches processSqsRecord, so its ids log here or
+          // nowhere: its deliveries still count against every job's budget.
+          if (stopped.length > 1) {
+            console.error(JSON.stringify({
+              level: 'error',
+              msg: 'SQS FIFO batch stopped before its remaining records',
+              messageId: stopped[0].messageId,
+              unprocessed: stopped.slice(1).map((record) => record.messageId),
+            }))
           }
+          return { batchItemFailures: stopped.map((record) => ({ itemIdentifier: record.messageId })) }
         }
       }
       return { batchItemFailures: [] }
