@@ -16,7 +16,7 @@ import {
 
 type Holder = Record<string, unknown>
 
-/** The sections an element of which names another element. */
+/** The sections whose elements name other elements. */
 export type PlanReferenceOwner = Extract<
   PlanElementSection,
   'questions' | 'models' | 'columns' | 'actions' | 'routes' | 'views' | 'resources' | 'policies' | 'flows' | 'tasks' | 'acceptance'
