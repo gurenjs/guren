@@ -1,4 +1,5 @@
 import type { QueueDriver, QueuedJob, FailedJob } from '../types'
+import { warnOnce } from '../../support/warn-once'
 
 /**
  * Implemented by wrapping your own SQS client, which keeps @aws-sdk/client-sqs
@@ -17,6 +18,12 @@ export interface SqsAdapter {
     queueUrl: string
     waitTimeSeconds?: number
   }): Promise<{ body: string; receiptHandle: string } | null>
+
+  /**
+   * Optional so adapters written before this method keep compiling; without it
+   * SQS redelivers every acknowledged job once the visibility timeout expires.
+   */
+  deleteMessage?(params: { queueUrl: string; receiptHandle: string }): Promise<void>
 
   changeMessageVisibility(params: {
     queueUrl: string
@@ -69,6 +76,16 @@ export function createSqsAdapter(client: { send(command: unknown): Promise<unkno
       return { body: msg.Body, receiptHandle: msg.ReceiptHandle }
     },
 
+    async deleteMessage(params) {
+      const { DeleteMessageCommand } = await importSqs()
+      await client.send(
+        new DeleteMessageCommand({
+          QueueUrl: params.queueUrl,
+          ReceiptHandle: params.receiptHandle,
+        } as any),
+      )
+    },
+
     async changeMessageVisibility(params) {
       const { ChangeMessageVisibilityCommand } = await importSqs()
       await client.send(
@@ -98,6 +115,7 @@ const SQS_MODULE = '@aws-sdk/client-sqs'
 async function importSqs(): Promise<{
   SendMessageCommand: new (input: unknown) => unknown
   ReceiveMessageCommand: new (input: unknown) => unknown
+  DeleteMessageCommand: new (input: unknown) => unknown
   ChangeMessageVisibilityCommand: new (input: unknown) => unknown
   GetQueueAttributesCommand: new (input: unknown) => unknown
 }> {
@@ -110,12 +128,18 @@ async function importSqs(): Promise<{
   }
 }
 
+/** A message this driver popped: the handle, and the queue it is valid on. */
+interface Reservation {
+  receiptHandle: string
+  queueUrl: string
+}
+
 /** AWS SQS queue driver for serverless deployments. */
 export class SqsDriver implements QueueDriver {
   private readonly adapter: SqsAdapter
   private readonly options: SqsDriverOptions
   private readonly failedJobs: Map<string, FailedJob> = new Map()
-  private readonly receiptHandles: Map<string, string> = new Map()
+  private readonly reservations: Map<string, Reservation> = new Map()
 
   constructor(adapter: SqsAdapter, options: SqsDriverOptions) {
     this.adapter = adapter
@@ -138,27 +162,26 @@ export class SqsDriver implements QueueDriver {
   }
 
   async pop(queue: string): Promise<QueuedJob | null> {
-    const result = await this.adapter.receiveMessage({
-      queueUrl: this.resolveQueueUrl(queue),
-    })
+    const queueUrl = this.resolveQueueUrl(queue)
+    const result = await this.adapter.receiveMessage({ queueUrl })
 
     if (!result) return null
 
     const job = deserializeJob(result.body)
-    this.receiptHandles.set(job.id, result.receiptHandle)
+    this.reservations.set(job.id, { receiptHandle: result.receiptHandle, queueUrl })
     job.reservedAt = new Date()
     return job
   }
 
   async release(job: QueuedJob, delayMs: number = 0): Promise<void> {
-    const receiptHandle = this.receiptHandles.get(job.id)
-    if (receiptHandle) {
+    const reservation = this.reservations.get(job.id)
+    if (reservation) {
       await this.adapter.changeMessageVisibility({
-        queueUrl: this.resolveQueueUrl(job.queue),
-        receiptHandle,
+        queueUrl: reservation.queueUrl,
+        receiptHandle: reservation.receiptHandle,
         visibilityTimeout: Math.ceil(delayMs / 1000),
       })
-      this.receiptHandles.delete(job.id)
+      this.reservations.delete(job.id)
     } else {
       job.reservedAt = null
       job.availableAt = new Date(Date.now() + delayMs)
@@ -167,7 +190,7 @@ export class SqsDriver implements QueueDriver {
   }
 
   async delete(jobId: string): Promise<void> {
-    this.receiptHandles.delete(jobId)
+    await this.acknowledge(jobId)
   }
 
   async fail(job: QueuedJob, error: Error): Promise<void> {
@@ -178,7 +201,21 @@ export class SqsDriver implements QueueDriver {
       stack: error.stack,
     }
     this.failedJobs.set(job.id, failedJob)
-    this.receiptHandles.delete(job.id)
+
+    // The job is already recorded as failed, so throwing here would cost the
+    // worker loop and the job's failed() hook without saving the message: SQS
+    // redelivers it once the visibility timeout expires either way.
+    try {
+      await this.acknowledge(job.id)
+    } catch (deleteError) {
+      console.error(JSON.stringify({
+        level: 'error',
+        msg: `Could not delete the SQS message for failed job: ${job.name}`,
+        job: job.name,
+        queue: job.queue,
+        error: (deleteError as Error).message,
+      }))
+    }
   }
 
   async size(queue: string): Promise<number> {
@@ -223,7 +260,29 @@ export class SqsDriver implements QueueDriver {
 
   async clear(): Promise<void> {
     this.failedJobs.clear()
-    this.receiptHandles.clear()
+    this.reservations.clear()
+  }
+
+  /** Drops the reservation only once SQS has accepted the deletion. */
+  private async acknowledge(jobId: string): Promise<void> {
+    const reservation = this.reservations.get(jobId)
+    if (!reservation) return
+
+    if (this.adapter.deleteMessage) {
+      await this.adapter.deleteMessage({
+        queueUrl: reservation.queueUrl,
+        receiptHandle: reservation.receiptHandle,
+      })
+    } else {
+      warnOnce(
+        'sqs-adapter-missing-delete-message',
+        '[guren] The SqsAdapter has no deleteMessage(): acknowledged jobs stay on the queue and SQS redelivers them '
+          + 'once the visibility timeout expires. Implement deleteMessage() on your adapter, or build it with '
+          + 'createSqsAdapter().',
+      )
+    }
+
+    this.reservations.delete(jobId)
   }
 
   private resolveQueueUrl(queue: string): string {
