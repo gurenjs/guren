@@ -31,6 +31,7 @@ const POSTS_TABLE: SourcedSchemaTable = {
   module: null,
   dialect: 'pg',
   source: 'runtime',
+  file: 'db/schema.ts',
   constraints: [{ kind: 'index', columns: ['authorId'] }],
   columns: [
     { name: 'id', columnName: 'id', type: 'serial', sqlType: 'serial', notNull: true, primaryKey: true, unique: false },
@@ -54,6 +55,7 @@ const USERS_TABLE: SourcedSchemaTable = {
   module: null,
   dialect: 'pg',
   source: 'runtime',
+  file: 'db/schema.ts',
   constraints: [],
   columns: [{ name: 'id', columnName: 'id', type: 'serial', sqlType: 'serial', notNull: true, primaryKey: true, unique: false }],
 }
@@ -67,25 +69,25 @@ function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
     mounts: { entry: 'mounted', modules: {} },
     tables: [POSTS_TABLE, USERS_TABLE],
     models: [
-      { className: 'Post', module: null, table: 'posts', relationships: [{ name: 'author', type: 'belongsTo', relatedModel: 'User' }], fillable: ['title'] },
-      { className: 'User', module: null, table: 'users', relationships: [], fillable: null },
+      { className: 'Post', module: null, file: 'app/Models/Post.ts', table: 'posts', relationships: [{ name: 'author', type: 'belongsTo', relatedModel: 'User' }], fillable: ['title'] },
+      { className: 'User', module: null, file: 'app/Models/User.ts', table: 'users', relationships: [], fillable: null },
     ],
     unparsedModelFiles: [],
     actions: [
-      { key: 'PostController.index', module: null, pages: ['posts/Index'], calls: ['inertia'], abilities: [], identifiers: ['Post', 'pages'], validates: [] },
-      { key: 'PostController.show', module: null, pages: ['posts/Show'], calls: ['inertia', 'authorize'], abilities: ['view'], identifiers: ['Post', 'PostResource'], validates: [] },
+      { key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: ['posts/Index'], calls: ['inertia'], abilities: [], identifiers: ['Post', 'pages'], validates: [] },
+      { key: 'PostController.show', module: null, file: 'app/Http/Controllers/PostController.ts', pages: ['posts/Show'], calls: ['inertia', 'authorize'], abilities: ['view'], identifiers: ['Post', 'PostResource'], validates: [] },
     ],
-    controllers: [{ className: 'PostController', module: null }],
+    controllers: [{ className: 'PostController', module: null, file: 'app/Http/Controllers/PostController.ts' }],
     controllerCollisions: [],
     pages: [
-      { id: 'posts/Index', props: { status: 'keys', keys: [{ name: 'posts', type: 'Post[]', optional: false }] } },
-      { id: 'posts/Show', props: { status: 'undeclared' } },
+      { id: 'posts/Index', file: 'resources/js/pages/posts/Index.tsx', props: { status: 'keys', keys: [{ name: 'posts', type: 'Post[]', optional: false }] } },
+      { id: 'posts/Show', file: 'resources/js/pages/posts/Show.tsx', props: { status: 'undeclared' } },
     ],
     validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null }],
-    resources: [{ className: 'PostResource', module: null }],
-    policies: [{ className: 'PostPolicy', module: null }],
+    resources: [{ className: 'PostResource', module: null, file: 'app/Http/Resources/PostResource.ts' }],
+    policies: [{ className: 'PostPolicy', module: null, file: 'app/Policies/PostPolicy.ts' }],
     routeFiles: [{ file: 'routes/web.ts', identifiers: ['PostController', 'PostPayloadSchema'] }],
-    sideEffects: { job: [{ className: 'SendDigest', module: null }], event: [], listener: [] },
+    sideEffects: { job: [{ className: 'SendDigest', module: null, file: 'app/Jobs/SendDigest.ts' }], event: [], listener: [] },
     ...overrides,
   } as PlanAppDetail
 }
@@ -235,7 +237,7 @@ const CASES: Case[] = [
     plan: validator(ADD),
     app: app({
       routeFiles: [],
-      actions: [{ key: 'PostController.index', module: null, pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: ['PostPayloadSchema'] }],
+      actions: [{ key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: ['PostPayloadSchema'] }],
     }),
     id: 'val',
     state: 'wired',
@@ -245,7 +247,7 @@ const CASES: Case[] = [
     plan: validator(ADD),
     app: app({
       routeFiles: [],
-      actions: [{ key: 'PostController.index', module: null, pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: [] }],
+      actions: [{ key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: [] }],
     }),
     id: 'val',
     state: 'present',
@@ -303,7 +305,7 @@ const CASES: Case[] = [
       validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
     }),
     app: app({
-      actions: [{ key: 'PostController.index', module: null, pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: [] }],
+      actions: [{ key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: [] }],
     }),
     id: 'a',
     state: 'unjudged',
@@ -315,7 +317,7 @@ const CASES: Case[] = [
       validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
     }),
     app: app({
-      actions: [{ key: 'PostController.index', module: null, pages: [], calls: [], abilities: [], identifiers: [], validates: ['PostPayloadSchema'] }],
+      actions: [{ key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: [], calls: [], abilities: [], identifiers: [], validates: ['PostPayloadSchema'] }],
     }),
     id: 'a',
     state: 'wired',
@@ -380,7 +382,7 @@ const CASES: Case[] = [
   {
     name: 'a model the plan puts at the project root and only a module declares',
     plan: plan({ models: [model(ADD)] }),
-    app: app({ models: [{ className: 'Post', module: 'billing', table: 'posts', relationships: [], fillable: ['title'] }] }),
+    app: app({ models: [{ className: 'Post', module: 'billing', file: 'modules/billing/app/Models/Post.ts', table: 'posts', relationships: [], fillable: ['title'] }] }),
     id: 'm',
     state: 'planned',
   },
@@ -388,7 +390,7 @@ const CASES: Case[] = [
   {
     name: 'a controller the plan puts at the project root and only a module declares',
     plan: plan({ controllers: [controller(ADD)] }),
-    app: app({ controllers: [{ className: 'PostController', module: 'billing' }] }),
+    app: app({ controllers: [{ className: 'PostController', module: 'billing', file: 'modules/billing/app/Http/Controllers/PostController.ts' }] }),
     id: 'ctl',
     state: 'planned',
   },
@@ -403,7 +405,7 @@ const CASES: Case[] = [
   {
     name: 'a policy the plan puts at the project root and only a module declares',
     plan: plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [] }] }),
-    app: app({ policies: [{ className: 'PostPolicy', module: 'billing' }] }),
+    app: app({ policies: [{ className: 'PostPolicy', module: 'billing', file: 'modules/billing/app/Policies/PostPolicy.ts' }] }),
     id: 'pol',
     state: 'planned',
   },
@@ -411,7 +413,7 @@ const CASES: Case[] = [
   {
     name: 'a job the plan puts at the project root and only a module declares',
     plan: plan({ sideEffects: [{ id: 'job', change: ADD, kind: 'job', name: 'SendDigest', trigger: 't', description: 'd' }] }),
-    app: app({ sideEffects: { job: [{ className: 'SendDigest', module: 'billing' }], event: [], listener: [] } }),
+    app: app({ sideEffects: { job: [{ className: 'SendDigest', module: 'billing', file: 'modules/billing/app/Jobs/SendDigest.ts' }], event: [], listener: [] } }),
     id: 'job',
     state: 'planned',
   },
@@ -595,7 +597,7 @@ describe('judgePlan', () => {
       const { summary } = judgePlan(document, app())
 
       expect(summary.existing).toEqual({ found: 1, missing: ['ghost'], unread: [] })
-      expect(summary.states).toEqual({ planned: 1, present: 0, wired: 0, drifted: 0, unjudged: 0, blocked: 0 })
+      expect(summary.states).toEqual({ planned: 1, present: 0, wired: 0, verified: 0, drifted: 0, unjudged: 0, blocked: 0, waived: 0 })
     })
 
     test('should keep an existing element nobody could read out of both the found and the changed counts', () => {

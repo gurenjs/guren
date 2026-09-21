@@ -941,6 +941,59 @@ identity of the environment it ran in. "At the current tree" would expire
 every earlier slice on the next commit; a fingerprint expires a step only
 when something it covers changes, and that is `drifted`.
 
+**Amended in implementation (`plan:verify`):** what the command settled where the
+text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
+
+- A step is `verified` when every command passed *and* every element it owns is
+  at the state its kind completes at (`wired` where it has a mount point,
+  `present` otherwise, or `unjudged`); the behaviours are the step's, since the
+  derivation puts them on the step that must see them pass, so an element is not
+  lifted while a behaviour of its step fails whether or not it names the element.
+  Commands passing over an element still `planned` is `incomplete`, a fourth
+  outcome beside `verified`, `failed` and `blocked`, listing the elements.
+- `blocked` covers a script `package.json` lacks (`typecheck`, `db:migrate`;
+  `codegen` falls back to the CLI), a command past the per-command timeout
+  (`--timeout`, default 600 s), a check that threw, a test run that wrote no
+  report, and a migration whose output carries one of a short list of
+  infrastructure signatures (`ECONNREFUSED`, `password authentication failed`,
+  `SQLITE_CANTOPEN`, a missing `drizzle-kit`). The list is literal on purpose: a
+  broader one would turn failed migrations into environment problems.
+- Tests run as `bun test <files>` on the files whose source carries a step's
+  acceptance ids as bracketed tokens; a step whose ids no file carries fails
+  its tests command with the ids named. `tests` passes when every behaviour is
+  `passing` *and* the run exited 0, since a file that fails to load shows only
+  in the exit code; `tests:fail` when every behaviour has a case and each case
+  failed, a skipped case not being a run. An id the plan does not declare fails
+  the command rather than blocking it: the test, not the environment, is wrong.
+  One `bun test` runs per file set and per invocation, and `tests` and
+  `tests:fail` judge the same run; `typecheck`, `codegen`, `check` and
+  `db:migrate` likewise run once per invocation across the steps.
+- The fingerprint is the SHA-256 of every file the status readers found the
+  step's elements in (a model's file, the controller's for an action, the
+  schema file for a column, the entry routes file for an entry route and every
+  routes file of a module for a module's, the page component, a validator's
+  file) plus the selected test files, and the environment (`runtime`,
+  `platform`, `arch`, `hostname`). The environment is recorded and shown, and
+  not compared: a machine is not a reason to call an element drifted.
+- The state file is `.guren/plans/<slug>.state.json` under the application
+  root, `<slug>` the plan file's name without `.plan.json` / `.json`, with one
+  record per step id and a `.gitignore` written beside it. A record names the
+  digest of the plan it ran against, the hash for a plan with a baseline and the
+  same computation over a draft; `plan:status` lifts an element only from a
+  record of the plan it is reading, and reports the steps of another revision
+  as stale. A state file that will not read is reported and lifts nothing, and
+  the next write replaces it whole.
+- `plan:status` lays the records over its result: an element of a verified
+  step is `verified` while every fingerprinted file hashes the same, `drifted`
+  once one does not or cannot be read, naming the files; an element the code
+  has since lost keeps what the readers say, with a note. For that the status
+  report carries each element's `files` and `completesAt`, and its summary
+  counts all eight states.
+- The per-step metrics of §7 (`total_cost_usd`, continuations, files touched,
+  lines changed) are not recorded yet; a record carries `durationMs` per
+  command and per step. `--ci` exits 1 when a step the run covered did not
+  verify, which is what the §7 `Stop` hook will call.
+
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store
 (§9), committed or on the issue. `.guren/plans/<slug>.state.json` is

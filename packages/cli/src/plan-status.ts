@@ -5,21 +5,36 @@
  * so a plan with nothing implemented is as successful a run as a finished one.
  */
 
-import { basename } from 'node:path'
+import { basename, relative } from 'node:path'
 
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
-import { judgePlan, PLAN_STATUS_SECTIONS, PLAN_STATUS_STATES, type PlanElementStatus, type PlanStatus } from './plan/status'
+import { planDigest, planSlug, planStatePath, readPlanState } from './plan/state'
+import { judgePlan, PLAN_ELEMENT_STATES, PLAN_STATUS_SECTIONS, type PlanElementState, type PlanElementStatus, type PlanStatus } from './plan/status'
+import { derivePlanTasks } from './plan/tasks'
+import { applyVerification, hashFiles } from './plan/verify'
 
 /** Bumped when a field of {@link PlanStatusReport} changes meaning or goes away; additions do not bump it. */
 export const PLAN_STATUS_REPORT_VERSION = 1
 
 /** What `--json` prints. */
-export interface PlanStatusReport extends PlanStatus {
+export interface PlanStatusReport extends PlanStatus<PlanElementState> {
   reportVersion: typeof PLAN_STATUS_REPORT_VERSION
   plan: { file: string; title: string; hash: string | null }
+  /**
+   * What `plan:verify` recorded under the application root, laid over the elements
+   * (RFC 0030 §6). Absent when the command was given no application root to read it from.
+   */
+  verification?: {
+    /** Relative to the application root; it need not exist. */
+    stateFile: string
+    /** Steps whose record ran against another revision of the plan, and so lifted nothing. */
+    staleSteps: string[]
+    /** Set when a state file exists and could not be read, which lifts nothing either. */
+    unreadable?: string
+  }
 }
 
 export interface PlanStatusFileOptions {
@@ -29,15 +44,34 @@ export interface PlanStatusFileOptions {
    */
   app: PlanAppState | (() => Promise<PlanAppState>)
   cwd?: string
+  /** Where `.guren/plans/` is read from. Without it, no verification is laid over the result. */
+  appRoot?: string
 }
 
 export async function planStatusFile(planPath: string, options: PlanStatusFileOptions): Promise<PlanStatusReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   const app = typeof options.app === 'function' ? await options.app() : options.app
-  return {
+  const status = judgePlan(plan, app)
+  const head: Pick<PlanStatusReport, 'reportVersion' | 'plan'> = {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
-    ...judgePlan(plan, app),
+  }
+  if (options.appRoot === undefined) return { ...head, ...status }
+
+  const root = options.appRoot
+  const slug = planSlug(path)
+  const read = await readPlanState(root, slug)
+  const records = read.state?.steps ?? {}
+  const files = Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files))
+  const applied = applyVerification(status, derivePlanTasks(plan, { apiOnly: app.apiOnly }), records, planDigest(plan), await hashFiles(root, files))
+  return {
+    ...head,
+    ...applied.status,
+    verification: {
+      stateFile: relative(root, planStatePath(root, slug)),
+      staleSteps: applied.notes.staleSteps,
+      ...(read.unreadable ? { unreadable: read.unreadable } : {}),
+    },
   }
 }
 
@@ -55,7 +89,7 @@ const SECTION_TITLES: Record<(typeof PLAN_STATUS_SECTIONS)[number], string> = {
   commands: 'Commands',
 }
 
-function elementLines(element: PlanElementStatus, widths: { state: number; change: number; label: number }): string[] {
+function elementLines(element: PlanElementStatus<PlanElementState>, widths: { state: number; change: number; label: number }): string[] {
   const head = `  ${element.state.padEnd(widths.state)}  ${element.change.padEnd(widths.change)}  ${element.label.padEnd(widths.label)}  ${element.id}`
   const lines = [head.trimEnd()]
   if (element.reason) lines.push(`      ${element.reason}`)
@@ -69,7 +103,7 @@ function elementLines(element: PlanElementStatus, widths: { state: number; chang
 export function formatPlanStatus(report: PlanStatusReport): string {
   const lines = [`${report.plan.title} (${report.plan.file})`, '']
   const widths = {
-    state: Math.max(...PLAN_STATUS_STATES.map((state) => state.length)),
+    state: Math.max(...PLAN_ELEMENT_STATES.map((state) => state.length)),
     change: 'existing'.length,
     label: Math.max(0, ...report.elements.map((element) => element.label.length)),
   }
@@ -83,9 +117,9 @@ export function formatPlanStatus(report: PlanStatusReport): string {
   }
 
   const { states, existing, properties, notCheckable } = report.summary
-  const changed = PLAN_STATUS_STATES.reduce((total, state) => total + states[state], 0)
+  const changed = PLAN_ELEMENT_STATES.reduce((total, state) => total + states[state], 0)
   lines.push(`Elements the plan changes: ${changed}`)
-  lines.push(`  ${PLAN_STATUS_STATES.map((state) => `${state} ${states[state]}`).join(', ')}`)
+  lines.push(`  ${PLAN_ELEMENT_STATES.map((state) => `${state} ${states[state]}`).join(', ')}`)
   const named = (ids: string[]): string => (ids.length > 0 ? ` (${ids.join(', ')})` : '')
   lines.push(
     `Existing elements referenced: ${existing.found} found, ${existing.missing.length} missing${named(existing.missing)}, ${existing.unread.length} not readable${named(existing.unread)}`,
@@ -97,6 +131,11 @@ export function formatPlanStatus(report: PlanStatusReport): string {
   if (notCheckable.length > 0) {
     lines.push('', 'Planned, not checkable:')
     for (const entry of notCheckable) lines.push(`  ${entry.id}: ${entry.properties.join(', ')}`)
+  }
+  const verification = report.verification
+  if (verification?.unreadable) lines.push('', `Verification records not read: ${verification.unreadable}`)
+  if (verification && verification.staleSteps.length > 0) {
+    lines.push('', `Verified against another revision of the plan, so not counted: ${verification.staleSteps.join(', ')}`)
   }
   return lines.join('\n')
 }

@@ -73,7 +73,8 @@ type StageOutcome = Omit<GateStageResult, 'name' | 'durationMs'>
 const MAX_FINDINGS = 40
 const OUTPUT_TAIL_LINES = 20
 
-async function readScripts(cwd: string): Promise<Record<string, string>> {
+/** The app's `package.json` scripts, or none when the manifest cannot be read. */
+export async function readScripts(cwd: string): Promise<Record<string, string>> {
   try {
     const manifest = JSON.parse(await readFile(join(cwd, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>

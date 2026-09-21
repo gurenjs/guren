@@ -14,7 +14,9 @@ import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSect
 export type PlanStepKind = 'commands' | 'scaffold' | 'tests' | 'data' | 'http' | 'pages'
 
 /** A verify command by name. `plan:verify` owns what each one spawns; a plan string never does (§8). */
-export type PlanVerifyCommand = 'codegen' | 'typecheck' | 'db:migrate' | 'check' | 'tests' | 'tests:fail'
+export const PLAN_VERIFY_COMMANDS = ['codegen', 'typecheck', 'db:migrate', 'check', 'tests', 'tests:fail'] as const
+
+export type PlanVerifyCommand = (typeof PLAN_VERIFY_COMMANDS)[number]
 
 export const PLAN_STEP_VERIFY: Record<PlanStepKind, readonly PlanVerifyCommand[]> = {
   commands: ['codegen', 'typecheck'],

@@ -7,7 +7,7 @@
  * Nothing here runs at import beyond building the command objects. Keep it that
  * way: a top-level `await` or `process.*` read would run for every importer.
  */
-import { relative } from 'node:path'
+import { relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { showUsage } from 'citty'
@@ -42,6 +42,7 @@ import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { renderPlanFile } from './plan-render'
 import { loadPlanAppState } from './plan/app-state'
 import { formatPlanStatus, planStatusFile } from './plan-status'
+import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from './plan-verify'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -84,6 +85,7 @@ import { displayEntityContext } from './entity-context'
 import { CHECK_SUITES, runCheck, renderCheckReport } from './check'
 import { ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, loadEnvSchema, writeEnvExample } from './app-env'
 import { readAppDefaultLocale } from './app-locale'
+import { CliError } from './cli-error'
 import { gatingResults } from './check-result'
 import { runAudit, renderAuditReport } from './audit'
 import { runGate, renderGateReport } from './gate'
@@ -269,8 +271,63 @@ const planStatusCommand = defineCommand({
   },
   async run({ args }) {
     const appRoot = args.app ?? process.cwd()
-    const report = await planStatusFile(args.plan, { app: () => loadPlanAppState(appRoot, { detail: true }) })
+    const report = await planStatusFile(args.plan, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanStatus(report))
+  },
+})
+
+const planVerifyCommand = defineCommand({
+  meta: {
+    name: 'plan:verify',
+    description:
+      "Run a plan step's verify commands and tests against the application and record the result under .guren/plans/ (RFC 0030). Executes: bun test boots the app and db:migrate opens the database. Exits non-zero only when the plan cannot be read, or with --ci when a step did not verify.",
+  },
+  args: {
+    plan: {
+      type: 'positional',
+      description: 'Path to the plan JSON file',
+      required: true,
+      valueHint: 'comments.plan.json',
+    },
+    step: {
+      type: 'string',
+      description: 'One derived step id (plan:render lists them). Every step, in task order, when absent.',
+      valueHint: 'task/entity/model.comment/http',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory: where the commands run and the state is written.',
+    },
+    timeout: {
+      type: 'string',
+      description: `Seconds each command may take before it is reported as blocked. Default ${DEFAULT_VERIFY_TIMEOUT_MS / 1000}.`,
+      valueHint: '600',
+    },
+    ci: {
+      type: 'boolean',
+      description: 'Exit 1 when a step this run covered did not verify.',
+      default: false,
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print the report as JSON.',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const appRoot = resolve(args.app ?? process.cwd())
+    const seconds = args.timeout === undefined ? undefined : Number(args.timeout)
+    if (seconds !== undefined && !(Number.isFinite(seconds) && seconds > 0)) {
+      throw new CliError(`--timeout takes a positive number of seconds, not "${args.timeout}"`)
+    }
+    const report = await planVerifyFile(args.plan, {
+      app: () => loadPlanAppState(appRoot, { detail: true }),
+      appRoot,
+      step: args.step,
+      timeoutMs: seconds === undefined ? undefined : seconds * 1000,
+    })
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanVerify(report))
+    if (args.ci && report.steps.some((step) => step.outcome !== 'verified')) process.exitCode = 1
   },
 })
 
@@ -3651,6 +3708,7 @@ export const builtinSubCommands = {
   'docs:graph': docsGraphCommand,
   'plan:render': planRenderCommand,
   'plan:status': planStatusCommand,
+  'plan:verify': planVerifyCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
   'make:ai-agent': makeAiAgentCommand,

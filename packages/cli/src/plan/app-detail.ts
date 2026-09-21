@@ -34,7 +34,7 @@ import {
   moduleRoutesEntryCandidates,
   toPosixRelative,
 } from '../discovery'
-import { extractInertiaPageRefs, describeInertiaPagePropKeys } from '../inertia-pages'
+import { extractInertiaPageRefs, describeInertiaPagePropKeys, resolveInertiaPageFile } from '../inertia-pages'
 import { discoverParsedModels, type ModelRelationship } from '../model-parser'
 import type { PagePropKeys } from '../page-props-extractor'
 import { ParseCache } from '../parse-cache'
@@ -70,6 +70,8 @@ export interface PlanAppRouteDetail {
   prototype?: true
   /** The module whose registrar declared the route, or `null` for the entry registrar. */
   module: string | null
+  /** The entry routes file, app-relative. A module's route is placed by its module's routes files. */
+  file?: string
   /**
    * Exported validator symbols this registered route's contract schemas *are*, matched
    * by object identity rather than by name: the registrar ran, so a schema reached here
@@ -81,6 +83,8 @@ export interface PlanAppRouteDetail {
 export interface PlanAppModelDetail {
   className: string
   module: PlanAppScope
+  /** App-relative, POSIX separators, as every `file` here: what `plan:verify` fingerprints. */
+  file: string
   /** The table identifier the class binds, when the parser could read it. */
   table?: string
   relationships: ModelRelationship[]
@@ -91,6 +95,8 @@ export interface PlanAppActionDetail {
   /** `ClassName.action`. */
   key: string
   module: PlanAppScope
+  /** The controller's file. */
+  file: string
   /** Inertia page ids the body returns. */
   pages: string[]
   /** `this.<member>(` calls in the body, comments and strings excluded. */
@@ -105,6 +111,8 @@ export interface PlanAppActionDetail {
 
 export interface PlanAppPageDetail {
   id: string
+  /** Absent when the page has no component file. */
+  file?: string
   props: PagePropKeys
 }
 
@@ -121,6 +129,7 @@ export interface PlanAppValidatorDetail {
 export interface PlanAppClassDetail {
   className: string
   module: PlanAppScope
+  file: string
 }
 
 /** A routes file and what it names, for the note on an element nothing wired. */
@@ -258,6 +267,7 @@ function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanApp
     ...(route.agent ? { agent: { toolName: route.agent.toolName, readOnly: route.agent.readOnlyHint } } : {}),
     ...(route.prototype ? { prototype: true as const } : {}),
     module: input.provenance[index] ?? null,
+    ...(input.provenance[index] == null && input.routesFile !== undefined ? { file: input.routesFile } : {}),
     contractSchemas: contractSymbols(input.definitions?.[index], symbols),
   }))
 }
@@ -300,9 +310,10 @@ async function modelDetail(
     const [models, files] = await Promise.all([discoverParsedModels(root), discoverModelFiles(root)])
     const parsed = new Set(models.map((model) => model.relPath))
     return {
-      models: models.map(({ info, module }) => ({
+      models: models.map(({ info, module, relPath }) => ({
         className: info.className,
         module,
+        file: relPath,
         table: info.tableName,
         relationships: info.relationships,
         fillable: info.fillable,
@@ -326,6 +337,7 @@ function actionDetail(
     return {
       key,
       module: moduleNameFor(root, resolve(root, info.filePath)),
+      file: toPosixRelative(root, resolve(root, info.filePath)),
       pages: extractInertiaPageRefs(info.rawBody, isCode).map((ref) => ref.id),
       calls: unique([...info.body.matchAll(MEMBER_CALL_PATTERN)].map((match) => match[1]!)),
       abilities: unique([...info.rawBody.matchAll(ABILITY_PATTERN)].filter((match) => isCode(match.index)).map((match) => match[2]!)),
@@ -335,7 +347,11 @@ function actionDetail(
   })
   return {
     actions,
-    controllers: [...controllers.classFiles].map(([className, relPath]) => ({ className, module: moduleNameFor(root, resolve(root, relPath)) })),
+    controllers: [...controllers.classFiles].map(([className, relPath]) => ({
+      className,
+      module: moduleNameFor(root, resolve(root, relPath)),
+      file: toPosixRelative(root, resolve(root, relPath)),
+    })),
     controllerCollisions: unique(controllers.collisions.map((collision) => collision.className)),
   }
 }
@@ -343,16 +359,20 @@ function actionDetail(
 /** Classes a directory scan discovers, each tagged with the app root it came from. */
 async function classDetail(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<PlanAppClassDetail[]> {
   const files = excludeBarrelFiles(await discover(root).catch((): string[] => []))
-  return files.map((file) => ({ className: classNameFromPath(file), module: moduleNameFor(root, file) }))
+  return files.map((file) => ({ className: classNameFromPath(file), module: moduleNameFor(root, file), file: toPosixRelative(root, file) }))
 }
 
 async function pageDetail(root: string, pages: string[] | PlanAppUnreadable): Promise<PlanAppDetail['pages']> {
   if (!Array.isArray(pages)) return pages
   return Promise.all(
-    pages.map(async (id) => ({
-      id,
-      props: (await describeInertiaPagePropKeys(root, id)) ?? { status: 'unreadable' as const, reason: 'the page has no component file' },
-    })),
+    pages.map(async (id) => {
+      const file = await resolveInertiaPageFile(root, id)
+      return {
+        id,
+        ...(file === undefined ? {} : { file }),
+        props: (await describeInertiaPagePropKeys(root, id)) ?? { status: 'unreadable' as const, reason: 'the page has no component file' },
+      }
+    }),
   )
 }
 
