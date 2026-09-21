@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test'
 
 import { SqsDriver, type SqsAdapter } from '../../../src/queue/drivers/SqsDriver'
+import { resetWarnOnce } from '../../../src/support/warn-once'
 import type { QueuedJob } from '../../../src/queue/types'
 
 interface MockCall {
@@ -18,6 +19,9 @@ function createMockAdapter(): SqsAdapter & { calls: MockCall[] } {
     async receiveMessage(params) {
       calls.push({ method: 'receiveMessage', params })
       return null
+    },
+    async deleteMessage(params) {
+      calls.push({ method: 'deleteMessage', params })
     },
     async changeMessageVisibility(params) {
       calls.push({ method: 'changeMessageVisibility', params })
@@ -169,6 +173,105 @@ describe('SqsDriver', () => {
     const params = adapter.calls[0].params as any
     expect(params.messageGroupId).toBe('my-group')
     expect(params.messageDeduplicationId).toBe('job-1')
+  })
+
+  test('should delete the popped message when a job completes', async () => {
+    const testJob = createTestJob()
+    adapter.receiveMessage = async () => ({
+      body: JSON.stringify(testJob),
+      receiptHandle: 'receipt-123',
+    })
+
+    await driver.pop('default')
+    await driver.delete('job-1')
+
+    const deletes = adapter.calls.filter((call) => call.method === 'deleteMessage')
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].params).toEqual({
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+      receiptHandle: 'receipt-123',
+    })
+
+    await driver.delete('job-1')
+    expect(adapter.calls.filter((call) => call.method === 'deleteMessage')).toHaveLength(1)
+  })
+
+  test('should delete the popped message from the queue it was received on', async () => {
+    const driverWithUrls = new SqsDriver(adapter, {
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/default',
+      queueUrls: { emails: 'https://sqs.us-east-1.amazonaws.com/123/emails' },
+    })
+    adapter.receiveMessage = async () => ({
+      body: JSON.stringify(createTestJob({ queue: 'default' })),
+      receiptHandle: 'receipt-emails',
+    })
+
+    await driverWithUrls.pop('emails')
+    await driverWithUrls.delete('job-1')
+
+    const deletes = adapter.calls.filter((call) => call.method === 'deleteMessage')
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].params).toEqual({
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/emails',
+      receiptHandle: 'receipt-emails',
+    })
+  })
+
+  test('should delete the popped message when a job fails permanently', async () => {
+    const testJob = createTestJob()
+    adapter.receiveMessage = async () => ({
+      body: JSON.stringify(testJob),
+      receiptHandle: 'receipt-456',
+    })
+
+    const popped = await driver.pop('default')
+    await driver.fail(popped!, new Error('permanent'))
+
+    const deletes = adapter.calls.filter((call) => call.method === 'deleteMessage')
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].params).toEqual({
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+      receiptHandle: 'receipt-456',
+    })
+    expect(await driver.getFailedJobs()).toHaveLength(1)
+  })
+
+  test('should not delete a message for a job it never popped', async () => {
+    await driver.fail(createTestJob(), new Error('never reserved'))
+    await driver.delete('job-1')
+
+    expect(adapter.calls.filter((call) => call.method === 'deleteMessage')).toHaveLength(0)
+  })
+
+  test('should warn once for an adapter without deleteMessage', async () => {
+    const legacyAdapter = createMockAdapter()
+    delete (legacyAdapter as { deleteMessage?: unknown }).deleteMessage
+    legacyAdapter.receiveMessage = async () => ({
+      body: JSON.stringify(createTestJob({ id: crypto.randomUUID() })),
+      receiptHandle: 'receipt-legacy',
+    })
+    const legacyDriver = new SqsDriver(legacyAdapter, {
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123/queue',
+    })
+
+    resetWarnOnce()
+    const warnings: unknown[][] = []
+    const originalWarn = console.warn
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args)
+    }
+
+    try {
+      const first = await legacyDriver.pop('default')
+      await legacyDriver.delete(first!.id)
+      const second = await legacyDriver.pop('default')
+      await legacyDriver.delete(second!.id)
+    } finally {
+      console.warn = originalWarn
+    }
+
+    expect(warnings).toHaveLength(1)
+    expect(String(warnings[0][0])).toContain('deleteMessage')
   })
 
   test('should pop job when adapter returns message', async () => {
