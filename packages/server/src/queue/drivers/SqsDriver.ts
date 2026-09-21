@@ -1,4 +1,5 @@
 import type { QueueDriver, QueuedJob, FailedJob } from '../types'
+import { deserializeQueuedJob } from '../serialize'
 import { warnOnce } from '../../support/warn-once'
 
 /**
@@ -221,7 +222,7 @@ export class SqsDriver implements QueueDriver {
 
     if (!result) return null
 
-    const job = deserializeJob(result.body)
+    const job = deserializeQueuedJob(result.body)
     const receiveCount = toReceiveCount(result.receiveCount)
     if (receiveCount !== undefined) {
       // The worker increments once before handle(). SQS owns the count across
@@ -358,12 +359,3 @@ export class SqsDriver implements QueueDriver {
   }
 }
 
-function deserializeJob(body: string): QueuedJob {
-  const raw = JSON.parse(body)
-  return {
-    ...raw,
-    availableAt: new Date(raw.availableAt),
-    createdAt: new Date(raw.createdAt),
-    reservedAt: raw.reservedAt ? new Date(raw.reservedAt) : null,
-  }
-}
