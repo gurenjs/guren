@@ -49,11 +49,45 @@ export interface PlanVerificationSummary {
 }
 
 /**
- * An element its step verified is `verified` while every fingerprinted file still hashes
- * the same, `drifted` once one does not or cannot be read. Lifted: an element at its
- * completion state or `unjudged`; one existing in files only when the record covers them,
- * since a result nothing could expire is not one. A `drop` has no file, its absence re-read
- * per status; an `unjudged` element with none rests on its step's behaviours, so it needs some.
+ * The elements the behaviours `acceptanceIds` exercise, read off the plan (RFC 0030 §6): the
+ * route each targets, the action it dispatches to and that action's controller, the validators,
+ * policy and response it names, and the view a behaviour or that response renders with the
+ * resources its props name. Nothing in a plan links a behaviour to a job, event or listener.
+ */
+export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: readonly string[]): Set<string> {
+  const reached = new Set<string>()
+  const wanted = new Set(acceptanceIds)
+  const routes = new Map(plan.routes.map((route) => [route.id, route]))
+  const actions = new Map(plan.controllers.flatMap((controller) => controller.actions.map((action) => [action.id, { controller, action }] as const)))
+  const views = new Map(plan.views.map((view) => [view.id, view]))
+  const reachView = (id: string): void => {
+    reached.add(id)
+    for (const prop of views.get(id)?.props ?? []) if (prop.resource) reached.add(prop.resource)
+  }
+
+  for (const behaviour of plan.tasks.flatMap((task) => task.acceptance)) {
+    if (!wanted.has(behaviour.id)) continue
+    reached.add(behaviour.route)
+    if (behaviour.expect.inertia) reachView(behaviour.expect.inertia)
+    const route = routes.get(behaviour.route)
+    if (!route) continue
+    for (const binding of route.bind) reached.add(binding.model)
+    const found = actions.get(route.action)
+    if (!found) continue
+    const { controller, action } = found
+    for (const id of [route.action, controller.id, action.params, action.query, action.body, action.authorization.policy?.id]) if (id) reached.add(id)
+    if (action.response.kind === 'inertia') reachView(action.response.view)
+    if (action.response.kind === 'resource') reached.add(action.response.resource)
+  }
+  return reached
+}
+
+/**
+ * An element its step verified is `verified` while every fingerprinted file still hashes the
+ * same, `drifted` once one does not or cannot be read. Lifted: one at its completion state or
+ * `unjudged`, in files the record covers, since a result nothing could expire is not one. A
+ * `drop` has no file, its absence re-read per status. One no property of which matched lifts
+ * only while a verified step of its task ran behaviours that reach it.
  */
 export function applyVerification(
   status: PlanStatus,
@@ -61,6 +95,7 @@ export function applyVerification(
   records: Readonly<Record<string, PlanStepRecord>>,
   digest: string,
   hashes: ReadonlyMap<string, string | null>,
+  plan: PlanDraft | Plan,
 ): { status: PlanStatus<PlanElementState>; staleSteps: string[] } {
   const lifted = new Map<string, PlanElementStatus<PlanElementState>>(status.elements.map((element) => [element.id, { ...element, notes: [...element.notes] }]))
   const staleSteps: string[] = []
@@ -76,13 +111,25 @@ export function applyVerification(
       const recorded = record.fingerprint.files
       const changed = changedFiles(record, hashes)
       const verifiedBy = `Verified ${record.ranAt} by ${step.id}`
+      // A split step's earlier parts carry no behaviours: the task's last work step runs them all.
+      const carriers = task.steps.filter((candidate) => {
+        if (candidate.kind === 'tests' || candidate.acceptanceIds.length === 0) return false
+        if (candidate === step) return true
+        const carried = records[candidate.id]
+        return carried?.outcome === 'verified' && carried.planDigest === digest && changedFiles(carried, hashes).length === 0
+      })
+      const reached = behaviourReach(plan, carriers.flatMap((carrier) => carrier.acceptanceIds))
       for (const id of step.elementIds) {
         const element = lifted.get(id)
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
-        const needsNoFiles = element.change === 'drop' || (element.state === 'unjudged' && step.acceptanceIds.length > 0)
+        const unread = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
+        // Past the reach test an `unjudged` element is one a behaviour exercised, whose test files a standing record covers.
+        const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
         if (!awaitsVerification(element)) {
           element.notes.push(`${verifiedBy}, and no longer at the state that completes it.`)
+        } else if (unread && !reached.has(id)) {
+          element.notes.push(`${verifiedBy}, and no planned property of it was read and no verified behaviour of its task reaches it, so that result is not counted.`)
         } else if (element.files.length === 0 && !needsNoFiles) {
           element.notes.push(`${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
@@ -171,7 +218,7 @@ export async function overlayVerification(
   const read = await readPlanState(root, slug)
   const records = read.state?.steps ?? {}
   const files = Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files))
-  const applied = applyVerification(status, derivation, records, planDigest(plan), await hashFiles(root, files))
+  const applied = applyVerification(status, derivation, records, planDigest(plan), await hashFiles(root, files), plan)
   const unreadable =
     read.unreadable ?? (options.replacedUnreadable ? `${options.replacedUnreadable}; this run replaced it, and its other records are gone` : undefined)
   const log = options.waivers ?? (await readPlanWaivers(planPath, plan))

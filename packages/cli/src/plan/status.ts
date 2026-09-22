@@ -117,6 +117,8 @@ interface Judgement {
   files?: () => string[]
   /** No reader exists for this kind of element at all. */
   unjudged?: string
+  /** Properties whose `differ` withholds the mount rather than drifting the element: a use the code does not make yet. */
+  withholding?: ReadonlySet<string>
   notes?: string[]
 }
 
@@ -194,11 +196,18 @@ function conclude(judgement: Judgement): PlanElementStatus {
   if (change.kind === 'alter' && readable.length === 0) {
     return result('unjudged', { reason: 'No planned property of this change has a reader.' })
   }
-  if (differing.length > 0) {
-    const untouched = change.kind === 'alter' && differing.length === readable.length
-    return result(untouched ? 'planned' : 'drifted')
+  // A mount is a reading of the element itself; with none, existence would complete what the plan stated and nothing read.
+  if (properties.length > 0 && readable.length === 0 && !judgement.mount) {
+    return result('unjudged', { reason: 'No planned property of this element could be read, and its existence says nothing about them.' })
   }
+  if (change.kind === 'alter' && differing.length > 0 && differing.length === readable.length) return result('planned')
+  const withheld = differing.filter((property) => judgement.withholding?.has(property.property))
+  if (differing.length > withheld.length) return result('drifted')
 
+  if (withheld.length > 0) {
+    notes.push(`Not wired: ${withheld.map((property) => `${property.property} ${property.planned} is not used (found ${property.actual})`).join('; ')}.`)
+    return result('present')
+  }
   if (!judgement.mount) return result('present')
   const mount = judgement.mount()
   if (mount === 'mounted') return result('wired')
@@ -273,6 +282,9 @@ function tableUnread(table: SourcedSchemaTable | PlanAppUnreadable | undefined):
 function previousOf(change: PlanChange, lookup: (name: string) => Existence): Existence | undefined {
   return change.kind === 'rename' ? lookup(change.from) : undefined
 }
+
+const VALIDATOR_FIELDS = ['params', 'query', 'body'] as const
+const VALIDATOR_PROPERTIES: ReadonlySet<string> = new Set(VALIDATOR_FIELDS.map((field) => `${field} validator`))
 
 const NO_DETAIL: PlanAppUnreadable = { unreadable: 'the application state was loaded without detail' }
 
@@ -683,6 +695,7 @@ class StatusContext {
       exists: find(action.name),
       previous: previousOf(action.change, find),
       properties: () => this.actionProperties(action, key),
+      withholding: VALIDATOR_PROPERTIES,
       mount: () => this.actionMount(key),
       files: () => this.controllerFiles(controller.className, controller.module),
     })
@@ -693,7 +706,10 @@ class StatusContext {
     return isUnreadable(actions) ? undefined : actions.find((candidate) => candidate.key === key)
   }
 
-  /** A body scan answers "the body mentions it", so a miss is `unknown`: a helper may do the work. */
+  /**
+   * A body scan answers "the body mentions it", so a missed mention is `unknown`: a helper may
+   * do the work. A validator is read off the call that takes it, so a readable body without one differs.
+   */
   private actionProperties(action: PlanAction, key: string): PlanPropertyStatus[] {
     const body = this.actionBody(key)
     const properties: PlanPropertyStatus[] = []
@@ -705,13 +721,18 @@ class StatusContext {
 
     // A mention is not a use, here as for the validator's own mount: a symbol can be
     // named by a leftover import or in a type position, and neither validates anything.
-    const NOT_VALIDATED = 'the action body validates with no such schema, and a helper or the route contract may'
-    for (const field of ['params', 'query', 'body'] as const) {
+    // A readable body that validates with another schema or none is a `differ`, even though
+    // a helper might do the work: every such miss the Part 2 measurement met was a fault.
+    const contracts = this.routesTo(key)
+    for (const field of VALIDATOR_FIELDS) {
       const id = action[field]
       if (!id) continue
       const property = `${field} validator`
       const name = this.namesById.get(id) ?? id
-      properties.push(body?.validates.includes(name) ? match(property, name) : unknown(property, name, NOT_VALIDATED))
+      if (body?.validates.includes(name)) properties.push(match(property, name))
+      else if (!isUnreadable(contracts) && contracts.some((route) => route.contractSchemas.includes(name))) properties.push(match(property, name, 'the route contract'))
+      else if (body) properties.push(differ(property, name, body.validates.length > 0 ? body.validates.join(', ') : 'no validate call'))
+      else properties.push(unknown(property, name, 'the action body could not be read'))
     }
     const policy = action.authorization.policy
     if (policy) {
