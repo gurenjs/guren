@@ -41,4 +41,3 @@ export type DrizzleDatabase = {
   run?(query: unknown): Promise<unknown>
   transaction?<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult>
 }
-
