@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { extractPagePropKeysFromSource, extractPagePropsFromSource } from '../src/page-props-extractor'
+import { extractPagePropKeysFromSource, extractPagePropsFromSource, pagePropMember, readPagePropMembers } from '../src/page-props-extractor'
+import { parseSourceFile } from '../src/parse-cache'
 
 describe('extractPagePropsFromSource', () => {
   it('extracts interface Props', () => {
@@ -259,5 +260,50 @@ describe('extractPagePropKeysFromSource', () => {
 
   it('should report a page that does not parse as unreadable', () => {
     expect(extractPagePropKeysFromSource('interface Props {{{').status).toBe('unreadable')
+  })
+})
+
+describe('readPagePropMembers', () => {
+  function member(source: string, name: string) {
+    const ast = parseSourceFile(source, 'page.tsx')
+    if (!ast) throw new Error('fixture does not parse')
+    return pagePropMember(readPagePropMembers(ast, source), name)
+  }
+
+  it('reads a literal part of an intersection and leaves the rest open', () => {
+    const source = `type Props = Shared & { posts?: Post[]; count: number }
+export default function Index({ posts }: Props) { return null }
+`
+    expect(member(source, 'posts')).toEqual({ status: 'declared', name: 'posts', optional: true, acceptsUndefined: true, type: 'Post[]' })
+    expect(member(source, 'count')).toEqual({ status: 'declared', name: 'count', optional: false, acceptsUndefined: false, type: 'number' })
+    expect(member(source, 'other')).toEqual({ status: 'unreadable', reason: '`Shared` is intersected in, and may declare it' })
+    expect(member('type Props = Shared\nexport default function Index(props: Props) { return null }\n', 'other'))
+      .toEqual({ status: 'unreadable', reason: '`Shared` is not declared in the page file' })
+  })
+
+  it('treats unknown, any, void, an unannotated member, a parenthesised union and a same-file alias as admitting undefined', () => {
+    const source = `type Posts = Post[] | undefined
+type Loop = Loop
+interface Props { a: unknown; b: any; c: void; d: (Post | undefined); e: Post | null; f(): void; g; h: Posts; i: Loop; j: Imported }
+export default function Index(props: Props) { return null }
+`
+    for (const name of ['a', 'b', 'c', 'd', 'g', 'h']) expect(member(source, name)).toMatchObject({ status: 'declared', acceptsUndefined: true })
+    expect(member(source, 'e')).toMatchObject({ status: 'declared', acceptsUndefined: false, type: 'Post | null' })
+    expect(member(source, 'f')).toMatchObject({ status: 'declared', optional: false, acceptsUndefined: false, type: '(): void' })
+    expect(member(source, 'i')).toMatchObject({ status: 'declared', acceptsUndefined: false })
+    expect(member(source, 'j')).toMatchObject({ status: 'declared', acceptsUndefined: false })
+  })
+
+  it('is confident about an absent member only when the type declares every member', () => {
+    const closed = `interface Props { posts: Post[] }
+export default function Index({ posts }: Props) { return null }
+`
+    expect(member(closed, 'stats')).toEqual({ status: 'absent' })
+    const open = `interface Props extends Base { posts: Post[] }
+export default function Index({ posts }: Props) { return null }
+`
+    expect(member(open, 'posts')).toMatchObject({ status: 'declared', acceptsUndefined: false })
+    expect(member(open, 'stats')).toEqual({ status: 'unreadable', reason: '`Props` extends another type, which may declare it' })
+    expect(member('export default function Index(props) { return null }\n', 'stats')).toEqual({ status: 'undeclared' })
   })
 })

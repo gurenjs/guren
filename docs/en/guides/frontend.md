@@ -151,7 +151,7 @@ export class UserController extends Controller {
 
 The initial page object lists the keys under `deferredProps`, grouped by the second argument (`default` when omitted): `{ "default": ["permissions"], "attributes": ["teams", "projects"] }`. The client issues one partial reload per group, so `teams` and `projects` arrive together while `permissions` loads in parallel. The callback runs only on that follow-up request.
 
-On the client the prop is `undefined` until its request lands, so declare it optional in `Props` and render it through `<Deferred>`, which shows the fallback until the value arrives:
+On the client the prop is `undefined` until its request lands, so declare it optional in `Props` and render it through `<Deferred>`, which shows the fallback until the value arrives. A required declaration still typechecks, since the controller may pass a deferred value for any prop; `guren check` warns when a controller passes `defer()` for a prop the page declares without `?`.
 
 ```tsx
 import type { PageProps } from '@guren/inertia-client/contracts'
