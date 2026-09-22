@@ -2,12 +2,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, spyOn } from 'bun:test'
-import { consola } from 'consola'
 import { makeCommand, registerScaffoldedCommand } from '../src/make-command'
 import { makeModule } from '../src/make-module'
 import * as patchHelpers from '../src/patch-helpers'
 import { PATCH_REASONS } from '../src/patch-helpers'
-import { createTempWorkspace } from './helpers'
+import { captureConsolaLines, createTempWorkspace } from './helpers'
 
 // The real scaffolded entrypoint, not a copy: a hand-copied fixture stops
 // proving make:command can patch it the moment the template is edited.
@@ -32,20 +31,9 @@ async function scaffoldAndRegister(name: string, options: { root?: string } = {}
   return file
 }
 
-/** `level: message` for every line the registration prints, in print order. */
-async function registerAndCollect(name: string, options: { root?: string } = {}): Promise<string[]> {
-  const lines: string[] = []
-  const spies = (['info', 'success', 'warn'] as const).map((level) =>
-    spyOn(consola, level).mockImplementation(((message: unknown) => {
-      lines.push(`${level}: ${String(message)}`)
-    }) as never),
-  )
-  try {
-    await scaffoldAndRegister(name, options)
-  } finally {
-    for (const spy of spies) spy.mockRestore()
-  }
-  return lines
+/** Every line the registration prints, in print order. */
+function registerAndCollect(name: string, options: { root?: string } = {}): Promise<string[]> {
+  return captureConsolaLines(['info', 'success', 'warn'], () => scaffoldAndRegister(name, options))
 }
 
 /**
@@ -254,10 +242,13 @@ kernel.registerMany([])
 
         const lines = await withFailingAddImport(PATCH_REASONS.fileNotFound, () => registerAndCollect('Invoice', { root: 'billing' }))
 
-        expect(lines).toEqual([
+        expect(lines.slice(0, 2)).toEqual([
           `warn: Could not add the import to modules/billing/index.ts automatically: ${PATCH_REASONS.fileNotFound}`,
           "info: Add `import InvoiceCommand from './app/Console/Commands/InvoiceCommand.js'` to modules/billing/index.ts: its registration is already in place.",
         ])
+        // The console hop is owed whether or not the import landed.
+        expect(lines).toContain('info:   kernel.registerMany(billingModule.commands)')
+        expect(lines.some((line) => line.startsWith('success:'))).toBe(false)
         const index = await readFile(join(workspace.dir, 'modules/billing/index.ts'), 'utf8')
         expect(index).toContain('commands: [InvoiceCommand]')
         expect(index).not.toContain('import InvoiceCommand')

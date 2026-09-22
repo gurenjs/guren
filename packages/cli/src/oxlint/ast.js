@@ -43,3 +43,8 @@ export function envKey(node) {
 
 /** `await x` is transparent to what the chain ultimately calls, but only there. */
 export const AWAIT = { type: 'AwaitExpression', key: 'argument' }
+
+/** The name an import specifier refers to: `import { "a-b" as c }` is legal. */
+export function importedName(specifier) {
+  return specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
+}

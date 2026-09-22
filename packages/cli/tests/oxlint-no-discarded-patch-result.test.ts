@@ -2,10 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 // @ts-expect-error TS7016: the plugin is JavaScript for oxlint's Node loader and ships no declarations
-import { PATCH_RESULT_FUNCTIONS as ruleTable } from '../src/oxlint/no-discarded-patch-result.js'
+import { PATCH_RESULT_FUNCTIONS } from '../src/oxlint/no-discarded-patch-result.js'
 import { lintFixture } from './helpers'
-
-const PATCH_RESULT_FUNCTIONS = ruleTable as Record<string, string[]>
 
 // Exercised through the real oxlint binary, like the sibling rules: what has to
 // hold is that the plugin loads and reports on the AST oxlint hands it.
@@ -21,14 +19,16 @@ function lint(source: string): string {
   })
 }
 
-/** Lines of `source` the rule reports, in the order oxlint prints them. */
-function reportedLines(source: string): number[] {
-  return [...lint(source).matchAll(/^case\.ts:(\d+):\d+: .*no-discarded-patch-result/gm)].map((m) => Number(m[1]))
+/** Lines of `output` the rule reports, in the order oxlint prints them. */
+function linesIn(output: string): number[] {
+  return [...output.matchAll(/^case\.ts:(\d+):\d+: .*no-discarded-patch-result/gm)].map((m) => Number(m[1]))
 }
 
+const reportedLines = (source: string): number[] => linesIn(lint(source))
+
 describe('guren/no-discarded-patch-result', () => {
-  test('reports a discarded call to every helper, however the statement wraps it', () => {
-    expect(reportedLines(`import { addImport, addToArrayOption, addToArrayArgument, addCreateAppOption } from './patch-helpers'
+  test('reports a discarded call to every helper, however the statement wraps it, naming what to read', () => {
+    const output = lint(`import { addImport, addToArrayOption, addToArrayArgument, addCreateAppOption } from './patch-helpers'
 import { addRouteRegistrarCall } from './route-registrar'
 await addImport('src/app.ts', "import x from './x'")
 addImport('src/app.ts', "import x from './x'")
@@ -38,7 +38,9 @@ void (await addImport('src/app.ts', "import x from './x'"))
 await addToArrayArgument('src/console.ts', 'registerMany', 'C')
 await addCreateAppOption('src/app.ts', 'auth', '{}')
 await addRouteRegistrarCall('routes/web.ts', 'registerAdminRoutes', "import a from './admin.js'")
-`)).toEqual([3, 4, 5, 6, 7, 8, 9, 10])
+`)
+    expect(linesIn(output)).toEqual([3, 4, 5, 6, 7, 8, 9, 10])
+    expect(output).toContain('`addImport()` reports a patch it could not apply in its PatchResult, and this statement discards it. Read `.modified` / `.reason` (PATCH_REASONS) before reporting success.')
   })
 
   test('follows an alias, a namespace import and a .js specifier', () => {
@@ -65,20 +67,17 @@ console.log(result, landed)
 `)).toEqual([])
   })
 
-  test('names the helper and what to read instead', () => {
-    expect(lint(`import { addImport } from './patch-helpers'\nawait addImport('a.ts', 'import x from "y"')\n`))
-      .toContain('`addImport()` reports a patch it could not apply in its PatchResult, and this statement discards it. Read `.modified` / `.reason` (PATCH_REASONS) before reporting success.')
-  })
-
   test('the table names exactly the exports typed Promise<PatchResult> under src/', async () => {
-    const found: Record<string, string[]> = {}
-    for (const file of await readdir(srcDir)) {
-      if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue
+    const files = (await readdir(srcDir)).filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
+    const scanned = await Promise.all(files.map(async (file) => {
       const source = await readFile(join(srcDir, file), 'utf8')
       const names = [...source.matchAll(/^export async function (\w+)\([^{]*?\): Promise<PatchResult>/gmu)].map((m) => m[1]!)
-      if (names.length > 0) found[file.replace(/\.ts$/u, '')] = names.sort()
-    }
-    const table = Object.fromEntries(Object.entries(PATCH_RESULT_FUNCTIONS).map(([k, v]) => [k, [...v].sort()]))
+      return [file.replace(/\.ts$/u, ''), names.sort()] as const
+    }))
+    const found = Object.fromEntries(scanned.filter(([, names]) => names.length > 0))
+    const table = Object.fromEntries(
+      Object.entries(PATCH_RESULT_FUNCTIONS as Record<string, string[]>).map(([k, v]) => [k, [...v].sort()]),
+    )
     expect(table).toEqual(found)
   })
 })

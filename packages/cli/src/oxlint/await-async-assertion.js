@@ -7,7 +7,7 @@
 // or as a `forEach` arrow body; recognises aliases (`expect as verify`) and
 // `t.expect`; a file declaring its own `expect` is left alone. Tests: `tests/oxlint-await-async-assertion.test.ts`.
 
-import { AWAIT, unwrap as unwrapNode } from './ast.js'
+import { AWAIT, importedName, unwrap as unwrapNode } from './ast.js'
 
 const ASYNC_MODIFIERS = new Set(['resolves', 'rejects'])
 
@@ -66,8 +66,7 @@ const rule = {
 
     return {
       ImportSpecifier(node) {
-        const imported = node.imported.type === 'Identifier' ? node.imported.name : node.imported.value
-        if (imported === 'expect') expectNames.add(node.local.name)
+        if (importedName(node) === 'expect') expectNames.add(node.local.name)
       },
       FunctionDeclaration(node) {
         if (node.id?.name === 'expect') declaresOwnExpect = true

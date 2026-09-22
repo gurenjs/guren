@@ -2,7 +2,6 @@ import { join } from 'node:path'
 import { consola } from 'consola'
 import type { WriterOptions } from './utils'
 import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, safeModuleName, scaffoldFile } from './utils'
-import type { PatchResult } from './patch-helpers'
 import { addImport, addToArrayArgument, addToArrayOption, PATCH_REASONS } from './patch-helpers'
 import { fileExists, readIfExists } from './discovery'
 import { registersCommandsOf } from './console-check'
@@ -88,8 +87,7 @@ async function registerRootCommand(className: string, file: string): Promise<voi
     return
   }
 
-  const importStatement = `import ${className} from '${specifier}'`
-  if (!importLanded(await addImport(CONSOLE_ENTRY, importStatement), importStatement, CONSOLE_ENTRY)) return
+  if (!(await addImportOrExplain(CONSOLE_ENTRY, `import ${className} from '${specifier}'`))) return
 
   if (registration.modified) {
     consola.success(`Registered ${className} in ${CONSOLE_ENTRY}`)
@@ -118,13 +116,13 @@ async function registerModuleCommand(className: string, file: string, moduleName
     return
   }
 
-  const importStatement = `import ${className} from '${specifier}'`
-  if (!importLanded(await addImport(indexPath, importStatement), importStatement, indexPath)) return
-
-  if (registration.modified) {
-    consola.success(`Registered ${className} in ${indexPath}`)
-  } else {
-    consola.info(`${className} is already registered in ${indexPath}`)
+  // The console hop below is owed whether or not the import landed.
+  if (await addImportOrExplain(indexPath, `import ${className} from '${specifier}'`)) {
+    if (registration.modified) {
+      consola.success(`Registered ${className} in ${indexPath}`)
+    } else {
+      consola.info(`${className} is already registered in ${indexPath}`)
+    }
   }
 
   await printModuleConsoleHopGuidance(moduleName)
@@ -157,7 +155,8 @@ async function printModuleConsoleHopGuidance(moduleName: string): Promise<void> 
  * registration has landed, so a failed import leaves the file naming an identifier
  * it never binds: the manual step is printed instead of a success line.
  */
-function importLanded(result: PatchResult, importStatement: string, filePath: string): boolean {
+async function addImportOrExplain(filePath: string, importStatement: string): Promise<boolean> {
+  const result = await addImport(filePath, importStatement)
   if (result.modified || result.reason === PATCH_REASONS.importAlreadyExists) return true
 
   consola.warn(`Could not add the import to ${filePath} automatically: ${result.reason}`)

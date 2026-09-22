@@ -1,12 +1,12 @@
 // oxlint plugin: a `PatchResult` nobody reads. The CLI's patch helpers report
 // "could not apply" as a value (`{ modified: false, reason }`), never by throwing,
 // so a call whose result is discarded is a scaffolder that goes on to print success
-// over a file it did not change: `make:command` did that with `addImport`, leaving
-// a registration naming an identifier the file never imports. Reports such a call as
-// a bare statement, awaited or not, or under `void`, when the callee is bound by an
-// import from the module in PATCH_RESULT_FUNCTIONS (named, aliased or namespace).
-// Tests: `tests/oxlint-no-discarded-patch-result.test.ts` holds the table to the sources.
-import { AWAIT, unwrap } from './ast.js'
+// over a file it did not change. Reports such a call as a bare statement, awaited or
+// not, or under `void`, when the callee is bound by an import from a module in
+// PATCH_RESULT_FUNCTIONS (named, aliased or namespace). A plugin cannot read TS types,
+// so the table is spelled here; `tests/oxlint-no-discarded-patch-result.test.ts`
+// holds it to the sources.
+import { AWAIT, importedName, unwrap } from './ast.js'
 
 /** Per module basename, the exports whose return type is `Promise<PatchResult>`. */
 export const PATCH_RESULT_FUNCTIONS = {
@@ -16,13 +16,8 @@ export const PATCH_RESULT_FUNCTIONS = {
 
 /** The table's key for an import source, or `undefined` for any other module. */
 function moduleKey(source) {
-  const match = /(?:^|\/)([^/]+?)(?:\.[cm]?[jt]s)?$/u.exec(source)
-  const key = match?.[1]
-  return key !== undefined && Object.hasOwn(PATCH_RESULT_FUNCTIONS, key) ? key : undefined
-}
-
-function importedName(specifier) {
-  return specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
+  const key = source.split('/').pop().replace(/\.[cm]?[jt]s$/u, '')
+  return Object.hasOwn(PATCH_RESULT_FUNCTIONS, key) ? key : undefined
 }
 
 const rule = {
@@ -64,9 +59,12 @@ const rule = {
         }
       },
       ExpressionStatement(node) {
-        let expression = unwrap(node.expression, AWAIT)
-        if (expression?.type === 'UnaryExpression' && expression.operator === 'void') expression = expression.argument
-        const helper = discardedHelper(expression)
+        // Imports come first in source, so empty maps mean no helper is in scope.
+        if (locals.size === 0 && namespaces.size === 0) return
+        const expression = unwrap(node.expression)
+        const helper = discardedHelper(
+          expression?.type === 'UnaryExpression' && expression.operator === 'void' ? expression.argument : expression,
+        )
         if (helper === undefined) return
         context.report({
           node,

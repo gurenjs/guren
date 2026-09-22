@@ -32,7 +32,7 @@
     "guren/await-async-assertion": "error",
     "guren/no-nullish-env-default": "error",
     // A patch helper reports failure as a value; a scaffolder that drops the
-    // value prints success over a file it did not change (make:command did).
+    // value prints success over a file it did not change.
     "guren/no-discarded-patch-result": "error",
     // The machine-checkable half of .claude/rules/coding-standards.md (Comments):
     // block length, banners, step labels, change-history wording, @param tags
