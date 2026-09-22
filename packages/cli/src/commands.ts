@@ -368,7 +368,7 @@ const planApproveCommand = defineCommand({
   meta: {
     name: 'plan:approve',
     description:
-      "Approve an implementation plan (RFC 0030 §4): stamp a draft's baseline (the application's HEAD and a hash per referenced element) into the plan file once, and record the approval of its hash beside the plan. Refuses while a check fails or a question is open, and outside a git repository with a commit.",
+      "Approve an implementation plan (RFC 0030 §4): stamp a draft's baseline into the plan file once, and record the approval of its hash beside the plan. Refuses while a check fails, a question is open, or the tree is dirty.",
   },
   args: {
     plan: {
@@ -381,6 +381,11 @@ const planApproveCommand = defineCommand({
       type: 'string',
       description: 'Application root directory: what the plan is checked and stamped against, and where git is asked for HEAD.',
     },
+    'allow-unstamped': {
+      type: 'boolean',
+      description: 'Approve although a section other than validators could not be read, leaving its elements without a context hash.',
+      default: false,
+    },
     json: {
       type: 'boolean',
       description: 'Print the report as JSON.',
@@ -389,7 +394,7 @@ const planApproveCommand = defineCommand({
   },
   async run({ args }) {
     const appRoot = resolve(args.app ?? process.cwd())
-    const report = await planApproveFile(args.plan, { app: () => loadPlanAppState(appRoot), appRoot })
+    const report = await planApproveFile(args.plan, { app: () => loadPlanAppState(appRoot), appRoot, allowUnstamped: args['allow-unstamped'] })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanApprove(report))
   },
 })

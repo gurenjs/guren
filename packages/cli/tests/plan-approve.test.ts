@@ -161,6 +161,47 @@ describe('guren plan:approve', () => {
     expect(await readFile(plan, 'utf8')).toBe(before)
   })
 
+  test('should refuse while a section other than validators cannot be read, unless told to approve without it', async () => {
+    const { app, plan } = await createApp('unstamped', answeredPlan())
+    const before = await readFile(plan, 'utf8')
+    const unread = planAppState({ tables: { unreadable: 'db/schema.ts declared no table this parser could read' } })
+
+    await expect(planApproveFile(plan, { app: unread, appRoot: app })).rejects.toThrow(
+      /The application's tables could not be read, so these elements would get no context hash[\s\S]*  model\.post: [\s\S]*--allow-unstamped/,
+    )
+    expect(await readFile(plan, 'utf8')).toBe(before)
+
+    const report = await planApproveFile(plan, { app: unread, appRoot: app, allowUnstamped: true, now: NOW })
+    expect(report.stamped!.unstamped.map((entry) => entry.id)).toEqual(expect.arrayContaining(['model.post', 'column.post.id', 'validator.comment']))
+  })
+
+  test('should take --allow-unstamped on the command line', async () => {
+    const document = answeredPlan()
+    const { app, plan } = await createApp('unstamped-flag', document)
+    // A module whose schema holds only a comment, as make:module leaves it, makes every table unreadable.
+    await writeWorkspaceFiles(app, { 'modules/billing/index.ts': 'export default {}\n', 'modules/billing/db/schema.ts': '// tables go here\n' })
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'module')
+
+    await expect(runCommand(builtinSubCommands['plan:approve'], { rawArgs: [plan, '--app', app] })).rejects.toThrow(/--allow-unstamped/)
+    await runCommand(builtinSubCommands['plan:approve'], { rawArgs: [plan, '--app', app, '--allow-unstamped'] })
+    expect((await readPlanApprovals(plan)).value!.approvals).toHaveLength(1)
+  })
+
+  test('should refuse to stamp a dirty tree, the plan and its own records excepted', async () => {
+    const { app, plan } = await createApp('dirty', answeredPlan())
+    // The plan's own edits, and an earlier run's state, are what approving is about.
+    await writeFile(plan, JSON.stringify(answeredPlan(), null, 1), 'utf8')
+    await writeWorkspaceFiles(app, { '.guren/plans/comments.state.json': '{}' })
+    await writeFile(join(app, 'app/Models/Tag.ts'), 'export class Tag {}\n', 'utf8')
+
+    await expect(planApproveFile(plan, { app: planAppState(), appRoot: app })).rejects.toThrow(/uncommitted changes[\s\S]*Commit or discard them first:\n {2}\?\? app\/Models\/Tag\.ts$/)
+
+    await rm(join(app, 'app/Models/Tag.ts'))
+    const report = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW })
+    expect(report.stamped).toBeDefined()
+  })
+
   test('should refuse an approvals file that will not read, before the plan is rewritten', async () => {
     const { app, plan } = await createApp('unreadable', answeredPlan())
     await writeFile(planApprovalsPath(plan), '{ not json', 'utf8')
@@ -186,7 +227,7 @@ describe('plan:status freshness', () => {
     expect(moved.freshness!.elements.find((element) => element.id === 'column.post.id')!.verdict).toBe('stale')
     const text = formatPlanStatus(moved)
     expect(text).toContain('Against the approved baseline: fresh ')
-    expect(text).toContain('  stale  column.post.id: What the scanners read for it changed since the plan was approved.')
+    expect(text).toContain('  stale  column.post.id: What the scanners read for it changed since approval, to neither what was stamped nor what the plan leaves.')
     expect(text).toContain('  unjudged: validator.comment')
   })
 })

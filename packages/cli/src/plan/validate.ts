@@ -15,6 +15,7 @@ import { check, type CheckResult, type CheckStatus } from '../check-result'
 import {
   appNames,
   COLUMNS_ARE_A_LOWER_BOUND,
+  findTable,
   isUnreadable,
   scopeName,
   type PlanAppName,
@@ -23,7 +24,7 @@ import {
   type PlanAppTable,
   type PlanAppUnreadable,
 } from './app-state'
-import { actionTargets, columnTargets, namedTargets, routeTarget, tableTarget } from './app-targets'
+import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
 import { listPlanReferences } from './references'
 import {
   findDuplicatePlanIds,
@@ -315,15 +316,7 @@ function checkChangeConsistency(plan: PlanDraft, results: PlanCheckResult[]): vo
   }
 }
 
-interface TargetCheck {
-  id: string
-  section: PlanElementSection
-  /** What the element is called after the change. */
-  current: string
-  /** What it was called before a rename. */
-  previous?: string
-  kind: PlanChange['kind']
-  noun: string
+type TargetCheck = Pick<PlanAppTarget, 'id' | 'section' | 'current' | 'previous' | 'kind' | 'noun'> & {
   /** What the name belongs to, e.g. ` of table "comments"`. */
   scope?: string
   /** The app root the plan puts the element in; absent where the section is not read per root. */
@@ -449,10 +442,10 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
     withSection(appSection, app[appSection], results, (entries) => {
       for (const target of targets) {
         if (target.appSection !== appSection) continue
-        const { names, ...scoped } = target.scoped
-          ? inRoot(entries, target.scoped.module)
+        const { names, ...placement } = target.perRoot
+          ? inRoot(entries, target.module)
           : { names: appNames(entries), root: undefined, elsewhere: undefined }
-        checkTarget({ ...target, ...scoped }, names, results)
+        checkTarget({ ...target, ...placement }, names, results)
       }
     })
   }
@@ -484,11 +477,11 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
 
   withSection('routes', app.routes, results, (routes) => {
     const names = routes.flatMap((route) => (route.name ? [route.name] : []))
-    const endpoints = new Set(routes.map((route) => `${route.method.toUpperCase()} ${route.path}`))
+    const endpoints = new Set(routes.map((route) => endpointKey(route.method, route.path)))
     for (const route of plan.routes) {
       const target = routeTarget(route)
       checkTarget(target, names, results)
-      if (!target.endpoint || !endpoints.has(`${target.endpoint.method} ${target.endpoint.path}`)) continue
+      if (route.change.kind !== 'add' || !endpoints.has(target.endpoint!)) continue
       results.push(
         finding('plan:app-collision', 'fail', `The route "${route.method} ${route.path}" is already registered by this application.`, {
           elementId: route.id,
@@ -499,9 +492,6 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
   })
 }
 
-/** The sections {@link namedTargets} yields, in the order their findings are reported. */
-const NAMED_APP_SECTIONS = ['models', 'controllers', 'validators', 'resources', 'policies', 'pages'] as const
-
 function checkColumnsAgainstApp(
   model: PlanModel,
   tables: ReadonlyArray<PlanAppTable>,
@@ -511,10 +501,7 @@ function checkColumnsAgainstApp(
   const targets = columnTargets(model)
   const lookup = targets[0]?.table?.lookup
   if (lookup === undefined) return
-  const table = tables.find(
-    (candidate) =>
-      candidate.module === (model.module ?? null) && (candidate.identifier === lookup || candidate.tableName === lookup),
-  )
+  const table = findTable(tables, lookup, model.module ?? null)
   if (!table) {
     const other = elsewhere(lookup)
     reportUnjudgedColumns(

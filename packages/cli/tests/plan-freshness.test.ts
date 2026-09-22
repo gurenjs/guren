@@ -3,7 +3,6 @@ import { describe, expect, test } from 'bun:test'
 import { listPlanAppTargets } from '../src/plan/app-targets'
 import { judgeFreshness, stampContextHash, type PlanFreshness } from '../src/plan/freshness'
 import { PlanDraftSchema, PlanSchema, type Plan, type PlanDraft } from '../src/plan/schema'
-import type { PlanElementState } from '../src/plan/status'
 import { validatePlan } from '../src/plan/validate'
 import { loadCommentsPlan, PLAN_APP_TABLES, planAppState, type PlanAppStateInput } from './plan-fixture'
 
@@ -16,11 +15,6 @@ function draft(edit?: (document: Record<string, unknown>) => void): PlanDraft {
 /** The draft approved against `at`: its baseline stamped the way `plan:approve` stamps it. */
 function approvedAgainst(plan: PlanDraft, at: PlanAppStateInput = {}): Plan {
   return PlanSchema.parse({ ...plan, baseline: { rev: 'abc123', contextHash: stampContextHash(plan, planAppState(at)).contextHash } })
-}
-
-/** Every element at one state, as plan:status would report a plan nobody has started. */
-function statesOf(plan: PlanDraft, state: PlanElementState = 'planned', overrides: Record<string, PlanElementState> = {}) {
-  return listPlanAppTargets(plan).map((target) => ({ id: target.id, state: overrides[target.id] ?? state }))
 }
 
 function verdictOf(freshness: PlanFreshness, id: string) {
@@ -84,28 +78,42 @@ describe('stampContextHash', () => {
     // A model is judged by its class and its table, so it goes unstamped with its columns.
     expect(contextHash['model.post']).toBeUndefined()
     expect(contextHash['column.post.id']).toBeUndefined()
-    expect(unstamped).toContainEqual({ id: 'model.post', reason: "the application's tables could not be read (schema threw)" })
+    expect(unstamped).toContainEqual({ id: 'model.post', sections: ['tables'], reason: "the application's tables could not be read (schema threw)" })
     // Validators are never readable: no scanner resolves an exported schema symbol.
     expect(unstamped.map((entry) => entry.id)).toContain('validator.comment')
     expect(contextHash['controller.comments']).toBeDefined()
   })
 
-  test('should derive its targets from the same place the reference checks do', () => {
+  test('should stamp exactly the elements the reference checks judge against the application by name', () => {
     const plan = draft()
+    // Against an application with nothing, every non-add is missing; against one declaring every
+    // name the plan uses, every add collides. Between them, each judged element is reported once.
     const empty = planAppState({ models: [], controllers: [], actions: [], resources: [], policies: [], pages: [], validators: [], routes: [], tables: [] })
-    const targets = new Set(listPlanAppTargets(plan).map((target) => target.id))
-    const judged = validatePlan(plan, empty)
-      .filter((result) => result.key === 'plan:app-missing' || result.key === 'plan:app-collision')
-      .map((result) => result.elementId)
-    expect(judged.length).toBeGreaterThan(0)
-    for (const id of judged) expect(targets.has(id!)).toBe(true)
+    const targets = listPlanAppTargets(plan)
+    const full = planAppState({
+      models: plan.models.map((model) => model.name),
+      controllers: plan.controllers.map((controller) => controller.className),
+      actions: targets.filter((target) => target.appSection === 'actions').map((target) => target.current),
+      resources: plan.resources.map((resource) => resource.name),
+      policies: plan.policies.map((policy) => policy.name),
+      pages: plan.views.map((view) => view.page),
+      validators: plan.validators.map((validator) => validator.name),
+      routes: plan.routes.map((route) => ({ name: route.name, method: route.method, path: route.path })),
+      tables: plan.models.map((model) => ({ identifier: model.table, tableName: model.table, columns: [] })),
+    })
+    const judged = new Set(
+      [...validatePlan(plan, empty), ...validatePlan(plan, full)]
+        .filter((result) => ['plan:app-missing', 'plan:app-collision', 'plan:app-unjudged'].includes(result.key) && result.elementId !== undefined)
+        .map((result) => result.elementId!),
+    )
+    expect([...judged].sort()).toEqual([...new Set(targets.map((target) => target.id))].sort())
   })
 })
 
 describe('judgeFreshness', () => {
   test('should call every stamped element fresh against the application it was stamped against', () => {
     const plan = approvedAgainst(draft())
-    const freshness = judgeFreshness(plan, planAppState(), statesOf(plan))
+    const freshness = judgeFreshness(plan, planAppState())
     expect(freshness.summary.stale).toBe(0)
     expect(freshness.summary.unstamped).toBe(0)
     expect(verdictOf(freshness, 'model.post')).toEqual({ id: 'model.post', section: 'models', change: 'alter', verdict: 'fresh' })
@@ -114,49 +122,116 @@ describe('judgeFreshness', () => {
 
   test('should mark a referenced element stale when what the scanners read for it changed, and name what depends on it', () => {
     const plan = approvedAgainst(draft())
-    const freshness = judgeFreshness(plan, planAppState({ models: [{ name: 'Post', module: 'blog' }, 'User'] }), statesOf(plan))
+    const freshness = judgeFreshness(plan, planAppState({ models: [{ name: 'Post', module: 'blog' }, 'User'] }))
 
     const post = verdictOf(freshness, 'model.post')
     expect(post.verdict).toBe('stale')
     // Every element naming it: the relationship, the foreign key, the route binding, the task covering it.
     expect(post.affects).toEqual(['model.comment', 'column.comment.postId', 'route.comments.store', 'task.comments'])
-    expect(post.affects).not.toContain('model.post')
     expect(freshness.summary.stale).toBe(1)
   })
 
-  test('should not call an added element stale once the plan implemented it, and should while it is still planned', () => {
+  test('should call an added element fresh once the application holds it where the plan puts it', () => {
     const plan = approvedAgainst(draft())
     const implemented = planAppState({ models: ['Comment', 'Post', 'User'], tables: [...PLAN_APP_TABLES, { identifier: 'comments', tableName: 'comments', columns: ['id', 'body', 'postId'] }] })
 
-    const done = judgeFreshness(plan, implemented, statesOf(plan, 'planned', { 'model.comment': 'present' }))
-    expect(verdictOf(done, 'model.comment')).toMatchObject({ verdict: 'fresh', reason: "Its context changed with the plan's own work (present)." })
-
-    // Someone else's Comment, landed while the plan's own step has not run: the collision is news.
-    const notYet = judgeFreshness(plan, implemented, statesOf(plan))
-    expect(verdictOf(notYet, 'model.comment').verdict).toBe('stale')
-    // Neither is a state that says the element exists, so neither excuses a difference.
-    for (const state of ['blocked', 'unjudged'] as const) {
-      expect(verdictOf(judgeFreshness(plan, implemented, statesOf(plan, 'planned', { 'model.comment': state })), 'model.comment').verdict).toBe('stale')
-    }
+    const freshness = judgeFreshness(plan, implemented)
+    expect(verdictOf(freshness, 'model.comment')).toMatchObject({ verdict: 'fresh', reason: 'The application reads as the plan leaves it.' })
+    // Half of it is neither the stamp nor the end: the class without its table.
+    const half = judgeFreshness(plan, planAppState({ models: ['Comment', 'Post', 'User'] }))
+    expect(verdictOf(half, 'model.comment').verdict).toBe('stale')
   })
 
-  test('should call a changed existing element stale whatever its status says', () => {
+  test('should read a same-root class the plan adds as the plan own, whoever wrote it', () => {
+    // Documented (RFC 0030 §4): someone else's Comment in the plan's root after approval
+    // reads exactly as the plan's own add, before its step has run as much as after.
+    const plan = approvedAgainst(draft())
+    const freshness = judgeFreshness(plan, planAppState({ models: ['Comment', 'Post', 'User'], tables: [...PLAN_APP_TABLES, { identifier: 'comments', tableName: 'comments', columns: [] }] }))
+    expect(verdictOf(freshness, 'model.comment').verdict).toBe('fresh')
+  })
+
+  test('should call an added table stale when another app root declares its name, which the shared schema makes a collision', () => {
+    const plan = approvedAgainst(draft())
+    const implemented = [...PLAN_APP_TABLES, { identifier: 'comments', tableName: 'comments', columns: ['id'] }]
+    const collided = planAppState({
+      models: ['Comment', 'Post', 'User'],
+      tables: [...implemented, { identifier: 'comments', tableName: 'comments', columns: ['id'], module: 'billing' }],
+    })
+    expect(verdictOf(judgeFreshness(plan, collided), 'model.comment').verdict).toBe('stale')
+  })
+
+  test('should call an altered route stale when another commit moves its path', () => {
+    const plan = approvedAgainst(
+      draft((document) => {
+        ;(document.controllers as Array<Record<string, unknown>>).push({
+          id: 'controller.posts',
+          change: { kind: 'existing' },
+          className: 'PostController',
+          actions: [{ id: 'action.posts.index', change: { kind: 'existing' }, name: 'index', authorization: { middleware: [] }, response: { kind: 'json', description: 'the posts' }, rules: [] }],
+        })
+        ;(document.routes as Array<Record<string, unknown>>).push({
+          id: 'route.posts.index',
+          change: { kind: 'alter' },
+          method: 'GET',
+          path: '/posts',
+          name: 'posts.index',
+          action: 'action.posts.index',
+          middleware: ['auth'],
+          bind: [],
+        })
+      }),
+    )
+    const moved = planAppState({ routes: [{ name: 'posts.index', method: 'GET', path: '/p' }, { name: 'posts.show', method: 'GET', path: '/posts/:id' }] })
+    expect(verdictOf(judgeFreshness(plan, moved), 'route.posts.index')).toMatchObject({ change: 'alter', verdict: 'stale' })
+    expect(verdictOf(judgeFreshness(plan, planAppState()), 'route.posts.index').verdict).toBe('fresh')
+  })
+
+  test('should call a changed existing element stale', () => {
     const plan = approvedAgainst(draft())
     const changed = planAppState({ tables: [{ identifier: 'posts', tableName: 'posts', columns: ['title', 'body'] }, PLAN_APP_TABLES[1]!] })
-    const freshness = judgeFreshness(plan, changed, statesOf(plan, 'present'))
-    expect(verdictOf(freshness, 'column.post.id')).toMatchObject({ change: 'existing', verdict: 'stale' })
+    expect(verdictOf(judgeFreshness(plan, changed), 'column.post.id')).toMatchObject({ change: 'existing', verdict: 'stale' })
+  })
+
+  test('should call the existing children of a dropped model fresh once the drop lands, and stale while only they vanish', () => {
+    const plan = approvedAgainst(
+      draft((document) => {
+        const post = (document.models as Array<Record<string, unknown>>)[0]!
+        post.change = { kind: 'drop', reason: 'posts are retired' }
+      }),
+    )
+    const dropped = judgeFreshness(plan, planAppState({ models: ['User'], tables: [PLAN_APP_TABLES[1]!] }))
+    expect(verdictOf(dropped, 'model.post').verdict).toBe('fresh')
+    expect(verdictOf(dropped, 'column.post.id')).toMatchObject({ change: 'existing', verdict: 'fresh' })
+
+    const columnGone = judgeFreshness(plan, planAppState({ tables: [{ identifier: 'posts', tableName: 'posts', columns: ['title'] }, PLAN_APP_TABLES[1]!] }))
+    expect(verdictOf(columnGone, 'column.post.id').verdict).toBe('stale')
+  })
+
+  test('should call the existing actions of a dropped controller fresh once the drop lands', () => {
+    const plan = approvedAgainst(
+      draft((document) => {
+        ;(document.controllers as Array<Record<string, unknown>>).push({
+          id: 'controller.posts',
+          change: { kind: 'drop', reason: 'posts are retired' },
+          className: 'PostController',
+          actions: [{ id: 'action.posts.index', change: { kind: 'existing' }, name: 'index', authorization: { middleware: [] }, response: { kind: 'json', description: 'the posts' }, rules: [] }],
+        })
+      }),
+    )
+    const dropped = judgeFreshness(plan, planAppState({ controllers: [], actions: [] }))
+    expect(verdictOf(dropped, 'action.posts.index').verdict).toBe('fresh')
+    expect(verdictOf(dropped, 'controller.posts').verdict).toBe('fresh')
   })
 
   test('should report an element with no stamp as unstamped, and an unreadable section as unjudged, never fresh', () => {
     const plan = approvedAgainst(draft(), { tables: { unreadable: 'schema threw' } })
 
-    const readable = judgeFreshness(plan, planAppState(), statesOf(plan))
+    const readable = judgeFreshness(plan, planAppState())
     expect(verdictOf(readable, 'model.post').verdict).toBe('unstamped')
     expect(verdictOf(readable, 'column.post.id').verdict).toBe('unstamped')
 
-    const unreadable = judgeFreshness(plan, planAppState({ tables: { unreadable: 'still threw' } }), statesOf(plan))
+    const unreadable = judgeFreshness(plan, planAppState({ tables: { unreadable: 'still threw' } }))
     expect(verdictOf(unreadable, 'model.post')).toMatchObject({ verdict: 'unjudged', reason: "the application's tables could not be read (still threw)" })
-    expect(unreadable.elements.filter((element) => element.verdict === 'fresh').map((element) => element.id)).not.toContain('model.post')
   })
 
   test('should report an element a revision added after approval as unstamped, the baseline left as its parent had it', () => {
@@ -167,24 +242,32 @@ describe('judgeFreshness', () => {
       }),
       baseline: parent.baseline,
     })
-    const freshness = judgeFreshness(revised, planAppState(), statesOf(revised))
+    const freshness = judgeFreshness(revised, planAppState())
     expect(verdictOf(freshness, 'resource.post').verdict).toBe('unstamped')
     expect(freshness.summary.stale).toBe(0)
   })
 
-  test('should keep the existing columns of a table the plan renames fresh once the rename is done', () => {
-    const plan = approvedAgainst(
-      draft((document) => {
-        const post = (document.models as Array<Record<string, unknown>>)[0]!
-        post.table = 'articles'
-        post.tableRenamedFrom = 'posts'
-      }),
-    )
-    const renamed = planAppState({ tables: [{ identifier: 'articles', tableName: 'articles', columns: ['id', 'title', 'body'] }, PLAN_APP_TABLES[1]!] })
-    const freshness = judgeFreshness(plan, renamed, statesOf(plan, 'planned', { 'model.post': 'present' }))
-    expect(verdictOf(freshness, 'column.post.id').verdict).toBe('fresh')
-    expect(verdictOf(freshness, 'model.post').verdict).toBe('fresh')
-  })
+  for (const change of ['alter', 'existing'] as const) {
+    test(`should keep an ${change} model whose table the plan renames, and its existing columns, fresh once the rename is done`, () => {
+      const plan = approvedAgainst(
+        draft((document) => {
+          const post = (document.models as Array<Record<string, unknown>>)[0]!
+          post.change = { kind: change }
+          post.table = 'articles'
+          post.tableRenamedFrom = 'posts'
+          post.dataMigration = { kind: 'none', reason: 'a rename keeps the rows' }
+          if (change === 'existing') post.relationships = []
+        }),
+      )
+      const renamed = planAppState({ tables: [{ identifier: 'articles', tableName: 'articles', columns: ['id', 'title', 'body'] }, PLAN_APP_TABLES[1]!] })
+      const freshness = judgeFreshness(plan, renamed)
+      expect(verdictOf(freshness, 'column.post.id').verdict).toBe('fresh')
+      expect(verdictOf(freshness, 'model.post').verdict).toBe('fresh')
+      // Both names at once is neither the stamp nor what the rename leaves.
+      const both = planAppState({ tables: [...PLAN_APP_TABLES, { identifier: 'articles', tableName: 'articles', columns: ['id'] }] })
+      expect(verdictOf(judgeFreshness(plan, both), 'model.post').verdict).toBe('stale')
+    })
+  }
 
   test('should keep the existing actions of a controller the plan renames fresh once the rename is done', () => {
     const plan = approvedAgainst(
@@ -198,10 +281,8 @@ describe('judgeFreshness', () => {
       }),
     )
     const renamed = planAppState({ controllers: ['ArticleController'], actions: ['ArticleController.index', 'ArticleController.show'] })
-    const freshness = judgeFreshness(plan, renamed, statesOf(plan, 'planned', { 'controller.posts': 'present' }))
-    expect(verdictOf(freshness, 'action.posts.index').verdict).toBe('fresh')
+    expect(verdictOf(judgeFreshness(plan, renamed), 'action.posts.index').verdict).toBe('fresh')
     // The action leaving the application altogether is still news.
-    const gone = judgeFreshness(plan, planAppState({ controllers: ['ArticleController'], actions: [] }), statesOf(plan, 'planned', { 'controller.posts': 'present' }))
-    expect(verdictOf(gone, 'action.posts.index').verdict).toBe('stale')
+    expect(verdictOf(judgeFreshness(plan, planAppState({ controllers: ['ArticleController'], actions: [] })), 'action.posts.index').verdict).toBe('stale')
   })
 })

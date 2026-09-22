@@ -134,7 +134,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   if (!reason) throw new CliError('A waiver records why an element was accepted incomplete, so --reason is required.')
 
   const at = (options.now ?? (() => new Date()))().toISOString()
-  const by = await gitAuthor(options.cwd ?? process.cwd(), options.exec ?? runCaptured)
+  const by = await gitAuthor(root, options.exec ?? runCaptured)
   const waived: PlanWaiver[] = []
   const replaced: PlanWaiver[] = []
   let written = false

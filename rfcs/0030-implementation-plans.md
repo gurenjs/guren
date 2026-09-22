@@ -579,11 +579,17 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
 
 - `plan:approve` is the one writer of `baseline`. A draft is stamped once:
   `rev` is `git rev-parse HEAD` of the application, and no repository or no
-  commit is a refusal rather than an invented rev. The plan file is written
-  back as the author's document plus the baseline, so an omitted section stays
-  omitted. A plan that already carries a baseline, as a revision carries its
-  parent's, is never restamped: the baseline is inside the hash every approval
-  and waiver names. It refuses while a §2 check fails or a question is open.
+  commit is a refusal rather than an invented rev. `contextHash` reads the
+  working tree while `rev` names a commit, so a dirty tree is refused too,
+  the plan file, its approvals and decision log, and `.guren/plans/` excepted.
+  The plan file is written back, atomically, as the author's document plus the
+  baseline, so an omitted section stays omitted. A plan that already carries a
+  baseline, as a revision carries its parent's, is never restamped: the
+  baseline is inside the hash every approval and waiver names. It refuses
+  while a §2 check fails or a question is open.
+- Stamping moves the hash, since the baseline is part of it. A draft's
+  `.guren/plans/` records name `planDigest()` of the draft, so every step
+  verified before approval starts over once the plan is approved.
 - The approval is `{ hash, approvedAt, approvedBy? }` in `approvals.json` beside
   a `plan.json`, and in `<slug>.approvals.json` beside any other plan, the rule
   the decision log follows. Approving a hash already approved writes nothing,
@@ -592,33 +598,42 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
 - `contextHash` is keyed by element id, one entry for every element the §2
   checks judge against the application by name. Both read one derivation of
   what name an element is judged by (`plan/app-targets.ts`). The value is a
-  SHA-256 of the facts those checks read for the name, across every app root:
-  which roots declare it, a table's identifier, SQL name and root without its
-  columns (a column is its own entry), whether a column's table declares it,
-  and a route name's endpoints. An `add` hashes the collision facts, usually
-  "declared nowhere".
-- A section that cannot be read stamps no entry, so validators, which no
-  scanner reads, are never stamped. Comparing gives four verdicts: `fresh`,
-  `stale`, `unstamped` (no entry: a revision named the element after approval,
-  or its section was unreadable then) and `unjudged` (its section cannot be
-  read now). An unreadable section is never `fresh`. `unstamped` is the answer
-  to what stamps an element a revision newly references: nothing, and the
-  baseline carried over from the parent stays as it was.
-- An element that is not `existing` is changed by the plan's own steps, so its
-  hash is bound to move. A difference is `stale` only while `plan:status` has
-  no evidence the plan's work reached the element (`planned`, `blocked`,
-  `unjudged`); `present`, `wired`, `drifted`, `verified` and `waived` are that
-  evidence. An `existing` element belongs to no step, so a difference is always
-  `stale`. An `existing` action under a renamed controller, and an `existing`
-  column of a renamed table, are read under both names, or the rename would
-  mark them stale.
+  SHA-256 of the facts those checks read for the name: whether the plan's own
+  app root declares it and which other roots do (a table is matched by its
+  identifier or SQL name, without its columns, since a column is its own
+  entry), whether a column's table declares the column, and a route name's
+  endpoints.
+- A section that cannot be read stamps no entry. Validators, which no scanner
+  reads, are never stamped. Any other unreadable section makes `plan:approve`
+  refuse, naming the section and the elements it would leave unstamped for
+  good, unless `--allow-unstamped` is passed. Comparing gives four verdicts:
+  `fresh`, `stale`, `unstamped` (no entry: a revision named the element after
+  approval, or its section was unreadable then) and `unjudged` (its section
+  cannot be read now). An unreadable section is never `fresh`. `unstamped` is
+  the answer to what stamps an element a revision newly references: nothing,
+  and the baseline carried over from the parent stays as it was.
+- An element is `fresh` while its facts hash to the stamp or to the facts the
+  plan's own end state predicts. The prediction comes from the plan alone: an
+  `add` or the new name of a `rename` is declared in the element's root, the
+  old name is not, a `drop` and every child of a dropped parent are gone, an
+  `existing` or `alter` element stays, a column sits in its table, and a route
+  name carries the planned method and path. A table name the plan brings in is
+  declared by no other root, since the shared schema would make that a
+  collision; any other declaration in another root is carried over as read.
+  Anything else is `stale`, so an `alter` route whose path another commit
+  moved is stale although `plan:status` already reads it as `drifted`. The
+  rule does not consult `plan:status`. It cannot tell a same-named class that
+  another commit adds in the plan's own root after approval from the plan's own
+  `add`: both read as the end state. An element judged by two targets (a
+  model's class and its table) is fresh only when both are at the stamp or both
+  at the end, so a step that renames one before the other reads as stale in
+  between.
 - `plan:status` reports the verdicts for a plan with a baseline, with the
   elements naming each stale one through the reference table. Skipping or
   blocking the steps that own them, and re-running the §2 checks for a stale
   element, are left to `plan:next` and the Stop hook in a later change.
-- The stamp is part of `planHash()`. Changing what it hashes renames every
-  approved plan and orphans its approvals and waivers, so the facts carry a
-  version of their own.
+- Changing what the stamp hashes renames every approved plan and orphans its
+  approvals and waivers, so the facts carry a version of their own.
 
 ### 5. Tasks are derived, not written
 

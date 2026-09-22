@@ -7,8 +7,11 @@
 
 import type { PlanChange, PlanController, PlanDraft, PlanElementSection, PlanModel, PlanRoute } from './schema'
 
+/** The `PlanAppState` sections {@link namedTargets} reads, in the order their findings are reported. */
+export const NAMED_APP_SECTIONS = ['models', 'controllers', 'validators', 'resources', 'policies', 'pages'] as const
+
 /** The `PlanAppState` section a target is looked up in. */
-export type PlanAppTargetSection = 'models' | 'controllers' | 'validators' | 'resources' | 'policies' | 'pages' | 'tables' | 'actions' | 'routes'
+export type PlanAppTargetSection = (typeof NAMED_APP_SECTIONS)[number] | 'tables' | 'actions' | 'routes'
 
 export interface PlanAppTarget {
   id: string
@@ -20,17 +23,25 @@ export interface PlanAppTarget {
   previous?: string
   kind: PlanChange['kind']
   noun: string
-  /** Whether the section is judged per app root, and the root the plan puts the element in. */
-  scoped: { module: string | undefined } | undefined
+  /** Whether the section is judged per app root; `module` is then the root the plan names. */
+  perRoot: boolean
+  module?: string
+  /** A child of an element the plan drops, which is gone once the drop lands whatever its own change says. */
+  parentDropped?: true
   /** An action under a controller the plan renames: the class it is found under once the rename is done. */
   renamedClass?: { from: string; to: string }
   /** A column: the table it is looked up in, in its model's app root. */
-  table?: { lookup: string; current: string; module: string | undefined }
-  /** A route `add`: the endpoint that must not already be registered. */
-  endpoint?: { method: string; path: string }
+  table?: { lookup: string; current: string }
+  /** A route: the endpoint the plan gives it, which an `add` must not find already registered. */
+  endpoint?: string
 }
 
-export function renameFrom(change: PlanChange): string | undefined {
+/** How an endpoint is compared everywhere: `GET /posts`. */
+export function endpointKey(method: string, path: string): string {
+  return `${method.toUpperCase()} ${path}`
+}
+
+function renameFrom(change: PlanChange): string | undefined {
   return change.kind === 'rename' ? change.from : undefined
 }
 
@@ -52,11 +63,12 @@ function named<T extends Named>(
     previous: renameFrom(element.change),
     kind: element.change.kind,
     noun,
-    scoped: perRoot ? { module: element.module } : undefined,
+    perRoot,
+    ...(perRoot ? { module: element.module } : {}),
   }))
 }
 
-/** The class-named sections, in the order the checks report them. */
+/** The class-named sections, in {@link NAMED_APP_SECTIONS} order. */
 export function namedTargets(plan: PlanDraft): PlanAppTarget[] {
   return [
     ...named(plan.models, 'models', 'models', 'model class', (m) => m.name),
@@ -80,14 +92,15 @@ export function tableTarget(model: PlanModel): PlanAppTarget {
     // A class rename leaves the table alone; `tableRenamedFrom` is the only thing that moves it.
     kind: model.tableRenamedFrom ? 'rename' : model.change.kind === 'rename' ? 'existing' : model.change.kind,
     noun: 'table',
-    scoped: { module: model.module },
+    perRoot: true,
+    module: model.module,
   }
 }
 
 /** Empty for an added model, whose columns no table in the application can hold yet. */
 export function columnTargets(model: PlanModel): PlanAppTarget[] {
   if (model.change.kind === 'add') return []
-  const table = { lookup: model.tableRenamedFrom ?? model.table, current: model.table, module: model.module }
+  const table = { lookup: model.tableRenamedFrom ?? model.table, current: model.table }
   return model.columns.map((column) => ({
     id: column.id,
     section: 'columns',
@@ -96,8 +109,10 @@ export function columnTargets(model: PlanModel): PlanAppTarget[] {
     previous: renameFrom(column.change),
     kind: column.change.kind,
     noun: 'column',
-    scoped: undefined,
+    perRoot: true,
+    module: model.module,
     table,
+    ...(model.change.kind === 'drop' ? { parentDropped: true as const } : {}),
   }))
 }
 
@@ -118,8 +133,10 @@ export function actionTargets(controller: PlanController): PlanAppTarget[] {
       previous: previousName ? `${className}.${previousName}` : undefined,
       kind: action.change.kind,
       noun: 'action',
-      scoped: { module: controller.module },
+      perRoot: true,
+      module: controller.module,
       ...(today ? { renamedClass: { from: today, to: controller.className } } : {}),
+      ...(controller.change.kind === 'drop' ? { parentDropped: true as const } : {}),
     }
   })
 }
@@ -134,8 +151,8 @@ export function routeTarget(route: PlanRoute): PlanAppTarget {
     previous: renameFrom(route.change),
     kind: route.change.kind,
     noun: 'route name',
-    scoped: undefined,
-    ...(route.change.kind === 'add' ? { endpoint: { method: route.method, path: route.path } } : {}),
+    perRoot: false,
+    endpoint: endpointKey(route.method, route.path),
   }
 }
 

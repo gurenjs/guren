@@ -5,7 +5,7 @@
  * not share one. Also who `git config` says is acting, which both records name.
  */
 
-import { readFile } from 'node:fs/promises'
+import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 import type { z } from 'zod'
@@ -60,4 +60,16 @@ export async function readBesideRecord<T>(path: string, schema: z.ZodType<T>, wh
   const parsed = schema.safeParse(document)
   if (!parsed.success) return { value: undefined, unreadable: `${path} does not match the ${what} schema:\n${formatSchemaIssues(parsed.error)}` }
   return { value: parsed.data }
+}
+
+/** Through a temporary file in the same directory, so a reader never sees half a record. */
+export async function writeFileAtomic(path: string, content: string): Promise<void> {
+  const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.tmp`)
+  try {
+    await writeFile(temporary, content, 'utf8')
+    await rename(temporary, path)
+  } catch (error) {
+    await rm(temporary, { force: true })
+    throw error
+  }
 }

@@ -29,8 +29,8 @@ export interface PlanStatusReport extends PlanStatus<PlanElementState> {
    */
   verification?: PlanVerificationSummary
   /**
-   * The application against `baseline.contextHash` (RFC 0030 §4), judged on the states above.
-   * Absent for a draft, which has no baseline to compare with.
+   * The application against `baseline.contextHash` (RFC 0030 §4). Absent for a draft,
+   * which has no baseline to compare with.
    */
   freshness?: PlanFreshness
 }
@@ -54,11 +54,10 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
   } satisfies Pick<PlanStatusReport, 'reportVersion' | 'plan'>
-  const freshnessOf = (elements: PlanStatusReport['elements']): Pick<PlanStatusReport, 'freshness'> =>
-    hasBaseline(plan) ? { freshness: judgeFreshness(plan, app, elements) } : {}
-  if (options.appRoot === undefined) return { ...head, ...status, ...freshnessOf(status.elements) }
+  const freshness = hasBaseline(plan) ? { freshness: judgeFreshness(plan, app) } : {}
+  if (options.appRoot === undefined) return { ...head, ...status, ...freshness }
   const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }))
-  return { ...head, ...overlaid.status, verification: overlaid.verification, ...freshnessOf(overlaid.status.elements) }
+  return { ...head, ...overlaid.status, verification: overlaid.verification, ...freshness }
 }
 
 const SECTION_TITLES: Record<(typeof PLAN_STATUS_SECTIONS)[number], string> = {

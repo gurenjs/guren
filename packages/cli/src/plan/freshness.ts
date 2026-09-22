@@ -1,28 +1,26 @@
 /**
  * Freshness (RFC 0030 §4): `baseline.contextHash`, one hash per element the §2 checks
  * judge by name, of what the scanners read for that name, and the comparison of it with
- * the application today. Pure: the app state and the status come in as values. A section
- * that cannot be read is never hashed as if it were empty, so it is never `fresh`.
- * The stamp is inside `baseline`, and so inside `planHash()`: changing what is hashed
- * here renames every approved plan and orphans its approvals and waivers.
+ * the application today. Pure. A section that cannot be read is never hashed as if it
+ * were empty, so it is never `fresh`. The stamp is inside `baseline`, and so inside
+ * `planHash()`: changing what is hashed renames every approved plan.
  */
 
 import { createHash } from 'node:crypto'
 
-import { isUnreadable, type PlanAppName, type PlanAppState, type PlanAppTable, type PlanAppUnreadable } from './app-state'
-import { listPlanAppTargets, type PlanAppTarget } from './app-targets'
+import { declaresTable, findTable, isUnreadable, type PlanAppName, type PlanAppScope, type PlanAppState, type PlanAppUnreadable } from './app-state'
+import { endpointKey, listPlanAppTargets, type PlanAppTarget, type PlanAppTargetSection } from './app-targets'
 import { canonicalJson } from './identity'
 import { listPlanReferences } from './references'
 import type { PlanChange, PlanDraft, PlanElementSection } from './schema'
-import type { PlanElementState } from './status'
 
 /** Hashed into every entry, so a change to what is hashed marks everything stale rather than colliding. */
-const CONTEXT_FACTS_VERSION = 1
+const CONTEXT_FACTS_VERSION = 2
 
 export interface PlanContextStamp {
   contextHash: Record<string, string>
   /** Elements the checks judge whose sections could not be read, which get no entry. */
-  unstamped: Array<{ id: string; reason: string }>
+  unstamped: Array<{ id: string; sections: PlanAppTargetSection[]; reason: string }>
 }
 
 export type PlanFreshnessVerdict = 'fresh' | 'stale' | 'unstamped' | 'unjudged'
@@ -34,7 +32,7 @@ export interface PlanElementFreshness {
   section: PlanElementSection
   change: PlanChange['kind']
   verdict: PlanFreshnessVerdict
-  /** Why, on every verdict but a plain `fresh`. */
+  /** Why, on every verdict but a `fresh` that matches its stamp. */
   reason?: string
   /** On `stale`: the elements naming this one (`listPlanReferences()`), whose steps depend on it. */
   affects?: string[]
@@ -45,28 +43,29 @@ export interface PlanFreshness {
   summary: Record<PlanFreshnessVerdict, number>
 }
 
-/** Always carries `section`, which is what tells it from a {@link PlanAppUnreadable}. */
-type Facts = { section: string } & Record<string, unknown>
-
-interface ElementContext {
-  id: string
-  section: PlanElementSection
-  change: PlanChange['kind']
-  /** The element's hash, or why one of the sections it is judged in could not be read. */
-  hash: string | PlanAppUnreadable
+/** Whether the plan's own root declares a name, and which other roots do. */
+interface Presence {
+  here: boolean
+  elsewhere?: PlanAppScope[]
 }
 
-/** Code-unit order with the project root first, so two machines write the same bytes. */
-function sortedRoots(modules: Iterable<string | null>): Array<string | null> {
+type Facts =
+  | { section: 'named' | 'tables'; names: Record<string, Presence> }
+  | { section: 'columns'; table: boolean; columns?: Record<string, boolean> }
+  | { section: 'routes'; endpoints: Record<string, string[]>; registered?: boolean }
+
+/** Project root first, then code-unit order, so two machines write the same bytes. */
+function sortedRoots(modules: Iterable<PlanAppScope>): PlanAppScope[] {
   return [...new Set(modules)].sort((a, b) => (a === b ? 0 : a === null ? -1 : b === null ? 1 : a < b ? -1 : 1))
 }
 
-function sortedStrings(values: Iterable<string>): string[] {
-  return [...new Set(values)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+function namesOf(target: PlanAppTarget): string[] {
+  return [...new Set([target.current, ...(target.previous === undefined ? [] : [target.previous])])].sort()
 }
 
-function namesOf(target: PlanAppTarget): string[] {
-  return sortedStrings([target.current, ...(target.previous === undefined ? [] : [target.previous])])
+/** Whether the plan leaves `name` in place: the current name, unless the element or its parent is dropped. */
+function presentAtEnd(target: PlanAppTarget, name: string): boolean {
+  return name === target.current && target.kind !== 'drop' && !target.parentDropped
 }
 
 /**
@@ -78,13 +77,16 @@ function aliasOf(target: PlanAppTarget, name: string): string | undefined {
   return renamed && name.startsWith(`${renamed.from}.`) ? `${renamed.to}${name.slice(renamed.from.length)}` : undefined
 }
 
-function namedFacts(target: PlanAppTarget, entries: ReadonlyArray<PlanAppName>): Facts {
-  const roots: Record<string, Array<string | null>> = {}
-  for (const name of namesOf(target)) {
-    const alias = aliasOf(target, name)
-    roots[name] = sortedRoots(entries.filter((entry) => entry.name === name || entry.name === alias).map((entry) => entry.module))
-  }
-  return { section: target.appSection, roots }
+function presence(target: PlanAppTarget, roots: PlanAppScope[]): Presence {
+  const own = target.module ?? null
+  if (!target.perRoot) return { here: roots.includes(null) }
+  return { here: roots.includes(own), elsewhere: roots.filter((root) => root !== own) }
+}
+
+function namesFacts(section: 'named' | 'tables', target: PlanAppTarget, rootsOf: (name: string) => PlanAppScope[]): Facts {
+  const names: Record<string, Presence> = {}
+  for (const name of namesOf(target)) names[name] = presence(target, sortedRoots(rootsOf(name)))
+  return { section, names }
 }
 
 function targetFacts(target: PlanAppTarget, app: PlanAppState): Facts | PlanAppUnreadable {
@@ -93,26 +95,20 @@ function targetFacts(target: PlanAppTarget, app: PlanAppState): Facts | PlanAppU
     const routes = app.routes
     const endpoints: Record<string, string[]> = {}
     for (const name of namesOf(target)) {
-      endpoints[name] = sortedStrings(routes.filter((route) => route.name === name).map((route) => `${route.method.toUpperCase()} ${route.path}`))
+      endpoints[name] = [...new Set(routes.filter((route) => route.name === name).map((route) => endpointKey(route.method, route.path)))].sort()
     }
-    const endpoint = target.endpoint && `${target.endpoint.method} ${target.endpoint.path}`
-    return {
-      section: 'routes',
-      endpoints,
-      ...(endpoint ? { registered: routes.some((route) => `${route.method.toUpperCase()} ${route.path}` === endpoint) } : {}),
-    }
+    const registered = target.kind === 'add' && target.endpoint ? { registered: routes.some((route) => endpointKey(route.method, route.path) === target.endpoint) } : {}
+    return { section: 'routes', endpoints, ...registered }
   }
 
   if (target.appSection === 'tables') {
     if (isUnreadable(app.tables)) return app.tables
     const tables = app.tables
-    const declaring = (name: string, module?: string | null): PlanAppTable[] =>
-      tables.filter((table) => (module === undefined || table.module === module) && (table.identifier === name || table.tableName === name))
     if (target.table) {
-      // Found under its name today or the name the plan gives it, and hashed without saying
+      // Found under its name today or the one the plan gives it, and hashed without saying
       // which, so implementing a table rename does not move its `existing` columns.
-      const module = target.table.module ?? null
-      const table = declaring(target.table.lookup, module)[0] ?? declaring(target.table.current, module)[0]
+      const module = target.module ?? null
+      const table = findTable(tables, target.table.lookup, module) ?? findTable(tables, target.table.current, module)
       if (!table) return { section: 'columns', table: false }
       const columns: Record<string, boolean> = {}
       for (const name of namesOf(target)) columns[name] = table.columns.includes(name)
@@ -120,90 +116,118 @@ function targetFacts(target: PlanAppTarget, app: PlanAppState): Facts | PlanAppU
     }
     // Every root's: an `add` collides with a table any root declares. Columns are their own
     // entries, so a column the plan adds does not move its model's hash.
-    const declared: Record<string, string[]> = {}
-    for (const name of namesOf(target)) {
-      declared[name] = sortedStrings(
-        declaring(name).map((table) => canonicalJson({ identifier: table.identifier, tableName: table.tableName ?? null, module: table.module })),
-      )
-    }
-    return { section: 'tables', declared }
+    return namesFacts('tables', target, (name) => tables.filter((table) => declaresTable(table, name)).map((table) => table.module))
   }
 
   const section = app[target.appSection]
   if (isUnreadable(section)) return section
-  return namedFacts(target, section)
+  const entries: ReadonlyArray<PlanAppName> = section
+  return namesFacts('named', target, (name) => {
+    const alias = aliasOf(target, name)
+    return entries.filter((entry) => entry.name === name || entry.name === alias).map((entry) => entry.module)
+  })
+}
+
+/**
+ * A table name the plan brings into being was declared by no root at approval, or the shared
+ * schema would have failed the §2 checks, and it stays that way everywhere but the plan's root.
+ */
+function claimsTableName(target: PlanAppTarget, name: string): boolean {
+  return name === target.current && (target.kind === 'add' || (target.kind === 'rename' && target.previous !== target.current))
+}
+
+/**
+ * The same facts once the plan's own work is done: every name it controls in the root it
+ * names is where the plan leaves it. A declaration in another app root is the plan's only
+ * where the shared schema makes it so; otherwise it is carried over as read.
+ */
+function plannedEnd(target: PlanAppTarget, facts: Facts): Facts {
+  switch (facts.section) {
+    case 'named':
+    case 'tables': {
+      const names: Record<string, Presence> = {}
+      for (const [name, found] of Object.entries(facts.names)) {
+        const elsewhere = facts.section === 'tables' && claimsTableName(target, name) ? { elsewhere: [] } : {}
+        names[name] = { ...found, here: presentAtEnd(target, name), ...elsewhere }
+      }
+      return { section: facts.section, names }
+    }
+    case 'columns': {
+      if (target.parentDropped) return { section: 'columns', table: false }
+      const columns: Record<string, boolean> = {}
+      for (const name of namesOf(target)) columns[name] = presentAtEnd(target, name)
+      return { section: 'columns', table: true, columns }
+    }
+    case 'routes': {
+      const endpoints: Record<string, string[]> = {}
+      for (const name of Object.keys(facts.endpoints)) endpoints[name] = presentAtEnd(target, name) && target.endpoint ? [target.endpoint] : []
+      return { section: 'routes', endpoints, ...(facts.registered === undefined ? {} : { registered: true }) }
+    }
+  }
 }
 
 function hashFacts(facts: Facts[]): string {
   return createHash('sha256').update(canonicalJson({ v: CONTEXT_FACTS_VERSION, facts }), 'utf8').digest('hex')
 }
 
-/** One entry per element, in the order the checks judge them. A model's class and table are one entry. */
-function elementContexts(plan: PlanDraft, app: PlanAppState): ElementContext[] {
-  const byId = new Map<string, { target: PlanAppTarget; facts: Facts[]; unreadable?: PlanAppUnreadable }>()
-  for (const target of listPlanAppTargets(plan)) {
-    const entry = byId.get(target.id) ?? { target, facts: [] }
-    byId.set(target.id, entry)
-    if (entry.unreadable) continue
-    const facts = targetFacts(target, app)
-    if (isUnreadableFacts(facts)) entry.unreadable = { unreadable: `the application's ${target.appSection} could not be read (${facts.unreadable})` }
-    else entry.facts.push(facts)
-  }
-  return [...byId.values()].map(({ target, facts, unreadable }) => ({
-    id: target.id,
-    section: target.section,
-    // The first target is the element's own: a model's class comes before its table.
-    change: target.kind,
-    hash: unreadable ?? hashFacts(facts),
-  }))
+interface ElementContext {
+  id: string
+  section: PlanElementSection
+  change: PlanChange['kind']
+  now: { hash: string; end: string } | { unreadable: string; sections: PlanAppTargetSection[] }
 }
 
-function isUnreadableFacts(facts: Facts | PlanAppUnreadable): facts is PlanAppUnreadable {
-  return !('section' in facts)
+/** One entry per element; a model's class and its table are one entry, and the class comes first. */
+function elementContexts(plan: PlanDraft, app: PlanAppState): ElementContext[] {
+  const byId = new Map<string, { first: PlanAppTarget; facts: Facts[]; end: Facts[]; unreadable: string[]; sections: PlanAppTargetSection[] }>()
+  for (const target of listPlanAppTargets(plan)) {
+    const entry = byId.get(target.id) ?? { first: target, facts: [], end: [], unreadable: [], sections: [] }
+    byId.set(target.id, entry)
+    const facts = targetFacts(target, app)
+    if ('unreadable' in facts) {
+      entry.unreadable.push(`the application's ${target.appSection} could not be read (${facts.unreadable})`)
+      entry.sections.push(target.appSection)
+      continue
+    }
+    entry.facts.push(facts)
+    entry.end.push(plannedEnd(target, facts))
+  }
+  return [...byId.values()].map(({ first, facts, end, unreadable, sections }) => ({
+    id: first.id,
+    section: first.section,
+    change: first.kind,
+    now: unreadable.length > 0 ? { unreadable: unreadable.join('; '), sections } : { hash: hashFacts(facts), end: hashFacts(end) },
+  }))
 }
 
 /** What `plan:approve` writes into `baseline.contextHash` for a draft. */
 export function stampContextHash(plan: PlanDraft, app: PlanAppState): PlanContextStamp {
   const contextHash: Record<string, string> = {}
   const unstamped: PlanContextStamp['unstamped'] = []
-  for (const element of elementContexts(plan, app)) {
-    if (typeof element.hash === 'string') contextHash[element.id] = element.hash
-    else unstamped.push({ id: element.id, reason: element.hash.unreadable })
+  for (const { id, now } of elementContexts(plan, app)) {
+    if ('hash' in now) contextHash[id] = now.hash
+    else unstamped.push({ id, sections: now.sections, reason: now.unreadable })
   }
   return { contextHash, unstamped }
 }
 
 /**
- * States that are positive evidence the element exists as the plan's own work left it. Its
- * context was bound to move, so a differing hash is the plan's doing, not someone else's.
- * `planned`, `blocked` and `unjudged` say nothing of the sort, so a difference there is stale.
+ * An element is fresh while what the scanners read for it is what was stamped, or what the
+ * plan's own work leaves there. Anything else is someone else's change. A name the plan
+ * adds that another commit declares first in the same root reads as the plan's own add.
  */
-const WORKED_ON = new Set<PlanElementState>(['present', 'wired', 'drifted', 'verified', 'waived'])
-
-/**
- * `states` is what `plan:status` reports per element, after verification and waivers are laid
- * over it: an `existing` element has no step to have moved it, so a difference is always stale.
- */
-export function judgeFreshness(
-  plan: PlanDraft & { baseline: { contextHash: Record<string, string> } },
-  app: PlanAppState,
-  states: ReadonlyArray<{ id: string; state: PlanElementState }>,
-): PlanFreshness {
-  const stateOf = new Map(states.map((element) => [element.id, element.state]))
+export function judgeFreshness(plan: PlanDraft & { baseline: { contextHash: Record<string, string> } }, app: PlanAppState): PlanFreshness {
   const stamped = plan.baseline.contextHash
-  const elements: PlanElementFreshness[] = elementContexts(plan, app).map(({ id, section, change, hash }) => {
+  const elements: PlanElementFreshness[] = elementContexts(plan, app).map(({ id, section, change, now }) => {
     const base = { id, section, change }
-    if (typeof hash !== 'string') return { ...base, verdict: 'unjudged', reason: hash.unreadable }
+    if ('unreadable' in now) return { ...base, verdict: 'unjudged', reason: now.unreadable }
     const before = Object.hasOwn(stamped, id) ? stamped[id] : undefined
     if (before === undefined) {
       return { ...base, verdict: 'unstamped', reason: 'No context was stamped for it: a revision named it after approval, or its section could not be read then.' }
     }
-    if (before === hash) return { ...base, verdict: 'fresh' }
-    const state = stateOf.get(id)
-    if (change !== 'existing' && state !== undefined && WORKED_ON.has(state)) {
-      return { ...base, verdict: 'fresh', reason: `Its context changed with the plan's own work (${state}).` }
-    }
-    return { ...base, verdict: 'stale', reason: 'What the scanners read for it changed since the plan was approved.' }
+    if (before === now.hash) return { ...base, verdict: 'fresh' }
+    if (now.hash === now.end) return { ...base, verdict: 'fresh', reason: 'The application reads as the plan leaves it.' }
+    return { ...base, verdict: 'stale', reason: 'What the scanners read for it changed since approval, to neither what was stamped nor what the plan leaves.' }
   })
 
   const stale = new Set(elements.filter((element) => element.verdict === 'stale').map((element) => element.id))

@@ -78,7 +78,8 @@ export function planOutputPath(planPath: string): string {
 }
 
 /** Reads and parses a plan file, every failure a `CliError` naming the path. Shared by the commands that take a plan. */
-export async function readPlanFile(planPath: string, cwd: string = process.cwd()): Promise<{ path: string; plan: PlanDraft | Plan }> {
+/** `document` is the file as written, before parsing fills defaulted sections in. */
+export async function readPlanFile(planPath: string, cwd: string = process.cwd()): Promise<{ path: string; plan: PlanDraft | Plan; document: unknown }> {
   const absolutePlan = resolve(cwd, planPath)
 
   let raw: string
@@ -95,7 +96,7 @@ export async function readPlanFile(planPath: string, cwd: string = process.cwd()
     throw new CliError(`${absolutePlan} is not valid JSON: ${(error as Error).message}`)
   }
 
-  return { path: absolutePlan, plan: parsePlanDocument(document) }
+  return { path: absolutePlan, plan: parsePlanDocument(document), document }
 }
 
 export async function renderPlanFile(planPath: string, options: RenderPlanFileOptions): Promise<RenderedPlanFile> {
