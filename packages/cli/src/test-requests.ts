@@ -360,36 +360,51 @@ function patternSegments(path: string): PatternSegment[] {
   })
 }
 
-function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: readonly TestRequestSegment[], si: number): boolean {
-  if (pi === patterns.length) return si === segments.length
+function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: readonly TestRequestSegment[], si: number): Match {
+  if (pi === patterns.length) return si === segments.length ? 'match' : 'none'
   const pattern = patterns[pi]!
   const last = pi === patterns.length - 1
-  if (pattern.source === null) return last || (si < segments.length && matchFrom(patterns, pi + 1, segments, si + 1))
-  if (last && pattern.param?.optional && si === segments.length) return true
   const segment = segments[si]
-  if (segment === undefined) return false
-  if ('runtime' in segment) return pattern.param !== undefined && matchFrom(patterns, pi + 1, segments, si + 1)
-  if (compile(pattern.source).test(segment.literal) && matchFrom(patterns, pi + 1, segments, si + 1)) return true
-  if (pattern.param?.constraint === undefined) return false
+  if (pattern.source === null) {
+    if (last) return 'match'
+    // A middle `*` takes one segment, and hono does not let it take an empty one.
+    return segment === undefined || ('literal' in segment && segment.literal === '') ? 'none' : matchFrom(patterns, pi + 1, segments, si + 1)
+  }
+  if (last && pattern.param?.optional && si === segments.length) return 'match'
+  if (segment === undefined) return 'none'
+  const constraint = pattern.param?.constraint
+  if ('runtime' in segment) {
+    if (!pattern.param) return 'none'
+    // A runtime value may fail the constraint, or span `/` and take the segments after it.
+    return constraint === undefined ? matchFrom(patterns, pi + 1, segments, si + 1) : 'unknown'
+  }
+  let result: Match = 'none'
+  const settles = (match: Match): boolean => {
+    if (match === 'unknown') result = 'unknown'
+    return match === 'match'
+  }
+  if (compile(pattern.source).test(segment.literal) && settles(matchFrom(patterns, pi + 1, segments, si + 1))) return 'match'
+  if (constraint === undefined) return result
   // A constraint may match `/` (`:path{.+}`) and take the spelled segments after it along.
   let joined = segment.literal
   for (let end = si + 1; end < segments.length; end += 1) {
     const following = segments[end]!
-    if ('runtime' in following) return false
+    if ('runtime' in following) return 'unknown'
     joined += `/${following.literal}`
-    if (compile(pattern.source).test(joined) && matchFrom(patterns, pi + 1, segments, end + 1)) return true
+    if (compile(pattern.source).test(joined) && settles(matchFrom(patterns, pi + 1, segments, end + 1))) return 'match'
   }
-  return false
+  return result
 }
 
 /**
  * Hono's matching of one route path: `:name`, `:name{re}`, an optional last `:name?`, a
- * trailing `*` (any rest, none included), a middle `*` (one segment). A runtime segment fills a lone param only. `unknown` is a constraint this
- * engine cannot compile, which is never read as no match.
+ * trailing `*` (any rest, none included), a middle `*` (one non-empty segment).
+ * A runtime segment fills a lone param; against a constraint it is `unknown`.
+ * A constraint this engine cannot compile is `unknown` too, never read as no match.
  */
 export function routePathMatches(path: string, segments: readonly TestRequestSegment[]): Match {
   try {
-    return matchFrom(patternSegments(path), 0, segments, 0) ? 'match' : 'none'
+    return matchFrom(patternSegments(path), 0, segments, 0)
   } catch (error) {
     if (error instanceof UncompilablePattern) return 'unknown'
     throw error

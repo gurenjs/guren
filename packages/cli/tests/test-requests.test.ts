@@ -232,7 +232,7 @@ describe('routePathMatches', () => {
     ['/tags/:slug{[a-z\\_]+}', '/tags/a_b'], ['/files/:path{.+}', '/files/a/b'], ['/files/:path{.+}', '/files/a'],
     ['/files/:path{.+}/raw', '/files/a/b/raw'], ['/feed/:format?', '/feed'], ['/feed/:format?', '/feed/'], ['/feed/:format?', '/feed/rss'],
     ['/assets/*', '/assets'], ['/assets/*', '/assets/'], ['/assets/*', '/assets/a/b.css'],
-    ['/wild/*/end', '/wild/x/end'], ['/wild/*/end', '/wild/x/y/end'], ['/wild/*/end', '/wild/x/other'],
+    ['/wild/*/end', '/wild/x/end'], ['/wild/*/end', '/wild//end'], ['/wild/*/end', '/wild/x/y/end'], ['/wild/*/end', '/wild/x/other'],
     ['/p/:id.json', '/p/3.json'], ['/p/:id.json', '/p/3'], ['/p/:id-x/raw', '/p/3/raw'], ['/f/:name*', '/f/a'], ['/f/:name*', '/f/a/b'], ['/status/foo:bar', '/status/foo:bar'],
   ]
 
@@ -246,9 +246,18 @@ describe('routePathMatches', () => {
   test('should fill a lone parameter with a runtime segment, and nothing else', () => {
     const runtime: TestRequestSegment[] = [{ literal: 'posts' }, { runtime: true }]
     expect(routePathMatches('/posts/:id', runtime)).toBe('match')
-    expect(routePathMatches('/posts/:id{[0-9]+}', runtime)).toBe('match')
     expect(routePathMatches('/posts/create', runtime)).toBe('none')
     expect(routePathMatches('/posts/:id.json', runtime)).toBe('match')
+  })
+
+  test('should answer unknown, never none, where a runtime segment meets a constraint or its span', () => {
+    const RUNTIME = { runtime: true } as const
+    const at = (...parts: Array<string | typeof RUNTIME>): TestRequestSegment[] => parts.map((part) => (typeof part === 'string' ? { literal: part } : part))
+    expect(routePathMatches('/posts/:id{[0-9]+}', at('posts', RUNTIME))).toBe('unknown')
+    expect(routePathMatches('/files/:path{.+}', at('files', 'a', RUNTIME))).toBe('unknown')
+    expect(routePathMatches('/files/:path{.+}', at('files', RUNTIME, RUNTIME))).toBe('unknown')
+    expect(routePathMatches('/files/:path{.+}/raw', at('files', RUNTIME, 'x', 'raw'))).toBe('unknown')
+    expect(routePathMatches('/files/:path{.+}/raw', at('files', 'a', 'raw'))).toBe('match')
   })
 
   test('should answer unknown for a constraint it cannot compile', () => {
