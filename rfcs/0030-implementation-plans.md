@@ -400,7 +400,10 @@ breaking regardless of what Impact found.
   or `PaginatedPageProps` of one. It follows plain aliases, destructuring, indexing,
   `for...of` and element callbacks. The column names a query spells
   (`where('title', …)`, `where({ title })`, `select('title', …)`, `orderBy`) are
-  reads, and the keys of the data `create`/`update` are given are writes, listed as
+  reads, as are the keys of the where clause the model class is handed first
+  (`update`, `delete`, `first`, `restore`, `forceDelete`) and the key `find(value,
+  key)` looks up by. A query is a chain of method calls back to the class, so
+  `Post.name.toLowerCase()` is none. The keys of the data `create`/`update` are given are writes, listed as
   such, since a rename breaks a writer as surely as a reader. A column held in a
   variable (`orderBy(column)`, `create(data)`) and a query ending in a method the
   scan does not classify (an application's own scope) are accesses no static scan can

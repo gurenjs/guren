@@ -338,16 +338,67 @@ describe('scanColumnConsumers on writes and queries it cannot classify', () => {
 
   test('should classify every public query method of the ORM, so none silently drops the records it returns', () => {
     const source = (path: string): string => readFileSync(join(import.meta.dir, '../..', path), 'utf8')
-    const names = new Set([
-      ...[...source('orm/src/Model.ts').matchAll(/^  static (?:async )?([A-Za-z]+)[<(]/gm)].map((match) => match[1]!),
-      ...[...source('orm/src/QueryBuilder.ts').matchAll(/^  (?:async )?([A-Za-z]+)[<(]/gm)].map((match) => match[1]!),
-      ...[...source('orm/src/SoftDeletes.ts').matchAll(/^\s+([A-Za-z]+)[<(]/gm)].map((match) => match[1]!),
-      ...[...source('core/src/attachments/Attachable.ts').matchAll(/^    ([A-Za-z]+)\(/gm)].map((match) => match[1]!),
-    ])
+    const perFile = {
+      model: [...source('orm/src/Model.ts').matchAll(/^  static (?:async )?([A-Za-z]+)[<(]/gm)].map((match) => match[1]!),
+      builder: [...source('orm/src/QueryBuilder.ts').matchAll(/^  (?:async )?([A-Za-z]+)[<(]/gm)].map((match) => match[1]!),
+      softDeletes: [...source('orm/src/SoftDeletes.ts').matchAll(/^\s+([A-Za-z]+)[<(]/gm)].map((match) => match[1]!),
+      attachable: [...source('core/src/attachments/Attachable.ts').matchAll(/^    ([A-Za-z]+)\(/gm)].map((match) => match[1]!),
+    }
+    const names = new Set(Object.values(perFile).flat())
     const classified = new Set<string>(Object.values(QUERY_METHOD_RESULTS).flat())
 
-    expect(names.size).toBeGreaterThan(60)
+    // A re-indented source would read no names and pass the comparison below vacuously.
+    expect(perFile.model).toContain('findOrFail')
+    expect(perFile.builder).toContain('firstOrFail')
+    expect(perFile.softDeletes).toContain('withTrashed')
+    expect(perFile.attachable).toContain('attach')
     expect([...names].filter((name) => !classified.has(name)).sort()).toEqual([])
+  })
+})
+
+describe('scanColumnConsumers on where clauses and chains', () => {
+  test('should read the where clause the model class is handed first, and the key find() looks up by', async () => {
+    const result = await scan({
+      controllers: controller(`  async destroy() {
+    await Post.delete({ id: 1 })
+    const post = await Post.first({ slug: 's' })
+    await Post.restore({ deletedBy: 2 })
+    await Post.forceDelete({ authorId: 3 })
+    const found = await Post.find('x', 'handle')
+    return this.json({ post, found })
+  }`),
+    })
+
+    expect(reads(result)).toEqual([
+      'PostController.destroy:id',
+      'PostController.destroy:slug',
+      'PostController.destroy:deletedBy',
+      'PostController.destroy:authorId',
+      'PostController.destroy:handle',
+    ])
+  })
+
+  test("should not take a member of the model class for a query: its methods read no column", async () => {
+    const result = await scan({
+      controllers: controller(`  async index() {
+    return this.json([Post.name.toLowerCase(), Post.fillable.includes('title')])
+  }`),
+    })
+
+    expect(result.opaque).toEqual([])
+  })
+
+  test('should count one opaque read per chain ending in a method it cannot classify, where the chain ends', async () => {
+    const result = await scan({
+      controllers: controller(`  async index() {
+    const a = await Post.published()
+    const b = Post.published().map((post) => post)
+    const c = await Post.where('a', 1).published()
+    return this.json({ a, b, c })
+  }`),
+    })
+
+    expect(result.opaque.map((read) => read.line)).toEqual([6, 7, 8])
   })
 })
 

@@ -7,7 +7,7 @@
  */
 
 import type { ColumnConsumerScan, ColumnRead, ResourceModelTie } from '../column-consumers'
-import { isTestFileNamedFor, moduleNameFromRelPath } from '../discovery'
+import { inAppRoot, isTestFileNamedFor, moduleNameFromRelPath } from '../discovery'
 import type { PlanAppActionDetail, PlanAppClassDetail } from './app-detail'
 import type { PlanAppScope } from './app-state'
 import type { PlanBreakingChange } from './page/payload'
@@ -137,8 +137,7 @@ function routeLabel(route: PlanImpactRoute): string {
 
 /** A class name as seen from an app root: that root's own model, else the project root's. */
 function resolveModel(sources: PlanImpactSources, className: string, from: PlanAppScope): PlanImpactModel | undefined {
-  return sources.models.find((model) => model.className === className && model.module === from)
-    ?? sources.models.find((model) => model.className === className && model.module === null)
+  return inAppRoot(sources.models.filter((model) => model.className === className), (model) => model.module, from)
 }
 
 class EntryBuilder {

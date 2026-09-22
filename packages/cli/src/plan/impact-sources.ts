@@ -94,6 +94,7 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
 
   const unreadable: Partial<Record<PlanImpactReader, string>> = {}
   const note = (reader: PlanImpactReader, section: readonly unknown[] | PlanAppUnreadable | ControllerMethodScan | undefined): void => {
+    // A controller scan is an object, not a list, so `isUnreadable()` alone would take it for a failure.
     if (section !== undefined && !('methods' in section) && isUnreadable(section)) unreadable[reader] = section.unreadable
   }
   note('models', sections.models)

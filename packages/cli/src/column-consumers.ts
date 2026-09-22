@@ -11,7 +11,7 @@ import { resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion, type BabelNode } from './ast-walk'
-import { toPosixRelative } from './discovery'
+import { inAppRoot, toPosixRelative } from './discovery'
 import { firstClassDeclaration } from './model-parser'
 import type { ParseCache } from './parse-cache'
 import { importsByLocal, specifierBase } from './schema-binding'
@@ -116,8 +116,34 @@ const QUERY_RESULT_OF = new Map<string, QueryResult>(
   (Object.entries(QUERY_METHOD_RESULTS) as Array<[QueryResult, readonly string[]]>).flatMap(([result, names]) => names.map((name) => [name, result] as const)),
 )
 
-/** Methods whose data argument is written: `create(data)`, `update(where, data)`, a builder's `update(data)`. */
-const WRITE_METHODS = new Set(['create', 'forceCreate', 'update', 'forceUpdate'])
+interface ArgumentPositions {
+  /** A where clause, or `find(value, key)`'s key: the columns it names are read. */
+  where?: number
+  /** The data a write is given: the columns it names are written. */
+  data?: number
+}
+
+/** The model class's own methods whose arguments name columns, by position. */
+const STATIC_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
+  ['create', { data: 0 }],
+  ['forceCreate', { data: 0 }],
+  ['update', { where: 0, data: 1 }],
+  ['forceUpdate', { where: 0, data: 1 }],
+  ['delete', { where: 0 }],
+  ['first', { where: 0 }],
+  ['restore', { where: 0 }],
+  ['forceDelete', { where: 0 }],
+  ['find', { where: 1 }],
+  ['findOrFail', { where: 1 }],
+])
+
+/** A query builder's: its where clause is already chained, so `update(data)` has only data. */
+const BUILDER_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
+  ['create', { data: 0 }],
+  ['forceCreate', { data: 0 }],
+  ['update', { data: 0 }],
+  ['forceUpdate', { data: 0 }],
+])
 
 /** Query methods whose first argument is a column name (`select` takes several). */
 const COLUMN_ARGUMENT_METHODS = new Set(['where', 'orWhere', 'whereIn', 'whereNotIn', 'whereNull', 'whereNotNull', 'orderBy', 'select', 'sum', 'avg', 'min', 'max', 'countBy'])
@@ -192,8 +218,7 @@ function indexModels(models: readonly ColumnConsumerModel[]): ModelIndex {
 
 /** A class name in an app root: that root's own model, else the project root's. */
 function modelIn(models: ModelIndex, className: string, module: string | null): ColumnConsumerModel | undefined {
-  const named = models.all.filter((model) => model.className === className)
-  return named.find((model) => modelModule(model.file) === module) ?? named.find((model) => modelModule(model.file) === null)
+  return inAppRoot(models.all.filter((model) => model.className === className), (model) => modelModule(model.file), module)
 }
 
 /**
@@ -377,12 +402,12 @@ class RecordWalker {
 
   /** The model class a query chain starts from, unless a local shadows its name. */
   private chainModel(expression: BabelNode, scope: Scope): ColumnConsumerModel | undefined {
-    let root = unwrapTypeAssertion(expression)
-    while (root.type === 'CallExpression' || root.type === 'OptionalCallExpression' || root.type === 'MemberExpression' || root.type === 'OptionalMemberExpression') {
-      root = unwrapTypeAssertion((root.type.endsWith('CallExpression') ? root.callee : root.object) as BabelNode)
-    }
-    if (root.type !== 'Identifier' || scope.has(root.name as string)) return undefined
-    return this.context.ties.models.get(root.name as string)
+    const node = unwrapTypeAssertion(expression)
+    if (node.type === 'Identifier') return scope.has(node.name as string) ? undefined : this.context.ties.models.get(node.name as string)
+    // Every link back to the class is a method call: `Post.name.toLowerCase()` is no query.
+    if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return undefined
+    const callee = unwrapTypeAssertion(node.callee as BabelNode)
+    return methodName(callee) === undefined ? undefined : this.chainModel(callee.object as BabelNode, scope)
   }
 
   /** What an expression holds, when the file says it is a model's record or list of them. */
@@ -511,12 +536,10 @@ class RecordWalker {
     if (!model) return
     const tie: Tie = { model, many: false }
     const args = node.arguments as BabelNode[]
-    const isStatic = unwrapTypeAssertion(receiver).type === 'Identifier'
-    if (WRITE_METHODS.has(method)) {
-      // The static `update(where, data)` names its row first; a builder's `update(data)` has only data.
-      const updatesByWhere = isStatic && (method === 'update' || method === 'forceUpdate')
-      if (updatesByWhere) this.columnKeys(tie, args[0], false)
-      this.columnKeys(tie, updatesByWhere ? args[1] : args[0], true)
+    const positions = unwrapTypeAssertion(receiver).type === 'Identifier' ? STATIC_ARGUMENTS.get(method) : BUILDER_ARGUMENTS.get(method)
+    if (positions) {
+      if (positions.where !== undefined) this.columnKeys(tie, args[positions.where], false)
+      if (positions.data !== undefined) this.columnKeys(tie, args[positions.data], true)
       return
     }
     if (COLUMN_ARGUMENT_METHODS.has(method)) {
@@ -562,6 +585,7 @@ class RecordWalker {
       const method = methodName(callee)
       // A method called on a record (`post.save()`, `posts.map()`) is not a column read.
       if (callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression') {
+        // Marked before the receiver is visited, which is where `queryColumns` asks whether it ends a chain.
         this.receivers.add(unwrapTypeAssertion(callee.object as BabelNode))
         this.visit(callee.object as BabelNode, scope)
         if (callee.computed) this.visit(callee.property as BabelNode, scope)
