@@ -12,9 +12,10 @@ import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { planWaiveFile } from '../src/plan-waive'
 import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
 import { stampContextHash } from '../src/plan/freshness'
+import { hasBaseline } from '../src/plan/render'
 import { sha256 } from '../src/plan/verification'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
+import { approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own, since Bun keys an imported routes file on
@@ -35,8 +36,10 @@ async function createApp(name: string, files: Record<string, string> = APP): Pro
   return dir
 }
 
-async function writePlan(name: string, document: unknown = loadCommentsPlan()): Promise<string> {
+/** A plan with a baseline is approved at its hash unless `approve` is false, as `plan:approve` would leave it. */
+async function writePlan(name: string, document: unknown = loadCommentsPlan(), { approve = true } = {}): Promise<string> {
   await writeWorkspaceFiles(ROOT, { [name]: JSON.stringify(document) })
+  if (approve && hasBaseline(document)) await approvePlanFile(join(ROOT, name))
   return join(ROOT, name)
 }
 
@@ -150,6 +153,37 @@ describe('plan:verify', () => {
 
     expect(result.freshness!.elements.find((element) => element.id === 'model.comment')!.verdict).toBe('stale')
     expect(result.staleContext ?? []).toEqual([])
+  })
+
+  test('should refuse a plan whose hash no approval names before any command runs or anything is recorded, and verify once approved', async () => {
+    const app = await createApp('unapproved')
+    const plan = await writePlan('unapproved.plan.json', loadApprovedCommentsPlan(), { approve: false })
+
+    await expect(verify(plan, app, '--step', HTTP)).rejects.toThrow(`${plan} is not approved at its current hash`)
+    await expect(verify(plan, app)).rejects.toThrow('so no step is verified against it')
+    // No state directory, which the first step's record would have created.
+    await expect(readdir(join(app, '.guren/plans'))).rejects.toThrow('ENOENT')
+
+    await approvePlanFile(plan)
+    const result = await verify(plan, app, '--step', HTTP)
+    expect(result.steps.map((step) => step.stepId)).toEqual([HTTP])
+    expect(result.approval).toMatchObject({ state: 'approved', approval: { approvedBy: 'Ada <ada@example.com>' } })
+  })
+
+  test('should refuse a plan with a baseline while its approvals file will not read, and verify a draft as before', async () => {
+    const app = await createApp('unreadable-approvals')
+    const plan = await writePlan('unreadable-approvals.plan.json', loadApprovedCommentsPlan(), { approve: false })
+    await writeWorkspaceFiles(ROOT, { 'unreadable-approvals.approvals.json': '{ "approvalsVersion": 1 }\n' })
+
+    await expect(verify(plan, app, '--step', HTTP)).rejects.toThrow('does not match the approvals schema')
+    await expect(readdir(join(app, '.guren/plans'))).rejects.toThrow('ENOENT')
+
+    // A draft has no hash to approve, so the same approvals file stops nothing.
+    const draft = await writePlan('unreadable-approvals-draft.plan.json')
+    await writeWorkspaceFiles(ROOT, { 'unreadable-approvals-draft.approvals.json': '{' })
+    const result = await verify(draft, app, '--step', HTTP)
+    expect(result.steps.map((step) => step.stepId)).toEqual([HTTP])
+    expect(result.approval).toBeUndefined()
   })
 
   test('should verify a step whose only incomplete elements the decision log waives', async () => {

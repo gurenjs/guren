@@ -1,9 +1,9 @@
 /**
  * The plan half of the harness Stop hook (RFC 0030 §7): verify the step `plan:next` marked
- * and block the stop while it is not, giving up where a continuation cannot help: what the
- * step depends on went stale since approval (§4), the step or an element it owns is `blocked`
- * (the environment's), the record is the one the last continuation was blocked on, or three
- * continuations. A stall is recorded in state and sticks until the next `plan:next`.
+ * and block the stop while it is not, giving up where a continuation cannot help: no approval
+ * names the plan's hash, what the step depends on went stale since approval (§4), the step or
+ * an element it owns is `blocked`, the record is the one the last continuation was blocked on,
+ * or three continuations. A stall is recorded in state and sticks until the next `plan:next`.
  * `verify` is the seam the unit tests fake; the shipped hooks run `plan:verify`, whose report
  * carries the stale context, judged on the app it reads after `codegen`.
  */
@@ -15,6 +15,8 @@ import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
+import { describeUnapproved, readPlanApprovalStanding } from './plan/approvals'
+import { hasBaseline } from './plan/render'
 import { describeDependency, type PlanStepContextElement } from './plan/step-context'
 import { listPlanStates, planDigest, planSlug, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
 import { derivePlanTasks, findPlanStep } from './plan/tasks'
@@ -104,6 +106,16 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     return {
       block: false,
       message: `${heading}: the mark is in .guren/plans/${slug}.state.json, but this plan's records are kept in ${planSlug(planPath)}.state.json, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` to mark the step again.`,
+    }
+  }
+  // A stall rather than a block: no continuation approves a plan. It sticks until plan:next, which refuses until someone approves.
+  const approval = hasBaseline(plan) ? await readPlanApprovalStanding(planPath, plan) : undefined
+  if (approval && approval.state !== 'approved') {
+    const reason = describeUnapproved(active.plan, approval, 'the step is not verified against it')
+    await writePlanActiveStep(appRoot, slug, { ...active, stalled: { at: (deps.now ?? (() => new Date()))().toISOString(), reason, output: '' } })
+    return {
+      block: false,
+      message: `${heading}: giving up, ${reason}\nThe step is recorded as stalled; \`bunx guren plan:next ${active.plan}\` returns it once an approval names the plan's hash.`,
     }
   }
   const digest = planDigest(plan)

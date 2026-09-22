@@ -256,7 +256,7 @@ const planStatusCommand = defineCommand({
   meta: {
     name: 'plan:status',
     description:
-      'Report which elements of an implementation plan exist in the code (RFC 0030). Observational: it exits 0 whatever the status, and non-zero only when the plan cannot be read.',
+      'Report which elements of an implementation plan exist in the code (RFC 0030), and whether an approval names the plan\'s current hash. Observational: it exits 0 whatever the status, unapproved included, and non-zero only when the plan cannot be read.',
   },
   args: {
     plan: {
@@ -286,7 +286,7 @@ const planVerifyCommand = defineCommand({
   meta: {
     name: 'plan:verify',
     description:
-      "Run a plan step's verify commands and tests against the application and record the result under .guren/plans/ (RFC 0030). Executes: bun test boots the app and db:migrate opens the database. Exits non-zero only when the plan cannot be read, or with --ci when a step did not verify.",
+      "Run a plan step's verify commands and tests against the application and record the result under .guren/plans/ (RFC 0030). Executes: bun test boots the app and db:migrate opens the database. Refuses, before running anything, a plan with a baseline whose current hash no approval names (run plan:approve). Exits non-zero only when the plan cannot be read or is refused, or with --ci when a step did not verify.",
   },
   args: {
     plan: {
@@ -341,7 +341,7 @@ const planNextCommand = defineCommand({
   meta: {
     name: 'plan:next',
     description:
-      'Print the next step of a plan to implement (RFC 0030 §7) with what it covers: its elements, behaviours and verify commands, never the whole plan. Marks the step under .guren/plans/ so the harness Stop hook verifies it on every stop. Spawns no command; for an approved plan it reads the app (importing the routes file) and skips the steps whose context went stale since approval, naming what changed. Refuses a working tree with uncommitted changes unless they are the marked step\'s own.',
+      'Print the next step of a plan to implement (RFC 0030 §7) with what it covers: its elements, behaviours and verify commands, never the whole plan. Marks the step under .guren/plans/ so the harness Stop hook verifies it on every stop. Spawns no command; for an approved plan it reads the app (importing the routes file) and skips the steps whose context went stale since approval, naming what changed. Refuses a plan with a baseline whose current hash no approval names (run plan:approve), and a working tree with uncommitted changes unless they are the marked step\'s own.',
   },
   args: {
     plan: {
@@ -406,7 +406,7 @@ const planWaiveCommand = defineCommand({
   meta: {
     name: 'plan:waive',
     description:
-      "Accept elements of an approved plan incomplete, with a reason, in the decision log beside the plan (RFC 0030 §6). The log is committed; a waiver names the plan's hash, so a revision does not inherit it. Loads no application, and runs nothing but `git config` to name who waived.",
+      "Accept elements of an approved plan incomplete, with a reason, in the decision log beside the plan (RFC 0030 §6). The log is committed; a waiver names the plan's hash, so a revision does not inherit it. Loads no application, and runs nothing but `git config` to name who waived. Refuses a draft and a plan whose current hash no approval names; --remove asks neither.",
   },
   args: {
     plan: {

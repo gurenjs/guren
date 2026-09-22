@@ -10,6 +10,7 @@ import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { planWaiveFile } from '../src/plan-waive'
 import { judgeFreshness, stampContextHash } from '../src/plan/freshness'
+import { hasBaseline } from '../src/plan/render'
 import { PlanSchema } from '../src/plan/schema'
 import { judgeStepContext } from '../src/plan/step-context'
 import { planDigest, PLAN_STATE_VERSION, type PlanActiveStep, type PlanState, type PlanStepRecord } from '../src/plan/state'
@@ -17,7 +18,7 @@ import { judgePlan, type PlanElementState, type PlanElementStatus } from '../src
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
-import { loadApprovedCommentsPlan, loadCommentsPlan, planAppState } from './plan-fixture'
+import { approvedAgainst, approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, planAppState } from './plan-fixture'
 
 // The verification itself is faked here (`verify`); the shipped hooks run it for real in
 // agent-hook-gate.test.ts. What this covers is the decision and what it writes to state.
@@ -70,7 +71,8 @@ function report(stepId: string, stepRecord: PlanStepRecord, blocked: string[] = 
   }
 }
 
-async function createApp(name: string, state?: Partial<PlanState>, plan: unknown = loadCommentsPlan()): Promise<string> {
+/** A plan with a baseline is approved at its hash unless `approve` is false, as `plan:approve` would leave it. */
+async function createApp(name: string, state?: Partial<PlanState>, plan: unknown = loadCommentsPlan(), { approve = true } = {}): Promise<string> {
   const app = join(ROOT, name)
   await writeWorkspaceFiles(app, {
     // The client dependency keeps the app fullstack, so the scaffold steps are derived.
@@ -79,6 +81,7 @@ async function createApp(name: string, state?: Partial<PlanState>, plan: unknown
     'comments.plan.json': JSON.stringify(plan),
     ...(state ? { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: {}, ...state }) } : {}),
   })
+  if (approve && hasBaseline(plan)) await approvePlanFile(join(app, 'comments.plan.json'))
   return app
 }
 
@@ -325,6 +328,55 @@ describe('planStopHookFindings', () => {
     // What the marked step owns is its own work: the same staleness keeps the data step going.
     const data = await createApp('stale-own', { active: active({ step: DATA }) }, approvedDocument)
     expect((await planStopHookFindings(data, { stopHookActive: false }, { verify: async () => withFreshness(DATA), now: NOW })).block).toBe(true)
+  })
+
+  test('should give up on a plan whose hash no approval names without verifying, stay silent after, and verify again once approved', async () => {
+    const document = approvedAgainst(loadCommentsPlan())
+    // The steps before the marked one stand, so plan:next returns the marked step with its stall.
+    const done = record({ outcome: 'verified', incomplete: [], planDigest: planDigest(parsePlanDocument(document)) })
+    const before = Object.fromEntries(planStepIds(derivePlanTasks(PLAN)).slice(0, 3).map((id) => [id, done]))
+    const app = await createApp('unapproved', { steps: before, active: active() }, document, { approve: false })
+    let verified = 0
+    const verify = async (): Promise<PlanVerifyReport> => (verified++, report(HTTP, record()))
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify, now: NOW })
+
+    expect(verified).toBe(0)
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain(`plan:verify on stop (comments.plan.json, ${HTTP}): giving up, comments.plan.json is not approved at its current hash`)
+    expect(verdict.message).toContain('Run guren plan:approve comments.plan.json')
+    expect((await readState(app)).active).toMatchObject({ step: HTTP, stalled: { at: '2026-09-21T10:00:00.000Z', reason: expect.stringContaining('is not approved'), output: '' } })
+    // The stall sticks, so the next stops neither block nor repeat the message.
+    expect(await planStopHookFindings(app, { stopHookActive: true }, { verify })).toEqual({ block: false })
+    expect(verified).toBe(0)
+
+    await approvePlanFile(join(app, 'comments.plan.json'))
+    const next = await planNextFile(join(app, 'comments.plan.json'), { appRoot: app, app: planAppState(), now: NOW })
+    expect(next.step).toMatchObject({ id: HTTP, stalled: { reason: expect.stringContaining('is not approved') } })
+    // plan:next reported the stall, so the step has a fresh mark and the hook verifies it again.
+    const renewed = await planStopHookFindings(app, { stopHookActive: false }, { verify, now: NOW })
+    expect(verified).toBe(1)
+    expect(renewed.block).toBe(true)
+  })
+
+  test('should give up on a plan whose approvals file will not read, and never on a draft', async () => {
+    const app = await createApp('unreadable-approvals', { active: active() }, approvedAgainst(loadCommentsPlan()), { approve: false })
+    await writeWorkspaceFiles(app, { 'comments.approvals.json': '{' })
+    let verified = 0
+    const verify = async (): Promise<PlanVerifyReport> => (verified++, report(HTTP, record()))
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify, now: NOW })
+
+    expect(verified).toBe(0)
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain('is not valid JSON')
+    expect(verdict.message).toContain('so the step is not verified against it. Fix the approvals file')
+
+    // A draft has no hash to approve: the same file holds nothing back.
+    const draft = await createApp('unreadable-approvals-draft', { active: active() })
+    await writeWorkspaceFiles(draft, { 'comments.approvals.json': '{' })
+    expect((await planStopHookFindings(draft, { stopHookActive: false }, { verify, now: NOW })).block).toBe(true)
+    expect(verified).toBe(1)
   })
 
   test('should verify every marked plan under the root and join their messages', async () => {

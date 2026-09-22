@@ -4,7 +4,8 @@
  * session is on. It spawns no command: the records under `.guren/plans/` say what is
  * verified, the plan says what the step covers. A plan with a baseline also has the app read
  * (the routes file is imported), so a step on stale context (§4) is held and named.
- * A dirty tree is refused unless it is the marked step's own work: one step is one commit.
+ * A dirty tree is refused unless it is the marked step's own work: one step is one commit, and a
+ * plan with a baseline no approval names is refused before anything is read or marked (§4).
  */
 
 import { basename } from 'node:path'
@@ -15,6 +16,7 @@ import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
+import { requirePlanApproval } from './plan/approvals'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
 import { planHash } from './plan/identity'
@@ -149,6 +151,8 @@ async function stepContexts(
 
 export async function planNextFile(planPath: string, options: PlanNextFileOptions): Promise<PlanNextReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
+  // Before the tree is read or a step marked: an unapproved plan hands out no work, whatever else is wrong.
+  if (hasBaseline(plan)) await requirePlanApproval(path, plan, 'no step of it is handed out')
   const root = options.appRoot
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(root).catch(() => false) })
   const digest = planDigest(plan)
@@ -360,7 +364,7 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
       lines.push(
         '',
         `Stalled ${step.stalled.at}: ${step.stalled.reason}`,
-        ...step.stalled.output.split('\n').map((line) => `  ${line}`),
+        ...(step.stalled.output ? step.stalled.output.split('\n').map((line) => `  ${line}`) : []),
         'A stall is a person\u2019s decision: fix the environment, revise the plan, or accept an element incomplete with',
         `  bunx guren plan:waive ${planArgument} <element-id> --reason "<why>"`,
       )

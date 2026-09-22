@@ -28,6 +28,12 @@ write or see pass, and the verify commands. It never prints the whole plan, and
 it refuses a working tree with uncommitted changes that are not the marked
 step's own: finish or discard them first.
 
+`plan:next`, `plan:verify` and `plan:waive` refuse a plan whose current hash no
+approval names: one edited after it was approved, or one nobody approved. The
+Stop hook stalls the marked step on it. Approving is the person's call, like
+closing: report the refusal and wait. Do not run `plan:approve` yourself, and do
+not edit the plan to get past it.
+
 For an approved plan it also holds a step whose context changed after
 approval: an element the step owns or names that another commit moved, so the
 plan does not describe the application there. It lists each held step

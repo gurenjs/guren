@@ -9,6 +9,7 @@ import { basename } from 'node:path'
 
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
+import { readPlanApprovalStanding, type PlanApprovalStanding } from './plan/approvals'
 import { judgeFreshness, PLAN_FRESHNESS_VERDICTS, type PlanFreshness } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
@@ -34,6 +35,11 @@ export interface PlanStatusReport extends PlanStatus<PlanElementState> {
    * which has no baseline to compare with.
    */
   freshness?: PlanFreshness
+  /**
+   * Whether an approval names the plan's current hash (RFC 0030 §4). Reported, never refused on:
+   * `plan:next`, `plan:verify`, `plan:waive` and `plan:close` refuse. Absent for a draft.
+   */
+  approval?: PlanApprovalStanding
 }
 
 export interface PlanStatusFileOptions {
@@ -49,6 +55,8 @@ export interface PlanStatusFileOptions {
   read?: { path: string; plan: PlanDraft | Plan }
   /** The decision log the caller already read, for the same reason. */
   waivers?: PlanWaiversRead
+  /** The approval the caller already judged, for the same reason. */
+  approval?: PlanApprovalStanding
 }
 
 export async function planStatusFile(planPath: string, options: PlanStatusFileOptions): Promise<PlanStatusReport> {
@@ -59,10 +67,10 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
   } satisfies Pick<PlanStatusReport, 'reportVersion' | 'plan'>
-  const freshness = hasBaseline(plan) ? { freshness: judgeFreshness(plan, app) } : {}
-  if (options.appRoot === undefined) return { ...head, ...status, ...freshness }
+  const stamped = hasBaseline(plan) ? { freshness: judgeFreshness(plan, app), approval: options.approval ?? (await readPlanApprovalStanding(path, plan)) } : {}
+  if (options.appRoot === undefined) return { ...head, ...status, ...stamped }
   const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }), { waivers: options.waivers })
-  return { ...head, ...overlaid.status, verification: overlaid.verification, ...freshness }
+  return { ...head, ...overlaid.status, verification: overlaid.verification, ...stamped }
 }
 
 const SECTION_TITLES: Record<(typeof PLAN_STATUS_SECTIONS)[number], string> = {
@@ -133,7 +141,19 @@ export function formatPlanStatus(report: PlanStatusReport): string {
   }
   if (verification && report.summary.states.waived > 0) lines.push('', `Waivers read from ${verification.decisionsFile}`)
   if (report.freshness) lines.push('', ...freshnessLines(report.freshness))
+  if (report.approval) lines.push('', approvalLine(report.approval))
   return lines.join('\n')
+}
+
+function approvalLine(standing: PlanApprovalStanding): string {
+  switch (standing.state) {
+    case 'approved':
+      return `Approved at this hash ${standing.approval.approvedAt}${standing.approval.approvedBy ? ` by ${standing.approval.approvedBy}` : ''}`
+    case 'unapproved':
+      return `Not approved at this hash: plan:next, plan:verify and plan:waive refuse the plan until guren plan:approve records an approval of it.`
+    case 'unreadable':
+      return `Approvals not read, so plan:next, plan:verify and plan:waive refuse the plan: ${standing.reason}`
+  }
 }
 
 function freshnessLines(freshness: PlanFreshness): string[] {

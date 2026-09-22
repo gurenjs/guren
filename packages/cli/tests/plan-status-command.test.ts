@@ -10,7 +10,7 @@ import type { PlanStatusReport } from '../src/plan-status'
 import { planHash } from '../src/plan/identity'
 import { PlanSchema } from '../src/plan/schema'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
+import { approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own, since Bun keys an imported routes file on
@@ -117,6 +117,7 @@ describe('plan:status', () => {
   })
 
   async function run(plan: string, app: string, ...flags: string[]): Promise<string> {
+    log.mockClear()
     log.mockImplementation(() => {})
     await runCommand(builtinSubCommands['plan:status'], { rawArgs: [plan, '--app', app, ...flags] })
     return log.mock.calls.map((call) => String(call[0])).join('\n')
@@ -157,6 +158,27 @@ describe('plan:status', () => {
     expect(result.verification!.staleWaivers).toEqual([staleWaiver])
     expect(text).toContain('Waivers read from ../waived.decisions.json')
     expect(text).toContain('Waived against another plan or revision, so not counted: resource.comment')
+  })
+
+  test('should report whether an approval names a stamped plan\u2019s hash, and exit 0 whatever it finds', async () => {
+    const plan = await writePlan('approval.plan.json', loadApprovedCommentsPlan())
+    const app = await createApp('approval', BASE_APP)
+    const hash = planHash(PlanSchema.parse(loadApprovedCommentsPlan()))
+
+    const unapproved = await report(plan, app)
+    expect(unapproved.approval).toEqual({ state: 'unapproved', hash })
+    expect(Object.keys(unapproved).sort()).toEqual(['approval', 'elements', 'freshness', 'plan', 'reportVersion', 'summary', 'verification'])
+    expect(await run(plan, app)).toContain('Not approved at this hash: plan:next, plan:verify and plan:waive refuse the plan until guren plan:approve records an approval of it.')
+
+    await writeWorkspaceFiles(ROOT, { 'approval.approvals.json': '{' })
+    const unreadable = (await report(plan, app)).approval
+    expect(unreadable).toMatchObject({ state: 'unreadable', hash, reason: expect.stringContaining('is not valid JSON') })
+    expect(await run(plan, app)).toContain('Approvals not read, so plan:next, plan:verify and plan:waive refuse the plan: ')
+
+    await rm(join(ROOT, 'approval.approvals.json'))
+    await approvePlanFile(plan)
+    expect((await report(plan, app)).approval).toEqual({ state: 'approved', hash, approval: { hash, approvedAt: '2026-09-22T09:00:00.000Z', approvedBy: 'Ada <ada@example.com>' } })
+    expect(await run(plan, app)).toContain('Approved at this hash 2026-09-22T09:00:00.000Z by Ada <ada@example.com>')
   })
 
   test('should keep the JSON report to its documented shape', async () => {

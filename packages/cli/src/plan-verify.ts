@@ -13,6 +13,7 @@ import { readScripts } from './command-output'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
+import { requirePlanApproval, type PlanApprovalStanding } from './plan/approvals'
 import { judgeFreshness, type PlanFreshness } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
@@ -54,6 +55,10 @@ export interface PlanVerifyFileOptions {
 
 export async function planVerifyFile(planPath: string, options: PlanVerifyFileOptions): Promise<PlanVerifyReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
+  // Before anything runs or is recorded: a result about a hash nobody approved verifies nothing anyone agreed to.
+  const approval: PlanApprovalStanding | undefined = hasBaseline(plan)
+    ? { state: 'approved', ...(await requirePlanApproval(path, plan, 'no step is verified against it')) }
+    : undefined
   const app = options.app
   const loadApp = typeof app === 'function' ? app : async () => app
   const root = options.appRoot
@@ -124,6 +129,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     steps,
     skipped,
     ...(freshness ? { freshness } : {}),
+    ...(approval ? { approval } : {}),
     ...(staleContext.length > 0 ? { staleContext } : {}),
   }
 }

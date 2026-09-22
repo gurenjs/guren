@@ -7,8 +7,10 @@ import { runCommand } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
 import { formatPlanWaive, planWaiveFile, type PlanWaiveFileOptions, type PlanWaiveReport } from '../src/plan-waive'
+import { planApprovalsPath } from '../src/plan/approvals'
 import { planDecisionsPath, readPlanDecisions, type PlanDecisions } from '../src/plan/decisions'
 import { planHash } from '../src/plan/identity'
+import { hasBaseline } from '../src/plan/render'
 import {
   listPlanElements,
   PlanColumnSchema,
@@ -27,7 +29,7 @@ import {
 } from '../src/plan/schema'
 import { PLAN_STATUS_SECTIONS } from '../src/plan/status'
 import type { CapturedExec } from '../src/subprocess'
-import { loadApprovedCommentsPlan, loadCommentsPlan, loadParsedCommentsPlan } from './plan-fixture'
+import { approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, loadParsedCommentsPlan } from './plan-fixture'
 
 let ROOT: string
 const HASH = planHash(loadParsedCommentsPlan())
@@ -36,10 +38,12 @@ const NOW = (): Date => new Date('2026-09-21T12:00:00.000Z')
 /** `git config` answering nothing, so a waiver's authorship is not what a test turns on. */
 const noAuthor: CapturedExec = async () => ({ exitCode: 1, stdout: '', stderr: '' })
 
-async function writePlan(name: string, document: unknown = loadApprovedCommentsPlan()): Promise<string> {
+/** A plan with a baseline is approved at its hash unless `approve` is false, as `plan:approve` would leave it. */
+async function writePlan(name: string, document: unknown = loadApprovedCommentsPlan(), { approve = true } = {}): Promise<string> {
   const path = join(ROOT, name)
   await mkdir(join(path, '..'), { recursive: true })
   await writeFile(path, typeof document === 'string' ? document : JSON.stringify(document), 'utf8')
+  if (approve && hasBaseline(document)) await approvePlanFile(path)
   return path
 }
 
@@ -255,6 +259,33 @@ describe('plan:waive', () => {
 
     await expect(waive(draft, ['model.comment'])).rejects.toThrow('has no baseline')
     expect(await readPlanDecisions(draft)).toEqual({ decisions: undefined })
+  })
+
+  test('should refuse a plan whose hash no approval names, and waive once plan:approve has recorded it', async () => {
+    const plan = await writePlan('unapproved.plan.json', loadApprovedCommentsPlan(), { approve: false })
+
+    await expect(waive(plan, ['model.comment'])).rejects.toThrow(`is not approved at its current hash ${HASH}, so no waiver is taken against it`)
+    await expect(waive(plan, ['model.comment'])).rejects.toThrow(`Run guren plan:approve ${plan}`)
+    expect(await readPlanDecisions(plan)).toEqual({ decisions: undefined })
+
+    // An approval of another hash is no approval of this one.
+    await writeFile(planApprovalsPath(plan), JSON.stringify({ approvalsVersion: 1, approvals: [{ hash: 'f'.repeat(64), approvedAt: '2026-09-20T00:00:00.000Z' }] }), 'utf8')
+    await expect(waive(plan, ['model.comment'])).rejects.toThrow('is not approved at its current hash')
+
+    await approvePlanFile(plan)
+    expect((await waive(plan, ['model.comment'])).waived.map((waiver) => waiver.planHash)).toEqual([HASH])
+  })
+
+  test('should refuse while the approvals file will not read, and still remove a waiver', async () => {
+    const plan = await writePlan('unreadable-approvals.plan.json')
+    await waive(plan, ['model.comment'])
+    await writeFile(planApprovalsPath(plan), '{ "approvalsVersion": 2 }\n', 'utf8')
+
+    await expect(waive(plan, ['policy.comment'])).rejects.toThrow('does not match the approvals schema')
+    await expect(waive(plan, ['policy.comment'])).rejects.toThrow('so no waiver is taken against it. Fix the approvals file')
+    // Withdrawing a waiver asks nothing of the plan, its approval included.
+    const removed = await planWaiveFile(plan, { elementIds: ['model.comment'], remove: true, app: ROOT })
+    expect(removed.removed.map((waiver) => waiver.elementId)).toEqual(['model.comment'])
   })
 
   test('should refuse to replace a decision log it cannot read, and leave its bytes alone', async () => {
