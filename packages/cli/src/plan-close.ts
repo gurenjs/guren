@@ -76,7 +76,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     throw new CliError(`${path} is a draft: it was never approved, so there is nothing to close. Run guren plan:approve on it first.`)
   }
   const approved = await requirePlanApproval(path, plan, 'it is not closed')
-  const hash = approved.hash
+  const { hash, approval } = approved
   const slug = planSlug(path)
   if (!MARKER_SLUG.test(slug)) {
     throw new CliError(`The plan's slug "${slug}" names the blocks it writes, and may hold only letters, digits, ".", "_" and "-". Rename the plan file or its directory.`)
@@ -115,7 +115,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     plan,
     hash,
     slug,
-    approval: approved.approval,
+    approval,
     elements: status.elements,
     waived,
     ...(planFile.startsWith('../') ? {} : { planFile }),
@@ -156,7 +156,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
   return {
     reportVersion: PLAN_CLOSE_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash },
-    approval: approved.approval,
+    approval,
     dryRun: options.dryRun === true,
     writes,
     waivers: closedWith,

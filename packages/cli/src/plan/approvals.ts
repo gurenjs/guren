@@ -108,11 +108,7 @@ export function describeUnapproved(planPath: string, standing: Exclude<PlanAppro
 export async function requirePlanApproval(planPath: string, plan: Plan, consequence: string): Promise<PlanApprovedStanding>
 export async function requirePlanApproval(planPath: string, plan: PlanDraft | Plan, consequence: string): Promise<PlanApprovedStanding | undefined>
 export async function requirePlanApproval(planPath: string, plan: PlanDraft | Plan, consequence: string): Promise<PlanApprovedStanding | undefined> {
-  return approvedOrRefused(planPath, await readPlanApprovalStanding(planPath, plan), consequence)
-}
-
-/** {@link requirePlanApproval} on a standing the caller already read, so one run reads the approvals once. */
-export function approvedOrRefused(planPath: string, standing: PlanApprovalStanding | undefined, consequence: string): PlanApprovedStanding | undefined {
+  const standing = await readPlanApprovalStanding(planPath, plan)
   if (standing === undefined || standing.state === 'approved') return standing
   throw new CliError(describeUnapproved(planPath, standing, consequence))
 }

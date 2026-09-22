@@ -363,6 +363,8 @@ describe('planStopHookFindings', () => {
 
   test('should not verify a plan that changed after the hook judged its approval, in either direction', async () => {
     // The fake runs the real plan:verify after rewriting the plan, so its own reading is what is judged.
+    // It stands in for the hook's verify, which calls planVerifyFile with no approval: `verify` takes
+    // none and planVerifyFile has no option for one, so the types keep a stale reading from reaching it.
     const rewriting = (app: string, document: Record<string, unknown>) => async (planPath: string, appRoot: string, stepId: string): Promise<PlanVerifyReport> => {
       await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(document) })
       return planVerifyFile(planPath, { app: planAppState(), appRoot, step: stepId })
