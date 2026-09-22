@@ -6,7 +6,9 @@ import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import {
   awaitsVerification,
   judgePlan,
+  readAlterProperties,
   type PlanElementStatus,
+  type PlanPropertyReading,
   type PlanPropertyStatus,
   type PlanStatusState,
 } from '../src/plan/status'
@@ -166,6 +168,13 @@ interface Case {
   app: PlanAppState
   id: string
   state: PlanStatusState
+  /** What the approval recorded; an `alter` counts no match without one. */
+  readings?: PlanPropertyReading[]
+}
+
+/** A reading at approval of one property of the element `a`/`m`/`v` the cases below judge. */
+function reading(element: string, label: string, property: string, planned: string, verdict: PlanPropertyReading['verdict']): PlanPropertyReading {
+  return { element, label, property, planned, verdict }
 }
 
 const CASES: Case[] = [
@@ -356,7 +365,7 @@ const CASES: Case[] = [
   },
 
   {
-    name: 'an altered action whose planned validator its body validates with',
+    name: 'an altered action whose planned validator its body validates with, and did not at approval',
     plan: plan({
       controllers: [controller(EXISTING, [action(ALTER, { body: 'val' })])],
       validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
@@ -366,6 +375,19 @@ const CASES: Case[] = [
     }),
     id: 'a',
     state: 'wired',
+    readings: [reading('a', 'PostController.index', 'body validator', 'PostPayloadSchema', 'differ')],
+  },
+  {
+    name: 'an altered action whose planned validator its body validates with, with no reading from approval',
+    plan: plan({
+      controllers: [controller(EXISTING, [action(ALTER, { body: 'val' })])],
+      validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
+    }),
+    app: app({
+      actions: [{ key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: [], calls: [], abilities: [], identifiers: [], validates: ['PostPayloadSchema'] }],
+    }),
+    id: 'a',
+    state: 'unjudged',
   },
   {
     name: 'an action of a class two files declare',
@@ -494,8 +516,8 @@ const CASES: Case[] = [
 ]
 
 describe('judgePlan', () => {
-  test.each(CASES)('should judge $name as $state', ({ plan: document, app: state, id, state: expected }) => {
-    expect(only(judgePlan(document, state), id).state).toBe(expected)
+  test.each(CASES)('should judge $name as $state', ({ plan: document, app: state, id, state: expected, readings }) => {
+    expect(only(judgePlan(document, state, readings), id).state).toBe(expected)
   })
 
   describe('unknown properties', () => {
@@ -570,13 +592,93 @@ describe('judgePlan', () => {
     })
   })
 
+  describe('an alter against how it read at approval', () => {
+    /** `PostController.show` altered to also load comments; its planned page is the one it rendered before the plan. */
+    const showAlter = plan({
+      controllers: [controller(EXISTING, [action(ALTER, { name: 'show', response: { kind: 'inertia', view: 'v' } })])],
+      views: [{ id: 'v', change: EXISTING, page: 'posts/Show', purpose: 'x', props: [], actions: [], states: {} }],
+    })
+    const RESPONSE_HELD = reading('a', 'PostController.show', 'response page', 'posts/Show', 'match')
+
+    test('should not complete an alter whose only readable property already held at approval', () => {
+      const element = only(judgePlan(showAlter, app(), [RESPONSE_HELD]), 'a')
+
+      expect(element.state).toBe('unjudged')
+      expect(element.reason).toContain('already held when the plan was approved')
+      expect(element.properties).toEqual([
+        {
+          property: 'response page',
+          verdict: 'unknown',
+          planned: 'posts/Show',
+          reason: 'it already read posts/Show when the plan was approved, so it says nothing about the change',
+        },
+      ])
+    })
+
+    test('should complete an alter whose property differed at approval and matches now', () => {
+      const moved = only(judgePlan(showAlter, app(), [{ ...RESPONSE_HELD, verdict: 'differ' }]), 'a')
+
+      expect(moved.state).toBe('wired')
+      expect(moved.properties[0]).toMatchObject({ verdict: 'match', actual: 'posts/Show' })
+    })
+
+    test('should count a property unknown at approval that matches now', () => {
+      expect(only(judgePlan(showAlter, app(), [{ ...RESPONSE_HELD, verdict: 'unknown' }]), 'a').state).toBe('wired')
+    })
+
+    test('should fail closed on a match with no reading, naming plan:approve as the remedy', () => {
+      for (const readings of [undefined, [], [{ ...RESPONSE_HELD, label: 'PostController.index' }], [{ ...RESPONSE_HELD, planned: 'posts/Index' }]]) {
+        const element = only(judgePlan(showAlter, app(), readings), 'a')
+
+        expect(element.state).toBe('unjudged')
+        expect(element.reason).toContain('run guren plan:approve on the plan to record the readings it lacks')
+        expect(element.properties[0]).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('no reading of it was recorded') })
+      }
+    })
+
+    test('should keep a property that held at approval and differs now a difference', () => {
+      const moved = app({
+        actions: [{ key: 'PostController.show', module: null, file: 'app/Http/Controllers/PostController.ts', pages: ['posts/Other'], calls: ['inertia'], abilities: [], identifiers: [], validates: [] }],
+      })
+
+      expect(only(judgePlan(showAlter, moved, [RESPONSE_HELD]), 'a').properties[0]).toMatchObject({ verdict: 'differ', actual: 'posts/Other' })
+    })
+
+    test('should read a page alter restating a declared prop beside a new one as planned, not drifted', () => {
+      const document = view(ALTER, { props: [{ name: 'posts', type: 'Post[]' }, { name: 'total', type: 'number' }] })
+      const readings = readAlterProperties(document, app())
+
+      expect(readings).toEqual([
+        reading('v', 'posts/Index', 'prop posts', 'declared', 'match'),
+        reading('v', 'posts/Index', 'prop total', 'declared', 'differ'),
+      ])
+      expect(only(judgePlan(document, app(), readings), 'v').state).toBe('planned')
+
+      const keys = [{ name: 'posts', type: 'Post[]', optional: false }, { name: 'total', type: 'number', optional: false }]
+      const built = app({ pages: [{ id: 'posts/Index', file: 'resources/js/pages/posts/Index.tsx', props: { status: 'keys', keys } }] })
+      expect(only(judgePlan(document, built, readings), 'v').state).toBe('wired')
+    })
+
+    test('should read no property of an alter it could not compare, nor of any other change', () => {
+      const document = plan({
+        controllers: [controller(EXISTING, [action(ALTER, { name: 'show' }), action(ADD, { id: 'b', name: 'store', response: { kind: 'inertia', view: 'v' } })], 'PostController')],
+        views: [{ id: 'v', change: EXISTING, page: 'posts/Show', purpose: 'x', props: [], actions: [], states: {} }],
+      })
+
+      expect(readAlterProperties(document, app())).toEqual([])
+      expect(readAlterProperties(showAlter, planAppState())).toEqual([])
+    })
+  })
+
   describe('the app root a lookup is scoped to', () => {
     /** A model renamed from `legacy_posts`, in `module` and judged against `tables`. */
     function previousTable(tables: SourcedSchemaTable[], module?: string): PlanPropertyStatus | undefined {
       const document = plan({ models: [model(ALTER, { tableRenamedFrom: 'legacy_posts', ...(module ? { module } : {}) })] })
       // The class has to exist in that root, or the element is `planned` and no property is judged.
       const classes = [{ className: 'Post', module: module ?? null, file: 'app/Models/Post.ts', table: 'posts', relationships: [], fillable: ['title'] }]
-      const element = only(judgePlan(document, app({ tables, models: classes })), 'm')
+      // Read at approval while the old table was still there, so an absence now is the change.
+      const readings = [reading('m', 'Post', 'previous table removed', 'legacy_posts', 'differ')]
+      const element = only(judgePlan(document, app({ tables, models: classes }), readings), 'm')
       return element.properties.find((property) => property.property === 'previous table removed')
     }
 

@@ -18,16 +18,17 @@ import type {
   PlanAppValidatorDetail,
 } from './app-detail'
 import { isUnreadable, scopeName, type PlanAppNames, type PlanAppState, type PlanAppUnreadable } from './app-state'
-import type {
-  PlanAction,
-  PlanChange,
-  PlanColumn,
-  PlanController,
-  PlanDraft,
-  PlanElementSection,
-  PlanModel,
-  PlanRoute,
-  PlanView,
+import {
+  listPlanElementEntries,
+  type PlanAction,
+  type PlanChange,
+  type PlanColumn,
+  type PlanController,
+  type PlanDraft,
+  type PlanElementSection,
+  type PlanModel,
+  type PlanRoute,
+  type PlanView,
 } from './schema'
 
 /** Every state of RFC 0030 §6. `plan:status` sets the ones in {@link PlanStatusState}. */
@@ -47,6 +48,19 @@ export interface PlanPropertyStatus {
   actual?: string
   /** Why the property could not be compared, on `unknown`. */
   reason?: string
+}
+
+/**
+ * How one planned property of an `alter` read when the plan was approved (RFC 0030 §6), kept
+ * on the approval beside the plan. A match counts only against a reading that was not one.
+ */
+export interface PlanPropertyReading {
+  element: string
+  /** The element's name in code then, so a revision that retargets the id finds no reading. */
+  label: string
+  property: string
+  planned?: string
+  verdict: PlanPropertyVerdict
 }
 
 /** `S` widens to {@link PlanElementState} for the result `plan:verify` layers on this one. */
@@ -148,7 +162,53 @@ function compare(property: string, planned: string, actual: string | undefined, 
   return actual === planned ? match(property, planned) : differ(property, planned, actual)
 }
 
-function conclude(judgement: Judgement): PlanElementStatus {
+/** What an `alter`'s properties count as once set against their readings at approval; the identity when taking those readings. */
+type AlterCredit = (judgement: Judgement, properties: PlanPropertyStatus[]) => PlanPropertyStatus[]
+
+/** A match set aside by {@link creditAlter}, so `conclude` can say why nothing shows the change. */
+const SET_ASIDE = new WeakMap<PlanPropertyStatus, 'held' | 'unrecorded'>()
+
+/**
+ * An alter's target existed before the plan, so a planned property it already held says nothing
+ * about the change. A match counts only against a reading at approval that was a `differ` or an
+ * `unknown`; any other match reads `unknown`. A difference stays one, however it read then.
+ */
+function creditAlter(readings: readonly PlanPropertyReading[] | undefined): AlterCredit {
+  return (judgement, properties) =>
+    properties.map((property) => {
+      if (property.verdict !== 'match') return property
+      const reading = readings?.find(
+        (entry) =>
+          entry.element === judgement.id && entry.label === judgement.label && entry.property === property.property && entry.planned === property.planned,
+      )
+      if (reading && reading.verdict !== 'match') return property
+      const setAside: PlanPropertyStatus = {
+        property: property.property,
+        verdict: 'unknown',
+        ...(property.planned !== undefined ? { planned: property.planned } : {}),
+        reason: reading
+          ? `it already read ${property.actual ?? property.planned} when the plan was approved, so it says nothing about the change`
+          : 'no reading of it was recorded when the plan was approved, so this match cannot be told from one that already held',
+      }
+      SET_ASIDE.set(setAside, reading ? 'held' : 'unrecorded')
+      return setAside
+    })
+}
+
+const AS_READ: AlterCredit = (_, properties) => properties
+
+function unreadableAlterReason(properties: PlanPropertyStatus[]): string {
+  const setAside = properties.flatMap((property) => SET_ASIDE.get(property) ?? [])
+  if (setAside.includes('unrecorded')) {
+    return 'The approval recorded no reading of the planned properties that match, so none can be told from one that already held: run guren plan:approve on the plan to record the readings it lacks (a property the application holds by then is not counted), or verify the change through a behaviour that reaches it.'
+  }
+  if (setAside.length > 0) {
+    return 'Every planned property that matches already held when the plan was approved, so none shows the change: state the change in a property the application did not hold, or verify it through a behaviour that reaches it.'
+  }
+  return 'No planned property of this change has a reader.'
+}
+
+function conclude(judgement: Judgement, credit: AlterCredit): PlanElementStatus {
   const { id, section, change, label, exists } = judgement
   const base = {
     id,
@@ -182,7 +242,8 @@ function conclude(judgement: Judgement): PlanElementStatus {
     return done('planned')
   }
 
-  const properties = judgement.properties?.() ?? []
+  const read = judgement.properties?.() ?? []
+  const properties = change.kind === 'alter' ? credit(judgement, read) : read
   if (change.kind === 'rename') {
     const previous = judgement.previous ?? { unknown: 'the previous name has no reader' }
     properties.unshift(
@@ -200,9 +261,7 @@ function conclude(judgement: Judgement): PlanElementStatus {
     done(state, { properties, ...extra })
 
   // An alter's target existed before the plan, so its existence says nothing about the change.
-  if (change.kind === 'alter' && readable.length === 0) {
-    return result('unjudged', { reason: 'No planned property of this change has a reader.' })
-  }
+  if (change.kind === 'alter' && readable.length === 0) return result('unjudged', { reason: unreadableAlterReason(properties) })
   // A mount is a reading of the element itself; with none, existence would complete what the plan stated and nothing read.
   if (properties.length > 0 && readable.length === 0 && !judgement.mount) {
     return result('unjudged', { reason: 'No planned property of this element could be read, and its existence says nothing about them.' })
@@ -319,8 +378,39 @@ function contractHolds(route: PlanAppRouteDetail, symbol: string): boolean {
 
 const NO_DETAIL: PlanAppUnreadable = { unreadable: 'the application state was loaded without detail' }
 
-export function judgePlan(plan: PlanDraft, app: PlanAppState): PlanStatus {
-  const context = new StatusContext(plan, app)
+/**
+ * `readings` are what the approval of the plan's current hash recorded; absent (a draft, or an
+ * approval that recorded none), no match of an `alter` property counts towards its completion.
+ */
+export function judgePlan(plan: PlanDraft, app: PlanAppState, readings?: readonly PlanPropertyReading[]): PlanStatus {
+  return judgeWith(plan, app, creditAlter(readings))
+}
+
+/**
+ * How every planned property of the plan's `alter`s reads now, which `plan:approve` records. An
+ * element no property of which was compared (not found, blocked, no reader) records nothing.
+ */
+export function readAlterProperties(plan: PlanDraft, app: PlanAppState): PlanPropertyReading[] {
+  return judgeWith(plan, app, AS_READ).elements.flatMap((element) =>
+    element.change !== 'alter'
+      ? []
+      : element.properties.map((property) => ({
+          element: element.id,
+          label: element.label,
+          property: property.property,
+          ...(property.planned !== undefined ? { planned: property.planned } : {}),
+          verdict: property.verdict,
+        })),
+  )
+}
+
+/** Whether the plan alters anything, the one case `plan:approve` reads the application's detail for. */
+export function planHasAlter(plan: PlanDraft): boolean {
+  return listPlanElementEntries(plan).some(({ element }) => (element as { change?: PlanChange }).change?.kind === 'alter')
+}
+
+function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit): PlanStatus {
+  const context = new StatusContext(plan, app, credit)
   const elements: PlanElementStatus[] = [
     ...plan.models.flatMap((model) => [context.model(model), ...model.columns.map((column) => context.column(model, column))]),
     ...plan.validators.map((validator) => context.validator(validator)),
@@ -334,7 +424,7 @@ export function judgePlan(plan: PlanDraft, app: PlanAppState): PlanStatus {
     ...plan.policies.map((policy) => context.named('policies', policy, app.policies, NOUNS.policies, policy.abilities.length > 0 ? ['abilities'] : [])),
     ...plan.sideEffects.map((effect) => context.sideEffect(effect)),
     ...plan.commands.map((command): PlanElementStatus =>
-      conclude({ id: command.id, section: 'commands', change: { kind: 'add' }, label: command.command, exists: 'no', unjudged: 'Nothing reads whether a command has been run.' }),
+      conclude({ id: command.id, section: 'commands', change: { kind: 'add' }, label: command.command, exists: 'no', unjudged: 'Nothing reads whether a command has been run.' }, AS_READ),
     ),
   ]
   return { elements, summary: summarize(elements) }
@@ -418,7 +508,11 @@ class StatusContext {
   private readonly viewsById: Map<string, PlanView>
   private readonly namesById: Map<string, string>
 
-  constructor(private readonly plan: PlanDraft, private readonly app: PlanAppState) {
+  constructor(
+    private readonly plan: PlanDraft,
+    private readonly app: PlanAppState,
+    private readonly credit: AlterCredit,
+  ) {
     this.detail = app.detail
     this.modelsById = new Map(plan.models.map((model) => [model.id, model]))
     this.actionKeys = new Map(
@@ -426,6 +520,10 @@ class StatusContext {
     )
     this.viewsById = new Map(plan.views.map((view) => [view.id, view]))
     this.namesById = new Map([...plan.validators, ...plan.resources, ...plan.policies].map((element) => [element.id, element.name]))
+  }
+
+  private conclude(judgement: Judgement): PlanElementStatus {
+    return conclude(judgement, this.credit)
   }
 
   private section<K extends 'routes' | 'tables' | 'models' | 'actions' | 'controllers' | 'pages' | 'validators'>(key: K): PlanAppDetail[K] | PlanAppUnreadable {
@@ -442,7 +540,7 @@ class StatusContext {
     const classes = section === 'resources' ? this.detail?.resources : this.detail?.policies
     const find = (name: string): Existence =>
       existsInScope(names, name, noun, element.module, classes, (entry) => entry.className === name)
-    return conclude({
+    return this.conclude({
       id: element.id,
       section,
       change: element.change,
@@ -484,7 +582,7 @@ class StatusContext {
   }
 
   model(model: PlanModel): PlanElementStatus {
-    return conclude({
+    return this.conclude({
       id: model.id,
       section: 'models',
       change: model.change,
@@ -570,7 +668,7 @@ class StatusContext {
       if (table.columns.some((candidate) => candidate.name === name)) return 'yes'
       return table.opaqueColumns ? { unknown: `the columns of "${table.identifier}" hold a spread or a computed key, and the schema did not import (${table.runtimeUnreadable ?? 'no reason given'})` } : 'no'
     }
-    return conclude({
+    return this.conclude({
       id: column.id,
       section: 'columns',
       change: column.change,
@@ -672,7 +770,7 @@ class StatusContext {
     const found = isUnreadable(validators)
       ? undefined
       : validators.find((entry) => entry.name === validator.name && entry.module === (validator.module ?? null))
-    return conclude({
+    return this.conclude({
       id: validator.id,
       section: 'validators',
       change: validator.change,
@@ -693,7 +791,7 @@ class StatusContext {
   }
 
   controller(controller: PlanController): PlanElementStatus {
-    return conclude({
+    return this.conclude({
       id: controller.id,
       section: 'controllers',
       change: controller.change,
@@ -718,7 +816,7 @@ class StatusContext {
       const actionKey = `${controller.className}.${name}`
       return existsInScope(this.app.actions, actionKey, NOUNS.actions, controller.module, this.section('actions'), (entry) => entry.key === actionKey)
     }
-    return conclude({
+    return this.conclude({
       id: action.id,
       section: 'actions',
       change: action.change,
@@ -854,7 +952,7 @@ class StatusContext {
       return this.detail?.routesIncomplete ? { unknown: `a module's routes did not load, so an absent route proves nothing (${this.detail.routesIncomplete})` } : 'no'
     }
     const actual = (): PlanAppRouteDetail => (routes as PlanAppRouteDetail[]).find((candidate) => candidate.name === route.name)!
-    return conclude({
+    return this.conclude({
       id: route.id,
       section: 'routes',
       change: route.change,
@@ -914,7 +1012,7 @@ class StatusContext {
       if (found !== 'yes' || view.module === undefined || page.startsWith(`${view.module}/`)) return found
       return { unknown: `the plan puts the page in modules/${view.module}, and a module's pages are namespaced as "${view.module}/${page}" under the project's own resources/js/pages` }
     }
-    return conclude({
+    return this.conclude({
       id: view.id,
       section: 'views',
       change: view.change,
@@ -961,13 +1059,13 @@ class StatusContext {
   sideEffect(effect: PlanDraft['sideEffects'][number]): PlanElementStatus {
     const base = { id: effect.id, section: 'sideEffects' as const, change: effect.change, label: effect.name }
     const readable: ReadonlyArray<string> = ['job', 'event', 'listener'] satisfies PlanAppSideEffectKind[]
-    if (!readable.includes(effect.kind)) return conclude({ ...base, exists: 'no', unjudged: `Nothing discovers a ${effect.kind} class.` })
+    if (!readable.includes(effect.kind)) return this.conclude({ ...base, exists: 'no', unjudged: `Nothing discovers a ${effect.kind} class.` })
     const classes = this.detail?.sideEffects[effect.kind as PlanAppSideEffectKind]
     const names: PlanAppNames = classes ? classes.map((entry) => ({ name: entry.className, module: entry.module })) : NO_DETAIL
     const noun = { plural: `${effect.kind} classes`, singular: effect.kind }
     const find = (name: string): Existence =>
       existsInScope(names, name, noun, effect.module, classes, (entry) => entry.className === name)
-    return conclude({
+    return this.conclude({
       ...base,
       exists: find(effect.name),
       previous: previousOf(effect.change, find),

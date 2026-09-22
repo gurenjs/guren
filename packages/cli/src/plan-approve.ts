@@ -14,13 +14,14 @@ import { CliError, formatSchemaIssues } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
-import { planApprovalsPath, readPlanApprovals, recordPlanApproval, requireReadableApprovals, type PlanApproval } from './plan/approvals'
+import { approvalReadings, planApprovalsPath, readPlanApprovals, recordPlanApproval, requireReadableApprovals, type PlanApproval } from './plan/approvals'
 import { gitAuthor, planBesideExclusions, writeFileAtomic } from './plan/beside'
 import { stampContextHash, type PlanContextStamp } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
-import { PlanSchema, type Plan } from './plan/schema'
+import { PlanSchema, type Plan, type PlanDraft } from './plan/schema'
 import { PLAN_STATE_DIR } from './plan/state'
+import { readAlterProperties } from './plan/status'
 import { settleBuiltFindings, validatePlan } from './plan/validate'
 import { runCaptured, type CapturedExec } from './subprocess'
 
@@ -39,11 +40,16 @@ export interface PlanApproveReport {
   alreadyApproved: boolean
   /** Elements whose collision or absence did not refuse, since the application reads as the plan leaves them. */
   builtByPlan?: string[]
+  /** `alter` elements this run recorded a reading of a planned property for (RFC 0030 §6); absent when it recorded none. */
+  readingsRecorded?: string[]
 }
 
 export interface PlanApproveFileOptions {
-  /** Resolved after the plan parses. */
-  app: PlanAppState | (() => Promise<PlanAppState>)
+  /**
+   * Resolved after the plan parses. A plan with an `alter` needs it loaded with `detail`, or no
+   * property is read and its readings are left for a later approval to record.
+   */
+  app: PlanAppState | ((plan: PlanDraft) => Promise<PlanAppState>)
   /** Where `git rev-parse HEAD` and `git config` are asked, and what paths are reported relative to. */
   appRoot: string
   cwd?: string
@@ -57,7 +63,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
   const { path, plan, document } = await readPlanFile(planPath, options.cwd)
   const appRoot = resolve(options.appRoot)
   const exec = options.exec ?? runCaptured
-  const app = typeof options.app === 'function' ? await options.app() : options.app
+  const app = typeof options.app === 'function' ? await options.app(plan) : options.app
 
   const settled = settleBuiltFindings(plan, app, validatePlan(plan, app))
   const blockers = [
@@ -103,8 +109,15 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
 
   const hash = planHash(approved)
   const by = await gitAuthor(appRoot, exec)
-  const approval: PlanApproval = { hash, approvedAt: (options.now ?? (() => new Date()))().toISOString(), ...(by ? { approvedBy: by } : {}) }
+  const readings = approvalReadings(approvals, approved, readAlterProperties(approved, app))
+  const approval: PlanApproval = {
+    hash,
+    approvedAt: (options.now ?? (() => new Date()))().toISOString(),
+    ...(by ? { approvedBy: by } : {}),
+    ...(readings.properties.length > 0 ? { readings } : {}),
+  }
   const recorded = await recordPlanApproval(path, approvals, approval)
+  const readingsRecorded = [...new Set(recorded.readingsAdded.map((reading) => reading.element))]
   return {
     reportVersion: PLAN_APPROVE_REPORT_VERSION,
     plan: { file: basename(path), title: approved.title, hash },
@@ -113,6 +126,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     approval: recorded.existing ?? approval,
     alreadyApproved: recorded.existing !== undefined,
     ...(settled.built.length > 0 ? { builtByPlan: settled.built } : {}),
+    ...(readingsRecorded.length > 0 ? { readingsRecorded } : {}),
   }
 }
 
@@ -172,10 +186,14 @@ export function formatPlanApprove(report: PlanApproveReport): string {
   if (report.builtByPlan) {
     lines.push(`Built as the plan leaves them, so their collision or absence is the plan's own work: ${report.builtByPlan.join(', ')}`)
   }
-  lines.push(
-    report.alreadyApproved
-      ? `Already approved at ${report.approval.approvedAt}; ${report.approvalsFile} was left alone.`
-      : `Approved ${report.plan.hash}, recorded in ${report.approvalsFile}.`,
-  )
+  if (report.alreadyApproved && report.readingsRecorded) {
+    lines.push(`Already approved at ${report.approval.approvedAt}; recorded the readings it lacked in ${report.approvalsFile}: ${report.readingsRecorded.join(', ')}.`)
+  } else {
+    lines.push(
+      report.alreadyApproved
+        ? `Already approved at ${report.approval.approvedAt}; ${report.approvalsFile} was left alone.`
+        : `Approved ${report.plan.hash}, recorded in ${report.approvalsFile}.`,
+    )
+  }
   return lines.join('\n')
 }

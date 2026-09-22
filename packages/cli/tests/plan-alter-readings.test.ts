@@ -1,0 +1,217 @@
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+
+import { runCommand, type CommandDef } from 'citty'
+
+import { builtinSubCommands } from '../src/commands'
+import type { PlanApproveReport } from '../src/plan-approve'
+import type { PlanCloseReport } from '../src/plan-close'
+import type { PlanNextReport } from '../src/plan-next'
+import type { PlanStatusReport } from '../src/plan-status'
+import type { PlanVerifyReport } from '../src/plan-verify'
+import { approvalReadings, planApprovalsPath, readPlanApprovals, type PlanApprovals } from '../src/plan/approvals'
+import { planHash } from '../src/plan/identity'
+import { PlanSchema } from '../src/plan/schema'
+import type { PlanPropertyReading } from '../src/plan/status'
+import { createTempRoot, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
+import { PLAN_VERIFY_APP_FILES } from './plan-fixture'
+
+// Each application has a directory of its own: Bun keys an imported routes file on its path.
+const ROOT_PREFIX = 'guren-plan-alter-readings-'
+let ROOT: string
+const WORKSPACE_DRIZZLE = resolve(import.meta.dir, '../../orm/node_modules/drizzle-orm')
+const PLAN_FILE = 'pages.plan.json'
+
+const page = (name: string, props: string): string => `interface Props {
+${props}
+}
+
+export default function ${name}(_props: Props) {
+  return null
+}
+`
+
+const INDEX = 'resources/js/pages/posts/Index.tsx'
+const SHOW = 'resources/js/pages/posts/Show.tsx'
+
+/**
+ * Two page alters: `posts/Show` restates the prop it already declares and changes nothing a
+ * reader sees, `posts/Index` adds `total` beside the `posts` it already declares.
+ */
+const PLAN_DOCUMENT = {
+  planVersion: 1,
+  title: 'Post totals',
+  summary: 'Show how many posts there are.',
+  locale: 'en',
+  scope: { goals: ['Show a total on the post list'], nonGoals: [] },
+  views: [
+    { id: 'view.posts.show', change: { kind: 'alter' }, page: 'posts/Show', purpose: 'Show a post.', props: [{ name: 'post', type: 'string' }], actions: [], states: {} },
+    {
+      id: 'view.posts.index',
+      change: { kind: 'alter' },
+      page: 'posts/Index',
+      purpose: 'List posts with their total.',
+      props: [
+        { name: 'posts', type: 'string[]' },
+        { name: 'total', type: 'number' },
+      ],
+      actions: [],
+      states: {},
+    },
+  ],
+}
+
+function git(dir: string, ...args: string[]): void {
+  const result = Bun.spawnSync(['git', '-c', 'user.name=Approver', '-c', 'user.email=approver@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
+  if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
+}
+
+/** A committed application with the plan beside it, before any of the plan is built. */
+async function createApp(name: string): Promise<{ dir: string; plan: string }> {
+  const dir = join(ROOT, name)
+  await writeWorkspaceFiles(dir, {
+    ...PLAN_VERIFY_APP_FILES,
+    '.gitignore': 'node_modules\n',
+    'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+
+export class PostController extends Controller {
+  async index() {
+    return this.inertia('posts/Index', { posts: [] })
+  }
+}
+`,
+    [INDEX]: page('Index', '  posts: string[]'),
+    [SHOW]: page('Show', '  post: string'),
+    [PLAN_FILE]: JSON.stringify(PLAN_DOCUMENT),
+  })
+  await linkWorkspaceCore(dir)
+  await mkdir(join(dir, 'node_modules'), { recursive: true })
+  await symlink(WORKSPACE_DRIZZLE, join(dir, 'node_modules', 'drizzle-orm'), 'dir')
+  git(dir, 'init', '-q')
+  git(dir, 'add', '-A')
+  git(dir, 'commit', '-q', '-m', 'init')
+  return { dir, plan: join(dir, PLAN_FILE) }
+}
+
+async function buildTotal(dir: string): Promise<void> {
+  await writeFile(join(dir, INDEX), page('Index', '  posts: string[]\n  total: number'), 'utf8')
+  git(dir, 'commit', '-q', '-am', 'total')
+}
+
+describe('an alter judged against how it read at approval', () => {
+  const log = spyOn(console, 'log')
+
+  beforeAll(async () => {
+    ROOT = await createTempRoot(ROOT_PREFIX)
+  })
+
+  afterEach(() => {
+    log.mockClear()
+    process.exitCode = 0
+  })
+
+  afterAll(() => {
+    log.mockRestore()
+  })
+
+  async function run<T>(command: 'plan:approve' | 'plan:status' | 'plan:verify' | 'plan:next' | 'plan:close', app: { dir: string; plan: string }): Promise<T> {
+    log.mockClear()
+    log.mockImplementation(() => {})
+    await runCommand(builtinSubCommands[command] as CommandDef, { rawArgs: [app.plan, '--app', app.dir, '--json'] })
+    return JSON.parse(log.mock.calls.map((call) => String(call[0])).join('\n')) as T
+  }
+
+  const states = (report: { elements: Array<{ id: string; state: string }> }): Record<string, string> =>
+    Object.fromEntries(report.elements.map((element) => [element.id, element.state]))
+
+  test('should record at approval how each planned property of an alter read', async () => {
+    const app = await createApp('record')
+
+    const report = await run<PlanApproveReport>('plan:approve', app)
+
+    expect(report.readingsRecorded).toEqual(['view.posts.show', 'view.posts.index'])
+    expect((await readPlanApprovals(app.plan)).value!.approvals[0]!.readings!.properties).toEqual([
+      { element: 'view.posts.show', label: 'posts/Show', property: 'prop post', planned: 'declared', verdict: 'match' },
+      { element: 'view.posts.index', label: 'posts/Index', property: 'prop posts', planned: 'declared', verdict: 'match' },
+      { element: 'view.posts.index', label: 'posts/Index', property: 'prop total', planned: 'declared', verdict: 'differ' },
+    ])
+  })
+
+  test('should complete no alter on a property that already held, before or after its step verifies', async () => {
+    const app = await createApp('held')
+    await run('plan:approve', app)
+
+    const before = await run<PlanStatusReport>('plan:status', app)
+    expect(states(before)).toEqual({ 'view.posts.show': 'unjudged', 'view.posts.index': 'planned' })
+    expect(before.elements[0]!.reason).toContain('already held when the plan was approved')
+
+    await buildTotal(app.dir)
+    const verified = await run<PlanVerifyReport>('plan:verify', app)
+    expect(verified.steps.map((step) => step.record.outcome)).not.toContain('failed')
+    expect(states(verified)).toEqual({ 'view.posts.show': 'unjudged', 'view.posts.index': 'verified' })
+    expect(verified.elements[0]!.hold?.kind).toBe('unreached')
+
+    // The same answer from every command that reads completion.
+    expect(states(await run<PlanStatusReport>('plan:status', app))).toEqual(states(verified))
+    const next = await run<PlanNextReport>('plan:next', app)
+    expect(next.unverified?.map((element) => element.id)).toEqual(['view.posts.show'])
+    await expect(run<PlanCloseReport>('plan:close', app)).rejects.toThrow(/view\.posts\.show/u)
+  })
+
+  test('should fail closed on an approval that recorded no reading, and record the missing ones on re-approval', async () => {
+    const app = await createApp('backfill')
+    await run('plan:approve', app)
+    const hash = planHash(PlanSchema.parse(JSON.parse(await readFile(app.plan, 'utf8'))))
+    // An approval written before readings were recorded carries none.
+    await writeFile(planApprovalsPath(app.plan), JSON.stringify({ approvalsVersion: 1, approvals: [{ hash, approvedAt: '2026-09-22T09:00:00.000Z' }] }), 'utf8')
+    git(app.dir, 'add', '-A')
+    git(app.dir, 'commit', '-q', '-m', 'approve')
+
+    const unrecorded = await run<PlanStatusReport>('plan:status', app)
+    expect(states(unrecorded)).toEqual({ 'view.posts.show': 'unjudged', 'view.posts.index': 'planned' })
+    expect(unrecorded.elements[0]!.reason).toContain('run guren plan:approve on the plan to record the readings it lacks')
+
+    // Built before the readings exist: a reading taken now can only miss the change, never credit it.
+    await buildTotal(app.dir)
+    const backfilled = await run<PlanApproveReport>('plan:approve', app)
+    expect(backfilled).toMatchObject({ alreadyApproved: true, readingsRecorded: ['view.posts.show', 'view.posts.index'] })
+    expect(states(await run<PlanStatusReport>('plan:status', app))).toEqual({ 'view.posts.show': 'unjudged', 'view.posts.index': 'unjudged' })
+    expect((await run<PlanApproveReport>('plan:approve', app)).readingsRecorded).toBeUndefined()
+  })
+
+  test('should carry the first reading to a revision approved after the work, so the change still counts', async () => {
+    const app = await createApp('revision')
+    await run('plan:approve', app)
+    await buildTotal(app.dir)
+    const document = JSON.parse(await readFile(app.plan, 'utf8')) as { scope: { goals: string[] } }
+    document.scope.goals.push('Keep the list short')
+    await writeFile(app.plan, JSON.stringify(document), 'utf8')
+
+    const reapproved = await run<PlanApproveReport>('plan:approve', app)
+
+    expect(reapproved.alreadyApproved).toBe(false)
+    const [first, second] = (await readPlanApprovals(app.plan)).value!.approvals
+    expect(second!.readings).toEqual(first!.readings)
+    expect(states(await run<PlanStatusReport>('plan:status', app))).toEqual({ 'view.posts.show': 'unjudged', 'view.posts.index': 'wired' })
+  })
+})
+
+describe('approvalReadings', () => {
+  const plan = PlanSchema.parse({ ...PLAN_DOCUMENT, baseline: { rev: 'abc123', contextHash: {} } })
+  const total = (verdict: PlanPropertyReading['verdict']): PlanPropertyReading => ({ element: 'view.posts.index', label: 'posts/Index', property: 'prop total', planned: 'declared', verdict })
+  const approvals = (baseline: string): PlanApprovals => ({
+    approvalsVersion: 1,
+    approvals: [{ hash: 'h0', approvedAt: '2026-09-21T00:00:00.000Z', readings: { baseline, properties: [total('differ')] } }],
+  })
+
+  test('should keep the earliest reading under the plan’s own baseline', () => {
+    const { baseline } = approvalReadings({ approvalsVersion: 1, approvals: [] }, plan, [])
+
+    expect(approvalReadings(approvals(baseline), plan, [total('match')]).properties).toEqual([total('differ')])
+  })
+
+  test('should take no reading from another baseline in the same file, which is another plan’s start', () => {
+    expect(approvalReadings(approvals('another'), plan, [total('match')]).properties).toEqual([total('match')])
+  })
+})

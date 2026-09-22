@@ -4,15 +4,26 @@
  * decision log: who approved is also who the repository's history says committed it.
  */
 
+import { createHash } from 'node:crypto'
+
 import { z } from 'zod'
 
 import { CliError } from '../cli-error'
 import { planSiblingPath, readBesideRecord, writeFileAtomic, type BesideRecordRead } from './beside'
-import { planHash } from './identity'
+import { canonicalJson, planHash } from './identity'
 import { hasBaseline } from './render'
 import type { Plan, PlanDraft } from './schema'
+import type { PlanPropertyReading } from './status'
 
 const PLAN_APPROVALS_VERSION = 1
+
+const PlanPropertyReadingSchema = z.object({
+  element: z.string(),
+  label: z.string(),
+  property: z.string(),
+  planned: z.string().optional(),
+  verdict: z.enum(['match', 'differ', 'unknown']),
+}) satisfies z.ZodType<PlanPropertyReading>
 
 const PlanApprovalSchema = z.object({
   /** `planHash()` of the approved plan, baseline included. */
@@ -20,6 +31,12 @@ const PlanApprovalSchema = z.object({
   approvedAt: z.string(),
   /** Whoever `git config` named, where it answered. */
   approvedBy: z.string().optional(),
+  /**
+   * How each planned property of the plan's `alter`s read before its work (RFC 0030 §6): the
+   * earliest reading under the same baseline, else the one taken at this approval. Outside the
+   * hash, so a re-approval can add the ones missing; it never replaces one.
+   */
+  readings: z.object({ baseline: z.string(), properties: z.array(PlanPropertyReadingSchema) }).optional(),
 })
 
 const PlanApprovalsSchema = z.object({
@@ -54,16 +71,55 @@ export function approvalAt(approvals: PlanApprovals, hash: string): PlanApproval
   return approvals.approvals.find((candidate) => candidate.hash === hash)
 }
 
-/** Appends in the order approvals were given; a hash already approved is returned and nothing is written. */
+/**
+ * Appends in the order approvals were given. A hash already approved keeps its entry, and gains
+ * only the readings `approval` carries that it lacks; nothing is written when it lacks none.
+ */
 export async function recordPlanApproval(
   planPath: string,
   approvals: PlanApprovals,
   approval: PlanApproval,
-): Promise<{ written: boolean; existing?: PlanApproval }> {
+): Promise<{ written: boolean; existing?: PlanApproval; readingsAdded: PlanPropertyReading[] }> {
+  const path = planApprovalsPath(planPath)
+  const write = (entries: PlanApproval[]) => writeFileAtomic(path, `${JSON.stringify({ ...approvals, approvals: entries }, null, 2)}\n`)
   const existing = approvalAt(approvals, approval.hash)
-  if (existing) return { written: false, existing }
-  await writeFileAtomic(planApprovalsPath(planPath), `${JSON.stringify({ ...approvals, approvals: [...approvals.approvals, approval] }, null, 2)}\n`)
-  return { written: true }
+  if (!existing) {
+    await write([...approvals.approvals, approval])
+    return { written: true, readingsAdded: approval.readings?.properties ?? [] }
+  }
+  const held = existing.readings?.properties ?? []
+  const added = (approval.readings?.properties ?? []).filter((reading) => !held.some((entry) => sameReading(entry, reading)))
+  if (added.length === 0 || !approval.readings) return { written: false, existing, readingsAdded: [] }
+  const updated: PlanApproval = { ...existing, readings: { baseline: approval.readings.baseline, properties: [...held, ...added] } }
+  await write(approvals.approvals.map((entry) => (entry === existing ? updated : entry)))
+  return { written: true, existing: updated, readingsAdded: added }
+}
+
+/** Names the baseline a reading was taken under: readings carry over only within one, since another is another plan's start. */
+export function baselineDigest(plan: Plan): string {
+  return createHash('sha256').update(canonicalJson(plan.baseline), 'utf8').digest('hex')
+}
+
+/** One reading per element, name in code, property and planned value; the earliest is the one that counts. */
+function sameReading(a: PlanPropertyReading, b: PlanPropertyReading): boolean {
+  return a.element === b.element && a.label === b.label && a.property === b.property && a.planned === b.planned
+}
+
+/**
+ * The readings an approval of `plan` records: for each of `current` (how the application reads
+ * now), the earliest reading the approvals already hold under the plan's baseline, else `current`.
+ * A reading taken late can only miss a change, never credit one: a property that already
+ * matched is never counted, and one that did not has moved since.
+ */
+export function approvalReadings(approvals: PlanApprovals, plan: Plan, current: readonly PlanPropertyReading[]): NonNullable<PlanApproval['readings']> {
+  const baseline = baselineDigest(plan)
+  const earlier = approvals.approvals.flatMap((entry) => (entry.readings?.baseline === baseline ? entry.readings.properties : []))
+  return { baseline, properties: current.map((reading) => earlier.find((held) => sameReading(held, reading)) ?? reading) }
+}
+
+/** The readings the approval of the plan's current hash recorded, which `judgePlan()` counts an `alter`'s matches against. */
+export function approvedReadings(standing: PlanApprovalStanding | undefined): PlanPropertyReading[] | undefined {
+  return standing?.state === 'approved' ? standing.approval.readings?.properties : undefined
 }
 
 /** The commands that refuse a plan no approval names; `plan:status` names them rather than refusing. */
