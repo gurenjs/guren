@@ -604,6 +604,12 @@ describe('whatHoldsElement', () => {
     )
   })
 
+  test('should keep what a run found ahead of the reason the reader gave', () => {
+    const expired = 'Verified t by s; changed since: a.ts.'
+    const unjudged = element('drifted', { reason: 'No planned property of this element could be read.', notes: [expired], hold: { kind: 'expired', note: expired } })
+    expect(whatHoldsElement(unjudged)).toBe('Verified t by s; changed since: a.ts; run guren plan:verify')
+  })
+
   test('should name the missing behaviour for an element no verified behaviour reaches, whatever reason the reader gave', () => {
     const stuck = 'Verified t by s, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.'
     const unjudged = element('unjudged', { reason: 'Nothing discovers a mail class.', notes: [stuck], hold: { kind: 'unreached', note: stuck } })
@@ -696,6 +702,15 @@ describe('applyVerification', () => {
     const resource = elementOf(lifted, 'resource.comment')
     expect(resource.state).toBe('present')
     expect(resource.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${HTTP}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`])
+    // A matched element with no file is held by its fingerprint, and a changed file expires a verified one.
+    const unfingerprinted = applyVerification(statusOf({ 'controller.comments': { files: [] } }), derivation, { [HTTP]: http }, 'digest', hashes, plan).status
+    expect(elementOf(unfingerprinted, 'controller.comments')).toMatchObject({ state: 'present', hold: { kind: 'unfingerprinted' } })
+    const changedHashes = new Map([[controllerFile, 'changed']])
+    const changedRun = applyVerification(statusOf(), derivation, { [HTTP]: http }, 'digest', changedHashes, plan).status
+    expect(elementOf(changedRun, 'controller.comments')).toMatchObject({ state: 'drifted', hold: { kind: 'expired' } })
+    // An element no behaviour reaches is held by that, before its changed file: a run cannot lift it either way.
+    const unreachedChanged = applyVerification(statusOf({ 'resource.comment': { properties: [] } }), derivation, { [HTTP]: http }, 'digest', changedHashes, plan).status
+    expect(elementOf(unreachedChanged, 'resource.comment')).toMatchObject({ state: 'present', hold: { kind: 'unreached' } })
     // With no file either, what holds it is still the missing behaviour: a run could fingerprint nothing more.
     const bare = applyVerification(statusOf({ 'resource.comment': { properties: [], files: [] } }), derivation, { [HTTP]: http }, 'digest', hashes, plan).status
     expect(elementOf(bare, 'resource.comment').hold?.kind).toBe('unreached')
@@ -801,6 +816,8 @@ describe('applyWaivers', () => {
 
   test('should lift a waived element whatever the readers found, with the reason and the date', () => {
     const status = statusOf({ 'policy.comment': { state: 'planned' }, 'model.comment': { state: 'drifted' } })
+    // What held it back is answered by the waiver, so it does not travel with the waived element.
+    elementOf(status, 'model.comment').hold = { kind: 'expired', note: 'Verified t by s; changed since: a.ts.' }
 
     const lifted = applyWaivers(status, new Map([['policy.comment', waiver('policy.comment', { by: 'Urata Daiki <someone@example.com>' })], ['model.comment', waiver('model.comment')]]))
 
@@ -808,6 +825,7 @@ describe('applyWaivers', () => {
     expect(policy.state).toBe('waived')
     expect(policy.notes).toEqual(['Waived 2026-09-21T12:00:00.000Z by Urata Daiki <someone@example.com>: the redesign lands in the next plan'])
     expect(elementOf(lifted, 'model.comment').state).toBe('waived')
+    expect(elementOf(lifted, 'model.comment').hold).toBeUndefined()
     expect(elementOf(lifted, 'model.comment').notes).toEqual(['Waived 2026-09-21T12:00:00.000Z: the redesign lands in the next plan'])
     expect(lifted.summary.states.waived).toBe(2)
   })

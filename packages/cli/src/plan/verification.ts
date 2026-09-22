@@ -190,7 +190,8 @@ export function applyWaivers(status: PlanStatus<PlanElementState>, waivers: Read
     const taken = `Waived ${waiver.at}${waiver.by ? ` by ${waiver.by}` : ''}: ${waiver.reason}`
     if (element.state === 'verified') return { ...element, notes: [...element.notes, `${taken}. It is verified, so the waiver is not needed.`] }
     if (element.change === 'existing') return { ...element, notes: [...element.notes, `${taken}. It is an existing element, no part of completion, so the waiver is not needed.`] }
-    return { ...element, state: 'waived', notes: [...element.notes, taken] }
+    const { hold: _hold, ...rest } = element
+    return { ...rest, state: 'waived', notes: [...element.notes, taken] }
   })
   return { elements, summary: summarize(elements) }
 }
@@ -294,8 +295,8 @@ export function whatHoldsElement(element: PlanElementStatus<PlanElementState>): 
   const bare = (text: string): string => text.replace(/\.$/u, '')
   if (hold?.kind === 'unreached') return bare(hold.note)
   // An element below its completion state is held by what the readers said, not by the run.
-  const said = hold?.kind === 'incomplete' ? element.notes.filter((note) => note !== hold.note).at(-1) : (hold?.note ?? element.notes.at(-1))
-  const detail = element.reason ?? said
+  const said = element.notes.filter((note) => note !== hold?.note).at(-1)
+  const detail = hold && hold.kind !== 'incomplete' ? hold.note : (element.reason ?? said)
   const lead = detail ? `${bare(detail)}; ` : ''
   if (element.state === 'blocked') return `${lead}fix what keeps it from being read, or waive it`
   if (hold?.kind === 'unfingerprinted') return `${lead}plan:verify cannot lift what it cannot fingerprint, so waive it`
