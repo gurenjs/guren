@@ -8,6 +8,7 @@
 
 import type { ColumnConsumerScan, ColumnRead, ResourceModelTie } from '../column-consumers'
 import { inAppRoot, isTestFileNamedFor, moduleNameFromRelPath } from '../discovery'
+import { mayReach, type TestRequestSite, type UnresolvedTestRequest } from '../test-requests'
 import type { PlanAppActionDetail, PlanAppClassDetail } from './app-detail'
 import type { PlanAppScope } from './app-state'
 import type { PlanBreakingChange } from './page/payload'
@@ -25,6 +26,10 @@ export interface PlanImpactRoute {
   module: PlanAppScope
   /** The tool `deriveAgentTools()` derives from the route, when it publishes one. */
   toolName?: string
+  /** The `TestApp` requests that reach the route (`test-requests.ts`). */
+  tests?: TestRequestSite[]
+  /** Requests whose comparison with this route's pattern could not be made. */
+  uncertainTests?: UnresolvedTestRequest[]
 }
 
 export interface PlanImpactModel {
@@ -43,8 +48,10 @@ export interface PlanImpactSources {
   actions: PlanAppActionDetail[]
   resources: ResourceModelTie[]
   policies: PlanAppClassDetail[]
-  /** App-relative test files. */
+  /** App-relative test files, which Impact pairs with a model by file name. */
   tests: string[]
+  /** What the `TestApp` request scan could not read, so a route of the same method may be missing tests. */
+  testRequests: { unresolved: UnresolvedTestRequest[]; unparsed: string[] }
   reads: ColumnConsumerScan
   /** A reader that could not look, and why: its empty list above is not a finding. */
   unreadable: Partial<Record<PlanImpactReader, string>>
@@ -64,6 +71,7 @@ export type PlanImpactConsumerKind =
   | 'policy'
   | 'page'
   | 'test'
+  | 'testRequest'
   | 'read'
   | 'write'
   | 'opaqueRead'
@@ -74,7 +82,7 @@ export interface PlanImpactConsumer {
   name: string
   file?: string
   line?: number
-  /** The resource whose data type tied a page's read to the model. */
+  /** The resource whose data type tied a page's read to the model, or the route a test requests. */
   via?: string
 }
 
@@ -112,6 +120,7 @@ const NO_SOURCES: PlanImpactSources = {
   resources: [],
   policies: [],
   tests: [],
+  testRequests: { unresolved: [], unparsed: [] },
   reads: { reads: [], opaque: [], resources: [], unreadable: [] },
   unreadable: {},
   unparsedModels: [],
@@ -144,11 +153,16 @@ class EntryBuilder {
   readonly consumers: PlanImpactConsumer[] = []
   readonly notes: PlanImpactNote[] = []
   private readonly seen = new Set<string>()
+  private readonly gaps = new Map<string, UnresolvedTestRequest>()
+  private askedNoneReach = false
 
   constructor(private readonly sources: PlanImpactSources) {}
 
   add(consumer: PlanImpactConsumer): void {
-    const key = JSON.stringify([consumer.kind, consumer.name, consumer.file ?? ''])
+    // A test file is listed once per route it reaches, at its first request.
+    const key = consumer.kind === 'testRequest'
+      ? JSON.stringify([consumer.kind, consumer.file, consumer.via])
+      : JSON.stringify([consumer.kind, consumer.name, consumer.file ?? ''])
     if (this.seen.has(key)) return
     this.seen.add(key)
     this.consumers.push(consumer)
@@ -166,6 +180,32 @@ class EntryBuilder {
     }
   }
 
+  /** The requests the scan could not match that may still reach `route`. */
+  testRequestGaps(route: PlanImpactRoute): void {
+    const candidates = [...(route.uncertainTests ?? []), ...this.sources.testRequests.unresolved.filter((request) => mayReach(request, route))]
+    for (const request of candidates) this.gaps.set(`${request.file}:${request.line}`, request)
+    const { unparsed } = this.sources.testRequests
+    if (unparsed.length > 0) this.note('impact.testRequests.unparsed', { files: unparsed.join(', ') })
+  }
+
+  /** Asks for the note that no test request reaches the routes found, settled in {@link finish}. */
+  noTestReaches(): void {
+    this.askedNoneReach = true
+  }
+
+  /** The notes that need every route of the entry first. */
+  finish(): void {
+    // A `routePattern` request targets this route; only its constraint was left unchecked.
+    for (const [key, uncertain] of [['impact.testRequests.unresolved', false], ['impact.testRequests.uncertain', true]] as const) {
+      const sites = [...this.gaps].filter(([, request]) => (request.reason === 'routePattern') === uncertain).map(([site]) => site)
+      if (sites.length > 0) this.note(key, { count: String(sites.length), requests: sites.join(', ') })
+    }
+    if (!this.askedNoneReach || this.gaps.size > 0) return
+    if (this.sources.testRequests.unparsed.length > 0 || this.sources.unreadable.tests !== undefined) return
+    const routes = this.consumers.some((consumer) => consumer.kind === 'route')
+    if (routes && !this.consumers.some((consumer) => consumer.kind === 'testRequest')) this.note('impact.testRequests.noneReach', {})
+  }
+
   /** What the column scan could not see: files that did not parse, models with no class, pages with no file. */
   scanGaps(): void {
     const { reads, unparsedModels, missingPages } = this.sources
@@ -175,17 +215,29 @@ class EntryBuilder {
   }
 }
 
-/** A route, and what hangs off it: its `ApiRoutes` entry and the agent tool it publishes. */
-function addRoute(entry: EntryBuilder, route: PlanImpactRoute): void {
-  entry.add({ kind: 'route', name: routeLabel(route) })
+/**
+ * A route, and what hangs off it: its `ApiRoutes` entry, the agent tool it publishes, the
+ * test requests reaching it, and the tests named after its controller in the same app root.
+ */
+function addRoute(entry: EntryBuilder, sources: PlanImpactSources, route: PlanImpactRoute): void {
+  const label = routeLabel(route)
+  entry.add({ kind: 'route', name: label })
   if (route.name !== undefined) entry.add({ kind: 'apiRoute', name: route.name })
   if (route.toolName !== undefined) entry.add({ kind: 'agentTool', name: route.toolName })
+  entry.rests('tests')
+  entry.testRequestGaps(route)
+  for (const test of route.tests ?? []) entry.add({ kind: 'testRequest', name: test.text, file: test.file, line: test.line, via: label })
+  const controller = route.action?.split('.')[0]
+  if (controller === undefined) return
+  for (const test of sources.tests) {
+    if (isTestFileNamedFor(test, controller) && moduleNameFromRelPath(test) === route.module) entry.add({ kind: 'test', name: test, file: test })
+  }
 }
 
 function addActionRoutes(entry: EntryBuilder, sources: PlanImpactSources, matches: (action: string) => boolean): void {
   entry.rests('routes')
   for (const route of sources.routes) {
-    if (route.action !== undefined && matches(route.action)) addRoute(entry, route)
+    if (route.action !== undefined && matches(route.action)) addRoute(entry, sources, route)
   }
 }
 
@@ -224,7 +276,7 @@ function modelEntry(entry: EntryBuilder, sources: PlanImpactSources, target: Pla
     }
   }
   for (const route of sources.routes) {
-    if (Object.values(route.bindings).some((className) => isTarget(className, route.module))) addRoute(entry, route)
+    if (Object.values(route.bindings).some((className) => isTarget(className, route.module))) addRoute(entry, sources, route)
   }
   for (const resource of sources.resources) {
     if (resource.models.some((model) => model.file === target.file)) entry.add({ kind: 'resource', name: resource.className, file: resource.file })
@@ -262,6 +314,7 @@ export function planImpact(plan: PlanDraft, sources: PlanImpactSources): PlanImp
   const build = (elementId: string, section: PlanElementSection, fill: (entry: EntryBuilder) => void): void => {
     const entry = new EntryBuilder(sources)
     fill(entry)
+    entry.finish()
     entries.push({ elementId, section, consumers: entry.consumers, notes: entry.notes })
   }
 
@@ -291,7 +344,10 @@ export function planImpact(plan: PlanDraft, sources: PlanImpactSources): PlanImp
     for (const action of controller.actions) {
       if (!changes(action.change)) continue
       const key = `${className}.${currentName(action.name, action.change)}`
-      build(action.id, 'actions', (entry) => addActionRoutes(entry, sources, (candidate) => candidate === key))
+      build(action.id, 'actions', (entry) => {
+        addActionRoutes(entry, sources, (candidate) => candidate === key)
+        if (action.change.kind !== 'rename') entry.noTestReaches()
+      })
     }
   }
 
@@ -302,7 +358,8 @@ export function planImpact(plan: PlanDraft, sources: PlanImpactSources): PlanImp
       entry.rests('routes')
       const found = sources.routes.find((candidate) => candidate.name === name)
         ?? sources.routes.find((candidate) => candidate.method === route.method && candidate.path === route.path)
-      if (found) addRoute(entry, found)
+      if (found) addRoute(entry, sources, found)
+      if (route.change.kind !== 'rename') entry.noTestReaches()
     })
   }
 

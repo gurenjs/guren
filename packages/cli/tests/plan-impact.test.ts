@@ -10,8 +10,8 @@ import { loadPlanAppState } from '../src/plan/app-state'
 import { impactBreakingChanges, planChangesExisting, planImpact, type PlanImpactEntry, type PlanImpactSources } from '../src/plan/impact'
 import { planBreakingChanges, renderPlanHtml } from '../src/plan/render'
 import { PlanDraftSchema, type PlanChange, type PlanDraft } from '../src/plan/schema'
-import { createTempWorkspace, writeWorkspaceFiles, type TempWorkspace } from './helpers'
-import { loadCommentsPlan, PLAN_APP_FILES, planPageData } from './plan-fixture'
+import { createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles, type TempWorkspace } from './helpers'
+import { loadCommentsPlan, PLAN_APP_FILES, PLAN_VERIFY_APP_FILES, planPageData } from './plan-fixture'
 import { openPlanPage, type Page, type PageNode } from './plan-page-dom'
 
 /** The comments fixture, parsed and then edited, so every section is present to edit. */
@@ -47,6 +47,7 @@ function sources(overrides: Partial<PlanImpactSources> = {}): PlanImpactSources 
     resources: [{ className: 'PostResource', file: 'app/Http/Resources/PostResource.ts', models: [POST] }],
     policies: [{ className: 'PostPolicy', module: null, file: 'app/Policies/PostPolicy.ts' }],
     tests: ['tests/PostController.test.ts', 'tests/UserController.test.ts', 'modules/blog/tests/PostController.test.ts'],
+    testRequests: { unresolved: [], unparsed: [] },
     reads: {
       ...NO_READS,
       reads: [
@@ -174,10 +175,10 @@ describe('planImpact', () => {
       'model User.posts',
       'route posts.show',
       'apiRoute posts.show',
+      'test tests/PostController.test.ts',
       'resource PostResource',
       'policy PostPolicy',
       'action PostController.show',
-      'test tests/PostController.test.ts',
     ])
   })
 
@@ -217,6 +218,7 @@ describe('planImpact', () => {
       { kind: 'route', name: 'posts.update' },
       { kind: 'apiRoute', name: 'posts.update' },
       { kind: 'agentTool', name: 'posts_update' },
+      { kind: 'test', name: 'tests/PostController.test.ts', file: 'tests/PostController.test.ts' },
     ])
   })
 
@@ -230,7 +232,7 @@ describe('planImpact', () => {
 
     const entries = planImpact(renamed, sources())
 
-    expect(entryFor(entries, 'route.comments.store').consumers.map((consumer) => consumer.kind)).toEqual(['route', 'apiRoute', 'agentTool'])
+    expect(entryFor(entries, 'route.comments.store').consumers.map((consumer) => consumer.kind)).toEqual(['route', 'apiRoute', 'agentTool', 'test'])
     expect(entryFor(entries, 'route.comments.destroy').consumers).toEqual([{ kind: 'route', name: 'GET /feed' }])
   })
 
@@ -244,6 +246,74 @@ describe('planImpact', () => {
     expect(entry).toMatchObject({ consumers: [], notes: [{ key: 'impact.unreadable.routes', values: { reason: 'routes/web.ts threw' } }] })
   })
 
+  describe('test requests', () => {
+    const REQUEST = { file: 'tests/posts.test.ts', line: 14, text: 'PATCH /posts/${…}' }
+    const alteredUpdate = (change: PlanChange = { kind: 'alter' }): PlanDraft => plan((input) => {
+      input.routes[0]!.change = change
+      input.routes[0]!.name = 'posts.update'
+    })
+    const withTests = (overrides: Partial<PlanImpactSources> = {}): PlanImpactSources => {
+      const base = sources(overrides)
+      base.routes[1] = { ...base.routes[1]!, tests: [REQUEST, { ...REQUEST, line: 30 }] }
+      return base
+    }
+
+    test('should list each test file whose TestApp request reaches a changed route, once, at its first request', () => {
+      const entry = entryFor(planImpact(alteredUpdate(), withTests()), 'route.comments.store')
+
+      expect(entry.consumers.filter((consumer) => consumer.kind === 'testRequest')).toEqual([
+        { kind: 'testRequest', name: 'PATCH /posts/${…}', file: 'tests/posts.test.ts', line: 14, via: 'posts.update' },
+      ])
+      expect(entry.notes).toEqual([])
+    })
+
+    test('should say no TestApp request reaches an altered route beside a test named after its controller, which may reach the action directly', () => {
+      const entry = entryFor(planImpact(alteredUpdate(), sources()), 'route.comments.store')
+
+      expect(entry.consumers).toContainEqual({ kind: 'test', name: 'tests/PostController.test.ts', file: 'tests/PostController.test.ts' })
+      expect(entry.notes).toEqual([{ key: 'impact.testRequests.noneReach', values: {} }])
+    })
+
+    test('should hold the note back while an unmatched request of the same method might reach the route, and only then', () => {
+      const unresolved = (method: string) => ({ unresolved: [{ ...REQUEST, reason: 'dynamicPath' as const, method }], unparsed: [] })
+
+      expect(entryFor(planImpact(alteredUpdate(), sources({ testRequests: unresolved('PATCH') })), 'route.comments.store').notes).toEqual([
+        { key: 'impact.testRequests.unresolved', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
+      ])
+      expect(entryFor(planImpact(alteredUpdate(), sources({ testRequests: unresolved('POST') })), 'route.comments.store').notes).toEqual([
+        { key: 'impact.testRequests.noneReach', values: {} },
+      ])
+    })
+
+    test("should hold it back for a request the route's own pattern could not be compared with", () => {
+      const base = sources()
+      base.routes[1] = { ...base.routes[1]!, uncertainTests: [{ ...REQUEST, reason: 'routePattern', method: 'PATCH' }] }
+      const unresolved = { unresolved: [{ ...REQUEST, line: 40, reason: 'dynamicPath' as const, method: 'PATCH' }], unparsed: [] }
+
+      expect(entryFor(planImpact(alteredUpdate(), base), 'route.comments.store').notes).toEqual([
+        { key: 'impact.testRequests.uncertain', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
+      ])
+      expect(entryFor(planImpact(alteredUpdate(), { ...base, testRequests: unresolved }), 'route.comments.store').notes).toEqual([
+        { key: 'impact.testRequests.unresolved', values: { count: '1', requests: 'tests/posts.test.ts:40' } },
+        { key: 'impact.testRequests.uncertain', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
+      ])
+    })
+
+    test('should not say it of a renamed route, whose paths the tests still reach', () => {
+      const entry = entryFor(planImpact(alteredUpdate({ kind: 'rename', from: 'posts.update' }), sources()), 'route.comments.store')
+
+      expect(entry.notes).toEqual([])
+    })
+
+    test('should reach a model through the routes that bind it', () => {
+      const base = sources()
+      base.routes[0] = { ...base.routes[0]!, tests: [REQUEST] }
+      const entry = entryFor(planImpact(plan(), base), 'model.post')
+
+      expect(entry.consumers).toContainEqual({ kind: 'testRequest', name: 'PATCH /posts/${…}', file: 'tests/posts.test.ts', line: 14, via: 'posts.show' })
+    })
+  })
+
   test('should reach an altered view and a validator through the actions that name them', () => {
     const altered = plan((input) => {
       input.validators.push({ id: 'validator.post', change: { kind: 'drop', reason: 'merged' }, name: 'PostPayloadSchema', fields: [] })
@@ -255,6 +325,7 @@ describe('planImpact', () => {
       'action PostController.show',
       'route posts.show',
       'apiRoute posts.show',
+      'test tests/PostController.test.ts',
     ])
     expect(entryFor(entries, 'validator.post').consumers.map((consumer) => `${consumer.kind} ${consumer.name}`)).toEqual([
       'action FeedController.index',
@@ -329,6 +400,21 @@ describe('the plan page', () => {
     expect(impactOn(openPlanPage(renderPlanHtml({ plan: altered, impact, uiLocale: 'ja' })), 'column.post.title')!.textContent).toContain(
       '影響がないとは限りません',
     )
+  })
+
+  test('should name a test by the request that reaches the route, in either locale', () => {
+    const altered = plan((input) => {
+      input.routes[0]!.change = { kind: 'alter' }
+      input.routes[0]!.name = 'posts.update'
+    })
+    const base = sources()
+    base.routes[1] = { ...base.routes[1]!, tests: [{ file: 'tests/posts.test.ts', line: 14, text: 'PATCH /posts/1' }] }
+    const impact = planImpact(altered, base)
+    const items = (uiLocale?: 'ja') => impactOn(openPlanPage(renderPlanHtml({ plan: altered, impact, ...(uiLocale ? { uiLocale } : {}) })), 'route.comments.store')!
+      .withTag('li').map((item) => item.textContent)
+
+    expect(items()).toContain('Request PATCH /posts/1 reaches posts.update (tests/posts.test.ts:14)')
+    expect(items('ja')).toContain('リクエスト PATCH /posts/1 が posts.update に届きます (tests/posts.test.ts:14)')
   })
 
   test('should draw no Impact at all when the page was rendered without an application', () => {
@@ -418,6 +504,60 @@ describe('loadPlanAppState({ impact: true })', () => {
     const impact = (await loadPlanAppState(workspace.dir, { impact: true })).impact!
 
     expect(impact.unreadable.controllers).toContain('app/Http/Controllers would not open')
+  })
+
+  test("should hang the TestApp requests of the application's tests off the routes they reach", async () => {
+    await linkWorkspaceCore(workspace.dir)
+    await writeWorkspaceFiles(workspace.dir, {
+      ...PLAN_VERIFY_APP_FILES,
+      'tests/comments-http.test.ts': `import { TestApp } from '@guren/testing'
+import app from '../src/app'
+
+const http = await TestApp.fromApp(app)
+const postId = 1
+await http.post(\`/posts/\${postId}/comments\`, { body: 'x' })
+await http.get(String(postId))
+`,
+    })
+
+    const impact = (await loadPlanAppState(workspace.dir, { impact: true })).impact!
+
+    expect(impact.routes.find((route) => route.name === 'comments.store')?.tests).toEqual([
+      { file: 'tests/comments-http.test.ts', line: 6, text: 'POST /posts/${…}/comments' },
+    ])
+    expect(impact.routes.find((route) => route.name === 'posts.index')?.tests).toBeUndefined()
+    expect(impact.testRequests.unresolved).toEqual([{ file: 'tests/comments-http.test.ts', line: 7, text: 'GET <runtime>', reason: 'dynamicPath', method: 'GET' }])
+  })
+
+  test('should carry a request a constrained route could not be checked against from the routes file to its note', async () => {
+    await linkWorkspaceCore(workspace.dir)
+    await writeWorkspaceFiles(workspace.dir, {
+      ...PLAN_VERIFY_APP_FILES,
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts/:id{[0-9]+}', [PostController, 'show']).name('posts.show')
+}
+`,
+      'tests/posts-http.test.ts': `import { TestApp } from '@guren/testing'
+import app from '../src/app'
+
+const http = await TestApp.fromApp(app)
+const id = 1
+await http.get(\`/posts/\${id}\`)
+`,
+    })
+    const altered = plan((input) => {
+      input.routes[0]!.change = { kind: 'alter' }
+      input.routes[0]!.name = 'posts.show'
+    })
+
+    const sources = (await loadPlanAppState(workspace.dir, { impact: true })).impact!
+    const entry = entryFor(planImpact(altered, sources), 'route.comments.store')
+
+    expect(sources.routes[0]?.uncertainTests).toEqual([{ file: 'tests/posts-http.test.ts', line: 6, text: 'GET /posts/${…}', reason: 'routePattern', method: 'GET' }])
+    expect(entry.notes).toEqual([{ key: 'impact.testRequests.uncertain', values: { count: '1', requests: 'tests/posts-http.test.ts:6' } }])
   })
 
   test('should carry the models verdict the checks reached', async () => {

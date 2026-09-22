@@ -419,10 +419,78 @@ breaking regardless of what Impact found.
 - The breaking rule stays the plan's own (`planBreakingChanges()`), with one addition
   only the application can answer: an altered route, action or controller whose route
   publishes an agent tool is flagged even when the plan does not declare the tool.
-- Deferred: the test-coverage scan of `TestApp` calls and the characterization step it
+- ~~Deferred: the test-coverage scan of `TestApp` calls and the characterization step it
   feeds. It is a reader of its own with an open accuracy question (Open Question 8),
   and its rule belongs to task derivation (§5). Impact names tests by file name until
-  it lands.
+  it lands.~~ The scan shipped (below); the characterization step is still deferred.
+
+**Amended in implementation (test-coverage scan):** what shipped, in
+`packages/cli/src/test-requests.ts`, and what it measured.
+
+- Every test file `discoverTestFiles()` finds is read by AST, so a comment or a
+  string spelling `http.get('/posts')` is no request. A receiver is a `TestApp` where
+  the file says so: a binding or parameter annotated `TestApp` (or `Promise<TestApp>`,
+  a union holding it, `testing.TestApp` through a namespace import), one initialised
+  or assigned from `TestApp.fromApp()` and the other factories, a builder on one
+  (`actingAs`, `json`, `withHeaders`, `withHeader`, `withCsrf`), or a call to a
+  function of the same file annotated to return one (an arrow whose body is one
+  counts). A test pins those builder names and the request methods to the members of
+  the `TestApp` class. Bindings are matched by name within the file, not by scope, and
+  a helper imported from another file is not followed: a request on what an imported
+  function returns (`(await testApp()).get('/posts')`) is reported unresolved.
+- The requests are `get`, `post`, `put`, `patch`, `delete` and `query`, plus the GET
+  `withCsrf(path = '/')` makes, and `agent().call('tool')`, matched to the route
+  whose derived tool has that name. `TestClient` (`@guren/testing/http`) is a second
+  request surface and is not read.
+- A path is a string, a template literal or a `+` chain, and an identifier bound in
+  the file to a `const` string is substituted. An interpolation that fills a whole
+  path segment is a runtime segment, which matches a route parameter and never a
+  literal segment (`` `/posts/${id}` `` reaches `/posts/:id`, never `/posts/create`).
+  The query string and fragment are dropped, an absolute URL loses its origin, and
+  empty segments are kept, since hono is strict (`/posts/` is not `/posts`). What
+  the scan cannot read is reported unresolved with its file, line and method, never
+  matched: a path that does not start with a spelled `/` (`get(path)`,
+  `` `${base}/posts` ``), an interpolation sharing a segment with text
+  (`` `/p-${id}` ``), and a request on an unknown receiver.
+- Route patterns are lexed with the shared `PATH_PARAM_PATTERN` and compared in the
+  CLI, since `@guren/cli` does not depend on hono at runtime; a test runs every
+  pattern shape it handles through hono itself. A segment that opens with a param is
+  that param (hono's label runs to the next `/`, so `:id.json` is one param), a
+  constraint that matches `/` takes the segments after it (`:path{.+}`), `*` is any
+  rest at the end and one segment elsewhere, and an optional `:name?` only ends a path.
+  A constraint JavaScript cannot compile makes the comparison unknown, never a miss.
+  Every matching route is listed: a static scan has no registration order to pick
+  hono's first match by. A request compared with every route that fits none is left
+  out: it reaches none of them.
+- Impact lists the requests that reach a route under every entry that reaches that
+  route (a changed route, action or controller, a model through its bound routes, a
+  view, validator, resource or policy through its actions), once per test file and
+  route, at the first request. Tests named after the route's controller are listed
+  beside them, labelled as matched by file name, because the reference application's
+  tests call the action without HTTP (below). Unresolved requests of the route's
+  method (for a tool call, any route publishing a tool), requests its pattern could
+  not be compared with, and test files that did not parse are noted beside the entry.
+  An altered or dropped route or action gets the note that no `TestApp` request
+  reaches it, which is the fact the characterization rule would act on, and only when
+  nothing unresolved or unparsed could have: an unreadable path is never read as
+  "uncovered".
+- Not derived: the characterization step of §5. Inserting it makes task derivation
+  depend on the application as well as the plan, which "the same plan always yields
+  the same tasks" and the plan digest the step records rest on do not allow as
+  written; where the step sits and who owns it is a §5 decision. The scan is
+  available to it, and to the skeleton rule that a generated test "must still call
+  the route its behaviour names".
+- Measured (Open Question 8). `examples/blog`: 26 test files, 29 routes, 0 `TestApp`
+  requests. Its 11 controller test files construct the controller and call the
+  action with `createControllerContext()`, so no HTTP request exists to read, static
+  or runtime, and a route-hit recorder in `TestApp` would see none either.
+  `examples/api` is the same (14 files, 11 routes, 0 requests). `examples/agents`:
+  6 test files, 20 routes, 40 request sites counted by hand, 40 read and matched to
+  the route a person reads them as reaching (16 of them through a runtime segment,
+  `` `/tickets/${id}/close` ``), 0 unresolved. That suite reaches 17 of the app's
+  20 routes, which is its coverage, not the scan's accuracy. The `create-app`
+  starters: 6 of 6. On this evidence the unreadable-path case is not what limits the
+  scan; tests that bypass HTTP are, and neither source sees them.
 
 Failures do not block rendering. They appear in the page beside the element
 they concern, and `guren plan:approve` refuses while any remain.
@@ -1989,6 +2057,11 @@ code and never from an earlier plan.
    paths in a way the static scan cannot read? If most do, the
    characterization rule fires on nothing and needs a runtime source instead
    (route hits recorded by `TestApp` during a test run).
+   **Partly answered (2026-09-22):** in this repository's suites every `TestApp`
+   request the scan met was readable (46 of 46), and the gap is elsewhere: the
+   reference applications test controllers without HTTP, which a runtime recorder
+   in `TestApp` would miss too. Suites outside the repository are unmeasured (§2,
+   test-coverage scan).
 9. ~~**A behaviours view.** Id-tagged test titles are enough to generate
    `docs/spec/behaviours.md` per entity, deterministically, under the existing
    drift gate. In this RFC, or a follow-up once plans have produced such tests?~~

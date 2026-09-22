@@ -14,6 +14,7 @@ const KIND_KEYS: Record<PlanImpactConsumerKind, string> = {
   policy: 'impact.kind.policy',
   page: 'impact.kind.page',
   test: 'impact.kind.test',
+  testRequest: 'impact.kind.testRequest',
   read: 'impact.kind.read',
   write: 'impact.kind.write',
   opaqueRead: 'impact.kind.opaqueRead',

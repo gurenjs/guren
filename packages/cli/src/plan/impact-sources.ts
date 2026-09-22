@@ -15,6 +15,7 @@ import { discoverControllerFiles, discoverModelFiles, discoverPolicyFiles, disco
 import { resolveInertiaPageFile } from '../inertia-pages'
 import { discoverParsedModels } from '../model-parser'
 import type { ParseCache } from '../parse-cache'
+import { scanTestRequests, testCoverage, type TestRequestScan, type UnresolvedTestRequest } from '../test-requests'
 import { classDetail, describeActions } from './app-detail'
 import type { PlanAppNames } from './app-state'
 import type { PlanImpactModel, PlanImpactReader, PlanImpactRoute, PlanImpactSources } from './impact'
@@ -43,10 +44,10 @@ function toolNames(definitions: RouteDefinition[] | undefined): Map<string, stri
   return new Map(deriveAgentTools(definitions ?? []).tools.map((tool) => [tool.routeName, tool.toolName]))
 }
 
-function impactRoutes(input: PlanImpactSourcesInput): PlanImpactRoute[] {
-  if (isUnreadable(input.routes)) return []
+function impactRoutes(input: PlanImpactSourcesInput, requests: TestRequestScan): { routes: PlanImpactRoute[]; unresolved: UnresolvedTestRequest[] } {
+  if (isUnreadable(input.routes)) return { routes: [], unresolved: requests.unresolved }
   const tools = toolNames(input.definitions)
-  return input.routes.map((route, index): PlanImpactRoute => {
+  const routes = input.routes.map((route, index): PlanImpactRoute => {
     const toolName = route.name === undefined ? undefined : tools.get(route.name)
     return {
       ...(route.name !== undefined ? { name: route.name } : {}),
@@ -58,6 +59,10 @@ function impactRoutes(input: PlanImpactSourcesInput): PlanImpactRoute[] {
       ...(toolName !== undefined ? { toolName } : {}),
     }
   })
+  const coverage = testCoverage(requests, routes)
+  for (const [index, tests] of coverage.byRoute) routes[index]!.tests = tests
+  for (const [index, tests] of coverage.uncertainByRoute) routes[index]!.uncertainTests = tests
+  return { routes, unresolved: coverage.unresolved }
 }
 
 interface ModelRead {
@@ -117,13 +122,17 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
     input.cache,
   )
 
+  const requests = await scanTestRequests(root, testFiles, input.cache)
+  const routes = impactRoutes(input, requests)
+
   return {
-    routes: impactRoutes(input),
+    routes: routes.routes,
     models: models.models,
     actions: 'methods' in input.controllers ? describeActions(root, input.controllers) : [],
     resources: reads.resources,
     policies,
     tests: testFiles.map(relative).sort(),
+    testRequests: { unresolved: routes.unresolved, unparsed: requests.unparsed },
     reads,
     unreadable,
     unparsedModels: models.unparsed,
