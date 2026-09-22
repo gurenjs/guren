@@ -71,10 +71,8 @@ export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery>
 }
 
 async function loadModules() {
-  const [render, renderPage, identity, approvals, state, closeDocs, targets, status, appState] = await Promise.all([
+  const [render, approvals, state, closeDocs, targets, status, appState] = await Promise.all([
     import('./plan-render'),
-    import('./plan/render'),
-    import('./plan/identity'),
     import('./plan/approvals'),
     import('./plan/state'),
     import('./plan/close-docs'),
@@ -84,10 +82,8 @@ async function loadModules() {
   ])
   return {
     readPlanFile: render.readPlanFile,
-    hasBaseline: renderPage.hasBaseline,
-    planHash: identity.planHash,
-    readPlanApprovals: approvals.readPlanApprovals,
-    approvalAt: approvals.approvalAt,
+    readPlanApprovalStanding: approvals.readPlanApprovalStanding,
+    describeUnapproved: approvals.describeUnapproved,
     planSlug: state.planSlug,
     planDocPath: closeDocs.planDocPath,
     planDocClosedHash: closeDocs.planDocClosedHash,
@@ -105,8 +101,11 @@ interface OpenPlan {
   plan: Plan
 }
 
-/** Skipped: a draft, a plan changed since its approval, or one `plan:close` closed at its current hash. */
-type Classified = { kind: 'open'; plan: OpenPlan } | { kind: 'skipped' } | { kind: 'unreadable'; reason: string }
+/**
+ * Skipped: a draft nobody approved, a plan changed since its approval, or one `plan:close` closed
+ * at its current hash. A draft with approvals beside it lost its baseline, which is reported.
+ */
+type Classified = { kind: 'open'; plan: OpenPlan } | { kind: 'skipped' } | { kind: 'unreadable' | 'baseline-removed'; reason: string }
 
 async function classify(m: Modules, appRoot: string, path: string, file: string): Promise<Classified> {
   let plan: Awaited<ReturnType<Modules['readPlanFile']>>['plan']
@@ -115,11 +114,12 @@ async function classify(m: Modules, appRoot: string, path: string, file: string)
   } catch (error) {
     return { kind: 'unreadable', reason: (error as Error).message }
   }
-  if (!m.hasBaseline(plan)) return { kind: 'skipped' }
-  const approvals = await m.readPlanApprovals(path)
-  if (approvals.unreadable) return { kind: 'unreadable', reason: approvals.unreadable }
-  const hash = m.planHash(plan)
-  if (!approvals.value || !m.approvalAt(approvals.value, hash)) return { kind: 'skipped' }
+  // The approval rule every gated plan command reads (RFC 0030 §4), so the two cannot disagree.
+  const standing = await m.readPlanApprovalStanding(path, plan)
+  if (standing === undefined || standing.state === 'unapproved') return { kind: 'skipped' }
+  if (standing.state === 'unreadable') return { kind: 'unreadable', reason: standing.reason }
+  if (standing.state === 'baseline-removed') return { kind: 'baseline-removed', reason: m.describeUnapproved(file, standing, 'it is not checked') }
+  const hash = standing.hash
 
   const doc = join(appRoot, m.planDocPath(m.planSlug(path)))
   let source: string | undefined
@@ -130,7 +130,8 @@ async function classify(m: Modules, appRoot: string, path: string, file: string)
   }
   // A revision approved after the close carries another hash, and is open work again.
   if (source !== undefined && m.planDocClosedHash(source) === hash) return { kind: 'skipped' }
-  return { kind: 'open', plan: { path, file, plan } }
+  // Only a plan with a baseline has the hash an `approved` standing names.
+  return { kind: 'open', plan: { path, file, plan: plan as Plan } }
 }
 
 type ClaimKind = PlanAppTarget['kind'] | 'parent'
@@ -263,6 +264,16 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
     const classified = await classify(m, appRoot, path, file)
     if (classified.kind === 'open') open.push(classified.plan)
     else if (classified.kind === 'unreadable') results.push(unreadable(file, `${file} was not checked: ${classified.reason}`, 'Fix the file so guren plan:status can read it.'))
+    else if (classified.kind === 'baseline-removed') {
+      results.push({
+        key: `plan:baseline-removed:${file}`,
+        title: 'Approved plan lost its baseline',
+        status: 'warn',
+        message: relative(classified.reason),
+        filePath: file,
+        advisory: true,
+      })
+    }
   }
 
   for (const [slug, files] of slugs) {

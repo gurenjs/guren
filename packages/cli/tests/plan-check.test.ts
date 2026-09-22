@@ -194,14 +194,21 @@ describe('guren check --plan', () => {
   })
 
   describe('which plans are judged', () => {
-    test('should judge a draft by neither rule, even beside an approvals file', async () => {
+    test('should judge a draft nobody approved by neither rule', async () => {
       const dir = await createApp('draft')
-      const draft = loadCommentsPlan()
-      const hash = planHash(PlanSchema.parse(loadApprovedCommentsPlan()))
-      await writeFile(planApprovalsPath(join(dir, 'comments.plan.json')), JSON.stringify({ approvalsVersion: 1, approvals: [{ hash, approvedAt: APPROVED_AT }] }), 'utf8')
-      await writeFile(join(dir, 'comments.plan.json'), JSON.stringify(draft), 'utf8')
 
       expect(await checkPlans({ cwd: dir })).toEqual([])
+    })
+
+    test('should report a draft with approvals beside it as a plan that lost its baseline, and judge it by neither rule', async () => {
+      const dir = await createDriftedApp('baseline-removed')
+      await writeFile(join(dir, 'comments.plan.json'), JSON.stringify(loadCommentsPlan()), 'utf8')
+
+      const results = await checkPlans({ cwd: dir })
+
+      expect(results.map((result) => result.key)).toEqual(['plan:baseline-removed:comments.plan.json'])
+      expect(results[0]).toMatchObject({ status: 'warn', advisory: true, filePath: 'comments.plan.json' })
+      expect(results[0].message).toContain('comments.plan.json has lost its baseline, but 1 approval(s) are recorded beside it, so it is not checked')
     })
 
     test('should judge a plan changed since its approval by neither rule', async () => {

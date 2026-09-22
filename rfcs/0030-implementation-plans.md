@@ -1643,12 +1643,16 @@ these readings (`packages/cli/src/plan-check.ts`).
   A plan kept anywhere else is not checked. A directory that will not list is
   reported, and so are two plans sharing a slug, since they share one state
   file and one doc node.
-- Open means approved at its current hash (`planHash()` in the approvals beside
-  it) and not closed. Closed is what `plan:close` writes: `closed: true` in
-  `docs/plans/<slug>.md` with `plan_hash` equal to that hash, so a revision
-  approved after the close is open again. A draft, and a plan edited since its
-  approval, are judged by neither rule, since nobody has agreed to them yet.
-  Nothing is reported when no plan has a finding; the counts are `plan:status`'s.
+- Open means approved and not closed. Approved is `readPlanApprovalStanding()`,
+  the reading the gated plan commands refuse on, so the two cannot disagree.
+  Closed is what `plan:close` writes: `closed: true` in
+  `docs/plans/<slug>.md` with `plan_hash` equal to the current hash, so a
+  revision approved after the close is open again. A draft nobody approved,
+  and a plan edited since its approval, are judged by neither rule, since
+  nobody has agreed to them yet. A draft with approvals beside it
+  (`baseline-removed`) is reported, because deleting a baseline would otherwise
+  take an approved plan out of every rule unnoticed. Nothing is reported when
+  no plan has a finding; the counts are `plan:status`'s.
 - `drifted` is whatever `planStatusFile()` reports, verification overlay
   included, the function `plan:status` prints. The application is loaded once,
   with `detail`, and only when an open plan exists.
