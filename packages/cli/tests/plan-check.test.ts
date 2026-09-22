@@ -51,9 +51,9 @@ function column(id: string, kind: string, name: string): Record<string, unknown>
 }
 
 /** A second plan altering `posts` under another id and class name than the comments plan's `model.post`. */
-function statusPlan(options: { table?: string; name?: string; column?: string } = {}): PlanDocument {
+function statusPlan(options: { table?: string; name?: string; column?: string; id?: string } = {}): PlanDocument {
   const name = options.name ?? 'Entry'
-  return planDocument(`${name} status`, { models: [model(`model.${name.toLowerCase()}`, 'alter', name, options.table ?? 'posts', { columns: [column(`column.${name.toLowerCase()}.${options.column ?? 'status'}`, 'add', options.column ?? 'status')] })] })
+  return planDocument(`${name} status`, { models: [model(options.id ?? `model.${name.toLowerCase()}`, 'alter', name, options.table ?? 'posts', { columns: [column(`column.${name.toLowerCase()}.${options.column ?? 'status'}`, 'add', options.column ?? 'status')] })] })
 }
 
 async function writePlan(path: string, document: PlanDocument, approve = true): Promise<void> {
@@ -313,18 +313,44 @@ describe('guren check --plan', () => {
   })
 
   describe('overlap', () => {
-    test('should report two open plans changing one table under different ids', async () => {
+    test('should report two plans altering one model class under different ids, and not its table', async () => {
       const dir = await createApp('overlap')
       await writePlan(join(dir, 'comments.plan.json'), loadApprovedCommentsPlan())
       await writeWorkspaceFiles(dir, { 'docs/plans/status/.keep': '' })
-      await writePlan(join(dir, 'docs/plans/status/plan.json'), statusPlan())
+      await writePlan(join(dir, 'docs/plans/status/plan.json'), statusPlan({ name: 'Post', id: 'model.article' }))
 
       const overlap = byKey(await checkPlans({ cwd: dir }), 'plan:overlap:')
 
       expect(overlap).toHaveLength(1)
       expect(overlap[0]).toMatchObject({ status: 'warn', advisory: true })
       expect(overlap[0].message).toContain('comments.plan.json and docs/plans/status/plan.json')
-      expect(overlap[0].message).toContain('table posts (model.post / model.entry)')
+      expect(overlap[0].message).toContain('model class Post (model.post / model.article)')
+      expect(overlap[0].message).not.toContain('table posts')
+    })
+
+    test('should not report two plans altering one table under different classes when their columns differ', async () => {
+      const dir = await createApp('alter-apart')
+      await writePlan(join(dir, 'comments.plan.json'), loadApprovedCommentsPlan())
+      await writeWorkspaceFiles(dir, { 'docs/plans/status/.keep': '' })
+      await writePlan(join(dir, 'docs/plans/status/plan.json'), statusPlan())
+
+      expect(await overlapMessage(dir)).toBe('')
+    })
+
+    test('should not report two plans adding different columns under one existing model', async () => {
+      const add = (column_: string) => planDocument(`Add ${column_}`, { models: [model('model.post', 'existing', 'Post', 'posts', { columns: [column(`column.post.${column_}`, 'add', column_)] })] })
+      const dir = await createAppWithPlans('existing-apart', { status: add('status'), priority: add('priority') })
+
+      expect(await overlapMessage(dir)).toBe('')
+    })
+
+    test('should not report a class rename against a column added under that class, since the table stays', async () => {
+      const dir = await createAppWithPlans('class-rename', {
+        rename: planDocument('Rename Post', { models: [model('model.post', 'rename', 'Article', 'posts', { from: 'Post' })] }),
+        status: planDocument('Status', { models: [model('model.post', 'existing', 'Post', 'posts', { columns: [column('column.post.status', 'add', 'status')] })] }),
+      })
+
+      expect(await overlapMessage(dir)).toBe('')
     })
 
     test('should not report two plans adding a column of one name to different tables', async () => {

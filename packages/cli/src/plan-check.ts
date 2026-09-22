@@ -153,7 +153,8 @@ function inModule(root: string): string {
 /**
  * The names a target occupies, by structured key. A rename occupies both of its names, a
  * column is keyed under its table, and a route also by its endpoint. A changed column or
- * action also claims its parent, which collides only with a plan renaming or dropping it.
+ * action also claims its parent, which collides only with a plan renaming or dropping it; so
+ * does a model's `alter` on its table. A class rename never moves the table, which stays `existing`.
  */
 function claims(target: PlanAppTarget): Array<[string, Claim]> {
   if (target.kind === 'existing') return []
@@ -169,7 +170,9 @@ function claims(target: PlanAppTarget): Array<[string, Claim]> {
       ...[...new Set([lookup, current])].map((table) => parent(['tables', '', table], `table ${table}`)),
     ]
   }
-  const result = names.map((name) => own([target.appSection, root, name], `${target.noun} ${name}${inModule(root)}`))
+  // A model's `alter` names its class, not its table: the columns carry the table-level change.
+  const claim = target.appSection === 'tables' && target.kind === 'alter' ? parent : own
+  const result = names.map((name) => claim([target.appSection, root, name], `${target.noun} ${name}${inModule(root)}`))
   if (target.endpoint) result.push(own(['endpoint', target.endpoint], `endpoint ${target.endpoint}`))
   if (target.appSection === 'actions') {
     const classes = new Set(names.map((name) => name.slice(0, name.lastIndexOf('.'))))
