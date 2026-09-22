@@ -240,7 +240,7 @@ const planRenderCommand = defineCommand({
     const appRoot = args.app ?? process.cwd()
     const rendered = await renderPlanFile(args.plan, {
       output: args.output,
-      app: () => loadPlanAppState(appRoot),
+      app: () => loadPlanAppState(appRoot, { impact: true }),
       locale: args.locale,
       appLocale: () => readAppDefaultLocale(appRoot),
     })

@@ -165,5 +165,22 @@
   "breaking.columnDropped": "カラムを削除します。",
   "breaking.columnAltered": "カラムの型や制約が変わります。",
   "breaking.routeDropped": "ルートを削除します。",
-  "breaking.agentToolChanges": "公開済みのエージェントツール {tool} が変わります。"
+  "breaking.agentToolChanges": "公開済みのエージェントツール {tool} が変わります。",
+
+  "impact.heading": "影響範囲 (下限): スキャンで見つかったものだけで、変更が及ぶすべてではありません",
+  "impact.none": "見つかりませんでした。一覧が空でも、影響がないとは限りません。",
+  "impact.kind.route": "ルート {name}",
+  "impact.kind.apiRoute": "ApiRoutes のエントリ {name}",
+  "impact.kind.agentTool": "エージェントツール {name}",
+  "impact.kind.action": "コントローラーアクション {name}",
+  "impact.kind.model": "リレーション {name}",
+  "impact.kind.resource": "Resource {name}",
+  "impact.kind.policy": "Policy {name}",
+  "impact.kind.page": "ページ {name}",
+  "impact.kind.test": "テスト {name}",
+  "impact.kind.read": "{name} が読んでいます",
+  "impact.kind.readVia": "{name} が {via} 経由で読んでいます",
+  "impact.kind.opaqueRead": "{name} が静的に特定できないプロパティを読んでいます",
+  "impact.unreadable": "{reader} の読み取りが失敗したため、ここでは何も見つけられていません: {reason}",
+  "impact.unreadableFiles": "次のファイルは読めなかったため、そこでの参照は含まれていません: {files}"
 }

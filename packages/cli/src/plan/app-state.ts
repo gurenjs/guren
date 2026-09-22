@@ -34,6 +34,8 @@ import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
 import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
 import { loadPlanAppDetail, type PlanAppDetail } from './app-detail'
+import type { PlanImpactSources } from './impact'
+import { loadPlanImpactSources } from './impact-sources'
 
 const POLICIES_DIR = 'app/Policies'
 
@@ -129,6 +131,8 @@ export interface PlanAppState {
   apiOnly: boolean
   /** What `plan:status` compares against; present only when the loader was asked for it. */
   detail?: PlanAppDetail
+  /** What Impact reads (RFC 0030 §2); present only when the loader was asked for it. */
+  impact?: PlanImpactSources
 }
 
 export function isUnreadable<T>(section: T[] | PlanAppUnreadable): section is PlanAppUnreadable {
@@ -146,8 +150,11 @@ const VALIDATOR_SECTION_REASON =
  */
 export async function loadPlanAppState(
   cwd: string,
-  /** `detail` also imports `db/schema.ts` (RFC 0030 §6), which `plan:render` has no reason to run. */
-  options: { routesFile?: string; detail?: boolean } = {},
+  /**
+   * `detail` also imports `db/schema.ts` (RFC 0030 §6), which `plan:render` has no reason to
+   * run; `impact` adds the static readers Impact needs and imports nothing.
+   */
+  options: { routesFile?: string; detail?: boolean; impact?: boolean } = {},
 ): Promise<PlanAppState> {
   const root = resolve(cwd)
   const roots = await listAppRoots(root).catch((): AppRoot[] => [])
@@ -174,6 +181,9 @@ export async function loadPlanAppState(
     routes: isUnreadable(routes.routes) ? routes.routes : routes.routes.map(({ name, method, path }) => ({ name, method, path })),
     tables,
     apiOnly,
+  }
+  if (options.impact) {
+    state.impact = await loadPlanImpactSources({ root, routes: routes.routes, controllers: controllers.scan, pages: isUnreadable(pages) ? pages : appNames(pages) })
   }
   if (!options.detail) return state
 

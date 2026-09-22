@@ -6,6 +6,7 @@
 
 import type { PlanDiagram } from '../diagram'
 import type { PlanFlowLayout } from '../flow'
+import type { PlanImpactEntry } from '../impact'
 import type { PlanDictionary, PlanLocale } from '../locales'
 import type { Plan, PlanDraft, PlanElementSection } from '../schema'
 import type { PlanCheckResult } from '../validate'
@@ -44,6 +45,8 @@ export interface PlanPagePayload {
   planHash: string | null
   checks: PlanCheckResult[]
   breaking: PlanBreakingChange[]
+  /** `null` when the page was rendered with no application to read, which is not an empty Impact. */
+  impact: PlanImpactEntry[] | null
   diagram: PlanDiagram
   /** Placed here rather than in the page: a flow's layout is the same everywhere it is drawn. */
   flows: PlanFlowLayout[]

@@ -10,6 +10,7 @@ import { basename, resolve } from 'node:path'
 import { CliError, formatSchemaIssues } from './cli-error'
 import type { PlanAppState } from './plan/app-state'
 import { isPlanLocale, matchPlanLocale, PLAN_LOCALES, type PlanLocale } from './plan/locales'
+import { planImpact, type PlanImpactEntry } from './plan/impact'
 import { hasBaseline, renderPlanHtml } from './plan/render'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { writeFileSafe } from './utils'
@@ -36,6 +37,8 @@ export interface RenderedPlanFile {
   path: string
   /** Every §2 finding, as the page received them. */
   checks: PlanCheckResult[]
+  /** What Impact found, or `null` when the application state carried no Impact sources. */
+  impact: PlanImpactEntry[] | null
 }
 
 /**
@@ -105,7 +108,14 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
   const app = typeof options.app === 'function' ? await options.app() : options.app
   // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to render nothing.
   const checks = validatePlan(plan, app)
-  const html = renderPlanHtml({ plan, checks, planFile: basename(absolutePlan), uiLocale: await pageLocale(plan, options) })
+  const impact = app.impact ? planImpact(plan, app.impact) : null
+  const html = renderPlanHtml({
+    plan,
+    checks,
+    ...(impact ? { impact } : {}),
+    planFile: basename(absolutePlan),
+    uiLocale: await pageLocale(plan, options),
+  })
   const target = options.output ? resolve(cwd, options.output) : planOutputPath(absolutePlan)
 
   // The plan is the input every later step reads, and this command keeps no copy of it,
@@ -125,5 +135,5 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
     if (error instanceof CliError) throw error
     throw new CliError(`Cannot write the page to ${target}: ${(error as Error).message}`)
   }
-  return { path: target, checks }
+  return { path: target, checks, impact }
 }

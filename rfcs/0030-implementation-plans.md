@@ -361,6 +361,38 @@ nothing was found, never that nothing is affected. Dropping a column, changing
 a type, renaming a route and altering a published agent tool are flagged as
 breaking regardless of what Impact found.
 
+**Amended in implementation (Impact):** what shipped, in `packages/cli/src/plan/impact.ts`
+(pure) and `impact-sources.ts` (the readers), and where it stops.
+
+- Impact is computed for every element whose change is `alter`, `rename` or `drop`, and
+  for a model whose table is renamed. A renamed element is looked up by its `from`, the
+  name the application has today. Its list may be empty, and the page says an empty
+  list is not proof of anything; a page rendered with no application draws no Impact.
+- The readers are the ones named above, all static: model relationships, route
+  bindings, the route graph (with each route's `ApiRoutes` entry and the tool
+  `deriveAgentTools()` would name), resources and policies, controller actions whose
+  body names the element outside comments and strings (a mention, and labelled so),
+  and tests by file name. `plan:render` asks for them with `loadPlanAppState({ impact:
+  true })`, which imports no `db/schema.ts`, so the command still runs no more
+  application code than the route graph needs.
+- The column-consumer scan (`column-consumers.ts`) reads the AST of controllers,
+  resources and page components. A value is a model's record where the file says so: a
+  query chain on the model class imported from its module, `this.model(M)`,
+  `this.resource` in a resource that imports the model, or an annotation naming
+  `MRecord`, a tied resource's data type, `Data.M` or `PaginatedPageProps` of one. It
+  follows plain aliases, destructuring, `for...of` and element callbacks, and nothing
+  across a call or a file. A method call on a record is not a read; `post[key]` and a
+  rest pattern are reported as reads no static scan can name. A page's read is
+  reported through the resource whose data type tied it, since the page reads the
+  resource's key.
+- The breaking rule stays the plan's own (`planBreakingChanges()`), with one addition
+  only the application can answer: an altered route, action or controller whose route
+  publishes an agent tool is flagged even when the plan does not declare the tool.
+- Deferred: the test-coverage scan of `TestApp` calls and the characterization step it
+  feeds. It is a reader of its own with an open accuracy question (Open Question 8),
+  and its rule belongs to task derivation (§5). Impact names tests by file name until
+  it lands.
+
 Failures do not block rendering. They appear in the page beside the element
 they concern, and `guren plan:approve` refuses while any remain.
 

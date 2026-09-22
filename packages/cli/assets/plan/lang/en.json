@@ -165,5 +165,22 @@
   "breaking.columnDropped": "The column is dropped.",
   "breaking.columnAltered": "The column changes shape.",
   "breaking.routeDropped": "The route is dropped.",
-  "breaking.agentToolChanges": "The published agent tool {tool} changes."
+  "breaking.agentToolChanges": "The published agent tool {tool} changes.",
+
+  "impact.heading": "Impact, a lower bound: what the scanners found, not everything the change reaches",
+  "impact.none": "Nothing found. An empty list is not proof that nothing is affected.",
+  "impact.kind.route": "Route {name}",
+  "impact.kind.apiRoute": "ApiRoutes entry {name}",
+  "impact.kind.agentTool": "Agent tool {name}",
+  "impact.kind.action": "Controller action {name}",
+  "impact.kind.model": "Relationship {name}",
+  "impact.kind.resource": "Resource {name}",
+  "impact.kind.policy": "Policy {name}",
+  "impact.kind.page": "Page {name}",
+  "impact.kind.test": "Test {name}",
+  "impact.kind.read": "{name} reads it",
+  "impact.kind.readVia": "{name} reads it through {via}",
+  "impact.kind.opaqueRead": "{name} reads a property no static scan can name",
+  "impact.unreadable": "The {reader} reader could not run, so it found nothing here: {reason}",
+  "impact.unreadableFiles": "Not scanned, so any reads in them are missing: {files}"
 }
