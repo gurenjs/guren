@@ -201,7 +201,7 @@ bunx guren plan:render docs/plans/comments/plan.json
 
 ### Impact
 
-計画が変更・改名・削除する要素ごとに、アプリケーションの中でそれに依存しているものをページが一覧にします。対象はリレーション、ルートとその `ApiRoutes` のエントリとエージェントツール、Resource、Policy、コントローラーのアクション、ファイル名で見つけたテスト、そしてカラムならそれを読み書きしている箇所です。ブログの `posts.excerpt` を `summary` に改名する計画では、カラムの下に次の一覧が出ます。
+計画が変更・改名・削除する要素ごとに、アプリケーションの中でそれに依存しているものをページが一覧にします。対象はリレーション、ルートとその `ApiRoutes` のエントリとエージェントツール、Resource、Policy、コントローラーのアクション、テスト、そしてカラムならそれを読み書きしている箇所です。ブログの `posts.excerpt` を `summary` に改名する計画では、カラムの下に次の一覧が出ます。
 
 ```text
 PostResource reads it                              app/Http/Resources/PostResource.ts:32
@@ -210,6 +210,25 @@ posts/Show reads it through PostResource           resources/js/pages/posts/Show
 PostController.store writes data no static scan can name the columns of
 PostController.update writes data no static scan can name the columns of
 ```
+
+テストは二つの方法で見つけます。一つは `TestApp` のリクエスト (`get`、`post`、`put`、`patch`、`delete`、`query` とエージェントツールの呼び出し) をルートグラフと照合する方法で、ルートにはそこに届くリクエストが並びます。もう一つはファイル名で、コントローラーやモデルの名前が付いたテストファイルも「ファイル名で対応」として並びます。アクションを直接呼ぶテストには、読み取れるリクエストがないためです。例の実装を終えたあとで、コメント削除のルートを移す計画を書くと次のように出ます。
+
+```text
+Route comments.destroy
+ApiRoutes entry comments.destroy
+Request DELETE /comments/${…} reaches comments.destroy    tests/comments.test.ts:38
+```
+
+ブログにもともとあるテストは HTTP を通さずにコントローラーを呼ぶので、`posts.show` を移す計画では、ファイル名で見つかったテストだけが並び、リクエストは見つかりません。
+
+```text
+Route posts.show
+ApiRoutes entry posts.show
+Test tests/controllers/PostController.test.ts, named after it
+No TestApp request in the existing tests reaches the routes above.
+```
+
+最後の注記が出るのは、見落としの可能性がないときだけです。パスを読めないリクエスト (変数から組み立てたもの、`TestApp` と判断できない受け手に対するもの)、ルートパラメータの制約を確かめられなかったリクエスト、解析できなかったテストファイルがあれば、代わりにそのことが要素の横に注記されます。
 
 Impact は下限です。静的な走査なので、別の関数やファイルに渡った値、再代入、変数に入れたカラム名は追えません。一覧が空でも、影響がないとは限りません。何も見つからなかったというだけです。カラムの削除や形の変更、ルートの改名や削除、公開済みエージェントツールの変更は、Impact の結果にかかわらず breaking として示されます。
 
@@ -240,7 +259,15 @@ Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recor
 
 validator はどのスキャナーも読まないので、ハッシュを取りません。それ以外のセクションが読めなかった場合、承認は拒否され、ハッシュのないまま残る要素が示されます。`--allow-unstamped` を付けると、それらを除いて承認します。
 
-計画を識別するのはハッシュです。baseline を含めた計画の SHA-256 で、検証の記録も waiver もこのハッシュを名指しします。承認後に手で変えた計画は別の計画になるので、もう一度承認し、各ステップの検証もやり直すことになります。baseline が書き直されることはありません。
+計画を識別するのはハッシュです。baseline を含めた計画の SHA-256 で、承認も検証の記録も waiver もこのハッシュを名指しします。承認後に編集した計画は別の計画です。baseline を持つ計画の現在のハッシュをどの承認も名指ししていなければ、`plan:next`、`plan:verify`、`plan:waive`、`plan:close` はその計画を拒否します。
+
+```text
+ ERROR  docs/plans/comments/plan.json is not approved at its current hash dc9a6ce3ad173e23290f743293fa0e3495c932b3b2cdf07c0cda8c9b063a5465, so no step of it is handed out: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve docs/plans/comments/plan.json once the plan says what you mean to build.
+```
+
+`plan:status` と `plan:render` は拒否しません。承認する前に変更を読むためのコマンドだからです。baseline のない下書きにはハッシュがないので、`plan:next` と `plan:verify` は下書きをこれまでどおり受け付けます。ただし隣に承認の記録がある下書きは、未承認の計画と同じく拒否されます。承認済みの計画から `baseline` を消しても、この確認からは逃れられません。
+
+編集した計画をもう一度承認すると、新しいハッシュが記録され、baseline はそのまま残ります。各ステップの検証は新しいハッシュのもとでやり直しです。承認の前には検査と質問の確認がもう一度走り、その時点のアプリケーションと突き合わされます。計画自身の `add` の要素がすでにコードにあると、検査はそれを「既に存在する」と報告し、承認は拒否されます。計画の変更は実装を始める前に済ませてください。
 
 ## 実装: `plan:next` と `plan:verify`
 
@@ -283,7 +310,7 @@ Implement this step only, then run `bunx guren plan:verify docs/plans/comments/p
 Marked in .guren/plans/comments.state.json
 ```
 
-`plan:next` が表示するのは一つのステップだけで、計画全体は出しません。`--json` を付けると同じ内容をデータで返します。表示したステップには状態ファイルで印が付き、Stop フックはこの印を読みます。未コミットの変更がある作業ツリーは、それが印の付いたステップ自身の作業でない限り拒否されます。`plan:next` はステップに取りかかる前に実行してください。
+`plan:next` が表示するのは一つのステップだけで、計画全体は出しません。`--json` を付けると同じ内容をデータで返します。表示したステップには状態ファイルで印が付き、Stop フックはこの印を読みます。承認のない計画は先に述べたとおり拒否されます。未コミットの変更がある作業ツリーも、それが印の付いたステップ自身の作業でない限り拒否されます。`plan:next` はステップに取りかかる前に実行してください。
 
 ```text
  ERROR  The working tree under /app has uncommitted changes (paths relative to the repository root), and one step is one commit. Commit or discard them first:
@@ -350,7 +377,7 @@ task/entity/model.comment/scaffold: blocked (354 ms)
       `bun run typecheck` exited 127: a tool it needs is not installed
 ```
 
-`plan:verify` はアプリケーションを実際に動かします。`bun test` はアプリケーションを起動し、`db:migrate` は設定されたデータベースを開きます。開発用かテスト用のデータベースに向けて実行し、本番には向けないでください。各コマンドは 600 秒を過ぎると `blocked` になり、`--timeout <seconds>` で変えられます。`--step` を省くと全ステップを順に実行し、記録がまだ有効なステップは飛ばします。`--ci` は実行したステップが一つでも verified にならなければ終了コード 1 を返し、`--json` は結果をデータで出します。
+`plan:verify` は承認のない計画を、何も実行しないうちに拒否します。誰も合意していないハッシュのもとで結果が記録されることはありません。そのうえで、`plan:verify` はアプリケーションを実際に動かします。`bun test` はアプリケーションを起動し、`db:migrate` は設定されたデータベースを開きます。開発用かテスト用のデータベースに向けて実行し、本番には向けないでください。各コマンドは 600 秒を過ぎると `blocked` になり、`--timeout <seconds>` で変えられます。`--step` を省くと全ステップを順に実行し、記録がまだ有効なステップは飛ばします。`--ci` は実行したステップが一つでも verified にならなければ終了コード 1 を返し、`--json` は結果をデータで出します。
 
 ### 一ステップ、一コミット
 
@@ -392,6 +419,15 @@ plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/da
 ```
 
 `plan:next` は stalled のステップを理由とともにもう一度返します。stall をどう収めるかは人が決めます。環境を直すか、計画を改めるか、要素を waive するかの三つです。
+
+承認後に計画が編集されていると、フックは次の stop でエージェントを作業に戻さず、ステップを stalled にします。作業を続けても計画は承認されないからです。以降の stop では何も言わず、計画が承認されれば `plan:next` がそのステップをもう一度渡します。
+
+```text
+plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/data): giving up, docs/plans/comments/plan.json is not approved at its current hash dc9a6ce3ad173e23290f743293fa0e3495c932b3b2cdf07c0cda8c9b063a5465, so the step is not verified against it: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve docs/plans/comments/plan.json once the plan says what you mean to build.
+The step is recorded as stalled; `bunx guren plan:next docs/plans/comments/plan.json` returns it once an approval names the plan's hash.
+```
+
+`plan-implement` スキルは、エージェントに拒否を報告させ、承認は人に任せるよう指示しています。
 
 ## 進捗を読む: `plan:status`
 
@@ -444,6 +480,12 @@ Planned, not checkable:
   policy.comment: abilities
 ```
 
+baseline を持つ計画では、レポートの最後に承認の状態が出ます。現在のハッシュを名指しする承認があればその日時と承認者、なければ拒否するコマンドの一覧です。
+
+```text
+Not approved at this hash: plan:next, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.
+```
+
 検証結果は git が無視する `.guren/plans/` に置かれます。検証結果は一台のマシンについての事実だからです。新しく clone したリポジトリや CI では、そこで `plan:verify` を実行するまで、どの要素も `wired` までにとどまります。
 
 ### 鮮度
@@ -466,7 +508,27 @@ Held, since what they depend on changed after the plan was approved:
       fail  The route name "comments.store" already exists in this application.
 ```
 
-`plan:next` は、その要素に依存しない次のステップを返し、終了コード 0 で終わります。保留を解くのは人の判断です。いまのアプリケーションに合わせて計画を書き直してもう一度承認するか、動かした変更を元に戻します。
+`plan:next` は、その要素に依存しない次のステップを返し、終了コード 0 で終わります。保留を解くのは人の判断です。いまのアプリケーションに合わせて計画を書き直してもう一度承認するか (「承認」の節で述べた再承認の制約があります)、動かした変更を元に戻します。
+
+### 計画をまとめて見る: `guren check --plan`
+
+```bash
+bunx guren check --plan
+```
+
+`check --plan` は、開いている計画をまとめて調べます。対象はアプリケーションのルートにある `*.plan.json` と、`docs/plans/` の下の `plan.json` と `*.plan.json` です。開いているとは、現在のハッシュで承認されていて、まだ閉じていないことを指します。報告するのは、`drifted` の要素を持つ計画と、同じ要素を変更する二つの計画です。同じかどうかは id ではなく、アプリケーションの中で何を変えるかで判断します。例の途中で、`posts.excerpt` を改名する二つ目の計画を承認したときの出力です。
+
+```text
+ WARN  [warn] Approved plan drifted: docs/plans/comments/plan.json has 4 drifted element(s): model.comment, controller.comments, resource.comment, policy.comment.
+
+ℹ        → Run guren plan:status docs/plans/comments/plan.json for what differs, then fix the code or revise the plan.
+
+ WARN  [warn] Open plans overlap: docs/plans/comments/plan.json and docs/plans/post-summary/plan.json are both approved and open, and both change: model class Post (model.post / model.post).
+
+ℹ        → Land or close one plan before implementing the other, or revise one so they stop changing the same element.
+```
+
+結果はすべて警告で、終了コードは 0 です。計画の検査は `--plan` を付けたときだけ走ります。`db/schema.ts` と validator のファイルを import するので、フラグなしの `guren check`、`check --ci`、`guren gate` には含まれません。隣に承認の記録がある下書き (baseline を消した計画) と、読めない承認ファイルも報告されます。それ以外の下書きと、承認後に編集した計画は、まだ誰も合意していないので対象外です。
 
 ## 要素を waive する: `plan:waive`
 
@@ -491,13 +553,14 @@ The decision log is committed with the plan. A waiver names this plan hash, so a
 - 計画にない id
 - `plan:status` が判定しないセクション (flows、tasks、振る舞い、質問) の要素
 - baseline のない下書き
+- 現在のハッシュをどの承認も名指ししていない計画
 - `--reason` がない
 
-`--remove` は、指定した要素の waiver を取り下げます。`plan-implement` スキルは、エージェントに stall を報告させ、waiver の判断は人に任せるよう指示しています。
+`--remove` は、指定した要素の waiver を取り下げます。こちらは上の確認を行わないので、waive した要素を落とした改訂版の計画にも使えます。`plan-implement` スキルは、エージェントに stall を報告させ、waiver の判断は人に任せるよう指示しています。
 
 ## 閉じる: `plan:close`
 
-計画が変更する要素がすべて `verified` か `waived` になったら、計画を閉じられます。それまでは拒否され、残っている要素が示されます。
+現在のハッシュを名指しする承認があり、計画が変更する要素がすべて `verified` か `waived` になったら、計画を閉じられます。それまでは拒否され、残っている要素が示されます。
 
 ```text
  ERROR  docs/plans/comments/plan.json is not closed: every element must be verified (guren plan:verify) or waived with a reason (guren plan:waive), and these are not:
@@ -535,7 +598,7 @@ Closed 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0. The pla
 <!-- /guren:plan comments rules -->
 ```
 
-マーカーの外の文章は自由に編集できます。同じエンティティについて後の計画を閉じても、置き換わるのはその計画自身のマーカーの中だけです。見出しは計画の `locale` に従い、`ja` の計画なら日本語で書かれます。ルールはそれを確かめる振る舞いの id を引用し、どのテストも持たない id を引用していれば `bunx guren check --docs` が警告します。waiver を残して閉じた計画では、waiver ごとに `make:adr` のコマンドも表示されます。決定として残す価値のあるものに使ってください。削除されるものはありません。計画、承認、決定ログはコミットされたまま残り、コードが何であるかの記述は引き続き `bunx guren spec:generate` の `docs/spec/` が担います。
+マーカーの外の文章は自由に編集できます。同じエンティティについて後の計画を閉じても、置き換わるのはその計画自身のマーカーの中だけです。見出しは計画の `locale` に従い、`ja` の計画なら日本語で書かれます。ルールはそれを確かめる振る舞いの id を引用し、どのテストも持たない id を引用していれば `bunx guren check --docs` が警告します。waiver を残して閉じた計画では、waiver ごとに `make:adr` のコマンドも表示されます。決定として残す価値のあるものに使ってください。閉じた計画は `check --plan` の対象から外れます。閉じるときに `docs/plans/<slug>.md` へ `closed: true` と計画のハッシュが書かれるためで、閉じたあとに承認した改訂版は再び開いた計画として扱われます。削除されるものはありません。計画、承認、決定ログはコミットされたまま残り、コードが何であるかの記述は引き続き `bunx guren spec:generate` の `docs/spec/` が担います。
 
 ## まだ使えないもの
 

@@ -191,7 +191,7 @@ The checks run against the application as it is now. They report, among others, 
 
 ### Impact
 
-For every element the plan alters, renames or drops, the page lists what in the application depends on it: relationships, routes with their `ApiRoutes` entries and agent tools, resources, policies, controller actions, tests by file name, and for a column the places that read or write it. A plan that renames `posts.excerpt` to `summary` in the blog shows, under the column:
+For every element the plan alters, renames or drops, the page lists what in the application depends on it: relationships, routes with their `ApiRoutes` entries and agent tools, resources, policies, controller actions, tests, and for a column the places that read or write it. A plan that renames `posts.excerpt` to `summary` in the blog shows, under the column:
 
 ```text
 PostResource reads it                              app/Http/Resources/PostResource.ts:32
@@ -200,6 +200,25 @@ posts/Show reads it through PostResource           resources/js/pages/posts/Show
 PostController.store writes data no static scan can name the columns of
 PostController.update writes data no static scan can name the columns of
 ```
+
+Tests are found two ways. A `TestApp` request (`get`, `post`, `put`, `patch`, `delete`, `query`, and an agent tool call) is matched against the route graph, so a route lists the requests that reach it. A test file named after the controller or model is listed too, marked as matched by name, because a test that calls the action directly makes no request to read. After the implementation of the example, a plan moving the comment delete route shows:
+
+```text
+Route comments.destroy
+ApiRoutes entry comments.destroy
+Request DELETE /comments/${…} reaches comments.destroy    tests/comments.test.ts:38
+```
+
+The blog's own tests call their controllers without HTTP, so a plan that moves `posts.show` finds a test by name and no request:
+
+```text
+Route posts.show
+ApiRoutes entry posts.show
+Test tests/controllers/PostController.test.ts, named after it
+No TestApp request in the existing tests reaches the routes above.
+```
+
+That last note appears only when nothing could have hidden a request. A request whose path the scan cannot read (built from a variable, or on a receiver it does not know as a `TestApp`), a request whose route parameter constraint could not be checked, and a test file that did not parse are noted beside the entry instead.
 
 Impact is a lower bound. The scan is static, so a value passed to another function or file, a reassignment and a column held in a variable are not followed, and an empty list means nothing was found, not that nothing is affected. Dropping a column, changing its shape, renaming or dropping a route, and changing a published agent tool are marked breaking whatever Impact found.
 
@@ -230,7 +249,15 @@ The first approval writes a `baseline` into the plan: `rev`, the commit the plan
 
 Validators are never hashed, since no scanner reads them. If another section cannot be read, approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
 
-The plan's hash is its identity: a SHA-256 of the plan with its baseline. Verification records and waivers name it, so an approved plan changed by hand is a different plan: approve it again, and expect its steps to verify again. A baseline is never stamped twice.
+The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
+
+```text
+ ERROR  docs/plans/comments/plan.json is not approved at its current hash dc9a6ce3ad173e23290f743293fa0e3495c932b3b2cdf07c0cda8c9b063a5465, so no step of it is handed out: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve docs/plans/comments/plan.json once the plan says what you mean to build.
+```
+
+`plan:status` and `plan:render` keep working, since they are how you read the change before approving it. A draft, which has no baseline and so no hash, is still accepted by `plan:next` and `plan:verify`. A draft with approvals recorded beside it is refused like an unapproved plan: deleting `baseline` from an approved plan does not take it out of the gate.
+
+Approving an edited plan again records the new hash and leaves the baseline as it was, so its steps verify again under the new hash. The checks and questions are asked again first, against the application as it is at that moment. Once the plan's own `add` elements exist in the code, those checks report them as already existing and the approval is refused, so settle changes to the plan before its implementation starts.
 
 ## Implementing: `plan:next` and `plan:verify`
 
@@ -273,7 +300,7 @@ Implement this step only, then run `bunx guren plan:verify docs/plans/comments/p
 Marked in .guren/plans/comments.state.json
 ```
 
-`plan:next` prints one step and never the whole plan. `--json` prints the same as data. It marks the step in the state file, which is what the Stop hook reads. It refuses a working tree with uncommitted changes unless they are the marked step's own, so run it before you start a step, not after:
+`plan:next` prints one step and never the whole plan. `--json` prints the same as data. It marks the step in the state file, which is what the Stop hook reads. It refuses a plan no approval names, as above, and a working tree with uncommitted changes unless they are the marked step's own, so run it before you start a step, not after:
 
 ```text
  ERROR  The working tree under /app has uncommitted changes (paths relative to the repository root), and one step is one commit. Commit or discard them first:
@@ -340,7 +367,7 @@ task/entity/model.comment/scaffold: blocked (354 ms)
       `bun run typecheck` exited 127: a tool it needs is not installed
 ```
 
-`plan:verify` executes your application: `bun test` boots it and `db:migrate` opens the database it is configured for, so run it against a development or test database, never production. Each command may take 600 seconds before it counts as `blocked`; `--timeout <seconds>` changes that. Without `--step` it runs every step in order and skips the ones whose record still holds. `--ci` exits 1 when a step it ran did not verify, and `--json` prints the report as data.
+`plan:verify` refuses an unapproved plan before it runs anything, so nothing is recorded against a hash nobody agreed to. Past that, it executes your application: `bun test` boots it and `db:migrate` opens the database it is configured for, so run it against a development or test database, never production. Each command may take 600 seconds before it counts as `blocked`; `--timeout <seconds>` changes that. Without `--step` it runs every step in order and skips the ones whose record still holds. `--ci` exits 1 when a step it ran did not verify, and `--json` prints the report as data.
 
 ### One step, one commit
 
@@ -375,6 +402,15 @@ plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/da
 ```
 
 `plan:next` returns a stalled step again, with the reason. A stall is for a person to settle, in one of three ways: fix the environment, revise the plan, or waive the element.
+
+A plan edited after approval stalls the step at the next stop without sending the agent back, since no continuation can approve a plan. Later stops stay silent, and once the plan is approved, `plan:next` hands the step out again:
+
+```text
+plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/data): giving up, docs/plans/comments/plan.json is not approved at its current hash dc9a6ce3ad173e23290f743293fa0e3495c932b3b2cdf07c0cda8c9b063a5465, so the step is not verified against it: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve docs/plans/comments/plan.json once the plan says what you mean to build.
+The step is recorded as stalled; `bunx guren plan:next docs/plans/comments/plan.json` returns it once an approval names the plan's hash.
+```
+
+The `plan-implement` skill tells the agent to report the refusal and leave approving to you.
 
 ## Reading progress: `plan:status`
 
@@ -427,6 +463,12 @@ Planned, not checkable:
   policy.comment: abilities
 ```
 
+For a plan with a baseline, the report ends with its approval: the time and approver when an approval names the current hash, or which commands refuse it when none does:
+
+```text
+Not approved at this hash: plan:next, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.
+```
+
 Verification results live in `.guren/plans/`, which git ignores: a result is a fact about one machine. A fresh clone and CI see every element at most `wired` until `plan:verify` has run there.
 
 ### Freshness
@@ -449,7 +491,27 @@ Held, since what they depend on changed after the plan was approved:
       fail  The route name "comments.store" already exists in this application.
 ```
 
-`plan:next` returns the next step that does not depend on it and exits 0. Releasing a hold is a person's call: change the plan to state what the application holds now and approve it again, or undo the change.
+`plan:next` returns the next step that does not depend on it and exits 0. Releasing a hold is a person's call: change the plan to state what the application holds now and approve it again (subject to the re-approval rule under Approving), or undo the change.
+
+### Across plans: `guren check --plan`
+
+```bash
+bunx guren check --plan
+```
+
+`check --plan` looks at every open plan at once. A plan is found at the application root as `*.plan.json`, and under `docs/plans/` as `plan.json` or `*.plan.json`. Open means approved at its current hash and not closed. It reports an open plan with `drifted` elements, and two open plans that change the same element, matched by what they change in the application rather than by id. Midway through the example, with a second approved plan renaming `posts.excerpt`:
+
+```text
+ WARN  [warn] Approved plan drifted: docs/plans/comments/plan.json has 4 drifted element(s): model.comment, controller.comments, resource.comment, policy.comment.
+
+ℹ        → Run guren plan:status docs/plans/comments/plan.json for what differs, then fix the code or revise the plan.
+
+ WARN  [warn] Open plans overlap: docs/plans/comments/plan.json and docs/plans/post-summary/plan.json are both approved and open, and both change: model class Post (model.post / model.post).
+
+ℹ        → Land or close one plan before implementing the other, or revise one so they stop changing the same element.
+```
+
+Every finding is a warning and the command exits 0. The plan checks run only under `--plan`: plain `guren check`, `check --ci` and `guren gate` never include them, because they import `db/schema.ts` and the validator files. A draft beside an approvals file (a deleted baseline) and an approvals file that will not read are reported too. Drafts and plans edited since approval are otherwise left out, since nobody has agreed to them.
 
 ## Waiving an element: `plan:waive`
 
@@ -468,11 +530,11 @@ Recorded in docs/plans/comments/decisions.json
 The decision log is committed with the plan. A waiver names this plan hash, so a revision does not inherit it.
 ```
 
-The element reads `waived`, `plan:verify` leaves it out of its step's judgement, and `plan:next` lists it under "Waived, not to be implemented". A waiver lifts an element and nothing else: a behaviour that fails still fails its step, so a behaviour the code will not satisfy needs a changed plan instead. `plan:waive` refuses an `existing` element, an id the plan does not declare, an element of a section `plan:status` does not judge (flows, tasks, behaviours, questions), a draft that has no baseline yet, and a missing `--reason`. `--remove` withdraws the waivers of the named elements. The `plan-implement` skill tells the agent to report a stall and leave the waiver to you.
+The element reads `waived`, `plan:verify` leaves it out of its step's judgement, and `plan:next` lists it under "Waived, not to be implemented". A waiver lifts an element and nothing else: a behaviour that fails still fails its step, so a behaviour the code will not satisfy needs a changed plan instead. `plan:waive` refuses an `existing` element, an id the plan does not declare, an element of a section `plan:status` does not judge (flows, tasks, behaviours, questions), a draft that has no baseline yet, a plan whose current hash no approval names, and a missing `--reason`. `--remove` withdraws the waivers of the named elements and asks for none of this, so it also works on a revision that dropped a waived element. The `plan-implement` skill tells the agent to report a stall and leave the waiver to you.
 
 ## Closing: `plan:close`
 
-A plan is closed when every element it changes is `verified` or `waived`. Until then it refuses and names what is left:
+A plan is closed when an approval names its current hash and every element it changes is `verified` or `waived`. Until then it refuses and names what is left:
 
 ```text
  ERROR  docs/plans/comments/plan.json is not closed: every element must be verified (guren plan:verify) or waived with a reason (guren plan:waive), and these are not:
@@ -510,7 +572,7 @@ Closed 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0. The pla
 <!-- /guren:plan comments rules -->
 ```
 
-Edit the text outside the markers freely: closing a later plan for the same entity replaces only what is inside its own markers. A heading the close has to add is written in the plan's `locale`, so a `ja` plan gets Japanese headings. Each rule cites the behaviours that test it, and `bunx guren check --docs` warns about a cited id no test carries. A plan closed with waivers also prints a `make:adr` command per waiver, for the ones worth recording as decisions. Nothing is deleted: the plan, its approvals and its decision log stay committed, and `docs/spec/` from `bunx guren spec:generate` stays the description of what the code is.
+Edit the text outside the markers freely: closing a later plan for the same entity replaces only what is inside its own markers. A heading the close has to add is written in the plan's `locale`, so a `ja` plan gets Japanese headings. Each rule cites the behaviours that test it, and `bunx guren check --docs` warns about a cited id no test carries. A plan closed with waivers also prints a `make:adr` command per waiver, for the ones worth recording as decisions. A closed plan drops out of `check --plan`: the close writes `closed: true` and the plan's hash into `docs/plans/<slug>.md`, and a revision approved after the close counts as open again. Nothing is deleted: the plan, its approvals and its decision log stay committed, and `docs/spec/` from `bunx guren spec:generate` stays the description of what the code is.
 
 ## Not available yet
 
