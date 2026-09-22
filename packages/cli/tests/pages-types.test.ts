@@ -42,6 +42,34 @@ describe('buildPageModuleContent', () => {
   })
 })
 
+describe('generatePageTypes page discovery', () => {
+  it('registers only the component files the client can render', async () => {
+    const workspace = await createTempWorkspace('guren-cli-pages-extensions-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'resources/js/pages/Home.tsx': PAGE_FIXTURE,
+        'resources/js/pages/Legacy.jsx': PAGE_FIXTURE,
+        'resources/js/pages/Helpers.ts': 'export const columns = []\n',
+        'resources/js/pages/Script.js': 'export const noop = () => {}\n',
+      })
+
+      const { outputPath } = await generatePageTypes({
+        appRoot: workspace.dir,
+        extractProps: false,
+        force: true,
+      })
+
+      const content = await readFile(outputPath, 'utf8')
+      expect(content).toContain("'Home': './pages/Home.tsx'")
+      expect(content).toContain("'Legacy': './pages/Legacy.jsx'")
+      expect(content).not.toContain('./pages/Helpers.ts')
+      expect(content).not.toContain('./pages/Script.js')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
 describe('generatePageTypes overwrite behavior', () => {
   // .guren/*.gen.ts are generated artifacts, so `codegenCommand` (src/bin.ts)
   // defaults `force: true`; without it a plain second `guren codegen` fails with

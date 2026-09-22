@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import type { PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
 import { loadPlanAppState } from '../src/plan/app-state'
-import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
+import { linkWorkspaceCore, PAGE_COMPONENT_FIXTURE, writeWorkspaceFiles } from './helpers'
 
 // Earlier runs' roots are removed at the start, one directory per application: see plan-status-command.test.ts.
 const ROOT_PREFIX = 'guren-plan-app-detail-'
@@ -263,6 +263,22 @@ describe('loadPlanAppState({ detail: true })', () => {
       unimported: expect.stringContaining('boom'),
     })
     expect(detail.validators).toContainEqual({ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null })
+  })
+
+  test('should carry the component file of a renderable page and skip a .ts sibling', async () => {
+    const detail = await detailOf('pages', {
+      'src/app.ts': entry('{ routes: registerWebRoutes }'),
+      'resources/js/pages/posts/Index.tsx': PAGE_COMPONENT_FIXTURE,
+      'resources/js/pages/posts/Legacy.jsx': PAGE_COMPONENT_FIXTURE,
+      // Neither the client glob nor pages.gen.ts registers these, so they are not pages.
+      'resources/js/pages/posts/Helpers.ts': 'export const columns = []\n',
+      'resources/js/pages/posts/Script.js': 'export const noop = () => {}\n',
+    })
+
+    expect(detail.pages).toEqual([
+      { id: 'posts/Index', file: 'resources/js/pages/posts/Index.tsx', props: expect.anything() },
+      { id: 'posts/Legacy', file: 'resources/js/pages/posts/Legacy.jsx', props: expect.anything() },
+    ])
   })
 
   test('should report the validators unreadable when a file outside a barrel re-exports everything', async () => {

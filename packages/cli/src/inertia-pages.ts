@@ -1,4 +1,4 @@
-import { resolve, relative } from 'node:path'
+import { extname, resolve, relative } from 'node:path'
 import { fileExists, collectFiles } from './discovery'
 import { extractPagePropKeys, extractPageProps, type PagePropKeys } from './page-props-extractor'
 
@@ -46,10 +46,17 @@ export function extractInertiaPageRefs(source: string, isCode?: (index: number) 
   return refs
 }
 
-/** Component file for a page ID (`.tsx` then `.jsx`), relative to `cwd`. */
+/**
+ * The extensions a page component may have: the scaffolded client entry globs the
+ * pages directory for `.tsx`, and codegen registers `.tsx` and `.jsx` in
+ * `.guren/pages.gen.ts`. A `.ts` or `.js` file there is not a page the app can render.
+ */
+export const PAGE_COMPONENT_EXTENSIONS: ReadonlySet<string> = new Set(['.tsx', '.jsx'])
+
+/** Component file for a page ID, relative to `cwd`; a `.tsx` wins over a `.jsx` of the same ID. */
 export async function resolveInertiaPageFile(cwd: string, id: string): Promise<string | undefined> {
-  for (const ext of ['tsx', 'jsx']) {
-    const candidate = `resources/js/pages/${id}.${ext}`
+  for (const extension of PAGE_COMPONENT_EXTENSIONS) {
+    const candidate = `resources/js/pages/${id}${extension}`
     if (await fileExists(cwd, candidate)) {
       return candidate
     }
@@ -104,8 +111,6 @@ export async function describeInertiaPagePropKeys(cwd: string, id: string): Prom
   }
 }
 
-const PAGE_COMPONENT_EXTENSIONS = new Set(['.tsx', '.jsx', '.ts', '.js'])
-
 /**
  * Page IDs for every component file under `resources/js/pages`, sorted,
  * excluding the shared `contracts/` types directory.
@@ -114,7 +119,10 @@ export async function listInertiaPageIds(cwd: string): Promise<string[]> {
   const pagesDir = resolve(cwd, 'resources/js/pages')
   const files = await collectFiles(pagesDir, PAGE_COMPONENT_EXTENSIONS)
   return files
-    .map((file) => relative(pagesDir, file).split(/[\\/]/).join('/').replace(/\.(tsx|jsx|ts|js)$/, ''))
+    .map((file) => {
+      const path = relative(pagesDir, file).split(/[\\/]/).join('/')
+      return path.slice(0, path.length - extname(path).length)
+    })
     .filter((id) => !id.startsWith('contracts'))
     .sort()
 }
