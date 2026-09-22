@@ -179,6 +179,19 @@ function withExecutor<T>(options: AdapterQueryOptions | undefined, callback: (db
   return operation
 }
 
+const SYNC_EXECUTIONS = ['all', 'get', 'run', 'values'] as const
+
+/** A BEGIN this adapter issued is on the connection, and the caller is not inside it. */
+function foreignTransactionOpen(): boolean {
+  if (!manualTransactionOpen) return false
+  const ambient = loadedStore?.getStore()
+  return !ambient || ambient.settled
+}
+
+function define(target: object, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { configurable: true, writable: true, value })
+}
+
 async function resolveList(result: DrizzleLikeSelect): Promise<unknown[]> {
   if (isPromiseLike(result)) {
     return result as unknown as Promise<unknown[]>
@@ -746,11 +759,35 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
   },
 
   executor(queryOptions?: AdapterQueryOptions): unknown {
-    const executor = resolveExecutor(queryOptions)
-    if (manualTransactionOpen && executor === database) {
-      throw new Error('DrizzleAdapter: raw queries outside an active SQLite transaction cannot share its connection. Await the transaction first.')
+    return resolveExecutor(queryOptions)
+  },
+
+  /**
+   * `then` reaches drizzle's `execute()`, so replacing it on the instance routes
+   * every await through `withExecutor`. `all()`/`get()`/`run()`/`values()` return
+   * synchronously on bun:sqlite and cannot wait: during a transaction another
+   * context holds they would run inside it, so they throw instead.
+   */
+  queueExecution<TQuery>(query: TQuery, queryOptions?: AdapterQueryOptions): TQuery {
+    if (queryOptions?.trx || !query || typeof query !== 'object') return query
+    const target = query as Record<string, unknown>
+    const execute = target.execute
+    if (typeof execute === 'function') {
+      define(target, 'execute', () => withExecutor(undefined, async () => execute.call(target)))
     }
-    return executor
+    for (const method of SYNC_EXECUTIONS) {
+      const run = target[method]
+      if (typeof run !== 'function') continue
+      define(target, method, (...args: unknown[]) => {
+        if (foreignTransactionOpen()) {
+          throw new Error(
+            `DrizzleAdapter: ${method}() cannot wait for the transaction another context has open on this connection, and would run inside it. Await the query instead.`,
+          )
+        }
+        return run.apply(target, args)
+      })
+    }
+    return query
   },
 
   async countByAdvanced(

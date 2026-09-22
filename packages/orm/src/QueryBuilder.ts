@@ -478,7 +478,9 @@ export class QueryBuilder<
     const selection = fields && fields.length > 0
       ? Object.fromEntries(fields.map((field) => [field, resolveColumn(this.table, field)]))
       : undefined
-    return this.resolveDrizzleDatabase().select(selection)?.from?.(this.table)
+    const query = this.resolveDrizzleDatabase().select(selection)?.from?.(this.table)
+    const advancedAdapter = this.adapter as ORMAdapterAdvanced
+    return advancedAdapter.queueExecution ? advancedAdapter.queueExecution(query, { trx: this.options.trx }) : query
   }
 
   private resolveDrizzleDatabase(): DrizzleSelectable {
@@ -865,6 +867,12 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
   ): Promise<unknown>
   /** The handle a query built outside the ORM runs on: `trx`, else the open transaction, else the database. */
   executor?(queryOptions?: AdapterQueryOptions): unknown
+  /**
+   * Makes awaiting a query built on {@link executor} wait, as the adapter's own
+   * calls do, for a transaction the caller is not inside where the driver shares
+   * one connection. Patches `query` in place and returns it.
+   */
+  queueExecution?<TQuery>(query: TQuery, queryOptions?: AdapterQueryOptions): TQuery
   /** `SELECT field, COUNT(*) ... GROUP BY field` under `conditions`. */
   countByAdvanced?(
     table: unknown,
