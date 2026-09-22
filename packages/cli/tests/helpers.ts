@@ -325,6 +325,13 @@ export const { Attachment } = configureAttachments({
   })
 }
 
+/** Generators with no TypeScript output: nothing for a parse or compile gate to check. */
+export const SKIPPED_GENERATORS: Record<string, string> = {
+  'make:adr': 'markdown output',
+  'make:migration': 'SQL migration output',
+  'make:lang': 'JSON translation catalogs',
+}
+
 /** One page component, for tests about an app that acquired one it cannot render. */
 export const PAGE_COMPONENT_FIXTURE = 'export default function Home() { return null }\n'
 

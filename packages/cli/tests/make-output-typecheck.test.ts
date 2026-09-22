@@ -3,6 +3,7 @@ import { readFile, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import {
   SERVER_DIST_ENTRY,
+  SKIPPED_GENERATORS,
   TSC_TIMEOUT,
   assertWorkspaceBuilt,
   checkTypes,
@@ -16,7 +17,9 @@ import {
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
 import { parseFieldsString, type FieldDefinition, type FieldType } from '../src/fields'
-import { schemaIdentifierFor, tableNameFor } from '../src/inflect'
+import { collectionSlug, schemaIdentifierFor, tableNameFor } from '../src/inflect'
+import { ensurePgImports } from '../src/patch-helpers'
+import { camelCase, pascalCase } from '../src/utils'
 import { loadScaffoldTemplate } from '../src/scaffold-templates'
 import { generateApiClientTypes } from '../src/api-client-types'
 import { generateDataTypes } from '../src/data-types'
@@ -55,6 +58,9 @@ import { makeView } from '../src/make-view'
 
 const cliRoot = resolve(import.meta.dir, '..')
 
+/** What the rendered app's import graph resolves at runtime, beyond the server every CLI test needs. */
+const LINKED_DIST_ENTRIES = [SERVER_DIST_ENTRY, ...['core', 'orm'].map((name) => join(cliRoot, `../${name}/dist/index.js`))]
+
 /** Every FIELD_TYPES member plus a nullable, so each column mapper branch renders. */
 const ALL_FIELDS = 'title:string,count:number,published:boolean,body:text,postedAt:date,meta:json,subtitle:string?'
 
@@ -70,6 +76,8 @@ async function prepareRenderedApp(dir: string): Promise<void> {
   await linkWorkspacePackage('orm', dir)
   await symlink(join(cliRoot, 'node_modules/zod'), join(dir, 'node_modules/zod'), 'dir')
 }
+
+const PG_TABLE_BUILDERS = ['boolean', 'integer', 'jsonb', 'pgTable', 'serial', 'text', 'timestamp']
 
 const PG_COLUMN: Record<FieldType, (column: string) => string> = {
   string: (column) => `text('${column}')`,
@@ -95,22 +103,20 @@ ${columns.join('\n')}
 `
 }
 
-const PG_SCHEMA_IMPORTS = "import { boolean, integer, jsonb, pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'\n"
+/** A `db/schema.ts` holding `tableSource` after `existing`, with the pg builders the table needs imported once. */
+function pgSchemaSource(tableSource: string, existing = ''): string {
+  return `${ensurePgImports(existing, PG_TABLE_BUILDERS)}\n${tableSource}`
+}
 
 /**
- * The schema and config `guren add attachments` leaves behind: the pg table from
- * the typecheck fixture (pinned to the blueprint in scaffold-output.test.ts) and
+ * The schema and config `guren add attachments` leaves behind: the typecheck
+ * fixture's pg table (pinned to the blueprint in scaffold-output.test.ts) and
  * the shipped config template, which the `--attach` preflight reads and tsc checks.
  */
 async function seedAttachmentsApp(dir: string, tableSource: string): Promise<void> {
   const fixture = await readFile(join(import.meta.dir, 'fixtures/scaffold-typecheck/attachments/db/schema.ts'), 'utf8')
-  const attachmentsTable = fixture.slice(fixture.indexOf('export const attachments'))
   await writeWorkspaceFiles(dir, {
-    'db/schema.ts': `import type { AttachmentVariantRecord } from '@guren/core'
-import { boolean, index, integer, jsonb, pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
-
-${attachmentsTable}
-${tableSource}`,
+    'db/schema.ts': pgSchemaSource(tableSource, fixture),
     'config/attachments.ts': loadScaffoldTemplate('attachments/config/attachments.ts'),
   })
 }
@@ -120,7 +126,7 @@ ${tableSource}`,
  * the file's own `router`. `controllerDir` is where the controllers sit relative
  * to the routes file (`../app` at the root, `./app` inside a module).
  */
-function routesSource(feature: { singular: string; routeName: string; routeVar: string; withAuth: boolean }, registrar: string, controllerDir: string): string {
+function routesSource(feature: Parameters<typeof buildRouteRegistrationHint>[0], registrar: string, controllerDir: string): string {
   const coreImports = feature.withAuth ? 'Router, requireAuthenticated' : 'Router'
   const body = buildRouteRegistrationHint(feature).map((line) => `  ${line}`).join('\n')
   return `import { ${coreImports} } from '@guren/core'
@@ -197,30 +203,26 @@ describe('rendered make:feature output typechecks', () => {
     it(
       `make:feature ${combo.label}`,
       async () => {
-        assertWorkspaceBuilt([SERVER_DIST_ENTRY])
+        assertWorkspaceBuilt(LINKED_DIST_ENTRIES)
         const workspace = await createTempWorkspace(`guren-typecheck-feature-${combo.singular.toLowerCase()}-`)
         try {
           await seedInertiaApp(workspace.dir)
           await prepareRenderedApp(workspace.dir)
           const fields = parseFieldsString(combo.fields)
-          const routeName = tableNameFor(combo.singular).replace(/_/g, '-')
-          const feature = {
-            singular: combo.singular,
-            routeName,
-            routeVar: routeName.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase()),
-            withAuth: !combo.options.publicAccess,
-          }
+          const routeName = collectionSlug(combo.singular)
+          const feature = { singular: combo.singular, routeName, routeVar: camelCase(routeName), withAuth: !combo.options.publicAccess }
 
           if (combo.options.attach) {
             await seedAttachmentsApp(workspace.dir, pgTableSource(combo.singular, fields))
           } else if (combo.options.root) {
+            // The registrar make:module wrote and its index.ts imports, rewritten with the feature's routes.
             await makeModule(combo.options.root)
             await writeWorkspaceFiles(workspace.dir, {
-              [`modules/${combo.options.root}/db/schema.ts`]: `${PG_SCHEMA_IMPORTS}\n${pgTableSource(combo.singular, fields)}`,
-              [`modules/${combo.options.root}/routes.ts`]: routesSource(feature, 'registerBillingRoutes', './app'),
+              [`modules/${combo.options.root}/db/schema.ts`]: pgSchemaSource(pgTableSource(combo.singular, fields)),
+              [`modules/${combo.options.root}/routes.ts`]: routesSource(feature, `register${pascalCase(combo.options.root)}Routes`, './app'),
             })
           } else {
-            await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': `${PG_SCHEMA_IMPORTS}\n${pgTableSource(combo.singular, fields)}` })
+            await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': pgSchemaSource(pgTableSource(combo.singular, fields)) })
           }
           if (!combo.options.root) {
             await writeWorkspaceFiles(workspace.dir, { 'routes/web.ts': routesSource(feature, 'registerWebRoutes', '../app') })
@@ -279,12 +281,10 @@ const singleFileRenders: Array<[string, () => Promise<unknown>]> = [
 
 /** Generators this gate leaves to another, by name so a stale exemption fails. */
 const COVERED_ELSEWHERE: Record<string, string> = {
+  ...SKIPPED_GENERATORS,
   'make:auth': 'scaffold-builder-typecheck.test.ts renders its flag combinations',
   'make:agent': 'make-agent.test.ts typechecks the class against the Workers types it needs',
   'make:ai-agent': 'make-ai-agent.test.ts typechecks the agent and its test',
-  'make:adr': 'markdown output',
-  'make:migration': 'SQL migration output',
-  'make:lang': 'JSON translation catalogs',
 }
 
 describe('rendered single-file make:* output typechecks', () => {
@@ -310,7 +310,8 @@ describe('rendered single-file make:* output typechecks', () => {
           const result = await render()
           created.push(...relativeToCwd(typeof result === 'string' ? [result] : (result as { filesCreated: string[] }).filesCreated))
         }
-        expect(created.length).toBe(singleFileRenders.length + 2)
+        // Two renders writing one path would let the later hide the earlier from the gate.
+        expect(new Set(created).size).toBe(created.length)
 
         await generatePageTypes({ appRoot: workspace.dir, extractProps: true, force: true })
         await typecheckRenderedApp(workspace.dir, created)
