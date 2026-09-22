@@ -7,8 +7,8 @@ import { useSqlite } from './sqlite-fixture'
 // Integration test against the real bun:sqlite driver, whose drizzle
 // `transaction()` COMMITs on whatever the callback returns without awaiting it.
 // Only a real driver can show whether a write survived a throw, which is why the
-// SQL-shape tests next door pass whether or not the transaction is atomic. The
-// adapter's queue is module-level; the fixture's per-test `configure()` resets it.
+// SQL-shape tests next door pass whether or not the transaction is atomic.
+// Each fixture creates a fresh connection and its own execution state.
 
 const postsTable = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),

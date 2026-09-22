@@ -6,8 +6,7 @@ import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 /**
  * A fresh in-memory database per test with `ddl` applied, configured as the
  * adapter's. `log`, when given, collects drizzle's rendered SQL and is emptied
- * between tests. `configure()` per test also resets the adapter's module-level
- * transaction queue and dialect memo.
+ * between tests. Each fresh connection owns its transaction queue and dialect memo.
  */
 export function useSqlite(ddl: string, options: { log?: string[] } = {}): () => Database {
   let sqlite: Database

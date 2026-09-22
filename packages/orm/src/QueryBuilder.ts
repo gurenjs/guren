@@ -578,11 +578,7 @@ export class QueryBuilder<
    * would be a supported way to bypass mass-assignment protection entirely.
    */
   async [PREPARED_UPDATE](payload: PlainObject): Promise<TRecord> {
-    if (!this.adapter.update) {
-      throw new Error('Configured adapter does not support update operations.')
-    }
-    this.assertWriteOptions()
-    this.assertFiltersSurvived('update')
+    this.assertWritable('update')
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.updateAdvanced === 'function') {
@@ -591,10 +587,16 @@ export class QueryBuilder<
 
     const simpleWhere = this.toSimpleWhereClause()
     if (simpleWhere) {
-      return this.adapter.update(this.table, simpleWhere, payload, { trx: this.options.trx }) as Promise<TRecord>
+      return this.adapter.update!(this.table, simpleWhere, payload, { trx: this.options.trx }) as Promise<TRecord>
     }
 
     throw new Error('Advanced conditions require an adapter that supports updateAdvanced.')
+  }
+
+  private assertWritable(operation: 'update' | 'delete'): void {
+    if (!this.adapter[operation]) throw new Error(`Configured adapter does not support ${operation} operations.`)
+    this.assertWriteOptions()
+    this.assertFiltersSurvived(operation)
   }
 
   private assertWriteOptions(): void {
@@ -612,11 +614,7 @@ export class QueryBuilder<
   }
 
   async [PHYSICAL_DELETE](): Promise<number | PlainObject | void> {
-    this.assertWriteOptions()
-    if (!this.adapter.delete) {
-      throw new Error('Configured adapter does not support delete operations.')
-    }
-    this.assertFiltersSurvived('delete')
+    this.assertWritable('delete')
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.deleteAdvanced === 'function') {
@@ -625,7 +623,7 @@ export class QueryBuilder<
 
     const simpleWhere = this.toSimpleWhereClause()
     if (simpleWhere) {
-      return this.adapter.delete(this.table, simpleWhere, { trx: this.options.trx })
+      return this.adapter.delete!(this.table, simpleWhere, { trx: this.options.trx })
     }
 
     throw new Error('Advanced conditions require an adapter that supports deleteAdvanced.')

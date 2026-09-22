@@ -1166,7 +1166,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     writeOptions: ModelWriteOptions | undefined,
     applyFillable: boolean,
   ): Promise<TRecordFor<T>> {
-    const table = this.resolveTable()
     const adapter = this.getAdapter()
     if (!adapter.update) {
       throw new Error('Configured adapter does not support update operations.')
@@ -1195,14 +1194,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       }
     }
 
-    // Global scopes must reach writes: a tenant scope applied to reads but
-    // dropped here lets one tenant update another's rows. The payload is
-    // already prepared, so mutators/casts run once.
-    const result = this.hasScopes()
-      ? await this.newQuery(writeOptions)
-          .where(where as Partial<Record<string, unknown>>)
-          [PREPARED_UPDATE](payload) as TRecordFor<T>
-      : await adapter.update(table, where, payload, writeOptions) as TRecordFor<T>
+    const result = await this.newQuery(writeOptions)
+      .where(where as Partial<Record<string, unknown>>)
+      [PREPARED_UPDATE](payload) as TRecordFor<T>
 
     if (hooks) {
       const resultData = result as unknown as Record<string, unknown>
@@ -1224,7 +1218,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     where: WhereClauseFor<T>,
     writeOptions?: ModelWriteOptions,
   ): Promise<number | PlainObject | void> {
-    const table = this.resolveTable()
     const adapter = this.getAdapter()
     if (!adapter.delete) {
       throw new Error('Configured adapter does not support delete operations.')
@@ -1246,13 +1239,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       }
     }
 
-    // Same reasoning as runUpdate: a delete that skips the tenant scope lets
-    // one tenant delete another's rows even though reads are isolated.
-    const result = this.hasScopes()
-      ? await this.newQuery(writeOptions)
-          .where(where as Partial<Record<string, unknown>>)
-          .delete()
-      : await adapter.delete(table, where, writeOptions)
+    const result = await this.newQuery(writeOptions)
+      .where(where as Partial<Record<string, unknown>>)
+      .delete()
 
     if (hooks) {
       await executeHook(hooks, 'deleted', whereData)
