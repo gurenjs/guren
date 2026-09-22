@@ -3,7 +3,8 @@
  * record of its approval beside it. A draft gets `rev` and `contextHash` once, here; a plan
  * that already carries a baseline (a revision carries its parent's) is never restamped,
  * since the baseline is inside the hash every approval and waiver names.
- * It refuses while a §2 check fails or a question is open: silence approves nothing.
+ * It refuses while a §2 check fails or a question is open: silence approves nothing. On a
+ * baselined plan, a finding the plan's own finished work explains is settled first.
  */
 
 import { realpath } from 'node:fs/promises'
@@ -20,7 +21,7 @@ import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { PlanSchema, type Plan } from './plan/schema'
 import { PLAN_STATE_DIR } from './plan/state'
-import { validatePlan } from './plan/validate'
+import { settleBuiltFindings, validatePlan } from './plan/validate'
 import { runCaptured, type CapturedExec } from './subprocess'
 
 export const PLAN_APPROVE_REPORT_VERSION = 1
@@ -36,6 +37,8 @@ export interface PlanApproveReport {
   approval: PlanApproval
   /** The hash was approved before, and nothing was written. */
   alreadyApproved: boolean
+  /** Elements whose collision or absence did not refuse, since the application reads as the plan leaves them. */
+  builtByPlan?: string[]
 }
 
 export interface PlanApproveFileOptions {
@@ -56,8 +59,9 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
   const exec = options.exec ?? runCaptured
   const app = typeof options.app === 'function' ? await options.app() : options.app
 
+  const settled = settleBuiltFindings(plan, app, validatePlan(plan, app))
   const blockers = [
-    ...validatePlan(plan, app)
+    ...settled.checks
       .filter((result) => result.status === 'fail')
       .map((result) => `  ${result.elementId ? `${result.elementId}: ` : ''}${result.message}`),
     ...plan.questions.map((question) => `  question ${question.id} is unanswered: ${question.question}`),
@@ -108,6 +112,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     ...(stamped ? { stamped } : {}),
     approval: recorded.existing ?? approval,
     alreadyApproved: recorded.existing !== undefined,
+    ...(settled.built.length > 0 ? { builtByPlan: settled.built } : {}),
   }
 }
 
@@ -163,6 +168,9 @@ export function formatPlanApprove(report: PlanApproveReport): string {
     if (report.stamped.unstamped.length > 0) {
       lines.push(`Not hashed, since their section could not be read: ${report.stamped.unstamped.map((entry) => entry.id).join(', ')}`)
     }
+  }
+  if (report.builtByPlan) {
+    lines.push(`Built as the plan leaves them, so their collision or absence is the plan's own work: ${report.builtByPlan.join(', ')}`)
   }
   lines.push(
     report.alreadyApproved
