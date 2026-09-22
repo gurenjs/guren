@@ -3,11 +3,15 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { planNextFile } from '../src/plan-next'
 import { judgeStopHook, MAX_STEP_CONTINUATIONS, planStopHookFindings, recordSignature } from '../src/plan-stop-hook'
 import { parsePlanDocument } from '../src/plan-render'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { planWaiveFile } from '../src/plan-waive'
+import { judgeFreshness, stampContextHash } from '../src/plan/freshness'
+import { PlanSchema } from '../src/plan/schema'
+import { judgeStepContext } from '../src/plan/step-context'
 import { planDigest, PLAN_STATE_VERSION, type PlanActiveStep, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { judgePlan, type PlanElementState, type PlanElementStatus } from '../src/plan/status'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
@@ -19,7 +23,7 @@ import { loadApprovedCommentsPlan, loadCommentsPlan, planAppState } from './plan
 // agent-hook-gate.test.ts. What this covers is the decision and what it writes to state.
 const PLAN = parsePlanDocument(loadCommentsPlan())
 const DIGEST = planDigest(PLAN)
-const [SCAFFOLD, , , HTTP] = planStepIds(derivePlanTasks(PLAN)) as [string, string, string, string]
+const [SCAFFOLD, , DATA, HTTP] = planStepIds(derivePlanTasks(PLAN)) as [string, string, string, string]
 const NOW = () => new Date('2026-09-21T10:00:00.000Z')
 const ENVIRONMENT = { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' }
 
@@ -99,6 +103,15 @@ describe('judgeStopHook', () => {
     // The same record on a stop no hook blocked is a new turn, not a failed continuation.
     expect(judgeStopHook(active({ continuations: 1, lastSignature: recordSignature(same) }), same, [], false)).toMatchObject({ kind: 'continue' })
     expect(judgeStopHook(active({ continuations: MAX_STEP_CONTINUATIONS }), record(), [], true)).toMatchObject({ kind: 'stalled', reason: `${MAX_STEP_CONTINUATIONS} continuations on this step` })
+  })
+
+  test('should give up on stale context before anything else, and still let a verified step through', () => {
+    const stale = [{ id: 'model.post', owned: false, through: ['route.comments.store'], within: [] }]
+    expect(judgeStopHook(active(), record(), [], false, stale)).toMatchObject({
+      kind: 'stalled',
+      reason: 'what the step depends on changed since the plan was approved (model.post, named by route.comments.store)',
+    })
+    expect(judgeStopHook(active(), record({ outcome: 'verified', incomplete: [] }), [], false, stale)).toEqual({ kind: 'verified' })
   })
 
   test('should sign what a continuation could change and nothing else', () => {
@@ -263,6 +276,39 @@ describe('planStopHookFindings', () => {
     const cleared = await planStopHookFindings(revised, { stopHookActive: false })
     expect(cleared).toEqual({ block: false, message: 'plan:verify on stop (comments.plan.json, task/entity/model.comment/nope): the plan no longer derives this step, so the mark was cleared. Run `bunx guren plan:next comments.plan.json` for the next one.' })
     expect((await readState(revised)).active).toBeUndefined()
+  })
+
+  test('should stop blocking once what the step names went stale, record it on the mark, and have plan:next report it', async () => {
+    const approvedDocument = { ...loadCommentsPlan(), baseline: { rev: 'abc123', contextHash: stampContextHash(PLAN, planAppState()).contextHash } }
+    const approved = PlanSchema.parse(approvedDocument)
+    const moved = planAppState({ models: [{ name: 'Post', module: 'blog' }, 'User'] })
+    // What plan:verify reports for the marked step: its stale context, its own elements left out.
+    const withFreshness = (stepId: string): PlanVerifyReport => {
+      const freshness = judgeFreshness(approved, moved)
+      const context = judgeStepContext(approved, freshness, derivePlanTasks(approved), { inProgress: stepId }).get(stepId)
+      return { ...report(stepId, record()), freshness, ...(context && context.stale.length > 0 ? { staleContext: [context] } : {}) }
+    }
+    const app = await createApp('stale', { active: active() }, approvedDocument)
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => withFreshness(HTTP), now: NOW })
+
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain('giving up, what the step depends on changed since the plan was approved (model.post, named by route.comments.store).')
+    const stalled = (await readState(app)).active
+    expect(stalled).toMatchObject({ step: HTTP, continuations: 0, stalled: { at: '2026-09-21T10:00:00.000Z', reason: expect.stringContaining('model.post') } })
+    let verified = 0
+    const counting = async (): Promise<PlanVerifyReport> => (verified++, withFreshness(HTTP))
+    expect(await planStopHookFindings(app, { stopHookActive: true }, { verify: counting })).toEqual({ block: false })
+    expect(verified).toBe(0)
+    expect((await readState(app)).active).toEqual(stalled)
+
+    const next = await planNextFile(join(app, 'comments.plan.json'), { appRoot: app, app: moved, now: NOW })
+    expect(next.held.find((step) => step.id === HTTP)!.stalled).toMatchObject({ reason: expect.stringContaining('model.post') })
+    expect(next.step!.id).toBe(SCAFFOLD)
+
+    // What the marked step owns is its own work: the same staleness keeps the data step going.
+    const data = await createApp('stale-own', { active: active({ step: DATA }) }, approvedDocument)
+    expect((await planStopHookFindings(data, { stopHookActive: false }, { verify: async () => withFreshness(DATA), now: NOW })).block).toBe(true)
   })
 
   test('should verify every marked plan under the root and join their messages', async () => {

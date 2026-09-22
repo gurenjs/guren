@@ -338,7 +338,7 @@ const planNextCommand = defineCommand({
   meta: {
     name: 'plan:next',
     description:
-      'Print the next step of a plan to implement (RFC 0030 §7) with what it covers: its elements, behaviours and verify commands, never the whole plan. Marks the step under .guren/plans/ so the harness Stop hook verifies it on every stop. Runs nothing and loads no app; refuses a working tree with uncommitted changes unless they are the marked step\'s own.',
+      'Print the next step of a plan to implement (RFC 0030 §7) with what it covers: its elements, behaviours and verify commands, never the whole plan. Marks the step under .guren/plans/ so the harness Stop hook verifies it on every stop. Spawns no command; for an approved plan it reads the app (importing the routes file) and skips the steps whose context went stale since approval, naming what changed. Refuses a working tree with uncommitted changes unless they are the marked step\'s own.',
   },
   args: {
     plan: {

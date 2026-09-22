@@ -20,12 +20,21 @@ bunx guren plan:verify docs/plans/<slug>/plan.json --step <id>
 git commit                                                  # one step, one commit; name the step id in the message
 ```
 
-Repeat until `plan:next` reports that every step is verified.
+Repeat until `plan:next` reports that every step is verified, or that no step
+can be returned because every step left is held.
 
 `plan:next` prints one step: its elements, the acceptance behaviours it must
 write or see pass, and the verify commands. It never prints the whole plan, and
 it refuses a working tree with uncommitted changes that are not the marked
 step's own: finish or discard them first.
+
+For an approved plan it also holds a step whose context changed after
+approval: an element the step owns or names that another commit moved, so the
+plan does not describe the application there. It lists each held step
+with the element, how the step depends on it and what the reference checks say
+now, and returns the next step that does not depend on one. A held step is a
+person's decision (revise the plan and approve it, or undo the change): report it, and
+do not edit the application back or the plan to make it pass.
 
 ## What a step asks for
 
@@ -59,7 +68,8 @@ blocked and stop.
 
 While a step is marked, the `Stop` hook verifies it whenever you end a turn and
 sends you back while it is not verified, up to three times. It gives up, and
-says why, when the step or one of its elements is blocked, when nothing changed
+says why, when something the step names went stale since approval, when the
+step or one of its elements is blocked, when nothing changed
 since the last continuation, or after the third continuation. The step is then
 recorded as stalled and `plan:next` returns it again, with the reason.
 
