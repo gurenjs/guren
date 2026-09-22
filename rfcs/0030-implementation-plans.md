@@ -581,9 +581,13 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
   `rev` is `git rev-parse HEAD` of the application, and no repository or no
   commit is a refusal rather than an invented rev. `contextHash` reads the
   working tree while `rev` names a commit, so a dirty tree is refused too,
-  the plan file, its approvals and decision log, and `.guren/plans/` excepted.
-  The plan file is written back, atomically, as the author's document plus the
-  baseline, so an omitted section stays omitted. A plan that already carries a
+  and so is a `git status` that fails. The plan file, its rendered page, its
+  approvals and decision log, a leftover temporary file of theirs and
+  `.guren/plans/` are excepted, compared as real paths, with untracked
+  directories listed file by file so a new `docs/plans/<slug>/` is not one
+  change. The plan file is written back atomically, keeping its mode and
+  writing through a symlink to the file it names, as the author's document
+  plus the baseline, so an omitted section stays omitted. A plan that already carries a
   baseline, as a revision carries its parent's, is never restamped: the
   baseline is inside the hash every approval and waiver names. It refuses
   while a §2 check fails or a question is open.
@@ -599,10 +603,10 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
   checks judge against the application by name. Both read one derivation of
   what name an element is judged by (`plan/app-targets.ts`). The value is a
   SHA-256 of the facts those checks read for the name: whether the plan's own
-  app root declares it and which other roots do (a table is matched by its
+  app root declares it, and for a table which other roots do (matched by its
   identifier or SQL name, without its columns, since a column is its own
-  entry), whether a column's table declares the column, and a route name's
-  endpoints.
+  entry), whether a column's table declares the column and where else that
+  table is declared, and a route name's endpoints.
 - A section that cannot be read stamps no entry. Validators, which no scanner
   reads, are never stamped. Any other unreadable section makes `plan:approve`
   refuse, naming the section and the elements it would leave unstamped for
@@ -617,9 +621,12 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
   `add` or the new name of a `rename` is declared in the element's root, the
   old name is not, a `drop` and every child of a dropped parent are gone, an
   `existing` or `alter` element stays, a column sits in its table, and a route
-  name carries the planned method and path. A table name the plan brings in is
-  declared by no other root, since the shared schema would make that a
-  collision; any other declaration in another root is carried over as read.
+  name carries the planned method and path. Every root's schema is one SQL
+  schema, so a table name the plan brings in or removes is predicted declared
+  in no other root, and a dropped model's columns with it; another root's
+  declaration of any other table name is carried over as read. Where else a
+  class is declared is not hashed at all, since it only feeds the text of a
+  §2 finding.
   Anything else is `stale`, so an `alter` route whose path another commit
   moved is stale although `plan:status` already reads it as `drifted`. The
   rule does not consult `plan:status`. It cannot tell a same-named class that

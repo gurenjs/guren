@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,10 +8,13 @@ import { runCommand } from 'citty'
 import { builtinSubCommands } from '../src/commands'
 import { planApproveFile, type PlanApproveReport } from '../src/plan-approve'
 import { formatPlanStatus, planStatusFile } from '../src/plan-status'
+import { loadPlanAppState } from '../src/plan/app-state'
 import { planApprovalsPath, readPlanApprovals } from '../src/plan/approvals'
+import { writeFileAtomic } from '../src/plan/beside'
 import { stampContextHash } from '../src/plan/freshness'
 import { planHash } from '../src/plan/identity'
 import { PlanDraftSchema, PlanSchema } from '../src/plan/schema'
+import { runCaptured, type CapturedExec } from '../src/subprocess'
 import { writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState } from './plan-fixture'
 
@@ -87,11 +90,11 @@ describe('guren plan:approve', () => {
     const report = JSON.parse(logged.join('\n')) as PlanApproveReport
 
     const written = JSON.parse(await readFile(plan, 'utf8')) as Record<string, unknown>
-    const stamp = stampContextHash(PlanDraftSchema.parse(answeredPlan()), planAppState())
-    expect(written.baseline).toEqual({ rev: head, contextHash: expect.any(Object) })
-    const contextHash = (written.baseline as { contextHash: Record<string, string> }).contextHash
-    // The on-disk app and the in-memory fixture read alike for every element they both declare.
-    expect(Object.keys(contextHash).sort()).toEqual(Object.keys(stamp.contextHash).sort())
+    // What the command's own loader reads of the committed app, hashed the way the stamp is.
+    const stamp = stampContextHash(PlanDraftSchema.parse(answeredPlan()), await loadPlanAppState(app))
+    expect(written.baseline).toEqual({ rev: head, contextHash: stamp.contextHash })
+    const contextHash = stamp.contextHash
+    expect(Object.keys(contextHash)).toContain('model.post')
     // The author's document plus the baseline: nothing else is rewritten.
     expect({ ...written, baseline: undefined }).toEqual({ ...answeredPlan(), baseline: undefined })
 
@@ -202,6 +205,38 @@ describe('guren plan:approve', () => {
     expect(report.stamped).toBeDefined()
   })
 
+  test('should approve a brand-new plan directory, its rendered page beside it, without calling the tree dirty', async () => {
+    const { app } = await createApp('new-dir', answeredPlan())
+    const plan = join(app, 'docs/plans/comments/plan.json')
+    await writeWorkspaceFiles(app, { 'docs/plans/comments/plan.json': JSON.stringify(answeredPlan()), 'docs/plans/comments/plan.html': '<html></html>\n' })
+    await writeFile(join(app, 'docs/plans/comments/.plan.json.1.2.tmp'), 'left over', 'utf8')
+
+    const report = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW })
+    expect(report.stamped).toBeDefined()
+    expect(report.approvalsFile).toBe('docs/plans/comments/approvals.json')
+
+    // Anything else in that new directory is still a change.
+    await writeFile(join(app, 'docs/plans/comments/notes.md'), 'x\n', 'utf8')
+    await writeFile(plan, JSON.stringify(answeredPlan()), 'utf8')
+    await expect(planApproveFile(plan, { app: planAppState(), appRoot: app })).rejects.toThrow(/\?\? docs\/plans\/comments\/notes\.md$/)
+  })
+
+  test('should exclude its own plan when the application root is reached through a symlink', async () => {
+    const { app, plan } = await createApp('linked', answeredPlan())
+    await writeFile(plan, JSON.stringify(answeredPlan(), null, 1), 'utf8')
+    const link = join(ROOT, 'linked-alias')
+    await symlink(app, link, 'dir')
+    const report = await planApproveFile(plan, { app: planAppState(), appRoot: link, now: NOW })
+    expect(report.stamped).toBeDefined()
+  })
+
+  test('should refuse to stamp when git cannot say whether the tree is clean', async () => {
+    const { app, plan } = await createApp('status-fails', answeredPlan())
+    const exec: CapturedExec = async (command, cwd, options) =>
+      command[1] === 'status' ? { exitCode: 128, stdout: '', stderr: 'fatal: index file corrupt' } : runCaptured(command, cwd, options)
+    await expect(planApproveFile(plan, { app: planAppState(), appRoot: app, exec })).rejects.toThrow(/Cannot tell whether the working tree .* is clean.*index file corrupt/s)
+  })
+
   test('should refuse an approvals file that will not read, before the plan is rewritten', async () => {
     const { app, plan } = await createApp('unreadable', answeredPlan())
     await writeFile(planApprovalsPath(plan), '{ not json', 'utf8')
@@ -229,5 +264,23 @@ describe('plan:status freshness', () => {
     expect(text).toContain('Against the approved baseline: fresh ')
     expect(text).toContain('  stale  column.post.id: What the scanners read for it changed since approval, to neither what was stamped nor what the plan leaves.')
     expect(text).toContain('  unjudged: validator.comment')
+  })
+})
+
+describe('writeFileAtomic', () => {
+  test('should keep the mode of the file it replaces, and write through a symlink to the file it names', async () => {
+    const dir = join(ROOT, 'atomic')
+    await writeWorkspaceFiles(dir, { 'real.json': '{}\n' })
+    const real = join(dir, 'real.json')
+    await chmod(real, 0o640)
+    const link = join(dir, 'link.json')
+    await symlink(real, link)
+
+    await writeFileAtomic(link, '{"a":1}\n')
+
+    expect((await lstat(link)).isSymbolicLink()).toBe(true)
+    expect(await readFile(real, 'utf8')).toBe('{"a":1}\n')
+    expect((await stat(real)).mode & 0o777).toBe(0o640)
+    expect((await readdir(dir)).sort()).toEqual(['link.json', 'real.json'])
   })
 })

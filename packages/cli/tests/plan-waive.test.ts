@@ -86,6 +86,20 @@ describe('plan:waive', () => {
     expect(report.replaced).toEqual([])
   })
 
+  test('should ask git config for the author in the application root, not the working directory', async () => {
+    const plan = await writePlan('author-root.plan.json')
+    const app = join(ROOT, 'elsewhere-app')
+    await mkdir(app, { recursive: true })
+    const asked: string[] = []
+    const exec: CapturedExec = async (_command, cwd) => {
+      asked.push(cwd)
+      return { exitCode: 1, stdout: '', stderr: '' }
+    }
+    await waive(plan, ['model.comment'], { exec, app, cwd: ROOT })
+    expect(asked.length).toBeGreaterThan(0)
+    expect(new Set(asked)).toEqual(new Set([app]))
+  })
+
   test('should name the waiver after whoever git config reports, and omit it where it reports nobody', async () => {
     const plan = await writePlan('author.plan.json')
     const exec: CapturedExec = async (command) => ({ exitCode: 0, stdout: command.includes('user.name') ? 'Urata Daiki\n' : 'someone@example.com\n', stderr: '' })

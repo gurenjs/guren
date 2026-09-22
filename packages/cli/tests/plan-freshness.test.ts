@@ -17,6 +17,13 @@ function approvedAgainst(plan: PlanDraft, at: PlanAppStateInput = {}): Plan {
   return PlanSchema.parse({ ...plan, baseline: { rev: 'abc123', contextHash: stampContextHash(plan, planAppState(at)).contextHash } })
 }
 
+function dropPost(): PlanDraft {
+  return draft((document) => {
+    const post = (document.models as Array<Record<string, unknown>>)[0]!
+    post.change = { kind: 'drop', reason: 'posts are retired' }
+  })
+}
+
 function verdictOf(freshness: PlanFreshness, id: string) {
   const element = freshness.elements.find((candidate) => candidate.id === id)
   if (!element) throw new Error(`no freshness verdict for ${id}`)
@@ -193,18 +200,38 @@ describe('judgeFreshness', () => {
   })
 
   test('should call the existing children of a dropped model fresh once the drop lands, and stale while only they vanish', () => {
-    const plan = approvedAgainst(
-      draft((document) => {
-        const post = (document.models as Array<Record<string, unknown>>)[0]!
-        post.change = { kind: 'drop', reason: 'posts are retired' }
-      }),
-    )
+    const plan = approvedAgainst(dropPost())
     const dropped = judgeFreshness(plan, planAppState({ models: ['User'], tables: [PLAN_APP_TABLES[1]!] }))
     expect(verdictOf(dropped, 'model.post').verdict).toBe('fresh')
     expect(verdictOf(dropped, 'column.post.id')).toMatchObject({ change: 'existing', verdict: 'fresh' })
 
     const columnGone = judgeFreshness(plan, planAppState({ tables: [{ identifier: 'posts', tableName: 'posts', columns: ['title'] }, PLAN_APP_TABLES[1]!] }))
     expect(verdictOf(columnGone, 'column.post.id').verdict).toBe('stale')
+  })
+
+  test('should call a dropped model stale when another commit moves it and its table into another app root', () => {
+    const plan = approvedAgainst(dropPost())
+    const moved = planAppState({
+      models: [{ name: 'Post', module: 'blog' }, 'User'],
+      tables: [{ identifier: 'posts', tableName: 'posts', columns: ['id', 'title', 'body'], module: 'blog' }, PLAN_APP_TABLES[1]!],
+    })
+    const freshness = judgeFreshness(plan, moved)
+    expect(verdictOf(freshness, 'model.post').verdict).toBe('stale')
+    expect(verdictOf(freshness, 'column.post.id').verdict).toBe('stale')
+  })
+
+  test('should keep a dropped model fresh before the drop lands while another root declares its table as it did at approval', () => {
+    const withBlog = { tables: [...PLAN_APP_TABLES, { identifier: 'posts', tableName: 'posts', columns: ['id'], module: 'blog' }] }
+    const plan = approvedAgainst(dropPost(), withBlog)
+    const freshness = judgeFreshness(plan, planAppState(withBlog))
+    expect(verdictOf(freshness, 'model.post').verdict).toBe('fresh')
+    expect(verdictOf(freshness, 'column.post.id').verdict).toBe('fresh')
+  })
+
+  test('should not hash where else a class is declared, which only the message text reads', () => {
+    const plan = approvedAgainst(draft())
+    const unrelated = judgeFreshness(plan, planAppState({ models: ['Post', 'User', { name: 'Comment', module: 'billing' }] }))
+    expect(verdictOf(unrelated, 'model.comment').verdict).toBe('fresh')
   })
 
   test('should call the existing actions of a dropped controller fresh once the drop lands', () => {

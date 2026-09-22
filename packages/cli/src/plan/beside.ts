@@ -5,7 +5,7 @@
  * not share one. Also who `git config` says is acting, which both records name.
  */
 
-import { readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 import type { z } from 'zod'
@@ -62,12 +62,24 @@ export async function readBesideRecord<T>(path: string, schema: z.ZodType<T>, wh
   return { value: parsed.data }
 }
 
-/** Through a temporary file in the same directory, so a reader never sees half a record. */
+/**
+ * Through a hidden temporary file beside the target, so a reader never sees half a record.
+ * A symlinked target is written through to the file it names, and an existing file keeps its mode.
+ */
 export async function writeFileAtomic(path: string, content: string): Promise<void> {
-  const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.tmp`)
+  let target = path
+  let mode: number | undefined
+  try {
+    target = await realpath(path)
+    mode = (await stat(target)).mode & 0o7777
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const temporary = join(dirname(target), `.${basename(target)}.${process.pid}.${Date.now()}.tmp`)
   try {
     await writeFile(temporary, content, 'utf8')
-    await rename(temporary, path)
+    if (mode !== undefined) await chmod(temporary, mode)
+    await rename(temporary, target)
   } catch (error) {
     await rm(temporary, { force: true })
     throw error

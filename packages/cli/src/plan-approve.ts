@@ -6,12 +6,12 @@
  * It refuses while a §2 check fails or a question is open: silence approves nothing.
  */
 
-import { basename, resolve } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 
-import { runGit } from './changed-files'
 import { CliError, formatSchemaIssues } from './cli-error'
 import { toPosixRelative } from './discovery'
-import { readPlanFile } from './plan-render'
+import { planOutputPath, readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
 import { planApprovalsPath, readPlanApprovals, recordPlanApproval, requireReadableApprovals, type PlanApproval } from './plan/approvals'
 import { gitAuthor, writeFileAtomic } from './plan/beside'
@@ -77,7 +77,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     approved = plan
   } else {
     const rev = await headRevision(appRoot, exec)
-    await refuseDirtyTree(appRoot, path)
+    await refuseDirtyTree(appRoot, path, exec)
     const stamp = stampContextHash(plan, app)
     // Validators are never read, so they alone never refuse; any other section would stay unstamped for good.
     const unread = stamp.unstamped.filter((entry) => entry.sections.some((section) => section !== 'validators'))
@@ -114,22 +114,44 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
 
 /**
  * `contextHash` reads the working tree and `rev` names a commit, so the two agree only on a
- * clean tree. The plan and its sibling records are excluded: approving writes them. Pathspecs
- * are relative to `appRoot`, which need not be the repository root.
+ * clean tree. The plan, its page, its sibling records, a write's leftover temp file and the
+ * state directory are excluded: approving and rendering write them. Pathspecs are relative
+ * to `appRoot`, which need not be the repository root; both sides are real paths.
  */
-async function refuseDirtyTree(appRoot: string, planPath: string): Promise<void> {
-  const inside = [planPath, planApprovalsPath(planPath), planDecisionsPath(planPath)]
-    .map((file) => toPosixRelative(appRoot, file))
-    .filter((file) => !file.startsWith('../'))
-  const dirty =
-    (await runGit(appRoot, ['status', '--porcelain', '--', '.', ...inside.map((file) => `:(exclude,literal)${file}`), `:(exclude)${PLAN_STATE_DIR}`])) ?? []
+async function refuseDirtyTree(appRoot: string, planPath: string, exec: CapturedExec): Promise<void> {
+  const [root, plan] = await Promise.all([realpath(appRoot), realpath(planPath)])
+  const own = [plan, planApprovalsPath(plan), planDecisionsPath(plan), planOutputPath(plan)]
+  const inside = (file: string): string | undefined => {
+    const relative = toPosixRelative(root, file)
+    return relative.startsWith('../') ? undefined : relative
+  }
+  const excluded = own.flatMap((file) => {
+    const relative = inside(file)
+    if (relative === undefined) return []
+    const temporary = inside(join(dirname(file), `.${basename(file)}.`))!
+    return [`:(exclude,literal)${relative}`, `:(exclude,glob)${globEscape(temporary)}*.tmp`]
+  })
+  let run
+  try {
+    run = await exec(['git', 'status', '--porcelain', '--untracked-files=all', '--', '.', ...excluded, `:(exclude)${PLAN_STATE_DIR}`], root)
+  } catch (error) {
+    run = { exitCode: -1, stdout: '', stderr: (error as Error).message }
+  }
+  if (run.exitCode !== 0) {
+    throw new CliError(`Cannot tell whether the working tree under ${root} is clean, so the baseline is not stamped: git status failed (${run.stderr.trim() || `exit ${run.exitCode}`}).`)
+  }
+  const dirty = run.stdout.split('\n').map((line) => line.trimEnd()).filter((line) => line.length > 0)
   if (dirty.length === 0) return
   throw new CliError(
-    `The working tree under ${appRoot} has uncommitted changes (paths relative to the repository root), and the baseline hashes the tree against HEAD. Commit or discard them first:\n${dirty
+    `The working tree under ${root} has uncommitted changes (paths relative to the repository root), and the baseline hashes the tree against HEAD. Commit or discard them first:\n${dirty
       .slice(0, 10)
       .map((line) => `  ${line}`)
       .join('\n')}${dirty.length > 10 ? `\n  … and ${dirty.length - 10} more` : ''}`,
   )
+}
+
+function globEscape(path: string): string {
+  return path.replace(/[*?[\]\\]/gu, (character) => `\\${character}`)
 }
 
 /** A rev that names no commit cannot be checked out later, so no repository and no commit are both refusals. */

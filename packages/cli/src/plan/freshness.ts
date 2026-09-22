@@ -15,7 +15,7 @@ import { listPlanReferences } from './references'
 import type { PlanChange, PlanDraft, PlanElementSection } from './schema'
 
 /** Hashed into every entry, so a change to what is hashed marks everything stale rather than colliding. */
-const CONTEXT_FACTS_VERSION = 2
+const CONTEXT_FACTS_VERSION = 3
 
 export interface PlanContextStamp {
   contextHash: Record<string, string>
@@ -43,7 +43,10 @@ export interface PlanFreshness {
   summary: Record<PlanFreshnessVerdict, number>
 }
 
-/** Whether the plan's own root declares a name, and which other roots do. */
+/**
+ * Whether the plan's own root declares a name, and for a table which other roots do: one
+ * name is one SQL table across roots. A class elsewhere feeds only §2 message text.
+ */
 interface Presence {
   here: boolean
   elsewhere?: PlanAppScope[]
@@ -51,7 +54,7 @@ interface Presence {
 
 type Facts =
   | { section: 'named' | 'tables'; names: Record<string, Presence> }
-  | { section: 'columns'; table: boolean; columns?: Record<string, boolean> }
+  | { section: 'columns'; table: boolean; elsewhere: PlanAppScope[]; columns?: Record<string, boolean> }
   | { section: 'routes'; endpoints: Record<string, string[]>; registered?: boolean }
 
 /** Project root first, then code-unit order, so two machines write the same bytes. */
@@ -77,15 +80,13 @@ function aliasOf(target: PlanAppTarget, name: string): string | undefined {
   return renamed && name.startsWith(`${renamed.from}.`) ? `${renamed.to}${name.slice(renamed.from.length)}` : undefined
 }
 
-function presence(target: PlanAppTarget, roots: PlanAppScope[]): Presence {
-  const own = target.module ?? null
-  if (!target.perRoot) return { here: roots.includes(null) }
-  return { here: roots.includes(own), elsewhere: roots.filter((root) => root !== own) }
-}
-
 function namesFacts(section: 'named' | 'tables', target: PlanAppTarget, rootsOf: (name: string) => PlanAppScope[]): Facts {
+  const own = target.perRoot ? (target.module ?? null) : null
   const names: Record<string, Presence> = {}
-  for (const name of namesOf(target)) names[name] = presence(target, sortedRoots(rootsOf(name)))
+  for (const name of namesOf(target)) {
+    const roots = sortedRoots(rootsOf(name))
+    names[name] = { here: roots.includes(own), ...(section === 'tables' ? { elsewhere: roots.filter((root) => root !== own) } : {}) }
+  }
   return { section, names }
 }
 
@@ -108,11 +109,14 @@ function targetFacts(target: PlanAppTarget, app: PlanAppState): Facts | PlanAppU
       // Found under its name today or the one the plan gives it, and hashed without saying
       // which, so implementing a table rename does not move its `existing` columns.
       const module = target.module ?? null
-      const table = findTable(tables, target.table.lookup, module) ?? findTable(tables, target.table.current, module)
-      if (!table) return { section: 'columns', table: false }
+      const { lookup, current } = target.table
+      const table = findTable(tables, lookup, module) ?? findTable(tables, current, module)
+      // Where else the table is declared, which is what the checks say of a table not in its root.
+      const elsewhere = sortedRoots(tables.filter((candidate) => candidate.module !== module && (declaresTable(candidate, lookup) || declaresTable(candidate, current))).map((candidate) => candidate.module))
+      if (!table) return { section: 'columns', table: false, elsewhere }
       const columns: Record<string, boolean> = {}
       for (const name of namesOf(target)) columns[name] = table.columns.includes(name)
-      return { section: 'columns', table: true, columns }
+      return { section: 'columns', table: true, elsewhere, columns }
     }
     // Every root's: an `add` collides with a table any root declares. Columns are their own
     // entries, so a column the plan adds does not move its model's hash.
@@ -129,17 +133,19 @@ function targetFacts(target: PlanAppTarget, app: PlanAppState): Facts | PlanAppU
 }
 
 /**
- * A table name the plan brings into being was declared by no root at approval, or the shared
- * schema would have failed the §2 checks, and it stays that way everywhere but the plan's root.
+ * Whether the plan settles a table name in every root, not only its own: one name is one SQL
+ * table, so a name it brings in was declared nowhere at approval (the §2 checks refuse it
+ * otherwise) and a name it removes is left declared nowhere.
  */
-function claimsTableName(target: PlanAppTarget, name: string): boolean {
+function settlesTableName(target: PlanAppTarget, name: string): boolean {
+  if (!presentAtEnd(target, name)) return true
   return name === target.current && (target.kind === 'add' || (target.kind === 'rename' && target.previous !== target.current))
 }
 
 /**
  * The same facts once the plan's own work is done: every name it controls in the root it
- * names is where the plan leaves it. A declaration in another app root is the plan's only
- * where the shared schema makes it so; otherwise it is carried over as read.
+ * names is where the plan leaves it. Another root's declaration of a table is the plan's
+ * where {@link settlesTableName} says so; otherwise it is carried over as read.
  */
 function plannedEnd(target: PlanAppTarget, facts: Facts): Facts {
   switch (facts.section) {
@@ -147,16 +153,17 @@ function plannedEnd(target: PlanAppTarget, facts: Facts): Facts {
     case 'tables': {
       const names: Record<string, Presence> = {}
       for (const [name, found] of Object.entries(facts.names)) {
-        const elsewhere = facts.section === 'tables' && claimsTableName(target, name) ? { elsewhere: [] } : {}
+        const elsewhere = facts.section === 'tables' && settlesTableName(target, name) ? { elsewhere: [] } : {}
         names[name] = { ...found, here: presentAtEnd(target, name), ...elsewhere }
       }
       return { section: facts.section, names }
     }
     case 'columns': {
-      if (target.parentDropped) return { section: 'columns', table: false }
+      // A dropped table is left declared nowhere, as settlesTableName() has it for the model.
+      if (target.parentDropped) return { section: 'columns', table: false, elsewhere: [] }
       const columns: Record<string, boolean> = {}
       for (const name of namesOf(target)) columns[name] = presentAtEnd(target, name)
-      return { section: 'columns', table: true, columns }
+      return { section: 'columns', table: true, elsewhere: facts.elsewhere, columns }
     }
     case 'routes': {
       const endpoints: Record<string, string[]> = {}
