@@ -1,8 +1,9 @@
 /**
- * The committed records a plan keeps beside itself (RFC 0030 §9): its decision log and its
- * approvals. `docs/plans/<slug>/plan.json` keeps them as `<record>.json` in its directory;
- * a plan named for its slug keeps `<slug>.<record>.json`, so two plans in one directory do
- * not share one. Also who `git config` says is acting, which both records name.
+ * What a plan keeps beside itself (RFC 0030 §9): its committed decision log and approvals,
+ * and the page `plan:render` writes. `docs/plans/<slug>/plan.json` keeps the records as
+ * `<record>.json` in its directory; a plan named for its slug keeps `<slug>.<record>.json`,
+ * so two plans in one directory do not share one. Also the `git status` exclusions for those
+ * files, and who `git config` says is acting, which both records name.
  */
 
 import { chmod, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -26,13 +27,14 @@ export function planOutputPath(planPath: string): string {
 }
 
 /**
- * `git status` pathspecs excluding what the plan commands write beside a plan: the plan, its
- * page, its approvals and decision log, and a leftover {@link writeFileAtomic} temporary of
- * each. Relative to `root`; both arguments must be real paths, or a symlinked temp directory
- * makes every pathspec miss. A file outside `root` needs no exclusion and gets none.
+ * `git status` pathspecs excluding what the plan commands write beside a plan: its page and,
+ * with `records`, the plan itself, its approvals and its decision log, plus a leftover
+ * {@link writeFileAtomic} temporary of each. Only `plan:approve`, which writes the records,
+ * may pass `records`: they are committed, and a waiver in the log steers `plan:next`.
+ * Relative to `root`; both paths must be real, or a symlinked temp directory makes every one miss.
  */
-export function planBesideExclusions(root: string, planPath: string): string[] {
-  const own = [planPath, planSiblingPath(planPath, 'approvals'), planSiblingPath(planPath, 'decisions'), planOutputPath(planPath)]
+export function planBesideExclusions(root: string, planPath: string, options: { records: boolean }): string[] {
+  const own = [planOutputPath(planPath), ...(options.records ? [planPath, planSiblingPath(planPath, 'approvals'), planSiblingPath(planPath, 'decisions')] : [])]
   const inside = (file: string): string | undefined => {
     const relative = toPosixRelative(root, file)
     return relative.startsWith('../') ? undefined : relative

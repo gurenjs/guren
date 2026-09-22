@@ -7,15 +7,14 @@
  */
 
 import { realpath } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 
 import { CliError, formatSchemaIssues } from './cli-error'
 import { toPosixRelative } from './discovery'
-import { planOutputPath, readPlanFile } from './plan-render'
+import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
 import { planApprovalsPath, readPlanApprovals, recordPlanApproval, requireReadableApprovals, type PlanApproval } from './plan/approvals'
-import { gitAuthor, writeFileAtomic } from './plan/beside'
-import { planDecisionsPath } from './plan/decisions'
+import { gitAuthor, planBesideExclusions, writeFileAtomic } from './plan/beside'
 import { stampContextHash, type PlanContextStamp } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
@@ -120,17 +119,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
  */
 async function refuseDirtyTree(appRoot: string, planPath: string, exec: CapturedExec): Promise<void> {
   const [root, plan] = await Promise.all([realpath(appRoot), realpath(planPath)])
-  const own = [plan, planApprovalsPath(plan), planDecisionsPath(plan), planOutputPath(plan)]
-  const inside = (file: string): string | undefined => {
-    const relative = toPosixRelative(root, file)
-    return relative.startsWith('../') ? undefined : relative
-  }
-  const excluded = own.flatMap((file) => {
-    const relative = inside(file)
-    if (relative === undefined) return []
-    const temporary = inside(join(dirname(file), `.${basename(file)}.`))!
-    return [`:(exclude,literal)${relative}`, `:(exclude,glob)${globEscape(temporary)}*.tmp`]
-  })
+  const excluded = planBesideExclusions(root, plan, { records: true })
   let run
   try {
     run = await exec(['git', 'status', '--porcelain', '--untracked-files=all', '--', '.', ...excluded, `:(exclude)${PLAN_STATE_DIR}`], root)
@@ -148,10 +137,6 @@ async function refuseDirtyTree(appRoot: string, planPath: string, exec: Captured
       .map((line) => `  ${line}`)
       .join('\n')}${dirty.length > 10 ? `\n  … and ${dirty.length - 10} more` : ''}`,
   )
-}
-
-function globEscape(path: string): string {
-  return path.replace(/[*?[\]\\]/gu, (character) => `\\${character}`)
 }
 
 /** A rev that names no commit cannot be checked out later, so no repository and no commit are both refusals. */

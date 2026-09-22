@@ -213,7 +213,7 @@ describe('plan:next', () => {
     await writeState(app, { steps: { [SCAFFOLD]: await holding(app) } })
 
     // What plan:render and an interrupted atomic write leave beside the plan; neither is a step's work.
-    await writeWorkspaceFiles(app, { 'comments.plan.html': '<html></html>\n', '.comments.plan.json.1.2.tmp': '{}\n' })
+    await writeWorkspaceFiles(app, { 'comments.plan.html': '<html></html>\n', '.comments.plan.html.1.2.tmp': '{}\n' })
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(TESTS)
 
     await writeWorkspaceFiles(app, { 'notes.md': 'x\n' })
@@ -221,16 +221,30 @@ describe('plan:next', () => {
     await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/first:\n {2}\?\? notes\.md$/)
   })
 
-  test('should not count a new plan directory holding only the plan and its page as a change', async () => {
+  test('should leave out an untracked page in a plan directory, and refuse an uncommitted decision log or plan edit', async () => {
     const app = join(ROOT, 'plan-dir')
-    await writeWorkspaceFiles(app, { 'package.json': JSON.stringify({ name: 'plan-dir', type: 'module', dependencies: { '@guren/inertia-client': '*' } }) })
+    const plan = join(app, 'docs/plans/comments/plan.json')
+    await writeWorkspaceFiles(app, {
+      'package.json': JSON.stringify({ name: 'plan-dir', type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
+      'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()),
+    })
     git(app, 'init', '-q')
     git(app, 'add', '-A')
     git(app, 'commit', '-q', '-m', 'init')
-    await writeWorkspaceFiles(app, { 'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()), 'docs/plans/comments/plan.html': '<html></html>\n' })
-    await writeState(app, { steps: {}, active: { plan: 'docs/plans/comments/plan.json', step: 'elsewhere', startedAt: 't', continuations: 0 } })
+    const unmarked = { steps: {}, active: { plan: 'docs/plans/comments/plan.json', step: 'elsewhere', startedAt: 't', continuations: 0 } }
+    await writeWorkspaceFiles(app, { 'docs/plans/comments/plan.html': '<html></html>\n' })
+    await writeState(app, unmarked)
+    expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
 
-    expect((await planNextFile(join(app, 'docs/plans/comments/plan.json'), { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
+    // The records are committed: a waiver in the log steers which step comes back, so it is nobody's step to carry.
+    await writeWorkspaceFiles(app, { 'docs/plans/comments/decisions.json': '{}\n' })
+    await writeState(app, unmarked)
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/first:\n {2}\?\? docs\/plans\/comments\/decisions\.json$/)
+
+    await rm(join(app, 'docs/plans/comments/decisions.json'))
+    await writeFile(plan, JSON.stringify({ ...loadCommentsPlan(), title: 'Edited' }), 'utf8')
+    await writeState(app, unmarked)
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/first:\n +M docs\/plans\/comments\/plan\.json$/)
   })
 
   test('should leave a tracked state file out of the dirty reading, in an application below the repository root', async () => {
@@ -265,7 +279,7 @@ describe('plan:next', () => {
     const text = formatPlanNext(report, 'comments.plan.json')
     expect(text).toContain('Stalled 2026-09-21T09:00:00.000Z: 3 continuations on this step')
     expect(text).toContain('    fail     typecheck   bun run typecheck')
-    expect(text).toContain('A stall is a person\u2019s decision: fix the environment, revise the plan, or accept an element incomplete with')
+    expect(text).toContain('A stall is a person\u2019s decision: fix the environment, edit the plan (and approve it), or accept an element incomplete with')
     expect(text).toContain('  bunx guren plan:waive comments.plan.json <element-id> --reason "<why>"')
     // The mark it wrote is a fresh one, so the next run is a plain step.
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.stalled).toBeUndefined()

@@ -157,7 +157,7 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     await writePlanActiveStep(appRoot, slug, { ...active, lastSignature: judgement.signature, stalled: { at, reason: judgement.reason, output } })
     return withNotice({
       block: false,
-      message: `${heading}: giving up, ${judgement.reason}.\n${output}\nThe step is recorded as stalled. Fix the environment, revise the plan, or waive an element with \`bunx guren plan:waive ${active.plan} <element-id> --reason "<why>"\`; \`bunx guren plan:next ${active.plan}\` then returns it again.`,
+      message: `${heading}: giving up, ${judgement.reason}.\n${output}\nThe step is recorded as stalled. Fix the environment, edit the plan (and approve it), or waive an element with \`bunx guren plan:waive ${active.plan} <element-id> --reason "<why>"\`; \`bunx guren plan:next ${active.plan}\` then returns it again.`,
     })
   }
   const continuations = active.continuations + 1

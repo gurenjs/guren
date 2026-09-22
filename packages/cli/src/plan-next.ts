@@ -23,7 +23,7 @@ import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
-import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
+import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
@@ -236,7 +236,8 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
 
   // The state files are git-ignored before the tree is read, and excluded from the reading for a
   // checkout that tracked them before, so neither an earlier run's write nor the mark makes it
-  // dirty; so are the plan's own files (its page, records, temporaries), which no step commits.
+  // dirty; so is the page `plan:render` writes beside the plan, with its temporaries, which the
+  // plan commands write. The plan and its records are not: a waiver steers which step is returned.
   // Excluded by pathspec, since porcelain paths are relative to the repository root, not to `root`.
   await ensurePlanStateIgnored(root)
   const [realRoot, realPlan] = await Promise.all([realpath(root), realpath(path)])
@@ -244,9 +245,10 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     (await runGit(realRoot, [
       'status',
       '--porcelain',
+      '--untracked-files=all',
       '--',
       '.',
-      ...planBesideExclusions(realRoot, realPlan),
+      ...planBesideExclusions(realRoot, realPlan, { records: false }),
       `:(exclude,glob)${PLAN_STATE_DIR}/*.state.json`,
       `:(exclude)${PLAN_STATE_DIR}/.gitignore`,
     ])) ?? []
@@ -344,8 +346,8 @@ function heldLines(report: PlanNextReport, planArgument: string): string[] {
   }
   lines.push(
     '',
-    'A held step is a person\u2019s decision: undo the change that moved it, or edit the plan so it states what the application holds now',
-    `  (an element already built becomes \`existing\`, or \`alter\` where the plan still changes it) and approve that with \`bunx guren plan:approve ${planArgument}\`.`,
+    `A held step is a person\u2019s decision: ${HELD_STEP_REMEDY}:`,
+    `  bunx guren plan:approve ${planArgument}`,
     '  Approval keeps the baseline the plan was first stamped with; to drop an edit instead, restore the approved plan text.',
   )
   return lines
@@ -393,7 +395,7 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
         '',
         `Stalled ${step.stalled.at}: ${indent(step.stalled.reason, '  ')}`,
         ...(step.stalled.output ? [`  ${indent(step.stalled.output, '  ')}`] : []),
-        'A stall is a person\u2019s decision: fix the environment, revise the plan, or accept an element incomplete with',
+        'A stall is a person\u2019s decision: fix the environment, edit the plan (and approve it), or accept an element incomplete with',
         `  bunx guren plan:waive ${planArgument} <element-id> --reason "<why>"`,
       )
     }

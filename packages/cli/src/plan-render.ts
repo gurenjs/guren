@@ -75,8 +75,6 @@ async function pageLocale(plan: PlanDraft | Plan, options: RenderPlanFileOptions
   return matchPlanLocale(await options.appLocale())
 }
 
-export { planOutputPath }
-
 /** Reads and parses a plan file, every failure a `CliError` naming the path. Shared by the commands that take a plan. */
 /** `document` is the file as written, before parsing fills defaulted sections in. */
 export async function readPlanFile(planPath: string, cwd: string = process.cwd()): Promise<{ path: string; plan: PlanDraft | Plan; document: unknown }> {

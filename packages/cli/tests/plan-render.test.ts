@@ -17,7 +17,7 @@ import {
   type PlanPagePayload,
 } from '../src/plan/render'
 import { PlanDraftSchema, PlanSchema, type PlanDraft } from '../src/plan/schema'
-import { parsePlanDocument, planOutputPath, renderPlanFile, type RenderPlanFileOptions } from '../src/plan-render'
+import { parsePlanDocument, renderPlanFile, type RenderPlanFileOptions } from '../src/plan-render'
 import { loadCommentsPlan, PAYLOADS, planAppState, planDataBlock, planPageData, TEST_BASELINE } from './plan-fixture'
 import { openPlanPage, planPageModule, planPageSource } from './plan-page-dom'
 
@@ -645,15 +645,5 @@ describe('parsePlanDocument', () => {
 
   test('should hold a document with a baseline to the full plan schema', () => {
     expect(() => parsePlanDocument({ ...loadCommentsPlan(), baseline: { rev: '' } })).toThrow(/baseline/)
-  })
-})
-
-describe('planOutputPath', () => {
-  test('should replace a .json extension', () => {
-    expect(planOutputPath('/tmp/comments.plan.json')).toBe('/tmp/comments.plan.html')
-  })
-
-  test('should append to a path with no .json extension', () => {
-    expect(planOutputPath('/tmp/plan')).toBe('/tmp/plan.html')
   })
 })
