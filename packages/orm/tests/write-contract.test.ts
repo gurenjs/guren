@@ -6,8 +6,13 @@ import { sqliteWriteFixture, postgresWriteFixture, mysqlWriteFixture, type Write
 
 type EntryRecord = { id: number; tenant: number; name: string; deletedAt: Date | null }
 
-function writeContract(name: string, factory: () => WriteFixture | Promise<WriteFixture>, enabled = true): void {
-  const suite = enabled ? describe : describe.skip
+/** A live driver runs only where a URL names a server; without one there is no fixture to build. */
+function liveFixture(url: string | undefined, make: (url: string) => Promise<WriteFixture>): (() => Promise<WriteFixture>) | undefined {
+  return url ? () => make(url) : undefined
+}
+
+function writeContract(name: string, factory: (() => WriteFixture | Promise<WriteFixture>) | undefined): void {
+  const suite = factory ? describe : describe.skip
   suite(`${name} write contract`, () => {
     let fixture: WriteFixture
     class Entry extends Model<EntryRecord> {
@@ -17,6 +22,7 @@ function writeContract(name: string, factory: () => WriteFixture | Promise<Write
     class SoftEntry extends SoftDeletes(Entry) {}
 
     beforeAll(async () => {
+      if (!factory) throw new Error(`${name} write contract: no fixture, the suite should have been skipped`)
       fixture = await factory()
       Object.defineProperty(Entry, 'table', { value: fixture.table, configurable: true })
     })
@@ -80,5 +86,5 @@ function writeContract(name: string, factory: () => WriteFixture | Promise<Write
 }
 
 writeContract('SQLite', sqliteWriteFixture)
-writeContract('PostgreSQL', () => postgresWriteFixture(process.env.POSTGRES_URL!), Boolean(process.env.POSTGRES_URL))
-writeContract('MySQL', () => mysqlWriteFixture(process.env.MYSQL_URL!), Boolean(process.env.MYSQL_URL))
+writeContract('PostgreSQL', liveFixture(process.env.POSTGRES_URL, postgresWriteFixture))
+writeContract('MySQL', liveFixture(process.env.MYSQL_URL, mysqlWriteFixture))

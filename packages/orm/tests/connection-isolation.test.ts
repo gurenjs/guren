@@ -8,12 +8,6 @@ import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 const table = sqliteTable('items', { id: integer('id').primaryKey(), name: text('name').notNull() })
 class Item extends Model<typeof table.$inferSelect> { static override table = table }
 
-function barrier() {
-  let release!: () => void
-  const promise = new Promise<void>((resolve) => { release = resolve })
-  return { promise, release }
-}
-
 function fixture() {
   const client = new Database(':memory:')
   client.exec('CREATE TABLE items (id integer primary key, name text not null)')
@@ -24,33 +18,35 @@ describe('connection-owned execution state', () => {
   it('retains an open connection queue when the default changes away and back', async () => {
     const first = fixture()
     const second = fixture()
-    const entered = barrier()
-    const release = barrier()
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
     DrizzleAdapter.configure(first.db as never)
     const transaction = Item.transaction(async () => {
       await Item.create({ id: 1, name: 'rollback' })
-      entered.release()
+      entered.resolve()
       await release.promise
       throw new Error('rollback')
     }).catch((error: unknown) => error)
+    let unrelated: Promise<void> | undefined
     try {
       await entered.promise
       DrizzleAdapter.configure(second.db as never)
       await Item.transaction(async () => { await Item.create({ id: 2, name: 'second' }) })
       DrizzleAdapter.configure(first.db as never)
       let completed = false
-      const unrelated = Item.create({ id: 3, name: 'kept' }).then(() => { completed = true })
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        expect(completed).toBe(false)
-      } finally { release.release() }
+      unrelated = Item.create({ id: 3, name: 'kept' }).then(() => { completed = true })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const queuedBehindTransaction = !completed
+      release.resolve()
+      expect(queuedBehindTransaction).toBe(true)
       expect(await transaction).toBeInstanceOf(Error)
       await unrelated
       expect(first.client.query('SELECT name FROM items').all()).toEqual([{ name: 'kept' }])
       expect(second.client.query('SELECT name FROM items').all()).toEqual([{ name: 'second' }])
     } finally {
-      release.release()
+      release.resolve()
       await transaction
+      await unrelated?.catch(() => undefined)
       first.client.close()
       second.client.close()
     }

@@ -171,7 +171,6 @@ async function resolveMutation(result: DrizzleLikeInsertResult | DrizzleLikeUpda
   return result
 }
 
-
 /**
  * Eagerly call `.returning()` if available: bun-sqlite's query builders are
  * thenable, so `resolveMutation`'s `isPromiseLike` check would otherwise win

@@ -5,6 +5,7 @@ import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { pgTable, integer as pgInteger, text as pgText, timestamp } from 'drizzle-orm/pg-core'
 import { mysqlTable, int, varchar, datetime } from 'drizzle-orm/mysql-core'
 import type { DrizzleDatabase } from '../src/adapters/drizzle-types'
+import { databaseUrl } from './database-url'
 
 export interface WriteFixture {
   db: DrizzleDatabase
@@ -33,15 +34,16 @@ export async function postgresWriteFixture(url: string): Promise<WriteFixture> {
   const { drizzle } = await import('drizzle-orm/postgres-js')
   const name = `guren_contract_${randomUUID().replaceAll('-', '')}`
   const admin = postgres(url, { max: 1 })
+  const discard = async () => {
+    try { await admin.unsafe(`DROP DATABASE "${name}"`) } finally { await admin.end() }
+  }
   try {
     await admin.unsafe(`CREATE DATABASE "${name}"`)
   } catch (error) {
     await admin.end()
     throw error
   }
-  const target = new URL(url)
-  target.pathname = `/${name}`
-  const client = postgres(target.toString(), { max: 2 })
+  const client = postgres(databaseUrl(url, name), { max: 2 })
   try {
     await client.unsafe('CREATE TABLE entries (id integer primary key, tenant integer not null, name text not null, deleted_at timestamp)')
     const table = pgTable('entries', {
@@ -53,12 +55,12 @@ export async function postgresWriteFixture(url: string): Promise<WriteFixture> {
       async clear() { await client.unsafe('DELETE FROM entries') },
       async close() {
         await client.end()
-        try { await admin.unsafe(`DROP DATABASE "${name}"`) } finally { await admin.end() }
+        await discard()
       },
     }
   } catch (error) {
     await client.end()
-    try { await admin.unsafe(`DROP DATABASE "${name}"`) } finally { await admin.end() }
+    await discard()
     throw error
   }
 }
@@ -68,15 +70,16 @@ export async function mysqlWriteFixture(url: string): Promise<WriteFixture> {
   const { drizzle } = await import('drizzle-orm/mysql2')
   const name = `guren_contract_${randomUUID().replaceAll('-', '')}`
   const admin = createPool({ uri: url, connectionLimit: 1 }).promise()
+  const discard = async () => {
+    try { await admin.query(`DROP DATABASE \`${name}\``) } finally { await admin.end() }
+  }
   try {
     await admin.query(`CREATE DATABASE \`${name}\``)
   } catch (error) {
     await admin.end()
     throw error
   }
-  const target = new URL(url)
-  target.pathname = `/${name}`
-  const pool = createPool({ uri: target.toString(), connectionLimit: 2 })
+  const pool = createPool({ uri: databaseUrl(url, name), connectionLimit: 2 })
   const client = pool.promise()
   try {
     await client.query('CREATE TABLE entries (id integer primary key, tenant integer not null, name varchar(255) not null, deleted_at datetime)')
@@ -89,12 +92,12 @@ export async function mysqlWriteFixture(url: string): Promise<WriteFixture> {
       async clear() { await client.query('DELETE FROM entries') },
       async close() {
         await client.end()
-        try { await admin.query(`DROP DATABASE \`${name}\``) } finally { await admin.end() }
+        await discard()
       },
     }
   } catch (error) {
     await client.end()
-    try { await admin.query(`DROP DATABASE \`${name}\``) } finally { await admin.end() }
+    await discard()
     throw error
   }
 }

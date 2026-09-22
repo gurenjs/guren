@@ -34,8 +34,19 @@ export function configureConnection(db: DrizzleDatabase): void {
 
 /** Reconfiguration changes the default, never the owner of an in-flight transaction. */
 export function currentConnection(): ConnectionRuntime | undefined {
+  return liveAmbient()?.owner ?? defaultConnection
+}
+
+/**
+ * The transaction the async context carries, while it is still open; `owner`
+ * narrows it to that runtime's own. A settled ambient is ignored: a
+ * continuation nobody awaited outlives the transaction it was started in, and
+ * its handle is finalised by then.
+ */
+function liveAmbient(owner?: ConnectionRuntime): AmbientTransaction | undefined {
   const ambient = loadedStore?.getStore()
-  return ambient && !ambient.settled ? ambient.owner : defaultConnection
+  if (!ambient || ambient.settled) return undefined
+  return owner && ambient.owner !== owner ? undefined : ambient
 }
 
 /**
@@ -70,6 +81,21 @@ function loadTransactionStore(): Promise<TransactionStore> {
 // Under the 65535 parameters Postgres and MySQL take per statement.
 const POOLED_IN_LIST_SIZE = 5000
 
+const SYNC_EXECUTIONS = ['all', 'get', 'run', 'values'] as const
+const NOOP = () => undefined
+
+type OpenTransaction = NonNullable<DrizzleDatabase['transaction']>
+type RunStatement = NonNullable<DrizzleDatabase['run']>
+
+// `typeof === 'function'` narrows to `Function`, whose apply() returns `any`.
+function isCallable(value: unknown): value is (...args: unknown[]) => unknown {
+  return typeof value === 'function'
+}
+
+function define(target: object, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { configurable: true, writable: true, value })
+}
+
 /**
  * Read from how the dialect escapes a parameter and a name, since this adapter
  * takes any drizzle-shaped handle and a driver list would name one it has never
@@ -97,26 +123,23 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
   /**
    * An explicit `trx` wins; without one, a call made inside a `transaction()`
    * callback runs on that transaction. Off the pool, on a driver whose pool is
-   * `max: 1`, it would wait on the connection the open transaction holds. A
-   * settled ambient is ignored: a continuation nobody awaited outlives the
-   * transaction it was started in, and its handle is finalised by then.
+   * `max: 1`, it would wait on the connection the open transaction holds.
    */
   function resolveExecutor(options?: AdapterQueryOptions): DrizzleDatabase {
     if (options?.trx && typeof options.trx === 'object') {
       return options.trx as DrizzleDatabase
     }
 
-    const ambient = loadedStore?.getStore()
-    if (ambient && ambient.owner === runtime && !ambient.settled && typeof ambient.handle === 'object' && ambient.handle !== null) {
-      return ambient.handle as DrizzleDatabase
+    const handle = liveAmbient(runtime)?.handle
+    if (typeof handle === 'object' && handle !== null) {
+      return handle as DrizzleDatabase
     }
 
     return db
   }
 
   function withExecutor<T>(options: AdapterQueryOptions | undefined, callback: (db: DrizzleDatabase) => Promise<T>): Promise<T> {
-    const ambient = loadedStore?.getStore()
-    if (options?.trx || (ambient && ambient.owner === runtime && !ambient.settled)) return callback(resolveExecutor(options))
+    if (options?.trx || liveAmbient(runtime)) return callback(resolveExecutor(options))
     if (transactionAwaitsCallback === false) {
       const operation = transactionQueue.then(() => callback(db))
       transactionQueue = operation.then(NOOP, NOOP)
@@ -131,12 +154,9 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
     return operation
   }
 
-  const SYNC_EXECUTIONS = ['all', 'get', 'run', 'values'] as const
-
   /** A BEGIN this adapter issued is on the connection, and the caller is not inside it. */
   function foreignTransactionOpen(): boolean {
-    const ambient = loadedStore?.getStore()
-    return manualTransactionOpen && !(ambient?.owner === runtime && !ambient.settled)
+    return manualTransactionOpen && !liveAmbient(runtime)
   }
 
   /**
@@ -172,17 +192,6 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
     return query
   }
 
-  // `typeof === 'function'` narrows to `Function`, whose apply() returns `any`.
-  function isCallable(value: unknown): value is (...args: unknown[]) => unknown {
-    return typeof value === 'function'
-  }
-
-  function define(target: object, key: string, value: unknown): void {
-    Object.defineProperty(target, key, { configurable: true, writable: true, value })
-  }
-
-  const NOOP = () => undefined
-
   /**
    * Whether `db.transaction()` awaits its callback before committing: drizzle's
    * bun-sqlite COMMITs on whatever the callback returns, d1 and every pg/mysql
@@ -202,9 +211,6 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
 
     return transactionAwaitsCallback
   }
-
-  type OpenTransaction = NonNullable<DrizzleDatabase['transaction']>
-  type RunStatement = NonNullable<DrizzleDatabase['run']>
 
   /**
    * Opened on the root database for a top-level call and on the open
@@ -241,8 +247,8 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
     }
   }
 
-  function manualEntry(db: DrizzleDatabase, run: RunStatement, store: TransactionStore): AmbientTransaction {
-    return { owner: runtime, handle: db, settled: false, nest: (callback) => runSavepoint(db, run, store, callback) }
+  function manualEntry(run: RunStatement, store: TransactionStore): AmbientTransaction {
+    return { owner: runtime, handle: db, settled: false, nest: (callback) => runSavepoint(run, store, callback) }
   }
 
   /**
@@ -253,7 +259,6 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
    * discard each other's frames.
    */
   async function runSavepoint<TResult>(
-    db: DrizzleDatabase,
     run: RunStatement,
     store: TransactionStore,
     callback: (trx: unknown) => Promise<TResult>,
@@ -262,7 +267,7 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
     // Outside enterTransaction: a SAVEPOINT that failed opened nothing to unwind.
     await run(sql.raw(`savepoint ${name}`))
 
-    return enterTransaction(db, run, store, callback, {
+    return enterTransaction(run, store, callback, {
       commit: [`release savepoint ${name}`],
       rollback: [`rollback to savepoint ${name}`, `release savepoint ${name}`],
     })
@@ -275,13 +280,12 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
    * starts — in this transaction's async context.
    */
   async function enterTransaction<TResult>(
-    db: DrizzleDatabase,
     run: RunStatement,
     store: TransactionStore,
     callback: (trx: unknown) => Promise<TResult>,
     settle: { commit: readonly string[]; rollback: readonly string[] },
   ): Promise<TResult> {
-    const entry = manualEntry(db, run, store)
+    const entry = manualEntry(run, store)
     try {
       const result = await store.run(entry, () => callback(db))
       for (const statement of settle.commit) await run(sql.raw(statement))
@@ -307,11 +311,7 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
    * one would queue behind itself, which is why `transaction()` settles nesting
    * from the async context before reaching this queue.
    */
-  async function runOwnTransaction<TResult>(
-    db: DrizzleDatabase,
-    store: TransactionStore,
-    callback: (trx: unknown) => Promise<TResult>,
-  ): Promise<TResult> {
+  async function runOwnTransaction<TResult>(store: TransactionStore, callback: (trx: unknown) => Promise<TResult>): Promise<TResult> {
     if (typeof db.run !== 'function') {
       throw new Error(
         'DrizzleAdapter: the configured database commits before its transaction callback has awaited anything, ' +
@@ -324,7 +324,7 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
     const pending = [...pendingOperations]
     const slot = transactionQueue.then(async () => {
       await Promise.allSettled(pending)
-      return runExclusively(db, run, store, callback)
+      return runExclusively(run, store, callback)
     })
     // The queue only orders: a settled slot must neither reject the next one nor,
     // via a value-preserving `.catch`, pin its result until the next transaction.
@@ -339,7 +339,6 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
    * between BEGIN and COMMIT is inside it. Callers reach this one at a time.
    */
   async function runExclusively<TResult>(
-    db: DrizzleDatabase,
     run: RunStatement,
     store: TransactionStore,
     callback: (trx: unknown) => Promise<TResult>,
@@ -348,7 +347,7 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
     manualTransactionOpen = true
     try {
       await run(sql.raw('begin'))
-      return await enterTransaction(db, run, store, callback, { commit: ['commit'], rollback: ['rollback'] })
+      return await enterTransaction(run, store, callback, { commit: ['commit'], rollback: ['rollback'] })
     } finally {
       manualTransactionOpen = false
     }
@@ -372,16 +371,14 @@ function createConnectionRuntime(db: DrizzleDatabase): ConnectionRuntime {
       }
 
       const store = await loadTransactionStore()
-      const ambient = store.getStore()
-      if (ambient && ambient.owner === runtime && !ambient.settled) {
-        return ambient.nest(callback)
-      }
+      const ambient = liveAmbient(runtime)
+      if (ambient) return ambient.nest(callback)
 
       if (await awaitsItsCallback(db)) {
         return runDriverTransaction(db.transaction.bind(db), store, callback)
       }
 
-      return runOwnTransaction(db, store, callback)
+      return runOwnTransaction(store, callback)
     },
   }
   return runtime

@@ -9,6 +9,7 @@ import { createPostgresDatabase, type PostgresDatabase } from '../src/postgres'
 import { Model, defineModel, type PaginatedResult, type TransactionHandle } from '../src/Model'
 import { SoftDeletes } from '../src/SoftDeletes'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
+import { databaseUrl } from './database-url'
 
 // postgres.test.ts mocks `postgres` and the migrator away, so it can assert a
 // migration run *happens* but never that the database ends up usable. CI supplies
@@ -20,12 +21,6 @@ const describePostgres = POSTGRES_URL ? describe : describe.skip
 
 // Derived rather than taken from POSTGRES_URL, which is what an app puts in DATABASE_URL.
 const TEST_DATABASE = 'guren_orm_test'
-
-function databaseUrl(url: string, database: string): string {
-  const target = new URL(url)
-  target.pathname = `/${database}`
-  return target.toString()
-}
 
 async function ensureTestDatabase(url: string, database: string = TEST_DATABASE): Promise<void> {
   const { default: postgres } = await import('postgres')

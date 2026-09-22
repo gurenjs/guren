@@ -355,9 +355,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Both write entry points fork on `hasScopes()`, and only one arm reaches a
-   * builder — so the refusal belongs above the fork, where every adapter is
-   * still in scope.
+   * Ahead of the `updating`/`deleting` hooks, which must not fire for a write
+   * that is refused; the builder repeats the check for its own callers.
    */
   private static assertFiltersSurvived(where: unknown, operation: 'update' | 'delete'): void {
     if (!everyFilterDropped(where)) return
