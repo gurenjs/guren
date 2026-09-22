@@ -10,24 +10,21 @@ export type AccessorDefinitions = Record<string, AccessorFn>
 
 export type MutatorDefinitions = Record<string, MutatorFn>
 
-const PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
-
 /**
  * A computed field is written with `record[key] = …`, and `__proto__` as a key
  * would rewrite the record's prototype rather than a column. The names come
  * from a model's static definitions, so refusing them is a boot-time mistake
- * surfacing at first use, not a runtime input check.
+ * surfacing at first use, not a runtime input check. The comparison is spelled
+ * at each write because CodeQL does not follow a guard that throws elsewhere.
  */
-function assertWritableKey(key: string, kind: 'accessor' | 'mutator'): void {
-  if (PROTOTYPE_KEYS.has(key)) {
-    throw new Error(`An ${kind} cannot be named "${key}": that key would alter the record's prototype.`)
-  }
+function prototypeKeyError(key: string, kind: 'accessor' | 'mutator'): Error {
+  return new Error(`An ${kind} cannot be named "${key}": that key would alter the record's prototype.`)
 }
 
 /** Writes the computed values onto `record`; each accessor sees the ones before it. */
 export function applyAccessorsInPlace(record: PlainObject, accessors: AccessorDefinitions): void {
   for (const key of Object.keys(accessors)) {
-    assertWritableKey(key, 'accessor')
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') throw prototypeKeyError(key, 'accessor')
     record[key] = accessors[key](record)
   }
 }
@@ -50,7 +47,7 @@ export function applyMutators(data: PlainObject, mutators?: MutatorDefinitions):
 
   const result = { ...data }
   for (const key of keys) {
-    assertWritableKey(key, 'mutator')
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') throw prototypeKeyError(key, 'mutator')
     if (Object.hasOwn(result, key)) {
       result[key] = mutators[key](result[key], result)
     }
