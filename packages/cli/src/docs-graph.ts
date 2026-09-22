@@ -13,11 +13,12 @@ import { matchesGlob } from './glob-match'
 import type { CheckResult, CheckStatus } from './check-result'
 import { SPEC_VIEWS } from './spec-generate'
 import { SPEC_DIR } from './spec-artifact'
+import { acceptanceIdNamesEntity, scanAcceptanceTests, type AcceptanceTestRef } from './docs-acceptance'
 
 export interface DocsGraphNode {
-  /** Doc path, `entity:<Name>`, or a code path/label. */
+  /** Doc path, `entity:<Name>`, `test:<acceptance id>`, or a code path/label. */
   id: string
-  kind: 'doc' | 'entity' | 'code'
+  kind: 'doc' | 'entity' | 'code' | 'test'
   label: string
   /** OKF `type`, doc nodes only — the viewer colors by it. */
   docType?: string
@@ -26,8 +27,11 @@ export interface DocsGraphNode {
 export interface DocsGraphEdge {
   from: string
   to: string
-  /** governs = frontmatter declaration, links = body markdown link, derives = spec-view source. */
-  relation: 'governs' | 'links' | 'derives'
+  /**
+   * governs = frontmatter declaration, links = body markdown link, derives = spec-view source,
+   * verifies = a test carrying an acceptance id a doc cites, or whose id names an entity (RFC 0030 §7).
+   */
+  relation: 'governs' | 'links' | 'derives' | 'verifies'
   /** The verdict `runDocsCheck` recorded for this relation. */
   verdict: CheckStatus
 }
@@ -50,7 +54,8 @@ function verdictOf(byKey: Map<string, CheckResult>, key: string): CheckStatus {
   return byKey.get(key)?.status ?? 'pass'
 }
 
-export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph {
+/** `tests` are the acceptance ids test titles carry; a cited id no test carries is still a node. */
+export function buildDocsGraph(refs: DocRef[], checks: CheckResult[], tests: AcceptanceTestRef[] = []): DocsGraph {
   const byKey = new Map(checks.map((check) => [check.key, check]))
   const nodes: DocsGraphNode[] = []
   const edges: DocsGraphEdge[] = []
@@ -110,6 +115,25 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph
     }
   }
 
+  // Edges run test → doc, reading "this test verifies that document's rule".
+  const entityNames = nodes.filter((node) => node.kind === 'entity').map((node) => node.label)
+  const carried = new Set(tests.map((test) => test.id))
+  const testIds = new Set([...carried, ...refs.flatMap((ref) => ref.citations)])
+  for (const id of [...testIds].sort()) {
+    const node = `test:${id}`
+    addNode({ id: node, kind: 'test', label: id })
+    for (const ref of refs) {
+      if (!ref.citations.includes(id)) continue
+      edges.push({ from: node, to: ref.path, relation: 'verifies', verdict: verdictOf(byKey, `docs-cites:${ref.path}:${id}`) })
+    }
+    for (const entity of entityNames) {
+      if (acceptanceIdNamesEntity(id, entity)) {
+        const verdict = carried.has(id) ? verdictOf(byKey, `docs-uncited-test:${id}`) : 'warn'
+        edges.push({ from: node, to: `entity:${entity}`, relation: 'verifies', verdict })
+      }
+    }
+  }
+
   // Only the app-root bundle carries these: spec:generate writes to
   // <root>/docs/spec.
   for (const view of SPEC_VIEWS) {
@@ -134,11 +158,12 @@ export interface LoadedDocsGraph {
   graph: DocsGraph
 }
 
-/** One filesystem pass behind every graph consumer. */
+/** One filesystem pass behind every graph consumer. Tests are read only once a doc cites an id. */
 export async function loadDocsGraph(cwd: string): Promise<LoadedDocsGraph> {
   const refs = await scanDocs(cwd)
-  const checks = await runDocsCheck({ cwd, refs })
-  return { refs, checks, graph: buildDocsGraph(refs, checks) }
+  const tests = refs.some((ref) => ref.citations.length > 0) ? await scanAcceptanceTests(cwd) : []
+  const checks = await runDocsCheck({ cwd, refs, tests })
+  return { refs, checks, graph: buildDocsGraph(refs, checks, tests) }
 }
 
 export interface DocsGraphReportOptions {
@@ -245,6 +270,7 @@ const VERDICT_GLYPH: Record<Exclude<CheckStatus, 'pass'>, string> = { warn: 'war
 const KIND_TITLES: Array<[DocsGraphNode['kind'], string]> = [
   ['doc', 'Documents'],
   ['entity', 'Entities'],
+  ['test', 'Tests'],
   ['code', 'Code'],
 ]
 

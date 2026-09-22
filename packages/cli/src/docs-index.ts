@@ -4,6 +4,7 @@ import {
   parseDocFrontmatter,
   type DocFrontmatterValue,
 } from './docs-frontmatter'
+import { extractAcceptanceCitations, extractUncitedRules } from './docs-acceptance'
 import { extractMarkdownLinks } from './docs-links'
 import { parseIssueRef, type DocIssueRef } from './issue-refs'
 import {
@@ -72,6 +73,10 @@ export interface DocRef {
    * External links, bare anchors and links inside code are excluded.
    */
   links: string[]
+  /** Acceptance ids the body cites as `(AC-…)`, the doc → test relation (RFC 0030 §7). */
+  citations: string[]
+  /** Items under a `## Rules` heading that cite no acceptance id. */
+  uncitedRules: string[]
   hasFrontmatter: boolean
 }
 
@@ -154,6 +159,8 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
               issues,
               malformedIssues,
               links: parsed ? extractMarkdownLinks(body) : [],
+              citations: parsed ? extractAcceptanceCitations(body) : [],
+              uncitedRules: parsed ? extractUncitedRules(body) : [],
               hasFrontmatter: parsed !== null,
             }
           }),

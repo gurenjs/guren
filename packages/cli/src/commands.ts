@@ -46,6 +46,7 @@ import { formatPlanStatus, planStatusFile } from './plan-status'
 import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from './plan-verify'
 import { formatPlanNext, planNextFile } from './plan-next'
 import { formatPlanWaive, planWaiveFile } from './plan-waive'
+import { formatPlanClose, planCloseFile } from './plan-close'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -443,6 +444,41 @@ const planWaiveCommand = defineCommand({
     const ids = [args.elements, ...args._.slice(2)].filter((id) => id.length > 0)
     const report = await planWaiveFile(args.plan, { elementIds: ids, reason: args.reason, remove: args.remove, app: args.app })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanWaive(report))
+  },
+})
+
+const planCloseCommand = defineCommand({
+  meta: {
+    name: 'plan:close',
+    description:
+      "Close an approved implementation plan whose every element is verified or waived (RFC 0030 §7): write its doc node to docs/plans/<slug>.md and a marker-fenced draft block per section of each touched entity's docs/entities/<Entity>.md, never rewriting text outside the markers. Deletes nothing: the plan, its approvals and its decision log stay committed. Refuses an unapproved plan and names every element still open.",
+  },
+  args: {
+    plan: {
+      type: 'positional',
+      description: 'Path to the plan JSON file',
+      required: true,
+      valueHint: 'comments.plan.json',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory: what the plan is judged against and where the documents are written.',
+    },
+    'dry-run': {
+      type: 'boolean',
+      description: 'Print what would be written, and write nothing.',
+      default: false,
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print the report as JSON.',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const appRoot = resolve(args.app ?? process.cwd())
+    const report = await planCloseFile(args.plan, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot, dryRun: args['dry-run'] })
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanClose(report))
   },
 })
 
@@ -3827,6 +3863,7 @@ export const builtinSubCommands = {
   'plan:verify': planVerifyCommand,
   'plan:next': planNextCommand,
   'plan:waive': planWaiveCommand,
+  'plan:close': planCloseCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
   'make:ai-agent': makeAiAgentCommand,

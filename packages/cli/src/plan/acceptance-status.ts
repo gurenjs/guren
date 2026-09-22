@@ -18,6 +18,11 @@ export const JUNIT_MAX_DEPTH = 64
 // A bracketed token no behaviour declares is an error only under this prefix: `[GET]` is not a mistyped id.
 const ACCEPTANCE_ID_PREFIX = 'AC-'
 
+/** An acceptance id by shape alone, the one grammar `plan:verify` and the docs checks read ids with. */
+export function isAcceptanceId(token: string): boolean {
+  return token.startsWith(ACCEPTANCE_ID_PREFIX) && ID_PATTERN.test(token)
+}
+
 /** A token comes from a test title, which no plan rule bounds, and an error's id is shown to a reader. */
 const MAX_REPORTED_ID_CHARS = 256
 
@@ -92,7 +97,7 @@ export function acceptanceStatus(junit: string | undefined, declaredIds: readonl
     let title: string | undefined
     for (const token of junitCase.tokens) {
       const isDeclared = declared.has(token)
-      if (!isDeclared && !(token.startsWith(ACCEPTANCE_ID_PREFIX) && ID_PATTERN.test(token))) continue
+      if (!isDeclared && !isAcceptanceId(token)) continue
 
       title ??= junitCase.title()
       if (isDeclared) {

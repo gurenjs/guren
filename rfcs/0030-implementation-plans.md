@@ -1352,6 +1352,61 @@ links, `derives` from a spec view's source; a verdict per edge from
 document, its ADRs, the plans that touched it, the tests that verify its rules
 and, through `@docs`, the code. All of it is Part 4 work with `plan:close`.
 
+**Amended in implementation (`plan:close`).** The command is shipped with these
+readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
+`docs-acceptance.ts`).
+
+- Completion is judged by `planStatusFile()`, the function `plan:status`
+  prints, so the two cannot disagree. Every element outside `existing`, in a
+  section `plan:status` judges, must be `verified` or `waived`; the refusal
+  names each one that is not and its state. A state file or a decision log
+  that will not read refuses too. The plan must carry a baseline, and its
+  current hash must be in the approvals beside it: a revision approved under
+  another hash is not closed on its parent's approval.
+- "Archives the plan" is the doc node. Under the `file` store nothing is moved
+  or deleted: the plan, its approvals and its decision log stay committed where
+  they are, and `.guren/plans/` is left alone. No command yet refuses to work on
+  a closed plan.
+- The doc node is `docs/plans/<slug>.md` wherever the plan file sits; a plan
+  named `plan.json` takes its directory's name. `status: closed` is not
+  written, since the checker reads `status` as the OKF lifecycle and warns on
+  any other value (`docs-check.ts`, `DOC_STATUSES`); closure is `closed: true`
+  beside `plan_hash`. `related:` is omitted: `plan:close` writes no ADR (it
+  prints one `make:adr` command per waiver), and a `related` entry nothing
+  matches fails `check --docs`. The approval is the `verified` event, as
+  `human:<approvedBy>` where `git config` named someone.
+- A block opens with `<!-- guren:plan <slug> <hash> <section> -->` and closes
+  with `<!-- /guren:plan <slug> <section> -->`. It is found by slug and section,
+  never by hash, so closing a revision replaces the blocks its parent wrote and
+  leaves every other plan's alone. The sections are Purpose, Rules, Decisions,
+  Non-goals and History; one with nothing to say gets no block, and a revision
+  that empties one removes it. A block goes at the end of the section whose
+  `## ` heading names it in either plan locale, or under a new heading in the
+  plan's locale (`en`, `ja`; any other tag writes `en`). An existing
+  document's frontmatter is never touched; one that does not name the entity
+  is reported.
+- The Rules block lists the behaviours of the tasks naming the entity, each
+  citing its own id, then each action rule and policy-ability rule, citing the
+  behaviours whose route reaches that action or authorizes with that ability.
+- Citations are a parenthesized, comma-separated group whose every entry passes
+  `isAcceptanceId()`, the prefix and grammar rule `plan:verify` reads undeclared
+  ids with; the test side is `bracketedTokens()` over the test sources, the scan
+  `plan:verify` selects test files by. The edge runs test → doc (`verifies`),
+  the reverse of the text above, so that the relation reads as its name; a
+  test also verifies the entity its id's segment names (the collection, as the
+  plan spells it, or the class name), which is what brings the tests into
+  `docs:graph --entity` in one hop. A citation no test carries, a test id that
+  no document cites while another id of its segment is cited, and a Rules item
+  in a `type: entity` document that cites nothing are `check --docs` warnings.
+  They stay advisory because a test may legitimately run ahead of the
+  documents, as work nobody planned under an entity a closed plan documented
+  does. The test tree is read only once a document cites an id.
+- Deferred: the scaffold step's `@docs` tags (the scaffold step is Part 3's),
+  the Behaviours section of `guren context <Entity>`, and a rule reading as
+  machine-confirmed by its test passing. The edge verdict says a test carries
+  the id; whether it passes is a result of `plan:verify` in one environment,
+  which a committed document cannot state.
+
 ### 8. Producers
 
 The schema, the checks, the renderer and the status derivation involve no

@@ -14,6 +14,7 @@ import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './d
 import { ISSUE_REF_FORMS } from './issue-refs'
 import type { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
+import { acceptanceIdSegment, scanAcceptanceTests, type AcceptanceTestRef } from './docs-acceptance'
 
 export interface DocsCheckOptions {
   cwd: string
@@ -23,6 +24,8 @@ export interface DocsCheckOptions {
   cache?: ParseCache
   /** Reuses an existing `scanDocs` result instead of re-scanning the bundle. */
   refs?: DocRef[]
+  /** Reuses an existing `scanAcceptanceTests` result; scanned only when a doc cites an id. */
+  tests?: AcceptanceTestRef[]
 }
 
 function hasGlobChars(entry: string): boolean {
@@ -152,7 +155,82 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
   results.push(...checkConformance(refs, docsWithFrontmatter.length > 0, changedFiles ?? null))
   results.push(...checkDeprecatedEntities(docsWithFrontmatter, modelNames, inScope))
   results.push(...(await checkDocsTags(cwd, [...modelFiles, ...controllerFiles], changedFiles ?? null, cache, probes)))
+  results.push(...(await checkAcceptanceCitations(docsWithFrontmatter, inScope, changedFiles ?? null, async () => options.tests ?? scanAcceptanceTests(cwd))))
 
+  return results
+}
+
+/**
+ * The doc → test relation (RFC 0030 §7): a cited acceptance id some test carries, a cited id
+ * none does, a test id whose entity's documents cite others but not it, and a rule in an
+ * entity document citing none. All warns, like a body link to a doc not written yet. The
+ * test tree is read only once some document cites an id, so an app without the convention
+ * pays nothing.
+ */
+async function checkAcceptanceCitations(
+  refs: DocRef[],
+  inScope: Set<string>,
+  changedFiles: Set<string> | null,
+  loadTests: () => Promise<AcceptanceTestRef[]>,
+): Promise<CheckResult[]> {
+  const results: CheckResult[] = []
+  for (const ref of refs) {
+    if (!inScope.has(ref.path) || ref.type !== 'entity') continue
+    ref.uncitedRules.forEach((rule, index) => {
+      results.push(
+        check(
+          `docs-rule-uncited:${ref.path}:${index}`,
+          `${ref.path} rule`,
+          'warn',
+          `The rule "${rule}" cites no acceptance id, so no test is known to verify it.`,
+          `Cite the behaviour that verifies it, as "(AC-<entity>-<n>)", or move the text out of the Rules section of ${ref.path}.`,
+          ref.path,
+        ),
+      )
+    })
+  }
+
+  const citing = refs.filter((ref) => ref.citations.length > 0)
+  if (citing.length === 0) return results
+  const carried = new Map((await loadTests()).map((test) => [test.id, test.files]))
+
+  for (const ref of citing) {
+    if (!inScope.has(ref.path)) continue
+    for (const id of ref.citations) {
+      const files = carried.get(id)
+      results.push(
+        files
+          ? check(`docs-cites:${ref.path}:${id}`, `${ref.path} → ${id}`, 'pass', `${id} is carried by ${files.join(', ')}.`, undefined, ref.path)
+          : check(
+              `docs-cites:${ref.path}:${id}`,
+              `${ref.path} → ${id}`,
+              'warn',
+              `Doc cites ${id}, but no test title carries [${id}].`,
+              `Write the test as test('[${id}] …'), or fix the citation in ${ref.path}.`,
+              ref.path,
+            ),
+      )
+    }
+  }
+
+  // Judged on a whole run only: a --changed scope cannot see the document that would cite the id.
+  if (changedFiles) return results
+  const cited = new Set(citing.flatMap((ref) => ref.citations))
+  const citedSegments = new Set([...cited].map(acceptanceIdSegment).filter((segment) => segment !== undefined))
+  for (const [id, files] of carried) {
+    const segment = acceptanceIdSegment(id)
+    if (cited.has(id) || segment === undefined || !citedSegments.has(segment)) continue
+    results.push(
+      check(
+        `docs-uncited-test:${id}`,
+        `${id} citation`,
+        'warn',
+        `${files.join(', ')} carries [${id}], and documents cite other ${segment} behaviours but not this one.`,
+        `Cite (${id}) beside the rule it verifies, or close the plan it belongs to with guren plan:close.`,
+        files[0],
+      ),
+    )
+  }
   return results
 }
 

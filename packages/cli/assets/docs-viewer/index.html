@@ -96,6 +96,7 @@ body {
 .node.doc.spec circle { fill: var(--spec-tint); stroke: var(--spec); }
 .node.entity circle { fill: var(--page); stroke: var(--pass); stroke-width: 1.6; }
 .node.code circle { fill: var(--raised); stroke: var(--border-strong); stroke-width: 1.2; }
+.node.test circle { fill: var(--page); stroke: var(--spec); stroke-width: 1.2; stroke-dasharray: 2 2; }
 .node:hover circle, .node.selected circle, .node:focus-visible circle { stroke-width: 3; }
 .node.selected .halo { display: block; }
 .halo { display: none; fill: none; stroke: var(--accent); stroke-opacity: 0.35; stroke-width: 7; }
@@ -145,6 +146,7 @@ body {
 .legend .dot.spec { background: var(--spec-tint); border: 1.5px solid var(--spec); }
 .legend .dot.entity { background: var(--page); border: 1.5px solid var(--pass); }
 .legend .dot.code { background: var(--raised); border: 1.5px solid var(--border-strong); }
+.legend .dot.test { background: var(--page); border: 1.5px dashed var(--spec); }
 
 .hint {
   position: fixed; bottom: 1.5rem; right: 1.75rem; z-index: 4;
@@ -294,6 +296,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   <span><span class="dot spec"></span>generated spec</span>
   <span><span class="dot entity"></span>model entity</span>
   <span><span class="dot code"></span>code</span>
+  <span><span class="dot test"></span>acceptance test</span>
   <span><span class="swatch"></span>governs / links — verified</span>
   <span><span class="swatch derives"></span>derives (regenerated from code)</span>
 </div>
@@ -321,7 +324,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 (() => {
   'use strict'
   const DATA_URL = '/_guren/docs/data.json'
-  const RADIUS = { doc: 22, entity: 15, code: 10 }
+  const RADIUS = { doc: 22, entity: 15, code: 10, test: 9 }
   const VERDICT_GLYPH = { pass: '●', warn: '▲', fail: '✕' }
   const svg = document.getElementById('graph')
   const NS = 'http://www.w3.org/2000/svg'
@@ -340,7 +343,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   let nodeEls = [], edgeEls = []
   let selected = null
   let etag = null
-  const kindEnabled = { doc: true, spec: true, entity: true, code: true }
+  const kindEnabled = { doc: true, spec: true, entity: true, code: true, test: true }
   let searchTerm = ''
 
   const mermaidReady = () =>
@@ -610,7 +613,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   })
 
   const toggleHost = document.getElementById('kind-toggles')
-  for (const kind of ['doc', 'spec', 'entity', 'code']) {
+  for (const kind of ['doc', 'spec', 'entity', 'code', 'test']) {
     const button = el('button', '', kind)
     button.setAttribute('aria-pressed', 'true')
     button.addEventListener('click', () => {
@@ -689,6 +692,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       list.append(relationItem(node ? node.label : e.to, e.verdict, node ? e.to : null))
     }
     front.append(list)
+    const verifiedBy = edges.filter((e) => e.to === doc.path && e.relation === 'verifies')
+    if (verifiedBy.length > 0) relationSection(front, 'Verified by', true, verifiedBy, 'from')
     root.append(front)
 
     const prose = el('div', 'prose')
@@ -724,23 +729,30 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   function buildSatelliteDetail(node) {
     const root = el('article', 'doc-detail')
     const head = el('div', 'doc-head')
-    head.append(el('p', 'path', node.kind === 'entity' ? 'Model entity' : 'Code'))
+    head.append(el('p', 'path', node.kind === 'entity' ? 'Model entity' : node.kind === 'test' ? 'Acceptance test' : 'Code'))
     head.append(el('h1', 'mono-title', node.label))
     root.append(head)
 
-    const governedBy = edges.filter((e) => e.to === node.id && e.relation !== 'derives')
+    const governedBy = edges.filter((e) => e.to === node.id && e.relation !== 'derives' && e.relation !== 'verifies')
     const feeds = edges.filter((e) => e.from === node.id && e.relation === 'derives')
+    const verifiedBy = edges.filter((e) => e.to === node.id && e.relation === 'verifies')
+    const verifies = edges.filter((e) => e.from === node.id && e.relation === 'verifies')
 
     const front = el('div', 'frontmatter')
     if (governedBy.length > 0) relationSection(front, 'Governed by', false, governedBy, 'from')
     if (feeds.length > 0) relationSection(front, 'Feeds spec views', governedBy.length > 0, feeds, 'to')
-    if (governedBy.length === 0 && feeds.length === 0) {
+    if (verifiedBy.length > 0) relationSection(front, 'Verified by', governedBy.length + feeds.length > 0, verifiedBy, 'from')
+    if (verifies.length > 0) relationSection(front, 'Verifies', false, verifies, 'to')
+    if (governedBy.length === 0 && feeds.length === 0 && verifiedBy.length === 0 && verifies.length === 0) {
       relationSection(front, 'Unlinked', false, [], 'from')
     }
     root.append(front)
 
     const note = el('p', 'rel-note')
-    if (node.kind === 'entity') {
+    if (node.kind === 'test') {
+      note.innerHTML =
+        'A test whose title carries this acceptance id, cited by a document rule. A citation no test carries warns in <code>guren check --docs</code>.'
+    } else if (node.kind === 'entity') {
       note.innerHTML =
         'A model class linked by name from doc frontmatter (survives file moves). Explore it with <code></code>.'
       note.querySelector('code').textContent = 'guren context ' + node.label
