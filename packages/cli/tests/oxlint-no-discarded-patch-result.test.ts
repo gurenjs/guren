@@ -67,11 +67,11 @@ console.log(result, landed)
 `)).toEqual([])
   })
 
-  test('the table names exactly the exports typed Promise<PatchResult> under src/', async () => {
+  test('the table names exactly the exports typed Promise<PatchResult> or Promise<EntryWiring> under src/', async () => {
     const files = (await readdir(srcDir)).filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
     const scanned = await Promise.all(files.map(async (file) => {
       const source = await readFile(join(srcDir, file), 'utf8')
-      const names = [...source.matchAll(/^export async function (\w+)\([^{]*?\): Promise<PatchResult>/gmu)].map((m) => m[1]!)
+      const names = [...source.matchAll(/^export async function (\w+)\([^{]*?\): Promise<(?:PatchResult|EntryWiring)>/gmu)].map((m) => m[1]!)
       return [file.replace(/\.ts$/u, ''), names.sort()] as const
     }))
     const found = Object.fromEntries(scanned.filter(([, names]) => names.length > 0))

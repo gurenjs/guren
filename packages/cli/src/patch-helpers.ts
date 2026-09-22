@@ -341,6 +341,63 @@ export async function addImport(
  */
 export type InsertResult = { content: string; reason?: undefined } | { content?: undefined; reason: string }
 
+/** The fate of an entry and of its import, patched together. */
+export type EntryWiring =
+  | { registered: false; entry: PatchResult }
+  | { registered: true; entry: PatchResult; import: PatchResult }
+
+/** {@link EntryWiring} plus the text to write, absent when the file is already right. */
+export type EntryComposition = EntryWiring & { content?: string }
+
+/**
+ * `insertEntry` and then the import, composed for one write: a lone import breaks
+ * `noUnusedLocals`, a lone entry is an unresolved identifier, and two sequenced
+ * writes can leave either. An entry already present still has its import checked,
+ * since a user can remove one by hand; `importStatement` is `null` when the entry
+ * is bound by an import the file already has under another name.
+ */
+export function composeEntryWithImport(
+  content: string,
+  insertEntry: (content: string) => InsertResult,
+  importStatement: string | null,
+): EntryComposition {
+  const inserted = insertEntry(content)
+  const alreadyRegistered = inserted.reason === PATCH_REASONS.alreadyPresent
+
+  if (inserted.content === undefined && !alreadyRegistered) {
+    return { registered: false, entry: { modified: false, reason: inserted.reason } }
+  }
+
+  const withEntry = inserted.content ?? content
+  const withImport = importStatement === null ? null : insertImport(withEntry, importStatement)
+
+  const entry: PatchResult = alreadyRegistered ? { modified: false, reason: PATCH_REASONS.alreadyPresent } : { modified: true }
+  const importResult: PatchResult = withImport === null
+    ? { modified: false, reason: PATCH_REASONS.importAlreadyExists }
+    : { modified: true }
+  const composed: EntryComposition = { registered: true, entry, import: importResult }
+
+  if (entry.modified || importResult.modified) composed.content = withImport ?? withEntry
+  return composed
+}
+
+/** {@link composeEntryWithImport} applied to a file: one read, and one write only when something changed. */
+export async function addEntryWithImport(
+  filePath: string,
+  insertEntry: (content: string) => InsertResult,
+  importStatement: string,
+): Promise<EntryWiring> {
+  const content = await readIfExists(process.cwd(), filePath)
+
+  if (content === null) {
+    return { registered: false, entry: { modified: false, reason: PATCH_REASONS.fileNotFound } }
+  }
+
+  const { content: updated, ...wiring } = composeEntryWithImport(content, insertEntry, importStatement)
+  if (updated !== undefined) await writeFile(resolve(process.cwd(), filePath), updated, 'utf8')
+  return wiring
+}
+
 /**
  * Pure, like `insertImport`: a caller adding the entry's import too writes once.
  * Scoped to `callName`'s own object, creating the option when absent. Splices
@@ -468,18 +525,22 @@ export async function addToArrayArgument(
     return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
-  const updatedContent = insertArrayArgument(content, methodName, valueSource)
+  const inserted = insertArrayArgumentEntry(content, methodName, valueSource)
 
-  if (updatedContent === null) {
-    return { modified: false, reason: `Could not find a ${methodName}([ ... ]) call` }
+  if (inserted.content === undefined) {
+    return { modified: false, reason: inserted.reason }
   }
 
-  if (updatedContent === content) {
-    return { modified: false, reason: PATCH_REASONS.alreadyPresent }
-  }
-
-  await writeFile(absolutePath, updatedContent, 'utf8')
+  await writeFile(absolutePath, inserted.content, 'utf8')
   return { modified: true }
+}
+
+/** {@link insertArrayArgument} read the way `insertArrayOptionEntry` reports, so one caller can compose either. */
+export function insertArrayArgumentEntry(content: string, methodName: string, valueSource: string): InsertResult {
+  const updated = insertArrayArgument(content, methodName, valueSource)
+  if (updated === null) return { reason: `Could not find a ${methodName}([ ... ]) call` }
+  if (updated === content) return { reason: PATCH_REASONS.alreadyPresent }
+  return { content: updated }
 }
 
 /**

@@ -2,7 +2,7 @@ import { consola } from 'consola'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { findFirstExisting, readIfExists } from './discovery'
-import { defaultImportBinding, insertArrayOptionEntry, insertImport, PATCH_REASONS, type PatchResult } from './patch-helpers'
+import { composeEntryWithImport, defaultImportBinding, insertArrayOptionEntry, PATCH_REASONS, type EntryWiring } from './patch-helpers'
 import { relativeImportPath } from './utils'
 
 /**
@@ -17,9 +17,7 @@ export async function resolveAppEntry(cwd: string = process.cwd()): Promise<stri
   return findFirstExisting(cwd, APP_ENTRY_CANDIDATES)
 }
 
-export type EntryWiring =
-  | { registered: false; entry: PatchResult }
-  | { registered: true; entry: PatchResult; import: PatchResult }
+export type { EntryWiring } from './patch-helpers'
 
 /** The default export of a scaffolded file: `local` from `target`, a project path without extension. */
 export interface DefaultExportImport {
@@ -48,30 +46,14 @@ export async function addArrayOptionRegistration(
   }
 
   const bound = typeof importFor === 'string' ? null : defaultImportBinding(content, appPath, importFor.target)
-  const inserted = insertArrayOptionEntry(content, key, bound ?? entry, { isRegistered })
-  const alreadyRegistered = inserted.reason === PATCH_REASONS.alreadyPresent
+  const { content: updated, ...wiring } = composeEntryWithImport(
+    content,
+    (source) => insertArrayOptionEntry(source, key, bound ?? entry, { isRegistered }),
+    bound === null ? importStatementFor(importFor, appPath) : null,
+  )
 
-  if (inserted.content === undefined && !alreadyRegistered) {
-    return { registered: false, entry: { modified: false, reason: inserted.reason } }
-  }
-
-  // An already-registered entry still needs its import checked: the two can
-  // fall out of sync when a user removes one by hand.
-  const withEntry = inserted.content ?? content
-  const withImport = bound === null ? insertImport(withEntry, importStatementFor(importFor, appPath)) : null
-
-  const entryResult: PatchResult = alreadyRegistered
-    ? { modified: false, reason: PATCH_REASONS.alreadyPresent }
-    : { modified: true }
-  const importResult: PatchResult = withImport === null
-    ? { modified: false, reason: PATCH_REASONS.importAlreadyExists }
-    : { modified: true }
-
-  if (entryResult.modified || importResult.modified) {
-    await writeFile(resolve(process.cwd(), appPath), withImport ?? withEntry, 'utf8')
-  }
-
-  return { registered: true, entry: entryResult, import: importResult }
+  if (updated !== undefined) await writeFile(resolve(process.cwd(), appPath), updated, 'utf8')
+  return wiring
 }
 
 function importStatementFor(importFor: string | DefaultExportImport, appPath: string): string {

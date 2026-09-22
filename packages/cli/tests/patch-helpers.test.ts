@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { parseSourceFile } from '../src/parse-cache'
-import { addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertArrayOptionEntry, insertImport, PATCH_REASONS } from '../src/patch-helpers'
+import { addEntryWithImport, addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertArrayArgumentEntry, insertArrayOptionEntry, insertImport, PATCH_REASONS } from '../src/patch-helpers'
 import { captureWarnings, createTempWorkspace, PG_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 
 describe('addImport', () => {
@@ -346,6 +346,80 @@ kernel.registerMany([Real])
       expect((await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')).reason).toBe('Already present')
     })
     expect(result).toBe(source)
+  })
+})
+
+describe('addEntryWithImport', () => {
+  const IMPORT = "import Alpha from './Alpha.js'"
+  const insert = (content: string) => insertArrayArgumentEntry(content, 'registerMany', 'Alpha')
+
+  async function withEntryFile(source: string, run: (path: string) => Promise<void>): Promise<string> {
+    const workspace = await createTempWorkspace('guren-cli-entry-with-import-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'src/console.ts'), source, 'utf8')
+      await run('src/console.ts')
+      return await readFile(join(workspace.dir, 'src/console.ts'), 'utf8')
+    } finally {
+      await workspace.cleanup()
+    }
+  }
+
+  it('lands the entry and its import together', async () => {
+    const result = await withEntryFile("import { ConsoleKernel } from '@guren/core'\nkernel.registerMany([])\n", async (path) => {
+      expect(await addEntryWithImport(path, insert, IMPORT)).toEqual({
+        registered: true,
+        entry: { modified: true },
+        import: { modified: true },
+      })
+    })
+    expect(result).toBe(`import { ConsoleKernel } from '@guren/core'\n${IMPORT}\nkernel.registerMany([Alpha])\n`)
+  })
+
+  it('writes nothing when the entry cannot be placed, so no lone import is left behind', async () => {
+    const source = "import { ConsoleKernel } from '@guren/core'\nkernel.registerMany(list)\n"
+    const result = await withEntryFile(source, async (path) => {
+      expect(await addEntryWithImport(path, insert, IMPORT)).toEqual({
+        registered: false,
+        entry: { modified: false, reason: 'Could not find a registerMany([ ... ]) call' },
+      })
+    })
+    expect(result).toBe(source)
+  })
+
+  it('restores the import of an entry already present', async () => {
+    const result = await withEntryFile("import { ConsoleKernel } from '@guren/core'\nkernel.registerMany([Alpha])\n", async (path) => {
+      expect(await addEntryWithImport(path, insert, IMPORT)).toEqual({
+        registered: true,
+        entry: { modified: false, reason: PATCH_REASONS.alreadyPresent },
+        import: { modified: true },
+      })
+    })
+    expect(result).toContain(IMPORT)
+  })
+
+  it('leaves a file that already has both untouched', async () => {
+    const source = `${IMPORT}\nkernel.registerMany([Alpha])\n`
+    const result = await withEntryFile(source, async (path) => {
+      expect(await addEntryWithImport(path, insert, IMPORT)).toEqual({
+        registered: true,
+        entry: { modified: false, reason: PATCH_REASONS.alreadyPresent },
+        import: { modified: false, reason: PATCH_REASONS.importAlreadyExists },
+      })
+    })
+    expect(result).toBe(source)
+  })
+
+  it('reports a missing file without inventing one', async () => {
+    const workspace = await createTempWorkspace('guren-cli-entry-with-import-missing-')
+    try {
+      expect(await addEntryWithImport('src/console.ts', insert, IMPORT)).toEqual({
+        registered: false,
+        entry: { modified: false, reason: PATCH_REASONS.fileNotFound },
+      })
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })
 
