@@ -749,7 +749,10 @@ command acts on the plan (`plan/approvals.ts`, `plan-next.ts`, `plan-verify.ts`,
   it is the exception (`baseline-removed`): deleting `baseline` would otherwise
   turn an approved plan into a draft no gate asks about, so it is refused like
   an unapproved plan, and so is a draft whose approvals file will not read,
-  since that file may hold the approval the baseline had.
+  since that file may hold the approval the baseline had. The rule reads the
+  approvals file the sibling rule names, so a draft named `plan.json` in a
+  directory whose unrelated `approvals.json` has entries is refused as well;
+  the message says to keep the new draft in a file of its own.
 - `plan:next` refuses before it reads the tree or the application and before
   it writes a mark, so a person mid-step on an edited plan hears about the
   approval rather than the dirty tree. `plan:verify` refuses before `codegen`
@@ -764,10 +767,11 @@ command acts on the plan (`plan/approvals.ts`, `plan-next.ts`, `plan-verify.ts`,
 - The Stop hook never throws and never blocks on approval: no continuation
   approves a plan. It verifies nothing, lets the stop through and records a
   stall on the mark with the refusal as the reason and `cause: 'approval'`, so
-  later stops stay silent. Unlike other stalls, `plan:next` does not report it:
-  a run that passes the gate has answered it, so the stall is dropped and the
-  mark resumes. The approvals read here are handed to `plan:verify`, which
-  reads them itself only when run alone.
+  later stops stay silent. Unlike other stalls, `plan:next` does not report it,
+  since a run that passes the gate has answered it; the step gets a fresh mark
+  as after any other stall. `plan:verify` judges the approvals again on the
+  plan it reads itself rather than trusting the hook's reading, since the plan
+  may change between the two.
 - `plan:status` reports and does not refuse. It is observational and exits 0
   whatever it finds, so a plan with a baseline carries `approval` in the
   report (`approved` with the record, `unapproved`, `baseline-removed`, or

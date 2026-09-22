@@ -7,7 +7,7 @@ import { planNextFile } from '../src/plan-next'
 import { judgeStopHook, MAX_STEP_CONTINUATIONS, planStopHookFindings, recordSignature } from '../src/plan-stop-hook'
 import { parsePlanDocument } from '../src/plan-render'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
-import type { PlanVerifyReport } from '../src/plan-verify'
+import { planVerifyFile, type PlanVerifyReport } from '../src/plan-verify'
 import { planWaiveFile } from '../src/plan-waive'
 import { judgeFreshness, stampContextHash } from '../src/plan/freshness'
 import { PlanSchema } from '../src/plan/schema'
@@ -334,7 +334,8 @@ describe('planStopHookFindings', () => {
     // The steps before the marked one stand, so plan:next returns the marked step with its stall.
     const done = record({ outcome: 'verified', incomplete: [], planDigest: planDigest(parsePlanDocument(document)) })
     const before = Object.fromEntries(planStepIds(derivePlanTasks(PLAN)).slice(0, 3).map((id) => [id, done]))
-    const app = await createApp('unapproved', { steps: before, active: active() }, document, { approve: false })
+    // A mark already continued, so the fresh mark plan:next gives the step is visible.
+    const app = await createApp('unapproved', { steps: before, active: active({ continuations: 2, lastSignature: 'sig' }) }, document, { approve: false })
     let verified = 0
     const verify = async (): Promise<PlanVerifyReport> => (verified++, report(HTTP, record()))
 
@@ -354,10 +355,33 @@ describe('planStopHookFindings', () => {
     // Passing the gate answers the stall, so plan:next drops it rather than repeating advice already followed.
     expect(next.step!.id).toBe(HTTP)
     expect(next.step!.stalled).toBeUndefined()
-    expect((await readState(app)).active).toEqual(active())
+    expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: HTTP, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0 })
     const renewed = await planStopHookFindings(app, { stopHookActive: false }, { verify, now: NOW })
     expect(verified).toBe(1)
     expect(renewed.block).toBe(true)
+  })
+
+  test('should not verify a plan that changed after the hook judged its approval, in either direction', async () => {
+    // The fake runs the real plan:verify after rewriting the plan, so its own reading is what is judged.
+    const rewriting = (app: string, document: Record<string, unknown>) => async (planPath: string, appRoot: string, stepId: string): Promise<PlanVerifyReport> => {
+      await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(document) })
+      return planVerifyFile(planPath, { app: planAppState(), appRoot, step: stepId })
+    }
+    const approved = approvedAgainst(loadCommentsPlan())
+
+    const edited = await createApp('edited-mid-stop', { active: active() }, approved)
+    const afterEdit = await planStopHookFindings(edited, { stopHookActive: false }, { verify: rewriting(edited, { ...approved, title: 'Comments, edited' }), now: NOW })
+    expect(afterEdit.block).toBe(false)
+    expect(afterEdit.message).toContain('could not verify the step: ')
+    expect(afterEdit.message).toContain('is not approved at its current hash')
+
+    const stamped = await createApp('stamped-mid-stop', { active: active() })
+    const afterStamp = await planStopHookFindings(stamped, { stopHookActive: false }, { verify: rewriting(stamped, approved), now: NOW })
+    expect(afterStamp.block).toBe(false)
+    expect(afterStamp.message).toContain('is not approved at its current hash')
+    // Neither run recorded anything for the step.
+    expect((await readState(edited)).steps).toEqual({})
+    expect((await readState(stamped)).steps).toEqual({})
   })
 
   test('should give up on a plan whose approvals file will not read, or whose baseline was deleted, with a log notice kept', async () => {

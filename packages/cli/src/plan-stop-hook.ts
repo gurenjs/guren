@@ -15,7 +15,7 @@ import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
-import { describeUnapproved, readPlanApprovalStanding, type PlanApprovalStanding } from './plan/approvals'
+import { describeUnapproved, readPlanApprovalStanding } from './plan/approvals'
 import { describeDependency, type PlanStepContextElement } from './plan/step-context'
 import { listPlanStates, planDigest, planSlug, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
 import { derivePlanTasks, findPlanStep } from './plan/tasks'
@@ -36,8 +36,7 @@ export interface PlanStopHookVerdict {
 }
 
 export interface PlanStopHookDeps {
-  /** `approval` is what the hook read, handed on so the run does not read the approvals again. */
-  verify?: (planPath: string, appRoot: string, stepId: string, approval: PlanApprovalStanding | undefined) => Promise<PlanVerifyReport>
+  verify?: (planPath: string, appRoot: string, stepId: string) => Promise<PlanVerifyReport>
   now?: () => Date
 }
 
@@ -86,8 +85,8 @@ export function judgeStopHook(
   return { kind: 'continue', signature }
 }
 
-function defaultVerify(planPath: string, appRoot: string, stepId: string, approval: PlanApprovalStanding | undefined): Promise<PlanVerifyReport> {
-  return planVerifyFile(planPath, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot, step: stepId, approval })
+function defaultVerify(planPath: string, appRoot: string, stepId: string): Promise<PlanVerifyReport> {
+  return planVerifyFile(planPath, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot, step: stepId })
 }
 
 async function verifyActiveStep(appRoot: string, slug: string, records: Readonly<Record<string, PlanStepRecord>>, active: PlanActiveStep, stopHookActive: boolean, deps: PlanStopHookDeps): Promise<PlanStopHookVerdict> {
@@ -138,7 +137,7 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
 
   let report: PlanVerifyReport
   try {
-    report = await (deps.verify ?? defaultVerify)(planPath, appRoot, active.step, approval)
+    report = await (deps.verify ?? defaultVerify)(planPath, appRoot, active.step)
   } catch (error) {
     // A run that could not judge the step is not a reason to hold the session: the hook says so and lets it stop.
     const reason = error instanceof CliError ? error.message : error instanceof Error ? `${error.name}: ${error.message}` : String(error)

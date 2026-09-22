@@ -158,9 +158,11 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const slug = planSlug(path)
   const state = (await readPlanState(root, slug)).state
   const records = state?.steps ?? {}
-  // A stall the approval gate recorded is answered by passing that gate, which this run just did.
+  // A stall the approval gate recorded is answered by passing that gate, which this run just did:
+  // it is not reported, and the step starts over on a fresh mark like any other stall's.
   const marked = state?.active
-  const previous = marked?.stalled?.cause === 'approval' ? { ...marked, stalled: undefined } : marked
+  const answered = marked?.stalled?.cause === 'approval'
+  const previous = answered ? { ...marked, stalled: undefined } : marked
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
   const log = await readPlanWaivers(path, plan)
   const judged = await stepContexts(plan, derivation, options, stepInProgress(previous))
@@ -249,7 +251,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
 
   const behaviours = new Set(step.acceptanceIds)
   // A stall is what the last session ended on: reported once, then the hook is asked again.
-  const resumed = previous && previous.step === step.id && !previous.stalled ? previous : undefined
+  const resumed = previous && previous.step === step.id && !previous.stalled && !answered ? previous : undefined
   const active: PlanActiveStep = resumed ?? {
     plan: toPosixRelative(root, path),
     step: step.id,

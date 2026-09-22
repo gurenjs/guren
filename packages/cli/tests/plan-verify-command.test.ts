@@ -38,12 +38,12 @@ async function createApp(name: string, files: Record<string, string> = APP): Pro
   return dir
 }
 
-/** A plan with a baseline is approved at its hash unless `approve` is false, as `plan:approve` would leave it. */
 function git(dir: string, ...args: string[]): void {
   const result = Bun.spawnSync(['git', '-c', 'user.name=Approver', '-c', 'user.email=approver@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
 }
 
+/** A plan with a baseline is approved at its hash unless `approve` is false, as `plan:approve` would leave it. */
 async function writePlan(name: string, document: unknown = loadCommentsPlan(), { approve = true } = {}): Promise<string> {
   await writeWorkspaceFiles(ROOT, { [name]: JSON.stringify(document) })
   if (approve) await approveIfStamped(join(ROOT, name), document)

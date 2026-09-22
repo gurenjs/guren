@@ -94,7 +94,7 @@ export function describeUnapproved(planPath: string, standing: Exclude<PlanAppro
     case 'unreadable':
       return `${standing.reason}\nNo approval of ${planPath} can be read, so ${consequence}. Fix the approvals file, then run this again.`
     case 'baseline-removed':
-      return `${planPath} has lost its baseline, but ${standing.approvals} approval(s) are recorded beside it, so ${consequence}: a plan is approved with its baseline, and without one it is no longer the plan anyone approved. Restore the baseline, or run guren plan:approve ${planPath} to approve it again.`
+      return `${planPath} has lost its baseline, but ${standing.approvals} approval(s) are recorded beside it, so ${consequence}: a plan is approved with its baseline, and without one it is no longer the plan anyone approved. Restore the baseline, keep the new draft in a file of its own, or run guren plan:approve ${planPath} to approve it again.`
     case 'unapproved':
       return `${planPath} is not approved at its current hash ${standing.hash}, so ${consequence}: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve ${planPath} once the plan says what you mean to build.`
   }

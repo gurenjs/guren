@@ -13,7 +13,7 @@ import { readScripts } from './command-output'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
-import { approvedOrRefused, readPlanApprovalStanding, type PlanApprovalStanding } from './plan/approvals'
+import { requirePlanApproval } from './plan/approvals'
 import { judgeFreshness, type PlanFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
 import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext } from './plan/step-context'
@@ -50,14 +50,13 @@ export interface PlanVerifyFileOptions {
   /** One step id; every step in task order when absent. */
   step?: string
   timeoutMs?: number
-  /** What the caller already read of this plan's approval (the Stop hook), so one run reads the approvals once; `undefined` is a draft nobody approved. */
-  approval?: PlanApprovalStanding
 }
 
 export async function planVerifyFile(planPath: string, options: PlanVerifyFileOptions): Promise<PlanVerifyReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
+  // Judged on the plan this run read, never a caller's earlier reading: the file may have changed since.
   // Before anything runs or is recorded: a result about a hash nobody approved verifies nothing anyone agreed to.
-  const approval = approvedOrRefused(path, 'approval' in options ? options.approval : await readPlanApprovalStanding(path, plan), 'no step is verified against it')
+  const approval = await requirePlanApproval(path, plan, 'no step is verified against it')
   const app = options.app
   const loadApp = typeof app === 'function' ? app : async () => app
   const root = options.appRoot
