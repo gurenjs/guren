@@ -1,7 +1,8 @@
 import type { Context } from 'hono'
 import type { FC } from 'hono/jsx'
 import { renderDocument, type ViewOptions } from './view'
-import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
+import { renderInertia, type InertiaOptions } from './inertia/InertiaEngine'
+import type { InertiaPropsInput, ResolvedInertiaProps } from './inertia/props'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { getRequestLocale, getRequestTranslator, type TranslatorBinding } from '../http/middleware/detect-locale'
 import { resolveI18n, type I18nManager, type RegisteredTranslationKey, type ReplacementValues } from '../i18n'
@@ -251,36 +252,39 @@ export class Controller {
     return renderDocument(component, props, options)
   }
 
+  // A prop may be its value, `defer(() => value)` or a lazy `() => value`; the
+  // response marker carries the resolved types, which is what
+  // `ControllerInertiaProps` reads back.
   protected async inertia<Component extends string, Props extends DefaultInertiaProps>(
     component: Component,
     props: Props,
     options?: InertiaResponseOptions,
-  ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>>
+  ): Promise<InertiaResponse<Component, ResolvedInertiaProps<Props> & ResolvedSharedInertiaProps>>
   // The contract overload stays last: TypeScript reports a call no overload
   // matches against the last one, so a missing page prop is named instead of
   // "not assignable to parameter of type 'string'".
   protected async inertia<TPage extends InertiaPageContractLike>(
     page: TPage,
-    props: InertiaPageProps<TPage>,
+    props: InertiaPropsInput<InertiaPageProps<TPage>>,
     options?: InertiaResponseOptions,
   ): Promise<InertiaResponse<InertiaPageComponent<TPage>, InertiaPageProps<TPage> & ResolvedSharedInertiaProps>>
   protected async inertia<Component extends string, Props extends DefaultInertiaProps>(
     componentOrPage: Component | InertiaPageContractLike<Component, Props>,
     props: Props,
     options: InertiaResponseOptions = {},
-  ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>> {
+  ): Promise<InertiaResponse<Component, ResolvedInertiaProps<Props> & ResolvedSharedInertiaProps>> {
     const ctx = this.ctx
     const component =
       typeof componentOrPage === 'string'
         ? componentOrPage
         : componentOrPage.component ?? componentOrPage.id
 
+    // Shared props go through the same partial-reload filter as the page's own.
     const sharedProps = await resolveSharedInertiaProps(ctx, this._container)
-    const propsWithShared = { ...sharedProps, ...props } as Props & ResolvedSharedInertiaProps
 
     // The engine derives the page url (path + query string) from the request
     // when options.url is absent.
-    const response = await inertia(component, propsWithShared as Record<string, unknown>, {
+    const { response, page } = await renderInertia(component, { ...sharedProps, ...props }, {
       ...options,
       // No 'en' fallback here (unlike the locale getter): unconfigured apps
       // keep the Inertia engine's own default lang.
@@ -289,12 +293,13 @@ export class Controller {
       container: this._container,
     })
 
-    ;(response as InertiaResponse<Component, typeof propsWithShared>).__gurenInertia = {
+    type Marked = InertiaResponse<Component, ResolvedInertiaProps<Props> & ResolvedSharedInertiaProps>
+    ;(response as Marked).__gurenInertia = {
       component,
-      props: propsWithShared,
+      props: (page?.props ?? {}) as Marked['__gurenInertia']['props'],
     }
 
-    return response as InertiaResponse<Component, typeof propsWithShared>
+    return response as Marked
   }
 
   /**

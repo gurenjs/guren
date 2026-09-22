@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { defer } from '@guren/server'
 import {
   createControllerContext,
   createGurenControllerModule,
@@ -157,7 +158,7 @@ describe('createGurenControllerModule', () => {
     const controller = new Controller()
     controller.setContext(ctx)
 
-    const response = controller.inertia('TestComponent', { foo: 'bar' })
+    const response = await controller.inertia('TestComponent', { foo: 'bar' })
     const { format, payload } = await readInertiaResponse(response)
 
     expect(format).toBe('json')
@@ -172,7 +173,7 @@ describe('createGurenControllerModule', () => {
     const controller = new Controller()
     controller.setContext(ctx)
 
-    const response = controller.inertia('TestComponent', { data: 123 })
+    const response = await controller.inertia('TestComponent', { data: 123 })
     const { format, payload, body } = await readInertiaResponse(response)
 
     expect(format).toBe('html')
@@ -190,7 +191,7 @@ describe('createGurenControllerModule', () => {
     const controller = new Controller()
     controller.setContext(ctx)
 
-    const response = controller.inertia('Component', {}, { url: '/custom' })
+    const response = await controller.inertia('Component', {}, { url: '/custom' })
     const { payload } = await readInertiaResponse(response)
 
     expect(payload.url).toBe('/custom')
@@ -205,10 +206,65 @@ describe('createGurenControllerModule', () => {
     const controller = new Controller()
     controller.setContext(ctx)
 
-    const response = controller.inertia('Component', {})
+    const response = await controller.inertia('Component', {})
     const { payload } = await readInertiaResponse(response)
 
     expect(payload.url).toBe('/posts?page=2&sort=desc')
+  })
+
+  // The mock resolves props through the engine's own rule, so a controller test
+  // sees the prop set a partial reload or an initial visit would actually send.
+  describe('Controller.inertia partial reloads and deferred props', () => {
+    const props = () => ({
+      posts: () => ['post'],
+      companies: () => ['company'],
+      comments: defer(() => ['comment']),
+    })
+
+    it('announces a deferred prop on the initial visit and narrows a partial reload', async () => {
+      const { Controller } = createGurenControllerModule()
+      const controller = new Controller()
+
+      controller.setContext(createControllerContext('http://example.com/posts', { headers: { 'X-Inertia': 'true' } }))
+      const initial = (await readInertiaResponse(await controller.inertia('posts/Index', props()))).payload
+      expect(initial.props).toEqual({ posts: ['post'], companies: ['company'] })
+      expect(initial.deferredProps).toEqual({ default: ['comments'] })
+
+      controller.setContext(
+        createControllerContext('http://example.com/posts', {
+          headers: {
+            'X-Inertia': 'true',
+            'X-Inertia-Partial-Component': 'posts/Index',
+            'X-Inertia-Partial-Data': 'comments',
+          },
+        }),
+      )
+      const partial = (await readInertiaResponse(await controller.inertia('posts/Index', props()))).payload
+      expect(partial.props).toEqual({ comments: ['comment'] })
+      expect(partial.deferredProps).toBeUndefined()
+    })
+
+    it('applies the same rule through the runtime-derived controller', async () => {
+      const { Controller } = createControllerModuleMock()
+      class PostController extends Controller {
+        index() {
+          return this.inertia('posts/Index', props())
+        }
+      }
+      const controller = new PostController()
+      controller.setContext(
+        createControllerContext('http://example.com/posts', {
+          headers: {
+            'X-Inertia': 'true',
+            'X-Inertia-Partial-Component': 'posts/Index',
+            'X-Inertia-Partial-Except': 'companies',
+          },
+        }),
+      )
+
+      const { payload } = await readInertiaResponse(await controller.index())
+      expect(payload.props).toEqual({ posts: ['post'], comments: ['comment'] })
+    })
   })
 
   it('parseRequestPayload parses JSON body', async () => {

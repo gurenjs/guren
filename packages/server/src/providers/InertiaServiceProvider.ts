@@ -3,6 +3,7 @@ import { inertia } from '../mvc/inertia/InertiaEngine'
 import { ViewEngine } from '../mvc/ViewEngine'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import { shareInertiaProps } from '../mvc/inertia/shared'
+import { always } from '../mvc/inertia/props'
 import { getSessionFromContext } from '../http/middleware/session'
 import {
   createValidationErrorsCookieCleanup,
@@ -96,15 +97,17 @@ export class InertiaServiceProvider extends ServiceProvider {
    * own registrations.
    */
   private registerSharedErrors(): void {
+    // Always: the flash is consumed by this request whether or not a partial
+    // reload's `only` list names `errors`, so a dropped copy would be lost.
     shareInertiaProps(async (ctx: Context) => {
       const session = getSessionFromContext(ctx)
       if (session) {
         const errors = session.getFlash<Record<string, string>>('errors')
-        return errors && Object.keys(errors).length > 0 ? { errors } : {}
+        return errors && Object.keys(errors).length > 0 ? { errors: always(errors) } : {}
       }
 
       const errors = readValidationErrorsCookie(ctx)
-      return errors ? { errors } : {}
+      return errors ? { errors: always(errors) } : {}
     }, this.container)
   }
 }

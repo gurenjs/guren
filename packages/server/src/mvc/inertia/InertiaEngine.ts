@@ -6,6 +6,7 @@ import { DEFAULT_DEV_STYLES_ENTRY } from "../../support/inertia-defaults";
 import type { ContainerLike } from "../../container/types";
 import { resolveOptional } from "../../container/resolve-optional";
 import { warnDeprecatedSetter } from "../../support/deprecate";
+import { readPartialReload, resolveInertiaProps } from "./props";
 
 ensureErrorStackTracePolyfill();
 
@@ -44,6 +45,8 @@ export interface InertiaPagePayload {
   props: Record<string, unknown>;
   url: string;
   version?: string;
+  /** Deferred prop keys by group, announced on a full visit and fetched by the client per group. */
+  deferredProps?: Record<string, string[]>;
 }
 
 export interface InertiaSsrContext {
@@ -159,15 +162,36 @@ export async function inertia(
   props: Record<string, unknown>,
   options: InertiaOptions = {}
 ): Promise<Response> {
+  const { response } = await renderInertia(component, props, options);
+  return response;
+}
+
+export interface InertiaRenderResult {
+  readonly response: Response;
+  /** The page the response carries; absent on a 409 version-mismatch, which renders none. */
+  readonly page?: InertiaPagePayload;
+}
+
+/**
+ * The page body varies on the partial-reload headers as well as on
+ * `X-Inertia`: a shared cache keyed on the URL alone would hand a narrowed
+ * partial response to the next full visit.
+ */
+export const INERTIA_VARY =
+  "Accept, X-Inertia, X-Inertia-Partial-Component, X-Inertia-Partial-Data, X-Inertia-Partial-Except";
+
+/**
+ * {@link inertia} plus the page it sent, for a caller that records the props
+ * actually resolved (`Controller.inertia()`'s response marker). The version
+ * check runs before any prop resolves: a 409 must not run a lazy prop's query.
+ */
+export async function renderInertia(
+  component: string,
+  props: Record<string, unknown>,
+  options: InertiaOptions = {}
+): Promise<InertiaRenderResult> {
   const resolvedVersion =
     options.version ?? process.env.GUREN_INERTIA_VERSION ?? undefined;
-
-  const page: InertiaPagePayload = {
-    component,
-    props,
-    url: options.url ?? inertiaPageUrl(options.request) ?? "",
-    version: resolvedVersion,
-  };
 
   const request = options.request;
   const isInertiaVisit = Boolean(request?.headers.get("X-Inertia"));
@@ -184,41 +208,71 @@ export async function inertia(
   ) {
     const clientVersion = request.headers.get("X-Inertia-Version");
     if (clientVersion !== resolvedVersion) {
-      return new Response(null, {
-        status: 409,
-        headers: {
-          "X-Inertia-Location": options.url ?? request.url,
-          Vary: "Accept",
-        },
-      });
+      return {
+        response: new Response(null, {
+          status: 409,
+          headers: {
+            "X-Inertia-Location": options.url ?? request.url,
+            Vary: "Accept",
+          },
+        }),
+      };
     }
   }
 
-  if (isInertiaVisit || prefersJson) {
-    return new Response(serializePage(page), {
+  const page = await buildInertiaPage(component, props, {
+    url: options.url,
+    version: resolvedVersion,
+    request,
+  });
+  const wantsJson = isInertiaVisit || prefersJson;
+  const body = wantsJson ? serializePage(page) : await renderDocument(page, options);
+
+  return {
+    page,
+    response: new Response(body, {
       status: options.status ?? 200,
       headers: {
-        "Content-Type": "application/json; charset=utf-8",
+        "Content-Type": wantsJson
+          ? "application/json; charset=utf-8"
+          : "text/html; charset=utf-8",
         "X-Inertia": "true",
-        Vary: "Accept",
+        Vary: INERTIA_VARY,
         ...versionHeader,
         ...options.headers,
       },
-    });
-  }
+    }),
+  };
+}
 
-  const html = await renderDocument(page, options);
+export interface InertiaPageOptions {
+  readonly url?: string;
+  readonly version?: string;
+  readonly request?: Request;
+}
 
-  return new Response(html, {
-    status: options.status ?? 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "X-Inertia": "true",
-      Vary: "Accept",
-      ...versionHeader,
-      ...options.headers,
-    },
-  });
+/**
+ * The page object for one request: props resolved under the request's
+ * partial-reload headers, the deferred announcement, and the page url derived
+ * from the request when `url` is absent. `@guren/testing`'s mock builds its
+ * page here too, so the two cannot disagree on the payload's shape.
+ */
+export async function buildInertiaPage(
+  component: string,
+  props: Record<string, unknown>,
+  options: InertiaPageOptions
+): Promise<InertiaPagePayload> {
+  const resolved = await resolveInertiaProps(
+    props,
+    readPartialReload(options.request, component)
+  );
+  return {
+    component,
+    props: resolved.props,
+    url: options.url ?? inertiaPageUrl(options.request) ?? "",
+    version: options.version,
+    ...(resolved.deferredProps ? { deferredProps: resolved.deferredProps } : {}),
+  };
 }
 
 /**

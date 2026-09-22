@@ -1,5 +1,12 @@
 import { HonoRequest } from 'hono/request'
-import type { Context, InertiaResponse, ResolvedSharedInertiaProps } from '@guren/server'
+import type {
+  Context,
+  InertiaPagePayload,
+  InertiaPropsInput,
+  InertiaResponse,
+  ResolvedInertiaProps,
+  ResolvedSharedInertiaProps,
+} from '@guren/server'
 import {
   asRecord,
   parseRequestBody,
@@ -21,6 +28,8 @@ import {
   defineModule,
   definePlugin,
   formatValidationErrors,
+  buildInertiaPage,
+  INERTIA_VARY,
   serializePage,
 } from '@guren/server/internal/testing'
 
@@ -57,12 +66,7 @@ export interface ControllerContext {
   status: (code: number) => void
 }
 
-export interface InertiaPayload {
-  component: string
-  props: Record<string, unknown>
-  url: string
-  version?: string
-}
+export type InertiaPayload = InertiaPagePayload
 
 /**
  * Context values that stand in for the route contract middleware, for a controller
@@ -144,30 +148,21 @@ function loadServer(): Promise<ServerModule> {
 
 /**
  * The Inertia response without a booted app: no shared props, root document, asset
- * version or SSR, which is why the mock keeps it. The JSON-or-HTML choice and the
- * payload escaping are the engine's own.
+ * version or SSR, which is why the mock keeps it. The page object (prop
+ * resolution included), the JSON-or-HTML choice and the payload escaping are the
+ * engine's own.
  */
-function renderInertia(
+async function renderInertia(
   request: Request,
   componentOrPage: string | InertiaPageContractLike,
   props: Record<string, unknown>,
   options: InertiaResponseOptions,
-): InertiaResponse<string, Record<string, unknown>> {
+): Promise<InertiaResponse<string, Record<string, unknown>>> {
   const component =
     typeof componentOrPage === 'string'
       ? componentOrPage
       : componentOrPage.component ?? componentOrPage.id
-  let url = options.url
-  if (url === undefined) {
-    const { pathname, search } = new URL(request.url)
-    url = `${pathname}${search}`
-  }
-  const payload: InertiaPayload = {
-    component,
-    props,
-    url,
-    version: options.version,
-  }
+  const payload = await buildInertiaPage(component, props, { url: options.url, version: options.version, request })
   const serialized = serializePage(payload)
   const prefersJson = request.headers.has('X-Inertia') || acceptsJson(request)
 
@@ -178,13 +173,13 @@ function renderInertia(
       headers: {
         'Content-Type': prefersJson ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
         'X-Inertia': 'true',
-        Vary: 'Accept',
+        Vary: INERTIA_VARY,
         ...options.headers,
       },
     },
   )
 
-  return Object.assign(response, { __gurenInertia: { component, props } })
+  return Object.assign(response, { __gurenInertia: { component, props: payload.props } })
 }
 
 export function createGurenControllerModule() {
@@ -225,7 +220,7 @@ export function createGurenControllerModule() {
       componentOrPage: string | { id: string; component?: string },
       props: Record<string, unknown>,
       options: Record<string, unknown> = {},
-    ): Response {
+    ): Promise<Response> {
       return renderInertia(this.ctx.req.raw, componentOrPage, props, options as InertiaResponseOptions)
     }
 
@@ -287,10 +282,10 @@ class TestController extends RuntimeController {
     component: Component,
     props: Props,
     options?: InertiaResponseOptions,
-  ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>>
+  ): Promise<InertiaResponse<Component, ResolvedInertiaProps<Props> & ResolvedSharedInertiaProps>>
   protected override inertia<TPage extends InertiaPageContractLike>(
     page: TPage,
-    props: NonNullable<TPage['__props']>,
+    props: InertiaPropsInput<NonNullable<TPage['__props']>>,
     options?: InertiaResponseOptions,
   ): Promise<InertiaResponse<TPage['id'], NonNullable<TPage['__props']> & ResolvedSharedInertiaProps>>
   protected override async inertia(

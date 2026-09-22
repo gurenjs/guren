@@ -92,6 +92,86 @@ Inertia のヘルパーでクライアントナビゲーションとフォーム
 
 バリデーションエラーはコントローラーから返し、クライアント側で `form.errors` を参照します。
 
+## Partial Reloads
+すでに表示しているページへ再訪問するとき、すべての props を取り直す必要はありません。クライアントは visit オプションの `only` か `except` で欲しい props を指定し、サーバーはその props だけを返します。
+
+```tsx
+import { router } from '@inertiajs/react'
+
+router.reload({ only: ['users'] })
+router.visit('/users?active=true', { except: ['companies'] })
+```
+
+リクエストには `X-Inertia-Partial-Component` ヘッダーで現在のコンポーネント名が付きます。絞り込みが効くのは、応答が同じコンポーネントを描画するときだけです。別のページに着地した visit（ログインページへのリダイレクトなど）は、props を全部受け取ります。共有 props にも同じ絞り込みが適用され、`errors` はどの応答にも含まれます。
+
+関数として渡した prop は送るときに初めて評価されます。partial reload で外された prop のクエリは実行されません。
+
+```typescript
+import { Controller } from '@guren/core'
+import { pages } from '@/.guren/pages.gen'
+
+export class UserController extends Controller {
+  async index() {
+    return this.inertia(pages.users.Index, {
+      users: () => User.all(),
+      companies: () => Company.all(),
+    })
+  }
+}
+```
+
+ページコンポーネント側の宣言は `users: User[]` のままです。コントローラーの呼び出しは解決後の型で検査され、`ControllerInertiaProps` からも `User[]` が読み取れます。
+
+`always()` で包んだ prop は、`only` や `except` の指定にかかわらずすべての応答に含まれます。フレームワークがバリデーションエラーを共有するときもこの形です。flash から読む共有 props にも同じ扱いが要ります。flash は応答に載るかどうかに関係なく、そのリクエストで消費されるためです。
+
+```typescript
+import { always, getSessionFromContext, shareInertiaProps } from '@guren/core'
+
+shareInertiaProps((ctx) => ({ flash: always(getSessionFromContext(ctx)?.getFlash('status')) }), container)
+```
+
+## Deferred Props
+`defer()` で包んだ prop は初回の応答に含まれず、最初の描画の直後にクライアントが取りに行きます。重いクエリの完了を待たずにページを表示できます。
+
+```typescript
+import { Controller, defer } from '@guren/core'
+import { pages } from '@/.guren/pages.gen'
+
+export class UserController extends Controller {
+  async index() {
+    return this.inertia(pages.users.Index, {
+      users: () => User.all(),
+      permissions: defer(() => Permission.all()),
+      teams: defer(() => Team.all(), 'attributes'),
+      projects: defer(() => Project.all(), 'attributes'),
+    })
+  }
+}
+```
+
+初回の page object には、第 2 引数のグループ名（省略時は `default`）ごとにキーが `deferredProps` として載ります。上の例では `{ "default": ["permissions"], "attributes": ["teams", "projects"] }` です。クライアントはグループごとに 1 回ずつ partial reload を送るので、`teams` と `projects` は一緒に届き、`permissions` は並行して読み込まれます。コールバックが実行されるのは、その後続リクエストのときだけです。
+
+クライアント側では、後続リクエストが届くまで prop は `undefined` です。`Props` では省略可能として宣言し、`<Deferred>` の中で描画します。値が届くまでは fallback が表示されます。
+
+```tsx
+import type { PageProps } from '@guren/inertia-client/contracts'
+import { Deferred } from '@inertiajs/react'
+import { pages } from '@/.guren/pages.gen'
+
+type Props = PageProps<typeof pages.users.Index>
+
+export default function Index({ users, permissions }: Props) {
+  return (
+    <>
+      <UserTable users={users} />
+      <Deferred data="permissions" fallback={<p>Loading permissions...</p>}>
+        <PermissionList permissions={permissions ?? []} />
+      </Deferred>
+    </>
+  )
+}
+```
+
 ## アセットとスタイル
 スキャフォールドには Tailwind CSS が設定済みです。`resources/css/app.css` を編集するか、好みの CSS フレームワークを追加してください。画像やフォントなどの追加アセットは `public/` 配下に置きます。
 
