@@ -1,4 +1,6 @@
 import { extname, resolve, relative } from 'node:path'
+import type { Node } from '@babel/types'
+import { literalString, unwrapTypeAssertion } from './ast-walk'
 import { fileExists, collectFiles } from './discovery'
 import { extractPagePropKeys, extractPageProps, type PagePropKeys } from './page-props-extractor'
 
@@ -44,6 +46,31 @@ export function extractInertiaPageRefs(source: string, isCode?: (index: number) 
     refs.push({ id, form })
   }
   return refs
+}
+
+/**
+ * The same rule read off a `this.inertia()` first argument as an AST node, for a
+ * scanner that already holds the call: `'posts/Index'`, `pages.posts.Index`,
+ * `pages['sales-admin'].Index`. Undefined for a variable or a call, which
+ * names a page only at runtime.
+ */
+export function inertiaPageIdOf(node: Node): string | undefined {
+  const target = unwrapTypeAssertion(node)
+  const literal = literalString(target)
+  if (literal) return literal
+
+  const segments: string[] = []
+  let current: Node = target
+  while (current.type === 'MemberExpression') {
+    const name = current.computed
+      ? literalString(current.property)
+      : current.property.type === 'Identifier' ? current.property.name : null
+    if (!name) return undefined
+    segments.unshift(name)
+    current = current.object
+  }
+  if (current.type !== 'Identifier' || current.name !== 'pages' || segments.length === 0) return undefined
+  return segments.join('/')
 }
 
 /**

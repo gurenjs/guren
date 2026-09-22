@@ -41,7 +41,7 @@ export function importedNamespaces(ast: File, specifier: string): Set<string> {
 }
 
 /** Namespace bindings too (`import * as ai`), whose member calls read as the export. */
-function importBindings(ast: File, target: PluginExport): { locals: Set<string>; namespaces: Set<string> } {
+export function importBindings(ast: File, target: PluginExport): { locals: Set<string>; namespaces: Set<string> } {
   const locals = new Set<string>()
   const namespaces = new Set<string>()
   for (const declaration of ast.program.body) {
@@ -147,7 +147,7 @@ async function appFiles(cwd: string): Promise<string[]> {
 }
 
 /** `aiPlugin(…)` through a named import, or `ai.aiPlugin(…)` through a namespace one. */
-function callsTarget(
+export function callsTarget(
   call: CallExpression,
   locals: ReadonlySet<string>,
   namespaces: ReadonlySet<string>,

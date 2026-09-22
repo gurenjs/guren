@@ -31,6 +31,7 @@ import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
+import { checkDeferredProps } from './deferred-props-check'
 import { checkAiAgents } from './ai-agent-check'
 import { checkSessionsConfig } from './sessions-check'
 import { checkPrototypeRoutes } from './prototype-check'
@@ -331,8 +332,10 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
 
   if (runs('core')) {
-    // 1. Check controllers for empty methods
-    const controllerFiles = filterChanged(await discoverControllerFiles(cwd))
+    // 1. Check controllers for empty methods. The unfiltered list is kept for
+    // check 2.5, which is deliberately not changed-filtered.
+    const allControllerFiles = await discoverControllerFiles(cwd)
+    const controllerFiles = filterChanged(allControllerFiles)
     for (const filePath of controllerFiles) {
       const relPath = relative(cwd, filePath)
       const results = await checkEmptyMethods(cache, filePath, relPath)
@@ -345,6 +348,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const results = await checkInertiaPages(cache, filePath, cwd, relPath)
       checks.push(...results)
     }
+
+    // 2.5. A `defer()` prop the page declares as required: the page's `Props` is
+    // independent of the controller's type, so it typechecks and the initial visit
+    // hands the component undefined. Not changed-filtered: the controller defers
+    // and the page declares, and either file can be the one that changed.
+    checks.push(...(await checkDeferredProps({ cwd, cache, files: allControllerFiles })))
 
     // The schema every check below reads, parsed once per run rather than per
     // model (checks 3 and 8 both consume it).

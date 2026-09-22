@@ -13,7 +13,7 @@ import { parseModelFile } from './model-parser'
 import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './docs-index'
 import { ISSUE_REF_FORMS } from './issue-refs'
 import type { ParseCache } from './parse-cache'
-import { check, type CheckResult } from './check-result'
+import { advisory, check, type CheckResult } from './check-result'
 import { acceptanceIdSegment, acceptanceTestsLoader, type AcceptanceTestRef } from './docs-acceptance'
 
 export interface DocsCheckOptions {
@@ -158,11 +158,6 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
   results.push(...(await checkAcceptanceCitations(docsWithFrontmatter, inScope, changedFiles ?? null, options.tests ?? acceptanceTestsLoader(cwd, refs))))
 
   return results
-}
-
-/** A warning `check --ci` and `guren gate` do not count. */
-function advisory(...args: Parameters<typeof check>): CheckResult {
-  return { ...check(...args), advisory: true }
 }
 
 /**
