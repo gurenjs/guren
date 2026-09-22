@@ -92,6 +92,78 @@ Inertia provides helpers for client-side navigation and form submissions:
 
 Handle validation errors by returning them from the controller and reading `form.errors` on the client.
 
+## Partial Reloads
+A visit back to the page a user is already on does not have to refetch every prop. The client names the props it wants with the `only` or `except` visit options, and the server sends only those:
+
+```tsx
+import { router } from '@inertiajs/react'
+
+router.reload({ only: ['users'] })
+router.visit('/users?active=true', { except: ['companies'] })
+```
+
+The request carries the current component name in `X-Inertia-Partial-Component`, so the filter applies only while the response renders that same component. A visit that ends up on another page (a redirect to the login page, say) receives the full prop set. Shared props are filtered the same way, and `errors` is sent on every response.
+
+A prop passed as a function is evaluated only when it is sent, so a partial reload that leaves it out never runs its query:
+
+```typescript
+import { Controller } from '@guren/core'
+import { pages } from '@/.guren/pages.gen'
+
+export class UserController extends Controller {
+  async index() {
+    return this.inertia(pages.users.Index, {
+      users: () => User.all(),
+      companies: () => Company.all(),
+    })
+  }
+}
+```
+
+The page component still declares `users: User[]`. The controller call is checked against the resolved type, and `ControllerInertiaProps` reads `User[]` back from it.
+
+## Deferred Props
+`defer()` keeps a prop out of the initial response and has the client fetch it right after the first render, so the page renders without waiting for a slow query:
+
+```typescript
+import { Controller, defer } from '@guren/core'
+import { pages } from '@/.guren/pages.gen'
+
+export class UserController extends Controller {
+  async index() {
+    return this.inertia(pages.users.Index, {
+      users: await User.all(),
+      permissions: defer(() => Permission.all()),
+      teams: defer(() => Team.all(), 'attributes'),
+      projects: defer(() => Project.all(), 'attributes'),
+    })
+  }
+}
+```
+
+The initial page object lists the keys under `deferredProps`, grouped by the second argument (`default` when omitted): `{ "default": ["permissions"], "attributes": ["teams", "projects"] }`. The client issues one partial reload per group, so `teams` and `projects` arrive together while `permissions` loads in parallel. The callback runs only on that follow-up request.
+
+On the client the prop is `undefined` until its request lands, so declare it optional in `Props` and render it through `<Deferred>`, which shows the fallback until the value arrives:
+
+```tsx
+import type { PageProps } from '@guren/inertia-client/contracts'
+import { Deferred } from '@inertiajs/react'
+import { pages } from '@/.guren/pages.gen'
+
+type Props = PageProps<typeof pages.users.Index>
+
+export default function Index({ users, permissions }: Props) {
+  return (
+    <>
+      <UserTable users={users} />
+      <Deferred data="permissions" fallback={<p>Loading permissions...</p>}>
+        <PermissionList permissions={permissions ?? []} />
+      </Deferred>
+    </>
+  )
+}
+```
+
 ## Assets and Styling
 The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css` or add custom CSS frameworks as needed. If you introduce additional assets (images, fonts), place them under `public/`.
 

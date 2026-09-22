@@ -8,6 +8,7 @@
 export { Controller } from '../mvc/Controller'
 export type { InertiaPageContractLike, InertiaResponseOptions } from '../mvc/Controller'
 export { acceptsJson, serializePage } from '../mvc/inertia/InertiaEngine'
+export { readPartialReload, resolveInertiaProps } from '../mvc/inertia/props'
 export { Resource, JsonResource, collect } from '../http/resources/Resource'
 export { ValidationException } from '../errors/exceptions/ValidationException'
 export { AuthenticationException } from '../errors/exceptions/AuthenticationException'

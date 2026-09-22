@@ -6,6 +6,7 @@ import { DEFAULT_DEV_STYLES_ENTRY } from "../../support/inertia-defaults";
 import type { ContainerLike } from "../../container/types";
 import { resolveOptional } from "../../container/resolve-optional";
 import { warnDeprecatedSetter } from "../../support/deprecate";
+import { readPartialReload, resolveInertiaProps } from "./props";
 
 ensureErrorStackTracePolyfill();
 
@@ -44,6 +45,8 @@ export interface InertiaPagePayload {
   props: Record<string, unknown>;
   url: string;
   version?: string;
+  /** Deferred prop keys by group, announced on a full visit and fetched by the client per group. */
+  deferredProps?: Record<string, string[]>;
 }
 
 export interface InertiaSsrContext {
@@ -159,15 +162,28 @@ export async function inertia(
   props: Record<string, unknown>,
   options: InertiaOptions = {}
 ): Promise<Response> {
+  const { response } = await renderInertia(component, props, options);
+  return response;
+}
+
+export interface InertiaRenderResult {
+  readonly response: Response;
+  /** The page the response carries; absent on a 409 version-mismatch, which renders none. */
+  readonly page?: InertiaPagePayload;
+}
+
+/**
+ * {@link inertia} plus the page it sent, for a caller that records the props
+ * actually resolved (`Controller.inertia()`'s response marker). The version
+ * check runs before any prop resolves: a 409 must not run a lazy prop's query.
+ */
+export async function renderInertia(
+  component: string,
+  props: Record<string, unknown>,
+  options: InertiaOptions = {}
+): Promise<InertiaRenderResult> {
   const resolvedVersion =
     options.version ?? process.env.GUREN_INERTIA_VERSION ?? undefined;
-
-  const page: InertiaPagePayload = {
-    component,
-    props,
-    url: options.url ?? inertiaPageUrl(options.request) ?? "",
-    version: resolvedVersion,
-  };
 
   const request = options.request;
   const isInertiaVisit = Boolean(request?.headers.get("X-Inertia"));
@@ -184,41 +200,61 @@ export async function inertia(
   ) {
     const clientVersion = request.headers.get("X-Inertia-Version");
     if (clientVersion !== resolvedVersion) {
-      return new Response(null, {
-        status: 409,
-        headers: {
-          "X-Inertia-Location": options.url ?? request.url,
-          Vary: "Accept",
-        },
-      });
+      return {
+        response: new Response(null, {
+          status: 409,
+          headers: {
+            "X-Inertia-Location": options.url ?? request.url,
+            Vary: "Accept",
+          },
+        }),
+      };
     }
   }
 
+  const resolved = await resolveInertiaProps(
+    props,
+    readPartialReload(request, component)
+  );
+  const page: InertiaPagePayload = {
+    component,
+    props: resolved.props,
+    url: options.url ?? inertiaPageUrl(options.request) ?? "",
+    version: resolvedVersion,
+    ...(resolved.deferredProps ? { deferredProps: resolved.deferredProps } : {}),
+  };
+
   if (isInertiaVisit || prefersJson) {
-    return new Response(serializePage(page), {
+    return {
+      page,
+      response: new Response(serializePage(page), {
+        status: options.status ?? 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "X-Inertia": "true",
+          Vary: "Accept",
+          ...versionHeader,
+          ...options.headers,
+        },
+      }),
+    };
+  }
+
+  const html = await renderDocument(page, options);
+
+  return {
+    page,
+    response: new Response(html, {
       status: options.status ?? 200,
       headers: {
-        "Content-Type": "application/json; charset=utf-8",
+        "Content-Type": "text/html; charset=utf-8",
         "X-Inertia": "true",
         Vary: "Accept",
         ...versionHeader,
         ...options.headers,
       },
-    });
-  }
-
-  const html = await renderDocument(page, options);
-
-  return new Response(html, {
-    status: options.status ?? 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "X-Inertia": "true",
-      Vary: "Accept",
-      ...versionHeader,
-      ...options.headers,
-    },
-  });
+    }),
+  };
 }
 
 /**

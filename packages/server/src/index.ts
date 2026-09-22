@@ -197,6 +197,14 @@ export { approvalStatusNotFoundMessage, toApprovalStatusReport } from './agent/a
 export type { ApprovalStatusOutcome, ApprovalStatusReport } from './agent/approval-status'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia, setInertiaSsrRenderer, setInertiaDocument } from './mvc/inertia/InertiaEngine'
+export { defer, isDeferredProp } from './mvc/inertia/props'
+export type {
+  DeferredProp,
+  InertiaPropInput,
+  InertiaPropsInput,
+  ResolvedInertiaProp,
+  ResolvedInertiaProps,
+} from './mvc/inertia/props'
 export { setInertiaSharedProps, getInertiaSharedPropsResolver, shareInertiaProps } from './mvc/inertia/shared'
 export type {
   InertiaDocumentContext,
