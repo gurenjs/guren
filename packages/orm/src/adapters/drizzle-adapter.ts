@@ -152,17 +152,21 @@ function resolveExecutor(options?: AdapterQueryOptions): DrizzleDatabase {
     return options.trx as DrizzleDatabase
   }
 
-  const ambient = loadedStore?.getStore()
-  if (ambient && !ambient.settled && typeof ambient.handle === 'object' && ambient.handle !== null) {
-    return ambient.handle as DrizzleDatabase
+  const handle = liveAmbient()?.handle
+  if (typeof handle === 'object' && handle !== null) {
+    return handle as DrizzleDatabase
   }
 
   return ensureDatabase()
 }
 
-function withExecutor<T>(options: AdapterQueryOptions | undefined, callback: (db: DrizzleDatabase) => Promise<T>): Promise<T> {
+function liveAmbient(): AmbientTransaction | undefined {
   const ambient = loadedStore?.getStore()
-  if (options?.trx || (ambient && !ambient.settled)) return callback(resolveExecutor(options))
+  return ambient && !ambient.settled ? ambient : undefined
+}
+
+function withExecutor<T>(options: AdapterQueryOptions | undefined, callback: (db: DrizzleDatabase) => Promise<T>): Promise<T> {
+  if (options?.trx || liveAmbient()) return callback(resolveExecutor(options))
   const db = ensureDatabase()
   if (transactionAwaitsCallback === false) {
     const operation = transactionQueue.then(() => callback(db))
@@ -183,9 +187,7 @@ const SYNC_EXECUTIONS = ['all', 'get', 'run', 'values'] as const
 
 /** A BEGIN this adapter issued is on the connection, and the caller is not inside it. */
 function foreignTransactionOpen(): boolean {
-  if (!manualTransactionOpen) return false
-  const ambient = loadedStore?.getStore()
-  return !ambient || ambient.settled
+  return manualTransactionOpen && !liveAmbient()
 }
 
 /**
@@ -200,7 +202,8 @@ function queueQuery<TQuery>(query: TQuery, queryOptions: AdapterQueryOptions | u
   const target = query as Record<string, unknown>
   const { execute, prepare } = target
   if (typeof execute === 'function') {
-    define(target, 'execute', () => withExecutor(queryOptions, async () => execute.call(target)))
+    // async: drizzle's lazy result becomes a Promise, and a synchronous throw a rejection.
+    define(target, 'execute', (...args: unknown[]) => withExecutor(queryOptions, async () => execute.apply(target, args)))
   }
   if (typeof prepare === 'function') {
     define(target, 'prepare', (...args: unknown[]) => queueQuery(prepare.apply(target, args), queryOptions))
@@ -794,8 +797,9 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     return resolveExecutor(queryOptions)
   },
 
+  // Still patched while the driver probe is unanswered: withExecutor records the query for runOwnTransaction then.
   queueExecution<TQuery>(query: TQuery, queryOptions?: AdapterQueryOptions): TQuery {
-    if (queryOptions?.trx) return query
+    if (queryOptions?.trx || transactionAwaitsCallback === true) return query
     return queueQuery(query, queryOptions)
   },
 

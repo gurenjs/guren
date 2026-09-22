@@ -479,8 +479,7 @@ export class QueryBuilder<
       ? Object.fromEntries(fields.map((field) => [field, resolveColumn(this.table, field)]))
       : undefined
     const query = this.resolveDrizzleDatabase().select(selection)?.from?.(this.table)
-    const advancedAdapter = this.adapter as ORMAdapterAdvanced
-    return advancedAdapter.queueExecution ? advancedAdapter.queueExecution(query, { trx: this.options.trx }) : query
+    return (this.adapter as ORMAdapterAdvanced).queueExecution?.(query, { trx: this.options.trx }) ?? query
   }
 
   private resolveDrizzleDatabase(): DrizzleSelectable {
