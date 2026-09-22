@@ -6,6 +6,7 @@ import { runCommand } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
 import { planApproveFile, type PlanApproveReport } from '../src/plan-approve'
+import { renderPlanFile } from '../src/plan-render'
 import { formatPlanStatus, planStatusFile } from '../src/plan-status'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { planApprovalsPath, readPlanApprovals } from '../src/plan/approvals'
@@ -240,6 +241,168 @@ describe('guren plan:approve', () => {
     await expect(planApproveFile(plan, { app: planAppState(), appRoot: app })).rejects.toThrow(/is not valid JSON.*will not replace it/s)
     expect(await readFile(plan, 'utf8')).toBe(before)
     expect(await readFile(planApprovalsPath(plan), 'utf8')).toBe('{ not json')
+  })
+})
+
+/** The fixture plus a policy the plan renames and a resource it drops, so an add, a rename and a drop can all be built. */
+function reshapingPlan(): Record<string, unknown> {
+  const document = answeredPlan()
+  ;(document.policies as unknown[]).push({ id: 'policy.post', change: { kind: 'rename', from: 'PostPolicy' }, name: 'ArticlePolicy', model: 'model.post', abilities: [] })
+  ;(document.resources as unknown[]).push({ id: 'resource.post', change: { kind: 'drop', reason: 'Posts render without a resource' }, name: 'PostResource', model: 'model.post', fields: [] })
+  return document
+}
+
+const COMMENT_TABLE = `
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
+  body: text('body').notNull(),
+})
+`
+
+/** Commits the plan's model add, its policy rename and its resource drop, as a finished step leaves them. */
+async function buildReshapingSteps(app: string): Promise<void> {
+  await writeWorkspaceFiles(app, {
+    'app/Models/Comment.ts': "import { defineModel } from '@guren/core'\nimport { comments } from '@/db/schema'\n\nexport class Comment extends defineModel(comments) {}\n",
+    'app/Policies/ArticlePolicy.ts': 'export class ArticlePolicy {}\n',
+    'db/schema.ts': `${PLAN_APP_FILES['db/schema.ts']}${COMMENT_TABLE}`,
+  })
+  await rm(join(app, 'app/Policies/PostPolicy.ts'))
+  await rm(join(app, 'app/Http/Resources/PostResource.ts'))
+  git(app, 'add', '-A')
+  git(app, 'commit', '-q', '-m', 'build')
+}
+
+type EditablePlan = { scope: { goals: string[] }; policies: Array<Record<string, unknown>>; resources: Array<Record<string, unknown>> }
+
+async function editPlan(plan: string, edit: (document: EditablePlan) => void): Promise<void> {
+  const document = JSON.parse(await readFile(plan, 'utf8')) as EditablePlan
+  edit(document)
+  await writeFile(plan, JSON.stringify(document), 'utf8')
+}
+
+/** An edit outside every element: the hash moves, and no element's facts do. */
+async function editGoal(plan: string): Promise<void> {
+  await editPlan(plan, (document) => document.scope.goals.push('See who wrote a comment'))
+}
+
+describe('guren plan:approve after implementation starts', () => {
+  test('should re-approve an edited plan whose added, renamed and dropped elements are built, keeping its baseline', async () => {
+    const { app, plan } = await createApp('reapprove', reshapingPlan())
+    const log = spyOn(console, 'log').mockImplementation(() => {})
+    let baseline: unknown
+    try {
+      await runCommand(builtinSubCommands['plan:approve'], { rawArgs: [plan, '--app', app] })
+      baseline = (JSON.parse(await readFile(plan, 'utf8')) as { baseline: unknown }).baseline
+      await buildReshapingSteps(app)
+      await editGoal(plan)
+      await runCommand(builtinSubCommands['plan:approve'], { rawArgs: [plan, '--app', app, '--json'] })
+      const report = JSON.parse(String(log.mock.calls.at(-1)![0])) as PlanApproveReport
+      expect(report.stamped).toBeUndefined()
+      expect(report.alreadyApproved).toBe(false)
+      expect(report.builtByPlan!.sort()).toEqual(['model.comment', 'policy.post', 'resource.post'])
+    } finally {
+      log.mockRestore()
+    }
+    const written = JSON.parse(await readFile(plan, 'utf8')) as Record<string, unknown>
+    expect(written.baseline).toEqual(baseline)
+    expect((await readPlanApprovals(plan)).value!.approvals.map((approval) => approval.hash)).toEqual([
+      expect.any(String),
+      planHash(PlanSchema.parse(written)),
+    ])
+
+    // The page settles the same findings rather than pinning them as failures.
+    const rendered = await renderPlanFile(plan, { app: () => loadPlanAppState(app), output: join(app, 'page.html') })
+    expect(rendered.checks.filter((result) => result.status === 'fail')).toEqual([])
+    expect(rendered.checks.find((result) => result.elementId === 'policy.post')).toMatchObject({ key: 'plan:app-missing', status: 'pass', message: expect.stringMatching(/^Built by this plan: the name is gone because the plan removed it/) })
+  })
+
+  test('should settle an added route once it is registered under its name at its planned endpoint', async () => {
+    const { app, plan } = await createApp('reapprove-route', reshapingPlan())
+    await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    await editGoal(plan)
+    // The fixture app has no routes file; the route the plan adds is what the scanners would read once it is mounted.
+    const withRoute = async () => {
+      const state = await loadPlanAppState(app)
+      return { ...state, routes: [{ name: 'comments.store', method: 'POST', path: '/posts/:postId/comments' }] }
+    }
+
+    const { checks } = await renderPlanFile(plan, { app: withRoute, output: join(app, 'page.html') })
+    const routeChecks = checks.filter((result) => result.elementId === 'route.comments.store' && result.key === 'plan:app-collision')
+    expect(routeChecks.map((result) => result.status)).toEqual(['pass', 'pass'])
+    const report = await planApproveFile(plan, { app: withRoute, appRoot: app, now: NOW })
+    expect(report.builtByPlan).toEqual(['route.comments.store'])
+  })
+
+  test('should still refuse a collision the plan did not build: its table declared by another app root', async () => {
+    const { app, plan } = await createApp('reapprove-foreign', reshapingPlan())
+    await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    await writeWorkspaceFiles(app, {
+      'modules/billing/index.ts': 'export default {}\n',
+      'modules/billing/db/schema.ts': `import { pgTable, serial, text } from 'drizzle-orm/pg-core'\n${COMMENT_TABLE}`,
+    })
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'billing')
+    await editGoal(plan)
+
+    await expect(planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app })).rejects.toThrow(/model\.comment: The table "comments" already exists in modules\/billing/)
+  })
+
+  test('should refuse a revision that turns an existing element into an add of the name it already had', async () => {
+    const document = reshapingPlan()
+    ;(document.policies as Array<Record<string, unknown>>).find((policy) => policy.id === 'policy.post')!.change = { kind: 'existing' }
+    ;(document.policies as Array<Record<string, unknown>>).find((policy) => policy.id === 'policy.post')!.name = 'PostPolicy'
+    const { app, plan } = await createApp('reapprove-existing-to-add', document)
+    await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    await editPlan(plan, (revised) => {
+      revised.policies.find((policy) => policy.id === 'policy.post')!.change = { kind: 'add' }
+    })
+
+    await expect(planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app })).rejects.toThrow(/policy\.post: The policy "PostPolicy" already exists/)
+  })
+
+  test('should refuse an added element a revision retargets onto a name the plan never built', async () => {
+    const { app, plan } = await createApp('reapprove-retarget', reshapingPlan())
+    await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    await editPlan(plan, (revised) => {
+      revised.resources.find((resource) => resource.id === 'resource.comment')!.name = 'PostResource'
+    })
+
+    await expect(planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app })).rejects.toThrow(/resource\.comment: The resource "PostResource" already exists/)
+  })
+
+  test('should settle a drop a revision made of an existing element someone else already deleted, as freshness does', async () => {
+    const document = reshapingPlan()
+    ;(document.resources as Array<Record<string, unknown>>).find((resource) => resource.id === 'resource.post')!.change = { kind: 'existing' }
+    const { app, plan } = await createApp('reapprove-existing-to-drop', document)
+    await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    await rm(join(app, 'app/Http/Resources/PostResource.ts'))
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'someone else')
+    await editPlan(plan, (revised) => {
+      revised.resources.find((resource) => resource.id === 'resource.post')!.change = { kind: 'drop', reason: 'already gone' }
+    })
+
+    const report = await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    expect(report.builtByPlan).toEqual(['resource.post'])
+  })
+
+  test('should not settle a model from its class alone while its table cannot be read', async () => {
+    const { app, plan } = await createApp('reapprove-unreadable', reshapingPlan())
+    await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    await buildReshapingSteps(app)
+    await editGoal(plan)
+    // The class reads and collides; the table, the other half of model.comment, does not read.
+    const unreadTables = async () => ({ ...(await loadPlanAppState(app)), tables: { unreadable: 'db/schema.ts could not be imported' } })
+
+    await expect(planApproveFile(plan, { app: unreadTables, appRoot: app })).rejects.toThrow(/model\.comment: The model class "Comment" already exists/)
+  })
+
+  test('should still refuse a draft whose added element already exists', async () => {
+    const { app, plan } = await createApp('draft-built', reshapingPlan())
+    await buildReshapingSteps(app)
+
+    await expect(planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app })).rejects.toThrow(/model\.comment: The model class "Comment" already exists/)
+    expect(JSON.parse(await readFile(plan, 'utf8'))).not.toHaveProperty('baseline')
   })
 })
 

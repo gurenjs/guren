@@ -20,11 +20,7 @@ The command's own duplicate-id warning is gone. The same rule is one of the §2
 checks, which reports it beside the element on the page, so the finding now has
 one spelling rather than two.
 
-The page prints two revise commands: the file form under the download button and
-the standard-input form under "Copy feedback", for piping the clipboard into
-`guren plan --revise ... --feedback -` without a file. Both hold the plan's file
-name to a bare name with no shell metacharacter, as before. `plan --revise` is
-not a command yet: the reader it will take is here, and the page names the
-command a later release adds. That reader takes at most 5 MiB, counted as the
-document arrives from either a file or a pipe, which is far above a feedback
-document and low enough to stop a log or a binary piped in by mistake.
+The page's feedback document has a reader for the revise command a later release
+adds; nothing calls it yet. It takes a file or standard input, and at most 5 MiB,
+counted as the document arrives, which is far above a feedback document and low
+enough to stop a log or a binary piped in by mistake.

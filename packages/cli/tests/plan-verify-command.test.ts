@@ -11,6 +11,7 @@ import { parsePlanDocument } from '../src/plan-render'
 import type { PlanStatusReport } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { planWaiveFile } from '../src/plan-waive'
+import { HELD_STEP_REMEDY } from '../src/plan/step-context'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
 import { stampContextHash } from '../src/plan/freshness'
@@ -140,7 +141,7 @@ describe('plan:verify', () => {
       },
     ])
     const text = formatPlanVerify(result)
-    expect(text).toContain(`${HTTP}: depends on what changed since the plan was approved: model.post (named by route.comments.store); plan:next holds it until the plan is revised and approved`)
+    expect(text).toContain(`${HTTP}: depends on what changed since the plan was approved: model.post (named by route.comments.store); plan:next holds it until a person decides: ${HELD_STEP_REMEDY}`)
     expect(text).toContain('Against the approved baseline: fresh ')
   })
 

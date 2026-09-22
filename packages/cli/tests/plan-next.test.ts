@@ -6,11 +6,13 @@ import { join } from 'node:path'
 import { runCommand, type CommandDef } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
+import { planApproveFile } from '../src/plan-approve'
 import { formatPlanNext, planNextFile, type PlanNextReport } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
 import { planWaiveFile } from '../src/plan-waive'
 import type { PlanAppState } from '../src/plan/app-state'
 import { MAX_STEP_CONTINUATIONS as MAX_CONTINUATIONS } from '../src/plan-stop-hook'
+import { HELD_STEP_REMEDY } from '../src/plan/step-context'
 import { planDigest, PLAN_STATE_VERSION, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
@@ -93,6 +95,16 @@ describe('plan:next', () => {
 
     const again = await planNextFile(plan, { appRoot: app, now: NOW })
     expect(again.step!.id).toBe(SCAFFOLD)
+  })
+
+  test('should name what a scaffold would generate without claiming a generator writes it', async () => {
+    const { app, plan } = await createApp('scaffold-text')
+
+    const text = formatPlanNext(await planNextFile(plan, { appRoot: app, now: NOW }), 'comments.plan.json')
+
+    expect(text).toContain('The elements a scaffold would generate: model.comment')
+    expect(text).toContain('No generator for this step ships yet, so it completes on its verify commands')
+    expect(text).not.toContain('Generates a first version')
   })
 
   test('should keep two plans in the docs/plans/<slug>/plan.json layout in state files of their own', async () => {
@@ -204,6 +216,48 @@ describe('plan:next', () => {
     await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/uncommitted changes \(paths relative to the repository root\), and one step is one commit\. Commit or discard them first:\n {2}M lib\.ts$/)
   })
 
+  test('should leave the rendered page and a leftover temporary out of the dirty reading, and still refuse an unrelated file', async () => {
+    const { app, plan } = await createApp('rendered')
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    await writeState(app, { steps: { [SCAFFOLD]: await holding(app) } })
+
+    // What plan:render and an interrupted atomic write leave beside the plan; neither is a step's work.
+    await writeWorkspaceFiles(app, { 'comments.plan.html': '<html></html>\n', '.comments.plan.html.1.2.tmp': '{}\n' })
+    expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(TESTS)
+
+    await writeWorkspaceFiles(app, { 'notes.md': 'x\n' })
+    await writeState(app, { steps: { [SCAFFOLD]: await holding(app) } })
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/first:\n {2}\?\? notes\.md$/)
+  })
+
+  test('should leave out an untracked page in a plan directory, and refuse an uncommitted decision log or plan edit', async () => {
+    const app = join(ROOT, 'plan-dir')
+    const plan = join(app, 'docs/plans/comments/plan.json')
+    await writeWorkspaceFiles(app, {
+      'package.json': JSON.stringify({ name: 'plan-dir', type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
+      'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()),
+    })
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    const unmarked = { steps: {}, active: { plan: 'docs/plans/comments/plan.json', step: 'elsewhere', startedAt: 't', continuations: 0 } }
+    await writeWorkspaceFiles(app, { 'docs/plans/comments/plan.html': '<html></html>\n' })
+    await writeState(app, unmarked)
+    expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
+
+    // The records are committed: a waiver in the log steers which step comes back, so it is nobody's step to carry.
+    await writeWorkspaceFiles(app, { 'docs/plans/comments/decisions.json': '{}\n' })
+    await writeState(app, unmarked)
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/first:\n {2}\?\? docs\/plans\/comments\/decisions\.json$/)
+
+    await rm(join(app, 'docs/plans/comments/decisions.json'))
+    await writeFile(plan, JSON.stringify({ ...loadCommentsPlan(), title: 'Edited' }), 'utf8')
+    await writeState(app, unmarked)
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/first:\n +M docs\/plans\/comments\/plan\.json$/)
+  })
+
   test('should leave a tracked state file out of the dirty reading, in an application below the repository root', async () => {
     // Porcelain paths are relative to the repository root: the exclusion has to hold when that is not the app.
     const { app, plan } = await createApp('nested/apps/web')
@@ -236,7 +290,7 @@ describe('plan:next', () => {
     const text = formatPlanNext(report, 'comments.plan.json')
     expect(text).toContain('Stalled 2026-09-21T09:00:00.000Z: 3 continuations on this step')
     expect(text).toContain('    fail     typecheck   bun run typecheck')
-    expect(text).toContain('A stall is a person\u2019s decision: fix the environment, revise the plan, or accept an element incomplete with')
+    expect(text).toContain('A stall is a person\u2019s decision: fix the environment, edit the plan (and approve it), or accept an element incomplete with')
     expect(text).toContain('  bunx guren plan:waive comments.plan.json <element-id> --reason "<why>"')
     // The mark it wrote is a fresh one, so the next run is a plain step.
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.stalled).toBeUndefined()
@@ -541,7 +595,36 @@ describe('plan:next on stale context', () => {
     const text = formatPlanNext(report, 'comments.plan.json')
     expect(text).toContain(`Held, since what they depend on changed after the plan was approved:\n  ${POST_HTTP}\n    action.posts.index (actions, existing), named by route.posts.index: `)
     expect(text).toContain('      fail  The action "PostController.index" was not found in the project root')
-    expect(text).toContain('revise the plan so it states what the application holds now')
+    expect(text).toContain(`A held step is a person\u2019s decision: ${HELD_STEP_REMEDY}:\n  bunx guren plan:approve comments.plan.json`)
+    expect(text).toContain('Commit the edited plan and its approvals file before the next plan:next')
+    // Nothing reads a revision request yet: the advice does not name one as a way out.
+    expect(text).not.toContain('run a revision')
+  })
+
+  test('should hand out a held step once the plan names what the application holds and that edit is approved and committed', async () => {
+    // Another commit removed PostController.index; the route the plan alters now serves `show`.
+    const document = threeTaskPlan() as { questions: unknown[]; controllers: Array<{ id: string; actions: Array<{ name: string }> }> }
+    document.questions = []
+    const { app, plan } = await approvedApp('released', document)
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    const moved = planAppState({ actions: ['PostController.show'] })
+    expect((await planNextFile(plan, { appRoot: app, app: moved, now: NOW })).held.map((step) => step.id)).toEqual([POST_HTTP])
+
+    const edited = JSON.parse(await readFile(plan, 'utf8')) as typeof document
+    edited.controllers.find((controller) => controller.id === 'controller.posts')!.actions[0]!.name = 'show'
+    await writeFile(plan, JSON.stringify(edited), 'utf8')
+    await planApproveFile(plan, { app: moved, appRoot: app, now: NOW })
+
+    // The edit and its approval are the person's commit, not the next step's.
+    await expect(planNextFile(plan, { appRoot: app, app: moved, now: NOW })).rejects.toThrow('uncommitted changes')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'plan: posts.index serves show')
+
+    const report = await planNextFile(plan, { appRoot: app, app: moved, now: NOW })
+    expect(report.held).toEqual([])
+    expect(report.step!.id).toBe(POST_HTTP)
   })
 
   test('should never block on an element whose freshness is unstamped or unjudged, nor on an application it could not read', async () => {

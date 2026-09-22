@@ -143,10 +143,43 @@ describe('judgeFreshness', () => {
     const implemented = planAppState({ models: ['Comment', 'Post', 'User'], tables: [...PLAN_APP_TABLES, { identifier: 'comments', tableName: 'comments', columns: ['id', 'body', 'postId'] }] })
 
     const freshness = judgeFreshness(plan, implemented)
-    expect(verdictOf(freshness, 'model.comment')).toMatchObject({ verdict: 'fresh', reason: 'The application reads as the plan leaves it.' })
+    expect(verdictOf(freshness, 'model.comment')).toMatchObject({ verdict: 'fresh', basis: 'built', reason: 'The application reads as the plan leaves it, from the state it was stamped in.' })
     // Half of it is neither the stamp nor the end: the class without its table.
     const half = judgeFreshness(plan, planAppState({ models: ['Comment', 'Post', 'User'] }))
     expect(verdictOf(half, 'model.comment').verdict).toBe('stale')
+  })
+
+  test('should never call an altered element built, since the plan starts and leaves its name in place', () => {
+    const plan = draft((document) => {
+      ;(document.policies as unknown[]).push({ id: 'policy.post', change: { kind: 'alter' }, name: 'PostPolicy', model: 'model.post', abilities: [] })
+    })
+    // Stamped while the name was missing, the one state an `alter` can be settled from if start were not end.
+    const stamped = approvedAgainst(plan, { policies: [] })
+    for (const policies of [[], ['PostPolicy']]) {
+      expect(verdictOf(judgeFreshness(stamped, planAppState({ policies })), 'policy.post').basis).not.toBe('built')
+    }
+  })
+
+  test('should never call an element built when the stamp is not the state the plan starts it from', () => {
+    // Stamped as an `existing` PostPolicy, then revised into an `add` of the name the application already had.
+    const stamped = approvedAgainst(draft((document) => {
+      ;(document.policies as unknown[]).push({ id: 'policy.post', change: { kind: 'existing' }, name: 'PostPolicy', model: 'model.post', abilities: [] })
+    }))
+    const revised = PlanSchema.parse({
+      ...stamped,
+      policies: stamped.policies.map((policy) => (policy.id === 'policy.post' ? { ...policy, change: { kind: 'add' } } : policy)),
+    })
+
+    // The application is at the stamp and at the add's end both; neither makes the name the plan's work.
+    const policy = verdictOf(judgeFreshness(revised, planAppState()), 'policy.post')
+    expect(policy.verdict).toBe('fresh')
+    expect(policy).not.toHaveProperty('basis')
+    // An add retargeted onto a name the application already had: at its end, not from its start.
+    const retargeted = PlanSchema.parse({
+      ...stamped,
+      resources: stamped.resources.map((resource) => (resource.id === 'resource.comment' ? { ...resource, name: 'PostResource' } : resource)),
+    })
+    expect(verdictOf(judgeFreshness(retargeted, planAppState()), 'resource.comment')).toMatchObject({ verdict: 'fresh', basis: 'end' })
   })
 
   test('should read a same-root class the plan adds as the plan own, whoever wrote it', () => {

@@ -15,7 +15,7 @@ import { layoutPlanFlows } from './flow'
 import { planHash } from './identity'
 import { impactBreakingChanges, type PlanImpactEntry } from './impact'
 import { loadPlanDictionaries, matchPlanLocale, type PlanLocale } from './locales'
-import { listPlanElements, type Plan, type PlanDraft } from './schema'
+import { hasBaseline, listPlanElements, type Plan, type PlanDraft } from './schema'
 
 /**
  * A `guren check` result that names the plan element it concerns. `elementId` is
@@ -30,9 +30,9 @@ export interface RenderPlanInput {
   plan: PlanDraft | Plan
   checks?: readonly PlanCheckResult[]
   /**
-   * The plan file's name, for the revise command the page prints. A name is dropped
-   * unless it is {@link PLAN_FILE_PATTERN}: the page shows that line for someone to
-   * paste into a shell, so a name carrying `;` or a quote would be pasted with it.
+   * The plan file's name, for the `plan:render` and `plan:approve` commands the page prints.
+   * A name is dropped unless it is {@link PLAN_FILE_PATTERN}: the page shows those lines for
+   * someone to paste into a shell, so a name carrying `;` or a quote would be pasted with it.
    */
   planFile?: string
   /** Derived task status (RFC 0030 §6). Reserved: an absent value renders nothing. */
@@ -69,10 +69,7 @@ export function escapeJsonForScript(json: string): string {
   })
 }
 
-/** Whether a document is a full `Plan` rather than a draft. The CLI picks its schema by it. */
-export function hasBaseline(document: unknown): document is Plan {
-  return typeof document === 'object' && document !== null && 'baseline' in document
-}
+export { hasBaseline }
 
 function hashOf(plan: PlanDraft | Plan): string | null {
   return hasBaseline(plan) ? planHash(plan) : null

@@ -182,7 +182,7 @@ describe('planStopHookFindings', () => {
     expect(verdict.block).toBe(false)
     expect(verdict.message).toContain(`plan:verify on stop (comments.plan.json, ${HTTP}): giving up, nothing about the step changed since the last continuation.\n${HTTP}: incomplete (3 ms)`)
     expect(verdict.message).toContain(
-      'The step is recorded as stalled. Fix the environment, revise the plan, or waive an element with `bunx guren plan:waive comments.plan.json <element-id> --reason "<why>"`; `bunx guren plan:next comments.plan.json` then returns it again.',
+      'The step is recorded as stalled. Fix the environment, edit the plan (and approve it), or waive an element with `bunx guren plan:waive comments.plan.json <element-id> --reason "<why>"`; `bunx guren plan:next comments.plan.json` then returns it again.',
     )
     const state = await readState(app)
     expect(state.active).toMatchObject({ continuations: 1, stalled: { at: '2026-09-21T10:00:00.000Z', reason: 'nothing about the step changed since the last continuation' } })

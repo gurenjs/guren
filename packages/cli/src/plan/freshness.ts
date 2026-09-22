@@ -34,6 +34,11 @@ export interface PlanElementFreshness {
   verdict: PlanFreshnessVerdict
   /** Why, on every verdict but a `fresh` that matches its stamp. */
   reason?: string
+  /**
+   * On a `fresh` that does not match its stamp: `built` when the stamp is the state the plan
+   * starts this element from, so the change is the plan's own work; `end` otherwise.
+   */
+  basis?: 'end' | 'built'
   /** On every verdict but `fresh`: the elements naming this one (`listPlanReferences()`), whose steps depend on it. */
   affects?: string[]
 }
@@ -69,6 +74,16 @@ function namesOf(target: PlanAppTarget): string[] {
 /** Whether the plan leaves `name` in place: the current name, unless the element or its parent is dropped. */
 function presentAtEnd(target: PlanAppTarget, name: string): boolean {
   return name === target.current && target.kind !== 'drop' && !target.parentDropped
+}
+
+/**
+ * Whether `name` is there before the plan's work: an `add` and the new name of a `rename` are
+ * not. An `existing` or `alter` name is present at start and end alike, so it is never `built`.
+ */
+function presentAtStart(target: PlanAppTarget, name: string): boolean {
+  if (target.kind === 'add') return false
+  if (target.kind === 'rename') return name === (target.previous ?? target.current)
+  return name === target.current
 }
 
 /**
@@ -173,6 +188,32 @@ function plannedEnd(target: PlanAppTarget, facts: Facts): Facts {
   }
 }
 
+/**
+ * The same facts before the plan's work, for the element as the plan names it now. What
+ * another root declares is carried over as read, and a route present at the start is
+ * predicted at its planned endpoint: either one moved since approval does not match.
+ */
+function plannedStart(target: PlanAppTarget, facts: Facts): Facts {
+  switch (facts.section) {
+    case 'named':
+    case 'tables': {
+      const names: Record<string, Presence> = {}
+      for (const [name, found] of Object.entries(facts.names)) names[name] = { ...found, here: presentAtStart(target, name) }
+      return { section: facts.section, names }
+    }
+    case 'columns': {
+      const columns: Record<string, boolean> = {}
+      for (const name of namesOf(target)) columns[name] = presentAtStart(target, name)
+      return { section: 'columns', table: true, elsewhere: facts.elsewhere, columns }
+    }
+    case 'routes': {
+      const endpoints: Record<string, string[]> = {}
+      for (const name of Object.keys(facts.endpoints)) endpoints[name] = presentAtStart(target, name) && target.endpoint ? [target.endpoint] : []
+      return { section: 'routes', endpoints, ...(facts.registered === undefined ? {} : { registered: false }) }
+    }
+  }
+}
+
 function hashFacts(facts: Facts[]): string {
   return createHash('sha256').update(canonicalJson({ v: CONTEXT_FACTS_VERSION, facts }), 'utf8').digest('hex')
 }
@@ -181,14 +222,14 @@ interface ElementContext {
   id: string
   section: PlanElementSection
   change: PlanChange['kind']
-  now: { hash: string; end: string } | { unreadable: string; sections: PlanAppTargetSection[] }
+  now: { hash: string; start: string; end: string } | { unreadable: string; sections: PlanAppTargetSection[] }
 }
 
 /** One entry per element; a model's class and its table are one entry, and the class comes first. */
 function elementContexts(plan: PlanDraft, app: PlanAppState): ElementContext[] {
-  const byId = new Map<string, { first: PlanAppTarget; facts: Facts[]; end: Facts[]; unreadable: string[]; sections: PlanAppTargetSection[] }>()
+  const byId = new Map<string, { first: PlanAppTarget; facts: Facts[]; start: Facts[]; end: Facts[]; unreadable: string[]; sections: PlanAppTargetSection[] }>()
   for (const target of listPlanAppTargets(plan)) {
-    const entry = byId.get(target.id) ?? { first: target, facts: [], end: [], unreadable: [], sections: [] }
+    const entry = byId.get(target.id) ?? { first: target, facts: [], start: [], end: [], unreadable: [], sections: [] }
     byId.set(target.id, entry)
     const facts = targetFacts(target, app)
     if ('unreadable' in facts) {
@@ -197,13 +238,14 @@ function elementContexts(plan: PlanDraft, app: PlanAppState): ElementContext[] {
       continue
     }
     entry.facts.push(facts)
+    entry.start.push(plannedStart(target, facts))
     entry.end.push(plannedEnd(target, facts))
   }
-  return [...byId.values()].map(({ first, facts, end, unreadable, sections }) => ({
+  return [...byId.values()].map(({ first, facts, start, end, unreadable, sections }) => ({
     id: first.id,
     section: first.section,
     change: first.kind,
-    now: unreadable.length > 0 ? { unreadable: unreadable.join('; '), sections } : { hash: hashFacts(facts), end: hashFacts(end) },
+    now: unreadable.length > 0 ? { unreadable: unreadable.join('; '), sections } : { hash: hashFacts(facts), start: hashFacts(start), end: hashFacts(end) },
   }))
 }
 
@@ -233,7 +275,10 @@ export function judgeFreshness(plan: PlanDraft & { baseline: { contextHash: Reco
       return { ...base, verdict: 'unstamped', reason: 'No context was stamped for it: a revision named it after approval, or its section could not be read then.' }
     }
     if (before === now.hash) return { ...base, verdict: 'fresh' }
-    if (now.hash === now.end) return { ...base, verdict: 'fresh', reason: 'The application reads as the plan leaves it.' }
+    if (now.hash === now.end) {
+      if (before === now.start) return { ...base, verdict: 'fresh', basis: 'built', reason: 'The application reads as the plan leaves it, from the state it was stamped in.' }
+      return { ...base, verdict: 'fresh', basis: 'end', reason: 'The application reads as the plan leaves it.' }
+    }
     return { ...base, verdict: 'stale', reason: 'What the scanners read for it changed since approval, to neither what was stamped nor what the plan leaves.' }
   })
 

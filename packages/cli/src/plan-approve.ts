@@ -3,25 +3,25 @@
  * record of its approval beside it. A draft gets `rev` and `contextHash` once, here; a plan
  * that already carries a baseline (a revision carries its parent's) is never restamped,
  * since the baseline is inside the hash every approval and waiver names.
- * It refuses while a §2 check fails or a question is open: silence approves nothing.
+ * It refuses while a §2 check fails or a question is open: silence approves nothing. On a
+ * baselined plan, a finding the plan's own finished work explains is settled first.
  */
 
 import { realpath } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 
 import { CliError, formatSchemaIssues } from './cli-error'
 import { toPosixRelative } from './discovery'
-import { planOutputPath, readPlanFile } from './plan-render'
+import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
 import { planApprovalsPath, readPlanApprovals, recordPlanApproval, requireReadableApprovals, type PlanApproval } from './plan/approvals'
-import { gitAuthor, writeFileAtomic } from './plan/beside'
-import { planDecisionsPath } from './plan/decisions'
+import { gitAuthor, planBesideExclusions, writeFileAtomic } from './plan/beside'
 import { stampContextHash, type PlanContextStamp } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { PlanSchema, type Plan } from './plan/schema'
 import { PLAN_STATE_DIR } from './plan/state'
-import { validatePlan } from './plan/validate'
+import { settleBuiltFindings, validatePlan } from './plan/validate'
 import { runCaptured, type CapturedExec } from './subprocess'
 
 export const PLAN_APPROVE_REPORT_VERSION = 1
@@ -37,6 +37,8 @@ export interface PlanApproveReport {
   approval: PlanApproval
   /** The hash was approved before, and nothing was written. */
   alreadyApproved: boolean
+  /** Elements whose collision or absence did not refuse, since the application reads as the plan leaves them. */
+  builtByPlan?: string[]
 }
 
 export interface PlanApproveFileOptions {
@@ -57,8 +59,9 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
   const exec = options.exec ?? runCaptured
   const app = typeof options.app === 'function' ? await options.app() : options.app
 
+  const settled = settleBuiltFindings(plan, app, validatePlan(plan, app))
   const blockers = [
-    ...validatePlan(plan, app)
+    ...settled.checks
       .filter((result) => result.status === 'fail')
       .map((result) => `  ${result.elementId ? `${result.elementId}: ` : ''}${result.message}`),
     ...plan.questions.map((question) => `  question ${question.id} is unanswered: ${question.question}`),
@@ -109,6 +112,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     ...(stamped ? { stamped } : {}),
     approval: recorded.existing ?? approval,
     alreadyApproved: recorded.existing !== undefined,
+    ...(settled.built.length > 0 ? { builtByPlan: settled.built } : {}),
   }
 }
 
@@ -120,17 +124,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
  */
 async function refuseDirtyTree(appRoot: string, planPath: string, exec: CapturedExec): Promise<void> {
   const [root, plan] = await Promise.all([realpath(appRoot), realpath(planPath)])
-  const own = [plan, planApprovalsPath(plan), planDecisionsPath(plan), planOutputPath(plan)]
-  const inside = (file: string): string | undefined => {
-    const relative = toPosixRelative(root, file)
-    return relative.startsWith('../') ? undefined : relative
-  }
-  const excluded = own.flatMap((file) => {
-    const relative = inside(file)
-    if (relative === undefined) return []
-    const temporary = inside(join(dirname(file), `.${basename(file)}.`))!
-    return [`:(exclude,literal)${relative}`, `:(exclude,glob)${globEscape(temporary)}*.tmp`]
-  })
+  const excluded = planBesideExclusions(root, plan, { records: true })
   let run
   try {
     run = await exec(['git', 'status', '--porcelain', '--untracked-files=all', '--', '.', ...excluded, `:(exclude)${PLAN_STATE_DIR}`], root)
@@ -148,10 +142,6 @@ async function refuseDirtyTree(appRoot: string, planPath: string, exec: Captured
       .map((line) => `  ${line}`)
       .join('\n')}${dirty.length > 10 ? `\n  … and ${dirty.length - 10} more` : ''}`,
   )
-}
-
-function globEscape(path: string): string {
-  return path.replace(/[*?[\]\\]/gu, (character) => `\\${character}`)
 }
 
 /** A rev that names no commit cannot be checked out later, so no repository and no commit are both refusals. */
@@ -178,6 +168,9 @@ export function formatPlanApprove(report: PlanApproveReport): string {
     if (report.stamped.unstamped.length > 0) {
       lines.push(`Not hashed, since their section could not be read: ${report.stamped.unstamped.map((entry) => entry.id).join(', ')}`)
     }
+  }
+  if (report.builtByPlan) {
+    lines.push(`Built as the plan leaves them, so their collision or absence is the plan's own work: ${report.builtByPlan.join(', ')}`)
   }
   lines.push(
     report.alreadyApproved

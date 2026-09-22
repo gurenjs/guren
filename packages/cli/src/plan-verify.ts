@@ -16,7 +16,7 @@ import type { PlanAppState } from './plan/app-state'
 import { requirePlanApproval } from './plan/approvals'
 import { judgeFreshness, type PlanFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
-import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext } from './plan/step-context'
+import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext } from './plan/step-context'
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
 import { judgePlan, type PlanStatus } from './plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
@@ -154,7 +154,7 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   }
   for (const context of report.staleContext ?? []) {
     const named = context.stale.map((element) => `${element.id} (${describeDependency(element)})`)
-    lines.push(`${context.stepId}: depends on what changed since the plan was approved: ${named.join(', ')}; plan:next holds it until the plan is revised and approved`, '')
+    lines.push(`${context.stepId}: depends on what changed since the plan was approved: ${named.join(', ')}; plan:next holds it until a person decides: ${HELD_STEP_REMEDY}`, '')
   }
   for (const stepId of report.skipped) lines.push(`${stepId}: verified before, and nothing it fingerprinted has changed`)
   if (report.skipped.length > 0) lines.push('')
