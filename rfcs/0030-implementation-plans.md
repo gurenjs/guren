@@ -1626,6 +1626,33 @@ Like `ai:eval`, `guren plan` is opt-in, costs money, and is never part of
 `check` or `gate`. `guren check --plan` is advisory: it reports approved plans
 with `drifted` elements and two open plans that touch the same element.
 
+**Amended in implementation (`guren check --plan`).** The suite is shipped with
+these readings (`packages/cli/src/plan-check.ts`).
+
+- Plans are found in one place: the app root's own `*.plan.json` and, under
+  `docs/plans/`, every `plan.json` (the §9 layout) and `*.plan.json`. The
+  records beside a plan never match, and a `revisions/` directory is not read.
+  A plan kept anywhere else is not checked.
+- Open means approved at its current hash (`planHash()` in the approvals beside
+  it) and not closed. Closed is what `plan:close` writes: `closed: true` in
+  `docs/plans/<slug>.md` with `plan_hash` equal to that hash, so a revision
+  approved after the close is open again. A draft, and a plan edited since its
+  approval, are judged by neither rule, since nobody has agreed to them yet.
+  Nothing is reported when no plan has a finding; the counts are `plan:status`'s.
+- `drifted` is whatever `planStatusFile()` reports, verification overlay
+  included, the function `plan:status` prints. The application is loaded once,
+  with `detail`, and only when an open plan exists, so plain `guren check` in an
+  app with an open plan now imports `db/schema.ts`.
+- Two plans touch the same element when a changed target of each occupies one
+  name in `listPlanAppTargets()`: the section, the app root, and the name (both
+  names of a rename; a column qualified by its table; a route also by its
+  endpoint). Ids play no part, so `model.post` in one plan and `model.entry` in
+  another, both on `posts`, collide. A target a plan marks `existing` is only
+  read and never collides. One finding per pair of plans lists every shared name.
+- It is a suite of plain `guren check`, and every result is an advisory `warn`,
+  a plan that will not read or whose approvals will not read included, so
+  neither `check --ci` nor `guren gate` counts it and `check --plan` exits 0.
+
 ### 9. Stores
 
 Where the approved plan, its revisions and the decision log live is an adapter.

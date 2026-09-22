@@ -63,13 +63,14 @@ import { runI18nCheck } from './i18n-check'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
+import { checkPlans, PLAN_DIR } from './plan-check'
 import { getChangedFiles } from './changed-files'
 import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
 export type { CheckStatus, CheckResult, CheckReport }
 
 /** The suites a flag of the same name selects. */
-export const CHECK_SUITES = ['arch', 'docs', 'spec', 'i18n', 'prototype', 'env'] as const
+export const CHECK_SUITES = ['arch', 'docs', 'spec', 'i18n', 'prototype', 'env', 'plan'] as const
 export type CheckSuite = (typeof CHECK_SUITES)[number]
 
 export interface RunCheckOptions {
@@ -103,6 +104,8 @@ export interface RunCheckOptions {
   prototype?: boolean
   /** Run the `.env.example` against `config/env.ts` check only (RFC 0027 §7). Content-activated. */
   env?: boolean
+  /** Run the implementation-plan checks only (RFC 0030 §8). Advisory and content-activated. */
+  plan?: boolean
 }
 
 /**
@@ -600,6 +603,13 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       graph = await loadRouteGraph(cwd, await routesEntryOrDefault(cwd, options.routesFile))
     }
     checks.push(...(await checkPrototypeRoutes({ cwd, cache, definitions: graph?.definitions })))
+  }
+
+  // Implementation plans (RFC 0030 §8). Status reads the app's source, and a plan, its
+  // approvals or its close doc may have moved; `.guren/plans/` is git-ignored and never in the set.
+  const planFileChanged = (file: string): boolean => file.startsWith(`${PLAN_DIR}/`) || file.endsWith('.plan.json') || file.endsWith('.approvals.json')
+  if (runs('plan') && (sourceChanged || [...(changedFiles ?? [])].some(planFileChanged))) {
+    checks.push(...(await checkPlans({ cwd, routesFile: options.routesFile })))
   }
 
   // 11. Check architecture boundaries (guren.arch.ts + derived module rules)

@@ -2942,6 +2942,10 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only the check that .env.example lists the keys config/env.ts declares (RFC 0027).',
     },
+    plan: {
+      type: 'boolean',
+      description: 'Run only the implementation-plan checks (RFC 0030): approved plans with drifted elements, and open plans changing the same element. Advisory: never sets the exit code.',
+    },
     changed: {
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
@@ -2971,6 +2975,7 @@ const checkCommand = defineCommand({
       i18n: Boolean(args.i18n),
       prototype: Boolean(args.prototype),
       env: Boolean(args.env),
+      plan: Boolean(args.plan),
       changed: Boolean(args.changed),
     })
 
