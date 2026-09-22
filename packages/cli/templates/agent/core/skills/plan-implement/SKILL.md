@@ -39,8 +39,10 @@ approval: an element the step owns or names that another commit moved, so the
 plan does not describe the application there. It lists each held step
 with the element, how the step depends on it and what the reference checks say
 now, and returns the next step that does not depend on one. A held step is a
-person's decision (revise the plan and approve it, or undo the change): report it, and
-do not edit the application back or the plan to make it pass.
+person's decision (undo the change, or edit the plan so each stale element
+states what the application holds now, such as an `existing` action another
+commit renamed, and approve the edit): report it, and do not edit the
+application back or the plan to make it pass.
 
 ## What a step asks for
 
@@ -82,7 +84,7 @@ recorded as stalled and `plan:next` returns it again, with the reason.
 ## What a stall means
 
 A stall is a decision for a person, and there are three answers: fix the
-environment, revise the plan, or accept an element incomplete with
+environment, edit the plan (and approve it), or accept an element incomplete with
 
 ```bash
 bunx guren plan:waive docs/plans/<slug>/plan.json <element-id> --reason "<why>"

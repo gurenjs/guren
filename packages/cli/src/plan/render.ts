@@ -30,9 +30,9 @@ export interface RenderPlanInput {
   plan: PlanDraft | Plan
   checks?: readonly PlanCheckResult[]
   /**
-   * The plan file's name, for the revise command the page prints. A name is dropped
-   * unless it is {@link PLAN_FILE_PATTERN}: the page shows that line for someone to
-   * paste into a shell, so a name carrying `;` or a quote would be pasted with it.
+   * The plan file's name, for the `plan:render` and `plan:approve` commands the page prints.
+   * A name is dropped unless it is {@link PLAN_FILE_PATTERN}: the page shows those lines for
+   * someone to paste into a shell, so a name carrying `;` or a quote would be pasted with it.
    */
   planFile?: string
   /** Derived task status (RFC 0030 §6). Reserved: an absent value renders nothing. */

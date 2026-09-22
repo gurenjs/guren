@@ -2,9 +2,9 @@
  * The review feedback the rendered plan exports, read back (RFC 0030 §4).
  *
  * The document is written by the page and carried here by hand, so it is parsed
- * against a schema rather than trusted: `guren plan --revise` turns it into model
- * input. `-` reads standard input, which is what the page's "Copy feedback" and a
- * pipe replace the file with.
+ * against a schema rather than trusted. No command reads it yet: the revise command
+ * that will turn it into model input is RFC 0030 Part 3. `-` reads standard input,
+ * which is what the page's "Copy feedback" and a pipe replace the file with.
  */
 
 import { createReadStream } from 'node:fs'

@@ -36,7 +36,7 @@ export function refreshAnswers(): void {
   }
 }
 
-/** Only what someone actually answered: an unconfirmed assumption would reach `plan --revise` as a decision. */
+/** Only what someone actually answered: an unconfirmed assumption would reach a revision as a decision. */
 export function givenAnswers(): PlanFeedback['answers'] {
   return answers.filter(answered).map((given) => {
     const answer: PlanFeedback['answers'][number] = { questionId: given.questionId }

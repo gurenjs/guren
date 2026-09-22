@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,7 +17,7 @@ import {
   type PlanPagePayload,
 } from '../src/plan/render'
 import { PlanDraftSchema, PlanSchema, type PlanDraft } from '../src/plan/schema'
-import { parsePlanDocument, planOutputPath, renderPlanFile, type RenderPlanFileOptions } from '../src/plan-render'
+import { parsePlanDocument, renderPlanFile, type RenderPlanFileOptions } from '../src/plan-render'
 import { loadCommentsPlan, PAYLOADS, planAppState, planDataBlock, planPageData, TEST_BASELINE } from './plan-fixture'
 import { openPlanPage, planPageModule, planPageSource } from './plan-page-dom'
 
@@ -183,19 +183,20 @@ describe('the plan file name the page prints in a command', () => {
     expect(payloadOf({ plan: draft(), planFile: name }).planFile).toBeNull()
   })
 
-  test('should be printed by the page in both revise commands', () => {
+  test('should be printed by the page in the render and approve commands, and never in a command that does not exist', () => {
     const page = openPlanPage(renderPlanHtml({ plan: draft(), planFile: 'comments.plan.json' }))
 
-    expect(page.byId('revise-file-command').textContent).toBe('bunx guren plan --revise comments.plan.json --feedback feedback.json')
-    // The stdin form the page's "Copy feedback" feeds (RFC 0030 §4): the pipe that
-    // writes it is the reader's, since the clipboard command differs per system.
-    expect(page.byId('revise-stdin-command').textContent).toBe('bunx guren plan --revise comments.plan.json --feedback -')
+    expect(page.byId('render-command').textContent).toBe('bunx guren plan:render comments.plan.json')
+    expect(page.byId('approve-command').textContent).toBe('bunx guren plan:approve comments.plan.json')
+    // Nothing reads feedback.json yet (`plan --revise` is RFC 0030 Part 3), so the page does not print it.
+    expect(page.byId('footer').textContent).not.toContain('--revise')
+    expect(page.byId('footer-revise-note').textContent).toContain('No command reads the feedback yet')
   })
 
   test('should print a stand-in where no safe name was given', () => {
     const page = openPlanPage(renderPlanHtml({ plan: draft(), planFile: 'plan.json; rm -rf ~' }))
 
-    expect(page.byId('revise-file-command').textContent).toBe('bunx guren plan --revise <plan.json> --feedback feedback.json')
+    expect(page.byId('render-command').textContent).toBe('bunx guren plan:render <plan.json>')
   })
 })
 
@@ -546,6 +547,18 @@ describe('renderPlanFile', () => {
     expect(await readFile(result.path, 'utf8')).toContain('plan-data')
   })
 
+  test('should replace the page through a temporary and leave none behind, creating the directory -o names', async () => {
+    const dir = await fixtureDir()
+    await writeFile(join(dir, 'comments.plan.html'), 'old\n', 'utf8')
+
+    await render(join(dir, 'comments.plan.json'))
+    await render(join(dir, 'comments.plan.json'), { output: join(dir, 'build/review.html') })
+
+    expect(await readFile(join(dir, 'comments.plan.html'), 'utf8')).toContain('plan-data')
+    expect((await readdir(dir)).sort()).toEqual(['build', 'comments.plan.html', 'comments.plan.json'])
+    expect(await readdir(join(dir, 'build'))).toEqual(['review.html'])
+  })
+
   test('should write to the path -o names', async () => {
     const dir = await fixtureDir()
 
@@ -644,15 +657,5 @@ describe('parsePlanDocument', () => {
 
   test('should hold a document with a baseline to the full plan schema', () => {
     expect(() => parsePlanDocument({ ...loadCommentsPlan(), baseline: { rev: '' } })).toThrow(/baseline/)
-  })
-})
-
-describe('planOutputPath', () => {
-  test('should replace a .json extension', () => {
-    expect(planOutputPath('/tmp/comments.plan.json')).toBe('/tmp/comments.plan.html')
-  })
-
-  test('should append to a path with no .json extension', () => {
-    expect(planOutputPath('/tmp/plan')).toBe('/tmp/plan.html')
   })
 })

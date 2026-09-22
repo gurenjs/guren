@@ -11,6 +11,10 @@ import type { PlanElementFreshness, PlanFreshness } from './freshness'
 import type { PlanDraft } from './schema'
 import { findPlanStep, listPlanSteps, planElementParents, type PlanTaskDerivation } from './tasks'
 
+/** What a person does about a held step; `plan:next` and `plan:verify` both print it. */
+export const HELD_STEP_REMEDY =
+  'undo the change that moved it, or edit the plan so each stale element states what the application holds now (an `existing` action another commit renamed or removed names the one that stands in its place) and approve the edit'
+
 export interface PlanStepContextElement {
   id: string
   section: PlanElementFreshness['section']

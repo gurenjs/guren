@@ -27,9 +27,9 @@
   "footer.copy": "Copy feedback",
   "footer.download": "Download feedback.json",
   "footer.note": "Comment on any element from the mark in its heading. This page never writes to the project and makes no network request.",
-  "footer.fileCommand": "Download the feedback beside the plan, then run:",
-  "footer.stdinCommand": "Or copy it and pipe it into:",
-  "footer.copied": "Copied. Pipe it into the second command below.",
+  "footer.revise": "No command reads the feedback yet. Hand feedback.json, or the copied text, to the agent that wrote the plan, or apply the comments to the plan by hand. Then render the plan again:",
+  "footer.approve": "Once the plan says what you mean to build, approve it:",
+  "footer.copied": "Copied. Paste it to the agent that wrote the plan.",
   "footer.clipboardRefused": "The browser refused the clipboard. Use Download instead.",
   "footer.downloaded": "Downloaded feedback.json.",
 
