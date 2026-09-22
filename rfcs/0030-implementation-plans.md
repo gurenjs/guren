@@ -852,6 +852,40 @@ command acts on the plan (`plan/approvals.ts`, `plan-next.ts`, `plan-verify.ts`,
   its baseline, so approving it records the new hash without restamping, and
   the §2 checks and open questions are asked again first.
 
+**Amended in implementation (re-approving a plan that is being built).** Asked
+again against an application the plan has partly built, the §2 checks fail
+the plan's own work: an `add` finds its name, the old name of a `rename` and
+the target of a `drop` are gone. Measured on a scratch blog, one edited goal
+after the scaffold step gave seven failures, so the refusal above told a
+person to run a command that could not succeed until the plan was finished.
+What shipped (`settleBuiltFindings()` in `plan/freshness.ts`):
+
+- On a plan with a baseline, a `plan:app-collision` or `plan:app-missing`
+  finding (`APP_FACT_FINDINGS` in `plan/validate.ts`) is settled to `pass`
+  when its element has a stamp and the application reads as the plan leaves
+  that element: the facts hash to the end state freshness predicts. There is
+  one prediction, the one `judgeFreshness()` already uses, so an element
+  approval accepts is one that freshness calls fresh by its end state.
+- Only the end state settles a finding. An element still at its stamp that
+  fails now was changed by the plan itself (a revision that turned an
+  `existing` into an `add` of a name the application has), which is a real
+  failure. An element a revision added has no stamp and is judged as a draft
+  would be.
+- Everything else still refuses: an open question, a failing internal
+  reference, the other §2 checks, and a collision the end state does not
+  explain. A table the plan adds that another app root declares, or a route
+  endpoint another route holds, reads as neither stamp nor end, so it fails.
+  The limit is the one freshness has: a same-named class another commit adds
+  in the plan's own root reads as the plan's own `add`, and so does a second
+  route on the endpoint of a built one.
+- A draft is unchanged: it has no stamp, so nothing is settled, and a draft
+  whose `add` already exists is refused as before.
+- The baseline is still never restamped; re-approval records the new hash.
+  The report names the settled elements (`builtByPlan`).
+- `plan:render` settles the same findings on a plan with a baseline, so the
+  page pins no failure the plan's own work explains, and the element's card
+  keeps the finding as a `pass` whose message says why.
+
 ### 5. Tasks are derived, not written
 
 The model supplies `tasks[]`: what each slice must achieve, and its acceptance

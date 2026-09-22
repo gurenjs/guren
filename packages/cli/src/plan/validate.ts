@@ -64,6 +64,13 @@ const CHILD_CHANGES_BY_PARENT: Record<PlanChange['kind'], ReadonlyArray<PlanChan
   rename: null,
 }
 
+/**
+ * The findings that state an application fact about one element's own name: an `add` finds
+ * it, a `rename`'s old name or a `drop`'s target is gone. Finishing the plan's work produces
+ * exactly these, which is what `settleBuiltFindings()` in `freshness.ts` answers.
+ */
+export const APP_FACT_FINDINGS: ReadonlySet<string> = new Set(['plan:app-collision', 'plan:app-missing'])
+
 export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResult[] {
   const results: PlanCheckResult[] = []
   const index = indexPlan(plan)

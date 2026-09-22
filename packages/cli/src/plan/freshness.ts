@@ -12,7 +12,8 @@ import { declaresTable, findTable, isUnreadable, type PlanAppName, type PlanAppS
 import { endpointKey, listPlanAppTargets, type PlanAppTarget, type PlanAppTargetSection } from './app-targets'
 import { canonicalJson } from './identity'
 import { listPlanReferences } from './references'
-import type { PlanChange, PlanDraft, PlanElementSection } from './schema'
+import type { Plan, PlanChange, PlanDraft, PlanElementSection } from './schema'
+import { APP_FACT_FINDINGS, type PlanCheckResult } from './validate'
 
 /** Hashed into every entry, so a change to what is hashed marks everything stale rather than colliding. */
 const CONTEXT_FACTS_VERSION = 3
@@ -252,4 +253,26 @@ export function judgeFreshness(plan: PlanDraft & { baseline: { contextHash: Reco
   const summary = Object.fromEntries(PLAN_FRESHNESS_VERDICTS.map((verdict) => [verdict, 0])) as Record<PlanFreshnessVerdict, number>
   for (const element of elements) summary[element.verdict] += 1
   return { elements, summary }
+}
+
+/**
+ * A baselined plan's §2 findings with its own finished work settled: a collision or an
+ * absence on a stamped element the application reads exactly as the plan leaves it becomes
+ * a `pass`. Only the end state settles one; an element still at its stamp that fails now was
+ * changed by the plan itself (an `existing` turned `add`), and that is still a failure.
+ */
+export function settleBuiltFindings(plan: Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
+  const stamped = plan.baseline.contextHash
+  const atEnd = new Set(
+    elementContexts(plan, app)
+      .filter(({ id, now }) => 'hash' in now && Object.hasOwn(stamped, id) && now.hash === now.end)
+      .map(({ id }) => id),
+  )
+  const built = new Set<string>()
+  const settled = checks.map((result) => {
+    if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined || !atEnd.has(result.elementId)) return result
+    built.add(result.elementId)
+    return { ...result, status: 'pass' as const, message: `${result.message} The application reads as the plan leaves this element: the plan's own work, built.` }
+  })
+  return { checks: settled, built: [...built] }
 }
