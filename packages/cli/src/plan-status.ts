@@ -9,6 +9,7 @@ import { basename } from 'node:path'
 
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
+import { judgeFreshness, PLAN_FRESHNESS_VERDICTS, type PlanFreshness } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { judgePlan, PLAN_ELEMENT_STATES, PLAN_STATUS_SECTIONS, type PlanElementState, type PlanElementStatus, type PlanStatus } from './plan/status'
@@ -27,6 +28,11 @@ export interface PlanStatusReport extends PlanStatus<PlanElementState> {
    * (RFC 0030 §6). Absent when the command was given no application root to read it from.
    */
   verification?: PlanVerificationSummary
+  /**
+   * The application against `baseline.contextHash` (RFC 0030 §4), judged on the states above.
+   * Absent for a draft, which has no baseline to compare with.
+   */
+  freshness?: PlanFreshness
 }
 
 export interface PlanStatusFileOptions {
@@ -48,9 +54,11 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
   } satisfies Pick<PlanStatusReport, 'reportVersion' | 'plan'>
-  if (options.appRoot === undefined) return { ...head, ...status }
+  const freshnessOf = (elements: PlanStatusReport['elements']): Pick<PlanStatusReport, 'freshness'> =>
+    hasBaseline(plan) ? { freshness: judgeFreshness(plan, app, elements) } : {}
+  if (options.appRoot === undefined) return { ...head, ...status, ...freshnessOf(status.elements) }
   const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }))
-  return { ...head, ...overlaid.status, verification: overlaid.verification }
+  return { ...head, ...overlaid.status, verification: overlaid.verification, ...freshnessOf(overlaid.status.elements) }
 }
 
 const SECTION_TITLES: Record<(typeof PLAN_STATUS_SECTIONS)[number], string> = {
@@ -120,5 +128,21 @@ export function formatPlanStatus(report: PlanStatusReport): string {
     lines.push('', `Waived against another plan or revision, so not counted: ${verification.staleWaivers.map((waiver) => waiver.elementId).join(', ')}`)
   }
   if (verification && report.summary.states.waived > 0) lines.push('', `Waivers read from ${verification.decisionsFile}`)
+  if (report.freshness) lines.push('', ...freshnessLines(report.freshness))
   return lines.join('\n')
+}
+
+function freshnessLines(freshness: PlanFreshness): string[] {
+  const { summary, elements } = freshness
+  const lines = [`Against the approved baseline: ${PLAN_FRESHNESS_VERDICTS.map((verdict) => `${verdict} ${summary[verdict]}`).join(', ')}`]
+  for (const element of elements) {
+    if (element.verdict !== 'stale') continue
+    lines.push(`  stale  ${element.id}: ${element.reason}`)
+    if (element.affects && element.affects.length > 0) lines.push(`         named by ${element.affects.join(', ')}`)
+  }
+  for (const verdict of ['unstamped', 'unjudged'] as const) {
+    const ids = elements.filter((element) => element.verdict === verdict).map((element) => element.id)
+    if (ids.length > 0) lines.push(`  ${verdict}: ${ids.join(', ')}`)
+  }
+  return lines
 }

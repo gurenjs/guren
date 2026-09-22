@@ -572,6 +572,54 @@ unrelated commit leaves it alone. A change to a referenced element marks that
 element stale, re-runs the §2 checks for it, and blocks only the steps that
 depend on it.
 
+**Amended in implementation (`plan:approve`, freshness).** `plan:approve` was
+pulled forward from Part 3 for this work, since nothing else could stamp a
+baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
+`plan/freshness.ts`, `plan/approvals.ts`):
+
+- `plan:approve` is the one writer of `baseline`. A draft is stamped once:
+  `rev` is `git rev-parse HEAD` of the application, and no repository or no
+  commit is a refusal rather than an invented rev. The plan file is written
+  back as the author's document plus the baseline, so an omitted section stays
+  omitted. A plan that already carries a baseline, as a revision carries its
+  parent's, is never restamped: the baseline is inside the hash every approval
+  and waiver names. It refuses while a §2 check fails or a question is open.
+- The approval is `{ hash, approvedAt, approvedBy? }` in `approvals.json` beside
+  a `plan.json`, and in `<slug>.approvals.json` beside any other plan, the rule
+  the decision log follows. Approving a hash already approved writes nothing,
+  and a file that will not read is refused before the plan is touched. That
+  every later command refuses a hash no approval names is not shipped yet.
+- `contextHash` is keyed by element id, one entry for every element the §2
+  checks judge against the application by name. Both read one derivation of
+  what name an element is judged by (`plan/app-targets.ts`). The value is a
+  SHA-256 of the facts those checks read for the name, across every app root:
+  which roots declare it, a table's identifier, SQL name and root without its
+  columns (a column is its own entry), whether a column's table declares it,
+  and a route name's endpoints. An `add` hashes the collision facts, usually
+  "declared nowhere".
+- A section that cannot be read stamps no entry, so validators, which no
+  scanner reads, are never stamped. Comparing gives four verdicts: `fresh`,
+  `stale`, `unstamped` (no entry: a revision named the element after approval,
+  or its section was unreadable then) and `unjudged` (its section cannot be
+  read now). An unreadable section is never `fresh`. `unstamped` is the answer
+  to what stamps an element a revision newly references: nothing, and the
+  baseline carried over from the parent stays as it was.
+- An element that is not `existing` is changed by the plan's own steps, so its
+  hash is bound to move. A difference is `stale` only while `plan:status` has
+  no evidence the plan's work reached the element (`planned`, `blocked`,
+  `unjudged`); `present`, `wired`, `drifted`, `verified` and `waived` are that
+  evidence. An `existing` element belongs to no step, so a difference is always
+  `stale`. An `existing` action under a renamed controller, and an `existing`
+  column of a renamed table, are read under both names, or the rename would
+  mark them stale.
+- `plan:status` reports the verdicts for a plan with a baseline, with the
+  elements naming each stale one through the reference table. Skipping or
+  blocking the steps that own them, and re-running the §2 checks for a stale
+  element, are left to `plan:next` and the Stop hook in a later change.
+- The stamp is part of `planHash()`. Changing what it hashes renames every
+  approved plan and orphans its approvals and waivers, so the facts carry a
+  version of their own.
+
 ### 5. Tasks are derived, not written
 
 The model supplies `tasks[]`: what each slice must achieve, and its acceptance
@@ -1105,8 +1153,9 @@ shipped with these readings:
   coming back. The context is the
   step's elements verbatim, its behaviours, its verify commands and, for a
   `scaffold` step, what it generates. The dependency shape through
-  `generateEntityContext()` and the freshness skip of §4 are not in it yet:
-  nothing stamps `contextHash` so far, so there is no stale element to skip.
+  `generateEntityContext()` and the freshness skip of §4 are not in it yet.
+  `plan:approve` now stamps `contextHash` and `plan:status` reports which
+  elements are stale (§4), but nothing here skips or blocks on them.
 - The hook knows which step a session is on from a mark in the state file,
   `active: { plan, step, startedAt, continuations, lastSignature?, stalled? }`,
   which `plan:next` writes (the plan path relative to the application root)
@@ -1388,6 +1437,9 @@ reshapes or drops them.
    dogfood app.
 3. **Part 3**: the scaffold step and its emitters (§5), the `claude -p`
    producer and `--print-prompt` (§8), `plan:approve`.
+   **Amended in implementation:** a minimal `plan:approve` (stamping the
+   baseline and recording the approval, §4) shipped ahead of Part 3 with the
+   freshness comparison, which needed a writer of `contextHash`.
 4. **Part 4**: `plan:next`, the harness skill and `Stop` hook, metrics (§7),
    `plan:waive`, `plan:close`.
 5. **Part 5**: the `github` store (§9), `guren check --plan`, the guide.

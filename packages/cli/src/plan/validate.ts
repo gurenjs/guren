@@ -18,12 +18,12 @@ import {
   isUnreadable,
   scopeName,
   type PlanAppName,
-  type PlanAppNames,
   type PlanAppScope,
   type PlanAppState,
   type PlanAppTable,
   type PlanAppUnreadable,
 } from './app-state'
+import { actionTargets, columnTargets, namedTargets, routeTarget, tableTarget } from './app-targets'
 import { listPlanReferences } from './references'
 import {
   findDuplicatePlanIds,
@@ -444,26 +444,18 @@ function withSection<T>(
 }
 
 function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
-  const named = <T extends { id: string; change: PlanChange }>(
-    elements: ReadonlyArray<T>,
-    options: {
-      section: PlanElementSection
-      appSection: string
-      noun: string
-      existing: PlanAppNames
-      nameOf: (element: T) => string
-      moduleOf?: (element: T) => string | undefined
-    },
-  ): void => checkNamedSection(elements, options, results)
-
-  named(plan.models, { section: 'models', appSection: 'models', noun: 'model class', existing: app.models, nameOf: (m) => m.name, moduleOf: (m) => m.module })
-  named(plan.controllers, { section: 'controllers', appSection: 'controllers', noun: 'controller class', existing: app.controllers, nameOf: (c) => c.className, moduleOf: (c) => c.module })
-  named(plan.validators, { section: 'validators', appSection: 'validators', noun: 'validator', existing: app.validators, nameOf: (v) => v.name, moduleOf: (v) => v.module })
-  named(plan.resources, { section: 'resources', appSection: 'resources', noun: 'resource', existing: app.resources, nameOf: (r) => r.name, moduleOf: (r) => r.module })
-  named(plan.policies, { section: 'policies', appSection: 'policies', noun: 'policy', existing: app.policies, nameOf: (p) => p.name, moduleOf: (p) => p.module })
-  // A module's pages are not colocated: they live in the project's own resources/js/pages
-  // under the module's name, so the page id carries the root and the name does not.
-  named(plan.views, { section: 'views', appSection: 'pages', noun: 'page', existing: app.pages, nameOf: (v) => v.page })
+  const targets = namedTargets(plan)
+  for (const appSection of NAMED_APP_SECTIONS) {
+    withSection(appSection, app[appSection], results, (entries) => {
+      for (const target of targets) {
+        if (target.appSection !== appSection) continue
+        const { names, ...scoped } = target.scoped
+          ? inRoot(entries, target.scoped.module)
+          : { names: appNames(entries), root: undefined, elsewhere: undefined }
+        checkTarget({ ...target, ...scoped }, names, results)
+      }
+    })
+  }
 
   withSection('tables', app.tables, results, (tables) => {
     const declared = tables.flatMap((table) => [
@@ -472,21 +464,7 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
     ])
     for (const model of plan.models) {
       const { names, ...scoped } = inRoot(declared, model.module)
-      checkTarget(
-        {
-          id: model.id,
-          section: 'models',
-          current: model.table,
-          previous: model.tableRenamedFrom,
-          // A class rename leaves the table alone; `tableRenamedFrom` is the only thing that moves it.
-          kind: model.tableRenamedFrom ? 'rename' : model.change.kind === 'rename' ? 'existing' : model.change.kind,
-          noun: 'table',
-          ...scoped,
-          shared: SHARED_SCHEMA,
-        },
-        names,
-        results,
-      )
+      checkTarget({ ...tableTarget(model), ...scoped, shared: SHARED_SCHEMA }, names, results)
       checkColumnsAgainstApp(model, tables, scoped.elsewhere, results)
     }
   },
@@ -499,27 +477,8 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
 
   withSection('actions', app.actions, results, (actions) => {
     for (const controller of plan.controllers) {
-      // An action's identity is `Class.action`, which is how a route names one; a
-      // controller the plan renames is looked up under the name it has today.
-      const className = renameFrom(controller.change) ?? controller.className
-      // An action sits in the app root its controller does.
       const { names, ...scoped } = inRoot(actions, controller.module)
-      for (const action of controller.actions) {
-        const previousName = renameFrom(action.change)
-        checkTarget(
-          {
-            id: action.id,
-            section: 'actions',
-            current: `${className}.${action.name}`,
-            previous: previousName ? `${className}.${previousName}` : undefined,
-            kind: action.change.kind,
-            noun: 'action',
-            ...scoped,
-          },
-          names,
-          results,
-        )
-      }
+      for (const target of actionTargets(controller)) checkTarget({ ...target, ...scoped }, names, results)
     }
   })
 
@@ -527,15 +486,9 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
     const names = routes.flatMap((route) => (route.name ? [route.name] : []))
     const endpoints = new Set(routes.map((route) => `${route.method.toUpperCase()} ${route.path}`))
     for (const route of plan.routes) {
-      // A route's name is checked as its identity; its path is not, since an `alter`
-      // may move the path while keeping the name.
-      checkTarget(
-        { id: route.id, section: 'routes', current: route.name, previous: renameFrom(route.change), kind: route.change.kind, noun: 'route name' },
-        names,
-        results,
-      )
-      if (route.change.kind !== 'add') continue
-      if (!endpoints.has(`${route.method} ${route.path}`)) continue
+      const target = routeTarget(route)
+      checkTarget(target, names, results)
+      if (!target.endpoint || !endpoints.has(`${target.endpoint.method} ${target.endpoint.path}`)) continue
       results.push(
         finding('plan:app-collision', 'fail', `The route "${route.method} ${route.path}" is already registered by this application.`, {
           elementId: route.id,
@@ -546,38 +499,8 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
   })
 }
 
-/**
- * A section whose elements are each checked by one name, against one list of app
- * names. `appSection` names the application's list rather than the plan's, since a
- * plan's `views` are judged against the application's `pages`.
- */
-function checkNamedSection<T extends { id: string; change: PlanChange }>(
-  elements: ReadonlyArray<T>,
-  options: {
-    section: PlanElementSection
-    appSection: string
-    noun: string
-    existing: PlanAppNames
-    nameOf: (element: T) => string
-    /** The app root the plan puts each element in; absent where the section is not read per root. */
-    moduleOf?: (element: T) => string | undefined
-  },
-  results: PlanCheckResult[],
-): void {
-  const { section, noun, nameOf, moduleOf } = options
-  withSection(options.appSection, options.existing, results, (entries) => {
-    for (const element of elements) {
-      const { names, ...scoped } = moduleOf
-        ? inRoot(entries, moduleOf(element))
-        : { names: appNames(entries), root: undefined, elsewhere: undefined }
-      checkTarget(
-        { id: element.id, section, current: nameOf(element), previous: renameFrom(element.change), kind: element.change.kind, noun, ...scoped },
-        names,
-        results,
-      )
-    }
-  })
-}
+/** The sections {@link namedTargets} yields, in the order their findings are reported. */
+const NAMED_APP_SECTIONS = ['models', 'controllers', 'validators', 'resources', 'policies', 'pages'] as const
 
 function checkColumnsAgainstApp(
   model: PlanModel,
@@ -585,36 +508,26 @@ function checkColumnsAgainstApp(
   elsewhere: (name: string) => string[],
   results: PlanCheckResult[],
 ): void {
-  if (model.change.kind === 'add') return
-  const lookup = model.tableRenamedFrom ?? model.table
+  const targets = columnTargets(model)
+  const lookup = targets[0]?.table?.lookup
+  if (lookup === undefined) return
   const table = tables.find(
     (candidate) =>
       candidate.module === (model.module ?? null) && (candidate.identifier === lookup || candidate.tableName === lookup),
   )
   if (!table) {
-    if (model.columns.length > 0) {
-      const other = elsewhere(lookup)
-      reportUnjudgedColumns(
-        model,
-        `table "${lookup}" was not found in ${scopeName(model.module ?? null)}`
-          + (other.length > 0 ? `, though this application declares one in ${other.join(', ')}` : ''),
-        results,
-      )
-    }
+    const other = elsewhere(lookup)
+    reportUnjudgedColumns(
+      model,
+      `table "${lookup}" was not found in ${scopeName(model.module ?? null)}`
+        + (other.length > 0 ? `, though this application declares one in ${other.join(', ')}` : ''),
+      results,
+    )
     return
   }
-  for (const column of model.columns) {
+  for (const target of targets) {
     checkTarget(
-      {
-        id: column.id,
-        section: 'columns',
-        current: column.name,
-        previous: renameFrom(column.change),
-        kind: column.change.kind,
-        noun: 'column',
-        scope: ` of table "${table.tableName ?? table.identifier}"`,
-        unconfirmedBecause: COLUMNS_ARE_A_LOWER_BOUND,
-      },
+      { ...target, scope: ` of table "${table.tableName ?? table.identifier}"`, unconfirmedBecause: COLUMNS_ARE_A_LOWER_BOUND },
       table.columns,
       results,
     )
@@ -634,10 +547,6 @@ function reportUnjudgedColumns(model: PlanModel, because: string, results: PlanC
       { elementId: model.id, section: 'models' },
     ),
   )
-}
-
-function renameFrom(change: PlanChange): string | undefined {
-  return change.kind === 'rename' ? change.from : undefined
 }
 
 function checkInflectedNames(plan: PlanDraft, results: PlanCheckResult[]): void {

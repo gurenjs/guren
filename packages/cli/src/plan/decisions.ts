@@ -6,12 +6,12 @@
  * inherit it.
  */
 
-import { readFile, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { writeFile } from 'node:fs/promises'
 
 import { z } from 'zod'
 
-import { CliError, formatSchemaIssues } from '../cli-error'
+import { CliError } from '../cli-error'
+import { planSiblingPath, readBesideRecord } from './beside'
 import { planHash } from './identity'
 import { hasBaseline } from './render'
 import type { Plan, PlanDraft } from './schema'
@@ -42,15 +42,8 @@ export interface PlanDecisionsRead {
   unreadable?: string
 }
 
-/**
- * The §9 layout (`docs/plans/<slug>/plan.json`) keeps its decisions beside the plan as
- * `decisions.json`; a plan named for its slug keeps them under that name, so two plans in
- * one directory do not share a log.
- */
 export function planDecisionsPath(planPath: string): string {
-  const name = basename(planPath)
-  if (name === 'plan.json') return join(dirname(planPath), 'decisions.json')
-  return join(dirname(planPath), `${name.replace(/(\.plan)?\.json$/u, '')}.decisions.json`)
+  return planSiblingPath(planPath, 'decisions')
 }
 
 /**
@@ -63,23 +56,8 @@ export function planWaiverHash(plan: PlanDraft | Plan): string | undefined {
 
 /** Absent is `decisions: undefined` with no reason; a file that exists and does not parse says why. */
 export async function readPlanDecisions(planPath: string): Promise<PlanDecisionsRead> {
-  const path = planDecisionsPath(planPath)
-  let raw: string
-  try {
-    raw = await readFile(path, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { decisions: undefined }
-    return { decisions: undefined, unreadable: `${path} could not be read: ${(error as Error).message}` }
-  }
-  let document: unknown
-  try {
-    document = JSON.parse(raw)
-  } catch (error) {
-    return { decisions: undefined, unreadable: `${path} is not valid JSON: ${(error as Error).message}` }
-  }
-  const parsed = PlanDecisionsSchema.safeParse(document)
-  if (!parsed.success) return { decisions: undefined, unreadable: `${path} does not match the decision log schema:\n${formatSchemaIssues(parsed.error)}` }
-  return { decisions: parsed.data }
+  const { value, unreadable } = await readBesideRecord(planDecisionsPath(planPath), PlanDecisionsSchema, 'decision log')
+  return { decisions: value, ...(unreadable ? { unreadable } : {}) }
 }
 
 /**

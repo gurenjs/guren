@@ -41,6 +41,7 @@ import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { renderPlanFile } from './plan-render'
 import { loadPlanAppState } from './plan/app-state'
+import { formatPlanApprove, planApproveFile } from './plan-approve'
 import { formatPlanStatus, planStatusFile } from './plan-status'
 import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from './plan-verify'
 import { formatPlanNext, planNextFile } from './plan-next'
@@ -360,6 +361,36 @@ const planNextCommand = defineCommand({
     const appRoot = resolve(args.app ?? process.cwd())
     const report = await planNextFile(args.plan, { appRoot })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanNext(report, args.plan))
+  },
+})
+
+const planApproveCommand = defineCommand({
+  meta: {
+    name: 'plan:approve',
+    description:
+      "Approve an implementation plan (RFC 0030 §4): stamp a draft's baseline (the application's HEAD and a hash per referenced element) into the plan file once, and record the approval of its hash beside the plan. Refuses while a check fails or a question is open, and outside a git repository with a commit.",
+  },
+  args: {
+    plan: {
+      type: 'positional',
+      description: 'Path to the plan JSON file',
+      required: true,
+      valueHint: 'comments.plan.json',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory: what the plan is checked and stamped against, and where git is asked for HEAD.',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print the report as JSON.',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const appRoot = resolve(args.app ?? process.cwd())
+    const report = await planApproveFile(args.plan, { app: () => loadPlanAppState(appRoot), appRoot })
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanApprove(report))
   },
 })
 
@@ -3786,6 +3817,7 @@ export const builtinSubCommands = {
   'spec:generate': specGenerateCommand,
   'docs:graph': docsGraphCommand,
   'plan:render': planRenderCommand,
+  'plan:approve': planApproveCommand,
   'plan:status': planStatusCommand,
   'plan:verify': planVerifyCommand,
   'plan:next': planNextCommand,
