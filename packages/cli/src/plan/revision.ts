@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { formatSchemaIssues } from '../cli-error'
 import type { PlanFeedback } from './feedback'
 import { canonicalJson, planHash } from './identity'
+import { listPlanReferences } from './references'
 import {
   AcceptanceSchema,
   findDuplicatePlanIds,
@@ -156,35 +157,6 @@ export function planRevisionOpsJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(PlanRevisionOpsSchema, { target: 'draft-7', io: 'input' }) as Record<string, unknown>
 }
 
-/**
- * Every place an element names another by id, as `[owner, path]` under the plan.
- * `plan-revision.test.ts` holds the list to the schema's id-typed fields.
- * Flow step ids and edge ends are the flow's own namespace and are not listed.
- */
-export const PLAN_REFERENCE_PATHS: ReadonlyArray<readonly [owner: string, path: string]> = [
-  ['questions[]', 'affects[]'],
-  ['models[]', 'relationships[].target'],
-  ['models[].columns[]', 'references.model'],
-  ['controllers[].actions[]', 'params'],
-  ['controllers[].actions[]', 'query'],
-  ['controllers[].actions[]', 'body'],
-  ['controllers[].actions[]', 'authorization.policy.id'],
-  ['controllers[].actions[]', 'response.view'],
-  ['controllers[].actions[]', 'response.resource'],
-  ['routes[]', 'action'],
-  ['routes[]', 'bind[].model'],
-  ['views[]', 'props[].resource'],
-  ['views[]', 'form.validator'],
-  ['views[]', 'form.submitsTo'],
-  ['views[]', 'actions[].route'],
-  ['resources[]', 'model'],
-  ['policies[]', 'model'],
-  ['flows[]', 'nodes[].element'],
-  ['tasks[]', 'covers[]'],
-  ['tasks[].acceptance[]', 'route'],
-  ['tasks[].acceptance[]', 'expect.inertia'],
-]
-
 export type PlanRevisionRejectionKind =
   | 'invalid-revision'
   | 'parent-mismatch'
@@ -279,31 +251,13 @@ function planHead(plan: Holder): Holder {
   return Object.fromEntries(Object.keys(PlanHeadSchema.shape).map((key) => [key, plan[key]]))
 }
 
-function collect(value: unknown, path: string): unknown[] {
-  let found: unknown[] = [value]
-  for (const segment of path.split('.')) {
-    const many = segment.endsWith('[]')
-    const key = many ? segment.slice(0, -2) : segment
-    found = found.flatMap((item) => {
-      const member = item !== null && typeof item === 'object' ? (item as Holder)[key] : undefined
-      if (member === undefined) return []
-      return many ? (member as unknown[]) : [member]
-    })
-  }
-  return found
-}
-
 /** Who names whom, read once: target id to the ids of the elements naming it. */
-function referencesTo(plan: Holder): Map<string, Set<string>> {
+function referencesTo(plan: Plan): Map<string, Set<string>> {
   const owners = new Map<string, Set<string>>()
-  for (const [ownerPath, path] of PLAN_REFERENCE_PATHS) {
-    for (const owner of collect(plan, ownerPath) as Element[]) {
-      for (const target of collect(owner, path) as string[]) {
-        const named = owners.get(target) ?? new Set<string>()
-        named.add(owner.id)
-        owners.set(target, named)
-      }
-    }
+  for (const reference of listPlanReferences(plan)) {
+    const named = owners.get(reference.to) ?? new Set<string>()
+    named.add(reference.from.id)
+    owners.set(reference.to, named)
   }
   return owners
 }

@@ -1,9 +1,14 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import type { CheckStatus } from '../src/check-result'
+import { loadPlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { validatePlan, type PlanCheckResult } from '../src/plan/validate'
-import { loadCommentsPlan, planAppState as appState } from './plan-fixture'
+import { writeWorkspaceFiles } from './helpers'
+import { loadCommentsPlan, PLAN_APP_TABLES, planAppState as appState } from './plan-fixture'
 
 function plan(): PlanDraft {
   return PlanDraftSchema.parse(loadCommentsPlan())
@@ -403,6 +408,254 @@ describe('validatePlan', () => {
     const results = validatePlan(plan(), appState({ apiOnly: true }))
 
     expectResult(results, 'plan:api-only-view', 'view.posts.show', 'fail')
+  })
+})
+
+describe('app roots', () => {
+  const [POSTS, USERS] = PLAN_APP_TABLES
+
+  /** An element raises more than one warning here, so they are told apart by their text. */
+  function unjudged(results: PlanCheckResult[], text: string): PlanCheckResult | undefined {
+    return results.find(
+      (result) => result.key === 'plan:app-unjudged' && result.elementId === 'model.post' && result.message.includes(text),
+    )
+  }
+
+  test('should not let a model at the project root satisfy one the plan puts in a module', () => {
+    const draft = plan()
+    draft.models[0].module = 'billing'
+
+    const result = expectResult(validatePlan(draft, appState()), 'plan:app-missing', 'model.post', 'fail')
+
+    expect(result.message).toContain('The model class "Post" was not found in modules/billing')
+    expect(result.message).toContain('This application declares one in the project root.')
+  })
+
+  test('should accept a model the application declares in the app root the plan names', () => {
+    const draft = plan()
+    draft.models[0].module = 'billing'
+
+    const results = validatePlan(
+      draft,
+      appState({
+        models: [{ name: 'Post', module: 'billing' }, 'User'],
+        tables: [{ ...POSTS, module: 'billing' }, USERS],
+      }),
+    )
+
+    expect(failures(results).filter((entry) => entry.elementId === 'model.post')).toEqual([])
+  })
+
+  test('should not let a model in a module satisfy one the plan puts at the project root', () => {
+    const draft = plan()
+    draft.models[0].change = { kind: 'existing' }
+
+    const results = validatePlan(draft, appState({ models: [{ name: 'Post', module: 'billing' }, 'User'] }))
+
+    const result = expectResult(results, 'plan:app-missing', 'model.post', 'fail')
+    expect(result.message).toContain('was not found in the project root')
+    expect(result.message).toContain('This application declares one in modules/billing.')
+  })
+
+  test('should not read a same-named model in another app root as a collision', () => {
+    const draft = plan()
+    draft.models[1].module = 'billing'
+
+    const results = validatePlan(draft, appState({ models: ['Post', 'User', 'Comment'] }))
+
+    expect(find(results, 'plan:app-collision', 'model.comment')).toBeUndefined()
+  })
+
+  test('should still refuse an added model whose class the same app root already has', () => {
+    const draft = plan()
+    draft.models[1].module = 'billing'
+
+    const results = validatePlan(draft, appState({ models: ['Post', 'User', { name: 'Comment', module: 'billing' }] }))
+
+    const result = expectResult(results, 'plan:app-collision', 'model.comment', 'fail')
+    expect(result.message).toContain('already exists in modules/billing')
+  })
+
+  test('should judge an action in the app root its controller sits in', () => {
+    const draft = plan()
+    draft.controllers[0].module = 'billing'
+    draft.controllers[0].change = { kind: 'existing' }
+    for (const action of draft.controllers[0].actions) action.change = { kind: 'existing' }
+
+    const results = validatePlan(
+      draft,
+      appState({
+        controllers: ['CommentController'],
+        actions: ['CommentController.store', 'CommentController.destroy'],
+      }),
+    )
+
+    const result = expectResult(results, 'plan:app-missing', 'action.comments.store', 'fail')
+    expect(result.message).toContain('The action "CommentController.store" was not found in modules/billing')
+  })
+
+  test('should read a table in the app root the plan puts its model in', () => {
+    const draft = plan()
+    draft.models[0].module = 'billing'
+
+    const result = unjudged(validatePlan(draft, appState()), 'planned column(s)')
+
+    expect(result?.message).toContain('table "posts" was not found in modules/billing')
+    expect(result?.message).toContain('though this application declares one in the project root')
+  })
+
+  test('should leave a table only another app root declares unjudged rather than missing', () => {
+    const draft = plan()
+    draft.models[0].module = 'billing'
+
+    const results = validatePlan(draft, appState())
+
+    const result = unjudged(results, 'The table')
+    expect(result?.status).toBe('warn')
+    expect(result?.message).toContain('This application declares one in the project root.')
+    expect(result?.message).toContain("re-exported from the project's own db/schema.ts")
+    expect(results.filter((entry) => entry.key === 'plan:app-missing' && entry.message.includes('The table'))).toEqual([])
+  })
+
+  test('should name the plan\'s own app root when two of them declare the table', () => {
+    const draft = plan()
+    draft.models[1].module = 'billing'
+
+    const results = validatePlan(
+      draft,
+      appState({
+        tables: [
+          POSTS,
+          USERS,
+          { identifier: 'comments', tableName: 'comments', columns: ['id'] },
+          { identifier: 'comments', tableName: 'comments', module: 'billing', columns: ['id'] },
+        ],
+      }),
+    )
+
+    const result = expectResult(results, 'plan:app-collision', 'model.comment', 'fail')
+    expect(result.message).toBe('The table "comments" already exists in modules/billing.')
+  })
+
+  test('should read a module\'s table as a collision for a model the plan adds at the project root', () => {
+    const results = validatePlan(
+      plan(),
+      appState({ tables: [POSTS, USERS, { identifier: 'comments', tableName: 'comments', module: 'billing', columns: ['id'] }] }),
+    )
+
+    const result = expectResult(results, 'plan:app-collision', 'model.comment', 'fail')
+    expect(result.message).toContain('already exists in modules/billing')
+    expect(result.message).toContain("re-exported from the project's own db/schema.ts")
+  })
+
+  test('should read another module\'s table as a collision, down to its identifier', () => {
+    const draft = plan()
+    draft.models[1].module = 'billing'
+
+    const results = validatePlan(
+      draft,
+      appState({
+        tables: [POSTS, USERS, { identifier: 'comments', tableName: 'invoicing_comments', module: 'invoicing', columns: ['id'] }],
+      }),
+    )
+
+    const result = expectResult(results, 'plan:app-collision', 'model.comment', 'fail')
+    expect(result.message).toContain('The table "comments" already exists in modules/invoicing')
+    expect(result.message).toContain("re-exported from the project's own db/schema.ts")
+  })
+
+  test('should refuse a table renamed into a name another app root declares', () => {
+    const draft = plan()
+    draft.models[0].tableRenamedFrom = 'articles'
+    draft.models[0].dataMigration = { kind: 'none', reason: 'the table is empty' }
+
+    const results = validatePlan(
+      draft,
+      appState({
+        tables: [
+          { identifier: 'articles', tableName: 'articles', columns: ['id', 'title', 'body'] },
+          USERS,
+          { ...POSTS, module: 'billing' },
+        ],
+      }),
+    )
+
+    const result = expectResult(results, 'plan:app-collision', 'model.post', 'fail')
+    expect(result.message).toContain('The table "posts" already exists in modules/billing')
+  })
+
+  test('should judge a page by its id, since a module\'s pages sit under the project root', () => {
+    const draft = plan()
+    draft.views[0].module = 'billing'
+
+    expect(find(validatePlan(draft, appState()), 'plan:app-missing', 'view.posts.show')).toBeUndefined()
+  })
+})
+
+/**
+ * The scanners and the checks against one application on disk. The cases above build
+ * the state by hand, which says nothing about whether the app root a scanner reports is
+ * the one a plan element names.
+ */
+describe('against an application on disk', () => {
+  let cwd: string
+
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'guren-plan-validate-'))
+    await writeWorkspaceFiles(cwd, {
+      'modules/billing/index.ts': 'export default {}\n',
+      'modules/billing/app/Models/Invoice.ts': `import { defineModel } from '@guren/core'
+import { invoices } from '@/db/schema'
+
+export class Invoice extends defineModel(invoices) {}
+`,
+    })
+  })
+
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true })
+  })
+
+  function invoicePlan(module?: string): PlanDraft {
+    return PlanDraftSchema.parse({
+      planVersion: 1,
+      title: 'Invoices',
+      summary: 'The invoice a module already declares.',
+      locale: 'en',
+      scope: { goals: [], nonGoals: [] },
+      models: [
+        {
+          id: 'model.invoice',
+          change: { kind: 'existing' },
+          name: 'Invoice',
+          table: 'invoices',
+          columns: [],
+          relationships: [],
+          fillable: [],
+          ...(module === undefined ? {} : { module }),
+        },
+      ],
+    })
+  }
+
+  /** The class findings alone: an app with no schema reports the table separately. */
+  function classFindings(results: PlanCheckResult[]): string[] {
+    return results.filter((result) => result.message.includes('The model class')).map((result) => result.message)
+  }
+
+  test('should accept a model the scanners found in the app root the plan names', async () => {
+    const results = validatePlan(invoicePlan('billing'), await loadPlanAppState(cwd))
+
+    expect(classFindings(results)).toEqual([])
+  })
+
+  test('should refuse the same model when the plan puts it at the project root', async () => {
+    const results = validatePlan(invoicePlan(), await loadPlanAppState(cwd))
+
+    expect(classFindings(results)).toEqual([
+      'The model class "Invoice" was not found in the project root, and the plan\'s change is "existing". '
+        + 'This application declares one in modules/billing.',
+    ])
   })
 })
 

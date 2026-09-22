@@ -14,6 +14,12 @@ export class PostController extends Controller {
 }
 `
 
+const MODEL = `import { defineModel } from '@guren/core'
+import { posts } from '@/db/schema'
+
+export class Post extends defineModel(posts) {}
+`
+
 const SCHEMA = `import { pgTable, serial, text } from 'drizzle-orm/pg-core'
 
 export const posts = pgTable('posts', {
@@ -38,9 +44,33 @@ describe('loadPlanAppState', () => {
 
     const state = await loadPlanAppState(cwd)
 
-    expect(state.controllers).toEqual(['PostController'])
+    expect(state.controllers).toEqual([{ name: 'PostController', module: null }])
     // A class-field action dispatches like a method, so both forms must be listed.
-    expect(state.actions).toEqual(['PostController.index', 'PostController.store'])
+    expect(state.actions).toEqual([
+      { name: 'PostController.index', module: null },
+      { name: 'PostController.store', module: null },
+    ])
+  })
+
+  test("should tag each name with the app root its file sits in", async () => {
+    await writeWorkspaceFiles(cwd, {
+      'app/Models/Post.ts': MODEL,
+      'app/Http/Controllers/PostController.ts': CONTROLLER,
+      'modules/billing/index.ts': 'export default {}\n',
+      'modules/billing/app/Models/Invoice.ts': MODEL.replace(/Post/g, 'Invoice').replace(/posts/g, 'invoices'),
+      'modules/billing/app/Http/Controllers/InvoiceController.ts': CONTROLLER.replace(/PostController/, 'InvoiceController'),
+      'modules/billing/app/Policies/InvoicePolicy.ts': 'export class InvoicePolicy {}\n',
+    })
+
+    const state = await loadPlanAppState(cwd)
+
+    expect(state.models).toEqual([
+      { name: 'Invoice', module: 'billing' },
+      { name: 'Post', module: null },
+    ])
+    expect(state.controllers).toContainEqual({ name: 'InvoiceController', module: 'billing' })
+    expect(state.actions).toContainEqual({ name: 'InvoiceController.index', module: 'billing' })
+    expect(state.policies).toEqual([{ name: 'InvoicePolicy', module: 'billing' }])
   })
 
   test('should report controllers and actions as unreadable when a file does not parse', async () => {
@@ -61,7 +91,18 @@ describe('loadPlanAppState', () => {
 
     const state = await loadPlanAppState(cwd)
 
-    expect(state.tables).toEqual([{ identifier: 'posts', tableName: 'posts', columns: ['id', 'title'] }])
+    expect(state.tables).toEqual([{ identifier: 'posts', tableName: 'posts', module: null, columns: ['id', 'title'] }])
+  })
+
+  test("should tag a module's table with the module that declares it", async () => {
+    await writeWorkspaceFiles(cwd, {
+      'modules/billing/index.ts': 'export default {}\n',
+      'modules/billing/db/schema.ts': SCHEMA.replace(/posts/g, 'invoices'),
+    })
+
+    const state = await loadPlanAppState(cwd)
+
+    expect(state.tables).toEqual([{ identifier: 'invoices', tableName: 'invoices', module: 'billing', columns: ['id', 'title'] }])
   })
 
   test('should report tables as unreadable when a present schema yields none', async () => {

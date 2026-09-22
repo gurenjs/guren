@@ -326,6 +326,20 @@ plan and the application's current context (`generateContext()`,
   a model or a resource, a `decision` a validator or a policy, and an `actor`
   names nothing at all.
 
+**Amended in implementation:** a check against the application reads the app root
+the plan element names (`module`, absent meaning the project root), for models,
+controllers, actions, validators, resources and policies: a same-named element in
+another root neither satisfies an `existing` nor collides with an `add`, and the
+finding names the root. A table name is the exception. `make:module` re-exports each
+module's schema from the project's own `db/schema.ts`, which is the file drizzle-kit
+reads, so two roots declaring one name are one SQL table in one migration set: an
+`add` collides with a table in any root. An `existing`, `alter`, `rename` or `drop`
+table is looked for in the plan's own root, and left unjudged, with its columns, when
+only another root declares it. Pages are judged by their id instead, since a module's
+pages sit in the project's own `resources/js/pages` under the module's name. The
+reference paths themselves are one table (`plan/references.ts`), which the checks here,
+the §5 derivation and §4's dangling-name rule all read.
+
 **Existing tests are read as the baseline.** A static scan of the test files
 collects which routes they exercise (`app.get('/posts')`, `app.post(...)` on a
 `TestApp`, matched against the route graph). The result feeds Impact, and one

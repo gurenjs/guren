@@ -6,7 +6,6 @@ import {
   applyRevision,
   createPlanRevision,
   diffPlans,
-  PLAN_REFERENCE_PATHS,
   PLAN_TOP_SECTIONS,
   PlanHeadSchema,
   PlanRevisionOpsSchema,
@@ -17,7 +16,6 @@ import {
 import {
   findDuplicatePlanIds,
   listPlanElements,
-  planDraftJsonSchema,
   PlanColumnSchema,
   PlanSchema,
   type Plan,
@@ -182,46 +180,6 @@ describe('what a revision can reach', () => {
     const reachable = [...Object.keys(PlanHeadSchema.shape), ...PLAN_TOP_SECTIONS, 'planVersion', 'baseline']
 
     expect(reachable.sort()).toEqual(Object.keys(PlanSchema.shape).sort())
-  })
-})
-
-describe('PLAN_REFERENCE_PATHS', () => {
-  test('should name every id-typed field of the plan schema that is not a declaration', () => {
-    const schema = planDraftJsonSchema() as Json
-    const idPattern = (((schema.properties as Json).questions as Json).items as { properties: { id: { pattern: string } } })
-      .properties.id.pattern
-    const found = new Set<string>()
-    const visit = (node: Json, path: string): void => {
-      if (node.pattern === idPattern) found.add(path)
-      for (const [key, value] of Object.entries((node.properties ?? {}) as Record<string, Json>)) {
-        visit(value, path ? `${path}.${key}` : key)
-      }
-      if (node.items) visit(node.items as Json, `${path}[]`)
-      for (const option of [...((node.oneOf ?? []) as Json[]), ...((node.anyOf ?? []) as Json[])]) visit(option, path)
-    }
-    visit(schema, '')
-
-    const declarations = [
-      'questions[].id',
-      'models[].id',
-      'models[].columns[].id',
-      'validators[].id',
-      'controllers[].id',
-      'controllers[].actions[].id',
-      'routes[].id',
-      'views[].id',
-      'resources[].id',
-      'policies[].id',
-      'sideEffects[].id',
-      'flows[].id',
-      'commands[].id',
-      'tasks[].id',
-      'tasks[].acceptance[].id',
-    ]
-    const flowLocal = ['flows[].nodes[].id', 'flows[].edges[].from', 'flows[].edges[].to']
-    const references = PLAN_REFERENCE_PATHS.map(([owner, path]) => `${owner}.${path}`)
-
-    expect([...found].sort()).toEqual([...declarations, ...flowLocal, ...references].sort())
   })
 })
 

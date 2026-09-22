@@ -42,17 +42,10 @@ import { resolveAppEntry } from '../provider-registrar'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../route-registrar'
 import { importsByLocal, specifierBase } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
-import type { PlanAppUnreadable } from './app-state'
+import type { PlanAppScope, PlanAppUnreadable } from './app-state'
 
 /** `mounted`, or why this command could not confirm it. Absence of evidence is never `mounted`. */
 export type PlanAppMount = 'mounted' | { unconfirmed: string }
-
-/**
- * The app root a file sits in: a module name, or `null` for the project root. A plan
- * element names the same thing with its optional `module`, and comparing the two is
- * what keeps a same-named element in another root from satisfying it.
- */
-export type PlanAppScope = string | null
 
 export interface PlanAppRouteDetail {
   name?: string
