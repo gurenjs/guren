@@ -14,11 +14,11 @@ import { join } from 'node:path'
 import { runCheck } from '../check'
 import { formatFinding, gatingResults, type CheckReport } from '../check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, resolveScriptCommand } from '../command-output'
-import { discoverTestFiles, toPosixRelative } from '../discovery'
+import { discoverTestFiles } from '../discovery'
+import { readBracketedTokenFiles } from '../docs-acceptance'
 import { bunExecutable, type CapturedExec, type CapturedRun } from '../subprocess'
 import {
   acceptanceStatus,
-  bracketedTokens,
   planAcceptanceIds,
   type AcceptanceBehaviourStatus,
   type AcceptanceError,
@@ -101,17 +101,8 @@ function currentEnvironment(): PlanFingerprint['environment'] {
 export async function acceptanceTestFiles(root: string, files: readonly string[], ids: readonly string[]): Promise<string[]> {
   const wanted = new Set(ids)
   if (wanted.size === 0) return []
-  const matched: string[] = []
-  for (const file of files) {
-    let source: string
-    try {
-      source = await readFile(file, 'utf8')
-    } catch {
-      continue
-    }
-    if (bracketedTokens(source).some((token) => wanted.has(token))) matched.push(toPosixRelative(root, file))
-  }
-  return matched.sort()
+  const byId = await readBracketedTokenFiles(root, files, (token) => wanted.has(token))
+  return [...new Set([...byId.values()].flat())].sort()
 }
 
 /** A failed command leaves the implementation something to fix whatever else was blocked, so it names the outcome. */
