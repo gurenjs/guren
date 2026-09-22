@@ -106,6 +106,14 @@ export function findPlanStep(derivation: PlanTaskDerivation, stepId: string): { 
   return undefined
 }
 
+/** Child id → parent id: a column's model, an action's controller, the pairs a task places together. */
+export function planElementParents(plan: PlanDraft): Map<string, string> {
+  const parents = new Map<string, string>()
+  for (const model of plan.models) for (const column of model.columns) parents.set(column.id, model.id)
+  for (const controller of plan.controllers) for (const action of controller.actions) parents.set(action.id, controller.id)
+  return parents
+}
+
 export interface DerivePlanTasksOptions {
   /** `PlanAppState.apiOnly`: `make:feature` refuses such an app, so no slice is scaffolded. */
   apiOnly?: boolean

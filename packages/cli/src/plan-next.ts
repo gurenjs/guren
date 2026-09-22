@@ -3,14 +3,13 @@
  * needs and nothing of the rest, and the mark the Stop hook reads to know which step a
  * session is on. It spawns no command: the records under `.guren/plans/` say what is
  * verified, the plan says what the step covers. A plan with a baseline also has the app read
- * (the routes file is imported), so a step on stale context (§4) is skipped and named.
+ * (the routes file is imported), so a step on stale context (§4) is held and named.
  * A dirty tree is refused unless it is the marked step's own work: one step is one commit.
  */
 
 import { basename } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
-import type { CheckStatus } from './check-result'
 import { runGit } from './changed-files'
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
@@ -21,10 +20,10 @@ import { judgeFreshness } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
-import { judgeStepContext, type PlanStepContext, type PlanStepContextElement } from './plan/stale-steps'
+import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
-import { validatePlan } from './plan/validate'
+import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordStillHolds } from './plan/verification'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
@@ -47,17 +46,17 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
   acceptance: PlanAcceptance[]
   /** Where the Stop hook gave up on this step; cleared by this call, so the next run of the loop is asked again. */
   stalled?: PlanStall
-  /** What the step depends on whose freshness could not be judged (§4); it blocks nothing. */
-  unjudged?: PlanStepContextElement[]
+  /** What the step depends on whose freshness is unstamped or unjudged (§4); it holds nothing. */
+  unconfirmed?: PlanStepContextElement[]
 }
 
 export interface PlanNextStaleElement extends PlanStepContextElement {
   /** The §2 checks re-run for the element against the application as it reads now; passes left out. */
-  checks: Array<{ key: string; status: CheckStatus; message: string }>
+  checks: Array<Pick<PlanCheckResult, 'key' | 'status' | 'message'>>
 }
 
-/** A step skipped because what it depends on changed since approval (RFC 0030 §4). */
-export interface PlanNextBlockedStep {
+/** A step held because what it depends on changed since approval (RFC 0030 §4). */
+export interface PlanNextHeldStep {
   id: string
   taskId: string
   stale: PlanNextStaleElement[]
@@ -73,11 +72,11 @@ export interface PlanNextReport {
   verified: string[]
   /** The verified steps whose record fingerprinted nothing: done on their commands, their elements never lifted by `plan:status`. */
   onCommandsAlone: string[]
-  /** `null` when every step is verified, or every one left is blocked or waits on one that is. */
+  /** `null` when every step is verified, or every one left is held or waits on one that is. */
   step: PlanNextStep | null
   /** In task order; always empty for a draft, which has no baseline to be stale against. */
-  blocked: PlanNextBlockedStep[]
-  /** Steps held behind a blocked one they come after in their task or whose task they wait for. */
+  held: PlanNextHeldStep[]
+  /** Steps behind a held one: later in its task, or in a task waiting for it. */
   waiting: Array<{ id: string; on: string[] }>
   /** Relative to the application root, POSIX separators. */
   stateFile: string
@@ -85,7 +84,7 @@ export interface PlanNextReport {
   decisionsFile: string
   /** Set when a decision log exists and would not read, so no waiver was applied to this report. */
   decisionsUnreadable?: string
-  /** Set when the application could not be read for a plan with a baseline, so no step was judged stale. */
+  /** Set when the application could not be read for a plan with a baseline, so no step was held. */
   freshnessUnreadable?: string
 }
 
@@ -129,7 +128,7 @@ function elementsOf(plan: PlanDraft, ids: readonly string[], waivers: ReadonlyMa
 
 /**
  * The steps of a plan with a baseline that depend on a non-fresh element, keyed by step id.
- * A load that throws judges nothing stale: it is not evidence that anything changed.
+ * A load that throws holds nothing: it is not evidence that anything changed.
  */
 async function stepContexts(
   plan: PlanDraft,
@@ -145,8 +144,7 @@ async function stepContexts(
   } catch (error) {
     return { contexts: new Map(), unreadable: error instanceof Error ? error.message : String(error) }
   }
-  const contexts = judgeStepContext(judgeFreshness(plan, app), derivation, { inProgress })
-  return { contexts: new Map(contexts.map((context) => [context.stepId, context])), app }
+  return { contexts: judgeStepContext(plan, judgeFreshness(plan, app), derivation, { inProgress }), app }
 }
 
 export async function planNextFile(planPath: string, options: PlanNextFileOptions): Promise<PlanNextReport> {
@@ -160,23 +158,21 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const previous = state?.active
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
   const log = await readPlanWaivers(path, plan)
-  const inProgress = previous && !previous.stalled ? previous.step : undefined
-  const judged = await stepContexts(plan, derivation, options, inProgress)
-  const checks = judged.app ? validatePlan(plan, judged.app) : []
+  const judged = await stepContexts(plan, derivation, options, stepInProgress(previous))
 
   const verified: string[] = []
   const onCommandsAlone: string[] = []
-  const blocked: PlanNextBlockedStep[] = []
+  const held: PlanNextHeldStep[] = []
   const waiting: PlanNextReport['waiting'] = []
-  // A blocked step holds the rest of its task and every task waiting for it: a step depends on the ones before it.
+  // A held step holds the rest of its task and every task waiting for it: a step depends on the ones before it.
   const heldBy = new Map<string, Set<string>>()
   let next: { task: PlanDerivedTask; step: PlanDerivedStep } | undefined
   for (const entry of listPlanSteps(derivation)) {
     const { task, step } = entry
-    let held = heldBy.get(task.id)
-    if (!held) {
-      held = new Set(task.dependsOn.flatMap((id) => [...(heldBy.get(id) ?? [])]))
-      heldBy.set(task.id, held)
+    let behind = heldBy.get(task.id)
+    if (!behind) {
+      behind = new Set(task.dependsOn.flatMap((id) => [...(heldBy.get(id) ?? [])]))
+      heldBy.set(task.id, behind)
     }
     const record = records[step.id]
     if (record && recordStillHolds(record, digest, hashes, log.waived)) {
@@ -186,20 +182,25 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     }
     const stale = judged.contexts.get(step.id)?.stale ?? []
     if (stale.length > 0) {
-      blocked.push({
+      held.push({
         id: step.id,
         taskId: task.id,
-        stale: stale.map((element) => ({
-          ...element,
-          checks: checks.filter((result) => result.elementId === element.id && result.status !== 'pass').map(({ key, status, message }) => ({ key, status, message })),
-        })),
+        stale: stale.map((element) => ({ ...element, checks: [] })),
         ...(previous?.step === step.id && previous.stalled ? { stalled: previous.stalled } : {}),
       })
-      held.add(step.id)
-    } else if (held.size > 0) {
-      waiting.push({ id: step.id, on: [...held] })
+      behind.add(step.id)
+    } else if (behind.size > 0) {
+      waiting.push({ id: step.id, on: [...behind] })
     } else {
       next ??= entry
+    }
+  }
+
+  // Re-run only when something is held, on the load the holds were judged on.
+  if (held.length > 0 && judged.app) {
+    const checks = validatePlan(plan, judged.app).filter((result) => result.status !== 'pass')
+    for (const element of held.flatMap((step) => step.stale)) {
+      element.checks = checks.filter((result) => result.elementId === element.id).map(({ key, status, message }) => ({ key, status, message }))
     }
   }
 
@@ -208,7 +209,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
     verified,
     onCommandsAlone,
-    blocked,
+    held,
     waiting,
     stateFile: toPosixRelative(root, planStatePath(root, slug)),
     decisionsFile: toPosixRelative(root, planDecisionsPath(path)),
@@ -216,7 +217,8 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     ...(judged.unreadable ? { freshnessUnreadable: judged.unreadable } : {}),
   } satisfies Omit<PlanNextReport, 'step'>
   if (next === undefined) {
-    if (previous) await writePlanActiveStep(root, slug, undefined)
+    // A stall sticks until a plan:next returns its step (§7); only a mark with nothing to report goes.
+    if (previous && !(previous.stalled && held.some((step) => step.id === previous.step))) await writePlanActiveStep(root, slug, undefined)
     return { ...head, step: null }
   }
   const { task, step } = next
@@ -227,13 +229,13 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   await ensurePlanStateIgnored(root)
   const dirty = (await runGit(root, ['status', '--porcelain', '--', '.', `:(exclude,glob)${PLAN_STATE_DIR}/*.state.json`, `:(exclude)${PLAN_STATE_DIR}/.gitignore`])) ?? []
   if (dirty.length > 0 && previous?.step !== step.id) {
-    const markedBlocked = blocked.some((entry) => entry.id === previous?.step)
+    const markedHeld = held.some((entry) => entry.id === previous?.step)
     throw new CliError(
       `The working tree under ${root} has uncommitted changes (paths relative to the repository root), and one step is one commit. Commit or discard them first:\n${dirty
         .slice(0, 10)
         .map((line) => `  ${line}`)
         .join('\n')}${dirty.length > 10 ? `\n  … and ${dirty.length - 10} more` : ''}${
-        markedBlocked ? `\nThe marked step ${previous!.step} is blocked: what it depends on changed since the plan was approved (plan:status names it).` : ''
+        markedHeld ? `\nThe marked step ${previous!.step} is held: what it depends on changed since the plan was approved (plan:status names it).` : ''
       }`,
     )
   }
@@ -248,7 +250,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     continuations: 0,
   }
   await writePlanActiveStep(root, slug, active)
-  const unjudged = judged.contexts.get(step.id)?.unjudged ?? []
+  const unconfirmed = judged.contexts.get(step.id)?.unconfirmed ?? []
 
   return {
     ...head,
@@ -263,7 +265,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       elements: elementsOf(plan, step.elementIds, log.waivers),
       acceptance: plan.tasks.flatMap((intent) => intent.acceptance).filter((behaviour) => behaviours.has(behaviour.id)),
       ...(previous?.step === step.id && previous.stalled ? { stalled: previous.stalled } : {}),
-      ...(unjudged.length > 0 ? { unjudged } : {}),
+      ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
     },
   }
 }
@@ -294,24 +296,24 @@ function describeExpectation(behaviour: PlanAcceptance): string {
   return parts.join('; ')
 }
 
-function blockedLines(report: PlanNextReport, planArgument: string): string[] {
-  if (report.blocked.length === 0) return []
-  const lines = ['', 'Blocked, since what they depend on changed after the plan was approved:']
-  for (const blocked of report.blocked) {
-    lines.push(`  ${blocked.id}`)
-    for (const element of blocked.stale) {
-      lines.push(`    ${element.id} (${element.section}, ${element.change}), ${element.owned ? 'owned by the step' : `named by ${element.through.join(', ')}`}: ${element.reason ?? 'stale'}`)
+function heldLines(report: PlanNextReport, planArgument: string): string[] {
+  if (report.held.length === 0) return []
+  const lines = ['', 'Held, since what they depend on changed after the plan was approved:']
+  for (const held of report.held) {
+    lines.push(`  ${held.id}`)
+    for (const element of held.stale) {
+      lines.push(`    ${element.id} (${element.section}, ${element.change}), ${describeDependency(element)}: ${element.reason ?? 'stale'}`)
       if (element.checks.length === 0) lines.push('      the reference checks pass for it against the application as it reads now')
       for (const check of element.checks) lines.push(`      ${check.status}  ${check.message}`)
     }
-    if (blocked.stalled) lines.push(`    stalled ${blocked.stalled.at}: ${blocked.stalled.reason}`)
+    if (held.stalled) lines.push(`    stalled ${held.stalled.at}: ${held.stalled.reason}`)
   }
   if (report.waiting.length > 0) {
-    lines.push('', 'Waiting on a blocked step:', ...report.waiting.map((entry) => `  ${entry.id} (on ${entry.on.join(', ')})`))
+    lines.push('', 'Waiting on a held step:', ...report.waiting.map((entry) => `  ${entry.id} (on ${entry.on.join(', ')})`))
   }
   lines.push(
     '',
-    'A blocked step is a person\u2019s decision: revise the plan so it states what the application holds now (edit it, or run a revision)',
+    'A held step is a person\u2019s decision: revise the plan so it states what the application holds now (edit it, or run a revision)',
     `  and approve the result with \`bunx guren plan:approve ${planArgument}\`, or undo the change that moved it.`,
   )
   return lines
@@ -321,8 +323,8 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
   const lines = [`${report.plan.title} (${report.plan.file})`, '']
   if (report.verified.length > 0) lines.push(`Verified: ${report.verified.join(', ')}`, '')
   const step = report.step
-  if (step === null && report.blocked.length > 0) {
-    lines.push('No step can be returned: every step left is blocked, or waits on one that is. A person decides how the plan meets the application now.')
+  if (step === null && report.held.length > 0) {
+    lines.push('No step can be returned: every step left is held, or waits on one that is. A person decides how the plan meets the application now.')
   } else if (step === null) {
     lines.push('Every step is verified. Nothing is left to implement.')
     if (report.onCommandsAlone.length > 0) {
@@ -357,14 +359,16 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
         `  bunx guren plan:waive ${planArgument} <element-id> --reason "<why>"`,
       )
     }
-    if (step.unjudged) {
-      lines.push('', 'Depends on elements whose freshness could not be judged, which blocks nothing:')
-      for (const element of step.unjudged) lines.push(`  ${element.verdict}  ${element.id}${element.reason ? `: ${element.reason}` : ''}`)
+    if (step.unconfirmed) {
+      lines.push('', 'Depends on elements whose freshness is not confirmed, which holds nothing:')
+      for (const element of step.unconfirmed) lines.push(`  ${element.verdict}  ${element.id}${element.reason ? `: ${element.reason}` : ''}`)
     }
     lines.push('', `Implement this step only, then run \`bunx guren plan:verify ${planArgument} --step ${step.id}\` and commit once it is verified.`, `Marked in ${report.stateFile}`)
   }
-  lines.push(...blockedLines(report, planArgument))
-  if (report.freshnessUnreadable) lines.push('', `The application could not be read, so no step was judged stale: ${report.freshnessUnreadable}`)
+  lines.push(...heldLines(report, planArgument))
+  if (report.freshnessUnreadable) {
+    lines.push('', `The application could not be read, so no step was held: ${report.freshnessUnreadable}`, 'On a fresh clone, run `bunx guren codegen` first: the routes file imports the generated files.')
+  }
   if (report.decisionsUnreadable) lines.push('', `Decision log not read, so no waiver was applied: ${report.decisionsUnreadable}`)
   return lines.join('\n')
 }

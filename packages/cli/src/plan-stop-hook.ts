@@ -3,9 +3,9 @@
  * and block the stop while it is not, giving up where a continuation cannot help: what the
  * step depends on went stale since approval (§4), the step or an element it owns is `blocked`
  * (the environment's), the record is the one the last continuation was blocked on, or three
- * continuations. A stall is recorded in state and sticks until the next `plan:next`, so a
- * session that gave up is not asked again on every stop. `verify` is the seam the unit tests
- * fake; the shipped hooks run `plan:verify`, whose app read after `codegen` staleness is judged on.
+ * continuations. A stall is recorded in state and sticks until the next `plan:next`.
+ * `verify` is the seam the unit tests fake; the shipped hooks run `plan:verify`, whose report
+ * carries the stale context, judged on the app it reads after `codegen`.
  */
 
 import { resolve } from 'node:path'
@@ -15,8 +15,7 @@ import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
-import { hasBaseline } from './plan/render'
-import { judgeStepContext, type PlanStepContextElement } from './plan/stale-steps'
+import { describeDependency, type PlanStepContextElement } from './plan/step-context'
 import { listPlanStates, planDigest, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
 import { derivePlanTasks, findPlanStep } from './plan/tasks'
 import { hashFiles, readPlanWaivers, recordStillHolds, sha256 } from './plan/verification'
@@ -57,21 +56,21 @@ export function recordSignature(record: PlanStepRecord): string {
 
 /**
  * Pure: whether the stop is blocked, let through as verified, or given up on, and why. `stale`
- * is what the step depends on and does not own that went stale: the plan does not describe
- * the application there, so no continuation can finish the step against it.
+ * is the step's stale context: the plan does not describe the application there, so no
+ * continuation can finish the step against it.
  */
 export function judgeStopHook(
   active: PlanActiveStep,
   record: PlanStepRecord,
   blockedElements: ReadonlyArray<{ id: string; reason?: string }>,
   stopHookActive: boolean,
-  stale: ReadonlyArray<Pick<PlanStepContextElement, 'id' | 'through'>> = [],
+  stale: ReadonlyArray<Pick<PlanStepContextElement, 'id' | 'owned' | 'through' | 'within'>> = [],
 ): StopHookJudgement {
   if (record.outcome === 'verified') return { kind: 'verified' }
   const signature = recordSignature(record)
   const stalled = (reason: string): StopHookJudgement => ({ kind: 'stalled', reason, signature })
   if (stale.length > 0) {
-    return stalled(`what the step depends on changed since the plan was approved (${stale.map((element) => `${element.id}, named by ${element.through.join(', ')}`).join('; ')})`)
+    return stalled(`what the step depends on changed since the plan was approved (${stale.map((element) => `${element.id}, ${describeDependency(element)}`).join('; ')})`)
   }
   if (record.outcome === 'blocked') {
     const reasons = record.commands.filter((command) => command.status === 'blocked').map((command) => `${command.command}: ${command.reason ?? 'blocked'}`)
@@ -128,8 +127,7 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   if (!verification) return withNotice({ block: false, message: `${heading}: the run did not cover the step.` })
   const owned = new Set(step.elementIds)
   const blockedElements = report.elements.filter((element) => owned.has(element.id) && element.state === 'blocked')
-  // The step's own elements are its work in progress; judgeStepContext() leaves them out.
-  const stale = hasBaseline(plan) && report.freshness ? (judgeStepContext(report.freshness, derivation, { inProgress: active.step }).find((context) => context.stepId === active.step)?.stale ?? []) : []
+  const stale = report.staleContext?.find((context) => context.stepId === active.step)?.stale ?? []
   const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive, stale)
   if (judgement.kind === 'verified') return withNotice({ block: false })
 

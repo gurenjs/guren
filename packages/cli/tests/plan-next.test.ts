@@ -10,6 +10,7 @@ import { formatPlanNext, planNextFile, type PlanNextReport } from '../src/plan-n
 import { parsePlanDocument } from '../src/plan-render'
 import { planWaiveFile } from '../src/plan-waive'
 import type { PlanAppState } from '../src/plan/app-state'
+import { MAX_STEP_CONTINUATIONS as MAX_CONTINUATIONS } from '../src/plan-stop-hook'
 import { stampContextHash } from '../src/plan/freshness'
 import { planDigest, PLAN_STATE_VERSION, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
@@ -374,7 +375,7 @@ describe('plan:next on stale context', () => {
 
     const report = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })
 
-    expect(report.blocked.map((step) => [step.id, step.stale.map((element) => [element.id, element.owned, element.through])])).toEqual([
+    expect(report.held.map((step) => [step.id, step.stale.map((element) => [element.id, element.owned, element.through])])).toEqual([
       [`${COMMENT}/data`, [['model.post', true, ['model.comment', 'column.comment.postId']]]],
       [`${COMMENT}/http`, [['model.post', false, ['route.comments.store']]]],
     ])
@@ -385,11 +386,11 @@ describe('plan:next on stale context', () => {
 
     // The same plan against the application it was approved against blocks nothing.
     const fresh = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
-    expect(fresh.blocked).toEqual([])
+    expect(fresh.held).toEqual([])
     expect(fresh.step!.id).toBe(`${COMMENT}/data`)
   })
 
-  test('should hold every step of a task waiting for a blocked one, and return a verified step to neither list', async () => {
+  test('should hold every step of a task waiting for a held one, and return a verified step to neither list', async () => {
     const document = loadCommentsPlan() as Record<string, Array<Record<string, unknown>>>
     // A reaction references a comment, so its slice waits for the comments task.
     document.models!.push({
@@ -410,14 +411,14 @@ describe('plan:next on stale context', () => {
 
     const report = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })
 
-    expect(report.blocked.map((step) => step.id)).toEqual([DATA, HTTP])
+    expect(report.held.map((step) => step.id)).toEqual([DATA, HTTP])
     expect(report.waiting).toEqual([
       { id: `${COMMENT}/pages`, on: [DATA, HTTP] },
       { id: `${reaction}/scaffold`, on: [DATA, HTTP] },
       { id: `${reaction}/data`, on: [DATA, HTTP] },
     ])
     expect(report.step).toBeNull()
-    const skipped = new Set([...report.blocked.map((step) => step.id), ...report.waiting.map((step) => step.id)])
+    const skipped = new Set([...report.held.map((step) => step.id), ...report.waiting.map((step) => step.id)])
     expect(report.verified.filter((id) => skipped.has(id))).toEqual([])
   })
 
@@ -426,15 +427,16 @@ describe('plan:next on stale context', () => {
 
     const report = await planNextFile(plan, { appRoot: app, app: planAppState({ actions: ['PostController.show'] }), now: NOW })
 
-    expect(report.blocked).toHaveLength(1)
-    const [blocked] = report.blocked
-    expect(blocked!.id).toBe(POST_HTTP)
-    expect(blocked!.stale).toEqual([
+    expect(report.held).toHaveLength(1)
+    const [held] = report.held
+    expect(held!.id).toBe(POST_HTTP)
+    expect(held!.stale).toEqual([
       expect.objectContaining({
         id: 'action.posts.index',
         change: 'existing',
         owned: false,
         through: ['route.posts.index'],
+        within: [],
         checks: [expect.objectContaining({ key: 'plan:app-missing', status: 'fail' })],
       }),
     ])
@@ -442,7 +444,7 @@ describe('plan:next on stale context', () => {
     expect(report.step!.id).toBe(`${COMMENT}/scaffold`)
 
     const text = formatPlanNext(report, 'comments.plan.json')
-    expect(text).toContain(`Blocked, since what they depend on changed after the plan was approved:\n  ${POST_HTTP}\n    action.posts.index (actions, existing), named by route.posts.index: `)
+    expect(text).toContain(`Held, since what they depend on changed after the plan was approved:\n  ${POST_HTTP}\n    action.posts.index (actions, existing), named by route.posts.index: `)
     expect(text).toContain('      fail  The action "PostController.index" was not found in the project root')
     expect(text).toContain('revise the plan so it states what the application holds now')
   })
@@ -454,16 +456,16 @@ describe('plan:next on stale context', () => {
 
     // model.post has no stamp: a change to it is not evidence of anything.
     const unstamped = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })
-    expect(unstamped.blocked).toEqual([])
+    expect(unstamped.held).toEqual([])
     expect(unstamped.step!.id).toBe(SCAFFOLD)
 
     const unjudged = await planNextFile(plan, { appRoot: app, app: planAppState({ tables: { unreadable: 'schema threw' } }), now: NOW })
-    expect(unjudged.blocked).toEqual([])
+    expect(unjudged.held).toEqual([])
 
     const threw = await planNextFile(plan, { appRoot: app, app: () => Promise.reject(new Error('routes file threw')), now: NOW })
-    expect(threw.blocked).toEqual([])
+    expect(threw.held).toEqual([])
     expect(threw.freshnessUnreadable).toBe('routes file threw')
-    expect(formatPlanNext(threw, 'comments.plan.json')).toContain('The application could not be read, so no step was judged stale: routes file threw')
+    expect(formatPlanNext(threw, 'comments.plan.json')).toContain('The application could not be read, so no step was held: routes file threw\nOn a fresh clone, run `bunx guren codegen` first')
   })
 
   test('should report what the returned step depends on whose freshness is not judged, blocking nothing', async () => {
@@ -473,39 +475,72 @@ describe('plan:next on stale context', () => {
 
     expect(report.step!.id).toBe(HTTP)
     // Validators are never read, so the one the step owns is always unjudged.
-    expect(report.step!.unjudged).toEqual([expect.objectContaining({ id: 'validator.comment', verdict: 'unjudged', owned: true })])
-    expect(formatPlanNext(report, 'comments.plan.json')).toContain('Depends on elements whose freshness could not be judged, which blocks nothing:\n  unjudged  validator.comment: ')
+    expect(report.step!.unconfirmed).toEqual([expect.objectContaining({ id: 'validator.comment', verdict: 'unjudged', owned: true })])
+    expect(formatPlanNext(report, 'comments.plan.json')).toContain('Depends on elements whose freshness is not confirmed, which holds nothing:\n  unjudged  validator.comment: ')
   })
 
-  test('should not block the marked step on what it owns, which is its own work in progress', async () => {
+  test('should not hold the marked step on what it owns, which is its own work in progress', async () => {
     const { app, plan } = await approvedApp('in-progress', loadCommentsPlan(), [SCAFFOLD, TESTS])
     // The class written before its table: neither the stamp nor what the plan leaves.
     const half: PlanAppStateInput = { models: ['Comment', 'Post', 'User'] }
 
     const unmarked = await planNextFile(plan, { appRoot: app, app: planAppState(half), now: NOW })
-    expect(unmarked.blocked.map((step) => step.id)).toEqual([DATA, HTTP])
+    expect(unmarked.held.map((step) => step.id)).toEqual([DATA, HTTP])
 
     await writeState(app, { ...(await readState(app)), active: { plan: 'comments.plan.json', step: DATA, startedAt: '2026-09-21T09:00:00.000Z', continuations: 1 } })
     const marked = await planNextFile(plan, { appRoot: app, app: planAppState(half), now: NOW })
-    expect(marked.blocked).toEqual([])
+    expect(marked.held).toEqual([])
     expect(marked.step!.id).toBe(DATA)
     expect((await readState(app)).active!.continuations).toBe(1)
   })
 
-  test('should return no step and clear the mark when every step left is blocked or waits on one, reporting the stall of the marked one', async () => {
-    const { app, plan } = await approvedApp('all-blocked', loadCommentsPlan(), [SCAFFOLD, TESTS])
+  test('should return a stalled step again on its own half-built work, with the stall reported', async () => {
+    const { app, plan } = await approvedApp('stalled-half', loadCommentsPlan(), [SCAFFOLD, TESTS])
+    const stall = { at: '2026-09-21T09:30:00.000Z', reason: `${MAX_CONTINUATIONS} continuations on this step`, output: 'x' }
+    await writeState(app, { ...(await readState(app)), active: { plan: 'comments.plan.json', step: DATA, startedAt: '2026-09-21T09:00:00.000Z', continuations: 3, stalled: stall } })
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState({ models: ['Comment', 'Post', 'User'] }), now: NOW })
+
+    expect(report.held).toEqual([])
+    expect(report.step).toMatchObject({ id: DATA, stalled: stall })
+    expect((await readState(app)).active).toMatchObject({ step: DATA, continuations: 0 })
+    expect((await readState(app)).active!.stalled).toBeUndefined()
+  })
+
+  test('should hold the step owning an action whose controller went stale, through the containment link', async () => {
+    const document = loadCommentsPlan() as Record<string, Array<Record<string, unknown>>>
+    document.controllers!.push({
+      id: 'controller.posts',
+      change: { kind: 'existing' },
+      className: 'PostController',
+      actions: [{ id: 'action.posts.feed', change: { kind: 'add' }, name: 'feed', authorization: { middleware: [] }, response: { kind: 'json', description: 'the feed' }, rules: [] }],
+    })
+    const { app, plan } = await approvedApp('containment', document)
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState({ controllers: ['ArticleController'], actions: ['ArticleController.index', 'ArticleController.show'] }), now: NOW })
+
+    const owner = report.held.find((step) => step.stale.some((element) => element.id === 'controller.posts'))
+    expect(owner).toBeDefined()
+    expect(owner!.stale.find((element) => element.id === 'controller.posts')).toMatchObject({ owned: false, through: [], within: ['action.posts.feed'] })
+    expect(formatPlanNext(report, 'comments.plan.json')).toContain('controller.posts (controllers, existing), holding action.posts.feed: ')
+  })
+
+  test('should return no step when every step left is held or waits on one, keeping the stall of the marked one', async () => {
+    const { app, plan } = await approvedApp('all-held', loadCommentsPlan(), [SCAFFOLD, TESTS])
     const stall = { at: '2026-09-21T09:30:00.000Z', reason: 'what the step depends on changed since the plan was approved', output: 'x' }
     await writeState(app, { ...(await readState(app)), active: { plan: 'comments.plan.json', step: HTTP, startedAt: '2026-09-21T09:00:00.000Z', continuations: 1, stalled: stall } })
 
     const report = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })
 
     expect(report.step).toBeNull()
-    expect(report.blocked.map((step) => step.id)).toEqual([DATA, HTTP])
-    expect(report.blocked[1]!.stalled).toEqual(stall)
+    expect(report.held.map((step) => step.id)).toEqual([DATA, HTTP])
+    expect(report.held[1]!.stalled).toEqual(stall)
     expect(report.waiting.map((step) => step.id)).toEqual([`${COMMENT}/pages`])
-    expect((await readState(app)).active).toBeUndefined()
+    // The stall sticks until a plan:next returns its step, so the next run reports it again.
+    expect((await readState(app)).active).toMatchObject({ step: HTTP, stalled: stall })
+    expect((await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })).held[1]!.stalled).toEqual(stall)
     const text = formatPlanNext(report, 'comments.plan.json')
-    expect(text).toContain('No step can be returned: every step left is blocked, or waits on one that is.')
+    expect(text).toContain('No step can be returned: every step left is held, or waits on one that is.')
     expect(text).not.toContain('Every step is verified')
     expect(text).toContain(`    stalled ${stall.at}: ${stall.reason}`)
   })
@@ -515,7 +550,7 @@ describe('plan:next on stale context', () => {
     let read = 0
     const report = await planNextFile(plan, { appRoot: app, app: () => (read++, Promise.resolve(planAppState(POST_MOVED) as PlanAppState)), now: NOW })
     expect(read).toBe(0)
-    expect(report.blocked).toEqual([])
+    expect(report.held).toEqual([])
     expect(report.step!.id).toBe(SCAFFOLD)
   })
 
@@ -554,8 +589,8 @@ describe('plan:next on stale context', () => {
       await runCommand(builtinSubCommands['plan:next'] as CommandDef, { rawArgs: [plan, '--app', app, '--json'] })
       const report = JSON.parse(String(log.mock.calls[0]![0])) as PlanNextReport
 
-      expect(report.blocked.map((step) => step.id)).toEqual([DATA, HTTP])
-      expect(report.blocked[0]!.stale[0]).toMatchObject({ id: 'model.post', owned: true, checks: [expect.objectContaining({ key: 'plan:app-missing' })] })
+      expect(report.held.map((step) => step.id)).toEqual([DATA, HTTP])
+      expect(report.held[0]!.stale[0]).toMatchObject({ id: 'model.post', owned: true, checks: [expect.objectContaining({ key: 'plan:app-missing' })] })
       expect(report.step!.id).toBe(SCAFFOLD)
       expect(process.exitCode ?? 0).toBe(0)
     })

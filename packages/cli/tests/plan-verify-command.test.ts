@@ -125,10 +125,16 @@ describe('plan:verify', () => {
     expect(result.steps[0]!.record.outcome).toBe('incomplete')
     expect(result.freshness!.elements.find((element) => element.id === 'model.post')!.verdict).toBe('stale')
     expect(result.staleContext).toEqual([
-      { stepId: HTTP, taskId: 'task/entity/model.comment', stale: [expect.objectContaining({ id: 'model.post', owned: false, through: ['route.comments.store'] })], unjudged: expect.any(Array) },
+      {
+        stepId: HTTP,
+        taskId: 'task/entity/model.comment',
+        stale: [expect.objectContaining({ id: 'model.post', owned: false, through: ['route.comments.store'], within: [] })],
+        // Validators are never read, so the one the step owns is unconfirmed and holds nothing.
+        unconfirmed: [expect.objectContaining({ id: 'validator.comment', verdict: 'unjudged', owned: true })],
+      },
     ])
     const text = formatPlanVerify(result)
-    expect(text).toContain(`${HTTP}: depends on what changed since the plan was approved: model.post (named by route.comments.store); plan:next skips it until the plan is revised and approved`)
+    expect(text).toContain(`${HTTP}: depends on what changed since the plan was approved: model.post (named by route.comments.store); plan:next holds it until the plan is revised and approved`)
     expect(text).toContain('Against the approved baseline: fresh ')
   })
 

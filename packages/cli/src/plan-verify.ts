@@ -13,12 +13,12 @@ import { readScripts } from './command-output'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
-import { judgeFreshness } from './plan/freshness'
+import { judgeFreshness, type PlanFreshness } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
-import { judgeStepContext, type PlanStepContext } from './plan/stale-steps'
+import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext } from './plan/step-context'
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
-import { judgePlan } from './plan/status'
+import { judgePlan, type PlanStatus } from './plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
 import { hashFiles, overlayVerification, readPlanWaivers, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
 import { PlanVerifier, type PlanStepVerification } from './plan/verify'
@@ -89,11 +89,14 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     throw new CliError(`No step "${options.step}" is derived from this plan. The steps are:\n${planStepIds(derivation).map((id) => `  ${id}`).join('\n')}`)
   }
 
-  let loaded: PlanAppState | undefined
+  // One app load answers both: the status after codegen, and freshness for a plan with a baseline.
+  let judged: Promise<{ status: PlanStatus; freshness?: PlanFreshness }> | undefined
+  const judge = () =>
+    (judged ??= loadApp().then((loadedApp) => ({ status: judgePlan(plan, loadedApp), ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, loadedApp) } : {}) })))
   const verifier = new PlanVerifier(plan, derivation, {
     root,
     planDigest: digest,
-    status: async () => judgePlan(plan, (loaded = await loadApp())),
+    status: async () => (await judge()).status,
     exec: runCaptured,
     timeoutMs: options.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
     scripts: await readScripts(root),
@@ -107,9 +110,12 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   }
 
   const overlaid = await overlayVerification(root, path, plan, await verifier.status(), derivation, { replacedUnreadable: before.unreadable, waivers: log })
-  const freshness = hasBaseline(plan) && loaded ? judgeFreshness(plan, loaded) : undefined
-  const ran = new Set(stepIds)
-  const staleContext = freshness ? judgeStepContext(freshness, derivation).filter((context) => ran.has(context.stepId) && context.stale.length > 0) : []
+  const { freshness } = await judge()
+  const contexts = freshness ? judgeStepContext(plan, freshness, derivation, { inProgress: stepInProgress(before.state?.active) }) : new Map<string, PlanStepContext>()
+  const staleContext = stepIds.flatMap((id) => {
+    const context = contexts.get(id)
+    return context && context.stale.length > 0 ? [context] : []
+  })
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
@@ -143,8 +149,8 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
     lines.push(...formatPlanStepRecord(stepId, record), '')
   }
   for (const context of report.staleContext ?? []) {
-    const named = context.stale.map((element) => (element.owned ? element.id : `${element.id} (named by ${element.through.join(', ')})`))
-    lines.push(`${context.stepId}: depends on what changed since the plan was approved: ${named.join(', ')}; plan:next skips it until the plan is revised and approved`, '')
+    const named = context.stale.map((element) => `${element.id} (${describeDependency(element)})`)
+    lines.push(`${context.stepId}: depends on what changed since the plan was approved: ${named.join(', ')}; plan:next holds it until the plan is revised and approved`, '')
   }
   for (const stepId of report.skipped) lines.push(`${stepId}: verified before, and nothing it fingerprinted has changed`)
   if (report.skipped.length > 0) lines.push('')

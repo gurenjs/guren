@@ -637,21 +637,26 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
   between.
 - `plan:status` reports the verdicts for a plan with a baseline, with the
   elements naming each non-fresh one through the reference table.
-- A step depends on a stale element when it owns it or when one of its own
-  elements or behaviours names it (`plan/stale-steps.ts`). An `existing`
-  element has no owner and blocks only the steps naming it. The rule is one
-  hop through the reference table and never its closure: relationships and
-  `covers` connect a model to most of the plan, so a closure would block every
-  step on one change. What names a stale element without being any step's
-  work (an intent's `covers`, a question, a flow) blocks nothing. Only `stale`
-  blocks. `unstamped` and `unjudged` are not evidence of change, so they block
-  nothing and are reported, and nothing unreadable lifts a block either.
-- The elements the marked step owns block no step while it is marked and not
-  stalled: they are its work in progress, and half of it reads as stale (a
-  model's class written before its table). An external change to one of them
-  still reaches that step through its own verification, which compares the
-  element with the plan.
-- Unblocking is a person's: a stale element turns fresh again once the
+- A step depends on a stale element when it owns it, when one of its own
+  elements or behaviours names it, or when it owns a column of that model or
+  an action of that controller (`plan/step-context.ts`; the parent is
+  `planElementParents()`, the pairing §5 places together). An `existing`
+  element has no owner and holds only the steps naming it or owning its
+  children. The rule is one hop through the reference table and never its
+  closure: relationships and `covers` connect a model to most of the plan, so
+  a closure would hold every step on one change. What names a stale element
+  without being any step's work (an intent's `covers`, a question, a flow)
+  holds nothing. Only `stale` holds a step. `unstamped` and `unjudged` are not
+  evidence of change, so they hold nothing and are reported as unconfirmed,
+  and nothing unreadable releases a hold either. The commands call such a
+  step `held`, since `blocked` is the environment's word (§6).
+- The elements the marked step owns hold no step while it is marked, stalled
+  or not (`stepInProgress()`): they are its work in progress, and half of it
+  reads as stale (a model's class written before its table). A stalled step is
+  still the one being built, and `plan:next` returns it again with the stall.
+  An external change to one of those elements still reaches that step through
+  its own verification, which compares the element with the plan.
+- Releasing a hold is a person's: a stale element turns fresh again once the
   application is back at its stamp or at what the plan leaves, so the answer
   is a plan revised to state what the application holds now and approved, or
   undoing the change. A carried-over baseline is never restamped (above).
@@ -1194,24 +1199,28 @@ shipped with these readings:
   `generateEntityContext()` is not in it yet.
 - For a plan with a baseline `plan:next` reads the application without
   `detail` (the scanners, and an import of the routes file) and spawns no
-  command; a draft is never read. It skips a step that depends on a stale
+  command; a draft is never read. It holds a step that depends on a stale
   element (§4), and the steps after it in its task or in a task waiting for
-  it, and returns the first step that is neither. Each blocked step is
-  reported with its stale elements, what names them, the §2 checks re-run for
-  them against the application as it reads now, and a stall the hook recorded
-  on it. When every step left is blocked or waiting no step is returned, the
-  mark is cleared so the hook holds nothing, and the command still exits 0:
-  the hook reads the mark, never this exit code, and a blocked plan is a
-  person's decision rather than a failed command. An application that cannot
-  be read is reported and blocks nothing.
+  it, and returns the first step that is neither. Each held step is reported
+  with its stale elements, how the step depends on them, the §2 checks re-run
+  for them against the application as it reads now (only when something is
+  held), and a stall the hook recorded on it. When every step left is held or
+  waiting no step is returned and the command still exits 0: the hook reads
+  the mark, never this exit code, and a held plan is a person's decision
+  rather than a failed command. The mark is cleared so the hook holds
+  nothing, unless it carries a stall on a held step: that stall sticks, and
+  the next run reports it again. An application that cannot be read is
+  reported, with a hint to run `codegen` on a fresh clone, and holds nothing.
 - The hook judges staleness on the application `plan:verify` reads after its
   `codegen`, not before it: importing the routes file first would leave Bun
   holding a failed import of a generated file for the rest of the process.
-  A step that is not verified and names something stale that it does not own
-  stalls with that reason, before the other give-up rules, since no
-  continuation can finish it against the plan; a verified step goes through.
+  It reads the step's stale context from that report. A step that is not
+  verified and has stale context stalls with that reason, before the other
+  give-up rules, since no continuation can finish it against the plan; a
+  verified step goes through.
 - `plan:verify` reports the baseline's freshness and the stale context of the
-  steps it ran without changing their outcome: `blocked` is the environment's
+  steps it ran, judged with the marked step in progress, without changing
+  their outcome: `blocked` is the environment's
   and `failed` the implementation's, and staleness is neither.
 - The hook knows which step a session is on from a mark in the state file,
   `active: { plan, step, startedAt, continuations, lastSignature?, stalled? }`,
