@@ -80,6 +80,28 @@ describe('scanColumnConsumers in controllers', () => {
     expect(result.reads[1]).toMatchObject({ kind: 'controller', file: 'app/Http/Controllers/PostController.ts', line: 7 })
   })
 
+  test('should find a read in an action written as a class field, and in a private helper', async () => {
+    const result = await scan({
+      controllers: controller(`  store = async () => {
+    const post = await Post.findOrFail(1)
+    return this.text(post.title + this.#summary())
+  }
+  #summary(): string {
+    return ''
+  }
+  show = async () => this.text((await Post.findOrFail(2)).body)
+  async edit() {
+    return this.text(await this.#load())
+  }
+  async #load() {
+    const post = await Post.findOrFail(3)
+    return post.excerpt
+  }`),
+    })
+
+    expect(reads(result)).toEqual(['PostController.store:title', 'PostController.show:body', 'PostController:excerpt'])
+  })
+
   test('should count neither a comment nor a string nor template text that spells the read', async () => {
     const result = await scan({
       controllers: controller(`  async show() {

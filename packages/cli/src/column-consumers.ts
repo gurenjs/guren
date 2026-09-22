@@ -8,9 +8,10 @@
  */
 
 import { resolve } from 'node:path'
-import type { Statement } from '@babel/types'
+import type { ClassDeclaration, Statement } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion, type BabelNode } from './ast-walk'
+import { classActionMembers } from './controller-methods'
 import { inAppRoot, toPosixRelative } from './discovery'
 import { firstClassDeclaration } from './model-parser'
 import type { ParseCache } from './parse-cache'
@@ -159,7 +160,10 @@ const LIST_WRAPPERS = new Set(['Array', 'ReadonlyArray'])
 /** Guren's paginated page props: `data` holds the argument's records. */
 const PAGINATED_PROPS = 'PaginatedPageProps'
 
-const FUNCTION_TYPES = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ClassMethod', 'ClassPrivateMethod', 'ObjectMethod'])
+/** Any function-like node, methods included, by shape: parameters and a body. */
+function isFunctionLike(node: BabelNode): boolean {
+  return Array.isArray(node.params) && node.body !== null && typeof node.body === 'object'
+}
 const TRANSPARENT_TS = new Set(['TSAsExpression', 'TSSatisfiesExpression', 'TSNonNullExpression', 'TSTypeAssertion', 'TSParameterProperty'])
 
 function keyOf(node: BabelNode): string | undefined {
@@ -515,7 +519,7 @@ class RecordWalker {
 
   /** The keys of an object literal naming columns; anything else there names them opaquely. */
   private columnKeys(tie: Tie, argument: BabelNode | undefined, write: boolean): void {
-    if (!argument || FUNCTION_TYPES.has(argument.type)) return
+    if (!argument || isFunctionLike(argument)) return
     if (argument.type === 'StringLiteral') this.read(tie, argument.value as string, argument, write)
     else if (argument.type !== 'ObjectExpression') this.opaqueRead(tie, argument, write)
     else {
@@ -557,7 +561,7 @@ class RecordWalker {
     if ((type.startsWith('TS') && !TRANSPARENT_TS.has(type)) || type === 'ImportDeclaration') return
 
     if (type === 'ClassDeclaration' || type === 'ClassExpression') return this.klass(node, scope)
-    if (FUNCTION_TYPES.has(type)) return this.fn(node, scope)
+    if (isFunctionLike(node)) return this.fn(node, scope)
     if (type === 'BlockStatement') return this.statements(node.body as BabelNode[], new Map(scope))
     if (type === 'VariableDeclarator') {
       this.visit(node.init as BabelNode, scope)
@@ -596,7 +600,7 @@ class RecordWalker {
       const list = method !== undefined && ELEMENT_CALLBACKS.has(method) ? this.bindingOf(callee.object as BabelNode, scope)?.tie : undefined
       const element = list?.many ? { ...list, many: false } : undefined
       for (const argument of node.arguments as BabelNode[]) {
-        if (element && FUNCTION_TYPES.has(argument.type)) this.fn(argument, scope, element)
+        if (element && isFunctionLike(argument)) this.fn(argument, scope, element)
         else this.visit(argument, scope)
       }
       return
@@ -628,13 +632,17 @@ class RecordWalker {
     const previous = { where: this.where, resourceTie: this.resourceTie }
     // A resource tied to two models reads each of them, so its body is walked once per model.
     const passes: Array<Tie | undefined> = models.length > 0 ? models.map((model) => ({ model, many: false })) : [undefined]
+    // Actions come from `classActionMembers()`, which also yields `store = async () => {}`; the other
+    // members (a `#private()` helper, a static initializer) are walked too, attributed to the class.
+    const actions = [...classActionMembers(node as unknown as ClassDeclaration)]
+    const named = new Map<unknown, string>(actions.map((action) => [action.member, action.name]))
     for (const pass of passes) {
       this.resourceTie = pass
       for (const member of (node.body as { body: BabelNode[] }).body) {
-        const name = keyOf(member) ?? '?'
-        if (this.context.kind === 'controller') this.where = `${className}.${name}`
+        const name = named.get(member)
+        if (this.context.kind === 'controller') this.where = name === undefined ? className : `${className}.${name}`
         else if (this.context.kind === 'resource') this.where = className
-        this.visit(member.type === 'ClassProperty' ? (member.value as BabelNode | null) : member, scope)
+        this.visit(member, scope)
       }
     }
     this.where = previous.where
