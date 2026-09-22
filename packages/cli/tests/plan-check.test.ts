@@ -200,6 +200,23 @@ describe('guren check --plan', () => {
       expect(await checkPlans({ cwd: dir })).toEqual([])
     })
 
+    test('should judge a draft beside an empty approvals file by neither rule', async () => {
+      const dir = await createApp('draft-empty-approvals')
+      await writeFile(planApprovalsPath(join(dir, 'comments.plan.json')), JSON.stringify({ approvalsVersion: 1, approvals: [] }), 'utf8')
+
+      expect(await checkPlans({ cwd: dir })).toEqual([])
+    })
+
+    test('should report a draft beside an approvals file that will not read', async () => {
+      const dir = await createApp('draft-unreadable-approvals')
+      await writeFile(planApprovalsPath(join(dir, 'comments.plan.json')), '{"approvalsVersion": 2}', 'utf8')
+
+      const results = await checkPlans({ cwd: dir })
+
+      expect(results.map((result) => result.key)).toEqual(['plan:unreadable:comments.plan.json'])
+      expect(results[0].message).toContain('comments.approvals.json does not match the approvals schema')
+    })
+
     test('should report a draft with approvals beside it as a plan that lost its baseline, and judge it by neither rule', async () => {
       const dir = await createDriftedApp('baseline-removed')
       await writeFile(join(dir, 'comments.plan.json'), JSON.stringify(loadCommentsPlan()), 'utf8')
@@ -209,6 +226,7 @@ describe('guren check --plan', () => {
       expect(results.map((result) => result.key)).toEqual(['plan:baseline-removed:comments.plan.json'])
       expect(results[0]).toMatchObject({ status: 'warn', advisory: true, filePath: 'comments.plan.json' })
       expect(results[0].message).toContain('comments.plan.json has lost its baseline, but 1 approval(s) are recorded beside it, so it is not checked')
+      expect(results[0].suggestion).toBe('Restore the baseline, or run guren plan:approve comments.plan.json to approve the draft again.')
     })
 
     test('should judge a plan changed since its approval by neither rule', async () => {

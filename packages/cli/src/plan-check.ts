@@ -270,6 +270,7 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
         title: 'Approved plan lost its baseline',
         status: 'warn',
         message: relative(classified.reason),
+        suggestion: `Restore the baseline, or run guren plan:approve ${file} to approve the draft again.`,
         filePath: file,
         advisory: true,
       })

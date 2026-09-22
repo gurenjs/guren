@@ -1651,7 +1651,8 @@ these readings (`packages/cli/src/plan-check.ts`).
   and a plan edited since its approval, are judged by neither rule, since
   nobody has agreed to them yet. A draft with approvals beside it
   (`baseline-removed`) is reported, because deleting a baseline would otherwise
-  take an approved plan out of every rule unnoticed. Nothing is reported when
+  take an approved plan out of every rule unnoticed. So is any plan, a draft
+  included, beside an approvals file that will not read. Nothing is reported when
   no plan has a finding; the counts are `plan:status`'s.
 - `drifted` is whatever `planStatusFile()` reports, verification overlay
   included, the function `plan:status` prints. The application is loaded once,
