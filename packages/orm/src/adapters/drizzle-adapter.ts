@@ -201,16 +201,16 @@ function queueQuery<TQuery>(query: TQuery, queryOptions: AdapterQueryOptions | u
   if (!query || typeof query !== 'object') return query
   const target = query as Record<string, unknown>
   const { execute, prepare } = target
-  if (typeof execute === 'function') {
+  if (isCallable(execute)) {
     // async: drizzle's lazy result becomes a Promise, and a synchronous throw a rejection.
     define(target, 'execute', (...args: unknown[]) => withExecutor(queryOptions, async () => execute.apply(target, args)))
   }
-  if (typeof prepare === 'function') {
+  if (isCallable(prepare)) {
     define(target, 'prepare', (...args: unknown[]) => queueQuery(prepare.apply(target, args), queryOptions))
   }
   for (const method of SYNC_EXECUTIONS) {
     const run = target[method]
-    if (typeof run !== 'function') continue
+    if (!isCallable(run)) continue
     define(target, method, (...args: unknown[]) => {
       if (foreignTransactionOpen()) {
         throw new Error(
@@ -221,6 +221,11 @@ function queueQuery<TQuery>(query: TQuery, queryOptions: AdapterQueryOptions | u
     })
   }
   return query
+}
+
+// `typeof === 'function'` narrows to `Function`, whose apply() returns `any`.
+function isCallable(value: unknown): value is (...args: unknown[]) => unknown {
+  return typeof value === 'function'
 }
 
 function define(target: object, key: string, value: unknown): void {

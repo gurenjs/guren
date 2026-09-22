@@ -211,6 +211,10 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
 
   describe('toDrizzle() from another async context', () => {
     type Prepared = { execute(values?: Record<string, unknown>): PromiseLike<unknown[]>; all(): unknown[] }
+    type Executable = { all(): unknown[]; prepare(): Prepared }
+
+    // DrizzleSelectQuery leaves out what bun:sqlite's select also carries.
+    const executable = (query: PromiseLike<unknown[]>) => query as unknown as Executable
 
     // Resolves once the held transaction's first write has run, so BEGIN is on the
     // connection. `finish()` gives a queued query a turn to jump the queue, then settles it.
@@ -255,7 +259,7 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
 
     it('should throw on a synchronous execution, which cannot wait', async () => {
       const held = await holdTransaction('rollback')
-      const query = Post.newQuery().toDrizzle() as unknown as { all(): unknown[] }
+      const query = executable(Post.newQuery().toDrizzle())
       expect(() => query.all()).toThrow('cannot wait for the transaction')
       await held.finish()
 
@@ -264,7 +268,7 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
 
     it('should wait for the open transaction when a prepared statement is executed', async () => {
       const held = await holdTransaction('rollback')
-      const prepared = (Post.newQuery().toDrizzle().where(eq(postsTable.id, sql.placeholder('id'))) as unknown as { prepare(): Prepared }).prepare()
+      const prepared = executable(Post.newQuery().toDrizzle().where(eq(postsTable.id, sql.placeholder('id')))).prepare()
       expect(() => prepared.all()).toThrow('cannot wait for the transaction')
       const read = prepared.execute({ id: 2 })
       await held.finish()
@@ -278,7 +282,7 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
         Post.transaction(async (_trx, txPost) => {
           await txPost.create({ title: 'inside' })
           expect(await Post.newQuery().toDrizzle()).toHaveLength(2)
-          expect((Post.newQuery().toDrizzle() as unknown as { all(): unknown[] }).all()).toHaveLength(2)
+          expect(executable(Post.newQuery().toDrizzle()).all()).toHaveLength(2)
           throw new Error('boom')
         }),
       ).rejects.toThrow('boom')
