@@ -32,10 +32,11 @@ A plan is a directory under `docs/plans/`, named by its slug:
 
 The slug is the directory name for a file called `plan.json`. Any other name works too: `comments.plan.json` has the slug `comments`, and keeps its records beside it as `comments.approvals.json` and `comments.decisions.json`.
 
-Ignore the rendered page before you start. `plan:next` refuses a working tree with untracked files, and the page is one:
+Ignore the rendered page before you start. `plan:next` refuses a working tree with untracked files, and the page is one. The first pattern covers the `docs/plans/<slug>/` layout, the second a plan named `<slug>.plan.json` anywhere else, such as the application root:
 
 ```text
 docs/plans/**/*.html
+*.plan.html
 ```
 
 ## Writing a plan
@@ -233,7 +234,7 @@ The plan's hash is its identity: a SHA-256 of the plan with its baseline. Verifi
 
 ## Implementing: `plan:next` and `plan:verify`
 
-Guren derives the work from the plan, and the order does not depend on a model. Every entity the plan adds or changes is a task, ordered by foreign keys, and every task has up to five steps:
+Guren derives the work from the plan, and the order does not depend on a model. Every entity the plan adds or changes is a task, ordered by foreign keys, and every task has up to five kinds of step:
 
 | Step | Work | Verified by |
 |---|---|---|
@@ -243,7 +244,7 @@ Guren derives the work from the plan, and the order does not depend on a model. 
 | `http` | Validators, controllers, routes, resources, policies | `codegen`, `guren check`, the tests passing |
 | `pages` | Page components | `codegen`, `typecheck`, `guren check` |
 
-Work shared by several entities goes to a `task/foundation` task, and a step with nothing to do is left out. Step ids read `task/entity/model.comment/http`. The loop is: ask for the next step, implement it, verify it, commit.
+Work shared by several entities goes to a `task/foundation` task, and a step with nothing to do is left out. Step ids read `task/entity/model.comment/http`. A `data`, `http` or `pages` step whose elements span more than five files is split into parts with ids such as `task/entity/model.comment/http/1` and `task/entity/model.comment/http/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`. The loop is: ask for the next step, implement it, verify it, commit.
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -437,7 +438,7 @@ Against the approved baseline: fresh 13, stale 0, unstamped 0, unjudged 1
   unjudged: validator.comment
 ```
 
-An element is `fresh` while the application holds what was stamped, or what the plan says it will hold. It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval), and `unjudged` cannot be read now. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
+An element is `fresh` while the application holds what was stamped, or what the plan says it will hold. It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval), and `unjudged` cannot be read now. Validators always read `unjudged`, since no scanner reads them, so the line above appears in any plan that declares a validator. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
 
 A stale element holds every step that depends on it. In a copy of the example, another commit registered a `comments.store` route before the implementation started:
 
@@ -513,7 +514,7 @@ Edit the text outside the markers freely: closing a later plan for the same enti
 
 ## Not available yet
 
-The RFC behind this feature (`rfcs/0030-implementation-plans.md`) describes more than has shipped. These are not available in the current release:
+The RFC behind this feature (`rfcs/0030-implementation-plans.md`) describes more than the commands on this page. These parts do not exist yet:
 
 - a `guren plan` command that asks Claude for the plan JSON, and the revision command that applies review feedback to it. Write and edit `plan.json` yourself or in your agent session;
 - keeping plans in GitHub issues instead of `docs/plans/`;

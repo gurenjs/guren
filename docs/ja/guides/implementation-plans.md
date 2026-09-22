@@ -32,10 +32,11 @@ flowchart LR
 
 ファイル名が `plan.json` なら、slug はディレクトリ名です。別の名前でも構いません。`comments.plan.json` の slug は `comments` で、記録はその隣に `comments.approvals.json` と `comments.decisions.json` として置かれます。
 
-始める前に、描画したページを git の対象から外しておきます。`plan:next` は未追跡のファイルが残った作業ツリーを受け付けず、ページもその一つに数えられるためです。
+始める前に、描画したページを git の対象から外しておきます。`plan:next` は未追跡のファイルが残った作業ツリーを受け付けず、ページもその一つに数えられるためです。一つ目のパターンは `docs/plans/<slug>/` の配置に、二つ目はアプリケーションのルートなどに置いた `<slug>.plan.json` に対応します。
 
 ```text
 docs/plans/**/*.html
+*.plan.html
 ```
 
 ## 計画を書く
@@ -170,7 +171,7 @@ Guren は GET 以外のリクエストへのリダイレクトを 303 で返し�
 }
 ```
 
-開いた質問がある計画は承認できません。答えは計画を編集して反映します。答えに沿って要素を直し、質問を消し、決めたことを `assumptions` に残してください。承認前の計画は、`plan.json` を直接編集して変えるのが普通のやり方です。
+質問が残っている計画は承認できません。答えは計画を編集して反映します。答えに沿って要素を直し、質問を消し、決めたことを `assumptions` に残してください。承認前の計画は、`plan.json` を直接編集して変えるのが普通のやり方です。
 
 ## 描画と検査: `plan:render`
 
@@ -180,7 +181,7 @@ bunx guren plan:render docs/plans/comments/plan.json
 
 `docs/plans/comments/plan.html` を書き、そのパスを表示します。`-o` で出力先を変えられます。別のディレクトリから実行するときは、`--app <dir>` で検査対象のアプリケーションを指定します。`--locale ja` を付けると、ページ自身のラベルが日本語で開きます。ページ上で `en` と `ja` を切り替えられますが、計画の本文は翻訳しません。
 
-ページは一つのファイルで、ネットワークには一切アクセスしません。ディスクから直接開けるので、レビュー依頼にそのまま添付できます。セクションごとのタブ、エンティティのフィルター、`existing` の要素を隠す「Changes only」の切り替えがあります。現在のスキーマに計画を重ねた ER 図も描かれ、id はすべて参照先の要素へのリンクです。失敗した検査と互換性を壊す変更は「Needs attention」に固定表示されます。要素ごとに Approve と Request changes のボタン、コメント欄があり、レビュー結果はフッターから `feedback.json` として書き出せます。フッターはこのファイルを渡すコマンドとして `guren plan --revise` を表示しますが、このコマンドはまだありません。ファイルはエージェントに渡すか、コメントを自分で `plan.json` に反映してください。
+ページは一つのファイルで、ネットワークにはアクセスしません。ディスクから直接開けるので、レビュー依頼にそのまま添付できます。以下のラベルは `--locale ja` で開いたときの表記です。セクションごとのタブ、エンティティのフィルター、`existing` の要素を隠す「変更のみ」の切り替えがあります。現在のスキーマに計画を重ねた ER 図も描かれ、id はすべて参照先の要素へのリンクです。失敗した検査と互換性を壊す変更は「確認が必要な項目」に固定表示されます。要素ごとに「承認」と「修正を依頼」のボタン、コメント欄があり、レビュー結果はフッターから `feedback.json` として書き出せます。フッターはこのファイルを渡すコマンドとして `guren plan --revise` を表示しますが、このコマンドはまだありません。ファイルはエージェントに渡すか、コメントを自分で `plan.json` に反映してください。
 
 検査は、いまのアプリケーションに対して走ります。報告する内容の例は次のとおりです。
 
@@ -214,7 +215,7 @@ Impact は下限です。静的な走査なので、別の関数やファイル�
 
 ## 承認: `plan:approve`
 
-承認は、ページを読んだ人が下す判断です。検査が失敗しているか、質問が開いたままなら拒否されます。
+承認は、ページを読んだ人が下す判断です。検査が失敗しているか、質問が残っていれば拒否されます。
 
 ```text
  ERROR  docs/plans/comments/plan.json is not approved while a check fails or a question is open; an assumption nobody confirmed is not approved by silence.
@@ -239,11 +240,11 @@ Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recor
 
 validator はどのスキャナーも読まないので、ハッシュを取りません。それ以外のセクションが読めなかった場合、承認は拒否され、ハッシュのないまま残る要素が示されます。`--allow-unstamped` を付けると、それらを除いて承認します。
 
-計画のハッシュが計画の身元です。baseline を含めた計画の SHA-256 で、検証の記録も waiver もこのハッシュを名指しします。承認後に手で変えた計画は別の計画になるので、もう一度承認し、各ステップの検証もやり直すことになります。baseline が書き直されることはありません。
+計画を識別するのはハッシュです。baseline を含めた計画の SHA-256 で、検証の記録も waiver もこのハッシュを名指しします。承認後に手で変えた計画は別の計画になるので、もう一度承認し、各ステップの検証もやり直すことになります。baseline が書き直されることはありません。
 
 ## 実装: `plan:next` と `plan:verify`
 
-作業の分解と順序は、モデルではなく Guren が計画から導きます。計画が足したり変えたりするエンティティごとにタスクができ、タスクは外部キーの順に並びます。各タスクは最大五つのステップを持ちます。
+作業の分解と順序は、モデルではなく Guren が計画から導きます。計画が足したり変えたりするエンティティごとにタスクができ、タスクは外部キーの順に並びます。各タスクが持つステップは最大で五種類です。
 
 | ステップ | 作業 | 検証 |
 |---|---|---|
@@ -253,7 +254,7 @@ validator はどのスキャナーも読まないので、ハッシュを取り�
 | `http` | validator、コントローラー、ルート、Resource、Policy | `codegen`、`guren check`、テストが通ること |
 | `pages` | ページコンポーネント | `codegen`、`typecheck`、`guren check` |
 
-複数のエンティティが共有する作業は `task/foundation` に入り、作業のないステップは省かれます。ステップの id は `task/entity/model.comment/http` のような形です。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
+複数のエンティティが共有する作業は `task/foundation` に入り、作業のないステップは省かれます。ステップの id は `task/entity/model.comment/http` のような形です。`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -454,7 +455,7 @@ Against the approved baseline: fresh 13, stale 0, unstamped 0, unjudged 1
   unjudged: validator.comment
 ```
 
-アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素で、承認時にセクションを読めなかったものです。`unjudged` はいま読めない要素です。参照している要素に触れないコミットなら、計画は fresh のままです。
+アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素で、承認時にセクションを読めなかったものです。`unjudged` はいま読めない要素です。validator はどのスキャナーも読まないので常に `unjudged` になり、validator を宣言した計画には上の行が必ず出ます。参照している要素に触れないコミットなら、計画は fresh のままです。
 
 stale になった要素は、それに依存するステップをすべて保留にします。例のコピーで、実装を始める前に別のコミットが `comments.store` というルートを登録したときの出力です。
 
@@ -484,7 +485,7 @@ Recorded in docs/plans/comments/decisions.json
 The decision log is committed with the plan. A waiver names this plan hash, so a revision does not inherit it.
 ```
 
-要素は `waived` になり、`plan:verify` はステップの判定からその要素を外します。`plan:next` はそれを「Waived, not to be implemented」の下に並べます。waiver が持ち上げるのは要素だけです。振る舞いが失敗すればステップは失敗したままなので、コードが満たせない振る舞いには計画の変更が要ります。`plan:waive` が拒否するのは次の場合です。
+要素は `waived` になり、`plan:verify` はステップの判定からその要素を外します。`plan:next` はそれを「Waived, not to be implemented」の下に並べます。waiver が外すのは要素の判定だけです。振る舞いが失敗すればステップは失敗したままなので、コードが満たせない振る舞いには計画の変更が要ります。`plan:waive` が拒否するのは次の場合です。
 
 - `existing` の要素
 - 計画にない id
@@ -538,7 +539,7 @@ Closed 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0. The pla
 
 ## まだ使えないもの
 
-この機能の元になった RFC (`rfcs/0030-implementation-plans.md`) には、まだ出荷していない部分も書かれています。現在のリリースでは次のものは使えません。
+この機能の元になった RFC (`rfcs/0030-implementation-plans.md`) には、このページのコマンドより先の部分も書かれています。次のものはまだありません。
 
 - 計画の JSON を Claude に書かせる `guren plan` コマンドと、レビューのフィードバックを計画に反映する改訂コマンド。`plan.json` は自分で、またはエージェントとのセッションで書き、編集してください
 - 計画を `docs/plans/` ではなく GitHub の issue に置く方式
