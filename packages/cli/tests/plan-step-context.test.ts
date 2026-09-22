@@ -50,6 +50,7 @@ describe('judgeStepContext', () => {
     const contexts = judgeStepContext(PLAN, freshness([{ id: 'controller.posts', section: 'controllers', change: 'existing', verdict: 'stale', affects: [] }]), DERIVATION)
 
     const [owner] = [...contexts.values()]
+    expect(owner!.stepId).toBe('task/entity/model.post/http')
     expect(owner!.stale).toEqual([expect.objectContaining({ id: 'controller.posts', owned: false, through: [], within: ['action.posts.feed'] })])
     expect(contexts.size).toBe(1)
   })

@@ -14,7 +14,7 @@ import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepReco
 import { stampContextHash } from '../src/plan/freshness'
 import { sha256 } from '../src/plan/verification'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { loadApprovedCommentsPlan, loadCommentsPlan, planAppState, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
+import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own, since Bun keys an imported routes file on
@@ -136,6 +136,20 @@ describe('plan:verify', () => {
     const text = formatPlanVerify(result)
     expect(text).toContain(`${HTTP}: depends on what changed since the plan was approved: model.post (named by route.comments.store); plan:next holds it until the plan is revised and approved`)
     expect(text).toContain('Against the approved baseline: fresh ')
+  })
+
+  test('should leave the marked step\u2019s own half-built elements out of its stale context', async () => {
+    // The Comment class is written and its table is not: neither the stamp nor what the plan leaves.
+    const app = await createApp('half-built', { ...APP, 'db/schema.ts': PLAN_APP_FILES['db/schema.ts']! })
+    const active = { plan: 'half.plan.json', step: DATA, startedAt: '2026-09-21T09:00:00.000Z', continuations: 0 }
+    await writeWorkspaceFiles(app, { '.guren/plans/half.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: {}, active }) })
+    const baseline = { rev: 'abc123', contextHash: stampContextHash(parsePlanDocument(loadCommentsPlan()), planAppState()).contextHash }
+    const plan = await writePlan('half.plan.json', { ...loadCommentsPlan(), baseline })
+
+    const result = await verify(plan, app, '--step', DATA)
+
+    expect(result.freshness!.elements.find((element) => element.id === 'model.comment')!.verdict).toBe('stale')
+    expect(result.staleContext ?? []).toEqual([])
   })
 
   test('should verify a step whose only incomplete elements the decision log waives', async () => {

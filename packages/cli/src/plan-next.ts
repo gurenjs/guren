@@ -77,7 +77,7 @@ export interface PlanNextReport {
   /** In task order; always empty for a draft, which has no baseline to be stale against. */
   held: PlanNextHeldStep[]
   /** Steps behind a held one: later in its task, or in a task waiting for it. */
-  waiting: Array<{ id: string; on: string[] }>
+  waiting: Array<{ id: string; on: string[]; stalled?: PlanStall }>
   /** Relative to the application root, POSIX separators. */
   stateFile: string
   /** The decision log beside the plan, relative to the application root; it need not exist. */
@@ -159,6 +159,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
   const log = await readPlanWaivers(path, plan)
   const judged = await stepContexts(plan, derivation, options, stepInProgress(previous))
+  const stallOf = (stepId: string): { stalled?: PlanStall } => (previous?.step === stepId && previous.stalled ? { stalled: previous.stalled } : {})
 
   const verified: string[] = []
   const onCommandsAlone: string[] = []
@@ -186,11 +187,11 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
         id: step.id,
         taskId: task.id,
         stale: stale.map((element) => ({ ...element, checks: [] })),
-        ...(previous?.step === step.id && previous.stalled ? { stalled: previous.stalled } : {}),
+        ...stallOf(step.id),
       })
       behind.add(step.id)
     } else if (behind.size > 0) {
-      waiting.push({ id: step.id, on: [...behind] })
+      waiting.push({ id: step.id, on: [...behind], ...stallOf(step.id) })
     } else {
       next ??= entry
     }
@@ -218,7 +219,8 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   } satisfies Omit<PlanNextReport, 'step'>
   if (next === undefined) {
     // A stall sticks until a plan:next returns its step (§7); only a mark with nothing to report goes.
-    if (previous && !(previous.stalled && held.some((step) => step.id === previous.step))) await writePlanActiveStep(root, slug, undefined)
+    const reported = [...held, ...waiting].some((step) => step.stalled !== undefined)
+    if (previous && !reported) await writePlanActiveStep(root, slug, undefined)
     return { ...head, step: null }
   }
   const { task, step } = next
@@ -264,7 +266,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       task: task.title,
       elements: elementsOf(plan, step.elementIds, log.waivers),
       acceptance: plan.tasks.flatMap((intent) => intent.acceptance).filter((behaviour) => behaviours.has(behaviour.id)),
-      ...(previous?.step === step.id && previous.stalled ? { stalled: previous.stalled } : {}),
+      ...stallOf(step.id),
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
     },
   }
@@ -309,7 +311,11 @@ function heldLines(report: PlanNextReport, planArgument: string): string[] {
     if (held.stalled) lines.push(`    stalled ${held.stalled.at}: ${held.stalled.reason}`)
   }
   if (report.waiting.length > 0) {
-    lines.push('', 'Waiting on a held step:', ...report.waiting.map((entry) => `  ${entry.id} (on ${entry.on.join(', ')})`))
+    lines.push('', 'Waiting on a held step:')
+    for (const entry of report.waiting) {
+      lines.push(`  ${entry.id} (on ${entry.on.join(', ')})`)
+      if (entry.stalled) lines.push(`    stalled ${entry.stalled.at}: ${entry.stalled.reason}`)
+    }
   }
   lines.push(
     '',

@@ -545,6 +545,20 @@ describe('plan:next on stale context', () => {
     expect(text).toContain(`    stalled ${stall.at}: ${stall.reason}`)
   })
 
+  test('should keep and report the stall of a marked step waiting behind a held one', async () => {
+    const { app, plan } = await approvedApp('waiting-stall', loadCommentsPlan(), [SCAFFOLD, TESTS])
+    const PAGES = `${COMMENT}/pages`
+    const stall = { at: '2026-09-21T09:30:00.000Z', reason: `${MAX_CONTINUATIONS} continuations on this step`, output: 'x' }
+    await writeState(app, { ...(await readState(app)), active: { plan: 'comments.plan.json', step: PAGES, startedAt: '2026-09-21T09:00:00.000Z', continuations: 3, stalled: stall } })
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })
+
+    expect(report.step).toBeNull()
+    expect(report.waiting).toEqual([{ id: PAGES, on: [DATA, HTTP], stalled: stall }])
+    expect((await readState(app)).active).toMatchObject({ step: PAGES, stalled: stall })
+    expect(formatPlanNext(report, 'comments.plan.json')).toContain(`  ${PAGES} (on ${DATA}, ${HTTP})\n    stalled ${stall.at}: ${stall.reason}`)
+  })
+
   test('should never read the application for a draft', async () => {
     const { app, plan } = await createApp('draft')
     let read = 0

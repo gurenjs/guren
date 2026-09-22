@@ -653,9 +653,13 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
 - The elements the marked step owns hold no step while it is marked, stalled
   or not (`stepInProgress()`): they are its work in progress, and half of it
   reads as stale (a model's class written before its table). A stalled step is
-  still the one being built, and `plan:next` returns it again with the stall.
-  An external change to one of those elements still reaches that step through
-  its own verification, which compares the element with the plan.
+  still the one being built, and `plan:next` returns it again with the stall,
+  or holds it when what stalled it is stale context. Once the mark moves to
+  another step, the exclusion goes with it: partial work the stalled step left
+  committed then reads as stale and holds that step, until a revised plan that
+  states it is approved or the step's work is finished. An external change to
+  one of those elements still reaches that step through its own verification,
+  which compares the element with the plan.
 - Releasing a hold is a person's: a stale element turns fresh again once the
   application is back at its stamp or at what the plan leaves, so the answer
   is a plan revised to state what the application holds now and approved, or
@@ -1208,8 +1212,8 @@ shipped with these readings:
   waiting no step is returned and the command still exits 0: the hook reads
   the mark, never this exit code, and a held plan is a person's decision
   rather than a failed command. The mark is cleared so the hook holds
-  nothing, unless it carries a stall on a held step: that stall sticks, and
-  the next run reports it again. An application that cannot be read is
+  nothing, unless it carries a stall on a held or waiting step: that stall
+  sticks, and the next run reports it again. An application that cannot be read is
   reported, with a hint to run `codegen` on a fresh clone, and holds nothing.
 - The hook judges staleness on the application `plan:verify` reads after its
   `codegen`, not before it: importing the routes file first would leave Bun
