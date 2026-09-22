@@ -87,7 +87,7 @@ import { installPlugin } from './plugin'
 import { displayModels } from './model-list'
 import { displayContext } from './context'
 import { displayEntityContext } from './entity-context'
-import { CHECK_SUITES, runCheck, renderCheckReport } from './check'
+import { CHECK_SUITES, ciSuiteConflict, runCheck, renderCheckReport } from './check'
 import { ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, loadEnvSchema, writeEnvExample } from './app-env'
 import { readAppDefaultLocale } from './app-locale'
 import { CliError } from './cli-error'
@@ -2942,6 +2942,10 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only the check that .env.example lists the keys config/env.ts declares (RFC 0027).',
     },
+    plan: {
+      type: 'boolean',
+      description: 'Run the implementation-plan checks (RFC 0030), which no other run includes: approved plans with drifted elements, and open plans changing the same element. Imports db/schema.ts and the validator files. Advisory: never sets the exit code.',
+    },
     changed: {
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
@@ -2956,7 +2960,7 @@ const checkCommand = defineCommand({
     // underneath it would report success while docs/spec/core went unchecked.
     const suiteFlags = CHECK_SUITES.filter((suite) => args[suite])
     if (args.ci && suiteFlags.length > 0) {
-      consola.error(`check --ci runs the full suite — drop ${CHECK_SUITES.map((suite) => `--${suite}`).join('/')} (they gate on their own).`)
+      consola.error(ciSuiteConflict(suiteFlags))
       process.exitCode = 1
       return
     }
@@ -2971,6 +2975,7 @@ const checkCommand = defineCommand({
       i18n: Boolean(args.i18n),
       prototype: Boolean(args.prototype),
       env: Boolean(args.env),
+      plan: Boolean(args.plan),
       changed: Boolean(args.changed),
     })
 

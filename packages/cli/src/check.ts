@@ -63,14 +63,27 @@ import { runI18nCheck } from './i18n-check'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
+import { checkPlans, isPlanInput } from './plan-check'
 import { getChangedFiles } from './changed-files'
 import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
 export type { CheckStatus, CheckResult, CheckReport }
 
 /** The suites a flag of the same name selects. */
-export const CHECK_SUITES = ['arch', 'docs', 'spec', 'i18n', 'prototype', 'env'] as const
+export const CHECK_SUITES = ['arch', 'docs', 'spec', 'i18n', 'prototype', 'env', 'plan'] as const
 export type CheckSuite = (typeof CHECK_SUITES)[number]
+
+/**
+ * Why `check --ci` refuses the suite flags it was given. A suite flag would narrow the gate;
+ * `--plan` is advisory and never part of it, so it is named apart from the gating suites.
+ */
+export function ciSuiteConflict(given: readonly CheckSuite[]): string {
+  const gating = CHECK_SUITES.filter((suite) => suite !== 'plan')
+  const parts: string[] = []
+  if (given.some((suite) => suite !== 'plan')) parts.push(`check --ci runs the full suite: drop ${gating.map((suite) => `--${suite}`).join('/')} (they gate on their own)`)
+  if (given.includes('plan')) parts.push('--plan is advisory and never part of check --ci; run guren check --plan on its own')
+  return `${parts.join('. ')}.`
+}
 
 export interface RunCheckOptions {
   cwd?: string
@@ -103,6 +116,8 @@ export interface RunCheckOptions {
   prototype?: boolean
   /** Run the `.env.example` against `config/env.ts` check only (RFC 0027 §7). Content-activated. */
   env?: boolean
+  /** Run the implementation-plan checks (RFC 0030 §8). Advisory, and never part of a run without this flag. */
+  plan?: boolean
 }
 
 /**
@@ -600,6 +615,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       graph = await loadRouteGraph(cwd, await routesEntryOrDefault(cwd, options.routesFile))
     }
     checks.push(...(await checkPrototypeRoutes({ cwd, cache, definitions: graph?.definitions })))
+  }
+
+  // Implementation plans (RFC 0030 §8), only when asked for: judging a plan imports
+  // `db/schema.ts` and the validator files, which no other suite does.
+  if (selected.has('plan') && (sourceChanged || [...(changedFiles ?? [])].some(isPlanInput))) {
+    checks.push(...(await checkPlans({ cwd, routesFile: options.routesFile })))
   }
 
   // 11. Check architecture boundaries (guren.arch.ts + derived module rules)

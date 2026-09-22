@@ -8,6 +8,7 @@
 import { posix } from 'node:path'
 
 import { RULES_HEADING_BY_LOCALE } from '../docs-acceptance'
+import { parseDocFrontmatter } from '../docs-frontmatter'
 import { markdownLines } from '../docs-links'
 import type { PlanApproval } from './approvals'
 import type { PlanWaiver } from './decisions'
@@ -116,6 +117,15 @@ function cite(text: string, ids: readonly string[]): string {
 
 function bullets(items: readonly string[]): string[] {
   return items.map((item) => `- ${item}`)
+}
+
+/**
+ * The hash a doc node written by {@link renderPlanDoc} says its plan closed at, or `undefined`
+ * for a document that does not say it is closed. The frontmatter reader returns scalars as strings.
+ */
+export function planDocClosedHash(source: string): string | undefined {
+  const data = parseDocFrontmatter(source)?.data
+  return data?.closed === 'true' && typeof data.plan_hash === 'string' ? data.plan_hash : undefined
 }
 
 /** The plan's doc node, `docs/plans/<slug>.md`: `type: plan`, governing what it touched. */

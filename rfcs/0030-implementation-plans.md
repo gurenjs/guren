@@ -1626,6 +1626,54 @@ Like `ai:eval`, `guren plan` is opt-in, costs money, and is never part of
 `check` or `gate`. `guren check --plan` is advisory: it reports approved plans
 with `drifted` elements and two open plans that touch the same element.
 
+**Amended in implementation (`guren check --plan`).** The suite is shipped with
+these readings (`packages/cli/src/plan-check.ts`).
+
+- It runs only under `--plan`, never in plain `guren check`, `check --ci` or
+  `guren gate`. Judging a plan imports the app's `db/schema.ts`
+  (`readSchemaTables()`) and every validator file (`readSchemaIdentities()`),
+  and `check` stays on the static schema reader everywhere else: `gate`, the
+  Stop hook, `plan:verify`'s check step and the dev MCP server would each pay
+  for the imports and discard advisory results. `--changed` with `--plan` runs
+  it when source, a plan, a record beside one or anything under `docs/plans/`
+  changed.
+- Plans are found in one place: the app root's own `*.plan.json` and, under
+  `docs/plans/`, every `plan.json` (the §9 layout) and `*.plan.json`. The
+  records beside a plan never match, and a `revisions/` directory is not read.
+  A plan kept anywhere else is not checked. A directory that will not list is
+  reported, and so are two plans sharing a slug, since they share one state
+  file and one doc node.
+- Open means approved and not closed. Approved is `readPlanApprovalStanding()`,
+  the reading the gated plan commands refuse on, so the two cannot disagree.
+  Closed is what `plan:close` writes: `closed: true` in
+  `docs/plans/<slug>.md` with `plan_hash` equal to the current hash, so a
+  revision approved after the close is open again. A draft nobody approved,
+  and a plan edited since its approval, are judged by neither rule, since
+  nobody has agreed to them yet. A draft with approvals beside it
+  (`baseline-removed`) is reported, because deleting a baseline would otherwise
+  take an approved plan out of every rule unnoticed. So is any plan, a draft
+  included, beside an approvals file that will not read. Nothing is reported when
+  no plan has a finding; the counts are `plan:status`'s.
+- `drifted` is whatever `planStatusFile()` reports, verification overlay
+  included, the function `plan:status` prints. The application is loaded once,
+  with `detail`, and only when an open plan exists.
+- Two plans touch the same element when a changed target of each occupies one
+  name in `listPlanAppTargets()`: the section, the app root, and the name (both
+  names of a rename; a column under its table; a route also by its endpoint).
+  A table and its columns are keyed app-wide, since every root's schema is
+  one set of SQL tables. Ids play no part, so `model.post` in one plan and
+  `model.entry` in another, both on `posts`, collide. A target a plan marks
+  `existing` is only read and never collides, but a changed column or action
+  under it also claims that parent, which collides with a plan renaming or
+  dropping it. A model's `alter` claims its table only as such a parent, since
+  its columns carry the table-level change, and a class rename leaves the table
+  `existing`, so it does not collide with a column another plan adds under that
+  class. Two plans that both alter one model class do collide on the class,
+  since each changes its body, even when their columns are unrelated. One
+  finding per pair of plans lists every shared name.
+- Every result is an advisory `warn`, a plan or approvals file that will not
+  read included, so `check --plan` exits 0.
+
 ### 9. Stores
 
 Where the approved plan, its revisions and the decision log live is an adapter.
