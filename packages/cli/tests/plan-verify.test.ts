@@ -691,10 +691,11 @@ describe('planWaivers', () => {
 })
 
 describe('plan state', () => {
-  test('should name the state file after the plan file, without its extensions', () => {
+  test('should name the state file after the plan file, without its extensions, and a plan.json after its directory', () => {
     expect(planSlug('/x/comments.plan.json')).toBe('comments')
     expect(planSlug('comments.json')).toBe('comments')
-    expect(planSlug('docs/plans/comments/plan.json')).toBe('plan')
+    expect(planSlug('docs/plans/comments/plan.json')).toBe('comments')
+    expect(planSlug('docs/plans/billing/plan.json')).not.toBe(planSlug('docs/plans/comments/plan.json'))
   })
 
   test('should digest a draft and a plan alike, from their canonical bytes', () => {

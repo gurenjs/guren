@@ -14,7 +14,8 @@ import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { judgePlan, PLAN_ELEMENT_STATES, PLAN_STATUS_SECTIONS, type PlanElementState, type PlanElementStatus, type PlanStatus } from './plan/status'
 import { derivePlanTasks } from './plan/tasks'
-import { overlayVerification, type PlanVerificationSummary } from './plan/verification'
+import type { Plan, PlanDraft } from './plan/schema'
+import { overlayVerification, type PlanVerificationSummary, type PlanWaiversRead } from './plan/verification'
 
 /** Bumped when a field of {@link PlanStatusReport} changes meaning or goes away; additions do not bump it. */
 export const PLAN_STATUS_REPORT_VERSION = 1
@@ -44,10 +45,14 @@ export interface PlanStatusFileOptions {
   cwd?: string
   /** Where `.guren/plans/` is read from. Without it, no verification is laid over the result. */
   appRoot?: string
+  /** The plan the caller already read from `planPath`, so one run judges one reading of it. */
+  read?: { path: string; plan: PlanDraft | Plan }
+  /** The decision log the caller already read, for the same reason. */
+  waivers?: PlanWaiversRead
 }
 
 export async function planStatusFile(planPath: string, options: PlanStatusFileOptions): Promise<PlanStatusReport> {
-  const { path, plan } = await readPlanFile(planPath, options.cwd)
+  const { path, plan } = options.read ?? (await readPlanFile(planPath, options.cwd))
   const app = typeof options.app === 'function' ? await options.app() : options.app
   const status = judgePlan(plan, app)
   const head = {
@@ -56,7 +61,7 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
   } satisfies Pick<PlanStatusReport, 'reportVersion' | 'plan'>
   const freshness = hasBaseline(plan) ? { freshness: judgeFreshness(plan, app) } : {}
   if (options.appRoot === undefined) return { ...head, ...status, ...freshness }
-  const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }))
+  const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }), { waivers: options.waivers })
   return { ...head, ...overlaid.status, verification: overlaid.verification, ...freshness }
 }
 

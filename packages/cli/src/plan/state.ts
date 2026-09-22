@@ -10,7 +10,7 @@
 
 import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import { z } from 'zod'
 
@@ -109,13 +109,15 @@ export interface PlanStateRead {
 }
 
 /**
- * The plan file's slug: `comments.plan.json` and `comments.json` are both `comments`.
- * A handle, never an identity: two plans of one slug share a state file and a step-id
- * namespace, so the later run overwrites the earlier one's records, and what is left is
- * told apart by digest.
+ * The plan file's slug: `comments.plan.json` and `comments.json` are both `comments`, and
+ * `docs/plans/comments/plan.json` (the §9 layout) is named by its directory, as its sibling
+ * records are. A handle, never an identity: two plans of one slug share a state file and a
+ * step-id namespace, so the later run overwrites the earlier one's records.
  */
 export function planSlug(planPath: string): string {
-  return basename(planPath).replace(/(\.plan)?\.json$/u, '')
+  const name = basename(planPath)
+  if (name === 'plan.json') return basename(dirname(planPath))
+  return name.replace(/(\.plan)?\.json$/u, '')
 }
 
 /**

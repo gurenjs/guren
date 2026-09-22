@@ -108,8 +108,45 @@ export function localLinkTarget(target: string): string | null {
   return withoutFragment === '' ? null : withoutFragment
 }
 
+export interface MarkdownLine {
+  text: string
+  /** A fence line itself, or any line between an opening fence and its close. */
+  inFence: boolean
+}
+
+// CommonMark: up to three spaces, then three or more of one fence character.
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/
+
+/**
+ * The document's lines with whether each is code, and the index of a fence that opens and
+ * never closes, which runs to the end. A fence closes on a run of the same character at least
+ * as long, with nothing after it. The one fence rule the line-oriented docs scanners read through.
+ */
+export function markdownLines(text: string): { lines: MarkdownLine[]; unclosedFence?: number } {
+  let open: { fence: string; line: number } | null = null
+  const lines = text.split(/\r?\n/).map((line, index) => {
+    const fence = FENCE_RE.exec(line)
+    if (open === null) {
+      if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) open = { fence: fence[1], line: index }
+      return { text: line, inFence: open !== null }
+    }
+    if (fence && fence[1][0] === open.fence[0] && fence[1].length >= open.fence.length && fence[2].trim() === '') open = null
+    return { text: line, inFence: true }
+  })
+  return open === null ? { lines } : { lines, unclosedFence: (open as { line: number }).line }
+}
+
+/**
+ * The body with every backtick fence removed wherever it sits (indented under a list item,
+ * inside a blockquote, mid-line) and inline code spans removed: what link and citation
+ * readers scan. Deliberately wider than {@link markdownLines}, so no link inside code is read.
+ */
+export function stripMarkdownCode(body: string): string {
+  return body.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
+}
+
 export function extractMarkdownLinks(body: string): string[] {
-  const withoutCode = body.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
+  const withoutCode = stripMarkdownCode(body)
   const targets = new Set<string>()
 
   const add = (target: string): void => {

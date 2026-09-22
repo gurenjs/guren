@@ -165,6 +165,8 @@ describe('buildEntityDocIndex', () => {
         issues: [],
         malformedIssues: [],
         links: [],
+        citations: [],
+        uncitedRules: [],
         hasFrontmatter: true,
       },
       {
@@ -177,6 +179,8 @@ describe('buildEntityDocIndex', () => {
         issues: [],
         malformedIssues: [],
         links: [],
+        citations: [],
+        uncitedRules: [],
         hasFrontmatter: true,
       },
     ])

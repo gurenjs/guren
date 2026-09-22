@@ -2,6 +2,14 @@ import { describe, expect, it } from 'bun:test'
 import { extractMarkdownLinks } from '../src/docs-links'
 
 describe('extractMarkdownLinks', () => {
+  it('ignores links inside a fence indented under a list item or quoted in a blockquote', () => {
+    const links = extractMarkdownLinks(
+      ['- A step:', '', '      ```md', '      [indented](./indented.md)', '      ```', '', '> ```md', '> [quoted](./quoted.md)', '> ```', '', '[kept](./kept.md)'].join('\n'),
+    )
+
+    expect(links).toEqual(['./kept.md'])
+  })
+
   it('extracts local link and image targets, stripping fragments', () => {
     const links = extractMarkdownLinks(`
 See [orders](/adr/0002-orders.md#joins) and [the model](../../app/Models/Post.ts).

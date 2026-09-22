@@ -17,6 +17,8 @@ function doc(path: string, overrides: Partial<DocRef> = {}): DocRef {
     issues: [],
     malformedIssues: [],
     links: [],
+    citations: [],
+    uncitedRules: [],
     hasFrontmatter: true,
     ...overrides,
   }

@@ -420,7 +420,7 @@ export function referencesIdentifier(body: string, name: string): boolean {
   return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'u').test(body)
 }
 
-const SAFE_MODULE_NAME_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/u
+export const SAFE_MODULE_NAME_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/u
 
 /**
  * kebab-cases a `--module <name>` value and rejects anything that would escape the

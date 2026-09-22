@@ -99,3 +99,18 @@ When the last step of a task verifies, ask the `code-review` agent to read that
 task's diff against the plan elements the task covers. Its findings are
 advisory: a reviewer asked for gaps reports some whether or not they exist, so
 weigh each one against the plan before acting on it.
+
+## When every step is verified
+
+Closing the plan is the person's call, like approving it. Show them what
+closing would write:
+
+```bash
+bunx guren plan:close docs/plans/<slug>/plan.json --dry-run
+```
+
+and run it without `--dry-run` only when asked. It refuses while any element is
+neither verified nor waived, and names them. It writes the plan's document under
+`docs/plans/` and draft blocks between `<!-- guren:plan … -->` markers in
+`docs/entities/<Entity>.md`; edit the text outside the markers freely, since a
+second close replaces only what is inside them.
