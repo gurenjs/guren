@@ -79,8 +79,9 @@ export type CheckSuite = (typeof CHECK_SUITES)[number]
  */
 export function ciSuiteConflict(given: readonly CheckSuite[]): string {
   const gating = CHECK_SUITES.filter((suite) => suite !== 'plan')
-  const parts = [`check --ci runs the full suite: drop ${gating.map((suite) => `--${suite}`).join('/')} (they gate on their own)`]
-  if (given.includes('plan')) parts.push('--plan is advisory and never part of --ci; run guren check --plan on its own')
+  const parts: string[] = []
+  if (given.some((suite) => suite !== 'plan')) parts.push(`check --ci runs the full suite: drop ${gating.map((suite) => `--${suite}`).join('/')} (they gate on their own)`)
+  if (given.includes('plan')) parts.push('--plan is advisory and never part of check --ci; run guren check --plan on its own')
   return `${parts.join('. ')}.`
 }
 

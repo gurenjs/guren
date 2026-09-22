@@ -297,14 +297,19 @@ describe('guren check --plan', () => {
       expect(message).not.toContain('--plan')
     })
 
+    test('should name only --plan when --plan is the only suite flag given', () => {
+      expect(ciSuiteConflict(['plan'])).toBe('--plan is advisory and never part of check --ci; run guren check --plan on its own.')
+      expect(ciSuiteConflict(['plan', 'docs'])).toContain('(they gate on their own). --plan is advisory')
+    })
+
     test('should refuse --ci --plan, saying --plan is advisory and runs on its own', async () => {
       const error = spyOn(consola, 'error').mockImplementation(Object.assign(() => {}, { raw: () => {} }))
       try {
         await runCommand(builtinSubCommands.check, { rawArgs: ['--ci', '--plan', '--app', ROOT] })
 
         const message = error.mock.calls.map((call) => String(call[0])).join('\n')
-        expect(message).toContain('--plan is advisory and never part of --ci')
-        expect(message).not.toMatch(/--env\/--plan|--plan \(they gate/u)
+        expect(message).toContain('--plan is advisory and never part of check --ci')
+        expect(message).not.toContain('they gate on their own')
         expect(process.exitCode).toBe(1)
       } finally {
         error.mockRestore()

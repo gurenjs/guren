@@ -1663,7 +1663,9 @@ these readings (`packages/cli/src/plan-check.ts`).
   dropping it. A model's `alter` claims its table only as such a parent, since
   its columns carry the table-level change, and a class rename leaves the table
   `existing`, so it does not collide with a column another plan adds under that
-  class. One finding per pair of plans lists every shared name.
+  class. Two plans that both alter one model class do collide on the class,
+  since each changes its body, even when their columns are unrelated. One
+  finding per pair of plans lists every shared name.
 - Every result is an advisory `warn`, a plan or approvals file that will not
   read included, so `check --plan` exits 0.
 
