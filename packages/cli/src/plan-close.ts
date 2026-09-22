@@ -9,7 +9,6 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 
-import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { SAFE_MODULE_NAME_RE } from './utils'
@@ -96,12 +95,13 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
   }
 
   const waiverRead = await readPlanWaivers(path, plan)
-  const status = await planStatusFile(path, { app: options.app, appRoot, read, waivers: waiverRead, approval: approved })
+  const app = typeof options.app === 'function' ? await options.app() : options.app
+  const status = await planStatusFile(path, { app, appRoot, read, waivers: waiverRead, approval: approved })
   const verification = status.verification
   const open = status.elements.filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
   const blockers: string[] = []
   if (open.length > 0) {
-    const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false) })
+    const derivation = derivePlanTasks(plan, { apiOnly: app.apiOnly })
     blockers.push(...describeCloseBlockers(plan, derivation.tasks.flatMap((task) => task.steps), open, planPath))
   }
   if (verification?.unreadable) blockers.push(`  verification records: ${verification.unreadable}`)
@@ -191,16 +191,16 @@ export function describeCloseBlockers(
   for (const step of steps) {
     for (const id of step.elementIds) context.owners.set(id, step.id)
     if (step.kind === 'tests' || step.acceptanceIds.length === 0) continue
-    for (const id of behaviourReach(plan, step.acceptanceIds)) context.carriers.set(id, [...(context.carriers.get(id) ?? []), step.id])
+    for (const id of behaviourReach(plan, step.acceptanceIds)) {
+      const carriers = context.carriers.get(id)
+      if (carriers) carriers.push(step.id)
+      else context.carriers.set(id, [step.id])
+    }
   }
   return elements.map((element) => closeBlocker(element, context))
 }
 
-/**
- * One refused element: what holds it, as `whatHoldsElement()` selects it (keep the two
- * alike), and the command that moves it. A run `applyVerification()` would not count is
- * never suggested: one no step's behaviour reaches, or one with nothing to fingerprint.
- */
+/** One refused element: what holds it, as `whatHoldsElement()` selects it (keep the two alike), and the command that moves it. */
 function closeBlocker(element: PlanElementStatus<PlanElementState>, context: BlockerContext): string {
   const hold = element.hold
   const said = element.notes.filter((note) => note !== hold?.note).at(-1)
@@ -208,27 +208,31 @@ function closeBlocker(element: PlanElementStatus<PlanElementState>, context: Blo
   return `  ${element.id}: ${element.state}${why ? ` (${why.replace(/\.$/u, '')})` : ''}\n    ${closeRemedy(element, context)}`
 }
 
+/**
+ * Mirrors `applyVerification()`'s holds: a run it would not count is never suggested, so an
+ * element no step's behaviour reaches, or one with nothing to fingerprint, is sent to plan:waive.
+ */
 function closeRemedy(element: PlanElementStatus<PlanElementState>, context: BlockerContext): string {
   const owner = context.owners.get(element.id)
   const verify = (step: string): string => `\`bunx guren plan:verify ${context.planArgument} --step ${step}\``
   const waive = `\`bunx guren plan:waive ${context.planArgument} ${element.id} --reason "<why>"\``
+  const orWaive = `; or waive it: ${waive}`
   if (owner === undefined) return `No step of the plan verifies it, so no plan:verify run lifts it: waive it with ${waive}`
-  if (element.state === 'blocked') return `Fix what keeps it from being read, then run ${verify(owner)}; or waive it: ${waive}`
-  if (element.hold?.kind === 'expired') return `Run ${verify(owner)} again, since that run no longer holds; or waive it: ${waive}`
+  if (element.state === 'blocked') return `Fix what keeps it from being read, then run ${verify(owner)}${orWaive}`
+  if (element.hold?.kind === 'expired') return `Run ${verify(owner)} again, since that run no longer holds${orWaive}`
   if (!awaitsVerification(element)) {
     const target = element.state === 'planned' ? 'Implement it' : `Change the code until plan:status reports it ${element.completesAt}`
-    return `${target}, then run ${verify(owner)}; or waive it: ${waive}`
+    return `${target}, then run ${verify(owner)}${orWaive}`
   }
   const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
+  const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
   const carriers = context.carriers.get(element.id) ?? []
   if (unmatched && carriers.length === 0) {
     return `No planned property of it matched and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with ${waive}, or add a behaviour that reaches it and approve the plan again`
   }
-  if (element.files.length === 0 && element.change !== 'drop' && element.state !== 'unjudged') {
-    return `plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive}`
-  }
+  if (element.files.length === 0 && !needsNoFiles) return `plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive}`
   const runs = unmatched && !carriers.includes(owner) ? [carriers[0]!, owner] : [owner]
-  return `Run ${runs.map(verify).join(', then ')}; or waive it: ${waive}`
+  return `Run ${runs.map(verify).join(', then ')}${orWaive}`
 }
 
 async function readOptional(path: string): Promise<string | undefined> {

@@ -74,7 +74,7 @@ export interface PlanAppRouteDetail {
    */
   contractSchemas: string[]
   /** Why a route registered before it may answer its requests; absent when none can. */
-  shadowed?: { unconfirmed: string }
+  shadowed?: Exclude<PlanAppMount, 'mounted'>
 }
 
 export interface PlanAppModelDetail {
@@ -277,23 +277,28 @@ function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanApp
  * The CLI loads modules in directory order instead, so two modules' routes are compared both
  * ways and never settled. The routes a provider registers are not in the definitions.
  */
-function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: number): { unconfirmed: string } | undefined {
+function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: number): Exclude<PlanAppMount, 'mounted'> | undefined {
   const route = routes[index]!
   const scope = input.provenance[index] ?? null
+  const routeMethod = route.method.toUpperCase()
+  const site = (candidate: ContextRoute, otherScope: string | null): string =>
+    `${candidate.method.toUpperCase()} ${candidate.path}${routeLabel(candidate)}, registered by ${otherScope === null ? (input.routesFile ?? 'the entry registrar') : `modules/${otherScope}`}`
   let uncertain: string | undefined
-  for (const [other, candidate] of routes.entries()) {
+  // A later definite shadow outranks an earlier uncertain one, so the scan does not stop at the first.
+  for (let other = 0; other < routes.length; other += 1) {
+    const candidate = routes[other]!
     const otherScope = input.provenance[other] ?? null
-    const acrossModules = scope !== null && otherScope !== null && otherScope !== scope
-    const before = acrossModules || (otherScope === scope ? other < index : otherScope === null)
+    const sameScope = otherScope === scope
+    const acrossModules = !sameScope && scope !== null && otherScope !== null
+    const before = sameScope ? other < index : acrossModules || otherScope === null
     const method = candidate.method.toUpperCase()
-    if (!before || (method !== route.method.toUpperCase() && method !== 'ALL')) continue
+    if (!before || (method !== routeMethod && method !== 'ALL')) continue
     const covers = routePathCovers(candidate.path, route.path)
     if (covers === 'none') continue
-    const site = `${method} ${candidate.path}${routeLabel(candidate)}, registered by ${otherScope === null ? (input.routesFile ?? 'the entry registrar') : `modules/${otherScope}`}`
-    if (covers === 'match' && !acrossModules) return { unconfirmed: `${site}, comes first and answers every request its path matches, so none reaches it` }
+    if (covers === 'match' && !acrossModules) return { unconfirmed: `${site(candidate, otherScope)}, comes first and answers every request its path matches, so none reaches it` }
     uncertain ??= acrossModules
-      ? `${site}, may answer its requests first: the order follows createApp({ modules }), which this does not read`
-      : `${site}, comes first, and whether it answers every request this path matches could not be judged`
+      ? `${site(candidate, otherScope)}, may answer its requests first: the order follows createApp({ modules }), which this does not read`
+      : `${site(candidate, otherScope)}, comes first, and whether it answers every request this path matches could not be judged`
   }
   if (uncertain !== undefined) return { unconfirmed: uncertain }
   if (scope !== null && input.moduleWarnings.length > 0) {
@@ -303,7 +308,9 @@ function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: num
 }
 
 function routeLabel(route: ContextRoute): string {
-  const parts = [...(route.name ? [`"${route.name}"`] : []), ...(route.controller ? [`${route.controller.name}.${route.controller.action}`] : [])]
+  const parts: string[] = []
+  if (route.name) parts.push(`"${route.name}"`)
+  if (route.controller) parts.push(`${route.controller.name}.${route.controller.action}`)
   return parts.length > 0 ? ` (${parts.join(', ')})` : ''
 }
 

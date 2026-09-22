@@ -315,8 +315,8 @@ type Match = 'match' | 'none' | 'unknown'
 interface PatternSegment {
   /** Regex source for the segment, or `null` for a lone `*`. */
   source: string | null
-  /** The segment as the route spells it, for a literal one. */
-  text: string
+  /** The segment as the route spells it; only on a literal segment. */
+  literal?: string
   /** A lone param token: what a runtime segment may fill, and a constraint that may span `/`. */
   param?: { constraint?: string; optional: boolean }
 }
@@ -354,11 +354,11 @@ function patternSegments(path: string): PatternSegment[] {
   })
   let next = 0
   return (masked.startsWith('/') ? masked.slice(1) : masked).split('/').map((part): PatternSegment => {
-    if (part === '*') return { source: null, text: part }
-    if (!part.startsWith(HOLE)) return { source: escapeRegExp(part), text: part }
+    if (part === '*') return { source: null }
+    if (!part.startsWith(HOLE)) return { source: escapeRegExp(part), literal: part }
     // Hono's label runs to the next `/` or `{`, so text after the token (`:id.json`) is part of the name.
     const param = tokens[next++]!
-    return { source: param.constraint ?? '[^/]+', text: part, param }
+    return { source: param.constraint ?? '[^/]+', param }
   })
 }
 
@@ -424,7 +424,7 @@ export function routePathCovers(earlier: string, later: string): Match {
   const patterns = patternSegments(later)
   const last = patterns.length - 1
   const exact = patterns.every((pattern, index) => pattern.source !== null && pattern.param?.constraint === undefined && (!pattern.param?.optional || index === last))
-  const request = patterns.map((pattern): TestRequestSegment => (pattern.param || pattern.source === null ? { runtime: true } : { literal: pattern.text }))
+  const request = patterns.map((pattern): TestRequestSegment => (pattern.literal === undefined ? { runtime: true } : { literal: pattern.literal }))
   const requests = patterns[last]?.param?.optional ? [request, request.slice(0, -1)] : [request]
   const results = requests.map((segments) => routePathMatches(earlier, segments))
   if (results.includes('none')) return 'none'

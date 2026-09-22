@@ -896,8 +896,8 @@ class StatusContext {
 
   private routeMount(route: PlanAppRouteDetail): PlanAppMount {
     const mounts = this.detail!.mounts
-    const scope = route.module === null ? mounts.entry : (mounts.modules[route.module] ?? { unconfirmed: `nothing was read about modules/${route.module}` })
-    return scope === 'mounted' ? (route.shadowed ?? scope) : scope
+    const mount = route.module === null ? mounts.entry : (mounts.modules[route.module] ?? { unconfirmed: `nothing was read about modules/${route.module}` })
+    return mount === 'mounted' ? (route.shadowed ?? mount) : mount
   }
 
   private actionMount(key: string): PlanAppMount {
