@@ -11,10 +11,11 @@ import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
 import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
+import { listPlanReferences, type PlanReferenceField } from './references'
 import type { Plan, PlanDraft } from './schema'
 import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from './status'
-import type { PlanTaskDerivation } from './tasks'
+import { planElementParents, type PlanTaskDerivation } from './tasks'
 
 export function sha256(bytes: Uint8Array | string): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -49,35 +50,55 @@ export interface PlanVerificationSummary {
 }
 
 /**
- * The elements the behaviours `acceptanceIds` exercise, read off the plan (RFC 0030 §6): the
- * route each targets, the action it dispatches to and that action's controller, the validators,
- * policy and response it names, and the view a behaviour or that response renders with the
- * resources its props name. Nothing in a plan links a behaviour to a job, event or listener.
+ * Which references a behaviour's reach follows (RFC 0030 §6). A route runs its action, which
+ * validates, authorizes and responds with what it names; a page shows its props' resources.
+ * A view's form and action routes do not: posting to a route shows nothing of the page that
+ * links to it. Total, so a new reference is a decision here.
  */
-export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: readonly string[]): Set<string> {
-  const reached = new Set<string>()
-  const wanted = new Set(acceptanceIds)
-  const routes = new Map(plan.routes.map((route) => [route.id, route]))
-  const actions = new Map(plan.controllers.flatMap((controller) => controller.actions.map((action) => [action.id, { controller, action }] as const)))
-  const views = new Map(plan.views.map((view) => [view.id, view]))
-  const reachView = (id: string): void => {
-    reached.add(id)
-    for (const prop of views.get(id)?.props ?? []) if (prop.resource) reached.add(prop.resource)
-  }
+const REFERENCE_CARRIES_BEHAVIOUR: Record<PlanReferenceField, boolean> = {
+  'acceptance.route': true,
+  'acceptance.inertia': true,
+  'route.action': true,
+  'route.bind': true,
+  'action.params': true,
+  'action.query': true,
+  'action.body': true,
+  'action.policy': true,
+  'action.view': true,
+  'action.resource': true,
+  'view.propResource': true,
+  'resource.model': true,
+  'policy.model': true,
+  'view.actionRoute': false,
+  'view.formValidator': false,
+  'view.formSubmitsTo': false,
+  'column.references': false,
+  'model.relationship': false,
+  'question.affects': false,
+  'flow.node': false,
+  'task.covers': false,
+}
 
-  for (const behaviour of plan.tasks.flatMap((task) => task.acceptance)) {
-    if (!wanted.has(behaviour.id)) continue
-    reached.add(behaviour.route)
-    if (behaviour.expect.inertia) reachView(behaviour.expect.inertia)
-    const route = routes.get(behaviour.route)
-    if (!route) continue
-    for (const binding of route.bind) reached.add(binding.model)
-    const found = actions.get(route.action)
-    if (!found) continue
-    const { controller, action } = found
-    for (const id of [route.action, controller.id, action.params, action.query, action.body, action.authorization.policy?.id]) if (id) reached.add(id)
-    if (action.response.kind === 'inertia') reachView(action.response.view)
-    if (action.response.kind === 'resource') reached.add(action.response.resource)
+/**
+ * The elements the behaviours `acceptanceIds` exercise: what the carrying references reach
+ * from them, and the controller of every action reached. Nothing in a plan links a behaviour
+ * to a job, event, listener, mail or notification, so none is ever reached.
+ */
+export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: Iterable<string>): Set<string> {
+  const edges = new Map<string, string[]>()
+  for (const reference of listPlanReferences(plan)) {
+    if (!REFERENCE_CARRIES_BEHAVIOUR[reference.field]) continue
+    edges.set(reference.from.id, [...(edges.get(reference.from.id) ?? []), reference.to])
+  }
+  const parents = planElementParents(plan)
+  const reached = new Set<string>()
+  const pending = [...acceptanceIds]
+  for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+    for (const next of [...(edges.get(id) ?? []), parents.get(id)]) {
+      if (next === undefined || reached.has(next)) continue
+      reached.add(next)
+      pending.push(next)
+    }
   }
   return reached
 }
@@ -100,6 +121,15 @@ export function applyVerification(
   const lifted = new Map<string, PlanElementStatus<PlanElementState>>(status.elements.map((element) => [element.id, { ...element, notes: [...element.notes] }]))
   const staleSteps: string[] = []
 
+  // Every standing step that ran behaviours counts: one task's behaviour may render a page or return a resource another task placed.
+  const carriers = derivation.tasks.flatMap((task) =>
+    task.steps.filter((step) => {
+      const record = records[step.id]
+      return step.kind !== 'tests' && step.acceptanceIds.length > 0 && record !== undefined && recordStands(record, digest, hashes)
+    }),
+  )
+  const reached = behaviourReach(plan, carriers.flatMap((step) => step.acceptanceIds))
+
   for (const task of derivation.tasks) {
     for (const step of task.steps) {
       const record = records[step.id]
@@ -111,35 +141,27 @@ export function applyVerification(
       const recorded = record.fingerprint.files
       const changed = changedFiles(record, hashes)
       const verifiedBy = `Verified ${record.ranAt} by ${step.id}`
-      // A split step's earlier parts carry no behaviours: the task's last work step runs them all.
-      const carriers = task.steps.filter((candidate) => {
-        if (candidate.kind === 'tests' || candidate.acceptanceIds.length === 0) return false
-        if (candidate === step) return true
-        const carried = records[candidate.id]
-        return carried?.outcome === 'verified' && carried.planDigest === digest && changedFiles(carried, hashes).length === 0
-      })
-      const reached = behaviourReach(plan, carriers.flatMap((carrier) => carrier.acceptanceIds))
       for (const id of step.elementIds) {
         const element = lifted.get(id)
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
-        const unread = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
-        // Past the reach test an `unjudged` element is one a behaviour exercised, whose test files a standing record covers.
+        const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
+        // An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers.
         const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
         if (!awaitsVerification(element)) {
-          element.notes.push(`${verifiedBy}, and no longer at the state that completes it.`)
-        } else if (unread && !reached.has(id)) {
-          element.notes.push(`${verifiedBy}, and no planned property of it was read and no verified behaviour of its task reaches it, so that result is not counted.`)
+          element.notes.push(`${verifiedBy}${NO_LONGER_COMPLETE}`)
         } else if (element.files.length === 0 && !needsNoFiles) {
           element.notes.push(`${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
           element.state = 'drifted'
           element.notes.push(`${verifiedBy}; now in a file that run did not fingerprint: ${uncovered.join(', ')}.`)
-        } else if (changed.length === 0) {
-          element.state = 'verified'
-        } else {
+        } else if (changed.length > 0) {
           element.state = 'drifted'
           element.notes.push(`${verifiedBy}; changed since: ${changed.join(', ')}.`)
+        } else if (unmatched && !reached.has(id)) {
+          element.notes.push(`${verifiedBy}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: ${NOT_REACHED_REMEDY}.`)
+        } else {
+          element.state = 'verified'
         }
       }
     }
@@ -250,7 +272,31 @@ function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string
  * `waived` defaults to none, which retires a record resting on one rather than keeping it.
  */
 export function recordStillHolds(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>, waived: ReadonlySet<string> = new Set()): boolean {
-  if (record.outcome !== 'verified' || record.planDigest !== digest) return false
-  if (record.waived.some((id) => !waived.has(id))) return false
-  return changedFiles(record, hashes).length === 0
+  return recordStands(record, digest, hashes) && record.waived.every((id) => waived.has(id))
+}
+
+/** Verified against this plan digest, every fingerprinted file hashing as it did: what a record must be to count at all. */
+export function recordStands(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>): boolean {
+  return record.outcome === 'verified' && record.planDigest === digest && changedFiles(record, hashes).length === 0
+}
+
+const NO_LONGER_COMPLETE = ', and no longer at the state that completes it.'
+
+/** What unsticks an element no verified behaviour reaches; running `plan:verify` again cannot. */
+export const NOT_REACHED_REMEDY = 'add a behaviour that reaches it, or waive it'
+
+/**
+ * What holds an element short of `verified` or `waived`, and what would move it, for the
+ * commands that refuse or report on such an element (`plan:close`, `plan:next`). Suggests
+ * `plan:verify` only where running it can lift the element.
+ */
+export function whatHoldsElement(element: PlanElementStatus<PlanElementState>): string {
+  const detail = element.reason ?? element.notes.filter((note) => !note.endsWith(NO_LONGER_COMPLETE)).at(-1)
+  const lead = detail ? `${detail.replace(/\.$/u, '')}; ` : ''
+  if (element.notes.some((note) => note.includes(NOT_REACHED_REMEDY))) return detail!.replace(/\.$/u, '')
+  if (element.state === 'blocked') return `${lead}fix what keeps it from being read, or waive it`
+  // A verified record whose files changed since is drifted by the overlay, and a fresh run may lift it again.
+  const expired = element.state === 'drifted' && element.notes.some((note) => note.startsWith('Verified '))
+  if (awaitsVerification(element) || expired) return `${lead}run guren plan:verify`
+  return `${lead}implement it, or waive it`
 }

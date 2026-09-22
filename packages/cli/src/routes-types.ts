@@ -8,6 +8,7 @@ import {
   RUNTIME_ROUTE_FUNCTION,
   RUNTIME_UTILITY_FUNCTIONS,
 } from './routes-types-fragments'
+import { CONTRACT_SEGMENTS } from './contract-segments'
 import { schemaToTypeString } from './schema-type-extractor'
 
 export type RouteDefinition = {
@@ -123,8 +124,6 @@ export const routes = ${helperObject} as const
 
 ${RUNTIME_UTILITY_FUNCTIONS}${buildContractAugmentation(namedDefinitions)}`
 }
-
-const CONTRACT_SEGMENTS = ['params', 'query', 'body'] as const
 
 /**
  * The `GurenRouteContracts` registry `Controller.validated()` reads: each named

@@ -306,7 +306,7 @@ export function registerWebRoutes(router: Router): void {
 
     expect(states(result)['action.comments.store']).toBe('present')
     expect(result.elements.find((element) => element.id === 'action.comments.store')!.notes).toEqual([
-      'Not wired: body validator CommentPayloadSchema is not used (found no validate call).',
+      'Not wired: body validator CommentPayloadSchema is not used (the body calls no validate method, and no route contract holds it).',
     ])
     expect(states(result)['validator.comment']).toBe('present')
     expect(result.elements.find((element) => element.id === 'validator.comment')!.notes).toEqual([

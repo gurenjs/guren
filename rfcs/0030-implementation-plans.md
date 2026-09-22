@@ -1077,9 +1077,10 @@ page or ability: a miss may be a helper's work. A planned `body` / `params` /
 `query` validator is read off the `this.validateBody` / `validateQuery` /
 `validateParams` call that takes it, the same reading the validator's own
 `wired` evidence uses, and never off a mention: an action whose only planned
-property is a validator its body merely names is ~~`unjudged`~~ `planned` for
-an `alter` and `present` for an `add`, not `wired` (the validator is then a
-`differ`, under *status rules after Part 2* below).
+property is a validator its body merely names is not `wired`. It reads
+`planned` for an `alter` and `present` for an `add`, since the validator is
+then a `differ` (see *status rules after Part 2* below); an earlier reading
+made it `unjudged`.
 Prose (`purpose`, `rules`, a description) is not
 a planned property and is not counted as one. Flows, tasks, behaviours and
 questions are not judged; a `command` and a `mail` / `notification` class are
@@ -1353,41 +1354,56 @@ each rule was read.
   target existed before the plan.
 - A planned `params`, `query` or `body` validator is `match` when the action
   body validates with it, or when a route dispatching to the action holds it as
-  its contract schema (object identity against the registered definitions, as
-  for the validator's own `wired`). It is `differ` when the body was read and
-  does neither, naming what the body validates with or `no validate call`, and
-  `unknown` only when no body was read. That `differ` does not drift the
-  action: it holds it at `present` with a note (`Not wired: ...`), and another
-  differing property is what makes it `drifted`. An `alter` whose readable
-  properties all differ stays `planned`. A helper that validates on the
-  action's behalf now reads as a `differ`; every such miss the measurement met
-  was a removed call, and holding an action back is the side to be wrong on.
+  a contract schema (object identity against the registered definitions, as for
+  the validator's own `wired`). Neither reading records which segment the
+  schema sits in, so a `query` contract or a `validateQuery` call satisfies a
+  planned `body` validator. It is `differ` when the body was read and does
+  neither, and `unknown` only when no body was read. That `differ` does not
+  drift the action: it holds it at `present` with a note (`Not wired: ...`),
+  and another differing property is what makes it `drifted`. An `alter` whose
+  readable properties all differ stays `planned`. A validate call is read as
+  written, so `this.validateBody(schemas.comment)` names `schemas.comment`,
+  which is not an export; the note says so and asks for the schema by name or
+  in the route contract. A helper that validates on the action's behalf also
+  reads as a `differ`, which holds the action back rather than passing it.
 - An element none of whose planned properties matched rests on existence, a
   mount or its behaviours alone, whatever its state. `plan:status` lifts such an
-  element to `verified` only while a verified step of its task ran behaviours
-  that reach it. A `drop` is the exception, since its absence is re-read on
-  every status. A behaviour reaches the route it targets, that route's bound
-  models, the action the route dispatches to and its controller, the action's
-  validators, policy and response view or resource, the view its
-  `expect.inertia` names, and the resources a reached view's props name. The
-  behaviours that count are those of the task's work step that carries the
-  acceptance ids, whose record must be `verified` against this plan digest
-  with its fingerprint unchanged; this is what lets the earlier parts of a
-  split `http` step lift what the last part's behaviours reach. The `tests`
-  step never counts: it verifies by seeing the behaviours fail. Nothing in a
-  plan links a behaviour to a job, event, listener, mail or notification (a
-  side effect's `trigger` is prose), so those are not lifted this way.
+  element to `verified` only while a verified behaviour reaches it. A `drop` is
+  the exception, since its absence is re-read on every status. Reach follows
+  the plan's references (`listPlanReferences()`) from a behaviour, through a
+  total table of which reference fields carry it: a behaviour's route and
+  expected page, a route's action and bound models, an action's validators,
+  policy and response page or resource, a page's prop resources, and the model
+  of a reached resource or policy; an action reached also reaches its
+  controller. A page's form validator, form target and action routes do not
+  carry it, since a request to a route shows nothing of the page that links to
+  it. Nothing in a plan links a behaviour to a job, event, listener, mail or
+  notification (a side effect's `trigger` is prose). The behaviours that count
+  are those of every step in the plan that carries acceptance ids and whose
+  record stands (`recordStands()`: verified against this plan digest, its
+  fingerprint unchanged), since one task's behaviour may render a page or return
+  a resource another task placed; the same predicate lets the earlier parts of
+  a split `http` step lift what the last part's behaviours reach. The `tests`
+  step never counts: it verifies by seeing the behaviours fail.
 - `recordStillHolds()` and the step outcome `plan:verify` records are
   unchanged. A step whose commands and behaviours passed stays `verified` and
   its record stands for `plan:next` and the `Stop` hook, because an element no
-  behaviour reaches is a gap in the plan that no implementation closes.
-  `plan:close` lists it until it is waived or the plan is revised to carry a
-  behaviour that reaches it.
-- On the comments fixture, judged against scratch applications with every step
-  recorded as verified, the finished implementation now lifts 13 of its 15
-  elements. `resource.comment` (fields unread, and no behaviour returns it) and
-  `view.posts.show` (only `form`, `actions` and `states` changed, and no
-  behaviour renders it) close only by a waiver or a behaviour that reaches them.
+  behaviour reaches is a gap in the plan that no implementation closes. Such an
+  element carries a note ending in "add a behaviour that reaches it, or waive
+  it". `plan:close` prints each element it refuses with what holds it, and
+  suggests `plan:verify` only where a run can lift it. `plan:next`, once every
+  step is verified, lists the elements `plan:close` would still refuse, so an
+  agent does not stop on a plan that cannot close.
+- What this costs a plan. A plan whose side effects or commands the behaviours
+  cannot reach, or with any other element that plans no property and no
+  behaviour reaches (a controller of an action nothing requests, a resource
+  nothing returns or renders), closes only by a waiver or a behaviour that
+  reaches it. On the comments fixture, judged against scratch applications with
+  every step recorded as verified, the finished implementation lifts 13 of its
+  15 elements. `resource.comment` has unread fields and no behaviour returns it.
+  `view.posts.show` changes only `form`, `actions` and `states`, and its form
+  targets a route, which does not carry reach. Both need a waiver, or a
+  behaviour with `expect.inertia` on the route that shows the post.
 - Pending: cause 1, an `alter` completing on a property that already held.
   Telling the two apart needs the per-property readings of every `alter`
   recorded at approval, which arrives with the change to re-approval; the rule

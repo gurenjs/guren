@@ -14,6 +14,8 @@ let ROOT: string
 const CONTROLLER = `import { Controller } from '@guren/core'
 import { OrphanPayloadSchema, PostPayloadSchema } from '../Validators/PostValidator.js'
 
+const schemas = { post: PostPayloadSchema }
+
 export class PostController extends Controller {
   async index() {
     // this.inertia('posts/Commented', {})
@@ -26,6 +28,7 @@ export class PostController extends Controller {
   async update() {
     await this.validateBodySafe(PostPayloadSchema)
     this.validateQuery<{ page: number }>(OrphanPayloadSchema)
+    this.validateParams(schemas . post)
     return this.redirect('/posts')
   }
   async destroy() {
@@ -203,7 +206,7 @@ describe('loadPlanAppState({ detail: true })', () => {
       { key: 'PostController.store', calls: ['validateBody', 'redirect'], validates: ['PostPayloadSchema'] },
       // The `Safe` variants and the generic form are validation too, and every one of the
       // six helpers is declared generic in `Controller.ts`.
-      { key: 'PostController.update', validates: ['PostPayloadSchema', 'OrphanPayloadSchema'] },
+      { key: 'PostController.update', validates: ['PostPayloadSchema', 'OrphanPayloadSchema', 'schemas.post'] },
       { key: 'PostController.destroy', pages: [], calls: ['authorize', 'redirect'], abilities: ['delete'], validates: [] },
     ])
   })

@@ -13,6 +13,7 @@ import type { File, Node, Statement } from '@babel/types'
 
 import { unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
 import { createAppOptions } from '../config-check'
+import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
 import {
@@ -98,7 +99,7 @@ export interface PlanAppActionDetail {
   abilities: string[]
   /** Identifiers the body mentions, comments and strings excluded: a mention, not a use. */
   identifiers: string[]
-  /** Schemas handed to `this.validateBody/Query/Params(`, which is a use. */
+  /** Schemas handed to `this.validateBody/Query/Params(`, which is a use; a member chain as written (`schemas.post`). */
   validates: string[]
 }
 
@@ -185,12 +186,9 @@ const VALIDATE_MEMBERS = [
 ] as const satisfies readonly ControllerMemberName[]
 
 const VALIDATE_CALL_PATTERN = new RegExp(
-  `\\bthis\\s*\\.\\s*${accessorCallPattern(VALIDATE_MEMBERS)}\\s*([A-Za-z_$][\\w$]*)`,
+  `\\bthis\\s*\\.\\s*${accessorCallPattern(VALIDATE_MEMBERS)}\\s*([A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)`,
   'g',
 )
-
-/** Route contract keys (`RouteContractOptions`) whose value is a schema. */
-const CONTRACT_SCHEMA_KEYS = ['body', 'params', 'query'] as const
 
 /** A validator file is imported only to match a contract schema, so it gets the schema reader's budget. */
 const VALIDATOR_IMPORT_TIMEOUT_MS = 5000
@@ -239,7 +237,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
 function contractSchemaObjects(definitions: RouteDefinition[] | undefined): Set<object> {
   const objects = new Set<object>()
   for (const definition of definitions ?? []) {
-    for (const key of CONTRACT_SCHEMA_KEYS) {
+    for (const key of CONTRACT_SEGMENTS) {
       const schema = definition.schemas?.[key]
       if (schema !== null && typeof schema === 'object') objects.add(schema)
     }
@@ -269,7 +267,7 @@ function contractSymbols(definition: RouteDefinition | undefined, symbols: Schem
   const schemas = definition?.schemas
   if (!schemas) return []
   return unique(
-    CONTRACT_SCHEMA_KEYS.flatMap((key) => {
+    CONTRACT_SEGMENTS.flatMap((key) => {
       const schema = schemas[key]
       return schema !== null && typeof schema === 'object' ? (symbols.get(schema) ?? []) : []
     }),
@@ -332,7 +330,7 @@ export function describeActions(root: string, controllers: ControllerMethodScan)
       calls: unique([...info.body.matchAll(MEMBER_CALL_PATTERN)].map((match) => match[1]!)),
       abilities: unique([...info.rawBody.matchAll(ABILITY_PATTERN)].filter((match) => isCode(match.index)).map((match) => match[2]!)),
       identifiers: unique(info.body.match(IDENTIFIER_PATTERN) ?? []),
-      validates: unique([...info.body.matchAll(VALIDATE_CALL_PATTERN)].map((match) => match[1]!)),
+      validates: unique([...info.body.matchAll(VALIDATE_CALL_PATTERN)].map((match) => match[1]!.replace(/\s+/g, ''))),
     }
   })
 }

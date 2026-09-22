@@ -6,6 +6,7 @@
  * reader is `unknown`, which never counts towards `present` and never satisfies a `drop`.
  */
 
+import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { SchemaColumnDefault, SchemaConstraint } from '../schema-parser'
 import type { RuntimeSchemaColumn, SourcedSchemaTable } from '../schema-runtime'
 import type {
@@ -117,8 +118,6 @@ interface Judgement {
   files?: () => string[]
   /** No reader exists for this kind of element at all. */
   unjudged?: string
-  /** Properties whose `differ` withholds the mount rather than drifting the element: a use the code does not make yet. */
-  withholding?: ReadonlySet<string>
   notes?: string[]
 }
 
@@ -201,11 +200,11 @@ function conclude(judgement: Judgement): PlanElementStatus {
     return result('unjudged', { reason: 'No planned property of this element could be read, and its existence says nothing about them.' })
   }
   if (change.kind === 'alter' && differing.length > 0 && differing.length === readable.length) return result('planned')
-  const withheld = differing.filter((property) => judgement.withholding?.has(property.property))
+  const withheld = differing.filter((property) => WITHHOLDS_MOUNT.has(property))
   if (differing.length > withheld.length) return result('drifted')
 
   if (withheld.length > 0) {
-    notes.push(`Not wired: ${withheld.map((property) => `${property.property} ${property.planned} is not used (found ${property.actual})`).join('; ')}.`)
+    notes.push(`Not wired: ${withheld.map(unusedValidator).join('; ')}.`)
     return result('present')
   }
   if (!judgement.mount) return result('present')
@@ -283,8 +282,32 @@ function previousOf(change: PlanChange, lookup: (name: string) => Existence): Ex
   return change.kind === 'rename' ? lookup(change.from) : undefined
 }
 
-const VALIDATOR_FIELDS = ['params', 'query', 'body'] as const
-const VALIDATOR_PROPERTIES: ReadonlySet<string> = new Set(VALIDATOR_FIELDS.map((field) => `${field} validator`))
+/** A `differ` that holds its element at `present` instead of drifting it: a use the code does not make yet. */
+const WITHHOLDS_MOUNT = new WeakSet<PlanPropertyStatus>()
+
+function withholding(property: PlanPropertyStatus): PlanPropertyStatus {
+  WITHHOLDS_MOUNT.add(property)
+  return property
+}
+
+const NO_VALIDATE_CALL = 'no validate call'
+
+function unusedValidator(property: PlanPropertyStatus): string {
+  const head = `${property.property} ${property.planned} is not used`
+  if (property.actual === NO_VALIDATE_CALL) return `${head} (the body calls no validate method, and no route contract holds it)`
+  // The scan names a member chain as written, never the export it evaluates to.
+  const chain = property.actual?.split(', ').find((name) => name.includes('.'))
+  if (chain) return `${head} (the body validates with ${property.actual}; ${chain} cannot be read as an export, so validate with ${property.planned} by name or hold it in the route contract)`
+  return `${head} (the body validates with ${property.actual})`
+}
+
+/**
+ * Whether a registered route to an action holds `symbol` as a contract schema. Any segment
+ * counts: `contractSchemas` does not say which, so a `query` contract satisfies a planned `body`.
+ */
+function contractHolds(route: PlanAppRouteDetail, symbol: string): boolean {
+  return route.contractSchemas.includes(symbol)
+}
 
 const NO_DETAIL: PlanAppUnreadable = { unreadable: 'the application state was loaded without detail' }
 
@@ -695,7 +718,6 @@ class StatusContext {
       exists: find(action.name),
       previous: previousOf(action.change, find),
       properties: () => this.actionProperties(action, key),
-      withholding: VALIDATOR_PROPERTIES,
       mount: () => this.actionMount(key),
       files: () => this.controllerFiles(controller.className, controller.module),
     })
@@ -721,17 +743,16 @@ class StatusContext {
 
     // A mention is not a use, here as for the validator's own mount: a symbol can be
     // named by a leftover import or in a type position, and neither validates anything.
-    // A readable body that validates with another schema or none is a `differ`, even though
-    // a helper might do the work: every such miss the Part 2 measurement met was a fault.
+    // A readable body that validates with another schema or none is a `differ` (RFC 0030 §6).
     const contracts = this.routesTo(key)
-    for (const field of VALIDATOR_FIELDS) {
+    for (const field of CONTRACT_SEGMENTS) {
       const id = action[field]
       if (!id) continue
       const property = `${field} validator`
       const name = this.namesById.get(id) ?? id
       if (body?.validates.includes(name)) properties.push(match(property, name))
-      else if (!isUnreadable(contracts) && contracts.some((route) => route.contractSchemas.includes(name))) properties.push(match(property, name, 'the route contract'))
-      else if (body) properties.push(differ(property, name, body.validates.length > 0 ? body.validates.join(', ') : 'no validate call'))
+      else if (!isUnreadable(contracts) && contracts.some((route) => contractHolds(route, name))) properties.push(match(property, name, 'the route contract'))
+      else if (body) properties.push(withholding(differ(property, name, body.validates.length > 0 ? body.validates.join(', ') : NO_VALIDATE_CALL)))
       else properties.push(unknown(property, name, 'the action body could not be read'))
     }
     const policy = action.authorization.policy
@@ -798,7 +819,7 @@ class StatusContext {
     }
 
     for (const route of isUnreadable(routes) ? [] : routes) {
-      if (!route.contractSchemas.includes(symbol)) continue
+      if (!contractHolds(route, symbol)) continue
       const mount = this.routeMount(route)
       if (mount === 'mounted') return 'mounted'
       reasons.push(`the contract of ${route.name ?? `${route.method} ${route.path}`} holds it, and ${mount.unconfirmed}`)

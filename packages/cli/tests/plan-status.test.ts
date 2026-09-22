@@ -524,8 +524,11 @@ describe('judgePlan', () => {
 
       const none = only(judgePlan(document, scanned([])), 'a')
       expect(none.properties).toEqual([{ property: 'body validator', verdict: 'differ', planned: 'PostPayloadSchema', actual: 'no validate call' }])
-      expect(none).toMatchObject({ state: 'present', notes: ['Not wired: body validator PostPayloadSchema is not used (found no validate call).'] })
+      expect(none).toMatchObject({ state: 'present', notes: ['Not wired: body validator PostPayloadSchema is not used (the body calls no validate method, and no route contract holds it).'] })
       expect(only(judgePlan(document, scanned(['OtherSchema'])), 'a').properties[0]).toMatchObject({ verdict: 'differ', actual: 'OtherSchema' })
+      expect(only(judgePlan(document, scanned(['schemas.post'])), 'a').notes).toEqual([
+        'Not wired: body validator PostPayloadSchema is not used (the body validates with schemas.post; schemas.post cannot be read as an export, so validate with PostPayloadSchema by name or hold it in the route contract).',
+      ])
     })
 
     test('should leave an added element with planned properties and no mount unjudged when none of them can be read', () => {

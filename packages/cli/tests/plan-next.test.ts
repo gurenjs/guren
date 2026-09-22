@@ -151,7 +151,7 @@ describe('plan:next', () => {
     await writeState(app, { steps: Object.fromEntries(STEPS.map((id) => [id, id === SCAFFOLD ? record : filed])) })
     const done = await planNextFile(plan, { appRoot: app, now: NOW })
     expect(done.step).toBeNull()
-    expect(formatPlanNext(done, 'comments.plan.json')).toContain(`Every step is verified. Nothing is left to implement.\n${SCAFFOLD}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
+    expect(formatPlanNext(done, 'comments.plan.json')).toContain(`\n${SCAFFOLD}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
   })
 
   test('should report that every step is verified and clear the mark, uncommitted work or not', async () => {
@@ -169,7 +169,15 @@ describe('plan:next', () => {
     expect(report.step).toBeNull()
     expect(report.verified).toEqual(STEPS)
     expect((await readState(app)).active).toBeUndefined()
-    expect(formatPlanNext(report, 'comments.plan.json')).toContain('Every step is verified.')
+    // Nothing of the plan is written in this application, so plan:close would refuse every element, and says why.
+    expect(report.unverified).toContainEqual({ id: 'resource.comment', state: 'planned', holds: 'implement it, or waive it' })
+    const text = formatPlanNext(report, 'comments.plan.json')
+    expect(text).toContain('Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.\n  model.post (planned): The element this alters was not found; implement it, or waive it')
+    expect(text).not.toContain('Nothing is left to implement')
+
+    const unread = await planNextFile(plan, { appRoot: app, now: NOW, statusApp: () => Promise.reject(new Error('the schema threw')) })
+    expect(unread.unverifiedUnreadable).toBe('the schema threw')
+    expect(formatPlanNext(unread, 'comments.plan.json')).toContain('Every step is verified. Nothing is left to implement.\nThe elements were not judged')
   })
 
   test('should refuse uncommitted changes unless they are the marked step\'s own', async () => {

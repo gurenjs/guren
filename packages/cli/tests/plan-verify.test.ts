@@ -9,7 +9,7 @@ import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPla
 import { planHash } from '../src/plan/identity'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
-import { applyVerification, applyWaivers, behaviourReach, hashFiles, overlayVerification, planWaivers, recordStillHolds, sha256 } from '../src/plan/verification'
+import { applyVerification, applyWaivers, behaviourReach, hashFiles, whatHoldsElement, overlayVerification, planWaivers, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
@@ -476,6 +476,131 @@ function record(overrides: Partial<PlanStepRecord> = {}): PlanStepRecord {
 
 const DATA_FILES = ['db/schema.ts', 'app/Models/Comment.ts']
 
+/** Posts listed on a page and shown as a resource, in two tasks: every clause a behaviour's reach follows, and three it does not. */
+function reachPlan(): PlanDraft {
+  const route = (id: string, method: string, path: string, action: string) => ({ id, change: { kind: 'add' }, method, path, name: id.slice(2), action, middleware: [], bind: [] })
+  const action = (id: string, name: string, response: Record<string, unknown>) => ({ id, change: { kind: 'add' }, name, authorization: { middleware: [] }, response, rules: [] })
+  const behaviour = (id: string, routeId: string, expect: Record<string, unknown> = {}) => ({ id, description: 'x', kind: 'success', actor: 'user', route: routeId, given: [], expect: { status: 200, ...expect } })
+  return PlanDraftSchema.parse({
+    planVersion: 1,
+    title: 'Reach',
+    summary: 'Reach fixture.',
+    locale: 'en',
+    scope: { goals: [], nonGoals: [] },
+    models: [
+      { id: 'm', change: { kind: 'existing' }, name: 'Post', table: 'posts', columns: [], relationships: [], fillable: [] },
+      { id: 'm.user', change: { kind: 'existing' }, name: 'User', table: 'users', columns: [], relationships: [], fillable: [] },
+    ],
+    validators: [{ id: 'val', change: { kind: 'add' }, name: 'PostPayloadSchema', fields: [] }],
+    controllers: [
+      {
+        id: 'ctl',
+        change: { kind: 'add' },
+        className: 'PostController',
+        actions: [
+          action('a.index', 'index', { kind: 'inertia', view: 'v.index' }),
+          action('a.show', 'show', { kind: 'resource', resource: 'res.post' }),
+          action('a.store', 'store', { kind: 'redirect', to: '/posts' }),
+        ],
+      },
+    ],
+    routes: [route('r.index', 'GET', '/posts', 'a.index'), route('r.show', 'GET', '/posts/:id', 'a.show'), route('r.store', 'POST', '/posts', 'a.store')],
+    views: [
+      {
+        id: 'v.index',
+        change: { kind: 'add' },
+        page: 'posts/Index',
+        purpose: 'List posts.',
+        props: [{ name: 'authors', type: 'Data.User[]', resource: 'res.list' }],
+        form: { validator: 'val', submitsTo: 'r.store', fields: [] },
+        actions: [{ label: 'New', route: 'r.store' }],
+        states: {},
+      },
+    ],
+    resources: [
+      { id: 'res.post', change: { kind: 'add' }, name: 'PostResource', model: 'm', fields: [] },
+      { id: 'res.list', change: { kind: 'add' }, name: 'UserResource', model: 'm.user', fields: [] },
+    ],
+    tasks: [
+      { id: 'task.list', entity: 'User', summary: 'The author resource.', covers: ['res.list'], acceptance: [] },
+      {
+        id: 'task.pages',
+        entity: 'Post',
+        summary: 'List and show posts.',
+        covers: ['ctl', 'r.index', 'r.show', 'r.store', 'v.index', 'res.post', 'val'],
+        acceptance: [behaviour('AC-show', 'r.show'), behaviour('AC-page', 'r.store', { inertia: 'v.index' }), behaviour('AC-index', 'r.index')],
+      },
+    ],
+  })
+}
+
+describe('behaviourReach', () => {
+  test('should reach the resource an action responds with', () => {
+    const reached = behaviourReach(reachPlan(), ['AC-show'])
+    expect([...reached].sort()).toEqual(['a.show', 'ctl', 'm', 'r.show', 'res.post'])
+  })
+
+  test('should reach the page a behaviour expects and the resources its props name, never its form or action routes', () => {
+    const reached = behaviourReach(reachPlan(), ['AC-page'])
+    expect(reached.has('v.index')).toBe(true)
+    expect(reached.has('res.list')).toBe(true)
+    // `r.store` is reached as the behaviour's own route; the form's validator is not, since `a.store` names none.
+    expect(reached.has('val')).toBe(false)
+    const index = behaviourReach(reachPlan(), ['AC-index'])
+    expect(index.has('r.store') || index.has('val')).toBe(false)
+  })
+
+  test('should reach the page an action responds with', () => {
+    const reached = behaviourReach(reachPlan(), ['AC-index'])
+    expect(reached.has('v.index')).toBe(true)
+    expect(reached.has('res.list')).toBe(true)
+  })
+
+  test('should lift an element of one task on the standing behaviours of another', async () => {
+    const reach = reachPlan()
+    const split = derivePlanTasks(reach)
+    const steps = split.tasks.flatMap((task) => task.steps)
+    const owner = steps.find((step) => step.elementIds.includes('res.list'))!
+    const carrier = steps.find((step) => step.kind !== 'tests' && step.acceptanceIds.includes('AC-page'))!
+    expect(split.tasks.find((task) => task.steps.includes(owner))).not.toBe(split.tasks.find((task) => task.steps.includes(carrier)))
+    const file = 'app/Http/Controllers/CommentController.ts'
+    const hashes = await hashFiles(ROOT, [file])
+    const covered = record({ fingerprint: { ...FINGERPRINT, files: { [file]: sha256(FILES[file]!) } } })
+    const judged = judgePlan(reach, planAppState())
+    const elements = judged.elements.map((element): PlanElementStatus => ({ ...element, state: element.completesAt, files: [file], properties: [], notes: [] }))
+    const status = { elements, summary: summarize(elements) }
+    const listAfter = (records: Record<string, PlanStepRecord>) => elementOf(applyVerification(status, split, records, 'digest', hashes, reach).status, 'res.list').state
+
+    expect(listAfter({ [owner.id]: covered })).toBe('present')
+    expect(listAfter({ [owner.id]: covered, [carrier.id]: covered })).toBe('verified')
+  })
+})
+
+describe('whatHoldsElement', () => {
+  const element = (state: PlanElementState, extra: Partial<PlanElementStatus<PlanElementState>> = {}): PlanElementStatus<PlanElementState> => ({
+    id: 'e',
+    section: 'resources',
+    change: 'add',
+    label: 'E',
+    state,
+    properties: [],
+    notes: [],
+    completesAt: 'present',
+    files: [],
+    ...extra,
+  })
+
+  test('should suggest plan:verify only where a run can lift the element', () => {
+    expect(whatHoldsElement(element('present'))).toBe('run guren plan:verify')
+    expect(whatHoldsElement(element('drifted', { notes: ['Verified t by s; changed since: a.ts.'] }))).toBe('Verified t by s; changed since: a.ts; run guren plan:verify')
+    expect(whatHoldsElement(element('planned'))).toBe('implement it, or waive it')
+    expect(whatHoldsElement(element('drifted', { notes: ['Not wired: x.'] }))).toBe('Not wired: x; implement it, or waive it')
+    expect(whatHoldsElement(element('blocked', { reason: 'the models could not be read' }))).toBe('the models could not be read; fix what keeps it from being read, or waive it')
+    const stuck = 'Verified t by s, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.'
+    expect(whatHoldsElement(element('present', { notes: [stuck] }))).toBe(stuck.slice(0, -1))
+  })
+})
+
 describe('applyVerification', () => {
   test('should lift the elements of a verified step while its fingerprint still matches', async () => {
     const hashes = await hashFiles(ROOT, DATA_FILES)
@@ -528,7 +653,7 @@ describe('applyVerification', () => {
     expect(elementOf(lifted, 'action.comments.store').state).toBe('verified')
     const body = elementOf(lifted, 'column.comment.body')
     expect(body.state).toBe('unjudged')
-    expect(body.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, and no planned property of it was read and no verified behaviour of its task reaches it, so that result is not counted.`])
+    expect(body.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`])
   })
 
   test('should reach what a behaviour\u2019s route dispatches to and names, and nothing the plan does not link to it', () => {
@@ -560,7 +685,7 @@ describe('applyVerification', () => {
     expect(elementOf(lifted, 'validator.comment').state).toBe('verified')
     const resource = elementOf(lifted, 'resource.comment')
     expect(resource.state).toBe('present')
-    expect(resource.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${HTTP}, and no planned property of it was read and no verified behaviour of its task reaches it, so that result is not counted.`])
+    expect(resource.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${HTTP}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`])
     // A property a reader matched is a reading of the change itself, which needs no behaviour to reach it.
     expect(elementOf(applyVerification(statusOf(), derivation, { [HTTP]: http }, 'digest', hashes, plan).status, 'resource.comment').state).toBe('verified')
   })

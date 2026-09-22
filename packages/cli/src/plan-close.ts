@@ -22,7 +22,7 @@ import { entityDocPath, planDocPath, renderEntityDoc, renderPlanDoc, touchedMode
 import type { PlanWaiver } from './plan/decisions'
 import { hasBaseline } from './plan/render'
 import { planSlug } from './plan/state'
-import { readPlanWaivers } from './plan/verification'
+import { readPlanWaivers, whatHoldsElement } from './plan/verification'
 
 export const PLAN_CLOSE_REPORT_VERSION = 1
 
@@ -96,12 +96,12 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
   const verification = status.verification
   const blockers = status.elements
     .filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
-    .map((element) => `  ${element.id}: ${element.state}${element.reason ? ` (${element.reason})` : ''}`)
+    .map((element) => `  ${element.id}: ${element.state} (${whatHoldsElement(element)})`)
   if (verification?.unreadable) blockers.push(`  verification records: ${verification.unreadable}`)
   if (verification?.decisionsUnreadable) blockers.push(`  decision log: ${verification.decisionsUnreadable}`)
   if (blockers.length > 0) {
     throw new CliError(
-      `${path} is not closed: every element must be verified (guren plan:verify) or waived with a reason (guren plan:waive), and these are not:\n${blockers.join('\n')}`,
+      `${path} is not closed: every element must be verified or waived with a reason (guren plan:waive), and these are not, each with what holds it:\n${blockers.join('\n')}`,
     )
   }
 

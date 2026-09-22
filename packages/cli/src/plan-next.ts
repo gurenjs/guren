@@ -15,17 +15,19 @@ import { runGit } from './changed-files'
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
+import { planStatusFile } from './plan-status'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval } from './plan/approvals'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
+import type { PlanElementState } from './plan/status'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
-import { hashFiles, readPlanWaivers, recordStillHolds } from './plan/verification'
+import { hashFiles, readPlanWaivers, recordStillHolds, whatHoldsElement, type PlanWaiversRead } from './plan/verification'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
 
@@ -87,6 +89,13 @@ export interface PlanNextReport {
   decisionsUnreadable?: string
   /** Set when the application could not be read for a plan with a baseline, so no step was held. */
   freshnessUnreadable?: string
+  /**
+   * With every step verified: the elements `plan:status` still does not count as verified or
+   * waived, which `plan:close` refuses, each with what holds it. Absent while a step is left.
+   */
+  unverified?: Array<{ id: string; state: PlanElementState; holds: string }>
+  /** Set when every step is verified and the application could not be read to list `unverified`. */
+  unverifiedUnreadable?: string
 }
 
 export interface PlanNextFileOptions {
@@ -95,6 +104,8 @@ export interface PlanNextFileOptions {
   app?: PlanAppState | (() => Promise<PlanAppState>)
   cwd?: string
   now?: () => Date
+  /** Read once every step is verified, for `unverified`. Defaults to {@link loadPlanAppState} with `detail`. */
+  statusApp?: PlanAppState | (() => Promise<PlanAppState>)
 }
 
 /** The items a section holds; some sections are nested inside another's items. */
@@ -146,6 +157,23 @@ async function stepContexts(
     return { contexts: new Map(), unreadable: error instanceof Error ? error.message : String(error) }
   }
   return { contexts: judgeStepContext(plan, judgeFreshness(plan, app), derivation, { inProgress }), app }
+}
+
+/** What `plan:close` would still refuse once every step is verified; a load that throws is reported, never fatal. */
+async function unverifiedElements(
+  path: string,
+  plan: PlanDraft,
+  root: string,
+  options: PlanNextFileOptions,
+  waivers: PlanWaiversRead,
+): Promise<Pick<PlanNextReport, 'unverified' | 'unverifiedUnreadable'>> {
+  try {
+    const status = await planStatusFile(path, { app: options.statusApp ?? (() => loadPlanAppState(root, { detail: true })), appRoot: root, read: { path, plan }, waivers, approval: undefined })
+    const open = status.elements.filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
+    return { unverified: open.map((element) => ({ id: element.id, state: element.state, holds: whatHoldsElement(element) })) }
+  } catch (error) {
+    return { unverifiedUnreadable: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 export async function planNextFile(planPath: string, options: PlanNextFileOptions): Promise<PlanNextReport> {
@@ -228,7 +256,8 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     // A stall sticks until a plan:next returns its step (§7); only a mark with nothing to report goes.
     const reported = [...held, ...waiting].some((step) => step.stalled !== undefined)
     if (previous && !reported) await writePlanActiveStep(root, slug, undefined)
-    return { ...head, step: null }
+    if (held.length > 0 || waiting.length > 0) return { ...head, step: null }
+    return { ...head, step: null, ...(await unverifiedElements(path, plan, root, options, log)) }
   }
   const { task, step } = next
 
@@ -344,7 +373,10 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
   if (step === null && report.held.length > 0) {
     lines.push('No step can be returned: every step left is held, or waits on one that is. A person decides how the plan meets the application now.')
   } else if (step === null) {
-    lines.push('Every step is verified. Nothing is left to implement.')
+    const open = report.unverified ?? []
+    lines.push(open.length > 0 ? 'Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.' : 'Every step is verified. Nothing is left to implement.')
+    for (const element of open) lines.push(`  ${element.id} (${element.state}): ${element.holds}`)
+    if (report.unverifiedUnreadable) lines.push(`The elements were not judged, so plan:status may still list some that plan:close refuses: ${report.unverifiedUnreadable}`)
     if (report.onCommandsAlone.length > 0) {
       lines.push(`${report.onCommandsAlone.join(', ')}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
     }
