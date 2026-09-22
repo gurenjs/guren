@@ -14,24 +14,24 @@ export function modelLifecycle(
   observers: ModelObserver[] | undefined,
 ) {
   // Capture references once: callbacks may replace the model's registrations.
-  const { before, after } = events[operation]
+  const { before: beforeEvents, after: afterEvents } = events[operation]
   return {
     async before(data: Record<string, unknown>): Promise<void> {
-      for (const name of before) {
+      for (const name of beforeEvents) {
         if (!(await executeHook(hooks, name, data))) {
           throw new Error(`${modelName}.${operation}() aborted by '${name}' hook.`)
         }
       }
-      for (const name of before) {
+      for (const name of beforeEvents) {
         if (!(await executeObservers(observers, name, data))) {
           throw new Error(`${modelName}.${operation}() aborted by observer '${name}'.`)
         }
       }
     },
     async after(data: Record<string, unknown>): Promise<void> {
-      // After callbacks cannot cancel persistence; ignore their return values.
-      for (const name of after) await executeHook(hooks, name, data)
-      for (const name of after) await executeObservers(observers, name, data)
+      // After callbacks cannot cancel persistence.
+      for (const name of afterEvents) await executeHook(hooks, name, data)
+      for (const name of afterEvents) await executeObservers(observers, name, data)
     },
   }
 }

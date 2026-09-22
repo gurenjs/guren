@@ -46,22 +46,29 @@ for (const { operation, before, after } of cases) {
   describe(`Model ${operation} lifecycle`, () => {
     it('awaits hooks, then each observer per event, around persistence and read transforms', async () => {
       const { User, events, result, where, run } = fixture()
+      let payload: PlainObject | undefined
+      const expectData = (name: HookName, data: PlainObject) => {
+        if (operation === 'delete') return expect(data).toBe(where)
+        if (after.includes(name)) return expect(data).toBe(result)
+        payload ??= data
+        expect(data).toBe(payload)
+        expect(data.name).toBe('input')
+      }
       for (const name of [...before, ...after]) {
         User.hooks[name] = async (data) => {
           await Promise.resolve()
           events.push(`hook:${name}`)
-          if (operation === 'delete') expect(data).toBe(where)
-          else if (after.includes(name)) expect(data).toBe(result)
-          else expect(data.name).toBe('input')
+          expectData(name, data)
         }
       }
       for (const label of ['first', 'second']) {
         const observer: ModelObserver = {}
         for (const name of [...before, ...after]) {
-          observer[name] = async function () {
+          observer[name] = async function (data) {
             await Promise.resolve()
             expect(this).toBe(observer)
             events.push(`${label}:${name}`)
+            expectData(name, data)
           }
         }
         User.observers.push(observer)
@@ -107,7 +114,12 @@ for (const { operation, before, after } of cases) {
 
     it('does not run after events when persistence fails', async () => {
       const { User, events, run, fail } = fixture()
-      for (const name of after) User.hooks[name] = () => { events.push(name) }
+      const observer: ModelObserver = {}
+      for (const name of after) {
+        User.hooks[name] = () => { events.push(`hook:${name}`) }
+        observer[name] = () => { events.push(`observer:${name}`) }
+      }
+      User.observers.push(observer)
       const error = new Error('storage failed')
       fail(error)
       await expect(run(operation)).rejects.toBe(error)
@@ -117,8 +129,13 @@ for (const { operation, before, after } of cases) {
     it('propagates after-hook failures after writing and skips subsequent callbacks', async () => {
       const { User, events, run } = fixture()
       const error = new Error('after hook failed')
+      const observer: ModelObserver = {}
+      for (const name of after) {
+        User.hooks[name] = () => { events.push(`hook:${name}`) }
+        observer[name] = () => { events.push(`observer:${name}`) }
+      }
+      User.observers.push(observer)
       User.hooks[after[0]] = () => { throw error }
-      User.observers.push({ [after[0]]: () => { events.push('observer') } })
       await expect(run(operation)).rejects.toBe(error)
       expect(events).toEqual(['write'])
     })
