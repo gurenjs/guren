@@ -11,8 +11,10 @@ import { basename, resolve } from 'node:path'
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
+import { requirePlanApproval } from './plan/approvals'
 import { gitAuthor } from './plan/beside'
 import { planDecisionsPath, planWaiverHash, removePlanWaiver, writePlanWaiver, type PlanWaiver } from './plan/decisions'
+import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { PLAN_STATUS_SECTIONS } from './plan/status'
 import { runCaptured, type CapturedExec } from './subprocess'
@@ -88,11 +90,12 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   if (options.elementIds.length === 0) throw new CliError('Name at least one element id to waive.')
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   const root = resolve(options.app ?? options.cwd ?? process.cwd())
-  const head = {
-    reportVersion: PLAN_WAIVE_REPORT_VERSION,
-    plan: { file: basename(path), title: plan.title, hash: planWaiverHash(plan) ?? null },
-    decisionsFile: toPosixRelative(root, planDecisionsPath(path)),
-  } satisfies Pick<PlanWaiveReport, 'reportVersion' | 'plan' | 'decisionsFile'>
+  const head = (hash: string | null) =>
+    ({
+      reportVersion: PLAN_WAIVE_REPORT_VERSION,
+      plan: { file: basename(path), title: plan.title, hash },
+      decisionsFile: toPosixRelative(root, planDecisionsPath(path)),
+    }) satisfies Pick<PlanWaiveReport, 'reportVersion' | 'plan' | 'decisionsFile'>
 
   // Removal matches on the element id and ignores the hash, so it asks none of the questions
   // below: withdrawing the waiver of an element a revision dropped is what it is for.
@@ -104,15 +107,16 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
       if (result.removed) removed.push(result.removed)
       written ||= result.written
     }
-    return { ...head, waived: [], replaced: [], removed, written }
+    return { ...head(planWaiverHash(plan) ?? null), waived: [], replaced: [], removed, written }
   }
 
-  const hash = planWaiverHash(plan)
-  if (hash === undefined) {
+  if (!hasBaseline(plan)) {
     throw new CliError(
       `${path} is a draft: it has no baseline, so it has no hash a waiver could name. A waiver is a decision about an approved plan; run guren plan:approve on it first.`,
     )
   }
+  // The hash a waiver names is the plan's, so it must be one somebody approved.
+  const { hash } = await requirePlanApproval(path, plan, 'no waiver is taken against it')
 
   const sections = new Map(listPlanElements(plan).map((element) => [element.id, element.section]))
   const existing = existingIds(plan)
@@ -145,7 +149,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
     written ||= result.written
     if (result.replaced) replaced.push(result.replaced)
   }
-  return { ...head, waived, replaced, removed: [], written }
+  return { ...head(hash), waived, replaced, removed: [], written }
 }
 
 export function formatPlanWaive(report: PlanWaiveReport): string {

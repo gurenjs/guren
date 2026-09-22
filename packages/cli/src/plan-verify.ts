@@ -13,8 +13,8 @@ import { readScripts } from './command-output'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
+import { requirePlanApproval } from './plan/approvals'
 import { judgeFreshness, type PlanFreshness } from './plan/freshness'
-import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext } from './plan/step-context'
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
@@ -54,6 +54,9 @@ export interface PlanVerifyFileOptions {
 
 export async function planVerifyFile(planPath: string, options: PlanVerifyFileOptions): Promise<PlanVerifyReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
+  // Judged on the plan this run read, never a caller's earlier reading: the file may have changed since.
+  // Before anything runs or is recorded: a result about a hash nobody approved verifies nothing anyone agreed to.
+  const approval = await requirePlanApproval(path, plan, 'no step is verified against it')
   const app = options.app
   const loadApp = typeof app === 'function' ? app : async () => app
   const root = options.appRoot
@@ -118,12 +121,13 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   })
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
-    plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
+    plan: { file: basename(path), title: plan.title, hash: approval?.hash ?? null },
     ...overlaid.status,
     verification: overlaid.verification,
     steps,
     skipped,
     ...(freshness ? { freshness } : {}),
+    ...(approval ? { approval } : {}),
     ...(staleContext.length > 0 ? { staleContext } : {}),
   }
 }
@@ -158,6 +162,7 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   if (codegenFailed.length > 0) {
     lines.push(`codegen did not pass in ${codegenFailed.map((step) => step.stepId).join(', ')}, so the status below was judged without the generated files.`, '')
   }
-  lines.push(formatPlanStatus(report))
+  // plan:verify runs only on an approved plan (or a draft), so the approval line would say nothing.
+  lines.push(formatPlanStatus({ ...report, approval: undefined }))
   return lines.join('\n')
 }

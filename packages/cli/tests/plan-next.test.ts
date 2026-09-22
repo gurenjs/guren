@@ -11,12 +11,11 @@ import { parsePlanDocument } from '../src/plan-render'
 import { planWaiveFile } from '../src/plan-waive'
 import type { PlanAppState } from '../src/plan/app-state'
 import { MAX_STEP_CONTINUATIONS as MAX_CONTINUATIONS } from '../src/plan-stop-hook'
-import { stampContextHash } from '../src/plan/freshness'
 import { planDigest, PLAN_STATE_VERSION, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
-import { loadCommentsPlan, PLAN_APP_FILES, planAppState, type PlanAppStateInput } from './plan-fixture'
+import { approvedAgainst, approvePlanFile, loadCommentsPlan, PLAN_APP_FILES, planAppState, type PlanAppStateInput } from './plan-fixture'
 
 // A draft never has the application read, so an app here is a directory with a plan; an approved
 // plan is handed the application as `app`, or read from a committed one on disk.
@@ -27,11 +26,6 @@ const [SCAFFOLD, TESTS, DATA, HTTP] = STEPS as [string, string, string, string]
 const NOW = () => new Date('2026-09-21T10:00:00.000Z')
 
 let ROOT: string
-
-/** The document approved against `at`, stamped the way `plan:approve` stamps it: nothing is stale against `at` itself. */
-function approvedAgainst(document: Record<string, unknown>, at: PlanAppStateInput = {}): Record<string, unknown> {
-  return { ...document, baseline: { rev: 'abc123', contextHash: stampContextHash(parsePlanDocument(document), planAppState(at)).contextHash } }
-}
 
 function git(dir: string, ...args: string[]): void {
   const result = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
@@ -257,6 +251,7 @@ describe('plan:next', () => {
       'comments.plan.json': JSON.stringify(approved),
     })
     const plan = join(app, 'comments.plan.json')
+    await approvePlanFile(plan)
     const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)), waived: ['policy.comment'] }
     await writeState(app, { steps: { [SCAFFOLD]: record } })
     await planWaiveFile(plan, { elementIds: ['policy.comment'], reason: 'the policy lands in the next plan', now: NOW })
@@ -275,6 +270,7 @@ describe('plan:next', () => {
     const approved = approvedAgainst(loadCommentsPlan())
     const { app, plan } = await createApp('waived-elements')
     await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
     const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) }
     await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: record, [DATA]: record } })
     // `git config` faked away, so the waiver's authorship is not this machine's.
@@ -303,6 +299,58 @@ describe('plan:next', () => {
     // Named in the report, so a --json consumer does not read the path out of the prose.
     expect(report.decisionsFile).toBe('comments.decisions.json')
     expect(formatPlanNext(report, 'comments.plan.json')).toContain('Decision log not read, so no waiver was applied:')
+  })
+
+  test('should refuse a plan whose hash no approval names before it reads the tree or marks a step, and hand out work once approved', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
+    const { app, plan } = await createApp('unapproved')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    const next = () => runCommand(builtinSubCommands['plan:next'] as CommandDef, { rawArgs: [plan, '--app', app] })
+
+    await expect(next()).rejects.toThrow(`${plan} is not approved at its current hash`)
+    await expect(next()).rejects.toThrow(`Run guren plan:approve ${plan}`)
+    await expect(readState(app)).rejects.toThrow('ENOENT')
+
+    await approvePlanFile(plan)
+    expect((await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })).step!.id).toBe(SCAFFOLD)
+
+    // An edit after approval moves the hash, which the approval does not name.
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify({ ...approved, title: 'Comments, edited' }) })
+    await expect(planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })).rejects.toThrow('is not approved at its current hash')
+  })
+
+  test('should refuse a plan with a baseline while its approvals file will not read', async () => {
+    const { app, plan } = await createApp('unreadable-approvals')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approvedAgainst(loadCommentsPlan())), 'comments.approvals.json': '{' })
+
+    const refusal = planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    await expect(refusal).rejects.toThrow('is not valid JSON')
+    await expect(planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })).rejects.toThrow('so no step of it is handed out. Fix the approvals file')
+    await expect(readState(app)).rejects.toThrow('ENOENT')
+  })
+
+  test('should refuse an approved plan whose baseline was deleted, and hand out a draft nobody approved', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
+    const { app, plan } = await createApp('baseline-removed')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
+    const { baseline: _baseline, ...draft } = approved
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(draft) })
+
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(`${plan} has lost its baseline, but 1 approval(s) are recorded beside it, so no step of it is handed out`)
+    await expect(readState(app)).rejects.toThrow('ENOENT')
+
+    await rm(join(app, 'comments.approvals.json'))
+    expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
+  })
+
+  test('should indent every line of a stall reason under the line that names it', async () => {
+    const stalled = { at: '2026-09-21T09:30:00.000Z', reason: 'first line\nsecond line', output: 'out one\nout two' }
+    const { app, plan } = await createApp('stall-lines', { active: { plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T09:00:00.000Z', continuations: 3, stalled } })
+
+    const text = formatPlanNext(await planNextFile(plan, { appRoot: app, now: NOW }), 'comments.plan.json')
+
+    expect(text).toContain('Stalled 2026-09-21T09:30:00.000Z: first line\n  second line\n  out one\n  out two\n')
   })
 
   describe('formatting', () => {
@@ -382,6 +430,7 @@ describe('plan:next on stale context', () => {
     const approved = approvedAgainst(document)
     const { app, plan } = await createApp(name)
     await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
     const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) }
     await writeState(app, { steps: Object.fromEntries(standing.map((id) => [id, record])) })
     return { app, plan }
@@ -470,6 +519,7 @@ describe('plan:next on stale context', () => {
     const approvedUnread = approvedAgainst(loadCommentsPlan(), { models: { unreadable: 'models threw' } })
     const { app, plan } = await createApp('unjudged')
     await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approvedUnread) })
+    await approvePlanFile(plan)
 
     // model.post has no stamp: a change to it is not evidence of anything.
     const unstamped = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })

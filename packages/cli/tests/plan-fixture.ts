@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs'
-import { mkdir, symlink } from 'node:fs/promises'
+import { mkdir, readFile, symlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import type { z } from 'zod'
 
+import { parsePlanDocument } from '../src/plan-render'
 import type {
   PlanAppName,
   PlanAppNames,
@@ -12,6 +13,10 @@ import type {
   PlanAppTable,
   PlanAppUnreadable,
 } from '../src/plan/app-state'
+import { readPlanApprovals, recordPlanApproval, requireReadableApprovals } from '../src/plan/approvals'
+import { stampContextHash } from '../src/plan/freshness'
+import { planHash } from '../src/plan/identity'
+import { hasBaseline } from '../src/plan/render'
 import { PLAN_STATE_VERSION, type PlanActiveStep } from '../src/plan/state'
 import { PlanSchema, type Plan, type PlanDraft, type PlanDraftSchema } from '../src/plan/schema'
 import type { PlanPagePayload } from '../src/plan/render'
@@ -42,6 +47,27 @@ export function loadCommentsPlanInput(): PlanInput {
 /** The fixture as a plan with an identity: parsed, under {@link TEST_BASELINE}. */
 export function loadParsedCommentsPlan(): Plan {
   return PlanSchema.parse(loadApprovedCommentsPlan())
+}
+
+/** The document stamped against `at` the way `plan:approve` stamps it: nothing is stale against `at` itself. */
+export function approvedAgainst(document: Record<string, unknown>, at: PlanAppStateInput = {}): Record<string, unknown> {
+  return { ...document, baseline: { rev: 'abc123', contextHash: stampContextHash(parsePlanDocument(document), planAppState(at)).contextHash } }
+}
+
+/**
+ * Records an approval of the plan file's current hash beside it through the writer `plan:approve`
+ * uses, keeping the approvals already there. For a test whose subject is not approval itself.
+ */
+export async function approvePlanFile(planPath: string): Promise<string> {
+  const hash = planHash(PlanSchema.parse(JSON.parse(await readFile(planPath, 'utf8'))))
+  const approvals = requireReadableApprovals(await readPlanApprovals(planPath))
+  await recordPlanApproval(planPath, approvals, { hash, approvedAt: '2026-09-22T09:00:00.000Z', approvedBy: 'Ada <ada@example.com>' })
+  return hash
+}
+
+/** {@link approvePlanFile} where `document`, the plan file's content, carries a baseline; a draft is left as it is. */
+export async function approveIfStamped(planPath: string, document: unknown): Promise<void> {
+  if (hasBaseline(document)) await approvePlanFile(planPath)
 }
 
 /** A section as a test spells it: a bare name sits at the project root. */

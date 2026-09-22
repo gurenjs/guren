@@ -68,8 +68,10 @@ export const PlanStepRecordSchema = z.object({
 const PlanStallSchema = z.object({
   at: z.string(),
   reason: z.string(),
-  /** The last failing verification, as the hook printed it. */
-  output: z.string(),
+  /** The last failing verification, as the hook printed it; absent where the hook verified nothing. */
+  output: z.string().optional(),
+  /** `approval` where no approval named the plan's hash, a stall `plan:next` drops once one does. */
+  cause: z.literal('approval').optional(),
 })
 
 /**

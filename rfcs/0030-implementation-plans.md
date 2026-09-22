@@ -661,8 +661,8 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
   a `plan.json`, and in `<slug>.approvals.json` beside any other plan, the rule
   the decision log follows. Approving a hash already approved writes nothing,
   and a file that will not read is refused before the plan is touched.
-  `plan:close` refuses a hash no approval names; the other commands do not
-  yet.
+  The commands that act on the plan refuse a hash no approval names (below,
+  approval gate).
 - `contextHash` is keyed by element id, one entry for every element the §2
   checks judge against the application by name. Both read one derivation of
   what name an element is judged by (`plan/app-targets.ts`). The value is a
@@ -730,6 +730,59 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
   undoing the change. A carried-over baseline is never restamped (above).
 - Changing what the stamp hashes renames every approved plan and orphans its
   approvals and waivers, so the facts carry a version of their own.
+
+**Amended in implementation (approval gate).** "Every later command
+recomputes the hash and refuses" is shipped per command, since not every later
+command acts on the plan (`plan/approvals.ts`, `plan-next.ts`, `plan-verify.ts`,
+`plan-waive.ts`, `plan-stop-hook.ts`, `plan-status.ts`):
+
+- One rule decides: `readPlanApprovalStanding()` recomputes `planHash()` and
+  answers `approved`, `unapproved` or `unreadable`, and `requirePlanApproval()`
+  turns anything but `approved` into a refusal that names the hash and says to
+  run `plan:approve`. `plan:close` refuses through the same helper. An
+  approvals file that will not read refuses: an approval nobody can read
+  approves nothing.
+- The gate applies to a plan with a baseline. A draft has no hash anyone could
+  approve, so the commands that accepted drafts (`plan:next`, `plan:verify`)
+  still do, and the ones that refused them (`plan:waive`, `plan:close`) still
+  refuse them with their own message. A draft with approvals recorded beside
+  it is the exception (`baseline-removed`): deleting `baseline` would otherwise
+  turn an approved plan into a draft no gate asks about, so it is refused like
+  an unapproved plan, and so is a draft whose approvals file will not read,
+  since that file may hold the approval the baseline had. The rule reads the
+  approvals file the sibling rule names, so a draft named `plan.json` in a
+  directory whose unrelated `approvals.json` has entries is refused as well;
+  the message says to keep the new draft in a file of its own.
+- `plan:next` refuses before it reads the tree or the application and before
+  it writes a mark, so a person mid-step on an edited plan hears about the
+  approval rather than the dirty tree. `plan:verify` refuses before `codegen`
+  runs and before any record is written: a result recorded under a digest
+  nobody approved would count once somebody approves that digest, which
+  verifies work against a plan before anyone agreed to it.
+- `plan:waive` refuses a waiver against an unapproved hash, since a waiver is a
+  decision about the approved plan and names its hash. `--remove` asks
+  nothing, the approval included: withdrawing a waiver of an element a
+  revision dropped is what it is for, and the revision is exactly the plan no
+  approval names yet.
+- The Stop hook never throws and never blocks on approval: no continuation
+  approves a plan. It verifies nothing, lets the stop through and records a
+  stall on the mark with the refusal as the reason and `cause: 'approval'`, so
+  later stops stay silent. Unlike other stalls, `plan:next` does not report it,
+  since a run that passes the gate has answered it; the step gets a fresh mark
+  as after any other stall. `plan:verify` judges the approvals again on the
+  plan it reads itself rather than trusting the hook's reading, since the plan
+  may change between the two.
+- `plan:status` reports and does not refuse. It is observational and exits 0
+  whatever it finds, so a plan with a baseline carries `approval` in the
+  report (`approved` with the record, `unapproved`, `baseline-removed`, or
+  `unreadable` with the reason) and one line naming the commands that refuse
+  (`PLAN_APPROVAL_GATED_COMMANDS`). `plan:verify`'s report, which extends it,
+  carries `approved` in its JSON and leaves the line out of its text.
+- `plan:render` is unaffected: the page is how a person reviews a plan before
+  approving it, so refusing it would leave nothing to approve from.
+- `plan:approve` itself answers the refusal. A plan edited after approval keeps
+  its baseline, so approving it records the new hash without restamping, and
+  the §2 checks and open questions are asked again first.
 
 ### 5. Tasks are derived, not written
 

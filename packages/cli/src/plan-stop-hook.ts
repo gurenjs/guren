@@ -1,9 +1,9 @@
 /**
  * The plan half of the harness Stop hook (RFC 0030 §7): verify the step `plan:next` marked
- * and block the stop while it is not, giving up where a continuation cannot help: what the
- * step depends on went stale since approval (§4), the step or an element it owns is `blocked`
- * (the environment's), the record is the one the last continuation was blocked on, or three
- * continuations. A stall is recorded in state and sticks until the next `plan:next`.
+ * and block the stop while it is not, giving up where a continuation cannot help: no approval
+ * names the plan's hash, what the step depends on went stale since approval (§4), the step or
+ * an element it owns is `blocked`, the record is the one the last continuation was blocked on,
+ * or three continuations. A stall is recorded in state and sticks until the next `plan:next`.
  * `verify` is the seam the unit tests fake; the shipped hooks run `plan:verify`, whose report
  * carries the stale context, judged on the app it reads after `codegen`.
  */
@@ -15,6 +15,7 @@ import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
+import { describeUnapproved, readPlanApprovalStanding } from './plan/approvals'
 import { describeDependency, type PlanStepContextElement } from './plan/step-context'
 import { listPlanStates, planDigest, planSlug, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
 import { derivePlanTasks, findPlanStep } from './plan/tasks'
@@ -106,6 +107,24 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
       message: `${heading}: the mark is in .guren/plans/${slug}.state.json, but this plan's records are kept in ${planSlug(planPath)}.state.json, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` to mark the step again.`,
     }
   }
+  const log = await readPlanWaivers(planPath, plan)
+  // A log nobody could read is judged as if no waiver were taken, which may be what holds the step,
+  // so every verdict below carries the notice: those that run nothing would otherwise drop it.
+  const notice = log.unreadable ? `${heading}: ${log.unreadable}\nNo waiver was applied, so the step is judged as if none were taken.` : undefined
+  const withNotice = (verdict: PlanStopHookVerdict): PlanStopHookVerdict =>
+    notice === undefined ? verdict : { ...verdict, message: verdict.message ? `${notice}\n${verdict.message}` : notice }
+
+  // A stall rather than a block: no continuation approves a plan. plan:next drops it once one does.
+  const approval = await readPlanApprovalStanding(planPath, plan)
+  if (approval && approval.state !== 'approved') {
+    const reason = describeUnapproved(active.plan, approval, 'the step is not verified against it')
+    const at = (deps.now ?? (() => new Date()))().toISOString()
+    await writePlanActiveStep(appRoot, slug, { ...active, stalled: { at, reason, cause: 'approval' } })
+    return withNotice({
+      block: false,
+      message: `${heading}: giving up, ${reason}\nThe step is recorded as stalled; \`bunx guren plan:next ${active.plan}\` returns it once an approval names the plan's hash.`,
+    })
+  }
   const digest = planDigest(plan)
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false) })
   const step = findPlanStep(derivation, active.step)?.step
@@ -114,13 +133,6 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     return { block: false, message: `${heading}: the plan no longer derives this step, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` for the next one.` }
   }
   const record = records[active.step]
-  const log = await readPlanWaivers(planPath, plan)
-  // A log nobody could read is judged as if no waiver were taken, which may be what holds the step,
-  // so every verdict below carries the notice: two of them run nothing and would otherwise drop it.
-  const notice = log.unreadable ? `${heading}: ${log.unreadable}\nNo waiver was applied, so the step is judged as if none were taken.` : undefined
-  const withNotice = (verdict: PlanStopHookVerdict): PlanStopHookVerdict =>
-    notice === undefined ? verdict : { ...verdict, message: verdict.message ? `${notice}\n${verdict.message}` : notice }
-
   if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)), log.waived)) return withNotice({ block: false })
 
   let report: PlanVerifyReport
