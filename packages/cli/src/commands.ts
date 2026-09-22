@@ -3316,6 +3316,10 @@ const makeFeatureCommand = defineCommand({
       type: 'boolean',
       description: 'Also generate a test file.',
     },
+    factory: {
+      type: 'boolean',
+      description: 'Also generate a model factory in db/factories.',
+    },
     public: {
       type: 'boolean',
       description: 'Skip authentication checks in mutating actions (default: auth required).',
@@ -3337,6 +3341,7 @@ const makeFeatureCommand = defineCommand({
       force: Boolean(args.force),
       root: args.module,
       withTest: Boolean(args.test),
+      withFactory: Boolean(args.factory),
       publicAccess: Boolean(args.public),
       withPolicy: Boolean(args.policy),
       prototype: Boolean(args.prototype),

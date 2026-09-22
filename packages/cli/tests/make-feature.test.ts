@@ -272,6 +272,34 @@ describe('makeFeature', () => {
     }
   })
 
+  it('generates a factory typed over the model record with withFactory', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-factory-')
+
+    try {
+      const created = await makeFeature('Post', { fields: 'title:string', withFactory: true })
+
+      // The macOS tmpdir is a symlink and the generators report the realpath.
+      expect(created.some((file) => file.endsWith('/db/factories/PostFactory.ts'))).toBe(true)
+      const factory = await readFile(join(workspace.dir, 'db/factories/PostFactory.ts'), 'utf8')
+      expect(factory).toContain("import type { PostRecord } from '../../app/Models/Post.js'")
+      expect(factory).toContain('export default class PostFactory extends Factory<PostRecord>')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('writes no factory without withFactory', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-no-factory-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string' })
+
+      expect(existsSync(join(workspace.dir, 'db/factories/PostFactory.ts'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('skips auth checks with publicAccess', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-public-')
 

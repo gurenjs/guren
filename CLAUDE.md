@@ -149,6 +149,7 @@ bunx guren guidelines           # Auto-generate project-specific coding guidelin
 bunx guren guidelines -o .claude/rules/project-guidelines.md  # Write to file
 bunx guren make:feature Post --fields "title:string,body:text,published:boolean"  # CRUD scaffold (store/update require auth by default)
 bunx guren make:feature Post --fields "title:string,body:text" --test  # With test file
+bunx guren make:feature Post --fields "title:string" --factory  # Also generate a model factory in db/factories
 bunx guren make:feature Post --fields "title:string" --public  # Skip auth checks in mutating actions
 bunx guren make:feature Post --fields "title:string" --policy  # Also generate a policy and enforce it in store/update
 bunx guren make:feature Post --fields "title:string" --attach "cover:one,images:many"  # Attachable model + attach-aware store/destroy (requires `guren add attachments` first; RFC 0013 Part 4)

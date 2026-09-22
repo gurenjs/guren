@@ -5,6 +5,7 @@ import { CliError } from './cli-error'
 import { appConfiguresAttachments } from './attachments-check'
 import { announceWrittenFiles, camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, writtenFileMessage, type WriterOptions } from './utils'
 import { pluralize, schemaIdentifierFor, tableNameFor } from './inflect'
+import { makeFactory } from './make-factory'
 import { findMigrationCreatingTable } from './make-migration'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
@@ -39,6 +40,7 @@ export interface MakeFeatureOptions extends WriterOptions {
    */
   attach?: string
   withTest?: boolean
+  /** Also generate a model factory in `db/factories`, typed over the model's record. */
   withFactory?: boolean
   /** Skip authentication checks in mutating actions. Defaults to false (auth required). */
   publicAccess?: boolean
@@ -200,6 +202,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
   const modelPath = await makeModel(singular, { ...writerOptions, attachments })
   created.push(modelPath)
+
+  if (options.withFactory) {
+    created.push(await makeFactory(singular, writerOptions))
+  }
 
   if (withPolicy) {
     const policyPath = await makePolicy(singular, writerOptions)
