@@ -392,7 +392,8 @@ describe('CLI make:* commands', () => {
     it('uses custom model name', async () => {
       const result = await makeFactory('Post', { model: 'BlogPost' })
       const content = fs.readFileSync(result, 'utf-8')
-      expect(content).toContain('typeof BlogPost')
+      expect(content).toContain("import type { BlogPostRecord } from '../../app/Models/BlogPost.js'")
+      expect(content).toContain('extends Factory<BlogPostRecord>')
     })
 
     it('preserves Factory suffix if already present', async () => {

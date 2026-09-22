@@ -39,8 +39,10 @@ export function register${pascalName}Routes(router: Router): void {
 }
 `
 
+  // `export {}` keeps the file a module: the root schema's `export *` fails on a script (TS2306).
   const schemaContents = `// Define this module's Drizzle tables here.
 // Re-exported into the project's db/schema.ts by \`guren make:module\`.
+export {}
 `
 
   const filesCreated = await writeScaffoldFiles(

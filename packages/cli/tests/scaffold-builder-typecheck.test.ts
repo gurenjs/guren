@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { checkTypes, TSC_TIMEOUT, createTempWorkspace, resolvedCompilerOptions, seedInertiaApp, writeWorkspaceFiles, type TsconfigCompilerOptions } from './helpers'
+import { checkTypes, TSC_TIMEOUT, createTempWorkspace, renderedAppCompilerOptions, seedInertiaApp, writeWorkspaceFiles } from './helpers'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { generatePageTypes } from '../src/pages-types'
@@ -15,33 +15,6 @@ import { generatePageTypes } from '../src/pages-types'
  */
 
 const cliRoot = join(import.meta.dir, '..')
-
-/**
- * The options of tsconfig.templates.json, pointed at a rendered workspace;
- * loaded from the config so this gate and `typecheck:templates` cannot drift.
- * The three overrides follow from the render living outside the repo:
- * `@/.guren/pages.gen` moves to this render's file, bare imports resolve to
- * this package's dependencies, and `types: ["bun-types"]` yields to node's globals.
- */
-function renderedScaffoldCompilerOptions(workspaceDir: string): TsconfigCompilerOptions {
-  const parsed = resolvedCompilerOptions(join(cliRoot, 'tsconfig.templates.json'))
-
-  return {
-    ...parsed,
-    // The two fixture dirs the static gate overlays; meaningless here.
-    rootDirs: undefined,
-    typeRoots: [join(cliRoot, '../../node_modules'), join(cliRoot, 'node_modules/@types')],
-    types: ['bun-types', 'node'],
-    paths: {
-      ...parsed.paths,
-      '@/.guren/pages.gen': [join(workspaceDir, '.guren/pages.gen.ts')],
-      zod: [join(cliRoot, 'node_modules/zod')],
-      '@inertiajs/react': [join(cliRoot, 'node_modules/@inertiajs/react')],
-      react: [join(cliRoot, 'node_modules/@types/react/index.d.ts')],
-      'react/jsx-runtime': [join(cliRoot, 'node_modules/@types/react/jsx-runtime.d.ts')],
-    },
-  }
-}
 
 /**
  * Proves the pages.gen mapping resolved to the *typed* module: a broken alias
@@ -109,7 +82,7 @@ describe('rendered make:auth output typechecks', () => {
             expect(collected).toContain(path)
           }
 
-          expect(checkTypes(rootNames, renderedScaffoldCompilerOptions(workspace.dir))).toEqual([])
+          expect(checkTypes(rootNames, renderedAppCompilerOptions(workspace.dir))).toEqual([])
         } finally {
           await workspace.cleanup()
         }
