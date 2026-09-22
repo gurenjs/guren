@@ -1,5 +1,5 @@
 // oxlint plugin: a `PatchResult` nobody reads. The CLI's patch helpers report
-// "could not apply" as a value (`{ modified: false, reason }`), never by throwing,
+// "could not apply" as a value (a `PatchResult` or an `EntryWiring`), never by throwing,
 // so a call whose result is discarded is a scaffolder that goes on to print success
 // over a file it did not change. Reports such a call as a bare statement, awaited or
 // not, or under `void`, when the callee is bound by an import from a module in
@@ -8,9 +8,10 @@
 // holds it to the sources.
 import { AWAIT, importedName, unwrap } from './ast.js'
 
-/** Per module basename, the exports whose return type is `Promise<PatchResult>`. */
+/** Per module basename, the exports whose return type is `Promise<PatchResult>` or `Promise<EntryWiring>`. */
 export const PATCH_RESULT_FUNCTIONS = {
-  'patch-helpers': ['addImport', 'addToArrayOption', 'addToArrayArgument', 'addCreateAppOption'],
+  'patch-helpers': ['addImport', 'addToArrayOption', 'addToArrayArgument', 'addCreateAppOption', 'addEntryWithImport'],
+  'provider-registrar': ['addArrayOptionRegistration'],
   'route-registrar': ['addRouteRegistrarCall'],
 }
 
@@ -69,8 +70,8 @@ const rule = {
         context.report({
           node,
           message:
-            `\`${helper}()\` reports a patch it could not apply in its PatchResult, and this statement discards it. `
-            + 'Read `.modified` / `.reason` (PATCH_REASONS) before reporting success.',
+            `\`${helper}()\` reports a patch it could not apply in its result, and this statement discards it. `
+            + 'Read `.modified` / `.reason` (PATCH_REASONS), or `.registered` / `.entry.reason` of an EntryWiring, before reporting success.',
         })
       },
     }
