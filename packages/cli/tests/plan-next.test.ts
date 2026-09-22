@@ -389,6 +389,38 @@ describe('plan:next on stale context', () => {
     expect(fresh.step!.id).toBe(`${COMMENT}/data`)
   })
 
+  test('should hold every step of a task waiting for a blocked one, and return a verified step to neither list', async () => {
+    const document = loadCommentsPlan() as Record<string, Array<Record<string, unknown>>>
+    // A reaction references a comment, so its slice waits for the comments task.
+    document.models!.push({
+      id: 'model.reaction',
+      change: { kind: 'add' },
+      name: 'Reaction',
+      table: 'reactions',
+      columns: [
+        { id: 'column.reaction.id', name: 'id', change: { kind: 'add' }, type: 'integer', nullable: false, unique: false, index: false, primaryKey: true },
+        { id: 'column.reaction.commentId', name: 'commentId', change: { kind: 'add' }, type: 'integer', nullable: false, unique: false, index: true, references: { model: 'model.comment', column: 'id', onDelete: 'cascade' } },
+      ],
+      relationships: [],
+      fillable: [],
+    })
+    const reaction = 'task/entity/model.reaction'
+    expect(derivePlanTasks(parsePlanDocument(document)).tasks.find((task) => task.id === reaction)!.dependsOn).toEqual([COMMENT])
+    const { app, plan } = await approvedApp('cross-task', document, [SCAFFOLD, TESTS])
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })
+
+    expect(report.blocked.map((step) => step.id)).toEqual([DATA, HTTP])
+    expect(report.waiting).toEqual([
+      { id: `${COMMENT}/pages`, on: [DATA, HTTP] },
+      { id: `${reaction}/scaffold`, on: [DATA, HTTP] },
+      { id: `${reaction}/data`, on: [DATA, HTTP] },
+    ])
+    expect(report.step).toBeNull()
+    const skipped = new Set([...report.blocked.map((step) => step.id), ...report.waiting.map((step) => step.id)])
+    expect(report.verified.filter((id) => skipped.has(id))).toEqual([])
+  })
+
   test('should block the steps naming a stale existing element, which no step owns, and name what the reference checks say now', async () => {
     const { app, plan } = await approvedApp('existing', threeTaskPlan())
 
