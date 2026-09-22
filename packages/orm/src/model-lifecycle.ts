@@ -12,26 +12,31 @@ export function modelLifecycle(
   operation: keyof typeof events,
   hooks: ModelHooks | undefined,
   observers: ModelObserver[] | undefined,
+  method: string = operation,
 ) {
-  // Capture references once: callbacks may replace the model's registrations.
+  // Held for the whole write, so replacing `hooks` or calling `observe()` /
+  // `clearObservers()` inside a callback applies from the next write. The array
+  // is copied because `observe()` pushes into it; the hooks object is not,
+  // since each hook is called as its method.
+  const observerList = observers?.slice()
   const { before: beforeEvents, after: afterEvents } = events[operation]
   return {
     async before(data: Record<string, unknown>): Promise<void> {
       for (const name of beforeEvents) {
         if (!(await executeHook(hooks, name, data))) {
-          throw new Error(`${modelName}.${operation}() aborted by '${name}' hook.`)
+          throw new Error(`${modelName}.${method}() aborted by '${name}' hook.`)
         }
       }
       for (const name of beforeEvents) {
-        if (!(await executeObservers(observers, name, data))) {
-          throw new Error(`${modelName}.${operation}() aborted by observer '${name}'.`)
+        if (!(await executeObservers(observerList, name, data))) {
+          throw new Error(`${modelName}.${method}() aborted by observer '${name}'.`)
         }
       }
     },
     async after(data: Record<string, unknown>): Promise<void> {
       // After callbacks cannot cancel persistence.
       for (const name of afterEvents) await executeHook(hooks, name, data)
-      for (const name of afterEvents) await executeObservers(observers, name, data)
+      for (const name of afterEvents) await executeObservers(observerList, name, data)
     },
   }
 }

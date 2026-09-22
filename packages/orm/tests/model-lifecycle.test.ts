@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import { Model, type ORMAdapter, type PlainObject } from '../src/Model'
 import type { HookName, ModelHooks } from '../src/hooks'
-import type { ModelObserver } from '../src/ModelObserver'
+import type { ModelObserver, ModelObserverConstructor } from '../src/ModelObserver'
+import { SoftDeletes } from '../src/SoftDeletes'
 
 const cases: { operation: 'create' | 'update' | 'delete'; before: HookName[]; after: HookName[] }[] = [
   { operation: 'create', before: ['creating', 'saving'], after: ['created', 'saved'] },
@@ -159,5 +160,102 @@ for (const { operation, before, after } of cases) {
       await run(operation)
       expect(events).toEqual(['write', 'original hook', 'original observer', ...(operation === 'delete' ? [] : ['read'])])
     })
+
+    for (const prior of [0, 1]) {
+      it(`applies observe() made inside a callback from the next write (${prior} prior observers)`, async () => {
+        const { User, events, run } = fixture()
+        for (let i = 0; i < prior; i++) User.observers.push({})
+        class Late {}
+        for (const name of [...before, ...after]) {
+          Object.defineProperty(Late.prototype, name, { value: () => { events.push(`late:${name}`) } })
+        }
+        User.hooks[before[0]] = () => { User.observe(Late as ModelObserverConstructor) }
+        const late = () => events.filter(event => event.startsWith('late:'))
+        await run(operation)
+        expect(late()).toEqual([])
+        await run(operation)
+        expect(late()).toEqual([...before, ...after].map(name => `late:${name}`))
+      })
+    }
   })
 }
+
+function softDeleteFixture(adapterOverrides: Partial<ORMAdapter> = {}) {
+  const events: string[] = []
+  const where = { id: 1 }
+  const adapter: ORMAdapter = {
+    async findMany() { return [] },
+    async findUnique() { return null },
+    async create<T extends PlainObject>() { return {} as T },
+    async update<T extends PlainObject>() { events.push('write:update'); return {} as T },
+    async delete() { events.push('write:delete'); return 1 },
+    ...adapterOverrides,
+  }
+  class Watcher implements ModelObserver {
+    deleting(data: PlainObject) { expect(data).toBe(where); events.push('observer:deleting') }
+    deleted(data: PlainObject) { expect(data).toBe(where); events.push('observer:deleted') }
+  }
+  class Post extends SoftDeletes(Model<{ id: number; deletedAt: Date | null }>) {
+    static table = 'posts'
+    static hooks: ModelHooks = {
+      deleting: (data) => { expect(data).toBe(where); events.push('hook:deleting') },
+      deleted: (data) => { expect(data).toBe(where); events.push('hook:deleted') },
+    }
+  }
+  Post.useAdapter(adapter)
+  Post.observe(Watcher as ModelObserverConstructor)
+  return { Post, Watcher, events, where }
+}
+
+describe('SoftDeletes delete lifecycle', () => {
+  const around = (write: string) => ['hook:deleting', 'observer:deleting', write, 'hook:deleted', 'observer:deleted']
+
+  it('runs deleting and deleted around a soft delete', async () => {
+    const { Post, events, where } = softDeleteFixture()
+    await Post.delete(where)
+    expect(events).toEqual(around('write:update'))
+  })
+
+  it('runs deleting and deleted around forceDelete', async () => {
+    const { Post, events, where } = softDeleteFixture()
+    await Post.forceDelete(where)
+    expect(events).toEqual(around('write:delete'))
+  })
+
+  it('stops a soft delete when deleting returns false', async () => {
+    const { Post, events, where } = softDeleteFixture()
+    Post.hooks.deleting = () => false
+    await expect(Post.delete(where)).rejects.toThrow("Post.delete() aborted by 'deleting' hook.")
+    expect(events).toEqual([])
+  })
+
+  it('names forceDelete when a hook or observer aborts it', async () => {
+    const { Post, Watcher, events, where } = softDeleteFixture()
+    Post.hooks.deleting = () => false
+    await expect(Post.forceDelete(where)).rejects.toThrow("Post.forceDelete() aborted by 'deleting' hook.")
+    delete Post.hooks.deleting
+    Watcher.prototype.deleting = () => false
+    await expect(Post.forceDelete(where)).rejects.toThrow("Post.forceDelete() aborted by observer 'deleting'.")
+    expect(events).toEqual([])
+  })
+
+  it('fires no delete events on restore', async () => {
+    const { Post, events, where } = softDeleteFixture()
+    await Post.restore(where)
+    expect(events).toEqual(['write:update'])
+  })
+
+  it('refuses a missing adapter capability before any event', async () => {
+    const { Post, events, where } = softDeleteFixture({ update: undefined, delete: undefined })
+    await expect(Post.delete(where)).rejects.toThrow('needed for soft delete')
+    await expect(Post.forceDelete(where)).rejects.toThrow('does not support delete operations')
+    expect(events).toEqual([])
+  })
+
+  it('refuses an unfiltered where before any event', async () => {
+    const { Post, events } = softDeleteFixture()
+    await expect(Post.delete({ id: undefined })).rejects.toThrow(/refusing to delete unfiltered/)
+    await expect(Post.forceDelete({ id: undefined })).rejects.toThrow(/refusing to delete unfiltered/)
+    expect(events).toEqual([])
+  })
+})

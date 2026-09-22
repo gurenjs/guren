@@ -9,7 +9,7 @@ import { modelLifecycle } from './model-lifecycle'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { everyFilterDropped } from './where-conditions'
-import { DEFAULT_IN_LIST_SIZE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
+import { DEFAULT_IN_LIST_SIZE, LIFECYCLE_DELETE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
 import { QueryBuilder } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
@@ -1169,15 +1169,29 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       throw new Error('Configured adapter does not support delete operations.')
     }
 
+    return this[LIFECYCLE_DELETE](where, 'delete', () => this.newQuery(writeOptions)
+      .where(where as Partial<Record<string, unknown>>)
+      .delete())
+  }
+
+  /**
+   * Runs `write` between the `deleting` and `deleted` events, for `delete()`
+   * and the SoftDeletes overrides. Symbol-keyed and kept out of the package
+   * entry point; each caller checks its own adapter capability first.
+   */
+  static async [LIFECYCLE_DELETE](
+    this: typeof Model,
+    where: object,
+    method: string,
+    write: () => Promise<number | PlainObject | void>,
+  ): Promise<number | PlainObject | void> {
     this.assertFiltersSurvived(where, 'delete')
 
-    const lifecycle = modelLifecycle(this.name, 'delete', this.hooks, this.observers)
-    const whereData = where as unknown as Record<string, unknown>
+    const lifecycle = modelLifecycle(this.name, 'delete', this.hooks, this.observers, method)
+    const whereData = where as Record<string, unknown>
     await lifecycle.before(whereData)
 
-    const result = await this.newQuery(writeOptions)
-      .where(where as Partial<Record<string, unknown>>)
-      .delete()
+    const result = await write()
 
     await lifecycle.after(whereData)
 
