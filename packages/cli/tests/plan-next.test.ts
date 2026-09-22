@@ -101,6 +101,23 @@ describe('plan:next', () => {
     expect(again.step!.id).toBe(SCAFFOLD)
   })
 
+  test('should keep two plans in the docs/plans/<slug>/plan.json layout in state files of their own', async () => {
+    const app = join(ROOT, 'layout')
+    await writeWorkspaceFiles(app, {
+      'package.json': JSON.stringify({ name: 'layout', type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
+      'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()),
+      'docs/plans/billing/plan.json': JSON.stringify(loadCommentsPlan()),
+    })
+
+    const comments = await planNextFile(join(app, 'docs/plans/comments/plan.json'), { appRoot: app, now: NOW })
+    const billing = await planNextFile(join(app, 'docs/plans/billing/plan.json'), { appRoot: app, now: NOW })
+
+    expect([comments.stateFile, billing.stateFile]).toEqual(['.guren/plans/comments.state.json', '.guren/plans/billing.state.json'])
+    const mark = async (slug: string): Promise<string | undefined> =>
+      (JSON.parse(await readFile(join(app, `.guren/plans/${slug}.state.json`), 'utf8')) as PlanState).active?.plan
+    expect([await mark('comments'), await mark('billing')]).toEqual(['docs/plans/comments/plan.json', 'docs/plans/billing/plan.json'])
+  })
+
   test('should skip the steps whose record still holds and carry the elements of the one it returns', async () => {
     const { app, plan } = await createApp('holding')
     const record = await holding(app)

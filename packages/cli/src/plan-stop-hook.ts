@@ -16,7 +16,7 @@ import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
 import { describeDependency, type PlanStepContextElement } from './plan/step-context'
-import { listPlanStates, planDigest, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
+import { listPlanStates, planDigest, planSlug, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
 import { derivePlanTasks, findPlanStep } from './plan/tasks'
 import { hashFiles, readPlanWaivers, recordStillHolds, sha256 } from './plan/verification'
 
@@ -97,6 +97,14 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   } catch (error) {
     // The mark outlived its plan: nothing to verify against, and the next plan:next rewrites it.
     return { block: false, message: `${heading}: ${error instanceof Error ? error.message : String(error)}\nRun \`bunx guren plan:next ${active.plan}\` again once the plan is back.` }
+  }
+  // plan:verify records under planSlug(); a mark in another file would never see them.
+  if (planSlug(planPath) !== slug) {
+    await writePlanActiveStep(appRoot, slug, undefined)
+    return {
+      block: false,
+      message: `${heading}: the mark is in .guren/plans/${slug}.state.json, but this plan's records are kept in ${planSlug(planPath)}.state.json, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` to mark the step again.`,
+    }
   }
   const digest = planDigest(plan)
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false) })

@@ -265,6 +265,22 @@ describe('planStopHookFindings', () => {
     expect(unreadable.message).toMatch(/^plan:verify on stop: .*comments\.state\.json is not valid JSON/)
   })
 
+  test('should clear, not block on, a mark in a state file other than the one its plan records to', async () => {
+    const app = await createApp('orphan')
+    await writeWorkspaceFiles(app, {
+      'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()),
+      '.guren/plans/plan.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: {}, active: active({ plan: 'docs/plans/comments/plan.json' }) }),
+    })
+    let verified = 0
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => { verified += 1; return report(HTTP, record()) } })
+
+    expect(verified).toBe(0)
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain('the mark is in .guren/plans/plan.state.json, but this plan\'s records are kept in comments.state.json, so the mark was cleared')
+    expect((JSON.parse(await readFile(join(app, '.guren/plans/plan.state.json'), 'utf8')) as PlanState).active).toBeUndefined()
+  })
+
   test('should not block on a mark whose plan is gone or no longer derives the step', async () => {
     const gone = await createApp('gone', { active: active({ plan: 'missing.plan.json' }) })
     const verdict = await planStopHookFindings(gone, { stopHookActive: false })
