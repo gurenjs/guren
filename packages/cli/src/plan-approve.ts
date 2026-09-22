@@ -59,8 +59,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
   const exec = options.exec ?? runCaptured
   const app = typeof options.app === 'function' ? await options.app() : options.app
 
-  const checks = validatePlan(plan, app)
-  const settled = hasBaseline(plan) ? settleBuiltFindings(plan, app, checks) : { checks, built: [] }
+  const settled = settleBuiltFindings(plan, app, validatePlan(plan, app))
   const blockers = [
     ...settled.checks
       .filter((result) => result.status === 'fail')

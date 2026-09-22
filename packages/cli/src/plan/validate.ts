@@ -25,7 +25,7 @@ import {
   type PlanAppUnreadable,
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
-import { elementsAtPlannedEnd } from './freshness'
+import { judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
 import {
   findDuplicatePlanIds,
@@ -71,20 +71,22 @@ const CHILD_CHANGES_BY_PARENT: Record<PlanChange['kind'], ReadonlyArray<PlanChan
  * it, a `rename`'s old name or a `drop`'s target is gone. Finishing the plan's work produces
  * exactly these, which is what {@link settleBuiltFindings} answers.
  */
-export const APP_FACT_FINDINGS: ReadonlySet<string> = new Set(['plan:app-collision', 'plan:app-missing'])
+const APP_FACT_FINDINGS: ReadonlySet<string> = new Set(['plan:app-collision', 'plan:app-missing'])
 
 /**
- * A baselined plan's findings with its own finished work settled: an app-fact finding on an
- * element freshness reads at the plan's end state becomes a `pass`. An element still at its
- * stamp that fails now fails through the plan's own edit (an `existing` turned `add`), and stays failed.
+ * The findings with the plan's own finished work settled: on a plan with a baseline, an
+ * app-fact finding on an element freshness calls `built` (stamped at the state the plan
+ * starts it from, read now as the plan leaves it) becomes a `pass`. A draft has no stamp.
  */
-export function settleBuiltFindings(plan: Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
-  const atEnd = elementsAtPlannedEnd(plan, app)
+export function settleBuiltFindings(plan: PlanDraft | Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
+  if (!('baseline' in plan)) return { checks, built: [] }
+  const builtIds = new Set(judgeFreshness(plan, app).elements.filter((element) => element.basis === 'built').map((element) => element.id))
   const built = new Set<string>()
   const settled = checks.map((result) => {
-    if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined || !atEnd.has(result.elementId)) return result
+    if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined || !builtIds.has(result.elementId)) return result
     built.add(result.elementId)
-    return { ...result, status: 'pass' as const, message: `${result.message} The application reads as the plan leaves this element: the plan's own work, built.` }
+    const fact = result.key === 'plan:app-collision' ? 'the name is already there because the plan put it there' : 'the name is gone because the plan removed it'
+    return { ...result, status: 'pass' as const, message: `Built by this plan: ${fact}, and the application reads as the plan leaves this element.` }
   })
   return { checks: settled, built: [...built] }
 }

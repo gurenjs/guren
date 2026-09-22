@@ -858,28 +858,39 @@ the plan's own work: an `add` finds its name, the old name of a `rename` and
 the target of a `drop` are gone. Measured on a scratch blog, one edited goal
 after the scaffold step gave seven failures, so the refusal above told a
 person to run a command that could not succeed until the plan was finished.
-What shipped (`settleBuiltFindings()` in `plan/validate.ts`, over
-`elementsAtPlannedEnd()` in `plan/freshness.ts`):
+What shipped (`settleBuiltFindings()` in `plan/validate.ts`, reading
+`judgeFreshness()`):
 
 - On a plan with a baseline, a `plan:app-collision` or `plan:app-missing`
-  finding (`APP_FACT_FINDINGS` in `plan/validate.ts`) is settled to `pass`
-  when its element has a stamp and the application reads as the plan leaves
-  that element: the facts hash to the end state freshness predicts. There is
-  one prediction, the one `judgeFreshness()` already uses, so an element
-  approval accepts is one that freshness calls fresh by its end state.
-- Only the end state settles a finding. An element still at its stamp that
-  fails now was changed by the plan itself (a revision that turned an
-  `existing` into an `add` of a name the application has), which is a real
-  failure. An element a revision added has no stamp and is judged as a draft
-  would be.
+  finding is settled to `pass` when freshness calls its element `built`: the
+  stamp equals the facts the plan starts that element from, and the
+  application now reads as the plan leaves it. Both predictions come from the
+  plan alone, for the element as the plan names it now: at the start an `add`
+  and the new name of a `rename` are absent and every other name is present,
+  and the end is the prediction freshness already makes. `judgeFreshness()`
+  reports the difference as `basis` on a `fresh` verdict that is not at its
+  stamp: `built`, or `end` when only the end matches.
+- The start is what keeps a revision honest. A revision that turns an
+  `existing` element into an `add` of the name the application has is still at
+  its stamp, not built, so the collision refuses. An `add` a revision
+  retargets onto a name the application already had is at its end, but its
+  stamp hashed the old name, so it refuses too. An element a revision added
+  has no stamp and is judged as a draft would be.
 - Everything else still refuses: an open question, a failing internal
-  reference, the other §2 checks, and a collision the end state does not
-  explain. A table the plan adds that another app root declares, or a route
-  endpoint another route holds, reads as neither stamp nor end, so it fails.
-  The limit is the one freshness has: a same-named class another commit adds
-  in the plan's own root reads as the plan's own `add`, and so does a second
-  route on the endpoint of a built one. A model whose class is written and
-  whose table is not reads as neither stamp nor end (the two-target rule
+  reference, the other §2 checks, an element whose facts cannot be read, and a
+  collision the end state does not explain. A table the plan adds that another
+  app root declares, or a route endpoint another route holds, is not at the
+  end. The start carries over what other roots declare as it reads now, and
+  predicts a route present at the start at its planned endpoint, so another
+  root's declarations changing since approval, or a `rename` or `alter` of a
+  route that also moves its path, reads as not built and refuses; that errs
+  on the refusing side.
+- Limits, the ones freshness has: a same-named class another commit adds in
+  the plan's own root reads as the plan's own `add`, and so does a second
+  route on the endpoint of a built one. A revision that turns an `existing`
+  element into a `drop` after someone else deleted it is settled, since the
+  stamp recorded it present and it is gone. A model whose class is written
+  and whose table is not reads as neither stamp nor end (the two-target rule
   above), so approval still refuses between the two.
 - A draft is unchanged: it has no stamp, so nothing is settled, and a draft
   whose `add` already exists is refused as before.
@@ -887,7 +898,7 @@ What shipped (`settleBuiltFindings()` in `plan/validate.ts`, over
   The report names the settled elements (`builtByPlan`).
 - `plan:render` settles the same findings on a plan with a baseline, so the
   page pins no failure the plan's own work explains, and the element's card
-  keeps the finding as a `pass` whose message says why.
+  shows the finding as a `pass` that says it was built by this plan.
 
 ### 5. Tasks are derived, not written
 
