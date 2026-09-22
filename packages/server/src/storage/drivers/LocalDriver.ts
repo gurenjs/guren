@@ -1,3 +1,4 @@
+import { encodeStoragePath } from '../url-path'
 import {
   readFile,
   lstat,
@@ -211,7 +212,7 @@ export class LocalDriver implements StorageDriver {
   }
 
   url(path: string): string {
-    return `${this.baseUrl}/${path}`
+    return `${this.baseUrl}/${encodeStoragePath(path)}`
   }
 
   async temporaryUrl(path: string, _expiration: Date): Promise<string> {

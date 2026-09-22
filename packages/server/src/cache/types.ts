@@ -1,4 +1,7 @@
 export interface CacheStore {
+  /** Atomic insertion when absent, required for tag namespace initialization. */
+  add?<T>(key: string, value: T): Promise<boolean>
+
   get<T>(key: string): Promise<T | null>
 
   /** @param ttl Time-to-live in seconds. */

@@ -289,6 +289,10 @@ await Post.create(payload)  // 新しいレコードを挿入
 await Post.first()          // 最初のマッチするレコードを返す
 ```
 
+一括の `update()`・`forceUpdate()`・`delete()` では `limit()`・`offset()`・`orderBy()` を指定できません。先に対象の ID を取得し、`whereIn()` で更新・削除してください。`SoftDeletes` モデルではビルダーの `delete()` も論理削除になります。物理削除には `forceDelete()` を使います。
+
+SQLite では、トランザクションの外から呼んだ通常のモデル読み書きは、そのトランザクションの終了を待ちます。生の Drizzle クエリは明示的に終了を待ってください。実行中の SQLite トランザクションの外から生の実行ハンドルを取得すると例外になります。
+
 ## トランザクション
 
 複数の書き込みを「全部成功 or 全部失敗」にしたい場合は `Model.transaction()` を使います。

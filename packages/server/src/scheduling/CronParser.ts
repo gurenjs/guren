@@ -1,49 +1,23 @@
 import type { ParsedCron } from './types'
 
 function parseField(field: string, min: number, max: number): number[] {
-  const values: Set<number> = new Set()
-
-  const parts = field.split(',')
-
-  for (const part of parts) {
-    // Step values: */5, 1-10/2
-    const stepMatch = part.match(/^(.+)\/(\d+)$/)
-    let range: string
-    let step = 1
-
-    if (stepMatch) {
-      range = stepMatch[1]
-      step = parseInt(stepMatch[2], 10)
-    } else {
-      range = part
+  const values = new Set<number>()
+  const invalid = () => new Error(`Invalid cron field: ${field}`)
+  for (const part of field.split(',')) {
+    const match = /^(\*|\d+(?:-\d+)?)(?:\/(\d+))?$/.exec(part)
+    if (!match) throw invalid()
+    const step = match[2] === undefined ? 1 : Number(match[2])
+    if (!Number.isSafeInteger(step) || step < 1) throw invalid()
+    const range = match[1]
+    const bounds = range === '*' ? [min, max] : range.split('-').map(Number)
+    const start = bounds[0]
+    const end = bounds[1] ?? (match[2] === undefined ? start : max)
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < min || end > max || end < start) {
+      throw invalid()
     }
-
-    if (range === '*') {
-      for (let i = min; i <= max; i += step) {
-        values.add(i)
-      }
-      continue
-    }
-
-    const rangeMatch = range.match(/^(\d+)-(\d+)$/)
-    if (rangeMatch) {
-      const start = parseInt(rangeMatch[1], 10)
-      const end = parseInt(rangeMatch[2], 10)
-      for (let i = start; i <= end; i += step) {
-        if (i >= min && i <= max) {
-          values.add(i)
-        }
-      }
-      continue
-    }
-
-    const value = parseInt(range, 10)
-    if (!isNaN(value) && value >= min && value <= max) {
-      values.add(value)
-    }
+    for (let value = start; value <= end; value += step) values.add(value)
   }
-
-  return Array.from(values).sort((a, b) => a - b)
+  return [...values].sort((a, b) => a - b)
 }
 
 export function parseCron(expression: string): ParsedCron {
@@ -62,20 +36,12 @@ export function parseCron(expression: string): ParsedCron {
   }
 }
 
-export function matchesCron(date: Date, cron: ParsedCron): boolean {
-  const minute = date.getMinutes()
-  const hour = date.getHours()
-  const dayOfMonth = date.getDate()
-  const month = date.getMonth() + 1
-  const dayOfWeek = date.getDay()
+function matchesDay(date: Date, cron: ParsedCron): boolean {
+  return cron.dayOfMonth.includes(date.getDate()) && cron.month.includes(date.getMonth() + 1) && cron.dayOfWeek.includes(date.getDay())
+}
 
-  return (
-    cron.minute.includes(minute) &&
-    cron.hour.includes(hour) &&
-    cron.dayOfMonth.includes(dayOfMonth) &&
-    cron.month.includes(month) &&
-    cron.dayOfWeek.includes(dayOfWeek)
-  )
+export function matchesCron(date: Date, cron: ParsedCron): boolean {
+  return cron.minute.includes(date.getMinutes()) && cron.hour.includes(date.getHours()) && matchesDay(date, cron)
 }
 
 export function getNextOccurrence(
@@ -89,16 +55,20 @@ export function getNextOccurrence(
   next.setMilliseconds(0)
   next.setMinutes(next.getMinutes() + 1)
 
-  const maxIterations = 525600 // 1 year in minutes
-  let iterations = 0
+  // Gregorian calendars repeat every 400 years, including leap-day weekdays.
+  const endYear = next.getFullYear() + 400
 
-  while (iterations < maxIterations) {
+  while (next.getFullYear() < endYear) {
+    if (!matchesDay(next, cron)) {
+      next.setDate(next.getDate() + 1)
+      next.setHours(0, 0, 0, 0)
+      continue
+    }
     if (matchesCron(next, cron)) {
       return next
     }
 
     next.setMinutes(next.getMinutes() + 1)
-    iterations++
   }
 
   throw new Error(`Could not find next occurrence for: ${expression}`)

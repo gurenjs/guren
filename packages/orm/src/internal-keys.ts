@@ -25,3 +25,9 @@ export const RAW_RESULTS = Symbol('guren.orm.rawResults')
  * SQLite's 999 on a build older than 3.32 included.
  */
 export const DEFAULT_IN_LIST_SIZE = 500
+
+/** Model-specific bulk deletion, preserving the builder's scopes. */
+export const BULK_DELETE = Symbol('guren.orm.bulkDelete')
+
+/** Explicit physical deletion, used by SoftDeletes.forceDelete. */
+export const PHYSICAL_DELETE = Symbol('guren.orm.physicalDelete')

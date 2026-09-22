@@ -21,6 +21,7 @@ export class EventManager {
   private readonly listenerSeqCounters = new Map<string, number>()
 
   private queueDispatcher?: QueueEventDispatcher
+  private readonly claimedOnce = new WeakSet<RegisteredListener>()
 
   on<T extends Event>(
     event: EventClass<T> | string,
@@ -153,14 +154,19 @@ export class EventManager {
     }
 
     const listenersToCall = [...registeredListeners]
-    const toRemove: RegisteredListener[] = []
-
     const call = async (registered: RegisteredListener): Promise<void> => {
-      const queued = await this.invoke(registered, event, eventName)
-      // A queued `once` listener is removed once it has *run*, which is on the
-      // worker; removing it here would drop it before the job is drained.
-      if (registered.options.once && !queued) {
-        toRemove.push(registered)
+      if (registered.options.once) {
+        if (this.claimedOnce.has(registered)) return
+        this.claimedOnce.add(registered)
+      }
+      try {
+        const queued = await this.invoke(registered, event, eventName)
+        if (registered.options.once && !queued) this.forget(eventName, registeredListeners, [registered])
+        if (queued) this.claimedOnce.delete(registered)
+      } catch (error) {
+        // Only failure or queueing releases the claim: an emit holding an older snapshot must not rerun a success.
+        this.claimedOnce.delete(registered)
+        throw error
       }
     }
 
@@ -171,8 +177,6 @@ export class EventManager {
         await call(registered)
       }
     }
-
-    this.forget(eventName, registeredListeners, toRemove)
   }
 
   /** Resolves whether the listener was sent to a queue rather than run here. */

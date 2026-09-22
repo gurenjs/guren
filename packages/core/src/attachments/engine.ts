@@ -53,6 +53,9 @@ declare module '@guren/server' {
 }
 
 export interface ConfigureAttachmentsOptions {
+  /** Shared exclusion for hasOne writes across processes; run callback while holding the key's lock. */
+  withCollectionLock?: <T>(key: string, callback: () => Promise<T>) => Promise<T>
+
   /**
    * The app's Drizzle `attachments` table. Column property names must match the
    * documented contract: `id`, `attachableType`, `attachableId`, `collection`,
@@ -317,8 +320,12 @@ export type QueueDispatcher = Pick<QueueManager, 'driver' | 'dispatch'>
 /** Installed by `configureAttachments()`; `queue` is the engine's own manager when it has one. */
 export type JobDispatcher = (payload: GenerateVariantsPayload, queue: QueueDispatcher | undefined) => Promise<unknown>
 
+const collectionWrites = new WeakMap<object, Map<string, Promise<unknown>>>()
+
 export class AttachmentEngine {
   readonly model: typeof Model
+  private readonly collectionLocks: Map<string, Promise<unknown>>
+  private readonly sharedCollectionLock: NonNullable<ConfigureAttachmentsOptions['withCollectionLock']>
   private readonly storageFactory: (container: Container) => StorageManager
   private container?: Container
   private readonly defaultDisk: string
@@ -334,6 +341,10 @@ export class AttachmentEngine {
 
   constructor(options: ConfigureAttachmentsOptions) {
     const table = options.table
+    const locks = collectionWrites.get(table as object) ?? new Map<string, Promise<unknown>>()
+    collectionWrites.set(table as object, locks)
+    this.collectionLocks = locks
+    this.sharedCollectionLock = options.withCollectionLock ?? ((_key, callback) => callback())
     this.model = class AttachmentModel extends Model {
       static override table = table
     }
@@ -375,6 +386,20 @@ export class AttachmentEngine {
     return this.storageFactory(this.container ?? ambientContainer() ?? unavailableContainer())
   }
 
+  private async withCollectionWrite<T>(model: typeof Model, recordId: string | number, collection: string, callback: () => Promise<T>): Promise<T> {
+    const key = JSON.stringify([model.name, String(recordId), collection])
+    const previous = this.collectionLocks.get(key) ?? Promise.resolve()
+    const operation = previous.catch(() => undefined).then(() =>
+      this.sharedCollectionLock(key, callback),
+    )
+    this.collectionLocks.set(key, operation)
+    try {
+      return await operation
+    } finally {
+      if (this.collectionLocks.get(key) === operation) this.collectionLocks.delete(key)
+    }
+  }
+
   async attach(
     model: typeof Model,
     declaration: AttachmentsDeclaration,
@@ -384,6 +409,18 @@ export class AttachmentEngine {
     options: AttachOptions = {},
   ): Promise<AttachmentRecord> {
     const spec = this.specFor(model, declaration, collection)
+    const write = () => this.attachUnlocked(model, spec, recordId, collection, source, options)
+    return spec.kind === 'one' ? this.withCollectionWrite(model, recordId, collection, write) : write()
+  }
+
+  private async attachUnlocked(
+    model: typeof Model,
+    spec: AttachmentCollectionSpec,
+    recordId: string | number,
+    collection: string,
+    source: AttachmentSource,
+    options: AttachOptions,
+  ): Promise<AttachmentRecord> {
     const normalized = await normalizeSource(source, options.name)
 
     const queued = options.queued === true

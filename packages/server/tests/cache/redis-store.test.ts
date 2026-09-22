@@ -16,8 +16,9 @@ class RecordingRedis {
     return keys.filter((k) => this.data.has(k)).length
   }
 
-  async set(key: string, value: string): Promise<'OK'> {
-    this.commands.push(['set', key, value])
+  async set(key: string, value: string, mode?: string): Promise<'OK' | null> {
+    this.commands.push(mode ? ['set', key, value, mode] : ['set', key, value])
+    if (mode === 'NX' && this.data.has(key)) return null
     this.data.set(key, value)
     return 'OK'
   }
@@ -41,6 +42,15 @@ const createStore = () => {
   const redis = new RecordingRedis()
   return { redis, store: new RedisStore({ client: redis }) }
 }
+
+it('inserts a tag namespace atomically without replacing a concurrent winner', async () => {
+  const { store, redis } = createStore()
+  expect(await Promise.all([store.add('tag', 'first'), store.add('tag', 'second')])).toEqual([true, false])
+  expect(redis.commands).toEqual([
+    ['set', 'cache:tag', '"first"', 'NX'],
+    ['set', 'cache:tag', '"second"', 'NX'],
+  ])
+})
 
 describe('RedisStore counters', () => {
   it('increments a missing key with a single INCRBY', async () => {

@@ -18,12 +18,17 @@ export class TaggedCache implements TaggedCacheStore {
     for (const tag of this.tags) {
       const tagKey = `${this.tagSetPrefix}${tag}`
       let namespace = await this.store.get<string>(tagKey)
-
       if (!namespace) {
-        namespace = this.generateNamespace()
-        await this.store.set(tagKey, namespace)
+        const proposed = this.generateNamespace()
+        if (this.store.add) {
+          namespace = (await this.store.add(tagKey, proposed)) ? proposed : await this.store.get<string>(tagKey)
+          if (!namespace) throw new Error('Tag namespace was evicted during initialization; retry the cache operation.')
+        } else {
+          // Without add(), two first writers can each create a namespace and one of them loses its entries.
+          await this.store.set(tagKey, proposed)
+          namespace = proposed
+        }
       }
-
       namespaces.push(namespace)
     }
 
@@ -39,9 +44,7 @@ export class TaggedCache implements TaggedCacheStore {
     return `tagged:${namespace}:${key}`
   }
 
-  private async trackKey(key: string): Promise<void> {
-    const taggedKey = await this.taggedKey(key)
-
+  private async trackKey(taggedKey: string): Promise<void> {
     for (const tag of this.tags) {
       const setKey = `${this.tagSetPrefix}${tag}:keys`
       const keys = (await this.store.get<string[]>(setKey)) ?? []
@@ -61,7 +64,7 @@ export class TaggedCache implements TaggedCacheStore {
   async set<T>(key: string, value: T, ttl?: number): Promise<void> {
     const taggedKey = await this.taggedKey(key)
     await this.store.set(taggedKey, value, ttl)
-    await this.trackKey(key)
+    await this.trackKey(taggedKey)
   }
 
   async has(key: string): Promise<boolean> {
@@ -81,13 +84,13 @@ export class TaggedCache implements TaggedCacheStore {
 
   async increment(key: string, value = 1): Promise<number> {
     const taggedKey = await this.taggedKey(key)
-    await this.trackKey(key)
+    await this.trackKey(taggedKey)
     return this.store.increment(taggedKey, value)
   }
 
   async decrement(key: string, value = 1): Promise<number> {
     const taggedKey = await this.taggedKey(key)
-    await this.trackKey(key)
+    await this.trackKey(taggedKey)
     return this.store.decrement(taggedKey, value)
   }
 

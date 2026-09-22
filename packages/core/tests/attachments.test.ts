@@ -207,6 +207,37 @@ describe('attachments', () => {
       await Post.attach(1, 'report', new Uint8Array(Buffer.from('csv,data')))
     })
 
+    test('should share replacement exclusion across engines using the same table', async () => {
+      const first = Post.attach(1, 'draftPdf', new Uint8Array([1]), { name: 'first.pdf' })
+      configure()
+      const second = Post.attach(1, 'draftPdf', new Uint8Array([2]), { name: 'second.pdf' })
+      await Promise.all([first, second])
+      expect(sqlite.query('SELECT name FROM attachments').all()).toEqual([{ name: 'second.pdf' }])
+    })
+
+    test('should use a shared collection lock and release the local queue after failure', async () => {
+      const keys: string[] = []
+      configure({ withCollectionLock: async (key, callback) => {
+        keys.push(key)
+        if (keys.length === 1) throw new Error('lock unavailable')
+        return callback()
+      } })
+      await expect(Post.attach(1, 'draftPdf', new Uint8Array([1]))).rejects.toThrow('lock unavailable')
+      await Post.attach(1, 'draftPdf', new Uint8Array([2]))
+      expect(keys).toEqual([JSON.stringify(['Post', '1', 'draftPdf']), JSON.stringify(['Post', '1', 'draftPdf'])])
+      expect(sqlite.query('SELECT id FROM attachments').all()).toHaveLength(1)
+    })
+
+    test('should serialize concurrent replacements of one attachment', async () => {
+      const records = await Promise.all([
+        Post.attach(1, 'draftPdf', new Uint8Array([1]), { name: 'first.pdf' }),
+        Post.attach(1, 'draftPdf', new Uint8Array([2]), { name: 'second.pdf' }),
+      ])
+      expect(sqlite.query('SELECT name FROM attachments').all()).toEqual([{ name: 'second.pdf' }])
+      expect(await storage.disk('media').exists(records[0].path)).toBe(false)
+      expect(await storage.disk('media').exists(records[1].path)).toBe(true)
+    })
+
     test('should replace the previous attachment on a hasOne collection', async () => {
       const first = await Post.attach(1, 'cover', PNG_1X1, { name: 'first.png' })
       const second = await Post.attach(1, 'cover', PNG_1X1, { name: 'second.png' })
