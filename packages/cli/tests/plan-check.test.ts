@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { runCommand } from 'citty'
+import { consola } from 'consola'
 
-import { runCheck } from '../src/check'
+import { ciSuiteConflict, runCheck } from '../src/check'
 import { gatingResults, type CheckResult } from '../src/check-result'
 import { builtinSubCommands } from '../src/commands'
 import { checkPlans, discoverPlanFiles, isPlanInput } from '../src/plan-check'
@@ -285,6 +286,29 @@ describe('guren check --plan', () => {
 
       expect(planResults((await runCheck({ cwd: dir })).checks)).toEqual([])
       expect(byKey((await runCheck({ cwd: dir, plan: true })).checks, 'plan:drifted:')).toHaveLength(1)
+    })
+  })
+
+  describe('check --ci', () => {
+    test('should not list --plan among the suites that gate on their own', () => {
+      const message = ciSuiteConflict(['arch'])
+
+      expect(message).toContain('--arch/--docs/--spec/--i18n/--prototype/--env (they gate on their own)')
+      expect(message).not.toContain('--plan')
+    })
+
+    test('should refuse --ci --plan, saying --plan is advisory and runs on its own', async () => {
+      const error = spyOn(consola, 'error').mockImplementation(Object.assign(() => {}, { raw: () => {} }))
+      try {
+        await runCommand(builtinSubCommands.check, { rawArgs: ['--ci', '--plan', '--app', ROOT] })
+
+        const message = error.mock.calls.map((call) => String(call[0])).join('\n')
+        expect(message).toContain('--plan is advisory and never part of --ci')
+        expect(message).not.toMatch(/--env\/--plan|--plan \(they gate/u)
+        expect(process.exitCode).toBe(1)
+      } finally {
+        error.mockRestore()
+      }
     })
   })
 

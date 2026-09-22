@@ -73,6 +73,17 @@ export type { CheckStatus, CheckResult, CheckReport }
 export const CHECK_SUITES = ['arch', 'docs', 'spec', 'i18n', 'prototype', 'env', 'plan'] as const
 export type CheckSuite = (typeof CHECK_SUITES)[number]
 
+/**
+ * Why `check --ci` refuses the suite flags it was given. A suite flag would narrow the gate;
+ * `--plan` is advisory and never part of it, so it is named apart from the gating suites.
+ */
+export function ciSuiteConflict(given: readonly CheckSuite[]): string {
+  const gating = CHECK_SUITES.filter((suite) => suite !== 'plan')
+  const parts = [`check --ci runs the full suite: drop ${gating.map((suite) => `--${suite}`).join('/')} (they gate on their own)`]
+  if (given.includes('plan')) parts.push('--plan is advisory and never part of --ci; run guren check --plan on its own')
+  return `${parts.join('. ')}.`
+}
+
 export interface RunCheckOptions {
   cwd?: string
   json?: boolean
