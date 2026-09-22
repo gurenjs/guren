@@ -1699,6 +1699,164 @@ reshapes or drops them.
    `plan:waive`, `plan:close`.
 5. **Part 5**: the `github` store (§9), `guren check --plan`, the guide.
 
+**Amended after acceptance (2026-09-22), Part 2 measurements.** The numbers
+Parts 3 to 5 are re-reviewed against, and the answer to Open Question 1.
+
+*Method.* Three hand-written plans: comments on `examples/blog` (23 elements
+the plan changes), scheduled publishing on the blog (15, carrying the one
+`rename` and the one `drop`), and task checklists on `kadai`, a private
+dogfood app on the published 2.1 packages with SQLite (25), whose numbers
+cannot be reproduced from this repository. Each ran through `plan:status
+--json` of this tree against scratch copies of the app in four kinds of state:
+before implementation, partly implemented, fully implemented, and near-miss
+states built on purpose to break a known reader. A fifth run took one blog
+near-miss copy with a schema that throws on import, to read the static
+fallback; it is reported apart and left out of the tables. The near-miss states carry 30
+faults of the kind an agent leaves behind: a validation call replaced by a raw
+parse, a route moved into a module `createApp()` never lists, a column option
+dropped, a listener never registered, a route declared after a `/:id` that
+shadows it. Every verdict was judged by hand against what the code does.
+`existing` elements are left out of every count.
+
+| State | Runs | Elements | Agree | False `present` | False `wired` | False `drifted` | `unjudged` |
+|---|---|---|---|---|---|---|---|
+| before implementation | 3 | 63 | 53 | 0 | 3 | 2 | 5 |
+| partly implemented | 2 | 48 | 41 | 0 | 2 | 2 | 3 |
+| fully implemented | 3 | 63 | 58 | 0 | 0 | 0 | 5 |
+| near-miss (adversarial) | 4 | 86 | 68 | 5 | 6 | 0 | 7 |
+
+Of the `present` and `wired` verdicts, the false share was 0 of 58 on the
+finished implementations, 2 of 30 partway through, and 11 of 63 in the
+near-miss states. The near-miss rate is an upper bound from states built to
+fail, not a field rate. Before implementation only three elements read
+`present` or `wired` at all, and all three were wrong, for the one reason under
+cause 1 below. A false `drifted` errs the safe way: it reports work that is
+already done as unfinished.
+
+Planned properties that ended `unknown` on the finished implementations, where
+every reader had something to read:
+
+| Section | Compared | `unknown` | Share |
+|---|---|---|---|
+| models | 24 | 1 | 4% |
+| columns | 83 | 5 | 6% |
+| actions | 23 | 0 | 0% |
+| routes | 30 | 0 | 0% |
+| views | 12 | 7 | 58% |
+| validators | 7 | 7 | 100% |
+| resources | 2 | 2 | 100% |
+| policies | 2 | 2 | 100% |
+| all | 183 | 24 | 13% |
+
+The column unknowns are `references.onDelete` (3 of 3) and a SQLite `integer`
+or `text` holding a boolean or a date (2 of 15 types); the view unknowns are
+`form`, `actions` and `states`. Five of the 63 elements were `unjudged`: three
+controller `alter`s, one mail class, and one model `alter` whose only change was
+a dropped column. A further 18 of the 58 complete verdicts rested on existence
+alone: every resource, policy, side effect and controller, every validator
+(also on its mount), and the dropped column (on its absence).
+
+Of the 30 near-miss faults, 17 showed on the faulty element's own verdict, 3
+only as a note on a neighbouring element (a validator left `present` because
+nothing validates with it), and 10 were hidden: 7 behind a property with no
+reader, 2 behind a reader defect, and 1 no static reader can see.
+
+*The false verdicts, by cause.* All 16 false `present` / `wired` verdicts have
+one shape: the element completed while every property that encodes the change
+was `unknown` or absent, carried over the line by a property that was true
+anyway. §6's rule that an unknown never counts towards `present` stops an
+unknown from satisfying a property; it does not stop an element whose
+meaningful properties are all unknown from completing on the rest.
+
+1. An `alter` completes on a property that already held (6 false `wired`). A
+   plan that alters an action's behaviour (`PostController.show` also loads
+   comments) states its response page, which was true before a line was
+   written, so the action reads `wired` from the start in all three plans. In
+   `packages/cli/src/plan/status.ts:194-202` an alter is `unjudged` only while
+   no property is readable. The same cause makes a view `alter` that restates
+   an existing prop beside a new one read `drifted` before implementation (the
+   4 false `drifted`, `status.ts:198`). `baseline.contextHash` does not
+   separate the two states: `action.tasks.show` read `fresh` both before and
+   after the change.
+2. A removed `this.validateBody` reads `unknown`, not `differ` (3 false
+   `wired`, `status.ts:708-714`). All three removals in the near-miss states
+   landed here, so on these plans an `unknown` body validator was a fault
+   every time, never a helper doing the work.
+3. No reader for what makes the element work (5): a validator whose rule
+   changed (`max(500)` for a planned `max(2000)`), a resource missing
+   fields, a policy with no `delete`, an event class nothing emits, and a
+   listener nothing registers with `events.on()`.
+4. A reader defect (1): `mergeRelationships()` in
+   `packages/cli/src/model-parser.ts:544-560` reports a relationship declared
+   only in `relationTypes`, with the `Post.hasMany(...)` call deleted, and lets
+   the annotation's kind override the call's, so a `hasOne` call under a
+   `BelongsToRecord` annotation reads `belongsTo`.
+5. Not statically visible (1): a route registered after a `/:id` sibling reads
+   `wired` while Hono serves every request to the sibling.
+
+Two readings of the static fallback. `packages/cli/src/schema-parser.ts:76`
+knows builders only from `drizzle-orm/*`, and the blog and every
+`create-app` database template import them from `@guren/orm/drizzle/*`, so on
+fallback every column of a scaffolded app is opaque; one run with a schema that
+throws on import turned two correct `drifted` columns into false `present`. And
+a schema that will not import takes the routes with it, since the models import
+it: that run also left 4 elements `blocked` (two spread columns, two routes)
+and 5 understated. The runtime reader is the only reader a scaffolded app
+gets.
+
+*`plan:verify`.* On kadai's finished checklist a whole-plan run verified all 25
+elements; its `tests` step reads `failed`, as §6 says it must on a finished
+tree. A near-miss the typecheck saw (a prop `TaskController.show` no longer
+passes) failed its steps and lifted nothing. A near-miss that type-checks and
+passes the behaviours lifted 16 elements, the unregistered listener among
+them: `verified` on a class no event reaches, because no behaviour exercised
+it. The bypassed validator kept its step `incomplete`. On the blog every step
+failed on work the plan did not list (spec views out of date, a prototype
+fixture the plan's new prop broke), `db:migrate` was `blocked` on an unreachable
+database as designed, and the `tests` steps failed with no test file carrying
+the ids, since this measurement wrote no blog tests. Writing them would not
+be enough: the blog's suite is written for Vitest (`vi.mock`,
+`vi.importActual`), and one of its files run under `bun test`, which is what
+`plan:verify` runs, fails on `vi.importActual is not a function`.
+
+*Answer to Open Question 1.* The progress view is not mostly "not checkable":
+13% of planned properties at completion, concentrated in the kinds §6 already
+lists as readerless. Causes 1, 2 and 4 (10 of the 16 false verdicts) come from
+two rules and one defect, each fixable without a new reader:
+
+- an `alter` counts only the properties that differ from how the code read at
+  approval, which means `plan:approve` records the per-property verdicts of
+  every `alter`; with none left readable the element is `unjudged`;
+- a planned body, params or query validator that the body does not validate
+  with holds the action at `present` with a note, as the validator's own
+  `wired` rule already does, instead of reading `unknown`;
+- an element whose completion rests on existence alone is not lifted to
+  `verified` by a step whose behaviours never reach it;
+- `mergeRelationships()` takes the kind from the call and keeps an
+  annotation-only relationship out of the declared set.
+
+Causes 3 and 5 (the other 6) remain after all four. The third rule stops
+`plan:verify` lifting such an element; `plan:status` still reports it `present`
+or `wired`. Part of cause 3 is a gap between the code and this RFC: the rule
+above says an element whose every planned property is unknown is `unjudged`,
+but `status.ts:194` applies it to an `alter` only, so an `add` resource or
+policy whose only planned property is unknown reads `present`. Applying the
+rule to every change kind would make those two `unjudged`; the validator,
+event and listener would still complete on their mount or on existence.
+
+*Parts 3 to 5.* `plan:approve`, `plan:next`, the `Stop` hook, `plan:waive` and
+`plan:close` landed before these numbers existed; the numbers support what
+landed, and `plan:approve` takes on the per-property record above. For what has
+not started:
+
+| Item | Call | On what |
+|---|---|---|
+| scaffold emitters (§5) | proceed | 0 false verdicts at completion on the kinds a scaffold writes (models, columns, actions, routes), at 0% to 6% unknown |
+| `claude -p` producer, `--print-prompt` (§8) | reshape | the prompt asks every `alter` to state its change in readable properties, and §2 warns on an `alter` whose readable properties all held at approval; an `alter` in prose alone is cause 1 |
+| `guren check --plan` (§9) | proceed | a single reading of the rules above serves it |
+| `github` store (§9) | defer | nothing measured here bears on it; it waits for a user |
+| the guide | proceed; update when the §6 rules land | the guide describes today's rules, which the changes above alter |
+
 Identity comes first and status second, before any model is called: they are
 what the rest stands on, and both can be tested without one.
 
@@ -1760,7 +1918,10 @@ code and never from an earlier plan.
    applications, and what share of planned properties ends up `unknown` or
    `unjudged`? A progress view that is mostly "not checkable" is not worth
    reading. Part 2 exists to answer this; a poor answer reshapes §6 and
-   decides whether Parts 3 to 5 happen.
+   decides whether Parts 3 to 5 happen. **Measured (2026-09-22):** 13% of
+   planned properties unknown at completion and no false verdict on the
+   finished implementations; the false verdicts found elsewhere and the §6
+   rules they call for are in the Part 2 measurements under Phasing.
 2. **One call or two.** Is the full schema within what `--json-schema` produces
    reliably, or does generation split into an outline call and per-entity detail
    calls with `--resume`? Decided by the measured rate of
