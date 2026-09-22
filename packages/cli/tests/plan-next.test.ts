@@ -9,13 +9,16 @@ import { builtinSubCommands } from '../src/commands'
 import { formatPlanNext, planNextFile, type PlanNextReport } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
 import { planWaiveFile } from '../src/plan-waive'
+import type { PlanAppState } from '../src/plan/app-state'
+import { stampContextHash } from '../src/plan/freshness'
 import { planDigest, PLAN_STATE_VERSION, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
-import { loadApprovedCommentsPlan, loadCommentsPlan } from './plan-fixture'
+import { loadCommentsPlan, PLAN_APP_FILES, planAppState, type PlanAppStateInput } from './plan-fixture'
 
-// The command never loads the application, so an app here is a directory with a plan.
+// A draft never has the application read, so an app here is a directory with a plan; an approved
+// plan is handed the application as `app`, or read from a committed one on disk.
 const PLAN = parsePlanDocument(loadCommentsPlan())
 const DIGEST = planDigest(PLAN)
 const STEPS = planStepIds(derivePlanTasks(PLAN))
@@ -23,6 +26,11 @@ const [SCAFFOLD, TESTS, DATA, HTTP] = STEPS as [string, string, string, string]
 const NOW = () => new Date('2026-09-21T10:00:00.000Z')
 
 let ROOT: string
+
+/** The document approved against `at`, stamped the way `plan:approve` stamps it: nothing is stale against `at` itself. */
+function approvedAgainst(document: Record<string, unknown>, at: PlanAppStateInput = {}): Record<string, unknown> {
+  return { ...document, baseline: { rev: 'abc123', contextHash: stampContextHash(parsePlanDocument(document), planAppState(at)).contextHash } }
+}
 
 function git(dir: string, ...args: string[]): void {
   const result = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
@@ -223,7 +231,7 @@ describe('plan:next', () => {
   })
 
   test('should let a waiver carry a step whose record rests on one, and return that step again once the waiver is gone', async () => {
-    const approved = loadApprovedCommentsPlan()
+    const approved = approvedAgainst(loadCommentsPlan())
     const app = join(ROOT, 'waived')
     await writeWorkspaceFiles(app, {
       'package.json': JSON.stringify({ name: 'waived', type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
@@ -235,9 +243,9 @@ describe('plan:next', () => {
     await writeState(app, { steps: { [SCAFFOLD]: record } })
     await planWaiveFile(plan, { elementIds: ['policy.comment'], reason: 'the policy lands in the next plan', now: NOW })
 
-    const carried = await planNextFile(plan, { appRoot: app, now: NOW })
+    const carried = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
     await planWaiveFile(plan, { elementIds: ['policy.comment'], remove: true })
-    const withdrawn = await planNextFile(plan, { appRoot: app, now: NOW })
+    const withdrawn = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
 
     expect(carried.verified).toEqual([SCAFFOLD])
     expect(carried.step?.id).toBe(TESTS)
@@ -246,7 +254,7 @@ describe('plan:next', () => {
   })
 
   test('should mark a step\u2019s waived elements apart from the ones to implement', async () => {
-    const approved = loadApprovedCommentsPlan()
+    const approved = approvedAgainst(loadCommentsPlan())
     const { app, plan } = await createApp('waived-elements')
     await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
     const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) }
@@ -254,7 +262,7 @@ describe('plan:next', () => {
     // `git config` faked away, so the waiver's authorship is not this machine's.
     await planWaiveFile(plan, { elementIds: ['policy.comment'], reason: 'the policy lands in the next plan', now: NOW, exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }) })
 
-    const report = await planNextFile(plan, { appRoot: app, now: NOW })
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
     const text = formatPlanNext(report, 'comments.plan.json')
 
     expect(report.step!.id).toBe(HTTP)
@@ -309,6 +317,215 @@ describe('plan:next', () => {
       expect(text).toContain('Marked in .guren/plans/comments.state.json')
       expect(json.reportVersion).toBe(1)
       expect(json.step).toMatchObject({ id: TESTS, kind: 'tests', acceptance: expect.arrayContaining([expect.objectContaining({ id: 'AC-comments-1' })]) })
+    })
+  })
+})
+
+/**
+ * The comments fixture with two more tasks: `model.post/http` owns an `alter` route naming an
+ * `existing` action, and `model.tag` is a slice that depends on nothing of the comments.
+ */
+function threeTaskPlan(): Record<string, unknown> {
+  const document = loadCommentsPlan() as Record<string, Array<Record<string, unknown>>>
+  document.models!.push({
+    id: 'model.tag',
+    change: { kind: 'add' },
+    name: 'Tag',
+    table: 'tags',
+    columns: [{ id: 'column.tag.id', name: 'id', change: { kind: 'add' }, type: 'integer', nullable: false, unique: false, index: false, primaryKey: true }],
+    relationships: [],
+    fillable: [],
+  })
+  document.controllers!.push({
+    id: 'controller.posts',
+    change: { kind: 'existing' },
+    className: 'PostController',
+    actions: [{ id: 'action.posts.index', change: { kind: 'existing' }, name: 'index', authorization: { middleware: [] }, response: { kind: 'json', description: 'the posts' }, rules: [] }],
+  })
+  document.routes!.push({ id: 'route.posts.index', change: { kind: 'alter' }, method: 'GET', path: '/posts', name: 'posts.index', action: 'action.posts.index', middleware: ['auth'], bind: [] })
+  return document
+}
+
+const POST_HTTP = 'task/entity/model.post/http'
+const COMMENT = 'task/entity/model.comment'
+const TAG_SCAFFOLD = 'task/entity/model.tag/scaffold'
+const POST_MOVED: PlanAppStateInput = { models: [{ name: 'Post', module: 'blog' }, 'User'] }
+
+describe('plan:next on stale context', () => {
+  beforeAll(async () => {
+    ROOT = await mkdtemp(join(tmpdir(), 'guren-plan-next-stale-'))
+  })
+
+  afterAll(async () => {
+    await rm(ROOT, { recursive: true, force: true })
+  })
+
+  async function approvedApp(name: string, document: Record<string, unknown>, standing: string[] = []): Promise<{ app: string; plan: string }> {
+    const approved = approvedAgainst(document)
+    const { app, plan } = await createApp(name)
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) }
+    await writeState(app, { steps: Object.fromEntries(standing.map((id) => [id, record])) })
+    return { app, plan }
+  }
+
+  test('should block the step owning a stale element and the steps naming it, hold what waits on them, and return an unrelated step', async () => {
+    const { app, plan } = await approvedApp('owner', threeTaskPlan(), [POST_HTTP, `${COMMENT}/scaffold`, `${COMMENT}/tests`])
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })
+
+    expect(report.blocked.map((step) => [step.id, step.stale.map((element) => [element.id, element.owned, element.through])])).toEqual([
+      [`${COMMENT}/data`, [['model.post', true, ['model.comment', 'column.comment.postId']]]],
+      [`${COMMENT}/http`, [['model.post', false, ['route.comments.store']]]],
+    ])
+    expect(report.waiting).toEqual([{ id: `${COMMENT}/pages`, on: [`${COMMENT}/data`, `${COMMENT}/http`] }])
+    expect(report.step!.id).toBe(TAG_SCAFFOLD)
+    expect(report.verified).toEqual([POST_HTTP, `${COMMENT}/scaffold`, `${COMMENT}/tests`])
+    expect((await readState(app)).active!.step).toBe(TAG_SCAFFOLD)
+
+    // The same plan against the application it was approved against blocks nothing.
+    const fresh = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    expect(fresh.blocked).toEqual([])
+    expect(fresh.step!.id).toBe(`${COMMENT}/data`)
+  })
+
+  test('should block the steps naming a stale existing element, which no step owns, and name what the reference checks say now', async () => {
+    const { app, plan } = await approvedApp('existing', threeTaskPlan())
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState({ actions: ['PostController.show'] }), now: NOW })
+
+    expect(report.blocked).toHaveLength(1)
+    const [blocked] = report.blocked
+    expect(blocked!.id).toBe(POST_HTTP)
+    expect(blocked!.stale).toEqual([
+      expect.objectContaining({
+        id: 'action.posts.index',
+        change: 'existing',
+        owned: false,
+        through: ['route.posts.index'],
+        checks: [expect.objectContaining({ key: 'plan:app-missing', status: 'fail' })],
+      }),
+    ])
+    expect(report.waiting).toEqual([])
+    expect(report.step!.id).toBe(`${COMMENT}/scaffold`)
+
+    const text = formatPlanNext(report, 'comments.plan.json')
+    expect(text).toContain(`Blocked, since what they depend on changed after the plan was approved:\n  ${POST_HTTP}\n    action.posts.index (actions, existing), named by route.posts.index: `)
+    expect(text).toContain('      fail  The action "PostController.index" was not found in the project root')
+    expect(text).toContain('revise the plan so it states what the application holds now')
+  })
+
+  test('should never block on an element whose freshness is unstamped or unjudged, nor on an application it could not read', async () => {
+    const approvedUnread = approvedAgainst(loadCommentsPlan(), { models: { unreadable: 'models threw' } })
+    const { app, plan } = await createApp('unjudged')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approvedUnread) })
+
+    // model.post has no stamp: a change to it is not evidence of anything.
+    const unstamped = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })
+    expect(unstamped.blocked).toEqual([])
+    expect(unstamped.step!.id).toBe(SCAFFOLD)
+
+    const unjudged = await planNextFile(plan, { appRoot: app, app: planAppState({ tables: { unreadable: 'schema threw' } }), now: NOW })
+    expect(unjudged.blocked).toEqual([])
+
+    const threw = await planNextFile(plan, { appRoot: app, app: () => Promise.reject(new Error('routes file threw')), now: NOW })
+    expect(threw.blocked).toEqual([])
+    expect(threw.freshnessUnreadable).toBe('routes file threw')
+    expect(formatPlanNext(threw, 'comments.plan.json')).toContain('The application could not be read, so no step was judged stale: routes file threw')
+  })
+
+  test('should report what the returned step depends on whose freshness is not judged, blocking nothing', async () => {
+    const { app, plan } = await approvedApp('reported', loadCommentsPlan(), [SCAFFOLD, TESTS, DATA])
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+
+    expect(report.step!.id).toBe(HTTP)
+    // Validators are never read, so the one the step owns is always unjudged.
+    expect(report.step!.unjudged).toEqual([expect.objectContaining({ id: 'validator.comment', verdict: 'unjudged', owned: true })])
+    expect(formatPlanNext(report, 'comments.plan.json')).toContain('Depends on elements whose freshness could not be judged, which blocks nothing:\n  unjudged  validator.comment: ')
+  })
+
+  test('should not block the marked step on what it owns, which is its own work in progress', async () => {
+    const { app, plan } = await approvedApp('in-progress', loadCommentsPlan(), [SCAFFOLD, TESTS])
+    // The class written before its table: neither the stamp nor what the plan leaves.
+    const half: PlanAppStateInput = { models: ['Comment', 'Post', 'User'] }
+
+    const unmarked = await planNextFile(plan, { appRoot: app, app: planAppState(half), now: NOW })
+    expect(unmarked.blocked.map((step) => step.id)).toEqual([DATA, HTTP])
+
+    await writeState(app, { ...(await readState(app)), active: { plan: 'comments.plan.json', step: DATA, startedAt: '2026-09-21T09:00:00.000Z', continuations: 1 } })
+    const marked = await planNextFile(plan, { appRoot: app, app: planAppState(half), now: NOW })
+    expect(marked.blocked).toEqual([])
+    expect(marked.step!.id).toBe(DATA)
+    expect((await readState(app)).active!.continuations).toBe(1)
+  })
+
+  test('should return no step and clear the mark when every step left is blocked or waits on one, reporting the stall of the marked one', async () => {
+    const { app, plan } = await approvedApp('all-blocked', loadCommentsPlan(), [SCAFFOLD, TESTS])
+    const stall = { at: '2026-09-21T09:30:00.000Z', reason: 'what the step depends on changed since the plan was approved', output: 'x' }
+    await writeState(app, { ...(await readState(app)), active: { plan: 'comments.plan.json', step: HTTP, startedAt: '2026-09-21T09:00:00.000Z', continuations: 1, stalled: stall } })
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(POST_MOVED), now: NOW })
+
+    expect(report.step).toBeNull()
+    expect(report.blocked.map((step) => step.id)).toEqual([DATA, HTTP])
+    expect(report.blocked[1]!.stalled).toEqual(stall)
+    expect(report.waiting.map((step) => step.id)).toEqual([`${COMMENT}/pages`])
+    expect((await readState(app)).active).toBeUndefined()
+    const text = formatPlanNext(report, 'comments.plan.json')
+    expect(text).toContain('No step can be returned: every step left is blocked, or waits on one that is.')
+    expect(text).not.toContain('Every step is verified')
+    expect(text).toContain(`    stalled ${stall.at}: ${stall.reason}`)
+  })
+
+  test('should never read the application for a draft', async () => {
+    const { app, plan } = await createApp('draft')
+    let read = 0
+    const report = await planNextFile(plan, { appRoot: app, app: () => (read++, Promise.resolve(planAppState(POST_MOVED) as PlanAppState)), now: NOW })
+    expect(read).toBe(0)
+    expect(report.blocked).toEqual([])
+    expect(report.step!.id).toBe(SCAFFOLD)
+  })
+
+  describe('through the command, against an application on disk', () => {
+    // Spied here rather than at collection, where the formatting block's restore would undo it.
+    let log: ReturnType<typeof spyOn>
+    beforeAll(() => {
+      log = spyOn(console, 'log')
+    })
+
+    afterEach(() => {
+      log.mockClear()
+      process.exitCode = 0
+    })
+
+    afterAll(() => {
+      log.mockRestore()
+    })
+
+    test('should skip the steps a commit after approval made stale, and exit 0', async () => {
+      const app = join(ROOT, 'on-disk')
+      await writeWorkspaceFiles(app, { ...PLAN_APP_FILES, 'comments.plan.json': JSON.stringify({ ...loadCommentsPlan(), questions: [] }) })
+      git(app, 'init', '-q')
+      git(app, 'add', '-A')
+      git(app, 'commit', '-q', '-m', 'init')
+      const plan = join(app, 'comments.plan.json')
+      log.mockImplementation(() => {})
+      await runCommand(builtinSubCommands['plan:approve'] as CommandDef, { rawArgs: [plan, '--app', app] })
+      git(app, 'add', '-A')
+      git(app, 'commit', '-q', '-m', 'approve')
+
+      // Another commit renames the model the plan alters.
+      await writeFile(join(app, 'app/Models/Post.ts'), (await readFile(join(app, 'app/Models/Post.ts'), 'utf8')).replace('class Post ', 'class Article '), 'utf8')
+      git(app, 'commit', '-q', '-am', 'rename Post')
+      log.mockClear()
+      await runCommand(builtinSubCommands['plan:next'] as CommandDef, { rawArgs: [plan, '--app', app, '--json'] })
+      const report = JSON.parse(String(log.mock.calls[0]![0])) as PlanNextReport
+
+      expect(report.blocked.map((step) => step.id)).toEqual([DATA, HTTP])
+      expect(report.blocked[0]!.stale[0]).toMatchObject({ id: 'model.post', owned: true, checks: [expect.objectContaining({ key: 'plan:app-missing' })] })
+      expect(report.step!.id).toBe(SCAFFOLD)
+      expect(process.exitCode ?? 0).toBe(0)
     })
   })
 })

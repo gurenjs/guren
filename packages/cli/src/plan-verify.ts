@@ -13,8 +13,10 @@ import { readScripts } from './command-output'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
+import { judgeFreshness } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
+import { judgeStepContext, type PlanStepContext } from './plan/stale-steps'
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
 import { judgePlan } from './plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
@@ -31,6 +33,12 @@ export interface PlanVerifyReport extends PlanStatusReport {
   /** Steps a whole-plan run left alone: verified before, at a fingerprint that still matches. */
   skipped: string[]
   verification: PlanVerificationSummary
+  /**
+   * The steps this run covered that depend on an element stale against the baseline (RFC
+   * 0030 §4). Reported beside the outcome and never folded into it: `blocked` is the
+   * environment's and `failed` the implementation's, and staleness is neither.
+   */
+  staleContext?: PlanStepContext[]
 }
 
 export interface PlanVerifyFileOptions {
@@ -81,10 +89,11 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     throw new CliError(`No step "${options.step}" is derived from this plan. The steps are:\n${planStepIds(derivation).map((id) => `  ${id}`).join('\n')}`)
   }
 
+  let loaded: PlanAppState | undefined
   const verifier = new PlanVerifier(plan, derivation, {
     root,
     planDigest: digest,
-    status: async () => judgePlan(plan, await loadApp()),
+    status: async () => judgePlan(plan, (loaded = await loadApp())),
     exec: runCaptured,
     timeoutMs: options.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
     scripts: await readScripts(root),
@@ -98,6 +107,9 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   }
 
   const overlaid = await overlayVerification(root, path, plan, await verifier.status(), derivation, { replacedUnreadable: before.unreadable, waivers: log })
+  const freshness = hasBaseline(plan) && loaded ? judgeFreshness(plan, loaded) : undefined
+  const ran = new Set(stepIds)
+  const staleContext = freshness ? judgeStepContext(freshness, derivation).filter((context) => ran.has(context.stepId) && context.stale.length > 0) : []
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
@@ -105,6 +117,8 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     verification: overlaid.verification,
     steps,
     skipped,
+    ...(freshness ? { freshness } : {}),
+    ...(staleContext.length > 0 ? { staleContext } : {}),
   }
 }
 
@@ -127,6 +141,10 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   const codegenFailed = report.steps.filter(({ record }) => record.commands.some((command) => command.command === 'codegen' && command.status !== 'pass'))
   for (const { stepId, record } of report.steps) {
     lines.push(...formatPlanStepRecord(stepId, record), '')
+  }
+  for (const context of report.staleContext ?? []) {
+    const named = context.stale.map((element) => (element.owned ? element.id : `${element.id} (named by ${element.through.join(', ')})`))
+    lines.push(`${context.stepId}: depends on what changed since the plan was approved: ${named.join(', ')}; plan:next skips it until the plan is revised and approved`, '')
   }
   for (const stepId of report.skipped) lines.push(`${stepId}: verified before, and nothing it fingerprinted has changed`)
   if (report.skipped.length > 0) lines.push('')

@@ -8,12 +8,13 @@ import { runCommand, type CommandDef } from 'citty'
 import { builtinSubCommands } from '../src/commands'
 import { parsePlanDocument } from '../src/plan-render'
 import type { PlanStatusReport } from '../src/plan-status'
-import type { PlanVerifyReport } from '../src/plan-verify'
+import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { planWaiveFile } from '../src/plan-waive'
 import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
+import { stampContextHash } from '../src/plan/freshness'
 import { sha256 } from '../src/plan/verification'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
+import { loadApprovedCommentsPlan, loadCommentsPlan, planAppState, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own, since Bun keys an imported routes file on
@@ -111,6 +112,24 @@ describe('plan:verify', () => {
     expect(state.steps[HTTP]).toMatchObject({ outcome: 'incomplete', planDigest: planDigest(parsePlanDocument(loadCommentsPlan())) })
     expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe(PLAN_STATE_GITIGNORE)
     expect(Object.values(states(result))).not.toContain('verified')
+  })
+
+  test('should report the stale context of the step it ran beside an outcome staleness does not change', async () => {
+    // Approved while the app had Post; another commit has since renamed it.
+    const app = await createApp('stale', { ...APP, 'app/Models/Post.ts': APP['app/Models/Post.ts']!.replace('class Post ', 'class Article ') })
+    const baseline = { rev: 'abc123', contextHash: stampContextHash(parsePlanDocument(loadCommentsPlan()), planAppState()).contextHash }
+    const plan = await writePlan('stale.plan.json', { ...loadCommentsPlan(), baseline })
+
+    const result = await verify(plan, app, '--step', HTTP)
+
+    expect(result.steps[0]!.record.outcome).toBe('incomplete')
+    expect(result.freshness!.elements.find((element) => element.id === 'model.post')!.verdict).toBe('stale')
+    expect(result.staleContext).toEqual([
+      { stepId: HTTP, taskId: 'task/entity/model.comment', stale: [expect.objectContaining({ id: 'model.post', owned: false, through: ['route.comments.store'] })], unjudged: expect.any(Array) },
+    ])
+    const text = formatPlanVerify(result)
+    expect(text).toContain(`${HTTP}: depends on what changed since the plan was approved: model.post (named by route.comments.store); plan:next skips it until the plan is revised and approved`)
+    expect(text).toContain('Against the approved baseline: fresh ')
   })
 
   test('should verify a step whose only incomplete elements the decision log waives', async () => {

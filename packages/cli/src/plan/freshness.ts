@@ -34,7 +34,7 @@ export interface PlanElementFreshness {
   verdict: PlanFreshnessVerdict
   /** Why, on every verdict but a `fresh` that matches its stamp. */
   reason?: string
-  /** On `stale`: the elements naming this one (`listPlanReferences()`), whose steps depend on it. */
+  /** On every verdict but `fresh`: the elements naming this one (`listPlanReferences()`), whose steps depend on it. */
   affects?: string[]
 }
 
@@ -237,16 +237,16 @@ export function judgeFreshness(plan: PlanDraft & { baseline: { contextHash: Reco
     return { ...base, verdict: 'stale', reason: 'What the scanners read for it changed since approval, to neither what was stamped nor what the plan leaves.' }
   })
 
-  const stale = new Set(elements.filter((element) => element.verdict === 'stale').map((element) => element.id))
+  const judged = new Set(elements.filter((element) => element.verdict !== 'fresh').map((element) => element.id))
   const affects = new Map<string, Set<string>>()
   for (const reference of listPlanReferences(plan)) {
-    if (!stale.has(reference.to) || reference.from.id === reference.to) continue
+    if (!judged.has(reference.to) || reference.from.id === reference.to) continue
     const set = affects.get(reference.to) ?? new Set<string>()
     set.add(reference.from.id)
     affects.set(reference.to, set)
   }
   for (const element of elements) {
-    if (element.verdict === 'stale') element.affects = [...(affects.get(element.id) ?? [])]
+    if (element.verdict !== 'fresh') element.affects = [...(affects.get(element.id) ?? [])]
   }
 
   const summary = Object.fromEntries(PLAN_FRESHNESS_VERDICTS.map((verdict) => [verdict, 0])) as Record<PlanFreshnessVerdict, number>
