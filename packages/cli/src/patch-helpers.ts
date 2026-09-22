@@ -542,8 +542,6 @@ import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { findSchemaAggregate, type SchemaDialect } from './schema-parser'
 export type { SchemaDialect }
 
-export { DIALECT_BARRELS }
-
 /**
  * The dialect an app's `db/schema.ts` is written in. Every column-appending
  * patcher must agree: drizzle's table builders accept a foreign dialect's column

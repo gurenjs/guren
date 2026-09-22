@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { describe, expect, it } from 'bun:test'
+import { beforeAll, describe, expect, it } from 'bun:test'
 import { DIALECT_BARRELS, isDrizzleBuilderSpecifier, MIXED_DRIZZLE_BARREL } from '../src/drizzle-specifiers'
 import { parseSchemaTables, type SchemaColumn, type SchemaTable } from '../src/schema-parser'
 import { checkSchemaTimestamps } from '../src/schema-check'
@@ -29,11 +29,17 @@ function column(table: SchemaTable, name: string): SchemaColumn {
 }
 
 describe('isDrizzleBuilderSpecifier', () => {
-  it('accepts every ./drizzle* subpath @guren/orm exports', async () => {
+  let ormExports: string[]
+
+  beforeAll(async () => {
     const manifest = JSON.parse(await readFile(join(REPO_ROOT, 'packages/orm/package.json'), 'utf8')) as {
       exports: Record<string, unknown>
     }
-    const subpaths = Object.keys(manifest.exports).filter((key) => key.startsWith('./drizzle'))
+    ormExports = Object.keys(manifest.exports)
+  })
+
+  it('accepts every ./drizzle* subpath @guren/orm exports', () => {
+    const subpaths = ormExports.filter((key) => key.startsWith('./drizzle'))
 
     expect(subpaths.length).toBeGreaterThan(0)
     for (const subpath of subpaths) {
@@ -41,12 +47,9 @@ describe('isDrizzleBuilderSpecifier', () => {
     }
   })
 
-  it('names only barrels @guren/orm actually exports', async () => {
-    const manifest = JSON.parse(await readFile(join(REPO_ROOT, 'packages/orm/package.json'), 'utf8')) as {
-      exports: Record<string, unknown>
-    }
+  it('names only barrels @guren/orm actually exports', () => {
     for (const specifier of [MIXED_DRIZZLE_BARREL, ...Object.values(DIALECT_BARRELS)]) {
-      expect(Object.keys(manifest.exports)).toContain(`.${specifier.slice('@guren/orm'.length)}`)
+      expect(ormExports).toContain(`.${specifier.slice('@guren/orm'.length)}`)
     }
   })
 
@@ -60,6 +63,9 @@ describe('isDrizzleBuilderSpecifier', () => {
   })
 })
 
+// Without the barrels accepted, every column below reads `opaqueBuilder: true` and every
+// barrel-built constraint goes unread: the `opaqueBuilder` and `constraints` assertions
+// are the ones that fail. Types and options were read either way.
 describe('parseSchemaTables on the create-app database templates', () => {
   it('covers every template driver', async () => {
     expect((await readdir(DATABASE_TEMPLATES)).sort()).toEqual(['mysql', 'postgres', 'sqlite'])
@@ -106,13 +112,12 @@ describe('parseSchemaTables on the create-app database templates', () => {
 })
 
 describe('parseSchemaTables on a scaffold-shaped schema', () => {
-  const SCAFFOLDED = `import { index, pgTable, serial, text, timestamp, uniqueIndex } from '@guren/orm/drizzle/pg'
+  const SCAFFOLDED = `import { index, pgTable, serial, text, uniqueIndex } from '@guren/orm/drizzle/pg'
 
 export const posts = pgTable('posts', {
   id: serial('id').primaryKey(),
   slug: text('slug').notNull(),
   title: text('title').notNull(),
-  publishedAt: timestamp('published_at'),
 }, (table) => [
   uniqueIndex('posts_slug_unique').on(table.slug),
   index('posts_title_idx').on(table.title),
@@ -153,9 +158,20 @@ export const posts = pgTable('posts', { id: idColumn(), other: serial('other') }
     expect(column(posts, 'id').opaqueBuilder).toBe(true)
     expect(column(posts, 'other').opaqueBuilder).toBeUndefined()
   })
+})
 
-  it('flags the offset-less timestamp for the schema check', async () => {
-    const results = checkSchemaTimestamps(await parseSchema(SCAFFOLDED))
+// A regression pin, not a test of the fix: the timestamptz check reads `type` and
+// `withTimezone`, which were read from the barrels before they were accepted too.
+describe('checkSchemaTimestamps on a barrel-imported schema', () => {
+  it('flags the offset-less timestamp', async () => {
+    const results = checkSchemaTimestamps(await parseSchema(`import { pgTable, serial, timestamp } from '@guren/orm/drizzle/pg'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  publishedAt: timestamp('published_at'),
+})
+`))
 
     expect(results.map((result) => result.key)).toEqual(['schema-timestamptz:posts.publishedAt'])
   })
