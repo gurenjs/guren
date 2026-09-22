@@ -1,8 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import { readIfExists } from './discovery'
+import { DIALECT_BARRELS, DRIZZLE_CORE_SUBPATHS } from './drizzle-specifiers'
 import { parseSourceFile } from './parse-cache'
 import { posix, resolve } from 'node:path'
+import { findSchemaAggregate, type SchemaDialect } from './schema-parser'
 import { escapeRegExp } from './utils'
 
 export interface PatchResult {
@@ -538,18 +540,7 @@ export async function hasAuthProvider(filePath: string): Promise<boolean> {
   }
 }
 
-import { findSchemaAggregate, type SchemaDialect } from './schema-parser'
 export type { SchemaDialect }
-
-/**
- * The barrel each dialect's schema imports its column builders from: a signal
- * for `detectSchemaDialect`, and where `ensure*Imports` merges new builders.
- */
-export const DIALECT_BARRELS = {
-  sqlite: '@guren/orm/drizzle/sqlite',
-  pg: '@guren/orm/drizzle/pg',
-  mysql: '@guren/orm/drizzle/mysql',
-} as const satisfies Record<SchemaDialect, string>
 
 /**
  * The dialect an app's `db/schema.ts` is written in. Every column-appending
@@ -561,14 +552,14 @@ export const DIALECT_BARRELS = {
 export function detectSchemaDialect(content: string): SchemaDialect {
   if (
     content.includes('sqliteTable') ||
-    content.includes('drizzle-orm/sqlite-core') ||
+    content.includes(DRIZZLE_CORE_SUBPATHS.sqlite) ||
     content.includes(DIALECT_BARRELS.sqlite)
   ) {
     return 'sqlite'
   }
   if (
     content.includes('mysqlTable') ||
-    content.includes('drizzle-orm/mysql-core') ||
+    content.includes(DRIZZLE_CORE_SUBPATHS.mysql) ||
     content.includes(DIALECT_BARRELS.mysql)
   ) {
     return 'mysql'

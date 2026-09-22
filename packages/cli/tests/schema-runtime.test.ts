@@ -9,6 +9,8 @@ import { writeWorkspaceFiles } from './helpers'
 // The copy `@guren/orm` pins. A temp app outside the repo resolves `drizzle-orm` from
 // Bun's global cache or not at all, so each fixture links this one explicitly.
 const WORKSPACE_DRIZZLE = resolve(import.meta.dir, '../../orm/node_modules/drizzle-orm')
+// Its built barrels import `drizzle-orm` from the directory above, the same copy.
+const WORKSPACE_ORM = resolve(import.meta.dir, '../../orm')
 
 const created: string[] = []
 
@@ -16,13 +18,17 @@ afterAll(async () => {
   await Promise.all(created.map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-async function createApp(files: Record<string, string>, options: { drizzle?: boolean } = {}): Promise<string> {
+async function createApp(files: Record<string, string>, options: { drizzle?: boolean; orm?: boolean } = {}): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'guren-schema-runtime-')))
   created.push(dir)
   await writeWorkspaceFiles(dir, files)
   if (options.drizzle !== false) {
     await mkdir(join(dir, 'node_modules'), { recursive: true })
     await symlink(WORKSPACE_DRIZZLE, join(dir, 'node_modules', 'drizzle-orm'), 'dir')
+  }
+  if (options.orm) {
+    await mkdir(join(dir, 'node_modules', '@guren'), { recursive: true })
+    await symlink(WORKSPACE_ORM, join(dir, 'node_modules', '@guren', 'orm'), 'dir')
   }
   return dir
 }
@@ -500,6 +506,20 @@ export const rows = pgTable('rows', {
       expect(columnOf(rows, 'next')).toMatchObject({ default: { kind: 'sql', text: '(select max(id) from counters)' } })
       expect(columnOf(rows, 'next').opaqueDefault).toBeUndefined()
       expect(columnOf(rows, 'bound')).toMatchObject({ default: { kind: 'sql', text: '?' }, opaqueDefault: true })
+    })
+
+    test('should keep the builder name of a column imported from an @guren/orm barrel', async () => {
+      const app = await createApp({
+        'db/schema.ts': `import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
+export const users = pgTable('users', { id: serial('id').primaryKey(), email: text('email').notNull() })
+`,
+      }, { orm: true })
+
+      const users = tableOf((await readSchemaTables(app)).tables, 'users')
+
+      expect(users.source).toBe('runtime')
+      expect(columnOf(users, 'id')).toMatchObject({ type: 'serial', primaryKey: true })
+      expect(columnOf(users, 'email')).toMatchObject({ type: 'text', notNull: true })
     })
 
     test('should report nothing for an app with no schema file', async () => {

@@ -19,6 +19,7 @@ import {
   walk,
 } from './ast-walk'
 import { listAppRoots } from './discovery'
+import { isDrizzleBuilderSpecifier } from './drizzle-specifiers'
 import { parseSourceFile } from './parse-cache'
 
 /**
@@ -63,9 +64,9 @@ const CONSTRAINT_BUILDERS = new Set<SchemaConstraintKind>(['index', 'uniqueIndex
  * so a call outside these names hides its modifiers rather than lacking them.
  */
 interface DrizzleImports {
-  /** Local name → imported name, for named imports from `drizzle-orm/*`. */
+  /** Local name → imported name, for named imports from a drizzle builder module. */
   named: Map<string, string>
-  /** Local names of `import * as p from 'drizzle-orm/*'`. */
+  /** Local names of `import * as p from '<drizzle builder module>'`. */
   namespaces: Set<string>
 }
 
@@ -73,7 +74,7 @@ function collectDrizzleImports(body: Statement[]): DrizzleImports {
   const imports: DrizzleImports = { named: new Map(), namespaces: new Set() }
   for (const node of body) {
     if (node.type !== 'ImportDeclaration') continue
-    if (node.source.value !== 'drizzle-orm' && !node.source.value.startsWith('drizzle-orm/')) continue
+    if (!isDrizzleBuilderSpecifier(node.source.value)) continue
     for (const specifier of node.specifiers) {
       if (specifier.type === 'ImportNamespaceSpecifier') imports.namespaces.add(specifier.local.name)
       if (specifier.type !== 'ImportSpecifier') continue
