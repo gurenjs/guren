@@ -11,6 +11,7 @@ import { basename, dirname, resolve } from 'node:path'
 
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
+import { SAFE_MODULE_NAME_RE } from './utils'
 import { frontmatterEntities } from './docs-index'
 import { planStatusFile } from './plan-status'
 import { readPlanFile } from './plan-render'
@@ -60,8 +61,8 @@ export interface PlanCloseFileOptions {
 
 /** A slug names the blocks inside HTML comments, so it may not carry what would end one or split the marker. */
 const MARKER_SLUG = /^[A-Za-z0-9_.-]+$/u
-/** A model's class name and module become path segments of the file written for it. */
-const PATH_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/u
+/** A model's class name becomes the file name written for it; a module name follows `safeModuleName()`'s rule. */
+const CLASS_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
 
 /** Single-quoted for a POSIX shell, so a title carrying `$`, a backtick or `"` is printed as text. */
 function shellQuote(text: string): string {
@@ -85,14 +86,10 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
   }
   const slug = planSlug(path)
   if (!MARKER_SLUG.test(slug)) {
-    throw new CliError(`The plan's slug "${slug}" names the blocks it writes, and may hold only letters, digits, ".", "_" and "-". Rename the plan file.`)
+    throw new CliError(`The plan's slug "${slug}" names the blocks it writes, and may hold only letters, digits, ".", "_" and "-". Rename the plan file or its directory.`)
   }
   const models = touchedModels(plan)
-  const unsafe = models.filter((model) => {
-    if (!PATH_SEGMENT.test(model.name) || (model.module !== undefined && !PATH_SEGMENT.test(model.module))) return true
-    const relative = toPosixRelative(appRoot, resolve(appRoot, entityDocPath(model)))
-    return relative.startsWith('../') || relative === '..'
-  })
+  const unsafe = models.filter((model) => !CLASS_NAME.test(model.name) || (model.module !== undefined && !SAFE_MODULE_NAME_RE.test(model.module)))
   if (unsafe.length > 0) {
     throw new CliError(
       `${path} names models whose document path would not be a plain file under ${appRoot}, so nothing is written:\n${unsafe

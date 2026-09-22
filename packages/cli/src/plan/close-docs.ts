@@ -263,11 +263,13 @@ interface EntityDocLines {
 export function readEntityDoc(document: string): { doc: EntityDocLines; problems: string[] } {
   const scanned = markdownLines(document)
   const doc: EntityDocLines = {
-    lines: scanned.map((line) => line.text),
-    inFence: scanned.map((line) => line.inFence),
+    lines: scanned.lines.map((line) => line.text),
+    inFence: scanned.lines.map((line) => line.inFence),
     eol: document.includes('\r\n') ? '\r\n' : '\n',
     blocks: new Map(),
   }
+  // Everything after an unclosed fence reads as code, so a block written there would be code too.
+  if (scanned.unclosedFence !== undefined) return { doc, problems: [`line ${scanned.unclosedFence + 1}: a code fence opens here and never closes`] }
   const problems: string[] = []
   let open: { key: string; line: number } | undefined
   const unclosed = (): void => {
@@ -316,7 +318,8 @@ function findHeading(doc: EntityDocLines, section: EntityDocSection): number {
 /**
  * The lines with the block of `slug` and `section` set to `content`: replaced between its
  * markers where one exists, otherwise inserted at the end of that section, or appended under a
- * new heading. Nothing outside a block is rewritten. `content` absent removes an existing block.
+ * new heading. No text outside a block is rewritten, but a document mixing line endings comes
+ * back with its first CRLF, or LF, throughout. `content` absent removes an existing block.
  */
 function spliceLines(doc: EntityDocLines, options: { slug: string; hash: string; section: EntityDocSection; content?: readonly string[]; locale: PlanLocale }): string[] {
   const { slug, hash, section, content } = options

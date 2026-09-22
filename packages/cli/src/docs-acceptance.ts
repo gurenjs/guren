@@ -99,7 +99,7 @@ const RULES_HEADINGS: readonly string[] = Object.values(RULES_HEADING_BY_LOCALE)
 export function extractUncitedRules(body: string): string[] {
   const uncited: string[] = []
   let inRules = false
-  for (const line of markdownLines(body)) {
+  for (const line of markdownLines(body).lines) {
     if (line.inFence) continue
     const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/u.exec(line.text)
     if (heading) {

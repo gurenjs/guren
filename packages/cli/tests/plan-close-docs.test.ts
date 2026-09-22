@@ -83,6 +83,10 @@ describe('readEntityDoc', () => {
     expect(problems(block)).toEqual([])
   })
 
+  test('should refuse a document whose code fence never closes, naming the line it opens on', () => {
+    expect(readEntityDoc('# Comment\n\n## Rules\n\n```ts\nconst x = 1\n').problems).toEqual(['line 5: a code fence opens here and never closes'])
+  })
+
   test('should refuse to splice a document it cannot read safely', () => {
     expect(() => splice('<!-- guren:plan comments aaa rules -->\n- a person\'s text\n', 'bbb', ['- x'])).toThrow(/opens and never closes/u)
   })

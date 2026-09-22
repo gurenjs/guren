@@ -1389,9 +1389,10 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   document's frontmatter is never touched; one that does not name the entity
   is reported. The close refuses, writing nothing, when a document's markers
   cannot be rewritten safely: an open marker with no close before the next
-  marker or heading, a close with no open, a pair written twice, or a marker
-  inside a code fence. Headings and the section's end are read outside code
-  fences, and a document keeps its line endings. A model's `name` and `module`
+  marker or heading, a close with no open, a pair written twice, a marker
+  inside a code fence, or a code fence that never closes. Headings and the
+  section's end are read outside code fences, and a document keeps its line
+  endings (one that mixes them comes back with the first kind throughout). A model's `name` and `module`
   become path segments, so one that is not a plain identifier, or would land
   outside the application, refuses too. A task belongs to the model its
   `entity` names by the task derivation's rule (class, then id, then table).

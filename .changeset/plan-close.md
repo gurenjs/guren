@@ -19,9 +19,3 @@ names, and the docs viewer shows them. `guren check --docs` warns on a citation
 no test title carries, on a test id its entity's documents never cite, and on a
 Rules item in an entity document that cites no id. The three are advisory, so
 `check --ci` and `guren gate` do not fail on them.
-
-`plan:status`, `plan:verify` and `plan:next` now name a plan kept as
-`docs/plans/<slug>/plan.json` by its directory, so two plans in that layout no
-longer share `.guren/plans/plan.state.json`. A state file left under the old
-name is git-ignored and is simply not read again; the next `plan:verify`
-rebuilds the records.

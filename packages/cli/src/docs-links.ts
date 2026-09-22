@@ -118,28 +118,31 @@ export interface MarkdownLine {
 const FENCE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/
 
 /**
- * The document's lines with whether each is code. A fence closes on a run of the same
- * character at least as long, with nothing after it; an unclosed fence runs to the end.
- * The one fence rule every line-oriented docs scanner reads through.
+ * The document's lines with whether each is code, and the index of a fence that opens and
+ * never closes, which runs to the end. A fence closes on a run of the same character at least
+ * as long, with nothing after it. The one fence rule the line-oriented docs scanners read through.
  */
-export function markdownLines(text: string): MarkdownLine[] {
-  let open: string | null = null
-  return text.split(/\r?\n/).map((line) => {
+export function markdownLines(text: string): { lines: MarkdownLine[]; unclosedFence?: number } {
+  let open: { fence: string; line: number } | null = null
+  const lines = text.split(/\r?\n/).map((line, index) => {
     const fence = FENCE_RE.exec(line)
     if (open === null) {
-      if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) open = fence[1]
+      if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) open = { fence: fence[1], line: index }
       return { text: line, inFence: open !== null }
     }
-    if (fence && fence[1][0] === open[0] && fence[1].length >= open.length && fence[2].trim() === '') open = null
+    if (fence && fence[1][0] === open.fence[0] && fence[1].length >= open.fence.length && fence[2].trim() === '') open = null
     return { text: line, inFence: true }
   })
+  return open === null ? { lines } : { lines, unclosedFence: (open as { line: number }).line }
 }
 
-/** The body with fenced blocks blanked and inline code spans removed: what link and citation readers scan. */
+/**
+ * The body with every backtick fence removed wherever it sits (indented under a list item,
+ * inside a blockquote, mid-line) and inline code spans removed: what link and citation
+ * readers scan. Deliberately wider than {@link markdownLines}, so no link inside code is read.
+ */
 export function stripMarkdownCode(body: string): string {
-  return markdownLines(body)
-    .map((line) => (line.inFence ? '' : line.text.replace(/`[^`\n]*`/g, '')))
-    .join('\n')
+  return body.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
 }
 
 export function extractMarkdownLinks(body: string): string[] {

@@ -317,6 +317,7 @@ describe('plan:close', () => {
     ])
     expect(graph.edges).toContainEqual({ from: 'docs/plans/comments.md', to: 'entity:Comment', relation: 'governs', verdict: 'pass' })
   })
+
   test('should refuse a drifted element, naming it', async () => {
     const plan = PlanSchema.parse(loadApprovedCommentsPlan())
     const app = await createClosableApp('drifted', { open: ['column.comment.id'] })
@@ -365,6 +366,7 @@ describe('plan:close', () => {
       unclosed: '# Comment\n\n## Rules\n\n<!-- guren:plan comments abc rules -->\n- A person\'s rule.\n\n## Glossary\n\nKept.\n',
       twice: '# Comment\n\n<!-- guren:plan comments abc rules -->\n- a\n<!-- /guren:plan comments rules -->\n\n<!-- guren:plan comments abc rules -->\n- b\n<!-- /guren:plan comments rules -->\n',
       fenced: '# Comment\n\n```md\n<!-- guren:plan comments abc rules -->\n```\n',
+      'unclosed-fence': '# Comment\n\n## Rules\n\n```ts\nconst x = 1\n',
     }
     for (const [name, body] of Object.entries(cases)) {
       const app = await createClosableApp(`markers-${name}`)
