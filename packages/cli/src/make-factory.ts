@@ -2,11 +2,13 @@ import { DB_ARTIFACT_DIRS } from './discovery'
 import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
 
+// `Factory<T>` is typed over the *record*: `definition()` returns its attributes.
 function factoryTemplate(className: string, modelName: string): string {
   return `import { Factory } from '@guren/core'
+import type { ${modelName}Record } from '../../app/Models/${modelName}.js'
 
-export default class ${className} extends Factory<typeof ${modelName}> {
-  definition() {
+export default class ${className} extends Factory<${modelName}Record> {
+  definition(): Partial<${modelName}Record> {
     return {}
   }
 }

@@ -325,6 +325,13 @@ export const { Attachment } = configureAttachments({
   })
 }
 
+/** Generators with no TypeScript output: nothing for a parse or compile gate to check. */
+export const SKIPPED_GENERATORS: Record<string, string> = {
+  'make:adr': 'markdown output',
+  'make:migration': 'SQL migration output',
+  'make:lang': 'JSON translation catalogs',
+}
+
 /** One page component, for tests about an app that acquired one it cannot render. */
 export const PAGE_COMPONENT_FIXTURE = 'export default function Home() { return null }\n'
 
@@ -568,6 +575,31 @@ export function templateCompilerOptions(paths: Record<string, string[]> = {}): T
     typeRoots: [join(repoRoot, 'node_modules'), join(cliRoot, 'node_modules/@types')],
     types: ['bun-types'],
     paths: { ...parsed.paths, ...paths },
+  }
+}
+
+/**
+ * {@link templateCompilerOptions} for an app a generator rendered into
+ * `workspaceDir`: the `@/` alias and the codegen artifacts resolve to that render,
+ * and React, Inertia and zod to this package's copies, since the render has no
+ * node_modules. The three `.gen` entries override the fixture-pointing ones the
+ * templates config carries, which an exact key wins over `@/*`.
+ */
+export function renderedAppCompilerOptions(workspaceDir: string): TsconfigCompilerOptions {
+  const cliRoot = join(repoRoot, 'packages/cli')
+  return {
+    ...templateCompilerOptions({
+      '@/.guren/pages.gen': [join(workspaceDir, '.guren/pages.gen.ts')],
+      '@/.guren/routes.gen': [join(workspaceDir, '.guren/routes.gen.ts')],
+      '@/.guren/api-client.gen': [join(workspaceDir, '.guren/api-client.gen.ts')],
+      '@/*': [join(workspaceDir, '*')],
+      zod: [join(cliRoot, 'node_modules/zod')],
+      '@inertiajs/react': [join(cliRoot, 'node_modules/@inertiajs/react')],
+      react: [join(cliRoot, 'node_modules/@types/react/index.d.ts')],
+      'react/jsx-runtime': [join(cliRoot, 'node_modules/@types/react/jsx-runtime.d.ts')],
+    }),
+    // The render lives outside the repo, where `types: ["bun-types"]` alone leaves node's globals out.
+    types: ['bun-types', 'node'],
   }
 }
 

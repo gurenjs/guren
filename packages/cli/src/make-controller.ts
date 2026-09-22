@@ -11,7 +11,7 @@ import { pages } from '@/.guren/pages.gen'
 
 export default class ${className} extends Controller {
   async index(): Promise<Response> {
-    return this.inertia(${pagesAccessor(moduleName, pageVar)}.Index, {
+    return this.inertia(${pagesAccessor(moduleName, pageVar)}.Index, {}, {
       title: '${className.replace(/Controller$/u, '')}',
     })
   }

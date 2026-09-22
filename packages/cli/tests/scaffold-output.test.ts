@@ -6,6 +6,7 @@ import {
   ENV_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
   SERVER_DIST_ENTRY,
+  SKIPPED_GENERATORS,
   assertWorkspaceBuilt,
   createTempWorkspace,
   seedApiOnlyApp,
@@ -49,18 +50,11 @@ import { generatePageTypes } from '../src/pages-types'
 
 /**
  * The syntax gate for every generator: render representative outputs and require
- * each generated .ts/.tsx to parse. templates/scaffold/ has `typecheck:templates`
- * and make:auth's builders have scaffold-builder-typecheck.test.ts; every other
- * builder's output exists only at generation time. The covered set derives from
+ * each generated .ts/.tsx to parse. templates/scaffold/ has `typecheck:templates`;
+ * the builders' output is compiled by scaffold-builder-typecheck.test.ts (make:auth)
+ * and make-output-typecheck.test.ts (the rest). The covered set derives from
  * `builtinSubCommands`, so a new `make:*` fails here until it joins the matrix.
  */
-
-/** Generators with no TypeScript output — nothing for a parse gate to check. */
-const SKIPPED_GENERATORS: Record<string, string> = {
-  'make:adr': 'markdown output',
-  'make:migration': 'SQL migration output',
-  'make:lang': 'JSON translation catalogs',
-}
 
 /** Exercises every FIELD_TYPES member plus a nullable — guarded below. */
 const ALL_FIELDS = 'title:string,count:number,published:boolean,body:text,postedAt:date,meta:json,subtitle:string?'
