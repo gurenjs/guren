@@ -101,7 +101,6 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
   const { path: absolutePlan, plan } = await readPlanFile(planPath, cwd)
   const app = typeof options.app === 'function' ? await options.app(plan) : options.app
   // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to render nothing.
-  // Once implementation starts, an approved plan's own built elements collide with themselves.
   const { checks } = settleBuiltFindings(plan, app, validatePlan(plan, app))
   // `null` draws no Impact, for a page with no application read; `[]` is a plan that changes nothing existing.
   const nothingExistingChanges = !planChangesExisting(plan)

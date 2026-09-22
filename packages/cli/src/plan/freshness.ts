@@ -76,7 +76,10 @@ function presentAtEnd(target: PlanAppTarget, name: string): boolean {
   return name === target.current && target.kind !== 'drop' && !target.parentDropped
 }
 
-/** Whether `name` is there before the plan's work: an `add` and the new name of a `rename` are not. */
+/**
+ * Whether `name` is there before the plan's work: an `add` and the new name of a `rename` are
+ * not. An `existing` or `alter` name is present at start and end alike, so it is never `built`.
+ */
 function presentAtStart(target: PlanAppTarget, name: string): boolean {
   if (target.kind === 'add') return false
   if (target.kind === 'rename') return name === (target.previous ?? target.current)

@@ -29,6 +29,7 @@ import { judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
 import {
   findDuplicatePlanIds,
+  hasBaseline,
   listPlanElements,
   type PlanAcceptance,
   type Plan,
@@ -79,7 +80,7 @@ const APP_FACT_FINDINGS: ReadonlySet<string> = new Set(['plan:app-collision', 'p
  * starts it from, read now as the plan leaves it) becomes a `pass`. A draft has no stamp.
  */
 export function settleBuiltFindings(plan: PlanDraft | Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
-  if (!('baseline' in plan)) return { checks, built: [] }
+  if (!hasBaseline(plan)) return { checks, built: [] }
   const builtIds = new Set(judgeFreshness(plan, app).elements.filter((element) => element.basis === 'built').map((element) => element.id))
   const built = new Set<string>()
   const settled = checks.map((result) => {

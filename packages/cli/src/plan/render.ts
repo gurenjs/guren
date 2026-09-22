@@ -15,7 +15,7 @@ import { layoutPlanFlows } from './flow'
 import { planHash } from './identity'
 import { impactBreakingChanges, type PlanImpactEntry } from './impact'
 import { loadPlanDictionaries, matchPlanLocale, type PlanLocale } from './locales'
-import { listPlanElements, type Plan, type PlanDraft } from './schema'
+import { hasBaseline, listPlanElements, type Plan, type PlanDraft } from './schema'
 
 /**
  * A `guren check` result that names the plan element it concerns. `elementId` is
@@ -69,10 +69,7 @@ export function escapeJsonForScript(json: string): string {
   })
 }
 
-/** Whether a document is a full `Plan` rather than a draft. The CLI picks its schema by it. */
-export function hasBaseline(document: unknown): document is Plan {
-  return typeof document === 'object' && document !== null && 'baseline' in document
-}
+export { hasBaseline }
 
 function hashOf(plan: PlanDraft | Plan): string | null {
   return hasBaseline(plan) ? planHash(plan) : null

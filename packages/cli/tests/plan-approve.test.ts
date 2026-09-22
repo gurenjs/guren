@@ -316,6 +316,23 @@ describe('guren plan:approve after implementation starts', () => {
     expect(rendered.checks.find((result) => result.elementId === 'policy.post')).toMatchObject({ key: 'plan:app-missing', status: 'pass', message: expect.stringMatching(/^Built by this plan: the name is gone because the plan removed it/) })
   })
 
+  test('should settle an added route once it is registered under its name at its planned endpoint', async () => {
+    const { app, plan } = await createApp('reapprove-route', reshapingPlan())
+    await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    await editGoal(plan)
+    // The fixture app has no routes file; the route the plan adds is what the scanners would read once it is mounted.
+    const withRoute = async () => {
+      const state = await loadPlanAppState(app)
+      return { ...state, routes: [{ name: 'comments.store', method: 'POST', path: '/posts/:postId/comments' }] }
+    }
+
+    const { checks } = await renderPlanFile(plan, { app: withRoute, output: join(app, 'page.html') })
+    const routeChecks = checks.filter((result) => result.elementId === 'route.comments.store' && result.key === 'plan:app-collision')
+    expect(routeChecks.map((result) => result.status)).toEqual(['pass', 'pass'])
+    const report = await planApproveFile(plan, { app: withRoute, appRoot: app, now: NOW })
+    expect(report.builtByPlan).toEqual(['route.comments.store'])
+  })
+
   test('should still refuse a collision the plan did not build: its table declared by another app root', async () => {
     const { app, plan } = await createApp('reapprove-foreign', reshapingPlan())
     await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
@@ -369,7 +386,7 @@ describe('guren plan:approve after implementation starts', () => {
     expect(report.builtByPlan).toEqual(['resource.post'])
   })
 
-  test('should never settle an element part of whose facts cannot be read', async () => {
+  test('should not settle a model from its class alone while its table cannot be read', async () => {
     const { app, plan } = await createApp('reapprove-unreadable', reshapingPlan())
     await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
     await buildReshapingSteps(app)

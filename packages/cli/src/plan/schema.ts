@@ -473,3 +473,8 @@ function isJsonText(text: string): boolean {
     return false
   }
 }
+
+/** Whether a document is a full `Plan` rather than a draft. The CLI picks its schema by it. */
+export function hasBaseline(document: unknown): document is Plan {
+  return typeof document === 'object' && document !== null && 'baseline' in document
+}

@@ -149,6 +149,17 @@ describe('judgeFreshness', () => {
     expect(verdictOf(half, 'model.comment').verdict).toBe('stale')
   })
 
+  test('should never call an altered element built, since the plan starts and leaves its name in place', () => {
+    const plan = draft((document) => {
+      ;(document.policies as unknown[]).push({ id: 'policy.post', change: { kind: 'alter' }, name: 'PostPolicy', model: 'model.post', abilities: [] })
+    })
+    // Stamped while the name was missing, the one state an `alter` can be settled from if start were not end.
+    const stamped = approvedAgainst(plan, { policies: [] })
+    for (const policies of [[], ['PostPolicy']]) {
+      expect(verdictOf(judgeFreshness(stamped, planAppState({ policies })), 'policy.post').basis).not.toBe('built')
+    }
+  })
+
   test('should never call an element built when the stamp is not the state the plan starts it from', () => {
     // Stamped as an `existing` PostPolicy, then revised into an `add` of the name the application already had.
     const stamped = approvedAgainst(draft((document) => {
