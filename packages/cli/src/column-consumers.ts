@@ -41,6 +41,8 @@ export interface ColumnConsumerInput {
 export interface ColumnRead {
   model: ColumnConsumerModel
   property: string
+  /** The site writes the column (`create`/`update` data) rather than reads it. */
+  write?: true
   kind: ColumnConsumerKind
   file: string
   line: number
@@ -50,7 +52,10 @@ export interface ColumnRead {
   via?: string
 }
 
-/** A read no static scan can name the property of: `post[key]`, `{ ...rest } = post`, `{ ...post }`. */
+/**
+ * An access no static scan can name the column of: `post[key]`, `{ ...post }`, `create(data)`,
+ * `orderBy(column)`, or a query ending in a method the scan does not classify (an app's own scope).
+ */
 export type OpaqueRead = Omit<ColumnRead, 'property' | 'via'>
 
 export interface ResourceModelTie {
@@ -82,10 +87,37 @@ interface Binding {
 
 type Scope = Map<string, Binding>
 
-/** Query results by the last method of a chain on the model class; a method in none of these ties nothing. */
-const RECORD_RESULTS = new Set(['find', 'findOrFail', 'findUnique', 'findWith', 'findWithOrFail', 'first', 'firstOrFail', 'create', 'forceCreate'])
-const LIST_RESULTS = new Set(['all', 'get', 'findMany', 'withAttachments', 'where', 'orWhere', 'whereIn', 'whereNotIn', 'whereNull', 'whereNotNull', 'orderBy', 'select', 'limit', 'offset', 'with', 'scope', 'query', 'newQuery'])
-const PAGINATED_RESULTS = new Set(['paginate', 'withPaginate'])
+/**
+ * Every public query method of `@guren/orm`'s `Model` and `QueryBuilder` and of the
+ * `Attachable` and `SoftDeletes` mixins, by what its result holds. A chain on the model
+ * ending in a method none of these name is an opaque read. `tests/plan-impact-scan.test.ts`
+ * fails on an ORM method missing here.
+ */
+export const QUERY_METHOD_RESULTS = {
+  record: ['find', 'findOrFail', 'findUnique', 'findWith', 'findWithOrFail', 'first', 'firstOrFail', 'create', 'forceCreate', 'update', 'forceUpdate'],
+  list: [
+    'all', 'get', 'findMany', 'withAttachments', 'withCount', 'where', 'orWhere', 'whereIn', 'whereNotIn', 'whereNull', 'whereNotNull',
+    'orderBy', 'select', 'limit', 'offset', 'with', 'scope', 'query', 'newQuery', 'newQueryWithoutScopes', 'withoutGlobalScope',
+    'withoutGlobalScopes', 'onlyTrashed', 'withTrashed',
+  ],
+  paginated: ['paginate', 'withPaginate'],
+  none: [
+    'count', 'countBy', 'exists', 'avg', 'sum', 'min', 'max', 'delete', 'forceDelete', 'restore', 'toSql', 'toDrizzle', 'getConditions',
+    'getOptions', 'then', 'catch', 'constructor', 'addGlobalScope', 'removeGlobalScope', 'applyCasts', 'belongsTo', 'belongsToMany',
+    'hasMany', 'hasManyThrough', 'hasOne', 'morphMany', 'morphTo', 'clearObservers', 'observe', 'filterFillable', 'getAdapter',
+    'useAdapter', 'getRelationDefinition', 'inTransaction', 'transaction', 'loadRelationInto', 'loadRelationsInto',
+    'prepareBulkPersistencePayload', 'resolveTable', 'serialize', 'serializeMany', 'attach', 'detach', 'attachmentUrl', 'purgeAttachments',
+  ],
+} as const satisfies Record<string, readonly string[]>
+
+type QueryResult = keyof typeof QUERY_METHOD_RESULTS
+
+const QUERY_RESULT_OF = new Map<string, QueryResult>(
+  (Object.entries(QUERY_METHOD_RESULTS) as Array<[QueryResult, readonly string[]]>).flatMap(([result, names]) => names.map((name) => [name, result] as const)),
+)
+
+/** Methods whose data argument is written: `create(data)`, `update(where, data)`, a builder's `update(data)`. */
+const WRITE_METHODS = new Set(['create', 'forceCreate', 'update', 'forceUpdate'])
 
 /** Query methods whose first argument is a column name (`select` takes several). */
 const COLUMN_ARGUMENT_METHODS = new Set(['where', 'orWhere', 'whereIn', 'whereNotIn', 'whereNull', 'whereNotNull', 'orderBy', 'select', 'sum', 'avg', 'min', 'max', 'countBy'])
@@ -125,8 +157,8 @@ interface FileTies {
   wholeTypes: Map<string, Tie>
   /** Type names whose members are. */
   containerTypes: Map<string, Map<string, Tie>>
-  /** `Data.<Model>` from the generated data types imports no model: a class name one model owns, or the root's. */
-  dataModels: ReadonlyMap<string, ColumnConsumerModel>
+  /** `Data.<Model>` from the generated data types imports no model, so it resolves in the file's app root. */
+  dataModel: (className: string) => ColumnConsumerModel | undefined
 }
 
 interface ScanContext {
@@ -141,26 +173,50 @@ interface ScanContext {
 
 interface ModelIndex {
   byFile: ReadonlyMap<string, ColumnConsumerModel>
-  byData: ReadonlyMap<string, ColumnConsumerModel>
+  all: readonly ColumnConsumerModel[]
+  /** Module names that hold a model, which is how a page id's first segment is told to be a module's. */
+  modules: ReadonlySet<string>
+}
+
+function modelModule(file: string): string | null {
+  return /^modules\/([^/]+)\//u.exec(file)?.[1] ?? null
 }
 
 function indexModels(models: readonly ColumnConsumerModel[]): ModelIndex {
-  const byName = new Map<string, ColumnConsumerModel[]>()
-  for (const model of models) byName.set(model.className, [...(byName.get(model.className) ?? []), model])
-  const byData = new Map<string, ColumnConsumerModel>()
-  for (const [name, candidates] of byName) {
-    const chosen = candidates.length === 1 ? candidates[0] : candidates.find((model) => !model.file.startsWith('modules/'))
-    if (chosen) byData.set(name, chosen)
+  return {
+    byFile: new Map(models.map((model) => [withoutExtension(model.file), model])),
+    all: models,
+    modules: new Set(models.flatMap((model) => modelModule(model.file) ?? [])),
   }
-  return { byFile: new Map(models.map((model) => [withoutExtension(model.file), model])), byData }
+}
+
+/** A class name in an app root: that root's own model, else the project root's. */
+function modelIn(models: ModelIndex, className: string, module: string | null): ColumnConsumerModel | undefined {
+  const named = models.all.filter((model) => model.className === className)
+  return named.find((model) => modelModule(model.file) === module) ?? named.find((model) => modelModule(model.file) === null)
 }
 
 /**
  * Imports tie a file to a model: the class itself from the model's module, `MRecord`
  * from it, and any name a resource tied to the model exports (its data type).
  */
-function importTies(root: string, file: string, body: Statement[], models: ModelIndex, resources: ReadonlyMap<string, ResourceModelTie>): FileTies {
-  const ties: FileTies = { models: new Map(), wholeTypes: new Map(), containerTypes: new Map(), dataModels: models.byData }
+function importTies(
+  root: string,
+  file: string,
+  body: Statement[],
+  models: ModelIndex,
+  resources: ReadonlyMap<string, ResourceModelTie>,
+  pageId?: string,
+): FileTies {
+  // A module's pages sit under `resources/js/pages/<module>/`, so a page's root is its id's first segment.
+  const pageModule = pageId?.split('/')[0]
+  const module = pageModule !== undefined && models.modules.has(pageModule) ? pageModule : modelModule(file)
+  const ties: FileTies = {
+    models: new Map(),
+    wholeTypes: new Map(),
+    containerTypes: new Map(),
+    dataModel: (className) => modelIn(models, className, module),
+  }
   for (const [local, entry] of importsByLocal(body)) {
     const target = importTarget(root, file, entry.source)
     if (target === null) continue
@@ -210,7 +266,7 @@ function typeTie(node: BabelNode | null | undefined, ties: FileTies): TypeTie {
         if (members) return { members }
       } else if (name.type === 'TSQualifiedName') {
         const left = name.left as BabelNode
-        const model = ties.dataModels.get((name.right as { name: string }).name)
+        const model = ties.dataModel((name.right as { name: string }).name)
         if (left.type === 'Identifier' && left.name === 'Data' && model !== undefined) return { whole: { model, many: false } }
       }
       const params = ((node.typeParameters as BabelNode | undefined)?.params ?? []) as BabelNode[]
@@ -294,6 +350,8 @@ function methodName(callee: BabelNode): string | undefined {
 class RecordWalker {
   private where: string
   private resourceTie: Tie | undefined
+  /** Calls that are the receiver of another call: `Post.published()` in `Post.published().first()` ends no chain. */
+  private readonly receivers = new WeakSet<BabelNode>()
 
   constructor(private readonly context: ScanContext) {
     this.where = context.pageId ?? ''
@@ -303,14 +361,14 @@ class RecordWalker {
     this.statements(body, new Map())
   }
 
-  private read(tie: Tie, property: string, node: BabelNode): void {
+  private read(tie: Tie, property: string, node: BabelNode, write = false): void {
     const { kind, file, scan } = this.context
-    scan.reads.push({ model: tie.model, property, kind, file, line: lineOf(node), where: this.where, ...(tie.via ? { via: tie.via } : {}) })
+    scan.reads.push({ model: tie.model, property, kind, file, line: lineOf(node), where: this.where, ...(write ? { write: true } : {}), ...(tie.via ? { via: tie.via } : {}) })
   }
 
-  private opaqueRead(tie: Tie, node: BabelNode): void {
+  private opaqueRead(tie: Tie, node: BabelNode, write = false): void {
     const { kind, file, scan } = this.context
-    scan.opaque.push({ model: tie.model, kind, file, line: lineOf(node), where: this.where })
+    scan.opaque.push({ model: tie.model, kind, file, line: lineOf(node), where: this.where, ...(write ? { write: true } : {}) })
   }
 
   private statements(statements: readonly BabelNode[], scope: Scope): void {
@@ -365,9 +423,10 @@ class RecordWalker {
       if (list?.many && LIST_PRESERVING.has(method)) return { tie: list }
       return undefined
     }
-    if (RECORD_RESULTS.has(method)) return { tie: { model, many: false } }
-    if (LIST_RESULTS.has(method)) return { tie: { model, many: true } }
-    if (PAGINATED_RESULTS.has(method)) return { members: new Map([['data', { model, many: true }]]) }
+    const result = QUERY_RESULT_OF.get(method)
+    if (result === 'record') return { tie: { model, many: false } }
+    if (result === 'list') return { tie: { model, many: true } }
+    if (result === 'paginated') return { members: new Map([['data', { model, many: true }]]) }
     return undefined
   }
 
@@ -429,21 +488,44 @@ class RecordWalker {
     else this.visit(body, inner)
   }
 
-  /** `Post.where('title', …)`, `.select('title', 'body')`, `.where({ title })`: the column names a query spells. */
+  /** The keys of an object literal naming columns; anything else there names them opaquely. */
+  private columnKeys(tie: Tie, argument: BabelNode | undefined, write: boolean): void {
+    if (!argument || FUNCTION_TYPES.has(argument.type)) return
+    if (argument.type === 'StringLiteral') this.read(tie, argument.value as string, argument, write)
+    else if (argument.type !== 'ObjectExpression') this.opaqueRead(tie, argument, write)
+    else {
+      for (const property of argument.properties as BabelNode[]) {
+        const key = property.type === 'ObjectProperty' ? keyOf(property) : undefined
+        if (key !== undefined) this.read(tie, key, property, write)
+        else this.opaqueRead(tie, property, write)
+      }
+    }
+  }
+
+  /**
+   * The columns a query on the model names: `where('title', …)`, `select('title', 'body')`,
+   * `where({ title })`, and the data `create`/`update` write. A column held in a variable is opaque.
+   */
   private queryColumns(node: BabelNode, method: string, receiver: BabelNode, scope: Scope): void {
-    if (!COLUMN_ARGUMENT_METHODS.has(method)) return
     const model = this.chainModel(receiver, scope)
     if (!model) return
     const tie: Tie = { model, many: false }
     const args = node.arguments as BabelNode[]
-    for (const argument of method === 'select' ? args : args.slice(0, 1)) {
-      if (argument.type === 'StringLiteral') this.read(tie, argument.value as string, argument)
-      if (argument.type !== 'ObjectExpression') continue
-      for (const property of argument.properties as BabelNode[]) {
-        const key = property.type === 'ObjectProperty' ? keyOf(property) : undefined
-        if (key !== undefined) this.read(tie, key, property)
-      }
+    const isStatic = unwrapTypeAssertion(receiver).type === 'Identifier'
+    if (WRITE_METHODS.has(method)) {
+      // The static `update(where, data)` names its row first; a builder's `update(data)` has only data.
+      const updatesByWhere = isStatic && (method === 'update' || method === 'forceUpdate')
+      if (updatesByWhere) this.columnKeys(tie, args[0], false)
+      this.columnKeys(tie, updatesByWhere ? args[1] : args[0], true)
+      return
     }
+    if (COLUMN_ARGUMENT_METHODS.has(method)) {
+      if (method === 'select') for (const argument of args) this.columnKeys(tie, argument, false)
+      else this.columnKeys(tie, args[0], false)
+      return
+    }
+    // A query ending in a method the scan does not classify may read any column.
+    if (!QUERY_RESULT_OF.has(method) && !this.receivers.has(node)) this.opaqueRead(tie, node)
   }
 
   private visit(node: BabelNode | null | undefined, scope: Scope): void {
@@ -480,6 +562,7 @@ class RecordWalker {
       const method = methodName(callee)
       // A method called on a record (`post.save()`, `posts.map()`) is not a column read.
       if (callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression') {
+        this.receivers.add(unwrapTypeAssertion(callee.object as BabelNode))
         this.visit(callee.object as BabelNode, scope)
         if (callee.computed) this.visit(callee.property as BabelNode, scope)
       } else {
@@ -576,7 +659,7 @@ export async function scanColumnConsumers(root: string, input: ColumnConsumerInp
   const resourceTies = new Map(scan.resources.map((resource) => [resource.className, resource.models]))
 
   const run = (file: string, body: Statement[], kind: ColumnConsumerKind, pageId?: string): void => {
-    const ties = importTies(root, file, body, models, resourcesByFile)
+    const ties = importTies(root, file, body, models, resourcesByFile, pageId)
     const nodes = body as unknown as BabelNode[]
     localTypeTies(nodes, ties)
     new RecordWalker({ file, kind, ties, resourceTies, scan, ...(pageId ? { pageId } : {}) }).run(nodes)

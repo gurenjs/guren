@@ -106,8 +106,9 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
   const app = typeof options.app === 'function' ? await options.app(plan) : options.app
   // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to render nothing.
   const checks = validatePlan(plan, app)
-  // A plan that changes nothing existing has no Impact to draw, which is not "rendered without an app".
-  const impact = app.impact ? planImpact(plan, app.impact) : planChangesExisting(plan) ? null : []
+  // `null` draws no Impact, for a page with no application read; `[]` is a plan that changes nothing existing.
+  const nothingExistingChanges = !planChangesExisting(plan)
+  const impact = app.impact ? planImpact(plan, app.impact) : nothingExistingChanges ? [] : null
   const html = renderPlanHtml({
     plan,
     checks,

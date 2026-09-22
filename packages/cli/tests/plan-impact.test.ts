@@ -92,6 +92,18 @@ describe('planImpact', () => {
     ])
   })
 
+  test('should list a site that writes the column apart from one that reads it', () => {
+    const writes = sources({ reads: { ...NO_READS, reads: [{ model: POST, property: 'title', write: true, kind: 'controller', file: 'app/Http/Controllers/PostController.ts', line: 3, where: 'PostController.store' }], opaque: [{ model: POST, write: true, kind: 'controller', file: 'app/Http/Controllers/PostController.ts', line: 4, where: 'PostController.store' }] } })
+    const altered = withTitleColumn({ kind: 'alter' })
+    const entry = entryFor(planImpact(altered, writes), 'column.post.title')
+
+    expect(entry.consumers.map((consumer) => consumer.kind)).toEqual(['write', 'opaqueWrite'])
+    expect(openPlanPage(renderPlanHtml({ plan: altered, impact: [entry] })).byId('el-column.post.title').withClass('impact')[0]!.withTag('li').map((item) => item.textContent)).toEqual([
+      'PostController.store writes it (app/Http/Controllers/PostController.ts:3)',
+      'PostController.store writes data no static scan can name the columns of (app/Http/Controllers/PostController.ts:4)',
+    ])
+  })
+
   test('should look a renamed column up by the name it has today', () => {
     const entry = entryFor(planImpact(withTitleColumn({ kind: 'rename', from: 'body' }), sources()), 'column.post.title')
 
@@ -419,11 +431,48 @@ describe('loadPlanAppState({ impact: true })', () => {
 })
 
 describe('planChangesExisting', () => {
-  test('should tell a plan that only adds from one that alters, which is when plan:render scans for Impact', () => {
-    expect(planChangesExisting(plan((draft) => {
+  /** The comments fixture with nothing existing changed: its one altered model and view are set back to `existing`. */
+  function additive(edit: (draft: PlanDraft) => void = () => {}): PlanDraft {
+    return plan((draft) => {
       draft.models[0]!.change = { kind: 'existing' }
-      draft.views[0]!.change = { kind: 'add' }
-    }))).toBe(false)
-    expect(planChangesExisting(plan())).toBe(true)
+      draft.views[0]!.change = { kind: 'existing' }
+      draft.controllers.push({ id: 'controller.posts', change: { kind: 'existing' }, className: 'PostController', actions: [
+        { id: 'action.posts.show', change: { kind: 'existing' }, name: 'show', authorization: { middleware: [] }, response: { kind: 'empty' }, rules: [] },
+      ] })
+      draft.resources.push({ id: 'resource.post', change: { kind: 'existing' }, name: 'PostResource', model: 'model.post', fields: [] })
+      draft.policies.push({ id: 'policy.post', change: { kind: 'existing' }, name: 'PostPolicy', model: 'model.post', abilities: [] })
+      draft.validators.push({ id: 'validator.post', change: { kind: 'existing' }, name: 'PostSchema', fields: [] })
+      draft.routes.push({ id: 'route.posts.show', change: { kind: 'existing' }, method: 'GET', path: '/posts/:id', name: 'posts.show', action: 'action.posts.show', middleware: [], bind: [] })
+      edit(draft)
+    })
+  }
+
+  const CHANGES: PlanChange[] = [{ kind: 'alter' }, { kind: 'rename', from: 'Old' }, { kind: 'drop', reason: 'gone' }]
+  const EDITS: Array<[string, (draft: PlanDraft, change: PlanChange) => void]> = [
+    ['a model', (draft, change) => { draft.models[0]!.change = change }],
+    ['a column', (draft, change) => { draft.models[0]!.columns[0]!.change = change }],
+    ['a validator', (draft, change) => { draft.validators.at(-1)!.change = change }],
+    ['a controller', (draft, change) => { draft.controllers.at(-1)!.change = change }],
+    ['an action', (draft, change) => { draft.controllers.at(-1)!.actions[0]!.change = change }],
+    ['a route', (draft, change) => { draft.routes.at(-1)!.change = change }],
+    ['a view', (draft, change) => { draft.views[0]!.change = change }],
+    ['a resource', (draft, change) => { draft.resources.at(-1)!.change = change }],
+    ['a policy', (draft, change) => { draft.policies.at(-1)!.change = change }],
+  ]
+
+  test('should find nothing existing changed in a plan that only adds and references', () => {
+    expect(planChangesExisting(additive())).toBe(false)
   })
+
+  test("should count a renamed table under an unchanged class", () => {
+    expect(planChangesExisting(additive((draft) => { draft.models[0]!.tableRenamedFrom = 'articles' }))).toBe(true)
+  })
+
+  for (const [what, edit] of EDITS) {
+    for (const change of CHANGES) {
+      test(`should count ${what} whose change is ${change.kind}`, () => {
+        expect(planChangesExisting(additive((draft) => edit(draft, change)))).toBe(true)
+      })
+    }
+  }
 })

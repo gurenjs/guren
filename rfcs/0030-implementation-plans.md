@@ -378,7 +378,11 @@ breaking regardless of what Impact found.
 - A class name is resolved from the app root that spells it: a module's own model,
   else the project root's. Relationships, route bindings, action mentions, tests and
   column reads are compared by the model they resolve to, so a module's `Post` never
-  lands in the root `Post`'s Impact.
+  lands in the root `Post`'s Impact. A page resolves `Data.Post` in its own root, the
+  first segment of its id when that names a module. Known limitation: an action or a
+  route binding is resolved by class name from the root it sits in, so a module's
+  action that imports the root's `Post` is attributed to the module's `Post` when one
+  exists.
 - A reader that could not look says so on every entry that rests on it, with its
   reason: a directory that would not open (models, controllers, resources, policies,
   pages, `tests/`), a routes file that threw, a controller or page that did not parse,
@@ -387,14 +391,20 @@ breaking regardless of what Impact found.
 - The column-consumer scan (`column-consumers.ts`) reads the AST of controllers,
   resources and page components. A value is a model's record, or a list of them,
   where the file says so: a query on the model class imported from its module (judged
-  by the chain's last method: `find*`/`first*`/`create` a record, `all`/`get`/`where`
-  and the other builders a list, `paginate` an object whose `data` is a list),
+  by the chain's last method: `find*`/`first*`/`create`/`update` a record,
+  `all`/`get`/`where`/`withCount` and the other builders a list, `paginate` an object
+  whose `data` is a list; every public method of `Model`, `QueryBuilder` and the
+  `Attachable`/`SoftDeletes` mixins is classified, and a test fails on one that is not),
   `this.model(M)`, `this.resource` in a resource that imports the model, or an
   annotation naming `MRecord`, a tied resource's data type, `Data.M`, an array of one
   or `PaginatedPageProps` of one. It follows plain aliases, destructuring, indexing,
   `for...of` and element callbacks. The column names a query spells
   (`where('title', …)`, `where({ title })`, `select('title', …)`, `orderBy`) are
-  reads. A method call, and a list's own members (`length`), are not. `post[key]`,
+  reads, and the keys of the data `create`/`update` are given are writes, listed as
+  such, since a rename breaks a writer as surely as a reader. A column held in a
+  variable (`orderBy(column)`, `create(data)`) and a query ending in a method the
+  scan does not classify (an application's own scope) are accesses no static scan can
+  name. A method call, and a list's own members (`length`), are not reads. `post[key]`,
   a rest pattern and a spread of a record (`{ ...post }`, `<Card {...post} />`) are
   reads no static scan can name, listed under every changed column of the model.
   A local or parameter named after the model class shadows it. A page's read is
@@ -402,8 +412,7 @@ breaking regardless of what Impact found.
 - Not scanned, so absent from the lists: a value that crosses a function call or a
   file, a reassignment, a component typed through `React.FC<Props>` rather than its
   own parameter annotation, an import through a barrel or through a path alias other
-  than `@/`, a query method the lists above do not name (an application's own
-  scopes), and a Drizzle table column (`posts.title`) read outside the model.
+  than `@/`, and a Drizzle table column (`posts.title`) read outside the model.
 - The breaking rule stays the plan's own (`planBreakingChanges()`), with one addition
   only the application can answer: an altered route, action or controller whose route
   publishes an agent tool is flagged even when the plan does not declare the tool.

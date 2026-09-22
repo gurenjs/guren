@@ -15,7 +15,9 @@ const KIND_KEYS: Record<PlanImpactConsumerKind, string> = {
   page: 'impact.kind.page',
   test: 'impact.kind.test',
   read: 'impact.kind.read',
+  write: 'impact.kind.write',
   opaqueRead: 'impact.kind.opaqueRead',
+  opaqueWrite: 'impact.kind.opaqueWrite',
 }
 
 let impactFor = idMap<PlanImpactEntry>()

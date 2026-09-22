@@ -16,8 +16,9 @@ import { resolveInertiaPageFile } from '../inertia-pages'
 import { discoverParsedModels } from '../model-parser'
 import type { ParseCache } from '../parse-cache'
 import { classDetail, describeActions } from './app-detail'
-import type { PlanAppNames, PlanAppUnreadable } from './app-state'
+import type { PlanAppNames } from './app-state'
 import type { PlanImpactModel, PlanImpactReader, PlanImpactRoute, PlanImpactSources } from './impact'
+import { isUnreadable, type PlanAppUnreadable } from './unreadable'
 
 export interface PlanImpactSourcesInput {
   root: string
@@ -43,7 +44,7 @@ function toolNames(definitions: RouteDefinition[] | undefined): Map<string, stri
 }
 
 function impactRoutes(input: PlanImpactSourcesInput): PlanImpactRoute[] {
-  if (!Array.isArray(input.routes)) return []
+  if (isUnreadable(input.routes)) return []
   const tools = toolNames(input.definitions)
   return input.routes.map((route, index): PlanImpactRoute => {
     const toolName = route.name === undefined ? undefined : tools.get(route.name)
@@ -81,7 +82,7 @@ async function impactModels(root: string): Promise<ModelRead> {
 export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Promise<PlanImpactSources> {
   const { root, sections } = input
   const relative = (file: string): string => toPosixRelative(root, file)
-  const pageIds = Array.isArray(sections.pages) ? sections.pages.map((page) => page.name) : []
+  const pageIds = isUnreadable(sections.pages) ? [] : sections.pages.map((page) => page.name)
   const [models, controllerFiles, resourceFiles, policies, testFiles, pages] = await Promise.all([
     impactModels(root),
     discoverControllerFiles(root),
@@ -92,8 +93,8 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
   ])
 
   const unreadable: Partial<Record<PlanImpactReader, string>> = {}
-  const note = (reader: PlanImpactReader, section: unknown): void => {
-    if (section && typeof section === 'object' && 'unreadable' in section) unreadable[reader] = (section as PlanAppUnreadable).unreadable
+  const note = (reader: PlanImpactReader, section: readonly unknown[] | PlanAppUnreadable | ControllerMethodScan | undefined): void => {
+    if (section !== undefined && !('methods' in section) && isUnreadable(section)) unreadable[reader] = section.unreadable
   }
   note('models', sections.models)
   if (models.unreadable !== undefined) unreadable.models = models.unreadable

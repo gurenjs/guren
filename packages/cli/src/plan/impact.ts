@@ -65,7 +65,9 @@ export type PlanImpactConsumerKind =
   | 'page'
   | 'test'
   | 'read'
+  | 'write'
   | 'opaqueRead'
+  | 'opaqueWrite'
 
 export interface PlanImpactConsumer {
   kind: PlanImpactConsumerKind
@@ -103,13 +105,25 @@ function changes(change: PlanChange): boolean {
   return change.kind === 'alter' || change.kind === 'rename' || change.kind === 'drop'
 }
 
-/** Whether a plan changes anything the application has, which is the only case Impact reads the app for. */
+const NO_SOURCES: PlanImpactSources = {
+  routes: [],
+  models: [],
+  actions: [],
+  resources: [],
+  policies: [],
+  tests: [],
+  reads: { reads: [], opaque: [], resources: [], unreadable: [] },
+  unreadable: {},
+  unparsedModels: [],
+  missingPages: [],
+}
+
+/**
+ * Whether a plan changes anything the application has, which is the only case Impact
+ * reads the app for. Asked of `planImpact()` itself, so the two cannot disagree on a kind.
+ */
 export function planChangesExisting(plan: PlanDraft): boolean {
-  return (
-    plan.models.some((model) => changes(model.change) || model.tableRenamedFrom !== undefined || model.columns.some((column) => changes(column.change)))
-    || plan.controllers.some((controller) => changes(controller.change) || controller.actions.some((action) => changes(action.change)))
-    || [...plan.validators, ...plan.routes, ...plan.views, ...plan.resources, ...plan.policies].some((element) => changes(element.change))
-  )
+  return planImpact(plan, NO_SOURCES).length > 0
 }
 
 /** The name the application knows the element by today: a rename's `from`. */
@@ -191,8 +205,9 @@ function addMentioningActions(
   }
 }
 
-function readConsumer(read: Pick<ColumnRead, 'where' | 'file' | 'line' | 'via'>): PlanImpactConsumer {
-  return { kind: 'read', name: read.where || read.file, file: read.file, line: read.line, ...(read.via ? { via: read.via } : {}) }
+function readConsumer(read: Pick<ColumnRead, 'where' | 'file' | 'line' | 'via' | 'write'>, opaque = false): PlanImpactConsumer {
+  const kind: PlanImpactConsumerKind = opaque ? (read.write ? 'opaqueWrite' : 'opaqueRead') : read.write ? 'write' : 'read'
+  return { kind, name: read.where || read.file, file: read.file, line: read.line, ...(read.via ? { via: read.via } : {}) }
 }
 
 function modelEntry(entry: EntryBuilder, sources: PlanImpactSources, target: PlanImpactModel | undefined, change: PlanChange): void {
@@ -229,7 +244,7 @@ function modelEntry(entry: EntryBuilder, sources: PlanImpactSources, target: Pla
   }
 }
 
-/** An opaque read (`post[key]`, a spread, a rest pattern) may be any column, so it is listed under every changed one. */
+/** An opaque access (`post[key]`, a spread, `create(data)`) may be any column, so it is listed under every changed one. */
 function columnEntry(entry: EntryBuilder, sources: PlanImpactSources, target: PlanImpactModel | undefined, property: string): void {
   entry.rests('models', 'controllers', 'resources', 'pages')
   entry.scanGaps()
@@ -238,7 +253,7 @@ function columnEntry(entry: EntryBuilder, sources: PlanImpactSources, target: Pl
     if (read.model.file === target.file && read.property === property) entry.add(readConsumer(read))
   }
   for (const opaque of sources.reads.opaque) {
-    if (opaque.model.file === target.file) entry.add({ ...readConsumer(opaque), kind: 'opaqueRead' })
+    if (opaque.model.file === target.file) entry.add(readConsumer(opaque, true))
   }
 }
 

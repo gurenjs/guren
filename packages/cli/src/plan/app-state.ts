@@ -37,14 +37,12 @@ import { loadPlanAppDetail, type PlanAppDetail } from './app-detail'
 import type { PlanImpactSources } from './impact'
 import { loadPlanImpactSources } from './impact-sources'
 import { ParseCache } from '../parse-cache'
+import { isUnreadable, type PlanAppUnreadable } from './unreadable'
 
 const POLICIES_DIR = 'app/Policies'
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
-/** A section the scanners could not read, carrying why. */
-export interface PlanAppUnreadable {
-  unreadable: string
-}
+export { isUnreadable, type PlanAppUnreadable }
 
 /**
  * The app root something sits in: a module name, or `null` for the project root. A plan
@@ -135,10 +133,6 @@ export interface PlanAppState {
   detail?: PlanAppDetail
   /** What Impact reads (RFC 0030 §2); present only when the loader was asked for it. */
   impact?: PlanImpactSources
-}
-
-export function isUnreadable<T>(section: T[] | PlanAppUnreadable): section is PlanAppUnreadable {
-  return !Array.isArray(section)
 }
 
 const VALIDATOR_SECTION_REASON =

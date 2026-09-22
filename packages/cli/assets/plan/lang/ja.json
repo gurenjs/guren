@@ -181,6 +181,8 @@
   "impact.kind.read": "{name} が読んでいます",
   "impact.kind.readVia": "{name} が {via} 経由で読んでいます",
   "impact.kind.opaqueRead": "{name} が静的に特定できないプロパティを読んでいます",
+  "impact.kind.write": "{name} が書き込んでいます",
+  "impact.kind.opaqueWrite": "{name} が静的に特定できないカラムへ書き込んでいます",
   "impact.unreadable.models": "モデルを読み取れなかったため、リレーションとカラムの参照が漏れている可能性があります: {reason}",
   "impact.unreadable.routes": "ルート一覧を読み取れなかったため、ルート、ApiRoutes のエントリ、エージェントツールが漏れている可能性があります: {reason}",
   "impact.unreadable.controllers": "コントローラーを読み取れなかったため、アクションが漏れている可能性があります: {reason}",

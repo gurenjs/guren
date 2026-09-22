@@ -181,6 +181,8 @@
   "impact.kind.read": "{name} reads it",
   "impact.kind.readVia": "{name} reads it through {via}",
   "impact.kind.opaqueRead": "{name} reads a property no static scan can name",
+  "impact.kind.write": "{name} writes it",
+  "impact.kind.opaqueWrite": "{name} writes data no static scan can name the columns of",
   "impact.unreadable.models": "The models could not be read, so relationships and column reads may be missing: {reason}",
   "impact.unreadable.routes": "The route graph could not be read, so routes, ApiRoutes entries and agent tools may be missing: {reason}",
   "impact.unreadable.controllers": "The controllers could not be read, so actions may be missing: {reason}",

@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { scanColumnConsumers, type ColumnConsumerModel, type ColumnConsumerScan, type ColumnRead } from '../src/column-consumers'
+import { QUERY_METHOD_RESULTS, scanColumnConsumers, type ColumnConsumerModel, type ColumnConsumerScan, type ColumnRead } from '../src/column-consumers'
 import { ParseCache } from '../src/parse-cache'
 import { writeWorkspaceFiles } from './helpers'
 
@@ -274,6 +275,79 @@ describe('scanColumnConsumers on queries, lists and shadowing', () => {
     })
 
     expect(result.reads.map((read) => read.model.file)).toEqual(['modules/blog/app/Models/Post.ts'])
+  })
+})
+
+describe('scanColumnConsumers on writes and queries it cannot classify', () => {
+  test("should read what update() returns, and tell the row it names from the data it writes", async () => {
+    const result = await scan({
+      controllers: controller(`  async update() {
+    const post = await Post.update({ id: 1 }, { title: 'x' })
+    await Post.where('slug', 's').update({ excerpt: 'y' })
+    return this.text(post.body)
+  }`),
+    })
+
+    expect(result.reads.map((read) => `${read.property}${read.write ? ' write' : ''}`)).toEqual(['id', 'title write', 'slug', 'excerpt write', 'body'])
+  })
+
+  test('should write the keys create() is given, and name the data it cannot see as opaque', async () => {
+    const result = await scan({
+      controllers: controller(`  async store() {
+    const data = { title: 'x' }
+    await Post.create({ ...data, authorId: 1 })
+    await Post.forceCreate(data)
+    return this.redirect('/posts')
+  }`),
+    })
+
+    expect(result.reads.map((read) => `${read.property}${read.write ? ' write' : ''}`)).toEqual(['authorId write'])
+    expect(result.opaque.map((read) => `${read.line}${read.write ? ' write' : ''}`)).toEqual(['7 write', '8 write'])
+  })
+
+  test('should name a column held in a variable, and a query ending in an unclassified method, as opaque', async () => {
+    const result = await scan({
+      controllers: controller(`  async index() {
+    const column = 'title'
+    const sorted = await Post.orderBy(column).get()
+    const published = await Post.published().first()
+    const featured = await Post.featured()
+    return this.json({ sorted, published, featured })
+  }`),
+    })
+
+    expect(result.opaque.map((read) => read.line)).toEqual([7, 9])
+  })
+
+  test("should resolve Data.<Model> in a module page's own app root", async () => {
+    const blogPost = { className: 'Post', file: 'modules/blog/app/Models/Post.ts' }
+    const result = await scan({
+      models: [...MODELS, blogPost],
+      extra: { 'modules/blog/app/Models/Post.ts': MODEL_FILES['app/Models/Post.ts']! },
+      pages: {
+        'blog/Show.tsx': "export default function Show({ post }: { post: Data.Post }) {\n  return <h1>{post.title}</h1>\n}\n",
+        'posts/Show.tsx': "export default function Show({ post }: { post: Data.Post }) {\n  return <h1>{post.title}</h1>\n}\n",
+      },
+    })
+
+    expect(result.reads.map((read) => `${read.where} ${read.model.file}`)).toEqual([
+      'blog/Show modules/blog/app/Models/Post.ts',
+      'posts/Show app/Models/Post.ts',
+    ])
+  })
+
+  test('should classify every public query method of the ORM, so none silently drops the records it returns', () => {
+    const source = (path: string): string => readFileSync(join(import.meta.dir, '../..', path), 'utf8')
+    const names = new Set([
+      ...[...source('orm/src/Model.ts').matchAll(/^  static (?:async )?([A-Za-z]+)[<(]/gm)].map((match) => match[1]!),
+      ...[...source('orm/src/QueryBuilder.ts').matchAll(/^  (?:async )?([A-Za-z]+)[<(]/gm)].map((match) => match[1]!),
+      ...[...source('orm/src/SoftDeletes.ts').matchAll(/^\s+([A-Za-z]+)[<(]/gm)].map((match) => match[1]!),
+      ...[...source('core/src/attachments/Attachable.ts').matchAll(/^    ([A-Za-z]+)\(/gm)].map((match) => match[1]!),
+    ])
+    const classified = new Set<string>(Object.values(QUERY_METHOD_RESULTS).flat())
+
+    expect(names.size).toBeGreaterThan(60)
+    expect([...names].filter((name) => !classified.has(name)).sort()).toEqual([])
   })
 })
 
