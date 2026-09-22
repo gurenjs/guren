@@ -4,17 +4,16 @@
  * it is a review artifact, not project knowledge, and nothing regenerates it.
  */
 
-import { readFile, stat } from 'node:fs/promises'
-import { basename, resolve } from 'node:path'
+import { mkdir, readFile, stat } from 'node:fs/promises'
+import { basename, dirname, resolve } from 'node:path'
 
 import { CliError, formatSchemaIssues } from './cli-error'
 import type { PlanAppState } from './plan/app-state'
-import { planOutputPath } from './plan/beside'
+import { planOutputPath, writeFileAtomic } from './plan/beside'
 import { isPlanLocale, matchPlanLocale, PLAN_LOCALES, type PlanLocale } from './plan/locales'
 import { planChangesExisting, planImpact } from './plan/impact'
 import { hasBaseline, renderPlanHtml } from './plan/render'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
-import { writeFileSafe } from './utils'
 import { PlanDraftSchema, PlanSchema, type Plan, type PlanDraft } from './plan/schema'
 
 export interface RenderPlanFileOptions {
@@ -123,10 +122,12 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
     throw new CliError(`Refusing to write the page over the plan itself at ${target}. Choose another -o path.`)
   }
 
-  // The package's own writer: it creates the directory, so `-o build/plan.html` works
-  // before `build/` exists. Always `force`, since re-rendering a plan is the normal case.
+  // The directory is created, so `-o build/plan.html` works before `build/` exists. Written
+  // through a temporary beside the page, so a crash never leaves a torn page; `plan:next`
+  // excludes such a leftover (`planBesideExclusions`). Re-rendering over the page is the normal case.
   try {
-    await writeFileSafe(target, html, { force: true })
+    await mkdir(dirname(target), { recursive: true })
+    await writeFileAtomic(target, html)
   } catch (error) {
     // A path the user chose, answered with the path rather than with a stack trace.
     if (error instanceof CliError) throw error

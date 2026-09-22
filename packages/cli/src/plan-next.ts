@@ -348,7 +348,7 @@ function heldLines(report: PlanNextReport, planArgument: string): string[] {
     '',
     `A held step is a person\u2019s decision: ${HELD_STEP_REMEDY}:`,
     `  bunx guren plan:approve ${planArgument}`,
-    '  Approval keeps the baseline the plan was first stamped with; to drop an edit instead, restore the approved plan text.',
+    '  Approval keeps the baseline the plan was first stamped with. Commit the edited plan and its approvals file before the next plan:next, which refuses them uncommitted.',
   )
   return lines
 }

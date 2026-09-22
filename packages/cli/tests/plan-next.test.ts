@@ -6,11 +6,13 @@ import { join } from 'node:path'
 import { runCommand, type CommandDef } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
+import { planApproveFile } from '../src/plan-approve'
 import { formatPlanNext, planNextFile, type PlanNextReport } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
 import { planWaiveFile } from '../src/plan-waive'
 import type { PlanAppState } from '../src/plan/app-state'
 import { MAX_STEP_CONTINUATIONS as MAX_CONTINUATIONS } from '../src/plan-stop-hook'
+import { HELD_STEP_REMEDY } from '../src/plan/step-context'
 import { planDigest, PLAN_STATE_VERSION, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
@@ -564,10 +566,36 @@ describe('plan:next on stale context', () => {
     const text = formatPlanNext(report, 'comments.plan.json')
     expect(text).toContain(`Held, since what they depend on changed after the plan was approved:\n  ${POST_HTTP}\n    action.posts.index (actions, existing), named by route.posts.index: `)
     expect(text).toContain('      fail  The action "PostController.index" was not found in the project root')
-    expect(text).toContain('undo the change that moved it, or edit the plan so it states what the application holds now')
-    expect(text).toContain('restore the approved plan text')
-    // Nothing reads a revision request yet, and approval does not restamp: the advice names neither as a way out.
+    expect(text).toContain(`A held step is a person\u2019s decision: ${HELD_STEP_REMEDY}:\n  bunx guren plan:approve comments.plan.json`)
+    expect(text).toContain('Commit the edited plan and its approvals file before the next plan:next')
+    // Nothing reads a revision request yet: the advice does not name one as a way out.
     expect(text).not.toContain('run a revision')
+  })
+
+  test('should hand out a held step once the plan names what the application holds and that edit is approved and committed', async () => {
+    // Another commit removed PostController.index; the route the plan alters now serves `show`.
+    const document = threeTaskPlan() as { questions: unknown[]; controllers: Array<{ id: string; actions: Array<{ name: string }> }> }
+    document.questions = []
+    const { app, plan } = await approvedApp('released', document)
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    const moved = planAppState({ actions: ['PostController.show'] })
+    expect((await planNextFile(plan, { appRoot: app, app: moved, now: NOW })).held.map((step) => step.id)).toEqual([POST_HTTP])
+
+    const edited = JSON.parse(await readFile(plan, 'utf8')) as typeof document
+    edited.controllers.find((controller) => controller.id === 'controller.posts')!.actions[0]!.name = 'show'
+    await writeFile(plan, JSON.stringify(edited), 'utf8')
+    await planApproveFile(plan, { app: moved, appRoot: app, now: NOW })
+
+    // The edit and its approval are the person's commit, not the next step's.
+    await expect(planNextFile(plan, { appRoot: app, app: moved, now: NOW })).rejects.toThrow('uncommitted changes')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'plan: posts.index serves show')
+
+    const report = await planNextFile(plan, { appRoot: app, app: moved, now: NOW })
+    expect(report.held).toEqual([])
+    expect(report.step!.id).toBe(POST_HTTP)
   })
 
   test('should never block on an element whose freshness is unstamped or unjudged, nor on an application it could not read', async () => {

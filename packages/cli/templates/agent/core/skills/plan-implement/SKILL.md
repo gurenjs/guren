@@ -39,8 +39,9 @@ approval: an element the step owns or names that another commit moved, so the
 plan does not describe the application there. It lists each held step
 with the element, how the step depends on it and what the reference checks say
 now, and returns the next step that does not depend on one. A held step is a
-person's decision (undo the change, or edit the plan so it states what the
-application holds now and approve it): report it, and do not edit the
+person's decision (undo the change, or edit the plan so each stale element
+states what the application holds now, such as an `existing` action another
+commit renamed, and approve the edit): report it, and do not edit the
 application back or the plan to make it pass.
 
 ## What a step asks for

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -545,6 +545,18 @@ describe('renderPlanFile', () => {
 
     expect(result.path).toBe(join(dir, 'comments.plan.html'))
     expect(await readFile(result.path, 'utf8')).toContain('plan-data')
+  })
+
+  test('should replace the page through a temporary and leave none behind, creating the directory -o names', async () => {
+    const dir = await fixtureDir()
+    await writeFile(join(dir, 'comments.plan.html'), 'old\n', 'utf8')
+
+    await render(join(dir, 'comments.plan.json'))
+    await render(join(dir, 'comments.plan.json'), { output: join(dir, 'build/review.html') })
+
+    expect(await readFile(join(dir, 'comments.plan.html'), 'utf8')).toContain('plan-data')
+    expect((await readdir(dir)).sort()).toEqual(['build', 'comments.plan.html', 'comments.plan.json'])
+    expect(await readdir(join(dir, 'build'))).toEqual(['review.html'])
   })
 
   test('should write to the path -o names', async () => {
