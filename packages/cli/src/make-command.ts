@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { consola } from 'consola'
 import type { WriterOptions } from './utils'
 import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, safeModuleName, scaffoldFile } from './utils'
+import type { PatchResult } from './patch-helpers'
 import { addImport, addToArrayArgument, addToArrayOption, PATCH_REASONS } from './patch-helpers'
 import { fileExists, readIfExists } from './discovery'
 import { registersCommandsOf } from './console-check'
@@ -87,7 +88,8 @@ async function registerRootCommand(className: string, file: string): Promise<voi
     return
   }
 
-  await addImport(CONSOLE_ENTRY, `import ${className} from '${specifier}'`)
+  const importStatement = `import ${className} from '${specifier}'`
+  if (!importLanded(await addImport(CONSOLE_ENTRY, importStatement), importStatement, CONSOLE_ENTRY)) return
 
   if (registration.modified) {
     consola.success(`Registered ${className} in ${CONSOLE_ENTRY}`)
@@ -116,7 +118,8 @@ async function registerModuleCommand(className: string, file: string, moduleName
     return
   }
 
-  await addImport(indexPath, `import ${className} from '${specifier}'`)
+  const importStatement = `import ${className} from '${specifier}'`
+  if (!importLanded(await addImport(indexPath, importStatement), importStatement, indexPath)) return
 
   if (registration.modified) {
     consola.success(`Registered ${className} in ${indexPath}`)
@@ -147,6 +150,19 @@ async function printModuleConsoleHopGuidance(moduleName: string): Promise<void> 
     consola.info(`Create ${CONSOLE_ENTRY} first if your project predates it.`)
   }
   consola.info('See: https://guren.dev/docs/guides/console')
+}
+
+/**
+ * Whether the import is in the file, by this patch or an earlier one. By now the
+ * registration has landed, so a failed import leaves the file naming an identifier
+ * it never binds: the manual step is printed instead of a success line.
+ */
+function importLanded(result: PatchResult, importStatement: string, filePath: string): boolean {
+  if (result.modified || result.reason === PATCH_REASONS.importAlreadyExists) return true
+
+  consola.warn(`Could not add the import to ${filePath} automatically: ${result.reason}`)
+  consola.info(`Add \`${importStatement}\` to ${filePath}: its registration is already in place.`)
+  return false
 }
 
 function printRootRegistrationGuidance(className: string, specifier: string): void {

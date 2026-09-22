@@ -25,19 +25,22 @@ describe('@guren/cli/oxlint', () => {
             'guren/await-async-assertion': 'error',
             'guren/no-nullish-env-default': 'error',
             'guren/no-unvalidated-env-read': 'error',
+            'guren/no-discarded-patch-result': 'error',
           },
         },
         file: 'case.ts',
-        source: `import { expect, test } from 'bun:test'\n// ---- banner ----\ntest('x', async () => {\n  expect(Promise.resolve(1)).resolves.toBe(1)\n})\nconst store = process.env.CACHE_STORE ?? 'memory'\n`,
+        source: `import { expect, test } from 'bun:test'\nimport { addImport } from './patch-helpers'\n// ---- banner ----\ntest('x', async () => {\n  expect(Promise.resolve(1)).resolves.toBe(1)\n})\nconst store = process.env.CACHE_STORE ?? 'memory'\nawait addImport('a.ts', 'import x from "y"')\n`,
       })
 
-      expect(output).toContain('case.ts:2:1:')
+      expect(output).toContain('case.ts:3:1:')
       expect(output).toContain('guren(comment-banner)')
-      expect(output).toContain('case.ts:4:3:')
+      expect(output).toContain('case.ts:5:3:')
       expect(output).toContain('guren(await-async-assertion)')
-      expect(output).toContain('case.ts:6:15:')
+      expect(output).toContain('case.ts:7:15:')
       expect(output).toContain('guren(no-nullish-env-default)')
       expect(output).toContain('guren(no-unvalidated-env-read)')
+      expect(output).toContain('case.ts:8:1:')
+      expect(output).toContain('guren(no-discarded-patch-result)')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

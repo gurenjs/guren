@@ -5,9 +5,10 @@
 import asyncAssertion from './await-async-assertion.js'
 import { rules as commentRules } from './comments.js'
 import { rules as envRules } from './nullish-env-default.js'
+import { rules as patchResultRules } from './no-discarded-patch-result.js'
 import { rules as envReadRules } from './unvalidated-env-read.js'
 
 export default {
   meta: { name: 'guren' },
-  rules: { ...asyncAssertion.rules, ...commentRules, ...envRules, ...envReadRules },
+  rules: { ...asyncAssertion.rules, ...commentRules, ...envRules, ...envReadRules, ...patchResultRules },
 }
