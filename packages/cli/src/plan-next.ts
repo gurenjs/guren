@@ -20,11 +20,11 @@ import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval } from './plan/approvals'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
-import type { PlanElementState } from './plan/status'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
+import type { PlanElementState } from './plan/status'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordStillHolds, whatHoldsElement, type PlanWaiversRead } from './plan/verification'
@@ -193,7 +193,12 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const previous = answered ? { ...marked, stalled: undefined } : marked
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
   const log = await readPlanWaivers(path, plan)
-  const judged = await stepContexts(plan, derivation, options, stepInProgress(previous))
+  // With every record standing nothing can be held, and the one read left is the detail load below.
+  const allStand = listPlanSteps(derivation).every(({ step }) => {
+    const record = records[step.id]
+    return record !== undefined && recordStillHolds(record, digest, hashes, log.waived)
+  })
+  const judged = allStand ? { contexts: new Map<string, PlanStepContext>() } : await stepContexts(plan, derivation, options, stepInProgress(previous))
   const stallOf = (stepId: string): { stalled?: PlanStall } => (previous?.step === stepId && previous.stalled ? { stalled: previous.stalled } : {})
 
   const verified: string[] = []
@@ -374,9 +379,14 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     lines.push('No step can be returned: every step left is held, or waits on one that is. A person decides how the plan meets the application now.')
   } else if (step === null) {
     const open = report.unverified ?? []
-    lines.push(open.length > 0 ? 'Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.' : 'Every step is verified. Nothing is left to implement.')
-    for (const element of open) lines.push(`  ${element.id} (${element.state}): ${element.holds}`)
-    if (report.unverifiedUnreadable) lines.push(`The elements were not judged, so plan:status may still list some that plan:close refuses: ${report.unverifiedUnreadable}`)
+    if (report.unverifiedUnreadable) {
+      lines.push(`Every step is verified. The elements were not judged, so plan:status may still list some that plan:close refuses: ${report.unverifiedUnreadable}`)
+    } else if (open.length > 0) {
+      lines.push('Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.')
+      for (const element of open) lines.push(`  ${element.id} (${element.state}): ${element.holds}`)
+    } else {
+      lines.push('Every step is verified. Nothing is left to implement.')
+    }
     if (report.onCommandsAlone.length > 0) {
       lines.push(`${report.onCommandsAlone.join(', ')}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
     }

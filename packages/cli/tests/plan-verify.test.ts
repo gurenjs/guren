@@ -592,12 +592,22 @@ describe('whatHoldsElement', () => {
 
   test('should suggest plan:verify only where a run can lift the element', () => {
     expect(whatHoldsElement(element('present'))).toBe('run guren plan:verify')
-    expect(whatHoldsElement(element('drifted', { notes: ['Verified t by s; changed since: a.ts.'] }))).toBe('Verified t by s; changed since: a.ts; run guren plan:verify')
+    const expired = 'Verified t by s; changed since: a.ts.'
+    expect(whatHoldsElement(element('drifted', { notes: [expired], hold: { kind: 'expired', note: expired } }))).toBe('Verified t by s; changed since: a.ts; run guren plan:verify')
     expect(whatHoldsElement(element('planned'))).toBe('implement it, or waive it')
-    expect(whatHoldsElement(element('drifted', { notes: ['Not wired: x.'] }))).toBe('Not wired: x; implement it, or waive it')
+    const incomplete = 'Verified t by s, and no longer at the state that completes it.'
+    expect(whatHoldsElement(element('drifted', { notes: ['Not wired: x.', incomplete], hold: { kind: 'incomplete', note: incomplete } }))).toBe('Not wired: x; implement it, or waive it')
     expect(whatHoldsElement(element('blocked', { reason: 'the models could not be read' }))).toBe('the models could not be read; fix what keeps it from being read, or waive it')
+    const unfingerprinted = 'Verified t by s, and nothing of it was fingerprinted, so that result could not expire and is not counted.'
+    expect(whatHoldsElement(element('present', { notes: [unfingerprinted], hold: { kind: 'unfingerprinted', note: unfingerprinted } }))).toBe(
+      'Verified t by s, and nothing of it was fingerprinted, so that result could not expire and is not counted; plan:verify cannot lift what it cannot fingerprint, so waive it',
+    )
+  })
+
+  test('should name the missing behaviour for an element no verified behaviour reaches, whatever reason the reader gave', () => {
     const stuck = 'Verified t by s, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.'
-    expect(whatHoldsElement(element('present', { notes: [stuck] }))).toBe(stuck.slice(0, -1))
+    const unjudged = element('unjudged', { reason: 'Nothing discovers a mail class.', notes: [stuck], hold: { kind: 'unreached', note: stuck } })
+    expect(whatHoldsElement(unjudged)).toBe(stuck.slice(0, -1))
   })
 })
 
@@ -686,6 +696,9 @@ describe('applyVerification', () => {
     const resource = elementOf(lifted, 'resource.comment')
     expect(resource.state).toBe('present')
     expect(resource.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${HTTP}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`])
+    // With no file either, what holds it is still the missing behaviour: a run could fingerprint nothing more.
+    const bare = applyVerification(statusOf({ 'resource.comment': { properties: [], files: [] } }), derivation, { [HTTP]: http }, 'digest', hashes, plan).status
+    expect(elementOf(bare, 'resource.comment').hold?.kind).toBe('unreached')
     // A property a reader matched is a reading of the change itself, which needs no behaviour to reach it.
     expect(elementOf(applyVerification(statusOf(), derivation, { [HTTP]: http }, 'digest', hashes, plan).status, 'resource.comment').state).toBe('verified')
   })

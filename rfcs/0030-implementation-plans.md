@@ -1364,7 +1364,10 @@ each rule was read.
   readable properties all differ stays `planned`. A validate call is read as
   written, so `this.validateBody(schemas.comment)` names `schemas.comment`,
   which is not an export; the note says so and asks for the schema by name or
-  in the route contract. A helper that validates on the action's behalf also
+  in the route contract. A chained or built schema reads the same way:
+  `this.validateBody(PostSchema.partial())` names `PostSchema.partial` and
+  `this.validateBody(z.object(...))` names `z.object`, so both are a
+  `differ`. A helper that validates on the action's behalf also
   reads as a `differ`, which holds the action back rather than passing it.
 - An element none of whose planned properties matched rests on existence, a
   mount or its behaviours alone, whatever its state. `plan:status` lifts such an
@@ -1390,10 +1393,12 @@ each rule was read.
   its record stands for `plan:next` and the `Stop` hook, because an element no
   behaviour reaches is a gap in the plan that no implementation closes. Such an
   element carries a note ending in "add a behaviour that reaches it, or waive
-  it". `plan:close` prints each element it refuses with what holds it, and
-  suggests `plan:verify` only where a run can lift it. `plan:next`, once every
-  step is verified, lists the elements `plan:close` would still refuse, so an
-  agent does not stop on a plan that cannot close.
+  it". The overlay records why it did not lift an element (`hold`: below its
+  completion state, nothing fingerprinted, a file changed since, or no
+  behaviour reaches it), and `plan:close` prints each element it refuses with
+  what holds it, suggesting `plan:verify` only where a run can lift it.
+  `plan:next`, once every step is verified, lists the elements `plan:close`
+  would still refuse, so an agent does not stop on a plan that cannot close.
 - What this costs a plan. A plan whose side effects or commands the behaviours
   cannot reach, or with any other element that plans no property and no
   behaviour reaches (a controller of an action nothing requests, a resource
@@ -1465,7 +1470,11 @@ shipped with these readings:
   `generateEntityContext()` is not in it yet.
 - For a plan with a baseline `plan:next` reads the application without
   `detail` (the scanners, and an import of the routes file) and spawns no
-  command; a draft is never read. It holds a step that depends on a stale
+  command; a draft is never read. Once every step is verified it reads the
+  application once, with `detail` and for a draft too, which imports
+  `db/schema.ts` and the validator files, to list the elements `plan:close`
+  would still refuse (see *status rules after Part 2*); a read that fails is
+  reported, never fatal. It holds a step that depends on a stale
   element (§4), and the steps after it in its task or in a task waiting for
   it, and returns the first step that is neither. Each held step is reported
   with its stale elements, how the step depends on them, the §2 checks re-run

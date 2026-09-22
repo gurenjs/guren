@@ -14,7 +14,7 @@ import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecision
 import { listPlanReferences, type PlanReferenceField } from './references'
 import type { Plan, PlanDraft } from './schema'
 import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
-import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from './status'
+import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus, type PlanVerificationHold } from './status'
 import { planElementParents, type PlanTaskDerivation } from './tasks'
 
 export function sha256(bytes: Uint8Array | string): string {
@@ -108,7 +108,7 @@ export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: Iterable<s
  * same, `drifted` once one does not or cannot be read. Lifted: one at its completion state or
  * `unjudged`, in files the record covers, since a result nothing could expire is not one. A
  * `drop` has no file, its absence re-read per status. One no property of which matched lifts
- * only while a verified step of its task ran behaviours that reach it.
+ * only while a behaviour of a standing step, in any task, reaches it.
  */
 export function applyVerification(
   status: PlanStatus,
@@ -148,18 +148,22 @@ export function applyVerification(
         const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
         // An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers.
         const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
+        const hold = (kind: PlanVerificationHold, note: string): void => {
+          element.notes.push(note)
+          element.hold = { kind, note }
+        }
         if (!awaitsVerification(element)) {
-          element.notes.push(`${verifiedBy}${NO_LONGER_COMPLETE}`)
+          hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
+        } else if (unmatched && !reached.has(id)) {
+          hold('unreached', `${verifiedBy}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`)
         } else if (element.files.length === 0 && !needsNoFiles) {
-          element.notes.push(`${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
+          hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
           element.state = 'drifted'
-          element.notes.push(`${verifiedBy}; now in a file that run did not fingerprint: ${uncovered.join(', ')}.`)
+          hold('expired', `${verifiedBy}; now in a file that run did not fingerprint: ${uncovered.join(', ')}.`)
         } else if (changed.length > 0) {
           element.state = 'drifted'
-          element.notes.push(`${verifiedBy}; changed since: ${changed.join(', ')}.`)
-        } else if (unmatched && !reached.has(id)) {
-          element.notes.push(`${verifiedBy}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: ${NOT_REACHED_REMEDY}.`)
+          hold('expired', `${verifiedBy}; changed since: ${changed.join(', ')}.`)
         } else {
           element.state = 'verified'
         }
@@ -280,23 +284,21 @@ export function recordStands(record: PlanStepRecord, digest: string, hashes: Rea
   return record.outcome === 'verified' && record.planDigest === digest && changedFiles(record, hashes).length === 0
 }
 
-const NO_LONGER_COMPLETE = ', and no longer at the state that completes it.'
-
-/** What unsticks an element no verified behaviour reaches; running `plan:verify` again cannot. */
-export const NOT_REACHED_REMEDY = 'add a behaviour that reaches it, or waive it'
-
 /**
  * What holds an element short of `verified` or `waived`, and what would move it, for the
  * commands that refuse or report on such an element (`plan:close`, `plan:next`). Suggests
  * `plan:verify` only where running it can lift the element.
  */
 export function whatHoldsElement(element: PlanElementStatus<PlanElementState>): string {
-  const detail = element.reason ?? element.notes.filter((note) => !note.endsWith(NO_LONGER_COMPLETE)).at(-1)
-  const lead = detail ? `${detail.replace(/\.$/u, '')}; ` : ''
-  if (element.notes.some((note) => note.includes(NOT_REACHED_REMEDY))) return detail!.replace(/\.$/u, '')
+  const hold = element.hold
+  const bare = (text: string): string => text.replace(/\.$/u, '')
+  if (hold?.kind === 'unreached') return bare(hold.note)
+  // An element below its completion state is held by what the readers said, not by the run.
+  const said = hold?.kind === 'incomplete' ? element.notes.filter((note) => note !== hold.note).at(-1) : (hold?.note ?? element.notes.at(-1))
+  const detail = element.reason ?? said
+  const lead = detail ? `${bare(detail)}; ` : ''
   if (element.state === 'blocked') return `${lead}fix what keeps it from being read, or waive it`
-  // A verified record whose files changed since is drifted by the overlay, and a fresh run may lift it again.
-  const expired = element.state === 'drifted' && element.notes.some((note) => note.startsWith('Verified '))
-  if (awaitsVerification(element) || expired) return `${lead}run guren plan:verify`
+  if (hold?.kind === 'unfingerprinted') return `${lead}plan:verify cannot lift what it cannot fingerprint, so waive it`
+  if (hold?.kind === 'expired' || (hold === undefined && awaitsVerification(element))) return `${lead}run guren plan:verify`
   return `${lead}implement it, or waive it`
 }

@@ -68,7 +68,15 @@ export interface PlanElementStatus<S extends PlanElementState = PlanStatusState>
   completesAt: 'present' | 'wired'
   /** App-relative files the readers found the element in; what `plan:verify` fingerprints. Empty until it exists. */
   files: string[]
+  /** Set by the verification overlay when a verified step did not lift the element: why, and the note that says so. */
+  hold?: { kind: PlanVerificationHold; note: string }
 }
+
+/**
+ * Why a verified step did not lift its element: it is below its completion state, nothing of it
+ * was fingerprinted, a fingerprinted file changed (`expired`), or no verified behaviour reaches it.
+ */
+export type PlanVerificationHold = 'incomplete' | 'unfingerprinted' | 'expired' | 'unreached'
 
 export interface PlanStatusSummary {
   /** Elements the plan changes, per state. `existing` elements are counted apart. */

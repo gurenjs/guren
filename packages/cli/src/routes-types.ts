@@ -1,6 +1,7 @@
 import { relative, resolve } from 'node:path'
 import type { RouteDefinition as ServerRouteDefinition } from '@guren/server'
 import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { CONTRACT_SEGMENTS } from './contract-segments'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import {
   DECLARATION_MODULE_AUGMENTATION,
@@ -8,7 +9,6 @@ import {
   RUNTIME_ROUTE_FUNCTION,
   RUNTIME_UTILITY_FUNCTIONS,
 } from './routes-types-fragments'
-import { CONTRACT_SEGMENTS } from './contract-segments'
 import { schemaToTypeString } from './schema-type-extractor'
 
 export type RouteDefinition = {
