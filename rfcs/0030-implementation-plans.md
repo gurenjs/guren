@@ -1758,7 +1758,10 @@ it. The bypassed validator kept its step `incomplete`. On the blog every step
 failed on debt the plan did not cause (spec views out of date, a prototype
 fixture the new prop broke), `db:migrate` was `blocked` on an unreachable
 database as designed, and the `tests` steps failed with no test file carrying
-the ids: the blog's suite runs under Vitest, and `plan:verify` runs `bun test`.
+the ids, since this measurement wrote no blog tests. Writing them would not
+be enough: the blog's suite is written for Vitest (`vi.mock`,
+`vi.importActual`), and one of its files run under `bun test`, which is what
+`plan:verify` runs, fails on `vi.importActual is not a function`.
 
 *Answer to Open Question 1.* The progress view is not mostly "not checkable":
 13% of planned properties at completion, concentrated in the kinds §6 already
