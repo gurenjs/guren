@@ -77,6 +77,15 @@ export interface PlanAppTable {
   columns: string[]
 }
 
+/** The table `name` means in one app root: a plan names a table by identifier or SQL name alike. */
+export function findTable(tables: ReadonlyArray<PlanAppTable>, name: string, module: PlanAppScope): PlanAppTable | undefined {
+  return tables.find((table) => table.module === module && declaresTable(table, name))
+}
+
+export function declaresTable(table: PlanAppTable, name: string): boolean {
+  return table.identifier === name || table.tableName === name
+}
+
 /**
  * Why a name absent from {@link PlanAppTable.columns} is unconfirmed rather than
  * missing. Stated once: the checks quote it, and the reason is the parser's.

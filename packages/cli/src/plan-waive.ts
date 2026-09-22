@@ -11,6 +11,7 @@ import { basename, resolve } from 'node:path'
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
+import { gitAuthor } from './plan/beside'
 import { planDecisionsPath, planWaiverHash, removePlanWaiver, writePlanWaiver, type PlanWaiver } from './plan/decisions'
 import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { PLAN_STATUS_SECTIONS } from './plan/status'
@@ -45,23 +46,6 @@ export interface PlanWaiveFileOptions {
   now?: () => Date
   /** How `git config` is asked who is waiving; absent authorship is not an error. */
   exec?: CapturedExec
-}
-
-/** `git config` on a machine with no identity answers nothing, which the waiver simply omits. */
-async function waiverAuthor(cwd: string, exec: CapturedExec): Promise<string | undefined> {
-  const value = async (key: string): Promise<string | undefined> => {
-    try {
-      const run = await exec(['git', 'config', '--get', key], cwd)
-      const text = run.stdout.trim()
-      return run.exitCode === 0 && text.length > 0 ? text : undefined
-    } catch {
-      return undefined
-    }
-  }
-  const name = await value('user.name')
-  const email = await value('user.email')
-  if (name && email) return `${name} <${email}>`
-  return name ?? email
 }
 
 /**
@@ -126,7 +110,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   const hash = planWaiverHash(plan)
   if (hash === undefined) {
     throw new CliError(
-      `${path} is a draft: it has no baseline, so it has no hash a waiver could name. A waiver is a decision about an approved plan; approve this one first.`,
+      `${path} is a draft: it has no baseline, so it has no hash a waiver could name. A waiver is a decision about an approved plan; run guren plan:approve on it first.`,
     )
   }
 
@@ -150,7 +134,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   if (!reason) throw new CliError('A waiver records why an element was accepted incomplete, so --reason is required.')
 
   const at = (options.now ?? (() => new Date()))().toISOString()
-  const by = await waiverAuthor(options.cwd ?? process.cwd(), options.exec ?? runCaptured)
+  const by = await gitAuthor(root, options.exec ?? runCaptured)
   const waived: PlanWaiver[] = []
   const replaced: PlanWaiver[] = []
   let written = false
