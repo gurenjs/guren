@@ -667,6 +667,8 @@ describe('judgePlan', () => {
 
       expect(readAlterProperties(document, app())).toEqual([])
       expect(readAlterProperties(showAlter, planAppState())).toEqual([])
+      // Without detail a page's props read `unknown`, and a blind reading would later credit any match.
+      expect(readAlterProperties(view(ALTER, { props: [{ name: 'posts', type: 'Post[]' }] }), planAppState())).toEqual([])
     })
   })
 

@@ -79,20 +79,20 @@ export async function recordPlanApproval(
   planPath: string,
   approvals: PlanApprovals,
   approval: PlanApproval,
-): Promise<{ written: boolean; existing?: PlanApproval; readingsAdded: PlanPropertyReading[] }> {
+): Promise<{ existing?: PlanApproval; readingsAdded: PlanPropertyReading[] }> {
   const path = planApprovalsPath(planPath)
   const write = (entries: PlanApproval[]) => writeFileAtomic(path, `${JSON.stringify({ ...approvals, approvals: entries }, null, 2)}\n`)
   const existing = approvalAt(approvals, approval.hash)
   if (!existing) {
     await write([...approvals.approvals, approval])
-    return { written: true, readingsAdded: approval.readings?.properties ?? [] }
+    return { readingsAdded: approval.readings?.properties ?? [] }
   }
   const held = existing.readings?.properties ?? []
   const added = (approval.readings?.properties ?? []).filter((reading) => !held.some((entry) => sameReading(entry, reading)))
-  if (added.length === 0 || !approval.readings) return { written: false, existing, readingsAdded: [] }
+  if (!approval.readings || added.length === 0) return { existing, readingsAdded: [] }
   const updated: PlanApproval = { ...existing, readings: { baseline: approval.readings.baseline, properties: [...held, ...added] } }
   await write(approvals.approvals.map((entry) => (entry === existing ? updated : entry)))
-  return { written: true, existing: updated, readingsAdded: added }
+  return { existing: updated, readingsAdded: added }
 }
 
 /** Names the baseline a reading was taken under: readings carry over only within one, since another is another plan's start. */
@@ -101,7 +101,7 @@ export function baselineDigest(plan: Plan): string {
 }
 
 /** One reading per element, name in code, property and planned value; the earliest is the one that counts. */
-function sameReading(a: PlanPropertyReading, b: PlanPropertyReading): boolean {
+export function sameReading(a: PlanPropertyReading, b: PlanPropertyReading): boolean {
   return a.element === b.element && a.label === b.label && a.property === b.property && a.planned === b.planned
 }
 
@@ -113,8 +113,9 @@ function sameReading(a: PlanPropertyReading, b: PlanPropertyReading): boolean {
  */
 export function approvalReadings(approvals: PlanApprovals, plan: Plan, current: readonly PlanPropertyReading[]): NonNullable<PlanApproval['readings']> {
   const baseline = baselineDigest(plan)
+  const earlier = approvals.approvals.flatMap((entry) => (entry.readings?.baseline === baseline ? entry.readings.properties : []))
   const properties: PlanPropertyReading[] = []
-  for (const reading of [...approvals.approvals.flatMap((entry) => (entry.readings?.baseline === baseline ? entry.readings.properties : [])), ...current]) {
+  for (const reading of [...earlier, ...current]) {
     if (!properties.some((held) => sameReading(held, reading))) properties.push(reading)
   }
   return { baseline, properties }

@@ -1470,7 +1470,8 @@ matched when the plan was approved says nothing about the change. What shipped
   `alter`, and records one reading per planned property of each `alter` it
   could compare: element id, the element's name in code, property, planned
   value and verdict. An element it could not compare (not found, blocked, no
-  reader) records nothing.
+  reader) records nothing, and neither does a state loaded without `detail`,
+  whose every property would read a blind `unknown`.
 - A match counts towards an `alter`'s completion only against a reading that
   was `differ` or `unknown`. A match that already held, or has no reading,
   reads `unknown` with the reason, so an `alter` whose readable properties all
@@ -1509,7 +1510,10 @@ matched when the plan was approved says nothing about the change. What shipped
   that rewrites the approvals file drops the field, which fails closed.
 - Limits: an `unknown` reading that turns into a match counts, as the rule
   says, even when only the reader changed (a schema the runtime reader could
-  not import at approval and can now). The §2 warning on an `alter` whose
+  not import at approval and can now). A later approval does not replace it
+  with what it reads then: an `unknown` also precedes real work (an action
+  that returned JSON before it rendered the planned page), and a re-approval
+  in the middle of that work would stop crediting it. The §2 warning on an `alter` whose
   readable properties all held at approval, which the producer row of Part 2
   asks for, is not part of this change.
 

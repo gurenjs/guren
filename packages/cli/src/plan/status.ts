@@ -18,6 +18,7 @@ import type {
   PlanAppValidatorDetail,
 } from './app-detail'
 import { isUnreadable, scopeName, type PlanAppNames, type PlanAppState, type PlanAppUnreadable } from './app-state'
+import { sameReading } from './approvals'
 import {
   listPlanElementEntries,
   type PlanAction,
@@ -165,6 +166,8 @@ function compare(property: string, planned: string, actual: string | undefined, 
 /** What an `alter`'s properties count as once set against their readings at approval; the identity when taking those readings. */
 type AlterCredit = (judgement: Judgement, properties: PlanPropertyStatus[]) => PlanPropertyStatus[]
 
+const AS_READ: AlterCredit = (_, properties) => properties
+
 /** A match set aside by {@link creditAlter}, so `conclude` can say why nothing shows the change. */
 const SET_ASIDE = new WeakMap<PlanPropertyStatus, 'held' | 'unrecorded'>()
 
@@ -177,25 +180,35 @@ function creditAlter(readings: readonly PlanPropertyReading[] | undefined): Alte
   return (judgement, properties) =>
     properties.map((property) => {
       if (property.verdict !== 'match') return property
-      const reading = readings?.find(
-        (entry) =>
-          entry.element === judgement.id && entry.label === judgement.label && entry.property === property.property && entry.planned === property.planned,
-      )
+      const reading = readings?.find((entry) => sameReading(entry, readingOf(judgement, property)))
       if (reading && reading.verdict !== 'match') return property
-      const setAside: PlanPropertyStatus = {
-        property: property.property,
-        verdict: 'unknown',
-        ...(property.planned !== undefined ? { planned: property.planned } : {}),
-        reason: reading
-          ? `it already read ${property.actual ?? property.planned} when the plan was approved, so it says nothing about the change`
-          : 'no reading of it was recorded when the plan was approved, so this match cannot be told from one that already held',
-      }
-      SET_ASIDE.set(setAside, reading ? 'held' : 'unrecorded')
-      return setAside
+      return setAside(property, reading ? 'held' : 'unrecorded')
     })
 }
 
-const AS_READ: AlterCredit = (_, properties) => properties
+function setAside(property: PlanPropertyStatus, why: 'held' | 'unrecorded'): PlanPropertyStatus {
+  const status: PlanPropertyStatus = {
+    property: property.property,
+    verdict: 'unknown',
+    ...(property.planned !== undefined ? { planned: property.planned } : {}),
+    reason:
+      why === 'held'
+        ? `it already read ${property.actual ?? property.planned} when the plan was approved, so it says nothing about the change`
+        : 'no reading of it was recorded when the plan was approved, so this match cannot be told from one that already held',
+  }
+  SET_ASIDE.set(status, why)
+  return status
+}
+
+function readingOf(element: { id: string; label: string }, property: PlanPropertyStatus): PlanPropertyReading {
+  return {
+    element: element.id,
+    label: element.label,
+    property: property.property,
+    ...(property.planned !== undefined ? { planned: property.planned } : {}),
+    verdict: property.verdict,
+  }
+}
 
 function unreadableAlterReason(properties: PlanPropertyStatus[]): string {
   const setAside = properties.flatMap((property) => SET_ASIDE.get(property) ?? [])
@@ -208,7 +221,7 @@ function unreadableAlterReason(properties: PlanPropertyStatus[]): string {
   return 'No planned property of this change has a reader.'
 }
 
-function conclude(judgement: Judgement, credit: AlterCredit): PlanElementStatus {
+function conclude(judgement: Judgement, credit: AlterCredit = AS_READ): PlanElementStatus {
   const { id, section, change, label, exists } = judgement
   const base = {
     id,
@@ -388,23 +401,17 @@ export function judgePlan(plan: PlanDraft, app: PlanAppState, readings?: readonl
 
 /**
  * How every planned property of the plan's `alter`s reads now, which `plan:approve` records. An
- * element no property of which was compared (not found, blocked, no reader) records nothing.
+ * element whose properties were never compared (not found, blocked, no reader) records nothing,
+ * and so does a state loaded without detail: a blind `unknown` would later credit any match.
  */
 export function readAlterProperties(plan: PlanDraft, app: PlanAppState): PlanPropertyReading[] {
-  return judgeWith(plan, app, AS_READ).elements.flatMap((element) =>
-    element.change !== 'alter'
-      ? []
-      : element.properties.map((property) => ({
-          element: element.id,
-          label: element.label,
-          property: property.property,
-          ...(property.planned !== undefined ? { planned: property.planned } : {}),
-          verdict: property.verdict,
-        })),
-  )
+  if (!app.detail) return []
+  return judgeWith(plan, app, AS_READ)
+    .elements.filter((element) => element.change === 'alter')
+    .flatMap((element) => element.properties.map((property) => readingOf(element, property)))
 }
 
-/** Whether the plan alters anything, the one case `plan:approve` reads the application's detail for. */
+/** Whether the plan alters anything: its properties are read through the detail, which imports db/schema.ts and the validators. */
 export function planHasAlter(plan: PlanDraft): boolean {
   return listPlanElementEntries(plan).some(({ element }) => (element as { change?: PlanChange }).change?.kind === 'alter')
 }
@@ -424,7 +431,7 @@ function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit): Pla
     ...plan.policies.map((policy) => context.named('policies', policy, app.policies, NOUNS.policies, policy.abilities.length > 0 ? ['abilities'] : [])),
     ...plan.sideEffects.map((effect) => context.sideEffect(effect)),
     ...plan.commands.map((command): PlanElementStatus =>
-      conclude({ id: command.id, section: 'commands', change: { kind: 'add' }, label: command.command, exists: 'no', unjudged: 'Nothing reads whether a command has been run.' }, AS_READ),
+      conclude({ id: command.id, section: 'commands', change: { kind: 'add' }, label: command.command, exists: 'no', unjudged: 'Nothing reads whether a command has been run.' }),
     ),
   ]
   return { elements, summary: summarize(elements) }

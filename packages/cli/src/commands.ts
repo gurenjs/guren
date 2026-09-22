@@ -399,7 +399,6 @@ const planApproveCommand = defineCommand({
   async run({ args }) {
     const appRoot = resolve(args.app ?? process.cwd())
     const report = await planApproveFile(args.plan, {
-      // An `alter`'s properties are read through the detail, which imports db/schema.ts and the validators.
       app: (plan) => loadPlanAppState(appRoot, { detail: planHasAlter(plan) }),
       appRoot,
       allowUnstamped: args['allow-unstamped'],

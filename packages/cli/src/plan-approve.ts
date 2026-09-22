@@ -40,14 +40,14 @@ export interface PlanApproveReport {
   alreadyApproved: boolean
   /** Elements whose collision or absence did not refuse, since the application reads as the plan leaves them. */
   builtByPlan?: string[]
-  /** `alter` elements this run recorded a reading of a planned property for (RFC 0030 §6); absent when it recorded none. */
+  /** `alter` elements whose readings (RFC 0030 §6) this run wrote to the approvals file, carried over or read now; absent when it wrote none. */
   readingsRecorded?: string[]
 }
 
 export interface PlanApproveFileOptions {
   /**
    * Resolved after the plan parses. A plan with an `alter` needs it loaded with `detail`, or no
-   * property is read and its readings are left for a later approval to record.
+   * reading is recorded and a later approval has to record them.
    */
   app: PlanAppState | ((plan: PlanDraft) => Promise<PlanAppState>)
   /** Where `git rev-parse HEAD` and `git config` are asked, and what paths are reported relative to. */
@@ -186,14 +186,12 @@ export function formatPlanApprove(report: PlanApproveReport): string {
   if (report.builtByPlan) {
     lines.push(`Built as the plan leaves them, so their collision or absence is the plan's own work: ${report.builtByPlan.join(', ')}`)
   }
-  if (report.alreadyApproved && report.readingsRecorded) {
+  if (!report.alreadyApproved) {
+    lines.push(`Approved ${report.plan.hash}, recorded in ${report.approvalsFile}.`)
+  } else if (report.readingsRecorded) {
     lines.push(`Already approved at ${report.approval.approvedAt}; recorded the readings it lacked in ${report.approvalsFile}: ${report.readingsRecorded.join(', ')}.`)
   } else {
-    lines.push(
-      report.alreadyApproved
-        ? `Already approved at ${report.approval.approvedAt}; ${report.approvalsFile} was left alone.`
-        : `Approved ${report.plan.hash}, recorded in ${report.approvalsFile}.`,
-    )
+    lines.push(`Already approved at ${report.approval.approvedAt}; ${report.approvalsFile} was left alone.`)
   }
   return lines.join('\n')
 }

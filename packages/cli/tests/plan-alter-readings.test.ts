@@ -10,7 +10,7 @@ import type { PlanCloseReport } from '../src/plan-close'
 import type { PlanNextReport } from '../src/plan-next'
 import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
-import { approvalReadings, planApprovalsPath, readPlanApprovals, type PlanApprovals } from '../src/plan/approvals'
+import { approvalReadings, baselineDigest, planApprovalsPath, readPlanApprovals, type PlanApprovals } from '../src/plan/approvals'
 import { planHash } from '../src/plan/identity'
 import { PlanSchema } from '../src/plan/schema'
 import type { PlanPropertyReading } from '../src/plan/status'
@@ -206,13 +206,13 @@ describe('approvalReadings', () => {
   })
 
   test('should keep the earliest reading under the plan’s own baseline', () => {
-    const { baseline } = approvalReadings({ approvalsVersion: 1, approvals: [] }, plan, [])
+    const baseline = baselineDigest(plan)
 
     expect(approvalReadings(approvals(baseline), plan, [total('match')]).properties).toEqual([total('differ')])
   })
 
   test('should keep a reading the application cannot give now, so a section unreadable at re-approval loses nothing', () => {
-    const { baseline } = approvalReadings({ approvalsVersion: 1, approvals: [] }, plan, [])
+    const baseline = baselineDigest(plan)
 
     expect(approvalReadings(approvals(baseline), plan, []).properties).toEqual([total('differ')])
   })
