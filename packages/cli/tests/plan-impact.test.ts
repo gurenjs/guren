@@ -175,10 +175,10 @@ describe('planImpact', () => {
       'model User.posts',
       'route posts.show',
       'apiRoute posts.show',
+      'test tests/PostController.test.ts',
       'resource PostResource',
       'policy PostPolicy',
       'action PostController.show',
-      'test tests/PostController.test.ts',
     ])
   })
 
@@ -218,6 +218,7 @@ describe('planImpact', () => {
       { kind: 'route', name: 'posts.update' },
       { kind: 'apiRoute', name: 'posts.update' },
       { kind: 'agentTool', name: 'posts_update' },
+      { kind: 'test', name: 'tests/PostController.test.ts', file: 'tests/PostController.test.ts' },
     ])
   })
 
@@ -231,7 +232,7 @@ describe('planImpact', () => {
 
     const entries = planImpact(renamed, sources())
 
-    expect(entryFor(entries, 'route.comments.store').consumers.map((consumer) => consumer.kind)).toEqual(['route', 'apiRoute', 'agentTool'])
+    expect(entryFor(entries, 'route.comments.store').consumers.map((consumer) => consumer.kind)).toEqual(['route', 'apiRoute', 'agentTool', 'test'])
     expect(entryFor(entries, 'route.comments.destroy').consumers).toEqual([{ kind: 'route', name: 'GET /feed' }])
   })
 
@@ -261,16 +262,34 @@ describe('planImpact', () => {
       const entry = entryFor(planImpact(alteredUpdate(), withTests()), 'route.comments.store')
 
       expect(entry.consumers.filter((consumer) => consumer.kind === 'testRequest')).toEqual([
-        { kind: 'testRequest', name: 'tests/posts.test.ts:14', file: 'tests/posts.test.ts', line: 14, via: 'posts.update' },
+        { kind: 'testRequest', name: 'PATCH /posts/${…}', file: 'tests/posts.test.ts', line: 14, via: 'posts.update' },
       ])
       expect(entry.notes).toEqual([])
     })
 
-    test('should say no test reaches an altered route, but not when a request it could not match might', () => {
-      const unresolved = { unresolved: [{ ...REQUEST, reason: 'dynamicPath' as const }], unparsed: [] }
+    test('should say no TestApp request reaches an altered route beside a test named after its controller, which may reach the action directly', () => {
+      const entry = entryFor(planImpact(alteredUpdate(), sources()), 'route.comments.store')
 
-      expect(entryFor(planImpact(alteredUpdate(), sources()), 'route.comments.store').notes).toEqual([{ key: 'impact.testRequests.noneReach', values: {} }])
-      expect(entryFor(planImpact(alteredUpdate(), sources({ testRequests: unresolved })), 'route.comments.store').notes).toEqual([
+      expect(entry.consumers).toContainEqual({ kind: 'test', name: 'tests/PostController.test.ts', file: 'tests/PostController.test.ts' })
+      expect(entry.notes).toEqual([{ key: 'impact.testRequests.noneReach', values: {} }])
+    })
+
+    test('should hold the note back while an unmatched request of the same method might reach the route, and only then', () => {
+      const unresolved = (method: string) => ({ unresolved: [{ ...REQUEST, reason: 'dynamicPath' as const, method }], unparsed: [] })
+
+      expect(entryFor(planImpact(alteredUpdate(), sources({ testRequests: unresolved('PATCH') })), 'route.comments.store').notes).toEqual([
+        { key: 'impact.testRequests.unresolved', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
+      ])
+      expect(entryFor(planImpact(alteredUpdate(), sources({ testRequests: unresolved('POST') })), 'route.comments.store').notes).toEqual([
+        { key: 'impact.testRequests.noneReach', values: {} },
+      ])
+    })
+
+    test("should hold it back for a request the route's own pattern could not be compared with", () => {
+      const base = sources()
+      base.routes[1] = { ...base.routes[1]!, uncertainTests: [{ ...REQUEST, reason: 'routePattern', method: 'PATCH' }] }
+
+      expect(entryFor(planImpact(alteredUpdate(), base), 'route.comments.store').notes).toEqual([
         { key: 'impact.testRequests.unresolved', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
       ])
     })
@@ -286,7 +305,7 @@ describe('planImpact', () => {
       base.routes[0] = { ...base.routes[0]!, tests: [REQUEST] }
       const entry = entryFor(planImpact(plan(), base), 'model.post')
 
-      expect(entry.consumers).toContainEqual({ kind: 'testRequest', name: 'tests/posts.test.ts:14', file: 'tests/posts.test.ts', line: 14, via: 'posts.show' })
+      expect(entry.consumers).toContainEqual({ kind: 'testRequest', name: 'PATCH /posts/${…}', file: 'tests/posts.test.ts', line: 14, via: 'posts.show' })
     })
   })
 
@@ -301,6 +320,7 @@ describe('planImpact', () => {
       'action PostController.show',
       'route posts.show',
       'apiRoute posts.show',
+      'test tests/PostController.test.ts',
     ])
     expect(entryFor(entries, 'validator.post').consumers.map((consumer) => `${consumer.kind} ${consumer.name}`)).toEqual([
       'action FeedController.index',
@@ -388,8 +408,8 @@ describe('the plan page', () => {
     const items = (uiLocale?: 'ja') => impactOn(openPlanPage(renderPlanHtml({ plan: altered, impact, ...(uiLocale ? { uiLocale } : {}) })), 'route.comments.store')!
       .withTag('li').map((item) => item.textContent)
 
-    expect(items()).toContain('Test tests/posts.test.ts:14 requests posts.update')
-    expect(items('ja')).toContain('テスト tests/posts.test.ts:14 が posts.update にリクエストしています')
+    expect(items()).toContain('Request PATCH /posts/1 reaches posts.update (tests/posts.test.ts:14)')
+    expect(items('ja')).toContain('リクエスト PATCH /posts/1 が posts.update に届きます (tests/posts.test.ts:14)')
   })
 
   test('should draw no Impact at all when the page was rendered without an application', () => {
@@ -501,7 +521,7 @@ await http.get(String(postId))
       { file: 'tests/comments-http.test.ts', line: 6, text: 'POST /posts/${…}/comments' },
     ])
     expect(impact.routes.find((route) => route.name === 'posts.index')?.tests).toBeUndefined()
-    expect(impact.testRequests.unresolved).toEqual([{ file: 'tests/comments-http.test.ts', line: 7, text: 'GET <runtime>', reason: 'dynamicPath' }])
+    expect(impact.testRequests.unresolved).toEqual([{ file: 'tests/comments-http.test.ts', line: 7, text: 'GET <runtime>', reason: 'dynamicPath', method: 'GET' }])
   })
 
   test('should carry the models verdict the checks reached', async () => {

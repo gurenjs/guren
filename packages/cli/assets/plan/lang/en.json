@@ -178,7 +178,7 @@
   "impact.kind.policy": "Policy {name}",
   "impact.kind.page": "Page {name}",
   "impact.kind.test": "Test {name}, named after it",
-  "impact.kind.testRequest": "Test {name} requests {via}",
+  "impact.kind.testRequest": "Request {name} reaches {via}",
   "impact.kind.read": "{name} reads it",
   "impact.kind.readVia": "{name} reads it through {via}",
   "impact.kind.opaqueRead": "{name} reads a property no static scan can name",
@@ -194,7 +194,7 @@
   "impact.unparsedModels": "These model files declare no model this scan could read, so reads of their columns are missing: {files}",
   "impact.missingPages": "These pages have no component file to scan: {pages}",
   "impact.unreadableFiles": "Not scanned, so any reads in them are missing: {files}",
-  "impact.testRequests.unresolved": "{count} TestApp request(s) build a path this scan cannot match, so tests reaching this may be missing: {requests}",
+  "impact.testRequests.unresolved": "{count} TestApp request(s) could not be matched to a route, so tests reaching this may be missing: {requests}",
   "impact.testRequests.unparsed": "These test files did not parse, so their requests were not read: {files}",
-  "impact.testRequests.noneReach": "No TestApp request in the existing tests reaches the routes above, so no test pins their current behaviour."
+  "impact.testRequests.noneReach": "No TestApp request in the existing tests reaches the routes above."
 }

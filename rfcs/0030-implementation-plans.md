@@ -428,15 +428,16 @@ breaking regardless of what Impact found.
 `packages/cli/src/test-requests.ts`, and what it measured.
 
 - Every test file `discoverTestFiles()` finds is read by AST, so a comment or a
-  string spelling `http.get('/posts')` is no request. A file that does not import
-  `TestApp` from `@guren/testing` holds none. A receiver is a `TestApp` where the
-  file says so: a binding or parameter annotated `TestApp` (or `Promise<TestApp>`,
-  or a union holding it), one initialised or assigned from `TestApp.fromApp()` and
-  the other factories, a builder on one (`actingAs`, `json`, `withHeaders`,
-  `withHeader`, `withCsrf`), or a call to a function of the same file annotated to
-  return one (an arrow whose body is one counts). Bindings are matched by name within
-  the file, and a helper imported from another file is not followed, so
-  `const http = await testApp()` from a support file needs its annotation.
+  string spelling `http.get('/posts')` is no request. A receiver is a `TestApp` where
+  the file says so: a binding or parameter annotated `TestApp` (or `Promise<TestApp>`,
+  a union holding it, `testing.TestApp` through a namespace import), one initialised
+  or assigned from `TestApp.fromApp()` and the other factories, a builder on one
+  (`actingAs`, `json`, `withHeaders`, `withHeader`, `withCsrf`), or a call to a
+  function of the same file annotated to return one (an arrow whose body is one
+  counts). A test pins those builder names and the request methods to the members of
+  the `TestApp` class. Bindings are matched by name within the file, not by scope, and
+  a helper imported from another file is not followed: a request on what an imported
+  function returns (`(await testApp()).get('/posts')`) is reported unresolved.
 - The requests are `get`, `post`, `put`, `patch`, `delete` and `query`, plus the GET
   `withCsrf(path = '/')` makes, and `agent().call('tool')`, matched to the route
   whose derived tool has that name. `TestClient` (`@guren/testing/http`) is a second
@@ -445,26 +446,34 @@ breaking regardless of what Impact found.
   the file to a `const` string is substituted. An interpolation that fills a whole
   path segment is a runtime segment, which matches a route parameter and never a
   literal segment (`` `/posts/${id}` `` reaches `/posts/:id`, never `/posts/create`).
-  The query string and fragment are dropped, an absolute URL loses its origin. What
-  the scan cannot read is reported unresolved with its file and line, never matched:
-  a path that does not start with a spelled `/` (`get(path)`, `` `${base}/posts` ``),
-  an interpolation sharing a segment with text (`` `/p-${id}` ``), and a runtime
-  segment that fits no route.
-- Matching compares the route graph's own patterns (`:name`, `:name{regex}`, an
-  optional last `:name?`, `*`) in the CLI rather than through the hono `TrieRouter`
-  the prototype client uses, since `@guren/cli` does not depend on hono. Every
-  matching route is listed: a static scan has no registration order to pick hono's
-  first match by.
-- Impact lists the test files whose requests reach a route under every entry that
-  reaches that route (a changed route, action or controller, a model through its
-  bound routes, a view, validator, resource or policy through its actions), once per
-  file and route, at the first request. File-name matching stays beside it, labelled
-  as such, because the reference application's tests never call `TestApp` (below).
-  Unresolved requests and test files that did not parse are noted beside each such
-  entry. An altered or dropped route or action with no test request reaching it gets
-  a note saying so, the fact the characterization rule would act on, and only when
-  nothing unresolved or unparsed could have reached it: an unreadable path is never
-  read as "uncovered".
+  The query string and fragment are dropped, an absolute URL loses its origin, and
+  empty segments are kept, since hono is strict (`/posts/` is not `/posts`). What
+  the scan cannot read is reported unresolved with its file, line and method, never
+  matched: a path that does not start with a spelled `/` (`get(path)`,
+  `` `${base}/posts` ``), an interpolation sharing a segment with text
+  (`` `/p-${id}` ``), and a request on an unknown receiver.
+- Route patterns are lexed with the shared `PATH_PARAM_PATTERN` and compared in the
+  CLI, since `@guren/cli` does not depend on hono at runtime; a test runs every
+  pattern shape it handles through hono itself. A segment that opens with a param is
+  that param (hono's label runs to the next `/`, so `:id.json` is one param), a
+  constraint that matches `/` takes the segments after it (`:path{.+}`), `*` is any
+  rest at the end and one segment elsewhere, and an optional `:name?` only ends a path.
+  A constraint JavaScript cannot compile makes the comparison unknown, never a miss.
+  Every matching route is listed: a static scan has no registration order to pick
+  hono's first match by. A request compared with every route that fits none is left
+  out: it reaches none of them.
+- Impact lists the requests that reach a route under every entry that reaches that
+  route (a changed route, action or controller, a model through its bound routes, a
+  view, validator, resource or policy through its actions), once per test file and
+  route, at the first request. Tests named after the route's controller are listed
+  beside them, labelled as matched by file name, because the reference application's
+  tests call the action without HTTP (below). Unresolved requests of the route's
+  method (for a tool call, any route publishing a tool), requests its pattern could
+  not be compared with, and test files that did not parse are noted beside the entry.
+  An altered or dropped route or action gets the note that no `TestApp` request
+  reaches it, which is the fact the characterization rule would act on, and only when
+  nothing unresolved or unparsed could have: an unreadable path is never read as
+  "uncovered".
 - Not derived: the characterization step of §5. Inserting it makes task derivation
   depend on the application as well as the plan, which "the same plan always yields
   the same tasks" and the plan digest the step records rest on do not allow as
@@ -478,9 +487,10 @@ breaking regardless of what Impact found.
   `examples/api` is the same (14 files, 11 routes, 0 requests). `examples/agents`:
   6 test files, 20 routes, 40 request sites counted by hand, 40 read and matched to
   the route a person reads them as reaching (16 of them through a runtime segment,
-  `` `/tickets/${id}/close` ``), 0 unresolved. That suite reaches 17 of the app's 20 routes, which is its coverage, not the scan's accuracy. The
-  `create-app` starters: 6 of 6. On this evidence the unreadable-path case is not
-  what limits the scan; tests that bypass HTTP are, and neither source sees them.
+  `` `/tickets/${id}/close` ``), 0 unresolved. That suite reaches 17 of the app's
+  20 routes, which is its coverage, not the scan's accuracy. The `create-app`
+  starters: 6 of 6. On this evidence the unreadable-path case is not what limits the
+  scan; tests that bypass HTTP are, and neither source sees them.
 
 Failures do not block rendering. They appear in the page beside the element
 they concern, and `guren plan:approve` refuses while any remain.

@@ -1,11 +1,10 @@
 /**
  * Which routes the existing tests request (RFC 0030 §2): `TestApp` calls read from each
  * test file's AST, matched against the route graph. A receiver is a `TestApp` only where
- * the file says so (an annotation, a `TestApp.*` factory, a builder on one, a local
- * function annotated to return one), by name within the file, never across files. A path
- * the file does not spell is reported unresolved, never guessed. Route patterns are
- * compared here rather than through the client's hono `TrieRouter`: `@guren/cli` does
- * not depend on hono.
+ * the file says so, matched by name within the file (not by scope) and never across
+ * files; a request on what an imported helper returns is reported unresolved, as is a
+ * path the file does not spell. Route patterns are lexed with `PATH_PARAM_PATTERN` and
+ * compared here, since `@guren/cli` does not depend on hono at runtime.
  */
 
 import type { File } from '@babel/types'
@@ -13,17 +12,20 @@ import type { File } from '@babel/types'
 import { literalString, memberKeyName, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { toPosixRelative } from './discovery'
 import type { ParseCache } from './parse-cache'
+import { importedLocals, importedNamespaces } from './plugin-calls'
+import { PATH_PARAM_PATTERN } from './utils'
 
-/** `TestApp`'s request methods, `.request()` being private; `withCsrf(path = '/')` also GETs its path. */
-const REQUEST_METHODS: Record<string, string> = { get: 'GET', post: 'POST', put: 'PUT', patch: 'PATCH', delete: 'DELETE', query: 'QUERY' }
-/** Builders that return a `TestApp` (`withCsrf` a promise of one). */
-const BUILDERS = new Set(['actingAs', 'json', 'withHeaders', 'withHeader', 'withCsrf'])
-const TESTING_PACKAGE = /^@guren\/testing(?:\/|$)/u
+const TESTING = '@guren/testing'
+
+/** `TestApp` members returning a `PendingTestResponse`; `tests/test-requests.test.ts` pins them to the class. */
+export const REQUEST_METHODS: Readonly<Record<string, string>> = { get: 'GET', post: 'POST', put: 'PUT', patch: 'PATCH', delete: 'DELETE', query: 'QUERY' }
+/** `TestApp` members returning a `TestApp` or a promise of one; `withCsrf(path = '/')` also GETs its path. */
+export const BUILDERS: ReadonlySet<string> = new Set(['actingAs', 'json', 'withHeaders', 'withHeader', 'withCsrf'])
 
 /** A path segment the file spells, or one a runtime value fills whole. */
 export type TestRequestSegment = { literal: string } | { runtime: true }
 
-export type TestRequestTarget =
+type TestRequestTarget =
   | { kind: 'path'; method: string; segments: TestRequestSegment[] }
   | { kind: 'tool'; name: string }
 
@@ -39,10 +41,12 @@ export interface TestRequest extends TestRequestSite {
   target: TestRequestTarget
 }
 
-export type UnresolvedReason = 'dynamicPath' | 'partialSegment' | 'noRoute'
+export type UnresolvedReason = 'dynamicPath' | 'partialSegment' | 'unknownReceiver' | 'routePattern'
 
 export interface UnresolvedTestRequest extends TestRequestSite {
   reason: UnresolvedReason
+  /** The HTTP method; absent for an agent tool call, which only a route publishing a tool can answer. */
+  method?: string
 }
 
 export interface TestRequestScan {
@@ -61,29 +65,51 @@ export interface TestRequestRoute {
 const RUNTIME = Symbol('runtime')
 type PathPart = string | typeof RUNTIME
 
-function typeNamesTestApp(node: BabelNode | undefined, aliases: ReadonlySet<string>): boolean {
-  if (!node) return false
-  if (node.type === 'TSTypeAnnotation') return typeNamesTestApp(node.typeAnnotation as BabelNode, aliases)
-  if (node.type === 'TSUnionType') return (node.types as BabelNode[]).some((type) => typeNamesTestApp(type, aliases))
-  if (node.type !== 'TSTypeReference') return false
-  const name = node.typeName as BabelNode
-  if (name.type !== 'Identifier') return false
-  if (aliases.has(name.name as string)) return true
-  const params = (node.typeParameters as BabelNode | undefined)?.params as BabelNode[] | undefined
-  return name.name === 'Promise' && params?.length === 1 && typeNamesTestApp(params[0], aliases)
+/** Stands for a runtime value inside a joined path, and for a param token inside a masked route path. */
+const HOLE = '\u{E000}'
+
+interface Receivers {
+  aliases: ReadonlySet<string>
+  namespaces: ReadonlySet<string>
+  /** Value imports, whose calls return something the file does not show. */
+  imported: ReadonlySet<string>
+  names: Set<string>
+  functions: Set<string>
+  foreign: Set<string>
+  agents: Set<string>
 }
 
-function testAppAliases(ast: File): Set<string> {
-  const aliases = new Set<string>()
+/** `TestApp`, an alias of it, or `testing.TestApp` through a namespace import, as a type or a value. */
+function namesTestApp(name: BabelNode, receivers: Receivers): boolean {
+  if (name.type === 'Identifier') return receivers.aliases.has(name.name as string)
+  const [namespace, member] = name.type === 'TSQualifiedName'
+    ? [name.left as BabelNode, name.right as BabelNode]
+    : name.type === 'MemberExpression' && !name.computed ? [name.object as BabelNode, name.property as BabelNode] : []
+  return namespace?.type === 'Identifier' && receivers.namespaces.has(namespace.name as string)
+    && member?.type === 'Identifier' && member.name === 'TestApp'
+}
+
+function typeNamesTestApp(node: BabelNode | undefined, receivers: Receivers): boolean {
+  if (!node) return false
+  if (node.type === 'TSTypeAnnotation') return typeNamesTestApp(node.typeAnnotation as BabelNode, receivers)
+  if (node.type === 'TSUnionType') return (node.types as BabelNode[]).some((type) => typeNamesTestApp(type, receivers))
+  if (node.type !== 'TSTypeReference') return false
+  const name = node.typeName as BabelNode
+  if (namesTestApp(name, receivers)) return true
+  const params = (node.typeParameters as BabelNode | undefined)?.params as BabelNode[] | undefined
+  return name.type === 'Identifier' && name.name === 'Promise' && params?.length === 1 && typeNamesTestApp(params[0], receivers)
+}
+
+function valueImports(ast: File): Set<string> {
+  const names = new Set<string>()
   for (const statement of ast.program.body) {
-    if (statement.type !== 'ImportDeclaration' || !TESTING_PACKAGE.test(statement.source.value)) continue
+    if (statement.type !== 'ImportDeclaration' || statement.importKind === 'type') continue
     for (const specifier of statement.specifiers) {
-      if (specifier.type !== 'ImportSpecifier') continue
-      const imported = specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
-      if (imported === 'TestApp') aliases.add(specifier.local.name)
+      if (specifier.type === 'ImportSpecifier' && specifier.importKind === 'type') continue
+      names.add(specifier.local.name)
     }
   }
-  return aliases
+  return names
 }
 
 /** `const NAME = '…'` anywhere in the file; a name bound twice to different strings is dropped. */
@@ -102,13 +128,6 @@ function stringConstants(ast: File): Map<string, string> {
   const constants = new Map<string, string>()
   for (const [name, value] of values) if (value !== null) constants.set(name, value)
   return constants
-}
-
-interface Receivers {
-  aliases: ReadonlySet<string>
-  names: Set<string>
-  functions: Set<string>
-  agents: Set<string>
 }
 
 function calleeMember(node: BabelNode): { object: BabelNode; name: string; line: number } | undefined {
@@ -131,9 +150,21 @@ function isTestApp(value: unknown, receivers: Receivers): boolean {
   if (callee.type === 'Identifier') return receivers.functions.has(callee.name as string)
   const member = calleeMember(node)
   if (!member) return false
-  const object = unwrapTypeAssertion(member.object)
-  if (object.type === 'Identifier' && receivers.aliases.has(object.name as string)) return true
+  if (namesTestApp(unwrapTypeAssertion(member.object), receivers)) return true
   return BUILDERS.has(member.name) && isTestApp(member.object, receivers)
+}
+
+/** What a call to an imported function returns, which may be a `TestApp` the file never names. */
+function isForeign(value: unknown, receivers: Receivers): boolean {
+  const node = unwrapTypeAssertion(value as BabelNode)
+  if (!node || isTestApp(node, receivers)) return false
+  if (node.type === 'AwaitExpression') return isForeign(node.argument, receivers)
+  if (node.type === 'Identifier') return receivers.foreign.has(node.name as string)
+  if (node.type !== 'CallExpression') return false
+  const callee = node.callee as BabelNode
+  if (callee.type === 'Identifier') return receivers.imported.has(callee.name as string)
+  const member = calleeMember(node)
+  return member !== undefined && BUILDERS.has(member.name) && isForeign(member.object, receivers)
 }
 
 function isAgent(value: unknown, receivers: Receivers): boolean {
@@ -144,29 +175,41 @@ function isAgent(value: unknown, receivers: Receivers): boolean {
 }
 
 function returnsTestApp(fn: BabelNode, receivers: Receivers): boolean {
-  if (typeNamesTestApp(fn.returnType as BabelNode | undefined, receivers.aliases)) return true
+  if (typeNamesTestApp(fn.returnType as BabelNode | undefined, receivers)) return true
   const body = fn.body as BabelNode
   return fn.type === 'ArrowFunctionExpression' && body.type !== 'BlockStatement' && isTestApp(body, receivers)
 }
 
 /** Grows the receiver names to a fixed point, since a binding may be declared before what makes it one. */
-function collectReceivers(ast: File, aliases: ReadonlySet<string>): Receivers {
-  const receivers: Receivers = { aliases, names: new Set(), functions: new Set(), agents: new Set() }
+function collectReceivers(ast: File): Receivers {
+  const receivers: Receivers = {
+    aliases: importedLocals(ast, { specifier: TESTING, exportName: 'TestApp' }),
+    namespaces: importedNamespaces(ast, TESTING),
+    imported: valueImports(ast),
+    names: new Set(),
+    functions: new Set(),
+    foreign: new Set(),
+    agents: new Set(),
+  }
   const addTo = (set: Set<string>, name: string): boolean => (set.has(name) ? false : (set.add(name), true))
+  const bind = (name: string, value: unknown): boolean => {
+    if (isTestApp(value, receivers)) return addTo(receivers.names, name)
+    if (isAgent(value, receivers)) return addTo(receivers.agents, name)
+    return isForeign(value, receivers) ? addTo(receivers.foreign, name) : false
+  }
   for (let changed = true; changed;) {
     changed = false
     walk(ast.program, (node) => {
-      if (node.type === 'Identifier' && typeNamesTestApp(node.typeAnnotation as BabelNode | undefined, aliases)) {
+      if (node.type === 'Identifier' && typeNamesTestApp(node.typeAnnotation as BabelNode | undefined, receivers)) {
         changed = addTo(receivers.names, node.name as string) || changed
       } else if (node.type === 'VariableDeclarator' && (node.id as BabelNode).type === 'Identifier') {
         const name = (node.id as BabelNode).name as string
         const init = node.init as BabelNode | null
         if (init && (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression')) {
           if (returnsTestApp(init, receivers)) changed = addTo(receivers.functions, name) || changed
-        } else if (init && isTestApp(init, receivers)) changed = addTo(receivers.names, name) || changed
-        else if (init && isAgent(init, receivers)) changed = addTo(receivers.agents, name) || changed
+        } else if (init) changed = bind(name, init) || changed
       } else if (node.type === 'AssignmentExpression' && (node.left as BabelNode).type === 'Identifier') {
-        if (isTestApp(node.right, receivers)) changed = addTo(receivers.names, (node.left as BabelNode).name as string) || changed
+        changed = bind((node.left as BabelNode).name as string, node.right) || changed
       } else if (node.type === 'FunctionDeclaration' && node.id && returnsTestApp(node, receivers)) {
         changed = addTo(receivers.functions, (node.id as BabelNode).name as string) || changed
       }
@@ -194,17 +237,17 @@ function pathParts(value: unknown, constants: ReadonlyMap<string, string>): Path
   return null
 }
 
-/** Stands for a runtime value inside the joined path; a private-use character no route spells. */
-const HOLE = '\u{E000}'
-
-/** Segments of the path before any query or fragment, or why they cannot be read. */
-export function pathSegments(parts: readonly PathPart[]): TestRequestSegment[] | Exclude<UnresolvedReason, 'noRoute'> {
+/**
+ * Segments of the path before any query or fragment, or why they cannot be read. Empty
+ * segments are kept, since hono is strict: `/posts/` is `['posts', '']`, not `/posts`.
+ */
+function pathSegments(parts: readonly PathPart[]): TestRequestSegment[] | 'dynamicPath' | 'partialSegment' {
   const joined = parts.map((part) => (part === RUNTIME ? HOLE : part)).join('')
   const origin = /^https?:\/\/[^/?#]*/u.exec(joined)?.[0] ?? ''
-  if (origin.includes(HOLE) || !(joined.startsWith('/') || origin !== '')) return 'dynamicPath'
+  const path = (joined.slice(origin.length).split(/[?#]/u)[0] ?? '') || '/'
+  if (origin.includes(HOLE) || !path.startsWith('/')) return 'dynamicPath'
   const segments: TestRequestSegment[] = []
-  for (const segment of (joined.slice(origin.length).split(/[?#]/u)[0] ?? '').split('/')) {
-    if (segment === '') continue
+  for (const segment of path.slice(1).split('/')) {
     if (!segment.includes(HOLE)) segments.push({ literal: segment })
     else if (segment === HOLE) segments.push({ runtime: true })
     else return 'partialSegment'
@@ -216,10 +259,13 @@ function describePath(method: string, parts: readonly PathPart[]): string {
   return `${method} ${parts.map((part) => (part === RUNTIME ? '${…}' : part)).join('')}`
 }
 
+function startsLikePath(parts: readonly PathPart[] | null): boolean {
+  const first = parts?.[0]
+  return typeof first === 'string' && (first.startsWith('/') || /^https?:\/\//u.test(first))
+}
+
 function scanFile(ast: File, file: string, scan: TestRequestScan): void {
-  const aliases = testAppAliases(ast)
-  if (aliases.size === 0) return
-  const receivers = collectReceivers(ast, aliases)
+  const receivers = collectReceivers(ast)
   const constants = stringConstants(ast)
 
   walk(ast.program, (node) => {
@@ -229,12 +275,16 @@ function scanFile(ast: File, file: string, scan: TestRequestScan): void {
     const { line } = member
     const primes = member.name === 'withCsrf'
     const method = primes ? 'GET' : REQUEST_METHODS[member.name]
-    if (method !== undefined && (args.length > 0 || primes) && isTestApp(member.object, receivers)) {
+    if (method !== undefined && (args.length > 0 || primes)) {
       const parts = args.length === 0 ? ['/'] : pathParts(args[0], constants)
       const text = parts === null ? `${method} <runtime>` : describePath(method, parts)
-      const segments = parts === null ? 'dynamicPath' : pathSegments(parts)
-      if (typeof segments === 'string') scan.unresolved.push({ file, line, text, reason: segments })
-      else scan.requests.push({ file, line, text, target: { kind: 'path', method, segments } })
+      if (isTestApp(member.object, receivers)) {
+        const segments = parts === null ? 'dynamicPath' : pathSegments(parts)
+        if (typeof segments === 'string') scan.unresolved.push({ file, line, text, reason: segments, method })
+        else scan.requests.push({ file, line, text, target: { kind: 'path', method, segments } })
+      } else if (startsLikePath(parts) && isForeign(member.object, receivers)) {
+        scan.unresolved.push({ file, line, text, reason: 'unknownReceiver', method })
+      }
     } else if (member.name === 'call' && args.length > 0 && isAgent(member.object, receivers)) {
       const name = literalString(args[0])
       const text = `agent().call(${name === null ? '<runtime>' : `'${name}'`})`
@@ -260,66 +310,126 @@ export async function scanTestRequests(root: string, files: readonly string[], c
   return scan
 }
 
-function segmentMatches(pattern: string, segment: TestRequestSegment): boolean {
-  if (!pattern.startsWith(':')) return 'literal' in segment && segment.literal === pattern
-  if ('runtime' in segment) return true
-  const constraint = /\{(.*)\}\??$/u.exec(pattern)
-  return constraint === null || new RegExp(`^(?:${constraint[1]})$`, 'u').test(segment.literal)
+type Match = 'match' | 'none' | 'unknown'
+
+interface PatternSegment {
+  /** Regex source for the segment, or `null` for a lone `*`. */
+  source: string | null
+  /** A lone param token: what a runtime segment may fill, and a constraint that may span `/`. */
+  param?: { constraint?: string; optional: boolean }
 }
 
-/** Hono's pattern grammar as far as a route path uses it: `:name`, `:name{re}`, an optional last `:name?`, and `*`. */
-export function routePathMatches(path: string, segments: readonly TestRequestSegment[]): boolean {
-  const patterns = path.split('/').filter((part) => part !== '')
-  for (let index = 0; index < patterns.length; index += 1) {
-    const pattern = patterns[index]!
-    if (pattern === '*') return true
-    const segment = segments[index]
-    if (segment === undefined) return index === patterns.length - 1 && pattern.startsWith(':') && pattern.endsWith('?')
-    if (!segmentMatches(pattern, segment)) return false
+class UncompilablePattern extends Error {}
+
+const compiled = new Map<string, RegExp | null>()
+
+function compile(source: string): RegExp {
+  let regex = compiled.get(source)
+  if (regex === undefined) {
+    try {
+      // No `u` flag: hono compiles constraints without it, and `\_` is an error under it.
+      regex = new RegExp(`^(?:${source})$`)
+    } catch {
+      regex = null
+    }
+    compiled.set(source, regex)
   }
-  return segments.length === patterns.length
+  if (regex === null) throw new UncompilablePattern(source)
+  return regex
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
+/** A route path as segments: param tokens are masked before the split, so a constraint's `/` stays in its token. */
+function patternSegments(path: string): PatternSegment[] {
+  const tokens: Array<{ constraint?: string; optional: boolean }> = []
+  const masked = path.replace(PATH_PARAM_PATTERN, (token: string, boundary: string) => {
+    const brace = token.indexOf('{')
+    tokens.push({ ...(brace >= 0 ? { constraint: token.slice(brace + 1, token.lastIndexOf('}')) } : {}), optional: token.endsWith('?') })
+    return `${boundary}${HOLE}`
+  })
+  let next = 0
+  return (masked.startsWith('/') ? masked.slice(1) : masked).split('/').map((part): PatternSegment => {
+    if (part === '*') return { source: null }
+    if (!part.startsWith(HOLE)) return { source: escapeRegExp(part) }
+    // Hono's label runs to the next `/` or `{`, so text after the token (`:id.json`) is part of the name.
+    const param = tokens[next++]!
+    return { source: param.constraint ?? '[^/]+', param }
+  })
+}
+
+function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: readonly TestRequestSegment[], si: number): boolean {
+  if (pi === patterns.length) return si === segments.length
+  const pattern = patterns[pi]!
+  const last = pi === patterns.length - 1
+  if (pattern.source === null) return last || (si < segments.length && matchFrom(patterns, pi + 1, segments, si + 1))
+  if (last && pattern.param?.optional && si === segments.length) return true
+  const segment = segments[si]
+  if (segment === undefined) return false
+  if ('runtime' in segment) return pattern.param !== undefined && matchFrom(patterns, pi + 1, segments, si + 1)
+  if (compile(pattern.source).test(segment.literal) && matchFrom(patterns, pi + 1, segments, si + 1)) return true
+  if (pattern.param?.constraint === undefined) return false
+  // A constraint may match `/` (`:path{.+}`) and take the spelled segments after it along.
+  let joined = segment.literal
+  for (let end = si + 1; end < segments.length; end += 1) {
+    const following = segments[end]!
+    if ('runtime' in following) return false
+    joined += `/${following.literal}`
+    if (compile(pattern.source).test(joined) && matchFrom(patterns, pi + 1, segments, end + 1)) return true
+  }
+  return false
 }
 
 /**
- * The routes a request reaches, as indices into `routes`. Every matching route is listed:
- * a static scan has no registration order to pick hono's first match by.
+ * Hono's matching of one route path: `:name`, `:name{re}`, an optional last `:name?`, a
+ * trailing `*` (any rest, none included), a middle `*` (one segment). A runtime segment fills a lone param only. `unknown` is a constraint this
+ * engine cannot compile, which is never read as no match.
  */
-export function routesReachedBy(request: TestRequest, routes: readonly TestRequestRoute[]): number[] {
-  const { target } = request
-  const reached: number[] = []
-  routes.forEach((route, index) => {
-    const hit = target.kind === 'tool'
-      ? route.toolName === target.name
-      : route.method.toUpperCase() === target.method && routePathMatches(route.path, target.segments)
-    if (hit) reached.push(index)
-  })
-  return reached
+export function routePathMatches(path: string, segments: readonly TestRequestSegment[]): Match {
+  try {
+    return matchFrom(patternSegments(path), 0, segments, 0) ? 'match' : 'none'
+  } catch (error) {
+    if (error instanceof UncompilablePattern) return 'unknown'
+    throw error
+  }
 }
 
 export interface TestCoverage {
   /** Per route index, the requests that reach it. */
   byRoute: Map<number, TestRequestSite[]>
-  /** What the scan could not read, plus a request with a runtime segment that matched no route. */
+  /** Per route index, the requests its pattern could not be compared with. */
+  uncertainByRoute: Map<number, UnresolvedTestRequest[]>
+  /** What the scan could not read, which may reach any route {@link mayReach} allows. */
   unresolved: UnresolvedTestRequest[]
-  /** A request the file spells whole that matches no route: a stale test, or a route the graph lacks. */
-  unmatched: TestRequestSite[]
 }
 
+function push<T>(map: Map<number, T[]>, index: number, value: T): void {
+  const list = map.get(index) ?? []
+  list.push(value)
+  map.set(index, list)
+}
+
+/** Every matching route is listed: a static scan has no registration order to pick hono's first match by. */
 export function testCoverage(scan: TestRequestScan, routes: readonly TestRequestRoute[]): TestCoverage {
-  const coverage: TestCoverage = { byRoute: new Map(), unresolved: [...scan.unresolved], unmatched: [] }
-  for (const request of scan.requests) {
-    const { target, ...site } = request
-    const reached = routesReachedBy(request, routes)
-    if (reached.length === 0) {
-      const runtime = target.kind === 'path' && target.segments.some((segment) => 'runtime' in segment)
-      if (runtime) coverage.unresolved.push({ ...site, reason: 'noRoute' })
-      else coverage.unmatched.push(site)
-    }
-    for (const index of reached) {
-      const list = coverage.byRoute.get(index) ?? []
-      list.push(site)
-      coverage.byRoute.set(index, list)
-    }
+  const coverage: TestCoverage = { byRoute: new Map(), uncertainByRoute: new Map(), unresolved: [...scan.unresolved] }
+  for (const { target, ...site } of scan.requests) {
+    routes.forEach((route, index) => {
+      if (target.kind === 'tool') {
+        if (route.toolName === target.name) push(coverage.byRoute, index, site)
+        return
+      }
+      if (route.method.toUpperCase() !== target.method) return
+      const match = routePathMatches(route.path, target.segments)
+      if (match === 'match') push(coverage.byRoute, index, site)
+      else if (match === 'unknown') push(coverage.uncertainByRoute, index, { ...site, reason: 'routePattern', method: target.method })
+    })
   }
   return coverage
+}
+
+/** Whether an unresolved request could be one reaching `route`: its method, or a tool call on a route publishing one. */
+export function mayReach(request: UnresolvedTestRequest, route: TestRequestRoute): boolean {
+  return request.method === undefined ? route.toolName !== undefined : request.method === route.method.toUpperCase()
 }

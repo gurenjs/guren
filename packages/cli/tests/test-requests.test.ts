@@ -1,10 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import { ParseCache } from '../src/parse-cache'
-import { routePathMatches, scanTestRequests, testCoverage, type TestRequestRoute, type TestRequestScan } from '../src/test-requests'
+import { Hono } from 'hono'
+
+import { extractClassDeclaration } from '../src/model-parser'
+import { ParseCache, parseSourceFile } from '../src/parse-cache'
+import { BUILDERS, REQUEST_METHODS, routePathMatches, scanTestRequests, testCoverage, type TestRequestRoute, type TestRequestScan, type TestRequestSegment } from '../src/test-requests'
 import { writeWorkspaceFiles } from './helpers'
 
 let ROOT: string
@@ -101,16 +105,28 @@ await http.get(\`/posts/p-\${1 + 1}\`)
     ])
   })
 
-  test('should call a runtime segment that fits no parameter unresolved, and a spelled path that fits no route unmatched', async () => {
+  test('should leave a request that was compared with every route and fits none out of both lists', async () => {
     const result = await scanOne(`${IMPORT}
 const http = await TestApp.fromApp(app)
 await http.delete(\`/comments/\${1}\`)
 await http.get('/nowhere')
+await http.get('/posts/')
 `)
     const coverage = testCoverage(result, ROUTES)
     expect(coverage.byRoute.size).toBe(0)
-    expect(coverage.unresolved.map((request) => `${request.reason} ${request.text}`)).toEqual(['noRoute DELETE /comments/${…}'])
-    expect(coverage.unmatched.map((request) => request.text)).toEqual(['GET /nowhere'])
+    expect(coverage.unresolved).toEqual([])
+  })
+
+  test("should call a route whose constraint it cannot compile uncertain, never unmatched, and compile hono's `\\_`", async () => {
+    const routes: TestRequestRoute[] = [{ method: 'GET', path: '/tags/:slug{[a-z\\_]+}' }, { method: 'GET', path: '/odd/:id{(}' }]
+    const result = await scanOne(`${IMPORT}
+const http = await TestApp.fromApp(app)
+await http.get('/tags/a_b')
+await http.get('/odd/1')
+`)
+    const coverage = testCoverage(result, routes)
+    expect([...coverage.byRoute.keys()]).toEqual([0])
+    expect(coverage.uncertainByRoute.get(1)?.map((request) => `${request.reason} ${request.method} ${request.text}`)).toEqual(['routePattern GET GET /odd/1'])
   })
 })
 
@@ -151,10 +167,36 @@ response.headers.get('/posts')
     expect(reached(result)).toEqual(['GET /posts/3 -> GET /posts/:id'])
   })
 
-  test('should read nothing from a file that never names TestApp', async () => {
+  test('should read nothing from a receiver that is neither a TestApp nor what an imported function returns', async () => {
     const result = await scanOne("const http = { get(path: string) { return path } }\nhttp.get('/posts')\n")
     expect(result.requests).toEqual([])
     expect(result.unresolved).toEqual([])
+  })
+
+  test('should take TestApp through a namespace import', async () => {
+    const result = await scanOne(`import * as testing from '@guren/testing'
+import app from '../src/app'
+let http: testing.TestApp
+http = await testing.TestApp.fromApp(app)
+await http.get('/posts')
+const other = await testing.TestApp.fromApp(app)
+await other.get('/posts/1')
+`)
+    expect(reached(result)).toEqual(['GET /posts -> GET /posts', 'GET /posts/1 -> GET /posts/:id'])
+  })
+
+  test('should call a request on what an imported helper returns unresolved, with its method', async () => {
+    const result = await scanOne(`import { testApp, headersOf } from './support/app'
+const http = await testApp()
+await http.post('/posts', {})
+await (await testApp()).actingAs({ id: 1 }).get(\`/posts/\${1}\`)
+headersOf().get('Location')
+`)
+    expect(result.requests).toEqual([])
+    expect(result.unresolved.map((request) => `${request.line} ${request.reason} ${request.method}`)).toEqual([
+      '3 unknownReceiver POST',
+      '4 unknownReceiver GET',
+    ])
   })
 
   test('should map agent().call() to the route publishing the tool', async () => {
@@ -182,18 +224,69 @@ await agent.call(process.env.TOOL!, {})
 })
 
 describe('routePathMatches', () => {
-  test('should compare parameters, a regex constraint, an optional last parameter and a wildcard', () => {
-    const literal = (...parts: string[]) => parts.map((part) => ({ literal: part }))
-    expect(routePathMatches('/posts/:id', literal('posts', '7'))).toBe(true)
-    expect(routePathMatches('/posts/:id', literal('posts'))).toBe(false)
-    expect(routePathMatches('/posts', literal('posts', '7'))).toBe(false)
-    expect(routePathMatches('/archive/:year{[0-9]+}', literal('archive', '2024'))).toBe(true)
-    expect(routePathMatches('/archive/:year{[0-9]+}', literal('archive', 'latest'))).toBe(false)
-    expect(routePathMatches('/feed/:format?', literal('feed'))).toBe(true)
-    expect(routePathMatches('/feed/:format?', literal('feed', 'rss'))).toBe(true)
-    expect(routePathMatches('/assets/*', literal('assets', 'a', 'b.css'))).toBe(true)
-    expect(routePathMatches('/', [])).toBe(true)
-    expect(routePathMatches('/posts/create', [{ literal: 'posts' }, { runtime: true }])).toBe(false)
-    expect(routePathMatches('/posts/:id', [{ literal: 'posts' }, { runtime: true }])).toBe(true)
+  const literal = (path: string): TestRequestSegment[] => path.slice(1).split('/').map((part) => ({ literal: part }))
+  const HONO_CASES: Array<[string, string]> = [
+    ['/posts/:id', '/posts/7'], ['/posts/:id', '/posts'], ['/posts/:id', '/posts/'], ['/posts', '/posts/7'],
+    ['/posts', '/posts/'], ['/posts/', '/posts'], ['/', '/'], ['/a//b', '/a//b'], ['/a//b', '/a/b'],
+    ['/archive/:year{[0-9]+}', '/archive/2024'], ['/archive/:year{[0-9]+}', '/archive/latest'],
+    ['/tags/:slug{[a-z\\_]+}', '/tags/a_b'], ['/files/:path{.+}', '/files/a/b'], ['/files/:path{.+}', '/files/a'],
+    ['/files/:path{.+}/raw', '/files/a/b/raw'], ['/feed/:format?', '/feed'], ['/feed/:format?', '/feed/'], ['/feed/:format?', '/feed/rss'],
+    ['/assets/*', '/assets'], ['/assets/*', '/assets/'], ['/assets/*', '/assets/a/b.css'],
+    ['/wild/*/end', '/wild/x/end'], ['/wild/*/end', '/wild/x/y/end'], ['/wild/*/end', '/wild/x/other'],
+    ['/p/:id.json', '/p/3.json'], ['/p/:id.json', '/p/3'], ['/p/:id-x/raw', '/p/3/raw'], ['/f/:name*', '/f/a'], ['/f/:name*', '/f/a/b'], ['/status/foo:bar', '/status/foo:bar'],
+  ]
+
+  test.each(HONO_CASES)('should agree with hono on %s against %s', async (route, path) => {
+    const app = new Hono()
+    app.get(route, (c) => c.text('ok'))
+    const status = (await app.request(path)).status
+    expect(routePathMatches(route, literal(path))).toBe(status === 200 ? 'match' : 'none')
+  })
+
+  test('should fill a lone parameter with a runtime segment, and nothing else', () => {
+    const runtime: TestRequestSegment[] = [{ literal: 'posts' }, { runtime: true }]
+    expect(routePathMatches('/posts/:id', runtime)).toBe('match')
+    expect(routePathMatches('/posts/:id{[0-9]+}', runtime)).toBe('match')
+    expect(routePathMatches('/posts/create', runtime)).toBe('none')
+    expect(routePathMatches('/posts/:id.json', runtime)).toBe('match')
+  })
+
+  test('should answer unknown for a constraint it cannot compile', () => {
+    expect(routePathMatches('/odd/:id{(}', literal('/odd/1'))).toBe('unknown')
+  })
+})
+
+describe('the TestApp surface', () => {
+  const TEST_APP_PATH = fileURLToPath(new URL('../../testing/src/test-app.ts', import.meta.url))
+
+  /** Public instance members of `TestApp`, by the type name their return annotation spells. */
+  async function membersReturning(): Promise<Record<string, string[]>> {
+    const source = await readFile(TEST_APP_PATH, 'utf8')
+    const ast = parseSourceFile(source, TEST_APP_PATH)
+    if (!ast) throw new Error(`Could not parse ${TEST_APP_PATH}.`)
+    for (const node of ast.program.body) {
+      const declaration = extractClassDeclaration(node)
+      if (declaration?.id?.name !== 'TestApp') continue
+      const byType: Record<string, string[]> = {}
+      for (const member of declaration.body.body) {
+        if (member.type !== 'ClassMethod' || member.static || member.kind !== 'method' || member.accessibility === 'private') continue
+        if (member.key.type !== 'Identifier') continue
+        const annotation = member.returnType?.type === 'TSTypeAnnotation' ? member.returnType.typeAnnotation : undefined
+        if (annotation?.type !== 'TSTypeReference' || annotation.typeName.type !== 'Identifier') continue
+        const inner = annotation.typeParameters?.params[0]
+        const type = annotation.typeName.name === 'Promise' && inner?.type === 'TSTypeReference' && inner.typeName.type === 'Identifier'
+          ? inner.typeName.name
+          : annotation.typeName.name
+        ;(byType[type] ??= []).push(member.key.name)
+      }
+      return byType
+    }
+    throw new Error(`No 'TestApp' class declaration found in ${TEST_APP_PATH}.`)
+  }
+
+  test('should know every member that sends a request and every one that returns a TestApp', async () => {
+    const byType = await membersReturning()
+    expect(Object.keys(REQUEST_METHODS).sort()).toEqual([...byType.PendingTestResponse!].sort())
+    expect([...BUILDERS].sort()).toEqual([...byType.TestApp!].sort())
   })
 })
