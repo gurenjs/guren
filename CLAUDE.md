@@ -524,7 +524,7 @@ Specialized subagents that run in isolated context for complex tasks:
 
 | Agent | Trigger Words | Purpose |
 |-------|---------------|---------|
-| `code-review` | "review", "check my code" | Review code changes for quality, patterns, security |
+| `code-review` | "review", "check my code" | Review code changes for quality, patterns, security (opus; its description names when to pass `model: "fable"`) |
 | `test-writer` | "write tests", "add tests" | Generate comprehensive tests for existing code |
 
 ## Claude Code Skills

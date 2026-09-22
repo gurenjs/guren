@@ -2,7 +2,8 @@
 name: code-review
 description: Reviews uncommitted changes against a Guren app's conventions — validation on mutating routes, a resource in front of every record, route order, authorization, and what `guren check` and `guren audit` do not settle. Use after any change to a controller, route, model, resource, or test, or when the user says "review" or "check my code".
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
+effort: high
 ---
 
 # Code Review Agent

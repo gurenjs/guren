@@ -1,8 +1,9 @@
 ---
 name: code-review
-description: Expert code reviewer for Guren framework. Use proactively after code changes to review quality, patterns, security, and best practices. Invoked when user says "review", "check my code", or asks for feedback.
+description: Expert code reviewer for Guren framework. Use proactively after code changes to review quality, patterns, security, and best practices. Invoked when user says "review", "check my code", or asks for feedback. Runs on opus by default; invoke with model "fable" when the diff touches a security boundary (CSRF exemptions, loopback/MCP guards, auth, env-gated endpoints), spans several packages or only reproduces through dist/, edits a module other commands share a rule through (a "the one rule for …" file in CLAUDE.md's Key Files), or is the final review before merge.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
+effort: high
 ---
 
 # Code Review Agent
