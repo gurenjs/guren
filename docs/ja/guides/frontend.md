@@ -122,6 +122,14 @@ export class UserController extends Controller {
 
 ページコンポーネント側の宣言は `users: User[]` のままです。コントローラーの呼び出しは解決後の型で検査され、`ControllerInertiaProps` からも `User[]` が読み取れます。
 
+`always()` で包んだ prop は、`only` や `except` の指定にかかわらずすべての応答に含まれます。フレームワークがバリデーションエラーを共有するときもこの形です。flash から読む共有 props にも同じ扱いが要ります。flash は応答に載るかどうかに関係なく、そのリクエストで消費されるためです。
+
+```typescript
+import { always, getSessionFromContext, shareInertiaProps } from '@guren/core'
+
+shareInertiaProps((ctx) => ({ flash: always(getSessionFromContext(ctx)?.getFlash('status')) }), container)
+```
+
 ## Deferred Props
 `defer()` で包んだ prop は初回の応答に含まれず、最初の描画の直後にクライアントが取りに行きます。重いクエリの完了を待たずにページを表示できます。
 

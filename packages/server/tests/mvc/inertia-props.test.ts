@@ -3,8 +3,10 @@ import { Hono } from 'hono'
 import { Container } from '../../src/container/Container'
 import { Controller } from '../../src/mvc/Controller'
 import { INERTIA_VARY, inertia, type InertiaPagePayload } from '../../src/mvc/inertia/InertiaEngine'
-import { defer, isDeferredProp, resolveInertiaProps, readPartialReload } from '../../src/mvc/inertia/props'
+import { always, defer, isAlwaysProp, isDeferredProp, resolveInertiaProps, readPartialReload } from '../../src/mvc/inertia/props'
 import { shareInertiaProps } from '../../src/mvc/inertia/shared'
+import { InertiaServiceProvider } from '../../src/providers/InertiaServiceProvider'
+import { validationErrorsSetCookie } from '../../src/http/middleware/validation-errors-cookie'
 
 type Page = InertiaPagePayload
 
@@ -32,6 +34,16 @@ describe('defer()', () => {
     expect(isDeferredProp({ resolve: () => 1, group: 'default' })).toBe(false)
     expect(isDeferredProp(() => 1)).toBe(false)
     expect(isDeferredProp(null)).toBe(false)
+  })
+})
+
+describe('always()', () => {
+  test('marks a value and serializes as the value itself', () => {
+    const prop = always({ email: 'required' })
+
+    expect(isAlwaysProp(prop)).toBe(true)
+    expect(isAlwaysProp({ value: 1 })).toBe(false)
+    expect(JSON.stringify({ errors: prop })).toBe('{"errors":{"email":"required"}}')
   })
 })
 
@@ -89,13 +101,19 @@ describe('resolveInertiaProps()', () => {
     expect(page).toEqual({ props: { title: 'Posts' } })
   })
 
-  test('narrows by only, then removes except, and keeps errors always', async () => {
+  test('narrows by only, then removes except, and keeps an always prop', async () => {
     const page = await resolveInertiaProps(
-      { posts: ['a'], stats: 1, errors: {}, auth: null },
+      { posts: ['a'], stats: 1, errors: always({}), auth: null },
       { only: new Set(['posts', 'stats']), except: new Set(['stats', 'errors']) },
     )
 
     expect(page.props).toEqual({ posts: ['a'], errors: {} })
+  })
+
+  test('unwraps an always prop on a full visit and evaluates a lazy one inside it', async () => {
+    const page = await resolveInertiaProps({ errors: always({}), flash: always(() => 'saved') }, undefined)
+
+    expect(page.props).toEqual({ errors: {}, flash: 'saved' })
   })
 
   test('sends everything but except when only is empty', async () => {
@@ -170,7 +188,7 @@ describe('inertia() partial reloads and deferred props', () => {
     posts: () => ['post'],
     companies: () => ['company'],
     comments: defer(() => ['comment']),
-    errors: {},
+    errors: always({}),
   })
 
   test('narrows the props to the partial header on the same component', async () => {
@@ -260,7 +278,7 @@ describe('Controller.inertia() partial reloads and deferred props', () => {
 
   function createApp() {
     const container = new Container()
-    shareInertiaProps(() => ({ auth: { user: 'jane' }, errors: {} }), container)
+    shareInertiaProps(() => ({ auth: { user: 'jane' }, errors: always({}) }), container)
     const app = new Hono()
     app.get('/posts', async (c) => {
       const ctrl = new PostController()
@@ -287,7 +305,7 @@ describe('Controller.inertia() partial reloads and deferred props', () => {
     expect(marker.props).toEqual(page.props)
   })
 
-  test('filters shared props by the partial header too, keeping errors', async () => {
+  test('filters shared props by the partial header too, keeping the always prop', async () => {
     const { page } = await request({ 'X-Inertia-Partial-Component': 'posts/Index', 'X-Inertia-Partial-Data': 'posts' })
 
     expect(page.props).toEqual({ errors: {}, posts: ['post'] })
@@ -324,3 +342,37 @@ describe('Controller.inertia() partial reloads and deferred props', () => {
   })
 })
 
+describe('flashed validation errors on a partial reload', () => {
+  class FormController extends Controller {
+    async show() {
+      return this.inertia('posts/Form', { posts: () => ['post'], companies: () => ['company'] })
+    }
+  }
+
+  test('survive an only list that leaves errors out', async () => {
+    const container = new Container()
+    const app = new Hono()
+    container.instance('hono', app)
+    const provider = new InertiaServiceProvider(container)
+    provider.register()
+    provider.boot()
+    app.get('/form', async (c) => {
+      const ctrl = new FormController()
+      ctrl.setContext(c)
+      ctrl.setContainer(container)
+      return ctrl.show()
+    })
+
+    const cookie = validationErrorsSetCookie({ title: 'Title is required.' }).split(';')[0]!
+    const response = await app.request('/form', {
+      headers: {
+        Cookie: cookie,
+        'X-Inertia': 'true',
+        'X-Inertia-Partial-Component': 'posts/Form',
+        'X-Inertia-Partial-Data': 'posts',
+      },
+    })
+
+    expect((await pageOf(response)).props).toEqual({ posts: ['post'], errors: { title: 'Title is required.' } })
+  })
+})

@@ -122,6 +122,14 @@ export class UserController extends Controller {
 
 The page component still declares `users: User[]`. The controller call is checked against the resolved type, and `ControllerInertiaProps` reads `User[]` back from it.
 
+A prop wrapped in `always()` is sent on every response, whatever the `only` and `except` lists say. The framework shares flashed validation errors this way, and a shared prop read from a flash needs the same treatment: the flash is consumed by the request whether or not the response carries it.
+
+```typescript
+import { always, getSessionFromContext, shareInertiaProps } from '@guren/core'
+
+shareInertiaProps((ctx) => ({ flash: always(getSessionFromContext(ctx)?.getFlash('status')) }), container)
+```
+
 ## Deferred Props
 `defer()` keeps a prop out of the initial response and has the client fetch it right after the first render, so the page renders without waiting for a slow query:
 

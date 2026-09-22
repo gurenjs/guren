@@ -6,12 +6,28 @@
  */
 
 const DEFERRED_BRAND = Symbol.for('guren.inertia.deferred')
+const ALWAYS_BRAND = Symbol.for('guren.inertia.always')
+
+export interface AlwaysProp<T> {
+  readonly [ALWAYS_BRAND]: true
+  readonly value: T
+  /** The plain value, so a consumer that serializes shared props before the engine sees them sends the value itself. */
+  toJSON(): T
+}
 
 /**
- * Props sent on every response, partial reloads included, whatever the
- * `only`/`except` lists say. `errors` is the protocol's own always prop.
+ * A prop sent on every response, partial reloads included, whatever the
+ * `only`/`except` lists say (Laravel's `Inertia::always()`). The protocol's
+ * `errors` is one; a flash-backed shared prop is the usual other, since a
+ * flash the partial filter drops is gone with the request.
  */
-const ALWAYS_PROPS: ReadonlySet<string> = new Set(['errors'])
+export function always<T>(value: T): AlwaysProp<T> {
+  return Object.freeze({ [ALWAYS_BRAND]: true as const, value, toJSON: () => value })
+}
+
+export function isAlwaysProp(value: unknown): value is AlwaysProp<unknown> {
+  return typeof value === 'object' && value !== null && (value as Record<symbol, unknown>)[ALWAYS_BRAND] === true
+}
 
 export interface DeferredProp<T> {
   readonly [DEFERRED_BRAND]: true
@@ -38,16 +54,18 @@ export function isDeferredProp(value: unknown): value is DeferredProp<unknown> {
 }
 
 /** What a controller may pass for a prop the page declares as `T`. */
-export type InertiaPropInput<T> = T | DeferredProp<T> | (() => T | Promise<T>)
+export type InertiaPropInput<T> = T | DeferredProp<T> | AlwaysProp<T> | (() => T | Promise<T>)
 
 export type InertiaPropsInput<Props> = { [K in keyof Props]: InertiaPropInput<Props[K]> }
 
-/** The value the page receives for one prop input: a deferred or lazy prop as its resolved type. */
+/** The value the page receives for one prop input: a deferred, always or lazy prop as its resolved type. */
 export type ResolvedInertiaProp<V> = V extends DeferredProp<unknown>
   ? Awaited<ReturnType<V['resolve']>>
-  : V extends () => infer R
-    ? Awaited<R>
-    : V
+  : V extends AlwaysProp<unknown>
+    ? V['value']
+    : V extends () => infer R
+      ? Awaited<R>
+      : V
 
 export type ResolvedInertiaProps<Props> = { [K in keyof Props]: ResolvedInertiaProp<Props[K]> }
 
@@ -89,7 +107,6 @@ export function readPartialReload(request: Request | undefined, component: strin
 }
 
 function isSelected(key: string, partial: PartialReload): boolean {
-  if (ALWAYS_PROPS.has(key)) return true
   if (partial.only.size > 0 && !partial.only.has(key)) return false
   return !partial.except.has(key)
 }
@@ -109,8 +126,8 @@ function startProp(value: unknown): Promise<unknown> {
  * The props a response carries under the protocol's evaluation rules: a full
  * visit resolves every prop but the deferred ones, which it announces; a
  * partial reload resolves only the selected props, deferred ones included, and
- * announces nothing; a lazy prop (a function value) runs only when sent.
- * Resolvers run concurrently, unlike Laravel's.
+ * announces nothing; an always prop is sent either way; a lazy prop (a function
+ * value) runs only when sent. Resolvers run concurrently, unlike Laravel's.
  */
 export async function resolveInertiaProps(
   input: Record<string, unknown>,
@@ -120,10 +137,12 @@ export async function resolveInertiaProps(
   const deferredProps: Record<string, string[]> = {}
   const pending: Promise<void>[] = []
 
-  for (const [key, value] of Object.entries(input)) {
+  for (const [key, raw] of Object.entries(input)) {
+    const alwaysProp = isAlwaysProp(raw)
+    const value = alwaysProp ? raw.value : raw
     const deferred = isDeferredProp(value)
     if (partial) {
-      if (!isSelected(key, partial)) continue
+      if (!alwaysProp && !isSelected(key, partial)) continue
     } else if (deferred) {
       ;(deferredProps[value.group] ??= []).push(key)
       continue
