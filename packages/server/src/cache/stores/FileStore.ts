@@ -4,6 +4,12 @@ import { join, dirname } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { CacheStore, FileStoreOptions, CachedItem } from '../types'
 
+const LOCK_TIMEOUT_MS = 5000
+
+function ignoreMissing(error: NodeJS.ErrnoException): void {
+  if (error.code !== 'ENOENT') throw error
+}
+
 /** File-based cache store. */
 export class FileStore implements CacheStore {
   private readonly basePath: string
@@ -39,8 +45,9 @@ export class FileStore implements CacheStore {
     }
   }
 
-  // Callers hold withFileLock, which has already created the directory.
+  // The rename is what lets readers and plain writers skip the lock: a reader sees the old file or the new one, never a torn one.
   private async writeCacheFile<T>(filePath: string, item: CachedItem<T>): Promise<void> {
+    await this.ensureDirectory(filePath)
     const temporary = `${filePath}.${randomUUID()}.tmp`
     try {
       await writeFile(temporary, JSON.stringify(item), 'utf-8')
@@ -51,24 +58,32 @@ export class FileStore implements CacheStore {
     }
   }
 
+  // Only for read-modify-write (add, increment). A lock still held at the
+  // deadline is taken over: its owner died mid-operation, and losing one
+  // update beats a key that throws until someone deletes the directory.
   private async withFileLock<T>(filePath: string, callback: () => Promise<T>): Promise<T> {
     await this.ensureDirectory(filePath)
     const lockPath = `${filePath}.lock`
-    const deadline = Date.now() + 5000
+    let deadline = Date.now() + LOCK_TIMEOUT_MS
     for (;;) {
       try {
         await mkdir(lockPath)
         break
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        if (Date.now() >= deadline) throw new Error('Timed out acquiring a file cache lock; check for an abandoned .lock directory.')
+        if (Date.now() >= deadline) {
+          await rmdir(lockPath).catch(ignoreMissing)
+          deadline = Date.now() + LOCK_TIMEOUT_MS
+          continue
+        }
         await new Promise((resolve) => setTimeout(resolve, 5))
       }
     }
     try {
       return await callback()
     } finally {
-      await rmdir(lockPath)
+      // clear() may have removed the whole tree, lock included.
+      await rmdir(lockPath).catch(ignoreMissing)
     }
   }
 
@@ -87,27 +102,25 @@ export class FileStore implements CacheStore {
 
   async get<T>(key: string): Promise<T | null> {
     const filePath = this.getFilePath(key)
-    return this.withFileLock(filePath, async () => {
-      const item = await this.readCacheFile<T>(filePath)
+    const item = await this.readCacheFile<T>(filePath)
 
-      if (!item) {
-        return null
-      }
+    if (!item) {
+      return null
+    }
 
-      if (this.isExpired(item)) {
-        await this.deleteCacheFile(filePath)
-        return null
-      }
+    if (this.isExpired(item)) {
+      await this.deleteCacheFile(filePath)
+      return null
+    }
 
-      return item.value
-    })
+    return item.value
   }
 
   async set<T>(key: string, value: T, ttl?: number): Promise<void> {
     const filePath = this.getFilePath(key)
     const expiresAt = ttl ? this.now() + ttl * 1000 : null
 
-    await this.withFileLock(filePath, () => this.writeCacheFile(filePath, { value, expiresAt }))
+    await this.writeCacheFile(filePath, { value, expiresAt })
   }
 
   async add<T>(key: string, value: T): Promise<boolean> {
@@ -127,7 +140,7 @@ export class FileStore implements CacheStore {
 
   async delete(key: string): Promise<boolean> {
     const filePath = this.getFilePath(key)
-    return this.withFileLock(filePath, () => this.deleteCacheFile(filePath))
+    return this.deleteCacheFile(filePath)
   }
 
   async clear(): Promise<void> {
@@ -212,24 +225,22 @@ export class FileStore implements CacheStore {
 
   async ttl(key: string): Promise<number> {
     const filePath = this.getFilePath(key)
-    return this.withFileLock(filePath, async () => {
-      const item = await this.readCacheFile(filePath)
+    const item = await this.readCacheFile(filePath)
 
-      if (!item) {
-        return -2
-      }
+    if (!item) {
+      return -2
+    }
 
-      if (this.isExpired(item)) {
-        await this.deleteCacheFile(filePath)
-        return -2
-      }
+    if (this.isExpired(item)) {
+      await this.deleteCacheFile(filePath)
+      return -2
+    }
 
-      if (item.expiresAt === null) {
-        return -1
-      }
+    if (item.expiresAt === null) {
+      return -1
+    }
 
-      return Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
-    })
+    return Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
   }
 
   /** Delete expired cache files; call periodically to free disk space. */
@@ -258,10 +269,8 @@ export class FileStore implements CacheStore {
         }
 
         const filePath = join(subdirPath, file)
-        await this.withFileLock(filePath, async () => {
-          const item = await this.readCacheFile(filePath)
-          if (item && this.isExpired(item) && await this.deleteCacheFile(filePath)) cleaned++
-        })
+        const item = await this.readCacheFile(filePath)
+        if (item && this.isExpired(item) && await this.deleteCacheFile(filePath)) cleaned++
       }
     }
 

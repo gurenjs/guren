@@ -19,10 +19,15 @@ export class TaggedCache implements TaggedCacheStore {
       const tagKey = `${this.tagSetPrefix}${tag}`
       let namespace = await this.store.get<string>(tagKey)
       if (!namespace) {
-        if (!this.store.add) throw new Error('TaggedCache requires a store with atomic add().')
         const proposed = this.generateNamespace()
-        namespace = (await this.store.add(tagKey, proposed)) ? proposed : await this.store.get<string>(tagKey)
-        if (!namespace) throw new Error('Tag namespace was evicted during initialization; retry the cache operation.')
+        if (this.store.add) {
+          namespace = (await this.store.add(tagKey, proposed)) ? proposed : await this.store.get<string>(tagKey)
+          if (!namespace) throw new Error('Tag namespace was evicted during initialization; retry the cache operation.')
+        } else {
+          // Without add(), two first writers can each create a namespace and one of them loses its entries.
+          await this.store.set(tagKey, proposed)
+          namespace = proposed
+        }
       }
       namespaces.push(namespace)
     }

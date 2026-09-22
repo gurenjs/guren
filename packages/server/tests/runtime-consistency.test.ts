@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -36,6 +36,23 @@ describe('runtime consistency', () => {
     })
   }
 
+  it('serves a file key whose lock an earlier process abandoned', async () => {
+    const path = await mkdtemp(join(tmpdir(), 'cache-abandoned-lock-'))
+    const store = new FileStore({ path })
+    try {
+      await store.set('count', 1)
+      const hash = new Bun.CryptoHasher('sha256').update('count').digest('hex')
+      await mkdir(join(path, hash.slice(0, 2), `${hash}.cache.lock`))
+      expect(await store.get<number>('count')).toBe(1)
+      await store.set('count', 2)
+      expect(await store.ttl('count')).toBe(-1)
+      expect(await store.increment('count')).toBe(3)
+      expect(await store.get<number>('count')).toBe(3)
+    } finally {
+      await rm(path, { recursive: true, force: true })
+    }
+  }, 15000)
+
   it('coordinates file counters across separate processes', async () => {
     const path = await mkdtemp(join(tmpdir(), 'cache-processes-'))
     const store = new FileStore({ path })
@@ -60,6 +77,16 @@ describe('runtime consistency', () => {
     await store.set('b', 3)
     expect(await store.get<number>('a')).toBe(1)
     expect(await store.get<number>('b')).toBe(3)
+  })
+
+  it('keeps tagged caches working on a store without add()', async () => {
+    const backing = new MemoryStore({ checkPeriod: 0 })
+    const store = Object.assign(Object.create(backing) as MemoryStore, { add: undefined })
+    const tagged = new TaggedCache(store, ['posts'])
+    await tagged.set('a', 1)
+    expect(await tagged.get<number>('a')).toBe(1)
+    await tagged.flush()
+    expect(await tagged.get<number>('a')).toBeNull()
   })
 
   it('shares initial tag namespaces across instances without losing writes or mixing tags', async () => {
