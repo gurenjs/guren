@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { Hono } from 'hono'
 import { Container } from '../../src/container/Container'
 import { Controller } from '../../src/mvc/Controller'
-import { inertia } from '../../src/mvc/inertia/InertiaEngine'
+import { INERTIA_VARY, inertia, type InertiaPagePayload } from '../../src/mvc/inertia/InertiaEngine'
 import { defer, isDeferredProp, resolveInertiaProps, readPartialReload } from '../../src/mvc/inertia/props'
 import { shareInertiaProps } from '../../src/mvc/inertia/shared'
 
-type Page = { component: string; props: Record<string, unknown>; deferredProps?: Record<string, string[]> }
+type Page = InertiaPagePayload
 
 function inertiaRequest(url: string, headers: Record<string, string> = {}): Request {
   return new Request(url, { headers: { 'X-Inertia': 'true', ...headers } })
@@ -128,6 +128,31 @@ describe('resolveInertiaProps()', () => {
     await expect(page).rejects.toThrow('db down')
   })
 
+  test('rejects on a synchronous throw and still settles the sibling resolvers', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const page = resolveInertiaProps(
+        { late: async () => { throw new Error('late') }, early: () => { throw new Error('sync') } },
+        undefined,
+      )
+
+      await expect(page).rejects.toThrow('sync')
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
+  test('keeps the declared key order across resolved and plain props', async () => {
+    const page = await resolveInertiaProps({ a: () => 1, b: 2, c: async () => 3 }, undefined)
+
+    expect(Object.keys(page.props)).toEqual(['a', 'b', 'c'])
+    expect(page.props).toEqual({ a: 1, b: 2, c: 3 })
+  })
+
   test('never calls a lazy prop a partial reload leaves out', async () => {
     let calls = 0
     const page = await resolveInertiaProps(
@@ -191,6 +216,13 @@ describe('inertia() partial reloads and deferred props', () => {
 
     expect(html).toContain('"deferredProps":{"default":["comments"]}')
     expect(html).not.toContain('"comments":')
+  })
+
+  test('varies the page response on the partial-reload headers', async () => {
+    const response = await inertia('posts/Index', props(), { request: inertiaRequest('http://example.com/posts') })
+
+    expect(response.headers.get('Vary')).toBe(INERTIA_VARY)
+    expect(INERTIA_VARY).toContain('X-Inertia-Partial-Data')
   })
 
   test('does not resolve a lazy prop on a version mismatch', async () => {
@@ -291,3 +323,4 @@ describe('Controller.inertia() partial reloads and deferred props', () => {
     expect(PostController.calls).toEqual({ posts: 1, companies: 0, comments: 1 })
   })
 })
+

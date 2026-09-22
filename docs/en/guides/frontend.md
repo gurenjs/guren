@@ -132,7 +132,7 @@ import { pages } from '@/.guren/pages.gen'
 export class UserController extends Controller {
   async index() {
     return this.inertia(pages.users.Index, {
-      users: await User.all(),
+      users: () => User.all(),
       permissions: defer(() => Permission.all()),
       teams: defer(() => Team.all(), 'attributes'),
       projects: defer(() => Project.all(), 'attributes'),

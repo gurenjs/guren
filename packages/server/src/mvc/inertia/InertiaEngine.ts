@@ -173,6 +173,14 @@ export interface InertiaRenderResult {
 }
 
 /**
+ * The page body varies on the partial-reload headers as well as on
+ * `X-Inertia`: a shared cache keyed on the URL alone would hand a narrowed
+ * partial response to the next full visit.
+ */
+export const INERTIA_VARY =
+  "Accept, X-Inertia, X-Inertia-Partial-Component, X-Inertia-Partial-Data, X-Inertia-Partial-Except";
+
+/**
  * {@link inertia} plus the page it sent, for a caller that records the props
  * actually resolved (`Controller.inertia()`'s response marker). The version
  * check runs before any prop resolves: a 409 must not run a lazy prop's query.
@@ -212,48 +220,58 @@ export async function renderInertia(
     }
   }
 
-  const resolved = await resolveInertiaProps(
-    props,
-    readPartialReload(request, component)
-  );
-  const page: InertiaPagePayload = {
-    component,
-    props: resolved.props,
-    url: options.url ?? inertiaPageUrl(options.request) ?? "",
+  const page = await buildInertiaPage(component, props, {
+    url: options.url,
     version: resolvedVersion,
-    ...(resolved.deferredProps ? { deferredProps: resolved.deferredProps } : {}),
-  };
-
-  if (isInertiaVisit || prefersJson) {
-    return {
-      page,
-      response: new Response(serializePage(page), {
-        status: options.status ?? 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "X-Inertia": "true",
-          Vary: "Accept",
-          ...versionHeader,
-          ...options.headers,
-        },
-      }),
-    };
-  }
-
-  const html = await renderDocument(page, options);
+    request,
+  });
+  const wantsJson = isInertiaVisit || prefersJson;
+  const body = wantsJson ? serializePage(page) : await renderDocument(page, options);
 
   return {
     page,
-    response: new Response(html, {
+    response: new Response(body, {
       status: options.status ?? 200,
       headers: {
-        "Content-Type": "text/html; charset=utf-8",
+        "Content-Type": wantsJson
+          ? "application/json; charset=utf-8"
+          : "text/html; charset=utf-8",
         "X-Inertia": "true",
-        Vary: "Accept",
+        Vary: INERTIA_VARY,
         ...versionHeader,
         ...options.headers,
       },
     }),
+  };
+}
+
+export interface InertiaPageOptions {
+  readonly url?: string;
+  readonly version?: string;
+  readonly request?: Request;
+}
+
+/**
+ * The page object for one request: props resolved under the request's
+ * partial-reload headers, the deferred announcement, and the page url derived
+ * from the request when `url` is absent. `@guren/testing`'s mock builds its
+ * page here too, so the two cannot disagree on the payload's shape.
+ */
+export async function buildInertiaPage(
+  component: string,
+  props: Record<string, unknown>,
+  options: InertiaPageOptions
+): Promise<InertiaPagePayload> {
+  const resolved = await resolveInertiaProps(
+    props,
+    readPartialReload(options.request, component)
+  );
+  return {
+    component,
+    props: resolved.props,
+    url: options.url ?? inertiaPageUrl(options.request) ?? "",
+    version: options.version,
+    ...(resolved.deferredProps ? { deferredProps: resolved.deferredProps } : {}),
   };
 }
 

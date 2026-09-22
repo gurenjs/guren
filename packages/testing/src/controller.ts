@@ -1,6 +1,7 @@
 import { HonoRequest } from 'hono/request'
 import type {
   Context,
+  InertiaPagePayload,
   InertiaPropsInput,
   InertiaResponse,
   ResolvedInertiaProps,
@@ -27,8 +28,8 @@ import {
   defineModule,
   definePlugin,
   formatValidationErrors,
-  readPartialReload,
-  resolveInertiaProps,
+  buildInertiaPage,
+  INERTIA_VARY,
   serializePage,
 } from '@guren/server/internal/testing'
 
@@ -65,13 +66,7 @@ export interface ControllerContext {
   status: (code: number) => void
 }
 
-export interface InertiaPayload {
-  component: string
-  props: Record<string, unknown>
-  url: string
-  version?: string
-  deferredProps?: Record<string, string[]>
-}
+export type InertiaPayload = InertiaPagePayload
 
 /**
  * Context values that stand in for the route contract middleware, for a controller
@@ -153,8 +148,8 @@ function loadServer(): Promise<ServerModule> {
 
 /**
  * The Inertia response without a booted app: no shared props, root document, asset
- * version or SSR, which is why the mock keeps it. The JSON-or-HTML choice, the
- * payload escaping and the partial-reload and deferred-prop resolution are the
+ * version or SSR, which is why the mock keeps it. The page object (prop
+ * resolution included), the JSON-or-HTML choice and the payload escaping are the
  * engine's own.
  */
 async function renderInertia(
@@ -167,19 +162,7 @@ async function renderInertia(
     typeof componentOrPage === 'string'
       ? componentOrPage
       : componentOrPage.component ?? componentOrPage.id
-  let url = options.url
-  if (url === undefined) {
-    const { pathname, search } = new URL(request.url)
-    url = `${pathname}${search}`
-  }
-  const resolved = await resolveInertiaProps(props, readPartialReload(request, component))
-  const payload: InertiaPayload = {
-    component,
-    props: resolved.props,
-    url,
-    version: options.version,
-    ...(resolved.deferredProps ? { deferredProps: resolved.deferredProps } : {}),
-  }
+  const payload = await buildInertiaPage(component, props, { url: options.url, version: options.version, request })
   const serialized = serializePage(payload)
   const prefersJson = request.headers.has('X-Inertia') || acceptsJson(request)
 
@@ -190,13 +173,13 @@ async function renderInertia(
       headers: {
         'Content-Type': prefersJson ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
         'X-Inertia': 'true',
-        Vary: 'Accept',
+        Vary: INERTIA_VARY,
         ...options.headers,
       },
     },
   )
 
-  return Object.assign(response, { __gurenInertia: { component, props: resolved.props } })
+  return Object.assign(response, { __gurenInertia: { component, props: payload.props } })
 }
 
 export function createGurenControllerModule() {

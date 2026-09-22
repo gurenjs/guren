@@ -7,9 +7,6 @@
 
 const DEFERRED_BRAND = Symbol.for('guren.inertia.deferred')
 
-/** The group a `defer()` call without one joins; the client fetches one group per request. */
-export const DEFAULT_DEFERRED_GROUP = 'default'
-
 /**
  * Props sent on every response, partial reloads included, whatever the
  * `only`/`except` lists say. `errors` is the protocol's own always prop.
@@ -28,7 +25,7 @@ export interface DeferredProp<T> {
  * `deferredProps[group]` and the client fetches each group with one partial
  * reload; `resolve` runs only on the request that asks for the key.
  */
-export function defer<T>(resolve: () => T, group: string = DEFAULT_DEFERRED_GROUP): DeferredProp<Awaited<T>> {
+export function defer<T>(resolve: () => T, group = 'default'): DeferredProp<Awaited<T>> {
   return Object.freeze({
     [DEFERRED_BRAND]: true as const,
     resolve: resolve as () => Awaited<T> | Promise<Awaited<T>>,
@@ -66,10 +63,14 @@ export interface ResolvedInertiaPage {
   readonly deferredProps?: Record<string, string[]>
 }
 
-/** A header list as its top-level prop names: `author.name` selects `author`. */
+/**
+ * A header list as its top-level prop names: `author.name` selects `author`.
+ * The prototype client (`@guren/inertia-client/prototype`) answers a fixture
+ * with the same rule; the two cannot import each other, so keep them in step.
+ */
 function propNames(value: string | null): Set<string> {
-  const items = value ? value.split(',').map((item) => item.trim()).filter(Boolean) : []
-  return new Set(items.map((item) => item.split('.')[0]!))
+  const names = (value ?? '').split(',').map((item) => item.trim().split('.')[0])
+  return new Set(names.filter((name): name is string => Boolean(name)))
 }
 
 /**
@@ -94,35 +95,48 @@ function isSelected(key: string, partial: PartialReload): boolean {
 }
 
 /**
- * The props a response carries, with the protocol's evaluation rules applied.
- * A full visit resolves every regular and lazy prop and announces deferred
- * ones without resolving them; a partial reload resolves only the selected
- * props, deferred ones included, and announces nothing. A lazy prop (a function
- * value) is called only when its key is sent.
+ * Starts one prop's value. Through a promise so a resolver that throws
+ * synchronously rejects like one that throws later: `Promise.all` then settles
+ * every sibling rather than leaving the ones already started unhandled.
+ */
+function startProp(value: unknown): Promise<unknown> {
+  return Promise.resolve().then(() =>
+    isDeferredProp(value) ? value.resolve() : (value as () => unknown)(),
+  )
+}
+
+/**
+ * The props a response carries under the protocol's evaluation rules: a full
+ * visit resolves every prop but the deferred ones, which it announces; a
+ * partial reload resolves only the selected props, deferred ones included, and
+ * announces nothing; a lazy prop (a function value) runs only when sent.
+ * Resolvers run concurrently, unlike Laravel's.
  */
 export async function resolveInertiaProps(
-  props: Record<string, unknown>,
+  input: Record<string, unknown>,
   partial: PartialReload | undefined,
 ): Promise<ResolvedInertiaPage> {
+  const props: Record<string, unknown> = {}
   const deferredProps: Record<string, string[]> = {}
-  // Resolvers start in key order and settle together: one response, N
-  // independent queries, deliberately concurrent rather than Laravel's sequence.
-  const pending: Array<[string, unknown]> = []
+  const pending: Promise<void>[] = []
 
-  for (const [key, value] of Object.entries(props)) {
+  for (const [key, value] of Object.entries(input)) {
+    const deferred = isDeferredProp(value)
     if (partial) {
       if (!isSelected(key, partial)) continue
-    } else if (isDeferredProp(value)) {
+    } else if (deferred) {
       ;(deferredProps[value.group] ??= []).push(key)
       continue
     }
-    pending.push([key, isDeferredProp(value) ? value.resolve() : typeof value === 'function' ? value() : value])
+    if (deferred || typeof value === 'function') {
+      // The key is claimed now so the props keep their declared order.
+      props[key] = undefined
+      pending.push(startProp(value).then((resolved) => { props[key] = resolved }))
+    } else {
+      props[key] = value
+    }
   }
 
-  const resolved = await Promise.all(pending.map(async ([key, value]) => [key, await value] as const))
-  const page: { props: Record<string, unknown>; deferredProps?: Record<string, string[]> } = {
-    props: Object.fromEntries(resolved),
-  }
-  if (Object.keys(deferredProps).length > 0) page.deferredProps = deferredProps
-  return page
+  if (pending.length > 0) await Promise.all(pending)
+  return Object.keys(deferredProps).length > 0 ? { props, deferredProps } : { props }
 }
