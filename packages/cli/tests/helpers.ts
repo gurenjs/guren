@@ -1,7 +1,7 @@
 import { mock } from 'bun:test'
 import { consola as realConsola } from 'consola'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ConfigDefinition, ConfigDefinitions } from '@guren/core'
@@ -24,6 +24,33 @@ export const CLI_DIST_BIN = join(repoRoot, 'packages/cli/dist/bin.js')
  * symlink to server's `exports`, which point at `dist/index.js`.
  */
 export const SERVER_DIST_ENTRY = join(repoRoot, 'packages/server/dist/index.js')
+
+/**
+ * A temp root named `<prefix><pid>-…`, after removing the ones earlier runs left
+ * (`bun test` fires no exit handler). tmpdir() is shared by every worktree, so a
+ * root is removed only when the process that made it is gone: a concurrent run of
+ * the same file keeps its own.
+ */
+export async function createTempRoot(prefix: string): Promise<string> {
+  const pidPattern = /^(\d+)-/
+  const entries = (await readdir(tmpdir())).filter((name) => name.startsWith(prefix))
+  await Promise.all(entries.map(async (name) => {
+    const pid = pidPattern.exec(name.slice(prefix.length))?.[1]
+    if (pid !== undefined && processIsAlive(Number(pid))) return
+    await rm(join(tmpdir(), name), { recursive: true, force: true })
+  }))
+  return mkdtemp(join(tmpdir(), `${prefix}${process.pid}-`))
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM: the process exists but belongs to another user.
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
 
 export interface TempWorkspace {
   dir: string

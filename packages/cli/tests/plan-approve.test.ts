@@ -1,6 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
-import { chmod, lstat, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, lstat, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { runCommand } from 'citty'
@@ -15,19 +14,15 @@ import { stampContextHash } from '../src/plan/freshness'
 import { planHash } from '../src/plan/identity'
 import { PlanDraftSchema, PlanSchema } from '../src/plan/schema'
 import { runCaptured, type CapturedExec } from '../src/subprocess'
-import { writeWorkspaceFiles } from './helpers'
+import { createTempRoot, writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState } from './plan-fixture'
 
-// `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 const ROOT_PREFIX = 'guren-plan-approve-'
 let ROOT: string
 const NOW = () => new Date('2026-09-22T09:00:00.000Z')
 
 beforeAll(async () => {
-  for (const entry of await readdir(tmpdir())) {
-    if (entry.startsWith(ROOT_PREFIX)) await rm(join(tmpdir(), entry), { recursive: true, force: true })
-  }
-  ROOT = await mkdtemp(join(tmpdir(), ROOT_PREFIX))
+  ROOT = await createTempRoot(ROOT_PREFIX)
 })
 
 afterAll(async () => {
