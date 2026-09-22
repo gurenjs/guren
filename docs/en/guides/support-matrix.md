@@ -4,8 +4,8 @@
 
 | Runtime | Versions | Status |
 |---------|----------|--------|
-| Bun     | 1.3.x    | Supported (CI-tested) |
-| Bun     | 1.4.x    | Planned |
+| Bun     | 1.4.x    | Supported (CI-tested, primary) |
+| Bun     | 1.3.x    | Previous (non-blocking CI lane) |
 | Node.js | 22.x     | Lambda only (via `createLambdaHandler`) |
 
 ## Database
@@ -38,6 +38,6 @@
 
 ## CI Coverage
 
-- Every PR: Bun 1.3.x, no external DB (mocked), Redis service
+- Every PR: Bun 1.4.x (gating) and 1.3.x (non-blocking), no external DB (mocked), Redis service
 - Nightly: same as PR, plus full runtime smoke tests against a real database, security audits, and an end-to-end scaffold-to-build check
 - Release: Full validation before publish

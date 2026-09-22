@@ -12,6 +12,9 @@ import { repoRoot } from './workspace-packages.ts'
  * than listed, so a new one that pins Bun is covered the day it is added.
  */
 const WORKFLOW_DIR = join(repoRoot, '.github/workflows')
+const ACTION_DIR = join(repoRoot, '.github/actions')
+
+type ActionManifest = { inputs?: Record<string, { default?: unknown }> }
 
 /**
  * `bun-version: '1.2.3'`, list item or not, quoted or not: recognising only one
@@ -81,6 +84,18 @@ describe('workflow Bun pins', () => {
       for (const pin of pins) expect(pin).toBe(primary)
     },
   )
+
+  it('defaults every composite action taking a Bun version to the primary runtime', () => {
+    // ci.yml's jobs outside the matrix call setup-and-build without `bun-version`,
+    // so an action's default is a pin the workflow scan above never reads.
+    const defaults = [...new Bun.Glob('*/action.{yml,yaml}').scanSync({ cwd: ACTION_DIR })]
+      .map((file) => Bun.YAML.parse(readFileSync(join(ACTION_DIR, file), 'utf8')) as ActionManifest)
+      .map((action) => action.inputs?.['bun-version']?.default)
+      .filter((version) => version !== undefined)
+
+    expect(defaults.length).toBeGreaterThan(0)
+    for (const version of defaults) expect(String(version)).toBe(primary)
+  })
 
   it("ci.yml's own pins stay inside its matrix", () => {
     // `include:` repeats the version to attach per-version settings; one that

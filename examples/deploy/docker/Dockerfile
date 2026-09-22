@@ -1,5 +1,5 @@
 # Build stage
-FROM oven/bun:1.3 AS builder
+FROM oven/bun:1.4 AS builder
 WORKDIR /app
 
 COPY package.json bun.lock ./
@@ -9,7 +9,7 @@ COPY . .
 RUN bun run codegen && bun run build
 
 # Production stage
-FROM oven/bun:1.3-slim
+FROM oven/bun:1.4-slim
 WORKDIR /app
 
 COPY --from=builder /app/package.json /app/bun.lock ./

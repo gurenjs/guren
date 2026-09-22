@@ -7,7 +7,7 @@
 
 ## 前提条件
 
-- **Bun 1.3.14**
+- **Bun 1.4.2**
 - **Docker Desktop (Compose v2)**: Postgres 用
 
 ## 1. プロジェクトを作成する

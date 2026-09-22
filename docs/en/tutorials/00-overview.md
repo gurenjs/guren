@@ -66,7 +66,7 @@ Each chapter starts where the previous one ended. Follow them in order.
 
 ## Prerequisites
 
-- **[Bun](https://bun.sh) 1.3.14.** That is the only hard requirement; the scaffold defaults to SQLite, so there is no database server to install.
+- **[Bun](https://bun.sh) 1.4.2.** That is the only hard requirement; the scaffold defaults to SQLite, so there is no database server to install.
 - **git.** Every chapter ends with a commit.
 - **TypeScript.** You should be comfortable with modern TypeScript: types, async/await, modules. The course does not assume React or Inertia; chapter 2 introduces the little you need and builds from there.
 - **A coding agent, optionally.** Claude Code is the one the chapters show. The harness also supports Codex, Cursor, Copilot and OpenCode, and every delegation has a no-agent fallback.
