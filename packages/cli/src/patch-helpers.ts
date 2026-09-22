@@ -346,54 +346,56 @@ export type EntryWiring =
   | { registered: false; entry: PatchResult }
   | { registered: true; entry: PatchResult; import: PatchResult }
 
-/** {@link EntryWiring} plus the text to write, absent when the file is already right. */
-export type EntryComposition = EntryWiring & { content?: string }
+export type RegisteredEntry = Extract<EntryWiring, { registered: true }>
 
 /**
- * `insertEntry` and then the import, composed for one write: a lone import breaks
+ * What to patch, decided from the file as read: the entry insert and the import
+ * it needs, `null` when the entry is bound by an import the file already has
+ * under another name (`defaultImportBinding`).
+ */
+export interface EntryPlan {
+  entry: InsertResult
+  importStatement: string | null
+}
+
+/**
+ * An entry and then its import, composed for one write: a lone import breaks
  * `noUnusedLocals`, a lone entry is an unresolved identifier, and two sequenced
  * writes can leave either. An entry already present still has its import checked,
- * since a user can remove one by hand; `importStatement` is `null` when the entry
- * is bound by an import the file already has under another name.
+ * since a user can remove one by hand. `content` is the text to write, absent
+ * when the file is already right.
  */
 export function composeEntryWithImport(
   content: string,
-  insertEntry: (content: string) => InsertResult,
-  importStatement: string | null,
-): EntryComposition {
-  const inserted = insertEntry(content)
-  const alreadyRegistered = inserted.reason === PATCH_REASONS.alreadyPresent
+  plan: (content: string) => EntryPlan,
+): { wiring: EntryWiring; content?: string } {
+  const { entry: inserted, importStatement } = plan(content)
 
-  if (inserted.content === undefined && !alreadyRegistered) {
-    return { registered: false, entry: { modified: false, reason: inserted.reason } }
+  if (inserted.content === undefined && inserted.reason !== PATCH_REASONS.alreadyPresent) {
+    return { wiring: { registered: false, entry: { modified: false, reason: inserted.reason } } }
   }
 
-  const withEntry = inserted.content ?? content
-  const withImport = importStatement === null ? null : insertImport(withEntry, importStatement)
+  const withImport = importStatement === null ? null : insertImport(inserted.content ?? content, importStatement)
 
-  const entry: PatchResult = alreadyRegistered ? { modified: false, reason: PATCH_REASONS.alreadyPresent } : { modified: true }
-  const importResult: PatchResult = withImport === null
-    ? { modified: false, reason: PATCH_REASONS.importAlreadyExists }
-    : { modified: true }
-  const composed: EntryComposition = { registered: true, entry, import: importResult }
-
-  if (entry.modified || importResult.modified) composed.content = withImport ?? withEntry
-  return composed
+  return {
+    wiring: {
+      registered: true,
+      entry: inserted.content === undefined ? { modified: false, reason: PATCH_REASONS.alreadyPresent } : { modified: true },
+      import: withImport === null ? { modified: false, reason: PATCH_REASONS.importAlreadyExists } : { modified: true },
+    },
+    content: withImport ?? inserted.content,
+  }
 }
 
 /** {@link composeEntryWithImport} applied to a file: one read, and one write only when something changed. */
-export async function addEntryWithImport(
-  filePath: string,
-  insertEntry: (content: string) => InsertResult,
-  importStatement: string,
-): Promise<EntryWiring> {
+export async function addEntryWithImport(filePath: string, plan: (content: string) => EntryPlan): Promise<EntryWiring> {
   const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
     return { registered: false, entry: { modified: false, reason: PATCH_REASONS.fileNotFound } }
   }
 
-  const { content: updated, ...wiring } = composeEntryWithImport(content, insertEntry, importStatement)
+  const { wiring, content: updated } = composeEntryWithImport(content, plan)
   if (updated !== undefined) await writeFile(resolve(process.cwd(), filePath), updated, 'utf8')
   return wiring
 }

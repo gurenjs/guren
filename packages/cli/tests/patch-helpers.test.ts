@@ -350,24 +350,24 @@ kernel.registerMany([Real])
 })
 
 describe('addEntryWithImport', () => {
+  const ENTRY = 'src/console.ts'
   const IMPORT = "import Alpha from './Alpha.js'"
-  const insert = (content: string) => insertArrayArgumentEntry(content, 'registerMany', 'Alpha')
+  const plan = (content: string) => ({ entry: insertArrayArgumentEntry(content, 'registerMany', 'Alpha'), importStatement: IMPORT })
 
-  async function withEntryFile(source: string, run: (path: string) => Promise<void>): Promise<string> {
+  async function withEntryFile(source: string, run: () => Promise<void>): Promise<string> {
     const workspace = await createTempWorkspace('guren-cli-entry-with-import-')
     try {
-      await mkdir(join(workspace.dir, 'src'), { recursive: true })
-      await writeFile(join(workspace.dir, 'src/console.ts'), source, 'utf8')
-      await run('src/console.ts')
-      return await readFile(join(workspace.dir, 'src/console.ts'), 'utf8')
+      await writeWorkspaceFiles(workspace.dir, { [ENTRY]: source })
+      await run()
+      return await readFile(join(workspace.dir, ENTRY), 'utf8')
     } finally {
       await workspace.cleanup()
     }
   }
 
   it('lands the entry and its import together', async () => {
-    const result = await withEntryFile("import { ConsoleKernel } from '@guren/core'\nkernel.registerMany([])\n", async (path) => {
-      expect(await addEntryWithImport(path, insert, IMPORT)).toEqual({
+    const result = await withEntryFile("import { ConsoleKernel } from '@guren/core'\nkernel.registerMany([])\n", async () => {
+      expect(await addEntryWithImport(ENTRY, plan)).toEqual({
         registered: true,
         entry: { modified: true },
         import: { modified: true },
@@ -378,8 +378,8 @@ describe('addEntryWithImport', () => {
 
   it('writes nothing when the entry cannot be placed, so no lone import is left behind', async () => {
     const source = "import { ConsoleKernel } from '@guren/core'\nkernel.registerMany(list)\n"
-    const result = await withEntryFile(source, async (path) => {
-      expect(await addEntryWithImport(path, insert, IMPORT)).toEqual({
+    const result = await withEntryFile(source, async () => {
+      expect(await addEntryWithImport(ENTRY, plan)).toEqual({
         registered: false,
         entry: { modified: false, reason: 'Could not find a registerMany([ ... ]) call' },
       })
@@ -388,8 +388,8 @@ describe('addEntryWithImport', () => {
   })
 
   it('restores the import of an entry already present', async () => {
-    const result = await withEntryFile("import { ConsoleKernel } from '@guren/core'\nkernel.registerMany([Alpha])\n", async (path) => {
-      expect(await addEntryWithImport(path, insert, IMPORT)).toEqual({
+    const result = await withEntryFile("import { ConsoleKernel } from '@guren/core'\nkernel.registerMany([Alpha])\n", async () => {
+      expect(await addEntryWithImport(ENTRY, plan)).toEqual({
         registered: true,
         entry: { modified: false, reason: PATCH_REASONS.alreadyPresent },
         import: { modified: true },
@@ -400,8 +400,8 @@ describe('addEntryWithImport', () => {
 
   it('leaves a file that already has both untouched', async () => {
     const source = `${IMPORT}\nkernel.registerMany([Alpha])\n`
-    const result = await withEntryFile(source, async (path) => {
-      expect(await addEntryWithImport(path, insert, IMPORT)).toEqual({
+    const result = await withEntryFile(source, async () => {
+      expect(await addEntryWithImport(ENTRY, plan)).toEqual({
         registered: true,
         entry: { modified: false, reason: PATCH_REASONS.alreadyPresent },
         import: { modified: false, reason: PATCH_REASONS.importAlreadyExists },
@@ -410,10 +410,22 @@ describe('addEntryWithImport', () => {
     expect(result).toBe(source)
   })
 
+  it('adds no import for a plan that names none', async () => {
+    const source = "import Alpha from './Alpha.js'\nkernel.registerMany([])\n"
+    const result = await withEntryFile(source, async () => {
+      expect(await addEntryWithImport(ENTRY, (content) => ({ ...plan(content), importStatement: null }))).toEqual({
+        registered: true,
+        entry: { modified: true },
+        import: { modified: false, reason: PATCH_REASONS.importAlreadyExists },
+      })
+    })
+    expect(result).toBe("import Alpha from './Alpha.js'\nkernel.registerMany([Alpha])\n")
+  })
+
   it('reports a missing file without inventing one', async () => {
     const workspace = await createTempWorkspace('guren-cli-entry-with-import-missing-')
     try {
-      expect(await addEntryWithImport('src/console.ts', insert, IMPORT)).toEqual({
+      expect(await addEntryWithImport(ENTRY, plan)).toEqual({
         registered: false,
         entry: { modified: false, reason: PATCH_REASONS.fileNotFound },
       })

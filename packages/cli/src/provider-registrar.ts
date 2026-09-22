@@ -1,8 +1,6 @@
 import { consola } from 'consola'
-import { writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
-import { findFirstExisting, readIfExists } from './discovery'
-import { composeEntryWithImport, defaultImportBinding, insertArrayOptionEntry, PATCH_REASONS, type EntryWiring } from './patch-helpers'
+import { findFirstExisting } from './discovery'
+import { addEntryWithImport, defaultImportBinding, insertArrayOptionEntry, type EntryWiring } from './patch-helpers'
 import { relativeImportPath } from './utils'
 
 /**
@@ -16,8 +14,6 @@ export const APP_ENTRY_CANDIDATES = ['src/app.ts', 'app.ts'] as const
 export async function resolveAppEntry(cwd: string = process.cwd()): Promise<string | null> {
   return findFirstExisting(cwd, APP_ENTRY_CANDIDATES)
 }
-
-export type { EntryWiring } from './patch-helpers'
 
 /** The default export of a scaffolded file: `local` from `target`, a project path without extension. */
 export interface DefaultExportImport {
@@ -39,21 +35,13 @@ export async function addArrayOptionRegistration(
   importFor: string | DefaultExportImport,
   isRegistered?: (entries: string[]) => boolean,
 ): Promise<EntryWiring> {
-  const content = await readIfExists(process.cwd(), appPath)
-
-  if (content === null) {
-    return { registered: false, entry: { modified: false, reason: PATCH_REASONS.fileNotFound } }
-  }
-
-  const bound = typeof importFor === 'string' ? null : defaultImportBinding(content, appPath, importFor.target)
-  const { content: updated, ...wiring } = composeEntryWithImport(
-    content,
-    (source) => insertArrayOptionEntry(source, key, bound ?? entry, { isRegistered }),
-    bound === null ? importStatementFor(importFor, appPath) : null,
-  )
-
-  if (updated !== undefined) await writeFile(resolve(process.cwd(), appPath), updated, 'utf8')
-  return wiring
+  return addEntryWithImport(appPath, (content) => {
+    const bound = typeof importFor === 'string' ? null : defaultImportBinding(content, appPath, importFor.target)
+    return {
+      entry: insertArrayOptionEntry(content, key, bound ?? entry, { isRegistered }),
+      importStatement: bound === null ? importStatementFor(importFor, appPath) : null,
+    }
+  })
 }
 
 function importStatementFor(importFor: string | DefaultExportImport, appPath: string): string {

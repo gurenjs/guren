@@ -176,6 +176,31 @@ kernel.registerMany([SendDigestCommand])
       }
     })
 
+    it('keeps the name the file already imports the command by', async () => {
+      const workspace = await createTempWorkspace('guren-cli-cmd-register-bound-')
+      try {
+        await writeConsoleEntry(
+          workspace.dir,
+          `import { ConsoleKernel } from '@guren/core'
+import Digest from '../app/Console/Commands/SendDigestCommand'
+
+export const kernel = new ConsoleKernel()
+
+kernel.registerMany([])
+`,
+        )
+
+        const lines = await registerAndCollect('SendDigest')
+
+        expect(lines).toEqual(['success: Registered SendDigestCommand in src/console.ts'])
+        const consoleSource = await readFile(join(workspace.dir, 'src/console.ts'), 'utf8')
+        expect(consoleSource).toContain('kernel.registerMany([Digest])')
+        expect(consoleSource.match(/^import /gm)).toHaveLength(2)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
     it('still reports success when the import was already there', async () => {
       const workspace = await createTempWorkspace('guren-cli-cmd-register-import-exists-')
       try {
@@ -254,7 +279,7 @@ kernel.registerMany([])
 
         const lines = await registerAndCollect('Invoice', { root: 'billing' })
 
-        expect(lines[0]).toMatch(/^warn: Could not register InvoiceCommand automatically: /)
+        expect(lines[0]).toBe('warn: Could not register InvoiceCommand automatically: Could not find a defineModule({ ... }) call')
         expect(lines.some((line) => line.startsWith('success:'))).toBe(false)
         expect(await readFile(join(workspace.dir, 'modules/billing/index.ts'), 'utf8')).toBe(source)
       } finally {
@@ -276,6 +301,25 @@ kernel.registerMany([])
         const index = await readFile(indexPath, 'utf8')
         expect(index).toContain("import InvoiceCommand from './app/Console/Commands/InvoiceCommand.js'")
         expect(index.match(/InvoiceCommand\]/g)).toHaveLength(1)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    it('keeps the name the descriptor already imports the command by', async () => {
+      const workspace = await createTempWorkspace('guren-cli-cmd-register-module-bound-')
+      try {
+        await writeModuleIndex()
+        const indexPath = join(workspace.dir, 'modules/billing/index.ts')
+        const scaffolded = await readFile(indexPath, 'utf8')
+        await writeFile(indexPath, `import Invoice from './app/Console/Commands/InvoiceCommand'\n${scaffolded}`, 'utf8')
+
+        const lines = await registerAndCollect('Invoice', { root: 'billing' })
+
+        expect(lines[0]).toBe('success: Registered InvoiceCommand in modules/billing/index.ts')
+        const index = await readFile(indexPath, 'utf8')
+        expect(index).toContain('commands: [Invoice]')
+        expect(index).not.toContain('InvoiceCommand from')
       } finally {
         await workspace.cleanup()
       }

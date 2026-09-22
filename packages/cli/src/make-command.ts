@@ -1,8 +1,8 @@
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { consola } from 'consola'
 import type { WriterOptions } from './utils'
 import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, safeModuleName, scaffoldFile } from './utils'
-import { addEntryWithImport, insertArrayArgumentEntry, insertArrayOptionEntry, type EntryWiring } from './patch-helpers'
+import { addEntryWithImport, defaultImportBinding, insertArrayArgumentEntry, insertArrayOptionEntry, type EntryPlan, type InsertResult, type RegisteredEntry } from './patch-helpers'
 import { fileExists, readIfExists } from './discovery'
 import { registersCommandsOf } from './console-check'
 
@@ -77,11 +77,8 @@ async function registerRootCommand(className: string, file: string): Promise<voi
     return
   }
 
-  const wiring = await addEntryWithImport(
-    CONSOLE_ENTRY,
-    (content) => insertArrayArgumentEntry(content, 'registerMany', className),
-    `import ${className} from '${specifier}'`,
-  )
+  const wiring = await addEntryWithImport(CONSOLE_ENTRY, commandPlan(CONSOLE_ENTRY, file, className, specifier,
+    (content, binding) => insertArrayArgumentEntry(content, 'registerMany', binding)))
 
   if (!wiring.registered) {
     consola.warn(`Could not register ${className} automatically: ${wiring.entry.reason}`)
@@ -104,11 +101,8 @@ async function registerModuleCommand(className: string, file: string, moduleName
     return
   }
 
-  const wiring = await addEntryWithImport(
-    indexPath,
-    (content) => insertArrayOptionEntry(content, 'commands', className, { callName: 'defineModule' }),
-    `import ${className} from '${specifier}'`,
-  )
+  const wiring = await addEntryWithImport(indexPath, commandPlan(indexPath, file, className, specifier,
+    (content, binding) => insertArrayOptionEntry(content, 'commands', binding, { callName: 'defineModule' })))
 
   if (!wiring.registered) {
     consola.warn(`Could not register ${className} automatically: ${wiring.entry.reason}`)
@@ -120,8 +114,30 @@ async function registerModuleCommand(className: string, file: string, moduleName
   await printModuleConsoleHopGuidance(moduleName)
 }
 
+/**
+ * The command's entry under the name `entryFile` already default-imports it by,
+ * if any, and the import only when there is none: a second import of the same
+ * module is an unused local, and a second entry a second registration.
+ */
+function commandPlan(
+  entryFile: string,
+  commandFile: string,
+  className: string,
+  specifier: string,
+  insertEntry: (content: string, binding: string) => InsertResult,
+): (content: string) => EntryPlan {
+  const target = relative(process.cwd(), commandFile).replaceAll('\\', '/').replace(/\.ts$/u, '')
+  return (content) => {
+    const bound = defaultImportBinding(content, entryFile, target)
+    return {
+      entry: insertEntry(content, bound ?? className),
+      importStatement: bound === null ? `import ${className} from '${specifier}'` : null,
+    }
+  }
+}
+
 /** The entry and its import landed together, so each line here describes a file that compiles. */
-function reportRegistration(wiring: EntryWiring & { registered: true }, className: string, filePath: string): void {
+function reportRegistration(wiring: RegisteredEntry, className: string, filePath: string): void {
   if (wiring.entry.modified) {
     consola.success(`Registered ${className} in ${filePath}`)
   } else if (wiring.import.modified) {

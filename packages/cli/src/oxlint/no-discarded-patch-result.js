@@ -70,8 +70,8 @@ const rule = {
         context.report({
           node,
           message:
-            `\`${helper}()\` reports a patch it could not apply in its PatchResult, and this statement discards it. `
-            + 'Read `.modified` / `.reason` (PATCH_REASONS) before reporting success.',
+            `\`${helper}()\` reports a patch it could not apply in its result, and this statement discards it. `
+            + 'Read `.modified` / `.reason` (PATCH_REASONS), or `.registered` / `.entry.reason` of an EntryWiring, before reporting success.',
         })
       },
     }
