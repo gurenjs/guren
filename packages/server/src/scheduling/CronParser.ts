@@ -36,20 +36,12 @@ export function parseCron(expression: string): ParsedCron {
   }
 }
 
-export function matchesCron(date: Date, cron: ParsedCron): boolean {
-  const minute = date.getMinutes()
-  const hour = date.getHours()
-  const dayOfMonth = date.getDate()
-  const month = date.getMonth() + 1
-  const dayOfWeek = date.getDay()
+function matchesDay(date: Date, cron: ParsedCron): boolean {
+  return cron.dayOfMonth.includes(date.getDate()) && cron.month.includes(date.getMonth() + 1) && cron.dayOfWeek.includes(date.getDay())
+}
 
-  return (
-    cron.minute.includes(minute) &&
-    cron.hour.includes(hour) &&
-    cron.dayOfMonth.includes(dayOfMonth) &&
-    cron.month.includes(month) &&
-    cron.dayOfWeek.includes(dayOfWeek)
-  )
+export function matchesCron(date: Date, cron: ParsedCron): boolean {
+  return cron.minute.includes(date.getMinutes()) && cron.hour.includes(date.getHours()) && matchesDay(date, cron)
 }
 
 export function getNextOccurrence(
@@ -67,7 +59,7 @@ export function getNextOccurrence(
   const endYear = next.getFullYear() + 400
 
   while (next.getFullYear() < endYear) {
-    if (!cron.month.includes(next.getMonth() + 1) || !cron.dayOfMonth.includes(next.getDate()) || !cron.dayOfWeek.includes(next.getDay())) {
+    if (!matchesDay(next, cron)) {
       next.setDate(next.getDate() + 1)
       next.setHours(0, 0, 0, 0)
       continue

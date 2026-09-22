@@ -157,9 +157,6 @@ function resolveExecutor(options?: AdapterQueryOptions): DrizzleDatabase {
     return ambient.handle as DrizzleDatabase
   }
 
-  if (manualTransactionOpen) {
-    throw new Error('DrizzleAdapter: raw queries outside an active SQLite transaction cannot share its connection. Await the transaction first.')
-  }
   return ensureDatabase()
 }
 
@@ -173,8 +170,12 @@ function withExecutor<T>(options: AdapterQueryOptions | undefined, callback: (db
     return operation
   }
   const operation = callback(db)
-  pendingOperations.add(operation)
-  void operation.then(() => pendingOperations.delete(operation), () => pendingOperations.delete(operation))
+  // Only runOwnTransaction reads this, and only before the driver probe has answered.
+  if (transactionAwaitsCallback === undefined) {
+    pendingOperations.add(operation)
+    const forget = () => pendingOperations.delete(operation)
+    void operation.then(forget, forget)
+  }
   return operation
 }
 
@@ -745,7 +746,11 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
   },
 
   executor(queryOptions?: AdapterQueryOptions): unknown {
-    return resolveExecutor(queryOptions)
+    const executor = resolveExecutor(queryOptions)
+    if (manualTransactionOpen && executor === database) {
+      throw new Error('DrizzleAdapter: raw queries outside an active SQLite transaction cannot share its connection. Await the transaction first.')
+    }
+    return executor
   },
 
   async countByAdvanced(

@@ -21,12 +21,8 @@ export class TaggedCache implements TaggedCacheStore {
       if (!namespace) {
         if (!this.store.add) throw new Error('TaggedCache requires a store with atomic add().')
         const proposed = this.generateNamespace()
-        if (await this.store.add(tagKey, proposed)) {
-          namespace = proposed
-        } else {
-          namespace = await this.store.get<string>(tagKey)
-          if (!namespace) throw new Error('Tag namespace was evicted during initialization; retry the cache operation.')
-        }
+        namespace = (await this.store.add(tagKey, proposed)) ? proposed : await this.store.get<string>(tagKey)
+        if (!namespace) throw new Error('Tag namespace was evicted during initialization; retry the cache operation.')
       }
       namespaces.push(namespace)
     }

@@ -325,7 +325,7 @@ const collectionWrites = new WeakMap<object, Map<string, Promise<unknown>>>()
 export class AttachmentEngine {
   readonly model: typeof Model
   private readonly collectionLocks: Map<string, Promise<unknown>>
-  private readonly sharedCollectionLock?: ConfigureAttachmentsOptions['withCollectionLock']
+  private readonly sharedCollectionLock: NonNullable<ConfigureAttachmentsOptions['withCollectionLock']>
   private readonly storageFactory: (container: Container) => StorageManager
   private container?: Container
   private readonly defaultDisk: string
@@ -341,14 +341,10 @@ export class AttachmentEngine {
 
   constructor(options: ConfigureAttachmentsOptions) {
     const table = options.table
-    const identity = table as object
-    let locks = collectionWrites.get(identity)
-    if (!locks) {
-      locks = new Map()
-      collectionWrites.set(identity, locks)
-    }
+    const locks = collectionWrites.get(table as object) ?? new Map<string, Promise<unknown>>()
+    collectionWrites.set(table as object, locks)
     this.collectionLocks = locks
-    this.sharedCollectionLock = options.withCollectionLock
+    this.sharedCollectionLock = options.withCollectionLock ?? ((_key, callback) => callback())
     this.model = class AttachmentModel extends Model {
       static override table = table
     }
@@ -394,7 +390,7 @@ export class AttachmentEngine {
     const key = JSON.stringify([model.name, String(recordId), collection])
     const previous = this.collectionLocks.get(key) ?? Promise.resolve()
     const operation = previous.catch(() => undefined).then(() =>
-      this.sharedCollectionLock ? this.sharedCollectionLock(key, callback) : callback(),
+      this.sharedCollectionLock(key, callback),
     )
     this.collectionLocks.set(key, operation)
     try {
@@ -413,19 +409,18 @@ export class AttachmentEngine {
     options: AttachOptions = {},
   ): Promise<AttachmentRecord> {
     const spec = this.specFor(model, declaration, collection)
-    const write = () => this.attachUnlocked(model, declaration, recordId, collection, source, options)
+    const write = () => this.attachUnlocked(model, spec, recordId, collection, source, options)
     return spec.kind === 'one' ? this.withCollectionWrite(model, recordId, collection, write) : write()
   }
 
   private async attachUnlocked(
     model: typeof Model,
-    declaration: AttachmentsDeclaration,
+    spec: AttachmentCollectionSpec,
     recordId: string | number,
     collection: string,
     source: AttachmentSource,
     options: AttachOptions,
   ): Promise<AttachmentRecord> {
-    const spec = this.specFor(model, declaration, collection)
     const normalized = await normalizeSource(source, options.name)
 
     const queued = options.queued === true

@@ -39,14 +39,15 @@ export class FileStore implements CacheStore {
     }
   }
 
+  // Callers hold withFileLock, which has already created the directory.
   private async writeCacheFile<T>(filePath: string, item: CachedItem<T>): Promise<void> {
-    await this.ensureDirectory(filePath)
     const temporary = `${filePath}.${randomUUID()}.tmp`
     try {
       await writeFile(temporary, JSON.stringify(item), 'utf-8')
       await rename(temporary, filePath)
-    } finally {
+    } catch (error) {
       await unlink(temporary).catch(() => undefined)
+      throw error
     }
   }
 
@@ -110,11 +111,11 @@ export class FileStore implements CacheStore {
   }
 
   async add<T>(key: string, value: T): Promise<boolean> {
-    const path = this.getFilePath(key)
-    return this.withFileLock(path, async () => {
-      const item = await this.readCacheFile(path)
+    const filePath = this.getFilePath(key)
+    return this.withFileLock(filePath, async () => {
+      const item = await this.readCacheFile(filePath)
       if (item && !this.isExpired(item)) return false
-      await this.writeCacheFile(path, { value, expiresAt: null })
+      await this.writeCacheFile(filePath, { value, expiresAt: null })
       return true
     })
   }

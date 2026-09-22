@@ -164,7 +164,7 @@ export class EventManager {
         if (registered.options.once && !queued) this.forget(eventName, registeredListeners, [registered])
         if (queued) this.claimedOnce.delete(registered)
       } catch (error) {
-        // Failed listeners remain retryable; successful ones are removed immediately.
+        // Only failure or queueing releases the claim: an emit holding an older snapshot must not rerun a success.
         this.claimedOnce.delete(registered)
         throw error
       }
@@ -177,7 +177,6 @@ export class EventManager {
         await call(registered)
       }
     }
-
   }
 
   /** Resolves whether the listener was sent to a queue rather than run here. */

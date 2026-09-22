@@ -1,8 +1,9 @@
-import type { TaskDefinition } from './types'
-import { isDue, isDueInTimezone, parseCron } from './CronParser'
+import type { ParsedCron, TaskDefinition } from './types'
+import { isDueInTimezone, matchesCron, parseCron } from './CronParser'
 
 export class ScheduledTask {
   private readonly definition: TaskDefinition
+  private readonly cron: ParsedCron
   private lastRun: Date | null = null
   /**
    * The invocation holding the overlap guard; null when idle. The token is an
@@ -12,7 +13,7 @@ export class ScheduledTask {
   private running: { token: object; startedAt: number } | null = null
 
   constructor(definition: TaskDefinition) {
-    parseCron(definition.expression)
+    this.cron = parseCron(definition.expression)
     this.definition = definition
   }
 
@@ -33,7 +34,7 @@ export class ScheduledTask {
     if (timezone) {
       return isDueInTimezone(this.definition.expression, timezone, date)
     }
-    return isDue(this.definition.expression, date)
+    return matchesCron(date, this.cron)
   }
 
   async shouldRun(): Promise<boolean> {

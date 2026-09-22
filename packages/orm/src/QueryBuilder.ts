@@ -603,7 +603,6 @@ export class QueryBuilder<
   }
 
   async delete(): Promise<number | PlainObject | void> {
-    this.assertWriteOptions()
     const model = this.modelClass as typeof Model & {
       [BULK_DELETE]?: (query: QueryBuilder<TRecord, TResult>) => Promise<number | PlainObject | void>
     }

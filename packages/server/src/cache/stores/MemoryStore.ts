@@ -37,8 +37,8 @@ export class MemoryStore implements CacheStore {
     return item.expiresAt !== null && item.expiresAt <= this.now()
   }
 
-  private evictIfNeeded(): void {
-    if (this.cache.size >= this.maxSize) {
+  private evictIfNeeded(key: string): void {
+    if (!this.cache.has(key) && this.cache.size >= this.maxSize) {
       // The oldest item is the Map's first key.
       const firstKey = this.cache.keys().next().value
       if (firstKey !== undefined) {
@@ -63,7 +63,7 @@ export class MemoryStore implements CacheStore {
   }
 
   async set<T>(key: string, value: T, ttl?: number): Promise<void> {
-    if (!this.cache.has(key)) this.evictIfNeeded()
+    this.evictIfNeeded(key)
 
     const expiresAt = ttl ? this.now() + ttl * 1000 : null
 
@@ -76,7 +76,7 @@ export class MemoryStore implements CacheStore {
   async add<T>(key: string, value: T): Promise<boolean> {
     const item = this.cache.get(key)
     if (item && !this.isExpired(item)) return false
-    if (!this.cache.has(key)) this.evictIfNeeded()
+    this.evictIfNeeded(key)
     this.cache.set(key, { value, expiresAt: null })
     return true
   }
@@ -108,7 +108,7 @@ export class MemoryStore implements CacheStore {
     const item = this.cache.get(key)
     const active = item && !this.isExpired(item) ? item : undefined
     const newValue = ((active?.value as number | undefined) ?? 0) + value
-    if (!this.cache.has(key)) this.evictIfNeeded()
+    this.evictIfNeeded(key)
     this.cache.set(key, { value: newValue, expiresAt: active?.expiresAt ?? null })
     return newValue
   }
