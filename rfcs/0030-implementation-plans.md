@@ -1491,10 +1491,12 @@ matched when the plan was approved says nothing about the change. What shipped
   Inside the baseline, every plan approved before this change, and every
   revision that adds an `alter` or changes a planned value, could close its
   `alter`s only by a waiver.
-- Each approval carries the readings for its own hash: the earliest reading the
-  file already holds under the same baseline (keyed on element, name in code,
-  property and planned value), else one taken now. A revision approved after
-  its work therefore keeps the reading from before the work. Readings under
+- Each approval carries the readings for its own hash: every reading the file
+  already holds under the same baseline, earliest first (keyed on element, name
+  in code, property and planned value), then one taken now for each key they
+  lack. A revision approved after its work therefore keeps the reading from
+  before the work, and a section that cannot be read at re-approval loses
+  none. Readings under
   another baseline are another plan's start and are never carried: a restamp
   after the baseline was removed, or an unrelated plan sharing the file.
 - Approving a hash already approved writes nothing unless the entry lacks a

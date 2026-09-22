@@ -106,15 +106,18 @@ function sameReading(a: PlanPropertyReading, b: PlanPropertyReading): boolean {
 }
 
 /**
- * The readings an approval of `plan` records: for each of `current` (how the application reads
- * now), the earliest reading the approvals already hold under the plan's baseline, else `current`.
- * A reading taken late can only miss a change, never credit one: a property that already
+ * The readings an approval of `plan` records: every reading the approvals already hold under the
+ * plan's baseline, earliest first, then each of `current` (how the application reads now) they
+ * lack. A reading taken late can only miss a change, never credit one: a property that already
  * matched is never counted, and one that did not has moved since.
  */
 export function approvalReadings(approvals: PlanApprovals, plan: Plan, current: readonly PlanPropertyReading[]): NonNullable<PlanApproval['readings']> {
   const baseline = baselineDigest(plan)
-  const earlier = approvals.approvals.flatMap((entry) => (entry.readings?.baseline === baseline ? entry.readings.properties : []))
-  return { baseline, properties: current.map((reading) => earlier.find((held) => sameReading(held, reading)) ?? reading) }
+  const properties: PlanPropertyReading[] = []
+  for (const reading of [...approvals.approvals.flatMap((entry) => (entry.readings?.baseline === baseline ? entry.readings.properties : [])), ...current]) {
+    if (!properties.some((held) => sameReading(held, reading))) properties.push(reading)
+  }
+  return { baseline, properties }
 }
 
 /** The readings the approval of the plan's current hash recorded, which `judgePlan()` counts an `alter`'s matches against. */

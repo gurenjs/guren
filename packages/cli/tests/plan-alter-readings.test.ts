@@ -211,6 +211,12 @@ describe('approvalReadings', () => {
     expect(approvalReadings(approvals(baseline), plan, [total('match')]).properties).toEqual([total('differ')])
   })
 
+  test('should keep a reading the application cannot give now, so a section unreadable at re-approval loses nothing', () => {
+    const { baseline } = approvalReadings({ approvalsVersion: 1, approvals: [] }, plan, [])
+
+    expect(approvalReadings(approvals(baseline), plan, []).properties).toEqual([total('differ')])
+  })
+
   test('should take no reading from another baseline in the same file, which is another plan’s start', () => {
     expect(approvalReadings(approvals('another'), plan, [total('match')]).properties).toEqual([total('match')])
   })
