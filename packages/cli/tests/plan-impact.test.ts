@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { readFile } from 'node:fs/promises'
+import { chmod, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { runCommand } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
 import type { ColumnConsumerScan } from '../src/column-consumers'
-import { impactBreakingChanges, planImpact, type PlanImpactEntry, type PlanImpactSources } from '../src/plan/impact'
+import { loadPlanAppState } from '../src/plan/app-state'
+import { impactBreakingChanges, planChangesExisting, planImpact, type PlanImpactEntry, type PlanImpactSources } from '../src/plan/impact'
 import { planBreakingChanges, renderPlanHtml } from '../src/plan/render'
 import { PlanDraftSchema, type PlanChange, type PlanDraft } from '../src/plan/schema'
 import { createTempWorkspace, writeWorkspaceFiles, type TempWorkspace } from './helpers'
@@ -22,33 +23,43 @@ function plan(edit: (draft: PlanDraft) => void = () => {}): PlanDraft {
 
 const NO_READS: ColumnConsumerScan = { reads: [], opaque: [], resources: [], unreadable: [] }
 
+const POST = { className: 'Post', file: 'app/Models/Post.ts' }
+const BLOG_POST = { className: 'Post', file: 'modules/blog/app/Models/Post.ts' }
+
 function sources(overrides: Partial<PlanImpactSources> = {}): PlanImpactSources {
   return {
     routes: [
-      { name: 'posts.show', method: 'GET', path: '/posts/:post', action: 'PostController.show', bindings: { post: 'Post' } },
-      { name: 'posts.update', method: 'PATCH', path: '/posts/:id', action: 'PostController.update', bindings: {}, toolName: 'posts_update' },
-      { method: 'GET', path: '/feed', action: 'FeedController.index', bindings: {} },
+      { name: 'posts.show', method: 'GET', path: '/posts/:post', action: 'PostController.show', bindings: { post: 'Post' }, module: null },
+      { name: 'posts.update', method: 'PATCH', path: '/posts/:id', action: 'PostController.update', bindings: {}, module: null, toolName: 'posts_update' },
+      { method: 'GET', path: '/feed', action: 'FeedController.index', bindings: {}, module: null },
+      { name: 'blog.posts.show', method: 'GET', path: '/blog/:post', action: 'BlogPostController.show', bindings: { post: 'Post' }, module: 'blog' },
     ],
     models: [
-      { className: 'Post', module: null, file: 'app/Models/Post.ts', relationships: [] },
+      { className: 'Post', module: null, file: POST.file, relationships: [] },
       { className: 'User', module: null, file: 'app/Models/User.ts', relationships: [{ name: 'posts', type: 'hasMany', relatedModel: 'Post' }] },
+      { className: 'Post', module: 'blog', file: BLOG_POST.file, relationships: [] },
     ],
     actions: [
       { key: 'PostController.show', module: null, file: 'app/Http/Controllers/PostController.ts', pages: ['posts/Show'], calls: [], abilities: [], identifiers: ['Post', 'PostResource'], validates: [] },
       { key: 'FeedController.index', module: null, file: 'app/Http/Controllers/FeedController.ts', pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: [] },
+      { key: 'BlogPostController.show', module: 'blog', file: 'modules/blog/app/Http/Controllers/BlogPostController.ts', pages: [], calls: [], abilities: [], identifiers: ['Post'], validates: [] },
     ],
-    resources: [{ className: 'PostResource', file: 'app/Http/Resources/PostResource.ts', models: ['Post'] }],
+    resources: [{ className: 'PostResource', file: 'app/Http/Resources/PostResource.ts', models: [POST] }],
     policies: [{ className: 'PostPolicy', module: null, file: 'app/Policies/PostPolicy.ts' }],
-    tests: ['tests/PostController.test.ts', 'tests/UserController.test.ts'],
+    tests: ['tests/PostController.test.ts', 'tests/UserController.test.ts', 'modules/blog/tests/PostController.test.ts'],
     reads: {
       ...NO_READS,
       reads: [
-        { model: 'Post', property: 'title', kind: 'resource', file: 'app/Http/Resources/PostResource.ts', line: 12, where: 'PostResource' },
-        { model: 'Post', property: 'title', kind: 'page', file: 'resources/js/pages/posts/Show.tsx', line: 20, where: 'posts/Show', via: 'PostResource' },
-        { model: 'Post', property: 'body', kind: 'controller', file: 'app/Http/Controllers/PostController.ts', line: 9, where: 'PostController.show' },
-        { model: 'User', property: 'title', kind: 'controller', file: 'app/Http/Controllers/UserController.ts', line: 4, where: 'UserController.show' },
+        { model: POST, property: 'title', kind: 'resource', file: 'app/Http/Resources/PostResource.ts', line: 12, where: 'PostResource' },
+        { model: POST, property: 'title', kind: 'page', file: 'resources/js/pages/posts/Show.tsx', line: 20, where: 'posts/Show', via: 'PostResource' },
+        { model: POST, property: 'body', kind: 'controller', file: 'app/Http/Controllers/PostController.ts', line: 9, where: 'PostController.show' },
+        { model: { className: 'User', file: 'app/Models/User.ts' }, property: 'title', kind: 'controller', file: 'app/Http/Controllers/UserController.ts', line: 4, where: 'UserController.show' },
+        { model: BLOG_POST, property: 'title', kind: 'controller', file: 'modules/blog/app/Http/Controllers/BlogPostController.ts', line: 5, where: 'BlogPostController.show' },
       ],
     },
+    unreadable: {},
+    unparsedModels: [],
+    missingPages: [],
     ...overrides,
   }
 }
@@ -100,6 +111,48 @@ describe('planImpact', () => {
     )
 
     expect(entry.notes).toEqual([{ key: 'impact.unreadableFiles', values: { files: 'app/Http/Controllers/Broken.ts' } }])
+  })
+
+  test('should say the models could not be read beside a column, rather than show nothing found', () => {
+    const entry = entryFor(planImpact(withTitleColumn({ kind: 'alter' }), sources({ models: [], unreadable: { models: 'app/Models would not open' } })), 'column.post.title')
+
+    expect(entry).toMatchObject({ consumers: [], notes: [{ key: 'impact.unreadable.models', values: { reason: 'app/Models would not open' } }] })
+  })
+
+  test('should name a model file that did not parse beside a column of it', () => {
+    const entry = entryFor(planImpact(withTitleColumn({ kind: 'alter' }), sources({ unparsedModels: ['app/Models/Broken.ts'] })), 'column.post.title')
+
+    expect(entry.notes).toEqual([{ key: 'impact.unparsedModels', values: { files: 'app/Models/Broken.ts' } }])
+  })
+
+  test('should name a page with no component file beside a column', () => {
+    const entry = entryFor(planImpact(withTitleColumn({ kind: 'alter' }), sources({ missingPages: ['posts/Gone'] })), 'column.post.title')
+
+    expect(entry.notes).toEqual([{ key: 'impact.missingPages', values: { pages: 'posts/Gone' } }])
+  })
+
+  test('should say the controllers could not be read beside an element found through actions', () => {
+    const entry = entryFor(planImpact(plan(), sources({ actions: [], unreadable: { controllers: 'app/Http/Controllers would not open' } })), 'view.posts.show')
+
+    expect(entry.notes).toEqual([{ key: 'impact.unreadable.controllers', values: { reason: 'app/Http/Controllers would not open' } }])
+  })
+
+  test("should keep a module's same-named model out of the root model's Impact, and in its own", () => {
+    const rootEntry = entryFor(planImpact(withTitleColumn({ kind: 'drop', reason: 'x' }), sources()), 'column.post.title')
+    const blog = plan((draft) => {
+      draft.models[0]!.module = 'blog'
+      draft.models[0]!.columns.push({ id: 'column.post.title', name: 'title', change: { kind: 'alter' }, type: 'string', nullable: false, unique: false, index: false })
+    })
+    const blogModel = entryFor(planImpact(blog, sources()), 'model.post')
+
+    expect(rootEntry.consumers.map((consumer) => consumer.name)).not.toContain('BlogPostController.show')
+    expect(entryFor(planImpact(blog, sources()), 'column.post.title').consumers.map((consumer) => consumer.name)).toEqual(['BlogPostController.show'])
+    expect(blogModel.consumers.map((consumer) => `${consumer.kind} ${consumer.name}`)).toEqual([
+      'route blog.posts.show',
+      'apiRoute blog.posts.show',
+      'action BlogPostController.show',
+      'test modules/blog/tests/PostController.test.ts',
+    ])
   })
 
   test('should hang the relationships, bound routes, resource, policy, mentioning actions and tests off an altered model', () => {
@@ -174,9 +227,9 @@ describe('planImpact', () => {
       input.routes[0]!.change = { kind: 'rename', from: 'posts.update' }
     })
 
-    const entry = entryFor(planImpact(renamed, sources({ routes: { unreadable: 'routes/web.ts threw' } })), 'route.comments.store')
+    const entry = entryFor(planImpact(renamed, sources({ routes: [], unreadable: { routes: 'routes/web.ts threw' } })), 'route.comments.store')
 
-    expect(entry).toMatchObject({ consumers: [], notes: [{ key: 'impact.unreadable', values: { reader: 'routes', reason: 'routes/web.ts threw' } }] })
+    expect(entry).toMatchObject({ consumers: [], notes: [{ key: 'impact.unreadable.routes', values: { reason: 'routes/web.ts threw' } }] })
   })
 
   test('should reach an altered view and a validator through the actions that name them', () => {
@@ -321,5 +374,56 @@ export class PostController extends Controller {
     expect(payload.impact?.find((entry) => entry.elementId === 'column.post.title')?.consumers).toEqual([
       { kind: 'read', name: 'PostController.show', file: 'app/Http/Controllers/PostController.ts', line: 8 },
     ])
+  })
+})
+
+describe('loadPlanAppState({ impact: true })', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-plan-impact-sources-')
+  })
+
+  afterEach(async () => {
+    await chmod(join(workspace.dir, 'app/Http/Controllers'), 0o755).catch(() => {})
+    await chmod(join(workspace.dir, 'app/Models'), 0o755).catch(() => {})
+    await workspace.cleanup()
+  })
+
+  test('should name a model file that yields no model class', async () => {
+    await writeWorkspaceFiles(workspace.dir, { ...PLAN_APP_FILES, 'app/Models/Broken.ts': 'export class Broken extends {' })
+
+    const impact = (await loadPlanAppState(workspace.dir, { impact: true })).impact!
+
+    expect(impact.unparsedModels).toEqual(['app/Models/Broken.ts'])
+    expect(impact.models.map((model) => model.className).sort()).toEqual(['Post', 'User'])
+  })
+
+  test('should say the controllers directory would not open, rather than scan nothing in silence', async () => {
+    await writeWorkspaceFiles(workspace.dir, PLAN_APP_FILES)
+    await chmod(join(workspace.dir, 'app/Http/Controllers'), 0o000)
+
+    const impact = (await loadPlanAppState(workspace.dir, { impact: true })).impact!
+
+    expect(impact.unreadable.controllers).toContain('app/Http/Controllers would not open')
+  })
+
+  test('should carry the models verdict the checks reached', async () => {
+    await writeWorkspaceFiles(workspace.dir, PLAN_APP_FILES)
+    await chmod(join(workspace.dir, 'app/Models'), 0o000)
+
+    const impact = (await loadPlanAppState(workspace.dir, { impact: true })).impact!
+
+    expect(impact.unreadable.models).toContain('app/Models would not open')
+  })
+})
+
+describe('planChangesExisting', () => {
+  test('should tell a plan that only adds from one that alters, which is when plan:render scans for Impact', () => {
+    expect(planChangesExisting(plan((draft) => {
+      draft.models[0]!.change = { kind: 'existing' }
+      draft.views[0]!.change = { kind: 'add' }
+    }))).toBe(false)
+    expect(planChangesExisting(plan())).toBe(true)
   })
 })

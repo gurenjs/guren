@@ -41,6 +41,7 @@ import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { renderPlanFile } from './plan-render'
 import { loadPlanAppState } from './plan/app-state'
+import { planChangesExisting } from './plan/impact'
 import { formatPlanApprove, planApproveFile } from './plan-approve'
 import { formatPlanStatus, planStatusFile } from './plan-status'
 import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from './plan-verify'
@@ -240,7 +241,8 @@ const planRenderCommand = defineCommand({
     const appRoot = args.app ?? process.cwd()
     const rendered = await renderPlanFile(args.plan, {
       output: args.output,
-      app: () => loadPlanAppState(appRoot, { impact: true }),
+      // Impact scans the whole application, which only a plan changing something existing needs.
+      app: (plan) => loadPlanAppState(appRoot, { impact: planChangesExisting(plan) }),
       locale: args.locale,
       appLocale: () => readAppDefaultLocale(appRoot),
     })

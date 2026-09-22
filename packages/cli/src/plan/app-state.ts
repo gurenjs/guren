@@ -36,8 +36,10 @@ import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
 import { loadPlanAppDetail, type PlanAppDetail } from './app-detail'
 import type { PlanImpactSources } from './impact'
 import { loadPlanImpactSources } from './impact-sources'
+import { ParseCache } from '../parse-cache'
 
 const POLICIES_DIR = 'app/Policies'
+const CONTROLLERS_DIR = 'app/Http/Controllers'
 
 /** A section the scanners could not read, carrying why. */
 export interface PlanAppUnreadable {
@@ -159,6 +161,8 @@ export async function loadPlanAppState(
   const root = resolve(cwd)
   const roots = await listAppRoots(root).catch((): AppRoot[] => [])
 
+  // One cache for the controller scan and Impact's column scan, which parse the same files.
+  const cache = new ParseCache()
   const [apiOnly, models, resources, policies, pages, routes, controllers, tables] = await Promise.all([
     isConfirmedApiOnlyApp(root).catch(() => false),
     modelSection(root, roots),
@@ -166,7 +170,7 @@ export async function loadPlanAppState(
     classSection(root, roots, POLICIES_DIR, discoverPolicyFiles),
     pageSection(root),
     routeSection(root, options.routesFile),
-    controllerSections(root),
+    controllerSections(root, cache),
     tableSection(root, roots),
   ])
 
@@ -183,7 +187,17 @@ export async function loadPlanAppState(
     apiOnly,
   }
   if (options.impact) {
-    state.impact = await loadPlanImpactSources({ root, routes: routes.routes, controllers: controllers.scan, pages: isUnreadable(pages) ? pages : appNames(pages) })
+    // The controller scan and the test discovery answer `[]` for a directory that would not open.
+    const [controllersDir, testsDir] = await Promise.all([probeDirectory(roots, CONTROLLERS_DIR), probeDirectory(roots, 'tests')])
+    state.impact = await loadPlanImpactSources({
+      root,
+      cache,
+      routes: routes.routes,
+      definitions: routes.definitions,
+      provenance: routes.provenance,
+      controllers: controllersDir ? { unreadable: controllersDir } : controllers.scan,
+      sections: { models, resources, policies, pages, ...(testsDir ? { tests: { unreadable: testsDir } } : {}) },
+    })
   }
   if (!options.detail) return state
 
@@ -267,10 +281,11 @@ async function pageSection(cwd: string): Promise<PlanAppNames> {
  */
 async function controllerSections(
   cwd: string,
+  cache: ParseCache,
 ): Promise<{ classes: PlanAppNames; actions: PlanAppNames; scan: ControllerMethodScan | PlanAppUnreadable }> {
   let scan: ControllerMethodScan
   try {
-    scan = await parseControllerMethods(cwd)
+    scan = await parseControllerMethods(cwd, cache)
   } catch (error) {
     const unreadable = { unreadable: error instanceof Error ? error.message : String(error) }
     return { classes: unreadable, actions: unreadable, scan: unreadable }

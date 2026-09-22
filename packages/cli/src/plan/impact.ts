@@ -2,13 +2,14 @@
  * Impact (RFC 0030 §2): for each plan element that changes something the application
  * already has, the consumers the existing readers and the column-consumer scan find.
  * Pure: `impact-sources.ts` reads the application. Every list is a lower bound, and an
- * empty one means nothing was found, never that nothing is affected. The breaking rule
- * stays `planBreakingChanges()`; this adds only a change to a tool the app publishes.
+ * empty one means nothing was found, never that nothing is affected; a reader that
+ * could not look says so beside it. The breaking rule stays `planBreakingChanges()`.
  */
 
-import type { ColumnConsumerScan, ResourceModelTie } from '../column-consumers'
+import type { ColumnConsumerScan, ColumnRead, ResourceModelTie } from '../column-consumers'
+import { isTestFileNamedFor, moduleNameFromRelPath } from '../discovery'
 import type { PlanAppActionDetail, PlanAppClassDetail } from './app-detail'
-import type { PlanAppScope, PlanAppUnreadable } from './app-state'
+import type { PlanAppScope } from './app-state'
 import type { PlanBreakingChange } from './page/payload'
 import type { PlanChange, PlanDraft, PlanElementSection } from './schema'
 
@@ -18,9 +19,11 @@ export interface PlanImpactRoute {
   path: string
   /** `ClassName.action`; absent for an inline or prototype handler. */
   action?: string
-  /** Route parameter → bound model class. */
+  /** Route parameter → bound model class, resolved from {@link PlanImpactRoute.module}. */
   bindings: Record<string, string>
-  /** The tool the route publishes (`agent.toolName`, else its name), when it declares `.agent()`. */
+  /** The module whose registrar declared the route, or `null`. */
+  module: PlanAppScope
+  /** The tool `deriveAgentTools()` derives from the route, when it publishes one. */
   toolName?: string
 }
 
@@ -31,32 +34,38 @@ export interface PlanImpactModel {
   relationships: Array<{ name: string; type: string; relatedModel?: string }>
 }
 
+/** The readers a finding rests on; each has its own sentence when it could not look. */
+export type PlanImpactReader = 'models' | 'routes' | 'controllers' | 'resources' | 'policies' | 'pages' | 'tests'
+
 export interface PlanImpactSources {
-  routes: PlanImpactRoute[] | PlanAppUnreadable
-  models: PlanImpactModel[] | PlanAppUnreadable
-  actions: PlanAppActionDetail[] | PlanAppUnreadable
+  routes: PlanImpactRoute[]
+  models: PlanImpactModel[]
+  actions: PlanAppActionDetail[]
   resources: ResourceModelTie[]
   policies: PlanAppClassDetail[]
   /** App-relative test files. */
   tests: string[]
   reads: ColumnConsumerScan
+  /** A reader that could not look, and why: its empty list above is not a finding. */
+  unreadable: Partial<Record<PlanImpactReader, string>>
+  /** Model files that yielded no model class, so a column of theirs is scanned for nothing. */
+  unparsedModels: string[]
+  /** Page ids with no component file to scan. */
+  missingPages: string[]
 }
 
-export const PLAN_IMPACT_CONSUMER_KINDS = [
-  'route',
-  'apiRoute',
-  'agentTool',
-  'action',
-  'model',
-  'resource',
-  'policy',
-  'page',
-  'test',
-  'read',
-  'opaqueRead',
-] as const
-
-export type PlanImpactConsumerKind = (typeof PLAN_IMPACT_CONSUMER_KINDS)[number]
+export type PlanImpactConsumerKind =
+  | 'route'
+  | 'apiRoute'
+  | 'agentTool'
+  | 'action'
+  | 'model'
+  | 'resource'
+  | 'policy'
+  | 'page'
+  | 'test'
+  | 'read'
+  | 'opaqueRead'
 
 export interface PlanImpactConsumer {
   kind: PlanImpactConsumerKind
@@ -67,7 +76,6 @@ export interface PlanImpactConsumer {
   via?: string
 }
 
-/** A reader Impact could not use for this element: its absence of findings says nothing. */
 export interface PlanImpactNote {
   /** An `impact.*` key of the page's dictionaries. */
   key: string
@@ -81,14 +89,27 @@ export interface PlanImpactEntry {
   notes: PlanImpactNote[]
 }
 
-type Unreadable = PlanAppUnreadable
-
-function readable<T>(section: T[] | Unreadable): section is T[] {
-  return Array.isArray(section)
+const READER_KEYS: Record<PlanImpactReader, string> = {
+  models: 'impact.unreadable.models',
+  routes: 'impact.unreadable.routes',
+  controllers: 'impact.unreadable.controllers',
+  resources: 'impact.unreadable.resources',
+  policies: 'impact.unreadable.policies',
+  pages: 'impact.unreadable.pages',
+  tests: 'impact.unreadable.tests',
 }
 
 function changes(change: PlanChange): boolean {
   return change.kind === 'alter' || change.kind === 'rename' || change.kind === 'drop'
+}
+
+/** Whether a plan changes anything the application has, which is the only case Impact reads the app for. */
+export function planChangesExisting(plan: PlanDraft): boolean {
+  return (
+    plan.models.some((model) => changes(model.change) || model.tableRenamedFrom !== undefined || model.columns.some((column) => changes(column.change)))
+    || plan.controllers.some((controller) => changes(controller.change) || controller.actions.some((action) => changes(action.change)))
+    || [...plan.validators, ...plan.routes, ...plan.views, ...plan.resources, ...plan.policies].some((element) => changes(element.change))
+  )
 }
 
 /** The name the application knows the element by today: a rename's `from`. */
@@ -100,10 +121,18 @@ function routeLabel(route: PlanImpactRoute): string {
   return route.name ?? `${route.method} ${route.path}`
 }
 
+/** A class name as seen from an app root: that root's own model, else the project root's. */
+function resolveModel(sources: PlanImpactSources, className: string, from: PlanAppScope): PlanImpactModel | undefined {
+  return sources.models.find((model) => model.className === className && model.module === from)
+    ?? sources.models.find((model) => model.className === className && model.module === null)
+}
+
 class EntryBuilder {
   readonly consumers: PlanImpactConsumer[] = []
   readonly notes: PlanImpactNote[] = []
   private readonly seen = new Set<string>()
+
+  constructor(private readonly sources: PlanImpactSources) {}
 
   add(consumer: PlanImpactConsumer): void {
     const key = JSON.stringify([consumer.kind, consumer.name, consumer.file ?? ''])
@@ -112,10 +141,24 @@ class EntryBuilder {
     this.consumers.push(consumer)
   }
 
-  unreadable(reader: string, section: readonly unknown[] | Unreadable): void {
-    if (Array.isArray(section)) return
-    const reason = (section as Unreadable).unreadable
-    if (!this.notes.some((note) => note.values.reader === reader)) this.notes.push({ key: 'impact.unreadable', values: { reader, reason } })
+  private note(key: string, values: Record<string, string>): void {
+    if (!this.notes.some((note) => note.key === key)) this.notes.push({ key, values })
+  }
+
+  /** The readers this entry's lists rest on: each one that could not look gets its sentence. */
+  rests(...readers: PlanImpactReader[]): void {
+    for (const reader of readers) {
+      const reason = this.sources.unreadable[reader]
+      if (reason !== undefined) this.note(READER_KEYS[reader], { reason })
+    }
+  }
+
+  /** What the column scan could not see: files that did not parse, models with no class, pages with no file. */
+  scanGaps(): void {
+    const { reads, unparsedModels, missingPages } = this.sources
+    if (reads.unreadable.length > 0) this.note('impact.unreadableFiles', { files: reads.unreadable.join(', ') })
+    if (unparsedModels.length > 0) this.note('impact.unparsedModels', { files: unparsedModels.join(', ') })
+    if (missingPages.length > 0) this.note('impact.missingPages', { pages: missingPages.join(', ') })
   }
 }
 
@@ -127,103 +170,103 @@ function addRoute(entry: EntryBuilder, route: PlanImpactRoute): void {
 }
 
 function addActionRoutes(entry: EntryBuilder, sources: PlanImpactSources, matches: (action: string) => boolean): void {
-  entry.unreadable('routes', sources.routes)
-  if (!readable(sources.routes)) return
+  entry.rests('routes')
   for (const route of sources.routes) {
     if (route.action !== undefined && matches(route.action)) addRoute(entry, route)
   }
 }
 
 /** Actions whose body names `identifier` outside comments and strings: a mention, which is the scan's bound. */
-function addMentioningActions(entry: EntryBuilder, sources: PlanImpactSources, identifier: string, withRoutes: boolean): void {
-  entry.unreadable('actions', sources.actions)
-  if (!readable(sources.actions)) return
+function addMentioningActions(
+  entry: EntryBuilder,
+  sources: PlanImpactSources,
+  identifier: string,
+  options: { withRoutes: boolean; refersTo?: (action: PlanAppActionDetail) => boolean },
+): void {
+  entry.rests('controllers')
   for (const action of sources.actions) {
-    if (!action.identifiers.includes(identifier)) continue
+    if (!action.identifiers.includes(identifier) || (options.refersTo && !options.refersTo(action))) continue
     entry.add({ kind: 'action', name: action.key, file: action.file })
-    if (withRoutes) addActionRoutes(entry, sources, (key) => key === action.key)
+    if (options.withRoutes) addActionRoutes(entry, sources, (key) => key === action.key)
   }
 }
 
-function addReadFileNotes(entry: EntryBuilder, sources: PlanImpactSources): void {
-  if (sources.reads.unreadable.length === 0) return
-  entry.notes.push({ key: 'impact.unreadableFiles', values: { files: sources.reads.unreadable.join(', ') } })
-}
-
-function readConsumer(read: { where: string; file: string; line: number; via?: string }): PlanImpactConsumer {
+function readConsumer(read: Pick<ColumnRead, 'where' | 'file' | 'line' | 'via'>): PlanImpactConsumer {
   return { kind: 'read', name: read.where || read.file, file: read.file, line: read.line, ...(read.via ? { via: read.via } : {}) }
 }
 
-function modelEntry(entry: EntryBuilder, sources: PlanImpactSources, className: string, module: PlanAppScope, change: PlanChange): void {
-  entry.unreadable('models', sources.models)
-  if (readable(sources.models)) {
-    for (const model of sources.models) {
-      if (model.className === className && model.module === module) continue
-      for (const relationship of model.relationships) {
-        if (relationship.relatedModel === className) entry.add({ kind: 'model', name: `${model.className}.${relationship.name}`, file: model.file })
-      }
+function modelEntry(entry: EntryBuilder, sources: PlanImpactSources, target: PlanImpactModel | undefined, change: PlanChange): void {
+  entry.rests('models', 'routes', 'resources', 'policies', 'controllers', 'tests')
+  if (change.kind === 'drop' || change.kind === 'rename') entry.rests('pages')
+  entry.scanGaps()
+  if (!target) return
+  const isTarget = (className: string | undefined, from: PlanAppScope): boolean =>
+    className !== undefined && resolveModel(sources, className, from) === target
+
+  for (const model of sources.models) {
+    if (model === target) continue
+    for (const relationship of model.relationships) {
+      if (isTarget(relationship.relatedModel, model.module)) entry.add({ kind: 'model', name: `${model.className}.${relationship.name}`, file: model.file })
     }
   }
-  entry.unreadable('routes', sources.routes)
-  if (readable(sources.routes)) {
-    for (const route of sources.routes) {
-      if (Object.values(route.bindings).includes(className)) addRoute(entry, route)
-    }
+  for (const route of sources.routes) {
+    if (Object.values(route.bindings).some((className) => isTarget(className, route.module))) addRoute(entry, route)
   }
   for (const resource of sources.resources) {
-    if (resource.models.includes(className)) entry.add({ kind: 'resource', name: resource.className, file: resource.file })
+    if (resource.models.some((model) => model.file === target.file)) entry.add({ kind: 'resource', name: resource.className, file: resource.file })
   }
   for (const policy of sources.policies) {
-    if (policy.className === `${className}Policy` && policy.module === module) entry.add({ kind: 'policy', name: policy.className, file: policy.file })
+    if (policy.className === `${target.className}Policy` && policy.module === target.module) entry.add({ kind: 'policy', name: policy.className, file: policy.file })
   }
-  addMentioningActions(entry, sources, className, false)
+  addMentioningActions(entry, sources, target.className, { withRoutes: false, refersTo: (action) => isTarget(target.className, action.module) })
   if (change.kind === 'drop' || change.kind === 'rename') {
     for (const read of sources.reads.reads) {
-      if (read.model === className && read.kind === 'page') entry.add({ kind: 'page', name: read.where, file: read.file })
+      if (read.model.file === target.file && read.kind === 'page') entry.add({ kind: 'page', name: read.where, file: read.file })
     }
-    addReadFileNotes(entry, sources)
   }
-  // `generateEntityContext()`'s rule: a test belongs to an entity when its file name carries it.
   for (const test of sources.tests) {
-    if ((test.split('/').pop() ?? test).includes(className)) entry.add({ kind: 'test', name: test, file: test })
+    if (isTestFileNamedFor(test, target.className) && isTarget(target.className, moduleNameFromRelPath(test))) entry.add({ kind: 'test', name: test, file: test })
   }
 }
 
-/** An opaque read (`post[key]`, a rest pattern) may be any column, so it is listed under every changed one. */
-function columnEntry(entry: EntryBuilder, sources: PlanImpactSources, className: string, property: string): void {
+/** An opaque read (`post[key]`, a spread, a rest pattern) may be any column, so it is listed under every changed one. */
+function columnEntry(entry: EntryBuilder, sources: PlanImpactSources, target: PlanImpactModel | undefined, property: string): void {
+  entry.rests('models', 'controllers', 'resources', 'pages')
+  entry.scanGaps()
+  if (!target) return
   for (const read of sources.reads.reads) {
-    if (read.model === className && read.property === property) entry.add(readConsumer(read))
+    if (read.model.file === target.file && read.property === property) entry.add(readConsumer(read))
   }
   for (const opaque of sources.reads.opaque) {
-    if (opaque.model === className) entry.add({ kind: 'opaqueRead', name: opaque.where || opaque.file, file: opaque.file, line: opaque.line })
+    if (opaque.model.file === target.file) entry.add({ ...readConsumer(opaque), kind: 'opaqueRead' })
   }
-  addReadFileNotes(entry, sources)
 }
 
 /** Every element that changes something existing, with what Impact found hanging off it. */
 export function planImpact(plan: PlanDraft, sources: PlanImpactSources): PlanImpactEntry[] {
   const entries: PlanImpactEntry[] = []
   const build = (elementId: string, section: PlanElementSection, fill: (entry: EntryBuilder) => void): void => {
-    const entry = new EntryBuilder()
+    const entry = new EntryBuilder(sources)
     fill(entry)
     entries.push({ elementId, section, consumers: entry.consumers, notes: entry.notes })
   }
 
   for (const model of plan.models) {
-    const className = currentName(model.name, model.change)
     const module = model.module ?? null
+    const target = sources.models.find((candidate) => candidate.className === currentName(model.name, model.change) && candidate.module === module)
     if (changes(model.change) || model.tableRenamedFrom !== undefined) {
-      build(model.id, 'models', (entry) => modelEntry(entry, sources, className, module, model.change))
+      build(model.id, 'models', (entry) => modelEntry(entry, sources, target, model.change))
     }
     for (const column of model.columns) {
       if (!changes(column.change)) continue
-      build(column.id, 'columns', (entry) => columnEntry(entry, sources, className, currentName(column.name, column.change)))
+      build(column.id, 'columns', (entry) => columnEntry(entry, sources, target, currentName(column.name, column.change)))
     }
   }
 
   for (const validator of plan.validators) {
     if (!changes(validator.change)) continue
-    build(validator.id, 'validators', (entry) => addMentioningActions(entry, sources, currentName(validator.name, validator.change), true))
+    const name = currentName(validator.name, validator.change)
+    build(validator.id, 'validators', (entry) => addMentioningActions(entry, sources, name, { withRoutes: true }))
   }
 
   for (const controller of plan.controllers) {
@@ -242,8 +285,7 @@ export function planImpact(plan: PlanDraft, sources: PlanImpactSources): PlanImp
     if (!changes(route.change)) continue
     const name = currentName(route.name, route.change)
     build(route.id, 'routes', (entry) => {
-      entry.unreadable('routes', sources.routes)
-      if (!readable(sources.routes)) return
+      entry.rests('routes')
       const found = sources.routes.find((candidate) => candidate.name === name)
         ?? sources.routes.find((candidate) => candidate.method === route.method && candidate.path === route.path)
       if (found) addRoute(entry, found)
@@ -254,8 +296,7 @@ export function planImpact(plan: PlanDraft, sources: PlanImpactSources): PlanImp
     if (!changes(view.change)) continue
     const page = currentName(view.page, view.change)
     build(view.id, 'views', (entry) => {
-      entry.unreadable('actions', sources.actions)
-      if (!readable(sources.actions)) return
+      entry.rests('controllers', 'routes')
       for (const action of sources.actions) {
         if (!action.pages.includes(page)) continue
         entry.add({ kind: 'action', name: action.key, file: action.file })
@@ -268,7 +309,8 @@ export function planImpact(plan: PlanDraft, sources: PlanImpactSources): PlanImp
     if (!changes(resource.change)) continue
     const name = currentName(resource.name, resource.change)
     build(resource.id, 'resources', (entry) => {
-      addMentioningActions(entry, sources, name, true)
+      addMentioningActions(entry, sources, name, { withRoutes: true })
+      entry.rests('pages')
       for (const read of sources.reads.reads) {
         if (read.kind === 'page' && read.via === name) entry.add({ kind: 'page', name: read.where, file: read.file })
       }
@@ -277,7 +319,8 @@ export function planImpact(plan: PlanDraft, sources: PlanImpactSources): PlanImp
 
   for (const policy of plan.policies) {
     if (!changes(policy.change)) continue
-    build(policy.id, 'policies', (entry) => addMentioningActions(entry, sources, currentName(policy.name, policy.change), true))
+    const name = currentName(policy.name, policy.change)
+    build(policy.id, 'policies', (entry) => addMentioningActions(entry, sources, name, { withRoutes: true }))
   }
 
   return entries

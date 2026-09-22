@@ -354,7 +354,7 @@ function actionDetail(
 }
 
 /** Classes a directory scan discovers, each tagged with the app root it came from. */
-async function classDetail(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<PlanAppClassDetail[]> {
+export async function classDetail(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<PlanAppClassDetail[]> {
   const files = excludeBarrelFiles(await discover(root).catch((): string[] => []))
   return files.map((file) => ({ className: classNameFromPath(file), module: moduleNameFor(root, file), file: toPosixRelative(root, file) }))
 }

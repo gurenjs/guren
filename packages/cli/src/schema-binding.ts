@@ -46,6 +46,7 @@ export interface ImportEntry {
   source: string
   /** The *exported* name a local aliases; empty for default and namespace imports, which have none. */
   imported: string
+  kind: 'named' | 'default' | 'namespace'
 }
 
 /** Local binding → where it came from and the exported name it aliases. */
@@ -60,9 +61,14 @@ export function importsByLocal(body: Statement[]): Map<string, ImportEntry> {
         imports.set(specifier.local.name, {
           source,
           imported: imported.type === 'Identifier' ? imported.name : imported.value,
+          kind: 'named',
         })
       } else {
-        imports.set(specifier.local.name, { source, imported: '' })
+        imports.set(specifier.local.name, {
+          source,
+          imported: '',
+          kind: specifier.type === 'ImportDefaultSpecifier' ? 'default' : 'namespace',
+        })
       }
     }
   }

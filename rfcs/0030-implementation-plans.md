@@ -367,24 +367,43 @@ breaking regardless of what Impact found.
 - Impact is computed for every element whose change is `alter`, `rename` or `drop`, and
   for a model whose table is renamed. A renamed element is looked up by its `from`, the
   name the application has today. Its list may be empty, and the page says an empty
-  list is not proof of anything; a page rendered with no application draws no Impact.
+  list is not proof of anything. A plan that changes nothing existing skips the scan;
+  a page rendered with no application draws no Impact.
 - The readers are the ones named above, all static: model relationships, route
   bindings, the route graph (with each route's `ApiRoutes` entry and the tool
-  `deriveAgentTools()` would name), resources and policies, controller actions whose
-  body names the element outside comments and strings (a mention, and labelled so),
-  and tests by file name. `plan:render` asks for them with `loadPlanAppState({ impact:
-  true })`, which imports no `db/schema.ts`, so the command still runs no more
-  application code than the route graph needs.
+  `deriveAgentTools()` derives from it), resources and policies, controller actions
+  whose body names the element outside comments and strings (a mention, and labelled
+  so), and tests by file name. `plan:render` asks for them with `loadPlanAppState({
+  impact: true })`, which imports no `db/schema.ts`.
+- A class name is resolved from the app root that spells it: a module's own model,
+  else the project root's. Relationships, route bindings, action mentions, tests and
+  column reads are compared by the model they resolve to, so a module's `Post` never
+  lands in the root `Post`'s Impact.
+- A reader that could not look says so on every entry that rests on it, with its
+  reason: a directory that would not open (models, controllers, resources, policies,
+  pages, `tests/`), a routes file that threw, a controller or page that did not parse,
+  a model file that declared no model the parser could read. A nested directory that
+  would not open still under-reports, as in the §2 checks.
 - The column-consumer scan (`column-consumers.ts`) reads the AST of controllers,
-  resources and page components. A value is a model's record where the file says so: a
-  query chain on the model class imported from its module, `this.model(M)`,
-  `this.resource` in a resource that imports the model, or an annotation naming
-  `MRecord`, a tied resource's data type, `Data.M` or `PaginatedPageProps` of one. It
-  follows plain aliases, destructuring, `for...of` and element callbacks, and nothing
-  across a call or a file. A method call on a record is not a read; `post[key]` and a
-  rest pattern are reported as reads no static scan can name. A page's read is
-  reported through the resource whose data type tied it, since the page reads the
-  resource's key.
+  resources and page components. A value is a model's record, or a list of them,
+  where the file says so: a query on the model class imported from its module (judged
+  by the chain's last method: `find*`/`first*`/`create` a record, `all`/`get`/`where`
+  and the other builders a list, `paginate` an object whose `data` is a list),
+  `this.model(M)`, `this.resource` in a resource that imports the model, or an
+  annotation naming `MRecord`, a tied resource's data type, `Data.M`, an array of one
+  or `PaginatedPageProps` of one. It follows plain aliases, destructuring, indexing,
+  `for...of` and element callbacks. The column names a query spells
+  (`where('title', …)`, `where({ title })`, `select('title', …)`, `orderBy`) are
+  reads. A method call, and a list's own members (`length`), are not. `post[key]`,
+  a rest pattern and a spread of a record (`{ ...post }`, `<Card {...post} />`) are
+  reads no static scan can name, listed under every changed column of the model.
+  A local or parameter named after the model class shadows it. A page's read is
+  reported through the resource whose data type tied it.
+- Not scanned, so absent from the lists: a value that crosses a function call or a
+  file, a reassignment, a component typed through `React.FC<Props>` rather than its
+  own parameter annotation, an import through a barrel or through a path alias other
+  than `@/`, a query method the lists above do not name (an application's own
+  scopes), and a Drizzle table column (`posts.title`) read outside the model.
 - The breaking rule stays the plan's own (`planBreakingChanges()`), with one addition
   only the application can answer: an altered route, action or controller whose route
   publishes an agent tool is flagged even when the plan does not declare the tool.

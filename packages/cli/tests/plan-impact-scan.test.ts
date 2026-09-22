@@ -3,7 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { scanColumnConsumers, type ColumnConsumerScan, type ColumnRead } from '../src/column-consumers'
+import { scanColumnConsumers, type ColumnConsumerModel, type ColumnConsumerScan, type ColumnRead } from '../src/column-consumers'
+import { ParseCache } from '../src/parse-cache'
 import { writeWorkspaceFiles } from './helpers'
 
 let ROOT: string
@@ -14,12 +15,13 @@ const MODEL_FILES: Record<string, string> = {
   'app/Models/User.ts': "import { defineModel } from '@guren/core'\nimport { users } from '../../db/schema'\n\nexport type UserRecord = typeof users.$inferSelect\nexport class User extends defineModel(users) {}\n",
 }
 
-const MODELS = [
+const MODELS: ColumnConsumerModel[] = [
   { className: 'Post', file: 'app/Models/Post.ts' },
   { className: 'User', file: 'app/Models/User.ts' },
 ]
 
 interface Fixture {
+  models?: ColumnConsumerModel[]
   controllers?: Record<string, string>
   resources?: Record<string, string>
   pages?: Record<string, string>
@@ -39,15 +41,15 @@ async function scan(fixture: Fixture): Promise<ColumnConsumerScan> {
     ...fixture.extra,
   })
   return scanColumnConsumers(dir, {
-    models: MODELS,
+    models: fixture.models ?? MODELS,
     controllers: Object.keys(fixture.controllers ?? {}).map((name) => `app/Http/Controllers/${name}`),
     resources: Object.keys(fixture.resources ?? {}).map((name) => `app/Http/Resources/${name}`),
     pages: Object.keys(fixture.pages ?? {}).map((name) => ({ id: name.replace(/\.tsx$/, ''), file: `resources/js/pages/${name}` })),
-  })
+  }, new ParseCache())
 }
 
 function reads(result: ColumnConsumerScan, model = 'Post'): string[] {
-  return result.reads.filter((read) => read.model === model).map((read) => `${read.where}:${read.property}`)
+  return result.reads.filter((read) => read.model.className === model).map((read) => `${read.where}:${read.property}`)
 }
 
 function controller(body: string, imports = "import { Post } from '../../Models/Post.js'"): Record<string, string> {
@@ -73,8 +75,8 @@ describe('scanColumnConsumers in controllers', () => {
   }`),
     })
 
-    expect(reads(result)).toEqual(['PostController.show:title'])
-    expect(result.reads[0]).toMatchObject({ kind: 'controller', file: 'app/Http/Controllers/PostController.ts', line: 7 })
+    expect(reads(result)).toEqual(['PostController.show:id', 'PostController.show:title'])
+    expect(result.reads[1]).toMatchObject({ kind: 'controller', file: 'app/Http/Controllers/PostController.ts', line: 7 })
   })
 
   test('should count neither a comment nor a string nor template text that spells the read', async () => {
@@ -205,6 +207,76 @@ describe('scanColumnConsumers in controllers', () => {
   })
 })
 
+describe('scanColumnConsumers on queries, lists and shadowing', () => {
+  test('should read the column names a query on the model spells', async () => {
+    const result = await scan({
+      controllers: controller(`  async index() {
+    const posts = await Post.where('published', true).orderBy('createdAt').select('title', 'body').get()
+    const drafts = await Post.where({ status: 'draft' })
+    return this.json({ posts, drafts })
+  }`),
+    })
+
+    expect(reads(result)).toEqual([
+      'PostController.index:published',
+      'PostController.index:createdAt',
+      'PostController.index:title',
+      'PostController.index:body',
+      'PostController.index:status',
+    ])
+  })
+
+  test('should take a list for a list: its length and methods are no column, its elements are records', async () => {
+    const result = await scan({
+      controllers: controller(`  async index() {
+    const posts = await Post.all()
+    const page = await Post.paginate({ page: 1 })
+    return this.json({ count: posts.length, first: posts[0].title, last: page.data.at(-1)?.body, total: page.total })
+  }`),
+    })
+
+    expect(reads(result)).toEqual(['PostController.index:title', 'PostController.index:body'])
+  })
+
+  test('should report a spread of a record as a read of every column', async () => {
+    const result = await scan({
+      resources: {
+        'PostResource.ts': "import { Resource } from '@guren/core'\nimport type { PostRecord } from '../../Models/Post.js'\n\nexport class PostResource extends Resource<PostRecord, {}> {\n  toArray() {\n    return { ...this.resource }\n  }\n}\n",
+      },
+      pages: {
+        'posts/Card.tsx': "import type { PostRecord } from '@/app/Models/Post'\n\nexport default function Card({ post, posts }: { post: PostRecord; posts: PostRecord[] }) {\n  return <Row {...post} items={[...posts]} />\n}\n",
+      },
+    })
+
+    expect(result.opaque.map((read) => `${read.where}:${read.line}`)).toEqual(['PostResource:6', 'posts/Card:4'])
+  })
+
+  test('should not take a parameter or a local named after the model class for the model', async () => {
+    const result = await scan({
+      controllers: controller(`  async show() {
+    const find = async (Post: { find(id: number): Promise<{ title: string }> }) => (await Post.find(1)).title
+    const other = (Post: unknown) => this.model(Post as never)
+    return this.json({ find, other })
+  }`),
+    })
+
+    expect(result.reads).toEqual([])
+  })
+
+  test("should attribute a module's model to its own file, not to the root's same-named class", async () => {
+    const result = await scan({
+      models: [...MODELS, { className: 'Post', file: 'modules/blog/app/Models/Post.ts' }],
+      controllers: controller(`  async show() {
+    const post = await Post.findOrFail(1)
+    return this.text(post.title)
+  }`, "import { Post } from '../../../modules/blog/app/Models/Post.js'"),
+      extra: { 'modules/blog/app/Models/Post.ts': MODEL_FILES['app/Models/Post.ts']! },
+    })
+
+    expect(result.reads.map((read) => read.model.file)).toEqual(['modules/blog/app/Models/Post.ts'])
+  })
+})
+
 describe('scanColumnConsumers in resources and pages', () => {
   const RESOURCE = `import { Resource } from '@guren/core'
 import type { PostRecord } from '../../Models/Post.js'
@@ -224,7 +296,7 @@ export class PostResource extends Resource<PostRecord, PostResourceData> {
   test('should read this.resource in a resource tied to the model by its import', async () => {
     const result = await scan({ resources: { 'PostResource.ts': RESOURCE } })
 
-    expect(result.resources).toEqual([{ className: 'PostResource', file: 'app/Http/Resources/PostResource.ts', models: ['Post'] }])
+    expect(result.resources).toEqual([{ className: 'PostResource', file: 'app/Http/Resources/PostResource.ts', models: [MODELS[0]] }])
     expect(reads(result)).toEqual(['PostResource:title', 'PostResource:body'])
   })
 

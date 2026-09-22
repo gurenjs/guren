@@ -1,5 +1,5 @@
 import { readdir, access, lstat, readFile, stat } from 'node:fs/promises'
-import { resolve, join, extname, relative, sep, posix } from 'node:path'
+import { basename, resolve, join, extname, relative, sep, posix } from 'node:path'
 import { collectionName } from './inflect'
 import { escapeRegExp } from './utils'
 
@@ -404,6 +404,11 @@ export function moduleRoutesEntryCandidates(moduleDir: string): string[] {
  */
 export function discoverCommandFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Console/Commands')
+}
+
+/** `generateEntityContext()`'s rule, shared with plan Impact: a test belongs to an entity whose name its file name carries. */
+export function isTestFileNamedFor(file: string, entity: string): boolean {
+  return basename(file).includes(entity)
 }
 
 /**
