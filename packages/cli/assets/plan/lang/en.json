@@ -195,6 +195,7 @@
   "impact.missingPages": "These pages have no component file to scan: {pages}",
   "impact.unreadableFiles": "Not scanned, so any reads in them are missing: {files}",
   "impact.testRequests.unresolved": "{count} TestApp request(s) could not be matched to a route, so tests reaching this may be missing: {requests}",
+  "impact.testRequests.uncertain": "{count} TestApp request(s) may reach this route, but its parameter constraint could not be checked statically against them: {requests}",
   "impact.testRequests.unparsed": "These test files did not parse, so their requests were not read: {files}",
   "impact.testRequests.noneReach": "No TestApp request in the existing tests reaches the routes above."
 }

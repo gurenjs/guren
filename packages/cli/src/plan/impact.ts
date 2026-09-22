@@ -195,7 +195,11 @@ class EntryBuilder {
 
   /** The notes that need every route of the entry first. */
   finish(): void {
-    if (this.gaps.size > 0) this.note('impact.testRequests.unresolved', { count: String(this.gaps.size), requests: [...this.gaps.keys()].join(', ') })
+    // A `routePattern` request targets this route; only its constraint was left unchecked.
+    for (const [key, uncertain] of [['impact.testRequests.unresolved', false], ['impact.testRequests.uncertain', true]] as const) {
+      const sites = [...this.gaps].filter(([, request]) => (request.reason === 'routePattern') === uncertain).map(([site]) => site)
+      if (sites.length > 0) this.note(key, { count: String(sites.length), requests: sites.join(', ') })
+    }
     if (!this.askedNoneReach || this.gaps.size > 0) return
     if (this.sources.testRequests.unparsed.length > 0 || this.sources.unreadable.tests !== undefined) return
     const routes = this.consumers.some((consumer) => consumer.kind === 'route')

@@ -288,9 +288,14 @@ describe('planImpact', () => {
     test("should hold it back for a request the route's own pattern could not be compared with", () => {
       const base = sources()
       base.routes[1] = { ...base.routes[1]!, uncertainTests: [{ ...REQUEST, reason: 'routePattern', method: 'PATCH' }] }
+      const unresolved = { unresolved: [{ ...REQUEST, line: 40, reason: 'dynamicPath' as const, method: 'PATCH' }], unparsed: [] }
 
       expect(entryFor(planImpact(alteredUpdate(), base), 'route.comments.store').notes).toEqual([
-        { key: 'impact.testRequests.unresolved', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
+        { key: 'impact.testRequests.uncertain', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
+      ])
+      expect(entryFor(planImpact(alteredUpdate(), { ...base, testRequests: unresolved }), 'route.comments.store').notes).toEqual([
+        { key: 'impact.testRequests.unresolved', values: { count: '1', requests: 'tests/posts.test.ts:40' } },
+        { key: 'impact.testRequests.uncertain', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
       ])
     })
 
@@ -522,6 +527,37 @@ await http.get(String(postId))
     ])
     expect(impact.routes.find((route) => route.name === 'posts.index')?.tests).toBeUndefined()
     expect(impact.testRequests.unresolved).toEqual([{ file: 'tests/comments-http.test.ts', line: 7, text: 'GET <runtime>', reason: 'dynamicPath', method: 'GET' }])
+  })
+
+  test('should carry a request a constrained route could not be checked against from the routes file to its note', async () => {
+    await linkWorkspaceCore(workspace.dir)
+    await writeWorkspaceFiles(workspace.dir, {
+      ...PLAN_VERIFY_APP_FILES,
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts/:id{[0-9]+}', [PostController, 'show']).name('posts.show')
+}
+`,
+      'tests/posts-http.test.ts': `import { TestApp } from '@guren/testing'
+import app from '../src/app'
+
+const http = await TestApp.fromApp(app)
+const id = 1
+await http.get(\`/posts/\${id}\`)
+`,
+    })
+    const altered = plan((input) => {
+      input.routes[0]!.change = { kind: 'alter' }
+      input.routes[0]!.name = 'posts.show'
+    })
+
+    const sources = (await loadPlanAppState(workspace.dir, { impact: true })).impact!
+    const entry = entryFor(planImpact(altered, sources), 'route.comments.store')
+
+    expect(sources.routes[0]?.uncertainTests).toEqual([{ file: 'tests/posts-http.test.ts', line: 6, text: 'GET /posts/${…}', reason: 'routePattern', method: 'GET' }])
+    expect(entry.notes).toEqual([{ key: 'impact.testRequests.uncertain', values: { count: '1', requests: 'tests/posts-http.test.ts:6' } }])
   })
 
   test('should carry the models verdict the checks reached', async () => {

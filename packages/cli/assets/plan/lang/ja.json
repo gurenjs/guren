@@ -195,6 +195,7 @@
   "impact.missingPages": "次のページにはスキャンできるコンポーネントファイルがありません: {pages}",
   "impact.unreadableFiles": "次のファイルは読めなかったため、そこでの参照は含まれていません: {files}",
   "impact.testRequests.unresolved": "TestApp のリクエスト {count} 件はルートと照合できなかったため、ここに届くテストが漏れている可能性があります: {requests}",
+  "impact.testRequests.uncertain": "TestApp のリクエスト {count} 件はこのルートに届く可能性がありますが、パラメータの制約を静的に確かめられませんでした: {requests}",
   "impact.testRequests.unparsed": "次のテストファイルは解析できなかったため、リクエストを読んでいません: {files}",
   "impact.testRequests.noneReach": "既存テストの TestApp リクエストは、上のルートのどれにも届いていません。"
 }
