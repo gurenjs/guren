@@ -125,6 +125,12 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   if (prototypeFirst && moduleName) {
     throw new CliError('guren make:feature --prototype does not support --module yet: the fixture is app-wide. Nothing was scaffolded.')
   }
+  // The prototype run writes no model or controller, so the flags that hang off them
+  // would otherwise vanish; a promotion run has to carry them again.
+  const droppedFlags = [options.withFactory && '--factory', options.withPolicy && '--policy', options.withTest && '--test'].filter((flag): flag is string => Boolean(flag))
+  if (prototypeFirst && droppedFlags.length > 0) {
+    consola.warn(`--prototype writes no model or controller, so ${droppedFlags.join(', ')} ${droppedFlags.length === 1 ? 'is' : 'are'} ignored on this run. Pass ${droppedFlags.length === 1 ? 'it' : 'them'} again when promoting the feature.`)
+  }
   // A feature scaffolded prototype-first leaves its page-data type behind;
   // finding one is what turns this run into the promotion.
   const promoting = !prototypeFirst && !moduleName && (await fileExists(appRoot, prototypeTypesPath(singular)))
