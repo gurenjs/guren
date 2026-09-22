@@ -1,5 +1,17 @@
+import { castInPlace } from './casts'
+import type {
+  RelationDefinition, HasManyRelationDefinition, HasOneRelationDefinition,
+  BelongsToRelationDefinition, BelongsToManyRelationDefinition,
+  HasManyThroughRelationDefinition, MorphManyRelationDefinition, MorphToRelationDefinition,
+} from './relation-definitions'
+import {
+  loadHasMany, loadHasOne, loadBelongsTo, loadBelongsToMany,
+  loadHasManyThrough, loadMorphMany, loadMorphTo,
+} from './relation-loading'
+import { countByChunks, countOwnersPresent, distinctKeys, maxInListSize, relationCountPlan, resolveModelReference } from './relation-records'
+import { groupRelationPaths, loadRelationChildren } from './relation-tree'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { applyAccessors, applyAccessorsInPlace, applyMutators } from './attributes'
+import { applyAccessors, applyMutators } from './attributes'
 import type { AccessorDefinitions, MutatorDefinitions } from './attributes'
 import { warnDeprecated } from './deprecate'
 import { GlobalScopeRegistry } from './GlobalScopeRegistry'
@@ -9,12 +21,11 @@ import { modelLifecycle } from './model-lifecycle'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { everyFilterDropped } from './where-conditions'
-import { DEFAULT_IN_LIST_SIZE, LIFECYCLE_DELETE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
+import { LIFECYCLE_DELETE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
 import { QueryBuilder } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
   EagerLoadConstraints,
-  ORMAdapterAdvanced,
   WhereGroupCallback,
   WhereOperator,
 } from './QueryBuilder'
@@ -1350,24 +1361,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   ): Promise<void> {
     if (relationNames.length === 0) return
 
-    const groups = new Map<string, string[]>()
-    for (const path of relationNames) {
-      const [head, ...rest] = path.split('.')
-      const tails = groups.get(head) ?? []
-      groups.set(head, tails)
-
-      // A bare path contributes no tail, so `posts` alongside `posts.comments`
-      // loads `posts` once. A trailing dot does contribute one — an empty tail
-      // — so `posts.` still reaches the unknown-relation throw.
-      if (rest.length > 0) {
-        const tail = rest.join('.')
-        if (!tails.includes(tail)) {
-          tails.push(tail)
-        }
-      }
-    }
-
-    for (const [head, tails] of groups) {
+    for (const [head, tails] of groupRelationPaths(relationNames)) {
       await this.loadRelationLevel(records, head, tails, queryOptions, constraints, pathPrefix)
     }
   }
@@ -1441,43 +1435,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         break
     }
 
-    if (tails.length > 0 && definition.type === 'morphTo') {
-      throw new Error(
-        `${this.name}: nested eager loading through morphTo relation "${head}" is not supported.`,
-      )
-    }
-
-    // morphTo rows come from several models at once, so its own loader is what
-    // applies each row's transforms.
-    if (definition.type === 'morphTo') {
-      return
-    }
-
-    // Deduplicated on identity: belongsTo and belongsToMany hand several
-    // parents the same child object, which must not be transformed twice.
-    const children: PlainObject[] = []
-    const seen = new Set<PlainObject>()
-    for (const record of records) {
-      const value = record[head]
-      const items = Array.isArray(value) ? value : value != null ? [value] : []
-      for (const item of items) {
-        if (item && typeof item === 'object' && !seen.has(item as PlainObject)) {
-          seen.add(item as PlainObject)
-          children.push(item as PlainObject)
-        }
-      }
-    }
-
-    if (children.length === 0) {
-      return
-    }
-
-    const related = await resolveModelReference(definition.related)
-    if (tails.length > 0) {
-      await related.loadRelationsInto(children, tails, queryOptions, constraints, currentPath)
-    }
-    // After the recursion: the grandchildren were keyed on these rows' raw values.
-    applyRelatedReadTransforms(related, children, projected)
+    await loadRelationChildren({
+      modelName: this.name, records, definition, head, tails, projected, currentPath, queryOptions, constraints,
+    })
   }
 
   protected static async loadHasMany(
@@ -1486,9 +1446,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    const { foreignKey, localKey, name } = definition
-    const related = await resolveModelReference(definition.related)
-    return loadRelationData(records, name, related, localKey, foreignKey, true, queryOptions, constraint)
+    return loadHasMany(records, definition, queryOptions, constraint)
   }
 
   protected static async loadHasOne(
@@ -1497,9 +1455,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    const { foreignKey, localKey, name } = definition
-    const related = await resolveModelReference(definition.related)
-    return loadRelationData(records, name, related, localKey, foreignKey, false, queryOptions, constraint)
+    return loadHasOne(records, definition, queryOptions, constraint)
   }
 
   protected static async loadBelongsTo(
@@ -1508,9 +1464,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    const { foreignKey, ownerKey, name } = definition
-    const related = await resolveModelReference(definition.related)
-    return loadRelationData(records, name, related, foreignKey, ownerKey, false, queryOptions, constraint)
+    return loadBelongsTo(records, definition, queryOptions, constraint)
   }
 
   protected static async loadBelongsToMany(
@@ -1519,68 +1473,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    const { pivotTable, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, name } = definition
-    const related = await resolveModelReference(definition.related)
-
-    const parentValues = distinctKeys(records, parentKey)
-
-    if (parentValues.length === 0) {
-      for (const record of records) {
-        record[name] = []
-      }
-      return false
-    }
-
-    const adapter = this.getAdapter()
-    const pivotRows = await loadByChunks(parentValues, maxInListSize(adapter), (chunk) =>
-      adapter.findMany<PlainObject>(pivotTable, { where: { [foreignPivotKey]: chunk } as WhereClause }, queryOptions),
-    )
-
-    const pivotMap = new Map<unknown, unknown[]>()
-    const allRelatedIds = new Set<unknown>()
-    for (const row of pivotRows) {
-      const fk = row[foreignPivotKey]
-      const rk = row[relatedPivotKey]
-      if (!pivotMap.has(fk)) pivotMap.set(fk, [])
-      pivotMap.get(fk)!.push(rk)
-      allRelatedIds.add(rk)
-    }
-
-    if (allRelatedIds.size === 0) {
-      for (const record of records) {
-        record[name] = []
-      }
-      return false
-    }
-
-    // The constraint filters the related rows, not the pivot lookup, and the
-    // keys batched below are theirs rather than the parents'.
-    const { records: relatedRecords, projected } = await loadRelatedRecords(
-      related,
-      Array.from(allRelatedIds),
-      (chunk) => ({ [relatedKey]: chunk }),
-      queryOptions,
-      constraint,
-    )
-
-    const relatedMap = new Map<unknown, PlainObject>()
-    for (const item of relatedRecords) {
-      relatedMap.set(item[relatedKey], { ...item })
-    }
-
-    for (const record of records) {
-      const pk = record[parentKey]
-      if (pk == null) {
-        record[name] = []
-        continue
-      }
-      const relatedIds = pivotMap.get(pk) ?? []
-      record[name] = relatedIds
-        .map((id) => relatedMap.get(id))
-        .filter((item): item is PlainObject => item != null)
-    }
-
-    return projected
+    return loadBelongsToMany(this, records, definition, queryOptions, constraint)
   }
 
   protected static async loadHasManyThrough(
@@ -1589,75 +1482,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    const { firstKey, secondKey, localKey, secondLocalKey, name } = definition
-    const related = await resolveModelReference(definition.related)
-    const through = await resolveModelReference(definition.through)
-
-    const localValues = distinctKeys(records, localKey)
-
-    if (localValues.length === 0) {
-      for (const record of records) {
-        record[name] = []
-      }
-      return false
-    }
-
-    const throughRecords = await loadByChunks(
-      localValues,
-      maxInListSize(through.getAdapter()),
-      (chunk) => through.newQuery(queryOptions).where({ [firstKey]: chunk } as WhereClause)[RAW_RESULTS]() as Promise<PlainObject[]>,
-    )
-
-    const throughMap = new Map<unknown, unknown[]>()
-    const allThroughIds = new Set<unknown>()
-    for (const row of throughRecords) {
-      const fk = row[firstKey]
-      const tk = row[secondLocalKey]
-      if (!throughMap.has(fk)) throughMap.set(fk, [])
-      throughMap.get(fk)!.push(tk)
-      allThroughIds.add(tk)
-    }
-
-    if (allThroughIds.size === 0) {
-      for (const record of records) {
-        record[name] = []
-      }
-      return false
-    }
-
-    // The constraint filters the related rows, not the intermediate lookup, and
-    // the keys batched below are theirs rather than the parents'.
-    const { records: relatedRecords, projected } = await loadRelatedRecords(
-      related,
-      Array.from(allThroughIds),
-      (chunk) => ({ [secondKey]: chunk }),
-      queryOptions,
-      constraint,
-    )
-
-    const relatedByKey = new Map<unknown, PlainObject[]>()
-    for (const item of relatedRecords) {
-      const key = item[secondKey]
-      if (!relatedByKey.has(key)) relatedByKey.set(key, [])
-      relatedByKey.get(key)!.push({ ...item })
-    }
-
-    for (const record of records) {
-      const lk = record[localKey]
-      if (lk == null) {
-        record[name] = []
-        continue
-      }
-      const throughIds = throughMap.get(lk) ?? []
-      const items: PlainObject[] = []
-      for (const tid of throughIds) {
-        const matched = relatedByKey.get(tid) ?? []
-        items.push(...matched)
-      }
-      record[name] = items
-    }
-
-    return projected
+    return loadHasManyThrough(records, definition, queryOptions, constraint)
   }
 
   protected static async loadMorphMany(
@@ -1666,43 +1491,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    const { morphName, localKey, name } = definition
-    const related = await resolveModelReference(definition.related)
-    const typeColumn = `${morphName}Type`
-    const idColumn = `${morphName}Id`
-    const parentType = this.name
-
-    const localValues = distinctKeys(records, localKey)
-
-    if (localValues.length === 0) {
-      for (const record of records) record[name] = []
-      return false
-    }
-
-    const { records: allRelated, projected } = await loadRelatedRecords(
-      related,
-      localValues,
-      (chunk) => ({ [typeColumn]: parentType, [idColumn]: chunk }),
-      queryOptions,
-      constraint,
-    )
-
-    const map = new Map<unknown, PlainObject[]>()
-    for (const item of allRelated) {
-      // Grouped on the type as well as the id: the query filters by type, but
-      // a constraint callback may widen it (a top-level `orWhere` does).
-      if (item[typeColumn] !== parentType) continue
-      const key = item[idColumn]
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push({ ...item })
-    }
-
-    for (const record of records) {
-      const key = record[localKey]
-      record[name] = key != null ? (map.get(key) ?? []) : []
-    }
-
-    return projected
+    return loadMorphMany(this, records, definition, queryOptions, constraint)
   }
 
   protected static async loadMorphTo(
@@ -1711,306 +1500,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<void> {
-    const { morphName, name } = definition
-    const typeColumn = `${morphName}Type`
-    const idColumn = `${morphName}Id`
-    const morphMap = Model.morphMap ?? {}
-
-    const byType = new Map<string, unknown[]>()
-    for (const record of records) {
-      const type = record[typeColumn] as string
-      const id = record[idColumn]
-      if (!type || id == null) continue
-      if (!byType.has(type)) byType.set(type, [])
-      byType.get(type)!.push(id)
-    }
-
-    const resolved = new Map<string, Map<unknown, PlainObject>>()
-    for (const [type, ids] of byType) {
-      const modelClass = morphMap[type]
-      if (!modelClass) continue
-      const uniqueIds = Array.from(new Set(ids))
-      // Runs once per morph target, so a constraint here may only reference
-      // columns every target shares.
-      const { records: results, projected } = await loadRelatedRecords(
-        modelClass,
-        uniqueIds,
-        (chunk) => ({ id: chunk }),
-        queryOptions,
-        constraint,
-      )
-      const idMap = new Map<unknown, PlainObject>()
-      for (const r of results) idMap.set(r.id, { ...r })
-      applyRelatedReadTransforms(modelClass, Array.from(idMap.values()), projected)
-      resolved.set(type, idMap)
-    }
-
-    for (const record of records) {
-      const type = record[typeColumn] as string
-      const id = record[idColumn]
-      if (!type || id == null) {
-        record[name] = null
-        continue
-      }
-      record[name] = resolved.get(type)?.get(id) ?? null
-    }
+    return loadMorphTo(Model.morphMap ?? {}, records, definition, queryOptions, constraint)
   }
-}
-
-/** The cast switch, written onto `target`. */
-function castInPlace(target: PlainObject, castDefs: Record<string, CastType>): void {
-  for (const [field, castType] of Object.entries(castDefs)) {
-    if (!(field in target)) continue
-    const value = target[field]
-    if (value == null) continue
-
-    switch (castType) {
-      case 'json': {
-        if (typeof value === 'string') {
-          try {
-            target[field] = JSON.parse(value)
-          } catch {
-          }
-        }
-        break
-      }
-      case 'date': {
-        if (!(value instanceof Date)) {
-          target[field] = new Date(value as string | number)
-        }
-        break
-      }
-      case 'boolean': {
-        target[field] = Boolean(value)
-        break
-      }
-      case 'number': {
-        target[field] = Number(value)
-        break
-      }
-      case 'string': {
-        target[field] = String(value)
-        break
-      }
-    }
-  }
-}
-
-/**
- * Written onto the records rather than onto copies: the parent rows hold them
- * by reference, and a nested loader has already keyed its own rows on them.
- * Keep in step with `[READ_TRANSFORMS]`: same casts-then-accessors order, and
- * the same rule that `projected` rows (a constraint's `select()` narrowed them)
- * skip the accessors, which would read a column that is not on them.
- */
-function applyRelatedReadTransforms(related: typeof Model, records: PlainObject[], projected: boolean): void {
-  const casts = related.casts
-  const accessors = projected ? undefined : related.accessors
-  if (!casts && !accessors) return
-
-  for (const record of records) {
-    if (casts) castInPlace(record, casts)
-    if (accessors) applyAccessorsInPlace(record, accessors)
-  }
-}
-
-async function loadRelationData(
-  records: PlainObject[],
-  name: string,
-  related: typeof Model,
-  parentKey: string,
-  relatedKey: string,
-  isArray: boolean,
-  queryOptions?: ModelQueryOptions,
-  constraint?: EagerLoadConstraint,
-): Promise<boolean> {
-  const values = distinctKeys(records, parentKey)
-
-  if (values.length === 0) {
-    for (const record of records) {
-      record[name] = isArray ? [] : null
-    }
-    return false
-  }
-
-  const { records: relatedRecords, projected } = await loadRelatedRecords(
-    related,
-    values,
-    (chunk) => ({ [relatedKey]: chunk }),
-    queryOptions,
-    constraint,
-  )
-  const map = new Map<unknown, PlainObject | PlainObject[]>()
-
-  for (const item of relatedRecords) {
-    const key = item[relatedKey]
-    if (isArray) {
-      if (!map.has(key)) map.set(key, [])
-      ;(map.get(key) as PlainObject[]).push({ ...item })
-    } else {
-      map.set(key, { ...item })
-    }
-  }
-
-  for (const record of records) {
-    const key = record[parentKey]
-    if (key == null) {
-      record[name] = isArray ? [] : null
-      continue
-    }
-    record[name] = map.get(key) ?? (isArray ? [] : null)
-  }
-
-  return projected
-}
-
-function maxInListSize(adapter: ORMAdapter): number {
-  const size = (adapter as ORMAdapterAdvanced).maxInListSize?.()
-  return typeof size === 'number' && size >= 1 ? Math.floor(size) : DEFAULT_IN_LIST_SIZE
-}
-
-interface RelationCountPlan {
-  related: Parameters<typeof resolveModelReference>[0]
-  parentKey: string
-  childKey: string
-  where: Record<string, unknown>
-  /** belongsTo yields 0 or 1, so the owner row only has to be shown to exist. */
-  presenceOnly: boolean
-}
-
-function relationCountPlan(definition: RelationDefinition, parentType: string): RelationCountPlan | undefined {
-  switch (definition.type) {
-    case 'hasMany':
-    case 'hasOne':
-      return {
-        related: definition.related,
-        parentKey: definition.localKey,
-        childKey: definition.foreignKey,
-        where: {},
-        presenceOnly: false,
-      }
-    case 'morphMany':
-      return {
-        related: definition.related,
-        parentKey: definition.localKey,
-        childKey: `${definition.morphName}Id`,
-        where: { [`${definition.morphName}Type`]: parentType },
-        presenceOnly: false,
-      }
-    case 'belongsTo':
-      return {
-        related: definition.related,
-        parentKey: definition.foreignKey,
-        childKey: definition.ownerKey,
-        where: {},
-        presenceOnly: true,
-      }
-    default:
-      return undefined
-  }
-}
-
-/**
- * One row per owner key that exists, never a grouped COUNT: the answer is 0 or
- * 1, and the key column alone is all of the owner row anything here reads.
- */
-async function countOwnersPresent(
-  related: typeof Model,
-  ownerKey: string,
-  keys: readonly unknown[],
-  size: number,
-  queryOptions?: ModelQueryOptions,
-): Promise<Map<unknown, number>> {
-  const rows = await loadByChunks(keys, size, (chunk) => related
-    .newQuery(queryOptions)
-    .where({ [ownerKey]: chunk } as WhereClause)
-    .select(ownerKey)[RAW_RESULTS]() as Promise<PlainObject[]>)
-  return new Map(rows.map((row) => [row[ownerKey], 1]))
-}
-
-function distinctKeys(records: readonly PlainObject[], key: string): unknown[] {
-  return Array.from(new Set(records.map((r) => r[key]).filter((v) => v != null)))
-}
-
-function chunkKeys(values: readonly unknown[], size: number): Array<readonly unknown[]> {
-  if (values.length <= size) return [values]
-  const chunks: unknown[][] = []
-  for (let i = 0; i < values.length; i += size) {
-    chunks.push(values.slice(i, i + size))
-  }
-  return chunks
-}
-
-async function loadByChunks<T>(
-  values: readonly unknown[],
-  size: number,
-  load: (chunk: readonly unknown[]) => Promise<T[]>,
-): Promise<T[]> {
-  const results: T[] = []
-  for (const chunk of chunkKeys(values, size)) {
-    for (const record of await load(chunk)) {
-      results.push(record)
-    }
-  }
-  return results
-}
-
-/**
- * The related rows behind one eager load, and whether the constraint narrowed
- * them with `select()`. The callback runs on the builder that is executed: it
- * is the caller's, and a probe would run it an extra time per load. A top-level
- * `orWhere()` in it widens the foreign-key filter, so a loader that groups on
- * something weaker (morphMany, on the morph id) filters the rows itself.
- */
-async function loadRelatedRecords(
-  related: typeof Model,
-  keys: readonly unknown[],
-  clause: (chunk: readonly unknown[]) => Record<string, unknown>,
-  queryOptions?: ModelQueryOptions,
-  constraint?: EagerLoadConstraint,
-): Promise<{ records: PlainObject[]; projected: boolean }> {
-  // Raw: the caller groups these rows on a key column the related model may
-  // cast, and the parent values it matches them against are raw.
-  const rows = (chunk: readonly unknown[]): Promise<PlainObject[]> => {
-    const query = related.newQuery(queryOptions).where(clause(chunk) as WhereClause)
-    constraint?.(query)
-    return query[RAW_RESULTS]() as Promise<PlainObject[]>
-  }
-
-  const size = maxInListSize(related.getAdapter())
-  const whole = related.newQuery(queryOptions).where(clause(keys) as WhereClause)
-  constraint?.(whole)
-  const options = whole.getOptions()
-  const projected = (options.selectFields?.length ?? 0) > 0
-
-  // `limit`, `offset` and `orderBy` describe the whole result set, so a split IN
-  // list would answer a different question per chunk — and a parent set large
-  // enough can push that one list past the driver's limit.
-  const describesWholeSet = options.limitValue !== undefined || options.offsetValue !== undefined || options.orderBy.length > 0
-  if (keys.length <= size || describesWholeSet) {
-    return { records: (await whole[RAW_RESULTS]()) as PlainObject[], projected }
-  }
-
-  return { records: await loadByChunks(keys, size, rows), projected }
-}
-
-async function countByChunks(
-  values: readonly unknown[],
-  size: number,
-  count: (chunk: readonly unknown[]) => Promise<Map<unknown, number>>,
-): Promise<Map<unknown, number>> {
-  // Chunks hold disjoint key sets, so no key is counted twice.
-  return new Map(await loadByChunks(values, size, async (chunk) => Array.from(await count(chunk))))
-}
-
-async function resolveModelReference(
-  reference: typeof Model | (() => typeof Model | Promise<typeof Model>),
-): Promise<typeof Model> {
-  if (typeof reference === 'function' && 'prototype' in reference && reference.prototype instanceof Model) {
-    return reference as typeof Model
-  }
-
-  return await (reference as () => typeof Model | Promise<typeof Model>)()
 }
 
 type TRecordFor<T extends typeof Model> = T extends { recordType: infer R }
@@ -2075,70 +1566,6 @@ export interface TransactionModelScope<T extends typeof Model> {
   update(where: WhereClauseFor<T>, data: Partial<TCreateFor<T>>): Promise<TRecordFor<T>>
   delete(where: WhereClauseFor<T>): Promise<number | PlainObject | void>
   paginate(options?: PaginateOptions<TRecordFor<T>>): Promise<PaginatedResult<TRecordFor<T>>>
-}
-
-interface BaseRelationDefinition {
-  type: 'hasMany' | 'hasOne' | 'belongsTo' | 'belongsToMany' | 'hasManyThrough' | 'morphMany' | 'morphTo'
-  name: string
-  related: typeof Model | (() => typeof Model | Promise<typeof Model>)
-}
-
-interface HasManyRelationDefinition extends BaseRelationDefinition {
-  type: 'hasMany'
-  foreignKey: string
-  localKey: string
-}
-
-interface HasOneRelationDefinition extends BaseRelationDefinition {
-  type: 'hasOne'
-  foreignKey: string
-  localKey: string
-}
-
-interface BelongsToRelationDefinition extends BaseRelationDefinition {
-  type: 'belongsTo'
-  foreignKey: string
-  ownerKey: string
-}
-
-interface BelongsToManyRelationDefinition extends BaseRelationDefinition {
-  type: 'belongsToMany'
-  pivotTable: unknown
-  foreignPivotKey: string
-  relatedPivotKey: string
-  parentKey: string
-  relatedKey: string
-}
-
-interface HasManyThroughRelationDefinition extends BaseRelationDefinition {
-  type: 'hasManyThrough'
-  through: typeof Model | (() => typeof Model | Promise<typeof Model>)
-  firstKey: string
-  secondKey: string
-  localKey: string
-  secondLocalKey: string
-}
-
-type RelationDefinition =
-  | HasManyRelationDefinition
-  | HasOneRelationDefinition
-  | BelongsToRelationDefinition
-  | BelongsToManyRelationDefinition
-  | HasManyThroughRelationDefinition
-  | MorphManyRelationDefinition
-  | MorphToRelationDefinition
-
-interface MorphManyRelationDefinition extends BaseRelationDefinition {
-  type: 'morphMany'
-  morphName: string
-  localKey: string
-}
-
-interface MorphToRelationDefinition {
-  type: 'morphTo'
-  name: string
-  related: undefined
-  morphName: string
 }
 
 export type HasManyRelationResult<T extends typeof Model> = Array<TRecordFor<T>>

@@ -36,6 +36,26 @@ reaches both phases. `restore()` fires no events, since no hook name covers it.
 `SoftDeletes` methods, including asynchronous ordering, abort messages, failure
 paths, and registration changes during callbacks.
 
+## Relation loading
+
+Model owns relation declarations, public result types, and dispatch through its
+protected loader methods. Keep those methods as delegates: subclasses can
+override them, including on a model reached through a nested relation.
+
+- `relation-loading.ts` fetches and attaches rows for each relation kind.
+- `relation-records.ts` owns scoped raw reads, key batching, count plans, and
+  related-row transforms. Pivot reads use the parent's adapter; through-model
+  and target-model reads use their respective scoped query builders.
+- `relation-tree.ts` groups shared path heads and walks children before applying
+  their transforms. Identity deduplication prevents shared children from being
+  transformed twice; projections continue to suppress accessors.
+- `relation-definitions.ts` describes internal relation metadata. `casts.ts`
+  keeps ordinary reads and related reads on the same cast implementation.
+
+Match and recurse on raw keys before casts or accessors change them. Preserve
+query options through pivot, intermediate, and target reads. A missing to-many
+relation yields an empty array, and a missing to-one relation yields null.
+
 ## Connection ownership
 
 `drizzle-adapter.ts` builds queries and decodes results. `drizzle-connection.ts`
