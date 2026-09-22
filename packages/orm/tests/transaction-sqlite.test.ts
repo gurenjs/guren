@@ -259,6 +259,20 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
       expect(query.all()).toHaveLength(1)
     })
 
+    it('should wait for the open transaction when a prepared statement is executed', async () => {
+      const held = holdTransaction('rollback')
+      await held.begun
+
+      const prepared = (Post.newQuery().toDrizzle() as unknown as { prepare(): { execute(): PromiseLike<unknown[]>; all(): unknown[] } }).prepare()
+      expect(() => prepared.all()).toThrow('cannot wait for the transaction')
+      const read = prepared.execute()
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      held.release()
+
+      await expect(held.done).rejects.toThrow('boom')
+      expect(await read).toHaveLength(1)
+    })
+
     it('should run on the open transaction when awaited inside its callback', async () => {
       await expect(
         Post.transaction(async (_trx, txPost) => {

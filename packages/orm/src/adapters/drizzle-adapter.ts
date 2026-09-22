@@ -188,6 +188,38 @@ function foreignTransactionOpen(): boolean {
   return !ambient || ambient.settled
 }
 
+/**
+ * `then` reaches drizzle's `execute()`, so replacing it on the instance routes
+ * every await through `withExecutor`. `all()`/`get()`/`run()`/`values()` return
+ * synchronously on bun:sqlite and cannot wait: during a transaction another
+ * context holds they would run inside it, so they throw instead. A prepared
+ * statement executes later, so it gets the same treatment.
+ */
+function queueQuery<TQuery>(query: TQuery, queryOptions: AdapterQueryOptions | undefined): TQuery {
+  if (!query || typeof query !== 'object') return query
+  const target = query as Record<string, unknown>
+  const { execute, prepare } = target
+  if (typeof execute === 'function') {
+    define(target, 'execute', () => withExecutor(queryOptions, async () => execute.call(target)))
+  }
+  if (typeof prepare === 'function') {
+    define(target, 'prepare', (...args: unknown[]) => queueQuery(prepare.apply(target, args), queryOptions))
+  }
+  for (const method of SYNC_EXECUTIONS) {
+    const run = target[method]
+    if (typeof run !== 'function') continue
+    define(target, method, (...args: unknown[]) => {
+      if (foreignTransactionOpen()) {
+        throw new Error(
+          `DrizzleAdapter: ${method}() cannot wait for the transaction another context has open on this connection, and would run inside it. Await the query instead.`,
+        )
+      }
+      return run.apply(target, args)
+    })
+  }
+  return query
+}
+
 function define(target: object, key: string, value: unknown): void {
   Object.defineProperty(target, key, { configurable: true, writable: true, value })
 }
@@ -762,32 +794,9 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     return resolveExecutor(queryOptions)
   },
 
-  /**
-   * `then` reaches drizzle's `execute()`, so replacing it on the instance routes
-   * every await through `withExecutor`. `all()`/`get()`/`run()`/`values()` return
-   * synchronously on bun:sqlite and cannot wait: during a transaction another
-   * context holds they would run inside it, so they throw instead.
-   */
   queueExecution<TQuery>(query: TQuery, queryOptions?: AdapterQueryOptions): TQuery {
-    if (queryOptions?.trx || !query || typeof query !== 'object') return query
-    const target = query as Record<string, unknown>
-    const execute = target.execute
-    if (typeof execute === 'function') {
-      define(target, 'execute', () => withExecutor(undefined, async () => execute.call(target)))
-    }
-    for (const method of SYNC_EXECUTIONS) {
-      const run = target[method]
-      if (typeof run !== 'function') continue
-      define(target, method, (...args: unknown[]) => {
-        if (foreignTransactionOpen()) {
-          throw new Error(
-            `DrizzleAdapter: ${method}() cannot wait for the transaction another context has open on this connection, and would run inside it. Await the query instead.`,
-          )
-        }
-        return run.apply(target, args)
-      })
-    }
-    return query
+    if (queryOptions?.trx) return query
+    return queueQuery(query, queryOptions)
   },
 
   async countByAdvanced(
