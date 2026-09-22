@@ -6,6 +6,7 @@ import {
   discoverResourceFiles,
   discoverPolicyFiles,
   discoverTestFiles,
+  isTestFileNamedFor,
   listAppRoots,
   classNameFromPath,
   discoverDbArtifactFiles,
@@ -472,7 +473,7 @@ export async function generateEntityContext(
     .sort((a, b) => a.model.localeCompare(b.model) || a.relationship.localeCompare(b.relationship))
 
   const tests = testFiles
-    .filter((file) => basename(file).includes(entity))
+    .filter((file) => isTestFileNamedFor(file, entity))
     .filter((file) => !duplicated || inLocation(file))
     .map((file) => toPosixRelative(cwd, file))
     .sort()

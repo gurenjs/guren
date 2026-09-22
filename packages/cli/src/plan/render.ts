@@ -13,6 +13,7 @@ import { readPlanTemplate } from './assets'
 import { planDiagram } from './diagram'
 import { layoutPlanFlows } from './flow'
 import { planHash } from './identity'
+import { impactBreakingChanges, type PlanImpactEntry } from './impact'
 import { loadPlanDictionaries, matchPlanLocale, type PlanLocale } from './locales'
 import { listPlanElements, type Plan, type PlanDraft } from './schema'
 
@@ -38,6 +39,8 @@ export interface RenderPlanInput {
   status?: unknown
   /** The locale the page's own words open in. Absent, the plan's `locale` decides, then `en`. */
   uiLocale?: PlanLocale
+  /** Impact (RFC 0030 §2), from `planImpact()`. Absent, the page draws no Impact at all rather than an empty one. */
+  impact?: readonly PlanImpactEntry[]
 }
 
 // Declared beside the page that reads them, so the two sides share one definition.
@@ -226,11 +229,13 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
     entity: entities.get(element.id) ?? null,
   }))
 
+  const breaking = planBreakingChanges(plan)
   return {
     plan,
     planHash: hashOf(plan),
     checks: [...(input.checks ?? [])],
-    breaking: planBreakingChanges(plan),
+    breaking: input.impact ? [...breaking, ...impactBreakingChanges(plan, input.impact, breaking)] : breaking,
+    impact: input.impact ? [...input.impact] : null,
     diagram: planDiagram(plan),
     flows: layoutPlanFlows(plan),
     planFile: input.planFile !== undefined && PLAN_FILE_PATTERN.test(input.planFile) ? input.planFile : null,

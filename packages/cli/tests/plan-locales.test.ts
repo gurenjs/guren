@@ -23,7 +23,10 @@ interface Formatter {
 }
 
 const pageSource = planPageSource()
-const rendererSource = readFileSync(join(import.meta.dir, '../src/plan/render.ts'), 'utf8')
+// The renderer and Impact both hand the page dictionary keys (`breaking.*`, `impact.*`).
+const rendererSource = ['render.ts', 'impact.ts']
+  .map((name) => readFileSync(join(import.meta.dir, '../src/plan', name), 'utf8'))
+  .join('\n')
 
 // The page's own functions, handed the nodes this file can read back.
 const formatter = { formatInto, formatText } as unknown as Formatter
@@ -38,7 +41,7 @@ describe('the plan dictionaries', () => {
   })
 
   test('should hold every key the renderer hands the page', () => {
-    const named = [...rendererSource.matchAll(/'(breaking\.[A-Za-z]+)'/g)].map((match) => match[1]!)
+    const named = [...rendererSource.matchAll(/'((?:breaking|impact)\.[A-Za-z.]+)'/g)].map((match) => match[1]!)
 
     expect(named.length).toBeGreaterThan(0)
     expect(named.filter((key) => !Object.hasOwn(dictionaries.en, key))).toEqual([])

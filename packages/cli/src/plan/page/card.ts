@@ -4,6 +4,7 @@ import type { PlanChangeKind } from '../diagram'
 import type { PlanChange } from '../schema'
 import type { PlanCheckResult } from '../validate'
 import { anchorId, el, groupBy, idMap, isNode, link, list } from './dom'
+import { impactNote, indexImpact } from './impact'
 import { t, tel, words } from './locale'
 import type { PlanBreakingChange, PlanLink, PlanPagePayload } from './payload'
 import { reviewControls } from './review'
@@ -57,6 +58,7 @@ export function indexPlan(data: PlanPagePayload): void {
 
   checksFor = groupBy(data.checks, (result) => result.elementId)
   breakingFor = groupBy(data.breaking, (item) => item.elementId)
+  indexImpact(data.impact)
 }
 
 /** An `h4` and the list under it. The emptiness rule is the caller's: three
@@ -122,6 +124,8 @@ export function card(options: CardOptions): HTMLElement {
   for (const item of breakingFor[options.id] ?? []) {
     node.appendChild(tel('p', 'note', 'card.breaking', () => ({ reason: t(item.reasonKey, item.reasonValues) })))
   }
+  const impact = impactNote(options.id)
+  if (impact) node.appendChild(impact)
   for (const result of checksFor[options.id] ?? []) {
     const line = el('p', 'note')
     line.appendChild(el('span', 'badge badge-' + result.status, result.status))

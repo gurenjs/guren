@@ -318,12 +318,9 @@ async function modelDetail(
   }
 }
 
-function actionDetail(
-  root: string,
-  controllers: ControllerMethodScan | PlanAppUnreadable,
-): Pick<PlanAppDetail, 'actions' | 'controllers' | 'controllerCollisions'> {
-  if (!('methods' in controllers)) return { actions: controllers, controllers, controllerCollisions: [] }
-  const actions = [...controllers.methods].map(([key, info]): PlanAppActionDetail => {
+/** One reading of every action body, which `plan:status` and Impact both take. */
+export function describeActions(root: string, controllers: ControllerMethodScan): PlanAppActionDetail[] {
+  return [...controllers.methods].map(([key, info]): PlanAppActionDetail => {
     // A page id and an ability are string contents, which only the raw body holds; the
     // blanked body, offsets preserved, says whether a match there is code or a comment.
     const isCode = (index: number): boolean => info.body.startsWith('this', index)
@@ -338,8 +335,15 @@ function actionDetail(
       validates: unique([...info.body.matchAll(VALIDATE_CALL_PATTERN)].map((match) => match[1]!)),
     }
   })
+}
+
+function actionDetail(
+  root: string,
+  controllers: ControllerMethodScan | PlanAppUnreadable,
+): Pick<PlanAppDetail, 'actions' | 'controllers' | 'controllerCollisions'> {
+  if (!('methods' in controllers)) return { actions: controllers, controllers, controllerCollisions: [] }
   return {
-    actions,
+    actions: describeActions(root, controllers),
     controllers: [...controllers.classFiles].map(([className, relPath]) => ({
       className,
       module: moduleNameFor(root, resolve(root, relPath)),
@@ -350,7 +354,7 @@ function actionDetail(
 }
 
 /** Classes a directory scan discovers, each tagged with the app root it came from. */
-async function classDetail(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<PlanAppClassDetail[]> {
+export async function classDetail(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<PlanAppClassDetail[]> {
   const files = excludeBarrelFiles(await discover(root).catch((): string[] => []))
   return files.map((file) => ({ className: classNameFromPath(file), module: moduleNameFor(root, file), file: toPosixRelative(root, file) }))
 }

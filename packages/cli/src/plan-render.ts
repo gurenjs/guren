@@ -10,6 +10,7 @@ import { basename, resolve } from 'node:path'
 import { CliError, formatSchemaIssues } from './cli-error'
 import type { PlanAppState } from './plan/app-state'
 import { isPlanLocale, matchPlanLocale, PLAN_LOCALES, type PlanLocale } from './plan/locales'
+import { planChangesExisting, planImpact } from './plan/impact'
 import { hasBaseline, renderPlanHtml } from './plan/render'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { writeFileSafe } from './utils'
@@ -21,7 +22,7 @@ export interface RenderPlanFileOptions {
    * clean plan. A function is resolved after the plan parses, so a mistyped path does
    * not pay for a scan of the application.
    */
-  app: PlanAppState | (() => Promise<PlanAppState>)
+  app: PlanAppState | ((plan: PlanDraft | Plan) => Promise<PlanAppState>)
   /** Where to write. Relative paths resolve against the working directory, as a shell argument reads. */
   output?: string
   /** Resolves the plan and the output path. The application root is {@link RenderPlanFileOptions.app}'s. */
@@ -102,10 +103,19 @@ export async function readPlanFile(planPath: string, cwd: string = process.cwd()
 export async function renderPlanFile(planPath: string, options: RenderPlanFileOptions): Promise<RenderedPlanFile> {
   const cwd = options.cwd ?? process.cwd()
   const { path: absolutePlan, plan } = await readPlanFile(planPath, cwd)
-  const app = typeof options.app === 'function' ? await options.app() : options.app
+  const app = typeof options.app === 'function' ? await options.app(plan) : options.app
   // RFC 0030 §3: a failing check is pinned to the top of the page, never a reason to render nothing.
   const checks = validatePlan(plan, app)
-  const html = renderPlanHtml({ plan, checks, planFile: basename(absolutePlan), uiLocale: await pageLocale(plan, options) })
+  // `null` draws no Impact, for a page with no application read; `[]` is a plan that changes nothing existing.
+  const nothingExistingChanges = !planChangesExisting(plan)
+  const impact = app.impact ? planImpact(plan, app.impact) : nothingExistingChanges ? [] : null
+  const html = renderPlanHtml({
+    plan,
+    checks,
+    ...(impact ? { impact } : {}),
+    planFile: basename(absolutePlan),
+    uiLocale: await pageLocale(plan, options),
+  })
   const target = options.output ? resolve(cwd, options.output) : planOutputPath(absolutePlan)
 
   // The plan is the input every later step reads, and this command keeps no copy of it,

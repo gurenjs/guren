@@ -34,13 +34,15 @@ import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
 import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
 import { loadPlanAppDetail, type PlanAppDetail } from './app-detail'
+import type { PlanImpactSources } from './impact'
+import { loadPlanImpactSources } from './impact-sources'
+import { ParseCache } from '../parse-cache'
+import { isUnreadable, type PlanAppUnreadable } from './unreadable'
 
 const POLICIES_DIR = 'app/Policies'
+const CONTROLLERS_DIR = 'app/Http/Controllers'
 
-/** A section the scanners could not read, carrying why. */
-export interface PlanAppUnreadable {
-  unreadable: string
-}
+export { isUnreadable, type PlanAppUnreadable }
 
 /**
  * The app root something sits in: a module name, or `null` for the project root. A plan
@@ -129,10 +131,8 @@ export interface PlanAppState {
   apiOnly: boolean
   /** What `plan:status` compares against; present only when the loader was asked for it. */
   detail?: PlanAppDetail
-}
-
-export function isUnreadable<T>(section: T[] | PlanAppUnreadable): section is PlanAppUnreadable {
-  return !Array.isArray(section)
+  /** What Impact reads (RFC 0030 §2); present only when the loader was asked for it. */
+  impact?: PlanImpactSources
 }
 
 const VALIDATOR_SECTION_REASON =
@@ -146,12 +146,17 @@ const VALIDATOR_SECTION_REASON =
  */
 export async function loadPlanAppState(
   cwd: string,
-  /** `detail` also imports `db/schema.ts` (RFC 0030 §6), which `plan:render` has no reason to run. */
-  options: { routesFile?: string; detail?: boolean } = {},
+  /**
+   * `detail` also imports `db/schema.ts` (RFC 0030 §6), which `plan:render` has no reason to
+   * run; `impact` adds the static readers Impact needs and imports nothing.
+   */
+  options: { routesFile?: string; detail?: boolean; impact?: boolean } = {},
 ): Promise<PlanAppState> {
   const root = resolve(cwd)
   const roots = await listAppRoots(root).catch((): AppRoot[] => [])
 
+  // One cache for the controller scan and Impact's column scan, which parse the same files.
+  const cache = new ParseCache()
   const [apiOnly, models, resources, policies, pages, routes, controllers, tables] = await Promise.all([
     isConfirmedApiOnlyApp(root).catch(() => false),
     modelSection(root, roots),
@@ -159,7 +164,7 @@ export async function loadPlanAppState(
     classSection(root, roots, POLICIES_DIR, discoverPolicyFiles),
     pageSection(root),
     routeSection(root, options.routesFile),
-    controllerSections(root),
+    controllerSections(root, cache),
     tableSection(root, roots),
   ])
 
@@ -174,6 +179,19 @@ export async function loadPlanAppState(
     routes: isUnreadable(routes.routes) ? routes.routes : routes.routes.map(({ name, method, path }) => ({ name, method, path })),
     tables,
     apiOnly,
+  }
+  if (options.impact) {
+    // The controller scan and the test discovery answer `[]` for a directory that would not open.
+    const [controllersDir, testsDir] = await Promise.all([probeDirectory(roots, CONTROLLERS_DIR), probeDirectory(roots, 'tests')])
+    state.impact = await loadPlanImpactSources({
+      root,
+      cache,
+      routes: routes.routes,
+      definitions: routes.definitions,
+      provenance: routes.provenance,
+      controllers: controllersDir ? { unreadable: controllersDir } : controllers.scan,
+      sections: { models, resources, policies, pages, ...(testsDir ? { tests: { unreadable: testsDir } } : {}) },
+    })
   }
   if (!options.detail) return state
 
@@ -257,10 +275,11 @@ async function pageSection(cwd: string): Promise<PlanAppNames> {
  */
 async function controllerSections(
   cwd: string,
+  cache: ParseCache,
 ): Promise<{ classes: PlanAppNames; actions: PlanAppNames; scan: ControllerMethodScan | PlanAppUnreadable }> {
   let scan: ControllerMethodScan
   try {
-    scan = await parseControllerMethods(cwd)
+    scan = await parseControllerMethods(cwd, cache)
   } catch (error) {
     const unreadable = { unreadable: error instanceof Error ? error.message : String(error) }
     return { classes: unreadable, actions: unreadable, scan: unreadable }

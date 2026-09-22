@@ -361,6 +361,69 @@ nothing was found, never that nothing is affected. Dropping a column, changing
 a type, renaming a route and altering a published agent tool are flagged as
 breaking regardless of what Impact found.
 
+**Amended in implementation (Impact):** what shipped, in `packages/cli/src/plan/impact.ts`
+(pure) and `impact-sources.ts` (the readers), and where it stops.
+
+- Impact is computed for every element whose change is `alter`, `rename` or `drop`, and
+  for a model whose table is renamed. A renamed element is looked up by its `from`, the
+  name the application has today. Its list may be empty, and the page says an empty
+  list is not proof of anything. A plan that changes nothing existing skips the scan;
+  a page rendered with no application draws no Impact.
+- The readers are the ones named above, all static: model relationships, route
+  bindings, the route graph (with each route's `ApiRoutes` entry and the tool
+  `deriveAgentTools()` derives from it), resources and policies, controller actions
+  whose body names the element outside comments and strings (a mention, and labelled
+  so), and tests by file name. `plan:render` asks for them with `loadPlanAppState({
+  impact: true })`, which imports no `db/schema.ts`.
+- A class name is resolved from the app root that spells it: a module's own model,
+  else the project root's. Relationships, route bindings, action mentions, tests and
+  column reads are compared by the model they resolve to, so a module's `Post` never
+  lands in the root `Post`'s Impact. A page resolves `Data.Post` in its own root, the
+  first segment of its id when that names a module. Known limitation: an action or a
+  route binding is resolved by class name from the root it sits in, so a module's
+  action that imports the root's `Post` is attributed to the module's `Post` when one
+  exists.
+- A reader that could not look says so on every entry that rests on it, with its
+  reason: a directory that would not open (models, controllers, resources, policies,
+  pages, `tests/`), a routes file that threw, a controller or page that did not parse,
+  a model file that declared no model the parser could read. A nested directory that
+  would not open still under-reports, as in the §2 checks.
+- The column-consumer scan (`column-consumers.ts`) reads the AST of controllers,
+  resources and page components. A value is a model's record, or a list of them,
+  where the file says so: a query on the model class imported from its module (judged
+  by the chain's last method: `find*`/`first*`/`create`/`update` a record,
+  `all`/`get`/`where`/`withCount` and the other builders a list, `paginate` an object
+  whose `data` is a list; every public method of `Model`, `QueryBuilder` and the
+  `Attachable`/`SoftDeletes` mixins is classified, and a test fails on one that is not),
+  `this.model(M)`, `this.resource` in a resource that imports the model, or an
+  annotation naming `MRecord`, a tied resource's data type, `Data.M`, an array of one
+  or `PaginatedPageProps` of one. It follows plain aliases, destructuring, indexing,
+  `for...of` and element callbacks. The column names a query spells
+  (`where('title', …)`, `where({ title })`, `select('title', …)`, `orderBy`) are
+  reads, as are the keys of the where clause the model class is handed first
+  (`update`, `delete`, `first`, `restore`, `forceDelete`) and the key `find(value,
+  key)` looks up by. A query is a chain of method calls back to the class, so
+  `Post.name.toLowerCase()` is none. The keys of the data `create`/`update` are given are writes, listed as
+  such, since a rename breaks a writer as surely as a reader. A column held in a
+  variable (`orderBy(column)`, `create(data)`) and a query ending in a method the
+  scan does not classify (an application's own scope) are accesses no static scan can
+  name. A method call, and a list's own members (`length`), are not reads. `post[key]`,
+  a rest pattern and a spread of a record (`{ ...post }`, `<Card {...post} />`) are
+  reads no static scan can name, listed under every changed column of the model.
+  A local or parameter named after the model class shadows it. A page's read is
+  reported through the resource whose data type tied it.
+- Not scanned, so absent from the lists: a value that crosses a function call or a
+  file, a reassignment, a component typed through `React.FC<Props>` rather than its
+  own parameter annotation, an import through a barrel or through a path alias other
+  than `@/`, and a Drizzle table column (`posts.title`) read outside the model.
+- The breaking rule stays the plan's own (`planBreakingChanges()`), with one addition
+  only the application can answer: an altered route, action or controller whose route
+  publishes an agent tool is flagged even when the plan does not declare the tool.
+- Deferred: the test-coverage scan of `TestApp` calls and the characterization step it
+  feeds. It is a reader of its own with an open accuracy question (Open Question 8),
+  and its rule belongs to task derivation (§5). Impact names tests by file name until
+  it lands.
+
 Failures do not block rendering. They appear in the page beside the element
 they concern, and `guren plan:approve` refuses while any remain.
 
