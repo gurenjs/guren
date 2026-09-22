@@ -267,7 +267,10 @@ validator はどのスキャナーも読まないので、ハッシュを取り�
 
 `plan:status` と `plan:render` は拒否しません。承認する前に変更を読むためのコマンドだからです。baseline のない下書きにはハッシュがないので、`plan:next` と `plan:verify` は下書きをこれまでどおり受け付けます。ただし隣に承認の記録がある下書きは、未承認の計画と同じく拒否されます。承認済みの計画から `baseline` を消しても、この確認からは逃れられません。
 
-編集した計画をもう一度承認すると、新しいハッシュが記録され、baseline はそのまま残ります。各ステップの検証は新しいハッシュのもとでやり直しです。承認の前には検査と質問の確認がもう一度走り、その時点のアプリケーションと突き合わされます。計画自身の `add` の要素がすでにコードにあると、検査はそれを「既に存在する」と報告し、承認は拒否されます。計画の変更は実装を始める前に済ませてください。
+編集した計画をもう一度承認すると、新しいハッシュが記録され、baseline はそのまま残ります。各ステップの検証は新しいハッシュのもとでやり直しです。承認の前には検査と質問の確認がもう一度走り、その時点のアプリケーションと突き合わされます。そのため、計画が追加・改名・削除する要素を実装が作ったあとは、再承認が拒否されます。`add` の要素は「既に存在する」と報告され、`rename` の旧名や `drop` の対象は「見つからない」と報告されるためです。`--allow-unstamped` は下書きに baseline を刻むときだけ効くので、ここでは役に立ちません。実装の途中で計画を編集してしまったときの抜け道は二つです。
+
+- 承認したときの文面に戻す。たとえば計画ファイルを `git checkout` します。ハッシュが既存の承認と再び一致し、編集が原因の stall は `plan:next` が解除します
+- すでに作ったものをいまの姿で書くように計画を改め、承認する。`add`、`rename`、`drop` の代わりに `existing` や `alter` と書きます。方針そのものを変えるなら、新しい計画ファイルに分けても構いません
 
 ## 実装: `plan:next` と `plan:verify`
 
@@ -418,9 +421,9 @@ plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/da
 plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/data): giving up, nothing about the step changed since the last continuation.
 ```
 
-`plan:next` は stalled のステップを理由とともにもう一度返します。stall をどう収めるかは人が決めます。環境を直すか、計画を改めるか、要素を waive するかの三つです。
+`plan:next` は stalled のステップを理由とともにもう一度返します。stall をどう収めるかは人が決めます。環境を直すか、計画を改めるか (「承認」の節で述べた再承認の制約があります)、要素を waive するかの三つです。
 
-承認後に計画が編集されていると、フックは次の stop でエージェントを作業に戻さず、ステップを stalled にします。作業を続けても計画は承認されないからです。以降の stop では何も言わず、計画が承認されれば `plan:next` がそのステップをもう一度渡します。
+承認後に計画が編集されていると、フックは次の stop でエージェントを作業に戻さず、ステップを stalled にします。作業を続けても計画は承認されないからです。以降の stop では何も言いません。承認したときの文面に戻すか、改めた計画を承認すれば、`plan:next` がそのステップをもう一度渡します。
 
 ```text
 plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/data): giving up, docs/plans/comments/plan.json is not approved at its current hash dc9a6ce3ad173e23290f743293fa0e3495c932b3b2cdf07c0cda8c9b063a5465, so the step is not verified against it: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve docs/plans/comments/plan.json once the plan says what you mean to build.
@@ -508,7 +511,7 @@ Held, since what they depend on changed after the plan was approved:
       fail  The route name "comments.store" already exists in this application.
 ```
 
-`plan:next` は、その要素に依存しない次のステップを返し、終了コード 0 で終わります。保留を解くのは人の判断です。いまのアプリケーションに合わせて計画を書き直してもう一度承認するか (「承認」の節で述べた再承認の制約があります)、動かした変更を元に戻します。
+`plan:next` は、その要素に依存しない次のステップを返し、終了コード 0 で終わります。保留を解くのは人の判断です。動かした変更を元に戻すか、いまのアプリケーションに合わせて計画を改めて承認します。改めた計画も baseline をそのまま引き継ぎ、鮮度は改めた計画が目指す形と比べて判定されるので、承認が通れば stale の要素は fresh に戻ります。妨げになるのは「承認」の節で述べた再承認の制約だけです。
 
 ### 計画をまとめて見る: `guren check --plan`
 
@@ -528,7 +531,7 @@ bunx guren check --plan
 ℹ        → Land or close one plan before implementing the other, or revise one so they stop changing the same element.
 ```
 
-結果はすべて警告で、終了コードは 0 です。計画の検査は `--plan` を付けたときだけ走ります。`db/schema.ts` と validator のファイルを import するので、フラグなしの `guren check`、`check --ci`、`guren gate` には含まれません。隣に承認の記録がある下書き (baseline を消した計画) と、読めない承認ファイルも報告されます。それ以外の下書きと、承認後に編集した計画は、まだ誰も合意していないので対象外です。
+二つの計画ファイルが同じ slug を持つ場合 (状態ファイルと `docs/plans/<slug>.md` を共有してしまうため) と、計画ファイルや計画のディレクトリを読めない場合にも警告します。結果はすべて警告で、終了コードは 0 です。計画の検査は `--plan` を付けたときだけ走ります。`db/schema.ts` と validator のファイルを import するので、フラグなしの `guren check`、`check --ci`、`guren gate` には含まれません。隣に承認の記録がある下書き (baseline を消した計画) と、読めない承認ファイルも報告されます。それ以外の下書きと、承認後に編集した計画は、まだ誰も合意していないので対象外です。
 
 ## 要素を waive する: `plan:waive`
 

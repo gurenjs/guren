@@ -257,7 +257,10 @@ The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approval
 
 `plan:status` and `plan:render` keep working, since they are how you read the change before approving it. A draft, which has no baseline and so no hash, is still accepted by `plan:next` and `plan:verify`. A draft with approvals recorded beside it is refused like an unapproved plan: deleting `baseline` from an approved plan does not take it out of the gate.
 
-Approving an edited plan again records the new hash and leaves the baseline as it was, so its steps verify again under the new hash. The checks and questions are asked again first, against the application as it is at that moment. Once the plan's own `add` elements exist in the code, those checks report them as already existing and the approval is refused, so settle changes to the plan before its implementation starts.
+Approving an edited plan again records the new hash and leaves the baseline as it was, so its steps verify again under the new hash. The checks and questions are asked again first, against the application as it is at that moment. So once the implementation has built an element the plan adds, renames or drops, re-approval is refused: an `add` reads as already existing, and the old name of a `rename` or the target of a `drop` reads as missing. `--allow-unstamped` does not help, since it only applies when a draft is stamped. A plan edited mid-implementation has two ways out:
+
+- restore the approved text, for example with `git checkout` of the plan file. The hash matches the existing approval again, and `plan:next` clears a stall the edit caused;
+- revise it so that what is already built is stated as it is now, as `existing` or `alter` instead of `add`, `rename` or `drop`, and approve that. A change of direction can also go in a new plan file of its own.
 
 ## Implementing: `plan:next` and `plan:verify`
 
@@ -401,9 +404,9 @@ It gives up after three continuations, when nothing about the step changed since
 plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/data): giving up, nothing about the step changed since the last continuation.
 ```
 
-`plan:next` returns a stalled step again, with the reason. A stall is for a person to settle, in one of three ways: fix the environment, revise the plan, or waive the element.
+`plan:next` returns a stalled step again, with the reason. A stall is for a person to settle, in one of three ways: fix the environment, revise the plan (within the re-approval rule under Approving), or waive the element.
 
-A plan edited after approval stalls the step at the next stop without sending the agent back, since no continuation can approve a plan. Later stops stay silent, and once the plan is approved, `plan:next` hands the step out again:
+A plan edited after approval stalls the step at the next stop without sending the agent back, since no continuation can approve a plan. Later stops stay silent. Restore the approved plan text, or approve a revision, and `plan:next` hands the step out again:
 
 ```text
 plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/data): giving up, docs/plans/comments/plan.json is not approved at its current hash dc9a6ce3ad173e23290f743293fa0e3495c932b3b2cdf07c0cda8c9b063a5465, so the step is not verified against it: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve docs/plans/comments/plan.json once the plan says what you mean to build.
@@ -491,7 +494,7 @@ Held, since what they depend on changed after the plan was approved:
       fail  The route name "comments.store" already exists in this application.
 ```
 
-`plan:next` returns the next step that does not depend on it and exits 0. Releasing a hold is a person's call: change the plan to state what the application holds now and approve it again (subject to the re-approval rule under Approving), or undo the change.
+`plan:next` returns the next step that does not depend on it and exits 0. Releasing a hold is a person's call: undo the change, or revise the plan to state what the application holds now and approve it. A revision keeps the baseline, and freshness counts the revised plan's end state, so the stale element turns fresh again once the approval goes through; the only obstacle is the re-approval rule under Approving.
 
 ### Across plans: `guren check --plan`
 
@@ -511,7 +514,7 @@ bunx guren check --plan
 ℹ        → Land or close one plan before implementing the other, or revise one so they stop changing the same element.
 ```
 
-Every finding is a warning and the command exits 0. The plan checks run only under `--plan`: plain `guren check`, `check --ci` and `guren gate` never include them, because they import `db/schema.ts` and the validator files. A draft beside an approvals file (a deleted baseline) and an approvals file that will not read are reported too. Drafts and plans edited since approval are otherwise left out, since nobody has agreed to them.
+It also warns when two plan files share a slug, since they would share one state file and one `docs/plans/<slug>.md`, and when a plan file or a plans directory cannot be read. Every finding is a warning and the command exits 0. The plan checks run only under `--plan`: plain `guren check`, `check --ci` and `guren gate` never include them, because they import `db/schema.ts` and the validator files. A draft beside an approvals file (a deleted baseline) and an approvals file that will not read are reported too. Drafts and plans edited since approval are otherwise left out, since nobody has agreed to them.
 
 ## Waiving an element: `plan:waive`
 
