@@ -62,3 +62,8 @@ export function check(
 ): CheckResult {
   return { key, title, status, message, suggestion, filePath }
 }
+
+/** A warning `check --ci` and `guren gate` do not count. */
+export function advisory(...args: Parameters<typeof check>): CheckResult {
+  return { ...check(...args), advisory: true }
+}

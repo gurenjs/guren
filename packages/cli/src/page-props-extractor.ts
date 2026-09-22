@@ -191,12 +191,14 @@ export async function extractPagePropKeys(filePath: string): Promise<PagePropKey
   return extractPagePropKeysFromSource(await readFile(filePath, 'utf-8'), filePath)
 }
 
-export function extractPagePropKeysFromSource(source: string, filePath = 'page.tsx'): PagePropKeys {
-  const ast = parseSourceFile(source, filePath)
-  if (!ast) return { status: 'unreadable', reason: 'the page does not parse' }
-
+/**
+ * The page's `Props` followed through same-file references to the type that carries its
+ * members, `undefined` when nothing declares one, or the reason the walk stopped short.
+ * Both readers below start here, so they cannot disagree about where the props are.
+ */
+function resolvePropsType(ast: File, source: string): LocatedPropsType | string | undefined {
   const found = locatePropsType(ast)
-  if (!found) return { status: 'undeclared' }
+  if (!found) return undefined
 
   const followed = new Set<string>()
   const resolve = (name: string): LocatedPropsType | string => {
@@ -213,6 +215,15 @@ export function extractPagePropKeysFromSource(source: string, filePath = 'page.t
       ? resolve(reference.typeName.name)
       : `\`${nodeText(source, reference)}\` is a generic or qualified type`
   }
+  return located
+}
+
+export function extractPagePropKeysFromSource(source: string, filePath = 'page.tsx'): PagePropKeys {
+  const ast = parseSourceFile(source, filePath)
+  if (!ast) return { status: 'unreadable', reason: 'the page does not parse' }
+
+  const located = resolvePropsType(ast, source)
+  if (located === undefined) return { status: 'undeclared' }
   if (typeof located === 'string') return { status: 'unreadable', reason: located }
 
   if (located.kind === 'interface') {
@@ -228,17 +239,123 @@ export function extractPagePropKeysFromSource(source: string, filePath = 'page.t
 function memberKeys(members: TSTypeElement[], source: string): PagePropKeys {
   const keys: PagePropKey[] = []
   for (const member of members) {
-    const name = member.type === 'TSPropertySignature' || member.type === 'TSMethodSignature' ? memberKeyName(member) : undefined
-    if (!name || (member.type !== 'TSPropertySignature' && member.type !== 'TSMethodSignature')) {
+    const info = readMember(member, source)
+    if (!info) {
       return { status: 'unreadable', reason: `\`${nodeText(source, member).replace(/\s+/g, ' ')}\` is not a named member` }
     }
-    // A method signature has no single type node: its text runs from the parameter list on.
-    const type = member.type === 'TSPropertySignature'
-      ? member.typeAnnotation && nodeText(source, member.typeAnnotation.typeAnnotation)
-      : source.slice(member.key.end! + (member.optional ? 1 : 0), member.end!).replace(/[;,]$/, '')
-    keys.push({ name, optional: Boolean(member.optional), ...(type ? { type: type.replace(/\s+/g, ' ').trim() } : {}) })
+    const { acceptsUndefined: _acceptsUndefined, ...key } = info
+    keys.push(key)
   }
   return { status: 'keys', keys }
+}
+
+export interface PagePropMemberInfo extends PagePropKey {
+  /** Optional, unannotated (implicit `any`), or spelled with a type that admits `undefined`. */
+  acceptsUndefined: boolean
+}
+
+/**
+ * The members a page's props declare, read once per page. `open` names why a
+ * member outside `members` may still be declared (a heritage clause, an opaque
+ * intersection part); absent, the map is the whole key set.
+ */
+export type PagePropMembers =
+  | { status: 'members'; members: Map<string, PagePropMemberInfo>; open?: string }
+  | { status: 'unreadable'; reason: string }
+  | { status: 'undeclared' }
+
+/** One member asked for by name: `absent` is confident only when the map is the whole key set. */
+export type PagePropMember =
+  | ({ status: 'declared' } & PagePropMemberInfo)
+  | { status: 'absent' }
+  | { status: 'unreadable'; reason: string }
+  | { status: 'undeclared' }
+
+export function readPagePropMembers(ast: File, source: string): PagePropMembers {
+  const located = resolvePropsType(ast, source)
+  if (located === undefined) return { status: 'undeclared' }
+  if (typeof located === 'string') return { status: 'unreadable', reason: located }
+
+  const members = new Map<string, PagePropMemberInfo>()
+  const collect = (elements: TSTypeElement[]): void => {
+    for (const element of elements) {
+      const info = readMember(element, source, ast)
+      if (info && !members.has(info.name)) members.set(info.name, info)
+    }
+  }
+
+  if (located.kind === 'interface') {
+    collect(located.node.body.body)
+    const extended = located.node.extends?.length ? `\`${located.node.id.name}\` extends another type, which may declare it` : undefined
+    return { status: 'members', members, ...(extended ? { open: extended } : {}) }
+  }
+
+  // An intersection's literal parts are read; any other part may declare a member.
+  const parts = located.node.type === 'TSIntersectionType' ? located.node.types : [located.node]
+  let opaque: TSType | undefined
+  for (const part of parts) {
+    const unwrapped = part.type === 'TSParenthesizedType' ? part.typeAnnotation : part
+    if (unwrapped.type === 'TSTypeLiteral') collect(unwrapped.members)
+    else opaque ??= unwrapped
+  }
+  if (opaque && members.size === 0) {
+    return { status: 'unreadable', reason: `the props type is not an object type (\`${nodeText(source, opaque).replace(/\s+/g, ' ')}\`)` }
+  }
+  const open = opaque ? `\`${nodeText(source, opaque).replace(/\s+/g, ' ')}\` is intersected in, and may declare it` : undefined
+  return { status: 'members', members, ...(open ? { open } : {}) }
+}
+
+export function pagePropMember(read: PagePropMembers, name: string): PagePropMember {
+  if (read.status !== 'members') return read
+  const info = read.members.get(name)
+  if (info) return { status: 'declared', ...info }
+  return read.open ? { status: 'unreadable', reason: read.open } : { status: 'absent' }
+}
+
+/**
+ * One named property or method signature; undefined for anything else (an index
+ * signature, a computed key). A method signature has no single type node, so its
+ * text runs from the parameter list on, and it never admits undefined.
+ */
+function readMember(member: TSTypeElement, source: string, ast?: File): PagePropMemberInfo | undefined {
+  if (member.type !== 'TSPropertySignature' && member.type !== 'TSMethodSignature') return undefined
+  const name = memberKeyName(member)
+  if (!name) return undefined
+  const optional = Boolean(member.optional)
+  const annotation = member.type === 'TSPropertySignature' ? member.typeAnnotation?.typeAnnotation : undefined
+  const type = member.type === 'TSPropertySignature'
+    ? annotation && nodeText(source, annotation)
+    : source.slice(member.key.end! + (optional ? 1 : 0), member.end!).replace(/[;,]$/, '')
+  const acceptsUndefined = member.type === 'TSMethodSignature'
+    ? optional
+    : optional || annotation === undefined || admitsUndefined(annotation, ast, new Set())
+  return { name, optional, acceptsUndefined, ...(type ? { type: type.replace(/\s+/g, ' ').trim() } : {}) }
+}
+
+/**
+ * Whether a type as written admits `undefined`. A same-file alias is followed
+ * once (`type Posts = Post[] | undefined`); an imported or generic name is not.
+ */
+function admitsUndefined(type: TSType, ast: File | undefined, followed: Set<string>): boolean {
+  switch (type.type) {
+    case 'TSUndefinedKeyword':
+    case 'TSUnknownKeyword':
+    case 'TSAnyKeyword':
+    case 'TSVoidKeyword':
+      return true
+    case 'TSUnionType':
+      return type.types.some((part) => admitsUndefined(part, ast, followed))
+    case 'TSParenthesizedType':
+      return admitsUndefined(type.typeAnnotation, ast, followed)
+    case 'TSTypeReference': {
+      if (!ast || type.typeName.type !== 'Identifier' || type.typeParameters || followed.has(type.typeName.name)) return false
+      followed.add(type.typeName.name)
+      const alias = declaredType(ast, type.typeName.name)
+      return typeof alias !== 'string' && alias.kind === 'type' && admitsUndefined(alias.node, ast, followed)
+    }
+    default:
+      return false
+  }
 }
 
 /** Local types referenced from `typeBody`, in dependency order. */

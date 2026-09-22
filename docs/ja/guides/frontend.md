@@ -151,7 +151,7 @@ export class UserController extends Controller {
 
 初回の page object には、第 2 引数のグループ名（省略時は `default`）ごとにキーが `deferredProps` として載ります。上の例では `{ "default": ["permissions"], "attributes": ["teams", "projects"] }` です。クライアントはグループごとに 1 回ずつ partial reload を送るので、`teams` と `projects` は一緒に届き、`permissions` は並行して読み込まれます。コールバックが実行されるのは、その後続リクエストのときだけです。
 
-クライアント側では、後続リクエストが届くまで prop は `undefined` です。`Props` では省略可能として宣言し、`<Deferred>` の中で描画します。値が届くまでは fallback が表示されます。
+クライアント側では、後続リクエストが届くまで prop は `undefined` です。`Props` では省略可能として宣言し、`<Deferred>` の中で描画します。値が届くまでは fallback が表示されます。コントローラはどの prop にも deferred な値を渡せるため、必須として宣言していても型検査は通ります。`?` なしで宣言した prop に `defer()` を渡していると `guren check` が警告します。
 
 ```tsx
 import type { PageProps } from '@guren/inertia-client/contracts'
