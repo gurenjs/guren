@@ -14,6 +14,7 @@ const KIND_KEYS: Record<PlanImpactConsumerKind, string> = {
   policy: 'impact.kind.policy',
   page: 'impact.kind.page',
   test: 'impact.kind.test',
+  testRequest: 'impact.kind.testRequest',
   read: 'impact.kind.read',
   write: 'impact.kind.write',
   opaqueRead: 'impact.kind.opaqueRead',
@@ -31,7 +32,7 @@ export function indexImpact(impact: readonly PlanImpactEntry[] | null): void {
 function consumerLine(consumer: PlanImpactConsumer): HTMLElement {
   const key = consumer.kind === 'read' && consumer.via !== undefined ? 'impact.kind.readVia' : KIND_KEYS[consumer.kind]
   const line = tel('span', null, key, { name: el('code', 'mono', consumer.name), via: consumer.via ?? null })
-  if (consumer.file !== undefined && consumer.file !== consumer.name) {
+  if (consumer.file !== undefined && consumer.file !== consumer.name && consumer.kind !== 'testRequest') {
     line.appendChild(el('span', 'mono impact-at', ' (' + consumer.file + (consumer.line ? ':' + consumer.line : '') + ')'))
   }
   return line

@@ -177,7 +177,8 @@
   "impact.kind.resource": "Resource {name}",
   "impact.kind.policy": "Policy {name}",
   "impact.kind.page": "ページ {name}",
-  "impact.kind.test": "テスト {name}",
+  "impact.kind.test": "テスト {name} (ファイル名で対応)",
+  "impact.kind.testRequest": "テスト {name} が {via} にリクエストしています",
   "impact.kind.read": "{name} が読んでいます",
   "impact.kind.readVia": "{name} が {via} 経由で読んでいます",
   "impact.kind.opaqueRead": "{name} が静的に特定できないプロパティを読んでいます",
@@ -192,5 +193,8 @@
   "impact.unreadable.tests": "tests ディレクトリを読み取れなかったため、テストが漏れている可能性があります: {reason}",
   "impact.unparsedModels": "次のモデルファイルからはモデルを読み取れなかったため、そのカラムの参照は含まれていません: {files}",
   "impact.missingPages": "次のページにはスキャンできるコンポーネントファイルがありません: {pages}",
-  "impact.unreadableFiles": "次のファイルは読めなかったため、そこでの参照は含まれていません: {files}"
+  "impact.unreadableFiles": "次のファイルは読めなかったため、そこでの参照は含まれていません: {files}",
+  "impact.testRequests.unresolved": "TestApp のリクエスト {count} 件はパスを照合できなかったため、ここに届くテストが漏れている可能性があります: {requests}",
+  "impact.testRequests.unparsed": "次のテストファイルは解析できなかったため、リクエストを読んでいません: {files}",
+  "impact.testRequests.noneReach": "既存テストの TestApp リクエストは、上のルートのどれにも届いていません。現在の振る舞いを固定するテストはありません。"
 }
