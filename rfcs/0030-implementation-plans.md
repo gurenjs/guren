@@ -1651,11 +1651,14 @@ Parts 3 to 5 are re-reviewed against, and the answer to Open Question 1.
 
 *Method.* Three hand-written plans: comments on `examples/blog` (23 elements
 the plan changes), scheduled publishing on the blog (15, carrying the one
-`rename` and the one `drop`), and task checklists on `kadai`, a dogfood app on
-the published 2.1 packages with SQLite (25). Each ran through `plan:status
+`rename` and the one `drop`), and task checklists on `kadai`, a private
+dogfood app on the published 2.1 packages with SQLite (25), whose numbers
+cannot be reproduced from this repository. Each ran through `plan:status
 --json` of this tree against scratch copies of the app in four kinds of state:
 before implementation, partly implemented, fully implemented, and near-miss
-states built on purpose to break a known reader. The near-miss states carry 30
+states built on purpose to break a known reader. A fifth run took one blog
+near-miss copy with a schema that throws on import, to read the static
+fallback; it is reported apart and left out of the tables. The near-miss states carry 30
 faults of the kind an agent leaves behind: a validation call replaced by a raw
 parse, a route moved into a module `createApp()` never lists, a column option
 dropped, a listener never registered, a route declared after a `/:id` that
@@ -1697,8 +1700,8 @@ or `text` holding a boolean or a date (2 of 15 types); the view unknowns are
 `form`, `actions` and `states`. Five of the 63 elements were `unjudged`: three
 controller `alter`s, one mail class, and one model `alter` whose only change was
 a dropped column. A further 18 of the 58 complete verdicts rested on existence
-alone (a validator also on its mount, a `drop` on absence): every resource,
-policy, side effect and controller, and every validator.
+alone: every resource, policy, side effect and controller, every validator
+(also on its mount), and the dropped column (on its absence).
 
 Of the 30 near-miss faults, 17 showed on the faulty element's own verdict, 3
 only as a note on a neighbouring element (a validator left `present` because
@@ -1745,8 +1748,8 @@ fallback every column of a scaffolded app is opaque; one run with a schema that
 throws on import turned two correct `drifted` columns into false `present`. And
 a schema that will not import takes the routes with it, since the models import
 it: that run also left 4 elements `blocked` (two spread columns, two routes)
-and 5 understated. The runtime
-reader is the only reader a scaffolded app gets.
+and 5 understated. The runtime reader is the only reader a scaffolded app
+gets.
 
 *`plan:verify`.* On kadai's finished checklist a whole-plan run verified all 25
 elements; its `tests` step reads `failed`, as §6 says it must on a finished
@@ -1755,8 +1758,8 @@ passes) failed its steps and lifted nothing. A near-miss that type-checks and
 passes the behaviours lifted 16 elements, the unregistered listener among
 them: `verified` on a class no event reaches, because no behaviour exercised
 it. The bypassed validator kept its step `incomplete`. On the blog every step
-failed on debt the plan did not cause (spec views out of date, a prototype
-fixture the new prop broke), `db:migrate` was `blocked` on an unreachable
+failed on work the plan did not list (spec views out of date, a prototype
+fixture the plan's new prop broke), `db:migrate` was `blocked` on an unreachable
 database as designed, and the `tests` steps failed with no test file carrying
 the ids, since this measurement wrote no blog tests. Writing them would not
 be enough: the blog's suite is written for Vitest (`vi.mock`,
@@ -1765,8 +1768,8 @@ be enough: the blog's suite is written for Vitest (`vi.mock`,
 
 *Answer to Open Question 1.* The progress view is not mostly "not checkable":
 13% of planned properties at completion, concentrated in the kinds §6 already
-lists as readerless. The false verdicts come from two rules and one defect,
-each fixable without a new reader:
+lists as readerless. Causes 1, 2 and 4 (10 of the 16 false verdicts) come from
+two rules and one defect, each fixable without a new reader:
 
 - an `alter` counts only the properties that differ from how the code read at
   approval, which means `plan:approve` records the per-property verdicts of
@@ -1779,8 +1782,17 @@ each fixable without a new reader:
 - `mergeRelationships()` takes the kind from the call and keeps an
   annotation-only relationship out of the declared set.
 
+Causes 3 and 5 (the other 6) remain after all four. The third rule stops
+`plan:verify` lifting such an element; `plan:status` still reports it `present`
+or `wired`. Part of cause 3 is a gap between the code and this RFC: the rule
+above says an element whose every planned property is unknown is `unjudged`,
+but `status.ts:194` applies it to an `alter` only, so an `add` resource or
+policy whose only planned property is unknown reads `present`. Applying the
+rule to every change kind would make those two `unjudged`; the validator,
+event and listener would still complete on their mount or on existence.
+
 *Parts 3 to 5.* `plan:approve`, `plan:next`, the `Stop` hook, `plan:waive` and
-`plan:close` shipped before these numbers existed; the numbers support what
+`plan:close` landed before these numbers existed; the numbers support what
 landed, and `plan:approve` takes on the per-property record above. For what has
 not started:
 
@@ -1790,7 +1802,7 @@ not started:
 | `claude -p` producer, `--print-prompt` (§8) | reshape | the prompt asks every `alter` to state its change in readable properties, and §2 warns on an `alter` whose readable properties all held at approval; an `alter` in prose alone is cause 1 |
 | `guren check --plan` (§9) | proceed | a single reading of the rules above serves it |
 | `github` store (§9) | defer | nothing measured here bears on it; it waits for a user |
-| the guide | proceed, after the §6 rules above land | it would otherwise document cause 1 as intended |
+| the guide | proceed; update when the §6 rules land | the guide describes today's rules, which the changes above alter |
 
 Identity comes first and status second, before any model is called: they are
 what the rest stands on, and both can be tested without one.
