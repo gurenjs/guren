@@ -256,7 +256,7 @@ bun test
 
 Green, and the same twenty post tests as before. A refactor with a relation is still a refactor.
 
-Something changed that no test can see. `bunx guren spec:generate` would now draw `User ||--o{ Post`: the ER and domain views it writes are derived from `relationTypes`, which is one more reason to type a relation with the record type (`BelongsToRecord<UserRecord>`) rather than a narrower alias. Chapter 13 generates those views, links them to your docs, and makes them a gate. Leave them ungenerated until then; a committed view that nobody regenerates is a view the gate fails on.
+Something changed that no test can see. `bunx guren spec:generate` would now draw `User ||--o{ Post`: the ER and domain views it writes take each relation from its `Post.belongsTo(...)` or `User.hasMany(...)` call and the model on the other end from `relationTypes`. That is one more reason to type a relation with the record type (`BelongsToRecord<UserRecord>`) rather than a narrower alias. Chapter 13 generates those views, links them to your docs, and makes them a gate. Leave them ungenerated until then; a committed view that nobody regenerates is a view the gate fails on.
 
 ```bash run
 bunx guren gate

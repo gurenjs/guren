@@ -322,6 +322,30 @@ export function registerWebRoutes(router: Router): void {
     expect(states(result)['column.comment.id']).toBe('blocked')
   })
 
+  test('should read a relationship from its call, never from a relationTypes annotation left behind', async () => {
+    const annotated = `import { defineModel, type BelongsToRecord } from '@guren/core'
+import { comments } from '@/db/schema'
+import type { PostRecord } from './Post.js'
+
+export class Comment extends defineModel(comments, { fillable: ['body'] }) {
+  static override relationTypes: { post: BelongsToRecord<PostRecord> } = { post: null }
+}
+`
+    const relationship = async (name: string, model: string) => {
+      log.mockClear()
+      const result = await report(await writePlan(`${name}.plan.json`), await createApp(name, { ...COMMENTS_APP, 'app/Models/Comment.ts': model }))
+      return result.elements.find((element) => element.id === 'model.comment')!.properties.filter((property) => property.property.startsWith('relationship post'))
+    }
+
+    expect(await relationship('relation-annotation-only', annotated)).toEqual([
+      { property: 'relationship post', verdict: 'differ', planned: 'belongsTo Post', actual: 'not declared' },
+    ])
+    const called = `${annotated}\nComment.belongsTo('post', () => import('./Post.js').then((module) => module.Post), 'postId', 'id')\n`
+    expect((await relationship('relation-called', called)).map((property) => property.verdict)).toEqual(['match', 'match'])
+    const otherKind = called.replace("Comment.belongsTo('post'", "Comment.hasOne('post'")
+    expect(await relationship('relation-other-kind', otherKind)).toContainEqual({ property: 'relationship post', verdict: 'differ', planned: 'belongsTo', actual: 'hasOne' })
+  })
+
   test('should fail only when the plan cannot be read', async () => {
     const app = await createApp('unreadable-plan', BASE_APP)
 

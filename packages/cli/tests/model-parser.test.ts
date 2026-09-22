@@ -296,6 +296,96 @@ Post.hasMany('comments', () => import('./Comment.js'), 'postId', 'id')
     expect(result!.relationships).toHaveLength(2)
     expect(result!.relationships.find(r => r.name === 'author')?.type).toBe('belongsTo')
     expect(result!.relationships.find(r => r.name === 'comments')?.type).toBe('hasMany')
+    expect(result!.relationships.find(r => r.name === 'author')?.relatedModel).toBe('User')
+    expect(result!.relationships.find(r => r.name === 'comments')?.relatedModel).toBe('Comment')
+  })
+
+  it('does not count a relationship only its relationTypes annotation declares', () => {
+    const source = `
+import { defineModel, type HasManyRecord, type BelongsToRecord } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts) {
+  static override relationTypes: {
+    author: BelongsToRecord<UserRecord>
+    comments: HasManyRecord<CommentRecord>
+  } = { author: null, comments: [] }
+}
+
+Post.belongsTo('author', () => import('./User.js'), 'authorId', 'id')
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.relationships.map((r) => r.name)).toEqual(['author'])
+  })
+
+  it('takes the kind from the call when the annotation names another', () => {
+    const source = `
+import { defineModel, type BelongsToRecord } from '@guren/orm'
+import { users } from '../../db/schema.js'
+
+export class User extends defineModel(users) {
+  static override relationTypes: { profile: BelongsToRecord<ProfileRecord> } = { profile: null }
+}
+
+User.hasOne('profile', () => import('./Profile.js'), 'userId', 'id')
+`
+    const result = parseModelSource(source, '/app/Models/User.ts')
+
+    expect(result!.relationships).toEqual([{ name: 'profile', type: 'hasOne', relatedModel: 'Profile' }])
+  })
+
+  it('reads a relationship declared by a call alone, with no target named', () => {
+    const source = `
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts) {}
+
+Post.hasMany('comments', () => import('./Comment.js'), 'postId', 'id')
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.relationships).toEqual([{ name: 'comments', type: 'hasMany' }])
+  })
+
+  it('reads relationship calls in a static block of the class', () => {
+    const source = `
+import { defineModel, type BelongsToRequiredRecord, type HasManyRecord } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts) {
+  declare static relationTypes: {
+    author: BelongsToRequiredRecord<UserRecord>
+    comments: HasManyRecord<CommentRecord>
+  }
+
+  static {
+    this.belongsTo('author', () => import('./User.js'), 'authorId', 'id')
+    Post.hasMany('comments', () => import('./Comment.js'), 'postId', 'id')
+  }
+}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.relationships).toEqual([
+      { name: 'author', type: 'belongsTo', relatedModel: 'User' },
+      { name: 'comments', type: 'hasMany', relatedModel: 'Comment' },
+    ])
+  })
+
+  it('ignores relationship calls on another class', () => {
+    const source = `
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts) {}
+
+Other.hasMany('comments', () => null, 'postId', 'id')
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.relationships).toEqual([])
   })
 
   it('extracts attachment collections from the Attachable(...) declaration', () => {
