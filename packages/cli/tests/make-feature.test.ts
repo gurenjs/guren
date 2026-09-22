@@ -7,7 +7,7 @@ import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
 import { findMigrationCreatingTable } from '../src/make-migration'
 import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureSuccesses, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureSuccesses, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -267,6 +267,34 @@ describe('makeFeature', () => {
         'utf8',
       )
       expect(policy).toContain('export class PostPolicy extends Policy')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('generates a factory typed over the model record with withFactory', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-factory-')
+
+    try {
+      const created = await makeFeature('Post', { fields: 'title:string', withFactory: true })
+
+      // The macOS tmpdir is a symlink and the generators report the realpath.
+      expect(created.some((file) => file.endsWith('/db/factories/PostFactory.ts'))).toBe(true)
+      const factory = await readFile(join(workspace.dir, 'db/factories/PostFactory.ts'), 'utf8')
+      expect(factory).toContain("import type { PostRecord } from '../../app/Models/Post.js'")
+      expect(factory).toContain('export default class PostFactory extends Factory<PostRecord>')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('writes no factory without withFactory', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-no-factory-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string' })
+
+      expect(existsSync(join(workspace.dir, 'db/factories/PostFactory.ts'))).toBe(false)
     } finally {
       await workspace.cleanup()
     }
@@ -690,6 +718,28 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       // The seed sits inside state() and the entries inside routes, in that order.
       expect(fixture.indexOf('state: () => ({')).toBeLessThan(fixture.indexOf('    notes: ['))
       expect(fixture.indexOf('routes: {')).toBeLessThan(fixture.indexOf("'notes.index'"))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns about the model-side flags the prototype run drops', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-prototype-dropped-flags-')
+    try {
+      await seedPrototypeApp(workspace.dir)
+
+      const { warnings } = await captureWarnings(() =>
+        makeFeature('Note', { fields: 'title:string', prototype: true, withFactory: true, withPolicy: true }))
+
+      const dropped = warnings.filter((line) => line.includes('ignored on this run'))
+      expect(dropped).toHaveLength(1)
+      expect(dropped[0]).toContain('--factory, --policy are ignored')
+      expect(dropped[0]).not.toContain('--test')
+      expect(existsSync(join(workspace.dir, 'db/factories/NoteFactory.ts'))).toBe(false)
+
+      const { warnings: quiet } = await captureWarnings(() =>
+        makeFeature('Note', { fields: 'title:string', prototype: true, force: true }))
+      expect(quiet.filter((line) => line.includes('ignored on this run'))).toEqual([])
     } finally {
       await workspace.cleanup()
     }

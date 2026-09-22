@@ -5,6 +5,7 @@ import { CliError } from './cli-error'
 import { appConfiguresAttachments } from './attachments-check'
 import { announceWrittenFiles, camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, writtenFileMessage, type WriterOptions } from './utils'
 import { pluralize, schemaIdentifierFor, tableNameFor } from './inflect'
+import { makeFactory } from './make-factory'
 import { findMigrationCreatingTable } from './make-migration'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
@@ -39,6 +40,7 @@ export interface MakeFeatureOptions extends WriterOptions {
    */
   attach?: string
   withTest?: boolean
+  /** Also generate a model factory in `db/factories`, typed over the model's record. */
   withFactory?: boolean
   /** Skip authentication checks in mutating actions. Defaults to false (auth required). */
   publicAccess?: boolean
@@ -123,6 +125,12 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   if (prototypeFirst && moduleName) {
     throw new CliError('guren make:feature --prototype does not support --module yet: the fixture is app-wide. Nothing was scaffolded.')
   }
+  // The prototype run writes no model or controller, so the flags that hang off them
+  // would otherwise vanish; a promotion run has to carry them again.
+  const droppedFlags = [options.withFactory && '--factory', options.withPolicy && '--policy', options.withTest && '--test'].filter((flag): flag is string => Boolean(flag))
+  if (prototypeFirst && droppedFlags.length > 0) {
+    consola.warn(`--prototype writes no model or controller, so ${droppedFlags.join(', ')} ${droppedFlags.length === 1 ? 'is' : 'are'} ignored on this run. Pass ${droppedFlags.length === 1 ? 'it' : 'them'} again when promoting the feature.`)
+  }
   // A feature scaffolded prototype-first leaves its page-data type behind;
   // finding one is what turns this run into the promotion.
   const promoting = !prototypeFirst && !moduleName && (await fileExists(appRoot, prototypeTypesPath(singular)))
@@ -200,6 +208,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
   const modelPath = await makeModel(singular, { ...writerOptions, attachments })
   created.push(modelPath)
+
+  if (options.withFactory) {
+    created.push(await makeFactory(singular, writerOptions))
+  }
 
   if (withPolicy) {
     const policyPath = await makePolicy(singular, writerOptions)

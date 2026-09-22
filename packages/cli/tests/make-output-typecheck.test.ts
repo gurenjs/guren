@@ -176,18 +176,19 @@ interface FeatureCombo {
 
 const featureCombos: FeatureCombo[] = [
   {
-    label: 'policy, test, every field type',
+    label: 'policy, test, factory, every field type',
     singular: 'Post',
     fields: ALL_FIELDS,
-    options: { withPolicy: true, withTest: true },
-    expectedWrites: ['app/Policies/PostPolicy.ts', 'tests/Post.test.ts', 'app/Http/Controllers/PostController.ts'],
+    options: { withPolicy: true, withTest: true, withFactory: true },
+    expectedWrites: ['app/Policies/PostPolicy.ts', 'tests/Post.test.ts', 'db/factories/PostFactory.ts', 'app/Http/Controllers/PostController.ts'],
   },
   {
-    label: 'public, in a module',
+    label: 'public, with a factory, in a module',
     singular: 'Invoice',
     fields: 'title:string,paidAt:date?',
-    options: { publicAccess: true, root: 'billing' },
-    expectedWrites: ['modules/billing/app/Http/Controllers/InvoiceController.ts', 'resources/js/pages/billing/invoices/Index.tsx'],
+    options: { publicAccess: true, withFactory: true, root: 'billing' },
+    // A module's factory imports its model by a path relative to the module; this combo compiles that path.
+    expectedWrites: ['modules/billing/app/Http/Controllers/InvoiceController.ts', 'modules/billing/db/factories/InvoiceFactory.ts', 'resources/js/pages/billing/invoices/Index.tsx'],
   },
   {
     label: 'attachments',

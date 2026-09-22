@@ -197,7 +197,7 @@ describe('generated sources parse', () => {
     expect(templatePaths.filter((path) => !writtenAuthTemplatePaths.has(path))).toEqual([])
   })
 
-  it('make:feature with every field type, policy, and tests', async () => {
+  it('make:feature with every field type, policy, tests, and a factory', async () => {
     await expectAllOutputsParse('guren-parse-feature-', () =>
       makeFeature('Post', { fields: ALL_FIELDS, withPolicy: true, withTest: true, withFactory: true }))
   })
