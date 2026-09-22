@@ -198,7 +198,7 @@ export function registerWebRoutes(router: Router): void {
         'utf8',
       )
       expect(resetController).toContain('validateBody(ResetPasswordSchema)')
-      expect(resetController).toContain('verifyPasswordResetToken(')
+      expect(resetController).toContain('completePasswordReset(')
       expect(resetController).toContain('User.update(')
 
       const mailConfig = await readFile(join(workspace.dir, 'config/mail.ts'), 'utf8')

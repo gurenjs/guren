@@ -43,7 +43,7 @@ bunx guren make:auth --install --minimal
 
 ### パスワードリセット
 
-ログインページの「Forgot your password?」から、`ForgotPasswordController` と `ResetPasswordController` によるフローに入ります。内部ではフレームワークの `createPasswordResetToken` / `verifyPasswordResetToken` を使っています。リセットトークンは、生成される `app/Auth/PasswordResetStore.ts`(インメモリストア。本番や複数インスタンス構成では Redis ベースのストアに差し替えてください)に保存され、同じく生成される `config/mail.ts` 経由でメール送信されます。`config/mail.ts` はデフォルトで `log` ドライバを使うので、リセットリンクはコンソールにそのまま出力され、開発環境では設定なしで動作確認できます。実際にメールを送るには `MAIL_MAILER=smtp`(および `SMTP_*` の環境変数)を設定してください。
+ログインページの「Forgot your password?」から、`ForgotPasswordController` と `ResetPasswordController` によるフローに入ります。内部ではフレームワークの `createPasswordResetToken` / `completePasswordReset` を使っています。リセットトークンは、生成される `app/Auth/PasswordResetStore.ts`(インメモリストア。本番や複数インスタンス構成では Redis ベースのストアに差し替えてください)に保存され、同じく生成される `config/mail.ts` 経由でメール送信されます。`config/mail.ts` はデフォルトで `log` ドライバを使うので、リセットリンクはコンソールにそのまま出力され、開発環境では設定なしで動作確認できます。実際にメールを送るには `MAIL_MAILER=smtp`(および `SMTP_*` の環境変数)を設定してください。
 
 ### メール確認
 
@@ -88,6 +88,14 @@ bunx guren make:auth --install --oauth github --oauth-only
 `make:auth` は生成するファイルを書き込むだけで、削除はしません。そのため、既存のパスワード認証アプリを `--oauth-only --force` で変換すると、旧来の登録・リセット関連ファイルがディスク上に残ります(スキャフォールドが一覧を表示します)。これらは削除してください。特に残った `db/seeders/UsersSeeder.ts` は、ルートテーブルではなく `db:seed` から拾われるので、`routes/auth.ts` を書き換えただけでは無効になりません。
 
 Cloudflare Workers の無料プランのように CPU 時間が課金・制限される実行環境では、どのハッシュアルゴリズムを選んでもパスワードハッシュ1回でリクエストあたりの CPU 予算を超えるので、この構成をおすすめします。
+
+### ワンタイムトークンのストア
+
+パスワード再設定とメール認証では、ストアの操作を原子的に実行します。`replace()` はメールアドレスの既存トークンの失効と新規保存を一括で行います。`consume(tokenId, email)` は保存済みメールアドレスとの比較とトークン削除を一括で行い、同時に呼ばれても成功を示す `true` を返すのは1回だけです。メモリ版とRedis版のストアは両方を実装しています。発行時にはメールアドレスを小文字に揃えてから置き換えます。
+
+独自の `PasswordResetTokenStore` と `EmailVerificationTokenStore` には、発行・完了ヘルパーを使う前にこれらのメソッドを追加してください。パスワード再設定ストアは `replace(tokenId, email, expiresAt)`、メール認証ストアは `replace(token)` を受け取ります。型の互換性を保つためメソッドは省略可能ですが、ヘルパーは必要な操作が未実装ならエラーにします。複数ワーカーで共有するストアでは、プロセス内のロックだけでは不十分です。トランザクションやデータベースの原子的なコマンドで実装してください。
+
+`completePasswordReset()` と `completeEmailVerification()` は、アプリの更新処理を呼ぶ前にトークンを消費します。更新に失敗した場合は再発行してください。消費したトークンは復活しません。`verifyPasswordResetToken()` と `verifyEmailToken()` は有効性の確認だけを行い、トークンの予約や消費はしません。更新には完了ヘルパーを使ってください。生成済みのパスワード再設定コントローラーで検証・更新・削除を個別に呼んでいる場合は、`completePasswordReset()` に置き換えてください。`@guren/core` と `@guren/cli` を一緒に更新し、トークンを発行・消費する全インスタンスを再起動してください。古いインスタンスには同時実行の問題が残ります。
 
 ## OAuth / ソーシャルログイン
 
