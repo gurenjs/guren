@@ -314,8 +314,47 @@ const CASES: Case[] = [
       actions: [{ key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: [] }],
     }),
     id: 'a',
-    state: 'unjudged',
+    state: 'planned',
   },
+  {
+    name: 'an added action a mounted route dispatches to, whose body validates with no planned validator',
+    plan: plan({
+      controllers: [controller(EXISTING, [action(ADD, { body: 'val' })])],
+      validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
+    }),
+    app: app({
+      actions: [{ key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates: [] }],
+    }),
+    id: 'a',
+    state: 'present',
+  },
+  {
+    name: 'an added action whose body validates with another schema and returns another page',
+    plan: plan({
+      controllers: [controller(EXISTING, [action(ADD, { body: 'val', response: { kind: 'inertia', view: 'v' } })])],
+      validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
+      views: [{ id: 'v', change: EXISTING, page: 'posts/Archive', purpose: 'x', props: [], actions: [], states: {} }],
+    }),
+    app: app({
+      actions: [{ key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: ['posts/Index'], calls: [], abilities: [], identifiers: [], validates: ['OtherSchema'] }],
+    }),
+    id: 'a',
+    state: 'drifted',
+  },
+  {
+    name: 'an added action validated by its route contract rather than its body',
+    plan: plan({
+      controllers: [controller(EXISTING, [action(ADD, { name: 'store', body: 'val' })])],
+      validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
+    }),
+    app: app({
+      routes: [contractRoute(null)],
+      actions: [{ key: 'PostController.store', module: null, file: 'app/Http/Controllers/PostController.ts', pages: [], calls: [], abilities: [], identifiers: [], validates: [] }],
+    }, { actions: ['PostController.store'] }),
+    id: 'a',
+    state: 'wired',
+  },
+
   {
     name: 'an altered action whose planned validator its body validates with',
     plan: plan({
@@ -377,6 +416,34 @@ const CASES: Case[] = [
   { name: 'an added resource with no file', plan: plan({ resources: [{ id: 'res', change: ADD, name: 'CommentResource', model: 'm', fields: [] }] }), app: app(), id: 'res', state: 'planned' },
   { name: 'an added resource', plan: plan({ resources: [{ id: 'res', change: ADD, name: 'PostResource', model: 'm', fields: [] }] }), app: app(), id: 'res', state: 'present' },
   { name: 'an added policy', plan: plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [] }] }), app: app(), id: 'pol', state: 'present' },
+  {
+    name: 'an added resource whose planned fields nothing reads',
+    plan: plan({ resources: [{ id: 'res', change: ADD, name: 'PostResource', model: 'm', fields: [{ name: 'id', type: 'number' }] }] }),
+    app: app(),
+    id: 'res',
+    state: 'unjudged',
+  },
+  {
+    name: 'an added policy whose planned abilities nothing reads',
+    plan: plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [{ name: 'delete', rule: 'owner' }] }] }),
+    app: app(),
+    id: 'pol',
+    state: 'unjudged',
+  },
+  {
+    name: 'an added model whose one planned property could not be read',
+    plan: plan({ models: [model(ADD)] }),
+    app: app({ tables: UNREADABLE }),
+    id: 'm',
+    state: 'unjudged',
+  },
+  {
+    name: 'an added validator whose planned fields nothing reads, on its mount',
+    plan: validator(ADD, 'PostPayloadSchema', { fields: [{ name: 'body', type: 'text', required: true, rules: [] }] }),
+    app: app({ routes: [contractRoute(null)] }),
+    id: 'val',
+    state: 'wired',
+  },
   { name: 'a policy when the directory would not open', plan: plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [] }] }), app: app({}, { policies: UNREADABLE }), id: 'pol', state: 'blocked' },
   { name: 'an added job', plan: plan({ sideEffects: [{ id: 'job', change: ADD, kind: 'job', name: 'SendDigest', trigger: 't', description: 'd' }] }), app: app(), id: 'job', state: 'present' },
   { name: 'an added job with no file', plan: plan({ sideEffects: [{ id: 'job', change: ADD, kind: 'job', name: 'Reindex', trigger: 't', description: 'd' }] }), app: app(), id: 'job', state: 'planned' },
@@ -445,6 +512,29 @@ describe('judgePlan', () => {
 
       const verdicts = Object.fromEntries(only(status, 'c').properties.map((property) => [property.property, property.verdict]))
       expect(verdicts).toEqual({ type: 'unknown', nullable: 'unknown', unique: 'unknown', index: 'unknown', default: 'unknown' })
+    })
+
+    test('should read a planned validator a readable body does not validate with as a difference that withholds the mount', () => {
+      const document = plan({
+        controllers: [controller(EXISTING, [action(ADD, { body: 'val' })])],
+        validators: [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }],
+      })
+      const scanned = (validates: string[]) =>
+        app({ actions: [{ key: 'PostController.index', module: null, file: 'app/Http/Controllers/PostController.ts', pages: [], calls: [], abilities: [], identifiers: ['PostPayloadSchema'], validates }] })
+
+      const none = only(judgePlan(document, scanned([])), 'a')
+      expect(none.properties).toEqual([{ property: 'body validator', verdict: 'differ', planned: 'PostPayloadSchema', actual: 'no validate call' }])
+      expect(none).toMatchObject({ state: 'present', notes: ['Not wired: body validator PostPayloadSchema is not used (the body calls no validate method, and no route contract holds it).'] })
+      expect(only(judgePlan(document, scanned(['OtherSchema'])), 'a').properties[0]).toMatchObject({ verdict: 'differ', actual: 'OtherSchema' })
+      expect(only(judgePlan(document, scanned(['schemas.post'])), 'a').notes).toEqual([
+        'Not wired: body validator PostPayloadSchema is not used (the body validates with schemas.post; schemas.post cannot be read as an export, so validate with PostPayloadSchema by name or hold it in the route contract).',
+      ])
+    })
+
+    test('should leave an added element with planned properties and no mount unjudged when none of them can be read', () => {
+      const document = plan({ resources: [{ id: 'res', change: ADD, name: 'PostResource', model: 'm', fields: [{ name: 'id', type: 'number' }] }] })
+
+      expect(only(judgePlan(document, app()), 'res')).toMatchObject({ state: 'unjudged', reason: expect.stringContaining('could be read') })
     })
 
     test('should list them per element as planned, not checkable', () => {

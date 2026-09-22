@@ -1,6 +1,7 @@
 import { relative, resolve } from 'node:path'
 import type { RouteDefinition as ServerRouteDefinition } from '@guren/server'
 import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { CONTRACT_SEGMENTS } from './contract-segments'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import {
   DECLARATION_MODULE_AUGMENTATION,
@@ -123,8 +124,6 @@ export const routes = ${helperObject} as const
 
 ${RUNTIME_UTILITY_FUNCTIONS}${buildContractAugmentation(namedDefinitions)}`
 }
-
-const CONTRACT_SEGMENTS = ['params', 'query', 'body'] as const
 
 /**
  * The `GurenRouteContracts` registry `Controller.validated()` reads: each named

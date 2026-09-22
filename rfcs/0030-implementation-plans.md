@@ -1125,7 +1125,10 @@ page or ability: a miss may be a helper's work. A planned `body` / `params` /
 `query` validator is read off the `this.validateBody` / `validateQuery` /
 `validateParams` call that takes it, the same reading the validator's own
 `wired` evidence uses, and never off a mention: an action whose only planned
-property is a validator its body merely names is `unjudged`, not `wired`.
+property is a validator its body merely names is not `wired`. It reads
+`planned` for an `alter` and `present` for an `add`, since the validator is
+then a `differ` (see *status rules after Part 2* below); an earlier reading
+made it `unjudged`.
 Prose (`purpose`, `rules`, a description) is not
 a planned property and is not counted as one. Flows, tasks, behaviours and
 questions are not judged; a `command` and a `mail` / `notification` class are
@@ -1381,6 +1384,84 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   verify leaves the working tree as clean as it found it, which `plan:next`
   relies on.
 
+**Amended in implementation (status rules after Part 2).** What the Part 2
+measurements below asked of `plan/status.ts` and `plan/verification.ts`, and how
+each rule was read.
+
+- "An element whose every planned property is unknown is `unjudged`" now holds
+  for every change kind, on two conditions outside `alter`: the element declared
+  at least one planned property, and its kind has no mount point. So an `add`
+  resource with fields, a policy with abilities, a model whose one read property
+  (its table) could not be read, and a column whose every property is hidden are
+  `unjudged`. An element that plans no property (a controller, a job, event or
+  listener, a resource with no fields) completes on existence as before. One
+  with a mount point (a validator, an action, a route, a page) completes on it,
+  since a mount is a reading of the element itself; that is why a validator
+  whose fields have no reader still reads `wired`. `alter` keeps its stricter
+  rule, `unjudged` with no readable property whatever it mounts, since its
+  target existed before the plan.
+- A planned `params`, `query` or `body` validator is `match` when the action
+  body validates with it, or when a route dispatching to the action holds it as
+  a contract schema (object identity against the registered definitions, as for
+  the validator's own `wired`). Neither reading records which segment the
+  schema sits in, so a `query` contract or a `validateQuery` call satisfies a
+  planned `body` validator. It is `differ` when the body was read and does
+  neither, and `unknown` only when no body was read. That `differ` does not
+  drift the action: it holds it at `present` with a note (`Not wired: ...`),
+  and another differing property is what makes it `drifted`. An `alter` whose
+  readable properties all differ stays `planned`. A validate call is read as
+  written, so `this.validateBody(schemas.comment)` names `schemas.comment`,
+  which is not an export; the note says so and asks for the schema by name or
+  in the route contract. A chained or built schema reads the same way:
+  `this.validateBody(PostSchema.partial())` names `PostSchema.partial` and
+  `this.validateBody(z.object(...))` names `z.object`, so both are a
+  `differ`. A helper that validates on the action's behalf also
+  reads as a `differ`, which holds the action back rather than passing it.
+- An element none of whose planned properties matched rests on existence, a
+  mount or its behaviours alone, whatever its state. `plan:status` lifts such an
+  element to `verified` only while a verified behaviour reaches it. A `drop` is
+  the exception, since its absence is re-read on every status. Reach follows
+  the plan's references (`listPlanReferences()`) from a behaviour, through a
+  total table of which reference fields carry it: a behaviour's route and
+  expected page, a route's action and bound models, an action's validators,
+  policy and response page or resource, a page's prop resources, and the model
+  of a reached resource or policy; an action reached also reaches its
+  controller. A page's form validator, form target and action routes do not
+  carry it, since a request to a route shows nothing of the page that links to
+  it. Nothing in a plan links a behaviour to a job, event, listener, mail or
+  notification (a side effect's `trigger` is prose). The behaviours that count
+  are those of every step in the plan that carries acceptance ids and whose
+  record stands (`recordStands()`: verified against this plan digest, its
+  fingerprint unchanged), since one task's behaviour may render a page or return
+  a resource another task placed; the same predicate lets the earlier parts of
+  a split `http` step lift what the last part's behaviours reach. The `tests`
+  step never counts: it verifies by seeing the behaviours fail.
+- `recordStillHolds()` and the step outcome `plan:verify` records are
+  unchanged. A step whose commands and behaviours passed stays `verified` and
+  its record stands for `plan:next` and the `Stop` hook, because an element no
+  behaviour reaches is a gap in the plan that no implementation closes. Such an
+  element carries a note ending in "add a behaviour that reaches it, or waive
+  it". The overlay records why it did not lift an element (`hold`: below its
+  completion state, nothing fingerprinted, a file changed since, or no
+  behaviour reaches it), and `plan:close` prints each element it refuses with
+  what holds it, suggesting `plan:verify` only where a run can lift it.
+  `plan:next`, once every step is verified, lists the elements `plan:close`
+  would still refuse, so an agent does not stop on a plan that cannot close.
+- What this costs a plan. A plan whose side effects or commands the behaviours
+  cannot reach, or with any other element that plans no property and no
+  behaviour reaches (a controller of an action nothing requests, a resource
+  nothing returns or renders), closes only by a waiver or a behaviour that
+  reaches it. On the comments fixture, judged against scratch applications with
+  every step recorded as verified, the finished implementation lifts 13 of its
+  15 elements. `resource.comment` has unread fields and no behaviour returns it.
+  `view.posts.show` changes only `form`, `actions` and `states`, and its form
+  targets a route, which does not carry reach. Both need a waiver, or a
+  behaviour with `expect.inertia` on the route that shows the post.
+- Pending: cause 1, an `alter` completing on a property that already held.
+  Telling the two apart needs the per-property readings of every `alter`
+  recorded at approval, which arrives with the change to re-approval; the rule
+  is applied in a later change on top of it.
+
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store
 (§9), committed or on the issue. `.guren/plans/<slug>.state.json` is
@@ -1437,7 +1518,11 @@ shipped with these readings:
   `generateEntityContext()` is not in it yet.
 - For a plan with a baseline `plan:next` reads the application without
   `detail` (the scanners, and an import of the routes file) and spawns no
-  command; a draft is never read. It holds a step that depends on a stale
+  command; a draft is never read. Once every step is verified it reads the
+  application once, with `detail` and for a draft too, which imports
+  `db/schema.ts` and the validator files, to list the elements `plan:close`
+  would still refuse (see *status rules after Part 2*); a read that fails is
+  reported, never fatal. It holds a step that depends on a stale
   element (§4), and the steps after it in its task or in a task waiting for
   it, and returns the first step that is neither. Each held step is reported
   with its stale elements, how the step depends on them, the §2 checks re-run

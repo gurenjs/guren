@@ -163,7 +163,7 @@ describe('plan:next', () => {
     await writeState(app, { steps: Object.fromEntries(STEPS.map((id) => [id, id === SCAFFOLD ? record : filed])) })
     const done = await planNextFile(plan, { appRoot: app, now: NOW })
     expect(done.step).toBeNull()
-    expect(formatPlanNext(done, 'comments.plan.json')).toContain(`Every step is verified. Nothing is left to implement.\n${SCAFFOLD}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
+    expect(formatPlanNext(done, 'comments.plan.json')).toContain(`\n${SCAFFOLD}: verified on the commands alone, nothing fingerprinted; plan:status shows what their elements are at.`)
   })
 
   test('should report that every step is verified and clear the mark, uncommitted work or not', async () => {
@@ -181,7 +181,16 @@ describe('plan:next', () => {
     expect(report.step).toBeNull()
     expect(report.verified).toEqual(STEPS)
     expect((await readState(app)).active).toBeUndefined()
-    expect(formatPlanNext(report, 'comments.plan.json')).toContain('Every step is verified.')
+    // Nothing of the plan is written in this application, so plan:close would refuse every element, and says why.
+    expect(report.unverified).toContainEqual({ id: 'resource.comment', state: 'planned', holds: 'implement it, or waive it' })
+    const text = formatPlanNext(report, 'comments.plan.json')
+    expect(text).toContain('Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.\n  model.post (planned): The element this alters was not found; implement it, or waive it')
+    expect(text).not.toContain('Nothing is left to implement')
+
+    const unread = await planNextFile(plan, { appRoot: app, now: NOW, statusApp: () => Promise.reject(new Error('the schema threw')) })
+    expect(unread.unverifiedUnreadable).toBe('the schema threw')
+    expect(formatPlanNext(unread, 'comments.plan.json')).toContain('Every step is verified. The elements were not judged, so plan:status may still list some that plan:close refuses: the schema threw')
+    expect(formatPlanNext(unread, 'comments.plan.json')).not.toContain('Nothing is left to implement')
   })
 
   test('should refuse uncommitted changes unless they are the marked step\'s own', async () => {
@@ -318,6 +327,26 @@ describe('plan:next', () => {
     expect(carried.step?.id).toBe(TESTS)
     expect(withdrawn.verified).toEqual([])
     expect(withdrawn.step?.id).toBe(SCAFFOLD)
+  })
+
+  test('should read the application once, with detail, when every step of an approved plan is verified', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
+    const { app, plan } = await createApp('approved-done')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
+    const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) }
+    await writeState(app, { steps: Object.fromEntries(STEPS.map((id) => [id, record])) })
+    const reads: string[] = []
+
+    const report = await planNextFile(plan, {
+      appRoot: app,
+      now: NOW,
+      app: () => (reads.push('freshness'), Promise.resolve(planAppState())),
+      statusApp: () => (reads.push('detail'), Promise.resolve(planAppState())),
+    })
+
+    expect(report.step).toBeNull()
+    expect(reads).toEqual(['detail'])
   })
 
   test('should mark a step\u2019s waived elements apart from the ones to implement', async () => {

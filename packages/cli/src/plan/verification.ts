@@ -11,10 +11,11 @@ import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
 import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
+import { listPlanReferences, type PlanReferenceField } from './references'
 import type { Plan, PlanDraft } from './schema'
 import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
-import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from './status'
-import type { PlanTaskDerivation } from './tasks'
+import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus, type PlanVerificationHold } from './status'
+import { planElementParents, type PlanTaskDerivation } from './tasks'
 
 export function sha256(bytes: Uint8Array | string): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -49,11 +50,65 @@ export interface PlanVerificationSummary {
 }
 
 /**
- * An element its step verified is `verified` while every fingerprinted file still hashes
- * the same, `drifted` once one does not or cannot be read. Lifted: an element at its
- * completion state or `unjudged`; one existing in files only when the record covers them,
- * since a result nothing could expire is not one. A `drop` has no file, its absence re-read
- * per status; an `unjudged` element with none rests on its step's behaviours, so it needs some.
+ * Which references a behaviour's reach follows (RFC 0030 §6). A route runs its action, which
+ * validates, authorizes and responds with what it names; a page shows its props' resources.
+ * A view's form and action routes do not: posting to a route shows nothing of the page that
+ * links to it. Total, so a new reference is a decision here.
+ */
+const REFERENCE_CARRIES_BEHAVIOUR: Record<PlanReferenceField, boolean> = {
+  'acceptance.route': true,
+  'acceptance.inertia': true,
+  'route.action': true,
+  'route.bind': true,
+  'action.params': true,
+  'action.query': true,
+  'action.body': true,
+  'action.policy': true,
+  'action.view': true,
+  'action.resource': true,
+  'view.propResource': true,
+  'resource.model': true,
+  'policy.model': true,
+  'view.actionRoute': false,
+  'view.formValidator': false,
+  'view.formSubmitsTo': false,
+  'column.references': false,
+  'model.relationship': false,
+  'question.affects': false,
+  'flow.node': false,
+  'task.covers': false,
+}
+
+/**
+ * The elements the behaviours `acceptanceIds` exercise: what the carrying references reach
+ * from them, and the controller of every action reached. Nothing in a plan links a behaviour
+ * to a job, event, listener, mail or notification, so none is ever reached.
+ */
+export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: Iterable<string>): Set<string> {
+  const edges = new Map<string, string[]>()
+  for (const reference of listPlanReferences(plan)) {
+    if (!REFERENCE_CARRIES_BEHAVIOUR[reference.field]) continue
+    edges.set(reference.from.id, [...(edges.get(reference.from.id) ?? []), reference.to])
+  }
+  const parents = planElementParents(plan)
+  const reached = new Set<string>()
+  const pending = [...acceptanceIds]
+  for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+    for (const next of [...(edges.get(id) ?? []), parents.get(id)]) {
+      if (next === undefined || reached.has(next)) continue
+      reached.add(next)
+      pending.push(next)
+    }
+  }
+  return reached
+}
+
+/**
+ * An element its step verified is `verified` while every fingerprinted file still hashes the
+ * same, `drifted` once one does not or cannot be read. Lifted: one at its completion state or
+ * `unjudged`, in files the record covers, since a result nothing could expire is not one. A
+ * `drop` has no file, its absence re-read per status. One no property of which matched lifts
+ * only while a behaviour of a standing step, in any task, reaches it.
  */
 export function applyVerification(
   status: PlanStatus,
@@ -61,9 +116,19 @@ export function applyVerification(
   records: Readonly<Record<string, PlanStepRecord>>,
   digest: string,
   hashes: ReadonlyMap<string, string | null>,
+  plan: PlanDraft | Plan,
 ): { status: PlanStatus<PlanElementState>; staleSteps: string[] } {
   const lifted = new Map<string, PlanElementStatus<PlanElementState>>(status.elements.map((element) => [element.id, { ...element, notes: [...element.notes] }]))
   const staleSteps: string[] = []
+
+  // Every standing step that ran behaviours counts: one task's behaviour may render a page or return a resource another task placed.
+  const carriers = derivation.tasks.flatMap((task) =>
+    task.steps.filter((step) => {
+      const record = records[step.id]
+      return step.kind !== 'tests' && step.acceptanceIds.length > 0 && record !== undefined && recordStands(record, digest, hashes)
+    }),
+  )
+  const reached = behaviourReach(plan, carriers.flatMap((step) => step.acceptanceIds))
 
   for (const task of derivation.tasks) {
     for (const step of task.steps) {
@@ -80,19 +145,27 @@ export function applyVerification(
         const element = lifted.get(id)
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
-        const needsNoFiles = element.change === 'drop' || (element.state === 'unjudged' && step.acceptanceIds.length > 0)
+        const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
+        // An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers.
+        const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
+        const hold = (kind: PlanVerificationHold, note: string): void => {
+          element.notes.push(note)
+          element.hold = { kind, note }
+        }
         if (!awaitsVerification(element)) {
-          element.notes.push(`${verifiedBy}, and no longer at the state that completes it.`)
+          hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
+        } else if (unmatched && !reached.has(id)) {
+          hold('unreached', `${verifiedBy}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`)
         } else if (element.files.length === 0 && !needsNoFiles) {
-          element.notes.push(`${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
+          hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
           element.state = 'drifted'
-          element.notes.push(`${verifiedBy}; now in a file that run did not fingerprint: ${uncovered.join(', ')}.`)
-        } else if (changed.length === 0) {
-          element.state = 'verified'
-        } else {
+          hold('expired', `${verifiedBy}; now in a file that run did not fingerprint: ${uncovered.join(', ')}.`)
+        } else if (changed.length > 0) {
           element.state = 'drifted'
-          element.notes.push(`${verifiedBy}; changed since: ${changed.join(', ')}.`)
+          hold('expired', `${verifiedBy}; changed since: ${changed.join(', ')}.`)
+        } else {
+          element.state = 'verified'
         }
       }
     }
@@ -117,7 +190,8 @@ export function applyWaivers(status: PlanStatus<PlanElementState>, waivers: Read
     const taken = `Waived ${waiver.at}${waiver.by ? ` by ${waiver.by}` : ''}: ${waiver.reason}`
     if (element.state === 'verified') return { ...element, notes: [...element.notes, `${taken}. It is verified, so the waiver is not needed.`] }
     if (element.change === 'existing') return { ...element, notes: [...element.notes, `${taken}. It is an existing element, no part of completion, so the waiver is not needed.`] }
-    return { ...element, state: 'waived', notes: [...element.notes, taken] }
+    const { hold: _hold, ...rest } = element
+    return { ...rest, state: 'waived', notes: [...element.notes, taken] }
   })
   return { elements, summary: summarize(elements) }
 }
@@ -171,7 +245,7 @@ export async function overlayVerification(
   const read = await readPlanState(root, slug)
   const records = read.state?.steps ?? {}
   const files = Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files))
-  const applied = applyVerification(status, derivation, records, planDigest(plan), await hashFiles(root, files))
+  const applied = applyVerification(status, derivation, records, planDigest(plan), await hashFiles(root, files), plan)
   const unreadable =
     read.unreadable ?? (options.replacedUnreadable ? `${options.replacedUnreadable}; this run replaced it, and its other records are gone` : undefined)
   const log = options.waivers ?? (await readPlanWaivers(planPath, plan))
@@ -203,7 +277,29 @@ function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string
  * `waived` defaults to none, which retires a record resting on one rather than keeping it.
  */
 export function recordStillHolds(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>, waived: ReadonlySet<string> = new Set()): boolean {
-  if (record.outcome !== 'verified' || record.planDigest !== digest) return false
-  if (record.waived.some((id) => !waived.has(id))) return false
-  return changedFiles(record, hashes).length === 0
+  return recordStands(record, digest, hashes) && record.waived.every((id) => waived.has(id))
+}
+
+/** Verified against this plan digest, every fingerprinted file hashing as it did: what a record must be to count at all. */
+export function recordStands(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>): boolean {
+  return record.outcome === 'verified' && record.planDigest === digest && changedFiles(record, hashes).length === 0
+}
+
+/**
+ * What holds an element short of `verified` or `waived`, and what would move it, for the
+ * commands that refuse or report on such an element (`plan:close`, `plan:next`). Suggests
+ * `plan:verify` only where running it can lift the element.
+ */
+export function whatHoldsElement(element: PlanElementStatus<PlanElementState>): string {
+  const hold = element.hold
+  const bare = (text: string): string => text.replace(/\.$/u, '')
+  if (hold?.kind === 'unreached') return bare(hold.note)
+  // An element below its completion state is held by what the readers said, not by the run.
+  const said = element.notes.filter((note) => note !== hold?.note).at(-1)
+  const detail = hold && hold.kind !== 'incomplete' ? hold.note : (element.reason ?? said)
+  const lead = detail ? `${bare(detail)}; ` : ''
+  if (element.state === 'blocked') return `${lead}fix what keeps it from being read, or waive it`
+  if (hold?.kind === 'unfingerprinted') return `${lead}plan:verify cannot lift what it cannot fingerprint, so waive it`
+  if (hold?.kind === 'expired' || (hold === undefined && awaitsVerification(element))) return `${lead}run guren plan:verify`
+  return `${lead}implement it, or waive it`
 }

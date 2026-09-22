@@ -6,6 +6,7 @@
  * reader is `unknown`, which never counts towards `present` and never satisfies a `drop`.
  */
 
+import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { SchemaColumnDefault, SchemaConstraint } from '../schema-parser'
 import type { RuntimeSchemaColumn, SourcedSchemaTable } from '../schema-runtime'
 import type {
@@ -67,7 +68,15 @@ export interface PlanElementStatus<S extends PlanElementState = PlanStatusState>
   completesAt: 'present' | 'wired'
   /** App-relative files the readers found the element in; what `plan:verify` fingerprints. Empty until it exists. */
   files: string[]
+  /** Set by the verification overlay when a verified step did not lift the element: why, and the note that says so. */
+  hold?: { kind: PlanVerificationHold; note: string }
 }
+
+/**
+ * Why a verified step did not lift its element: it is below its completion state, nothing of it
+ * was fingerprinted, a fingerprinted file changed (`expired`), or no verified behaviour reaches it.
+ */
+export type PlanVerificationHold = 'incomplete' | 'unfingerprinted' | 'expired' | 'unreached'
 
 export interface PlanStatusSummary {
   /** Elements the plan changes, per state. `existing` elements are counted apart. */
@@ -194,11 +203,18 @@ function conclude(judgement: Judgement): PlanElementStatus {
   if (change.kind === 'alter' && readable.length === 0) {
     return result('unjudged', { reason: 'No planned property of this change has a reader.' })
   }
-  if (differing.length > 0) {
-    const untouched = change.kind === 'alter' && differing.length === readable.length
-    return result(untouched ? 'planned' : 'drifted')
+  // A mount is a reading of the element itself; with none, existence would complete what the plan stated and nothing read.
+  if (properties.length > 0 && readable.length === 0 && !judgement.mount) {
+    return result('unjudged', { reason: 'No planned property of this element could be read, and its existence says nothing about them.' })
   }
+  if (change.kind === 'alter' && differing.length > 0 && differing.length === readable.length) return result('planned')
+  const withheld = differing.filter((property) => WITHHOLDS_MOUNT.has(property))
+  if (differing.length > withheld.length) return result('drifted')
 
+  if (withheld.length > 0) {
+    notes.push(`Not wired: ${withheld.map(unusedValidator).join('; ')}.`)
+    return result('present')
+  }
   if (!judgement.mount) return result('present')
   const mount = judgement.mount()
   if (mount === 'mounted') return result('wired')
@@ -272,6 +288,33 @@ function tableUnread(table: SourcedSchemaTable | PlanAppUnreadable | undefined):
 
 function previousOf(change: PlanChange, lookup: (name: string) => Existence): Existence | undefined {
   return change.kind === 'rename' ? lookup(change.from) : undefined
+}
+
+/** A `differ` that holds its element at `present` instead of drifting it: a use the code does not make yet. */
+const WITHHOLDS_MOUNT = new WeakSet<PlanPropertyStatus>()
+
+function withholding(property: PlanPropertyStatus): PlanPropertyStatus {
+  WITHHOLDS_MOUNT.add(property)
+  return property
+}
+
+const NO_VALIDATE_CALL = 'no validate call'
+
+function unusedValidator(property: PlanPropertyStatus): string {
+  const head = `${property.property} ${property.planned} is not used`
+  if (property.actual === NO_VALIDATE_CALL) return `${head} (the body calls no validate method, and no route contract holds it)`
+  // The scan names a member chain as written, never the export it evaluates to.
+  const chain = property.actual?.split(', ').find((name) => name.includes('.'))
+  if (chain) return `${head} (the body validates with ${property.actual}; ${chain} cannot be read as an export, so validate with ${property.planned} by name or hold it in the route contract)`
+  return `${head} (the body validates with ${property.actual})`
+}
+
+/**
+ * Whether a registered route to an action holds `symbol` as a contract schema. Any segment
+ * counts: `contractSchemas` does not say which, so a `query` contract satisfies a planned `body`.
+ */
+function contractHolds(route: PlanAppRouteDetail, symbol: string): boolean {
+  return route.contractSchemas.includes(symbol)
 }
 
 const NO_DETAIL: PlanAppUnreadable = { unreadable: 'the application state was loaded without detail' }
@@ -693,7 +736,10 @@ class StatusContext {
     return isUnreadable(actions) ? undefined : actions.find((candidate) => candidate.key === key)
   }
 
-  /** A body scan answers "the body mentions it", so a miss is `unknown`: a helper may do the work. */
+  /**
+   * A body scan answers "the body mentions it", so a missed mention is `unknown`: a helper may
+   * do the work. A validator is read off the call that takes it, so a readable body without one differs.
+   */
   private actionProperties(action: PlanAction, key: string): PlanPropertyStatus[] {
     const body = this.actionBody(key)
     const properties: PlanPropertyStatus[] = []
@@ -705,13 +751,17 @@ class StatusContext {
 
     // A mention is not a use, here as for the validator's own mount: a symbol can be
     // named by a leftover import or in a type position, and neither validates anything.
-    const NOT_VALIDATED = 'the action body validates with no such schema, and a helper or the route contract may'
-    for (const field of ['params', 'query', 'body'] as const) {
+    // A readable body that validates with another schema or none is a `differ` (RFC 0030 §6).
+    const contracts = this.routesTo(key)
+    for (const field of CONTRACT_SEGMENTS) {
       const id = action[field]
       if (!id) continue
       const property = `${field} validator`
       const name = this.namesById.get(id) ?? id
-      properties.push(body?.validates.includes(name) ? match(property, name) : unknown(property, name, NOT_VALIDATED))
+      if (body?.validates.includes(name)) properties.push(match(property, name))
+      else if (!isUnreadable(contracts) && contracts.some((route) => contractHolds(route, name))) properties.push(match(property, name, 'the route contract'))
+      else if (body) properties.push(withholding(differ(property, name, body.validates.length > 0 ? body.validates.join(', ') : NO_VALIDATE_CALL)))
+      else properties.push(unknown(property, name, 'the action body could not be read'))
     }
     const policy = action.authorization.policy
     if (policy) {
@@ -777,7 +827,7 @@ class StatusContext {
     }
 
     for (const route of isUnreadable(routes) ? [] : routes) {
-      if (!route.contractSchemas.includes(symbol)) continue
+      if (!contractHolds(route, symbol)) continue
       const mount = this.routeMount(route)
       if (mount === 'mounted') return 'mounted'
       reasons.push(`the contract of ${route.name ?? `${route.method} ${route.path}`} holds it, and ${mount.unconfirmed}`)

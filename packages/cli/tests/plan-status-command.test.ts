@@ -300,7 +300,10 @@ export function registerWebRoutes(router: Router): void {
 
     const result = await report(await writePlan('leftover-import.plan.json'), app)
 
-    expect(states(result)['action.comments.store']).toBe('wired')
+    expect(states(result)['action.comments.store']).toBe('present')
+    expect(result.elements.find((element) => element.id === 'action.comments.store')!.notes).toEqual([
+      'Not wired: body validator CommentPayloadSchema is not used (the body calls no validate method, and no route contract holds it).',
+    ])
     expect(states(result)['validator.comment']).toBe('present')
     expect(result.elements.find((element) => element.id === 'validator.comment')!.notes).toEqual([
       expect.stringContaining('routes/web.ts mentions it, and no registered route contract holds it'),
