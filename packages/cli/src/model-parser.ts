@@ -1,13 +1,20 @@
 import { readFile } from 'node:fs/promises'
-import type { Statement, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty, TSPropertySignature } from '@babel/types'
+import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty, TSPropertySignature } from '@babel/types'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion } from './ast-walk'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 import { parseSourceFile } from './parse-cache'
 
+const RELATION_METHODS = ['belongsTo', 'hasMany', 'hasOne', 'belongsToMany', 'hasManyThrough', 'morphMany', 'morphTo'] as const
+const RELATION_METHOD_SET: ReadonlySet<string> = new Set(RELATION_METHODS)
+
+function isRelationMethod(name: string): name is (typeof RELATION_METHODS)[number] {
+  return RELATION_METHOD_SET.has(name)
+}
+
 export interface ModelRelationship {
   name: string
-  type: 'belongsTo' | 'hasMany' | 'hasOne' | 'belongsToMany' | 'hasManyThrough' | 'morphMany' | 'morphTo'
+  type: (typeof RELATION_METHODS)[number]
   relatedModel?: string
 }
 
@@ -87,10 +94,10 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
 
   const className = classDecl.id.name
   const { tableName, usesAuth, hasSoftDeletes } = analyzeClassHeader(classDecl, source)
-  const bodyRelationships = extractRelationshipsFromBody(classDecl.body, source)
-  const callRelationships = extractRelationshipsFromCalls(ast.program.body, classDecl, className)
-
-  const relationships = mergeRelationships(bodyRelationships, callRelationships)
+  const relationships = mergeRelationships(
+    extractRelationshipsFromCalls(ast.program.body, classDecl),
+    extractRelatedModels(classDecl.body, source),
+  )
 
   return {
     className,
@@ -411,84 +418,55 @@ function analyzeClassHeader(
   }
 }
 
-/** From `static override relationTypes: { author: BelongsToRecord<...> }`. */
-function extractRelationshipsFromBody(body: ClassBody, source: string): ModelRelationship[] {
-  const relationships: ModelRelationship[] = []
+const RELATION_RECORD_TYPES = [
+  'BelongsToRecord',
+  'BelongsToRequiredRecord',
+  'HasManyRecord',
+  'HasOneRecord',
+  'BelongsToManyRecord',
+  'HasManyThroughRecord',
+  'MorphManyRecord',
+  'MorphToRecord',
+]
 
+/** Relationship name → target model, from `static override relationTypes: { author: BelongsToRecord<UserRecord> }`. */
+function extractRelatedModels(body: ClassBody, source: string): Map<string, string> {
+  const related = new Map<string, string>()
   for (const member of body.body) {
     if (
-      member.type === 'ClassProperty' &&
-      member.static &&
-      member.key.type === 'Identifier' &&
-      member.key.name === 'relationTypes' &&
-      member.typeAnnotation?.type === 'TSTypeAnnotation'
-    ) {
-      const typeAnn = member.typeAnnotation.typeAnnotation
-      if (typeAnn.type === 'TSTypeLiteral') {
-        for (const prop of typeAnn.members) {
-          if (prop.type === 'TSPropertySignature' && prop.key.type === 'Identifier') {
-            const relName = prop.key.name
-            const relType = extractRelationType(prop, source)
-            if (relType) {
-              relationships.push({
-                name: relName,
-                type: relType.type,
-                relatedModel: relType.model,
-              })
-            }
-          }
-        }
-      }
+      member.type !== 'ClassProperty' ||
+      !member.static ||
+      member.key.type !== 'Identifier' ||
+      member.key.name !== 'relationTypes' ||
+      member.typeAnnotation?.type !== 'TSTypeAnnotation' ||
+      member.typeAnnotation.typeAnnotation.type !== 'TSTypeLiteral'
+    ) continue
+    for (const prop of member.typeAnnotation.typeAnnotation.members) {
+      if (prop.type !== 'TSPropertySignature' || prop.key.type !== 'Identifier') continue
+      const model = relatedModelOf(prop, source)
+      if (model) related.set(prop.key.name, model)
     }
   }
-
-  return relationships
+  return related
 }
 
-function extractRelationType(
-  prop: TSPropertySignature,
-  source: string,
-): { type: ModelRelationship['type']; model?: string } | null {
+function relatedModelOf(prop: TSPropertySignature, source: string): string | undefined {
   const typeAnn = prop.typeAnnotation?.typeAnnotation
-  if (!typeAnn) return null
-
+  if (!typeAnn) return undefined
   const typeStr = source.slice(typeAnn.start!, typeAnn.end!)
-
-  const typeMap: Record<string, ModelRelationship['type']> = {
-    BelongsToRecord: 'belongsTo',
-    BelongsToRequiredRecord: 'belongsTo',
-    HasManyRecord: 'hasMany',
-    HasOneRecord: 'hasOne',
-    BelongsToManyRecord: 'belongsToMany',
-    HasManyThroughRecord: 'hasManyThrough',
-    MorphManyRecord: 'morphMany',
-    MorphToRecord: 'morphTo',
-  }
-
-  for (const [prefix, relType] of Object.entries(typeMap)) {
-    if (typeStr.includes(prefix)) {
-      // BelongsToRecord<UserRecord> → User
-      const match = typeStr.match(new RegExp(`${prefix}<([A-Z]\\w*?)(?:Record)?(?:[,>])`))
-      const model = match?.[1]
-      return { type: relType, model }
-    }
-  }
-
-  return null
+  const prefix = RELATION_RECORD_TYPES.find((candidate) => typeStr.includes(candidate))
+  // BelongsToRecord<UserRecord> → User
+  return prefix ? typeStr.match(new RegExp(`${prefix}<([A-Z]\\w*?)(?:Record)?(?:[,>])`))?.[1] : undefined
 }
-
-const RELATION_METHODS = new Set<string>(['belongsTo', 'hasMany', 'hasOne', 'belongsToMany', 'hasManyThrough', 'morphMany', 'morphTo'])
 
 /**
  * From the calls that register a relationship at runtime: module-level
  * `Post.belongsTo('author', ...)`, the same inside `if (typeof Post.belongsTo === 'function')`,
  * and `this.hasMany(...)` / `Post.hasMany(...)` in a `static {}` block of the class.
  */
-function extractRelationshipsFromCalls(
-  body: Statement[],
-  classDecl: ClassDeclaration,
-  className: string,
-): ModelRelationship[] {
+function extractRelationshipsFromCalls(body: Statement[], classDecl: ClassDeclaration): ModelRelationship[] {
+  if (!classDecl.id) return []
+  const className = classDecl.id.name
   const relationships = relationshipCallsIn(body, className, false)
   for (const member of classDecl.body.body) {
     if (member.type === 'StaticBlock') relationships.push(...relationshipCallsIn(member.body, className, true))
@@ -496,23 +474,22 @@ function extractRelationshipsFromCalls(
   return relationships
 }
 
+/** A statement's own expression, or those of an `if` block's statements. */
+function statementExpressions(node: Statement): Expression[] {
+  if (node.type === 'ExpressionStatement') return [node.expression]
+  if (node.type !== 'IfStatement' || node.consequent.type !== 'BlockStatement') return []
+  return node.consequent.body.flatMap((stmt) => (stmt.type === 'ExpressionStatement' ? [stmt.expression] : []))
+}
+
 function relationshipCallsIn(statements: Statement[], className: string, thisIsTheClass: boolean): ModelRelationship[] {
   const relationships: ModelRelationship[] = []
-  for (const node of statements) {
-    const expressions =
-      node.type === 'ExpressionStatement'
-        ? [node.expression]
-        : node.type === 'IfStatement' && node.consequent.type === 'BlockStatement'
-          ? node.consequent.body.flatMap((stmt) => (stmt.type === 'ExpressionStatement' ? [stmt.expression] : []))
-          : []
-    for (const expr of expressions) {
-      if (expr.type !== 'CallExpression' || expr.callee.type !== 'MemberExpression') continue
-      const { object, property } = expr.callee
-      const onClass = (object.type === 'Identifier' && object.name === className) || (thisIsTheClass && object.type === 'ThisExpression')
-      if (!onClass || property.type !== 'Identifier' || !RELATION_METHODS.has(property.name)) continue
-      const name = literalString(expr.arguments[0])
-      if (name !== null) relationships.push({ name, type: property.name as ModelRelationship['type'] })
-    }
+  for (const expr of statements.flatMap(statementExpressions)) {
+    if (expr.type !== 'CallExpression' || expr.callee.type !== 'MemberExpression') continue
+    const { object, property } = expr.callee
+    const onClass = (object.type === 'Identifier' && object.name === className) || (thisIsTheClass && object.type === 'ThisExpression')
+    if (!onClass || property.type !== 'Identifier' || !isRelationMethod(property.name)) continue
+    const name = literalString(expr.arguments[0])
+    if (name !== null) relationships.push({ name, type: property.name })
   }
   return relationships
 }
@@ -521,15 +498,11 @@ function relationshipCallsIn(statements: Statement[], className: string, thisIsT
  * The call is the declaration: it alone registers the relationship, so it decides that
  * one exists and its kind. `relationTypes` is a type annotation, and only names the target.
  */
-function mergeRelationships(
-  bodyRels: ModelRelationship[],
-  callRels: ModelRelationship[],
-): ModelRelationship[] {
+function mergeRelationships(calls: ModelRelationship[], relatedModels: Map<string, string>): ModelRelationship[] {
   const merged = new Map<string, ModelRelationship>()
-  for (const rel of callRels) merged.set(rel.name, rel)
-  for (const rel of bodyRels) {
-    const call = merged.get(rel.name)
-    if (call && rel.relatedModel) merged.set(rel.name, { ...call, relatedModel: rel.relatedModel })
+  for (const call of calls) {
+    const relatedModel = relatedModels.get(call.name)
+    merged.set(call.name, relatedModel ? { ...call, relatedModel } : call)
   }
   return Array.from(merged.values())
 }
