@@ -152,17 +152,21 @@ function resolveExecutor(options?: AdapterQueryOptions): DrizzleDatabase {
     return options.trx as DrizzleDatabase
   }
 
-  const ambient = loadedStore?.getStore()
-  if (ambient && !ambient.settled && typeof ambient.handle === 'object' && ambient.handle !== null) {
-    return ambient.handle as DrizzleDatabase
+  const handle = liveAmbient()?.handle
+  if (typeof handle === 'object' && handle !== null) {
+    return handle as DrizzleDatabase
   }
 
   return ensureDatabase()
 }
 
-function withExecutor<T>(options: AdapterQueryOptions | undefined, callback: (db: DrizzleDatabase) => Promise<T>): Promise<T> {
+function liveAmbient(): AmbientTransaction | undefined {
   const ambient = loadedStore?.getStore()
-  if (options?.trx || (ambient && !ambient.settled)) return callback(resolveExecutor(options))
+  return ambient && !ambient.settled ? ambient : undefined
+}
+
+function withExecutor<T>(options: AdapterQueryOptions | undefined, callback: (db: DrizzleDatabase) => Promise<T>): Promise<T> {
+  if (options?.trx || liveAmbient()) return callback(resolveExecutor(options))
   const db = ensureDatabase()
   if (transactionAwaitsCallback === false) {
     const operation = transactionQueue.then(() => callback(db))
@@ -177,6 +181,50 @@ function withExecutor<T>(options: AdapterQueryOptions | undefined, callback: (db
     void operation.then(forget, forget)
   }
   return operation
+}
+
+const SYNC_EXECUTIONS = ['all', 'get', 'run', 'values'] as const
+
+/** A BEGIN this adapter issued is on the connection, and the caller is not inside it. */
+function foreignTransactionOpen(): boolean {
+  return manualTransactionOpen && !liveAmbient()
+}
+
+/**
+ * `then` reaches drizzle's `execute()`, so replacing it on the instance routes
+ * every await through `withExecutor`. `all()`/`get()`/`run()`/`values()` return
+ * synchronously on bun:sqlite and cannot wait: during a transaction another
+ * context holds they would run inside it, so they throw instead. A prepared
+ * statement executes later, so it gets the same treatment.
+ */
+function queueQuery<TQuery>(query: TQuery, queryOptions: AdapterQueryOptions | undefined): TQuery {
+  if (!query || typeof query !== 'object') return query
+  const target = query as Record<string, unknown>
+  const { execute, prepare } = target
+  if (typeof execute === 'function') {
+    // async: drizzle's lazy result becomes a Promise, and a synchronous throw a rejection.
+    define(target, 'execute', (...args: unknown[]) => withExecutor(queryOptions, async () => execute.apply(target, args)))
+  }
+  if (typeof prepare === 'function') {
+    define(target, 'prepare', (...args: unknown[]) => queueQuery(prepare.apply(target, args), queryOptions))
+  }
+  for (const method of SYNC_EXECUTIONS) {
+    const run = target[method]
+    if (typeof run !== 'function') continue
+    define(target, method, (...args: unknown[]) => {
+      if (foreignTransactionOpen()) {
+        throw new Error(
+          `DrizzleAdapter: ${method}() cannot wait for the transaction another context has open on this connection, and would run inside it. Await the query instead.`,
+        )
+      }
+      return run.apply(target, args)
+    })
+  }
+  return query
+}
+
+function define(target: object, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { configurable: true, writable: true, value })
 }
 
 async function resolveList(result: DrizzleLikeSelect): Promise<unknown[]> {
@@ -746,11 +794,13 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
   },
 
   executor(queryOptions?: AdapterQueryOptions): unknown {
-    const executor = resolveExecutor(queryOptions)
-    if (manualTransactionOpen && executor === database) {
-      throw new Error('DrizzleAdapter: raw queries outside an active SQLite transaction cannot share its connection. Await the transaction first.')
-    }
-    return executor
+    return resolveExecutor(queryOptions)
+  },
+
+  // Still patched while the driver probe is unanswered: withExecutor records the query for runOwnTransaction then.
+  queueExecution<TQuery>(query: TQuery, queryOptions?: AdapterQueryOptions): TQuery {
+    if (queryOptions?.trx || transactionAwaitsCallback === true) return query
+    return queueQuery(query, queryOptions)
   },
 
   async countByAdvanced(

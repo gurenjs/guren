@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { eq, sql } from 'drizzle-orm'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { Model } from '../src/Model'
 import { useSqlite } from './sqlite-fixture'
@@ -206,5 +207,83 @@ describe('Model.transaction on the real bun:sqlite driver', () => {
     ).rejects.toThrow('boom')
 
     expect(titles()).toEqual(['original'])
+  })
+
+  describe('toDrizzle() from another async context', () => {
+    type Prepared = { execute(values?: Record<string, unknown>): PromiseLike<unknown[]>; all(): unknown[] }
+
+    // Resolves once the held transaction's first write has run, so BEGIN is on the
+    // connection. `finish()` gives a queued query a turn to jump the queue, then settles it.
+    async function holdTransaction(settle: 'commit' | 'rollback') {
+      const begun = Promise.withResolvers<void>()
+      const gate = Promise.withResolvers<void>()
+      const done = Post.transaction(async (_trx, txPost) => {
+        await txPost.create({ title: 'uncommitted' })
+        begun.resolve()
+        await gate.promise
+        if (settle === 'rollback') throw new Error('boom')
+      })
+      await begun.promise
+      return {
+        async finish() {
+          await new Promise((resolve) => setTimeout(resolve, 5))
+          gate.resolve()
+          if (settle === 'rollback') await expect(done).rejects.toThrow('boom')
+          else await done
+        },
+      }
+    }
+
+    const readTitles = () => Post.newQuery().toDrizzle().orderBy(postsTable.id).then((rows) => rows.map((row) => row.title))
+
+    it('should wait for the open transaction instead of throwing', async () => {
+      const held = await holdTransaction('commit')
+      const read = readTitles()
+      await held.finish()
+
+      expect(await read).toEqual(['original', 'uncommitted'])
+    })
+
+    it('should neither see nor join the writes of a transaction that rolls back', async () => {
+      const held = await holdTransaction('rollback')
+      const read = readTitles()
+      await held.finish()
+
+      expect(await read).toEqual(['original'])
+      expect(titles()).toEqual(['original'])
+    })
+
+    it('should throw on a synchronous execution, which cannot wait', async () => {
+      const held = await holdTransaction('rollback')
+      const query = Post.newQuery().toDrizzle() as unknown as { all(): unknown[] }
+      expect(() => query.all()).toThrow('cannot wait for the transaction')
+      await held.finish()
+
+      expect(query.all()).toHaveLength(1)
+    })
+
+    it('should wait for the open transaction when a prepared statement is executed', async () => {
+      const held = await holdTransaction('rollback')
+      const prepared = (Post.newQuery().toDrizzle().where(eq(postsTable.id, sql.placeholder('id'))) as unknown as { prepare(): Prepared }).prepare()
+      expect(() => prepared.all()).toThrow('cannot wait for the transaction')
+      const read = prepared.execute({ id: 2 })
+      await held.finish()
+
+      expect(await read).toHaveLength(0)
+      expect(await prepared.execute({ id: 1 })).toHaveLength(1)
+    })
+
+    it('should run on the open transaction when awaited or run synchronously inside its callback', async () => {
+      await expect(
+        Post.transaction(async (_trx, txPost) => {
+          await txPost.create({ title: 'inside' })
+          expect(await Post.newQuery().toDrizzle()).toHaveLength(2)
+          expect((Post.newQuery().toDrizzle() as unknown as { all(): unknown[] }).all()).toHaveLength(2)
+          throw new Error('boom')
+        }),
+      ).rejects.toThrow('boom')
+
+      expect(titles()).toEqual(['original'])
+    })
   })
 })

@@ -264,7 +264,7 @@ await Post.delete({ id: post.id })
 
 Bulk `update()`, `forceUpdate()`, and `delete()` reject `limit()`, `offset()`, and `orderBy()`. Select the intended IDs first, then write with `whereIn()`. On a `SoftDeletes` model, builder `delete()` also marks rows deleted; use `forceDelete()` for permanent removal.
 
-SQLite queues ordinary model reads and writes made outside an open transaction until that transaction settles. Raw Drizzle queries must wait explicitly; obtaining a raw executor from outside an active SQLite transaction throws.
+SQLite queues ordinary model reads and writes made outside an open transaction until that transaction settles. Awaiting a query from `toDrizzle()` without an argument waits the same way. Its synchronous `.all()`, `.get()`, `.run()` and `.values()` cannot wait, so they throw while another request holds a transaction open. A Drizzle query you build on `db` yourself, including one you pass to `toDrizzle(query)`, does not wait and would run inside that transaction; await the transaction first.
 
 ### Transactions
 
