@@ -2944,7 +2944,7 @@ const checkCommand = defineCommand({
     },
     plan: {
       type: 'boolean',
-      description: 'Run only the implementation-plan checks (RFC 0030): approved plans with drifted elements, and open plans changing the same element. Advisory: never sets the exit code.',
+      description: 'Run the implementation-plan checks (RFC 0030), which no other run includes: approved plans with drifted elements, and open plans changing the same element. Imports db/schema.ts and the validator files. Advisory: never sets the exit code.',
     },
     changed: {
       type: 'boolean',

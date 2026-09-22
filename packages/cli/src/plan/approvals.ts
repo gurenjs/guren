@@ -49,13 +49,18 @@ export function requireReadableApprovals(read: BesideRecordRead<PlanApprovals>):
   return read.value ?? { approvalsVersion: PLAN_APPROVALS_VERSION, approvals: [] }
 }
 
+/** The approval given at `hash`, if any. */
+export function approvalAt(approvals: PlanApprovals, hash: string): PlanApproval | undefined {
+  return approvals.approvals.find((candidate) => candidate.hash === hash)
+}
+
 /** Appends in the order approvals were given; a hash already approved is returned and nothing is written. */
 export async function recordPlanApproval(
   planPath: string,
   approvals: PlanApprovals,
   approval: PlanApproval,
 ): Promise<{ written: boolean; existing?: PlanApproval }> {
-  const existing = approvals.approvals.find((candidate) => candidate.hash === approval.hash)
+  const existing = approvalAt(approvals, approval.hash)
   if (existing) return { written: false, existing }
   await writeFileAtomic(planApprovalsPath(planPath), `${JSON.stringify({ ...approvals, approvals: [...approvals.approvals, approval] }, null, 2)}\n`)
   return { written: true }
@@ -84,7 +89,7 @@ export async function readPlanApprovalStanding(planPath: string, plan: PlanDraft
   if (read.unreadable) return { state: 'unreadable', hash, reason: read.unreadable }
   const approvals = read.value?.approvals ?? []
   if (hash === null) return approvals.length > 0 ? { state: 'baseline-removed', hash, approvals: approvals.length } : undefined
-  const approval = approvals.find((candidate) => candidate.hash === hash)
+  const approval = read.value && approvalAt(read.value, hash)
   return approval ? { state: 'approved', hash, approval } : { state: 'unapproved', hash }
 }
 

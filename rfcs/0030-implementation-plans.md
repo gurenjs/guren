@@ -1629,10 +1629,20 @@ with `drifted` elements and two open plans that touch the same element.
 **Amended in implementation (`guren check --plan`).** The suite is shipped with
 these readings (`packages/cli/src/plan-check.ts`).
 
+- It runs only under `--plan`, never in plain `guren check`, `check --ci` or
+  `guren gate`. Judging a plan imports the app's `db/schema.ts`
+  (`readSchemaTables()`) and every validator file (`readSchemaIdentities()`),
+  and `check` stays on the static schema reader everywhere else: `gate`, the
+  Stop hook, `plan:verify`'s check step and the dev MCP server would each pay
+  for the imports and discard advisory results. `--changed` with `--plan` runs
+  it when source, a plan, a record beside one or anything under `docs/plans/`
+  changed.
 - Plans are found in one place: the app root's own `*.plan.json` and, under
   `docs/plans/`, every `plan.json` (the §9 layout) and `*.plan.json`. The
   records beside a plan never match, and a `revisions/` directory is not read.
-  A plan kept anywhere else is not checked.
+  A plan kept anywhere else is not checked. A directory that will not list is
+  reported, and so are two plans sharing a slug, since they share one state
+  file and one doc node.
 - Open means approved at its current hash (`planHash()` in the approvals beside
   it) and not closed. Closed is what `plan:close` writes: `closed: true` in
   `docs/plans/<slug>.md` with `plan_hash` equal to that hash, so a revision
@@ -1641,17 +1651,18 @@ these readings (`packages/cli/src/plan-check.ts`).
   Nothing is reported when no plan has a finding; the counts are `plan:status`'s.
 - `drifted` is whatever `planStatusFile()` reports, verification overlay
   included, the function `plan:status` prints. The application is loaded once,
-  with `detail`, and only when an open plan exists, so plain `guren check` in an
-  app with an open plan now imports `db/schema.ts`.
+  with `detail`, and only when an open plan exists.
 - Two plans touch the same element when a changed target of each occupies one
   name in `listPlanAppTargets()`: the section, the app root, and the name (both
-  names of a rename; a column qualified by its table; a route also by its
-  endpoint). Ids play no part, so `model.post` in one plan and `model.entry` in
-  another, both on `posts`, collide. A target a plan marks `existing` is only
-  read and never collides. One finding per pair of plans lists every shared name.
-- It is a suite of plain `guren check`, and every result is an advisory `warn`,
-  a plan that will not read or whose approvals will not read included, so
-  neither `check --ci` nor `guren gate` counts it and `check --plan` exits 0.
+  names of a rename; a column under its table; a route also by its endpoint).
+  A table and its columns are keyed app-wide, since every root's schema is
+  one set of SQL tables. Ids play no part, so `model.post` in one plan and
+  `model.entry` in another, both on `posts`, collide. A target a plan marks
+  `existing` is only read and never collides, but a changed column or action
+  under it also claims that parent, which collides with a plan renaming or
+  dropping it. One finding per pair of plans lists every shared name.
+- Every result is an advisory `warn`, a plan or approvals file that will not
+  read included, so `check --plan` exits 0.
 
 ### 9. Stores
 
