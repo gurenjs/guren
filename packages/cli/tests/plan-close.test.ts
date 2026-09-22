@@ -1,6 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { runCommand } from 'citty'
@@ -20,10 +19,9 @@ import { PLAN_STATE_VERSION, planDigest, planSlug, planStatePath, type PlanStepR
 import { PLAN_STATUS_SECTIONS } from '../src/plan/status'
 import { derivePlanTasks } from '../src/plan/tasks'
 import { hashFiles } from '../src/plan/verification'
-import { writeWorkspaceFiles } from './helpers'
+import { createTempRoot, writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, planAppState, writePlanVerifyApp } from './plan-fixture'
 
-// `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own: Bun keys an imported routes file on its path.
 const ROOT_PREFIX = 'guren-plan-close-'
 let ROOT: string
@@ -78,9 +76,7 @@ describe('plan:close', () => {
   const log = spyOn(console, 'log')
 
   beforeAll(async () => {
-    const stale = (await readdir(tmpdir())).filter((entry) => entry.startsWith(ROOT_PREFIX))
-    await Promise.all(stale.map((entry) => rm(join(tmpdir(), entry), { recursive: true, force: true })))
-    ROOT = await mkdtemp(join(tmpdir(), ROOT_PREFIX))
+    ROOT = await createTempRoot(ROOT_PREFIX)
   })
 
   afterEach(() => {
