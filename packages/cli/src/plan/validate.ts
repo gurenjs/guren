@@ -25,11 +25,13 @@ import {
   type PlanAppUnreadable,
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
+import { elementsAtPlannedEnd } from './freshness'
 import { listPlanReferences } from './references'
 import {
   findDuplicatePlanIds,
   listPlanElements,
   type PlanAcceptance,
+  type Plan,
   type PlanAction,
   type PlanChange,
   type PlanColumn,
@@ -67,9 +69,25 @@ const CHILD_CHANGES_BY_PARENT: Record<PlanChange['kind'], ReadonlyArray<PlanChan
 /**
  * The findings that state an application fact about one element's own name: an `add` finds
  * it, a `rename`'s old name or a `drop`'s target is gone. Finishing the plan's work produces
- * exactly these, which is what `settleBuiltFindings()` in `freshness.ts` answers.
+ * exactly these, which is what {@link settleBuiltFindings} answers.
  */
 export const APP_FACT_FINDINGS: ReadonlySet<string> = new Set(['plan:app-collision', 'plan:app-missing'])
+
+/**
+ * A baselined plan's findings with its own finished work settled: an app-fact finding on an
+ * element freshness reads at the plan's end state becomes a `pass`. An element still at its
+ * stamp that fails now fails through the plan's own edit (an `existing` turned `add`), and stays failed.
+ */
+export function settleBuiltFindings(plan: Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
+  const atEnd = elementsAtPlannedEnd(plan, app)
+  const built = new Set<string>()
+  const settled = checks.map((result) => {
+    if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined || !atEnd.has(result.elementId)) return result
+    built.add(result.elementId)
+    return { ...result, status: 'pass' as const, message: `${result.message} The application reads as the plan leaves this element: the plan's own work, built.` }
+  })
+  return { checks: settled, built: [...built] }
+}
 
 export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResult[] {
   const results: PlanCheckResult[] = []

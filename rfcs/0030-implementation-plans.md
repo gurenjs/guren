@@ -858,7 +858,8 @@ the plan's own work: an `add` finds its name, the old name of a `rename` and
 the target of a `drop` are gone. Measured on a scratch blog, one edited goal
 after the scaffold step gave seven failures, so the refusal above told a
 person to run a command that could not succeed until the plan was finished.
-What shipped (`settleBuiltFindings()` in `plan/freshness.ts`):
+What shipped (`settleBuiltFindings()` in `plan/validate.ts`, over
+`elementsAtPlannedEnd()` in `plan/freshness.ts`):
 
 - On a plan with a baseline, a `plan:app-collision` or `plan:app-missing`
   finding (`APP_FACT_FINDINGS` in `plan/validate.ts`) is settled to `pass`
@@ -877,7 +878,9 @@ What shipped (`settleBuiltFindings()` in `plan/freshness.ts`):
   endpoint another route holds, reads as neither stamp nor end, so it fails.
   The limit is the one freshness has: a same-named class another commit adds
   in the plan's own root reads as the plan's own `add`, and so does a second
-  route on the endpoint of a built one.
+  route on the endpoint of a built one. A model whose class is written and
+  whose table is not reads as neither stamp nor end (the two-target rule
+  above), so approval still refuses between the two.
 - A draft is unchanged: it has no stamp, so nothing is settled, and a draft
   whose `add` already exists is refused as before.
 - The baseline is still never restamped; re-approval records the new hash.

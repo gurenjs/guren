@@ -12,8 +12,7 @@ import { declaresTable, findTable, isUnreadable, type PlanAppName, type PlanAppS
 import { endpointKey, listPlanAppTargets, type PlanAppTarget, type PlanAppTargetSection } from './app-targets'
 import { canonicalJson } from './identity'
 import { listPlanReferences } from './references'
-import type { Plan, PlanChange, PlanDraft, PlanElementSection } from './schema'
-import { APP_FACT_FINDINGS, type PlanCheckResult } from './validate'
+import type { PlanChange, PlanDraft, PlanElementSection } from './schema'
 
 /** Hashed into every entry, so a change to what is hashed marks everything stale rather than colliding. */
 const CONTEXT_FACTS_VERSION = 3
@@ -256,23 +255,14 @@ export function judgeFreshness(plan: PlanDraft & { baseline: { contextHash: Reco
 }
 
 /**
- * A baselined plan's §2 findings with its own finished work settled: a collision or an
- * absence on a stamped element the application reads exactly as the plan leaves it becomes
- * a `pass`. Only the end state settles one; an element still at its stamp that fails now was
- * changed by the plan itself (an `existing` turned `add`), and that is still a failure.
+ * Stamped elements the application reads exactly as the plan leaves them: its own work,
+ * built. Only the end state counts; one still at its stamp was never touched by the plan.
  */
-export function settleBuiltFindings(plan: Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
+export function elementsAtPlannedEnd(plan: PlanDraft & { baseline: { contextHash: Record<string, string> } }, app: PlanAppState): Set<string> {
   const stamped = plan.baseline.contextHash
-  const atEnd = new Set(
+  return new Set(
     elementContexts(plan, app)
       .filter(({ id, now }) => 'hash' in now && Object.hasOwn(stamped, id) && now.hash === now.end)
       .map(({ id }) => id),
   )
-  const built = new Set<string>()
-  const settled = checks.map((result) => {
-    if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined || !atEnd.has(result.elementId)) return result
-    built.add(result.elementId)
-    return { ...result, status: 'pass' as const, message: `${result.message} The application reads as the plan leaves this element: the plan's own work, built.` }
-  })
-  return { checks: settled, built: [...built] }
 }
