@@ -14,6 +14,25 @@ boundary. Internal soft-delete timestamps bypass user payload transforms.
 `SoftDeletes` supplies the `BULK_DELETE` handler used by both static and
 builder deletion; `PHYSICAL_DELETE` is the internal path for explicit hard deletes.
 
+## Model lifecycle
+
+`model-lifecycle.ts` owns event order and cancellation for static create, update,
+and delete. Each operation captures its hook and observer references after
+payload preparation. Before events run all hooks first, then observers in
+registration order for each event. A false result aborts before persistence;
+exceptions propagate. After events run only after a successful write, before
+read transforms, and their return values do not cancel the write.
+
+Model retains payload preparation, scoped query construction, and return types.
+Create and update pass the prepared payload to before events and the adapter
+result to after events. Delete passes the same condition object to both phases.
+Bulk builder writes and SoftDeletes keep their own existing lifecycle behavior;
+the helper does not introduce events at those boundaries.
+
+`model-lifecycle.test.ts` fixes these contracts through the public Model methods,
+including asynchronous ordering, abort messages, failure paths, and registration
+replacement during callbacks.
+
 ## Connection ownership
 
 `drizzle-adapter.ts` builds queries and decodes results. `drizzle-connection.ts`
