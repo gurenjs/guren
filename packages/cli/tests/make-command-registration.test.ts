@@ -1,10 +1,12 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { makeCommand, registerScaffoldedCommand } from '../src/make-command'
 import { makeModule } from '../src/make-module'
-import { createTempWorkspace } from './helpers'
+import * as patchHelpers from '../src/patch-helpers'
+import { PATCH_REASONS } from '../src/patch-helpers'
+import { captureConsolaLines, createTempWorkspace } from './helpers'
 
 // The real scaffolded entrypoint, not a copy: a hand-copied fixture stops
 // proving make:command can patch it the moment the template is edited.
@@ -27,6 +29,25 @@ async function scaffoldAndRegister(name: string, options: { root?: string } = {}
   const file = await makeCommand(name, options)
   await registerScaffoldedCommand(name, file, options)
   return file
+}
+
+/** Every line the registration prints, in print order. */
+function registerAndCollect(name: string, options: { root?: string } = {}): Promise<string[]> {
+  return captureConsolaLines(['info', 'success', 'warn'], () => scaffoldAndRegister(name, options))
+}
+
+/**
+ * `addImport` fails only as a value, and no file state reachable from a test
+ * makes it fail after the registration patch on the same file has just
+ * succeeded, so the failure is injected at the helper's own boundary.
+ */
+async function withFailingAddImport<T>(reason: string, run: () => Promise<T>): Promise<T> {
+  const spy = spyOn(patchHelpers, 'addImport').mockResolvedValue({ modified: false, reason })
+  try {
+    return await run()
+  } finally {
+    spy.mockRestore()
+  }
 }
 
 describe('registerScaffoldedCommand', () => {
@@ -125,6 +146,50 @@ kernel.registerMany([])
       }
     })
 
+    it('prints the manual import step, not success, when the import patch fails', async () => {
+      const workspace = await createTempWorkspace('guren-cli-cmd-register-import-fails-')
+      try {
+        await writeConsoleEntry(workspace.dir)
+
+        const lines = await withFailingAddImport(PATCH_REASONS.fileNotFound, () => registerAndCollect('SendDigest'))
+
+        expect(lines).toEqual([
+          `warn: Could not add the import to src/console.ts automatically: ${PATCH_REASONS.fileNotFound}`,
+          "info: Add `import SendDigestCommand from '../app/Console/Commands/SendDigestCommand.js'` to src/console.ts: its registration is already in place.",
+        ])
+        // The registration patch ran first and stays: the message has to describe that file.
+        const consoleSource = await readFile(join(workspace.dir, 'src/console.ts'), 'utf8')
+        expect(consoleSource).toContain('kernel.registerMany([SendDigestCommand])')
+        expect(consoleSource).not.toContain('import SendDigestCommand')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    it('still reports success when the import was already there', async () => {
+      const workspace = await createTempWorkspace('guren-cli-cmd-register-import-exists-')
+      try {
+        await writeConsoleEntry(
+          workspace.dir,
+          `import { ConsoleKernel } from '@guren/core'
+import SendDigestCommand from '../app/Console/Commands/SendDigestCommand.js'
+
+export const kernel = new ConsoleKernel()
+
+kernel.registerMany([])
+`,
+        )
+
+        const lines = await registerAndCollect('SendDigest')
+
+        expect(lines).toEqual(['success: Registered SendDigestCommand in src/console.ts'])
+        const consoleSource = await readFile(join(workspace.dir, 'src/console.ts'), 'utf8')
+        expect(consoleSource.match(/import SendDigestCommand from/g)).toHaveLength(1)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
     it('leaves the project alone when there is no src/console.ts', async () => {
       const workspace = await createTempWorkspace('guren-cli-cmd-register-noentry-')
       try {
@@ -165,6 +230,28 @@ kernel.registerMany([])
 
         const index = await readFile(join(workspace.dir, 'modules/billing/index.ts'), 'utf8')
         expect(index).toContain('commands: [InvoiceCommand, DunningCommand]')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    it('prints the manual import step, not success, when the import patch fails', async () => {
+      const workspace = await createTempWorkspace('guren-cli-cmd-register-module-import-fails-')
+      try {
+        await writeModuleIndex()
+
+        const lines = await withFailingAddImport(PATCH_REASONS.fileNotFound, () => registerAndCollect('Invoice', { root: 'billing' }))
+
+        expect(lines.slice(0, 2)).toEqual([
+          `warn: Could not add the import to modules/billing/index.ts automatically: ${PATCH_REASONS.fileNotFound}`,
+          "info: Add `import InvoiceCommand from './app/Console/Commands/InvoiceCommand.js'` to modules/billing/index.ts: its registration is already in place.",
+        ])
+        // The console hop is owed whether or not the import landed.
+        expect(lines).toContain('info:   kernel.registerMany(billingModule.commands)')
+        expect(lines.some((line) => line.startsWith('success:'))).toBe(false)
+        const index = await readFile(join(workspace.dir, 'modules/billing/index.ts'), 'utf8')
+        expect(index).toContain('commands: [InvoiceCommand]')
+        expect(index).not.toContain('import InvoiceCommand')
       } finally {
         await workspace.cleanup()
       }

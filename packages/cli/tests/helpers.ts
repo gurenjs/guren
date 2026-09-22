@@ -421,24 +421,43 @@ const app = createApp({
 export default app
 `
 
+type CapturedConsolaLevel = 'info' | 'success' | 'warn'
+
 /**
- * Runs `task` with `consola[level]` collecting into an array instead of
+ * Runs `task` with each of `levels` collecting into an array instead of
  * printing. Scoped to the call, unlike `createConsolaStub`, which serves the
  * process-wide `mock.module('consola')` path.
  */
-async function captureConsola(level: 'info' | 'success', task: () => Promise<unknown>): Promise<string[]> {
-  const lines: string[] = []
-  const original = realConsola[level]
-  realConsola[level] = ((...args: unknown[]) => {
-    lines.push(args.map(String).join(' '))
-  }) as typeof original
+async function withConsolaCapture(
+  levels: readonly CapturedConsolaLevel[],
+  onLine: (level: CapturedConsolaLevel, message: string) => void,
+  task: () => Promise<unknown>,
+): Promise<void> {
+  const originals = levels.map((level) => [level, realConsola[level]] as const)
+  for (const level of levels) {
+    realConsola[level] = ((...args: unknown[]) => {
+      onLine(level, args.map(String).join(' '))
+    }) as (typeof realConsola)[typeof level]
+  }
 
   try {
     await task()
-    return lines
   } finally {
-    realConsola[level] = original
+    for (const [level, original] of originals) realConsola[level] = original
   }
+}
+
+async function captureConsola(level: 'info' | 'success', task: () => Promise<unknown>): Promise<string[]> {
+  const lines: string[] = []
+  await withConsolaCapture([level], (_, message) => lines.push(message), task)
+  return lines
+}
+
+/** `level: message` for every line `task` prints at one of `levels`, in print order. */
+export async function captureConsolaLines(levels: readonly CapturedConsolaLevel[], task: () => Promise<unknown>): Promise<string[]> {
+  const lines: string[] = []
+  await withConsolaCapture(levels, (level, message) => lines.push(`${level}: ${message}`), task)
+  return lines
 }
 
 export const captureSuccesses = (task: () => Promise<unknown>): Promise<string[]> => captureConsola('success', task)

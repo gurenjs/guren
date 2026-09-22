@@ -87,7 +87,7 @@ async function registerRootCommand(className: string, file: string): Promise<voi
     return
   }
 
-  await addImport(CONSOLE_ENTRY, `import ${className} from '${specifier}'`)
+  if (!(await addImportOrExplain(CONSOLE_ENTRY, `import ${className} from '${specifier}'`))) return
 
   if (registration.modified) {
     consola.success(`Registered ${className} in ${CONSOLE_ENTRY}`)
@@ -116,12 +116,13 @@ async function registerModuleCommand(className: string, file: string, moduleName
     return
   }
 
-  await addImport(indexPath, `import ${className} from '${specifier}'`)
-
-  if (registration.modified) {
-    consola.success(`Registered ${className} in ${indexPath}`)
-  } else {
-    consola.info(`${className} is already registered in ${indexPath}`)
+  // The console hop below is owed whether or not the import landed.
+  if (await addImportOrExplain(indexPath, `import ${className} from '${specifier}'`)) {
+    if (registration.modified) {
+      consola.success(`Registered ${className} in ${indexPath}`)
+    } else {
+      consola.info(`${className} is already registered in ${indexPath}`)
+    }
   }
 
   await printModuleConsoleHopGuidance(moduleName)
@@ -147,6 +148,20 @@ async function printModuleConsoleHopGuidance(moduleName: string): Promise<void> 
     consola.info(`Create ${CONSOLE_ENTRY} first if your project predates it.`)
   }
   consola.info('See: https://guren.dev/docs/guides/console')
+}
+
+/**
+ * Whether the import is in the file, by this patch or an earlier one. By now the
+ * registration has landed, so a failed import leaves the file naming an identifier
+ * it never binds: the manual step is printed instead of a success line.
+ */
+async function addImportOrExplain(filePath: string, importStatement: string): Promise<boolean> {
+  const result = await addImport(filePath, importStatement)
+  if (result.modified || result.reason === PATCH_REASONS.importAlreadyExists) return true
+
+  consola.warn(`Could not add the import to ${filePath} automatically: ${result.reason}`)
+  consola.info(`Add \`${importStatement}\` to ${filePath}: its registration is already in place.`)
+  return false
 }
 
 function printRootRegistrationGuidance(className: string, specifier: string): void {

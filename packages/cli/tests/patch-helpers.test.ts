@@ -293,14 +293,14 @@ kernel.registerMany([Real])
 ])
 `
     const result = await withConsole(source, async () => {
-      await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')
+      expect((await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')).modified).toBe(true)
     })
     expect(result).toContain('Existing, Alpha, // primary')
   })
 
   it('appends at the top level of a nested array', async () => {
     const result = await withConsole('kernel.registerMany([Basic, ...(dev ? [Dev] : [])])\n', async () => {
-      await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')
+      expect((await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')).modified).toBe(true)
     })
     expect(result).toBe('kernel.registerMany([Basic, ...(dev ? [Dev] : []), Alpha])\n')
   })
@@ -310,7 +310,7 @@ kernel.registerMany([Real])
 kernel.registerMany([Real])
 `
     const result = await withConsole(source, async () => {
-      await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')
+      expect((await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')).modified).toBe(true)
     })
     expect(result).toContain('kernel.registerMany(billingModule.commands)')
     expect(result).toContain('kernel.registerMany([Real, Alpha])')
@@ -332,7 +332,7 @@ kernel.registerMany([Real])
         'export const m = defineModule({ name: "billing", commands /* note */: [Old] })\n',
         'utf8',
       )
-      await addToArrayOption('mod.ts', 'commands', 'New', 'defineModule')
+      expect((await addToArrayOption('mod.ts', 'commands', 'New', 'defineModule')).modified).toBe(true)
       const result = await readFile(join(workspace.dir, 'mod.ts'), 'utf8')
       expect(result).toContain('commands /* note */: [Old, New]')
     } finally {

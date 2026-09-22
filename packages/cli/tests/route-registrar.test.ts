@@ -158,7 +158,7 @@ describe('addRouteRegistrarCall', () => {
     try {
       const target = await seedRoutes(workspace, BLOG_ROUTES_FIXTURE)
 
-      await addRouteRegistrarCall('routes/web.ts', 'registerAdminRoutes', ADMIN_IMPORT)
+      expect((await addRouteRegistrarCall('routes/web.ts', 'registerAdminRoutes', ADMIN_IMPORT)).modified).toBe(true)
       const second = await addRouteRegistrarCall('routes/web.ts', 'registerAdminRoutes', ADMIN_IMPORT)
 
       expect(second.modified).toBe(false)
