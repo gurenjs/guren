@@ -183,19 +183,20 @@ describe('the plan file name the page prints in a command', () => {
     expect(payloadOf({ plan: draft(), planFile: name }).planFile).toBeNull()
   })
 
-  test('should be printed by the page in both revise commands', () => {
+  test('should be printed by the page in the render and approve commands, and never in a command that does not exist', () => {
     const page = openPlanPage(renderPlanHtml({ plan: draft(), planFile: 'comments.plan.json' }))
 
-    expect(page.byId('revise-file-command').textContent).toBe('bunx guren plan --revise comments.plan.json --feedback feedback.json')
-    // The stdin form the page's "Copy feedback" feeds (RFC 0030 §4): the pipe that
-    // writes it is the reader's, since the clipboard command differs per system.
-    expect(page.byId('revise-stdin-command').textContent).toBe('bunx guren plan --revise comments.plan.json --feedback -')
+    expect(page.byId('render-command').textContent).toBe('bunx guren plan:render comments.plan.json')
+    expect(page.byId('approve-command').textContent).toBe('bunx guren plan:approve comments.plan.json')
+    // Nothing reads feedback.json yet (`plan --revise` is RFC 0030 Part 3), so the page does not print it.
+    expect(page.byId('footer').textContent).not.toContain('--revise')
+    expect(page.byId('footer-revise-note').textContent).toContain('No command reads the feedback yet')
   })
 
   test('should print a stand-in where no safe name was given', () => {
     const page = openPlanPage(renderPlanHtml({ plan: draft(), planFile: 'plan.json; rm -rf ~' }))
 
-    expect(page.byId('revise-file-command').textContent).toBe('bunx guren plan --revise <plan.json> --feedback feedback.json')
+    expect(page.byId('render-command').textContent).toBe('bunx guren plan:render <plan.json>')
   })
 })
 

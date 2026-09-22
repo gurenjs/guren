@@ -95,6 +95,16 @@ describe('plan:next', () => {
     expect(again.step!.id).toBe(SCAFFOLD)
   })
 
+  test('should name what a scaffold would generate without claiming a generator writes it', async () => {
+    const { app, plan } = await createApp('scaffold-text')
+
+    const text = formatPlanNext(await planNextFile(plan, { appRoot: app, now: NOW }), 'comments.plan.json')
+
+    expect(text).toContain('The elements a scaffold would generate: model.comment')
+    expect(text).toContain('No generator for this step ships yet, so it completes on its verify commands')
+    expect(text).not.toContain('Generates a first version')
+  })
+
   test('should keep two plans in the docs/plans/<slug>/plan.json layout in state files of their own', async () => {
     const app = join(ROOT, 'layout')
     await writeWorkspaceFiles(app, {
@@ -193,6 +203,34 @@ describe('plan:next', () => {
     const record = await holding(app)
     await writeState(app, { steps: { [SCAFFOLD]: record }, active: { plan: 'comments.plan.json', step: SCAFFOLD, startedAt: 't', continuations: 0 } })
     await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/uncommitted changes \(paths relative to the repository root\), and one step is one commit\. Commit or discard them first:\n {2}M lib\.ts$/)
+  })
+
+  test('should leave the rendered page and a leftover temporary out of the dirty reading, and still refuse an unrelated file', async () => {
+    const { app, plan } = await createApp('rendered')
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    await writeState(app, { steps: { [SCAFFOLD]: await holding(app) } })
+
+    // What plan:render and an interrupted atomic write leave beside the plan; neither is a step's work.
+    await writeWorkspaceFiles(app, { 'comments.plan.html': '<html></html>\n', '.comments.plan.json.1.2.tmp': '{}\n' })
+    expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(TESTS)
+
+    await writeWorkspaceFiles(app, { 'notes.md': 'x\n' })
+    await writeState(app, { steps: { [SCAFFOLD]: await holding(app) } })
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(/first:\n {2}\?\? notes\.md$/)
+  })
+
+  test('should not count a new plan directory holding only the plan and its page as a change', async () => {
+    const app = join(ROOT, 'plan-dir')
+    await writeWorkspaceFiles(app, { 'package.json': JSON.stringify({ name: 'plan-dir', type: 'module', dependencies: { '@guren/inertia-client': '*' } }) })
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    await writeWorkspaceFiles(app, { 'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()), 'docs/plans/comments/plan.html': '<html></html>\n' })
+    await writeState(app, { steps: {}, active: { plan: 'docs/plans/comments/plan.json', step: 'elsewhere', startedAt: 't', continuations: 0 } })
+
+    expect((await planNextFile(join(app, 'docs/plans/comments/plan.json'), { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
   })
 
   test('should leave a tracked state file out of the dirty reading, in an application below the repository root', async () => {
@@ -512,7 +550,10 @@ describe('plan:next on stale context', () => {
     const text = formatPlanNext(report, 'comments.plan.json')
     expect(text).toContain(`Held, since what they depend on changed after the plan was approved:\n  ${POST_HTTP}\n    action.posts.index (actions, existing), named by route.posts.index: `)
     expect(text).toContain('      fail  The action "PostController.index" was not found in the project root')
-    expect(text).toContain('revise the plan so it states what the application holds now')
+    expect(text).toContain('undo the change that moved it, or edit the plan so it states what the application holds now')
+    expect(text).toContain('restore the approved plan text')
+    // Nothing reads a revision request yet, and approval does not restamp: the advice names neither as a way out.
+    expect(text).not.toContain('run a revision')
   })
 
   test('should never block on an element whose freshness is unstamped or unjudged, nor on an application it could not read', async () => {

@@ -48,7 +48,7 @@ export interface PlanDerivedStep {
   kind: PlanStepKind
   /** The elements this step completes. Empty for `scaffold` and `tests`, which complete on their commands. */
   elementIds: string[]
-  /** `scaffold` only: the added elements the generators write a first version of. */
+  /** `scaffold` only: the added elements a scaffold would generate. No generator ships yet (RFC 0030 Part 3). */
   generates: string[]
   /** On `tests`, which writes their skeletons, and on the step that must see them pass. */
   acceptanceIds: string[]
@@ -127,8 +127,8 @@ const STEP_ORDER = ['commands', 'data', 'http', 'pages'] as const
 type WorkStep = (typeof STEP_ORDER)[number]
 
 /**
- * Which step completes an element of each section, and whether `make:feature` and the
- * emitters can write its first version. Total over the sections, so a new one fails
+ * Which step completes an element of each section, and whether a scaffold (`make:feature` and
+ * the Part 3 emitters) would write its first version. Total over the sections, so a new one fails
  * the type check here until it is given a step or a reason to have none.
  */
 export const PLAN_SECTION_STEP: Record<PlanElementSection, { step: WorkStep; scaffoldable: boolean } | null> = {

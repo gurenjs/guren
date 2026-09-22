@@ -297,7 +297,7 @@ const planVerifyCommand = defineCommand({
     },
     step: {
       type: 'string',
-      description: 'One derived step id (plan:render lists them). Every step, in task order, when absent.',
+      description: 'One derived step id, as plan:next names it or a whole-plan plan:verify reports it. Every step, in task order, when absent.',
       valueHint: 'task/entity/model.comment/http',
     },
     app: {

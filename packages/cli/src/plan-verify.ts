@@ -154,7 +154,7 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   }
   for (const context of report.staleContext ?? []) {
     const named = context.stale.map((element) => `${element.id} (${describeDependency(element)})`)
-    lines.push(`${context.stepId}: depends on what changed since the plan was approved: ${named.join(', ')}; plan:next holds it until the plan is revised and approved`, '')
+    lines.push(`${context.stepId}: depends on what changed since the plan was approved: ${named.join(', ')}; plan:next holds it until that change is undone, or the plan states what the application holds now and is approved`, '')
   }
   for (const stepId of report.skipped) lines.push(`${stepId}: verified before, and nothing it fingerprinted has changed`)
   if (report.skipped.length > 0) lines.push('')

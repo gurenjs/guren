@@ -349,5 +349,5 @@
   "view.posts.showApproveRequest changes",
   "@aria-label Comment on AC-comments-page",
   "@placeholder Comment on this element",
-  "Copy feedbackDownload feedback.jsonComment on any element from the mark in its heading. This page never writes to the project and makes no network request.Download the feedback beside the plan, then run:bunx guren plan --revise comments.plan.json --feedback feedback.jsonOr copy it and pipe it into:bunx guren plan --revise comments.plan.json --feedback -"
+  "Copy feedbackDownload feedback.jsonComment on any element from the mark in its heading. This page never writes to the project and makes no network request.No command reads the feedback yet. Hand feedback.json, or the copied text, to the agent that wrote the plan, or apply the comments to the plan by hand. Then render the plan again:bunx guren plan:render comments.plan.jsonOnce the plan says what you mean to build, approve it:bunx guren plan:approve comments.plan.json"
 ]

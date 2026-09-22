@@ -11,12 +11,42 @@ import { basename, dirname, join } from 'node:path'
 import type { z } from 'zod'
 
 import { formatSchemaIssues } from '../cli-error'
+import { toPosixRelative } from '../discovery'
 import type { CapturedExec } from '../subprocess'
 
 export function planSiblingPath(planPath: string, record: 'decisions' | 'approvals'): string {
   const name = basename(planPath)
   if (name === 'plan.json') return join(dirname(planPath), `${record}.json`)
   return join(dirname(planPath), `${name.replace(/(\.plan)?\.json$/u, '')}.${record}.json`)
+}
+
+/** The page `plan:render` writes when no `--output` is given. */
+export function planOutputPath(planPath: string): string {
+  return planPath.endsWith('.json') ? `${planPath.slice(0, -'.json'.length)}.html` : `${planPath}.html`
+}
+
+/**
+ * `git status` pathspecs excluding what the plan commands write beside a plan: the plan, its
+ * page, its approvals and decision log, and a leftover {@link writeFileAtomic} temporary of
+ * each. Relative to `root`; both arguments must be real paths, or a symlinked temp directory
+ * makes every pathspec miss. A file outside `root` needs no exclusion and gets none.
+ */
+export function planBesideExclusions(root: string, planPath: string): string[] {
+  const own = [planPath, planSiblingPath(planPath, 'approvals'), planSiblingPath(planPath, 'decisions'), planOutputPath(planPath)]
+  const inside = (file: string): string | undefined => {
+    const relative = toPosixRelative(root, file)
+    return relative.startsWith('../') ? undefined : relative
+  }
+  return own.flatMap((file) => {
+    const relative = inside(file)
+    if (relative === undefined) return []
+    const temporary = inside(join(dirname(file), `.${basename(file)}.`))!
+    return [`:(exclude,literal)${relative}`, `:(exclude,glob)${globEscape(temporary)}*.tmp`]
+  })
+}
+
+function globEscape(path: string): string {
+  return path.replace(/[*?[\]\\]/gu, (character) => `\\${character}`)
 }
 
 /** `git config` on a machine with no identity answers nothing, which the record simply omits. */

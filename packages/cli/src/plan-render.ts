@@ -9,6 +9,7 @@ import { basename, resolve } from 'node:path'
 
 import { CliError, formatSchemaIssues } from './cli-error'
 import type { PlanAppState } from './plan/app-state'
+import { planOutputPath } from './plan/beside'
 import { isPlanLocale, matchPlanLocale, PLAN_LOCALES, type PlanLocale } from './plan/locales'
 import { planChangesExisting, planImpact } from './plan/impact'
 import { hasBaseline, renderPlanHtml } from './plan/render'
@@ -74,9 +75,7 @@ async function pageLocale(plan: PlanDraft | Plan, options: RenderPlanFileOptions
   return matchPlanLocale(await options.appLocale())
 }
 
-export function planOutputPath(planPath: string): string {
-  return planPath.endsWith('.json') ? `${planPath.slice(0, -'.json'.length)}.html` : `${planPath}.html`
-}
+export { planOutputPath }
 
 /** Reads and parses a plan file, every failure a `CliError` naming the path. Shared by the commands that take a plan. */
 /** `document` is the file as written, before parsing fills defaulted sections in. */

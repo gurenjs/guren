@@ -8,6 +8,7 @@
  * plan with a baseline no approval names is refused before anything is read or marked (§4).
  */
 
+import { realpath } from 'node:fs/promises'
 import { basename } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
@@ -17,6 +18,7 @@ import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval } from './plan/approvals'
+import { planBesideExclusions } from './plan/beside'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
@@ -234,9 +236,20 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
 
   // The state files are git-ignored before the tree is read, and excluded from the reading for a
   // checkout that tracked them before, so neither an earlier run's write nor the mark makes it
-  // dirty. Excluded by pathspec, since porcelain paths are relative to the repository root, not to `root`.
+  // dirty; so are the plan's own files (its page, records, temporaries), which no step commits.
+  // Excluded by pathspec, since porcelain paths are relative to the repository root, not to `root`.
   await ensurePlanStateIgnored(root)
-  const dirty = (await runGit(root, ['status', '--porcelain', '--', '.', `:(exclude,glob)${PLAN_STATE_DIR}/*.state.json`, `:(exclude)${PLAN_STATE_DIR}/.gitignore`])) ?? []
+  const [realRoot, realPlan] = await Promise.all([realpath(root), realpath(path)])
+  const dirty =
+    (await runGit(realRoot, [
+      'status',
+      '--porcelain',
+      '--',
+      '.',
+      ...planBesideExclusions(realRoot, realPlan),
+      `:(exclude,glob)${PLAN_STATE_DIR}/*.state.json`,
+      `:(exclude)${PLAN_STATE_DIR}/.gitignore`,
+    ])) ?? []
   if (dirty.length > 0 && previous?.step !== step.id) {
     const markedHeld = held.some((entry) => entry.id === previous?.step)
     throw new CliError(
@@ -331,8 +344,9 @@ function heldLines(report: PlanNextReport, planArgument: string): string[] {
   }
   lines.push(
     '',
-    'A held step is a person\u2019s decision: revise the plan so it states what the application holds now (edit it, or run a revision)',
-    `  and approve the result with \`bunx guren plan:approve ${planArgument}\`, or undo the change that moved it.`,
+    'A held step is a person\u2019s decision: undo the change that moved it, or edit the plan so it states what the application holds now',
+    `  (an element already built becomes \`existing\`, or \`alter\` where the plan still changes it) and approve that with \`bunx guren plan:approve ${planArgument}\`.`,
+    '  Approval keeps the baseline the plan was first stamped with; to drop an edit instead, restore the approved plan text.',
   )
   return lines
 }
@@ -360,7 +374,13 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     if (waived.length > 0) {
       lines.push('', 'Waived, not to be implemented:', ...waived, '  The step verifies without them; a waiver is the person\u2019s decision, not yours to take or to undo.')
     }
-    if (step.generates.length > 0) lines.push('', `Generates a first version of: ${step.generates.join(', ')}`)
+    if (step.generates.length > 0) {
+      lines.push(
+        '',
+        `The elements a scaffold would generate: ${step.generates.join(', ')}`,
+        '  No generator for this step ships yet, so it completes on its verify commands; the steps after it implement these elements.',
+      )
+    }
     if (step.acceptance.length > 0) {
       lines.push('', `Behaviours${step.kind === 'tests' ? ' to write, as test titles `[<id>] <description>`, failing' : ' that must pass'}:`)
       for (const behaviour of step.acceptance) {

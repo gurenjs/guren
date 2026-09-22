@@ -140,7 +140,7 @@ describe('plan:verify', () => {
       },
     ])
     const text = formatPlanVerify(result)
-    expect(text).toContain(`${HTTP}: depends on what changed since the plan was approved: model.post (named by route.comments.store); plan:next holds it until the plan is revised and approved`)
+    expect(text).toContain(`${HTTP}: depends on what changed since the plan was approved: model.post (named by route.comments.store); plan:next holds it until that change is undone, or the plan states what the application holds now and is approved`)
     expect(text).toContain('Against the approved baseline: fresh ')
   })
 
