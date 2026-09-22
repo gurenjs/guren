@@ -341,6 +341,65 @@ export async function addImport(
  */
 export type InsertResult = { content: string; reason?: undefined } | { content?: undefined; reason: string }
 
+/** The fate of an entry and of its import, patched together. */
+export type EntryWiring =
+  | { registered: false; entry: PatchResult }
+  | { registered: true; entry: PatchResult; import: PatchResult }
+
+export type RegisteredEntry = Extract<EntryWiring, { registered: true }>
+
+/**
+ * What to patch, decided from the file as read: the entry insert and the import
+ * it needs, `null` when the entry is bound by an import the file already has
+ * under another name (`defaultImportBinding`).
+ */
+export interface EntryPlan {
+  entry: InsertResult
+  importStatement: string | null
+}
+
+/**
+ * An entry and then its import, composed for one write: a lone import breaks
+ * `noUnusedLocals`, a lone entry is an unresolved identifier, and two sequenced
+ * writes can leave either. An entry already present still has its import checked,
+ * since a user can remove one by hand. `content` is the text to write, absent
+ * when the file is already right.
+ */
+export function composeEntryWithImport(
+  content: string,
+  plan: (content: string) => EntryPlan,
+): { wiring: EntryWiring; content?: string } {
+  const { entry: inserted, importStatement } = plan(content)
+
+  if (inserted.content === undefined && inserted.reason !== PATCH_REASONS.alreadyPresent) {
+    return { wiring: { registered: false, entry: { modified: false, reason: inserted.reason } } }
+  }
+
+  const withImport = importStatement === null ? null : insertImport(inserted.content ?? content, importStatement)
+
+  return {
+    wiring: {
+      registered: true,
+      entry: inserted.content === undefined ? { modified: false, reason: PATCH_REASONS.alreadyPresent } : { modified: true },
+      import: withImport === null ? { modified: false, reason: PATCH_REASONS.importAlreadyExists } : { modified: true },
+    },
+    content: withImport ?? inserted.content,
+  }
+}
+
+/** {@link composeEntryWithImport} applied to a file: one read, and one write only when something changed. */
+export async function addEntryWithImport(filePath: string, plan: (content: string) => EntryPlan): Promise<EntryWiring> {
+  const content = await readIfExists(process.cwd(), filePath)
+
+  if (content === null) {
+    return { registered: false, entry: { modified: false, reason: PATCH_REASONS.fileNotFound } }
+  }
+
+  const { wiring, content: updated } = composeEntryWithImport(content, plan)
+  if (updated !== undefined) await writeFile(resolve(process.cwd(), filePath), updated, 'utf8')
+  return wiring
+}
+
 /**
  * Pure, like `insertImport`: a caller adding the entry's import too writes once.
  * Scoped to `callName`'s own object, creating the option when absent. Splices
@@ -468,18 +527,22 @@ export async function addToArrayArgument(
     return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
-  const updatedContent = insertArrayArgument(content, methodName, valueSource)
+  const inserted = insertArrayArgumentEntry(content, methodName, valueSource)
 
-  if (updatedContent === null) {
-    return { modified: false, reason: `Could not find a ${methodName}([ ... ]) call` }
+  if (inserted.content === undefined) {
+    return { modified: false, reason: inserted.reason }
   }
 
-  if (updatedContent === content) {
-    return { modified: false, reason: PATCH_REASONS.alreadyPresent }
-  }
-
-  await writeFile(absolutePath, updatedContent, 'utf8')
+  await writeFile(absolutePath, inserted.content, 'utf8')
   return { modified: true }
+}
+
+/** {@link insertArrayArgument} read the way `insertArrayOptionEntry` reports, so one caller can compose either. */
+export function insertArrayArgumentEntry(content: string, methodName: string, valueSource: string): InsertResult {
+  const updated = insertArrayArgument(content, methodName, valueSource)
+  if (updated === null) return { reason: `Could not find a ${methodName}([ ... ]) call` }
+  if (updated === content) return { reason: PATCH_REASONS.alreadyPresent }
+  return { content: updated }
 }
 
 /**

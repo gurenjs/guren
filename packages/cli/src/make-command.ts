@@ -1,8 +1,8 @@
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { consola } from 'consola'
 import type { WriterOptions } from './utils'
 import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, safeModuleName, scaffoldFile } from './utils'
-import { addImport, addToArrayArgument, addToArrayOption, PATCH_REASONS } from './patch-helpers'
+import { addEntryWithImport, defaultImportBinding, insertArrayArgumentEntry, insertArrayOptionEntry, type EntryPlan, type InsertResult, type RegisteredEntry } from './patch-helpers'
 import { fileExists, readIfExists } from './discovery'
 import { registersCommandsOf } from './console-check'
 
@@ -77,23 +77,16 @@ async function registerRootCommand(className: string, file: string): Promise<voi
     return
   }
 
-  // Patch the registration before the import, so a failure here can't leave
-  // an unused import behind.
-  const registration = await addToArrayArgument(CONSOLE_ENTRY, 'registerMany', className)
+  const wiring = await addEntryWithImport(CONSOLE_ENTRY, commandPlan(CONSOLE_ENTRY, file, className, specifier,
+    (content, binding) => insertArrayArgumentEntry(content, 'registerMany', binding)))
 
-  if (!registration.modified && registration.reason !== PATCH_REASONS.alreadyPresent) {
-    consola.warn(`Could not register ${className} automatically: ${registration.reason}`)
+  if (!wiring.registered) {
+    consola.warn(`Could not register ${className} automatically: ${wiring.entry.reason}`)
     printRootRegistrationGuidance(className, specifier)
     return
   }
 
-  if (!(await addImportOrExplain(CONSOLE_ENTRY, `import ${className} from '${specifier}'`))) return
-
-  if (registration.modified) {
-    consola.success(`Registered ${className} in ${CONSOLE_ENTRY}`)
-  } else {
-    consola.info(`${className} is already registered in ${CONSOLE_ENTRY}`)
-  }
+  reportRegistration(wiring, className, CONSOLE_ENTRY)
 }
 
 async function registerModuleCommand(className: string, file: string, moduleName: string): Promise<void> {
@@ -108,24 +101,50 @@ async function registerModuleCommand(className: string, file: string, moduleName
     return
   }
 
-  const registration = await addToArrayOption(indexPath, 'commands', className, 'defineModule')
+  const wiring = await addEntryWithImport(indexPath, commandPlan(indexPath, file, className, specifier,
+    (content, binding) => insertArrayOptionEntry(content, 'commands', binding, { callName: 'defineModule' })))
 
-  if (!registration.modified && registration.reason !== PATCH_REASONS.alreadyPresent) {
-    consola.warn(`Could not register ${className} automatically: ${registration.reason}`)
+  if (!wiring.registered) {
+    consola.warn(`Could not register ${className} automatically: ${wiring.entry.reason}`)
     consola.info(`Add \`commands: [${className}]\` to defineModule() in ${indexPath}, importing it from '${specifier}'.`)
     return
   }
 
-  // The console hop below is owed whether or not the import landed.
-  if (await addImportOrExplain(indexPath, `import ${className} from '${specifier}'`)) {
-    if (registration.modified) {
-      consola.success(`Registered ${className} in ${indexPath}`)
-    } else {
-      consola.info(`${className} is already registered in ${indexPath}`)
+  reportRegistration(wiring, className, indexPath)
+  await printModuleConsoleHopGuidance(moduleName)
+}
+
+/**
+ * The command's entry under the name `entryFile` already default-imports it by,
+ * if any, and the import only when there is none: a second import of the same
+ * module is an unused local, and a second entry a second registration.
+ */
+function commandPlan(
+  entryFile: string,
+  commandFile: string,
+  className: string,
+  specifier: string,
+  insertEntry: (content: string, binding: string) => InsertResult,
+): (content: string) => EntryPlan {
+  const target = relative(process.cwd(), commandFile).replaceAll('\\', '/').replace(/\.ts$/u, '')
+  return (content) => {
+    const bound = defaultImportBinding(content, entryFile, target)
+    return {
+      entry: insertEntry(content, bound ?? className),
+      importStatement: bound === null ? `import ${className} from '${specifier}'` : null,
     }
   }
+}
 
-  await printModuleConsoleHopGuidance(moduleName)
+/** The entry and its import landed together, so each line here describes a file that compiles. */
+function reportRegistration(wiring: RegisteredEntry, className: string, filePath: string): void {
+  if (wiring.entry.modified) {
+    consola.success(`Registered ${className} in ${filePath}`)
+  } else if (wiring.import.modified) {
+    consola.success(`Restored the ${className} import in ${filePath}`)
+  } else {
+    consola.info(`${className} is already registered in ${filePath}`)
+  }
 }
 
 /**
@@ -148,20 +167,6 @@ async function printModuleConsoleHopGuidance(moduleName: string): Promise<void> 
     consola.info(`Create ${CONSOLE_ENTRY} first if your project predates it.`)
   }
   consola.info('See: https://guren.dev/docs/guides/console')
-}
-
-/**
- * Whether the import is in the file, by this patch or an earlier one. By now the
- * registration has landed, so a failed import leaves the file naming an identifier
- * it never binds: the manual step is printed instead of a success line.
- */
-async function addImportOrExplain(filePath: string, importStatement: string): Promise<boolean> {
-  const result = await addImport(filePath, importStatement)
-  if (result.modified || result.reason === PATCH_REASONS.importAlreadyExists) return true
-
-  consola.warn(`Could not add the import to ${filePath} automatically: ${result.reason}`)
-  consola.info(`Add \`${importStatement}\` to ${filePath}: its registration is already in place.`)
-  return false
 }
 
 function printRootRegistrationGuidance(className: string, specifier: string): void {

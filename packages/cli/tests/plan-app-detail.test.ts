@@ -1,13 +1,11 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
 import { loadPlanAppState } from '../src/plan/app-state'
-import { linkWorkspaceCore, PAGE_COMPONENT_FIXTURE, writeWorkspaceFiles } from './helpers'
+import { createTempRoot, linkWorkspaceCore, PAGE_COMPONENT_FIXTURE, writeWorkspaceFiles } from './helpers'
 
-// Earlier runs' roots are removed at the start, one directory per application: see plan-status-command.test.ts.
+// One directory per application: see plan-status-command.test.ts.
 const ROOT_PREFIX = 'guren-plan-app-detail-'
 let ROOT: string
 
@@ -128,9 +126,7 @@ async function detailOf(name: string, files: Record<string, string>): Promise<Pl
 
 describe('loadPlanAppState({ detail: true })', () => {
   beforeAll(async () => {
-    const stale = (await readdir(tmpdir())).filter((name) => name.startsWith(ROOT_PREFIX))
-    await Promise.all(stale.map((name) => rm(join(tmpdir(), name), { recursive: true, force: true })))
-    ROOT = await mkdtemp(join(tmpdir(), ROOT_PREFIX))
+    ROOT = await createTempRoot(ROOT_PREFIX)
   })
 
   test('should leave the detail out unless asked, so plan:render imports no schema', async () => {
