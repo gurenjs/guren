@@ -50,6 +50,8 @@ export class Post extends defineModel(posts) {
     author: null,
   }
 }
+
+Post.belongsTo('author', () => import('./User.js').then((module) => module.User), 'authorId', 'id')
 `,
     'utf8',
   )
@@ -68,6 +70,8 @@ export class User extends defineModel(users) {
     posts: [],
   }
 }
+
+User.hasMany('posts', () => import('./Post.js').then((module) => module.Post), 'authorId', 'id')
 `,
     'utf8',
   )
