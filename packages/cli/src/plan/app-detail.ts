@@ -43,6 +43,7 @@ import { resolveAppEntry } from '../provider-registrar'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../route-registrar'
 import { importsByLocal, specifierBase } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
+import { routePathCovers } from '../test-requests'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
 
 /** `mounted`, or why this command could not confirm it. Absence of evidence is never `mounted`. */
@@ -72,6 +73,8 @@ export interface PlanAppRouteDetail {
    * only from a call the application made.
    */
   contractSchemas: string[]
+  /** Why a route registered before it may answer its requests; absent when none can. */
+  shadowed?: { unconfirmed: string }
 }
 
 export interface PlanAppModelDetail {
@@ -246,21 +249,62 @@ function contractSchemaObjects(definitions: RouteDefinition[] | undefined): Set<
 }
 
 function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanAppDetail['routes'] {
-  if (!Array.isArray(input.routes)) return input.routes
-  return input.routes.map((route, index) => ({
-    name: route.name,
-    method: route.method,
-    path: route.path,
-    ...(route.controller ? { action: `${route.controller.name}.${route.controller.action}` } : {}),
-    middleware: route.middleware ?? [],
-    hasInlineMiddleware: route.hasInlineMiddleware === true,
-    bindings: route.bindings ?? {},
-    ...(route.agent ? { agent: { toolName: route.agent.toolName, readOnly: route.agent.readOnlyHint } } : {}),
-    ...(route.prototype ? { prototype: true as const } : {}),
-    module: input.provenance[index] ?? null,
-    ...(input.provenance[index] == null && input.routesFile !== undefined ? { file: input.routesFile } : {}),
-    contractSchemas: contractSymbols(input.definitions?.[index], symbols),
-  }))
+  const routes = input.routes
+  if (!Array.isArray(routes)) return routes
+  return routes.map((route, index) => {
+    const shadowed = shadowing(input, routes, index)
+    return {
+      name: route.name,
+      method: route.method,
+      path: route.path,
+      ...(route.controller ? { action: `${route.controller.name}.${route.controller.action}` } : {}),
+      middleware: route.middleware ?? [],
+      hasInlineMiddleware: route.hasInlineMiddleware === true,
+      bindings: route.bindings ?? {},
+      ...(route.agent ? { agent: { toolName: route.agent.toolName, readOnly: route.agent.readOnlyHint } } : {}),
+      ...(route.prototype ? { prototype: true as const } : {}),
+      module: input.provenance[index] ?? null,
+      ...(input.provenance[index] == null && input.routesFile !== undefined ? { file: input.routesFile } : {}),
+      contractSchemas: contractSymbols(input.definitions?.[index], symbols),
+      ...(shadowed ? { shadowed } : {}),
+    }
+  })
+}
+
+/**
+ * Hono hands a request to the first registered route that matches it, in `mountRoutes()`'s
+ * order: the entry registrar's routes, then each module's in `createApp({ modules })` order.
+ * The CLI loads modules in directory order instead, so two modules' routes are compared both
+ * ways and never settled. The routes a provider registers are not in the definitions.
+ */
+function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: number): { unconfirmed: string } | undefined {
+  const route = routes[index]!
+  const scope = input.provenance[index] ?? null
+  let uncertain: string | undefined
+  for (const [other, candidate] of routes.entries()) {
+    const otherScope = input.provenance[other] ?? null
+    const acrossModules = scope !== null && otherScope !== null && otherScope !== scope
+    const before = acrossModules || (otherScope === scope ? other < index : otherScope === null)
+    const method = candidate.method.toUpperCase()
+    if (!before || (method !== route.method.toUpperCase() && method !== 'ALL')) continue
+    const covers = routePathCovers(candidate.path, route.path)
+    if (covers === 'none') continue
+    const site = `${method} ${candidate.path}${routeLabel(candidate)}, registered by ${otherScope === null ? (input.routesFile ?? 'the entry registrar') : `modules/${otherScope}`}`
+    if (covers === 'match' && !acrossModules) return { unconfirmed: `${site}, comes first and answers every request its path matches, so none reaches it` }
+    uncertain ??= acrossModules
+      ? `${site}, may answer its requests first: the order follows createApp({ modules }), which this does not read`
+      : `${site}, comes first, and whether it answers every request this path matches could not be judged`
+  }
+  if (uncertain !== undefined) return { unconfirmed: uncertain }
+  if (scope !== null && input.moduleWarnings.length > 0) {
+    return { unconfirmed: `a module's routes did not load, and one registered before it may answer its requests (${input.moduleWarnings.join(' ')})` }
+  }
+  return undefined
+}
+
+function routeLabel(route: ContextRoute): string {
+  const parts = [...(route.name ? [`"${route.name}"`] : []), ...(route.controller ? [`${route.controller.name}.${route.controller.action}`] : [])]
+  return parts.length > 0 ? ` (${parts.join(', ')})` : ''
 }
 
 function contractSymbols(definition: RouteDefinition | undefined, symbols: SchemaSymbols): string[] {

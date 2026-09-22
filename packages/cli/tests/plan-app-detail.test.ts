@@ -289,3 +289,108 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.validators).toEqual({ unreadable: expect.stringContaining('app/Http/Validators/All.ts') })
   })
 })
+
+describe('loadPlanAppState({ detail: true }) on route shadowing', () => {
+  const routes = (...lines: string[]): string => `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  void PostController
+${lines.map((line) => `  ${line}`).join('\n')}
+}
+`
+  const catalog = {
+    'modules/catalog/index.ts': "import { defineModule } from '@guren/core'\n\nexport default defineModule({ name: 'catalog', providers: [], routes: (router) => { router.get('/invoices', (c) => c.text('ok')).name('catalog.invoices') } })\n",
+  }
+  const shadowedOf = (detail: PlanAppDetail): Record<string, unknown> =>
+    Object.fromEntries((detail.routes as PlanAppRouteDetail[]).map((route) => [route.name, route.shadowed?.unconfirmed]))
+
+  beforeAll(async () => {
+    ROOT ??= await createTempRoot(ROOT_PREFIX)
+  })
+
+  test('should name a route registered first that answers every request of a later one', async () => {
+    const detail = await detailOf('shadowed', {
+      'src/app.ts': entry('{ routes: registerWebRoutes, modules: [billing] }'),
+      'routes/web.ts': routes(
+        "router.get('/comments/:id', [PostController, 'index']).name('comments.show')",
+        "router.get('/comments/new', (c) => c.text('new')).name('comments.create')",
+      ),
+    })
+
+    expect(shadowedOf(detail)).toEqual({
+      'comments.show': undefined,
+      'comments.create': 'GET /comments/:id ("comments.show", PostController.index), registered by routes/web.ts, comes first and answers every request its path matches, so none reaches it',
+      'invoices.index': undefined,
+    })
+  })
+
+  test('should leave a route alone that is registered before what would shadow it, or that another method serves', async () => {
+    const detail = await detailOf('unshadowed', {
+      'src/app.ts': entry('{ routes: registerWebRoutes }'),
+      'routes/web.ts': routes(
+        "router.get('/comments/new', (c) => c.text('new')).name('comments.create')",
+        "router.get('/comments/:id', (c) => c.text('show')).name('comments.show')",
+        "router.post('/comments/:id', (c) => c.text('update')).name('comments.update')",
+        "router.post('/comments/new', (c) => c.text('store')).name('comments.store')",
+      ),
+    })
+
+    expect(shadowedOf(detail)).toEqual({
+      'comments.create': undefined,
+      'comments.show': undefined,
+      'comments.update': undefined,
+      'comments.store': expect.stringContaining('POST /comments/:id ("comments.update")'),
+      'invoices.index': undefined,
+    })
+  })
+
+  test('should take an ALL route as every method, and call a constraint it cannot compare unjudged', async () => {
+    const detail = await detailOf('unjudged', {
+      'src/app.ts': entry('{ routes: registerWebRoutes }'),
+      'routes/web.ts': routes(
+        "router.on('ALL', '/legacy/*', (c) => c.text('gone')).name('legacy')",
+        "router.delete('/legacy/posts/:id', (c) => c.text('destroy')).name('legacy.destroy')",
+        "router.get('/posts/:id{[0-9]+}', (c) => c.text('show')).name('posts.show')",
+        "router.get('/posts/:slug', (c) => c.text('bySlug')).name('posts.slug')",
+      ),
+    })
+
+    const shadowed = shadowedOf(detail)
+    expect(shadowed['legacy.destroy']).toContain('ALL /legacy/* ("legacy"), registered by routes/web.ts, comes first and answers every request')
+    expect(shadowed['posts.slug']).toBe('GET /posts/:id{[0-9]+} ("posts.show"), registered by routes/web.ts, comes first, and whether it answers every request this path matches could not be judged')
+  })
+
+  test('should put the entry registrar before every module, and never settle two modules against each other', async () => {
+    const detail = await detailOf('modules', {
+      ...catalog,
+      'src/app.ts': entry('{ routes: registerWebRoutes, modules: [billing] }'),
+      'routes/web.ts': routes("router.get('/:section', (c) => c.text('section')).name('section')", "router.get('/posts', (c) => c.text('posts')).name('posts.index')"),
+    })
+
+    const shadowed = shadowedOf(detail)
+    expect(shadowed.section).toBeUndefined()
+    expect(shadowed['posts.index']).toContain('GET /:section ("section"), registered by routes/web.ts, comes first and answers')
+    expect(shadowed['invoices.index']).toContain('registered by routes/web.ts, comes first and answers')
+    expect(shadowed['catalog.invoices']).toContain('registered by routes/web.ts, comes first and answers')
+
+    const apart = await detailOf('modules-apart', { ...catalog, 'src/app.ts': entry('{ routes: registerWebRoutes, modules: [billing] }'), 'routes/web.ts': routes() })
+    expect(shadowedOf(apart)).toEqual({
+      'invoices.index': 'GET /invoices ("catalog.invoices"), registered by modules/catalog, may answer its requests first: the order follows createApp({ modules }), which this does not read',
+      'catalog.invoices': 'GET /invoices ("invoices.index"), registered by modules/billing, may answer its requests first: the order follows createApp({ modules }), which this does not read',
+    })
+  })
+
+  test("should not clear a module's route while another module's routes did not load", async () => {
+    const detail = await detailOf('module-missing', {
+      'modules/broken/index.ts': "throw new Error('boom')\n",
+      'src/app.ts': entry('{ routes: registerWebRoutes, modules: [billing] }'),
+      'routes/web.ts': routes("router.get('/posts', (c) => c.text('posts')).name('posts.index')"),
+    })
+
+    expect(shadowedOf(detail)).toEqual({
+      'posts.index': undefined,
+      'invoices.index': expect.stringContaining("a module's routes did not load"),
+    })
+  })
+})

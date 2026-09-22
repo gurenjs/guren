@@ -237,6 +237,35 @@ describe('plan:status', () => {
     expect(result.elements.find((element) => element.id === 'action.comments.store')!.notes).toEqual([expect.stringContaining('passes no routes')])
   })
 
+  test('should never call a route wired while a route registered before it answers every request it matches', async () => {
+    const document = loadCommentsPlan()
+    const routes = document.routes as Array<Record<string, unknown>>
+    Object.assign(routes.find((route) => route.id === 'route.comments.store')!, { middleware: [], bind: [] })
+    const plan = await writePlan('shadowed.plan.json', document)
+    const web = (first: string): string => `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+import { registerCommentRoutes } from './comments.js'
+
+export function registerWebRoutes(router: Router): void {
+  ${first}
+  router.get('/posts', [PostController, 'index']).name('posts.index')
+  registerCommentRoutes(router)
+}
+`
+
+    const clear = await report(plan, await createApp('unshadowed', { ...COMMENTS_APP, 'routes/web.ts': web("router.post('/posts/:postId/comments/:id', (c) => c.text('reply')).name('comments.reply')") }))
+    expect(states(clear)['route.comments.store']).toBe('wired')
+    expect(states(clear)['action.comments.store']).toBe('wired')
+
+    const result = await report(plan, await createApp('shadowed', { ...COMMENTS_APP, 'routes/web.ts': web("router.post('/posts/:postId/:section', (c) => c.text('section')).name('posts.section')") }))
+    expect(states(result)['route.comments.store']).toBe('present')
+    expect(states(result)['action.comments.store']).toBe('present')
+    expect(states(result)['validator.comment']).toBe('present')
+    expect(result.elements.find((element) => element.id === 'route.comments.store')!.notes).toEqual([
+      'Not confirmed as wired: POST /posts/:postId/:section ("posts.section"), registered by routes/web.ts, comes first and answers every request its path matches, so none reaches it.',
+    ])
+  })
+
   test('should fall back to the static schema when the schema throws at import, and block what that cannot prove', async () => {
     const schema = `${PLAN_APP_FILES['db/schema.ts']}
 const shared = { body: text('body').notNull() }

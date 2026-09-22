@@ -8,7 +8,7 @@ import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { builtinSubCommands } from '../src/commands'
 import { loadDocsGraph } from '../src/docs-graph'
-import { planCloseFile, type PlanCloseReport } from '../src/plan-close'
+import { describeCloseBlockers, planCloseFile, type PlanCloseReport } from '../src/plan-close'
 import { planStatusFile } from '../src/plan-status'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { planApprovalsPath } from '../src/plan/approvals'
@@ -16,9 +16,9 @@ import { writePlanWaiver } from '../src/plan/decisions'
 import { planHash } from '../src/plan/identity'
 import { PlanSchema, listPlanElements } from '../src/plan/schema'
 import { PLAN_STATE_VERSION, planDigest, planSlug, planStatePath, type PlanStepRecord } from '../src/plan/state'
-import { PLAN_STATUS_SECTIONS } from '../src/plan/status'
+import { PLAN_STATUS_SECTIONS, summarize, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
 import { derivePlanTasks } from '../src/plan/tasks'
-import { hashFiles } from '../src/plan/verification'
+import { applyVerification, hashFiles } from '../src/plan/verification'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, planAppState, writePlanVerifyApp } from './plan-fixture'
 
@@ -332,6 +332,21 @@ describe('plan:close', () => {
     await writeWorkspaceFiles(app.dir, { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [step.id]: record } }) })
 
     await expect(close(app)).rejects.toThrow(/column\.comment\.id: drifted/u)
+    await expect(close(app)).rejects.toThrow(`Run \`bunx guren plan:verify ${app.plan} --step ${step.id}\` again, since that run no longer holds`)
+  })
+
+  test('should name the step that lifts an element, and plan:waive for one no plan:verify run lifts', async () => {
+    const app = await createClosableApp('remedies', { open: ['column.comment.id', 'view.posts.show'] })
+
+    const error = await close(app).then(
+      () => new Error('plan:close did not refuse'),
+      (caught: unknown) => caught as Error,
+    )
+
+    expect(error.message).toContain(`  column.comment.id: present\n    Run \`bunx guren plan:verify ${app.plan} --step task/entity/model.comment/data\`;`)
+    expect(error.message).toContain(
+      `  view.posts.show: unjudged (No planned property of this change has a reader)\n    No planned property of it matched and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with \`bunx guren plan:waive ${app.plan} view.posts.show --reason "<why>"\``,
+    )
   })
 
   test('should refuse a blocked and an unjudged element, with the reason the reader gave', async () => {
@@ -422,5 +437,80 @@ describe('plan:close', () => {
     expect(await read(dir, 'docs/plans/comments.md')).toContain('[plan.json](comments/plan.json)')
     expect(await read(dir, 'docs/entities/Comment.md')).toContain('<!-- guren:plan comments ')
     expect(planStatePath(dir, planSlug(plan))).toBe(join(dir, '.guren/plans/comments.state.json'))
+  })
+})
+
+describe('describeCloseBlockers', () => {
+  const plan = PlanSchema.parse(loadApprovedCommentsPlan())
+  const derivation = derivePlanTasks(plan, { apiOnly: false })
+  const steps = derivation.tasks.flatMap((task) => task.steps)
+  const DATA = 'task/entity/model.comment/data'
+  const HTTP = 'task/entity/model.comment/http'
+  const verify = (step: string): string => `\`bunx guren plan:verify p.json --step ${step}\``
+  const waive = (id: string): string => `\`bunx guren plan:waive p.json ${id} --reason "<why>"\``
+  const element = (id: string, state: PlanStatusState, extra: Partial<PlanElementStatus> = {}): PlanElementStatus => ({
+    id,
+    section: 'resources',
+    change: 'add',
+    label: id,
+    state,
+    properties: [],
+    notes: [],
+    completesAt: 'present',
+    files: ['app/x.ts'],
+    ...extra,
+  })
+  const blockerOf = (entry: PlanElementStatus): string => describeCloseBlockers(plan, steps, [entry], 'p.json')[0]!
+
+  test('should name the command that moves each kind of hold', () => {
+    const incomplete = 'Verified t by s, and no longer at the state that completes it.'
+    const expired = 'Verified t by s; changed since: a.ts.'
+    const unfingerprinted = 'Verified t by s, and nothing of it was fingerprinted, so that result could not expire and is not counted.'
+    const matched = [{ property: 'p', verdict: 'match' as const, planned: 'x', actual: 'x' }]
+
+    expect(blockerOf(element('model.post', 'blocked', { reason: 'the models could not be read' }))).toBe(
+      `  model.post: blocked (the models could not be read)\n    Fix what keeps it from being read, then run ${verify(DATA)}; or waive it: ${waive('model.post')}`,
+    )
+    expect(blockerOf(element('resource.comment', 'planned'))).toBe(`  resource.comment: planned\n    Implement it, then run ${verify(HTTP)}; or waive it: ${waive('resource.comment')}`)
+    expect(blockerOf(element('route.comments.store', 'present', { completesAt: 'wired', notes: ['Not confirmed as wired: x.', incomplete], hold: { kind: 'incomplete', note: incomplete } }))).toBe(
+      `  route.comments.store: present (Not confirmed as wired: x)\n    Change the code until plan:status reports it wired, then run ${verify(HTTP)}; or waive it: ${waive('route.comments.store')}`,
+    )
+    expect(blockerOf(element('column.comment.id', 'drifted', { properties: matched, notes: [expired], hold: { kind: 'expired', note: expired } }))).toBe(
+      `  column.comment.id: drifted (Verified t by s; changed since: a.ts)\n    Run ${verify(DATA)} again, since that run no longer holds; or waive it: ${waive('column.comment.id')}`,
+    )
+    expect(blockerOf(element('controller.comments', 'present', { files: [], notes: [unfingerprinted], hold: { kind: 'unfingerprinted', note: unfingerprinted } }))).toBe(
+      `  controller.comments: present (${unfingerprinted.slice(0, -1)})\n    plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive('controller.comments')}`,
+    )
+    expect(blockerOf(element('column.comment.id', 'present', { properties: matched }))).toBe(`  column.comment.id: present\n    Run ${verify(DATA)}; or waive it: ${waive('column.comment.id')}`)
+    expect(blockerOf(element('resource.ghost', 'present'))).toBe(`  resource.ghost: present\n    No step of the plan verifies it, so no plan:verify run lifts it: waive it with ${waive('resource.ghost')}`)
+  })
+
+  test('should send an element nothing matched to the step whose behaviour reaches it first', () => {
+    expect(blockerOf(element('model.comment', 'present'))).toBe(`  model.comment: present\n    Run ${verify(HTTP)}, then ${verify(DATA)}; or waive it: ${waive('model.comment')}`)
+    expect(blockerOf(element('controller.comments', 'present'))).toBe(`  controller.comments: present\n    Run ${verify(HTTP)}; or waive it: ${waive('controller.comments')}`)
+  })
+
+  test('should call an element a dead end for plan:verify exactly where a verified record does not lift it', () => {
+    const unreached = element('resource.comment', 'present')
+    const record: PlanStepRecord = {
+      outcome: 'verified',
+      planDigest: 'digest',
+      ranAt: 't',
+      durationMs: 1,
+      commands: [],
+      acceptance: [],
+      incomplete: [],
+      waived: [],
+      fingerprint: { files: { 'app/x.ts': 'h' }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
+    }
+    const records = Object.fromEntries(steps.map((step) => [step.id, record]))
+    const lift = (entry: PlanElementStatus) =>
+      applyVerification({ elements: [entry], summary: summarize([entry]) }, derivation, records, 'digest', new Map([['app/x.ts', 'h']]), plan).status.elements[0]!
+
+    expect(lift(unreached).hold?.kind).toBe('unreached')
+    expect(blockerOf(unreached)).toContain('so no plan:verify run lifts it: waive it with')
+    const reached = element('model.comment', 'present')
+    expect(lift(reached).state).toBe('verified')
+    expect(blockerOf(reached)).not.toContain('waive it with')
   })
 })

@@ -315,6 +315,8 @@ type Match = 'match' | 'none' | 'unknown'
 interface PatternSegment {
   /** Regex source for the segment, or `null` for a lone `*`. */
   source: string | null
+  /** The segment as the route spells it, for a literal one. */
+  text: string
   /** A lone param token: what a runtime segment may fill, and a constraint that may span `/`. */
   param?: { constraint?: string; optional: boolean }
 }
@@ -352,11 +354,11 @@ function patternSegments(path: string): PatternSegment[] {
   })
   let next = 0
   return (masked.startsWith('/') ? masked.slice(1) : masked).split('/').map((part): PatternSegment => {
-    if (part === '*') return { source: null }
-    if (!part.startsWith(HOLE)) return { source: escapeRegExp(part) }
+    if (part === '*') return { source: null, text: part }
+    if (!part.startsWith(HOLE)) return { source: escapeRegExp(part), text: part }
     // Hono's label runs to the next `/` or `{`, so text after the token (`:id.json`) is part of the name.
     const param = tokens[next++]!
-    return { source: param.constraint ?? '[^/]+', param }
+    return { source: param.constraint ?? '[^/]+', text: part, param }
   })
 }
 
@@ -409,6 +411,24 @@ export function routePathMatches(path: string, segments: readonly TestRequestSeg
     if (error instanceof UncompilablePattern) return 'unknown'
     throw error
   }
+}
+
+/**
+ * Whether a route at `earlier`, registered first, answers every request a route at `later`
+ * matches: hono dispatches to the first registered handler, so `match` means none reaches
+ * `later`. `later` is read as one request, a lone parameter filled at runtime (and dropped,
+ * when it is an optional last one). Only literals and unconstrained parameters make that
+ * request stand for all of `later`'s, so with a constraint or a `*` a `match` is `unknown`.
+ */
+export function routePathCovers(earlier: string, later: string): Match {
+  const patterns = patternSegments(later)
+  const last = patterns.length - 1
+  const exact = patterns.every((pattern, index) => pattern.source !== null && pattern.param?.constraint === undefined && (!pattern.param?.optional || index === last))
+  const request = patterns.map((pattern): TestRequestSegment => (pattern.param || pattern.source === null ? { runtime: true } : { literal: pattern.text }))
+  const requests = patterns[last]?.param?.optional ? [request, request.slice(0, -1)] : [request]
+  const results = requests.map((segments) => routePathMatches(earlier, segments))
+  if (results.includes('none')) return 'none'
+  return exact && results.every((result) => result === 'match') ? 'match' : 'unknown'
 }
 
 export interface TestCoverage {
