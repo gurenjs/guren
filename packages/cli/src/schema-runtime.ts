@@ -10,6 +10,7 @@ import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { fileExists, listAppRoots } from './discovery'
+import { DRIZZLE_CORE_SUBPATHS } from './drizzle-specifiers'
 import {
   parseSchemaTables,
   schemaPathFor,
@@ -94,9 +95,9 @@ interface DrizzleCopy {
 }
 
 const DIALECT_SUBPATHS: { dialect: SchemaDialect; subpath: string; tableClass: string }[] = [
-  { dialect: 'pg', subpath: 'drizzle-orm/pg-core', tableClass: 'PgTable' },
-  { dialect: 'sqlite', subpath: 'drizzle-orm/sqlite-core', tableClass: 'SQLiteTable' },
-  { dialect: 'mysql', subpath: 'drizzle-orm/mysql-core', tableClass: 'MySqlTable' },
+  { dialect: 'pg', subpath: DRIZZLE_CORE_SUBPATHS.pg, tableClass: 'PgTable' },
+  { dialect: 'sqlite', subpath: DRIZZLE_CORE_SUBPATHS.sqlite, tableClass: 'SQLiteTable' },
+  { dialect: 'mysql', subpath: DRIZZLE_CORE_SUBPATHS.mysql, tableClass: 'MySqlTable' },
 ]
 
 // A schema awaiting a connection at top level never settles; the static reader answers instead.

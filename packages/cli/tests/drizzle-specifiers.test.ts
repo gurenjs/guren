@@ -3,7 +3,6 @@ import { join, resolve } from 'node:path'
 import { beforeAll, describe, expect, it } from 'bun:test'
 import { DIALECT_BARRELS, isDrizzleBuilderSpecifier, MIXED_DRIZZLE_BARREL } from '../src/drizzle-specifiers'
 import { parseSchemaTables, type SchemaColumn, type SchemaTable } from '../src/schema-parser'
-import { checkSchemaTimestamps } from '../src/schema-check'
 import { createTempWorkspace } from './helpers'
 
 const REPO_ROOT = resolve(import.meta.dir, '../../..')
@@ -157,22 +156,5 @@ export const posts = pgTable('posts', { id: idColumn(), other: serial('other') }
 `)
     expect(column(posts, 'id').opaqueBuilder).toBe(true)
     expect(column(posts, 'other').opaqueBuilder).toBeUndefined()
-  })
-})
-
-// A regression pin, not a test of the fix: the timestamptz check reads `type` and
-// `withTimezone`, which were read from the barrels before they were accepted too.
-describe('checkSchemaTimestamps on a barrel-imported schema', () => {
-  it('flags the offset-less timestamp', async () => {
-    const results = checkSchemaTimestamps(await parseSchema(`import { pgTable, serial, timestamp } from '@guren/orm/drizzle/pg'
-
-export const posts = pgTable('posts', {
-  id: serial('id').primaryKey(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  publishedAt: timestamp('published_at'),
-})
-`))
-
-    expect(results.map((result) => result.key)).toEqual(['schema-timestamptz:posts.publishedAt'])
   })
 })

@@ -1,5 +1,12 @@
 import type { SchemaDialect } from './schema-parser'
 
+/** The `drizzle-orm` subpath each dialect's builders and table class come from. */
+export const DRIZZLE_CORE_SUBPATHS = {
+  sqlite: 'drizzle-orm/sqlite-core',
+  pg: 'drizzle-orm/pg-core',
+  mysql: 'drizzle-orm/mysql-core',
+} as const satisfies Record<SchemaDialect, string>
+
 /**
  * The `@guren/orm` subpath re-exporting each dialect's builders wholesale: where
  * `ensure*Imports` merges new builders, and a signal for `detectSchemaDialect`.

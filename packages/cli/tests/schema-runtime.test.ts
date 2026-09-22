@@ -18,13 +18,17 @@ afterAll(async () => {
   await Promise.all(created.map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-async function createApp(files: Record<string, string>, options: { drizzle?: boolean } = {}): Promise<string> {
+async function createApp(files: Record<string, string>, options: { drizzle?: boolean; orm?: boolean } = {}): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'guren-schema-runtime-')))
   created.push(dir)
   await writeWorkspaceFiles(dir, files)
   if (options.drizzle !== false) {
     await mkdir(join(dir, 'node_modules'), { recursive: true })
     await symlink(WORKSPACE_DRIZZLE, join(dir, 'node_modules', 'drizzle-orm'), 'dir')
+  }
+  if (options.orm) {
+    await mkdir(join(dir, 'node_modules', '@guren'), { recursive: true })
+    await symlink(WORKSPACE_ORM, join(dir, 'node_modules', '@guren', 'orm'), 'dir')
   }
   return dir
 }
@@ -509,9 +513,7 @@ export const rows = pgTable('rows', {
         'db/schema.ts': `import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
 export const users = pgTable('users', { id: serial('id').primaryKey(), email: text('email').notNull() })
 `,
-      })
-      await mkdir(join(app, 'node_modules', '@guren'), { recursive: true })
-      await symlink(WORKSPACE_ORM, join(app, 'node_modules', '@guren', 'orm'), 'dir')
+      }, { orm: true })
 
       const users = tableOf((await readSchemaTables(app)).tables, 'users')
 
