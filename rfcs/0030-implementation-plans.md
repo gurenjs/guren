@@ -1115,9 +1115,49 @@ shipped with these readings:
   gives the step a fresh mark. Cursor's `loop_count` stands in for
   `stop_hook_active` there, and a stall goes to stderr, since its hook can
   only follow up or stay silent.
-- `plan:waive` is not shipped, so the skill tells the agent to report a stall
-  rather than route around it. The reviewer at the end of a task is the
-  harness's `code-review` subagent, given the task's elements and its diff.
+- A stalled step leaves the person three answers, and `plan:waive` is the
+  third; the skill tells the agent to report the stall and never to waive on
+  its own. The reviewer at the end of a task is the harness's `code-review`
+  subagent, given the task's elements and its diff.
+
+**Amended in implementation (`plan:waive`).** The waiver command is shipped
+with these readings (`packages/cli/src/plan-waive.ts`, `plan/decisions.ts`).
+
+- The decision log lives beside the plan and is committed. A plan named
+  `plan.json`, the §9 layout, keeps it as `decisions.json` in the same
+  directory; any other plan keeps it as `<slug>.decisions.json`, so two plans
+  in one directory do not share a log. The shape is
+  `{ decisionsVersion, waivers: [{ elementId, planHash, reason, at, by? }] }`,
+  sorted by element id, `by` read from `git config` where it answers. A log
+  that will not read is reported and never replaced: a state file holds
+  results a rerun rebuilds, this one holds decisions nobody can.
+- A waiver names the plan's hash, so a revision inherits none of them. One
+  taken against another hash is reported in the status summary
+  (`staleWaivers`) and lifts nothing.
+- A waiver lifts its element to `waived` whatever the readers found, unless
+  the element is already `verified`: verification is a stronger answer than
+  acceptance, so the note then says the waiver is not needed. `plan:status`,
+  `plan:verify` and the Stop hook read the log through the one overlay.
+- `plan:verify` leaves a waived element out of the step's judgement and
+  records which ones it left out. A step whose only missing elements are
+  waived verifies, which is how the loop of §7 gets past a stall. That record
+  stops standing once the waiver is withdrawn, so `plan:next` returns the
+  step again rather than skipping it forever.
+- A waiver lifts an element and nothing else, so it only carries a step that
+  is `incomplete`. A behaviour that fails makes its `tests` command fail and
+  the step is `failed`, whatever is waived: a behaviour the code will not
+  satisfy is a revision. `plan:next` lists a step's waived elements apart from
+  the ones to implement, and a log that will not read is reported by
+  `plan:next` and the Stop hook, which then judge as if no waiver were taken.
+- The command refuses an element the plan does not declare, one in a section
+  `plan:status` does not judge (flows, tasks, behaviours, questions), an
+  `existing` element, which the table above keeps out of completion, a
+  missing `--reason`, and a draft, which has no hash a waiver could name.
+  `--remove` deletes a waiver and asks none of that: it matches on the element
+  id alone, since withdrawing the waiver of an element a revision dropped is
+  exactly what it is for. Out of scope here: `plan:close`, which is what
+  reads the log to decide a plan is finished, and any waiver of a whole step
+  or task, since completion is defined per element.
 
 `plan:verify` appends to state, per step: `total_cost_usd` and duration where a
 producer reported them, stop-hook continuations, files touched, lines changed.

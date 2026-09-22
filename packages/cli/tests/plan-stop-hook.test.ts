@@ -7,12 +7,13 @@ import { judgeStopHook, MAX_STEP_CONTINUATIONS, planStopHookFindings, recordSign
 import { parsePlanDocument } from '../src/plan-render'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
+import { planWaiveFile } from '../src/plan-waive'
 import { planDigest, PLAN_STATE_VERSION, type PlanActiveStep, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { judgePlan, type PlanElementState, type PlanElementStatus } from '../src/plan/status'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
-import { loadCommentsPlan, planAppState } from './plan-fixture'
+import { loadApprovedCommentsPlan, loadCommentsPlan, planAppState } from './plan-fixture'
 
 // The verification itself is faked here (`verify`); the shipped hooks run it for real in
 // agent-hook-gate.test.ts. What this covers is the decision and what it writes to state.
@@ -36,6 +37,7 @@ function record(overrides: Partial<PlanStepRecord> = {}): PlanStepRecord {
     ],
     acceptance: [{ id: 'AC-comments-1', status: 'passing' }],
     incomplete: ['action.comments.destroy: planned'],
+    waived: [],
     fingerprint: { files: { 'lib.ts': sha256('export const a = 1\n') }, environment: ENVIRONMENT },
     ...overrides,
   }
@@ -58,7 +60,7 @@ function report(stepId: string, stepRecord: PlanStepRecord, blocked: string[] = 
     plan: { file: 'comments.plan.json', title: PLAN.title, hash: null },
     elements,
     summary: status.summary,
-    verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [] },
+    verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
     steps: [{ stepId, taskId: 'task/entity/model.comment', record: stepRecord }],
     skipped: [],
   }
@@ -164,7 +166,9 @@ describe('planStopHookFindings', () => {
 
     expect(verdict.block).toBe(false)
     expect(verdict.message).toContain(`plan:verify on stop (comments.plan.json, ${HTTP}): giving up, nothing about the step changed since the last continuation.\n${HTTP}: incomplete (3 ms)`)
-    expect(verdict.message).toContain('The step is recorded as stalled. Fix the environment or revise the plan, then `bunx guren plan:next comments.plan.json` returns it again.')
+    expect(verdict.message).toContain(
+      'The step is recorded as stalled. Fix the environment, revise the plan, or waive an element with `bunx guren plan:waive comments.plan.json <element-id> --reason "<why>"`; `bunx guren plan:next comments.plan.json` then returns it again.',
+    )
     const state = await readState(app)
     expect(state.active).toMatchObject({ continuations: 1, stalled: { at: '2026-09-21T10:00:00.000Z', reason: 'nothing about the step changed since the last continuation' } })
     expect(state.active!.stalled!.output).toContain('  not at its completion state: action.comments.destroy: planned')
@@ -182,6 +186,51 @@ describe('planStopHookFindings', () => {
     // An element of another step being blocked is not this step's stall.
     const other = await createApp('blocked-elsewhere', { active: active() })
     expect((await planStopHookFindings(other, { stopHookActive: false }, { verify: async () => report(HTTP, record(), ['model.comment']) })).block).toBe(true)
+  })
+
+  test('should hold a record resting on a waiver, and re-verify it once the waiver is gone', async () => {
+    const approved = loadApprovedCommentsPlan()
+    const resting = record({ outcome: 'verified', incomplete: [], waived: ['policy.comment'], planDigest: planDigest(parsePlanDocument(approved)) })
+    const app = await createApp('waived', { steps: { [HTTP]: resting }, active: active() }, approved)
+    const plan = join(app, 'comments.plan.json')
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], reason: 'the policy lands in the next plan', now: NOW })
+    let verified = 0
+    const verify = async (): Promise<PlanVerifyReport> => {
+      verified += 1
+      return report(HTTP, record())
+    }
+
+    expect(await planStopHookFindings(app, { stopHookActive: false }, { verify })).toEqual({ block: false })
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], remove: true })
+    const withdrawn = await planStopHookFindings(app, { stopHookActive: false }, { verify })
+
+    expect(verified).toBe(1)
+    expect(withdrawn.block).toBe(true)
+  })
+
+  test('should say a decision log it could not read applied no waiver, beside the verdict', async () => {
+    const app = await createApp('unreadable-log', { active: active() })
+    await writeWorkspaceFiles(app, { 'comments.decisions.json': '{ "decisionsVersion": 2 }\n' })
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => report(HTTP, record()), now: NOW })
+
+    expect(verdict.block).toBe(true)
+    expect(verdict.message).toContain('does not match the decision log schema')
+    expect(verdict.message).toContain('No waiver was applied, so the step is judged as if none were taken.')
+    expect(verdict.message).toContain('so this turn is not done (continuation 1 of')
+  })
+
+  test('should say a log it could not read applied no waiver even where it verifies nothing', async () => {
+    // The record stands, so the hook returns before it runs anything: the notice must still reach the session.
+    const app = await createApp('unreadable-log-holding', { steps: { [HTTP]: record({ outcome: 'verified', incomplete: [] }) }, active: active() })
+    await writeWorkspaceFiles(app, { 'comments.decisions.json': '{ "decisionsVersion": 2 }\n' })
+    let verified = 0
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => { verified += 1; return report(HTTP, record()) } })
+
+    expect(verified).toBe(0)
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain('No waiver was applied, so the step is judged as if none were taken.')
   })
 
   test('should let a verified step through silently', async () => {

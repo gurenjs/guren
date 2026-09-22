@@ -115,5 +115,10 @@ export function formatPlanStatus(report: PlanStatusReport): string {
   if (verification && verification.staleSteps.length > 0) {
     lines.push('', `Verified against another plan or revision, so not counted: ${verification.staleSteps.join(', ')}`)
   }
+  if (verification?.decisionsUnreadable) lines.push('', `Decision log not read: ${verification.decisionsUnreadable}`)
+  if (verification && verification.staleWaivers.length > 0) {
+    lines.push('', `Waived against another plan or revision, so not counted: ${verification.staleWaivers.map((waiver) => waiver.elementId).join(', ')}`)
+  }
+  if (verification && report.summary.states.waived > 0) lines.push('', `Waivers read from ${verification.decisionsFile}`)
   return lines.join('\n')
 }

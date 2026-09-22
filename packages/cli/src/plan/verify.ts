@@ -50,6 +50,8 @@ export interface PlanVerifierOptions {
   timeoutMs: number
   /** The app's `package.json` scripts. */
   scripts: Record<string, string>
+  /** Element ids a waiver covers (RFC 0030 §6): left out of every step's judgement, and recorded. */
+  waived?: ReadonlySet<string>
   /** Defaults to `runCheck()` against `root`. */
   check?: () => Promise<CheckReport>
   /** Test files, absolute. Defaults to `discoverTestFiles(root)`. */
@@ -232,11 +234,14 @@ export class PlanVerifier {
     const { elements } = await this.load()
 
     // An owned id the status did not judge can never verify: listing it keeps a new section from reading as green.
+    // A waiver outranks both, since a person's decision does not wait on what a reader found.
     const incomplete: string[] = []
+    const waived: string[] = []
     const owned: PlanElementStatus[] = []
     for (const id of step.elementIds) {
       const element = elements.get(id)
-      if (!element) incomplete.push(`${id}: not judged by plan:status`)
+      if (this.options.waived?.has(id)) waived.push(id)
+      else if (!element) incomplete.push(`${id}: not judged by plan:status`)
       else if (!awaitsVerification(element)) incomplete.push(`${id}: ${element.state}`)
       else owned.push(element)
     }
@@ -254,7 +259,7 @@ export class PlanVerifier {
     const acceptance = step.acceptanceIds.map((id) => ({ id, status: behaviours.find((behaviour) => behaviour.id === id)?.status ?? ('pending' as const) }))
     const outcome = stepOutcome(commands, incomplete)
     // A status judged behind a failed command would blame the code for what that command left unwritten.
-    return { outcome, commands, acceptance, incomplete: outcome === 'failed' || outcome === 'blocked' ? [] : incomplete, fingerprint }
+    return { outcome, commands, acceptance, incomplete: outcome === 'failed' || outcome === 'blocked' ? [] : incomplete, waived, fingerprint }
   }
 
   /**

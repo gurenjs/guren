@@ -6,14 +6,16 @@ import { dirname, join } from 'node:path'
 import type { CheckReport } from '../src/check-result'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPlanState, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
+import { planHash } from '../src/plan/identity'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
-import { applyVerification, hashFiles, recordStillHolds, sha256 } from '../src/plan/verification'
+import { applyVerification, applyWaivers, hashFiles, overlayVerification, planWaivers, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
 import type { CapturedExec, CapturedRun } from '../src/subprocess'
-import { loadCommentsPlan, planAppState } from './plan-fixture'
+import type { PlanWaiver } from '../src/plan/decisions'
+import { loadCommentsPlan, loadParsedCommentsPlan, planAppState } from './plan-fixture'
 
 const HTTP = 'task/entity/model.comment/http'
 const DATA = 'task/entity/model.comment/data'
@@ -187,6 +189,29 @@ describe('PlanVerifier', () => {
 
     expect(step.record.outcome).toBe('incomplete')
     expect(step.record.incomplete).toEqual(['action.comments.destroy: planned', 'route.comments.store: present', 'policy.comment: not judged by plan:status'])
+  })
+
+  test('should leave a waived element out of the judgement and record it, so the step verifies without it', async () => {
+    const status = statusOf({ 'action.comments.destroy': { state: 'planned' }, 'policy.comment': { state: 'planned' } })
+    const waived = new Set(['action.comments.destroy', 'policy.comment'])
+
+    const step = await verifier(status, fakeExec(), { waived }).verify(HTTP)
+
+    expect(step.record.outcome).toBe('verified')
+    expect(step.record.incomplete).toEqual([])
+    expect(step.record.waived).toEqual(['action.comments.destroy', 'policy.comment'])
+    // A waived element is nothing the run watched, so its file is not what would expire the result.
+    expect(Object.keys(step.record.fingerprint.files)).not.toContain('app/Policies/CommentPolicy.ts')
+  })
+
+  test('should waive an element plan:status never judged, since a person\u2019s decision does not wait on a reader', async () => {
+    const status = statusOf()
+    status.elements = status.elements.filter((element) => element.id !== 'policy.comment')
+
+    const step = await verifier(status, fakeExec(), { waived: new Set(['policy.comment']) }).verify(HTTP)
+
+    expect(step.record.outcome).toBe('verified')
+    expect(step.record.waived).toEqual(['policy.comment'])
   })
 
   test('should ask for the status once, after the first codegen has run', async () => {
@@ -440,6 +465,7 @@ function record(overrides: Partial<PlanStepRecord> = {}): PlanStepRecord {
     commands: [],
     acceptance: [],
     incomplete: [],
+    waived: [],
     fingerprint: FINGERPRINT,
     ...overrides,
   }
@@ -514,6 +540,12 @@ describe('applyVerification', () => {
     expect(recordStillHolds(empty, 'digest', hashes)).toBe(true)
     expect(recordStillHolds({ ...empty, planDigest: 'older' }, 'digest', hashes)).toBe(false)
     expect(recordStillHolds({ ...empty, outcome: 'incomplete' }, 'digest', hashes)).toBe(false)
+
+    // A record that rested on a waiver retires with it, or the loop would skip a step nobody accepted any more.
+    const onWaiver = record({ waived: ['policy.comment'] })
+    expect(recordStillHolds(onWaiver, 'digest', hashes, new Set(['policy.comment']))).toBe(true)
+    expect(recordStillHolds(onWaiver, 'digest', hashes, new Set(['resource.comment']))).toBe(false)
+    expect(recordStillHolds(onWaiver, 'digest', hashes)).toBe(false)
   })
 
   test('should lift nothing of an element the fingerprint does not cover', async () => {
@@ -563,6 +595,98 @@ describe('applyVerification', () => {
     applyVerification(status, derivation, { [DATA]: record() }, 'digest', await hashFiles(ROOT, DATA_FILES))
 
     expect(JSON.stringify(status)).toBe(before)
+  })
+})
+
+describe('applyWaivers', () => {
+  function waiver(elementId: string, overrides: Partial<PlanWaiver> = {}): PlanWaiver {
+    return { elementId, planHash: 'hash', reason: 'the redesign lands in the next plan', at: '2026-09-21T12:00:00.000Z', ...overrides }
+  }
+
+  test('should lift a waived element whatever the readers found, with the reason and the date', () => {
+    const status = statusOf({ 'policy.comment': { state: 'planned' }, 'model.comment': { state: 'drifted' } })
+
+    const lifted = applyWaivers(status, new Map([['policy.comment', waiver('policy.comment', { by: 'Urata Daiki <someone@example.com>' })], ['model.comment', waiver('model.comment')]]))
+
+    const policy = elementOf(lifted, 'policy.comment')
+    expect(policy.state).toBe('waived')
+    expect(policy.notes).toEqual(['Waived 2026-09-21T12:00:00.000Z by Urata Daiki <someone@example.com>: the redesign lands in the next plan'])
+    expect(elementOf(lifted, 'model.comment').state).toBe('waived')
+    expect(elementOf(lifted, 'model.comment').notes).toEqual(['Waived 2026-09-21T12:00:00.000Z: the redesign lands in the next plan'])
+    expect(lifted.summary.states.waived).toBe(2)
+  })
+
+  test('should leave a verified element verified, and say the waiver is not needed', async () => {
+    const verified = applyVerification(statusOf(), derivation, { [DATA]: record() }, 'digest', await hashFiles(ROOT, DATA_FILES)).status
+
+    const lifted = applyWaivers(verified, new Map([['model.comment', waiver('model.comment')]]))
+
+    const model = elementOf(lifted, 'model.comment')
+    expect(model.state).toBe('verified')
+    expect(model.notes).toContain('Waived 2026-09-21T12:00:00.000Z: the redesign lands in the next plan. It is verified, so the waiver is not needed.')
+    expect(lifted.summary.states.waived).toBe(0)
+  })
+
+  test('should leave an existing element alone, which a hand-edited log is the only way to waive', () => {
+    const status = statusOf({ 'column.post.id': { state: 'present' } })
+
+    const lifted = applyWaivers(status, new Map([['column.post.id', waiver('column.post.id')]]))
+
+    const column = elementOf(lifted, 'column.post.id')
+    expect(column.state).toBe('present')
+    expect(column.notes).toContain('Waived 2026-09-21T12:00:00.000Z: the redesign lands in the next plan. It is an existing element, no part of completion, so the waiver is not needed.')
+    expect(lifted.summary.states.waived).toBe(0)
+  })
+
+  test('should not touch the status it was given', () => {
+    const status = statusOf({ 'policy.comment': { state: 'planned' } })
+    const before = JSON.stringify(status)
+
+    applyWaivers(status, new Map([['policy.comment', waiver('policy.comment')]]))
+
+    expect(JSON.stringify(status)).toBe(before)
+  })
+})
+
+describe('overlayVerification', () => {
+  test('should report the log the caller already read rather than reading it again', async () => {
+    const passed = { elementId: 'policy.comment', planHash: 'another-revision', reason: 'later', at: '2026-09-21T12:00:00.000Z' }
+    // Nothing of this is on disk under ROOT, so a second read would answer with none of it.
+    const waivers = { waivers: new Map(), waived: new Set<string>(), stale: [passed], unreadable: 'passed in' }
+
+    const overlaid = await overlayVerification(ROOT, join(ROOT, 'seam.plan.json'), plan, statusOf(), derivation, { waivers })
+
+    expect(overlaid.verification.staleWaivers).toEqual([passed])
+    expect(overlaid.verification.decisionsUnreadable).toBe('passed in')
+    expect(overlaid.verification.decisionsFile).toBe('seam.decisions.json')
+  })
+})
+
+describe('planWaivers', () => {
+  const APPROVED = loadParsedCommentsPlan()
+  const HASH = planHash(APPROVED)
+
+  function waiver(elementId: string, planHash: string): PlanWaiver {
+    return { elementId, planHash, reason: 'later', at: '2026-09-21T12:00:00.000Z' }
+  }
+
+  test('should keep the waivers of this plan and report the ones of another revision as stale', () => {
+    const decisions = { decisionsVersion: 1 as const, waivers: [waiver('policy.comment', HASH), waiver('model.comment', 'another-revision')] }
+
+    const { waivers, stale } = planWaivers(APPROVED, decisions)
+
+    expect([...waivers.keys()]).toEqual(['policy.comment'])
+    expect(stale.map((entry) => entry.elementId)).toEqual(['model.comment'])
+  })
+
+  test('should lift nothing for a draft, which has no hash a waiver could name', () => {
+    const draft = PlanDraftSchema.parse(loadCommentsPlan())
+    const decisions = { decisionsVersion: 1 as const, waivers: [waiver('policy.comment', HASH)] }
+
+    const { waivers, stale } = planWaivers(draft, decisions)
+
+    expect(waivers.size).toBe(0)
+    expect(stale.map((entry) => entry.elementId)).toEqual(['policy.comment'])
   })
 })
 
@@ -626,7 +750,7 @@ describe('formatPlanVerify', () => {
       plan: { file: 'comments.plan.json', title: 'Comments', hash: null },
       elements: [],
       summary: summarize([]),
-      verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [] },
+      verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
       steps: steps.map(([stepId, entry]) => ({ stepId, taskId: 'task/entity/model.comment', record: entry })),
       skipped: [],
     })

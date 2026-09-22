@@ -8,11 +8,12 @@ import { runCommand, type CommandDef } from 'citty'
 import { builtinSubCommands } from '../src/commands'
 import { formatPlanNext, planNextFile, type PlanNextReport } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
+import { planWaiveFile } from '../src/plan-waive'
 import { planDigest, PLAN_STATE_VERSION, type PlanState, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
-import { loadCommentsPlan } from './plan-fixture'
+import { loadApprovedCommentsPlan, loadCommentsPlan } from './plan-fixture'
 
 // The command never loads the application, so an app here is a directory with a plan.
 const PLAN = parsePlanDocument(loadCommentsPlan())
@@ -38,6 +39,7 @@ async function holding(app: string): Promise<PlanStepRecord> {
     commands: [],
     acceptance: [],
     incomplete: [],
+    waived: [],
     fingerprint: { files: { 'lib.ts': sha256(await readFile(join(app, 'lib.ts'))) }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' } },
   }
 }
@@ -205,6 +207,8 @@ describe('plan:next', () => {
     const text = formatPlanNext(report, 'comments.plan.json')
     expect(text).toContain('Stalled 2026-09-21T09:00:00.000Z: 3 continuations on this step')
     expect(text).toContain('    fail     typecheck   bun run typecheck')
+    expect(text).toContain('A stall is a person\u2019s decision: fix the environment, revise the plan, or accept an element incomplete with')
+    expect(text).toContain('  bunx guren plan:waive comments.plan.json <element-id> --reason "<why>"')
     // The mark it wrote is a fresh one, so the next run is a plain step.
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.stalled).toBeUndefined()
   })
@@ -216,6 +220,63 @@ describe('plan:next', () => {
     await planNextFile(plan, { appRoot: app, now: NOW })
 
     expect((await readState(app)).active).toEqual(active)
+  })
+
+  test('should let a waiver carry a step whose record rests on one, and return that step again once the waiver is gone', async () => {
+    const approved = loadApprovedCommentsPlan()
+    const app = join(ROOT, 'waived')
+    await writeWorkspaceFiles(app, {
+      'package.json': JSON.stringify({ name: 'waived', type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
+      'lib.ts': 'export const a = 1\n',
+      'comments.plan.json': JSON.stringify(approved),
+    })
+    const plan = join(app, 'comments.plan.json')
+    const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)), waived: ['policy.comment'] }
+    await writeState(app, { steps: { [SCAFFOLD]: record } })
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], reason: 'the policy lands in the next plan', now: NOW })
+
+    const carried = await planNextFile(plan, { appRoot: app, now: NOW })
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], remove: true })
+    const withdrawn = await planNextFile(plan, { appRoot: app, now: NOW })
+
+    expect(carried.verified).toEqual([SCAFFOLD])
+    expect(carried.step?.id).toBe(TESTS)
+    expect(withdrawn.verified).toEqual([])
+    expect(withdrawn.step?.id).toBe(SCAFFOLD)
+  })
+
+  test('should mark a step\u2019s waived elements apart from the ones to implement', async () => {
+    const approved = loadApprovedCommentsPlan()
+    const { app, plan } = await createApp('waived-elements')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) }
+    await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: record, [DATA]: record } })
+    // `git config` faked away, so the waiver's authorship is not this machine's.
+    await planWaiveFile(plan, { elementIds: ['policy.comment'], reason: 'the policy lands in the next plan', now: NOW, exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }) })
+
+    const report = await planNextFile(plan, { appRoot: app, now: NOW })
+    const text = formatPlanNext(report, 'comments.plan.json')
+
+    expect(report.step!.id).toBe(HTTP)
+    const waived = report.step!.elements.filter((element) => element.waived)
+    expect(waived.map((element) => element.id)).toEqual(['policy.comment'])
+    expect(waived[0]!.waived).toEqual({ reason: 'the policy lands in the next plan', at: '2026-09-21T10:00:00.000Z' })
+    expect(report.step!.elements.find((element) => element.id === 'action.comments.store')!.waived).toBeUndefined()
+    expect(text).toContain('Waived, not to be implemented:\n  policy.comment (policies): the policy lands in the next plan (2026-09-21T10:00:00.000Z)')
+    expect(text).toContain('The step verifies without them')
+    expect(text).not.toContain('  policy.comment (policies)\n')
+  })
+
+  test('should report a decision log it could not read, having applied no waiver', async () => {
+    const { app, plan } = await createApp('unreadable-log')
+    await writeWorkspaceFiles(app, { 'comments.decisions.json': '{ "decisionsVersion": 2 }\n' })
+
+    const report = await planNextFile(plan, { appRoot: app, now: NOW })
+
+    expect(report.decisionsUnreadable).toContain('does not match the decision log schema')
+    // Named in the report, so a --json consumer does not read the path out of the prose.
+    expect(report.decisionsFile).toBe('comments.decisions.json')
+    expect(formatPlanNext(report, 'comments.plan.json')).toContain('Decision log not read, so no waiver was applied:')
   })
 
   describe('formatting', () => {

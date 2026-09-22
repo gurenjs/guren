@@ -9,10 +9,11 @@ import { builtinSubCommands } from '../src/commands'
 import { parsePlanDocument } from '../src/plan-render'
 import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
+import { planWaiveFile } from '../src/plan-waive'
 import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
 import { sha256 } from '../src/plan/verification'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { loadCommentsPlan, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
+import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own, since Bun keys an imported routes file on
@@ -102,7 +103,7 @@ describe('plan:verify', () => {
       'tests/comments.test.ts',
     ])
     expect(record.fingerprint.files['app/Http/Controllers/CommentController.ts']).toBe(sha256(APP['app/Http/Controllers/CommentController.ts']!))
-    expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [] })
+    expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [], decisionsFile: '../http.decisions.json', staleWaivers: [] })
     expect(result.skipped).toEqual([])
 
     const state = JSON.parse(await readFile(join(app, '.guren/plans/http.state.json'), 'utf8')) as { stateVersion: number; steps: Record<string, PlanStepRecord> }
@@ -110,6 +111,42 @@ describe('plan:verify', () => {
     expect(state.steps[HTTP]).toMatchObject({ outcome: 'incomplete', planDigest: planDigest(parsePlanDocument(loadCommentsPlan())) })
     expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe(PLAN_STATE_GITIGNORE)
     expect(Object.values(states(result))).not.toContain('verified')
+  })
+
+  test('should verify a step whose only incomplete elements the decision log waives', async () => {
+    const app = await createApp('waived')
+    const plan = await writePlan('waived.plan.json', loadApprovedCommentsPlan())
+    // What the app leaves the http step: four elements never written, and a store route that drifted.
+    const unwritten = ['action.comments.destroy', 'route.comments.destroy', 'resource.comment', 'policy.comment', 'route.comments.store']
+    await planWaiveFile(plan, {
+      elementIds: unwritten,
+      reason: 'delete lands in the next plan',
+      now: () => new Date('2026-09-21T12:00:00.000Z'),
+      exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }),
+    })
+
+    const result = await verify(plan, app, '--step', HTTP)
+    const { record } = result.steps[0]!
+
+    expect(record.outcome).toBe('verified')
+    expect(record.incomplete).toEqual([])
+    expect(record.waived.sort()).toEqual([...unwritten].sort())
+    // The report the same run prints lifts exactly what the record left out.
+    expect(states(result)).toMatchObject(Object.fromEntries(unwritten.map((id) => [id, 'waived'])))
+    expect(result.verification.decisionsFile).toBe('../waived.decisions.json')
+  })
+
+  test('should report a decision log it could not read once, having judged and lifted as if none were taken', async () => {
+    const app = await createApp('unreadable-log')
+    const plan = await writePlan('unreadable-log.plan.json', loadApprovedCommentsPlan())
+    await writeWorkspaceFiles(ROOT, { 'unreadable-log.decisions.json': '{ "decisionsVersion": 2 }\n' })
+
+    const result = await verify(plan, app, '--step', HTTP)
+
+    expect(result.steps[0]!.record.outcome).toBe('incomplete')
+    expect(result.steps[0]!.record.waived).toEqual([])
+    expect(result.verification.decisionsUnreadable).toContain('does not match the decision log schema')
+    expect(result.summary.states.waived).toBe(0)
   })
 
   test('should lay a recorded verification over plan:status, and turn it drifted when a fingerprinted file changes', async () => {
@@ -123,6 +160,7 @@ describe('plan:verify', () => {
       commands: [],
       acceptance: [],
       incomplete: [],
+      waived: [],
       fingerprint: { files: { 'db/schema.ts': sha256(SCHEMA), 'app/Models/Comment.ts': sha256(APP['app/Models/Comment.ts']!) }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' } },
     }
     await mkdir(join(app, '.guren/plans'), { recursive: true })
@@ -153,7 +191,7 @@ describe('plan:verify', () => {
     const revised = await writePlan('lift-revised.plan.json', { ...loadCommentsPlan(), title: 'Revised' })
     await writeFile(join(app, '.guren/plans/lift-revised.state.json'), JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [DATA]: record } }), 'utf8')
     const stale = await status(revised, app)
-    expect(stale.verification).toEqual({ stateFile: '.guren/plans/lift-revised.state.json', staleSteps: [DATA] })
+    expect(stale.verification).toEqual({ stateFile: '.guren/plans/lift-revised.state.json', staleSteps: [DATA], decisionsFile: '../lift-revised.decisions.json', staleWaivers: [] })
     expect(stale.summary.states.verified).toBe(0)
   })
 

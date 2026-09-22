@@ -61,9 +61,27 @@ While a step is marked, the `Stop` hook verifies it whenever you end a turn and
 sends you back while it is not verified, up to three times. It gives up, and
 says why, when the step or one of its elements is blocked, when nothing changed
 since the last continuation, or after the third continuation. The step is then
-recorded as stalled and `plan:next` returns it again, with the reason, once a
-person has fixed the environment or revised the plan. Do not work around a
-stall: report it.
+recorded as stalled and `plan:next` returns it again, with the reason.
+
+## What a stall means
+
+A stall is a decision for a person, and there are three answers: fix the
+environment, revise the plan, or accept an element incomplete with
+
+```bash
+bunx guren plan:waive docs/plans/<slug>/plan.json <element-id> --reason "<why>"
+```
+
+which writes the reason into the decision log beside the plan, committed with
+it. A waived element is left out of the step's judgement, so the loop moves on.
+
+A waiver only lifts an element. A behaviour that fails makes its `tests`
+command fail, and the step stays `failed` whatever is waived, so a behaviour
+the code will not satisfy is a revision rather than a waiver.
+
+The waiver is the person's decision, never yours. Report the stall, say which
+of the three you think it needs and why, and wait to be told. Do not run
+`plan:waive` to get past a step, and do not work around a stall in the code.
 
 ## After a task's last step
 
