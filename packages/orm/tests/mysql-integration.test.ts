@@ -8,6 +8,7 @@ import { createMySqlDatabase, type MySqlDatabase } from '../src/mysql'
 import { Model, defineModel } from '../src/Model'
 import { SoftDeletes } from '../src/SoftDeletes'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
+import { databaseUrl } from './database-url'
 
 // The unit tests mock `drizzle-orm/mysql2` away, so they cannot see driver-level
 // breakage. CI supplies MYSQL_URL from a mysql service container; locally, start
@@ -19,12 +20,6 @@ const describeMySql = MYSQL_URL ? describe : describe.skip
 // Derived rather than taken from MYSQL_URL: the reset below drops every table in
 // the database it runs against, and MYSQL_URL is what an app puts in DATABASE_URL.
 const TEST_DATABASE = 'guren_orm_test'
-
-function databaseUrl(url: string, database: string): string {
-  const target = new URL(url)
-  target.pathname = `/${database}`
-  return target.toString()
-}
 
 async function ensureTestDatabase(url: string, database: string = TEST_DATABASE): Promise<void> {
   const { createPool } = await import('mysql2/promise')

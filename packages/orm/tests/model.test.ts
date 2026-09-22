@@ -268,6 +268,20 @@ describe('Model', () => {
     expect(deletedCount).toBe(1)
   })
 
+  it('reaches a basic adapter with an empty where for the whole table', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const { adapter, snapshot } = createAdapter([{ id: 1, name: 'Daiki', team: 'core' }])
+    User.useAdapter(adapter)
+
+    expect(await User.update({}, { team: 'platform' })).toEqual({ id: 1, name: 'Daiki', team: 'platform' })
+    expect(await User.newQuery().update({ team: 'infra' })).toEqual({ id: 1, name: 'Daiki', team: 'infra' })
+    expect(await User.delete({})).toBe(1)
+    expect(snapshot()).toEqual([])
+  })
+
   it('orders results when an order clause is provided', async () => {
     class User extends Model<UserRecord> {
       static table = 'users'

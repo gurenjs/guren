@@ -578,23 +578,32 @@ export class QueryBuilder<
    * would be a supported way to bypass mass-assignment protection entirely.
    */
   async [PREPARED_UPDATE](payload: PlainObject): Promise<TRecord> {
-    if (!this.adapter.update) {
-      throw new Error('Configured adapter does not support update operations.')
-    }
-    this.assertWriteOptions()
-    this.assertFiltersSurvived('update')
+    const adapter = this.assertWritable('update')
 
-    const advancedAdapter = this.adapter as ORMAdapterAdvanced
-    if (typeof advancedAdapter.updateAdvanced === 'function') {
-      return advancedAdapter.updateAdvanced(this.table, this.effectiveConditions(), payload, { trx: this.options.trx }) as Promise<TRecord>
+    if (typeof adapter.updateAdvanced === 'function') {
+      return adapter.updateAdvanced(this.table, this.effectiveConditions(), payload, { trx: this.options.trx }) as Promise<TRecord>
     }
 
+    return adapter.update(this.table, this.simpleWhereFor('update'), payload, { trx: this.options.trx }) as Promise<TRecord>
+  }
+
+  /**
+   * The object-where a basic adapter takes; a condition the flat object cannot
+   * carry (an OR group, an operator, two values on one field) refuses rather
+   * than writing with it dropped.
+   */
+  private simpleWhereFor(operation: 'update' | 'delete'): Record<string, unknown> {
     const simpleWhere = this.toSimpleWhereClause()
-    if (simpleWhere) {
-      return this.adapter.update(this.table, simpleWhere, payload, { trx: this.options.trx }) as Promise<TRecord>
-    }
+    if (!simpleWhere) throw new Error(`Advanced conditions require an adapter that supports ${operation}Advanced.`)
+    return simpleWhere
+  }
 
-    throw new Error('Advanced conditions require an adapter that supports updateAdvanced.')
+  /** Returns the adapter narrowed to the operation, so no call site needs a non-null assertion. */
+  private assertWritable<K extends 'update' | 'delete'>(operation: K): ORMAdapterAdvanced & Required<Pick<ORMAdapter, K>> {
+    if (!this.adapter[operation]) throw new Error(`Configured adapter does not support ${operation} operations.`)
+    this.assertWriteOptions()
+    this.assertFiltersSurvived(operation)
+    return this.adapter as ORMAdapterAdvanced & Required<Pick<ORMAdapter, K>>
   }
 
   private assertWriteOptions(): void {
@@ -612,23 +621,13 @@ export class QueryBuilder<
   }
 
   async [PHYSICAL_DELETE](): Promise<number | PlainObject | void> {
-    this.assertWriteOptions()
-    if (!this.adapter.delete) {
-      throw new Error('Configured adapter does not support delete operations.')
-    }
-    this.assertFiltersSurvived('delete')
+    const adapter = this.assertWritable('delete')
 
-    const advancedAdapter = this.adapter as ORMAdapterAdvanced
-    if (typeof advancedAdapter.deleteAdvanced === 'function') {
-      return advancedAdapter.deleteAdvanced(this.table, this.effectiveConditions(), { trx: this.options.trx })
+    if (typeof adapter.deleteAdvanced === 'function') {
+      return adapter.deleteAdvanced(this.table, this.effectiveConditions(), { trx: this.options.trx })
     }
 
-    const simpleWhere = this.toSimpleWhereClause()
-    if (simpleWhere) {
-      return this.adapter.delete(this.table, simpleWhere, { trx: this.options.trx })
-    }
-
-    throw new Error('Advanced conditions require an adapter that supports deleteAdvanced.')
+    return adapter.delete(this.table, this.simpleWhereFor('delete'), { trx: this.options.trx })
   }
 
   /** Makes the builder awaitable, resolving to `get()`. */
@@ -752,7 +751,7 @@ export class QueryBuilder<
     // Passing a null conversion on as `where: undefined` would drop every
     // condition — global scopes included — and return the whole table.
     const simpleWhere = this.toSimpleWhereClause()
-    if (simpleWhere === null && this.hasConditions()) {
+    if (simpleWhere === null) {
       throw new Error(
         `${this.modelClass.name}: this query uses conditions the configured adapter cannot express `
         + `(it implements neither findManyAdvanced nor countAdvanced). Running it would drop every `
@@ -760,20 +759,19 @@ export class QueryBuilder<
       )
     }
     return this.adapter.findMany<TResult>(this.table, {
-      where: (simpleWhere ?? undefined) as FindManyOptions<TResult>['where'],
+      where: simpleWhere as FindManyOptions<TResult>['where'],
       orderBy: orderBy.length > 0 ? (orderBy as OrderByClause) : undefined,
       limit,
       offset,
     }, { trx: this.options.trx })
   }
 
-  /** Null when the conditions are too complex for a basic adapter's WhereClause. */
+  /**
+   * The flat object a basic adapter's WhereClause takes: `{}` for no conditions
+   * at all, null when the conditions are too complex for it.
+   */
   private toSimpleWhereClause(): Record<string, unknown> | null {
     const conditions = this.allConditions()
-    if (conditions.length === 0) {
-      return null
-    }
-
     const result: Record<string, unknown> = {}
 
     for (const condition of conditions) {

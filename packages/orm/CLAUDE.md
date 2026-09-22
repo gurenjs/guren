@@ -8,6 +8,7 @@ Houses the ORM-facing surface (Model base class, Drizzle adapter, Postgres helpe
 - `DrizzleAdapter` plus helper factories (`createPostgresDatabase`, `runSeeders`, `defineSeeder`, `loadSeeders`)
 
 ## Conventions
+- See `ARCHITECTURE.md` for write boundaries, connection ownership, and shared driver contracts.
 - PascalCase for files that export classes (`Model.ts`); helper modules stay kebab-case (`postgres.ts`, `seeder.ts`)
 - Keep adapters self-contained; avoid importing from `@guren/server` to prevent cycles
 - Treat `drizzle-orm` and `postgres` as peer deps — type-safe but optional

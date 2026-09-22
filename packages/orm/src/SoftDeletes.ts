@@ -73,11 +73,7 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
     if (!adapter.update) {
       throw new Error('Configured adapter does not support update operations (needed for soft delete).')
     }
-    const column = (this as unknown as SoftDeletesStatic).deletedAtColumn
-    // Through the scoped builder, not straight to the adapter: the caller's
-    // `where` alone ignores every global scope, so one tenant could
-    // soft-delete another tenant's row. PREPARED_UPDATE skips mutators/casts.
-    return scopedQuery(this, where, writeOptions)[PREPARED_UPDATE]({ [column]: new Date() })
+    return scopedQuery(this, where, writeOptions).delete()
   } as typeof Model.delete
 
   Object.defineProperty(SoftDeleteModel, BULK_DELETE, {
