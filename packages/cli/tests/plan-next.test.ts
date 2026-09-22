@@ -329,6 +329,30 @@ describe('plan:next', () => {
     await expect(readState(app)).rejects.toThrow('ENOENT')
   })
 
+  test('should refuse an approved plan whose baseline was deleted, and hand out a draft nobody approved', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
+    const { app, plan } = await createApp('baseline-removed')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
+    const { baseline: _baseline, ...draft } = approved
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(draft) })
+
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow(`${plan} has lost its baseline, but 1 approval(s) are recorded beside it, so no step of it is handed out`)
+    await expect(readState(app)).rejects.toThrow('ENOENT')
+
+    await rm(join(app, 'comments.approvals.json'))
+    expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
+  })
+
+  test('should indent every line of a stall reason under the line that names it', async () => {
+    const stalled = { at: '2026-09-21T09:30:00.000Z', reason: 'first line\nsecond line', output: 'out one\nout two' }
+    const { app, plan } = await createApp('stall-lines', { active: { plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T09:00:00.000Z', continuations: 3, stalled } })
+
+    const text = formatPlanNext(await planNextFile(plan, { appRoot: app, now: NOW }), 'comments.plan.json')
+
+    expect(text).toContain('Stalled 2026-09-21T09:30:00.000Z: first line\n  second line\n  out one\n  out two\n')
+  })
+
   describe('formatting', () => {
     const log = spyOn(console, 'log')
 

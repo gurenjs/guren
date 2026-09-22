@@ -19,7 +19,6 @@ import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval } from './plan/approvals'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
-import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
@@ -152,14 +151,16 @@ async function stepContexts(
 export async function planNextFile(planPath: string, options: PlanNextFileOptions): Promise<PlanNextReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   // Before the tree is read or a step marked: an unapproved plan hands out no work, whatever else is wrong.
-  if (hasBaseline(plan)) await requirePlanApproval(path, plan, 'no step of it is handed out')
+  const approval = await requirePlanApproval(path, plan, 'no step of it is handed out')
   const root = options.appRoot
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(root).catch(() => false) })
   const digest = planDigest(plan)
   const slug = planSlug(path)
   const state = (await readPlanState(root, slug)).state
   const records = state?.steps ?? {}
-  const previous = state?.active
+  // A stall the approval gate recorded is answered by passing that gate, which this run just did.
+  const marked = state?.active
+  const previous = marked?.stalled?.cause === 'approval' ? { ...marked, stalled: undefined } : marked
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
   const log = await readPlanWaivers(path, plan)
   const judged = await stepContexts(plan, derivation, options, stepInProgress(previous))
@@ -211,7 +212,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
 
   const head = {
     reportVersion: PLAN_NEXT_REPORT_VERSION,
-    plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
+    plan: { file: basename(path), title: plan.title, hash: approval?.hash ?? null },
     verified,
     onCommandsAlone,
     held,
@@ -276,6 +277,11 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   }
 }
 
+/** A multi-line text under a line that already carries its first line. */
+function indent(text: string, pad: string): string {
+  return text.split('\n').join(`\n${pad}`)
+}
+
 function describeTask(title: PlanTaskTitle): string {
   switch (title.kind) {
     case 'foundation':
@@ -312,13 +318,13 @@ function heldLines(report: PlanNextReport, planArgument: string): string[] {
       if (element.checks.length === 0) lines.push('      the reference checks pass for it against the application as it reads now')
       for (const check of element.checks) lines.push(`      ${check.status}  ${check.message}`)
     }
-    if (held.stalled) lines.push(`    stalled ${held.stalled.at}: ${held.stalled.reason}`)
+    if (held.stalled) lines.push(`    stalled ${held.stalled.at}: ${indent(held.stalled.reason, '      ')}`)
   }
   if (report.waiting.length > 0) {
     lines.push('', 'Waiting on a held step:')
     for (const entry of report.waiting) {
       lines.push(`  ${entry.id} (on ${entry.on.join(', ')})`)
-      if (entry.stalled) lines.push(`    stalled ${entry.stalled.at}: ${entry.stalled.reason}`)
+      if (entry.stalled) lines.push(`    stalled ${entry.stalled.at}: ${indent(entry.stalled.reason, '      ')}`)
     }
   }
   lines.push(
@@ -363,8 +369,8 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     if (step.stalled) {
       lines.push(
         '',
-        `Stalled ${step.stalled.at}: ${step.stalled.reason}`,
-        ...(step.stalled.output ? step.stalled.output.split('\n').map((line) => `  ${line}`) : []),
+        `Stalled ${step.stalled.at}: ${indent(step.stalled.reason, '  ')}`,
+        ...(step.stalled.output ? [`  ${indent(step.stalled.output, '  ')}`] : []),
         'A stall is a person\u2019s decision: fix the environment, revise the plan, or accept an element incomplete with',
         `  bunx guren plan:waive ${planArgument} <element-id> --reason "<why>"`,
       )

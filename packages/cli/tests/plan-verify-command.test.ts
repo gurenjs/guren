@@ -6,16 +6,18 @@ import { join, resolve } from 'node:path'
 import { runCommand, type CommandDef } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
+import { planApproveFile } from '../src/plan-approve'
+import type { PlanNextReport } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
 import type { PlanStatusReport } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { planWaiveFile } from '../src/plan-waive'
+import { loadPlanAppState } from '../src/plan/app-state'
 import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
 import { stampContextHash } from '../src/plan/freshness'
-import { hasBaseline } from '../src/plan/render'
 import { sha256 } from '../src/plan/verification'
 import { linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
+import { approveIfStamped, approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own, since Bun keys an imported routes file on
@@ -37,9 +39,14 @@ async function createApp(name: string, files: Record<string, string> = APP): Pro
 }
 
 /** A plan with a baseline is approved at its hash unless `approve` is false, as `plan:approve` would leave it. */
+function git(dir: string, ...args: string[]): void {
+  const result = Bun.spawnSync(['git', '-c', 'user.name=Approver', '-c', 'user.email=approver@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
+  if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
+}
+
 async function writePlan(name: string, document: unknown = loadCommentsPlan(), { approve = true } = {}): Promise<string> {
   await writeWorkspaceFiles(ROOT, { [name]: JSON.stringify(document) })
-  if (approve && hasBaseline(document)) await approvePlanFile(join(ROOT, name))
+  if (approve) await approveIfStamped(join(ROOT, name), document)
   return join(ROOT, name)
 }
 
@@ -170,20 +177,47 @@ describe('plan:verify', () => {
     expect(result.approval).toMatchObject({ state: 'approved', approval: { approvedBy: 'Ada <ada@example.com>' } })
   })
 
-  test('should refuse a plan with a baseline while its approvals file will not read, and verify a draft as before', async () => {
+  test('should refuse while its approvals file will not read, whether or not the plan carries a baseline', async () => {
     const app = await createApp('unreadable-approvals')
     const plan = await writePlan('unreadable-approvals.plan.json', loadApprovedCommentsPlan(), { approve: false })
     await writeWorkspaceFiles(ROOT, { 'unreadable-approvals.approvals.json': '{ "approvalsVersion": 1 }\n' })
 
     await expect(verify(plan, app, '--step', HTTP)).rejects.toThrow('does not match the approvals schema')
-    await expect(readdir(join(app, '.guren/plans'))).rejects.toThrow('ENOENT')
-
-    // A draft has no hash to approve, so the same approvals file stops nothing.
+    // A draft's unreadable approvals may hold the approval its deleted baseline had, so it refuses too.
     const draft = await writePlan('unreadable-approvals-draft.plan.json')
     await writeWorkspaceFiles(ROOT, { 'unreadable-approvals-draft.approvals.json': '{' })
-    const result = await verify(draft, app, '--step', HTTP)
+    await expect(verify(draft, app, '--step', HTTP)).rejects.toThrow('is not valid JSON')
+    await expect(readdir(join(app, '.guren/plans'))).rejects.toThrow('ENOENT')
+  })
+
+  test('should refuse an approved plan whose baseline was deleted, which would otherwise pass as a draft', async () => {
+    const app = await createApp('baseline-removed')
+    const plan = await writePlan('baseline-removed.plan.json', loadApprovedCommentsPlan())
+    const { baseline: _baseline, ...draft } = loadApprovedCommentsPlan()
+    await writePlan('baseline-removed.plan.json', draft)
+
+    await expect(verify(plan, app, '--step', HTTP)).rejects.toThrow(`${plan} has lost its baseline, but 1 approval(s) are recorded beside it, so no step is verified against it`)
+    await expect(readdir(join(app, '.guren/plans'))).rejects.toThrow('ENOENT')
+  })
+
+  test('should accept a plan plan:approve stamped and approved, in plan:next and plan:verify alike', async () => {
+    // The application before the plan: approval refuses one that already declares what the plan adds.
+    const app = await createApp('approved-for-real', { ...PLAN_APP_FILES, '.gitignore': 'node_modules\n' })
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    const plan = await writePlan('approved-for-real.plan.json', { ...loadCommentsPlan(), questions: [] })
+
+    const approved = await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app })
+    await runCommand(builtinSubCommands['plan:next'] as CommandDef, { rawArgs: [plan, '--app', app, '--json'] })
+    const next = JSON.parse(String(log.mock.calls.at(-1)![0])) as PlanNextReport
+    const result = await verify(plan, app, '--step', HTTP)
+
+    expect(approved.stamped).toBeDefined()
+    expect(next.plan.hash).toBe(approved.plan.hash)
+    expect(next.step).not.toBeNull()
+    expect(result.plan.hash).toBe(approved.plan.hash)
     expect(result.steps.map((step) => step.stepId)).toEqual([HTTP])
-    expect(result.approval).toBeUndefined()
   })
 
   test('should verify a step whose only incomplete elements the decision log waives', async () => {

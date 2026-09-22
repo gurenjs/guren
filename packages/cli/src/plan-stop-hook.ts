@@ -15,8 +15,7 @@ import { CliError } from './cli-error'
 import { readPlanFile } from './plan-render'
 import { formatPlanStepRecord, planVerifyFile, type PlanVerifyReport } from './plan-verify'
 import { loadPlanAppState } from './plan/app-state'
-import { describeUnapproved, readPlanApprovalStanding } from './plan/approvals'
-import { hasBaseline } from './plan/render'
+import { describeUnapproved, readPlanApprovalStanding, type PlanApprovalStanding } from './plan/approvals'
 import { describeDependency, type PlanStepContextElement } from './plan/step-context'
 import { listPlanStates, planDigest, planSlug, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
 import { derivePlanTasks, findPlanStep } from './plan/tasks'
@@ -37,7 +36,8 @@ export interface PlanStopHookVerdict {
 }
 
 export interface PlanStopHookDeps {
-  verify?: (planPath: string, appRoot: string, stepId: string) => Promise<PlanVerifyReport>
+  /** `approval` is what the hook read, handed on so the run does not read the approvals again. */
+  verify?: (planPath: string, appRoot: string, stepId: string, approval: PlanApprovalStanding | undefined) => Promise<PlanVerifyReport>
   now?: () => Date
 }
 
@@ -86,8 +86,8 @@ export function judgeStopHook(
   return { kind: 'continue', signature }
 }
 
-function defaultVerify(planPath: string, appRoot: string, stepId: string): Promise<PlanVerifyReport> {
-  return planVerifyFile(planPath, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot, step: stepId })
+function defaultVerify(planPath: string, appRoot: string, stepId: string, approval: PlanApprovalStanding | undefined): Promise<PlanVerifyReport> {
+  return planVerifyFile(planPath, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot, step: stepId, approval })
 }
 
 async function verifyActiveStep(appRoot: string, slug: string, records: Readonly<Record<string, PlanStepRecord>>, active: PlanActiveStep, stopHookActive: boolean, deps: PlanStopHookDeps): Promise<PlanStopHookVerdict> {
@@ -108,15 +108,23 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
       message: `${heading}: the mark is in .guren/plans/${slug}.state.json, but this plan's records are kept in ${planSlug(planPath)}.state.json, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` to mark the step again.`,
     }
   }
-  // A stall rather than a block: no continuation approves a plan. It sticks until plan:next, which refuses until someone approves.
-  const approval = hasBaseline(plan) ? await readPlanApprovalStanding(planPath, plan) : undefined
+  const log = await readPlanWaivers(planPath, plan)
+  // A log nobody could read is judged as if no waiver were taken, which may be what holds the step,
+  // so every verdict below carries the notice: those that run nothing would otherwise drop it.
+  const notice = log.unreadable ? `${heading}: ${log.unreadable}\nNo waiver was applied, so the step is judged as if none were taken.` : undefined
+  const withNotice = (verdict: PlanStopHookVerdict): PlanStopHookVerdict =>
+    notice === undefined ? verdict : { ...verdict, message: verdict.message ? `${notice}\n${verdict.message}` : notice }
+
+  // A stall rather than a block: no continuation approves a plan. plan:next drops it once one does.
+  const approval = await readPlanApprovalStanding(planPath, plan)
   if (approval && approval.state !== 'approved') {
     const reason = describeUnapproved(active.plan, approval, 'the step is not verified against it')
-    await writePlanActiveStep(appRoot, slug, { ...active, stalled: { at: (deps.now ?? (() => new Date()))().toISOString(), reason, output: '' } })
-    return {
+    const at = (deps.now ?? (() => new Date()))().toISOString()
+    await writePlanActiveStep(appRoot, slug, { ...active, stalled: { at, reason, cause: 'approval' } })
+    return withNotice({
       block: false,
       message: `${heading}: giving up, ${reason}\nThe step is recorded as stalled; \`bunx guren plan:next ${active.plan}\` returns it once an approval names the plan's hash.`,
-    }
+    })
   }
   const digest = planDigest(plan)
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false) })
@@ -126,18 +134,11 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     return { block: false, message: `${heading}: the plan no longer derives this step, so the mark was cleared. Run \`bunx guren plan:next ${active.plan}\` for the next one.` }
   }
   const record = records[active.step]
-  const log = await readPlanWaivers(planPath, plan)
-  // A log nobody could read is judged as if no waiver were taken, which may be what holds the step,
-  // so every verdict below carries the notice: two of them run nothing and would otherwise drop it.
-  const notice = log.unreadable ? `${heading}: ${log.unreadable}\nNo waiver was applied, so the step is judged as if none were taken.` : undefined
-  const withNotice = (verdict: PlanStopHookVerdict): PlanStopHookVerdict =>
-    notice === undefined ? verdict : { ...verdict, message: verdict.message ? `${notice}\n${verdict.message}` : notice }
-
   if (record && recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)), log.waived)) return withNotice({ block: false })
 
   let report: PlanVerifyReport
   try {
-    report = await (deps.verify ?? defaultVerify)(planPath, appRoot, active.step)
+    report = await (deps.verify ?? defaultVerify)(planPath, appRoot, active.step, approval)
   } catch (error) {
     // A run that could not judge the step is not a reason to hold the session: the hook says so and lets it stop.
     const reason = error instanceof CliError ? error.message : error instanceof Error ? `${error.name}: ${error.message}` : String(error)

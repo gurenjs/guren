@@ -90,11 +90,12 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   if (options.elementIds.length === 0) throw new CliError('Name at least one element id to waive.')
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   const root = resolve(options.app ?? options.cwd ?? process.cwd())
-  const head = {
-    reportVersion: PLAN_WAIVE_REPORT_VERSION,
-    plan: { file: basename(path), title: plan.title, hash: planWaiverHash(plan) ?? null },
-    decisionsFile: toPosixRelative(root, planDecisionsPath(path)),
-  } satisfies Pick<PlanWaiveReport, 'reportVersion' | 'plan' | 'decisionsFile'>
+  const head = (hash: string | null) =>
+    ({
+      reportVersion: PLAN_WAIVE_REPORT_VERSION,
+      plan: { file: basename(path), title: plan.title, hash },
+      decisionsFile: toPosixRelative(root, planDecisionsPath(path)),
+    }) satisfies Pick<PlanWaiveReport, 'reportVersion' | 'plan' | 'decisionsFile'>
 
   // Removal matches on the element id and ignores the hash, so it asks none of the questions
   // below: withdrawing the waiver of an element a revision dropped is what it is for.
@@ -106,7 +107,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
       if (result.removed) removed.push(result.removed)
       written ||= result.written
     }
-    return { ...head, waived: [], replaced: [], removed, written }
+    return { ...head(planWaiverHash(plan) ?? null), waived: [], replaced: [], removed, written }
   }
 
   if (!hasBaseline(plan)) {
@@ -148,7 +149,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
     written ||= result.written
     if (result.replaced) replaced.push(result.replaced)
   }
-  return { ...head, waived, replaced, removed: [], written }
+  return { ...head(hash), waived, replaced, removed: [], written }
 }
 
 export function formatPlanWaive(report: PlanWaiveReport): string {

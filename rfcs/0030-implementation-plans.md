@@ -745,7 +745,11 @@ command acts on the plan (`plan/approvals.ts`, `plan-next.ts`, `plan-verify.ts`,
 - The gate applies to a plan with a baseline. A draft has no hash anyone could
   approve, so the commands that accepted drafts (`plan:next`, `plan:verify`)
   still do, and the ones that refused them (`plan:waive`, `plan:close`) still
-  refuse them with their own message.
+  refuse them with their own message. A draft with approvals recorded beside
+  it is the exception (`baseline-removed`): deleting `baseline` would otherwise
+  turn an approved plan into a draft no gate asks about, so it is refused like
+  an unapproved plan, and so is a draft whose approvals file will not read,
+  since that file may hold the approval the baseline had.
 - `plan:next` refuses before it reads the tree or the application and before
   it writes a mark, so a person mid-step on an edited plan hears about the
   approval rather than the dirty tree. `plan:verify` refuses before `codegen`
@@ -759,16 +763,17 @@ command acts on the plan (`plan/approvals.ts`, `plan-next.ts`, `plan-verify.ts`,
   approval names yet.
 - The Stop hook never throws and never blocks on approval: no continuation
   approves a plan. It verifies nothing, lets the stop through and records a
-  stall on the mark with the refusal as the reason, so later stops stay silent.
-  The stall is what `plan:next` reports once the plan is approved (or the edit
-  undone), which also gives the step a fresh mark, the rule every other stall
-  follows. A mark stalled before approval is never a wedge, since
-  approving is the answer the stall asks for.
+  stall on the mark with the refusal as the reason and `cause: 'approval'`, so
+  later stops stay silent. Unlike other stalls, `plan:next` does not report it:
+  a run that passes the gate has answered it, so the stall is dropped and the
+  mark resumes. The approvals read here are handed to `plan:verify`, which
+  reads them itself only when run alone.
 - `plan:status` reports and does not refuse. It is observational and exits 0
   whatever it finds, so a plan with a baseline carries `approval` in the
-  report (`approved` with the record, `unapproved`, or `unreadable` with the
-  reason) and one line in the text. `plan:verify`'s report, which extends it,
-  carries `approved`.
+  report (`approved` with the record, `unapproved`, `baseline-removed`, or
+  `unreadable` with the reason) and one line naming the commands that refuse
+  (`PLAN_APPROVAL_GATED_COMMANDS`). `plan:verify`'s report, which extends it,
+  carries `approved` in its JSON and leaves the line out of its text.
 - `plan:render` is unaffected: the page is how a person reviews a plan before
   approving it, so refusing it would leave nothing to approve from.
 - `plan:approve` itself answers the refusal. A plan edited after approval keeps

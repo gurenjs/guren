@@ -75,7 +75,8 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
   if (!hasBaseline(plan)) {
     throw new CliError(`${path} is a draft: it was never approved, so there is nothing to close. Run guren plan:approve on it first.`)
   }
-  const { hash, approval } = await requirePlanApproval(path, plan, 'it is not closed')
+  const approved = await requirePlanApproval(path, plan, 'it is not closed')
+  const { hash, approval } = approved
   const slug = planSlug(path)
   if (!MARKER_SLUG.test(slug)) {
     throw new CliError(`The plan's slug "${slug}" names the blocks it writes, and may hold only letters, digits, ".", "_" and "-". Rename the plan file or its directory.`)
@@ -91,7 +92,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
   }
 
   const waiverRead = await readPlanWaivers(path, plan)
-  const status = await planStatusFile(path, { app: options.app, appRoot, read, waivers: waiverRead, approval: { state: 'approved', hash, approval } })
+  const status = await planStatusFile(path, { app: options.app, appRoot, read, waivers: waiverRead, approval: approved })
   const verification = status.verification
   const blockers = status.elements
     .filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')

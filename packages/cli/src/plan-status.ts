@@ -9,7 +9,7 @@ import { basename } from 'node:path'
 
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
-import { readPlanApprovalStanding, type PlanApprovalStanding } from './plan/approvals'
+import { PLAN_APPROVAL_GATED_COMMANDS, readPlanApprovalStanding, type PlanApprovalStanding } from './plan/approvals'
 import { judgeFreshness, PLAN_FRESHNESS_VERDICTS, type PlanFreshness } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
@@ -37,7 +37,7 @@ export interface PlanStatusReport extends PlanStatus<PlanElementState> {
   freshness?: PlanFreshness
   /**
    * Whether an approval names the plan's current hash (RFC 0030 §4). Reported, never refused on:
-   * `plan:next`, `plan:verify`, `plan:waive` and `plan:close` refuse. Absent for a draft.
+   * the commands in `PLAN_APPROVAL_GATED_COMMANDS` refuse. Absent for a draft nobody approved.
    */
   approval?: PlanApprovalStanding
 }
@@ -55,7 +55,7 @@ export interface PlanStatusFileOptions {
   read?: { path: string; plan: PlanDraft | Plan }
   /** The decision log the caller already read, for the same reason. */
   waivers?: PlanWaiversRead
-  /** The approval the caller already judged, for the same reason. */
+  /** The approval the caller already read, for the same reason; `undefined` is a draft nobody approved. */
   approval?: PlanApprovalStanding
 }
 
@@ -63,14 +63,15 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
   const { path, plan } = options.read ?? (await readPlanFile(planPath, options.cwd))
   const app = typeof options.app === 'function' ? await options.app() : options.app
   const status = judgePlan(plan, app)
+  const approval = 'approval' in options ? options.approval : await readPlanApprovalStanding(path, plan)
   const head = {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
-    plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
+    plan: { file: basename(path), title: plan.title, hash: approval?.hash ?? (hasBaseline(plan) ? planHash(plan) : null) },
   } satisfies Pick<PlanStatusReport, 'reportVersion' | 'plan'>
-  const stamped = hasBaseline(plan) ? { freshness: judgeFreshness(plan, app), approval: options.approval ?? (await readPlanApprovalStanding(path, plan)) } : {}
-  if (options.appRoot === undefined) return { ...head, ...status, ...stamped }
+  const judged = { ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, app) } : {}), ...(approval ? { approval } : {}) }
+  if (options.appRoot === undefined) return { ...head, ...status, ...judged }
   const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }), { waivers: options.waivers })
-  return { ...head, ...overlaid.status, verification: overlaid.verification, ...stamped }
+  return { ...head, ...overlaid.status, verification: overlaid.verification, ...judged }
 }
 
 const SECTION_TITLES: Record<(typeof PLAN_STATUS_SECTIONS)[number], string> = {
@@ -146,13 +147,16 @@ export function formatPlanStatus(report: PlanStatusReport): string {
 }
 
 function approvalLine(standing: PlanApprovalStanding): string {
+  const refusing = `${PLAN_APPROVAL_GATED_COMMANDS.join(', ')} refuse the plan`
   switch (standing.state) {
     case 'approved':
       return `Approved at this hash ${standing.approval.approvedAt}${standing.approval.approvedBy ? ` by ${standing.approval.approvedBy}` : ''}`
     case 'unapproved':
-      return `Not approved at this hash: plan:next, plan:verify and plan:waive refuse the plan until guren plan:approve records an approval of it.`
+      return `Not approved at this hash: ${refusing} until guren plan:approve records an approval of it.`
+    case 'baseline-removed':
+      return `No baseline, but ${standing.approvals} approval(s) recorded beside the plan: ${refusing} until it is stamped and approved again.`
     case 'unreadable':
-      return `Approvals not read, so plan:next, plan:verify and plan:waive refuse the plan: ${standing.reason}`
+      return `Approvals not read, so ${refusing}: ${standing.reason}`
   }
 }
 

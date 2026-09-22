@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import type { z } from 'zod'
@@ -13,9 +13,10 @@ import type {
   PlanAppTable,
   PlanAppUnreadable,
 } from '../src/plan/app-state'
-import { planApprovalsPath, type PlanApprovals } from '../src/plan/approvals'
+import { readPlanApprovals, recordPlanApproval, requireReadableApprovals } from '../src/plan/approvals'
 import { stampContextHash } from '../src/plan/freshness'
 import { planHash } from '../src/plan/identity'
+import { hasBaseline } from '../src/plan/render'
 import { PLAN_STATE_VERSION, type PlanActiveStep } from '../src/plan/state'
 import { PlanSchema, type Plan, type PlanDraft, type PlanDraftSchema } from '../src/plan/schema'
 import type { PlanPagePayload } from '../src/plan/render'
@@ -54,20 +55,19 @@ export function approvedAgainst(document: Record<string, unknown>, at: PlanAppSt
 }
 
 /**
- * Records an approval of the plan file's current hash beside it, in the file `plan:approve`
- * writes, keeping the approvals already there. For a test whose subject is not approval itself.
+ * Records an approval of the plan file's current hash beside it through the writer `plan:approve`
+ * uses, keeping the approvals already there. For a test whose subject is not approval itself.
  */
 export async function approvePlanFile(planPath: string): Promise<string> {
   const hash = planHash(PlanSchema.parse(JSON.parse(await readFile(planPath, 'utf8'))))
-  let approvals: PlanApprovals = { approvalsVersion: 1, approvals: [] }
-  try {
-    approvals = JSON.parse(await readFile(planApprovalsPath(planPath), 'utf8')) as PlanApprovals
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
-  approvals.approvals.push({ hash, approvedAt: '2026-09-22T09:00:00.000Z', approvedBy: 'Ada <ada@example.com>' })
-  await writeFile(planApprovalsPath(planPath), JSON.stringify(approvals), 'utf8')
+  const approvals = requireReadableApprovals(await readPlanApprovals(planPath))
+  await recordPlanApproval(planPath, approvals, { hash, approvedAt: '2026-09-22T09:00:00.000Z', approvedBy: 'Ada <ada@example.com>' })
   return hash
+}
+
+/** {@link approvePlanFile} where `document`, the plan file's content, carries a baseline; a draft is left as it is. */
+export async function approveIfStamped(planPath: string, document: unknown): Promise<void> {
+  if (hasBaseline(document)) await approvePlanFile(planPath)
 }
 
 /** A section as a test spells it: a bare name sits at the project root. */

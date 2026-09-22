@@ -9,7 +9,8 @@ import { z } from 'zod'
 import { CliError } from '../cli-error'
 import { planSiblingPath, readBesideRecord, writeFileAtomic, type BesideRecordRead } from './beside'
 import { planHash } from './identity'
-import type { Plan } from './schema'
+import { hasBaseline } from './render'
+import type { Plan, PlanDraft } from './schema'
 
 const PLAN_APPROVALS_VERSION = 1
 
@@ -60,35 +61,58 @@ export async function recordPlanApproval(
   return { written: true }
 }
 
-/** Whether an approval names a stamped plan's current hash; `plan:status` reports it, the acting commands refuse on it. */
+/** The commands that refuse a plan no approval names; `plan:status` names them rather than refusing. */
+export const PLAN_APPROVAL_GATED_COMMANDS = ['plan:next', 'plan:verify', 'plan:waive', 'plan:close'] as const
+
+/**
+ * Whether an approval names the plan's current hash. `baseline-removed` is a draft with approvals
+ * beside it: deleting `baseline` would otherwise turn an approved plan back into a draft no gate asks about.
+ * `hash` is `planHash()` of a plan with a baseline and `null` for a draft.
+ */
 export type PlanApprovalStanding =
   | { state: 'approved'; hash: string; approval: PlanApproval }
   | { state: 'unapproved'; hash: string }
-  | { state: 'unreadable'; hash: string; reason: string }
+  | { state: 'baseline-removed'; hash: null; approvals: number }
+  | { state: 'unreadable'; hash: string | null; reason: string }
 
-export async function readPlanApprovalStanding(planPath: string, plan: Plan): Promise<PlanApprovalStanding> {
-  const hash = planHash(plan)
+export type PlanApprovedStanding = Extract<PlanApprovalStanding, { state: 'approved' }>
+
+/** `undefined` for a draft with no approvals file, or an empty one: nobody approved anything there to guard. */
+export async function readPlanApprovalStanding(planPath: string, plan: PlanDraft | Plan): Promise<PlanApprovalStanding | undefined> {
+  const hash = hasBaseline(plan) ? planHash(plan) : null
   const read = await readPlanApprovals(planPath)
   if (read.unreadable) return { state: 'unreadable', hash, reason: read.unreadable }
-  const approval = read.value?.approvals.find((candidate) => candidate.hash === hash)
+  const approvals = read.value?.approvals ?? []
+  if (hash === null) return approvals.length > 0 ? { state: 'baseline-removed', hash, approvals: approvals.length } : undefined
+  const approval = approvals.find((candidate) => candidate.hash === hash)
   return approval ? { state: 'approved', hash, approval } : { state: 'unapproved', hash }
 }
 
 /** Why `standing` stops a command, with what to run; `consequence` says what the command would otherwise have done. */
-export function describeUnapproved(planPath: string, standing: Exclude<PlanApprovalStanding, { state: 'approved' }>, consequence: string): string {
-  if (standing.state === 'unreadable') {
-    return `${standing.reason}\nNo approval of ${planPath} can be read, so ${consequence}. Fix the approvals file, then run this again.`
+export function describeUnapproved(planPath: string, standing: Exclude<PlanApprovalStanding, PlanApprovedStanding>, consequence: string): string {
+  switch (standing.state) {
+    case 'unreadable':
+      return `${standing.reason}\nNo approval of ${planPath} can be read, so ${consequence}. Fix the approvals file, then run this again.`
+    case 'baseline-removed':
+      return `${planPath} has lost its baseline, but ${standing.approvals} approval(s) are recorded beside it, so ${consequence}: a plan is approved with its baseline, and without one it is no longer the plan anyone approved. Restore the baseline, or run guren plan:approve ${planPath} to approve it again.`
+    case 'unapproved':
+      return `${planPath} is not approved at its current hash ${standing.hash}, so ${consequence}: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve ${planPath} once the plan says what you mean to build.`
   }
-  return `${planPath} is not approved at its current hash ${standing.hash}, so ${consequence}: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve ${planPath} once the plan says what you mean to build.`
 }
 
 /**
- * The approval naming a stamped plan's current hash (RFC 0030 §4), or a refusal that says what
- * to run. A draft has no hash to approve, so callers that accept drafts ask `hasBaseline()` first.
- * An approvals file that will not read refuses too: an approval nobody can read approves nothing.
+ * The approval naming the plan's current hash (RFC 0030 §4), or a refusal that says what to run;
+ * `undefined` for a draft nobody approved, which the commands accepting drafts go on with.
+ * An approvals file that will not read refuses: an approval nobody can read approves nothing.
  */
-export async function requirePlanApproval(planPath: string, plan: Plan, consequence: string): Promise<{ hash: string; approval: PlanApproval }> {
-  const standing = await readPlanApprovalStanding(planPath, plan)
-  if (standing.state !== 'approved') throw new CliError(describeUnapproved(planPath, standing, consequence))
-  return { hash: standing.hash, approval: standing.approval }
+export async function requirePlanApproval(planPath: string, plan: Plan, consequence: string): Promise<PlanApprovedStanding>
+export async function requirePlanApproval(planPath: string, plan: PlanDraft | Plan, consequence: string): Promise<PlanApprovedStanding | undefined>
+export async function requirePlanApproval(planPath: string, plan: PlanDraft | Plan, consequence: string): Promise<PlanApprovedStanding | undefined> {
+  return approvedOrRefused(planPath, await readPlanApprovalStanding(planPath, plan), consequence)
+}
+
+/** {@link requirePlanApproval} on a standing the caller already read, so one run reads the approvals once. */
+export function approvedOrRefused(planPath: string, standing: PlanApprovalStanding | undefined, consequence: string): PlanApprovedStanding | undefined {
+  if (standing === undefined || standing.state === 'approved') return standing
+  throw new CliError(describeUnapproved(planPath, standing, consequence))
 }

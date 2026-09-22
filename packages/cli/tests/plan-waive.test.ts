@@ -10,7 +10,6 @@ import { formatPlanWaive, planWaiveFile, type PlanWaiveFileOptions, type PlanWai
 import { planApprovalsPath } from '../src/plan/approvals'
 import { planDecisionsPath, readPlanDecisions, type PlanDecisions } from '../src/plan/decisions'
 import { planHash } from '../src/plan/identity'
-import { hasBaseline } from '../src/plan/render'
 import {
   listPlanElements,
   PlanColumnSchema,
@@ -29,7 +28,7 @@ import {
 } from '../src/plan/schema'
 import { PLAN_STATUS_SECTIONS } from '../src/plan/status'
 import type { CapturedExec } from '../src/subprocess'
-import { approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, loadParsedCommentsPlan } from './plan-fixture'
+import { approveIfStamped, approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, loadParsedCommentsPlan } from './plan-fixture'
 
 let ROOT: string
 const HASH = planHash(loadParsedCommentsPlan())
@@ -43,7 +42,7 @@ async function writePlan(name: string, document: unknown = loadApprovedCommentsP
   const path = join(ROOT, name)
   await mkdir(join(path, '..'), { recursive: true })
   await writeFile(path, typeof document === 'string' ? document : JSON.stringify(document), 'utf8')
-  if (approve && hasBaseline(document)) await approvePlanFile(path)
+  if (approve) await approveIfStamped(path, document)
   return path
 }
 

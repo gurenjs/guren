@@ -13,9 +13,8 @@ import { readScripts } from './command-output'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
-import { requirePlanApproval, type PlanApprovalStanding } from './plan/approvals'
+import { approvedOrRefused, readPlanApprovalStanding, type PlanApprovalStanding } from './plan/approvals'
 import { judgeFreshness, type PlanFreshness } from './plan/freshness'
-import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
 import { describeDependency, judgeStepContext, stepInProgress, type PlanStepContext } from './plan/step-context'
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
@@ -51,14 +50,14 @@ export interface PlanVerifyFileOptions {
   /** One step id; every step in task order when absent. */
   step?: string
   timeoutMs?: number
+  /** What the caller already read of this plan's approval (the Stop hook), so one run reads the approvals once; `undefined` is a draft nobody approved. */
+  approval?: PlanApprovalStanding
 }
 
 export async function planVerifyFile(planPath: string, options: PlanVerifyFileOptions): Promise<PlanVerifyReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   // Before anything runs or is recorded: a result about a hash nobody approved verifies nothing anyone agreed to.
-  const approval: PlanApprovalStanding | undefined = hasBaseline(plan)
-    ? { state: 'approved', ...(await requirePlanApproval(path, plan, 'no step is verified against it')) }
-    : undefined
+  const approval = approvedOrRefused(path, 'approval' in options ? options.approval : await readPlanApprovalStanding(path, plan), 'no step is verified against it')
   const app = options.app
   const loadApp = typeof app === 'function' ? app : async () => app
   const root = options.appRoot
@@ -123,7 +122,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   })
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
-    plan: { file: basename(path), title: plan.title, hash: hasBaseline(plan) ? planHash(plan) : null },
+    plan: { file: basename(path), title: plan.title, hash: approval?.hash ?? null },
     ...overlaid.status,
     verification: overlaid.verification,
     steps,
@@ -164,6 +163,7 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   if (codegenFailed.length > 0) {
     lines.push(`codegen did not pass in ${codegenFailed.map((step) => step.stepId).join(', ')}, so the status below was judged without the generated files.`, '')
   }
-  lines.push(formatPlanStatus(report))
+  // plan:verify runs only on an approved plan (or a draft), so the approval line would say nothing.
+  lines.push(formatPlanStatus({ ...report, approval: undefined }))
   return lines.join('\n')
 }
