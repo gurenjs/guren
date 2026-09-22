@@ -538,18 +538,11 @@ export async function hasAuthProvider(filePath: string): Promise<boolean> {
   }
 }
 
+import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { findSchemaAggregate, type SchemaDialect } from './schema-parser'
 export type { SchemaDialect }
 
-/**
- * The barrel each dialect's schema imports its column builders from: a signal
- * for `detectSchemaDialect`, and where `ensure*Imports` merges new builders.
- */
-export const DIALECT_BARRELS = {
-  sqlite: '@guren/orm/drizzle/sqlite',
-  pg: '@guren/orm/drizzle/pg',
-  mysql: '@guren/orm/drizzle/mysql',
-} as const satisfies Record<SchemaDialect, string>
+export { DIALECT_BARRELS }
 
 /**
  * The dialect an app's `db/schema.ts` is written in. Every column-appending
