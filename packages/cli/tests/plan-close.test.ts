@@ -5,20 +5,23 @@ import { join } from 'node:path'
 
 import { runCommand } from 'citty'
 
+import { runCheck } from '../src/check'
+import { gatingResults } from '../src/check-result'
 import { builtinSubCommands } from '../src/commands'
 import { loadDocsGraph } from '../src/docs-graph'
-import type { PlanCloseReport } from '../src/plan-close'
+import { planCloseFile, type PlanCloseReport } from '../src/plan-close'
 import { planStatusFile } from '../src/plan-status'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { planApprovalsPath } from '../src/plan/approvals'
 import { writePlanWaiver } from '../src/plan/decisions'
 import { planHash } from '../src/plan/identity'
 import { PlanSchema, listPlanElements } from '../src/plan/schema'
-import { PLAN_STATE_VERSION, planDigest, type PlanStepRecord } from '../src/plan/state'
+import { PLAN_STATE_VERSION, planDigest, planSlug, planStatePath, type PlanStepRecord } from '../src/plan/state'
+import { PLAN_STATUS_SECTIONS } from '../src/plan/status'
 import { derivePlanTasks } from '../src/plan/tasks'
 import { hashFiles } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
-import { loadApprovedCommentsPlan, writePlanVerifyApp } from './plan-fixture'
+import { loadApprovedCommentsPlan, planAppState, writePlanVerifyApp } from './plan-fixture'
 
 // `bun test` fires no exit handler, so the roots earlier runs left are removed at the start.
 // Each application has a directory of its own: Bun keys an imported routes file on its path.
@@ -32,7 +35,7 @@ const WAIVED_AT = '2026-09-22T10:00:00.000Z'
 type PlanDocument = Record<string, unknown>
 
 /** The ids plan:close judges: every element outside `existing` in a section plan:status reads. */
-const JUDGED_SECTIONS = new Set(['models', 'columns', 'validators', 'controllers', 'actions', 'routes', 'views', 'resources', 'policies', 'sideEffects', 'commands'])
+const JUDGED_SECTIONS = new Set<string>(PLAN_STATUS_SECTIONS)
 
 function judgedIds(document: PlanDocument): string[] {
   const plan = PlanSchema.parse(document)
@@ -157,7 +160,7 @@ describe('plan:close', () => {
     expect(comment).toContain("- The comment's author is the signed-in user. (AC-comments-1, AC-comments-2, AC-comments-3)")
     expect(comment).toContain('- The signed-in user wrote the comment. (AC-comments-4)')
     expect(comment).toContain('- [Comments on posts](../plans/comments.md): closed plan')
-    expect(report.adrCommands).toContain('guren make:adr "Comments on posts: model.comment waived"')
+    expect(report.adrCommands).toContain("guren make:adr 'Comments on posts: model.comment waived'")
   })
 
   test('should write headings and labels in the plan locale, under the heading check --docs reads rules from', async () => {
@@ -284,7 +287,19 @@ describe('plan:close', () => {
 
     expect(results.filter((result) => result.status !== 'pass')).toEqual([])
     expect(results.map((result) => result.key)).toContain('docs-cites:docs/entities/Comment.md:AC-comments-4')
-    expect(process.exitCode).not.toBe(1)
+  })
+
+  test('should report an uncited rule without failing a gate: the citation warnings are advisory', async () => {
+    const app = await createClosableApp('advisory')
+    await close(app)
+    const doc = await read(app.dir, 'docs/entities/Comment.md')
+    await writeFile(join(app.dir, 'docs/entities/Comment.md'), doc.replace('## Rules\n', '## Rules\n\n- Nobody tests this.\n'), 'utf8')
+
+    const report = await runCheck({ cwd: app.dir, docs: true })
+
+    const uncited = report.checks.find((result) => result.key.startsWith('docs-rule-uncited:docs/entities/Comment.md'))
+    expect(uncited).toMatchObject({ status: 'warn', advisory: true })
+    expect(gatingResults(report)).toEqual([])
   })
 
   test('should draw each acceptance test as a node that verifies the documents citing it and its entity', async () => {
@@ -301,5 +316,113 @@ describe('plan:close', () => {
       { from: 'test:AC-comments-4', to: 'entity:Comment', relation: 'verifies', verdict: 'pass' },
     ])
     expect(graph.edges).toContainEqual({ from: 'docs/plans/comments.md', to: 'entity:Comment', relation: 'governs', verdict: 'pass' })
+  })
+  test('should refuse a drifted element, naming it', async () => {
+    const plan = PlanSchema.parse(loadApprovedCommentsPlan())
+    const app = await createClosableApp('drifted', { open: ['column.comment.id'] })
+    const step = derivePlanTasks(plan, { apiOnly: false }).tasks.flatMap((task) => task.steps).find((entry) => entry.elementIds.includes('column.comment.id'))!
+    const record: PlanStepRecord = {
+      outcome: 'verified',
+      planDigest: planDigest(plan),
+      ranAt: '2026-09-22T11:00:00.000Z',
+      durationMs: 1,
+      commands: [],
+      acceptance: [],
+      incomplete: [],
+      waived: [],
+      fingerprint: { files: { 'app/Models/Comment.ts': 'not-the-hash' }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
+    }
+    await writeWorkspaceFiles(app.dir, { '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [step.id]: record } }) })
+
+    await expect(close(app)).rejects.toThrow(/column\.comment\.id: drifted/u)
+  })
+
+  test('should refuse a blocked and an unjudged element, with the reason the reader gave', async () => {
+    const app = await createClosableApp('blocked', { open: ['model.post', 'view.posts.show'] })
+
+    // An application whose model section nobody could read, as a failed scan reports it.
+    const error = await planCloseFile(app.plan, { app: planAppState(), appRoot: app.dir }).then(
+      () => new Error('plan:close did not refuse'),
+      (caught: unknown) => caught as Error,
+    )
+
+    expect(error.message).toMatch(/model\.post: blocked \(/u)
+    expect(error.message).toMatch(/view\.posts\.show: unjudged \(/u)
+  })
+
+  test('should refuse when the state file or the decision log will not read', async () => {
+    const state = await createClosableApp('state-unreadable')
+    await writeWorkspaceFiles(state.dir, { '.guren/plans/comments.state.json': '{ not json' })
+    await expect(close(state)).rejects.toThrow(/verification records: /u)
+
+    const decisions = await createClosableApp('decisions-unreadable')
+    await writeFile(join(decisions.dir, 'comments.decisions.json'), '{ not json', 'utf8')
+    await expect(close(decisions)).rejects.toThrow(/decision log: /u)
+  })
+
+  test('should refuse, and write nothing, when a document carries markers it cannot rewrite safely', async () => {
+    const cases: Record<string, string> = {
+      unclosed: '# Comment\n\n## Rules\n\n<!-- guren:plan comments abc rules -->\n- A person\'s rule.\n\n## Glossary\n\nKept.\n',
+      twice: '# Comment\n\n<!-- guren:plan comments abc rules -->\n- a\n<!-- /guren:plan comments rules -->\n\n<!-- guren:plan comments abc rules -->\n- b\n<!-- /guren:plan comments rules -->\n',
+      fenced: '# Comment\n\n```md\n<!-- guren:plan comments abc rules -->\n```\n',
+    }
+    for (const [name, body] of Object.entries(cases)) {
+      const app = await createClosableApp(`markers-${name}`)
+      const document = `---\ntype: entity\nentities: [Comment]\n---\n\n${body}`
+      await writeWorkspaceFiles(app.dir, { 'docs/entities/Comment.md': document })
+
+      await expect(close(app)).rejects.toThrow(/docs\/entities\/Comment\.md, line \d+: /u)
+      expect(await read(app.dir, 'docs/entities/Comment.md')).toBe(document)
+      await expect(readdir(join(app.dir, 'docs/plans'))).rejects.toThrow()
+    }
+  })
+
+  test('should keep a document\'s CRLF line endings', async () => {
+    const app = await createClosableApp('crlf')
+    const document = '---\r\ntype: entity\r\nentities: [Comment]\r\n---\r\n\r\n# Comment\r\n\r\n## Rules\r\n\r\n- Mine. (AC-comments-1)\r\n'
+    await writeWorkspaceFiles(app.dir, { 'docs/entities/Comment.md': document })
+
+    await close(app)
+
+    const written = await read(app.dir, 'docs/entities/Comment.md')
+    expect(written).toStartWith(document)
+    expect(written.replaceAll('\r\n', '')).not.toContain('\n')
+  })
+
+  test('should refuse a model whose name or module would put its document outside the application', async () => {
+    const document = loadApprovedCommentsPlan()
+    const models = (document.models as Array<Record<string, unknown>>).map((model) => (model.id === 'model.comment' ? { ...model, module: '../../outside' } : model))
+    const app = await createClosableApp('traversal', { document: { ...document, models } })
+
+    await expect(close(app)).rejects.toThrow(/model\.comment: name "Comment", module "\.\.\/\.\.\/outside"/u)
+    await expect(readdir(join(app.dir, 'docs'))).rejects.toThrow()
+  })
+
+  test('should give an entity the tasks that name it by table or by id, as the task derivation reads them', async () => {
+    for (const entity of ['comments', 'model.comment']) {
+      const document = loadApprovedCommentsPlan()
+      const tasks = (document.tasks as Array<Record<string, unknown>>).map((task) => ({ ...task, entity }))
+      const app = await createClosableApp(`entity-${entity.replace('.', '-')}`, { document: { ...document, tasks } })
+
+      await close(app)
+
+      expect(await read(app.dir, 'docs/entities/Comment.md')).toContain('## Purpose\n\n<!-- guren:plan comments ')
+    }
+  })
+
+  test('should name a plan in the docs/plans/<slug>/plan.json layout by its directory, in its state and its documents', async () => {
+    const dir = join(ROOT, 'layout')
+    await writePlanVerifyApp(dir)
+    const document = loadApprovedCommentsPlan()
+    const plan = join(dir, 'docs/plans/comments/plan.json')
+    await writeWorkspaceFiles(dir, { 'docs/plans/comments/plan.json': JSON.stringify(document) })
+    await approveAndWaive(plan, document)
+
+    const report = await close({ dir, plan })
+
+    expect(report.writes.map((write) => write.path)).toContain('docs/plans/comments.md')
+    expect(await read(dir, 'docs/plans/comments.md')).toContain('[plan.json](comments/plan.json)')
+    expect(await read(dir, 'docs/entities/Comment.md')).toContain('<!-- guren:plan comments ')
+    expect(planStatePath(dir, planSlug(plan))).toBe(join(dir, '.guren/plans/comments.state.json'))
   })
 })

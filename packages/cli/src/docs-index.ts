@@ -171,6 +171,11 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
   return groups.flat().sort((a, b) => a.path.localeCompare(b.path))
 }
 
+/** The entity names a document's frontmatter lists, as `scanDocs()` reads them. */
+export function frontmatterEntities(source: string): string[] {
+  return toStringList(parseDocFrontmatter(source)?.data.entities)
+}
+
 /**
  * Reverse index: lowercased entity class name → documents whose
  * frontmatter `entities` list names it.

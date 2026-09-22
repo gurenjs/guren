@@ -198,7 +198,7 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 }
 
 /** The model a name spells out: by class, then by id, then by table. An intent's `entity` and a hint both name one this way. */
-function modelNamed(models: readonly PlanModel[], name: string): PlanModel | undefined {
+export function modelNamed(models: readonly PlanModel[], name: string): PlanModel | undefined {
   return (
     models.find((model) => model.name === name) ??
     models.find((model) => model.id === name) ??

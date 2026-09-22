@@ -13,7 +13,7 @@ import { matchesGlob } from './glob-match'
 import type { CheckResult, CheckStatus } from './check-result'
 import { SPEC_VIEWS } from './spec-generate'
 import { SPEC_DIR } from './spec-artifact'
-import { acceptanceIdNamesEntity, scanAcceptanceTests, type AcceptanceTestRef } from './docs-acceptance'
+import { acceptanceIdNamesEntity, acceptanceTestsLoader, type AcceptanceTestRef } from './docs-acceptance'
 
 export interface DocsGraphNode {
   /** Doc path, `entity:<Name>`, `test:<acceptance id>`, or a code path/label. */
@@ -161,9 +161,9 @@ export interface LoadedDocsGraph {
 /** One filesystem pass behind every graph consumer. Tests are read only once a doc cites an id. */
 export async function loadDocsGraph(cwd: string): Promise<LoadedDocsGraph> {
   const refs = await scanDocs(cwd)
-  const tests = refs.some((ref) => ref.citations.length > 0) ? await scanAcceptanceTests(cwd) : []
+  const tests = acceptanceTestsLoader(cwd, refs)
   const checks = await runDocsCheck({ cwd, refs, tests })
-  return { refs, checks, graph: buildDocsGraph(refs, checks, tests) }
+  return { refs, checks, graph: buildDocsGraph(refs, checks, await tests()) }
 }
 
 export interface DocsGraphReportOptions {

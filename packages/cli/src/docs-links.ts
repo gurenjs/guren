@@ -108,8 +108,42 @@ export function localLinkTarget(target: string): string | null {
   return withoutFragment === '' ? null : withoutFragment
 }
 
+export interface MarkdownLine {
+  text: string
+  /** A fence line itself, or any line between an opening fence and its close. */
+  inFence: boolean
+}
+
+// CommonMark: up to three spaces, then three or more of one fence character.
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/
+
+/**
+ * The document's lines with whether each is code. A fence closes on a run of the same
+ * character at least as long, with nothing after it; an unclosed fence runs to the end.
+ * The one fence rule every line-oriented docs scanner reads through.
+ */
+export function markdownLines(text: string): MarkdownLine[] {
+  let open: string | null = null
+  return text.split(/\r?\n/).map((line) => {
+    const fence = FENCE_RE.exec(line)
+    if (open === null) {
+      if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) open = fence[1]
+      return { text: line, inFence: open !== null }
+    }
+    if (fence && fence[1][0] === open[0] && fence[1].length >= open.length && fence[2].trim() === '') open = null
+    return { text: line, inFence: true }
+  })
+}
+
+/** The body with fenced blocks blanked and inline code spans removed: what link and citation readers scan. */
+export function stripMarkdownCode(body: string): string {
+  return markdownLines(body)
+    .map((line) => (line.inFence ? '' : line.text.replace(/`[^`\n]*`/g, '')))
+    .join('\n')
+}
+
 export function extractMarkdownLinks(body: string): string[] {
-  const withoutCode = body.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
+  const withoutCode = stripMarkdownCode(body)
   const targets = new Set<string>()
 
   const add = (target: string): void => {

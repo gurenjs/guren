@@ -11,17 +11,16 @@ import { basename, dirname, resolve } from 'node:path'
 
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
-import { parseDocFrontmatter } from './docs-frontmatter'
+import { frontmatterEntities } from './docs-index'
 import { planStatusFile } from './plan-status'
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
 import { readPlanApprovals, requireReadableApprovals, type PlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
-import { renderEntityDoc, renderPlanDoc, touchedModels, type PlanCloseContext } from './plan/close-docs'
+import { entityDocPath, planDocPath, renderEntityDoc, renderPlanDoc, touchedModels, type PlanCloseContext } from './plan/close-docs'
 import type { PlanWaiver } from './plan/decisions'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
-import type { PlanModel } from './plan/schema'
 import { planSlug } from './plan/state'
 import { readPlanWaivers } from './plan/verification'
 
@@ -61,18 +60,17 @@ export interface PlanCloseFileOptions {
 
 /** A slug names the blocks inside HTML comments, so it may not carry what would end one or split the marker. */
 const MARKER_SLUG = /^[A-Za-z0-9_.-]+$/u
+/** A model's class name and module become path segments of the file written for it. */
+const PATH_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/u
 
-/** `docs/plans/<slug>/plan.json` (the §9 layout) is named by its directory; any other plan by its file. */
-function closeSlug(planPath: string): string {
-  return basename(planPath) === 'plan.json' ? basename(dirname(planPath)) : planSlug(planPath)
-}
-
-function entityDocPath(model: PlanModel): string {
-  return model.module ? `modules/${model.module}/docs/entities/${model.name}.md` : `docs/entities/${model.name}.md`
+/** Single-quoted for a POSIX shell, so a title carrying `$`, a backtick or `"` is printed as text. */
+function shellQuote(text: string): string {
+  return `'${text.replaceAll("'", `'\\''`)}'`
 }
 
 export async function planCloseFile(planPath: string, options: PlanCloseFileOptions): Promise<PlanCloseReport> {
-  const { path, plan } = await readPlanFile(planPath, options.cwd)
+  const read = await readPlanFile(planPath, options.cwd)
+  const { path, plan } = read
   const appRoot = resolve(options.appRoot)
   if (!hasBaseline(plan)) {
     throw new CliError(`${path} is a draft: it was never approved, so there is nothing to close. Run guren plan:approve on it first.`)
@@ -85,12 +83,26 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
       `${path} is not approved at its current hash ${hash}, so it is not closed: what was verified may not be what anyone agreed to. Run guren plan:approve on it.`,
     )
   }
-  const slug = closeSlug(path)
+  const slug = planSlug(path)
   if (!MARKER_SLUG.test(slug)) {
     throw new CliError(`The plan's slug "${slug}" names the blocks it writes, and may hold only letters, digits, ".", "_" and "-". Rename the plan file.`)
   }
+  const models = touchedModels(plan)
+  const unsafe = models.filter((model) => {
+    if (!PATH_SEGMENT.test(model.name) || (model.module !== undefined && !PATH_SEGMENT.test(model.module))) return true
+    const relative = toPosixRelative(appRoot, resolve(appRoot, entityDocPath(model)))
+    return relative.startsWith('../') || relative === '..'
+  })
+  if (unsafe.length > 0) {
+    throw new CliError(
+      `${path} names models whose document path would not be a plain file under ${appRoot}, so nothing is written:\n${unsafe
+        .map((model) => `  ${model.id}: name "${model.name}"${model.module === undefined ? '' : `, module "${model.module}"`}`)
+        .join('\n')}`,
+    )
+  }
 
-  const status = await planStatusFile(path, { app: options.app, appRoot, cwd: options.cwd })
+  const waiverRead = await readPlanWaivers(path, plan)
+  const status = await planStatusFile(path, { app: options.app, appRoot, read, waivers: waiverRead })
   const verification = status.verification
   const blockers = status.elements
     .filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
@@ -103,7 +115,11 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     )
   }
 
-  const { waivers } = await readPlanWaivers(path, plan)
+  const waived = new Map<string, PlanWaiver>()
+  for (const element of status.elements) {
+    const waiver = element.state === 'waived' ? waiverRead.waivers.get(element.id) : undefined
+    if (waiver) waived.set(element.id, waiver)
+  }
   const planFile = toPosixRelative(appRoot, path)
   const context: PlanCloseContext = {
     plan,
@@ -111,28 +127,34 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     slug,
     approval,
     elements: status.elements,
-    waivers,
+    waived,
     ...(planFile.startsWith('../') ? {} : { planFile }),
-    planDocPath: `docs/plans/${slug}.md`,
-    entityDocPath,
   }
 
   const notes: string[] = []
-  const planned: Array<{ path: string; content: string }> = [{ path: context.planDocPath, content: renderPlanDoc(context) }]
-  for (const model of touchedModels(plan)) {
+  const problems: string[] = []
+  const planned: Array<{ path: string; content: string; before: string | undefined }> = []
+  planned.push({ path: planDocPath(slug), content: renderPlanDoc(context), before: await readOptional(resolve(appRoot, planDocPath(slug))) })
+  for (const model of models) {
     const docPath = entityDocPath(model)
-    const existing = await readOptional(resolve(appRoot, docPath))
-    if (existing !== undefined && !namesEntity(existing, model.name)) {
+    const before = await readOptional(resolve(appRoot, docPath))
+    if (before !== undefined && !frontmatterEntities(before).some((entry) => entry.toLowerCase() === model.name.toLowerCase())) {
       notes.push(`${docPath} does not name ${model.name} in its frontmatter entities, so the docs graph does not link it to the entity. Add it by hand.`)
     }
-    planned.push({ path: docPath, content: renderEntityDoc(existing, context, model) })
+    const rendered = renderEntityDoc(before, context, model)
+    if ('problems' in rendered) problems.push(...rendered.problems.map((problem) => `  ${docPath}, ${problem}`))
+    else planned.push({ path: docPath, content: rendered.content, before })
+  }
+  if (problems.length > 0) {
+    throw new CliError(
+      `${path} is not closed: these documents carry guren:plan markers that cannot be rewritten safely, and nothing was written. Fix the markers by hand:\n${problems.join('\n')}`,
+    )
   }
 
   const writes: PlanCloseWrite[] = []
   for (const entry of planned) {
     const target = resolve(appRoot, entry.path)
-    const before = await readOptional(target)
-    const action: PlanCloseWriteAction = before === undefined ? 'create' : before === entry.content ? 'unchanged' : 'update'
+    const action: PlanCloseWriteAction = entry.before === undefined ? 'create' : entry.before === entry.content ? 'unchanged' : 'update'
     if (!options.dryRun && action !== 'unchanged') {
       await mkdir(dirname(target), { recursive: true })
       await writeFileAtomic(target, entry.content)
@@ -140,10 +162,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     writes.push({ path: entry.path, action, content: entry.content })
   }
 
-  const closedWith = status.elements.flatMap((element) => {
-    const waiver = element.state === 'waived' ? waivers.get(element.id) : undefined
-    return waiver ? [waiver] : []
-  })
+  const closedWith = [...waived.values()]
   return {
     reportVersion: PLAN_CLOSE_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash },
@@ -151,7 +170,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     dryRun: options.dryRun === true,
     writes,
     waivers: closedWith,
-    adrCommands: closedWith.map((waiver) => `guren make:adr ${JSON.stringify(`${plan.title}: ${waiver.elementId} waived`)}`),
+    adrCommands: closedWith.map((waiver) => `guren make:adr ${shellQuote(`${plan.title}: ${waiver.elementId} waived`)}`),
     notes,
   }
 }
@@ -163,13 +182,6 @@ async function readOptional(path: string): Promise<string | undefined> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   }
-}
-
-/** Whether a document's frontmatter lists the entity, by the parser `scanDocs()` reads it with. */
-function namesEntity(document: string, entity: string): boolean {
-  const entities = parseDocFrontmatter(document)?.data.entities
-  const list = typeof entities === 'string' ? [entities] : Array.isArray(entities) ? entities : []
-  return list.some((entry) => typeof entry === 'string' && entry.toLowerCase() === entity.toLowerCase())
 }
 
 export function formatPlanClose(report: PlanCloseReport): string {

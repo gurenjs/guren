@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { extractUncitedRules } from '../src/docs-acceptance'
-import { spliceEntityBlock } from '../src/plan/close-docs'
+import { readEntityDoc, spliceEntityBlock } from '../src/plan/close-docs'
 
 const HAND = ['---', 'type: entity', 'entities: [Comment]', '---', '', '# Comment', '', 'Kept.', '', '## Rules', '', '- Mine. (AC-comments-9)', '', '## Glossary', '', 'Also kept.', ''].join('\n')
 
@@ -53,13 +53,48 @@ describe('spliceEntityBlock', () => {
   })
 })
 
+describe('fences', () => {
+  const FENCED = ['# Comment', '', '## Rules', '', '- Mine. (AC-comments-9)', '', '```sh', '# seed the db', 'bun run db:seed', '```', '', '~~~', '## Rules', '~~~', '', '## Glossary', ''].join('\n')
+
+  test('should not end a section at a heading-shaped line inside a code fence', () => {
+    const out = splice(FENCED, 'aaa', ['- New. (AC-comments-1)'])
+
+    expect(out).toContain('~~~\n## Rules\n~~~\n\n<!-- guren:plan comments aaa rules -->\n- New. (AC-comments-1)\n<!-- /guren:plan comments rules -->\n\n## Glossary')
+  })
+
+  test('should not take a fenced heading for the section', () => {
+    const document = ['# Comment', '', '```md', '## Rules', '```', ''].join('\n')
+
+    expect(splice(document, 'aaa', ['- x'])).toBe(`${document.trimEnd()}\n\n## Rules\n\n<!-- guren:plan comments aaa rules -->\n- x\n<!-- /guren:plan comments rules -->\n`)
+  })
+})
+
+describe('readEntityDoc', () => {
+  test('should name an open marker with no close before the next heading, a stray close, a pair seen twice and a fenced marker', () => {
+    const problems = (body: string): string[] => readEntityDoc(body).problems
+
+    expect(problems('<!-- guren:plan comments aaa rules -->\n- x\n## Next\n<!-- /guren:plan comments rules -->\n')).toEqual([
+      'line 1: the block "comments rules" opens and never closes',
+      'line 4: the block "comments rules" closes and never opened',
+    ])
+    const block = '<!-- guren:plan comments aaa rules -->\n- x\n<!-- /guren:plan comments rules -->\n'
+    expect(problems(`${block}${block}`)).toEqual(['line 4: the block "comments rules" appears twice'])
+    expect(problems('~~~\n<!-- guren:plan comments aaa rules -->\n~~~\n')).toEqual(['line 2: a guren:plan marker sits inside a code fence'])
+    expect(problems(block)).toEqual([])
+  })
+
+  test('should refuse to splice a document it cannot read safely', () => {
+    expect(() => splice('<!-- guren:plan comments aaa rules -->\n- a person\'s text\n', 'bbb', ['- x'])).toThrow(/opens and never closes/u)
+  })
+})
+
 describe('extractUncitedRules', () => {
   test('should report a rule under a Rules heading that cites no acceptance id', () => {
     expect(extractUncitedRules(HAND.replace('## Glossary', '- Nobody tests this.\n\n## Glossary'))).toEqual(['Nobody tests this.'])
   })
 
   test('should read a Japanese Rules heading and ignore lists under other headings or in code', () => {
-    const body = ['## ルール', '', '- 未検証の規則', '', '```', '- not a rule', '```', '', '## Glossary', '', '- not a rule either'].join('\n')
+    const body = ['## ルール', '', '- 未検証の規則', '', '```', '- not a rule', '```', '~~~', '## Glossary', '- nor this', '~~~', '', '## Glossary', '', '- not a rule either'].join('\n')
 
     expect(extractUncitedRules(body)).toEqual(['未検証の規則'])
   })

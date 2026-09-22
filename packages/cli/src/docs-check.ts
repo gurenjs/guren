@@ -14,7 +14,7 @@ import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './d
 import { ISSUE_REF_FORMS } from './issue-refs'
 import type { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
-import { acceptanceIdSegment, scanAcceptanceTests, type AcceptanceTestRef } from './docs-acceptance'
+import { acceptanceIdSegment, acceptanceTestsLoader, type AcceptanceTestRef } from './docs-acceptance'
 
 export interface DocsCheckOptions {
   cwd: string
@@ -24,8 +24,8 @@ export interface DocsCheckOptions {
   cache?: ParseCache
   /** Reuses an existing `scanDocs` result instead of re-scanning the bundle. */
   refs?: DocRef[]
-  /** Reuses an existing `scanAcceptanceTests` result; scanned only when a doc cites an id. */
-  tests?: AcceptanceTestRef[]
+  /** Reuses a shared `acceptanceTestsLoader()`, which reads the test tree only when a doc cites an id. */
+  tests?: () => Promise<AcceptanceTestRef[]>
 }
 
 function hasGlobChars(entry: string): boolean {
@@ -155,17 +155,21 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
   results.push(...checkConformance(refs, docsWithFrontmatter.length > 0, changedFiles ?? null))
   results.push(...checkDeprecatedEntities(docsWithFrontmatter, modelNames, inScope))
   results.push(...(await checkDocsTags(cwd, [...modelFiles, ...controllerFiles], changedFiles ?? null, cache, probes)))
-  results.push(...(await checkAcceptanceCitations(docsWithFrontmatter, inScope, changedFiles ?? null, async () => options.tests ?? scanAcceptanceTests(cwd))))
+  results.push(...(await checkAcceptanceCitations(docsWithFrontmatter, inScope, changedFiles ?? null, options.tests ?? acceptanceTestsLoader(cwd, refs))))
 
   return results
+}
+
+/** A warning `check --ci` and `guren gate` do not count. */
+function advisory(...args: Parameters<typeof check>): CheckResult {
+  return { ...check(...args), advisory: true }
 }
 
 /**
  * The doc → test relation (RFC 0030 §7): a cited acceptance id some test carries, a cited id
  * none does, a test id whose entity's documents cite others but not it, and a rule in an
- * entity document citing none. All warns, like a body link to a doc not written yet. The
- * test tree is read only once some document cites an id, so an app without the convention
- * pays nothing.
+ * entity document citing none. Advisory warns: a test may run ahead of the documents, and an
+ * entity document written before this rule must not turn a gate red on upgrade.
  */
 async function checkAcceptanceCitations(
   refs: DocRef[],
@@ -178,7 +182,7 @@ async function checkAcceptanceCitations(
     if (!inScope.has(ref.path) || ref.type !== 'entity') continue
     ref.uncitedRules.forEach((rule, index) => {
       results.push(
-        check(
+        advisory(
           `docs-rule-uncited:${ref.path}:${index}`,
           `${ref.path} rule`,
           'warn',
@@ -201,7 +205,7 @@ async function checkAcceptanceCitations(
       results.push(
         files
           ? check(`docs-cites:${ref.path}:${id}`, `${ref.path} → ${id}`, 'pass', `${id} is carried by ${files.join(', ')}.`, undefined, ref.path)
-          : check(
+          : advisory(
               `docs-cites:${ref.path}:${id}`,
               `${ref.path} → ${id}`,
               'warn',
@@ -221,7 +225,7 @@ async function checkAcceptanceCitations(
     const segment = acceptanceIdSegment(id)
     if (cited.has(id) || segment === undefined || !citedSegments.has(segment)) continue
     results.push(
-      check(
+      advisory(
         `docs-uncited-test:${id}`,
         `${id} citation`,
         'warn',

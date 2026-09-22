@@ -597,8 +597,9 @@ baseline, and ships in a minimal form (`packages/cli/src/plan-approve.ts`,
 - The approval is `{ hash, approvedAt, approvedBy? }` in `approvals.json` beside
   a `plan.json`, and in `<slug>.approvals.json` beside any other plan, the rule
   the decision log follows. Approving a hash already approved writes nothing,
-  and a file that will not read is refused before the plan is touched. That
-  every later command refuses a hash no approval names is not shipped yet.
+  and a file that will not read is refused before the plan is touched.
+  `plan:close` refuses a hash no approval names; the other commands do not
+  yet.
 - `contextHash` is keyed by element id, one entry for every element the §2
   checks judge against the application by name. Both read one derivation of
   what name an element is judged by (`plan/app-targets.ts`). The value is a
@@ -1114,12 +1115,13 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   recorded as `null`, which never matches. The environment is recorded and
   shown, and not compared: a machine is not a reason to call an element drifted.
 - The state file is `.guren/plans/<slug>.state.json` under the application
-  root, `<slug>` the plan file's name without `.plan.json` / `.json`, with one
+  root, `<slug>` the plan file's name without `.plan.json` / `.json` (the
+  directory's name for a `plan.json`, the §9 layout), with one
   record per step id and a `.gitignore` written beside it. A record names the
   digest of the plan it ran against, the hash for a plan with a baseline and the
   same computation over a draft; `plan:status` lifts an element only from a
   record of the plan it is reading, and reports the steps of another plan or
-  revision as stale. Two plan files of one name share a state file and a step
+  revision as stale. Two plan files of one slug share a state file and a step
   namespace, the later run overwriting the earlier. A state file that will not
   read is reported and lifts nothing, and the next write replaces it whole;
   writes take no lock.
@@ -1366,7 +1368,8 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
 - "Archives the plan" is the doc node. Under the `file` store nothing is moved
   or deleted: the plan, its approvals and its decision log stay committed where
   they are, and `.guren/plans/` is left alone. No command yet refuses to work on
-  a closed plan.
+  a closed plan. Freshness (§4) is not consulted: a stale element is reported by
+  `plan:status` and `plan:next`, and what closes a plan is its elements' states.
 - The doc node is `docs/plans/<slug>.md` wherever the plan file sits; a plan
   named `plan.json` takes its directory's name. `status: closed` is not
   written, since the checker reads `status` as the OKF lifecycle and warns on
@@ -1384,7 +1387,16 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   `## ` heading names it in either plan locale, or under a new heading in the
   plan's locale (`en`, `ja`; any other tag writes `en`). An existing
   document's frontmatter is never touched; one that does not name the entity
-  is reported.
+  is reported. The close refuses, writing nothing, when a document's markers
+  cannot be rewritten safely: an open marker with no close before the next
+  marker or heading, a close with no open, a pair written twice, or a marker
+  inside a code fence. Headings and the section's end are read outside code
+  fences, and a document keeps its line endings. A model's `name` and `module`
+  become path segments, so one that is not a plain identifier, or would land
+  outside the application, refuses too. A task belongs to the model its
+  `entity` names by the task derivation's rule (class, then id, then table).
+  Not handled: a `### Rules` heading, a heading a revision's removed block
+  leaves empty, and a citation wrapped across lines.
 - The Rules block lists the behaviours of the tasks naming the entity, each
   citing its own id, then each action rule and policy-ability rule, citing the
   behaviours whose route reaches that action or authorizes with that ability.
@@ -1397,7 +1409,8 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   plan spells it, or the class name), which is what brings the tests into
   `docs:graph --entity` in one hop. A citation no test carries, a test id that
   no document cites while another id of its segment is cited, and a Rules item
-  in a `type: entity` document that cites nothing are `check --docs` warnings.
+  in a `type: entity` document that cites nothing are advisory `check --docs`
+  warnings, which `check --ci` and `guren gate` do not count.
   They stay advisory because a test may legitimately run ahead of the
   documents, as work nobody planned under an entity a closed plan documented
   does. The test tree is read only once a document cites an id.
