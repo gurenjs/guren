@@ -91,21 +91,25 @@ const deployTargets = [
     name: 'Bun server',
     detail: 'Self-host on any VPS or container. The runtime you develop on is the one that serves production.',
     href: '/docs/guides/deployment',
+    command: 'bunx guren deploy --target docker',
   },
   {
     name: 'Cloudflare Workers',
     detail: 'Workers + D1 at the edge, on the free plan if you like. This site is a Guren app running there.',
     href: '/docs/guides/cloudflare',
+    command: 'bunx guren plugin @guren/plugin-cloudflare',
   },
   {
     name: 'Vercel',
     detail: "One plugin sets up the build, and the app runs on Vercel's Bun runtime, the same engine you develop on.",
     href: '/docs/guides/deployment#vercel-serverless',
+    command: 'bunx guren plugin @guren/plugin-vercel',
   },
   {
     name: 'AWS Lambda',
     detail: 'A handler adapter and Node-compatible defaults run the same app on Lambda.',
     href: '/docs/guides/serverless',
+    command: 'bunx guren plugin @guren/plugin-lambda',
   },
 ]
 
@@ -482,7 +486,13 @@ export default function Home({ codeExamples }: Props) {
                     className="group grid grid-cols-1 gap-x-8 gap-y-1 py-5 transition hover:bg-white/[0.03] sm:grid-cols-[13rem_1fr_auto] sm:items-baseline sm:px-3"
                   >
                     <span className="font-bold text-crimson-50">{t.name}</span>
-                    <span className="text-[0.9375rem] leading-relaxed text-smoke">{t.detail}</span>
+                    <span className="min-w-0">
+                      <span className="block text-[0.9375rem] leading-relaxed text-smoke">{t.detail}</span>
+                      <code className="mt-2 block truncate font-mono text-[13px] text-crimson-50">
+                        <span className="select-none text-smoke/60">$ </span>
+                        {t.command}
+                      </code>
+                    </span>
                     <span className="text-sm font-semibold text-smoke transition group-hover:text-crimson-300">
                       Deployment guide
                     </span>
