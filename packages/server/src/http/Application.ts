@@ -22,12 +22,8 @@ import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { isMcpEndpointEnabled } from '../mcp/endpoint'
 import { isDocsViewerEnabled } from '../docs-viewer/endpoint'
-import {
-  formatHostPort,
-  isWildcardHost,
-  logDevServerBanner,
-  type DevBannerOptions,
-} from './dev-banner'
+import type { DevBannerOptions } from './dev-banner'
+import { formatHostPort, isWildcardHost } from './host-port'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 import { runInRequestScope } from '../support/request-deferrer'
 import { adoptDefaultApplication } from './default-application'
@@ -115,6 +111,28 @@ function resolvePortAttempts(option: boolean | undefined, port: number): number 
 function toConnectableUrl(hostname: string, port: number): string {
   const host = isWildcardHost(hostname) ? (hostname === '::' ? '::1' : '127.0.0.1') : hostname
   return `http://${formatHostPort(host, port)}`
+}
+
+type DevBannerModule = typeof import('./dev-banner')
+
+let devBanner: DevBannerModule | undefined
+
+/**
+ * The banner module brings figlet and chalk, so it is loaded outside production
+ * only. The NODE_ENV test stays alone around the import, in plain member access:
+ * a deploy bundle's `--define` folds that one expression to `false` and drops the
+ * module, and neither Bun nor esbuild folds it through a call or a wider condition.
+ */
+async function loadDevBanner(): Promise<DevBannerModule | undefined> {
+  if (typeof process === 'undefined') {
+    return devBanner
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    devBanner ??= await import('./dev-banner')
+  }
+
+  return devBanner
 }
 
 function clearManagedViteEnv(): void {
@@ -1031,6 +1049,16 @@ export class Application {
       }
     }
 
+    const shouldLogBanner =
+      typeof process === 'undefined' ||
+      (process.env.NODE_ENV !== 'production' && process.env?.GUREN_DEV_BANNER !== '0')
+
+    // Before the bind: from publishing the server to returning its address,
+    // `listen()` must not yield, or a concurrent `stop()` lands in between.
+    if (shouldLogBanner) {
+      await loadDevBanner()
+    }
+
     const attempts = resolvePortAttempts(portFallback, port)
     let server: BunServer | undefined
     let attemptPort = port
@@ -1103,10 +1131,6 @@ export class Application {
     this.boundAddress = address
     setActiveBunServer(server)
     this.registerBunTeardown()
-
-    const shouldLogBanner =
-      typeof process === 'undefined' ||
-      (process.env.NODE_ENV !== 'production' && process.env?.GUREN_DEV_BANNER !== '0')
 
     if (shouldLogBanner) {
       this.logDevServerBanner({
@@ -1187,8 +1211,22 @@ export class Application {
     return this
   }
 
+  /**
+   * Prints the dev server banner. `listen()` loads the banner module first, so it
+   * prints there at once; a call before anything has loaded it prints once the
+   * import settles. The module is never loaded under `NODE_ENV=production`, which
+   * keeps it out of deploy bundles, so a call there prints nothing.
+   */
   logDevServerBanner(options: DevBannerOptions): void {
-    logDevServerBanner(options)
+    if (devBanner) {
+      devBanner.logDevServerBanner(options)
+      return
+    }
+
+    void loadDevBanner().then(
+      (loaded) => loaded?.logDevServerBanner(options),
+      (error: unknown) => console.error('Failed to load the dev server banner:', error),
+    )
   }
 
   /**
