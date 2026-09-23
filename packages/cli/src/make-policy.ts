@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 const POLICY_DIR = 'app/Policies'
 
@@ -38,7 +38,12 @@ export class ${className} extends Policy {
 }
 
 export async function makePolicy(name: string, options: WriterOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = policyFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function policyFile(name: string, options: WriterOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: POLICY_DIR,
     suffix: 'Policy',
     template: ({ normalizedName }) => policyTemplate(normalizedName),

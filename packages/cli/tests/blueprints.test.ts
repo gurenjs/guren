@@ -21,6 +21,7 @@ import {
   readShippedSchemaFile,
   seedApiOnlyApp,
   seedShippedApiOnlyApp,
+  snapshotTree,
   ENV_SCHEMA_FIXTURE,
   linkWorkspaceCore,
   linkWorkspacePackage,
@@ -457,6 +458,22 @@ export default function registerWebRoutes(appRouter: Router): void {
   // but the table appended to the app's `db/schema.ts` survives. Every reason a
   // patch can fail therefore has to be settled before the first write.
   describe('resource blueprint preflight', () => {
+    // makeFeature refuses before its first write, and runs before either patch:
+    // the table and the route group cannot be taken back once the scaffold stops.
+    it('refuses over a hand-written model and leaves the app byte-identical', async () => {
+      await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+      await writeWorkspaceFiles(workspace.dir, { 'app/Models/Comment.ts': 'export class Comment {}\n' })
+      const before = await snapshotTree(workspace.dir)
+
+      await expect(addResource({ name: 'comments', fields: 'body:text' })).rejects.toThrow(
+        'Scaffolding Comment would overwrite a file that already exists:\n  app/Models/Comment.ts\nNothing was scaffolded.',
+      )
+
+      expect(await snapshotTree(workspace.dir)).toEqual(before)
+      expect(await readFile('db/schema.ts', 'utf8')).toBe(PG_SCHEMA_FIXTURE)
+      expect(await readFile('routes/web.ts', 'utf8')).toBe(DEFAULT_ROUTES_FIXTURE)
+    })
+
     it('refuses an app with no routes/web.ts, naming the file it wanted', async () => {
       await mkdir('db', { recursive: true })
       await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)

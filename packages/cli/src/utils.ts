@@ -267,15 +267,21 @@ export async function writeScaffoldFiles(
   return created
 }
 
-export async function scaffoldFile(name: string, config: ScaffoldConfig, options: WriterOptions = {}): Promise<string> {
+/** What `scaffoldFile` writes, for a caller that checks every target before its first write. */
+export function scaffoldFileEntry(name: string, config: ScaffoldConfig, options: WriterOptions = {}): ScaffoldFileEntry {
   const { className, fileName } = resourceName(name)
   const normalizedName = config.suffix ? ensureSuffix(className, config.suffix) : className
   const baseName = config.fileName ? config.fileName({ rawName: name, className, fileName, normalizedName }) : normalizedName
   const extension = config.extension ?? 'ts'
   const dir = options.root ? `modules/${safeModuleName(options.root)}/${config.dir}` : config.dir
-  const filePath = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
+  const path = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
   const contents = config.template({ rawName: name, className, fileName, normalizedName })
-  return writeScaffoldFile(filePath, contents, options)
+  return { path, contents }
+}
+
+export async function scaffoldFile(name: string, config: ScaffoldConfig, options: WriterOptions = {}): Promise<string> {
+  const { path, contents } = scaffoldFileEntry(name, config, options)
+  return writeScaffoldFile(path, contents, options)
 }
 
 export function pascalCase(value: string): string {

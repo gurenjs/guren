@@ -3,14 +3,14 @@ import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
 import { CliError } from './cli-error'
 import { appConfiguresAttachments } from './attachments-check'
-import { announceWrittenFiles, camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, writtenFileMessage, type WriterOptions } from './utils'
+import { announceWrittenFiles, camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, writtenFileMessage, type ScaffoldFileEntry, type WriterOptions } from './utils'
 import { pluralize, schemaIdentifierFor, tableNameFor } from './inflect'
-import { makeFactory } from './make-factory'
+import { factoryFile } from './make-factory'
 import { findMigrationCreatingTable } from './make-migration'
-import { makeModel } from './make-model'
-import { makePolicy } from './make-policy'
-import { makeTest } from './make-test'
-import { makeValidator } from './make-validator'
+import { modelFile } from './make-model'
+import { policyFile } from './make-policy'
+import { testFile } from './make-test'
+import { validatorFile } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
 import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
@@ -142,11 +142,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // Composed rather than emitted inline, so the schema names the generated
   // controller imports and the ones `make:validator` writes cannot drift. At
   // promotion the prototype run already wrote it, and it is kept as edited.
-  const validatorRelPath = `${appPrefix}app/Http/Validators/${singular}Validator.ts`
-  const validatorKept = promoting && !options.force && (await fileExists(appRoot, validatorRelPath))
-  const validatorPath = validatorKept
-    ? resolve(appRoot, validatorRelPath)
-    : await makeValidator(singular, { ...writerOptions, fields })
+  const validator = validatorFile(singular, { ...writerOptions, fields })
+  const validatorKept = promoting && !options.force && (await fileExists(appRoot, validator.path))
 
   const pageFiles = [
     {
@@ -168,12 +165,14 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   ]
 
   if (prototypeFirst) {
-    const created = await writeScaffoldFiles([
+    const files = [
+      validator,
       { path: prototypeTypesPath(singular), contents: generatePrototypeTypes(singular, fields) },
       ...pageFiles,
-    ], writerOptions)
+    ]
+    await assertNoExistingTargets(singular, appRoot, files, options.force)
+    const created = await writeScaffoldFiles(files, writerOptions)
     await ensureGurenUiTokens(appRoot)
-    created.unshift(validatorPath)
     const appended = await appendPrototypeEntries(appRoot, { singular, collection: routeVar, routeName, variableName, fields })
     // `guren add prototype` created the fixture; this run only appended to it.
     const patchedFixture = appended === 'patched' ? resolve(appRoot, PROTOTYPE_FIXTURE_PATH) : undefined
@@ -185,7 +184,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     return created
   }
 
-  const created = await writeScaffoldFiles([
+  const backendFiles: FeatureFile[] = [
+    ...(validatorKept ? [] : [validator]),
     {
       path: `${appPrefix}app/Http/Resources/${singular}Resource.ts`,
       contents: promoting
@@ -196,36 +196,25 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
       path: `${appPrefix}app/Http/Controllers/${singular}Controller.ts`,
       contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy, moduleName, attachments),
     },
-  ], writerOptions)
+  ]
+  const modelFiles: FeatureFile[] = [
+    modelFile(singular, { ...writerOptions, attachments }),
+    ...(options.withFactory ? [{ ...factoryFile(singular, writerOptions), flag: '--factory' }] : []),
+    ...(withPolicy ? [{ ...policyFile(singular, writerOptions), flag: '--policy' }] : []),
+    ...(options.withTest ? [{ ...(await testFile(singular, writerOptions)), flag: '--test' }] : []),
+  ]
   // At promotion the pages are the prototype's, possibly hand-edited since; a
   // page that exists is kept, and only a missing one is written.
-  created.push(...(await writeScaffoldFiles(pageFiles, { ...writerOptions, skipExisting: promoting })))
+  await assertNoExistingTargets(singular, appRoot, [...backendFiles, ...(promoting ? [] : pageFiles), ...modelFiles], options.force)
+
+  const created = [
+    ...(await writeScaffoldFiles(backendFiles, writerOptions)),
+    ...(await writeScaffoldFiles(pageFiles, { ...writerOptions, skipExisting: promoting })),
+    ...(await writeScaffoldFiles(modelFiles, writerOptions)),
+  ]
 
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens(appRoot)
-
-  if (!validatorKept) created.unshift(validatorPath)
-
-  const modelPath = await makeModel(singular, { ...writerOptions, attachments })
-  created.push(modelPath)
-
-  if (options.withFactory) {
-    created.push(await makeFactory(singular, writerOptions))
-  }
-
-  if (withPolicy) {
-    const policyPath = await makePolicy(singular, writerOptions)
-    created.push(policyPath)
-  }
-
-  if (options.withTest) {
-    try {
-      const testPath = await makeTest(singular, writerOptions)
-      created.push(testPath)
-    } catch {
-      // Ignore if test creation fails
-    }
-  }
 
   if (options.announce === false) {
     return created
@@ -233,7 +222,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
   announceWrittenFiles(created, overwritten)
   if (validatorKept) {
-    consola.info(`Kept ${validatorPath} (pass --force to regenerate it)`)
+    consola.info(`Kept ${resolve(appRoot, validator.path)} (pass --force to regenerate it)`)
   }
 
   const schemaPath = schemaPathFor(moduleName)
@@ -299,6 +288,35 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
 
   return created
+}
+
+/** A file the run writes; `flag` names the option that added it, which a refusal offers to drop. */
+interface FeatureFile extends ScaffoldFileEntry {
+  flag?: string
+}
+
+/**
+ * Refuses before the first write when a file the run would write is already there.
+ * Stopping at the first would leave the files written before it behind, and every one
+ * is named because `--force` overwrites them all, the author's own files included.
+ */
+async function assertNoExistingTargets(singular: string, appRoot: string, files: readonly FeatureFile[], force: boolean | undefined): Promise<void> {
+  if (force) return
+  const existing: FeatureFile[] = []
+  for (const file of files) {
+    if (await fileExists(appRoot, file.path)) existing.push(file)
+  }
+  if (existing.length === 0) return
+
+  const one = existing.length === 1
+  // Dropping a flag is only a way out when every file in the way came from one.
+  const flags = existing.every((file) => file.flag) ? [...new Set(existing.flatMap((file) => (file.flag ? [file.flag] : [])))] : []
+  const pick = flags.length > 0 ? `Drop ${flags.join(' and ')}, pick` : 'Pick'
+  throw new CliError([
+    `Scaffolding ${singular} would overwrite ${one ? 'a file that already exists' : `${existing.length} files that already exist`}:`,
+    ...existing.map((file) => `  ${file.path}${file.flag ? ` (${file.flag})` : ''}`),
+    `Nothing was scaffolded. ${pick} another name, or pass --force to overwrite ${one ? 'it' : 'them'}.`,
+  ].join('\n'))
 }
 
 function announcePrototypeFeature(options: { created: string[]; overwritten: string[]; patchedFixture: string | undefined; singular: string; routeName: string; routeVar: string; withAuth: boolean }): void {
