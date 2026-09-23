@@ -1,7 +1,7 @@
 import { applyAccessorsInPlace } from './attributes'
 import { castInPlace } from './casts'
 import { DEFAULT_IN_LIST_SIZE, RAW_RESULTS } from './internal-keys'
-import { Model, type ModelQueryOptions, type ORMAdapter, type PlainObject, type WhereClause } from './Model'
+import type { Model, ModelQueryOptions, ORMAdapter, PlainObject, WhereClause } from './Model'
 import type { EagerLoadConstraint, ORMAdapterAdvanced } from './QueryBuilder'
 import type { RelationDefinition } from './relation-definitions'
 
@@ -21,56 +21,6 @@ export function applyRelatedReadTransforms(related: typeof Model, records: Plain
     if (casts) castInPlace(record, casts)
     if (accessors) applyAccessorsInPlace(record, accessors)
   }
-}
-
-export async function loadRelationData(
-  records: PlainObject[],
-  name: string,
-  related: typeof Model,
-  parentKey: string,
-  relatedKey: string,
-  isArray: boolean,
-  queryOptions?: ModelQueryOptions,
-  constraint?: EagerLoadConstraint,
-): Promise<boolean> {
-  const values = distinctKeys(records, parentKey)
-
-  if (values.length === 0) {
-    for (const record of records) {
-      record[name] = isArray ? [] : null
-    }
-    return false
-  }
-
-  const { records: relatedRecords, projected } = await loadRelatedRecords(
-    related,
-    values,
-    (chunk) => ({ [relatedKey]: chunk }),
-    queryOptions,
-    constraint,
-  )
-  const map = new Map<unknown, PlainObject | PlainObject[]>()
-
-  for (const item of relatedRecords) {
-    const key = item[relatedKey]
-    if (isArray) {
-      if (!map.has(key)) map.set(key, [])
-      ;(map.get(key) as PlainObject[]).push({ ...item })
-    } else {
-      map.set(key, { ...item })
-    }
-  }
-
-  for (const record of records) {
-    const key = record[parentKey]
-    if (key == null) {
-      record[name] = isArray ? [] : null
-      continue
-    }
-    record[name] = map.get(key) ?? (isArray ? [] : null)
-  }
-
-  return projected
 }
 
 export function maxInListSize(adapter: ORMAdapter): number {
@@ -166,8 +116,8 @@ export async function loadByChunks<T>(
 
 /**
  * The related rows behind one eager load, and whether the constraint narrowed
- * them with `select()`. The callback runs on the builder that is executed: it
- * is the caller's, and a probe would run it an extra time per load. A top-level
+ * them with `select()`. The callback runs on `whole`, which decides whether the
+ * keys may be split; chunked, it runs once more per executed chunk. A top-level
  * `orWhere()` in it widens the foreign-key filter, so a loader that groups on
  * something weaker (morphMany, on the morph id) filters the rows itself.
  */
@@ -215,7 +165,9 @@ export async function countByChunks(
 export async function resolveModelReference(
   reference: typeof Model | (() => typeof Model | Promise<typeof Model>),
 ): Promise<typeof Model> {
-  if (typeof reference === 'function' && 'prototype' in reference && reference.prototype instanceof Model) {
+  // Every Model class inherits a static `newQuery`; a thunk has none. Checked by
+  // shape so this module needs no value import of Model, which imports it.
+  if (typeof (reference as { newQuery?: unknown }).newQuery === 'function') {
     return reference as typeof Model
   }
 

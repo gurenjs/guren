@@ -4,10 +4,7 @@ import type {
   BelongsToRelationDefinition, BelongsToManyRelationDefinition,
   HasManyThroughRelationDefinition, MorphManyRelationDefinition, MorphToRelationDefinition,
 } from './relation-definitions'
-import {
-  loadHasMany, loadHasOne, loadBelongsTo, loadBelongsToMany,
-  loadHasManyThrough, loadMorphMany, loadMorphTo,
-} from './relation-loading'
+import * as relationLoading from './relation-loading'
 import { countByChunks, countOwnersPresent, distinctKeys, maxInListSize, relationCountPlan, resolveModelReference } from './relation-records'
 import { groupRelationPaths, loadRelationChildren } from './relation-tree'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
@@ -1446,7 +1443,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    return loadHasMany(records, definition, queryOptions, constraint)
+    return relationLoading.loadHasMany(records, definition, queryOptions, constraint)
   }
 
   protected static async loadHasOne(
@@ -1455,7 +1452,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    return loadHasOne(records, definition, queryOptions, constraint)
+    return relationLoading.loadHasOne(records, definition, queryOptions, constraint)
   }
 
   protected static async loadBelongsTo(
@@ -1464,7 +1461,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    return loadBelongsTo(records, definition, queryOptions, constraint)
+    return relationLoading.loadBelongsTo(records, definition, queryOptions, constraint)
   }
 
   protected static async loadBelongsToMany(
@@ -1473,7 +1470,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    return loadBelongsToMany(this, records, definition, queryOptions, constraint)
+    return relationLoading.loadBelongsToMany(this, records, definition, queryOptions, constraint)
   }
 
   protected static async loadHasManyThrough(
@@ -1482,7 +1479,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    return loadHasManyThrough(records, definition, queryOptions, constraint)
+    return relationLoading.loadHasManyThrough(records, definition, queryOptions, constraint)
   }
 
   protected static async loadMorphMany(
@@ -1491,7 +1488,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<boolean> {
-    return loadMorphMany(this, records, definition, queryOptions, constraint)
+    return relationLoading.loadMorphMany(this, records, definition, queryOptions, constraint)
   }
 
   protected static async loadMorphTo(
@@ -1500,7 +1497,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     queryOptions?: ModelQueryOptions,
     constraint?: EagerLoadConstraint,
   ): Promise<void> {
-    return loadMorphTo(Model.morphMap ?? {}, records, definition, queryOptions, constraint)
+    return relationLoading.loadMorphTo(Model.morphMap ?? {}, records, definition, queryOptions, constraint)
   }
 }
 

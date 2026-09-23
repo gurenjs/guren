@@ -8,8 +8,58 @@ import type {
 } from './relation-definitions'
 import {
   applyRelatedReadTransforms, distinctKeys, loadByChunks, loadRelatedRecords,
-  loadRelationData, maxInListSize, resolveModelReference,
+  maxInListSize, resolveModelReference,
 } from './relation-records'
+
+async function loadRelationData(
+  records: PlainObject[],
+  name: string,
+  related: typeof Model,
+  parentKey: string,
+  relatedKey: string,
+  isArray: boolean,
+  queryOptions?: ModelQueryOptions,
+  constraint?: EagerLoadConstraint,
+): Promise<boolean> {
+  const values = distinctKeys(records, parentKey)
+
+  if (values.length === 0) {
+    for (const record of records) {
+      record[name] = isArray ? [] : null
+    }
+    return false
+  }
+
+  const { records: relatedRecords, projected } = await loadRelatedRecords(
+    related,
+    values,
+    (chunk) => ({ [relatedKey]: chunk }),
+    queryOptions,
+    constraint,
+  )
+  const map = new Map<unknown, PlainObject | PlainObject[]>()
+
+  for (const item of relatedRecords) {
+    const key = item[relatedKey]
+    if (isArray) {
+      if (!map.has(key)) map.set(key, [])
+      ;(map.get(key) as PlainObject[]).push({ ...item })
+    } else {
+      map.set(key, { ...item })
+    }
+  }
+
+  for (const record of records) {
+    const key = record[parentKey]
+    if (key == null) {
+      record[name] = isArray ? [] : null
+      continue
+    }
+    record[name] = map.get(key) ?? (isArray ? [] : null)
+  }
+
+  return projected
+}
 
 export async function loadHasMany(
   records: Array<PlainObject>,
