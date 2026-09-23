@@ -1,15 +1,18 @@
 import type { CacheStore, TaggedCacheStore } from './types'
+import { pendingComputationsFor, type PendingComputations } from './pending-computations'
 
 /** Groups cache items by tags for bulk invalidation. */
 export class TaggedCache implements TaggedCacheStore {
   private readonly store: CacheStore
   private readonly tags: string[]
   private readonly tagSetPrefix: string
+  private readonly pending: PendingComputations
 
   constructor(store: CacheStore, tags: string[], tagSetPrefix = 'tag:') {
     this.store = store
     this.tags = tags
     this.tagSetPrefix = tagSetPrefix
+    this.pending = pendingComputationsFor(store)
   }
 
   private async getTagNamespace(): Promise<string> {
@@ -63,6 +66,7 @@ export class TaggedCache implements TaggedCacheStore {
 
   async set<T>(key: string, value: T, ttl?: number): Promise<void> {
     const taggedKey = await this.taggedKey(key)
+    this.pending.forget(taggedKey)
     await this.store.set(taggedKey, value, ttl)
     await this.trackKey(taggedKey)
   }
@@ -74,6 +78,7 @@ export class TaggedCache implements TaggedCacheStore {
 
   async delete(key: string): Promise<boolean> {
     const taggedKey = await this.taggedKey(key)
+    this.pending.forget(taggedKey)
     return this.store.delete(taggedKey)
   }
 
@@ -95,27 +100,29 @@ export class TaggedCache implements TaggedCacheStore {
   }
 
   async remember<T>(key: string, ttl: number, callback: () => Promise<T>): Promise<T> {
-    const cached = await this.get<T>(key)
-
-    if (cached !== null) {
-      return cached
-    }
-
-    const value = await callback()
-    await this.set(key, value, ttl)
-    return value
+    return this.rememberAt(await this.taggedKey(key), ttl, callback)
   }
 
   async rememberForever<T>(key: string, callback: () => Promise<T>): Promise<T> {
-    const cached = await this.get<T>(key)
+    return this.rememberAt(await this.taggedKey(key), undefined, callback)
+  }
 
-    if (cached !== null) {
-      return cached
-    }
+  // Writes under the namespace it read, not a fresh one: after a flush the
+  // callers sharing this computation were keyed on the old namespace.
+  private async rememberAt<T>(taggedKey: string, ttl: number | undefined, callback: () => Promise<T>): Promise<T> {
+    const cached = await this.store.get<T>(taggedKey)
+    if (cached !== null) return cached
 
-    const value = await callback()
-    await this.set(key, value)
-    return value
+    return this.pending.run(taggedKey, ttl, async () => {
+      // A computation that settled after this caller's read may have stored the value.
+      const stored = await this.store.get<T>(taggedKey)
+      if (stored !== null) return stored
+
+      const value = await callback()
+      await this.store.set(taggedKey, value, ttl)
+      await this.trackKey(taggedKey)
+      return value
+    })
   }
 
   async getMany<T>(keys: string[]): Promise<Map<string, T | null>> {
