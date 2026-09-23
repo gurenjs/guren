@@ -294,7 +294,7 @@ Guren derives the work from the plan, and the order does not depend on a model. 
 | `http` | Validators, controllers, routes, resources, policies | `codegen`, `guren check`, the tests passing |
 | `pages` | Page components | `codegen`, `typecheck`, `guren check` |
 
-Work shared by several entities goes to a `task/foundation` task, and a step with nothing to do is left out. Step ids read `task/entity/model.comment/http`. A `commands`, `data`, `http` or `pages` step whose elements span more than five files is split into parts with ids such as `task/entity/model.comment/http/1` and `task/entity/model.comment/http/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`. The loop is: ask for the next step, implement it, verify it, commit.
+Work shared by several entities goes to a `task/foundation` task. Step ids read `task/entity/model.comment/http`. A `commands`, `data`, `http` or `pages` step whose elements span more than five files is split into parts with ids such as `task/entity/model.comment/http/1` and `task/entity/model.comment/http/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`. The loop is: ask for the next step, implement it, verify it, commit.
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -419,7 +419,7 @@ Routes
       Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts.
 ```
 
-The ones verified only through a behaviour of `http` (its controller and policy, and `model.post` of the `data` step) fell back to the state `plan:status` reads for them, since a step whose files changed carries no reach (see Reading progress).
+The elements verified only through a behaviour of `http` (its controller and policy, and `model.post` of the `data` step) fell back to the state `plan:status` reads for them, since a step whose files changed carries no reach (see Reading progress).
 
 `plan:verify --step` re-checks such steps. Once the given step verifies, the same run re-checks the earlier steps whose files changed, in task order, stopping at the first one that runs commands and does not verify. Each outcome is recorded (a `failed` one names what broke) and listed under "Re-checked"; `plan:next` then returns the earliest step left unverified, usually the one that failed. A re-check that comes out `blocked` is left for a later run. While the given step does not verify, the earlier records are left alone and listed as left for a later run, since the commands the steps share would fail them too.
 
@@ -515,7 +515,7 @@ A verified step does not lift an element none of whose planned properties matche
 
 A planned `body`, `params` or `query` validator counts as matched when the action validates with it or a route holds it as a contract schema. An action that validates with something else, a schema built in place (`this.validateBody(PostSchema.partial())`) included, or through a helper, keeps the action at `present` with a note instead of drifting it.
 
-A validator's `fields` are read off the exported zod schema. Every key is checked; a field's type, whether it is required, and the rules `min`, `max`, `email`, `url` and `uuid` are read only when the field is built from plain pieces (a primitive or `z.coerce.*`, `.optional()`, `.nullable()`, `.default()`, and length, bound and format checks). A bare coerced string, number, boolean or date reads `required` as `unknown`. A transform, a refinement, a union or any other wrapper on the way leaves them `unknown`; `--json` gives the reason on the property. A resource's `fields` are read from the payload type `guren codegen` reads. A key the schema or payload lacks, or a type, `required` or rule that differs, makes the element `drifted`, and `plan:verify` reports its step `incomplete`.
+A validator's `fields` are read off the exported zod schema. Every key is checked; a field's type, whether it is required, and the rules `min`, `max`, `email`, `url` and `uuid` are read only when the field is built from plain pieces (a primitive or `z.coerce.*`, `.optional()`, `.nullable()`, `.default()`, and length, bound and format checks). For a coerced string, number, boolean or date with no `.optional()`, `.nullable()` or `.default()`, `required` reads `unknown` whatever checks it carries. A transform, a refinement, a union or any other wrapper on the way leaves the type, `required` and rules `unknown`; `--json` gives the reason on the property. A resource's `fields` are read from the payload type `guren codegen` reads. A key the schema or payload lacks, or a type, `required` or rule that differs, makes the element `drifted`, and `plan:verify` reports its step `incomplete`.
 
 The report lists every planned property left `unknown` under "Planned, not checkable": one no scanner reads, one read but not decidable (a type compared only as text, a bound looser than planned), and an `alter`'s match that already held at approval. A gap in what Guren can judge stays visible rather than passing as green:
 
