@@ -973,6 +973,11 @@ directly:
 bunx guren make:migration --dialect postgresql
 ```
 
+The command runs the drizzle-kit your app installs, found in its `node_modules`
+or a parent's (a hoisted workspace install). With none installed it stops and
+asks for `bun install`; it never fetches a copy from npm, whose version may
+take other flags.
+
 > [!NOTE]
 > Once a migration has shipped to any environment, treat it as immutable. Create a follow-up migration to correct mistakes.
 

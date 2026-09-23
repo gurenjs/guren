@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { findFirstExisting } from './discovery'
+import { bunExecutable } from './subprocess'
 import { runCommand, slugifyProse } from './utils'
 
 const DEFAULT_SCHEMA = 'db/schema.ts'
@@ -107,9 +108,7 @@ export type AppDrizzleKit = { bin: string; config: string } | { missing: string 
  * The drizzle-kit `root` installs, found by Node's lookup (each `node_modules` from `root` up) and
  * never by `bun x`, which falls back to whatever npm serves: a different major with other flags.
  */
-export async function resolveAppDrizzleKit(root: string): Promise<AppDrizzleKit> {
-  const config = await resolveDrizzleConfig(root)
-  if (!config) return { missing: 'the application has no drizzle config (drizzle.config.ts)' }
+export async function findAppDrizzleKitBin(root: string): Promise<{ bin: string } | { missing: string }> {
   for (let dir = resolve(root); ; dir = dirname(dir)) {
     const manifest = resolve(dir, 'node_modules', 'drizzle-kit', 'package.json')
     const text = await readFile(manifest, 'utf8').catch(() => undefined)
@@ -121,10 +120,18 @@ export async function resolveAppDrizzleKit(root: string): Promise<AppDrizzleKit>
         return { missing: `${manifest} does not parse as JSON` }
       }
       const bin = typeof declared?.bin === 'string' ? declared.bin : declared?.bin?.['drizzle-kit']
-      if (bin) return { bin: resolve(dirname(manifest), bin), config }
+      if (bin) return { bin: resolve(dirname(manifest), bin) }
     }
     if (dirname(dir) === dir) return { missing: 'drizzle-kit is not installed in the application' }
   }
+}
+
+/** {@link findAppDrizzleKitBin}, for a caller that hands drizzle-kit the app's config. */
+export async function resolveAppDrizzleKit(root: string): Promise<AppDrizzleKit> {
+  const config = await resolveDrizzleConfig(root)
+  if (!config) return { missing: 'the application has no drizzle config (drizzle.config.ts)' }
+  const kit = await findAppDrizzleKitBin(root)
+  return 'missing' in kit ? kit : { bin: kit.bin, config }
 }
 
 /**
@@ -258,7 +265,7 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
   // beside `--config`, so `--name` rides on either branch. `breakpoints: false` flags cannot carry.
   const configured = configPath ? await readDrizzleConfig(configPath) : {}
 
-  const args = ['x', 'drizzle-kit', 'generate']
+  const args = ['generate']
 
   // Ahead of the branch: drizzle-kit whitelists `--name` beside `--config`.
   if (name) {
@@ -323,8 +330,11 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
   const migrationsFolder = outDir ? resolve(process.cwd(), outDir) : undefined
   const before = migrationsFolder ? new Set(listMigrationNames(migrationsFolder)) : new Set<string>()
 
-  const bunExecutable = process.execPath || 'bun'
-  await runCommand(bunExecutable, args)
+  const kit = await findAppDrizzleKitBin(process.cwd())
+  if ('missing' in kit) {
+    throw new Error(`Cannot generate a migration: ${kit.missing}. Run \`bun install\` (or \`bun add -d drizzle-kit\`), then try again.`)
+  }
+  await runCommand(bunExecutable(), [kit.bin, ...args])
 
   if (!migrationsFolder) {
     return { created: [], droppedConfigFields, configUnreadable }
@@ -348,7 +358,7 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
  * which is what a caller's "run db:make" next step hangs on.
  */
 export async function generateSchemaMigration(name: string, subject: string): Promise<boolean> {
-  if (!existsSync(resolve(process.cwd(), 'node_modules', 'drizzle-kit'))) {
+  if ('missing' in (await findAppDrizzleKitBin(process.cwd()))) {
     consola.info(`drizzle-kit is not installed — run \`bun run db:make\` after \`bun install\` to generate the ${subject} migration.`)
     return false
   }

@@ -195,6 +195,8 @@ bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
 bunx guren make:migration --dialect postgresql --schema ./db/schema.ts --out ./db/migrations
 ```
 
+コマンドが実行するのは、アプリがインストールした drizzle-kit です。アプリの `node_modules` を探し、無ければ親ディレクトリの `node_modules`(ワークスペースで巻き上げられたもの)を探します。どこにも無い場合は `bun install` を求めて停止し、npm から取得することはしません。npm の版はフラグが異なる場合があるためです。
+
 なお設定ファイルの `schema` を配列で宣言している場合、`--schema` は値を 1 つしか取らないため上書き経路では引き継げません。この場合は Guren がエラーで停止します(黙って一部のテーブルだけを生成しないためです)。`--schema` に 1 つのパスか glob を渡すか、上書きをやめて設定ファイルをそのまま使ってください。
 
 空のファイルが欲しい場合は手動で作成しても構いません。マイグレーションは単なる SQL です。
