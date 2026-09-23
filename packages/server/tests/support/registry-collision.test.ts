@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { Event, createEventManager } from '../../src/events'
+import { Event, Listener, createEventManager } from '../../src/events'
 import {
   DatabaseChannel,
   Notification,
@@ -149,6 +149,24 @@ describe('event classes', () => {
 
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('registered as "OrderPlaced" (OrderPlaced and OrderShipped)')
+  })
+
+  test('a Listener class for a different same-named event warns through listen()', async () => {
+    const First = orderPlacedEvent()
+    const Second = orderPlacedEvent()
+    class NotifyWarehouse extends Listener<InstanceType<typeof Second>> {
+      static override event = Second
+      handle(): void {}
+    }
+    const events = createEventManager()
+
+    const warnings = await captureWarnings(() => {
+      events.on(First, () => {})
+      events.listen(NotifyWarehouse)
+    })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Two different event classes are registered as "OrderPlaced" (both named OrderPlaced)')
   })
 
   test('two managers keep their own classes', async () => {

@@ -7,16 +7,13 @@ interface NamedClass {
   readonly name: string
 }
 
-const ADVICE: Record<ClassRegistryKind, (name: string) => string> = {
-  job: (name) =>
-    `A queued "${name}" message runs whichever registered last. ` +
+const ADVICE: Record<ClassRegistryKind, string> = {
+  job: 'A queued message runs whichever registered last. ' +
     'Give one a different class name or its own static jobName.',
-  event: (name) =>
-    `Listeners are keyed by "${name}", so each class's listeners also run for the other's emits, ` +
+  event: "Listeners are keyed by the name, so each class's listeners also run for the other's emits, " +
     'and a queued emit is rebuilt as whichever registered last. ' +
     'Give one a different class name or its own static eventName.',
-  notification: (name) =>
-    `A queued "${name}" notification is rebuilt as whichever registered last. ` +
+  notification: 'A queued notification is rebuilt as whichever registered last. ' +
     'Give one a different class name or override its type getter.',
 }
 
@@ -43,6 +40,6 @@ export function reportRegistryCollision(
   warnOnce(
     `registry-collision:${kind}:${name}`,
     `[guren] Two different ${kind} classes are registered as "${name}" (${classes}). ` +
-      `${ADVICE[kind](name)} A future major will throw here instead.`,
+      `${ADVICE[kind]} A future major will throw here instead.`,
   )
 }
