@@ -128,9 +128,10 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const steps: PlanStepVerification[] = []
   const reverified: string[] = []
   const recheckPending: string[] = []
-  // Commands are shared across one run's steps, so the drifted ones run only once every other step
-  // verified: beside one that failed, they would inherit its failure and lose a record that stood.
-  /** Runs and records one step; true where it ran commands a later re-check shares and did not verify. */
+  /**
+   * Runs and records one step; true where it ran commands and did not verify. Commands are shared
+   * across one run's steps, so a drifted step re-checked beside such a one would inherit its failure.
+   */
   const run = async (stepId: string): Promise<boolean> => {
     const record = records[stepId]
     const recheck = record !== undefined && drifted(stepId)
@@ -202,7 +203,7 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   }
   if (report.reverified.length > 0) lines.push(`Re-checked, since files they were verified at have changed: ${report.reverified.join(', ')}`, '')
   if (report.recheckPending.length > 0) {
-    lines.push(`Left verified for a later run to re-check, since a step they share commands with did not verify, or the re-check was blocked or found a behaviour no test file carries: ${report.recheckPending.join(', ')}`, '')
+    lines.push(`Left verified for a later run to re-check: a step they share commands with did not verify, the re-check was blocked, or a static re-check failed: ${report.recheckPending.join(', ')}`, '')
   }
   for (const stepId of report.skipped) lines.push(`${stepId}: verified before, and nothing it fingerprinted has changed`)
   if (report.skipped.length > 0) lines.push('')

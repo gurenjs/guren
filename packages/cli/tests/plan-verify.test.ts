@@ -1099,7 +1099,7 @@ describe('formatPlanVerify', () => {
     const text = formatPlanVerify(report([DATA], [HTTP]))
 
     expect(text).toContain(`Re-checked, since files they were verified at have changed: ${DATA}`)
-    expect(text).toContain(`Left verified for a later run to re-check, since a step they share commands with did not verify, or the re-check was blocked or found a behaviour no test file carries: ${HTTP}`)
+    expect(text).toContain(`Left verified for a later run to re-check: a step they share commands with did not verify, the re-check was blocked, or a static re-check failed: ${HTTP}`)
     expect(formatPlanVerify(report([], []))).not.toContain('Re-checked')
     expect(formatPlanVerify(report([], []))).not.toContain('Left verified')
   })

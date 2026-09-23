@@ -291,6 +291,22 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
     expect(state.steps[DELETION_HTTP]!.outcome).toBe('verified')
   }, 60_000)
 
+  test('should go on re-checking past a failed static re-check, which runs nothing another step shares', async () => {
+    const app = await afterDeletionIsWritten('static-then-data', 'store')
+    const DATA = 'task/entity/model.comment/data'
+    await writePlanStepRecord(app, 'comments', COMMENTS_TESTS, doneRecord({ 'tests/comments.test.ts': sha256(COMMENT_TESTS) }))
+    await writePlanStepRecord(app, 'comments', DATA, doneRecord({ 'db/schema.ts': sha256('the schema before') }))
+    await writeFile(join(app, 'tests/comments.test.ts'), COMMENT_TESTS.replace('[AC-comments-2] ', ''), 'utf8')
+
+    const report = verifyAll(app)
+
+    expect(outcome(report, COMMENTS_TESTS)).toBe('failed')
+    expect(report.recheckPending).toContain(COMMENTS_TESTS)
+    expect(report.reverified).toContain(DATA)
+    const state = JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, { outcome: string }> }
+    expect(state.steps[COMMENTS_TESTS]!.outcome).toBe('verified')
+  }, 60_000)
+
   test('should keep an earlier step drifted and verified when its re-check comes out blocked', async () => {
     const app = await afterDeletionIsWritten('recheck-blocked', 'store')
     const DATA = 'task/entity/model.comment/data'

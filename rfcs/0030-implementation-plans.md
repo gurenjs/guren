@@ -1561,8 +1561,9 @@ migration).** Two defects the loop hit once a plan had more than one task.
   leaves the drifted records as they are, and the report lists them as
   `recheckPending`; so does a re-check that comes out `blocked`, which is the
   environment's and never replaces a drifted record. The re-checks also stop at
-  the first that does not verify, leaving the rest pending, since two drifted
-  steps share commands as well. A whole-plan run keeps the same order: the
+  the first that runs commands and does not verify, leaving the rest pending,
+  since two drifted steps share commands as well; a static re-check (below)
+  runs nothing, so its failure does not stop the rest. A whole-plan run keeps the same order: the
   steps that did not drift run first, and the drifted ones are re-checked only
   once all of those verified. A drifted `--step` target is its own re-check:
   its failure is recorded like any step's, and only a `blocked` result or a
@@ -1585,7 +1586,8 @@ migration).** Two defects the loop hit once a plan had more than one task.
   the give-up rules still judge the marked step's record alone. A verified
   step whose changes broke an earlier one lets the stop through, naming the
   earlier step, which `plan:next` returns next; so does one whose run could
-  not re-check an earlier step, naming it and why.
+  not re-check an earlier step, naming it and why, or left one for the next
+  run behind a re-check that did not verify.
 - `recordStillHolds()` stays the one rule for a step being done. `plan:next`
   still runs nothing: a drifted step it returns carries the changed files as
   `drifted`, and the text says to re-check it with `plan:verify --step` rather

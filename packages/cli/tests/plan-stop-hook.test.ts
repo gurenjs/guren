@@ -275,13 +275,17 @@ describe('planStopHookFindings', () => {
     const app = await createApp('recheck-blocked', { active: active({ continuations: 1 }) })
     const blocked = record({ outcome: 'blocked', commands: [{ command: 'db:migrate', label: 'bun run db:migrate', status: 'blocked', durationMs: 3, reason: 'the database is unreachable', findings: [] }], acceptance: [], incomplete: [] })
     const verified = report(HTTP, record({ outcome: 'verified', incomplete: [] }))
-    const run = { ...verified, steps: [...verified.steps, { stepId: DATA, taskId: 'task/entity/model.comment', record: blocked }], recheckPending: [DATA] }
+    // TESTS never ran: the blocked re-check before it stopped the rest.
+    const run = { ...verified, steps: [...verified.steps, { stepId: DATA, taskId: 'task/entity/model.comment', record: blocked }], recheckPending: [DATA, TESTS] }
 
     const verdict = await planStopHookFindings(app, { stopHookActive: true }, { verify: async () => run })
 
     expect(verdict).toEqual({
       block: false,
-      message: `plan:verify on stop (comments.plan.json, ${HTTP}): ${DATA}, whose files changed since it verified, could not be re-checked (db:migrate: the database is unreachable); its record stays for the next run.`,
+      message: [
+        `plan:verify on stop (comments.plan.json, ${HTTP}): ${DATA}, whose files changed since it verified, could not be re-checked (db:migrate: the database is unreachable); its record stays for the next run.`,
+        `plan:verify on stop (comments.plan.json, ${HTTP}): ${TESTS}, whose files changed since it verified, is left for the next run to re-check, since an earlier re-check did not verify.`,
+      ].join('\n'),
     })
     expect((await readState(app)).active).toEqual(active({ continuations: 1 }))
   })
