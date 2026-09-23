@@ -347,6 +347,80 @@ describe('create-guren-app CLI', () => {
     }
   })
 
+  it('lists add auth and add resource under Add features for the default blueprint', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-default-features-')
+    try {
+      logMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: join(workspace.dir, 'default-app'),
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      expect(logged(logMock, 'bunx guren add auth')).toBe(true)
+      expect(logged(logMock, 'bunx guren add resource posts')).toBe(true)
+      expect(logged(logMock, 'make:controller')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // `guren add auth` and `guren add resource` both refuse an API-only app.
+  it('lists only commands an API-only app accepts under Add features for the api blueprint', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-api-features-')
+    try {
+      logMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: join(workspace.dir, 'api-app'),
+          force: false,
+          auth: false,
+          blueprint: 'api',
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      expect(logged(logMock, 'guren add auth')).toBe(false)
+      expect(logged(logMock, 'guren add resource')).toBe(false)
+      expect(logged(logMock, 'bunx guren make:controller Post')).toBe(true)
+      expect(logged(logMock, 'routes/api.ts')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores --auth for the api blueprint and names the bearer-token alternative', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-api-auth-')
+    try {
+      infoMock.mockClear()
+      warnMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: join(workspace.dir, 'api-auth-app'),
+          force: false,
+          auth: true,
+          blueprint: 'api',
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      expect(logged(infoMock, 'ignoring --auth')).toBe(true)
+      expect(logged(infoMock, 'createBearerTokenMiddleware')).toBe(true)
+      // Every message for an auth step that did not run names `guren add auth`,
+      // so its absence means the step was never planned.
+      expect(logged(warnMock, 'guren add auth')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('rejects invalid rendering modes', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-invalid-')
     try {
