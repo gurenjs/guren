@@ -1,0 +1,5 @@
+---
+'@guren/cli': patch
+---
+
+`plan:close` and `plan:next` send an element no behaviour can reach (a column, a command, a job, event, listener, mail or notification) to `plan:waive` alone, and no longer suggest adding a behaviour for it; the unreached note `plan:status` prints says the same. A model `alter` that adds a relationship now completes on it: the relationship's type and target are read under the same keys before and after the work, so the reading taken at approval counts. An element lifted to `verified`, `drifted` or `waived` no longer carries the reason it was unjudged, and a match with no reading at approval no longer tells you to run `plan:approve`, which would record it as already held; that advice now appears on a planned property that still differs, where a re-approval before the work helps.

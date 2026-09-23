@@ -1466,7 +1466,10 @@ each rule was read.
   its record stands for `plan:next` and the `Stop` hook, because an element no
   behaviour reaches is a gap in the plan that no implementation closes. Such an
   element carries a note ending in "add a behaviour that reaches it, or waive
-  it". The overlay records why it did not lift an element (`hold`: below its
+  it", or, where no behaviour could reach it (`behaviourCanReach()`: a column,
+  a command, a side effect), in "no behaviour can reach it, so waive it". An
+  element lifted to `verified`, `drifted` or `waived` keeps no `reason`, which
+  says why the readers could not complete it and is answered there. The overlay records why it did not lift an element (`hold`: below its
   completion state, nothing fingerprinted, a file changed since, or no
   behaviour reaches it), and `plan:close` prints each element it refuses with
   what holds it, suggesting `plan:verify` only where a run can lift it.
@@ -1527,8 +1530,13 @@ matched when the plan was approved says nothing about the change. What shipped
   after the baseline was removed, or an unrelated plan sharing the file.
 - Approving a hash already approved writes nothing unless the entry lacks a
   reading of a current `alter` property; then it adds those, and replaces none.
-  That is the remedy the `unjudged` reason names for an approval recorded
-  before readings existed. A draft has no approval, so its `alter`s count no
+  That helps only before the work: a planned property that still differs and
+  has no reading gets a note naming `plan:approve`. A match with no reading
+  does not, since a reading taken then records it as one that already held;
+  the `unjudged` reason sends it to a behaviour that reaches it.
+- A model's relationship is read as two properties, its type and its target,
+  under those keys whether it is declared or not, so the reading taken before
+  the work is the one the match after it is set against. A draft has no approval, so its `alter`s count no
   match; its verification records start over at approval anyway.
 - A reading is as protected as the approval that carries it: whoever can edit
   one can forge the other, and both are committed and reviewed. An older CLI
@@ -1702,11 +1710,13 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
   behaviour that reaches it. A differing
   field makes the element `drifted`, which `plan:verify` reports as
   `incomplete`; unlike an action's validator, it is not held at `present`. An
+  `alter` whose readable properties all differ reads `planned` instead, since
+  nothing of the change is in the code yet. An
   `add` resource with fields is no longer `unjudged` once its payload is read.
   Readings recorded at approval are keyed on the property name, so an `alter`
-  approved before this change has no reading of the new properties: its matches
-  read `unrecorded` until `plan:approve` records them, as for any approval that
-  predates a reader.
+  approved before this change has no reading of the new properties: a
+  re-approval before the work records them, as for any approval that predates
+  a reader, and a match with no reading from before the work does not count.
 - Measured on `examples/blog` (9 validators, 1 resource) and `examples/api` (8
   validators, 2 resources) against hand-written plans that state the code as it
   is (`packages/cli/tests/fixtures/plan/fields/{blog,api}.plan.json`, run with
@@ -2063,7 +2073,12 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   no step verifies it, nothing of it can be fingerprinted, or none of its
   planned properties matched beyond an existence and no step's behaviour
   reaches it. The last is predicted before any run, so a reader is not sent
-  to `plan:verify` only to find the element held as unreached.
+  to `plan:verify` only to find the element held as unreached. Adding a
+  behaviour and approving again is offered beside the waiver only for an
+  element some behaviour could reach (`behaviourCanReach()`, the reach walk
+  seeded with every element of a section a carrying reference names); a
+  column, a command, a job, event, listener, mail or notification is sent to
+  `plan:waive` alone.
   `plan:next`, once every step is verified, lists the same lines
   (`plan/close-remedy.ts`), so the two commands give one piece of advice.
 - "Archives the plan" is the doc node. Under the `file` store nothing is moved
