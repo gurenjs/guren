@@ -1,6 +1,7 @@
 /**
- * What moves an element `plan:close` refuses (RFC 0030 §7), which `plan:close` prints and
- * `plan:next` lists once every step is verified. Pure: the steps come from the task derivation.
+ * The one rule for why an element `plan:close` refuses is held and what moves it (RFC 0030 §7),
+ * which `plan:close` prints and `plan:next` lists once every step is verified. Pure: the steps
+ * come from the task derivation.
  */
 
 import type { Plan, PlanDraft } from './schema'

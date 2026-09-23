@@ -953,8 +953,9 @@ bunx guren make:migration --name add_posts_table
 bun run db:migrate
 ```
 
-The command reads `drizzle.config.ts` (or `.mts`/`.js`/`.mjs`) for the schema
-path, output directory, and dialect. You can override the paths:
+The command reads the first of `drizzle.config.ts`, `.mts`, `.js`, `.mjs` and
+`.json` that exists, in that order, for the schema path, output directory, and
+dialect. You can override the paths:
 
 ```bash
 bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
@@ -972,6 +973,11 @@ directly:
 ```bash
 bunx guren make:migration --dialect postgresql
 ```
+
+The command runs the drizzle-kit your app installs, found in its `node_modules`
+or a parent's (a hoisted workspace install). With none installed it stops and
+asks for `bun install`; it never fetches a copy from npm, whose version may
+take other flags.
 
 > [!NOTE]
 > Once a migration has shipped to any environment, treat it as immutable. Create a follow-up migration to correct mistakes.

@@ -295,22 +295,3 @@ export function recordDrift(record: PlanStepRecord, digest: string, hashes: Read
 export function recordStands(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>): boolean {
   return record.outcome === 'verified' && record.planDigest === digest && changedFiles(record, hashes).length === 0
 }
-
-/**
- * What holds an element short of `verified` or `waived`, and what would move it, for the
- * commands that refuse or report on such an element (`plan:close`, `plan:next`). Suggests
- * `plan:verify` only where running it can lift the element.
- */
-export function whatHoldsElement(element: PlanElementStatus<PlanElementState>): string {
-  const hold = element.hold
-  const bare = (text: string): string => text.replace(/\.$/u, '')
-  if (hold?.kind === 'unreached') return bare(hold.note)
-  // An element below its completion state is held by what the readers said, not by the run.
-  const said = element.notes.filter((note) => note !== hold?.note).at(-1)
-  const detail = hold && hold.kind !== 'incomplete' ? hold.note : (element.reason ?? said)
-  const lead = detail ? `${bare(detail)}; ` : ''
-  if (element.state === 'blocked') return `${lead}fix what keeps it from being read, or waive it`
-  if (hold?.kind === 'unfingerprinted') return `${lead}plan:verify cannot lift what it cannot fingerprint, so waive it`
-  if (hold?.kind === 'expired' || (hold === undefined && awaitsVerification(element))) return `${lead}run guren plan:verify`
-  return `${lead}implement it, or waive it`
-}
