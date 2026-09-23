@@ -7,6 +7,7 @@ import type { AppManifest } from '@guren/core'
 import { introspectApp, type Introspection, type IntrospectionFailure } from '../src/introspect'
 import {
   assertWorkspaceBuilt,
+  CLI_BIN_PATH,
   createTempRoot,
   linkWorkspaceCore,
   runCliBinCaptured,
@@ -87,6 +88,37 @@ const fakeCore = (application: string): Record<string, string> => ({
   'node_modules/@guren/core/package.json': JSON.stringify({ name: '@guren/core', type: 'module', exports: { '.': './index.js' } }),
   'node_modules/@guren/core/index.js': application,
 })
+
+/** A provider that starts a `sleep` helper, records its pid, and then never finishes (or does, with `hang` false). */
+const spawningApp = (hang: boolean): string => `import { writeFileSync } from 'node:fs'
+import { createApp, ServiceProvider } from '@guren/core'
+
+class SpawningProvider extends ServiceProvider {
+  register(): Promise<void> {
+    const helper = Bun.spawn(['sleep', '30'])
+    writeFileSync('helper.pid', String(helper.pid))
+    return ${hang ? 'new Promise(() => {})' : 'Promise.resolve()'}
+  }
+}
+
+export default createApp({ providers: [SpawningProvider] })
+`
+
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitFor(check: () => boolean, ms = 10_000): Promise<void> {
+  for (const started = Date.now(); !check(); ) {
+    if (Date.now() - started > ms) throw new Error('timed out waiting')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
 
 /** The scaffold's entry shapes, read from the templates so a change there reaches this test. */
 async function templateFile(relativePath: string): Promise<string> {
@@ -271,7 +303,7 @@ export function registerWebRoutes(router: Router): void {
       'app/Http/Controllers/Hang.ts': 'await new Promise(() => {})\nexport {}\n',
     })
 
-    const message = expectFailure(await introspectApp(dir, { timeoutMs: 2000 }), 'timeout')
+    const message = expectFailure(await introspectApp(dir, { timeoutMs: 4000 }), 'timeout')
 
     expect(message).toContain('app/Http/Controllers/Hang.ts')
   }, 30_000)
@@ -401,27 +433,11 @@ export default createApp({ routes: registerAttachmentRoutes })
   }, 30_000)
 
   test('reports timeout when a provider never finishes registering, and kills what it spawned', async () => {
-    const dir = await app('timeout', {
-      'src/app.ts': `import { writeFileSync } from 'node:fs'
-import { createApp, ServiceProvider } from '@guren/core'
+    const dir = await app('timeout', { 'src/app.ts': spawningApp(true) })
 
-class HangingProvider extends ServiceProvider {
-  register(): Promise<void> {
-    const helper = Bun.spawn(['sleep', '30'])
-    writeFileSync('helper.pid', String(helper.pid))
-    setInterval(() => {}, 1000)
-    return new Promise(() => {})
-  }
-}
-
-export default createApp({ providers: [HangingProvider] })
-`,
-    })
-
-    expect(expectFailure(await introspectApp(dir, { timeoutMs: 1500 }), 'timeout')).toContain('1500ms')
+    expect(expectFailure(await introspectApp(dir, { timeoutMs: 4000 }), 'timeout')).toContain('4000ms')
     const pid = Number(await readFile(join(dir, 'helper.pid'), 'utf8'))
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(() => process.kill(pid, 0)).toThrow()
+    await waitFor(() => !isAlive(pid))
   }, 30_000)
 
   test.each([
@@ -479,6 +495,30 @@ export default createApp({ providers: [HangingProvider] })
     })
 
     expect(expectFailure(await introspectApp(dir), 'crashed')).toContain('Neither @guren/core nor @guren/server')
+  }, 30_000)
+})
+
+describe('what a register() spawned', () => {
+  test('is gone after a run that finished', async () => {
+    const dir = await app('spawn-finished', { 'src/app.ts': spawningApp(false) })
+
+    expect((await introspectApp(dir)).status).toBe('ok')
+    const pid = Number(await readFile(join(dir, 'helper.pid'), 'utf8'))
+
+    await waitFor(() => !isAlive(pid))
+  }, 30_000)
+
+  test.each(['SIGINT', 'SIGKILL'] as const)('is gone when the CLI dies by %s', async (signal) => {
+    const dir = await app(`spawn-${signal}`, { 'src/app.ts': spawningApp(true) })
+    const cli = Bun.spawn(['bun', CLI_BIN_PATH, 'introspect', '--timeout', '60'], { cwd: dir, stdout: 'ignore', stderr: 'ignore' })
+    const pidFile = join(dir, 'helper.pid')
+    await waitFor(() => existsSync(pidFile))
+    const pid = Number(await readFile(pidFile, 'utf8'))
+
+    cli.kill(signal)
+    await cli.exited
+
+    await waitFor(() => !isAlive(pid))
   }, 30_000)
 })
 

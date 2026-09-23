@@ -243,11 +243,12 @@ Routes wrapped in named middleware (for example `router.middleware('auth').group
 source text. It starts a child process with `GUREN_INTROSPECT=1`, imports
 `src/main.ts`, registers every provider and every route, and stops there.
 Routes are not mounted, and provider `boot()` methods, the `createApp({ boot })`
-callback and `listen()` never run, so no port is bound and the scaffolded
-`DatabaseProvider`, which connects in `boot()`, does not connect. Code that
-connects at module scope or in `register()` still runs. The child loads `.env`
-from the app root, as `guren dev` does; with `--app`, a variable already set in
-your shell (including one Bun loaded from the current directory's `.env`) wins
+callback and `listen()` never run, so no port is bound and the scaffold's
+`defineDatabaseConfig()` definition, which connects in its `boot`, does not
+connect. Code that connects at module scope or in `register()` still runs. The
+child loads `.env` from the app root, as `guren dev` does, and a variable set in
+your shell wins over it. With `--app`, the current directory's `.env` files are
+loaded into the CLI as well and reach the child the same way, so they also win
 over the app's.
 
 ```bash

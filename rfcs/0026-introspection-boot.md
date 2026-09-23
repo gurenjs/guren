@@ -377,14 +377,21 @@ every check that asks: the same shape as `check.ts`'s `loadRouteGraph()`
 > A scaffolded `src/main.ts` boots at import, and an older server would ignore
 > the flag and run the real boot. `guren introspect` also takes `--app <dir>`
 > and `--timeout <s>`. The child runs in its own process group, killed on
-> timeout and once it exits, so a helper a `register()` started does not outlive
-> the run. It resolves `@guren/core` the way the entry does (ESM conditions), and
-> a framework module that will not resolve or load is `crashed`, never a pass.
+> timeout, once it exits, and on SIGINT/SIGTERM/SIGHUP to the CLI. The CLI holds
+> the child's stdin open, and the child kills its group when that pipe ends, so
+> a helper a `register()` started outlives no death of the CLI, SIGKILL included.
+> The child resolves `@guren/core`, then `@guren/server`, the way the entry does
+> (ESM conditions): a module that resolves but will not load is `crashed`, and so
+> is neither resolving; an old one is `old-server`. Whether a `listen()` call came
+> from the entry or from a scanned controller file is recorded when it is made,
+> by wrapping `Application.prototype.listen` on that module, not inferred from
+> when its rejection arrives: only the entry's `listen()` refusal is `crashed`.
 > When no provider binds `attachments`, the child reads core's
 > `describeActiveAttachmentEngine()`, the documented fallback the server cannot
 > reach. On failure `--json` prints `{ status, reason, message }`
-> and the command exits 1. An unhandled rejection other than the `listen()`
-> refusal becomes an `unhandled-rejection` warning on an otherwise `ok` manifest.
+> and the command exits 1. An unhandled rejection other than the entry's
+> `listen()` refusal becomes an `unhandled-rejection` warning on an otherwise
+> `ok` manifest.
 
 ### 5. Who reads the manifest, who stays static
 

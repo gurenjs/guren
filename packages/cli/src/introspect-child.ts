@@ -10,7 +10,8 @@ import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AppManifest, AttachmentsDescription } from '@guren/server'
 
-import { classNameFromPath, discoverControllerFiles, excludeBarrelFiles, toPosixRelative } from './discovery'
+import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
+import { pickDeclaringFile } from './introspect-controller-file'
 import type { Introspection, IntrospectionFailure } from './introspect'
 import { bootstrapApplication, resolveMainEntry } from './runtime'
 
@@ -32,7 +33,7 @@ interface IntrospectableApp {
 
 /** What the child needs of the `@guren/core` / `@guren/server` the app resolves. */
 interface FrameworkModule {
-  Application?: { prototype?: IntrospectableApp }
+  Application?: { prototype?: IntrospectableApp & { listen?: (...args: unknown[]) => unknown } }
   describeActiveAttachmentEngine?: () => AttachmentsDescription
 }
 
@@ -41,8 +42,25 @@ const outFile = process.argv[2]
 const scanFile = `${outFile}.scanning`
 /** True until the controller scan: only the entry's `listen()` refusal fails the run. */
 let loadingApp = true
+/** Where each `listen()` call happened, recorded when it is made rather than when its rejection lands. */
+const listenCalls: Array<'app' | 'scan'> = []
 
-/** A timer tick: `unhandledRejection` is delivered only after one. */
+/**
+ * Records the phase of every `listen()` on the framework's `Application`, the
+ * same class object the entry's app is built from. The refusal it then throws
+ * is judged here, whenever its unhandled rejection is delivered.
+ */
+function watchListen(framework: FrameworkModule): void {
+  const prototype = framework.Application?.prototype
+  const listen = prototype?.listen
+  if (!prototype || typeof listen !== 'function') return
+  prototype.listen = function (this: unknown, ...args: unknown[]) {
+    listenCalls.push(loadingApp ? 'app' : 'scan')
+    return listen.apply(this, args)
+  }
+}
+
+/** One macrotask: pending microtasks, and the `unhandledRejection` events they raise, run before it. */
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 /** The refusal itself or anywhere in its `cause` chain: `bootstrapApplication()` wraps a rejected `ready`. */
@@ -140,10 +158,8 @@ async function resolveControllers(
     const route = manifest.routes[handler.index]
     const candidates = exportsOf.get(handler.controller)
     if (!route?.controller || !candidates) continue
-    // A barrel re-exports the class too: the file named after it declares it, and any non-barrel beats one.
-    const declared = candidates.find(({ file }) => classNameFromPath(file) === route.controller!.name)
-      ?? candidates.find(({ file }) => excludeBarrelFiles([file]).length > 0)
-      ?? candidates[0]!
+    const declared = pickDeclaringFile(candidates, route.controller.name)
+    if (!declared) continue
     route.controller = {
       ...route.controller,
       file: toPosixRelative(root, declared.file),
@@ -163,6 +179,7 @@ async function introspect(root: string): Promise<Introspection> {
 
   const loaded = await loadFramework(entry)
   if ('status' in loaded) return loaded
+  watchListen(loaded.framework)
 
   let mod: Record<string, unknown>
   try {
@@ -181,7 +198,6 @@ async function introspect(root: string): Promise<Introspection> {
   const manifest = await app.introspect()
   manifest.entry.file = toPosixRelative(root, entry)
   describeUnboundAttachments(manifest, app, loaded.framework)
-  await tick()
   loadingApp = false
   await resolveControllers(manifest, app, root, loaded.framework)
   return { status: 'ok', manifest }
@@ -204,6 +220,17 @@ function describeUnboundAttachments(manifest: AppManifest, app: IntrospectableAp
     : rest
 }
 
+/** The CLI holds this pipe open for the run; its end means the CLI is gone, however it died. */
+function dieWithParent(): void {
+  process.stdin.on('end', () => {
+    try {
+      process.kill(-process.pid, 'SIGKILL')
+    } catch {
+      process.exit(1)
+    }
+  })
+  process.stdin.resume()
+}
 
 async function main(): Promise<void> {
   if (!outFile) {
@@ -211,26 +238,28 @@ async function main(): Promise<void> {
     process.exit(2)
   }
 
-  let listenRefused = false
+  dieWithParent()
   const otherRejections: string[] = []
-  // A module-scope `app.listen()` with no await rejects outside any frame we hold.
+  // A module-scope `app.listen()` with no await rejects outside any frame we hold;
+  // `listenCalls` already says where it was made.
   process.on('unhandledRejection', (reason) => {
-    if (loadingApp && isListenRefusal(reason)) listenRefused = true
-    else otherRejections.push(messageOf(reason))
+    if (!isListenRefusal(reason)) otherRejections.push(messageOf(reason))
   })
 
   let result: Introspection
   try {
     result = await introspect(process.cwd())
   } catch (error) {
-    if (isListenRefusal(error)) listenRefused = true
-    result = failed('crashed', messageOf(error))
+    result = isListenRefusal(error) ? failed('crashed', LISTEN_GUIDANCE) : failed('crashed', messageOf(error))
   }
   // Let a rejection raised during the last await reach the handler above.
   await tick()
-  if (listenRefused) result = failed('crashed', LISTEN_GUIDANCE)
+  if (listenCalls.includes('app')) result = failed('crashed', LISTEN_GUIDANCE)
   // `bun run dev` would have died on these; a manifest must not read clean past them.
   if (result.status === 'ok') {
+    if (listenCalls.includes('scan')) {
+      otherRejections.push('A controller file called listen() while it was imported, which introspection refuses.')
+    }
     for (const message of otherRejections) result.manifest.warnings.push({ code: 'unhandled-rejection', message })
   }
 

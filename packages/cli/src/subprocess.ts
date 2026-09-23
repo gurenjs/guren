@@ -14,12 +14,15 @@ export interface CapturedOptions {
   /** Laid over this process's environment. */
   env?: Readonly<Record<string, string>>
   /**
-   * Run the child in its own process group, and kill the whole group on timeout
-   * or when this process exits: what the child spawned (an app's `register()`
-   * starting a helper) goes with it. POSIX only; elsewhere the child alone is killed.
+   * Run the child in its own process group, killed whole on timeout, on its exit,
+   * and on SIGINT/SIGTERM/SIGHUP here. Its stdin is a pipe held open for the run: a
+   * child that kills its group when it ends (`introspect-child`) outlives no death
+   * of this process, SIGKILL included. POSIX only; elsewhere the child alone is killed.
    */
   processGroup?: boolean
 }
+
+const FORWARDED_SIGNALS: readonly NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP']
 
 /** A subprocess run to completion with its output captured. `command[0]` is the executable. */
 export type CapturedExec = (command: string[], cwd: string, options?: CapturedOptions) => Promise<CapturedRun>
@@ -41,9 +44,12 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
     const child = spawn(executable, args, {
       cwd,
       env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', ...options?.env },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [options?.processGroup ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       detached: grouped,
     })
+    // Both are piped above; the conditional stdin only widens the inferred type.
+    const out = child.stdout!
+    const err = child.stderr!
     const kill = (): void => {
       try {
         if (grouped && child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
@@ -52,7 +58,20 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
         // Already gone: the child leads its group, so an empty group means it exited too.
       }
     }
-    if (grouped) process.once('exit', kill)
+    // A detached group is outside this terminal's foreground group, which Ctrl+C signals.
+    const forward = (signal: NodeJS.Signals): void => {
+      kill()
+      releaseSignals()
+      process.kill(process.pid, signal)
+    }
+    const releaseSignals = (): void => {
+      process.off('exit', kill)
+      for (const signal of FORWARDED_SIGNALS) process.off(signal, forward)
+    }
+    if (grouped) {
+      process.once('exit', kill)
+      for (const signal of FORWARDED_SIGNALS) process.once(signal, forward)
+    }
     let stdout = ''
     let stderr = ''
     let settled = false
@@ -60,7 +79,7 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
       if (settled) return
       settled = true
       clearTimeout(timer)
-      process.off('exit', kill)
+      releaseSignals()
       complete()
     }
     const settle = (run: CapturedRun): void => finish(() => resolvePromise(run))
@@ -72,14 +91,14 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
         ? undefined
         : setTimeout(() => {
             kill()
-            child.stdout.destroy()
-            child.stderr.destroy()
+            out.destroy()
+            err.destroy()
             settle({ exitCode: 1, stdout, stderr, timedOut: true })
           }, options.timeoutMs)
-    child.stdout.on('data', (chunk: Buffer | string) => {
+    out.on('data', (chunk: Buffer | string) => {
       stdout += chunk.toString()
     })
-    child.stderr.on('data', (chunk: Buffer | string) => {
+    err.on('data', (chunk: Buffer | string) => {
       stderr += chunk.toString()
     })
     child.on('error', (error) => finish(() => rejectPromise(error)))
