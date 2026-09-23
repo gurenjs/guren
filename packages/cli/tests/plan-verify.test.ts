@@ -9,6 +9,7 @@ import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPla
 import { planHash } from '../src/plan/identity'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
+import { describeCloseBlockers } from '../src/plan/close-remedy'
 import { behaviourReach } from '../src/plan/reach'
 import { applyVerification, applyWaivers, hashFiles, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
@@ -790,6 +791,26 @@ describe('applyVerification', () => {
     expect(model.hold?.kind).toBe('unreached')
     expect(model.hold?.note).toContain(`reach it (${HTTP}) holds now`)
     expect(model.hold?.note).not.toContain('add a behaviour')
+
+    // Two steps carrying the same behaviours: either one's run would lift it.
+    const twice = { ...derivation, tasks: derivation.tasks.map((task) => ({ ...task, steps: task.steps.flatMap((step) => (step.id === HTTP ? [step, { ...step, id: `${HTTP}-again` }] : [step])) })) }
+    const both = elementOf(applyVerification(statusOf({ 'controller.comments': { properties: [] } }), twice, { [HTTP]: http }, 'digest', changedHashes, plan).status, 'controller.comments')
+    expect(both.hold?.note).toEndWith(`reach it (${HTTP}, ${HTTP}-again) holds now, so that result is not counted: run plan:verify on one of those steps, or waive it.`)
+  })
+
+  test('should offer only a waiver for an element whose reaching step has no standing run and that plan:verify cannot fingerprint', () => {
+    const controllerFile = 'app/Http/Controllers/CommentController.ts'
+    const http = record({ fingerprint: { ...FINGERPRINT, files: { [controllerFile]: sha256(FILES[controllerFile]!) } } })
+
+    const { status } = applyVerification(statusOf({ 'controller.comments': { properties: [], files: [] } }), derivation, { [HTTP]: http }, 'digest', new Map([[controllerFile, 'changed']]), plan)
+
+    const controller = elementOf(status, 'controller.comments')
+    expect(controller.hold?.kind).toBe('unreached')
+    expect(controller.hold?.note).toBe(
+      `Verified 2026-09-21T00:00:00.000Z by ${HTTP}, but no planned property of it matched beyond its existence and no verified run of a step whose behaviours reach it (${HTTP}) holds now, and plan:verify cannot fingerprint it, so that result is not counted: waive it.`,
+    )
+    const [blocker] = describeCloseBlockers(plan, derivation, [controller], 'plan.json')
+    expect(blocker?.moves).toStartWith('plan:verify cannot fingerprint it, so no run lifts it: waive it with')
   })
 
   test('should reach an element of a split step\u2019s earlier part through the part that runs the behaviours, while its record stands', async () => {

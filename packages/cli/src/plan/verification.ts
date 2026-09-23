@@ -59,6 +59,11 @@ export function restsOnReach(element: Pick<PlanElementStatus<PlanElementState>, 
   return element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match' && !property.existence)
 }
 
+/** An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers; a `drop` has no file. */
+function needsNoFiles(element: Pick<PlanElementStatus<PlanElementState>, 'change' | 'state'>): boolean {
+  return element.change === 'drop' || element.state === 'unjudged'
+}
+
 /**
  * An element its step verified is `verified` while every fingerprinted file still hashes the
  * same, `drifted` once one does not or cannot be read. Lifted: one at its completion state or
@@ -79,18 +84,18 @@ export function applyVerification(
 
   // A carrier in any task counts: one task's behaviour may render a page or return a resource another task placed.
   const carriers = behaviourCarriers(plan, derivation)
-  const stands = (stepId: string): boolean => {
-    const record = records[stepId]
-    return record !== undefined && recordStands(record, digest, hashes)
-  }
+  const standing = new Set(Object.keys(records).filter((stepId) => recordStands(records[stepId]!, digest, hashes)))
   const reachable = behaviourCanReach(plan)
-  const unreached = (id: string): string => {
-    const reaching = carriers.get(id) ?? []
+  const unreached = (element: PlanElementStatus<PlanElementState>): string => {
+    const reaching = carriers.get(element.id) ?? []
     if (reaching.length > 0) {
+      const steps = `no verified run of a step whose behaviours reach it (${reaching.join(', ')}) holds now`
+      // Mirrors close-remedy: a run of a carrier would still be held as `unfingerprinted`, so it is not suggested.
+      if (element.files.length === 0 && !needsNoFiles(element)) return `${steps}, and plan:verify cannot fingerprint it, so that result is not counted: waive it`
       const which = reaching.length === 1 ? 'that step' : 'one of those steps'
-      return `no verified run of a step whose behaviours reach it (${reaching.join(', ')}) holds now, so that result is not counted: run plan:verify on ${which}, or waive it`
+      return `${steps}, so that result is not counted: run plan:verify on ${which}, or waive it`
     }
-    const remedy = reachable.has(id) ? 'add a behaviour that reaches it, or waive it' : 'no behaviour can reach it, so waive it'
+    const remedy = reachable.has(element.id) ? 'add a behaviour that reaches it, or waive it' : 'no behaviour can reach it, so waive it'
     return `no verified behaviour reaches it, so that result is not counted: ${remedy}`
   }
 
@@ -110,8 +115,6 @@ export function applyVerification(
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
         const unmatched = restsOnReach(element)
-        // An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers.
-        const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
         const hold = (kind: PlanVerificationHold, note: string): void => {
           element.notes.push(note)
           element.hold = { kind, note }
@@ -123,9 +126,9 @@ export function applyVerification(
         }
         if (!awaitsVerification(element)) {
           hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
-        } else if (unmatched && !(carriers.get(id) ?? []).some(stands)) {
-          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and ${unreached(id)}.`)
-        } else if (element.files.length === 0 && !needsNoFiles) {
+        } else if (unmatched && !(carriers.get(id) ?? []).some((stepId) => standing.has(stepId))) {
+          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and ${unreached(element)}.`)
+        } else if (element.files.length === 0 && !needsNoFiles(element)) {
           hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
           settle('drifted')

@@ -37,9 +37,7 @@ export function describeCloseBlockers(
   planArgument: string,
 ): CloseBlocker[] {
   const context: BlockerContext = { planArgument, owners: new Map(), carriers: behaviourCarriers(plan, derivation), reachable: behaviourCanReach(plan) }
-  for (const { step } of listPlanSteps(derivation)) {
-    for (const id of step.elementIds) context.owners.set(id, step.id)
-  }
+  for (const { step } of listPlanSteps(derivation)) for (const id of step.elementIds) context.owners.set(id, step.id)
   return elements.map((element) => {
     const hold = element.hold
     const said = element.notes.filter((note) => note !== hold?.note).at(-1)
