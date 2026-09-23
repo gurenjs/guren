@@ -37,7 +37,7 @@ import { shareInertiaProps, type SharedInertiaPropsResolver } from '../mvc/inert
 import type { EnvSchema } from '../config/env'
 import type { ConfigDefinition } from '../config/define'
 import { ConfigServiceProvider } from '../providers/ConfigServiceProvider'
-import { IntrospectionListenError, isIntrospecting } from '../introspection/flag'
+import { IntrospectionListenError, isIntrospecting, runIntrospecting } from '../introspection/flag'
 import type { AppManifest } from '../introspection/types'
 import { buildAppManifest, type ModuleRouteRange } from '../introspection/manifest'
 
@@ -856,7 +856,7 @@ export class Application {
       throw new Error('[guren] Cannot introspect an application that has booted: introspection describes the registered, unbooted app.')
     }
 
-    this.manifestPromise ??= this.introspectOnce()
+    this.manifestPromise ??= runIntrospecting(() => this.introspectOnce())
     return this.manifestPromise
   }
 

@@ -5,7 +5,7 @@ import type { RouteDefinition } from '../mvc/Router'
 
 /**
  * What `Application.introspect()` reports (RFC 0026 §1): the app after every
- * provider registered and every route mounted, before anything booted. Plain
+ * provider and every route registered, before anything mounted or booted. Plain
  * JSON throughout, so `guren introspect --json` prints it as it is.
  */
 export interface AppManifest {
