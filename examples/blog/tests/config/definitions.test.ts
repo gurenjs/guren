@@ -5,7 +5,6 @@ import {
   MemoryTransport,
   type CacheManager,
   type MailManager,
-  type OAuthManager,
   type QueueManager,
   type StorageManager,
 } from '@guren/core'
@@ -13,13 +12,12 @@ import {
 import cache from '../../config/cache.js'
 import env from '../../config/env.js'
 import mail from '../../config/mail.js'
-import oauth from '../../config/oauth.js'
 import queue from '../../config/queue.js'
 import storage from '../../config/storage.js'
 
 // Through createApp: a definition binds its manager only when createApp resolves it.
 async function boot() {
-  const app = createApp({ env, config: [cache, mail, queue, storage, oauth] })
+  const app = createApp({ env, config: [cache, mail, queue, storage] })
   await app.boot()
   return app.container
 }
@@ -45,17 +43,6 @@ describe('Blog config definitions', () => {
   it('keeps a blank MAIL_FROM_NAME blank', async () => {
     vi.stubEnv('MAIL_FROM_NAME', '')
     expect(env.parse(undefined, { mode: 'report' }).values.MAIL_FROM_NAME).toBe('')
-  })
-
-  it('registers an OAuth provider only when all three of its keys are set', async () => {
-    vi.stubEnv('OAUTH_GITHUB_CLIENT_ID', 'id')
-    vi.stubEnv('OAUTH_GITHUB_CLIENT_SECRET', 'secret')
-    vi.stubEnv('OAUTH_GITHUB_REDIRECT_URI', 'http://localhost:3333/auth/github/callback')
-    vi.stubEnv('OAUTH_GOOGLE_CLIENT_ID', 'id')
-    vi.stubEnv('OAUTH_GOOGLE_CLIENT_SECRET', '')
-    const container = await boot()
-
-    expect(container.make<OAuthManager>('oauth').providerNames()).toEqual(['github'])
   })
 
   it('fails the boot on a mail transport or queue driver config/*.ts does not declare', async () => {

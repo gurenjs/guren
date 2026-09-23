@@ -23,7 +23,6 @@ import database from '../config/database.js'
 import env from '../config/env.js'
 import http from '../config/http.js'
 import mail from '../config/mail.js'
-import oauth from '../config/oauth.js'
 import queue from '../config/queue.js'
 import session from '../config/session.js'
 import storage from '../config/storage.js'
@@ -43,7 +42,7 @@ const app = createApp({
     },
   },
   env,
-  config: [database, http, session, cache, mail, queue, storage, oauth],
+  config: [database, http, session, cache, mail, queue, storage],
   routes: registerWebRoutes,
   modules: [authModule],
   providers: [
