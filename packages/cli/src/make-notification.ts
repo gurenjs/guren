@@ -4,8 +4,7 @@ import { scaffoldFile } from './utils'
 const NOTIFICATIONS_DIR = 'app/Notifications'
 
 function notificationTemplate(className: string): string {
-  return `import { Notification } from '@guren/core'
-import type { NotificationMailMessage } from '@guren/core'
+  return `import { Notification, type NotificationMailMessage } from '@guren/core'
 
 export class ${className} extends Notification {
   constructor(
@@ -14,8 +13,9 @@ export class ${className} extends Notification {
     super()
   }
 
+  // A getter is inherited: without the check a subclass would take this pin and its registry key.
   override get type(): string {
-    return '${className}'
+    return this.constructor === ${className} ? '${className}' : this.constructor.name
   }
 
   via(): string[] {

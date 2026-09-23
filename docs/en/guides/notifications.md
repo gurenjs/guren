@@ -65,7 +65,7 @@ also pins `type` to the generated class name:
 
 ```ts
 override get type(): string {
-  return 'OrderShippedNotification'
+  return this.constructor === OrderShippedNotification ? 'OrderShippedNotification' : this.constructor.name
 }
 ```
 
@@ -74,9 +74,11 @@ the database channel stores. Without the override it is the class name, which a
 bundler can rename. Change the string before the first notification is queued
 or stored if you want a different one.
 
-A getter is inherited, unlike a job's `jobName`. A subclass of this
-notification reports the same `type` and registers under the same key, so give
-the subclass its own `type` override.
+The constructor check limits the pin to the generated class, the way a job's
+`jobName` only counts on the class that declares it. A getter is inherited, so
+without the check a subclass would report the same `type` and replace this
+class in the registry. A subclass resolves by its own class name until it
+overrides `type` itself.
 
 ## Sending Notifications
 
