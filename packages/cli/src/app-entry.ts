@@ -4,12 +4,12 @@
  * descriptor (RFC 0002). `guren check` and `plan:status` judge wiring through it,
  * so the two cannot disagree about whether a module is mounted.
  */
-import { resolve } from 'node:path'
+import { basename, dirname, resolve, sep } from 'node:path'
 import type { File, Node, ObjectExpression } from '@babel/types'
 import { objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { findFirstExisting, moduleDescriptorCandidates, toPosixRelative } from './discovery'
 import type { ParseCache } from './parse-cache'
-import { importsByLocal, specifierBase, withoutExtension } from './schema-binding'
+import { importsByLocal, specifierBase, withoutExtension, type ImportEntry } from './schema-binding'
 
 /** The object literal the first `callee({ … })` call takes; a call passing anything else is skipped. */
 export function firstCallOptions(program: unknown, callee: string): ObjectExpression | null {
@@ -32,26 +32,94 @@ export function createAppOptions(program: unknown): ObjectExpression | null {
 }
 
 /**
- * Each element of an array option traced to the file its identifier is imported
- * from, absolute and without extension; `null` for an element this cannot trace.
- * `undefined` when the value is not an array literal.
+ * Each element of an array option traced to the import its identifier names, `file` absolute
+ * and without extension (`null` when `specifierBase` cannot resolve it); `null` for an element
+ * that is not an imported identifier. `undefined` when the value is not an array literal.
  */
-export function importedArrayFiles(
+function importedArrayEntries(
   declared: Node,
   program: { body: unknown[] },
   cwd: string,
   fromFile: string,
-): Array<string | null> | undefined {
+): Array<{ file: string | null; kind: ImportEntry['kind']; specifier: string } | null> | undefined {
   const array = unwrapTypeAssertion(declared)
   if (array.type !== 'ArrayExpression') return undefined
 
   const imports = importsByLocal(program.body as never)
   return array.elements.map((element) => {
     const value = element ? unwrapTypeAssertion(element as Node) : null
-    const source = value?.type === 'Identifier' ? imports.get(value.name)?.source : undefined
-    const base = source === undefined ? null : specifierBase(cwd, fromFile, source)
-    return base === null ? null : withoutExtension(base)
+    const entry = value?.type === 'Identifier' ? imports.get(value.name) : undefined
+    if (entry === undefined) return null
+    const base = specifierBase(cwd, fromFile, entry.source)
+    return { file: base === null ? null : withoutExtension(base), kind: entry.kind, specifier: entry.source }
   })
+}
+
+/** {@link importedArrayEntries} as files; `null` for an element this cannot trace to one. */
+export function importedArrayFiles(
+  declared: Node,
+  program: { body: unknown[] },
+  cwd: string,
+  fromFile: string,
+): Array<string | null> | undefined {
+  return importedArrayEntries(declared, program, cwd, fromFile)?.map((entry) => entry?.file ?? null)
+}
+
+/** The package an import specifier names, `name` or `@scope/name`, without its subpath. */
+function packageOf(specifier: string): string {
+  const [first = '', second] = specifier.split('/')
+  return first.startsWith('@') && second !== undefined ? `${first}/${second}` : first
+}
+
+/** Whether an import traced to `listed` names the module at `target`, a directory through its index. */
+function importedAs(listed: string, target: string): boolean {
+  return listed === target || resolve(listed, 'index') === target
+}
+
+/**
+ * Whether `createApp({ providers, config })` in `entryFile` imports one of `files` (absolute).
+ * `null` is no evidence, and on purpose broader than what `guren check` reads: an element this
+ * cannot trace, an import that may re-export one of them, or a specifier outside `packages`
+ * (the app's declared dependencies), which may be a path alias. A wrong `false` tells the user
+ * to register the file a second time.
+ */
+export function createAppListsFile(
+  program: File['program'],
+  cwd: string,
+  entryFile: string,
+  files: readonly string[],
+  packages: ReadonlySet<string>,
+): boolean | null {
+  const options = createAppOptions(program)
+  if (!options) return null
+  const wanted = files.map(withoutExtension)
+  let untraced = false
+  for (const key of ['providers', 'config']) {
+    const declared = propertyValue(options, key)
+    const entries = declared === undefined
+      ? (hidesKeys(options) ? undefined : [])
+      : importedArrayEntries(declared, program, cwd, entryFile)
+    if (entries === undefined) {
+      untraced = true
+      continue
+    }
+    for (const entry of entries) {
+      if (entry === null) {
+        untraced = true
+        continue
+      }
+      const { file, kind, specifier } = entry
+      if (file === null) {
+        if (!packages.has(packageOf(specifier))) untraced = true
+        continue
+      }
+      if (wanted.some((target) => importedAs(file, target))) return true
+      // A named import may come from a barrel, a default one from a directory's index.
+      const dir = basename(file) === 'index' ? dirname(file) : file
+      if (kind !== 'default' || wanted.some((target) => target.startsWith(`${dir}${sep}`))) untraced = true
+    }
+  }
+  return untraced ? null : false
 }
 
 /**
@@ -80,7 +148,7 @@ export function moduleMountState(
   const declared = propertyValue(options, 'modules')
   const files = declared === undefined ? undefined : importedArrayFiles(declared, program, cwd, entryFile)
   if (files === undefined) return declared === undefined && !hidesKeys(options) ? 'no-modules' : 'not-array'
-  if (files.some((file) => file === moduleDir || file === resolve(moduleDir, 'index'))) return 'mounted'
+  if (files.some((file) => file !== null && importedAs(file, resolve(moduleDir, 'index')))) return 'mounted'
   return files.includes(null) ? 'untraceable' : 'unlisted'
 }
 

@@ -18,7 +18,7 @@ import { eventFile } from './make-event'
 import { jobFile } from './make-job'
 import { listenerFile } from './make-listener'
 import { mailFile } from './make-mail'
-import { MAIL_SCAFFOLD } from './mail-scaffold'
+import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { notificationFile } from './make-notification'
 import { appendTableToSchema, detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
@@ -193,7 +193,14 @@ export default registerAdminRoutes
     description: 'Install mail infrastructure with a transport switchable via MAIL_MAILER and a sample mailable.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
-      return installServiceScaffold(MAIL_SCAFFOLD, writerOptions, [mailFile('WelcomeEmail', writerOptions)])
+      const existingMail = await appMailBindings()
+      const mailable = mailFile('WelcomeEmail', writerOptions)
+      if (existingMail.length > 0) {
+        const created = await writeScaffoldFiles([mailable], writerOptions)
+        await reportKeptMail(existingMail, 'only the sample mailable was written')
+        return created
+      }
+      return installServiceScaffold(MAIL_SCAFFOLD, writerOptions, [mailable])
     },
   },
   queue: {
