@@ -116,8 +116,223 @@ describe('checkConfigWiring', () => {
     expect(results).toEqual([])
   })
 
+  test('names the entry as the lister of a file it lists that is not a definition', async () => {
+    const results = await run({
+      'config/notes.ts': 'export default { note: 1 }\n',
+      'src/app.ts': entry('{ config: [notes] }', `import notes from '../config/notes'\n`),
+    })
+
+    expect(results[0]?.message).toBe('createApp({ config }) in src/app.ts lists config/notes.ts, but it does not default-export a config definition. The boot fails on it.')
+  })
+
   test('contributes nothing to an app with no entry', async () => {
     const results = await run(WITH_CACHE)
+
+    expect(results).toEqual([])
+  })
+})
+
+const OAUTH_CONFIG = `import { defineOAuthConfig } from '@guren/core'
+
+export default defineOAuthConfig(() => ({ providers: {} }))
+`
+
+function billingModule(options: string, imports = `import oauth from './config/oauth'\n`): string {
+  return `import { defineModule } from '@guren/core'
+${imports}
+export const billingModule = defineModule(${options})
+`
+}
+
+const MOUNTS_BILLING = `import billing from '../modules/billing'\nimport cache from '../config/cache'\n`
+
+describe('checkConfigWiring with defineModule({ config }) (RFC 0002)', () => {
+  test('passes a module definition its module lists, when createApp lists the module', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [oauth] }`),
+      'src/app.ts': entry('{ config: [cache], modules: [billing] }', MOUNTS_BILLING),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-wired', 'pass']])
+    expect(results[0].message).toBe('2 config definition(s) are listed across src/app.ts and modules/billing/index.ts.')
+  })
+
+  test('warns about a module definition nothing lists, pointing at its module', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing' }`, ''),
+      'src/app.ts': entry('{ config: [cache], modules: [billing] }', MOUNTS_BILLING),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([
+      ['config-wired', 'pass'],
+      ['config-unwired:modules/billing/config/oauth.ts', 'warn'],
+    ])
+    expect(results[1].suggestion).toBe('Add it to defineModule({ config: [...] }) in modules/billing/index.ts.')
+  })
+
+  test('warns when the listing module is not in createApp({ modules }), since nothing reads its config', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [oauth] }`),
+      'src/app.ts': entry('{ config: [cache] }'),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([
+      ['config-wired', 'pass'],
+      ['config-unwired:modules/billing/config/oauth.ts', 'warn'],
+    ])
+    expect(results[1].message).toContain('createApp({ modules }) in src/app.ts does not list modules/billing')
+  })
+
+  test('counts a root config file a mounted module lists as wired', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [cache] }`, `import cache from '../../config/cache'\n`),
+      'src/app.ts': entry('{ modules: [billing] }', `import billing from '../modules/billing/index.js'\n`),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-wired', 'pass']])
+  })
+
+  test('fails a key the app and a module both list, which the boot refuses', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/cache.ts': CACHE_CONFIG_FIXTURE,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [cache] }`, `import cache from './config/cache'\n`),
+      'src/app.ts': entry('{ config: [cache], modules: [billing] }', MOUNTS_BILLING),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([
+      ['config-wired', 'pass'],
+      ['config-duplicate-key:cache', 'fail'],
+    ])
+    expect(results[1].message).toBe('The "cache" config is listed 2 times: config/cache.ts by createApp({ config }) in src/app.ts, modules/billing/config/cache.ts by defineModule({ config }) in modules/billing/index.ts. The boot fails on the second.')
+  })
+
+  test('fails a duplicate key even when one side could not be resolved on this machine', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/cache.ts': `import { defineConfig } from '@guren/core'\n\nexport default defineConfig({ key: 'cache', resolve: () => { throw new Error('no redis') }, bind: () => {} })\n`,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [cache] }`, `import cache from './config/cache'\n`),
+      'src/app.ts': entry('{ config: [cache], modules: [billing] }', MOUNTS_BILLING),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toContainEqual(['config-duplicate-key:cache', 'fail'])
+  })
+
+  test('fails a duplicate key when neither side resolves on this machine, since the boot refuses before resolving', async () => {
+    const throwing = `import { defineConfig } from '@guren/core'\n\nexport default defineConfig({ key: 'cache', resolve: () => { throw new Error('no redis') }, bind: () => {} })\n`
+    const results = await run({
+      'config/cache.ts': throwing,
+      'modules/billing/config/cache.ts': throwing,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [cache] }`, `import cache from './config/cache'\n`),
+      'src/app.ts': entry('{ config: [cache], modules: [billing] }', MOUNTS_BILLING),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toContainEqual(['config-duplicate-key:cache', 'fail'])
+  })
+
+  test('still judges the app beside an unmounted module whose descriptor is not a defineModule() call', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/legacy/index.ts': `export const legacy = { name: 'legacy' }\n`,
+      'src/app.ts': entry('{ providers: [] }', ''),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-unwired:config/cache.ts', 'warn']])
+  })
+
+  test('points a definition in an unmounted, unreadable module at mounting it, not at its descriptor', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/legacy/config/oauth.ts': OAUTH_CONFIG,
+      'modules/legacy/index.ts': `import oauth from './config/oauth'\n\nexport const legacy = { name: 'legacy', providers: [], commands: [], config: [oauth] }\n`,
+      'src/app.ts': entry('{ config: [cache] }'),
+    })
+
+    expect(results).toContainEqual(expect.objectContaining({
+      key: 'config-unwired:modules/legacy/config/oauth.ts',
+      message: 'modules/legacy/config/oauth.ts declares the "oauth" config, but createApp({ modules }) in src/app.ts does not list modules/legacy. Nothing reads it, so the defaults apply instead.',
+      suggestion: 'Add the module to createApp({ modules: [...] }) in src/app.ts.',
+    }))
+  })
+
+  test('judges nothing when createApp computes a key that may carry modules and a module lists config', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [oauth] }`),
+      'src/app.ts': entry('{ config: [cache], [key]: [] }', `import cache from '../config/cache'\nconst key = 'modules'\n`),
+    })
+
+    expect(results).toEqual([])
+  })
+
+  test('judges nothing when createApp({ modules }) holds an element it cannot trace and a module lists config', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [oauth] }`),
+      'src/app.ts': entry('{ config: [cache], modules: [inline] }', `import cache from '../config/cache'\nconst inline = { name: 'inline', providers: [], commands: [] }\n`),
+    })
+
+    expect(results).toEqual([])
+  })
+
+  test('judges nothing when a module descriptor is not a defineModule() call, since it may list any file', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': `import oauth from './config/oauth'\n\nexport const billing = { name: 'billing', providers: [], commands: [], config: [oauth] }\n`,
+      'src/app.ts': entry('{ config: [cache], modules: [billing] }', MOUNTS_BILLING),
+    })
+
+    expect(results).toEqual([])
+  })
+
+  test('judges nothing when a module config array is not a literal, since it may list any file', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: definitions }`, `import { definitions } from './config/all'\n`),
+      'src/app.ts': entry('{ modules: [billing] }', `import billing from '../modules/billing'\n`),
+    })
+
+    expect(results).toEqual([])
+  })
+
+  test('judges nothing when a module descriptor spreads options that may carry config', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', ...shared }`, `import { shared } from './shared'\n`),
+      'src/app.ts': entry('{ modules: [billing] }', `import billing from '../modules/billing'\n`),
+    })
+
+    expect(results).toEqual([])
+  })
+
+  test('judges nothing when createApp spreads options that may carry the listing module', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [oauth] }`),
+      'src/app.ts': entry('{ config: [cache], ...shared }', `import cache from '../config/cache'\nimport { shared } from './shared'\n`),
+    })
+
+    expect(results).toEqual([])
+  })
+
+  test('judges nothing when createApp({ modules }) cannot be traced and a module lists config', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [oauth] }`),
+      'src/app.ts': entry('{ config: [cache], modules: allModules }', `import cache from '../config/cache'\nimport { allModules } from '../modules/all'\n`),
+    })
 
     expect(results).toEqual([])
   })

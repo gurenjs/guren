@@ -7,7 +7,7 @@ import { resolve } from 'node:path'
 import type { Node } from '@babel/types'
 
 import { literalString, objectLiteral, propertyValue, unwrapTypeAssertion } from './ast-walk'
-import { createAppOptions } from './config-check'
+import { createAppOptions } from './app-entry'
 import { ParseCache } from './parse-cache'
 import { resolveAppEntry } from './provider-registrar'
 

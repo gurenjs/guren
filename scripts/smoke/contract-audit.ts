@@ -14,7 +14,10 @@ async function read(root: string, relativePath: string): Promise<string> {
 async function auditBlog(root: string): Promise<void> {
   const appBootstrap = await read(root, 'src/app.ts')
   assert(appBootstrap.includes('providers: ['), 'Blog app must declare providers through createApp().')
-  assert(appBootstrap.includes('config: [database, http, session, cache, mail, queue, storage, oauth]'), 'Blog app must list its config definitions through createApp().')
+  assert(appBootstrap.includes('config: [database, http, session, cache, mail, queue, storage]'), 'Blog app must list its config definitions through createApp().')
+  assert(appBootstrap.includes('modules: [authModule]'), 'Blog app must mount the auth module through createApp().')
+  const authModule = await read(root, 'modules/auth/index.ts')
+  assert(authModule.includes('config: [oauth]'), 'Blog auth module must list its OAuth definition through defineModule({ config }).')
   assert(appBootstrap.includes('EventServiceProvider'), 'Blog app must register EventServiceProvider.')
   assert(appBootstrap.includes('SchedulingProvider'), 'Blog app must register SchedulingProvider.')
 
@@ -47,9 +50,9 @@ async function auditBlog(root: string): Promise<void> {
   assert(eventProvider.includes('createEventManager'), 'Blog event provider must create an event manager.')
   assert(eventProvider.includes("this.container.singleton('events'"), 'Blog event provider must register events in the container.')
 
-  for (const [file, helper] of [['cache', 'defineCacheConfig'], ['mail', 'defineMailConfig'], ['queue', 'defineQueueConfig'], ['storage', 'defineStorageConfig'], ['session', 'defineSessionConfig'], ['oauth', 'defineOAuthConfig']] as const) {
-    const definition = await read(root, `config/${file}.ts`)
-    assert(definition.includes(`export default ${helper}(`), `Blog config/${file}.ts must be a ${helper} definition.`)
+  for (const [file, helper] of [['config/cache.ts', 'defineCacheConfig'], ['config/mail.ts', 'defineMailConfig'], ['config/queue.ts', 'defineQueueConfig'], ['config/storage.ts', 'defineStorageConfig'], ['config/session.ts', 'defineSessionConfig'], ['modules/auth/config/oauth.ts', 'defineOAuthConfig']] as const) {
+    const definition = await read(root, file)
+    assert(definition.includes(`export default ${helper}(`), `Blog ${file} must be a ${helper} definition.`)
   }
 
   const schedulingProvider = await read(root, 'app/Providers/SchedulingProvider.ts')

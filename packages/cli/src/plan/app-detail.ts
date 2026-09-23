@@ -11,8 +11,8 @@ import { pathToFileURL } from 'node:url'
 import type { RouteDefinition } from '@guren/server'
 import type { File, Node, Statement } from '@babel/types'
 
-import { unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
-import { createAppOptions } from '../config-check'
+import { memberKeyName, unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
+import { createAppOptions, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
@@ -645,7 +645,9 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
   if (!parsed || !options) return all({ unconfirmed: `${entryPath} does not call createApp() with an object literal` })
 
   const imports = importsByLocal(parsed.ast.program.body)
-  const hasSpread = options.properties.some((property) => property.type !== 'ObjectProperty')
+  const optionsHideKeys = hidesKeys(options)
+  const routesMethod = options.properties.some((property) => property.type === 'ObjectMethod' && memberKeyName(property) === 'routes')
+  const mountState = (name: string) => moduleMountState(options, parsed.ast.program, root, resolve(root, entryPath), resolve(root, 'modules', name))
   const importedFile = (node: Node | null | undefined): { base: string; imported: string } | null => {
     const value = node ? unwrapTypeAssertion(node) : undefined
     const entry = value?.type === 'Identifier' ? imports.get(value.name) : undefined
@@ -662,7 +664,10 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
     if (input.routesFile === undefined) return { unconfirmed: 'the application has no routes entry file' }
     const declared = propertyValue(options, 'routes')
     if (declared === undefined) {
-      return { unconfirmed: hasSpread ? `createApp() in ${entryPath} spreads its options, which may carry routes` : `createApp() in ${entryPath} passes no routes` }
+      if (routesMethod) {
+        return { unconfirmed: `createApp({ routes }) in ${entryPath} is not a registrar imported from a file` }
+      }
+      return { unconfirmed: optionsHideKeys ? `createApp() in ${entryPath} spreads its options or computes a key, which may carry routes` : `createApp() in ${entryPath} passes no routes` }
     }
     const imported = importedFile(declared)
     if (!imported) return { unconfirmed: `createApp({ routes }) in ${entryPath} is not a registrar imported from a file` }
@@ -678,18 +683,12 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
   }
 
   function moduleMount(name: string): PlanAppMount {
-    const declared = propertyValue(options, 'modules')
-    const array = declared ? unwrapTypeAssertion(declared) : undefined
-    if (array?.type !== 'ArrayExpression') {
-      return { unconfirmed: declared === undefined && !hasSpread ? `createApp() in ${entryPath} lists no modules` : `createApp({ modules }) in ${entryPath} is not an array literal` }
+    switch (mountState(name)) {
+      case 'mounted': return 'mounted'
+      case 'no-modules': return { unconfirmed: `createApp() in ${entryPath} lists no modules` }
+      case 'not-array': return { unconfirmed: `createApp({ modules }) in ${entryPath} is not an array literal` }
+      case 'untraceable': return { unconfirmed: `createApp({ modules }) in ${entryPath} holds an entry this cannot trace to a file` }
+      case 'unlisted': return { unconfirmed: `createApp({ modules }) in ${entryPath} does not list modules/${name}` }
     }
-    const moduleDir = resolve(root, 'modules', name)
-    let opaque = false
-    for (const element of array.elements) {
-      const imported = importedFile(element)
-      if (!imported) opaque = true
-      else if (imported.base === moduleDir || imported.base === resolve(moduleDir, 'index')) return 'mounted'
-    }
-    return { unconfirmed: opaque ? `createApp({ modules }) in ${entryPath} holds an entry this cannot trace to a file` : `createApp({ modules }) in ${entryPath} does not list modules/${name}` }
   }
 }

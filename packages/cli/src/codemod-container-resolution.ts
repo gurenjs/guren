@@ -339,7 +339,7 @@ function inertiaDocumentEdits(program: unknown, source: string, guren: Set<strin
   if (!guren.has('setInertiaDocument') || !guren.has('createApp')) return []
   const body = (program as { body?: BabelNode[] }).body ?? []
 
-  const options = createAppOptions(program)
+  const options = createAppOptionsRange(program)
   if (!options) return []
 
   for (const statement of body) {
@@ -379,7 +379,7 @@ function inertiaDocumentEdits(program: unknown, source: string, guren: Set<strin
  * `inertia` key yet. A call that already carries one is reported rather than
  * merged: the two values would have to be reconciled by a reader.
  */
-function createAppOptions(program: unknown): Range | null {
+function createAppOptionsRange(program: unknown): Range | null {
   let found: Range | null = null
   walk(program, (node) => {
     if (found || node.type !== 'CallExpression') return

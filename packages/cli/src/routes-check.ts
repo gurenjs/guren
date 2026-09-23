@@ -1,7 +1,8 @@
 import { stat } from 'node:fs/promises'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
-import type { CallExpression, Statement } from '@babel/types'
-import { memberKeyName, objectLiteral, walk } from './ast-walk'
+import type { Statement } from '@babel/types'
+import { memberKeyName, walk } from './ast-walk'
+import { hidesKeys, readModuleDescriptor } from './app-entry'
 import {
   discoverModuleRoutesFiles,
   discoverRoutesFiles,
@@ -326,59 +327,37 @@ type ModuleEntryResolution =
  * Resolves the file a module's `defineModule({ routes })` takes its registrar from — the
  * same link the runtime follows, which is what makes it the scope entry rather than any
  * conventionally named file. Misses rather than invents: a `routes` value this cannot
- * trace yields `opaque`, which skips the module, and a spread in the descriptor makes an
- * absent `routes` property `opaque` too rather than `unwired`.
+ * trace yields `opaque`, which skips the module, and a spread or computed key in the
+ * descriptor makes an absent `routes` property `opaque` too rather than `unwired`.
  */
 async function resolveModuleEntry(
   cwd: string,
   cache: ParseCache,
   moduleDir: string,
 ): Promise<ModuleEntryResolution> {
-  const relDir = toPosixRelative(cwd, moduleDir)
-  const descriptor = await findFirstExisting(cwd, [`${relDir}/index.ts`, `${relDir}/index.js`])
-  if (descriptor === null) return { kind: 'fallback' }
-
+  const read = await readModuleDescriptor(cwd, cache, moduleDir)
+  if (typeof read === 'string') return { kind: 'fallback' }
+  const descriptor = read.file
   const descriptorPath = resolve(cwd, descriptor)
-  const parsed = await cache.get(descriptorPath)
-  if (!parsed) return { kind: 'fallback' }
 
   // Local name → import specifier, for tracing `routes: registerBillingRoutes`
   // back to the file that declared it.
   const importSources = new Map<string, string>()
-  for (const node of parsed.ast.program.body) {
+  for (const node of read.ast.program.body) {
     if (node.type !== 'ImportDeclaration' || node.importKind === 'type') continue
     for (const specifier of node.specifiers) {
       importSources.set(specifier.local.name, node.source.value)
     }
   }
 
-  let sawDefineModule = false
-  let hasSpread = false
+  const hasSpread = hidesKeys(read.options)
   let routesValue: { type?: string; name?: string } | null = null
-
-  walk(parsed.ast.program, (node) => {
-    if (sawDefineModule || node.type !== 'CallExpression') return
-    const call = node as unknown as CallExpression
-    if (call.callee.type !== 'Identifier' || call.callee.name !== 'defineModule') return
-    // `defineModule({ … } satisfies ModuleDefinition)` describes the same module, so
-    // unwrap before judging the argument's shape or the descriptor reads as absent.
-    const argument = objectLiteral(call.arguments[0])
-    if (!argument) return
-    sawDefineModule = true
-
-    for (const property of argument.properties) {
-      if (property.type === 'SpreadElement') {
-        hasSpread = true
-        continue
-      }
-      // Computed keys answer `undefined` here, which is the skip this wants.
-      if (memberKeyName(property) !== 'routes') continue
-      // A method shorthand (`routes(router) {...}`) is an inline registrar, like an arrow.
-      routesValue = property.type === 'ObjectMethod' ? { type: 'FunctionExpression' } : (property.value ?? null)
-    }
-  })
-
-  if (!sawDefineModule) return { kind: 'fallback' }
+  for (const property of read.options.properties) {
+    // Computed keys answer `undefined` here, which is the skip this wants.
+    if (property.type === 'SpreadElement' || memberKeyName(property) !== 'routes') continue
+    // A method shorthand (`routes(router) {...}`) is an inline registrar, like an arrow.
+    routesValue = property.type === 'ObjectMethod' ? { type: 'FunctionExpression' } : (property.value ?? null)
+  }
   if (routesValue === null) return hasSpread ? { kind: 'opaque' } : { kind: 'unwired', descriptor }
 
   const value = routesValue as { type?: string; name?: string }

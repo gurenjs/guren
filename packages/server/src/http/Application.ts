@@ -439,9 +439,18 @@ export interface ApplicationOptions {
   readonly env?: EnvSchema
   /**
    * The definitions `config/*.ts` export, resolved against `env` and bound before
-   * any provider registers (RFC 0027 §2). One definition per key.
+   * any provider registers (RFC 0027 §2). One definition per key, counting the
+   * `config` of every module.
    */
   readonly config?: ReadonlyArray<ConfigDefinition>
+}
+
+/** A config definition and where it was listed: `createApp({ config })[index]`, or a module's `config[index]`. */
+export interface ConfiguredDefinition {
+  readonly definition: ConfigDefinition
+  readonly index: number
+  /** The listing module's name; absent for `createApp({ config })`. */
+  readonly module?: string
 }
 
 export interface InertiaApplicationOptions {
@@ -538,10 +547,18 @@ export class Application {
   private disposeBunTeardown?: () => void
   private autoSessionAttached = false
   private readonly cookielessAuthPaths = new Set<string>()
+  /** {@link configDefinitions} with where each was listed, which ConfigServiceProvider's errors name. */
+  readonly configEntries: ReadonlyArray<ConfiguredDefinition>
   private routesRegistered = false
   private bootPromise?: Promise<void>
 
   constructor(private readonly options: ApplicationOptions = {}) {
+    this.configEntries = [
+      ...(options.config ?? []).map((definition, index) => ({ definition, index })),
+      ...(options.modules ?? []).flatMap((gurenModule) =>
+        (gurenModule.config ?? []).map((definition, index) => ({ definition, index, module: gurenModule.name })),
+      ),
+    ]
     this.hono = new Hono()
     this.container = new Container()
     this.router = new Router()
@@ -570,7 +587,7 @@ export class Application {
     }
 
     // Must stay the first provider registered (RFC 0027 §3).
-    if (options.env || options.config?.length) {
+    if (options.env || this.configEntries.length > 0) {
       this.providerManager.register(ConfigServiceProvider)
     }
 
@@ -653,8 +670,9 @@ export class Application {
     return this.options.env
   }
 
+  /** `createApp({ config })`, then each module's `config` in `modules` order (RFC 0002, RFC 0027 §2). */
   get configDefinitions(): ReadonlyArray<ConfigDefinition> {
-    return this.options.config ?? []
+    return this.configEntries.map((entry) => entry.definition)
   }
 
   markAutoSessionAttached(): void {

@@ -1926,6 +1926,22 @@ export const billingModule = defineModule({ name: 'billing' })
     expect(entry[0].suggestion).toContain('routes: registerBillingRoutes')
   })
 
+  // A computed key may be `routes`, so the descriptor proves nothing either way.
+  it('judges a module whose descriptor computes a key as unreadable, not as naming no registrar', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.ts': BILLING_ENTRY_WIRED,
+      'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+
+const key = 'routes'
+export const billingModule = defineModule({ name: 'billing', [key]: () => {} })
+`,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    expect(report.checks.filter((c) => c.key === 'route-entry:modules/billing/index.ts')).toEqual([])
+  })
+
   // No descriptor at all: the conventional entry stands in, so the warning
   // can name the file to create rather than describe its absence.
   it('reports a module with no descriptor and no routes entry once', async () => {
