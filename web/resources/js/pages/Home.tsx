@@ -6,7 +6,7 @@ interface Props {
 import { GITHUB_URL, OWN_REPO_LINK_REL, SITE_DESCRIPTION, SITE_TITLE } from '../../../config/site.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
-import { GithubIcon } from '../components/icons.js'
+import { FunctionIcon, GithubIcon, GlobeIcon, LayersIcon, ServerIcon } from '../components/icons.js'
 import { Seo } from '../components/Seo.js'
 import { softwareJsonLd, websiteJsonLd } from '../lib/structured-data.js'
 
@@ -89,24 +89,28 @@ const agentBenchmarkStats = [
 const deployTargets = [
   {
     name: 'Bun server',
+    Icon: ServerIcon,
     detail: 'Self-host on any VPS or container. The runtime you develop on is the one that serves production.',
     href: '/docs/guides/deployment',
     command: 'bunx guren deploy --target docker',
   },
   {
     name: 'Cloudflare Workers',
+    Icon: GlobeIcon,
     detail: 'Workers + D1 at the edge, on the free plan if you like. This site is a Guren app running there.',
     href: '/docs/guides/cloudflare',
     command: 'bunx guren plugin @guren/plugin-cloudflare',
   },
   {
     name: 'Vercel',
+    Icon: LayersIcon,
     detail: "One plugin sets up the build, and the app runs on Vercel's Bun runtime, the same engine you develop on.",
     href: '/docs/guides/deployment#vercel-serverless',
     command: 'bunx guren plugin @guren/plugin-vercel',
   },
   {
     name: 'AWS Lambda',
+    Icon: FunctionIcon,
     detail: 'A handler adapter and Node-compatible defaults run the same app on Lambda.',
     href: '/docs/guides/serverless',
     command: 'bunx guren plugin @guren/plugin-lambda',
@@ -443,7 +447,8 @@ export default function Home({ codeExamples }: Props) {
                   className="grid grid-cols-1 gap-x-6 gap-y-3 border-t border-white/10 py-6 last:border-b sm:grid-cols-[6.5rem_1fr]"
                 >
                   <p className="text-[2.75rem] font-bold leading-none tracking-[-0.03em] text-foam tabular-nums">
-                    {b.ratio}×
+                    {b.ratio}
+                    <span className="ml-0.5 text-[0.6em] font-normal">×</span>
                   </p>
                   <div>
                     <p className="font-bold text-crimson-50">{b.label}</p>
@@ -485,7 +490,10 @@ export default function Home({ codeExamples }: Props) {
                     href={t.href}
                     className="group grid grid-cols-1 gap-x-8 gap-y-1 py-5 transition hover:bg-white/[0.03] sm:grid-cols-[13rem_1fr_auto] sm:items-baseline sm:px-3"
                   >
-                    <span className="font-bold text-crimson-50">{t.name}</span>
+                    <span className="flex items-center gap-3 font-bold text-crimson-50">
+                      <t.Icon aria-hidden className="size-6 shrink-0 text-crimson-300" />
+                      {t.name}
+                    </span>
                     <span className="min-w-0">
                       <span className="block text-[0.9375rem] leading-relaxed text-smoke">{t.detail}</span>
                       <code className="mt-2 block truncate font-mono text-[13px] text-crimson-50">
