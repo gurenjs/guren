@@ -1,4 +1,4 @@
-import { relative } from 'node:path'
+import { isAbsolute, relative, sep } from 'node:path'
 
 /**
  * A path as the user would type it: cwd-relative when it is under cwd, verbatim
@@ -7,7 +7,8 @@ import { relative } from 'node:path'
  */
 export function describePath(path: string): string {
   const relativePath = relative(process.cwd(), path)
-  return relativePath === '' || relativePath.startsWith('..') ? path : relativePath
+  const outsideCwd = relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)
+  return relativePath === '' || outsideCwd ? path : relativePath
 }
 
 export function describeMigrationsFolder(folder: string | undefined): string {

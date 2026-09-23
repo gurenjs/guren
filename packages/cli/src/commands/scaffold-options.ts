@@ -9,6 +9,12 @@ export function toWriterOptions(args: ForceableArgs): WriterOptions {
   }
 }
 
+export const FORCE_ARG = {
+  type: 'boolean' as const,
+  description: 'Overwrite existing files',
+  alias: 'f',
+}
+
 export const MODULE_ARG = {
   type: 'string' as const,
   description: 'Scaffold inside modules/<name>/ instead of the project root.',
