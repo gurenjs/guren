@@ -437,3 +437,9 @@ configureAttachments({ table: attachments, storage: () => storage, disk: 'media'
 const record = await Post.attach(post.id, 'cover', new File([bytes], 'cover.png'))
 expect(await storage.disk('media').exists(record.path)).toBe(true)
 ```
+
+Vitest の `jsdom` 環境では、`createControllerContext()` からアップロードした `File` がコントローラーのアクションに届きません。jsdom 独自の `File` と `Blob` は、undici が multipart ボディの組み立てと解析に使うクラスと一致しないためです。Vitest と Node のバージョンによって、テストがタイムアウトする、undici の内部で失敗する、`this.file()` が `null` を返したままテストが通る、のいずれかになります。こうしたテストファイルは、先頭行に次のコメントを書いて Node 環境で実行してください。
+
+```ts
+// @vitest-environment node
+```
