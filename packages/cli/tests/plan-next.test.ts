@@ -189,7 +189,7 @@ describe('plan:next', () => {
     })
     const text = formatPlanNext(report, 'comments.plan.json')
     expect(text).toContain(
-      `Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.\n  model.post (planned): The element this alters was not found\n    Implement it, then run \`bunx guren plan:verify ${plan} --step task/entity/model.comment/data\`;`,
+      `Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.\n  model.post: planned (The element this alters was not found)\n    Implement it, then run \`bunx guren plan:verify ${plan} --step task/entity/model.comment/data\`;`,
     )
     expect(text).not.toContain('Nothing is left to implement')
 

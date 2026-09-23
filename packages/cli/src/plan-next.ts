@@ -20,7 +20,7 @@ import { planStatusFile } from './plan-status'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
 import { planBesideExclusions } from './plan/beside'
-import { describeCloseBlockers, type CloseBlocker } from './plan/close-remedy'
+import { describeCloseBlockers, formatCloseBlocker, type CloseBlocker } from './plan/close-remedy'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
@@ -401,7 +401,7 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
       lines.push(`Every step is verified. The elements were not judged, so plan:status may still list some that plan:close refuses: ${report.unverifiedUnreadable}`)
     } else if (open.length > 0) {
       lines.push('Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.')
-      for (const element of open) lines.push(`  ${element.id} (${element.state})${element.holds ? `: ${element.holds}` : ''}`, `    ${element.moves}`)
+      lines.push(...open.map(formatCloseBlocker))
     } else {
       lines.push('Every step is verified. Nothing is left to implement.')
     }

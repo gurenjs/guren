@@ -19,7 +19,7 @@ import type { PlanAppState } from './plan/app-state'
 import { requirePlanApproval, type PlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { entityDocPath, planDocPath, renderEntityDoc, renderPlanDoc, touchedModels, type PlanCloseContext } from './plan/close-docs'
-import { describeCloseBlockers } from './plan/close-remedy'
+import { describeCloseBlockers, formatCloseBlocker } from './plan/close-remedy'
 import type { PlanWaiver } from './plan/decisions'
 import { hasBaseline } from './plan/render'
 import { planSlug } from './plan/state'
@@ -101,9 +101,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
   const blockers: string[] = []
   if (open.length > 0) {
     const derivation = derivePlanTasks(plan, { apiOnly: app.apiOnly })
-    for (const blocker of describeCloseBlockers(plan, derivation, open, planPath)) {
-      blockers.push(`  ${blocker.id}: ${blocker.state}${blocker.holds ? ` (${blocker.holds})` : ''}\n    ${blocker.moves}`)
-    }
+    blockers.push(...describeCloseBlockers(plan, derivation, open, planPath).map(formatCloseBlocker))
   }
   if (verification?.unreadable) blockers.push(`  verification records: ${verification.unreadable}`)
   if (verification?.decisionsUnreadable) blockers.push(`  decision log: ${verification.decisionsUnreadable}`)

@@ -9,7 +9,7 @@ import { gatingResults } from '../src/check-result'
 import { builtinSubCommands } from '../src/commands'
 import { loadDocsGraph } from '../src/docs-graph'
 import { planCloseFile, type PlanCloseReport } from '../src/plan-close'
-import { describeCloseBlockers } from '../src/plan/close-remedy'
+import { describeCloseBlockers, formatCloseBlocker } from '../src/plan/close-remedy'
 import { planStatusFile } from '../src/plan-status'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { planApprovalsPath } from '../src/plan/approvals'
@@ -460,10 +460,7 @@ describe('describeCloseBlockers', () => {
     files: ['app/x.ts'],
     ...extra,
   })
-  const blockerOf = (entry: PlanElementStatus): string => {
-    const blocker = describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!
-    return `  ${blocker.id}: ${blocker.state}${blocker.holds ? ` (${blocker.holds})` : ''}\n    ${blocker.moves}`
-  }
+  const blockerOf = (entry: PlanElementStatus): string => formatCloseBlocker(describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!)
 
   test('should name the command that moves each kind of hold', () => {
     const incomplete = 'Verified t by s, and no longer at the state that completes it.'

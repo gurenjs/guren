@@ -19,7 +19,7 @@ interface BlockerContext {
 export interface CloseBlocker {
   id: string
   state: PlanElementState
-  /** What holds it, as `whatHoldsElement()` selects it (keep the two alike); absent when no reader said. */
+  /** What holds it: the hold's note, else the reader's reason or last note; absent when none says. */
   holds?: string
   /** The command that moves it. */
   moves: string
@@ -48,6 +48,11 @@ export function describeCloseBlockers(
     const why = hold && hold.kind !== 'incomplete' ? hold.note : (element.reason ?? said)
     return { id: element.id, state: element.state, ...(why ? { holds: why.replace(/\.$/u, '') } : {}), moves: closeRemedy(element, context) }
   })
+}
+
+/** The line pair `plan:close` refuses with and `plan:next` lists. */
+export function formatCloseBlocker(blocker: CloseBlocker): string {
+  return `  ${blocker.id}: ${blocker.state}${blocker.holds ? ` (${blocker.holds})` : ''}\n    ${blocker.moves}`
 }
 
 /**
