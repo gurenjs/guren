@@ -89,6 +89,9 @@ function junit(cases: Array<{ name: string; file?: string; inner?: string }>): s
 const PASSING = junit(IDS.map((id) => ({ name: `[${id}] x` })))
 const FAILING = junit(IDS.map((id) => ({ name: `[${id}] x`, inner: '<failure message="no"/>' })))
 
+/** What drizzle-kit prints when the migrations cover the schema; every fake answers a data step's check with it unless told otherwise. */
+const NO_CHANGES = '{"status":"no_changes","dialect":"postgresql"}\n'
+
 interface FakeExec {
   exec: CapturedExec
   calls: string[][]
@@ -103,7 +106,8 @@ function fakeExec(answers: Record<string, Partial<CapturedRun>> = {}, report: st
     const outfile = command.find((arg) => arg.startsWith('--reporter-outfile='))?.slice('--reporter-outfile='.length)
     if (outfile !== undefined && report !== null) await writeFile(outfile, report, 'utf8')
     const match = Object.entries(answers).find(([prefix]) => key.startsWith(prefix))
-    return { exitCode: 0, stdout: '', stderr: '', ...match?.[1] }
+    const stdout = key.startsWith('drizzle-kit generate') ? NO_CHANGES : ''
+    return { exitCode: 0, stdout, stderr: '', ...match?.[1] }
   }
   return { exec, calls }
 }
@@ -121,6 +125,7 @@ function verifier(status: PlanStatus, fake: Pick<FakeExec, 'exec'>, overrides: P
     timeoutMs: 1000,
     scripts: { codegen: 'guren codegen', typecheck: 'tsc --noEmit', 'db:migrate': 'guren db:migrate' },
     check: async () => checkReport([]),
+    drizzleKit: async () => ({ bin: 'drizzle-kit', config: 'drizzle.config.ts' }),
     now: () => new Date('2026-09-21T00:00:00Z'),
     ...overrides,
   })
@@ -312,6 +317,58 @@ describe('PlanVerifier', () => {
     expect(blocked.record.outcome).toBe('blocked')
     expect(commandsOf(failed)['db:migrate']).toBe('fail')
     expect(failed.record.outcome).toBe('failed')
+  })
+
+  describe('whether a migration covers the schema', () => {
+    const GENERATE = 'drizzle-kit generate --config drizzle.config.ts --explain --output json'
+
+    test('should fail db:migrate, without running it, on statements no migration covers, naming them', async () => {
+      const fake = fakeExec({
+        [GENERATE]: {
+          stdout: `Reading config\n${JSON.stringify({ status: 'ok', statements: [{ type: 'create_table', table: { name: 'comments' } }, { type: 'add_column', column: { table: 'posts', name: 'edited_at' } }] })}\n`,
+        },
+      })
+
+      const step = await verifier(statusOf(), fake).verify(DATA)
+
+      expect(commandOf(step, 'db:migrate')).toMatchObject({
+        status: 'fail',
+        label: 'drizzle-kit generate --explain',
+        reason: 'the schema has changes no migration covers: generate one with `guren make:migration`',
+        findings: ['create_table comments', 'add_column posts.edited_at'],
+      })
+      expect(step.record.outcome).toBe('failed')
+      expect(fake.calls.some((call) => call.includes('db:migrate'))).toBe(false)
+    })
+
+    test('should fail db:migrate where drizzle-kit needs a rename answered, since a migration is still missing', async () => {
+      const fake = fakeExec({
+        [GENERATE]: { exitCode: 2, stdout: `${JSON.stringify({ status: 'missing_hints', unresolved: [{ type: 'rename_or_create', kind: 'column', entity: ['public', 'posts', 'headline'] }] })}\n` },
+      })
+
+      const step = await verifier(statusOf(), fake).verify(DATA)
+
+      expect(commandOf(step, 'db:migrate')).toMatchObject({ status: 'fail', findings: ['rename_or_create: column public.posts.headline'] })
+    })
+
+    test('should block db:migrate, never pass it, where drizzle-kit cannot say or is not there to ask', async () => {
+      const failed = fakeExec({ [GENERATE]: { exitCode: 1, stdout: `${JSON.stringify({ status: 'error', error: { code: 'internal_error', message: '2 errors building db/schema.ts' } })}\n` } })
+      const silent = fakeExec({ [GENERATE]: { exitCode: 1, stdout: '', stderr: "Unrecognized options for command 'generate': --explain\n" } })
+      const slow = fakeExec({ [GENERATE]: { timedOut: true } })
+      const wrote = fakeExec({ [GENERATE]: { stdout: `${JSON.stringify({ status: 'ok', dialect: 'postgresql', migration_path: 'drizzle/0001_x.sql' })}\n` } })
+
+      const errored = await verifier(statusOf(), failed).verify(DATA)
+      const unrecognized = await verifier(statusOf(), silent).verify(DATA)
+      const timedOut = await verifier(statusOf(), slow).verify(DATA)
+      const missing = await verifier(statusOf(), fakeExec(), { drizzleKit: async () => ({ missing: 'drizzle-kit is not installed in the application' }) }).verify(DATA)
+
+      expect(commandOf(errored, 'db:migrate')).toMatchObject({ status: 'blocked', reason: expect.stringContaining(': internal_error: 2 errors building db/schema.ts') })
+      expect(commandOf(unrecognized, 'db:migrate')).toMatchObject({ status: 'blocked', findings: ["Unrecognized options for command 'generate': --explain"] })
+      expect(commandOf(timedOut, 'db:migrate').status).toBe('blocked')
+      expect(commandOf(await verifier(statusOf(), wrote).verify(DATA), 'db:migrate')).toMatchObject({ status: 'blocked', reason: expect.stringContaining(': it wrote drizzle/0001_x.sql') })
+      expect(commandOf(missing, 'db:migrate')).toMatchObject({ status: 'blocked', reason: 'cannot tell whether a migration covers the schema: drizzle-kit is not installed in the application' })
+      expect(missing.record.outcome).toBe('blocked')
+    })
   })
 
   test('should call a step failed when a command failed, whatever else was blocked', async () => {
