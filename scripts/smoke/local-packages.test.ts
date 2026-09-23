@@ -2,7 +2,7 @@
 // quietly stopped covering a package would surface a release late — how
 // `@guren/testing` went missing from two of the three lists. These run fast.
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -143,6 +143,14 @@ describe('distDifferences', () => {
         'dist/index.js missing',
         'dist/sub/x.d.ts missing',
       ])
+    })
+  })
+
+  test('reads a symlink to the checkout file as that file', async () => {
+    await withTrees({ 'index.js': 'export {}\n' }, {}, async (sourceDir, installedDir) => {
+      await mkdir(join(installedDir, 'dist'), { recursive: true })
+      await symlink(join(sourceDir, 'dist/index.js'), join(installedDir, 'dist/index.js'))
+      expect(await distDifferences(sourceDir, installedDir)).toEqual([])
     })
   })
 

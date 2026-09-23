@@ -226,8 +226,10 @@ export async function vendorLocalPackages(vendorRoot: string): Promise<Map<strin
  * `dist/`.
  */
 export async function distDifferences(sourceDir: string, installedDir: string): Promise<string[]> {
-  const list = async (dir: string): Promise<Set<string>> =>
-    new Set(await Array.fromAsync(new Bun.Glob('**/*').scan({ cwd: join(dir, 'dist'), onlyFiles: true })))
+  // `onlyFiles` alone skips symlinks, and bun links the files of a `file:` directory dependency.
+  const list = async (dir: string): Promise<Set<string>> => new Set(await Array.fromAsync(
+    new Bun.Glob('**/*').scan({ cwd: join(dir, 'dist'), onlyFiles: true, followSymlinks: true }),
+  ))
   const [expected, actual] = await Promise.all([
     list(sourceDir),
     // An installed copy with no dist/ is a difference to report, not a reason to stop checking.
