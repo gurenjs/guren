@@ -3,8 +3,7 @@
 // which two attempts writing into one directory cannot both do: an empty directory
 // has no holder, so removing one is always safe. A waiter takes a lock over when it
 // reads the same entries `timeoutMs` apart, as they were there the whole time; only
-// this process's clock is read. An older release's lock is an empty directory, so
-// the two releases do not reliably exclude each other.
+// this process's clock is read.
 import { mkdir, readdir, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -24,10 +23,15 @@ async function entriesOf(lockPath: string): Promise<string[] | undefined> {
   }
 }
 
-// Best effort: whatever a failure leaves behind is taken over after the timeout.
+// Another attempt or FileStore.clear() got there first; rmdir reports a non-empty
+// directory as ENOTEMPTY, or as EEXIST on some systems.
+function ignoreRaced(error: unknown): void {
+  if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].some((code) => hasCode(error, code))) throw error
+}
+
 async function remove(lockPath: string, names: string[]): Promise<void> {
-  for (const name of names) await unlink(join(lockPath, name)).catch(() => undefined)
-  await rmdir(lockPath).catch(() => undefined)
+  for (const name of names) await unlink(join(lockPath, name)).catch(ignoreRaced)
+  await rmdir(lockPath).catch(ignoreRaced)
 }
 
 async function tryAcquire(lockPath: string): Promise<string | undefined> {
@@ -36,7 +40,7 @@ async function tryAcquire(lockPath: string): Promise<string | undefined> {
   } catch (error) {
     if (hasCode(error, 'EEXIST')) return undefined
     if (!hasCode(error, 'ENOENT')) throw error
-    // FileStore.clear() removed the parent.
+    // The parent may not exist yet, or FileStore.clear() removed it.
     await mkdir(dirname(lockPath), { recursive: true })
     return tryAcquire(lockPath)
   }
@@ -47,7 +51,7 @@ async function tryAcquire(lockPath: string): Promise<string | undefined> {
     const entries = await readdir(lockPath)
     held = entries.length === 1 && entries[0] === token
   } catch (error) {
-    // ENOENT: a waiter removed the directory.
+    // ENOENT: another attempt or FileStore.clear() removed the directory.
     if (!hasCode(error, 'ENOENT')) throw error
   } finally {
     if (!held) await remove(lockPath, [token])
@@ -64,7 +68,8 @@ export async function withFileLock<T>(lockPath: string, timeoutMs: number, callb
       try {
         return await callback()
       } finally {
-        await remove(lockPath, [token])
+        // The update is already written; a lock left behind is taken over after the timeout.
+        await remove(lockPath, [token]).catch(() => undefined)
       }
     }
     if (performance.now() >= takeOverAt) {

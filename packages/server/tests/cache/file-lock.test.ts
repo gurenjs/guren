@@ -121,7 +121,7 @@ describe('withFileLock', () => {
     expect(existsSync(lockPath)).toBe(false)
   })
 
-  it('creates a missing parent directory, as FileStore.clear() leaves one', async () => {
+  it('creates a missing parent directory for the lock', async () => {
     lockPath = join(directory, 'cleared', 'key.cache.lock')
     expect(await lock(60_000, async () => 'ran')).toBe('ran')
     expect(existsSync(join(directory, 'cleared'))).toBe(true)
