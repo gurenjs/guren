@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { CliError } from './cli-error'
 import { findFirstExisting } from './discovery'
 import { bunExecutable } from './subprocess'
 import { runCommand, slugifyProse } from './utils'
@@ -11,10 +12,10 @@ const DEFAULT_SCHEMA = 'db/schema.ts'
 const DEFAULT_OUTPUT = 'db/migrations'
 /**
  * Wider than drizzle-kit's own discovery (`.ts`/`.js`/`.json`): its loader
- * accepts an explicit `--config` pointing at `.mts`/`.mjs` too. `.json` is
- * probed although drizzle-kit cannot load one under its Node shebang: an error
- * naming the user's own config beats a missing-`dialect` report. Order matters —
- * a loadable config must beat a `.json`. Verified against drizzle-kit 1.0.0-rc.4.
+ * accepts an explicit `--config` pointing at `.mts`/`.mjs` too. A `.json` loads
+ * only because drizzle-kit runs under Bun here; under its Node shebang the import
+ * lacks `type: json`. Order follows drizzle-kit's own preference, `.json` last.
+ * Verified against drizzle-kit 1.0.0-rc.4.
  */
 const DRIZZLE_CONFIG_CANDIDATES = [
   'drizzle.config.ts',
@@ -284,7 +285,7 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
     // the field and the fix.
     const dialect = options.dialect ?? configured.dialect
     if (!dialect) {
-      throw new Error(describeMissingDialect(configPath, configured))
+      throw new CliError(describeMissingDialect(configPath, configured))
     }
 
     // `--schema` takes one value and a repeated flag keeps only the last, so
@@ -292,7 +293,7 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
     // rest silently. Reachable from the default template's own comment, which
     // documents `schema: ['./db/schema.ts', './modules/*/db/schema.ts']`.
     if (options.schema == null && configured.schemaIsList) {
-      throw new Error(
+      throw new CliError(
         `${configPath} declares \`schema\` as a list, which cannot be passed as a single --schema ` +
           '— drizzle-kit would keep only the last entry and silently skip the rest. ' +
           'Pass --schema with one path or glob, or drop the overrides so the config is used as a whole.',
@@ -332,7 +333,7 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
 
   const kit = await findAppDrizzleKitBin(process.cwd())
   if ('missing' in kit) {
-    throw new Error(`Cannot generate a migration: ${kit.missing}. Run \`bun install\` (or \`bun add -d drizzle-kit\`), then try again.`)
+    throw new CliError(`Cannot generate a migration: ${kit.missing}. Run \`bun install\` (or \`bun add -d drizzle-kit\`), then try again.`)
   }
   await runCommand(bunExecutable(), [kit.bin, ...args])
 
@@ -358,8 +359,9 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
  * which is what a caller's "run db:make" next step hangs on.
  */
 export async function generateSchemaMigration(name: string, subject: string): Promise<boolean> {
-  if ('missing' in (await findAppDrizzleKitBin(process.cwd()))) {
-    consola.info(`drizzle-kit is not installed — run \`bun run db:make\` after \`bun install\` to generate the ${subject} migration.`)
+  const kit = await findAppDrizzleKitBin(process.cwd())
+  if ('missing' in kit) {
+    consola.info(`${kit.missing} — run \`bun run db:make\` after \`bun install\` to generate the ${subject} migration.`)
     return false
   }
 

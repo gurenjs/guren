@@ -127,7 +127,7 @@ describe('makeMigration', () => {
     }
   })
 
-  it('prefers a loadable config over the json drizzle-kit cannot import', async () => {
+  it('prefers a .ts or .js config over a .json, as drizzle-kit does', async () => {
     const workspace = await appWorkspace('guren-cli-make-migration-order-')
     try {
       await writeFile(join(workspace.dir, 'drizzle.config.js'), 'export default {}', 'utf8')
