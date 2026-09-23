@@ -14,6 +14,8 @@ import {
   type AppManifest,
   type Router,
 } from '../../src'
+import { Container } from '../../src/container/Container'
+import { ProviderManager } from '../../src/container/ServiceProvider'
 import { defineConfig } from '../../src/config/define'
 import { resetDefaultApplication } from '../../src/http/default-application'
 import { withEnv } from '../support/env'
@@ -339,13 +341,14 @@ describe('isIntrospecting()', () => {
   })
 
   test('the same provider instance registered twice keeps its first outcome', async () => {
-    const app = createApp()
-    const hooked = new HookedProvider(app.container)
-    app.register(hooked).register(hooked)
+    const container = new Container()
+    const manager = new ProviderManager(container)
+    const hooked = new HookedProvider(container)
+    manager.register(hooked).register(hooked)
 
-    const manifest = await app.introspect()
+    const providers = await manager.registerAllForIntrospection()
 
-    expect(manifest.providers.filter((provider) => provider.name === 'HookedProvider').map((provider) => provider.register))
+    expect(providers.filter((provider) => provider.name === 'HookedProvider').map((provider) => provider.register))
       .toEqual(['introspect-hook'])
   })
 })
