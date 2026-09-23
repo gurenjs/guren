@@ -18,6 +18,7 @@ import {
   classNameFromPath,
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
+import { OLDEST_TESTED_BUN } from './bun-support'
 import { compareVersions } from './codemods'
 import {
   describePageManifestSuppression,
@@ -754,34 +755,30 @@ async function createScriptsAutofix(_context: DoctorRuleContext, check: DoctorCh
   }
 }
 
-const MIN_BUN_VERSION = '1.1.0'
-
 async function detectBunVersion(_context: DoctorRuleContext): Promise<DoctorCheck> {
-  const bunVersion = typeof process !== 'undefined' && process.versions?.bun
-    ? process.versions.bun
-    : null
+  return judgeBunVersion(typeof process !== 'undefined' && process.versions?.bun ? process.versions.bun : null)
+}
 
+export function judgeBunVersion(bunVersion: string | null): DoctorCheck {
   if (!bunVersion) {
     return createCheck(
       'bun-version',
       'Bun Version',
       'fail',
-      'Could not detect Bun runtime version. Guren requires Bun >= 1.1.0.',
+      `Could not detect Bun runtime version. Guren requires Bun >= ${OLDEST_TESTED_BUN}.`,
       {
         fix: 'Install or update Bun with `bun upgrade`.',
-        manualFix: 'Install Bun from https://bun.sh and ensure version >= 1.1.0.',
+        manualFix: `Install Bun from https://bun.sh and ensure version >= ${OLDEST_TESTED_BUN}.`,
       },
     )
   }
 
-  const cmp = compareVersions(bunVersion, MIN_BUN_VERSION)
-
-  if (cmp >= 0) {
+  if (compareVersions(bunVersion, OLDEST_TESTED_BUN) >= 0) {
     return createCheck(
       'bun-version',
       'Bun Version',
       'pass',
-      `Bun ${bunVersion} detected (minimum: ${MIN_BUN_VERSION}).`,
+      `Bun ${bunVersion} detected (oldest tested: ${OLDEST_TESTED_BUN}).`,
     )
   }
 
@@ -791,10 +788,10 @@ async function detectBunVersion(_context: DoctorRuleContext): Promise<DoctorChec
     'bun-version',
     'Bun Version',
     critical ? 'fail' : 'warn',
-    `Bun ${bunVersion} detected, but Guren requires >= ${MIN_BUN_VERSION}.`,
+    `Bun ${bunVersion} detected, but Guren is tested on Bun >= ${OLDEST_TESTED_BUN} only.`,
     {
       fix: 'Update Bun with `bun upgrade`.',
-      manualFix: `Upgrade Bun to >= ${MIN_BUN_VERSION} by running \`bun upgrade\`.`,
+      manualFix: `Upgrade Bun to >= ${OLDEST_TESTED_BUN} by running \`bun upgrade\`.`,
     },
   )
 }

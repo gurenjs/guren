@@ -7,6 +7,7 @@ import {
   type DoctorAutofix,
   type DoctorCheck,
 } from './doctor'
+import { OLDEST_TESTED_BUN } from './bun-support'
 import { checkDeprecations, type DeprecationWarning } from './deprecations'
 import { runCommand } from './utils'
 import { compareVersions, isExactVersion, runCodemods, type CodemodResult } from './codemods'
@@ -323,8 +324,8 @@ export async function checkVersionCompatibility(
   const warnings: string[] = []
 
   const bunVersion = process.versions?.bun
-  if (bunVersion && compareVersions(bunVersion, '1.0.0') < 0) {
-    warnings.push(`Bun ${bunVersion} may not be compatible. Recommend Bun 1.3.x or later.`)
+  if (bunVersion && compareVersions(bunVersion, OLDEST_TESTED_BUN) < 0) {
+    warnings.push(`Bun ${bunVersion} is older than any Bun Guren is tested on (>= ${OLDEST_TESTED_BUN}). Update with \`bun upgrade\`.`)
   }
 
   // Resolve the tag so the report names a version: a tag left behind by an older release

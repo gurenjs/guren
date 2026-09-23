@@ -66,7 +66,7 @@ flowchart LR
 
 ## 前提
 
-- **[Bun](https://bun.sh) 1.3.14。** 必須なのはこれだけです。雛形は SQLite が既定なので、データベースサーバーの導入は不要です。
+- **[Bun](https://bun.sh) 1.4.2。** 必須なのはこれだけです。雛形は SQLite が既定なので、データベースサーバーの導入は不要です。
 - **git。** 各章はコミットで終わります。
 - **TypeScript。** 型、async/await、モジュールといった現代の TypeScript に慣れていること。React と Inertia の知識は前提にしません。第 2 章で必要最小限を導入し、そこから積み上げます。
 - **コーディングエージェント(任意)。** 章で示すのは Claude Code です。ハーネスは Codex、Cursor、Copilot、OpenCode にも対応し、すべての委任にエージェント無しの代替があります。

@@ -64,8 +64,9 @@ The `check` command validates route-controller-page consistency. The `doctor` co
 Deploy each reference app to verify the production build path:
 
 ```bash
-# Docker
-docker build -f deploy/docker/Dockerfile -t guren-blog-test .
+# Docker (the Dockerfile `guren deploy` generates, as an app would)
+bunx guren deploy --target docker
+docker build -t guren-blog-test .
 docker run --rm -p 3333:3333 guren-blog-test
 
 # Smoke test

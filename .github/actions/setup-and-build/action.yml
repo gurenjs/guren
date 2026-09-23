@@ -10,7 +10,7 @@ inputs:
   bun-version:
     description: Bun version to install; also part of the dist cache key.
     required: false
-    default: '1.3.14'
+    default: '1.4.2'
 
 outputs:
   cache-hit:

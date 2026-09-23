@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { OLDEST_TESTED_BUN } from '../packages/cli/src/bun-support.ts'
 import { repoRoot } from './workspace-packages.ts'
 
 /**
@@ -12,6 +13,9 @@ import { repoRoot } from './workspace-packages.ts'
  * than listed, so a new one that pins Bun is covered the day it is added.
  */
 const WORKFLOW_DIR = join(repoRoot, '.github/workflows')
+const ACTION_DIR = join(repoRoot, '.github/actions')
+
+type ActionManifest = { inputs?: Record<string, { default?: unknown }> }
 
 /**
  * `bun-version: '1.2.3'`, list item or not, quoted or not: recognising only one
@@ -25,6 +29,10 @@ const MATRIX = /^[^\S\n]*bun-version:[^\S\n]*\[([^\]]*)\]/m
 
 function workflowFiles(): string[] {
   return [...new Bun.Glob('*.{yml,yaml}').scanSync({ cwd: WORKFLOW_DIR })].sort()
+}
+
+function actionFiles(): string[] {
+  return [...new Bun.Glob('*/action.{yml,yaml}').scanSync({ cwd: ACTION_DIR })].sort()
 }
 
 /** Every literal Bun version a workflow pins, in file order. */
@@ -81,6 +89,46 @@ describe('workflow Bun pins', () => {
       for (const pin of pins) expect(pin).toBe(primary)
     },
   )
+
+  it('holds every composite action to the primary runtime', () => {
+    // ci.yml's jobs outside the matrix call setup-and-build without `bun-version`,
+    // so an action's input default is a pin just like a literal in its steps.
+    const actions = actionFiles()
+    const pinned: string[] = []
+    const unpinned: string[] = []
+    for (const file of actions) {
+      const source = readFileSync(join(ACTION_DIR, file), 'utf8')
+      const inputDefault = (Bun.YAML.parse(source) as ActionManifest).inputs?.['bun-version']?.default
+      const pins = [...pinnedVersions(source), ...(inputDefault === undefined ? [] : [String(inputDefault)])]
+      if (source.includes('oven-sh/setup-bun') && pins.length === 0) unpinned.push(file)
+      pinned.push(...pins.map((pin) => `${file}: ${pin}`))
+    }
+
+    expect(actions.length).toBeGreaterThan(0)
+    expect(pinned.length).toBeGreaterThan(0)
+    expect(unpinned).toEqual([])
+    expect(pinned.filter((entry) => !entry.endsWith(`: ${primary}`))).toEqual([])
+  })
+
+  it("keeps the CLI's oldest tested Bun on the oldest matrix line", () => {
+    // `guren doctor` and `guren upgrade` warn below it, so it has to name a line CI runs.
+    const line = (version: string) => version.split('.').slice(0, 2).join('.')
+    const oldest = [...matrix].sort(Bun.semver.order)[0]!
+
+    expect(line(OLDEST_TESTED_BUN)).toBe(line(oldest))
+  })
+
+  it('keeps bun.lock in a format every matrix version reads', () => {
+    // Measured: Bun 1.4.2 writes `lockfileVersion: 2` for a lockfile it creates from
+    // scratch (an existing v1 stays v1), and Bun 1.3.14 rejects v2 with "Unknown
+    // lockfile version". A trial lane failing its install blocks no PR, so nothing else notices.
+    const lockfileVersion = Number(/"lockfileVersion":\s*(\d+)/.exec(readFileSync(join(repoRoot, 'bun.lock'), 'utf8'))?.[1])
+    const firstMeasuredReader: Record<number, string> = { 1: '0.0.0', 2: '1.4.2' }
+
+    expect(Object.keys(firstMeasuredReader)).toContain(String(lockfileVersion))
+    const reader = firstMeasuredReader[lockfileVersion]!
+    expect(matrix.filter((version) => Bun.semver.order(version, reader) < 0)).toEqual([])
+  })
 
   it("ci.yml's own pins stay inside its matrix", () => {
     // `include:` repeats the version to attach per-version settings; one that

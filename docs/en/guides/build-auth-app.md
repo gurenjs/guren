@@ -7,7 +7,7 @@ This guide walks you through building an application with user registration, log
 
 ## Prerequisites
 
-- **Bun 1.3.14**
+- **Bun 1.4.2**
 - **Docker Desktop (Compose v2)** for Postgres
 
 ## 1. Scaffold the Project
