@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -17,12 +17,12 @@ async function until(condition: () => boolean): Promise<void> {
 describe('withFileLock', () => {
   let directory: string
   let lockPath: string
-  let holds: PromiseWithResolvers<void>[]
+  let releases: (() => void)[]
   let calls: Promise<unknown>[]
 
-  function hold(): PromiseWithResolvers<void> {
+  function hold() {
     const gate = Promise.withResolvers<void>()
-    holds.push(gate)
+    releases.push(gate.resolve)
     return gate
   }
 
@@ -35,13 +35,13 @@ describe('withFileLock', () => {
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'file-lock-'))
     lockPath = join(directory, 'key.cache.lock')
-    holds = []
+    releases = []
     calls = []
   })
 
   // A failed assertion leaves holders and waiters running, and a waiter recreates a missing directory.
   afterEach(async () => {
-    for (const gate of holds) gate.resolve()
+    for (const release of releases) release()
     await Promise.allSettled(calls)
     await rm(directory, { recursive: true, force: true })
   })
@@ -116,6 +116,8 @@ describe('withFileLock', () => {
     expect(entered).toBe(false)
     expect(existsSync(join(lockPath, 'owner-b'))).toBe(true)
 
+    await unlink(join(lockPath, 'owner-b'))
+    await rmdir(lockPath)
     await waiter
     expect(entered).toBe(true)
     expect(existsSync(lockPath)).toBe(false)
