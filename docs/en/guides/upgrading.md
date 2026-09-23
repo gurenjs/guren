@@ -141,7 +141,7 @@ export class User extends defineModel(users, { base: AuthenticatableModel }) {
 // Before: authorId silently dropped when not in fillable
 await Post.create({ ...data, authorId: user.id })
 
-// After: either add authorId to fillable, or use forceCreate for trusted data
+// After: keep authorId out of fillable and set it from the session with forceCreate
 await Post.forceCreate({ ...validated, authorId: user.id })
 ```
 

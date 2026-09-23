@@ -59,7 +59,7 @@ export default class PostController extends Controller {
     const { body: data } = this.validated('posts.store')
     const authUser = await this.auth.userOrFail<UserRecord>()
 
-    const post = await Post.create({ ...data, authorId: authUser.id })
+    const post = await Post.forceCreate({ ...data, authorId: authUser.id })
 
     if (post) {
       // Invalidate and announce before the attach: a rejected cover throws,
@@ -97,7 +97,7 @@ export default class PostController extends Controller {
     const post = await Post.findOrFail(id) as BoundPost
     const { body: data } = this.validated(['posts.update', 'posts.patch'])
 
-    await Post.update({ id: post.id }, { ...data, authorId: post.authorId })
+    await Post.update({ id: post.id }, data)
 
     // Invalidate before the attach: a rejected cover throws after the row is
     // already updated, and the cached list must not keep the old fields.
