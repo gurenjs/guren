@@ -23,7 +23,12 @@ export type {
 export { isIntrospecting } from './introspection/flag'
 export type {
   AppManifest,
+  AttachmentsDescription,
+  AttachmentsEntry,
+  AuthEntry,
+  AuthProviderEntry,
   ControllerRef,
+  DriverMapEntry,
   JsonSchema,
   ManifestWarning,
   MiddlewareEntry,
@@ -33,6 +38,8 @@ export type {
   ProviderSource,
   RouteEntry,
   RouteSchemaEntry,
+  SessionEntry,
+  SessionStoreEntry,
 } from './introspection/types'
 export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'

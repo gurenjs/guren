@@ -10,11 +10,15 @@ import type {
 import { LocalDriver } from './drivers/LocalDriver'
 import { S3Driver } from './drivers/S3Driver'
 import { MemoryDriver } from './drivers/MemoryDriver'
+import { describeDriverMap } from '../introspection/driver-map'
+import type { DriverMapEntry } from '../introspection/types'
 
 export class StorageManager {
   private readonly defaultDiskName: string
   private readonly diskFactories: Map<string, StorageDriverFactory> = new Map()
   private readonly resolvedDisks: Map<string, StorageDriver> = new Map()
+  /** The configured driver per disk; null for one `registerDisk()` added as a bare factory. */
+  private readonly diskDrivers: Map<string, string | null> = new Map()
   private driverFactories: Map<string, (options: unknown) => StorageDriver> = new Map()
 
   constructor(config: StorageConfig = {}) {
@@ -30,6 +34,7 @@ export class StorageManager {
 
     if (!this.diskFactories.has(this.defaultDiskName) && this.defaultDiskName === 'local') {
       this.diskFactories.set('local', () => new LocalDriver({ root: './storage' }))
+      this.diskDrivers.set('local', 'local')
     }
   }
 
@@ -59,6 +64,7 @@ export class StorageManager {
     }
 
     this.diskFactories.set(name, () => factory(options))
+    this.diskDrivers.set(name, driver)
   }
 
   disk(name?: string): StorageDriver {
@@ -81,6 +87,7 @@ export class StorageManager {
 
   registerDisk(name: string, factory: StorageDriverFactory): void {
     this.diskFactories.set(name, factory)
+    this.diskDrivers.set(name, null)
     this.resolvedDisks.delete(name)
   }
 
@@ -98,6 +105,11 @@ export class StorageManager {
 
   getDiskNames(): string[] {
     return Array.from(this.diskFactories.keys())
+  }
+
+  /** The declared disks and the default, building none of them (RFC 0026 §1). */
+  describe(): DriverMapEntry {
+    return describeDriverMap(this.defaultDiskName, this.diskFactories.keys(), (name) => this.diskDrivers.get(name))
   }
 }
 

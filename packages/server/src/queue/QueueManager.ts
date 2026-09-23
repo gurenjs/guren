@@ -1,5 +1,7 @@
 import type { JobOptions, QueueDriver } from './types'
 import { enqueueJob, type JobClass } from './Job'
+import { describeDriverMap } from '../introspection/driver-map'
+import type { DriverMapEntry } from '../introspection/types'
 
 export type QueueDriverFactory = () => QueueDriver
 
@@ -74,6 +76,11 @@ export class QueueManager {
 
   getDriverNames(): string[] {
     return Array.from(this.driverFactories.keys())
+  }
+
+  /** The declared drivers and the default, resolving none. Every driver is a bare factory, so `driver` is null. */
+  describe(): DriverMapEntry {
+    return describeDriverMap(this.defaultDriver, this.driverFactories.keys())
   }
 
   /**

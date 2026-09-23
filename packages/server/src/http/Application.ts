@@ -870,6 +870,7 @@ export class Application {
       providerWarnings: this.providerManager.manifestWarnings(),
       modules: this.options.modules ?? [],
       moduleRouteRanges: this.moduleRouteRanges,
+      authOptions: this.options.auth,
       hasBootCallback: this.options.boot !== undefined,
     })
   }

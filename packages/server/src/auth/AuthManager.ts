@@ -12,6 +12,7 @@ import { TokenGuard } from './TokenGuard'
 import { hasBearerHeader, type ApiTokenStore } from './api-token'
 import { bindPasswordHasher, createPasswordHasher } from './password/configured-hasher'
 import type { PasswordHasher } from './password/PasswordHasher'
+import type { AuthEntry, AuthProviderEntry } from '../introspection/types'
 import type {
   AttachContextOptions,
   AuthContext,
@@ -55,6 +56,8 @@ interface GuardRegistryEntry {
 interface ProviderRegistryEntry<User = unknown> {
   factory: ProviderFactory<User>
   instance?: UserProvider<User>
+  /** What `describe()` reports without calling `factory`; absent for a bare `registerProvider()`. */
+  description?: AuthProviderEntry
 }
 
 export class AuthManager implements AuthManagerContract {
@@ -258,7 +261,10 @@ export class AuthManager implements AuthManagerContract {
 
     bindPasswordHasher(model, hasher)
 
-    this.registerProvider(providerName, () => new ModelUserProvider(model, defaultOptions))
+    this.providers.set(providerName, {
+      factory: () => new ModelUserProvider(model, defaultOptions),
+      description: { kind: 'model', model: model.name, hasher: hasher.constructor.name },
+    })
 
     this.registerGuard(guardName, ({ session, manager }) => {
       const provider = manager.getProvider(providerName)
@@ -329,6 +335,20 @@ export class AuthManager implements AuthManagerContract {
    */
   getApiTokenStore(): ApiTokenStore | undefined {
     return this.apiTokenStore ?? undefined
+  }
+
+  /** Guards and providers as registered, constructing no provider (RFC 0026 §1). */
+  describe(): AuthEntry {
+    const providers: Record<string, AuthProviderEntry> = {}
+    for (const [name, entry] of this.providers) {
+      providers[name] = entry.description ? { ...entry.description } : { kind: 'custom', hasher: null }
+    }
+    return {
+      guards: this.guardNames(),
+      defaultGuard: this.defaultGuard,
+      hasher: this.passwordHasher.constructor.name,
+      providers,
+    }
   }
 }
 

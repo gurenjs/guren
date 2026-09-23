@@ -11,6 +11,7 @@ import {
   HttpException,
   ValidationException,
   type AppKeyring,
+  type AttachmentsDescription,
   type Container,
   type QueueManager,
   type StorageDriver,
@@ -338,9 +339,11 @@ export class AttachmentEngine {
   private readonly urlExpiresIn: number
   private readonly queue?: () => unknown
   private dispatchJob: JobDispatcher | null = null
+  private readonly table: unknown
 
   constructor(options: ConfigureAttachmentsOptions) {
     const table = options.table
+    this.table = table
     const locks = collectionWrites.get(table as object) ?? new Map<string, Promise<unknown>>()
     collectionWrites.set(table as object, locks)
     this.collectionLocks = locks
@@ -1199,6 +1202,21 @@ export class AttachmentEngine {
     return this.delivery
   }
 
+  /**
+   * The configuration as RFC 0026's manifest reports it, touching no disk. The
+   * manifest adds `delivery.mounted`, which only the route registry knows.
+   */
+  describe(): AttachmentsDescription {
+    const table = drizzleTableName(this.table)
+    return {
+      configured: true,
+      ...(table === undefined ? {} : { table }),
+      disk: this.defaultDisk,
+      disks: Object.fromEntries(Object.entries(this.diskDelivery).map(([name, disk]) => [name, { ...disk }])),
+      ...(this.delivery ? { delivery: { ...this.delivery } } : {}),
+    }
+  }
+
   private deliveryKeyring(): AppKeyring {
     // Lazy so the env is read at first use; the derived keyring is scoped, so a
     // leaked delivery key forges delivery URLs and nothing else.
@@ -1478,6 +1496,25 @@ export function resolveDeliveryRoute(): { prefix: string; routeName: string } {
       routeName: DEFAULT_DELIVERY_ROUTE_NAME,
     }
   )
+}
+
+/**
+ * The engine an `Attachable` static would use, described (RFC 0026 §1): the
+ * default application's binding, else the one `configureAttachments()` built.
+ */
+export function describeActiveAttachmentEngine(): AttachmentsDescription {
+  // `has()` before `make()`: `ambientBinding()` would activate a deferred provider.
+  const container = ambientContainer()
+  const bound = container?.has(ATTACHMENTS_BINDING) ? container.make(ATTACHMENTS_BINDING) : undefined
+  const engine = bound ?? activeEngine
+  return engine ? engine.describe() : { configured: false }
+}
+
+/** drizzle's `getTableName()` through its registry symbol; `session-manager.ts` in server reads it the same way. */
+function drizzleTableName(table: unknown): string | undefined {
+  if (!table || typeof table !== 'object') return undefined
+  const name = (table as Record<symbol, unknown>)[Symbol.for('drizzle:Name')]
+  return typeof name === 'string' ? name : undefined
 }
 
 export function resolveAttachmentEngine(caller: string): AttachmentEngine {
