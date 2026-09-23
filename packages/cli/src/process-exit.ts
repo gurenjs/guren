@@ -10,16 +10,26 @@ type WriteWithCallback = (chunk: unknown, encoding: unknown, callback: (error?: 
 let pending = 0
 let onIdle: (() => void) | undefined
 
+function release(): void {
+  pending -= 1
+  if (pending === 0) onIdle?.()
+}
+
 function track(stream: NodeJS.WriteStream): void {
   const write = stream.write.bind(stream) as WriteWithCallback
   stream.write = ((chunk: unknown, encoding?: unknown, callback?: unknown): boolean => {
     const done = typeof encoding === 'function' ? encoding : callback
     pending += 1
-    return write(chunk, typeof encoding === 'function' ? undefined : encoding, (error) => {
-      pending -= 1
-      if (pending === 0) onIdle?.()
-      if (typeof done === 'function') (done as (error?: Error | null) => void)(error)
-    })
+    try {
+      return write(chunk, typeof encoding === 'function' ? undefined : encoding, (error) => {
+        release()
+        if (typeof done === 'function') (done as (error?: Error | null) => void)(error)
+      })
+    } catch (error) {
+      // Bun throws on a chunk that is not a string or buffer and never calls back.
+      release()
+      throw error
+    }
   }) as NodeJS.WriteStream['write']
 }
 

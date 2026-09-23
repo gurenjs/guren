@@ -223,6 +223,11 @@ describe('token:issue flag parsing', () => {
     await workspace.cleanup()
   })
 
+  function issued(): { token: unknown; granted: unknown } {
+    const printed = logSpy.mock.calls.at(-1)?.[0]
+    return JSON.parse(String(printed)) as { token: unknown; granted: unknown }
+  }
+
   async function runFlags(rawArgs: string[]): Promise<unknown> {
     const command = builtinSubCommands['token:issue']
     return runCommand(command, { rawArgs: [...rawArgs, '--app', appDir, '--json'] })
@@ -238,14 +243,17 @@ describe('token:issue flag parsing', () => {
     // The inverse direction on a write tool: a lingering `--read-only=true`
     // would refuse `posts.store`, so issuing the token is the assertion.
     await runFlags(['--name', 'ci', '--user', '42', '--tools', 'posts.store', '--read-only=true', '--read-only=false'])
-    expect(logSpy).toHaveBeenCalled()
+    expect(issued().token).toEqual(expect.any(String))
+    expect(JSON.stringify(issued().granted)).toContain('posts.store')
   })
 
   it('reads the last --tools rather than joining repeats', async () => {
     // Joined, the repeat would name neither tool and be refused; last-wins
     // issues against the second one.
     await runFlags(['--name', 'ci', '--user', '42', '--tools', 'internal.index', '--tools', 'posts.index'])
-    expect(logSpy).toHaveBeenCalled()
+    expect(issued().token).toEqual(expect.any(String))
+    expect(JSON.stringify(issued().granted)).toContain('posts.index')
+    expect(JSON.stringify(issued().granted)).not.toContain('internal.index')
   })
 
   it('refuses a repeated --allow-unmatched that ends in false', async () => {

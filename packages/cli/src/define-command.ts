@@ -54,8 +54,9 @@ export function keepsProcessAlive<T extends object>(command: T): T {
 }
 
 /**
- * Whether `bin.ts` exits once the command's `run()` settles. A plugin's command is
- * built with citty's own `defineCommand` and reads false: its lifetime is unknown.
+ * Whether `bin.ts` exits once the command's `run()` settles without error (a failure
+ * always exits). A plugin's command is built with citty's own `defineCommand` and
+ * reads false: its lifetime is unknown.
  */
 export function exitsWhenDone(command: object): boolean {
   return normalizesRepeatedFlags(command) && (command as Record<symbol, unknown>)[KEEPS_PROCESS_ALIVE] !== true

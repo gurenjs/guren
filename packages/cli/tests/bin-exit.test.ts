@@ -92,28 +92,52 @@ describe('guren exits after a command that imported app code holding a handle op
 })
 
 describe('exitWhenFlushed', () => {
-  // Bun's process.exit() drops a stdout write still queued on a pipe whose reader is slow,
-  // which a spawned child's own pipe never is: Bun.spawn reads it eagerly. So the reader
-  // here is a shell pipeline that sleeps before it reads.
-  const PROBE = `import { exitWhenFlushed, trackStdioWrites } from ${JSON.stringify(resolve(import.meta.dir, '../src/process-exit.ts'))}
+  // The probes import process-exit.ts from a temp dir outside the workspace, where no
+  // package resolves, so that module must stay free of imports.
+  const HELPER = JSON.stringify(resolve(import.meta.dir, '../src/process-exit.ts'))
+  let root: string
+
+  beforeAll(async () => {
+    root = await createTempRoot('guren-cli-exit-flush-')
+  })
+
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function runProbe(name: string, body: string, shell: string): Promise<{ stdout: string; exitCode: number | null; killed: boolean }> {
+    await writeFile(join(root, name), `import { exitWhenFlushed, trackStdioWrites } from ${HELPER}
 trackStdioWrites()
 setInterval(() => {}, 60_000)
-process.stdout.write('x'.repeat(4 * 1024 * 1024))
-process.exitCode = 3
-await exitWhenFlushed(0)
-`
+${body}
+`)
+    const proc = Bun.spawn(['bash', '-c', shell], { cwd: root, stdout: 'pipe', timeout: HARD_TIMEOUT_MS, killSignal: 'SIGKILL' })
+    const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+    return { stdout, exitCode: proc.exitCode, killed: proc.signalCode === 'SIGKILL' }
+  }
 
   it('delivers everything written before exiting, with the exit code a command set', async () => {
-    const root = await createTempRoot('guren-cli-exit-flush-')
-    try {
-      await writeFile(join(root, 'probe.ts'), PROBE)
-      const proc = Bun.spawn(['bash', '-c', 'set -o pipefail; bun probe.ts | (sleep 1; wc -c)'], { cwd: root, stdout: 'pipe' })
-      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+    // Bun's process.exit() drops a stdout write still queued on a pipe whose reader is
+    // slow, which a spawned child's own pipe never is: Bun.spawn reads it eagerly. So the
+    // reader here is a shell pipeline that sleeps before it reads.
+    const run = await runProbe(
+      'slow-pipe.ts',
+      "process.stdout.write('x'.repeat(4 * 1024 * 1024))\nprocess.exitCode = 3\nawait exitWhenFlushed(0)",
+      'set -o pipefail; bun slow-pipe.ts | (sleep 1; wc -c)',
+    )
 
-      expect(stdout.trim()).toBe(String(4 * 1024 * 1024))
-      expect(exitCode).toBe(3)
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  }, 20_000)
+    expect(run.stdout.trim()).toBe(String(4 * 1024 * 1024))
+    expect(run.exitCode).toBe(3)
+  }, TEST_TIMEOUT_MS)
+
+  it('still exits after a write that threw instead of calling back', async () => {
+    const run = await runProbe(
+      'throwing-write.ts',
+      'try { process.stdout.write(123 as never) } catch {}\nawait exitWhenFlushed(4)',
+      'bun throwing-write.ts',
+    )
+
+    expect(run.killed).toBe(false)
+    expect(run.exitCode).toBe(4)
+  }, TEST_TIMEOUT_MS)
 })
