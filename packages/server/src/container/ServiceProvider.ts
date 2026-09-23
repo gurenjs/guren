@@ -122,8 +122,9 @@ export class ProviderManager {
       )
     }
 
-    // The first registration names where an instance came from; a repeat adds nothing.
-    if (!this.origins.has(provider)) this.origins.set(provider, origin)
+    // An instance registered again adds nothing: its first origin, outcome and warnings stand.
+    if (this.origins.has(provider)) return this
+    this.origins.set(provider, origin)
 
     // Deferred providers are loaded on-demand when Container.make() is called
     if (provider.isDeferred()) {
@@ -168,8 +169,6 @@ export class ProviderManager {
     const outcomes = new Map<ServiceProvider, Pick<ProviderEntry, 'register' | 'error'>>()
 
     for (const provider of this.providers) {
-      // The same instance registered twice keeps the outcome of its first pass.
-      if (outcomes.has(provider)) continue
       if (this.registered.has(provider)) {
         outcomes.set(provider, { register: 'ran' })
         continue
@@ -196,7 +195,7 @@ export class ProviderManager {
 
   /** @internal Findings registered providers hold for the manifest, each named after its provider. */
   manifestWarnings(): ManifestWarning[] {
-    return [...new Set(this.providers)]
+    return this.providers
       .filter((provider) => this.registered.has(provider))
       .filter(isManifestWarningSource)
       .flatMap((provider) =>
