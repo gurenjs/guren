@@ -418,7 +418,7 @@ bunx guren make:test posts/PostController --runner bun
 
 ### File uploads under jsdom
 
-Under Vitest's `jsdom` environment, a test that posts a `File` inside a `FormData` body (for example through `createControllerContext(url, { method: 'POST', body: formData })` to an action that calls `this.file()`) hangs until its timeout and reports no error. jsdom replaces `File` and `Blob` with its own classes, and undici's multipart encoder never finishes reading them, so `formData()` never resolves. String-only forms are not affected. Controller tests render no DOM, so switch the file to the Node environment with a comment on its first line:
+Under Vitest's `jsdom` environment, a `File` posted inside a `FormData` body (for example through `createControllerContext(url, { method: 'POST', body: formData })` to an action that calls `this.file()`) never reaches the action. jsdom replaces the global `File` and `Blob` with its own classes, which are not the ones undici uses to encode and parse the multipart body. Depending on the Vitest and Node versions, the test times out, fails inside undici, or passes while `this.file()` returns `null` and the upload is dropped. Controller tests render no DOM, so switch the file to the Node environment with a comment on its first line:
 
 ```ts
 // @vitest-environment node

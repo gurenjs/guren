@@ -606,7 +606,7 @@ const record = await Post.attach(post.id, 'cover', new File([bytes], 'cover.png'
 expect(await storage.disk('media').exists(record.path)).toBe(true)
 ```
 
-A controller test that uploads a `File` through `createControllerContext()` under Vitest's `jsdom` environment hangs until its timeout with no error: jsdom's `File` is not one undici's multipart encoder can read, so `formData()` never resolves. Run such files in the Node environment by putting this comment on the first line:
+Under Vitest's `jsdom` environment, a `File` uploaded through `createControllerContext()` never reaches the controller action, because jsdom's `File` and `Blob` are not the classes undici uses to encode and parse the multipart body. Depending on the Vitest and Node versions, the test times out, fails inside undici, or passes while `this.file()` returns `null`. Run such files in the Node environment by putting this comment on the first line:
 
 ```ts
 // @vitest-environment node
