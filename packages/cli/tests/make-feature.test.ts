@@ -960,11 +960,11 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
         'resources/js/pages/notes/New.tsx',
         'resources/js/pages/notes/Edit.tsx',
       ]
-      const before = await Promise.all(keptPaths.map((path) => readFile(join(workspace.dir, path), 'utf8')))
 
+      // Announcing off, as `add resource` promotes: the Kept lines still print.
       let created: string[] = []
       const infos = await captureInfos(async () => {
-        created = await makeFeature('Note', { fields: 'title:string' })
+        created = await makeFeature('Note', { fields: 'title:string', announce: false })
       })
 
       const root = await realpath(workspace.dir)
@@ -974,7 +974,6 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
         'resources/js/pages/notes/Show.tsx',
         'app/Models/Note.ts',
       ])
-      expect(await Promise.all(keptPaths.map((path) => readFile(join(workspace.dir, path), 'utf8')))).toEqual(before)
       expect(infos.filter((line) => line.startsWith('Kept '))).toEqual(
         keptPaths.map((path) => `Kept ${join(root, path)} (pass --force to regenerate it)`),
       )

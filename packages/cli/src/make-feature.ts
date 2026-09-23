@@ -51,9 +51,9 @@ export interface MakeFeatureOptions extends WriterOptions {
   /**
    * Prototype-first (RFC 0021): pages, validator, the page-data type and fixture
    * entries only — no model, migration, Resource or controller. Requires
-   * `guren add prototype`. Re-running without the flag later promotes the
-   * feature: the Resource is typed against the page-data type and the pages
-   * are left as they are.
+   * `guren add prototype`. Re-running without the flag promotes the feature: the
+   * Resource is typed against the page-data type, the prototype's validator and pages
+   * that exist are kept, and any missing are written.
    */
   prototype?: boolean
 }
@@ -199,8 +199,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     ...(withPolicy ? [{ ...policyFile(singular, writerOptions), flag: '--policy' }] : []),
     ...(options.withTest ? [{ ...(await testFile(singular, writerOptions)), flag: '--test' }] : []),
   ]
-  // At promotion the validator and pages are the prototype run's, possibly hand-edited
-  // since: each one there is kept, and only a missing one is written.
+  // At promotion the validator and pages are the prototype run's, possibly hand-edited since.
   const kept = promoting && !options.force ? await existingFiles(appRoot, [validator, ...pageFiles]) : []
   const files = [...backendFiles, ...pageFiles, ...modelFiles].filter((file) => !kept.includes(file))
   await assertNoExistingTargets(singular, appRoot, files, options.force)
@@ -209,13 +208,14 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens(appRoot)
 
-  if (options.announce === false) {
-    return created
-  }
-
-  announceWrittenFiles(created, overwritten)
+  if (options.announce !== false) announceWrittenFiles(created, overwritten)
+  // Printed either way: a caller that announces `created` itself has no list of what was kept.
   for (const file of kept) {
     consola.info(`Kept ${resolve(appRoot, file.path)} (pass --force to regenerate it)`)
+  }
+
+  if (options.announce === false) {
+    return created
   }
 
   const schemaPath = schemaPathFor(moduleName)
@@ -288,8 +288,8 @@ interface FeatureFile extends ScaffoldFileEntry {
   flag?: string
 }
 
-async function existingFiles<T extends ScaffoldFileEntry>(appRoot: string, files: readonly T[]): Promise<T[]> {
-  const existing: T[] = []
+async function existingFiles(appRoot: string, files: readonly FeatureFile[]): Promise<FeatureFile[]> {
+  const existing: FeatureFile[] = []
   for (const file of files) {
     if (await fileExists(appRoot, file.path)) existing.push(file)
   }
