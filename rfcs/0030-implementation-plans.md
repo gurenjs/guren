@@ -1628,36 +1628,46 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
   `PostPayloadSchema` is `z.object(baseFields)` over helper calls, which a
   static reader can only call opaque, and it would be a second reading of what
   `.default()` or `.pipe()` means for presence.
-- Each planned field yields `field <name>`, `field <name> type`,
-  `field <name> required` and one `field <name> rule <text>` per rule; each
-  resource field yields `field <name>` and `field <name> type`. A key the
-  schema's object does not declare is a `differ` and its other properties are
-  `unknown`. An export that reaches no object (`z.lazy()`, a plain object, a
-  zod v3 schema), a walk that throws (a recursive getter schema), or a file
-  that would not import leaves every property `unknown` with the reason.
+- A planned validator's fields are the keys a client sends. Each yields
+  `field <name>`, `field <name> type`, `field <name> required` and one
+  `field <name> rule <text>` per rule; each resource field yields
+  `field <name>` and `field <name> type`. A key the schema's object does not
+  declare is a `differ` and its other properties are `unknown`, unless the
+  object pipes into a second one (`z.object(a).pipe(z.object(b))`), whose keys
+  and presence then decide and are not compared. A key a transform on the
+  object adds is not a key the client sends. An export that reaches no object
+  (`z.lazy()`, a plain object, a zod v3 schema), a walk that throws (a
+  recursive getter schema), or a file that would not import leaves every
+  property `unknown` with the reason.
 - A planned `type` describes the validated value, so it is compared with the
   walker's output side: `z.coerce.number().int()` and `z.stringbool()` match
   `integer` and `boolean`. A field whose output passes through a `.transform()`
   is `unknown`, since the walker renders a transform's result as its input, and
   so is every field's type under a transform on the object itself (the checks
-  that ran before it are still read). A
-  type is a `differ` only across JSON families and only on a field with no pipe
-  or transform, where both sides are one node; a format the planned type needs
-  and the schema does not declare (`uuid`, `date`), a number for a planned
-  `integer`, and a union are `unknown`.
+  that ran before it are still read). A type is a `differ` only across JSON
+  families and only on a field with no pipe or transform, where both sides are
+  one node; a format the planned type needs and the schema does not declare
+  (`uuid`, `date`), a number for a planned `integer`, and a union are
+  `unknown`.
 - `required` means a client must send a non-null value, so a key it may omit or
-  send as `null` reads `false`; a union reads `unknown`, and so does a key the
-  walker calls required on a field with a transform stage, which may fill a
-  missing value in, and a key the walker drops unrendered (`z.file()`,
-  `z.lazy()`), which says nothing of its presence. Rules are prose, and only `min`, `max`, `email`, `url` and
-  `uuid` are compared. A bound is the tightest either stage states in the
-  planned type's unit (both stages run; a transformed field's input length says
-  nothing of an `integer`), an integer's exclusive bound read as the next
-  integer in. It is a
-  `match` when it equals the planned bound, a `differ` when it is tighter, since
-  it rejects a value the plan accepts, and `unknown` when it is looser or absent,
-  since a refinement the walker does not render may tighten it. That settles
-  the `max(500)` against a planned `max(2000)` near-miss of cause 3.
+  send as `null` reads `false`. It reads `unknown` for a union; for a key the
+  walker calls required whose chain holds a transform, `.default()`,
+  `.prefault()` or `.catch()` in any stage, which may fill a missing value in
+  (`z.string().default('1').pipe(z.coerce.number())`); and for an omissible key
+  planned as required when a refinement on the object, or on the field above
+  its presence wrapper, may require it. A key the walker drops unrendered
+  (`z.file()`, `z.lazy()`) is read off its outermost presence wrapper, so
+  `.optional()` reads `false` and `.required()`, which adds `nonoptional`
+  over it, reads `unknown`, as does a key with no such wrapper.
+- Rules are prose, and only `min`, `max`, `email`, `url` and `uuid` are
+  compared. A bound is the tightest either stage states in the planned type's
+  unit (both stages run), an integer's exclusive bound read as the next integer
+  in; a field with a transform reads none, since its input bounds a value the
+  plan does not describe. It is a `match` when it equals the planned bound, a
+  `differ` when it is tighter, since it rejects a value the plan accepts, and
+  `unknown` when it is looser or absent, since a refinement the walker does not
+  render may tighten it. That settles the `max(500)` against a planned
+  `max(2000)` near-miss of cause 3.
 - A resource's payload is `guren codegen`'s own reading, the definitions
   `data.gen.ts` is emitted from (`readResourceDefinitions()`), with the
   `extends` clause the copied body drops now kept beside it. A payload codegen

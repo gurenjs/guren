@@ -68,8 +68,20 @@ export const OpaqueSchema = z.object({
 
 export const ReshapedSchema = z.object({ amount: z.string(), label: z.string().max(20) }).transform((value) => ({ ...value, amount: Number(value.amount) }))
 
+export const PresenceSchema = z
+  .object({
+    upload: z.file().optional(),
+    page: z.string().default('1').pipe(z.coerce.number().int().min(1)),
+    tab: z.string().catch('all').pipe(z.enum(['all', 'mine'])),
+    nick: z.string().optional().refine((value) => value !== undefined),
+  })
+export const RequiredSchema = PresenceSchema.required()
+export const RefinedObjectSchema = z.object({ note: z.string().optional() }).superRefine(() => {})
+export const RepipedSchema = z.looseObject({ a: z.string().optional() }).pipe(z.object({ a: z.string(), b: z.string().optional() }))
+
 export const BoundsSchema = z.object({
   digits: z.string().max(3).transform(Number),
+  trimmed: z.string().max(3).transform((value) => value.trim()),
   quantity: z.number().int().min(0).gt(0),
   note: z.string().max(500),
   title: z.string().max(2000),
@@ -93,7 +105,7 @@ const FILES: Record<string, string> = {
   'app/Http/Validators/CommentValidator.ts': VALIDATORS,
   'app/Http/Resources/CommentResource.ts': RESOURCE('Comment', 'export interface CommentResourceData extends Record<string, unknown> {\n  id: number\n  body: string\n  author?: { name: string }\n}'),
   'app/Http/Resources/DraftResource.ts': RESOURCE('Draft', 'interface Base { id: number }\n\nexport interface DraftResourceData extends Base {\n  body: string\n}'),
-  'app/Http/Resources/TaskResource.ts': RESOURCE('Task', "interface Base { id: number }\n\nexport interface TaskResourceData extends Record<string, unknown>, Base {\n  status: 'draft' | 'in progress'\n  rank: 1 | 2\n}"),
+  'app/Http/Resources/TaskResource.ts': RESOURCE('Task', "interface Base { id: number }\n\nexport interface TaskResourceData extends Record<string, unknown>, Base {\n  status: 'draft' | 'in progress'\n  rank: 1 | 2\n  big: 0x1Fn\n}"),
   'app/Http/Resources/TagResource.ts': RESOURCE('Tag', 'export interface TagResourceData {\n  [key: string]: unknown\n  name: string\n}'),
   'app/Http/Resources/LooseResource.ts': "import { Resource } from '@guren/core'\n\nexport class LooseResource extends Resource<Record<string, unknown>> {\n  toArray() {\n    return {}\n  }\n}\n",
   'bunfig.toml': '[install]\nauto = "disable"\n',
@@ -245,6 +257,36 @@ describe('plan:status validator fields', () => {
     expect(verdicts(element)).toMatchObject({ 'field filled required': 'unknown', 'field a.b type': 'match', 'field gone': 'match' })
   })
 
+  test('should read presence off the outermost wrapper, and leave a fill or a refinement unknown rather than differ', () => {
+    const fields: Field[] = [
+      { name: 'upload', type: 'json', required: false, rules: [] },
+      { name: 'page', type: 'integer', required: false, rules: [] },
+      { name: 'tab', type: 'string', required: false, rules: [] },
+      { name: 'nick', type: 'string', required: true, rules: [] },
+    ]
+    expect(verdicts(judged(validator('PresenceSchema', fields), 'val'))).toMatchObject({
+      'field upload required': 'match',
+      'field page required': 'unknown',
+      'field tab required': 'unknown',
+      'field nick required': 'unknown',
+    })
+    const required = verdicts(judged(validator('RequiredSchema', fields.map((field) => ({ ...field, required: true }))), 'val'))
+    expect(Object.entries(required).filter(([, verdict]) => verdict === 'differ')).toEqual([])
+    expect(required['field upload required']).toBe('unknown')
+  })
+
+  test('should leave a key an object refinement may require unknown', () => {
+    const element = judged(validator('RefinedObjectSchema', [{ name: 'note', type: 'string', required: true, rules: [] }]), 'val')
+
+    expect(verdicts(element)['field note required']).toBe('unknown')
+  })
+
+  test('should leave presence and keys unknown when the object pipes into a second one', () => {
+    const element = judged(validator('RepipedSchema', [{ name: 'a', type: 'string', required: true, rules: [] }, { name: 'b', type: 'string', required: false, rules: [] }]), 'val')
+
+    expect(verdicts(element)).toMatchObject({ 'field a required': 'unknown', 'field b': 'unknown' })
+  })
+
   test('should leave a recursive schema unread rather than fail the command', () => {
     const element = judged(validator('TreeSchema', [{ name: 'name', type: 'string', required: true, rules: [] }]), 'val')
 
@@ -268,9 +310,12 @@ describe('plan:status validator fields', () => {
   })
 
   test('should read a bound only in the planned type’s unit, never a transformed field’s input length', () => {
-    const element = judged(validator('BoundsSchema', [{ name: 'digits', type: 'integer', required: true, rules: ['max 500'] }]), 'val')
+    const element = judged(validator('BoundsSchema', [
+      { name: 'digits', type: 'integer', required: true, rules: ['max 500'] },
+      { name: 'trimmed', type: 'string', required: true, rules: ['max 5'] },
+    ]), 'val')
 
-    expect(verdicts(element)['field digits rule max 500']).toBe('unknown')
+    expect(verdicts(element)).toMatchObject({ 'field digits rule max 500': 'unknown', 'field trimmed rule max 5': 'unknown' })
   })
 
   test('should call only a bound tighter than planned a differ, reading an integer’s exclusive bound as the next integer', () => {
@@ -338,6 +383,7 @@ describe('plan:status resource fields', () => {
     expect(verdictOf('status', 'number')).toBe('differ')
     expect(verdictOf('rank', 'number')).toBe('unknown')
     expect(verdictOf('rank', 'bigint')).toBe('differ')
+    expect(verdictOf('big', 'bigint')).toBe('unknown')
   })
 
   test('should keep an index signature from opening the key set, as a Record heritage does', () => {

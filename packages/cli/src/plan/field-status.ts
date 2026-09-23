@@ -39,20 +39,21 @@ function shapeOf(schema: JsonSchemaObject): FieldShape {
 }
 
 /**
- * Per planned type, the families that hold it outright and the ones that cannot hold it.
- * A family in neither may carry it under a format or a refinement this does not read.
+ * Per planned type, the families that hold it outright and the ones that cannot hold it (a
+ * family in neither may carry it under a format or a refinement this does not read), and the
+ * families its `min`/`max` is stated in: a string's length, a number's value, an array's size.
  */
-const VALIDATOR_TYPES: Record<PlanValidatorField['type'], { holds: (shape: FieldShape) => boolean; excludes: Family[] }> = {
-  string: { holds: (shape) => shape.family === 'string', excludes: ['integer', 'number', 'boolean', 'object', 'array'] },
-  text: { holds: (shape) => shape.family === 'string', excludes: ['integer', 'number', 'boolean', 'object', 'array'] },
-  integer: { holds: (shape) => shape.family === 'integer', excludes: ['string', 'boolean', 'object', 'array'] },
-  number: { holds: (shape) => shape.family === 'number' || shape.family === 'integer', excludes: ['string', 'boolean', 'object', 'array'] },
-  decimal: { holds: () => false, excludes: ['boolean', 'object', 'array'] },
-  boolean: { holds: (shape) => shape.family === 'boolean', excludes: ['string', 'integer', 'number', 'object', 'array'] },
-  date: { holds: (shape) => shape.family === 'string' && shape.format === 'date', excludes: ['boolean', 'object', 'array'] },
-  datetime: { holds: (shape) => shape.family === 'string' && shape.format === 'date-time', excludes: ['boolean', 'object', 'array'] },
-  json: { holds: (shape) => shape.family === 'object' || shape.family === 'array', excludes: [] },
-  uuid: { holds: (shape) => shape.family === 'string' && shape.format === 'uuid', excludes: ['integer', 'number', 'boolean', 'object', 'array'] },
+const VALIDATOR_TYPES: Record<PlanValidatorField['type'], { holds: (shape: FieldShape) => boolean; excludes: Family[]; bounds: Family[] }> = {
+  string: { holds: (shape) => shape.family === 'string', excludes: ['integer', 'number', 'boolean', 'object', 'array'], bounds: ['string'] },
+  text: { holds: (shape) => shape.family === 'string', excludes: ['integer', 'number', 'boolean', 'object', 'array'], bounds: ['string'] },
+  integer: { holds: (shape) => shape.family === 'integer', excludes: ['string', 'boolean', 'object', 'array'], bounds: ['integer', 'number'] },
+  number: { holds: (shape) => shape.family === 'number' || shape.family === 'integer', excludes: ['string', 'boolean', 'object', 'array'], bounds: ['integer', 'number'] },
+  decimal: { holds: () => false, excludes: ['boolean', 'object', 'array'], bounds: ['integer', 'number'] },
+  boolean: { holds: (shape) => shape.family === 'boolean', excludes: ['string', 'integer', 'number', 'object', 'array'], bounds: [] },
+  date: { holds: (shape) => shape.family === 'string' && shape.format === 'date', excludes: ['boolean', 'object', 'array'], bounds: ['string'] },
+  datetime: { holds: (shape) => shape.family === 'string' && shape.format === 'date-time', excludes: ['boolean', 'object', 'array'], bounds: ['string'] },
+  json: { holds: (shape) => shape.family === 'object' || shape.family === 'array', excludes: [], bounds: ['array'] },
+  uuid: { holds: (shape) => shape.family === 'string' && shape.format === 'uuid', excludes: ['integer', 'number', 'boolean', 'object', 'array'], bounds: ['string'] },
 }
 
 function describe(shape: FieldShape): string {
@@ -75,11 +76,15 @@ function validatorField(field: PlanValidatorField, read: PlanAppSchemaFields): P
   if ('unreadable' in read) return [unknown(name, 'declared', read.unreadable), ...details(read.unreadable)]
 
   const actual = read.fields[field.name]
+  if (!actual && read.repiped) {
+    const reason = 'the object pipes into a second one, whose keys this does not compare'
+    return [unknown(name, 'declared', reason), ...details(reason)]
+  }
   if (!actual) return [differ(name, 'declared', 'not declared'), ...details('the schema does not declare it')]
   return [
     match(name, 'declared'),
     read.reshaped ? unknown(`${name} type`, field.type, 'a transform on the object reshapes the validated value, whose type is not read') : typeProperty(`${name} type`, field.type, actual),
-    requiredProperty(`${name} required`, field.required, actual),
+    read.repiped ? unknown(`${name} required`, String(field.required), 'the object pipes into a second one, which decides whether it must be sent') : requiredProperty(`${name} required`, field.required, actual),
     ...rules.map(({ property, rule }) => ruleProperty(property, rule, field.type, actual)),
   ]
 }
@@ -98,14 +103,15 @@ function typeProperty(property: string, planned: PlanValidatorField['type'], fie
 /** Required means a client must send a value: a key it may omit, or one it may send as `null`, is not. */
 function requiredProperty(property: string, planned: boolean, field: PlanAppSchemaField): PlanPropertyStatus {
   if (field.required === undefined) return unknown(property, String(planned), field.unrendered ?? 'the schema walker renders nothing for the field')
+  if (!field.required && planned && field.refinedPresence) return unknown(property, 'true', 'the key may be omitted, and a refinement this does not read may require it')
   if (!field.required) return compareBoolean(property, planned, false, 'may be omitted')
   if (!field.input) return unknown(property, String(planned), field.unrendered ?? 'the input side was not rendered')
   const shape = shapeOf(field.input)
   if (shape.nullable) return compareBoolean(property, planned, false, 'accepts null')
   // A union may hold `null` or `undefined` in a member this does not unwrap.
   if (!shape.family) return unknown(property, String(planned), 'the field is a union, which may accept null')
-  // The walker reads a pipe as required even where a transforming stage fills in the missing value.
-  if (field.transforming) return unknown(property, String(planned), 'a transform in the field may supply a missing value')
+  // The walker reads a pipe as required even where a stage of it fills in the missing value.
+  if (field.fillsMissing) return unknown(property, String(planned), 'a transform, default or catch in the field may supply a missing value')
   return compareBoolean(property, planned, true, 'must be sent')
 }
 
@@ -132,20 +138,6 @@ interface Bound {
   keyword: BoundKeyword
 }
 
-/** The families a planned type's bound is stated in: a string's length, a number's value, an array's size. */
-const BOUND_FAMILIES: Record<PlanValidatorField['type'], Family[]> = {
-  string: ['string'],
-  text: ['string'],
-  uuid: ['string'],
-  date: ['string'],
-  datetime: ['string'],
-  integer: ['integer', 'number'],
-  number: ['integer', 'number'],
-  decimal: ['integer', 'number'],
-  boolean: [],
-  json: ['array'],
-}
-
 /** Whether `a` admits less than `b` on this side; at an equal value an exclusive `a` is the tighter. */
 function isTighter(side: 'min' | 'max', a: { value: number; exclusive: boolean }, b: { value: number }): boolean {
   if (a.value === b.value) return a.exclusive
@@ -158,12 +150,13 @@ function isTighter(side: 'min' | 'max', a: { value: number; exclusive: boolean }
  * field's output side is its input again, and its input bounds a value the plan does not describe.
  */
 function statedBound(field: PlanAppSchemaField, type: PlanValidatorField['type'], side: 'min' | 'max'): Bound | undefined {
-  const sides = field.transformed ? [] : [field.input, field.output]
+  if (field.transformed) return undefined
   let bound: Bound | undefined
-  for (const schema of sides) {
-    const shape = schema ? shapeOf(schema) : undefined
-    const keywords = shape?.family && BOUND_FAMILIES[type].includes(shape.family) ? BOUND_KEYWORDS[shape.family] : undefined
-    if (!shape || !keywords) continue
+  for (const schema of [field.input, field.output]) {
+    if (!schema) continue
+    const shape = shapeOf(schema)
+    const keywords = shape.family && VALIDATOR_TYPES[type].bounds.includes(shape.family) ? BOUND_KEYWORDS[shape.family] : undefined
+    if (!keywords) continue
     for (const keyword of keywords[side]) {
       const stated = shape.schema[keyword]
       if (typeof stated !== 'number') continue
@@ -226,7 +219,7 @@ const isKind = (kind: TypeKind | undefined): kind is TypeKind => kind !== undefi
 function keywordOf(member: string): TypeKind | undefined {
   if (PRIMITIVE_TYPES.has(member)) return { keyword: member, literal: false }
   if (member.startsWith('"')) return { keyword: 'string', literal: true }
-  if (/^-?\d[\d_]*n$/u.test(member)) return { keyword: 'bigint', literal: true }
+  if (/^-?\d\w*n$/u.test(member)) return { keyword: 'bigint', literal: true }
   if (/^-?\d/u.test(member)) return { keyword: 'number', literal: true }
   if (member === 'true' || member === 'false') return { keyword: 'boolean', literal: true }
   return undefined
