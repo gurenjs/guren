@@ -44,6 +44,11 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   `database-command-boundary.test.ts` exercises the CLI in subprocesses with
   inert database hooks, including refusal, dry-run, reset ordering, failures,
   and JSON status/rollback output.
+- `src/commands/diagnostics.ts` owns check, audit, and gate argument mapping,
+  output selection, and exit-code decisions. Diagnostic engines remain in their
+  existing modules. Preserve each command's distinct gating rules: plain check
+  is observational, check --ci uses gatingResults, audit gates on failures, and
+  gate uses the complete report's ok flag.
 - These modules only construct command objects at import time. Resolve cwd,
   environment, and application state inside command execution. Use the local
   `defineCommand` wrapper so repeated flags keep their existing semantics.
