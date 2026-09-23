@@ -37,6 +37,9 @@ import { shareInertiaProps, type SharedInertiaPropsResolver } from '../mvc/inert
 import type { EnvSchema } from '../config/env'
 import type { ConfigDefinition } from '../config/define'
 import { ConfigServiceProvider } from '../providers/ConfigServiceProvider'
+import { IntrospectionListenError, isIntrospecting } from '../introspection/flag'
+import type { AppManifest } from '../introspection/types'
+import { buildAppManifest, type ModuleRouteRange } from '../introspection/manifest'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
 // still allowing consumers to stub or polyfill it when running elsewhere.
@@ -551,6 +554,8 @@ export class Application {
   readonly configEntries: ReadonlyArray<ConfiguredDefinition>
   private routesRegistered = false
   private bootPromise?: Promise<void>
+  private manifestPromise?: Promise<AppManifest>
+  private readonly moduleRouteRanges: ModuleRouteRange[] = []
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.configEntries = [
@@ -586,9 +591,11 @@ export class Application {
       shareInertiaProps(options.inertia.share, this.container)
     }
 
+    const framework = { source: 'framework' } as const
+
     // Must stay the first provider registered (RFC 0027 §3).
     if (options.env || this.configEntries.length > 0) {
-      this.providerManager.register(ConfigServiceProvider)
+      this.providerManager.register(ConfigServiceProvider, framework)
     }
 
     // Registered here, before any provider, so requireAuthenticated/requireGuest
@@ -606,19 +613,19 @@ export class Application {
     // app.use() before boot() finds it. The context resolves its session
     // lazily, so running ahead of the session middleware is fine.
     if (this.options.auth) {
-      this.providerManager.register(AuthServiceProvider)
+      this.providerManager.register(AuthServiceProvider, framework)
     } else {
       this.hono.use('*', attachAuthContext((ctx) => this.authManager.createAuthContext(ctx)))
     }
 
-    this.providerManager.register(AuthorizationServiceProvider)
+    this.providerManager.register(AuthorizationServiceProvider, framework)
 
-    // Through the same registerMany() as options.providers, so a module-supplied
-    // Error/Inertia provider subclass overrides the default like a top-level one.
-    const moduleProviders = (this.options.modules ?? []).flatMap((module) => module.providers)
+    // A module-supplied Error/Inertia provider subclass overrides the default
+    // like a top-level one, so both lists count as user providers here.
+    const listedProviders = Array.isArray(this.options.providers) ? this.options.providers : []
     const userProviders = [
-      ...(Array.isArray(this.options.providers) ? this.options.providers : []),
-      ...moduleProviders,
+      ...listedProviders,
+      ...(this.options.modules ?? []).flatMap((module) => module.providers),
     ]
 
     // A user-supplied subclass of a default provider takes ownership of that
@@ -627,23 +634,24 @@ export class Application {
       userProviders.some((provider) => provider === base || provider.prototype instanceof base)
 
     if (this.options.i18n && !hasUserProviderOf(I18nServiceProvider)) {
-      this.providerManager.register(I18nServiceProvider)
+      this.providerManager.register(I18nServiceProvider, framework)
     }
 
     // Before user providers, so a custom ErrorServiceProvider subclass wins via
     // its later hono.onError() call.
     if (!hasUserProviderOf(ErrorServiceProvider)) {
-      this.providerManager.register(ErrorServiceProvider)
+      this.providerManager.register(ErrorServiceProvider, framework)
     }
 
-    if (userProviders.length > 0) {
-      this.providerManager.registerMany(userProviders)
+    this.providerManager.registerMany(listedProviders, { source: 'options.providers' })
+    for (const gurenModule of this.options.modules ?? []) {
+      this.providerManager.registerMany(gurenModule.providers, { source: 'module', module: gurenModule.name })
     }
 
     // After user providers: the first matching exception renderer wins, so a
     // user-registered ValidationException renderer keeps precedence over this.
     if (!hasUserProviderOf(InertiaServiceProvider)) {
-      this.providerManager.register(InertiaServiceProvider)
+      this.providerManager.register(InertiaServiceProvider, framework)
     }
 
     // Publish as the default application: code outside a request (Job.make(),
@@ -726,7 +734,9 @@ export class Application {
       }
 
       for (const gurenModule of this.options.modules ?? []) {
+        const start = this.router.routeCount
         await mountModuleRoutes(this.router, gurenModule)
+        this.moduleRouteRanges.push({ module: gurenModule.name, start, end: this.router.routeCount })
       }
 
       this.routesRegistered = true
@@ -796,6 +806,20 @@ export class Application {
    * retries on the partially mounted app rather than starting clean.
    */
   async boot(): Promise<void> {
+    // Degrading here, not only in `introspect()`, covers an entry that boots
+    // at module scope before the CLI ever holds the app (RFC 0026 §2).
+    if (isIntrospecting()) {
+      await this.introspect()
+      return
+    }
+
+    if (this.manifestPromise) {
+      throw new Error(
+        '[guren] This application was introspected: its providers may have run introspect() in place of register(), '
+          + 'so it cannot boot. Construct a new application to serve it.',
+      )
+    }
+
     this.bootPromise ??= this.bootOnce()
 
     try {
@@ -814,6 +838,34 @@ export class Application {
    */
   async booted(): Promise<void> {
     await this.bootPromise
+  }
+
+  /**
+   * Registers providers and mounts routes, then describes the result (RFC 0026
+   * §1). Never runs `createApp({ boot })`, a provider's `boot()`, or `listen()`.
+   * Memoised; the application cannot boot afterwards.
+   */
+  async introspect(): Promise<AppManifest> {
+    if (this.bootPromise) {
+      throw new Error('[guren] Cannot introspect an application that has booted: introspection describes the registered, unbooted app.')
+    }
+
+    this.manifestPromise ??= this.introspectOnce()
+    return this.manifestPromise
+  }
+
+  private async introspectOnce(): Promise<AppManifest> {
+    const providers = await this.providerManager.registerAllForIntrospection()
+    await this.mountRoutes()
+    return buildAppManifest({
+      router: this.router,
+      container: this.container,
+      providers,
+      providerWarnings: this.providerManager.manifestWarnings(),
+      modules: this.options.modules ?? [],
+      moduleRouteRanges: this.moduleRouteRanges,
+      hasBootCallback: this.options.boot !== undefined,
+    })
   }
 
   private async bootOnce(): Promise<void> {
@@ -951,6 +1003,10 @@ export class Application {
   }
 
   async listen(options: ApplicationListenOptions = {}): Promise<ListenAddress> {
+    if (isIntrospecting()) {
+      throw new IntrospectionListenError()
+    }
+
     if (!Bun) {
       throw new Error('Bun runtime is required to call Application.listen')
     }

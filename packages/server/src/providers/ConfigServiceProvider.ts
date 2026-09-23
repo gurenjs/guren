@@ -4,6 +4,8 @@ import type { AppEnv, EnvSource } from '../config/env'
 import { recordEnvReads } from '../config/env-reads'
 import type { Application, ConfiguredDefinition } from '../http/Application'
 import { warnOnce } from '../support/warn-once'
+import { isIntrospecting } from '../introspection/flag'
+import type { ManifestWarning } from '../introspection/types'
 
 interface ResolvedDefinition {
   readonly definition: ConfigDefinition
@@ -22,9 +24,11 @@ export class ConfigServiceProvider extends ServiceProvider {
   private unset: ReadonlySet<string> = new Set()
   private resolved: ResolvedDefinition[] = []
   private owned = new Map<string, OwnedBinding>()
+  private warnings: ManifestWarning[] = []
 
   register(): void {
     const app = this.container.make<Application>('app')
+    this.warnings = []
     this.env = this.parseEnv(app)
     this.resolved = []
     this.owned = new Map()
@@ -42,10 +46,9 @@ export class ConfigServiceProvider extends ServiceProvider {
       // manager constructor that validates it; nothing bound answers 503 instead.
       const placeholders = [...read].filter((key) => this.unset.has(key))
       if (placeholders.length > 0) {
-        warnOnce(
-          `config-unverified:${definition.key}`,
-          `[guren] the "${definition.key}" config reads ${placeholders.join(', ')}, which the environment does not set; it was left unbound.`,
-        )
+        const message = `the "${definition.key}" config reads ${placeholders.join(', ')}, which the environment does not set; it was left unbound.`
+        warnOnce(`config-unverified:${definition.key}`, `[guren] ${message}`)
+        this.warnings.push({ code: 'config-unverified', message })
         continue
       }
 
@@ -68,6 +71,11 @@ export class ConfigServiceProvider extends ServiceProvider {
     }
   }
 
+  /** @internal What the manifest reports under GUREN_INTROSPECT=1 (RFC 0027 §1): env problems and configs left unbound. */
+  manifestWarnings(): ReadonlyArray<ManifestWarning> {
+    return this.warnings
+  }
+
   /** @internal The bindings the definitions made, for ProviderManager's twice-configured check. */
   ownedBindings(): ReadonlyMap<string, OwnedBinding> {
     return this.owned
@@ -80,11 +88,11 @@ export class ConfigServiceProvider extends ServiceProvider {
 
     const source = this.container.makeOptional<EnvSource>('env.source')
     // RFC 0026's introspection child has no secrets; it reports rather than failing the manifest.
-    const introspecting = typeof process !== 'undefined' && process.env.GUREN_INTROSPECT === '1'
-    const parsed = schema.parse(source, { mode: introspecting ? 'report' : 'throw' })
+    const parsed = schema.parse(source, { mode: isIntrospecting() ? 'report' : 'throw' })
 
     for (const problem of parsed.problems) {
       warnOnce(`env-invalid:${problem.key}`, `[guren] Invalid environment: ${problem.key} ${problem.message} (reported under GUREN_INTROSPECT=1).`)
+      this.warnings.push({ code: 'env-invalid', message: `${problem.key} ${problem.message}` })
     }
 
     this.unset = parsed.unset

@@ -19,6 +19,21 @@ export type {
   ListenAddress,
   ServiceProviderConstructor,
 } from './http/Application'
+// Introspection boot (RFC 0026): the flag a provider reads, and the manifest `Application.introspect()` returns.
+export { isIntrospecting } from './introspection/flag'
+export type {
+  AppManifest,
+  ControllerRef,
+  JsonSchema,
+  ManifestWarning,
+  MiddlewareEntry,
+  ModuleEntry,
+  ProviderEntry,
+  ProviderRegisterOutcome,
+  ProviderSource,
+  RouteEntry,
+  RouteSchemaEntry,
+} from './introspection/types'
 export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'
 export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps, AuthPayload } from './mvc/Controller'
