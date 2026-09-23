@@ -19,7 +19,7 @@ interface BlockerContext {
 export interface CloseBlocker {
   id: string
   state: PlanElementState
-  /** What holds it: the hold's note, else the reader's reason or last note; absent when none says. */
+  /** The hold's note, or for no hold or an `incomplete` one the reader's reason or last note; absent when none says. */
   holds?: string
   /** The command that moves it. */
   moves: string
