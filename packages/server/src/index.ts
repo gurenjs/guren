@@ -387,6 +387,8 @@ export {
   createHostAuthorizationMiddleware,
   // CORS
   createCorsMiddleware,
+  // WebSocket origin
+  createWebSocketOriginGuard,
   // Redirect safety
   createRedirectSafetyMiddleware,
   isSafeRedirectUrl,
@@ -439,6 +441,8 @@ export type {
   HostAuthorizationOptions,
   // CORS types
   CorsOptions,
+  // WebSocket origin types
+  WebSocketOriginOptions,
   // Redirect safety types
   RedirectSafetyOptions,
   // Force HTTPS types

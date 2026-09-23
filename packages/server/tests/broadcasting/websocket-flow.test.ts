@@ -93,9 +93,11 @@ function subscriptionFrame(frames: Frame[], channel: string): Frame | undefined 
   return frames.find((frame) => frame.event === 'subscription' && frame.data.channel === channel)
 }
 
-/** Lets a broadcast that should not arrive have the time to arrive anyway. */
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 50))
+/** Frames on one socket arrive in order, so this reply follows anything the server sent before it. */
+async function roundTrip(socket: WebSocket, frames: Frame[]): Promise<void> {
+  const probe = `probe-${crypto.randomUUID()}`
+  socket.send(JSON.stringify({ action: 'unsubscribe', channel: probe }))
+  await waitFor(() => subscriptionFrame(frames, probe))
 }
 
 describe('WebSocket subscription flow', () => {
@@ -104,7 +106,7 @@ describe('WebSocket subscription flow', () => {
     manager.channel('announcements', () => true)
     const url = await serve(manager)
 
-    const { frames, clientId, channels } = await connect(url, { query: '?channels=announcements' })
+    const { frames, clientId, channels } = await connect(url, { query: '?channels=announcements,announcements' })
     expect(clientId).toMatch(/^ws_[0-9a-f]{32}$/)
     expect(channels).toEqual(['announcements'])
 
@@ -119,11 +121,11 @@ describe('WebSocket subscription flow', () => {
     manager.privateChannel('secret', () => false)
     const url = await serve(manager)
 
-    const { frames, channels } = await connect(url, { query: '?channels=private-secret,private-unregistered' })
+    const { socket, frames, channels } = await connect(url, { query: '?channels=private-secret,private-unregistered' })
     expect(channels).toEqual([])
 
     await manager.broadcast('private-secret', 'Leaked', {})
-    await settle()
+    await roundTrip(socket, frames)
     expect(frames.some((frame) => frame.event === 'Leaked')).toBe(false)
     expect((manager.driver() as MemoryDriver).getSubscriberCount('private-secret')).toBe(0)
   })
@@ -141,7 +143,7 @@ describe('WebSocket subscription flow', () => {
 
     const refused = await waitFor(() => subscriptionFrame(frames, 'private-orders.2'))
     const granted = await waitFor(() => subscriptionFrame(frames, 'private-orders.1'))
-    expect(refused.data).toEqual({ channel: 'private-orders.2', authorized: false, subscribed: false })
+    expect(refused.data).toEqual({ channel: 'private-orders.2', authorized: false })
     expect(granted.data).toEqual({ channel: 'private-orders.1', authorized: true, subscribed: true })
 
     await manager.broadcast('private-orders.2', 'SomeoneElsesOrder', {})
@@ -182,7 +184,7 @@ describe('WebSocket subscription flow', () => {
     expect(reply.data).toEqual({ channel: 'announcements', subscribed: false })
 
     await manager.broadcast('announcements', 'AfterUnsubscribe', {})
-    await settle()
+    await roundTrip(socket, frames)
     expect(frames.some((frame) => frame.event === 'AfterUnsubscribe')).toBe(false)
   })
 
@@ -210,6 +212,71 @@ describe('WebSocket subscription flow', () => {
     expect((manager.driver() as MemoryDriver).getSubscriberCount('private-slow')).toBe(0)
   })
 
+  test('ignores a message longer than the protocol needs', async () => {
+    const manager = createManager()
+    const url = await serve(manager)
+    const channel = 'a'.repeat(5000)
+
+    const { socket, frames } = await connect(url)
+    socket.send(JSON.stringify({ action: 'subscribe', channel }))
+    await roundTrip(socket, frames)
+
+    expect(subscriptionFrame(frames, channel)).toBeUndefined()
+    expect((manager.driver() as MemoryDriver).getSubscriberCount(channel)).toBe(0)
+  })
+
+  test('closes a socket that queues more messages than the cap', async () => {
+    const manager = createManager()
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    manager.privateChannel('gated', async () => {
+      await gate
+      return true
+    })
+    const url = await serve(manager)
+
+    const { socket, clientId } = await connect(url)
+    const closed = new Promise<number>((resolve) => {
+      socket.addEventListener('close', (event) => resolve(event.code), { once: true })
+    })
+    for (let i = 0; i < 40; i += 1) {
+      socket.send(JSON.stringify({ action: 'subscribe', channel: 'private-gated' }))
+    }
+
+    expect(await closed).toBe(1008)
+    release()
+    await waitFor(() => (manager.getWebSocketClient(clientId) === undefined ? true : undefined))
+    expect((manager.driver() as MemoryDriver).getSubscriberCount('private-gated')).toBe(0)
+  })
+
+  test('leaves no subscription behind for a subscribe still authorizing when the socket closes', async () => {
+    const manager = createManager()
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let authorizing = false
+    manager.privateChannel('gated', async () => {
+      authorizing = true
+      await gate
+      return true
+    })
+    const url = await serve(manager)
+
+    const { socket, clientId } = await connect(url)
+    socket.send(JSON.stringify({ action: 'subscribe', channel: 'private-gated' }))
+    await waitFor(() => (authorizing ? true : undefined))
+    socket.close()
+    await waitFor(() => (manager.getWebSocketClient(clientId) === undefined ? true : undefined))
+
+    release()
+    await gate
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect((manager.driver() as MemoryDriver).getSubscriberCount('private-gated')).toBe(0)
+  })
+
   test('removes the client and its driver subscriptions when the socket closes', async () => {
     const manager = createManager()
     manager.channel('announcements', () => true)
@@ -235,27 +302,19 @@ describe('WebSocket upgrade origin check', () => {
 
   // A page on another site can open a socket to the app, and the browser sends
   // the app's cookies with the handshake; CORS does not apply to it.
-  test('refuses an upgrade from another origin', async () => {
+  test.each([
+    ['another site', 'https://evil.example'],
+    ['an opaque origin', 'null'],
+  ])('refuses an upgrade from %s', async (_label, origin) => {
     const manager = createManager()
     const url = await serve(manager)
 
     const response = await fetch(`${url}/broadcasting/socket`, {
-      headers: { ...handshake, Origin: 'https://evil.example' },
+      headers: { ...handshake, Origin: origin },
     })
 
     expect(response.status).toBe(403)
     expect(manager.getWebSocketClients()).toEqual([])
-  })
-
-  test('refuses an opaque origin', async () => {
-    const manager = createManager()
-    const url = await serve(manager)
-
-    const response = await fetch(`${url}/broadcasting/socket`, {
-      headers: { ...handshake, Origin: 'null' },
-    })
-
-    expect(response.status).toBe(403)
   })
 
   test('accepts the app\'s own origin', async () => {
@@ -282,6 +341,24 @@ describe('WebSocket upgrade origin check', () => {
 
     expect(response.status).toBe(426)
     expect(response.headers.get('upgrade')).toBe('websocket')
+  })
+
+  test('answers 400 to a handshake without a key, before resolving the user', async () => {
+    const manager = createManager()
+    let userLookups = 0
+    const url = await serve(manager, {
+      getUser: () => {
+        userLookups += 1
+        return undefined
+      },
+    })
+
+    const response = await fetch(`${url}/broadcasting/socket`, {
+      headers: { Upgrade: 'websocket', Connection: 'Upgrade' },
+    })
+
+    expect(response.status).toBe(400)
+    expect(userLookups).toBe(0)
   })
 })
 

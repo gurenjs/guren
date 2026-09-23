@@ -207,7 +207,15 @@ socket.addEventListener('message', (e) => {
 socket.send(JSON.stringify({ action: 'unsubscribe', channel: 'private-orders.123' }))
 ```
 
-Messages are handled in the order they arrive. A refused channel is answered with `authorized: false` and delivers nothing. The `clientId` from `connected` also works with `POST /broadcasting/auth`.
+Messages are handled in the order they arrive. A refused channel is answered with `authorized: false` and delivers nothing. A socket with more than 32 messages waiting for an answer is closed with code 1008, and a message over 4 KB is ignored. The `clientId` from `connected` also works with `POST /broadcasting/auth`.
+
+The socket keeps the user it opened with, so signing out does not close it. Remove that user's clients when they sign out or lose access:
+
+```ts
+for (const client of broadcast.getWebSocketClients()) {
+  if (client.userId === user.id) broadcast.removeWebSocketClient(client.id)
+}
+```
 
 ### Origin check
 
@@ -220,7 +228,7 @@ broadcast.webSocketMiddleware({
 })
 ```
 
-A handshake with no `Origin` comes from outside a browser and carries none of the user's cookies. It passes the check and still has to authorize its channels like any other socket.
+A handshake with no `Origin` comes from outside a browser and carries none of the user's cookies. It passes the check and still has to authorize its channels like any other socket. The check compares hosts and ignores the scheme, because TLS usually ends at the proxy, so a plain-HTTP page on the same host passes; HSTS is what keeps pages on HTTPS. An `allowedOrigins` entry matches its scheme exactly.
 
 ### Custom socket routes
 
@@ -241,7 +249,15 @@ if (await broadcast.authorize(channel, user)) {
 broadcast.removeWebSocketClient(clientId)
 ```
 
-Such a route does its own `Origin` check. `broadcast.disconnectAll()` closes WebSocket clients as well as SSE streams.
+Put `createWebSocketOriginGuard()` in front of such a route for the same `Origin` check; it takes the same `allowedOrigins`:
+
+```ts
+import { createWebSocketOriginGuard } from '@guren/core'
+
+router.get('/socket', socketHandler, createWebSocketOriginGuard())
+```
+
+`broadcast.disconnectAll()` closes WebSocket clients as well as SSE streams.
 
 ### Typed channel codegen
 

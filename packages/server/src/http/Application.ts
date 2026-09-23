@@ -1000,7 +1000,7 @@ export class Application {
       await loadDevBanner()
     }
 
-    // Awaited here for the banner's two reasons. It is the handler that hono's
+    // Before Vite and the bind, like the banner. It is the handler that hono's
     // `upgradeWebSocket` hands an upgraded socket to; without it `server.upgrade()`
     // throws. `hono/bun` reads the `Bun` global at load, so only this path imports it.
     const { websocket } = await import('hono/bun')

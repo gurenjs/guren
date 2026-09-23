@@ -196,7 +196,15 @@ socket.addEventListener('message', (e) => {
 socket.send(JSON.stringify({ action: 'unsubscribe', channel: 'private-orders.123' }))
 ```
 
-メッセージは届いた順に処理されます。拒否されたチャンネルには `authorized: false` が返り、イベントは届きません。`connected` で受け取った `clientId` は `POST /broadcasting/auth` でも使えます。
+メッセージは届いた順に処理されます。拒否されたチャンネルには `authorized: false` が返り、イベントは届きません。応答待ちのメッセージが 32 件を超えたソケットはコード 1008 で閉じられ、4 KB を超えるメッセージは無視されます。`connected` で受け取った `clientId` は `POST /broadcasting/auth` でも使えます。
+
+ソケットは開いたときのユーザーを保持し続けるため、ログアウトしても閉じられません。ユーザーがログアウトしたときや権限を失ったときは、そのユーザーのクライアントを削除してください。
+
+```ts
+for (const client of broadcast.getWebSocketClients()) {
+  if (client.userId === user.id) broadcast.removeWebSocketClient(client.id)
+}
+```
 
 ### Origin の検査
 
@@ -209,7 +217,7 @@ broadcast.webSocketMiddleware({
 })
 ```
 
-`Origin` のないハンドシェイクはブラウザ以外からの接続で、ユーザーの Cookie を持っていません。この検査は通りますが、チャンネルの認可はほかのソケットと同じく必要です。
+`Origin` のないハンドシェイクはブラウザ以外からの接続で、ユーザーの Cookie を持っていません。この検査は通りますが、チャンネルの認可はほかのソケットと同じく必要です。TLS は通常プロキシで終端されるため、この検査はホストだけを比べ、スキームは比べません。同じホストの平文 HTTP のページも通るので、ページを HTTPS に限るのは HSTS の役目です。`allowedOrigins` の項目はスキームまで一致したときだけ通します。
 
 ### 独自のソケットルート
 
@@ -230,7 +238,15 @@ if (await broadcast.authorize(channel, user)) {
 broadcast.removeWebSocketClient(clientId)
 ```
 
-こうしたルートでは `Origin` の検査も自分で行います。`broadcast.disconnectAll()` は、SSE ストリームに加えて WebSocket クライアントも閉じます。
+こうしたルートの前に `createWebSocketOriginGuard()` を置くと、同じ `Origin` の検査が入ります。`allowedOrigins` も同じように渡せます。
+
+```ts
+import { createWebSocketOriginGuard } from '@guren/core'
+
+router.get('/socket', socketHandler, createWebSocketOriginGuard())
+```
+
+`broadcast.disconnectAll()` は、SSE ストリームに加えて WebSocket クライアントも閉じます。
 
 ### 型安全 channel codegen
 
