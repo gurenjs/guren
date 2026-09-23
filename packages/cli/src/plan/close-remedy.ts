@@ -7,8 +7,8 @@
 import type { Plan, PlanDraft } from './schema'
 import { awaitsVerification, type PlanElementState, type PlanElementStatus } from './status'
 import { listPlanSteps, type PlanTaskDerivation } from './tasks'
-import { behaviourCanReach, behaviourReach } from './reach'
-import { restsOnReach } from './verification'
+import { behaviourCanReach, behaviourCarriers } from './reach'
+import { needsNoFiles, restsOnReach } from './verification'
 
 interface BlockerContext {
   planArgument: string
@@ -36,16 +36,8 @@ export function describeCloseBlockers(
   elements: ReadonlyArray<PlanElementStatus<PlanElementState>>,
   planArgument: string,
 ): CloseBlocker[] {
-  const context: BlockerContext = { planArgument, owners: new Map(), carriers: new Map(), reachable: behaviourCanReach(plan) }
-  for (const { step } of listPlanSteps(derivation)) {
-    for (const id of step.elementIds) context.owners.set(id, step.id)
-    if (step.kind === 'tests' || step.acceptanceIds.length === 0) continue
-    for (const id of behaviourReach(plan, step.acceptanceIds)) {
-      const carriers = context.carriers.get(id)
-      if (carriers) carriers.push(step.id)
-      else context.carriers.set(id, [step.id])
-    }
-  }
+  const context: BlockerContext = { planArgument, owners: new Map(), carriers: behaviourCarriers(plan, derivation), reachable: behaviourCanReach(plan) }
+  for (const { step } of listPlanSteps(derivation)) for (const id of step.elementIds) context.owners.set(id, step.id)
   return elements.map((element) => {
     const hold = element.hold
     const said = element.notes.filter((note) => note !== hold?.note).at(-1)
@@ -76,7 +68,6 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
     return `${target}, then run ${verify(owner)}${orWaive}`
   }
   const unmatched = restsOnReach(element)
-  const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
   const carriers = context.carriers.get(element.id) ?? []
   if (unmatched && carriers.length === 0) {
     if (!context.reachable.has(element.id)) {
@@ -84,7 +75,7 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
     }
     return `No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with ${waive}, or add a behaviour that reaches it and approve the plan again`
   }
-  if (element.files.length === 0 && !needsNoFiles) return `plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive}`
+  if (element.files.length === 0 && !needsNoFiles(element)) return `plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive}`
   const runs = unmatched && !carriers.includes(owner) ? [carriers[0]!, owner] : [owner]
   return `Run ${runs.map(verify).join(', then ')}${orWaive}`
 }
