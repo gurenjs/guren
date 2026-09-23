@@ -271,6 +271,12 @@ describe('toJsonSchema', () => {
   })
 })
 
+describe('toJsonSchema on an all-optional object', () => {
+  test('omits `required` instead of setting it to undefined', () => {
+    expect(walk(z.object({ q: z.string().optional() })).result).toStrictEqual({ type: 'object', properties: { q: { type: 'string' } } })
+  })
+})
+
 describe('readObjectSchema', () => {
   test('reports the properties and the keys a caller must supply', () => {
     const warnings: string[] = []

@@ -188,7 +188,7 @@ export function toJsonSchema(
       return {
         type: 'object',
         properties: details.properties,
-        required: details.required.size > 0 ? Array.from(details.required) : undefined,
+        ...(details.required.size > 0 ? { required: Array.from(details.required) } : {}),
       }
     }
     case 'nullable': {

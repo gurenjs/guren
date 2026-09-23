@@ -4,6 +4,7 @@ import type { AppEnv, EnvSource } from '../config/env'
 import { recordEnvReads } from '../config/env-reads'
 import type { Application, ConfiguredDefinition } from '../http/Application'
 import { warnOnce } from '../support/warn-once'
+import type { ManifestWarning } from '../introspection/types'
 
 interface ResolvedDefinition {
   readonly definition: ConfigDefinition
@@ -22,10 +23,21 @@ export class ConfigServiceProvider extends ServiceProvider {
   private unset: ReadonlySet<string> = new Set()
   private resolved: ResolvedDefinition[] = []
   private owned = new Map<string, OwnedBinding>()
+  private warnings: ManifestWarning[] = []
 
   register(): void {
+    this.bindAll('throw')
+  }
+
+  /** Under introspection (RFC 0026) the environment has no secrets: problems are reported, not thrown. */
+  override introspect(): void {
+    this.bindAll('report')
+  }
+
+  private bindAll(mode: 'throw' | 'report'): void {
     const app = this.container.make<Application>('app')
-    this.env = this.parseEnv(app)
+    this.warnings = []
+    this.env = this.parseEnv(app, mode)
     this.resolved = []
     this.owned = new Map()
 
@@ -37,15 +49,14 @@ export class ConfigServiceProvider extends ServiceProvider {
       const { env, read } = recordEnvReads(this.env)
       const config = definition.resolve(env)
 
-      // Reachable only where parsing reported rather than threw, which today is
-      // GUREN_INTROSPECT=1. Binding would hand the redacted placeholder to a
-      // manager constructor that validates it; nothing bound answers 503 instead.
+      // Reachable only where parsing reported rather than threw, which is
+      // introspection (`introspect()` above). Binding would hand the redacted placeholder
+      // to a manager constructor that validates it; nothing bound answers 503 instead.
       const placeholders = [...read].filter((key) => this.unset.has(key))
       if (placeholders.length > 0) {
-        warnOnce(
-          `config-unverified:${definition.key}`,
-          `[guren] the "${definition.key}" config reads ${placeholders.join(', ')}, which the environment does not set; it was left unbound.`,
-        )
+        const message = `the "${definition.key}" config reads ${placeholders.join(', ')}, which the environment does not set; it was left unbound.`
+        warnOnce(`config-unverified:${definition.key}`, `[guren] ${message}`)
+        this.warnings.push({ code: 'config-unverified', message })
         continue
       }
 
@@ -68,23 +79,27 @@ export class ConfigServiceProvider extends ServiceProvider {
     }
   }
 
+  /** @internal Env problems reported under introspection, and configs left unbound, for the manifest (RFC 0027 §1). */
+  manifestWarnings(): ReadonlyArray<ManifestWarning> {
+    return this.warnings
+  }
+
   /** @internal The bindings the definitions made, for ProviderManager's twice-configured check. */
   ownedBindings(): ReadonlyMap<string, OwnedBinding> {
     return this.owned
   }
 
-  private parseEnv(app: Application): AppEnv {
+  private parseEnv(app: Application, mode: 'throw' | 'report'): AppEnv {
     const schema = app.envSchema
     this.unset = new Set()
     if (!schema) return {} as AppEnv
 
     const source = this.container.makeOptional<EnvSource>('env.source')
-    // RFC 0026's introspection child has no secrets; it reports rather than failing the manifest.
-    const introspecting = typeof process !== 'undefined' && process.env.GUREN_INTROSPECT === '1'
-    const parsed = schema.parse(source, { mode: introspecting ? 'report' : 'throw' })
+    const parsed = schema.parse(source, { mode })
 
     for (const problem of parsed.problems) {
-      warnOnce(`env-invalid:${problem.key}`, `[guren] Invalid environment: ${problem.key} ${problem.message} (reported under GUREN_INTROSPECT=1).`)
+      warnOnce(`env-invalid:${problem.key}`, `[guren] Invalid environment: ${problem.key} ${problem.message} (reported under introspection).`)
+      this.warnings.push({ code: 'env-invalid', message: `${problem.key} ${problem.message}` })
     }
 
     this.unset = parsed.unset
