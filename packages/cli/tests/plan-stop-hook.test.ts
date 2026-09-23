@@ -23,7 +23,7 @@ import { approvedAgainst, approveIfStamped, approvePlanFile, loadApprovedComment
 // agent-hook-gate.test.ts. What this covers is the decision and what it writes to state.
 const PLAN = parsePlanDocument(loadCommentsPlan())
 const DIGEST = planDigest(PLAN)
-const [SCAFFOLD, TESTS, DATA, HTTP] = planStepIds(derivePlanTasks(PLAN)) as [string, string, string, string]
+const [SCAFFOLD, TESTS, DATA, HTTP, PAGES] = planStepIds(derivePlanTasks(PLAN)) as [string, string, string, string, string]
 const NOW = () => new Date('2026-09-21T10:00:00.000Z')
 const ENVIRONMENT = { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' }
 
@@ -272,22 +272,40 @@ describe('planStopHookFindings', () => {
   })
 
   test('should name an earlier step whose re-check was blocked, its record kept for the next run', async () => {
-    const app = await createApp('recheck-blocked', { active: active({ continuations: 1 }) })
+    const app = await createApp('recheck-blocked', { active: active({ step: PAGES, continuations: 1 }) })
     const blocked = record({ outcome: 'blocked', commands: [{ command: 'db:migrate', label: 'bun run db:migrate', status: 'blocked', durationMs: 3, reason: 'the database is unreachable', findings: [] }], acceptance: [], incomplete: [] })
-    const verified = report(HTTP, record({ outcome: 'verified', incomplete: [] }))
-    // TESTS never ran: the blocked re-check before it stopped the rest.
-    const run = { ...verified, steps: [...verified.steps, { stepId: DATA, taskId: 'task/entity/model.comment', record: blocked }], recheckPending: [DATA, TESTS] }
+    const verified = report(PAGES, record({ outcome: 'verified', incomplete: [] }))
+    // HTTP never ran: the blocked re-check of DATA before it stopped the rest.
+    const run = { ...verified, steps: [...verified.steps, { stepId: DATA, taskId: 'task/entity/model.comment', record: blocked }], recheckPending: [DATA, HTTP] }
 
     const verdict = await planStopHookFindings(app, { stopHookActive: true }, { verify: async () => run })
 
     expect(verdict).toEqual({
       block: false,
       message: [
-        `plan:verify on stop (comments.plan.json, ${HTTP}): ${DATA}, whose files changed since it verified, could not be re-checked (db:migrate: the database is unreachable); its record stays for the next run.`,
-        `plan:verify on stop (comments.plan.json, ${HTTP}): ${TESTS}, whose files changed since it verified, is left for the next run to re-check, since an earlier re-check did not verify.`,
+        `plan:verify on stop (comments.plan.json, ${PAGES}): ${DATA}, whose files changed since it verified, could not be re-checked (db:migrate: the database is unreachable); its record stays for the next run.`,
+        `plan:verify on stop (comments.plan.json, ${PAGES}): ${HTTP}, whose files changed since it verified, is left for the next run to re-check, since an earlier re-check did not verify.`,
       ].join('\n'),
     })
-    expect((await readState(app)).active).toEqual(active({ continuations: 1 }))
+    expect((await readState(app)).active).toEqual(active({ step: PAGES, continuations: 1 }))
+  })
+
+  test('should list every earlier step a verified one broke, in step order, a failed static re-check among them', async () => {
+    const app = await createApp('broke-two', { active: active({ step: PAGES }) })
+    const lost = record({ outcome: 'failed', commands: [{ command: 'tests:fail', label: 'not run: a re-check that one test file still carries each behaviour', status: 'fail', durationMs: 0, reason: 'the test files no longer carry the behaviours the step saw fail', findings: ['[AC-comments-2] is carried by no test file'] }], acceptance: [], incomplete: [] })
+    const failed = record({ outcome: 'failed', commands: [{ command: 'tests', label: 'bun test tests/comments.test.ts', status: 'fail', durationMs: 3, reason: 'a behaviour is not passing', findings: [] }], acceptance: [], incomplete: [] })
+    const verified = report(PAGES, record({ outcome: 'verified', incomplete: [] }))
+    const run = {
+      ...verified,
+      steps: [...verified.steps, { stepId: TESTS, taskId: 'task/entity/model.comment', record: lost }, { stepId: HTTP, taskId: 'task/entity/model.comment', record: failed }],
+      reverified: [HTTP],
+      recheckPending: [TESTS],
+    }
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => run })
+
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toMatch(new RegExp(`its changes broke 2 earlier steps:\\n${TESTS}: failed[^]*\\n${HTTP}: failed[^]*returns them in turn\\.$`))
   })
 
   test('should report an earlier step whose static re-check found a lost behaviour with the broken ones, not as unchecked', async () => {

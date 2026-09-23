@@ -161,7 +161,7 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
     if (broken.length > 0) {
       const lines = broken.flatMap(({ stepId, record: earlier }) => formatPlanStepRecord(stepId, earlier))
       const which = broken.length === 1 ? 'an earlier step' : `${broken.length} earlier steps`
-      said.push(`${heading}: the step is verified, and its changes broke ${which}:\n${lines.join('\n')}\n\`bunx guren plan:next ${active.plan}\` returns ${broken.length === 1 ? 'it' : 'them'} next.`)
+      said.push(`${heading}: the step is verified, and its changes broke ${which}:\n${lines.join('\n')}\n\`bunx guren plan:next ${active.plan}\` returns ${broken.length === 1 ? 'it next' : 'them in turn'}.`)
     }
     for (const { stepId, record: earlier } of unchecked) {
       const why = earlier.commands.filter((command) => command.status === 'blocked').map((command) => `${command.command}: ${command.reason ?? 'blocked'}`)

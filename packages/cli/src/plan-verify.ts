@@ -129,8 +129,9 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const reverified: string[] = []
   const recheckPending: string[] = []
   /**
-   * Runs and records one step; true where it ran commands and did not verify. Commands are shared
-   * across one run's steps, so a drifted step re-checked beside such a one would inherit its failure.
+   * Runs one step and records it unless it stays pending; true where it ran commands and did not
+   * verify. Commands are shared across one run's steps, so a drifted step re-checked beside such a
+   * one would inherit its failure.
    */
   const run = async (stepId: string): Promise<boolean> => {
     const record = records[stepId]
@@ -203,7 +204,7 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   }
   if (report.reverified.length > 0) lines.push(`Re-checked, since files they were verified at have changed: ${report.reverified.join(', ')}`, '')
   if (report.recheckPending.length > 0) {
-    lines.push(`Left verified for a later run to re-check: a step they share commands with did not verify, the re-check was blocked, or a static re-check failed: ${report.recheckPending.join(', ')}`, '')
+    lines.push(`Left verified for a later run to re-check (a step they share commands with did not verify, the re-check was blocked, or a static re-check failed): ${report.recheckPending.join(', ')}`, '')
   }
   for (const stepId of report.skipped) lines.push(`${stepId}: verified before, and nothing it fingerprinted has changed`)
   if (report.skipped.length > 0) lines.push('')
