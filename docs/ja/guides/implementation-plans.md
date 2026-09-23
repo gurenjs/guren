@@ -532,7 +532,7 @@ side effect が取り付けられたと読まれるのは、テストとクラ�
 
 計画が書いた `body`、`params`、`query` の validator は、アクションがそれで検証しているか、ルートが契約スキーマとして持っていれば一致と数えます。別のものを使っている場合、その場で組み立てたスキーマ (`this.validateBody(PostSchema.partial())` など)、ヘルパー経由の検証は、アクションを drifted にはせず、注記付きの `present` にとどめます。
 
-validator の `fields` は、export された zod のスキーマから読みます。キーはすべて確かめます。フィールドの型、必須かどうか、ルールの `min`、`max`、`email`、`url`、`uuid` を読むのは、フィールドが単純な部品だけでできているときです。プリミティブか `z.coerce.*`、`.optional()`、`.nullable()`、`.default()`、`.prefault()`、長さや範囲や形式の検査がそれに当たります。これらのラッパーを付けない `z.coerce` の string、number、boolean、date は、検査の有無にかかわらず必須かどうかが `unknown` になります。`.pipe(z.email())` のように単純な部品二つをつないだ `.pipe()` は、型は読みますが、ルールは読みません。必須かどうかは、上のラッパーがあれば `false`、なければ `unknown` です。途中に transform、refinement、union などのラッパーがあれば、型、必須かどうか、ルールは `unknown` になります。理由は `--json` の性質ごとに出ます。Resource の `fields` は、`guren codegen` が読むペイロードの型から読みます。スキーマやペイロードにないキーや、型、必須かどうか、ルールの食い違いがあれば要素は `drifted` になり、`plan:verify` はそのステップを `incomplete` と報告します。
+validator の `fields` は export された zod のスキーマから、Resource の `fields` は `guren codegen` が読むペイロードの型から、Policy の ability はメンバー名から読みます。キーや ability がない場合や、フィールドの型、必須かどうか、ルールが計画と食い違う場合は `differ` になります。要素は `drifted` になり、`plan:verify` はそのステップを `incomplete` と報告します。transform、refinement、union の奥にあるフィールドなど、確かに言えないものは推測せず `unknown` にします。理由は `--json` の性質ごとに出ます。`unknown` と存在だけの一致しか残らない要素には、上で述べたとおり、届く振る舞いか waiver が要ります。部品ごとの規則は [RFC 0030](https://github.com/gurenjs/guren/blob/main/rfcs/0030-implementation-plans.md) の §6 にある、フィールドの読み取りについての追記にあります。
 
 `unknown` のまま残った計画上の性質は、すべて「Planned, not checkable」の下に並びます。どのスキャナーも読まない性質、読んでも判定できない性質 (文字列としてしか比べられない型や、計画より緩い範囲など)、承認時にすでに一致していた `alter` の性質です。Guren が判定できない部分が、緑に紛れて見えなくなることはありません。
 
