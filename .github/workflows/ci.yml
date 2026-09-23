@@ -270,9 +270,10 @@ jobs:
       - name: Guren integrity check (blog example)
         run: cd examples/blog && bun ../../packages/cli/src/bin.ts check
 
-      # RFC 0026: the registered, unbooted app must produce a manifest.
+      # RFC 0026: the registered, unbooted app must produce a manifest. The table
+      # form keeps the log short, and a failure prints its reason there.
       - name: Introspection manifest (blog example)
-        run: cd examples/blog && bun ../../packages/cli/src/bin.ts introspect --json > /dev/null
+        run: cd examples/blog && bun ../../packages/cli/src/bin.ts introspect
 
       - name: Build example apps
         run: |
@@ -540,7 +541,7 @@ jobs:
         run: cd web && bun ../packages/cli/src/bin.ts check
 
       - name: Introspection manifest
-        run: cd web && bun ../packages/cli/src/bin.ts introspect --json > /dev/null
+        run: cd web && bun ../packages/cli/src/bin.ts introspect
 
       - name: Run tests
         run: bun run --cwd web test

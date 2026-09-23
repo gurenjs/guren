@@ -243,14 +243,18 @@ Routes wrapped in named middleware (for example `router.middleware('auth').group
 source text. It starts a child process with `GUREN_INTROSPECT=1`, imports
 `src/main.ts`, registers every provider and every route, and stops there.
 Routes are not mounted, and provider `boot()` methods, the `createApp({ boot })`
-callback and `listen()` never run, so the database is not opened and no port
-is bound. The
-child loads `.env` from the app root, as `guren dev` does.
+callback and `listen()` never run, so no port is bound and the scaffolded
+`DatabaseProvider`, which connects in `boot()`, does not connect. Code that
+connects at module scope or in `register()` still runs. The child loads `.env`
+from the app root, as `guren dev` does; with `--app`, a variable already set in
+your shell (including one Bun loaded from the current directory's `.env`) wins
+over the app's.
 
 ```bash
 bunx guren introspect                 # providers, routes, services and warnings as tables
 bunx guren introspect --json          # the manifest, for tools
 bunx guren introspect --timeout 60    # allow a slow register() up to 60 seconds (default 30)
+bunx guren introspect --app ../api    # introspect another app root
 ```
 
 Each provider is reported with how it registered: `ran`, `introspect-hook`

@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path'
 import type { AppManifest } from '@guren/server'
 
 import { siblingEntry } from './cli-entry'
+import type { IntrospectionPhase } from './introspect-child'
 import { outputTail } from './command-output'
 import { bunExecutable, runCaptured } from './subprocess'
 
@@ -26,21 +27,26 @@ export interface IntrospectOptions {
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
 
-/** One run per app root per CLI process, shared by every command that asks. */
+/** One run per app root and timeout per CLI process, so a larger `timeoutMs` can retry a timed-out run. */
 const runs = new Map<string, Promise<Introspection>>()
 
 export function introspectApp(cwd: string, options: IntrospectOptions = {}): Promise<Introspection> {
   const root = resolve(cwd)
-  let run = runs.get(root)
+  const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
+  const key = `${timeoutMs}:${root}`
+  let run = runs.get(key)
   if (!run) {
-    run = runIntrospection(root, options)
-    runs.set(root, run)
+    run = runIntrospection(root, timeoutMs).catch((error: unknown) => ({
+      status: 'failed' as const,
+      reason: 'crashed' as const,
+      message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
+    }))
+    runs.set(key, run)
   }
   return run
 }
 
-async function runIntrospection(root: string, options: IntrospectOptions): Promise<Introspection> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
+async function runIntrospection(root: string, timeoutMs: number): Promise<Introspection> {
   const child = siblingEntry('introspect-child')
   if (!child) {
     return { status: 'failed', reason: 'crashed', message: 'introspect-child is missing beside the CLI; rebuild @guren/cli.' }
@@ -52,13 +58,10 @@ async function runIntrospection(root: string, options: IntrospectOptions): Promi
     const run = await runCaptured([bunExecutable(), child, resultFile], root, {
       timeoutMs,
       env: { GUREN_INTROSPECT: '1' },
+      processGroup: true,
     })
     if (run.timedOut) {
-      return {
-        status: 'failed',
-        reason: 'timeout',
-        message: `The app did not finish registering within ${timeoutMs}ms. A provider's register() may be waiting on a connection.`,
-      }
+      return { status: 'failed', reason: 'timeout', message: await timeoutMessage(`${resultFile}.phase`, timeoutMs) }
     }
 
     const result = await readResult(resultFile)
@@ -73,6 +76,22 @@ async function runIntrospection(root: string, options: IntrospectOptions): Promi
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+}
+
+/** Where the child was when the clock ran out, from the phase it last recorded. */
+async function timeoutMessage(phaseFile: string, timeoutMs: number): Promise<string> {
+  let phase: IntrospectionPhase | undefined
+  try {
+    phase = JSON.parse(await readFile(phaseFile, 'utf8')) as IntrospectionPhase
+  } catch {
+    phase = undefined
+  }
+  if (phase?.phase === 'controllers') {
+    return `The app registered, but importing ${phase.file} to match a routed controller did not finish within ${timeoutMs}ms. `
+      + 'Its module scope may await something that never settles.'
+  }
+  return `The app did not finish loading and registering within ${timeoutMs}ms. `
+    + 'The entry\'s module scope, or a provider\'s register(), may be waiting on a connection.'
 }
 
 async function readResult(file: string): Promise<Introspection | undefined> {

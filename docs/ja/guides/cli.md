@@ -242,13 +242,17 @@ MCP サーバは `guren_gate` ツールとして公開します。それ以外�
 `GUREN_INTROSPECT=1` を付けた子プロセスで `src/main.ts` を import し、すべての
 provider とすべてのルートを登録したところで止まります。ルートはマウントしません。
 provider の `boot()`、`createApp({ boot })` のコールバック、`listen()` は実行されないので、
-データベースは開かれず、ポートも使いません。子プロセスは `guren dev` と同じく
-アプリのルートにある `.env` を読み込みます。
+ポートは使わず、`boot()` で接続する scaffold の `DatabaseProvider` も接続しません。
+モジュールスコープや `register()` で接続するコードは実行されます。子プロセスは
+`guren dev` と同じくアプリのルートにある `.env` を読み込みます。`--app` を使う場合は、
+シェルですでに設定されている変数(カレントディレクトリの `.env` から Bun が
+読み込んだものを含む)がアプリの `.env` より優先されます。
 
 ```bash
 bunx guren introspect                 # provider・ルート・サービス・警告を表で表示
 bunx guren introspect --json          # ツール向けのマニフェスト
 bunx guren introspect --timeout 60    # 遅い register() を 60 秒まで待つ(既定は 30 秒)
+bunx guren introspect --app ../api    # 別のアプリのルートを調べる
 ```
 
 provider にはそれぞれ登録の結果が付きます。`ran`、`introspect-hook`(`introspect()`

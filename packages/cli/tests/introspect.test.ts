@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import type { AppManifest } from '@guren/core'
 
 import { introspectApp, type Introspection, type IntrospectionFailure } from '../src/introspect'
@@ -169,6 +169,9 @@ export class InvoiceController extends Controller {
   }
 }
 `,
+      // A barrel re-exporting it: the declaring file wins, whatever the scan order.
+      'app/Http/Controllers/index.ts': "export { InvoiceController } from './billing.js'\n",
+      'app/Http/Controllers/Broken.ts': "throw new Error('broken at import')\n",
     })
 
     const result = await introspectApp(dir)
@@ -176,15 +179,178 @@ export class InvoiceController extends Controller {
     if (result.status !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(result)}`)
     expect(result.manifest.routes.find((route) => route.name === 'invoices.index')?.controller).toMatchObject({
       file: 'app/Http/Controllers/billing.ts',
+      exportName: 'InvoiceController',
       resolved: 'identity',
+    })
+    expect(result.manifest.warnings).toContainEqual({
+      code: 'controller-import',
+      message: 'app/Http/Controllers/Broken.ts could not be imported: broken at import',
     })
   }, 30_000)
 
-  test('memoises one run per app root', () => {
-    const dir = apps.ok!
+  test('leaves a framework controller and an inline class name-only without scanning app files', async () => {
+    const dir = await app('framework-controller', {
+      'routes/web.ts': `import { AttachmentDeliveryController, Controller, type Router } from '@guren/core'
 
-    expect(introspectApp(dir)).toBe(introspectApp(join(dir, '.')))
-  })
+class InlineController extends Controller {
+  async index() {
+    return this.json([])
+  }
+}
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/files/:id/:name', [AttachmentDeliveryController, 'show']).name('files.show')
+  router.get('/inline', [InlineController, 'index']).name('inline')
+}
+`,
+      'app/Http/Controllers/Side.ts': "import { writeFileSync } from 'node:fs'\nwriteFileSync('side-effect.txt', 'ran')\n",
+    })
+
+    const result = await introspectApp(dir)
+
+    if (result.status !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(result)}`)
+    const controllerOf = (name: string) => result.manifest.routes.find((route) => route.name === name)?.controller
+    expect(controllerOf('files.show')).toMatchObject({ name: 'AttachmentDeliveryController', resolved: 'name-only', file: null })
+    expect(controllerOf('inline')).toMatchObject({ name: 'InlineController', resolved: 'name-only', file: null })
+    // InlineController is unmatched, so the full scan runs; the framework class alone would not trigger it.
+    expect(existsSync(join(dir, 'side-effect.txt'))).toBe(true)
+  }, 30_000)
+
+  test('does not import unrouted controller files when only a framework controller is unmatched', async () => {
+    const dir = await app('framework-only', {
+      'routes/web.ts': `import { AttachmentDeliveryController, type Router } from '@guren/core'
+import PostController from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostController, 'index']).name('posts.index')
+  router.get('/files/:id/:name', [AttachmentDeliveryController, 'show']).name('files.show')
+}
+`,
+      'app/Http/Controllers/Side.ts': "import { writeFileSync } from 'node:fs'\nwriteFileSync('side-effect.txt', 'ran')\n",
+    })
+
+    const result = await introspectApp(dir)
+
+    if (result.status !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(result)}`)
+    expect(existsSync(join(dir, 'side-effect.txt'))).toBe(false)
+  }, 30_000)
+
+  test('names the controller file a timeout struck in', async () => {
+    const dir = await app('scan-hang', {
+      'routes/web.ts': `import { Controller, type Router } from '@guren/core'
+
+class InlineController extends Controller {
+  async index() {
+    return this.json([])
+  }
+}
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/inline', [InlineController, 'index']).name('inline')
+}
+`,
+      'app/Http/Controllers/Hang.ts': 'await new Promise(() => {})\nexport {}\n',
+    })
+
+    const message = expectFailure(await introspectApp(dir, { timeoutMs: 2000 }), 'timeout')
+
+    expect(message).toContain('app/Http/Controllers/Hang.ts')
+  }, 30_000)
+
+  test('reports a listen() refusal from a scanned controller file as a warning, not a crash', async () => {
+    const dir = await app('scan-listen', {
+      'routes/web.ts': `import { Controller, type Router } from '@guren/core'
+
+class InlineController extends Controller {
+  async index() {
+    return this.json([])
+  }
+}
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/inline', [InlineController, 'index']).name('inline')
+}
+`,
+      'app/Http/Controllers/Serving.ts': "import app from '../../../src/app.js'\nvoid app.listen({ port: 0 })\n",
+    })
+
+    const result = await introspectApp(dir)
+
+    if (result.status !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(result)}`)
+    expect(result.manifest.warnings.map((warning) => warning.code)).toContain('unhandled-rejection')
+  }, 30_000)
+
+  test('describes an attachments engine no provider binds, through core\'s fallback', async () => {
+    const dir = await app('attachments-fallback', {
+      'src/app.ts': `import { configureAttachments, createApp, registerAttachmentRoutes, StorageManager } from '@guren/core'
+
+configureAttachments({
+  table: { [Symbol.for('drizzle:Name')]: 'attachments' },
+  storage: () => new StorageManager(),
+  disk: 'media',
+  delivery: {},
+  processor: null,
+})
+
+export default createApp({ routes: registerAttachmentRoutes })
+`,
+    })
+
+    const result = await introspectApp(dir)
+
+    if (result.status !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(result)}`)
+    expect(result.manifest.attachments).toMatchObject({
+      configured: true,
+      table: 'attachments',
+      disk: 'media',
+      delivery: { routeName: 'attachments.show', mounted: true },
+    })
+  }, 30_000)
+
+  test('memoises one run per app root and timeout, whatever spelling names the root', async () => {
+    const dir = await app('memo')
+    const spelled = `${relative(process.cwd(), dir)}/`
+
+    expect(introspectApp(dir)).toBe(introspectApp(spelled))
+    expect(introspectApp(dir, { timeoutMs: 60_000 })).not.toBe(introspectApp(dir))
+    await Promise.all([introspectApp(dir), introspectApp(dir, { timeoutMs: 60_000 })])
+  }, 30_000)
+
+  test('reports crashed, never a rejection, when the process cannot be spawned', async () => {
+    const message = expectFailure(await introspectApp(join(root, 'does-not-exist')), 'crashed')
+
+    expect(message).toContain('could not run')
+  }, 30_000)
+
+  test('reports crashed when the child dies before reporting', async () => {
+    const dir = await app('dies', { 'src/main.ts': 'process.exit(3)\n' })
+
+    expect(expectFailure(await introspectApp(dir), 'crashed')).toContain('exited with code 3')
+  }, 30_000)
+
+  test('kills what register() spawned when the run times out', async () => {
+    const dir = await app('grandchild', {
+      'src/app.ts': `import { writeFileSync } from 'node:fs'
+import { createApp, ServiceProvider } from '@guren/core'
+
+class SpawningProvider extends ServiceProvider {
+  register(): Promise<void> {
+    const helper = Bun.spawn(['sleep', '30'])
+    writeFileSync('helper.pid', String(helper.pid))
+    return new Promise(() => {})
+  }
+}
+
+export default createApp({ providers: [SpawningProvider] })
+`,
+    })
+
+    expectFailure(await introspectApp(dir, { timeoutMs: 1500 }), 'timeout')
+    const pid = Number(await readFile(join(dir, 'helper.pid'), 'utf8'))
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    expect(() => process.kill(pid, 0)).toThrow()
+  }, 30_000)
 
   test('reports no-entry for a directory without src/main.ts', async () => {
     const dir = join(root, 'empty')
@@ -265,11 +431,49 @@ export default createApp({ providers: [HangingProvider] })
     expect(expectFailure(await introspectApp(dir), 'old-server')).toContain('introspect()')
     expect(existsSync(join(dir, 'imported.txt'))).toBe(false)
   }, 30_000)
+
+  const FAKE_CORE = (application: string): Record<string, string> => ({
+    'bunfig.toml': '[install]\nauto = "disable"\n',
+    'package.json': JSON.stringify({ name: 'fake-core-fixture', type: 'module' }),
+    'node_modules/@guren/core/package.json': JSON.stringify({ name: '@guren/core', type: 'module', exports: { '.': './index.js' } }),
+    'node_modules/@guren/core/index.js': application,
+  })
+
+  test('reports old-server when the app object itself has no introspect()', async () => {
+    const dir = join(root, 'old-app-object')
+    await writeWorkspaceFiles(dir, {
+      ...FAKE_CORE('export class Application { async introspect() {} }\n'),
+      'src/main.ts': 'export default { listen() {} }\n',
+    })
+
+    expect(expectFailure(await introspectApp(dir), 'old-server')).toContain('may already have run')
+  }, 30_000)
+
+  test('reports crashed for a manifest of a schema version this CLI does not read', async () => {
+    const dir = join(root, 'schema-version')
+    await writeWorkspaceFiles(dir, {
+      ...FAKE_CORE('export class Application { async introspect() {} }\n'),
+      'src/main.ts': 'export default { listen() {}, async introspect() { return { schemaVersion: 2, entry: {}, routes: [], warnings: [] } } }\n',
+    })
+
+    expect(expectFailure(await introspectApp(dir), 'crashed')).toContain('schemaVersion 2')
+  }, 30_000)
+
+  test('reports crashed when no framework module resolves from the entry', async () => {
+    const dir = join(root, 'no-framework')
+    await writeWorkspaceFiles(dir, {
+      'bunfig.toml': '[install]\nauto = "disable"\n',
+      'package.json': JSON.stringify({ name: 'no-framework-fixture', type: 'module' }),
+      'src/main.ts': 'export default { listen() {} }\n',
+    })
+
+    expect(expectFailure(await introspectApp(dir), 'crashed')).toContain('Neither @guren/core nor @guren/server')
+  }, 30_000)
 })
 
 describe('guren introspect --json', () => {
   test('prints the manifest, and exits non-zero with the failure as JSON', async () => {
-    const dir = apps.ok!
+    const dir = apps.ok ?? await app('ok')
 
     const empty = join(root, 'json-no-entry')
     await writeWorkspaceFiles(empty, { 'bunfig.toml': '[install]\nauto = "disable"\n' })

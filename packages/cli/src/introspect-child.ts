@@ -5,9 +5,9 @@
  * It exits explicitly, since an app may hold open handles (timers, a Redis client).
  */
 import { writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
+import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { AppManifest } from '@guren/server'
+import type { AppManifest, AttachmentsDescription } from '@guren/server'
 
 import { classNameFromPath, discoverControllerFiles, excludeBarrelFiles, toPosixRelative } from './discovery'
 import type { Introspection, IntrospectionFailure } from './introspect'
@@ -23,7 +23,27 @@ const LISTEN_GUIDANCE =
 
 interface IntrospectableApp {
   introspect?: () => Promise<AppManifest>
-  router?: { registeredHandlers?: () => ReadonlyArray<{ index: number; controller?: unknown }> }
+  router?: {
+    registeredHandlers?: () => ReadonlyArray<{ index: number; controller?: unknown }>
+    hasRoute?: (name: string) => boolean
+  }
+}
+
+/** What the child needs of the `@guren/core` / `@guren/server` the app resolves. */
+interface FrameworkModule {
+  Application?: { prototype?: IntrospectableApp }
+  describeActiveAttachmentEngine?: () => AttachmentsDescription
+}
+
+/** Written beside the result as each phase starts, so the parent can say where a timeout struck. */
+export type IntrospectionPhase = { phase: 'app' } | { phase: 'controllers'; file: string }
+
+let phaseFile: string | undefined
+/** True until the controller scan: only the entry's `listen()` refusal fails the run. */
+let loadingApp = true
+
+async function enterPhase(phase: IntrospectionPhase): Promise<void> {
+  if (phaseFile) await writeFile(phaseFile, JSON.stringify(phase))
 }
 
 /** The refusal itself or anywhere in its `cause` chain: `bootstrapApplication()` wraps a rejected `ready`. */
@@ -43,38 +63,55 @@ function failed(reason: IntrospectionFailure, message: string): Introspection {
 }
 
 /**
- * Whether the server the app resolves predates `introspect()`, asked before the
- * entry is imported: a scaffolded `src/main.ts` boots at import, and an old
- * server ignores the flag and would run the real boot (migrations, connections).
+ * The framework modules the entry resolves, loaded before the entry is imported:
+ * a scaffolded `src/main.ts` boots at import, and a server without `introspect()`
+ * would run the real boot. Resolved as the entry's own imports are (Bun, ESM
+ * conditions); a module that will not resolve or load is a failure, not a pass.
  */
-async function resolvesOldServer(entry: string): Promise<boolean> {
-  const require = createRequire(entry)
+async function loadFramework(entry: string): Promise<{ modules: FrameworkModule[] } | Introspection> {
+  const modules: FrameworkModule[] = []
   for (const specifier of ['@guren/core', '@guren/server']) {
     let resolved: string
     try {
-      resolved = require.resolve(specifier)
+      resolved = Bun.resolveSync(specifier, dirname(entry))
     } catch {
       continue
     }
     try {
-      const mod = (await import(pathToFileURL(resolved).href)) as { Application?: { prototype?: IntrospectableApp } }
-      return typeof mod.Application?.prototype?.introspect !== 'function'
-    } catch {
-      return false
+      modules.push((await import(pathToFileURL(resolved).href)) as FrameworkModule)
+    } catch (error) {
+      return failed('crashed', `${specifier} resolved from the entry but did not load: ${messageOf(error)}`)
     }
   }
-  return false
+
+  const application = modules[0]?.Application
+  if (!application) {
+    return failed('crashed', 'Neither @guren/core nor @guren/server resolves from the entry, so the app cannot be introspected.')
+  }
+  if (typeof application.prototype?.introspect !== 'function') {
+    return failed('old-server', 'The app resolves a @guren/server without Application.introspect(). Upgrade @guren/core to a release with RFC 0026 introspection.')
+  }
+  return { modules }
 }
 
 /**
  * Upgrades each `name-only` controller reference to the file that exports the
- * very class the router holds (RFC 0026 §3). Files are found by the CLI's one
- * discovery rule, those named after a routed class first (a module-cache hit);
- * the rest are imported only for a class still unmatched, such as a renamed export.
+ * very class the router holds (RFC 0026 §3). A framework class (core's delivery
+ * controller) keeps `name-only`. App files are found by the CLI's one discovery
+ * rule, those named after a routed class first (a module-cache hit); the rest
+ * are imported only while an app class is still unmatched.
  */
-async function resolveControllers(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
+async function resolveControllers(
+  manifest: AppManifest,
+  app: IntrospectableApp,
+  root: string,
+  framework: FrameworkModule[],
+): Promise<void> {
+  const frameworkExports = new Set<unknown>(framework.flatMap((mod) => Object.values(mod)))
   const handlers = app.router?.registeredHandlers?.() ?? []
-  const wanted = new Set<unknown>(handlers.map((handler) => handler.controller).filter((controller) => controller !== undefined))
+  const wanted = new Set<unknown>(handlers
+    .map((handler) => handler.controller)
+    .filter((controller) => controller !== undefined && !frameworkExports.has(controller)))
   if (wanted.size === 0) return
 
   const routedNames = new Set(handlers.map((handler) => manifest.routes[handler.index]?.controller?.name))
@@ -84,6 +121,7 @@ async function resolveControllers(manifest: AppManifest, app: IntrospectableApp,
 
   const scan = async (batch: string[]): Promise<void> => {
     for (const file of batch) {
+      await enterPhase({ phase: 'controllers', file: toPosixRelative(root, file) })
       let mod: Record<string, unknown>
       try {
         mod = (await import(pathToFileURL(file).href)) as Record<string, unknown>
@@ -127,10 +165,10 @@ async function introspect(root: string): Promise<Introspection> {
     return failed('no-entry', messageOf(error))
   }
 
-  if (await resolvesOldServer(entry)) {
-    return failed('old-server', 'The app resolves a @guren/server without Application.introspect(). Upgrade @guren/core to a release with RFC 0026 introspection.')
-  }
+  const framework = await loadFramework(entry)
+  if ('status' in framework) return framework
 
+  await enterPhase({ phase: 'app' })
   let mod: Record<string, unknown>
   try {
     mod = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
@@ -147,9 +185,30 @@ async function introspect(root: string): Promise<Introspection> {
 
   const manifest = await app.introspect()
   manifest.entry.file = toPosixRelative(root, entry)
-  await resolveControllers(manifest, app, root)
+  describeUnboundAttachments(manifest, app, framework.modules)
+  // `unhandledRejection` arrives after a timer tick: let the entry's land before the phase ends.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  loadingApp = false
+  await resolveControllers(manifest, app, root, framework.modules)
   return { status: 'ok', manifest }
 }
+
+/**
+ * The documented fallback when no provider binds the engine: the one
+ * `configureAttachments()` built last, which only core can read, so the server's
+ * manifest cannot (RFC 0026 §1, amended).
+ */
+function describeUnboundAttachments(manifest: AppManifest, app: IntrospectableApp, framework: FrameworkModule[]): void {
+  if (manifest.attachments) return
+  const describe = framework.find((mod) => typeof mod.describeActiveAttachmentEngine === 'function')?.describeActiveAttachmentEngine
+  const description = describe?.()
+  if (!description?.configured) return
+  const { delivery, ...rest } = description
+  manifest.attachments = delivery
+    ? { ...rest, delivery: { ...delivery, mounted: app.router?.hasRoute?.(delivery.routeName) ?? false } }
+    : rest
+}
+
 
 async function main(): Promise<void> {
   const outFile = process.argv[2]
@@ -157,12 +216,13 @@ async function main(): Promise<void> {
     console.error('usage: introspect-child <result-file>')
     process.exit(2)
   }
+  phaseFile = `${outFile}.phase`
 
   let listenRefused = false
   const otherRejections: string[] = []
   // A module-scope `app.listen()` with no await rejects outside any frame we hold.
   process.on('unhandledRejection', (reason) => {
-    if (isListenRefusal(reason)) listenRefused = true
+    if (loadingApp && isListenRefusal(reason)) listenRefused = true
     else otherRejections.push(messageOf(reason))
   })
 

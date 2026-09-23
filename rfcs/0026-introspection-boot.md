@@ -330,9 +330,12 @@ user's middleware may add it, and an absent value means "not determinable", whic
 > **Amended in implementation (Part 1):** identity resolution runs in the CLI's
 > introspection child, not in `@guren/server`. The child holds the app, walks
 > `app.router.registeredHandlers()`, finds controller files through the CLI's
-> `discoverControllerFiles()` and compares exports with `===`. It imports the
-> files named after a routed class first, and the rest only while a class is
-> still unmatched, so an unrouted controller is evaluated only when needed. The server would
+> `discoverControllerFiles()` and compares exports with `===`. A routed class
+> that `@guren/core` or `@guren/server` exports (core's delivery controller)
+> stays `name-only` and is not searched for. The child imports the app files
+> named after a routed class first, and every other controller file only while
+> an app class is still unmatched: an unrouted controller's module scope runs
+> then, and a timeout there names the file it was importing. The server would
 > otherwise restate that discovery rule and import `node:fs` from a module
 > Workers bundles. An in-process `introspect()` therefore reports every
 > controller `resolved: 'name-only'`. Middleware resolution stays in the Router,
@@ -373,7 +376,13 @@ every check that asks: the same shape as `check.ts`'s `loadRouteGraph()`
 > `@guren/server`) from the entry and checks `Application.prototype.introspect`.
 > A scaffolded `src/main.ts` boots at import, and an older server would ignore
 > the flag and run the real boot. `guren introspect` also takes `--app <dir>`
-> and `--timeout <s>`. On failure `--json` prints `{ status, reason, message }`
+> and `--timeout <s>`. The child runs in its own process group, killed on
+> timeout and once it exits, so a helper a `register()` started does not outlive
+> the run. It resolves `@guren/core` the way the entry does (ESM conditions), and
+> a framework module that will not resolve or load is `crashed`, never a pass.
+> When no provider binds `attachments`, the child reads core's
+> `describeActiveAttachmentEngine()`, the documented fallback the server cannot
+> reach. On failure `--json` prints `{ status, reason, message }`
 > and the command exits 1. An unhandled rejection other than the `listen()`
 > refusal becomes an `unhandled-rejection` warning on an otherwise `ok` manifest.
 
