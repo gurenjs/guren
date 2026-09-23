@@ -77,77 +77,22 @@
   --animate-gradient-shift: gradient-shift 8s ease infinite;
 }
 
-/* The home hero's 紅蓮: flames rise, the name burns in from the bottom, and
-   the fire settles at its foot. --burn is registered so it can animate; its
-   initial value is "fully shown", which is what reduced motion and a browser
-   without @property get. */
-@property --burn {
-  syntax: '<percentage>';
-  inherits: true;
-  initial-value: 115%;
+/* The home hero's 紅蓮 waits hidden for BurningName to burn it in. If the
+   script never runs, the fallback shows it anyway; reduced motion shows it
+   at once, which is also what the component then settles on. */
+.guren-name-pending {
+  opacity: 0;
+  animation: guren-name-fallback 0s linear 2.5s forwards;
 }
 
-@keyframes burn-in {
-  from { --burn: -15%; }
-  to { --burn: 115%; }
-}
-
-@keyframes burn-edge-out {
-  to { opacity: 0; }
-}
-
-@keyframes flame-body {
-  0% { opacity: 0; transform: scaleY(0.15); }
-  18% { opacity: 1; }
-  50% { transform: scaleY(1.08); }
-  100% { opacity: 0.9; transform: scaleY(0.58); }
-}
-
-@keyframes flame-lick {
-  0% { opacity: 0; transform: translate3d(0, 0, 0) scale(1); }
-  12% { opacity: 1; }
-  100% { opacity: 0; transform: translate3d(var(--drift), -14rem, 0) scale(0.2); }
-}
-
-.guren-burn {
-  animation: burn-in 1.7s cubic-bezier(0.35, 0.55, 0.3, 1) 0.45s both;
-}
-
-.guren-burn-text {
-  -webkit-mask-image: linear-gradient(to top, #000 calc(var(--burn) - 9%), transparent var(--burn));
-  mask-image: linear-gradient(to top, #000 calc(var(--burn) - 9%), transparent var(--burn));
-}
-
-.guren-burn-edge {
-  -webkit-mask-image: linear-gradient(to top, transparent calc(var(--burn) - 16%), #000 calc(var(--burn) - 6%), #000 calc(var(--burn) - 1%), transparent calc(var(--burn) + 3%));
-  mask-image: linear-gradient(to top, transparent calc(var(--burn) - 16%), #000 calc(var(--burn) - 6%), #000 calc(var(--burn) - 1%), transparent calc(var(--burn) + 3%));
-  animation: burn-edge-out 0.5s ease-out 2.1s forwards;
-}
-
-.guren-flame {
-  transform-origin: 50% 100%;
-  animation: flame-body 2.8s cubic-bezier(0.3, 0.6, 0.35, 1) both;
-}
-
-.guren-flame > span {
-  animation: flame-lick var(--dur) linear var(--delay) infinite;
-}
-
-.guren-fire-paused *,
-.guren-fire-paused {
-  animation-play-state: paused !important;
+@keyframes guren-name-fallback {
+  to { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .guren-burn,
-  .guren-flame,
-  .guren-flame > span {
+  .guren-name-pending {
+    opacity: 1;
     animation: none;
-  }
-
-  .guren-burn-edge,
-  .guren-flame {
-    display: none;
   }
 }
 

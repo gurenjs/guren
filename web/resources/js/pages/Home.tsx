@@ -1,9 +1,10 @@
 import { Link } from '@inertiajs/react'
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 interface Props {
   codeExamples: Record<string, string>
 }
 import { GITHUB_URL, OWN_REPO_LINK_REL, SITE_DESCRIPTION, SITE_TITLE } from '../../../config/site.js'
+import { BurningName } from '../components/BurningName.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
 import { FunctionIcon, GithubIcon, GlobeIcon, LayersIcon, ServerIcon } from '../components/icons.js'
@@ -194,77 +195,11 @@ function CopyCommand({ command }: { command: string }) {
   )
 }
 
-// Positions come from the index, not Math.random, so SSR and hydration agree.
-// Negative delays start every particle mid-flight rather than in one burst.
-const FLAMES = Array.from({ length: 24 }, (_, i) => {
-  const spread = (i * 0.618034) % 1
-  const jitter = (i * 0.381966 + 0.13) % 1
-  const fromCenter = Math.abs(spread - 0.5)
-  return {
-    left: 50 + (spread - 0.5) * 70,
-    size: 5.2 - fromCenter * 5 + jitter * 1.2,
-    duration: 1.2 + ((i * 7) % 5) * 0.17,
-    delay: -((i * 0.53) % 2.1),
-    drift: (jitter - 0.5) * 2.4,
-  }
-})
-
-/** 紅蓮 burning in: flames rise, the name appears from the bottom up, and the fire settles at its foot. */
-function BurningName() {
-  const ref = useRef<HTMLElement>(null)
-  const [offscreen, setOffscreen] = useState(false)
-
-  useEffect(() => {
-    const element = ref.current
-    if (!element || typeof IntersectionObserver === 'undefined') return
-    const observer = new IntersectionObserver(([entry]) => setOffscreen(!entry?.isIntersecting))
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
-
+function HeroName() {
   return (
-    <figure
-      ref={ref}
-      aria-hidden
-      className={`relative hidden w-72 flex-col items-center lg:flex ${offscreen ? 'guren-fire-paused' : ''}`}
-    >
-      <svg className="absolute size-0" focusable="false">
-        <filter id="guren-flame-noise" x="-30%" y="-30%" width="160%" height="160%" colorInterpolationFilters="sRGB">
-          <feTurbulence type="fractalNoise" baseFrequency="0.06 0.016" numOctaves={2} seed={7} />
-          <feDisplacementMap in="SourceGraphic" scale={30} xChannelSelector="R" yChannelSelector="G" />
-        </filter>
-      </svg>
-      <div className="relative flex w-full justify-center pb-4">
-        <span className="pointer-events-none absolute -inset-x-12 -bottom-10 h-56 bg-[radial-gradient(closest-side,rgba(255,90,40,0.3),transparent)]" />
-        <div className="guren-flame pointer-events-none absolute inset-x-0 bottom-0 top-0 [filter:url(#guren-flame-noise)]">
-          {FLAMES.map((flame, i) => (
-            <span
-              key={i}
-              className="absolute bottom-0 rounded-full bg-[radial-gradient(circle,rgba(255,228,150,0.95)_0%,rgba(255,140,50,0.75)_28%,rgba(230,40,20,0.35)_55%,transparent_70%)] mix-blend-screen"
-              style={
-                {
-                  left: `${flame.left}%`,
-                  width: `${flame.size}rem`,
-                  height: `${flame.size}rem`,
-                  marginLeft: `${-flame.size / 2}rem`,
-                  '--dur': `${flame.duration}s`,
-                  '--delay': `${flame.delay}s`,
-                  '--drift': `${flame.drift}rem`,
-                } as CSSProperties
-              }
-            />
-          ))}
-        </div>
-        <div lang="ja" className="guren-burn relative font-mincho text-[9.5rem] font-bold leading-none [writing-mode:vertical-rl]">
-          <span className="guren-burn-text block bg-[linear-gradient(to_top,#ffb35c_0%,#ff3c28_38%,#db1b1b_100%)] bg-clip-text text-transparent">
-            紅蓮
-          </span>
-          <span className="guren-burn-edge absolute inset-0 block text-[#ffe2a0] [filter:drop-shadow(0_0_12px_rgba(255,150,50,0.9))]">
-            紅蓮
-          </span>
-        </div>
-      </div>
-      <figcaption className="relative mt-6 text-sm text-smoke">gu·ren, crimson lotus</figcaption>
+    <figure aria-hidden className="hidden flex-col items-center lg:flex">
+      <BurningName />
+      <figcaption className="mt-6 text-sm text-smoke">gu·ren, crimson lotus</figcaption>
     </figure>
   )
 }
@@ -312,7 +247,7 @@ export default function Home({ codeExamples }: Props) {
                 <CopyCommand command="bunx create-guren-app my-app" />
               </div>
             </div>
-            <BurningName />
+            <HeroName />
           </div>
         </section>
 
