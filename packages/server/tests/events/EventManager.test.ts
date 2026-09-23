@@ -6,6 +6,7 @@ import {
   Listener,
 } from '../../src/events'
 import { resetWarnOnce } from '../../src/support/warn-once'
+import { settleWithin } from '../support/deadline'
 
 class TestEvent extends Event {
   constructor(public readonly message: string) {
@@ -19,12 +20,10 @@ class AnotherEvent extends Event {
   }
 }
 
-function settleWithin<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`promise did not settle within ${ms}ms`)), ms)
-  })
-  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
+// A timer fires only after every queued microtask has run, so a promise that
+// did not wait for anything has settled by the time this resolves.
+function nextMacrotask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 describe('Event', () => {
@@ -151,20 +150,39 @@ describe('EventManager', () => {
   describe('emitParallel()', () => {
     it('calls listeners in parallel', async () => {
       const calls: number[] = []
-      const secondStarted = Promise.withResolvers<void>()
+      const gated = (id: number) => {
+        const started = Promise.withResolvers<void>()
+        const release = Promise.withResolvers<void>()
+        events.on(TestEvent, async () => {
+          started.resolve()
+          await release.promise
+          calls.push(id)
+        })
+        return { started: started.promise, release: release.resolve }
+      }
+      const first = gated(1)
+      const second = gated(2)
 
-      // The first listener finishes only once the second has started, so a
-      // sequential dispatch never settles and the deadline fails the test.
-      events.on(TestEvent, async () => {
-        await secondStarted.promise
-        calls.push(1)
-      })
-      events.on(TestEvent, async () => {
-        secondStarted.resolve()
-        calls.push(2)
+      let settled = false
+      const emitted = events.emitParallel(new TestEvent('test')).then(() => {
+        settled = true
       })
 
-      await settleWithin(events.emitParallel(new TestEvent('test')), 1_000)
+      // Neither listener finishes before the test releases it, so a sequential
+      // dispatch never starts the second, whichever order it runs them in.
+      await settleWithin(
+        Promise.all([first.started, second.started]),
+        1_000,
+        'emitParallel did not start the second listener while the first was running',
+      )
+
+      await nextMacrotask()
+      expect(settled).toBe(false)
+      first.release()
+      await nextMacrotask()
+      expect(settled).toBe(false)
+      second.release()
+      await emitted
 
       expect(calls).toHaveLength(2)
     })
