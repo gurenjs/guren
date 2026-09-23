@@ -162,10 +162,10 @@ table to.
 | `make:validator <Name>` | Generates Zod validation schemas (route params, list query, payload) in `app/Http/Validators`; `--fields` uses the same syntax as `make:feature` | `bunx guren make:validator Post --fields "title:string,body:text"` |
 | `make:adr "<Title>"` | Records an architecture decision as a numbered file under `docs/adr/` with linkable frontmatter; `--entity <Model>` prefills the `entities:`/`related:` links, `--issue <ref>` (comma-separated for several) the `issues:` link to a GitHub issue or PR | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |
 | `make:seeder <Name>` | Generates a database seeder file | `bunx guren make:seeder UserSeeder` |
-| `make:job <Name>` | Generates a queueable job class | `bunx guren make:job SendEmail` |
+| `make:job <Name>` | Generates a queueable job class, its `jobName` pinned to the class name | `bunx guren make:job SendEmail` |
 | `make:event <Name>` | Generates an event class | `bunx guren make:event UserRegistered` |
 | `make:listener <Name>` | Generates an event listener class | `bunx guren make:listener SendWelcomeEmail` |
-| `make:notification <Name>` | Generates a notification class | `bunx guren make:notification InvoicePaid` |
+| `make:notification <Name>` | Generates a notification class, its `type` pinned to the class name | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | Generates a mailable class | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | Generates a console command in `app/Console/Commands`; `--command <name>` sets the invocation name. Register it in `src/console.ts` — see the [console commands guide](./console.md) | `bunx guren make:command SendDigest --command reports:digest` |
 | `make:ai-agent <Name>` | Scaffolds an in-process AI agent in `app/Ai/Agents` (`@guren/plugin-ai`). `--tools` grants route-derived agent tools, `--output` adds a Zod output schema, `--test` writes a `fakeAi()` test | `bunx guren make:ai-agent SupportTriager --tools tickets_show --test` |

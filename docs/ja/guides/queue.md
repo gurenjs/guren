@@ -51,6 +51,9 @@ interface SendWelcomeEmailPayload {
 }
 
 export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
+  // キューのメッセージに記録される名前（デフォルト: クラス名）
+  static jobName = 'SendWelcomeEmailJob'
+
   // キュー名（デフォルト: 'default'）
   static queue = 'emails'
 
@@ -116,8 +119,10 @@ export class SendWelcomeEmailJob extends Job<{ userId: string }> {
 ```
 
 固定したあとはクラス名を自由に変更できます。永続化されるのは `jobName` だけで、
-これが `registerJob()` のキーになり、ワーカーもこの文字列で解決します。`jobName` を
-持たないジョブは従来どおりクラス名で解決されるので、この設定はオプトインです。
+これが `registerJob()` のキーになり、ワーカーもこの文字列で解決します。`make:job` は
+生成するクラス名で `jobName` を書き込むので、生成したジョブは最初から固定されています。
+別の名前にしたい場合は、最初にディスパッチする前に書き換えてください。`jobName` を
+持たない手書きのジョブは、クラス名で解決されます。
 
 JavaScript の static メンバーは継承されますが、サブクラスは親の `jobName` を
 **継承しません**。自分で宣言するまでは自身のクラス名で解決されます。

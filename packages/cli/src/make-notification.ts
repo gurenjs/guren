@@ -4,30 +4,38 @@ import { scaffoldFile } from './utils'
 const NOTIFICATIONS_DIR = 'app/Notifications'
 
 function notificationTemplate(className: string): string {
-  return `export class ${className} {
+  return `import { Notification, type NotificationMailMessage } from '@guren/core'
+
+export class ${className} extends Notification {
   constructor(
     public readonly data: Record<string, unknown> = {},
-  ) {}
+  ) {
+    super()
+  }
+
+  // A getter is inherited: without the check a subclass would take this pin and its registry key.
+  override get type(): string {
+    return this.constructor === ${className} ? '${className}' : this.constructor.name
+  }
 
   via(): string[] {
     return ['mail', 'database']
   }
 
-  toMail() {
+  override toMail(): NotificationMailMessage {
     return {
       subject: '${className.replace(/Notification$/, '')}',
-      body: 'Your notification content here.',
+      text: 'Your notification content here.',
     }
   }
 
-  toDatabase() {
+  override toDatabase(): Record<string, unknown> {
     return {
-      type: '${className}',
-      data: this.data,
+      ...this.data,
     }
   }
 
-  toArray() {
+  override toArray(): Record<string, unknown> {
     return {
       ...this.data,
     }
