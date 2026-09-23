@@ -968,6 +968,8 @@ describe('judgePlan', () => {
       expect(filesOf({ routeFiles, routes: [routeIn('billing')] })).toEqual(['modules/billing/routes.ts', 'modules/billing/routes/invoices.ts'])
       // The entry file did not parse, so the detail skipped it; the route still names it.
       expect(filesOf({ routeFiles: routeFiles.slice(1), routes: [routeIn(null)] })).toEqual(['routes/web.ts', 'routes/comments.ts', 'routes/admin/users.ts'])
+      // No entry file was loaded: the project's `routes/` files alone.
+      expect(filesOf({ routeFiles: routeFiles.slice(1), routes: [{ ...index!, module: null, file: undefined }] })).toEqual(['routes/comments.ts', 'routes/admin/users.ts'])
     })
   })
 })

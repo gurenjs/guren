@@ -1012,7 +1012,7 @@ class StatusContext {
   /**
    * Every routes file of the route's scope, since nothing says which declared it: for an entry
    * route the entry file and the project's `routes/` files (the scope `routes-check.ts` reads),
-   * for a module's every routes file of that module. The entry file is kept even when it did not parse.
+   * every routes file of its module for a module's route. The entry file is kept even when it did not parse.
    */
   private routeFiles(route: PlanAppRouteDetail): string[] {
     const files = (this.detail?.routeFiles ?? []).map((entry) => entry.file)
