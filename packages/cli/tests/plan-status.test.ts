@@ -71,13 +71,15 @@ const USERS_TABLE: SourcedSchemaTable = {
 const NO_FIELDS = { fields: {} }
 const UNIMPORTED_FIELDS = { unreadable: 'app/Http/Validators/PostValidator.ts would not import (it threw)' }
 
+const MOUNT_FILES = { entry: ['src/app.ts'], descriptors: {} }
+
 function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
   return {
     routes: [
       { name: 'posts.index', method: 'GET', path: '/posts', action: 'PostController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null, file: 'routes/web.ts', contractSchemas: [] },
       { name: 'posts.show', method: 'GET', path: '/posts/:id', action: 'PostController.show', middleware: ['auth'], hasInlineMiddleware: false, bindings: { id: 'Post' }, module: null, file: 'routes/web.ts', contractSchemas: [] },
     ],
-    mounts: { entry: 'mounted', modules: {} },
+    mounts: { entry: 'mounted', modules: {}, files: MOUNT_FILES },
     tables: [POSTS_TABLE, USERS_TABLE],
     models: [
       { className: 'Post', module: null, file: 'app/Models/Post.ts', table: 'posts', relationships: [{ name: 'author', type: 'belongsTo', relatedModel: 'User' }], fillable: ['title'] },
@@ -230,7 +232,7 @@ const CASES: Case[] = [
     plan: validator(ADD),
     app: app({
       routes: [contractRoute('billing')],
-      mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } } },
+      mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } }, files: MOUNT_FILES },
     }),
     id: 'val',
     state: 'present',
@@ -407,7 +409,7 @@ const CASES: Case[] = [
   {
     name: 'an added route whose registrar createApp() is not seen to take',
     plan: route(ADD),
-    app: app({ mounts: { entry: { unconfirmed: 'createApp() passes no routes' }, modules: {} } }),
+    app: app({ mounts: { entry: { unconfirmed: 'createApp() passes no routes' }, modules: {}, files: MOUNT_FILES } }),
     id: 'r',
     state: 'present',
   },
@@ -786,7 +788,7 @@ describe('judgePlan', () => {
     test('should name the route whose contract holds it when that route is not mounted', () => {
       const unmounted = app({
         routes: [contractRoute('billing')],
-        mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } } },
+        mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } }, files: MOUNT_FILES },
       })
 
       expect(only(judgePlan(validator(ADD), unmounted), 'val').notes).toEqual([
@@ -839,8 +841,8 @@ describe('judgePlan', () => {
         controllers: [controller(EXISTING, [action(EXISTING)], 'InvoiceController')],
         routes: [{ id: 'r', change: ADD, method: 'GET', path: '/billing/invoices', name: 'invoices.index', action: 'a', middleware: [], bind: [] }],
       })
-      const mounted = app({ routes, mounts: { entry: 'mounted', modules: { billing: 'mounted' } } })
-      const unlisted = app({ routes, mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp({ modules }) does not list modules/billing' } } } })
+      const mounted = app({ routes, mounts: { entry: 'mounted', modules: { billing: 'mounted' }, files: MOUNT_FILES } })
+      const unlisted = app({ routes, mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp({ modules }) does not list modules/billing' } }, files: MOUNT_FILES } })
 
       expect(only(judgePlan(document, mounted), 'r').state).toBe('wired')
       expect(only(judgePlan(document, unlisted), 'r')).toMatchObject({ state: 'present', notes: [expect.stringContaining('modules/billing')] })
@@ -941,9 +943,9 @@ describe('judgePlan', () => {
         c: ['db/schema.ts'],
         val: ['app/Http/Validators/PostValidator.ts'],
         ctl: ['app/Http/Controllers/PostController.ts'],
-        a: ['app/Http/Controllers/PostController.ts', 'routes/web.ts'],
-        r: ['routes/web.ts'],
-        v: ['resources/js/pages/posts/Index.tsx', 'app/Http/Controllers/PostController.ts', 'routes/web.ts'],
+        a: ['app/Http/Controllers/PostController.ts', 'routes/web.ts', 'src/app.ts'],
+        r: ['routes/web.ts', 'src/app.ts'],
+        v: ['resources/js/pages/posts/Index.tsx', 'app/Http/Controllers/PostController.ts', 'routes/web.ts', 'src/app.ts'],
         res: ['app/Http/Resources/PostResource.ts'],
         pol: ['app/Policies/PostPolicy.ts'],
         job: ['app/Jobs/SendDigest.ts'],
@@ -962,7 +964,9 @@ describe('judgePlan', () => {
       ].map((file) => ({ file, identifiers: [] }))
       const [index] = detail().routes as PlanAppRouteDetail[]
       const routeIn = (module: string | null): PlanAppRouteDetail => ({ ...index!, module })
-      const filesOf = (overrides: Partial<PlanAppDetail>): string[] => only(judgePlan(route(EXISTING), app(overrides)), 'r').files
+      // No mount files, so only the routes files are asked about.
+      const mounts = { entry: 'mounted' as const, modules: {}, files: { entry: [], descriptors: {} } }
+      const filesOf = (overrides: Partial<PlanAppDetail>): string[] => only(judgePlan(route(EXISTING), app({ mounts, ...overrides })), 'r').files
 
       expect(filesOf({ routeFiles, routes: [routeIn(null)] })).toEqual(['routes/web.ts', 'routes/comments.ts', 'routes/admin/users.ts'])
       // The entry's routes and another module's register before a module's, and either may shadow it.
@@ -981,7 +985,7 @@ describe('judgePlan', () => {
     })
 
     test('should name the files a mount was read from for a route, per scope', () => {
-      const files = { entry: ['src/app.ts'], modules: { billing: ['src/app.ts', 'modules/billing/index.ts'] } }
+      const files = { entry: ['src/app.ts'], descriptors: { billing: 'modules/billing/index.ts' } }
       const routeFiles = ['routes/web.ts', 'modules/billing/routes.ts'].map((file) => ({ file, identifiers: [] }))
       const [index] = detail().routes as PlanAppRouteDetail[]
       const filesOf = (module: string | null): string[] =>
@@ -992,7 +996,7 @@ describe('judgePlan', () => {
     })
 
     test('should name the routes an action is wired through, so rewiring its route expires its record', () => {
-      const status = judgePlan(plan({ controllers: [controller(EXISTING, [action(EXISTING)])] }), app({ mounts: { entry: 'mounted', modules: {}, files: { entry: ['src/app.ts'], modules: {} } } }))
+      const status = judgePlan(plan({ controllers: [controller(EXISTING, [action(EXISTING)])] }), app())
 
       expect(only(status, 'a').files).toEqual(['app/Http/Controllers/PostController.ts', 'routes/web.ts', 'src/app.ts'])
       // The controller itself has no mount point, so it rests on its file alone.
@@ -1003,13 +1007,13 @@ describe('judgePlan', () => {
       const routeFiles = ['routes/web.ts', 'routes/comments.ts'].map((file) => ({ file, identifiers: [] }))
       const status = judgePlan(plan({ controllers: [controller(EXISTING, [action(EXISTING)])] }), app({ routes: UNREADABLE, routeFiles }))
 
-      expect(only(status, 'a').files).toEqual(['app/Http/Controllers/PostController.ts', 'routes/web.ts', 'routes/comments.ts'])
+      expect(only(status, 'a').files).toEqual(['app/Http/Controllers/PostController.ts', 'routes/web.ts', 'routes/comments.ts', 'src/app.ts'])
     })
 
     test('should name the controllers returning a page and their routes, since the page is wired through them', () => {
       const status = judgePlan(view(EXISTING, { page: 'posts/Show' }), app())
 
-      expect(only(status, 'v').files).toEqual(['resources/js/pages/posts/Show.tsx', 'app/Http/Controllers/PostController.ts', 'routes/web.ts'])
+      expect(only(status, 'v').files).toEqual(['resources/js/pages/posts/Show.tsx', 'app/Http/Controllers/PostController.ts', 'routes/web.ts', 'src/app.ts'])
     })
 
     test('should name the actions validating with a validator and the routes whose contract holds it', () => {
@@ -1022,13 +1026,13 @@ describe('judgePlan', () => {
         actions: [indexAction!, { ...showAction!, file: 'app/Http/Controllers/PostShowController.ts', validates: ['PostPayloadSchema'] }],
         routes: [index!, { ...show!, file: 'routes/web.ts' }],
       })
-      expect(inBody).toEqual(['app/Http/Validators/PostValidator.ts', 'app/Http/Controllers/PostShowController.ts', 'routes/web.ts'])
+      expect(inBody).toEqual(['app/Http/Validators/PostValidator.ts', 'app/Http/Controllers/PostShowController.ts', 'routes/web.ts', 'src/app.ts'])
 
       const inContract = judged({
         routes: [index!, { ...show!, module: 'billing', contractSchemas: ['PostPayloadSchema'] }],
         routeFiles: ['routes/web.ts', 'modules/billing/routes.ts'].map((file) => ({ file, identifiers: [] })),
       })
-      expect(inContract).toEqual(['app/Http/Validators/PostValidator.ts', 'routes/web.ts', 'modules/billing/routes.ts'])
+      expect(inContract).toEqual(['app/Http/Validators/PostValidator.ts', 'routes/web.ts', 'modules/billing/routes.ts', 'src/app.ts'])
     })
 
     test('should name the files using a side effect, since removing the last use is what unwires it', () => {

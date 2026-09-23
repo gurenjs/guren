@@ -145,7 +145,7 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.mounts).toEqual({
       entry: 'mounted',
       modules: { billing: 'mounted' },
-      files: { entry: ['src/app.ts'], modules: { billing: ['src/app.ts', 'modules/billing/index.ts'] } },
+      files: { entry: ['src/app.ts'], descriptors: { billing: 'modules/billing/index.ts' } },
     })
     expect(detail.routes).toMatchObject([
       { name: 'posts.index', action: 'PostController.index', module: null },

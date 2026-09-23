@@ -12,7 +12,7 @@ import type { RouteDefinition } from '@guren/server'
 import type { File, Node, Statement } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
-import { createAppOptions, hidesKeys, moduleMountState } from '../app-entry'
+import { createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
@@ -32,7 +32,6 @@ import {
   excludeBarrelFiles,
   findFirstExisting,
   listModuleNames,
-  moduleDescriptorCandidates,
   moduleNameFor,
   moduleNameFromRelPath,
   moduleRoutesEntryCandidates,
@@ -164,8 +163,11 @@ export interface PlanAppSideEffectDetail extends PlanAppClassDetail {
 export interface PlanAppMounts {
   entry: PlanAppMount
   modules: Record<string, PlanAppMount>
-  /** Per scope, the app files a verdict was read from (the entry, a module's descriptor): part of what `wired` rests on. */
-  files?: { entry: string[]; modules: Record<string, string[]> }
+  /**
+   * Part of what `wired` rests on: the entry `createApp()` is read from, and per module its
+   * descriptor, which names the registrar the CLI loads though no verdict here reads it.
+   */
+  files: { entry: string[]; descriptors: Record<string, string> }
 }
 
 export interface PlanAppDetail {
@@ -641,15 +643,13 @@ function registrarExport(ast: File): string | null {
  */
 async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetailInput): Promise<PlanAppMounts> {
   const modules = unique(input.provenance.filter((name): name is string => name !== null))
-  const entryPath = await resolveAppEntry(root)
-  const entryFiles = entryPath === null ? [] : [entryPath]
-  const descriptors = await Promise.all(modules.map((name) => findFirstExisting(root, moduleDescriptorCandidates(`modules/${name}`))))
-  const files: NonNullable<PlanAppMounts['files']> = {
-    entry: entryFiles,
-    modules: Object.fromEntries(modules.map((name, index) => {
-      const descriptor = descriptors[index]
-      return [name, descriptor ? [...entryFiles, descriptor] : entryFiles]
-    })),
+  const [entryPath, descriptors] = await Promise.all([
+    resolveAppEntry(root),
+    Promise.all(modules.map((name) => findModuleDescriptor(root, resolve(root, 'modules', name)))),
+  ])
+  const files: PlanAppMounts['files'] = {
+    entry: entryPath === null ? [] : [entryPath],
+    descriptors: Object.fromEntries(modules.flatMap((name, index) => (descriptors[index] ? [[name, descriptors[index]]] : []))),
   }
   const all = (mount: PlanAppMount): PlanAppMounts => ({
     entry: mount,
