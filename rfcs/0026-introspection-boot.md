@@ -176,7 +176,7 @@ export type RouteEntry = Omit<RouteDefinition, 'schemas' | 'controller' | 'middl
 export interface SessionEntry {
   source: 'manager' | 'auth.sessionOptions.store' | 'none'
   default: string
-  stores: Record<string, { driver: string; table?: string; perProcess: boolean }>
+  stores: Record<string, { driver: string | null; table?: string; perProcess: boolean | null }>   // amended below
 }
 
 export interface AuthEntry {
@@ -202,8 +202,8 @@ read-only method each so the manifest never resolves a store:
 `session-manager.ts:96`; the `database` driver's `table` reported through
 drizzle's `getTableName()`), `CacheManager.describe()`, `StorageManager.describe()`,
 `QueueManager.describe()`, `AuthManager.describe()`, and
-`describeActiveAttachmentEngine()` in `@guren/core`. `perProcess` comes from the
-same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
+`describeActiveAttachmentEngine()` in `@guren/core`. `perProcess` comes from
+`BUILT_IN_SESSION_DRIVERS` (amended below).
 
 > **Amended in implementation (Part 1):** the shapes above changed where the
 > code they describe differs from what the draft assumed, and each change reports
@@ -224,9 +224,18 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 >   `auth.sessionOptions.store` thunk, which only calling it would answer. With no
 >   manager and no explicit store, `source: 'none'` describes the in-memory store
 >   the session middleware falls back to.
-> - `AuthEntry` gains `hasher`, the one the app writes with. A provider entry is
->   `{ kind: 'model', model, hasher }` for `useModel()` and `{ kind: 'custom',
->   hasher: null }` for a bare `registerProvider()` factory.
+> - `perProcess` (`boolean | null`) comes from `BUILT_IN_SESSION_DRIVERS`, not
+>   `PER_PROCESS_SESSION_DRIVERS`: that map records every framework driver and
+>   whether it shares state, so a driver outside it (a plugin's) is `null`. An
+>   explicit store's class is mapped to its driver first (`MemorySessionStore` to
+>   `memory`, core's `DatabaseSessionStore` to `database`); any other class is
+>   `null`.
+> - `AuthEntry` gains `hasher`, the one the app writes with, and `algorithm`:
+>   `DefaultHasher` writes scrypt or, with `hasher: 'argon2'`, Bun-only Argon2id
+>   under one class name, so the class alone cannot tell them apart. A provider
+>   entry is `{ kind: 'model', model, hasher, algorithm }` for `useModel()` and
+>   `{ kind: 'custom', hasher: null, algorithm: null }` for a bare
+>   `registerProvider()` factory. `algorithm` is null for a custom hasher.
 > - `AttachmentsEntry.delivery` is `{ prefix, routeName, mounted }`, and a `disks`
 >   map carries each disk's `visibility`, `route` and `serve`. RFC 0015 made the
 >   serve mode per disk, so the draft's single `mode` has no source.
@@ -329,9 +338,10 @@ user's middleware may add it, and an absent value means "not determinable", whic
 > alias and group maps are private to it. `ability` is not a new capability
 > field: the authorization stamp has carried `abilities` since RFC 0016 §4, so
 > `ability` is derived from it by `derivableAbility()`, the rule agent tools
-> use too. It is the one ability of a single-ability `all` check, or on a route
-> entry the verb-map ability of a resource check whose `fromMethodMap` holds and
-> that no other check shares the chain with.
+> use too. It is the one ability of a single-ability `all` stamp, or on a route
+> entry the verb-map ability of a resource stamp whose `fromMethodMap` holds and
+> that names no ability of its own. The stamp is per entry: a group's merges its
+> members', so a group combining a resource check with a named one has none.
 
 ### 4. `guren introspect --json`
 

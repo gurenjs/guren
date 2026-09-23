@@ -46,6 +46,25 @@ describe('attachments in the manifest (RFC 0026 §1)', () => {
     })
   })
 
+  test('describeActiveAttachmentEngine() never activates a deferred provider of the binding', async () => {
+    const fallback = configure()
+    let activated = false
+    class DeferredAttachmentsProvider extends ServiceProvider {
+      static override deferred = true
+      static override provides = ['attachments']
+
+      register(): void {
+        activated = true
+        fallback.bindTo(this.container)
+      }
+    }
+    // Booted: the container only loads deferred providers once bootAll() installed the loader.
+    await createApp({ providers: [DeferredAttachmentsProvider] }).boot()
+
+    expect(describeActiveAttachmentEngine()).toMatchObject({ configured: true, table: 'attachments' })
+    expect(activated).toBe(false)
+  })
+
   test('an engine bound in register() becomes the manifest section, with whether its delivery route mounted', async () => {
     const engine = configure()
     class AttachmentsProvider extends ServiceProvider {
