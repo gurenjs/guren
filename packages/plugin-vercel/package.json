@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-vercel",
-  "version": "0.7.2",
+  "version": "0.7.1",
   "description": "Deploy a Guren SSR application to Vercel through the Build Output API, on Vercel's Bun runtime.",
   "keywords": [
     "guren",
@@ -46,7 +46,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.21.0"
+    "@guren/core": "^1.20.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

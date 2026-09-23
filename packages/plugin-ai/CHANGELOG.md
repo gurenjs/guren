@@ -1,22 +1,5 @@
 # @guren/plugin-ai
 
-## 0.4.0
-
-### Minor Changes
-
-- 07b623c: Evaluation models in `config/ai.ts` (RFC 0029 §3, amended). A provider entry may carry `evaluationModel: () => AiEvaluationModel`, an AI SDK evaluation model such as `createTypeSafeAi().evaluationModel('jev-latest')` or `gateway.evaluationModel('typesafe-ai/jev')`, and `model` is now optional so an entry may exist for evaluation alone. `AiConfig.defaultEvaluation` names the entry evaluations use when the call names none (checked at boot like `default`; `default` when absent). `AiManager` gains `evaluationModel(provider?)`, memoized like `model()`, and `evaluate({ state, questions, provider?, manager? })` joins `embed()` and `image()`: the AI SDK's `experimental_evaluate` with the model resolved by provider name, so `fakeAi()` scripts every answer. The `AiEvaluation*` types re-export the SDK's; the SDK marks the API experimental and may change it in a patch release, so `ai` now needs `^7.0.106`.
-
-### Patch Changes
-
-- Updated dependencies [f0f0124]
-- Updated dependencies [bce6db1]
-- Updated dependencies [760d020]
-- Updated dependencies [6905e22]
-- Updated dependencies [7ea7497]
-- Updated dependencies [474842f]
-- Updated dependencies [2ef86a8]
-  - @guren/core@1.21.0
-
 ## 0.3.0
 
 ### Minor Changes

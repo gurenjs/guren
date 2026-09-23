@@ -1,57 +1,5 @@
 # @guren/server
 
-## 2.26.0
-
-### Minor Changes
-
-- f0f0124: Consume password reset and email verification tokens atomically before invoking application updates. Replace tokens per normalized email atomically so concurrent reissuance leaves only one valid token. Memory and Redis stores implement the new operations; custom stores must implement `replace` and `consume` to use the issuance and completion helpers. Failed updates require a new token.
-
-  Generate password reset controllers that use the atomic completion helper. The helper only requires a provider's credential lookup, allowing applications to use their existing record types.
-
-- 94fcb7a: Partial reloads and deferred props for Inertia responses. A request whose `X-Inertia-Partial-Component` names the rendered component is answered with the props its `X-Inertia-Partial-Data` and `X-Inertia-Partial-Except` headers select (shared props included), and a prop passed as a function is called only when it is sent. `always(value)` marks a prop sent on every response whatever those headers say; the flashed `errors` prop is shared that way. `defer(() => value, group?)` keeps a prop out of the initial response, announces it under the page object's `deferredProps` by group, and resolves it on the partial reload the client sends for that group. `Controller.inertia()` accepts a deferred or lazy prop wherever the page declares its resolved type, and `ControllerInertiaProps` reads the resolved type back. The response marker carries the props the response sent, so on a 409 version mismatch (which sends none) it is empty.
-- 760d020: A module can carry its own config definitions (RFC 0002, RFC 0027 §2). `defineModule({ config: [...] })` takes the same definitions as `createApp({ config })`, conventionally from `modules/<name>/config/<key>.ts`. The app's definitions bind first, then each module's in `createApp({ modules })` order, through the one `ConfigServiceProvider`, which now also registers when only a module carries definitions. Keys stay app-wide: a key the app and a module both define, or two modules define, fails the boot naming both places (`"oauth" has two config definitions, at createApp({ config })[3] and the "auth" module's config[0]`). The duplicate-key error for two root definitions is reworded to the same shape. `Application.configDefinitions` now includes the modules' definitions after the root's, and `Application.configEntries` (typed `ConfiguredDefinition`, now exported) carries where each was listed. `GurenModule.config` is optional, so a module literal built without `defineModule()` still typechecks.
-- 7ea7497: Isolate concurrent container scopes and make Redis queue transitions atomic. Fence stale reservations and renew active leases while handlers run. Jobs can pass `this.signal` to cancellable I/O; timeouts request cancellation and retries wait for the handler to settle. A handler that completes after its timeout is acknowledged rather than retried, a failed lease renewal is retried at the next heartbeat, and a lease another worker took is reported per job without stopping the worker. `SqsDriver` renews message visibility while a job runs (`visibilityTimeout` option) and `SqsAdapter.changeMessageVisibility` may resolve `false` for an expired receipt. Worker lifecycle state is reset after driver failures.
-
-  Remove the CLI's runtime dependency on the core facade by sharing registration conventions below both packages. Document queue delivery guarantees, mass-assignment boundaries and the supported runtime baseline.
-
-- 6a5d490: Use the SQS receive count to preserve retry limits across redeliveries and worker restarts. A polling adapter that reports no receive count warns once and keeps the previous behaviour.
-
-  Reject storage paths that leave a local disk through a symbolic link. Links that resolve inside the disk, and a configured root that is itself a link, keep working.
-
-### Patch Changes
-
-- 5b0a04e: `HealthManager` now clears each check's timeout timer once the check settles. The timer used to stay pending for the full timeout (5 seconds by default) even after the check had passed, so a script or test that ran a health check waited that long to exit, and a `/health` endpoint kept one pending timer per check for up to the timeout after every probe. A check that exceeds its timeout still reports `Health check timed out after <ms>ms`.
-- 7017b32: Use the SQS receive count for Lambda job attempts and stop executing handlers after maxAttempts. `failed()` runs once, on the delivery that spends the last attempt and with that attempt's error, matching the queue worker; later deliveries run neither callback and keep the message in the partial batch response for SQS redrive. Every record the handler runs logs its job name, attempt and error as JSON when it fails, and a FIFO batch that stops logs the records it left unprocessed, so a record that reaches the dead-letter queue without running is no longer silent.
-
-  Process FIFO batches sequentially and return both failed and unprocessed records after the first failure. Standard queue batches retain concurrent processing.
-
-- ef9398d: Warn when a different class registers under a job, event or notification name another class already holds. `registerJob()`, `EventManager.on()` / `listen()` / `registerEvent()` and `registerNotification()` (including the automatic registration when a notification is queued) print one warning per name that names both classes and the fix: a distinct class name, or a pinned `jobName`, `eventName` or `type`. Registering the same class again stays silent, and the registries still keep the class registered last, so nothing but the log changes. A future major will throw instead.
-- 2ef86a8: Protect SQLite transaction isolation, reject unsupported bulk-write pagination, and honor soft deletes through query builders. Preserve concurrent cache counters, expiration deadlines, tag namespaces, rate-limit admission, and once-listener execution. Apply scheduler timezones, validate cron fields, find leap-day occurrences, and encode storage URL paths. Serialize single-attachment replacements within a process and support a shared collection lock across processes.
-
-  Tagged caches create tag namespaces with the store's atomic `add()` when it has one; a custom store without it keeps the previous non-atomic behavior. The file store locks only its read-modify-write operations (`add()`, `increment()`, `decrement()`), and takes over a lock still held after five seconds, so a crashed process no longer leaves a key unusable. Bulk writes with limit, offset, or ordering now throw rather than silently ignoring those options.
-
-- 382a6a7: Delete acknowledged SQS messages instead of only dropping the receipt handle.
-
-  `SqsDriver.delete()` and `fail()` now send `DeleteMessage`, so a job a worker
-  finished or gave up on no longer reappears when the queue's visibility timeout
-  expires. `SqsAdapter` gains an optional `deleteMessage()` — `createSqsAdapter()`
-  implements it, and an adapter without it warns once and keeps its previous
-  behaviour. A deletion that fails inside `fail()` is logged rather than thrown:
-  the job is already recorded as failed, and throwing would only cost the worker
-  loop and the job's `failed()` hook.
-
-  `release()` now changes visibility on the queue the message was received on
-  rather than the one named in the serialized job, so the two can no longer
-  disagree when `queueUrls` maps a logical queue elsewhere.
-
-- d8e24e8: `MemoryRateLimitStore` and `SlidingWindowRateLimitStore` now `unref()` their cleanup timer (60 seconds by default), as the memory cache store already did. A process that only built one (a CLI command or script evaluating a routes module that calls `createRateLimitMiddleware()`, a test file) exits on its own instead of staying alive forever. The sweep still runs while a server keeps the process up, and `destroy()` still stops it.
-- Updated dependencies [a923c9b]
-- Updated dependencies [cde0638]
-- Updated dependencies [87ccdc1]
-- Updated dependencies [2ef86a8]
-- Updated dependencies [8555cc4]
-  - @guren/orm@2.12.0
-
 ## 2.25.1
 
 ### Patch Changes

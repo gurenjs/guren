@@ -1,6 +1,6 @@
 {
   "name": "@guren/openapi",
-  "version": "1.4.2",
+  "version": "1.4.1",
   "description": "OpenAPI 3.1 document generation from Guren route contracts.",
   "keywords": [
     "guren",
@@ -44,7 +44,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.21.0"
+    "@guren/core": "^1.20.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

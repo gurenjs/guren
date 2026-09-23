@@ -1,19 +1,5 @@
 # @guren/plugin-cloudflare
 
-## 0.12.2
-
-### Patch Changes
-
-- 5d15be6: `cloudflare:build` refuses a `wrangler.jsonc` that sets `"keep_names": false`, at the top level or in any `env.<name>` block, and accepts `"minify": true`. wrangler bundles with esbuild's `keepNames` on unless `keep_names` turns it off, so minification alone keeps class names; with `keep_names` off, a minified bundle renames every class and an unminified one renames the second of two top-level classes that share a name. The refusal now applies to every app, not only one hosting agents: queued jobs, queued events and stored notifications are keyed by class name unless they pin `static jobName`, `static eventName` or a `type` getter. An app with no agents that sets `"keep_names": false` fails the build where it passed before; remove the key, since wrangler defaults it to `true`.
-- Updated dependencies [f0f0124]
-- Updated dependencies [bce6db1]
-- Updated dependencies [760d020]
-- Updated dependencies [6905e22]
-- Updated dependencies [7ea7497]
-- Updated dependencies [474842f]
-- Updated dependencies [2ef86a8]
-  - @guren/core@1.21.0
-
 ## 0.12.1
 
 ### Patch Changes
