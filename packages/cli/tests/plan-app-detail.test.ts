@@ -9,6 +9,9 @@ import { createTempRoot, linkWorkspaceCore, PAGE_COMPONENT_FIXTURE, writeWorkspa
 const ROOT_PREFIX = 'guren-plan-app-detail-'
 let ROOT: string
 
+/** The fixture's validators are plain objects, so their fields are read as unreadable. */
+const NOT_ZOD = { unreadable: expect.stringContaining('is not a zod schema') }
+
 const CONTROLLER = `import { Controller } from '@guren/core'
 import { OrphanPayloadSchema, PostPayloadSchema } from '../Validators/PostValidator.js'
 
@@ -211,9 +214,9 @@ describe('loadPlanAppState({ detail: true })', () => {
     const detail = await detailOf('names', { 'src/app.ts': entry('{ routes: registerWebRoutes }') })
 
     expect(detail.validators).toEqual([
-      { name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null },
-      { name: 'OrphanPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null },
-      { name: 'helper', file: 'app/Http/Validators/PostValidator.ts', module: null },
+      { name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: NOT_ZOD },
+      { name: 'OrphanPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: NOT_ZOD },
+      { name: 'helper', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: NOT_ZOD },
     ])
     expect(detail.unparsedModelFiles).toEqual(['app/Models/Broken.ts'])
   })
@@ -227,7 +230,7 @@ describe('loadPlanAppState({ detail: true })', () => {
       { className: 'InvoiceController', module: 'billing', file: 'modules/billing/app/Http/Controllers/InvoiceController.ts' },
     ])
     expect(detail.actions).toContainEqual(expect.objectContaining({ key: 'InvoiceController.index', module: 'billing' }))
-    expect(detail.validators).toContainEqual({ name: 'InvoicePayloadSchema', file: 'modules/billing/app/Http/Validators/InvoiceValidator.ts', module: 'billing' })
+    expect(detail.validators).toContainEqual({ name: 'InvoicePayloadSchema', file: 'modules/billing/app/Http/Validators/InvoiceValidator.ts', module: 'billing', fields: NOT_ZOD })
     expect(detail.resources).toEqual([{ className: 'InvoiceResource', module: 'billing', file: 'modules/billing/app/Http/Resources/InvoiceResource.ts' }])
     expect(detail.policies).toEqual([{ className: 'InvoicePolicy', module: 'billing', file: 'modules/billing/app/Policies/InvoicePolicy.ts' }])
     expect(detail.sideEffects.job).toEqual([{ className: 'ChargeInvoice', module: 'billing', file: 'modules/billing/app/Jobs/ChargeInvoice.ts' }])
@@ -242,10 +245,10 @@ describe('loadPlanAppState({ detail: true })', () => {
     })
 
     expect(detail.validators).toEqual([
-      { name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null },
-      { name: 'OrphanPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null },
-      { name: 'helper', file: 'app/Http/Validators/PostValidator.ts', module: null },
-      { name: 'InvoicePayloadSchema', file: 'modules/billing/app/Http/Validators/InvoiceValidator.ts', module: 'billing' },
+      { name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: NOT_ZOD },
+      { name: 'OrphanPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: NOT_ZOD },
+      { name: 'helper', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: NOT_ZOD },
+      { name: 'InvoicePayloadSchema', file: 'modules/billing/app/Http/Validators/InvoiceValidator.ts', module: 'billing', fields: NOT_ZOD },
     ])
   })
 
@@ -260,8 +263,9 @@ describe('loadPlanAppState({ detail: true })', () => {
       file: 'app/Http/Validators/Throws.ts',
       module: null,
       unimported: expect.stringContaining('boom'),
+      fields: { unreadable: expect.stringContaining('would not import') },
     })
-    expect(detail.validators).toContainEqual({ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null })
+    expect(detail.validators).toContainEqual({ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: NOT_ZOD })
   })
 
   test('should carry the component file of a renderable page and skip a .ts sibling', async () => {

@@ -30,6 +30,8 @@ export interface ResourceDefinition {
    * the source, or an `import('…').Name` reference. `null` if neither.
    */
   rawType: string | null
+  /** What a copied body `extends`, which `rawType` leaves out along with the members it adds. */
+  heritage?: string
   imports: string[]
   /** Module (`modules/<name>/`) the class lives in — `null` at the project root. */
   module: string | null
@@ -82,6 +84,15 @@ export async function generateDataTypes(
   const outputPath = await writeGeneratedFileIn(appRoot, outputFile, module, { force: options.force })
 
   return { outputPath, definitions, warnings }
+}
+
+/**
+ * The definitions `guren codegen` would emit `data.gen.ts` from, without writing it: the one
+ * reading of a resource's payload, which `plan:status` compares a planned resource's fields with.
+ */
+export async function readResourceDefinitions(appRoot: string): Promise<ResourceDefinition[]> {
+  const files = await discoverResourceFiles(appRoot, RESOURCES_DIR)
+  return (await collectResourceDefinitions(appRoot, files, join(appRoot, '.guren'))).definitions
 }
 
 export function buildDataModuleContent(
@@ -246,7 +257,7 @@ async function extractResourceType(
   // Strategy 1: an interface named after the class.
   const named = readObjectType(source, masked, `${baseName}(?:Resource)?Data`)
   if (named.kind === 'body') {
-    return { ...common, rawType: named.body }
+    return { ...common, rawType: named.body, ...heritageOf(named) }
   }
 
   // Strategy 2: an explicit return type on toArray().
@@ -255,7 +266,7 @@ async function extractResourceType(
     const typeName = returnTypeMatch[1]
     const annotated = readObjectType(source, masked, typeName)
     if (annotated.kind === 'body') {
-      return { ...common, rawType: annotated.body }
+      return { ...common, rawType: annotated.body, ...heritageOf(annotated) }
     }
 
     if (annotated.kind === 'unreadable') {
@@ -313,7 +324,7 @@ async function extractResourceType(
  * declaration the file *exports* falls back to an import-type reference ({@link readTypeReference}).
  */
 type ObjectTypeRead =
-  | { kind: 'body'; body: string }
+  | { kind: 'body'; body: string; heritage?: string }
   | { kind: 'none' }
   | { kind: 'unreadable'; typeName: string; reason: string; fix?: string }
 
@@ -413,7 +424,12 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
     }
   }
 
-  return { kind: 'body', body: source.slice(openIndex, end) }
+  const body = source.slice(openIndex, end)
+  return heritage ? { kind: 'body', body, heritage: heritage.replace(/^extends\s+/u, '').trim() } : { kind: 'body', body }
+}
+
+function heritageOf(read: { heritage?: string }): Pick<ResourceDefinition, 'heritage'> {
+  return read.heritage ? { heritage: read.heritage } : {}
 }
 
 function countOccurrences(haystack: string, needle: string): number {
