@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
+import type { PlanAppActionDetail, PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
 import type { PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import {
@@ -941,9 +941,9 @@ describe('judgePlan', () => {
         c: ['db/schema.ts'],
         val: ['app/Http/Validators/PostValidator.ts'],
         ctl: ['app/Http/Controllers/PostController.ts'],
-        a: ['app/Http/Controllers/PostController.ts'],
+        a: ['app/Http/Controllers/PostController.ts', 'routes/web.ts'],
         r: ['routes/web.ts'],
-        v: ['resources/js/pages/posts/Index.tsx'],
+        v: ['resources/js/pages/posts/Index.tsx', 'app/Http/Controllers/PostController.ts', 'routes/web.ts'],
         res: ['app/Http/Resources/PostResource.ts'],
         pol: ['app/Policies/PostPolicy.ts'],
         job: ['app/Jobs/SendDigest.ts'],
@@ -951,7 +951,7 @@ describe('judgePlan', () => {
       expect(only(judgePlan(route(ADD, { name: 'posts.missing' }), app()), 'r').files).toEqual([])
     })
 
-    test('should name every routes file of its scope for a route, since nothing says which file declared it', () => {
+    test('should name every routes file that may declare a route or shadow it: its scope for an entry route, all of them for a module\'s', () => {
       const routeFiles = [
         'routes/web.ts',
         'routes/comments.ts',
@@ -965,11 +965,83 @@ describe('judgePlan', () => {
       const filesOf = (overrides: Partial<PlanAppDetail>): string[] => only(judgePlan(route(EXISTING), app(overrides)), 'r').files
 
       expect(filesOf({ routeFiles, routes: [routeIn(null)] })).toEqual(['routes/web.ts', 'routes/comments.ts', 'routes/admin/users.ts'])
-      expect(filesOf({ routeFiles, routes: [routeIn('billing')] })).toEqual(['modules/billing/routes.ts', 'modules/billing/routes/invoices.ts'])
+      // The entry's routes and another module's register before a module's, and either may shadow it.
+      expect(filesOf({ routeFiles, routes: [routeIn('billing')] })).toEqual([
+        'modules/billing/routes.ts',
+        'modules/billing/routes/invoices.ts',
+        'routes/web.ts',
+        'routes/comments.ts',
+        'routes/admin/users.ts',
+        'modules/shop/routes.ts',
+      ])
       // The entry file did not parse, so the detail skipped it; the route still names it.
       expect(filesOf({ routeFiles: routeFiles.slice(1), routes: [routeIn(null)] })).toEqual(['routes/web.ts', 'routes/comments.ts', 'routes/admin/users.ts'])
       // No entry file was loaded: the project's `routes/` files alone.
       expect(filesOf({ routeFiles: routeFiles.slice(1), routes: [{ ...index!, module: null, file: undefined }] })).toEqual(['routes/comments.ts', 'routes/admin/users.ts'])
+    })
+
+    test('should name the files a mount was read from for a route, per scope', () => {
+      const files = { entry: ['src/app.ts'], modules: { billing: ['src/app.ts', 'modules/billing/index.ts'] } }
+      const routeFiles = ['routes/web.ts', 'modules/billing/routes.ts'].map((file) => ({ file, identifiers: [] }))
+      const [index] = detail().routes as PlanAppRouteDetail[]
+      const filesOf = (module: string | null): string[] =>
+        only(judgePlan(route(EXISTING), app({ routeFiles, routes: [{ ...index!, module }], mounts: { entry: 'mounted', modules: { billing: 'mounted' }, files } })), 'r').files
+
+      expect(filesOf(null)).toEqual(['routes/web.ts', 'src/app.ts'])
+      expect(filesOf('billing')).toEqual(['modules/billing/routes.ts', 'routes/web.ts', 'src/app.ts', 'modules/billing/index.ts'])
+    })
+
+    test('should name the routes an action is wired through, so rewiring its route expires its record', () => {
+      const status = judgePlan(plan({ controllers: [controller(EXISTING, [action(EXISTING)])] }), app({ mounts: { entry: 'mounted', modules: {}, files: { entry: ['src/app.ts'], modules: {} } } }))
+
+      expect(only(status, 'a').files).toEqual(['app/Http/Controllers/PostController.ts', 'routes/web.ts', 'src/app.ts'])
+      // The controller itself has no mount point, so it rests on its file alone.
+      expect(only(status, 'ctl').files).toEqual(['app/Http/Controllers/PostController.ts'])
+    })
+
+    test('should name every routes file for an action when the routes did not read', () => {
+      const routeFiles = ['routes/web.ts', 'routes/comments.ts'].map((file) => ({ file, identifiers: [] }))
+      const status = judgePlan(plan({ controllers: [controller(EXISTING, [action(EXISTING)])] }), app({ routes: UNREADABLE, routeFiles }))
+
+      expect(only(status, 'a').files).toEqual(['app/Http/Controllers/PostController.ts', 'routes/web.ts', 'routes/comments.ts'])
+    })
+
+    test('should name the controllers returning a page and their routes, since the page is wired through them', () => {
+      const status = judgePlan(view(EXISTING, { page: 'posts/Show' }), app())
+
+      expect(only(status, 'v').files).toEqual(['resources/js/pages/posts/Show.tsx', 'app/Http/Controllers/PostController.ts', 'routes/web.ts'])
+    })
+
+    test('should name the actions validating with a validator and the routes whose contract holds it', () => {
+      const validators = [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }]
+      const [index, show] = detail().routes as PlanAppRouteDetail[]
+      const [indexAction, showAction] = detail().actions as PlanAppActionDetail[]
+      const judged = (overrides: Partial<PlanAppDetail>): string[] => only(judgePlan(plan({ validators }), app(overrides)), 'val').files
+
+      const inBody = judged({
+        actions: [indexAction!, { ...showAction!, file: 'app/Http/Controllers/PostShowController.ts', validates: ['PostPayloadSchema'] }],
+        routes: [index!, { ...show!, file: 'routes/web.ts' }],
+      })
+      expect(inBody).toEqual(['app/Http/Validators/PostValidator.ts', 'app/Http/Controllers/PostShowController.ts', 'routes/web.ts'])
+
+      const inContract = judged({
+        routes: [index!, { ...show!, module: 'billing', contractSchemas: ['PostPayloadSchema'] }],
+        routeFiles: ['routes/web.ts', 'modules/billing/routes.ts'].map((file) => ({ file, identifiers: [] })),
+      })
+      expect(inContract).toEqual(['app/Http/Validators/PostValidator.ts', 'routes/web.ts', 'modules/billing/routes.ts'])
+    })
+
+    test('should name the files using a side effect, since removing the last use is what unwires it', () => {
+      const sideEffects = { job: [{ className: 'SendDigest', module: null, file: 'app/Jobs/SendDigest.ts', usedIn: ['app/Http/Controllers/PostController.ts'], unprovenIn: [], mentionedIn: ['routes/web.ts'] }], event: [], listener: [], mail: [], notification: [] }
+      const status = judgePlan(plan({ sideEffects: [{ id: 'job', change: EXISTING, kind: 'job', name: 'SendDigest', trigger: 't', description: 'd' }] }), app({ sideEffects }))
+
+      expect(only(status, 'job').files).toEqual(['app/Jobs/SendDigest.ts', 'app/Http/Controllers/PostController.ts'])
+    })
+
+    test('should fingerprint nothing of an element no reader found a file of, whatever wires it', () => {
+      const pages = [{ id: 'posts/Show', props: { status: 'undeclared' as const } }]
+
+      expect(only(judgePlan(view(EXISTING, { page: 'posts/Show' }), app({ pages })), 'v').files).toEqual([])
     })
   })
 })

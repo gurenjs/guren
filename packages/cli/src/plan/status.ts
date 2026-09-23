@@ -81,7 +81,7 @@ export interface PlanElementStatus<S extends PlanElementState = PlanStatusState>
    * `wired` for a kind with a mount point, `present` for the rest and for a `drop`.
    */
   completesAt: 'present' | 'wired'
-  /** App-relative files the readers found the element in; what `plan:verify` fingerprints. Empty until it exists. */
+  /** App-relative files the readers found the element in, and those its `wired` rests on; what `plan:verify` fingerprints. Empty until it exists. */
   files: string[]
   /** Set by the verification overlay when a verified step did not lift the element: why, and the note that says so. */
   hold?: { kind: PlanVerificationHold; note: string }
@@ -349,6 +349,18 @@ function findClass<T extends { className: string; module: string | null }>(class
   return classes?.find((entry) => entry.className === name && entry.module === (module ?? null))
 }
 
+function unique(values: Iterable<string>): string[] {
+  return [...new Set(values)]
+}
+
+/**
+ * An element's files and the files its `wired` verdict rests on, so a change that unwires it
+ * expires its record. An element no reader found a file of stays unfingerprinted: wiring alone never lifts one.
+ */
+function withWiring(own: string[], wiring: () => string[]): string[] {
+  return own.length === 0 ? own : unique([...own, ...wiring()])
+}
+
 /** The file of the discovered class matching a name in the plan's app root, as a list for `files`. */
 function classFiles(
   classes: ReadonlyArray<{ className: string; module: string | null; file: string }> | undefined,
@@ -557,8 +569,8 @@ class StatusContext {
   }
 
   /**
-   * An element a discovered class satisfies: found by name in the plan's app root, fingerprinted
-   * by the class's file. `properties` and `mount` are asked of the class found, as `conclude()` asks.
+   * An element a discovered class satisfies: found by name in the plan's app root, fingerprinted by
+   * the class's file and what `wiringFiles` names. `properties` and `mount` are asked of the class found, as `conclude()` asks.
    */
   private named<T extends PlanAppClassDetail>(
     section: PlanElementSection,
@@ -566,9 +578,9 @@ class StatusContext {
     names: PlanAppNames,
     noun: PlanNoun,
     classes: T[] | undefined,
-    judge: { properties?: (found: T | undefined) => PlanPropertyStatus[]; mount?: (found: T) => PlanAppMount },
+    judge: { properties?: (found: T | undefined) => PlanPropertyStatus[]; mount?: (found: T) => PlanAppMount; wiringFiles?: (found: T) => string[] },
   ): PlanElementStatus {
-    const { properties, mount } = judge
+    const { properties, mount, wiringFiles } = judge
     const find = (name: string): Existence =>
       existsInScope(names, name, noun, element.module, classes, (entry) => entry.className === name)
     const found = (): T | undefined => findClass(classes, element.name, element.module)
@@ -581,7 +593,7 @@ class StatusContext {
       previous: previousOf(element.change, find),
       properties: properties && (() => properties(found())),
       mount: mount && (() => mount(found()!)),
-      files: () => classFiles(classes, element.name, element.module),
+      files: () => withWiring(classFiles(classes, element.name, element.module), () => (wiringFiles ? wiringFiles(found()!) : [])),
     })
   }
 
@@ -822,7 +834,7 @@ class StatusContext {
       previous: previousOf(validator.change, find),
       properties: () => validatorFieldProperties(validator.fields, found?.fields ?? { unreadable: isUnreadable(validators) ? validators.unreadable : 'the validator was not read' }),
       mount: () => this.referenceMount(validator.name, found),
-      files: () => (found ? [found.file] : []),
+      files: () => withWiring(found ? [found.file] : [], () => this.referenceWiringFiles(validator.name)),
     })
   }
 
@@ -868,7 +880,7 @@ class StatusContext {
       previous: previousOf(action.change, find),
       properties: () => this.actionProperties(action, key),
       mount: () => this.actionMount(key),
-      files: () => this.controllerFiles(controller.className, controller.module),
+      files: () => withWiring(this.controllerFiles(controller.className, controller.module), () => this.actionWiringFiles(key)),
     })
   }
 
@@ -1005,7 +1017,7 @@ class StatusContext {
       previous: previousOf(route.change, find),
       properties: () => this.routeProperties(route, actual()),
       mount: () => this.routeMount(actual()),
-      files: () => this.routeFiles(actual()),
+      files: () => withWiring(this.routeFiles(actual()), () => this.routeWiringFiles(actual())),
     })
   }
 
@@ -1022,6 +1034,46 @@ class StatusContext {
     }
     const prefix = `modules/${route.module}/`
     return files.filter((file) => file.startsWith(prefix))
+  }
+
+  /**
+   * What a route's `wired` rests on: the files its mount was read from, and the routes files that may
+   * declare it or a route registered before it. A module's route takes every routes file, since the
+   * entry's and another module's may shadow it; an entry route's register first.
+   */
+  private routeWiringFiles(route: PlanAppRouteDetail): string[] {
+    const read = this.detail?.mounts.files
+    const mountFiles = route.module === null ? read?.entry : (read?.modules[route.module] ?? read?.entry)
+    const declared = route.module === null ? this.routeFiles(route) : (this.detail?.routeFiles ?? []).map((entry) => entry.file)
+    return unique([...declared, ...(mountFiles ?? [])])
+  }
+
+  /** What an action's `wired` rests on: every route dispatching to it, or every routes file when the routes did not read. */
+  private actionWiringFiles(key: string): string[] {
+    const routes = this.routesTo(key)
+    if (!isUnreadable(routes)) return unique(routes.flatMap((route) => this.routeWiringFiles(route)))
+    return unique([...(this.detail?.routeFiles ?? []).map((entry) => entry.file), ...(this.detail?.mounts.files?.entry ?? [])])
+  }
+
+  /** An element wired through an action rests on the action's body, in its controller, and on the action's own wiring. */
+  private throughActionFiles(action: PlanAppActionDetail): string[] {
+    return [action.file, ...this.actionWiringFiles(action.key)]
+  }
+
+  /** What `referenceMount()` reads for a validator: the actions validating with it, and the routes whose contract holds it. */
+  private referenceWiringFiles(symbol: string): string[] {
+    const actions = this.section('actions')
+    const routes = this.section('routes')
+    return unique([
+      ...(isUnreadable(actions) ? [] : actions.filter((action) => action.validates.includes(symbol)).flatMap((action) => this.throughActionFiles(action))),
+      ...(isUnreadable(routes) ? [] : routes.filter((route) => contractHolds(route, symbol)).flatMap((route) => this.routeWiringFiles(route))),
+    ])
+  }
+
+  /** What `viewMount()` reads for a page: the actions returning it. */
+  private viewWiringFiles(page: string): string[] {
+    const actions = this.section('actions')
+    return isUnreadable(actions) ? [] : unique(actions.filter((action) => action.pages.includes(page)).flatMap((action) => this.throughActionFiles(action)))
   }
 
   private routeProperties(route: PlanRoute, actual: PlanAppRouteDetail): PlanPropertyStatus[] {
@@ -1076,7 +1128,7 @@ class StatusContext {
       files: () => {
         const pages = this.section('pages')
         const file = isUnreadable(pages) ? undefined : pages.find((candidate) => candidate.id === view.page)?.file
-        return file === undefined ? [] : [file]
+        return withWiring(file === undefined ? [] : [file], () => this.viewWiringFiles(view.page))
       },
     })
   }
@@ -1135,6 +1187,8 @@ class StatusContext {
     const names: PlanAppNames = classes ? classes.map((entry) => ({ name: entry.className, module: entry.module })) : NO_DETAIL
     return this.named('sideEffects', effect, names, { plural: `${effect.kind} classes`, singular: effect.kind }, classes, {
       mount: (found) => this.sideEffectMount(effect, found),
+      // Removing the last use is what unwires it, and a use sits in the file that makes it.
+      wiringFiles: (found) => found.usedIn,
     })
   }
 

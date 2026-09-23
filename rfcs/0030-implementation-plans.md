@@ -1466,10 +1466,17 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
 - The fingerprint is the SHA-256 of every file the status readers found the
   step's elements in (a model's file, the controller's for an action, the
   schema file for a column, the entry routes file and every file under the
-  project's `routes/` for an entry route and every routes file of a module for
-  a module's (nothing says which file declared it), the page component, a validator's
-  file) plus the selected test files, and the environment (`runtime`,
-  `platform`, `arch`, `hostname`). A file that cannot be read at verify time is
+  project's `routes/` for an entry route and every routes file of the
+  application for a module's (nothing says which file declared it, and the
+  entry's and another module's routes may shadow it), the page component, a
+  validator's file), plus, for an element with a mount point, the files its
+  `wired` rests on: the entry `createApp()` is read from and a module's
+  descriptor, the routes dispatching to an action, the actions returning a page
+  or validating with a validator, and those actions' routes, the routes whose
+  contract holds a validator, and the files using a side effect. An element no
+  reader found a file of stays unfingerprinted whatever wires it. The
+  fingerprint also holds the selected test files and the environment
+  (`runtime`, `platform`, `arch`, `hostname`). A file that cannot be read at verify time is
   recorded as `null`, which never matches. The environment is recorded and
   shown, and not compared: a machine is not a reason to call an element drifted.
 - The state file is `.guren/plans/<slug>.state.json` under the application

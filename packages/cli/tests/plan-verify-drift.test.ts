@@ -126,10 +126,10 @@ function verifyAll(app: string): PlanVerifyReport {
   return JSON.parse(result.stdout.toString()) as PlanVerifyReport
 }
 
-function doneRecord(files: Record<string, string> = {}): PlanStepRecord {
+function doneRecord(files: Record<string, string> = {}, plan: Record<string, unknown> = splitPlan()): PlanStepRecord {
   return {
     outcome: 'verified',
-    planDigest: planDigest(parsePlanDocument(splitPlan())),
+    planDigest: planDigest(parsePlanDocument(plan)),
     ranAt: '2026-09-23T00:00:00.000Z',
     durationMs: 1,
     commands: [],
@@ -390,5 +390,88 @@ describe('plan:verify fingerprints every routes file an entry route may be decla
     const next = await planNextFile(planPath, { appRoot: app })
     expect(next.step?.id).toBe(COMMENTS_HTTP)
     expect(next.step?.drifted).toEqual(['routes/comments.ts'])
+  }, 60_000)
+})
+
+/** The split plan with the store route `existing`: no step owns the route the store action is wired through. */
+function existingStoreRoutePlan(): Record<string, unknown> {
+  const plan = splitPlan() as { routes: Array<{ id: string; change: { kind: string } }> }
+  plan.routes.find((route) => route.id === 'route.comments.store')!.change = { kind: 'existing' }
+  return plan as unknown as Record<string, unknown>
+}
+
+const COMMENTS_PAGES = 'task/entity/model.comment/pages'
+
+/**
+ * The plan approved on the fixture app, `edit` written after the approval, `step` verified with
+ * `waived` accepted, and every other step done on nothing fingerprinted: plan:next then reads only `step`.
+ */
+async function verifiedAlone(name: string, step: string, waived: string[], edit: Record<string, string> = {}): Promise<string> {
+  const plan = existingStoreRoutePlan()
+  const app = await createPlanVerifyApp(join(ROOT, name), {
+    ...APP,
+    ...DRIZZLE_KIT_STUB_FILES,
+    '.gitignore': 'node_modules\n',
+    'tests/comments.test.ts': COMMENT_TESTS,
+    'comments.plan.json': JSON.stringify(plan),
+  })
+  await approvePlanFile(join(app, 'comments.plan.json'))
+  await writeWorkspaceFiles(app, edit)
+  if (waived.length > 0) await waiveForTest(join(app, 'comments.plan.json'), waived)
+  expect(outcome(verify(app, step), step)).toBe('verified')
+  for (const id of planStepIds(derivePlanTasks(parsePlanDocument(plan))).filter((other) => other !== step)) {
+    await writePlanStepRecord(app, 'comments', id, doneRecord({}, plan))
+  }
+  return app
+}
+
+/** `files` written and committed, then what plan:next hands out. */
+async function nextAfter(app: string, files: Record<string, string>): Promise<Awaited<ReturnType<typeof planNextFile>>> {
+  await writeWorkspaceFiles(app, files)
+  git(app, 'init', '-q')
+  git(app, 'add', '-A')
+  git(app, 'commit', '-q', '-m', 'unwired')
+  return planNextFile(join(app, 'comments.plan.json'), { appRoot: app })
+}
+
+async function fingerprinted(app: string, step: string): Promise<string[]> {
+  const state = JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, PlanStepRecord> }
+  return Object.keys(state.steps[step]!.fingerprint.files)
+}
+
+describe('plan:verify fingerprints the files an element\'s wired verdict rests on', () => {
+  test('should hand an action\'s step out again when the route it is wired through, owned by no step, is rewired', async () => {
+    const app = await verifiedAlone('action-rewired', COMMENTS_HTTP, ['action.comments.destroy', 'resource.comment', 'policy.comment'])
+    expect(await fingerprinted(app, COMMENTS_HTTP)).toEqual(expect.arrayContaining(['routes/web.ts', 'src/app.ts']))
+
+    const next = await nextAfter(app, { 'routes/web.ts': APP['routes/web.ts']!.replace("[CommentController, 'store']", "[PostController, 'show']") })
+
+    expect(next.step?.id).toBe(COMMENTS_HTTP)
+    expect(next.step?.drifted).toEqual(['routes/web.ts'])
+  }, 60_000)
+
+  test('should hand a validator\'s step out again when the action validating with it stops', async () => {
+    const app = await verifiedAlone('validator-unused', COMMENTS_HTTP, ['controller.comments', 'action.comments.store', 'action.comments.destroy', 'resource.comment', 'policy.comment'])
+    expect(await fingerprinted(app, COMMENTS_HTTP)).toEqual(expect.arrayContaining(['app/Http/Controllers/CommentController.ts', 'routes/web.ts']))
+
+    const controller = APP['app/Http/Controllers/CommentController.ts']!
+    const next = await nextAfter(app, { 'app/Http/Controllers/CommentController.ts': controller.replace('    await this.validateBody(CommentPayloadSchema)\n', '') })
+
+    expect(next.step?.id).toBe(COMMENTS_HTTP)
+    expect(next.step?.drifted).toEqual(['app/Http/Controllers/CommentController.ts'])
+  }, 60_000)
+
+  test('should hand a page\'s step out again when the action returning it stops', async () => {
+    const posts = APP['app/Http/Controllers/PostController.ts']!
+    const app = await verifiedAlone('page-unreturned', COMMENTS_PAGES, [], {
+      'resources/js/pages/posts/Show.tsx': 'interface Props {\n  comments: unknown[]\n}\n\nexport default function Show(_props: Props) {\n  return null\n}\n',
+      'app/Http/Controllers/PostController.ts': posts.replace('return this.json([])', "return this.inertia('posts/Show', { comments: [] })"),
+    })
+    expect(await fingerprinted(app, COMMENTS_PAGES)).toEqual(expect.arrayContaining(['app/Http/Controllers/PostController.ts', 'routes/web.ts']))
+
+    const next = await nextAfter(app, { 'app/Http/Controllers/PostController.ts': posts })
+
+    expect(next.step?.id).toBe(COMMENTS_PAGES)
+    expect(next.step?.drifted).toEqual(['app/Http/Controllers/PostController.ts'])
   }, 60_000)
 })
