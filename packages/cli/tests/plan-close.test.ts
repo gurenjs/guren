@@ -13,13 +13,13 @@ import { describeCloseBlockers, formatCloseBlocker } from '../src/plan/close-rem
 import { planStatusFile } from '../src/plan-status'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { planApprovalsPath } from '../src/plan/approvals'
-import { writePlanWaiver } from '../src/plan/decisions'
+import { writePlanWaiver, type PlanWaiver } from '../src/plan/decisions'
 import { planHash } from '../src/plan/identity'
 import { PlanSchema, listPlanElements } from '../src/plan/schema'
 import { PLAN_STATE_VERSION, planDigest, planSlug, planStatePath, type PlanStepRecord } from '../src/plan/state'
 import { PLAN_STATUS_SECTIONS, summarize, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
 import { derivePlanTasks, listPlanSteps } from '../src/plan/tasks'
-import { applyVerification, hashFiles } from '../src/plan/verification'
+import { applyVerification, applyWaivers, hashFiles } from '../src/plan/verification'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, planAppState, writePlanVerifyApp } from './plan-fixture'
 
@@ -505,22 +505,26 @@ describe('describeCloseBlockers', () => {
     expect(blockerOf(element('controller.comments', 'present'))).toBe(`  controller.comments: present\n    Run ${verify(HTTP)}; or waive it: ${waive('controller.comments')}`)
   })
 
+  const RECORD: PlanStepRecord = {
+    outcome: 'verified',
+    planDigest: 'digest',
+    ranAt: 't',
+    durationMs: 1,
+    commands: [],
+    acceptance: [],
+    incomplete: [],
+    waived: [],
+    fingerprint: { files: { 'app/x.ts': 'h' }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
+  }
+  /** `entry` under a verified record of every step of `document`, as the overlay reads it. */
+  const liftIn = (document: typeof plan, tasks: typeof derivation, entry: PlanElementStatus) => {
+    const records = Object.fromEntries(listPlanSteps(tasks).map(({ step }) => [step.id, RECORD]))
+    return applyVerification({ elements: [entry], summary: summarize([entry]) }, tasks, records, 'digest', new Map([['app/x.ts', 'h']]), document).status.elements[0]!
+  }
+  const lift = (entry: PlanElementStatus) => liftIn(plan, derivation, entry)
+
   test('should call an element a dead end for plan:verify exactly where a verified record does not lift it', () => {
     const unreached = element('resource.comment', 'present')
-    const record: PlanStepRecord = {
-      outcome: 'verified',
-      planDigest: 'digest',
-      ranAt: 't',
-      durationMs: 1,
-      commands: [],
-      acceptance: [],
-      incomplete: [],
-      waived: [],
-      fingerprint: { files: { 'app/x.ts': 'h' }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
-    }
-    const records = Object.fromEntries(listPlanSteps(derivation).map(({ step }) => [step.id, record]))
-    const lift = (entry: PlanElementStatus) =>
-      applyVerification({ elements: [entry], summary: summarize([entry]) }, derivation, records, 'digest', new Map([['app/x.ts', 'h']]), plan).status.elements[0]!
 
     expect(lift(unreached).hold?.kind).toBe('unreached')
     expect(blockerOf(unreached)).toContain('so no plan:verify run lifts it: waive it with')
@@ -530,5 +534,48 @@ describe('describeCloseBlockers', () => {
     const reached = element('model.comment', 'present')
     expect(lift(reached).state).toBe('verified')
     expect(blockerOf(reached)).not.toContain('waive it with')
+  })
+
+  test('should offer a behaviour only for an element one could reach, and send the rest to plan:waive alone', () => {
+    const document = PlanSchema.parse({
+      ...loadApprovedCommentsPlan(),
+      sideEffects: [{ id: 'event.commentPosted', change: { kind: 'add' }, kind: 'event', name: 'CommentPosted', trigger: 'a comment is stored', description: 'd' }],
+      commands: [{ id: 'command.attachments', command: 'guren add attachments', reason: 'comments take images' }],
+    })
+    const tasks = derivePlanTasks(document, { apiOnly: false })
+    const blocker = (entry: PlanElementStatus) => describeCloseBlockers(document, tasks, [entry], 'p.json')[0]!
+    const never = [
+      element('event.commentPosted', 'wired', { section: 'sideEffects', completesAt: 'wired' }),
+      element('command.attachments', 'unjudged', { section: 'commands', files: [] }),
+      element('column.comment.body', 'present', { section: 'columns' }),
+    ]
+
+    for (const entry of never) {
+      const lifted = liftIn(document, tasks, entry)
+      expect(lifted.hold?.kind).toBe('unreached')
+      expect(lifted.hold?.note).not.toContain('add a behaviour')
+      const { holds, moves } = blocker(lifted)
+      expect(moves).toBe(`No planned property of it matched beyond its existence and no behaviour can reach it, so no plan:verify run lifts it: waive it with ${waive(entry.id)}`)
+      expect(holds).not.toContain('add a behaviour')
+    }
+    const reachable = element('resource.comment', 'present')
+    expect(liftIn(document, tasks, reachable).hold?.note).toContain('add a behaviour that reaches it, or waive it')
+    expect(blocker(reachable).moves).toBe(
+      `No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with ${waive('resource.comment')}, or add a behaviour that reaches it and approve the plan again`,
+    )
+  })
+
+  test('should keep no reason on an element the overlay lifts past unjudged, since a remedy there can change nothing', () => {
+    const reason = 'The approval recorded no reading of the planned properties that match, so none can be told from one that already held.'
+    const unjudged = element('model.comment', 'unjudged', { section: 'models', change: 'alter', reason })
+
+    expect(lift(unjudged)).toMatchObject({ state: 'verified' })
+    expect(lift(unjudged).reason).toBeUndefined()
+    expect(lift({ ...unjudged, files: ['app/y.ts'] })).toMatchObject({ state: 'drifted' })
+    expect(lift({ ...unjudged, files: ['app/y.ts'] }).reason).toBeUndefined()
+    const waiver: PlanWaiver = { elementId: 'model.comment', planHash: 'h', reason: 'accepted', at: 't' }
+    const [waived] = applyWaivers({ elements: [unjudged], summary: summarize([unjudged]) }, new Map([['model.comment', waiver]])).elements
+    expect(waived).toMatchObject({ state: 'waived' })
+    expect(waived!.reason).toBeUndefined()
   })
 })

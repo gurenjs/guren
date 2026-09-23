@@ -121,9 +121,12 @@ export function approvalReadings(approvals: PlanApprovals, plan: Plan, current: 
   return { baseline, properties }
 }
 
-/** The readings the approval of the plan's current hash recorded, which `judgePlan()` counts an `alter`'s matches against. */
+/**
+ * The readings the approval of the plan's current hash recorded, which `judgePlan()` counts an
+ * `alter`'s matches against: none for an approval that recorded none, `undefined` without one.
+ */
 export function approvedReadings(standing: PlanApprovalStanding | undefined): PlanPropertyReading[] | undefined {
-  return standing?.state === 'approved' ? standing.approval.readings?.properties : undefined
+  return standing?.state === 'approved' ? (standing.approval.readings?.properties ?? []) : undefined
 }
 
 /** The commands that refuse a plan no approval names; `plan:status` names them rather than refusing. */

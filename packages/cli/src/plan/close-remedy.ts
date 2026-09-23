@@ -7,7 +7,7 @@
 import type { Plan, PlanDraft } from './schema'
 import { awaitsVerification, type PlanElementState, type PlanElementStatus } from './status'
 import { listPlanSteps, type PlanTaskDerivation } from './tasks'
-import { behaviourReach, restsOnReach } from './verification'
+import { behaviourCanReach, behaviourReach, restsOnReach } from './verification'
 
 interface BlockerContext {
   planArgument: string
@@ -15,6 +15,8 @@ interface BlockerContext {
   owners: Map<string, string>
   /** The steps whose behaviours reach each element, which is what lifts one `restsOnReach()` holds for. */
   carriers: Map<string, string[]>
+  /** The elements a behaviour added to the plan could reach (`behaviourCanReach()`). */
+  reachable: Set<string>
 }
 
 export interface CloseBlocker {
@@ -33,7 +35,7 @@ export function describeCloseBlockers(
   elements: ReadonlyArray<PlanElementStatus<PlanElementState>>,
   planArgument: string,
 ): CloseBlocker[] {
-  const context: BlockerContext = { planArgument, owners: new Map(), carriers: new Map() }
+  const context: BlockerContext = { planArgument, owners: new Map(), carriers: new Map(), reachable: behaviourCanReach(plan) }
   for (const { step } of listPlanSteps(derivation)) {
     for (const id of step.elementIds) context.owners.set(id, step.id)
     if (step.kind === 'tests' || step.acceptanceIds.length === 0) continue
@@ -76,6 +78,9 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
   const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
   const carriers = context.carriers.get(element.id) ?? []
   if (unmatched && carriers.length === 0) {
+    if (!context.reachable.has(element.id)) {
+      return `No planned property of it matched beyond its existence and no behaviour can reach it, so no plan:verify run lifts it: waive it with ${waive}`
+    }
     return `No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with ${waive}, or add a behaviour that reaches it and approve the plan again`
   }
   if (element.files.length === 0 && !needsNoFiles) return `plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive}`

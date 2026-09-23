@@ -156,10 +156,13 @@ function compare(property: string, planned: string, actual: string | undefined, 
   return actual === planned ? match(property, planned) : differ(property, planned, actual)
 }
 
-/** What an `alter`'s properties count as once set against their readings at approval; the identity when taking those readings. */
-type AlterCredit = (judgement: Judgement, properties: PlanPropertyStatus[]) => PlanPropertyStatus[]
+/**
+ * What an `alter`'s properties count as once set against their readings at approval, with a note
+ * naming the readings a re-approval could still record in time; the identity when taking them.
+ */
+type AlterCredit = (judgement: Judgement, properties: PlanPropertyStatus[]) => { properties: PlanPropertyStatus[]; note?: string }
 
-const AS_READ: AlterCredit = (_, properties) => properties
+const AS_READ: AlterCredit = (_, properties) => ({ properties })
 
 /** A match set aside by {@link creditAlter}, so `conclude` can say why nothing shows the change. */
 const SET_ASIDE = new WeakMap<PlanPropertyStatus, 'held' | 'unrecorded'>()
@@ -168,15 +171,27 @@ const SET_ASIDE = new WeakMap<PlanPropertyStatus, 'held' | 'unrecorded'>()
  * An alter's target existed before the plan, so a planned property it already held says nothing
  * about the change. A match counts only against a reading at approval that was a `differ` or an
  * `unknown`; any other match reads `unknown`. A difference stays one, however it read then.
+ * `readings` is `undefined` where no approval stands, which the approval gate reports instead.
  */
 function creditAlter(readings: readonly PlanPropertyReading[] | undefined): AlterCredit {
-  return (judgement, properties) =>
-    properties.map((property) => {
-      if (property.verdict !== 'match') return property
-      const reading = readings?.find((entry) => sameReading(entry, readingOf(judgement, property)))
-      if (reading && reading.verdict !== 'match') return property
-      return setAside(property, reading ? 'held' : 'unrecorded')
-    })
+  return (judgement, properties) => {
+    const readingFor = (property: PlanPropertyStatus) => readings?.find((entry) => sameReading(entry, readingOf(judgement, property)))
+    // Only a difference is worth recording late: a match read now would be recorded as one that already held.
+    const unread = readings ? properties.filter((property) => property.verdict === 'differ' && !readingFor(property)).map((property) => property.property) : []
+    return {
+      properties: properties.map((property) => {
+        if (property.verdict !== 'match') return property
+        const reading = readingFor(property)
+        if (reading && reading.verdict !== 'match') return property
+        return setAside(property, reading ? 'held' : 'unrecorded')
+      }),
+      ...(unread.length > 0
+        ? {
+            note: `The approval recorded no reading of ${unread.join(', ')}: run guren plan:approve on the plan before changing ${unread.length === 1 ? 'it' : 'them'}, since a match with no reading from before the work does not count.`,
+          }
+        : {}),
+    }
+  }
 }
 
 function setAside(property: PlanPropertyStatus, why: 'held' | 'unrecorded'): PlanPropertyStatus {
@@ -206,7 +221,7 @@ function readingOf(element: { id: string; label: string }, property: PlanPropert
 function unreadableAlterReason(properties: PlanPropertyStatus[]): string {
   const setAside = properties.flatMap((property) => SET_ASIDE.get(property) ?? [])
   if (setAside.includes('unrecorded')) {
-    return 'The approval recorded no reading of the planned properties that match, so none can be told from one that already held: run guren plan:approve on the plan to record the readings it lacks (a property the application holds by then is not counted), or verify the change through a behaviour that reaches it.'
+    return 'The approval recorded no reading of the planned properties that match, so none can be told from one that already held, and a reading taken now would find them held: verify the change through a behaviour that reaches it.'
   }
   if (setAside.length > 0) {
     return 'Every planned property that matches already held when the plan was approved, so none shows the change: state the change in a property the application did not hold, or verify it through a behaviour that reaches it.'
@@ -249,7 +264,9 @@ function conclude(judgement: Judgement, credit: AlterCredit = AS_READ): PlanElem
   }
 
   const read = judgement.properties?.() ?? []
-  const properties = change.kind === 'alter' ? credit(judgement, read) : read
+  const credited = change.kind === 'alter' ? credit(judgement, read) : { properties: read }
+  const { properties } = credited
+  if (credited.note) notes.push(credited.note)
   if (change.kind === 'rename') {
     const previous = judgement.previous ?? { unknown: 'the previous name has no reader' }
     properties.unshift(
@@ -648,20 +665,18 @@ class StatusContext {
     for (const relationship of model.relationships) {
       const property = `relationship ${relationship.name}`
       const target = this.modelsById.get(relationship.target)?.name ?? relationship.target
-      const planned = `${relationship.type} ${target}`
+      // Two properties, under the same keys whatever is read, since an alter's reading at approval is
+      // keyed on them: a target written as a lazy import is one the parser cannot name, and that
+      // must not hide a relationship whose name and type it did read.
+      const found = actual?.relationships.find((candidate) => candidate.name === relationship.name)
       if (!actual) {
-        properties.push(unknown(property, planned, whyNoModel))
-        continue
+        properties.push(unknown(property, relationship.type, whyNoModel), unknown(`${property} target`, target, whyNoModel))
+      } else if (!found) {
+        properties.push(differ(property, relationship.type, 'not declared'), differ(`${property} target`, target, 'not declared'))
+      } else {
+        properties.push(compare(property, relationship.type, found.type, ''))
+        properties.push(compare(`${property} target`, target, found.relatedModel, 'the related model is not written as a class the parser can name'))
       }
-      const found = actual.relationships.find((candidate) => candidate.name === relationship.name)
-      if (!found) {
-        properties.push(differ(property, planned, 'not declared'))
-        continue
-      }
-      // Two properties: a target written as a lazy import is one the parser cannot name,
-      // and that must not hide a relationship whose name and type it did read.
-      properties.push(compare(property, relationship.type, found.type, ''))
-      properties.push(compare(`${property} target`, target, found.relatedModel, 'the related model is not written as a class the parser can name'))
     }
 
     for (const name of model.fillable) {

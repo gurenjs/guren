@@ -11,8 +11,8 @@ import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
 import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
-import { listPlanReferences, type PlanReferenceField } from './references'
-import type { Plan, PlanDraft } from './schema'
+import { listPlanReferences, PLAN_REFERENCES, type PlanReferenceField } from './references'
+import { listPlanElementEntries, type Plan, type PlanDraft } from './schema'
 import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus, type PlanVerificationHold } from './status'
 import { planElementParents, type PlanTaskDerivation } from './tasks'
@@ -103,6 +103,22 @@ export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: Iterable<s
   return reached
 }
 
+/** The sections a carrying reference may name; `null` is a reference that may name any element. */
+const BEHAVIOUR_TARGETS = new Set(PLAN_REFERENCES.filter((entry) => REFERENCE_CARRIES_BEHAVIOUR[entry.field]).map((entry) => entry.expected))
+
+/**
+ * The elements some behaviour could reach, were one added: every element of a section a carrying
+ * reference names, and what {@link behaviourReach} walks to from them. The rest (a column, a
+ * command, a job, event, listener, mail or notification) no behaviour reaches, so only a waiver
+ * lifts one for which `restsOnReach()` holds.
+ */
+export function behaviourCanReach(plan: PlanDraft | Plan): Set<string> {
+  const targets = listPlanElementEntries(plan)
+    .filter(({ section }) => BEHAVIOUR_TARGETS.has(null) || BEHAVIOUR_TARGETS.has(section))
+    .map(({ id }) => id)
+  return new Set([...targets, ...behaviourReach(plan, targets)])
+}
+
 /**
  * Whether a verified step lifts the element only while a verified behaviour reaches it (RFC 0030
  * §6): no planned property of it matched beyond an existence (`existence`: a key a validator or
@@ -139,6 +155,7 @@ export function applyVerification(
     }),
   )
   const reached = behaviourReach(plan, carriers.flatMap((step) => step.acceptanceIds))
+  const reachable = behaviourCanReach(plan)
 
   for (const task of derivation.tasks) {
     for (const step of task.steps) {
@@ -162,20 +179,26 @@ export function applyVerification(
           element.notes.push(note)
           element.hold = { kind, note }
         }
+        // `reason` says why the readers could not complete it (blocked, unjudged); a run has answered that.
+        const settle = (state: 'verified' | 'drifted'): void => {
+          element.state = state
+          delete element.reason
+        }
         if (!awaitsVerification(element)) {
           hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
         } else if (unmatched && !reached.has(id)) {
-          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`)
+          const remedy = reachable.has(id) ? 'add a behaviour that reaches it, or waive it' : 'no behaviour can reach it, so waive it'
+          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: ${remedy}.`)
         } else if (element.files.length === 0 && !needsNoFiles) {
           hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
-          element.state = 'drifted'
+          settle('drifted')
           hold('expired', `${verifiedBy}; now in a file that run did not fingerprint: ${uncovered.join(', ')}.`)
         } else if (changed.length > 0) {
-          element.state = 'drifted'
+          settle('drifted')
           hold('expired', `${verifiedBy}; changed since: ${changed.join(', ')}.`)
         } else {
-          element.state = 'verified'
+          settle('verified')
         }
       }
     }
@@ -200,7 +223,7 @@ export function applyWaivers(status: PlanStatus<PlanElementState>, waivers: Read
     const taken = `Waived ${waiver.at}${waiver.by ? ` by ${waiver.by}` : ''}: ${waiver.reason}`
     if (element.state === 'verified') return { ...element, notes: [...element.notes, `${taken}. It is verified, so the waiver is not needed.`] }
     if (element.change === 'existing') return { ...element, notes: [...element.notes, `${taken}. It is an existing element, no part of completion, so the waiver is not needed.`] }
-    const { hold: _hold, ...rest } = element
+    const { hold: _hold, reason: _reason, ...rest } = element
     return { ...rest, state: 'waived', notes: [...element.notes, taken] }
   })
   return { elements, summary: summarize(elements) }
