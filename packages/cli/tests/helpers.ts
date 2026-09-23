@@ -518,6 +518,20 @@ export async function writeWorkspaceFiles(
 }
 
 /**
+ * Every entry under `dir` with its contents, directories included: a writer
+ * that fails after its `mkdir` still changes the tree, so a refusal that
+ * promises to leave the app as it was is held to the directories too.
+ */
+export async function snapshotTree(dir: string): Promise<Record<string, string | null>> {
+  const tree: Record<string, string | null> = {}
+  for (const entry of await readdir(dir, { withFileTypes: true, recursive: true })) {
+    const path = join(entry.parentPath, entry.name)
+    tree[relative(dir, path)] = entry.isDirectory() ? null : await readFile(path, 'utf8')
+  }
+  return tree
+}
+
+/**
  * Known hazard, deliberately left in place: the `process.chdir()` below is
  * global state in Bun's shared test process, so an overrunning test can chdir
  * and `rm -rf` out from under whichever test started meanwhile. The workspace
