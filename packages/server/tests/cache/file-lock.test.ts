@@ -85,15 +85,15 @@ describe('withFileLock', () => {
     await mkdir(lockPath)
     await writeFile(join(lockPath, 'owner-a'), '')
     let entered = false
-    const waiter = withFileLock(lockPath, 300, async () => {
+    const waiter = withFileLock(lockPath, 600, async () => {
       entered = true
     })
-    await Bun.sleep(150)
+    await Bun.sleep(200)
     await writeFile(join(lockPath, 'owner-b'), '')
     await unlink(join(lockPath, 'owner-a'))
 
     // The waiter has waited past the timeout, but owner-b has held the lock for less than it.
-    await Bun.sleep(200)
+    await Bun.sleep(600)
     expect(entered).toBe(false)
     expect(existsSync(join(lockPath, 'owner-b'))).toBe(true)
 
@@ -104,6 +104,14 @@ describe('withFileLock', () => {
 
   it('takes over an empty lock directory, which a process that died before writing its token leaves', async () => {
     await mkdir(lockPath)
+    expect(await withFileLock(lockPath, 50, async () => 'ran')).toBe('ran')
+    expect(existsSync(lockPath)).toBe(false)
+  })
+
+  it('takes over a directory two contenders died in, between writing their tokens and checking them', async () => {
+    await mkdir(lockPath)
+    await writeFile(join(lockPath, 'dead-a'), '')
+    await writeFile(join(lockPath, 'dead-b'), '')
     expect(await withFileLock(lockPath, 50, async () => 'ran')).toBe('ran')
     expect(existsSync(lockPath)).toBe(false)
   })

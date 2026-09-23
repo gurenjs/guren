@@ -14,7 +14,7 @@ async function succeeds(operation: Promise<unknown>, ...tolerated: string[]): Pr
   }
 }
 
-async function listTokens(lockPath: string): Promise<string[] | undefined> {
+async function listEntries(lockPath: string): Promise<string[] | undefined> {
   try {
     return await readdir(lockPath)
   } catch (error) {
@@ -28,36 +28,36 @@ async function removeToken(lockPath: string, token: string): Promise<void> {
   if (await succeeds(unlink(join(lockPath, token)), 'ENOENT')) await succeeds(rmdir(lockPath), 'ENOENT', 'ENOTEMPTY')
 }
 
-// A lock is a directory each contender writes its token file into; only one that
-// then reads its own token alone holds it, and two writers into one directory
-// cannot both. A waiter takes a lock over once it has seen the same holder at
-// least `timeoutMs` apart: tokens are never reused, so that owner held it the whole
-// time. Only this process's clock is read, never a file's timestamp.
+// The lock is a directory of token files, each written once by one acquisition
+// attempt; an attempt holds the lock when it reads its own token alone, which two
+// attempts writing into one directory cannot both do. A waiter takes over when it
+// reads the same entries `timeoutMs` apart, as they were present throughout; only
+// this process's clock is read. An empty directory has no owner from this release.
 export async function withFileLock<T>(lockPath: string, timeoutMs: number, callback: () => Promise<T>): Promise<T> {
-  const token = randomUUID()
-  let holder: string | undefined
+  let token = ''
+  let seen: string | undefined
   let takeOverAt = 0
   for (;;) {
     if (await succeeds(mkdir(lockPath), 'EEXIST')) {
+      token = randomUUID()
       if (await succeeds(writeFile(join(lockPath, token), ''), 'ENOENT')) {
-        const tokens = await listTokens(lockPath)
-        if (tokens?.length === 1 && tokens[0] === token) break
+        const entries = await listEntries(lockPath)
+        if (entries?.length === 1 && entries[0] === token) break
         await removeToken(lockPath, token)
       }
       continue
     }
-    if (holder === undefined || performance.now() >= takeOverAt) {
-      const tokens = await listTokens(lockPath)
-      if (tokens === undefined) continue
-      // '' is an empty directory: an owner between mkdir and its token write, one that died there, or an older release's lock.
-      const current = tokens.length > 1 ? undefined : tokens[0] ?? ''
-      if (current !== undefined && current === holder) {
-        if (current === '') await succeeds(rmdir(lockPath), 'ENOENT', 'ENOTEMPTY')
-        else await removeToken(lockPath, current)
-        holder = undefined
+    if (seen === undefined || performance.now() >= takeOverAt) {
+      const entries = await listEntries(lockPath)
+      if (entries === undefined) continue
+      const current = entries.sort().join('/')
+      if (current === seen) {
+        for (const entry of entries) await succeeds(unlink(join(lockPath, entry)), 'ENOENT')
+        await succeeds(rmdir(lockPath), 'ENOENT', 'ENOTEMPTY')
+        seen = undefined
         continue
       }
-      holder = current
+      seen = current
       takeOverAt = performance.now() + timeoutMs
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_MS))
