@@ -44,6 +44,11 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   `database-command-boundary.test.ts` exercises the CLI in subprocesses with
   inert database hooks, including refusal, dry-run, reset ordering, failures,
   and JSON status/rollback output.
+- `src/commands/codegen.ts` owns routes:types, codegen, and openapi:generate
+  arguments and output formatting. `src/codegen.ts` owns the full codegen
+  sequence and passes route/resource definitions to their consumers. Its async
+  iterator yields completed stages so progress remains visible if a later
+  generator fails. Consume it to completion to generate all artifacts.
 - These modules only construct command objects at import time. Resolve cwd,
   environment, and application state inside command execution. Use the local
   `defineCommand` wrapper so repeated flags keep their existing semantics.
