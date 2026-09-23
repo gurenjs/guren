@@ -1,8 +1,9 @@
 import { deriveAgentTools } from '../agent/derive'
-import { resourceAbilityForMethod } from '../authorization/middleware'
+import { derivableAbility } from '../authorization/middleware'
 import type { Container } from '../container/Container'
 import type { GurenModule } from '../container/defineModule'
 import type { AuthPluginOptions } from '../http/Application'
+import { SessionManager, sessionDriverIsPerProcess } from '../http/middleware/session-manager'
 import { toJsonSchema } from '../internal/zod-json-schema'
 import type { RouteDefinition, Router } from '../mvc/Router'
 import type {
@@ -140,29 +141,17 @@ function describeRoutes(
   })
 }
 
-/**
- * The one ability a middleware checks, derived from the authorization stamp
- * the framework's middlewares already carry (RFC 0007, RFC 0016 §4). A
- * resource check resolves through the verb map only where the route's method
- * is known, so an alias entry outside a route leaves it absent.
- */
 function withAbility(entry: MiddlewareEntry, method?: string): MiddlewareEntry {
-  const authorization = entry.capabilities.authorization
-  if (!authorization) return entry
-  if (authorization.mode === 'all' && authorization.abilities.length === 1 && !authorization.resource) {
-    return { ...entry, ability: authorization.abilities[0]! }
-  }
-  if (method && authorization.abilities.length === 0 && authorization.resource?.fromMethodMap) {
-    const ability = resourceAbilityForMethod(method)
-    if (ability) return { ...entry, ability }
-  }
-  return entry
+  const ability = derivableAbility(entry.capabilities.authorization, method)
+  return ability === undefined ? entry : { ...entry, ability }
 }
 
 function describeSession(sources: ManifestSources, warnings: ManifestWarning[]): SessionEntry | undefined {
   const read = readSection<Omit<SessionEntry, 'source'>>(sources, 'session', warnings)
   if (read.status === 'described') {
-    if (sources.authOptions?.sessionOptions?.store !== undefined) {
+    // AuthServiceProvider refuses this pair only for a session it attaches itself.
+    const auth = sources.authOptions
+    if (auth && auth.autoSession !== false && auth.sessionOptions?.store !== undefined) {
       warnings.push({
         code: 'session-configured-twice',
         message: 'A "session" binding and createApp({ auth: { sessionOptions: { store } } }) both configure sessions; the app refuses to boot until one is removed.',
@@ -177,24 +166,29 @@ function describeSession(sources: ManifestSources, warnings: ManifestWarning[]):
   if (!auth || auth.autoSession === false) return undefined
 
   const store = auth.sessionOptions?.store
-  if (store === undefined) {
-    return { source: 'none', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } }
-  }
+  // The session middleware's own fallback is the manager's default memory store.
+  if (store === undefined) return { source: 'none', ...new SessionManager().describe() }
 
   // A thunk is not called: that would build the store this manifest must not resolve.
   const driver = typeof store === 'function' ? null : store.constructor.name
   return {
     source: 'auth.sessionOptions.store',
     default: 'sessionOptions.store',
-    stores: { 'sessionOptions.store': { driver, perProcess: driver === null ? null : PER_PROCESS_BY_STORE_CLASS[driver] ?? null } },
+    stores: { 'sessionOptions.store': { driver, perProcess: perProcessOfStoreClass(driver) } },
   }
 }
 
-/** The session store classes server ships; any other class may or may not share state across instances. */
-const PER_PROCESS_BY_STORE_CLASS: Readonly<Record<string, boolean>> = {
-  MemorySessionStore: true,
-  CookieSessionStore: false,
-  RedisSessionStore: false,
+/** The framework's store classes by the driver that builds them; core's `DatabaseSessionStore` included. */
+const DRIVER_BY_STORE_CLASS: Readonly<Record<string, string>> = {
+  MemorySessionStore: 'memory',
+  CookieSessionStore: 'cookie',
+  RedisSessionStore: 'redis',
+  DatabaseSessionStore: 'database',
+}
+
+function perProcessOfStoreClass(storeClass: string | null): boolean | null {
+  const driver = storeClass === null ? undefined : DRIVER_BY_STORE_CLASS[storeClass]
+  return driver === undefined ? null : sessionDriverIsPerProcess(driver)
 }
 
 type SectionRead<T> = { status: 'described'; value: T } | { status: 'absent' | 'unverified' | 'unreadable' }

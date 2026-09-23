@@ -63,6 +63,12 @@ export const BUILT_IN_SESSION_DRIVERS: ReadonlyMap<string, boolean> = new Map([
   ['redis', true],
 ])
 
+/** Null for a driver outside {@link BUILT_IN_SESSION_DRIVERS}: a plugin's `gurenPlugin` manifest says which it is. */
+export function sessionDriverIsPerProcess(driver: string): boolean | null {
+  const shared = BUILT_IN_SESSION_DRIVERS.get(driver)
+  return shared === undefined ? null : !shared
+}
+
 /** Cookie and TTL settings plus the named stores one of which is the default. */
 export interface SessionConfig extends SessionCookieOptions {
   /** @default 'memory' */
@@ -179,8 +185,7 @@ export class SessionManager {
       stores[name] = {
         driver,
         ...(table === undefined ? {} : { table }),
-        // A plugin's driver is unverifiable here, not shared: its `gurenPlugin` manifest says which.
-        perProcess: BUILT_IN_SESSION_DRIVERS.has(driver) ? PER_PROCESS_SESSION_DRIVERS.has(driver) : null,
+        perProcess: sessionDriverIsPerProcess(driver),
       }
     }
     return { default: this.defaultStoreName, stores }

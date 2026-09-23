@@ -17,7 +17,7 @@ export class StorageManager {
   private readonly defaultDiskName: string
   private readonly diskFactories: Map<string, StorageDriverFactory> = new Map()
   private readonly resolvedDisks: Map<string, StorageDriver> = new Map()
-  /** The configured driver per disk; null for one `registerDisk()` added as a bare factory. */
+  /** The configured driver per disk, keyed like `diskFactories`; null for a bare `registerDisk()` factory. */
   private readonly diskDrivers: Map<string, string | null> = new Map()
   private driverFactories: Map<string, (options: unknown) => StorageDriver> = new Map()
 
@@ -109,7 +109,7 @@ export class StorageManager {
 
   /** The declared disks and the default, building none of them (RFC 0026 §1). */
   describe(): DriverMapEntry {
-    return describeDriverMap(this.defaultDiskName, this.diskFactories.keys(), (name) => this.diskDrivers.get(name))
+    return describeDriverMap(this.defaultDiskName, this.diskDrivers)
   }
 }
 

@@ -96,18 +96,30 @@ describe('manager sections (RFC 0026 §1)', () => {
 
     const manifest = await createApp({ auth: { sessionOptions: { store: new MemorySessionStore() } }, providers: [SessionProvider] }).introspect()
 
+    const unattached = await createApp({
+      auth: { autoSession: false, sessionOptions: { store: new MemorySessionStore() } },
+      providers: [SessionProvider],
+    }).introspect()
+
     expect(manifest.session?.source).toBe('manager')
     expect(manifest.warnings.map((warning) => warning.code)).toContain('session-configured-twice')
+    expect(unattached.warnings.map((warning) => warning.code)).not.toContain('session-configured-twice')
   })
 
   test('answers perProcess only for the store classes the framework ships', async () => {
     class InProcessStore extends MemorySessionStore {}
+    // Core's class, which server cannot import: only its name is read.
+    const DatabaseSessionStore = class extends MemorySessionStore {}
+    Object.defineProperty(DatabaseSessionStore, 'name', { value: 'DatabaseSessionStore' })
 
     const shipped = await createApp({ auth: { sessionOptions: { store: new MemorySessionStore() } } }).introspect()
     const custom = await createApp({ auth: { sessionOptions: { store: new InProcessStore() } } }).introspect()
 
     expect(shipped.session?.stores['sessionOptions.store']).toEqual({ driver: 'MemorySessionStore', perProcess: true })
+    const database = await createApp({ auth: { sessionOptions: { store: new DatabaseSessionStore() } } }).introspect()
+
     expect(custom.session?.stores['sessionOptions.store']).toEqual({ driver: 'InProcessStore', perProcess: null })
+    expect(database.session?.stores['sessionOptions.store']).toEqual({ driver: 'DatabaseSessionStore', perProcess: false })
   })
 
   test('never falls back to the in-memory session when the bound manager cannot be built', async () => {
@@ -140,8 +152,13 @@ describe('ability on middleware entries', () => {
           .aliasMiddleware('can-any', authorizeMiddleware(['a', 'b']))
           .aliasMiddleware('can-resource', authorizeResourceMiddleware(() => ({})))
           .groupMiddleware('web', ['auth', 'can-edit'])
+          .aliasMiddleware('deny-all', authorizeMiddleware([]))
           .groupMiddleware('mixed', ['can-edit', 'can-resource'])
+          .groupMiddleware('undetermined', ['deny-all', 'can-resource'])
         router.delete('/posts/:id', [PostController, 'update']).middleware(authorizeResourceMiddleware(() => ({})))
+        router.middleware('undetermined').group((scoped) => {
+          scoped.get('/posts', [PostController, 'update'])
+        })
       },
     })
 
@@ -153,6 +170,8 @@ describe('ability on middleware entries', () => {
     expect(manifest.middlewareAliases.mixed?.ability).toBeUndefined()
     expect(manifest.middlewareAliases.auth?.ability).toBeUndefined()
     expect(manifest.routes[0]?.middleware[0]).toMatchObject({ kind: 'inline', ability: 'delete' })
+    expect(manifest.routes[1]?.middleware[0]).toMatchObject({ kind: 'group', name: 'undetermined' })
+    expect(manifest.routes[1]?.middleware[0]?.ability).toBeUndefined()
   })
 })
 

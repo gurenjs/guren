@@ -80,7 +80,7 @@ export class QueueManager {
 
   /** The declared drivers and the default, resolving none. Every driver is a bare factory, so `driver` is null. */
   describe(): DriverMapEntry {
-    return describeDriverMap(this.defaultDriver, this.driverFactories.keys())
+    return describeDriverMap(this.defaultDriver, Array.from(this.driverFactories.keys(), (name): [string, null] => [name, null]))
   }
 
   /**

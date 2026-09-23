@@ -1,12 +1,8 @@
 import type { DriverMapEntry } from './types'
 
-/** `DriverMapEntry` from a manager's entry names, with the driver each was configured with where known. */
-export function describeDriverMap(
-  defaultName: string,
-  names: Iterable<string>,
-  driverOf: (name: string) => string | null | undefined = () => null,
-): DriverMapEntry {
+/** `DriverMapEntry` from a manager's entries, each with the driver it was configured with or null. */
+export function describeDriverMap(defaultName: string, drivers: Iterable<[string, string | null]>): DriverMapEntry {
   const entries: DriverMapEntry['entries'] = {}
-  for (const name of names) entries[name] = { driver: driverOf(name) ?? null }
+  for (const [name, driver] of drivers) entries[name] = { driver }
   return { default: defaultName, entries }
 }

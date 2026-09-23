@@ -310,9 +310,10 @@ user's middleware may add it, and an absent value means "not determinable", whic
 > as `Router.describeMiddleware()` beside `registeredHandlers()`, because the
 > alias and group maps are private to it. `ability` is not a new capability
 > field: the authorization stamp has carried `abilities` since RFC 0016 §4, so
-> `ability` is derived from it. It is the one ability of a single-ability `all`
-> check, or on a route entry the verb-map ability of a resource check whose
-> `fromMethodMap` holds.
+> `ability` is derived from it by `derivableAbility()`, the rule agent tools
+> use too. It is the one ability of a single-ability `all` check, or on a route
+> entry the verb-map ability of a resource check whose `fromMethodMap` holds and
+> that no other check shares the chain with.
 
 ### 4. `guren introspect --json`
 

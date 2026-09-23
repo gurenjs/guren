@@ -91,7 +91,11 @@ export class AuthManager implements AuthManagerContract {
   }
 
   registerProvider<User>(name: string, factory: ProviderFactory<User>): void {
-    this.providers.set(name, { factory: factory as ProviderFactory<any> })
+    this.setProvider(name, factory)
+  }
+
+  private setProvider<User>(name: string, factory: ProviderFactory<User>, description?: AuthProviderEntry): void {
+    this.providers.set(name, { factory: factory as ProviderFactory<any>, ...(description ? { description } : {}) })
   }
 
   /** The guard `useTokens()` registered, or null. On this class rather than the contract, like `getApiTokenOptions()`. */
@@ -261,9 +265,11 @@ export class AuthManager implements AuthManagerContract {
 
     bindPasswordHasher(model, hasher)
 
-    this.registerProvider(providerName, () => new ModelUserProvider(model, defaultOptions))
-    const entry = this.providers.get(providerName)
-    if (entry) entry.description = { kind: 'model', model: model.name, hasher: hasher.constructor.name }
+    this.setProvider(providerName, () => new ModelUserProvider(model, defaultOptions), {
+      kind: 'model',
+      model: model.name,
+      hasher: hasher.constructor.name,
+    })
 
     this.registerGuard(guardName, ({ session, manager }) => {
       const provider = manager.getProvider(providerName)

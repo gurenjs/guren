@@ -83,7 +83,7 @@ export class CacheManager {
   private readonly defaultStoreName: string
   private readonly storeFactories: Map<string, CacheStoreFactory> = new Map()
   private readonly resolvedStores: Map<string, TaggableCacheStore> = new Map()
-  /** The configured driver per store; null for one `registerStore()` added as a bare factory. */
+  /** The configured driver per store, keyed like `storeFactories`; null for a bare `registerStore()` factory. */
   private readonly storeDrivers: Map<string, string | null> = new Map()
   /**
    * Where this manager was built, for identifying its stores across hot reloads.
@@ -202,7 +202,7 @@ export class CacheManager {
 
   /** The declared stores and the default, building none of them (RFC 0026 §1). */
   describe(): DriverMapEntry {
-    return describeDriverMap(this.defaultStoreName, this.storeFactories.keys(), (name) => this.storeDrivers.get(name))
+    return describeDriverMap(this.defaultStoreName, this.storeDrivers)
   }
 }
 
