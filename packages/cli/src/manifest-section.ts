@@ -9,6 +9,9 @@
  */
 import type { AppManifest } from '@guren/server'
 
+import type { CheckResult } from './check-result'
+import type { Introspection } from './introspect'
+
 export type ManifestSectionKey = 'auth' | 'session' | 'cache' | 'storage' | 'queue' | 'attachments'
 
 /** What the app reported (`undefined` for a section it does not configure), or why that cannot be trusted. */
@@ -44,4 +47,41 @@ export function readManifestSection<K extends ManifestSectionKey>(
 
 export function mapSection<T, U>(section: ManifestSection<T>, map: (value: T) => U): ManifestSection<U> {
   return section.status === 'described' ? { status: 'described', value: map(section.value) } : section
+}
+
+/** A section as a check with a static path reads it: the manifest's value, or source with the reason the manifest could not be used. */
+export type IntrospectedSection<T> =
+  | { status: 'described'; value: T; manifest: AppManifest }
+  | { status: 'static'; reason?: string }
+
+/**
+ * The section `key`, asking for the introspection only now, so the check calling this is what
+ * starts the child. No thunk (`--no-introspect`, an in-process run) and a failed run give no
+ * reason: `guren check` reports a failure once, as `introspection-unavailable`.
+ */
+export async function introspectedSection<K extends ManifestSectionKey>(
+  introspect: (() => Promise<Introspection>) | undefined,
+  key: K,
+): Promise<IntrospectedSection<AppManifest[K]>> {
+  const introspection = await introspect?.()
+  if (introspection?.status !== 'ok') return { status: 'static' }
+  const section = readManifestSection(introspection.manifest, key)
+  return section.status === 'described'
+    ? { status: 'described', value: section.value, manifest: introspection.manifest }
+    : { status: 'static', reason: section.reason }
+}
+
+/** Results a check judged from source, naming why the manifest was not used when there is a reason. */
+export function judgedFromSource(results: CheckResult[], reason?: string): CheckResult[] {
+  return results.map((result) => ({
+    ...result,
+    ...(reason ? { message: `${result.message} Judged from source: ${reason}.` } : {}),
+    evidence: 'static',
+  }))
+}
+
+/** Manifest verdicts win per key; a source verdict the manifest did not judge (another config file) stays. */
+export function mergeVerdicts(manifest: CheckResult[], source: CheckResult[]): CheckResult[] {
+  const judged = new Set(manifest.map((result) => result.key))
+  return [...manifest, ...source.filter((result) => !judged.has(result.key))]
 }
