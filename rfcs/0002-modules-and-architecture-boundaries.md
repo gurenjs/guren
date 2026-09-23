@@ -27,8 +27,9 @@ candidate, so the single-file `routes.ts` that `make:module` scaffolds, as
 `web/modules/blog` uses, leaves it vacuous. Neither app had exercised that
 half of the check before this.
 `examples/blog`'s tsconfig and
-vitest config did not include `modules/`, so a module's own files and tests
-were silently outside `bun run typecheck:blog` and `bun run test` — fixed
+vitest config did not include `modules/`, so a module file nothing imports
+(its tests, above all) was silently outside `bun run typecheck:blog` and
+`bun run test`; files the entry reaches were already checked — fixed
 alongside. Still not exercised anywhere: a module's own `db/schema.ts` (both
 dogfood apps keep their tables in the root schema, reached from the module
 via a root import) and a per-module RFC 0027 config definition
