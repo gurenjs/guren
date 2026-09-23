@@ -11,7 +11,7 @@ import { relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { showUsage } from 'citty'
-import { defineCommand } from './define-command'
+import { defineCommand, keepsProcessAlive } from './define-command'
 import { UsageError } from './run-cli'
 import { newCommand } from './new-command'
 import { addResource, runBlueprint } from './blueprints'
@@ -1550,7 +1550,6 @@ const routeTypesCommand = defineCommand({
     reportSuppressedPageManifest(pagesPlan)
     consola.success(`Route types generated at ${outputPath}`)
     consola.success(`Route helpers generated at ${runtimeOutputPath}`)
-    process.exit(0)
   },
 })
 
@@ -1603,7 +1602,7 @@ const codegenCommand = defineCommand({
     const appRoot = args.app ?? process.cwd()
     if (!existsSync(resolvePath(appRoot, routesFile))) {
       consola.warn(`Routes file ${routesFile} not found — skipped route, data, channel, and API client generation.`)
-      process.exit(0)
+      return
     }
 
     const { outputPath, runtimeOutputPath, definitions } = await generateRouteTypes({
@@ -1659,7 +1658,6 @@ const codegenCommand = defineCommand({
       )
     }
     consola.success(`API client generated at ${apiClientOutputPath}`)
-    process.exit(0)
   },
 })
 
@@ -1722,7 +1720,6 @@ const openApiGenerateCommand = defineCommand({
     for (const warning of warnings) {
       consola.warn(warning)
     }
-    process.exit(0)
   },
 })
 
@@ -2252,15 +2249,12 @@ const tokenIssueCommand = defineCommand({
       appRoot: args.app,
       json: Boolean(args.json),
     })
-
-    // Booting the app opens whatever the app opens — a database pool, a Redis
-    // client — and nothing here closes them, so a one-shot command must exit
-    // explicitly. `routes:types` ends the same way.
-    process.exit(0)
   },
 })
 
-const toolDevCommand = defineCommand({
+// This command *is* the server: it ends when the developer stops it, which is
+// when the token stops existing.
+const toolDevCommand = keepsProcessAlive(defineCommand({
   meta: {
     name: 'tool:dev',
     description: 'Serve this application\'s agent tools locally with a throwaway token (RFC 0016).',
@@ -2308,11 +2302,8 @@ const toolDevCommand = defineCommand({
       hostname: args.host,
       appRoot: args.app,
     })
-
-    // Deliberately no process.exit: this command *is* the server, and it ends
-    // when the developer stops it — which is when the token stops existing.
   },
-})
+}))
 
 const configCacheCommand = defineCommand({
   meta: {
@@ -2693,7 +2684,7 @@ const langListCommand = defineCommand({
   },
 })
 
-const devCommand = defineCommand({
+const devCommand = keepsProcessAlive(defineCommand({
   meta: {
     name: 'dev',
     description: 'Start the Guren application in development mode using Bun.',
@@ -2747,7 +2738,7 @@ const devCommand = defineCommand({
       `Development server listening on ${address?.url ?? `http://${hostname}:${port}`}`,
     )
   },
-})
+}))
 
 const doctorCommand = defineCommand({
   meta: {

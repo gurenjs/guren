@@ -5,8 +5,11 @@ import { showUsage, type CommandDef } from 'citty'
 import { consola } from 'consola'
 import { builtinSubCommands } from './commands'
 import { discoverPluginCommands, createPluginCommandProxy } from './plugin-commands'
-import { defineCommand } from './define-command'
-import { runCli, UsageError } from './run-cli'
+import { defineCommand, exitsWhenDone } from './define-command'
+import { exitWhenFlushed, trackStdioWrites } from './process-exit'
+import { resolveSubCommand, runCli, UsageError } from './run-cli'
+
+trackStdioWrites()
 
 // CLI commands declared by installed plugins (gurenPlugin.commands). Discovery
 // only reads package.json; a plugin's entry module is imported lazily when one
@@ -77,7 +80,11 @@ const main = defineCommand({
   },
 })
 
-const exitCode = await runCli(main, process.argv.slice(2))
-if (exitCode !== 0) {
-  process.exit(exitCode)
+// A command that imported app code (a routes file, db/schema.ts) may leave a timer
+// or client open that nothing here closes, so a finished command exits explicitly.
+const rawArgs = process.argv.slice(2)
+const exitCode = await runCli(main, rawArgs)
+const [command] = await resolveSubCommand(main, rawArgs)
+if (exitCode !== 0 || exitsWhenDone(command)) {
+  await exitWhenFlushed(exitCode)
 }

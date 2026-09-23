@@ -38,7 +38,28 @@ export function defineCommand<T extends ArgsDef = ArgsDef>(def: CommandDef<T>): 
 
   const defined = defineCittyCommand(command)
   Object.defineProperty(defined, LAST_FLAG_WINS, { value: true })
+  Object.defineProperty(defined, EXITS_WHEN_DONE, { value: true, configurable: true })
   return defined
+}
+
+const EXITS_WHEN_DONE = Symbol('guren.cli.exitsWhenDone')
+
+/**
+ * Marks a command whose `run()` returns while what it started (a listener, a REPL)
+ * must keep the process alive. Every other command defined here ends the process
+ * once `run()` settles (`bin.ts`), so a new server that forgets this dies at once.
+ */
+export function keepsProcessAlive<T extends object>(command: T): T {
+  Object.defineProperty(command, EXITS_WHEN_DONE, { value: false })
+  return command
+}
+
+/**
+ * Whether `bin.ts` exits once the command's `run()` settles. A plugin's command is
+ * built with citty's own `defineCommand` and reads false: its lifetime is unknown.
+ */
+export function exitsWhenDone(command: object): boolean {
+  return (command as Record<symbol, unknown>)[EXITS_WHEN_DONE] === true
 }
 
 /**

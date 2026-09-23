@@ -206,7 +206,6 @@ describe('token:issue flag parsing', () => {
   let workspace: TempWorkspace
   let appDir: string
   let logSpy: ReturnType<typeof spyOn>
-  let exitSpy: ReturnType<typeof spyOn>
 
   beforeEach(async () => {
     workspace = await createTempWorkspace('guren-cli-token-flags-')
@@ -217,15 +216,9 @@ describe('token:issue flag parsing', () => {
     await writeFile(join(appDir, 'routes/web.ts'), ROUTES)
     await writeFile(join(appDir, 'src/main.ts'), MAIN)
     logSpy = spyOn(console, 'log').mockImplementation(() => {})
-    // A successful run ends in `process.exit(0)` and closes nothing it opened,
-    // so success is observed as this sentinel rather than left real.
-    exitSpy = spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`process.exit(${code ?? 0})`)
-    }) as never)
   })
 
   afterEach(async () => {
-    exitSpy.mockRestore()
     logSpy.mockRestore()
     await workspace.cleanup()
   })
@@ -243,18 +236,20 @@ describe('token:issue flag parsing', () => {
 
   it('honours the last value of a repeated boolean rather than any false', async () => {
     // The inverse direction on a write tool: a lingering `--read-only=true`
-    // would refuse `posts.store`, so reaching the success exit is the assertion.
+    // would refuse `posts.store`, so issuing the token is the assertion.
     await expect(
       runFlags(['--name', 'ci', '--user', '42', '--tools', 'posts.store', '--read-only=true', '--read-only=false']),
-    ).rejects.toThrow('process.exit(0)')
+    ).resolves.toBeDefined()
+    expect(logSpy).toHaveBeenCalled()
   })
 
   it('reads the last --tools rather than joining repeats', async () => {
     // Joined, the repeat would name neither tool and be refused; last-wins
-    // issues against the second one and reaches the success exit.
+    // issues against the second one.
     await expect(
       runFlags(['--name', 'ci', '--user', '42', '--tools', 'internal.index', '--tools', 'posts.index']),
-    ).rejects.toThrow('process.exit(0)')
+    ).resolves.toBeDefined()
+    expect(logSpy).toHaveBeenCalled()
   })
 
   it('refuses a repeated --allow-unmatched that ends in false', async () => {
