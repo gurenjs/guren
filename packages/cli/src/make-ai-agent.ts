@@ -10,7 +10,8 @@ import {
   resourceName,
   safeModuleName,
   splitCommaList,
-  writeScaffoldFile,
+  writeScaffoldFiles,
+  type ScaffoldFileEntry,
   type WriterOptions,
 } from './utils'
 
@@ -49,23 +50,27 @@ export async function makeAiAgent(name: string, options: MakeAiAgentOptions = {}
 
   const root = options.root ? `modules/${safeModuleName(options.root)}/` : ''
   const agentPath = `${root}app/Ai/Agents/${className}.ts`
-  const writer: WriterOptions = { force: options.force, overwritten: options.overwritten, cwd }
-  const files = [
-    await writeScaffoldFile(agentPath, agentTemplate(className, fileName, tools, Boolean(options.output)), writer),
+  const entries: ScaffoldFileEntry[] = [
+    { path: agentPath, contents: agentTemplate(className, fileName, tools, Boolean(options.output)) },
   ]
 
   if (options.test) {
     const testPath = `${root}tests/Ai/${className}.test.ts`
     const appEntry = (await resolveAppEntry(cwd)) ?? 'src/app.ts'
-    files.push(await writeScaffoldFile(testPath, testTemplate({
-      className,
-      runner: await detectRunner(cwd),
-      appImport: importOf(testPath, appEntry),
-      agentImport: importOf(testPath, agentPath),
-      output: Boolean(options.output),
-    }), writer))
+    entries.push({
+      path: testPath,
+      contents: testTemplate({
+        className,
+        runner: await detectRunner(cwd),
+        appImport: importOf(testPath, appEntry),
+        agentImport: importOf(testPath, agentPath),
+        output: Boolean(options.output),
+      }),
+      flag: '--test',
+    })
   }
 
+  const files = await writeScaffoldFiles(entries, { force: options.force, overwritten: options.overwritten, cwd, subject: className })
   return { files, notes }
 }
 

@@ -1,0 +1,5 @@
+---
+'@guren/cli': patch
+---
+
+Every command that writes a set of scaffold files now checks all of them before writing the first one, as `guren make:feature` already did. When any already exists, the command lists them all and writes nothing. It used to stop at the first one and leave the files before it behind, with an error that suggested `--force`, which would also overwrite the user's own files. This covers `make:auth` / `guren add auth`, `add oauth`, `add admin`, `add storage`, `add attachments`, `make:module` and `guren deploy`. It also covers `add mail`, `add events`, `add queue`, `add notifications`, `add broadcasting` and `make:ai-agent`, which used to write their sample class or agent before the rest. The refusal names the files in the way, and names any that a flag such as `--test` added. `--force` still overwrites. Blueprints that skip files already present on a re-run (`add session`, `add schedule`, `add ai`, `add prototype`, the attachments config) still do. A dangling symlink now counts as a file in the way. A path the CLI cannot probe (a parent that is a file, a directory it cannot read) is reported before anything is written.

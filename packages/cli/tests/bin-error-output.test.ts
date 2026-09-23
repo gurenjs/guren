@@ -118,7 +118,11 @@ describe('guren CLI error reporting', () => {
       const { exitCode, stderr } = await runBin(['deploy', '--target', 'docker'], workspace.dir)
 
       expect(exitCode).toBe(1)
-      expect(stderr).toContain('Dockerfile already exists. Use --force to overwrite.')
+      expect(stderr).toContain([
+        'Scaffolding would overwrite a file that already exists:',
+        '  Dockerfile',
+        'Nothing was scaffolded. Pass --force to overwrite it.',
+      ].join('\n'))
       expect(stderr).not.toMatch(/^\s+at /m)
     } finally {
       await workspace.cleanup()

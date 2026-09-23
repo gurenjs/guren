@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
 import { CliError } from './cli-error'
@@ -225,15 +225,22 @@ export function assertCwdUnsupported(options: WriterOptions, command: string): v
 export interface ScaffoldFileEntry {
   path: string
   contents: string
+  /** The option that added the file; a refusal offers dropping it. */
+  flag?: string
 }
 
-/** Local to avoid a cycle: discovery.ts imports from this module. */
+/**
+ * `lstat`, not `access`: a `wx` write refuses a dangling symlink, so a probe that followed
+ * it would pass a path the write then stops on. Anything but ENOENT is thrown, not read as
+ * absent. Local to avoid a cycle: discovery.ts imports from this module.
+ */
 async function pathExists(path: string): Promise<boolean> {
   try {
-    await access(path)
+    await lstat(path)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
   }
 }
 
@@ -243,13 +250,15 @@ export type ScaffoldFilesOptions = WriterOptions & {
    * re-run repairs whatever is missing. Ignored under `force`.
    */
   skipExisting?: boolean
+  /** The name the command was given (`Comment`), which a refusal names and offers to change. */
+  subject?: string
 }
 
 /**
- * `writeScaffoldFile` over a batch. Every path is containment-checked before the first
- * write. Existence is not: an existing file stops the batch partway, and with
- * `skipExisting` every path is probed first and existing ones skipped, though one that
- * appears after the probe still stops it.
+ * `writeScaffoldFile` over a batch. Before the first write every path is checked for
+ * containment, then, unless `force`, for existence: an existing file is skipped under
+ * `skipExisting` and otherwise refuses the whole batch. `wx` on each write still stops
+ * one that appears after the probe.
  */
 export async function writeScaffoldFiles(
   entries: ScaffoldFileEntry[],
@@ -261,22 +270,45 @@ export async function writeScaffoldFiles(
     assertScaffoldPath(entry.path, cwd)
   }
 
-  const pending: ScaffoldFileEntry[] = []
-  for (const entry of entries) {
-    if (options.skipExisting && !options.force && (await pathExists(resolve(cwd, entry.path)))) {
-      consola.info(`${entry.path} already exists — left unchanged (use --force to overwrite).`)
-    } else {
-      pending.push(entry)
+  const existing: ScaffoldFileEntry[] = []
+  if (!options.force) {
+    for (const entry of entries) {
+      if (await pathExists(resolve(cwd, entry.path))) existing.push(entry)
     }
+  }
+  if (existing.length > 0 && !options.skipExisting) {
+    throw existingTargetsError(existing, options.subject)
+  }
+  for (const entry of existing) {
+    consola.info(`${entry.path} already exists — left unchanged (use --force to overwrite).`)
   }
 
   const created: string[] = []
 
-  for (const entry of pending) {
+  for (const entry of entries) {
+    if (existing.includes(entry)) continue
     created.push(await writeFileSafe(entry.path, entry.contents, { ...options, cwd }))
   }
 
   return created
+}
+
+/** Names every file in the way, because `--force` overwrites all of them, hand-written ones included. */
+function existingTargetsError(existing: readonly ScaffoldFileEntry[], subject: string | undefined): CliError {
+  const one = existing.length === 1
+  const flags = [...new Set(existing.flatMap((entry) => entry.flag ?? []))]
+  const remedies = [
+    // Dropping a flag is only a way out when every file in the way came from one.
+    ...(existing.every((entry) => entry.flag) ? [`drop ${flags.join(' and ')}`] : []),
+    ...(subject ? ['pick another name'] : []),
+    `pass --force to overwrite ${one ? 'it' : 'them'}`,
+  ]
+  const remedy = remedies.length === 1 ? remedies[0]! : `${remedies.slice(0, -1).join(', ')}, or ${remedies.at(-1)}`
+  return new CliError([
+    `Scaffolding ${subject ? `${subject} ` : ''}would overwrite ${one ? 'a file that already exists' : `${existing.length} files that already exist`}:`,
+    ...existing.map((entry) => `  ${entry.path}${entry.flag ? ` (${entry.flag})` : ''}`),
+    `Nothing was scaffolded. ${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}.`,
+  ].join('\n'))
 }
 
 /** What `scaffoldFile` writes, for a caller that checks every target before its first write. */

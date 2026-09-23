@@ -1,6 +1,6 @@
 import { MAIL_DIR } from './discovery'
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 function mailTemplate(className: string): string {
   const subject = className.replace(/Mail$/, '')
@@ -24,7 +24,12 @@ export class ${className} extends Mail {
 }
 
 export async function makeMail(name: string, options: WriterOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = mailFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function mailFile(name: string, options: WriterOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: MAIL_DIR,
     suffix: 'Mail',
     template: ({ normalizedName }) => mailTemplate(normalizedName),

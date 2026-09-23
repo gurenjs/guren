@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createTempWorkspace, type TempWorkspace } from './helpers'
+import { createTempWorkspace, snapshotTree, type TempWorkspace } from './helpers'
 import { DOCKER_RUNTIME_DIRECTORIES, DOCKER_RUNTIME_FILES, scaffoldDeploy } from '../src/deploy'
 
 const createAppTemplates = join(import.meta.dir, '../../create-app/templates')
@@ -115,6 +115,20 @@ describe('scaffoldDeploy', () => {
     expect(overwritten).toHaveLength(1)
     expect(overwritten[0]!.endsWith('Dockerfile')).toBe(true)
     expect(await readFile('Dockerfile', 'utf8')).toContain('FROM oven/bun:1 AS builder')
+  })
+
+  it('writes no recipe while one it would write is already there', async () => {
+    await writeFile('Dockerfile', 'FROM scratch\n', 'utf8')
+    await writeFile('railway.json', '{}\n', 'utf8')
+    const before = await snapshotTree(workspace.dir)
+
+    await expect(scaffoldDeploy({ target: 'all' })).rejects.toThrow([
+      'Scaffolding would overwrite 2 files that already exist:',
+      '  Dockerfile',
+      '  railway.json',
+      'Nothing was scaffolded. Pass --force to overwrite them.',
+    ].join('\n'))
+    expect(await snapshotTree(workspace.dir)).toEqual(before)
   })
 
   it('keeps the committed Docker recipe identical to what `guren deploy` writes', async () => {

@@ -3,7 +3,7 @@ import { appendEnvEntry, type AppendEnvEntryOptions } from './env-registrar'
 import { appBindsService, callsDefineConfig, fileExists, readIfExists } from './discovery'
 import { wireConfig, wireProviders } from './provider-registrar'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
-import { writeScaffoldFiles, type ScaffoldFilesOptions } from './utils'
+import { writeScaffoldFiles, type ScaffoldFileEntry, type ScaffoldFilesOptions } from './utils'
 
 /** A blueprint installing one container service, in either form it ships (RFC 0027 §2). */
 export interface ServiceScaffold {
@@ -55,14 +55,22 @@ export async function installsConfigDefinition(key: string): Promise<boolean> {
   return existing === null || callsDefineConfig(existing, key)
 }
 
-/** Writes and wires `scaffold` as a definition or a provider, per {@link installsConfigDefinition}. */
-export async function installServiceScaffold(scaffold: ServiceScaffold, options: ScaffoldFilesOptions): Promise<string[]> {
+/**
+ * Writes and wires `scaffold` as a definition or a provider, per {@link installsConfigDefinition}.
+ * `samples` (a blueprint's sample job or mailable) are written in the same batch, so a file in
+ * the way refuses them too.
+ */
+export async function installServiceScaffold(
+  scaffold: ServiceScaffold,
+  options: ScaffoldFilesOptions,
+  samples: readonly ScaffoldFileEntry[] = [],
+): Promise<string[]> {
   const { key, coreProvider, provider, definitionProviders = [], shared = [] } = scaffold
   const definition = await installsConfigDefinition(key)
   const files = definition
     ? [`config/${key}.ts`, ...definitionProviders.map((name) => `app/Providers/${name}.ts`)].map((path) => definitionTemplateFile(key, path))
     : [scaffoldTemplateFile(key, `app/Providers/${provider}.ts`)]
-  const created = await writeScaffoldFiles([...files, ...shared.map((path) => scaffoldTemplateFile(key, path))], options)
+  const created = await writeScaffoldFiles([...samples, ...files, ...shared.map((path) => scaffoldTemplateFile(key, path))], options)
 
   if (definition) {
     await wireConfig(key)

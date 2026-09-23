@@ -155,6 +155,13 @@ among them. A file that only `--test`, `--factory` or `--policy` adds is marked
 with its flag, and dropping the flag gets past it. Promoting a prototype keeps the
 pages and validator the prototype run wrote, so those never count.
 
+Every other command that writes several files refuses the same way before its first
+write: `make:auth`, `make:module`, `make:ai-agent` (where `--test` is the flag),
+`deploy`, and the `add` blueprints, their sample event, job or mailable included. The
+blueprints meant to be re-run to repair a partial install (`add session`,
+`add schedule`, `add ai`, `add prototype`) keep the files already there and write the
+rest instead.
+
 ## Core Commands
 
 | Command | Description | Example |
@@ -453,7 +460,7 @@ bunx guren deploy --target railway
 bunx guren deploy --target all --app my-app --port 4000
 ```
 
-Supported targets are `docker`, `fly`, `railway`, and `all`. The command stops when a file it would write already exists; pass `--force` to overwrite it.
+Supported targets are `docker`, `fly`, `railway`, and `all`. When a file it would write already exists, the command lists every such file and writes none; pass `--force` to overwrite them.
 
 Vercel and AWS Lambda use plugins, installed with `bunx guren plugin @guren/plugin-vercel` and `bunx guren plugin @guren/plugin-lambda`, and `--target vercel` is rejected. [Deployment](./deployment.md) walks through both.
 
