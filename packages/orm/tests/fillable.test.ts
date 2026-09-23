@@ -53,7 +53,7 @@ function refusal(run: () => unknown): MassAssignmentException {
     expect(error).toBeInstanceOf(MassAssignmentException)
     return error as MassAssignmentException
   }
-  throw new Error('expected a MassAssignmentException')
+  expect.unreachable()
 }
 
 describe('Model.filterFillable', () => {
@@ -87,14 +87,10 @@ describe('Model.filterFillable', () => {
         }),
       ).toThrow(MassAssignmentException)
 
-      try {
-        FillableModel.filterFillable({ title: 'Hello', isAdmin: true })
-      } catch (error) {
-        expect(error).toBeInstanceOf(MassAssignmentException)
-        expect((error as MassAssignmentException).fields).toEqual(['isAdmin'])
-        expect((error as MassAssignmentException).reason).toBe('not-fillable')
-        expect((error as MassAssignmentException).message).toContain('FillableModel.create(data, { set: { isAdmin } })')
-      }
+      const error = refusal(() => FillableModel.filterFillable({ title: 'Hello', isAdmin: true }))
+      expect(error.fields).toEqual(['isAdmin'])
+      expect(error.reason).toBe('not-fillable')
+      expect(error.message).toContain('FillableModel.update(): { set: { isAdmin } }')
     })
 
     it('should pass through data made only of fillable fields', () => {

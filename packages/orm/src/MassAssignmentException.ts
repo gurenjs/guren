@@ -19,12 +19,13 @@ export class MassAssignmentException extends Error {
   constructor(
     model: string,
     fields: string[],
-    options?: { reason?: 'not-fillable' | 'denied'; set?: 'no-fillable' | 'id' | 'fillable' | 'conflict' },
+    options?: { reason?: 'not-fillable'; set?: SetRule } | { reason: 'denied' },
   ) {
     const reason = options?.reason ?? 'not-fillable'
+    const set = options && 'set' in options ? options.set : undefined
     const list = fields.map((field) => `"${field}"`).join(', ')
     super(
-      `${model}: mass assignment blocked for field(s) ${list}. ${remediation(model, fields, reason, options?.set)} ` +
+      `${model}: mass assignment blocked for field(s) ${list}. ${remediation(model, fields, reason, set)} ` +
         `Never pass request input to forceCreate/forceUpdate or spread it into set.`,
     )
     this.name = 'MassAssignmentException'
@@ -34,12 +35,9 @@ export class MassAssignmentException extends Error {
   }
 }
 
-function remediation(
-  model: string,
-  fields: string[],
-  reason: 'not-fillable' | 'denied',
-  set: 'no-fillable' | 'id' | 'fillable' | 'conflict' | undefined,
-): string {
+type SetRule = 'no-fillable' | 'id' | 'fillable' | 'conflict'
+
+function remediation(model: string, fields: string[], reason: 'not-fillable' | 'denied', set: SetRule | undefined): string {
   if (reason === 'denied') {
     return `These are protected columns (e.g. credential fields) and can never be mass-assigned, ` +
       `not even through ${model}.fillable or set. Pass the plain input field (e.g. \`password\`) and let ` +
@@ -51,8 +49,8 @@ function remediation(
       return `${model} declares no fillable, so every column is already writable through the data ` +
         `and set would keep nothing apart. Declare fillable with the columns a request may set.`
     case 'id':
-      return `set cannot carry the primary key: a server-chosen id is a system write, ` +
-        `for ${model}.forceCreate().`
+      return `set cannot carry the primary key: a server-chosen id is a system write, which belongs ` +
+        `in ${model}.forceCreate().`
     case 'fillable':
       return `They are in ${model}.fillable, so a request may already set them: pass them in the data. ` +
         `A column the server sets must not be fillable, or every other write would accept it from a request.`
@@ -60,6 +58,6 @@ function remediation(
       return `They are set by the server in this call, so they must not also arrive in the data.`
     default:
       return `Add them to fillable if a request may set them; if the server chooses the value, ` +
-        `name it in set: ${model}.create(data, { set: { ${fields.join(', ')} } }).`
+        `name it in the set option of ${model}.create() or ${model}.update(): { set: { ${fields.join(', ')} } }.`
   }
 }

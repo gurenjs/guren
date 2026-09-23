@@ -1119,14 +1119,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     data: CreateDataFor<T, NoInfer<S>>,
     options: ModelSetOptions<T, S>,
   ): Promise<TRecordFor<T>>
-  // Last, so `.call`/`.bind`/`Parameters<>`, which read the last overload, see the signature they always did.
+  // Last: `.call`/`.bind`/`Parameters<>` read the last overload, and must see the one without `set`.
   static create<T extends typeof Model>(this: T, data: TCreateFor<T>, writeOptions?: ModelWriteOptions): Promise<TRecordFor<T>>
   static async create<T extends typeof Model>(
     this: T,
     data: TCreateFor<T>,
     options?: SetWriteOptions,
   ): Promise<TRecordFor<T>> {
-    if (!options || !('set' in options)) return this.runCreate(data, options, true)
+    if (options?.set === undefined) return this.runCreate(data, options, true)
     const { set, ...writeOptions } = options
     return this.runCreate(data, writeOptions, true, set)
   }
@@ -1184,7 +1184,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     data: Partial<TCreateFor<T>>,
     options?: SetWriteOptions,
   ): Promise<TRecordFor<T>> {
-    if (!options || !('set' in options)) return this.runUpdate(where, data, options, true)
+    if (options?.set === undefined) return this.runUpdate(where, data, options, true)
     const { set, ...writeOptions } = options
     return this.runUpdate(where, data, writeOptions, true, set)
   }
@@ -1587,9 +1587,13 @@ type SetFor<T extends typeof Model> = OmitNamed<Partial<TCreateFor<T>>, 'id'>
 
 // `S` is inferred from the `set` literal, and an inferred type parameter gets no
 // excess-property check: the `never` keys are what reject `id` and a misspelt
-// column. A model whose create type names no key accepts any.
+// column, and the create type's own value types what reject `undefined` for a
+// required one (`SetFor` is partial). A model whose create type names no key
+// accepts any.
 type SetOption<T extends typeof Model, S> = {
-  set: S & { [K in Exclude<keyof S, SettableKey<T>>]: never }
+  set: S
+    & { [K in Exclude<keyof S, SettableKey<T>>]: never }
+    & { [K in Extract<keyof S, keyof TCreateFor<T>>]: TCreateFor<T>[K] }
 }
 type SettableKey<T extends typeof Model> = [NamedKeys<SetFor<T>>] extends [never] ? PropertyKey : NamedKeys<SetFor<T>>
 

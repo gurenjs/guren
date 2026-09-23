@@ -24,6 +24,7 @@ class Post extends defineModel(posts, { fillable: ['title', 'body', 'categoryId'
 
 declare const payload: { title: string; body: string }
 declare const trx: TransactionHandle
+declare const maybeAuthorId: number | undefined
 
 async function _setRemovesTheKeyFromData() {
   await Post.create(payload, { set: { authorId: 1 } })
@@ -49,6 +50,12 @@ async function _setIsCheckedAgainstTheCreatePayload() {
 
   // @ts-expect-error the column's type still applies
   await Post.create(payload, { set: { authorId: 'ada' } })
+
+  // @ts-expect-error a required column taken out of data cannot be undefined in set
+  await Post.create(payload, { set: { authorId: maybeAuthorId } })
+
+  await Post.create({ ...payload, categoryId: 3 }, { set: { authorId: 1 } })
+  await Post.update({ id: 1 }, {}, { set: { categoryId: undefined } })
 }
 void _setIsCheckedAgainstTheCreatePayload
 
@@ -89,8 +96,8 @@ async function _untypedModel() {
 }
 void _untypedModel
 
-// `.bind`, `.call` and `Parameters<>` read the last overload, which is the
-// signature create and update had before `set`.
+// `.bind`, `.call` and `Parameters<>` read the last overload, which must be the
+// one without `set`.
 async function _lastOverloadIsUnchanged() {
   const create = Post.create.bind(Post)
   await create({ ...payload, authorId: 1 })
@@ -101,8 +108,8 @@ async function _lastOverloadIsUnchanged() {
 }
 void _lastOverloadIsUnchanged
 
-// An app model overriding create with the signature it had before the overload
-// must still extend the base's static side.
+// An app model overriding create with the signature without `set` must still
+// extend the base's static side.
 class Audited extends defineModel(posts, { fillable: ['title', 'body'] }) {
   static override async create<T extends typeof Model>(
     this: T,

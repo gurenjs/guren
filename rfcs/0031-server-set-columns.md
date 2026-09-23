@@ -150,7 +150,10 @@ static update<T extends typeof Model, S extends SetFor<T>>(
   neither `id` nor a misspelt column. `set` is typed
   `S & { [K in Exclude<keyof S, SettableKey<T>>]: never }`, where `SettableKey`
   is the create type's named keys without `id`. A model whose create type names
-  no key (no `createType`) still accepts any.
+  no key (no `createType`) still accepts any. `set` is also intersected with the
+  create type's own value types: `SetFor` is partial, so without that
+  `{ set: { authorId: user?.id } }` would take a required column out of `data`
+  and hand it `undefined`.
 - The `set` overload comes first and the unchanged signature last. `.bind`,
   `.call` and `Parameters<>` read the last overload, so they still see the
   signature they always did.
@@ -205,7 +208,10 @@ The `not-fillable` remediation names `set`, and the closing negative covers
 **Amended in implementation:** the constructor takes a `set` option
 (`'no-fillable' | 'id' | 'fillable' | 'conflict'`) naming the section 2 rule
 that refused the fields. It changes only the message, and the exception gains
-no property. Steps 1 and 2 throw with `reason: 'not-fillable'`.
+no property. Steps 1 and 2 throw with `reason: 'not-fillable'`. The
+`not-fillable` remediation names both methods ("name it in the set option of
+Post.create() or Post.update(): { set: { authorId } }"), since the refusal also
+comes from `update()` and from `QueryBuilder.update()`.
 
 ### 4. `guren audit`
 
