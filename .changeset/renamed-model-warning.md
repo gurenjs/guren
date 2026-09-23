@@ -1,0 +1,5 @@
+---
+'@guren/core': patch
+---
+
+The Lambda and Vercel builds' renamed-class warning (`reportRenamedNameKeyedClasses`) also covers models, including ones built with `Attachable(...)` or `SoftDeletes(...)`. When another module declares the same top-level name, Bun bundles the model as `<Name>2`, and attachments and `morphMany` then store that name while `Model.morphMap` resolves the source name, so the two stop matching within one deploy. An app model named `Channel` can hit this when broadcasting is in the bundle, since `@guren/server` declares a top-level `Channel` there. A model has no name to pin, so the warning asks for a new class name. The warning now also names only the declaration whose base the numbered class extends, so a dependency's renamed class is not reported as the app's. A base resolves through the file's named imports: an aliased `import { Job as QueuedJob } from '@guren/core'` is recognized, and an app class that shares a framework base's name (a calendar `Event` model) is read as the app's own. An `extends` clause on the next line and a bundled member-expression base are read too.

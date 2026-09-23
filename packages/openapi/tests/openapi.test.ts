@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { z } from 'zod'
 import * as z3 from 'zod/v3'
-import { createApp, type RouteDefinition } from '@guren/core'
+import { Resource, Router, createApp, type RouteDefinition } from '@guren/core'
 import { extractPathParamNames } from '@guren/core/internal/route-path'
 import {
   generateOpenApiDocument,
@@ -192,6 +192,30 @@ describe('@guren/openapi', () => {
     const html = await docsResponse.text()
     expect(html).toContain('@scalar/api-reference')
     expect(html).toContain('/openapi.json')
+  })
+
+  it('warns for a route whose response is declared only by a Resource hint', () => {
+    class PostResource extends Resource<{ id: number }> {
+      toArray() { return { id: this.resource.id } }
+    }
+    const router = new Router()
+    router.get('/posts', { name: 'posts.index', resource: { data: [PostResource] } }, () => [])
+    router.get('/posts/:id', {
+      name: 'posts.show',
+      resource: PostResource,
+      output: z.object({ id: z.number() }),
+    }, async () => ({ id: 1 }))
+
+    const { document, warnings } = generateOpenApiDocument(router.definitions(), {
+      title: 'Blog API',
+      version: '1.0.0',
+    })
+
+    expect(warnings).toEqual([
+      'GET /posts response: declared only by a Resource hint, so the document carries no response schema. Declare `output` for a documented response.',
+    ])
+    expect(document.paths['/posts']?.get?.responses['200']).toEqual({ description: 'Successful response', content: undefined })
+    expect(document.paths['/posts/{id}']?.get?.responses['200']?.content?.['application/json']?.schema).toBeDefined()
   })
 
   it('skips methods OpenAPI 3.1 cannot express and says so in a warning', () => {

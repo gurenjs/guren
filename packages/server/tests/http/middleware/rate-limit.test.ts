@@ -150,6 +150,32 @@ describe('SlidingWindowRateLimitStore', () => {
   })
 })
 
+describe('memory rate limit store sweep timer', () => {
+  // The timer is unref()ed; it must still fire while something else (here the
+  // test runner) keeps the process alive.
+  it.each([
+    ['MemoryRateLimitStore', MemoryRateLimitStore],
+    ['SlidingWindowRateLimitStore', SlidingWindowRateLimitStore],
+  ] as const)('%s sweeps expired entries on its own', async (_name, Store) => {
+    let currentTime = FAKE_EPOCH
+    const store = new Store(10, () => currentTime)
+    try {
+      await store.increment('expired', 1)
+      currentTime += 10
+      expect(store.size).toBe(1)
+
+      const deadline = Date.now() + 2_000
+      while (store.size > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+
+      expect(store.size).toBe(0)
+    } finally {
+      store.destroy()
+    }
+  })
+})
+
 describe('createRateLimitMiddleware', () => {
   let store: MemoryRateLimitStore
   let app: Hono

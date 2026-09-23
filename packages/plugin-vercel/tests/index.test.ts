@@ -358,16 +358,16 @@ describe('@guren/plugin-vercel', () => {
           '',
         ].join('\n'),
       })
+      // Unimported bases read as the framework's, and only the plugin's wiring is under test.
       mkdirSync(join(root, 'app/Events'), { recursive: true })
       mkdirSync(join(root, 'app/Notifications'), { recursive: true })
-      writeFileSync(join(root, 'app/base.ts'), 'export class Event {}\nexport class Notification {}\n')
       writeFileSync(
         join(root, 'app/Events/OrderShipped.ts'),
-        "import { Event } from '../base'\nexport class OrderShipped extends Event {}\n",
+        'export class OrderShipped extends Event {}\n',
       )
       writeFileSync(
         join(root, 'app/Notifications/OrderShipped.ts'),
-        "import { Notification } from '../base'\nexport class OrderShipped extends Notification {}\n",
+        'export class OrderShipped extends Notification {}\n',
       )
 
       const warnings = await captureWarnings(() => buildVercelOutput(app))
@@ -376,8 +376,8 @@ describe('@guren/plugin-vercel', () => {
         line.startsWith('Vercel build: the bundle names a class OrderShipped as OrderShipped2'),
       )
       expect(renamed).toBeDefined()
-      const declaring = [join('app', 'Events', 'OrderShipped.ts'), join('app', 'Notifications', 'OrderShipped.ts')]
-      expect(renamed).toContain(` ${declaring.join(', ')} declare a job`)
+      // Whichever of the two the bundle renamed, named by its app-relative path.
+      expect(renamed).toMatch(/ app[\\/](Events|Notifications)[\\/]OrderShipped\.ts declares a job/)
     })
 
     it('finds docs in a parent directory when the app root is nested', async () => {

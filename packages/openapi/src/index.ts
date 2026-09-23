@@ -334,6 +334,14 @@ function buildResponses(definition: RouteDefinition, warnings: string[]): Record
     ? toJsonSchema(definition.schemas.output, warnings, `${definition.method} ${definition.path} response`, 'output')
     : undefined
 
+  // Turning a hint into a schema needs the Resource's TypeScript type as JSON
+  // Schema, which nothing here can derive (#536).
+  if (!definition.schemas?.output && definition.resource !== undefined) {
+    warnings.push(
+      `${definition.method} ${definition.path} response: declared only by a Resource hint, so the document carries no response schema. Declare \`output\` for a documented response.`,
+    )
+  }
+
   responses[successStatus] = {
     description: successStatus === '201' ? 'Created' : 'Successful response',
     content: successSchema

@@ -9,7 +9,8 @@ import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPla
 import { planHash } from '../src/plan/identity'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
-import { applyVerification, applyWaivers, behaviourReach, hashFiles, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
+import { behaviourReach } from '../src/plan/reach'
+import { applyVerification, applyWaivers, hashFiles, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
@@ -718,7 +719,7 @@ describe('applyVerification', () => {
     expect(elementOf(lifted, 'action.comments.store').state).toBe('verified')
     const body = elementOf(lifted, 'column.comment.body')
     expect(body.state).toBe('unjudged')
-    expect(body.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`])
+    expect(body.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: no behaviour can reach it, so waive it.`])
   })
 
   test('should reach what a behaviour\u2019s route dispatches to and names, and nothing the plan does not link to it', () => {

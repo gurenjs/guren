@@ -23,11 +23,13 @@ import { isUnreadable, scopeName, type PlanAppNames, type PlanAppState, type Pla
 import { sameReading } from './approvals'
 import { resourceFieldProperties, validatorFieldProperties } from './field-status'
 import { differ, existenceMatch, match, unknown, type PlanPropertyStatus, type PlanPropertyVerdict } from './property-status'
+import { behaviourCanReach } from './reach'
 import {
   listPlanElementEntries,
   type PlanAction,
   type PlanChange,
   type PlanColumn,
+  type PlanCommand,
   type PlanController,
   type PlanDraft,
   type PlanElementSection,
@@ -156,8 +158,11 @@ function compare(property: string, planned: string, actual: string | undefined, 
   return actual === planned ? match(property, planned) : differ(property, planned, actual)
 }
 
-/** What an `alter`'s properties count as once set against their readings at approval; the identity when taking those readings. */
-type AlterCredit = (judgement: Judgement, properties: PlanPropertyStatus[]) => PlanPropertyStatus[]
+/**
+ * What an `alter`'s properties count as once set against their readings at approval, pushing onto
+ * `notes` the readings a re-approval could still record in time; the identity when taking them.
+ */
+type AlterCredit = (judgement: Judgement, properties: PlanPropertyStatus[], notes: string[]) => PlanPropertyStatus[]
 
 const AS_READ: AlterCredit = (_, properties) => properties
 
@@ -168,15 +173,23 @@ const SET_ASIDE = new WeakMap<PlanPropertyStatus, 'held' | 'unrecorded'>()
  * An alter's target existed before the plan, so a planned property it already held says nothing
  * about the change. A match counts only against a reading at approval that was a `differ` or an
  * `unknown`; any other match reads `unknown`. A difference stays one, however it read then.
+ * `readings` is `undefined` where no approval stands, which the approval gate reports instead.
  */
 function creditAlter(readings: readonly PlanPropertyReading[] | undefined): AlterCredit {
-  return (judgement, properties) =>
-    properties.map((property) => {
+  return (judgement, properties, notes) => {
+    const readingFor = (property: PlanPropertyStatus) => readings?.find((entry) => sameReading(entry, readingOf(judgement, property)))
+    // Only a difference is worth recording late: a match read now would be recorded as one that already held.
+    const unread = readings ? properties.filter((property) => property.verdict === 'differ' && !readingFor(property)).map((property) => property.property) : []
+    if (unread.length > 0) {
+      notes.push(`The approval recorded no reading of ${unread.join(', ')}: run guren plan:approve on the plan before changing ${unread.length === 1 ? 'it' : 'them'}, since a match with no reading from before the work does not count.`)
+    }
+    return properties.map((property) => {
       if (property.verdict !== 'match') return property
-      const reading = readings?.find((entry) => sameReading(entry, readingOf(judgement, property)))
+      const reading = readingFor(property)
       if (reading && reading.verdict !== 'match') return property
       return setAside(property, reading ? 'held' : 'unrecorded')
     })
+  }
 }
 
 function setAside(property: PlanPropertyStatus, why: 'held' | 'unrecorded'): PlanPropertyStatus {
@@ -203,18 +216,20 @@ function readingOf(element: { id: string; label: string }, property: PlanPropert
   }
 }
 
-function unreadableAlterReason(properties: PlanPropertyStatus[]): string {
+/** `reachable`: whether a behaviour could reach the element (`behaviourCanReach()`), or only a waiver lifts it. */
+function unreadableAlterReason(properties: PlanPropertyStatus[], reachable: boolean): string {
   const setAside = properties.flatMap((property) => SET_ASIDE.get(property) ?? [])
+  const lift = reachable ? 'verify the change through a behaviour that reaches it' : 'waive it, since no behaviour can reach it'
   if (setAside.includes('unrecorded')) {
-    return 'The approval recorded no reading of the planned properties that match, so none can be told from one that already held: run guren plan:approve on the plan to record the readings it lacks (a property the application holds by then is not counted), or verify the change through a behaviour that reaches it.'
+    return `The approval recorded no reading of the planned properties that match, so none can be told from one that already held, and a reading taken now would find them held: ${lift}.`
   }
   if (setAside.length > 0) {
-    return 'Every planned property that matches already held when the plan was approved, so none shows the change: state the change in a property the application did not hold, or verify it through a behaviour that reaches it.'
+    return `Every planned property that matches already held when the plan was approved, so none shows the change: state the change in a property the application did not hold, or ${lift}.`
   }
   return 'No planned property of this change has a reader.'
 }
 
-function conclude(judgement: Judgement, credit: AlterCredit = AS_READ): PlanElementStatus {
+function conclude(judgement: Judgement, credit: AlterCredit, reachable: ReadonlySet<string>): PlanElementStatus {
   const { id, section, change, label, exists } = judgement
   const base = {
     id,
@@ -249,7 +264,7 @@ function conclude(judgement: Judgement, credit: AlterCredit = AS_READ): PlanElem
   }
 
   const read = judgement.properties?.() ?? []
-  const properties = change.kind === 'alter' ? credit(judgement, read) : read
+  const properties = change.kind === 'alter' ? credit(judgement, read, notes) : read
   if (change.kind === 'rename') {
     const previous = judgement.previous ?? { unknown: 'the previous name has no reader' }
     properties.unshift(
@@ -267,7 +282,7 @@ function conclude(judgement: Judgement, credit: AlterCredit = AS_READ): PlanElem
     done(state, { properties, ...extra })
 
   // An alter's target existed before the plan, so its existence says nothing about the change.
-  if (change.kind === 'alter' && readable.length === 0) return result('unjudged', { reason: unreadableAlterReason(properties) })
+  if (change.kind === 'alter' && readable.length === 0) return result('unjudged', { reason: unreadableAlterReason(properties, reachable.has(id)) })
   // A mount is a reading of the element itself; with none, existence would complete what the plan stated and nothing read.
   if (properties.length > 0 && readable.length === 0 && !judgement.mount) {
     return result('unjudged', { reason: 'No planned property of this element could be read, and its existence says nothing about them.' })
@@ -390,8 +405,9 @@ function contractHolds(route: PlanAppRouteDetail, symbol: string): boolean {
 const NO_DETAIL: PlanAppUnreadable = { unreadable: 'the application state was loaded without detail' }
 
 /**
- * `readings` are what the approval of the plan's current hash recorded; absent (a draft, or an
- * approval that recorded none), no match of an `alter` property counts towards its completion.
+ * `readings` are what the approval of the plan's current hash recorded: `[]` for an approval that
+ * recorded none, absent where none stands. A match with no reading never counts towards an
+ * `alter`'s completion.
  */
 export function judgePlan(plan: PlanDraft, app: PlanAppState, readings?: readonly PlanPropertyReading[]): PlanStatus {
   return judgeWith(plan, app, creditAlter(readings))
@@ -428,9 +444,7 @@ function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit): Pla
     ...plan.resources.map((resource) => context.resource(resource)),
     ...plan.policies.map((policy) => context.policy(policy)),
     ...plan.sideEffects.map((effect) => context.sideEffect(effect)),
-    ...plan.commands.map((command): PlanElementStatus =>
-      conclude({ id: command.id, section: 'commands', change: { kind: 'add' }, label: command.command, exists: 'no', unjudged: 'Nothing reads whether a command has been run.' }),
-    ),
+    ...plan.commands.map((command) => context.command(command)),
   ]
   return { elements, summary: summarize(elements) }
 }
@@ -512,12 +526,14 @@ class StatusContext {
   private readonly actionKeys: Map<string, string>
   private readonly viewsById: Map<string, PlanView>
   private readonly namesById: Map<string, string>
+  private readonly reachable: ReadonlySet<string>
 
   constructor(
     private readonly plan: PlanDraft,
     private readonly app: PlanAppState,
     private readonly credit: AlterCredit,
   ) {
+    this.reachable = behaviourCanReach(plan)
     this.detail = app.detail
     this.modelsById = new Map(plan.models.map((model) => [model.id, model]))
     this.actionKeys = new Map(
@@ -528,7 +544,11 @@ class StatusContext {
   }
 
   private conclude(judgement: Judgement): PlanElementStatus {
-    return conclude(judgement, this.credit)
+    return conclude(judgement, this.credit, this.reachable)
+  }
+
+  command(command: PlanCommand): PlanElementStatus {
+    return this.conclude({ id: command.id, section: 'commands', change: { kind: 'add' }, label: command.command, exists: 'no', unjudged: 'Nothing reads whether a command has been run.' })
   }
 
   private section<K extends 'routes' | 'tables' | 'models' | 'actions' | 'controllers' | 'pages' | 'validators'>(key: K): PlanAppDetail[K] | PlanAppUnreadable {
@@ -648,20 +668,19 @@ class StatusContext {
     for (const relationship of model.relationships) {
       const property = `relationship ${relationship.name}`
       const target = this.modelsById.get(relationship.target)?.name ?? relationship.target
-      const planned = `${relationship.type} ${target}`
-      if (!actual) {
-        properties.push(unknown(property, planned, whyNoModel))
-        continue
+      // Two properties, under the same keys whatever is read, since an alter's reading at approval is
+      // keyed on them: a target written as a lazy import is one the parser cannot name, and that
+      // must not hide a relationship whose name and type it did read.
+      const targetProperty = `${property} target`
+      const found = actual?.relationships.find((candidate) => candidate.name === relationship.name)
+      if (!actual) properties.push(unknown(property, relationship.type, whyNoModel), unknown(targetProperty, target, whyNoModel))
+      else if (!found) properties.push(differ(property, relationship.type, 'not declared'), differ(targetProperty, target, 'not declared'))
+      else {
+        properties.push(
+          compare(property, relationship.type, found.type, ''),
+          compare(targetProperty, target, found.relatedModel, 'the related model is not written as a class the parser can name'),
+        )
       }
-      const found = actual.relationships.find((candidate) => candidate.name === relationship.name)
-      if (!found) {
-        properties.push(differ(property, planned, 'not declared'))
-        continue
-      }
-      // Two properties: a target written as a lazy import is one the parser cannot name,
-      // and that must not hide a relationship whose name and type it did read.
-      properties.push(compare(property, relationship.type, found.type, ''))
-      properties.push(compare(`${property} target`, target, found.relatedModel, 'the related model is not written as a class the parser can name'))
     }
 
     for (const name of model.fillable) {

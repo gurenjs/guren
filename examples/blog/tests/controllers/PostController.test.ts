@@ -1,6 +1,6 @@
 // @vitest-environment node
-// The suite default is jsdom, whose File is not a real Blob: a multipart Request
-// holding one stalls undici's formData() forever.
+// The suite default is jsdom, whose File is not the File the multipart body parser
+// produces, so this.file() would see no upload.
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
   contractInput,
