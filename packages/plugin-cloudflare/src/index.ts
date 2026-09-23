@@ -9,6 +9,9 @@ export interface CloudflarePluginConfig {}
 const factory = definePlugin<CloudflarePluginConfig>({
   name: 'cloudflare',
   register() {},
+  // Binds nothing and reads no Workers binding: `getWorkersEnv()` throws until
+  // a request captures `env`, which an introspection run never serves (RFC 0026).
+  introspect() {},
 })
 
 /** Register the Cloudflare plugin: `createApp({ providers: [cloudflarePlugin()] })`. */

@@ -2,7 +2,7 @@
 
 **Author:** 7nohe
 **Date:** 2026-09-11
-**Status:** Draft
+**Status:** Accepted (2026-09-23 — discussion window shortened, as RFC 0023/0027 were)
 
 ## Problem
 
@@ -205,6 +205,45 @@ drizzle's `getTableName()`), `CacheManager.describe()`, `StorageManager.describe
 `describeActiveAttachmentEngine()` in `@guren/core`. `perProcess` comes from the
 same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 
+> **Amended in implementation (Part 1):** the shapes above changed where the
+> code they describe differs from what the draft assumed, and each change reports
+> `null` rather than a value the manifest cannot know.
+>
+> - `entry.file` is `string | null`: `Application` does not know which file
+>   imported it, so the CLI reader fills it in and an in-process `introspect()`
+>   leaves it `null`.
+> - `ProviderEntry.source` is `'framework' | 'options.providers' | 'module' |
+>   'app.register'`. Nothing in `Application` runs `AutoDiscovery`, so
+>   `'discovered'` could never be set; `'app.register'` is a provider added
+>   through `Application.register()` after construction, which is the path an
+>   `AutoDiscovery` result takes.
+> - `DriverMapEntry.entries[*].driver` is `string | null`: `null` for an entry
+>   registered as a bare factory (`CacheManager.registerStore()`,
+>   `StorageManager.registerDisk()`, and every `QueueManager` driver, whose config
+>   is factories only).
+> - `SessionStoreEntry.driver` and `perProcess` are `null` for an
+>   `auth.sessionOptions.store` thunk, which only calling it would answer. With no
+>   manager and no explicit store, `source: 'none'` describes the in-memory store
+>   the session middleware falls back to.
+> - `AuthEntry` gains `hasher`, the one the app writes with. A provider entry is
+>   `{ kind: 'model', model, hasher }` for `useModel()` and `{ kind: 'custom',
+>   hasher: null }` for a bare `registerProvider()` factory.
+> - `AttachmentsEntry.delivery` is `{ prefix, routeName, mounted }`, and a `disks`
+>   map carries each disk's `visibility`, `route` and `serve`. RFC 0015 made the
+>   serve mode per disk, so the draft's single `mode` has no source.
+> - `MiddlewareEntry` gains `unresolved: true` for a name no alias or group
+>   registers, which `definitions()` already skips rather than throws on.
+> - Warning codes: `boot-callback-skipped`, `env-invalid` and `config-unverified`
+>   (RFC 0027 §1, collected from `ConfigServiceProvider`), `schema-partial`,
+>   `agent-tool`, `section-unreadable` (a bound manager whose construction threw)
+>   and `controller-import`.
+> - `introspect()` is terminal. A `boot()` after it refuses, since a provider may
+>   have run `introspect()` in place of `register()`, and an `introspect()` after
+>   `boot()` refuses too.
+> - The session `database` store's `table` is read through drizzle's
+>   `Symbol.for('drizzle:Name')`, the value `getTableName()` returns, because
+>   `@guren/server` must not depend on the ORM.
+
 ### 2. What introspection must not do
 
 Introspection runs user code, exactly as `load-routes.ts:141` does today; the
@@ -218,6 +257,12 @@ new exposure is `src/app.ts` and the providers' `register()` bodies. The guards:
 | Providers with eager side effects | `ServiceProvider` gains `introspect?(): void \| Promise<void>`. When present it runs *instead of* `register()` under the flag and should bind only what `describe()` needs. When absent, `register()` runs unchanged. The scaffolded providers already register thunks (`templates/scaffold/cache/.../CacheProvider.ts:8-20`, `session/config/session.ts`), and `SessionManager`, `CacheManager`, `QueueManager` resolve lazily, so none of them needs the hook. An ioredis client constructed inside `register()` without `lazyConnect` is the shape that does. |
 | A `register()` that throws | Recorded as `register: 'threw'` with the message; registration continues so the manifest still describes the rest. Every reader treats a section behind a thrown provider as unverified (§5), never as absent. |
 | A `register()` that hangs | The child has a wall-clock cap (default 30 s, `--timeout`). A timeout is a failed introspection, and Part 2's fallback applies. The child loads `.env` the way `guren dev` does and writes nothing. |
+
+> **Amended in implementation (Part 1):** `definePlugin()` gains the same
+> `introspect(container, config)` hook, passed through only when a definition
+> supplies one, so a plugin without it still runs `register()`. The
+> `provider-connected-in-register` warning needs `@guren/orm`'s connection
+> registry and lands with the §5 readers in Part 2.
 
 ### 3. Controller references and middleware resolution
 
@@ -241,6 +286,20 @@ framework's own authorization middleware gains that declaration in Part 1, a
 user's middleware may add it, and an absent value means "not determinable", which
 `guren audit` reports as it reports an unresolved alias today.
 
+> **Amended in implementation (Part 1):** identity resolution runs in the CLI's
+> introspection child, not in `@guren/server`. The child holds the app, walks
+> `app.router.registeredHandlers()`, finds controller files through the CLI's
+> `discoverControllerFiles()` and compares exports with `===`. The server would
+> otherwise restate that discovery rule and import `node:fs` from a module
+> Workers bundles. An in-process `introspect()` therefore reports every
+> controller `resolved: 'name-only'`. Middleware resolution stays in the Router,
+> as `Router.describeMiddleware()` beside `registeredHandlers()`, because the
+> alias and group maps are private to it. `ability` is not a new capability
+> field: the authorization stamp has carried `abilities` since RFC 0016 §4, so
+> `ability` is derived from it. It is the one ability of a single-ability `all`
+> check, or on a route entry the verb-map ability of a resource check whose
+> `fromMethodMap` holds.
+
 ### 4. `guren introspect --json`
 
 A new command, additive. Reads the app the way `dev` does (`resolveMainEntry()`,
@@ -261,6 +320,16 @@ reader detects it structurally, as `MaybeApplication` does for `listen()`
 (`runtime.ts:15-24`). One introspection per CLI process, memoised, shared by
 every check that asks: the same shape as `check.ts`'s `loadRouteGraph()`
 (`:168-185`) and `doctor.ts`'s `createManifestPlans()` (`:1248-1256`).
+
+> **Amended in implementation (Part 1):** the child writes its result to a temp
+> file named in its argv, never stdout, because the app's modules print there. It
+> exits explicitly afterwards, since an app may hold open handles. `old-server` is
+> checked before the entry is imported: the child resolves `@guren/core` (then
+> `@guren/server`) from the entry and checks `Application.prototype.introspect`.
+> A scaffolded `src/main.ts` boots at import, and an older server would ignore
+> the flag and run the real boot. `guren introspect` also takes `--app <dir>`
+> and `--timeout <s>`. On failure `--json` prints `{ status, reason, message }`
+> and the command exits 1.
 
 ### 5. Who reads the manifest, who stays static
 
@@ -322,6 +391,12 @@ Referencing `RFC 0026` in each PR:
    `deploy-runtime`, `session-config` and the collision half of
    `controller-methods` are rewritten to point at the manifest.
 
+> **Amended in implementation:** Part 1 landed before the §6 split, which is
+> being done as smaller extractions (`commands/make.ts`, `commands/database.ts`,
+> and the diagnostic commands). `guren introspect` lives in
+> `commands/introspect.ts` and is registered in `commands.ts` with one import
+> and one registry entry.
+
 ## Alternatives Considered
 
 **Keep static-only.** The drift tax is the numbers above: 5 fixes in 63 commits
@@ -371,30 +446,23 @@ Internal for the most part:
   untouched. Changesets: `@guren/server` minor, `@guren/core` minor,
   `@guren/cli` minor for Part 1; `@guren/cli` minor for Parts 0, 2, 3.
 
-## Open Questions
+## Decisions
 
-1. **Workers-only providers that touch bindings at `register()`.**
-   `getWorkersEnv()` throws before the first request captures `env`
-   (`packages/plugin-cloudflare/src/env.ts:27-34`), and `bootWorkersApp()` runs
-   `boot()` only after `captureWorkersEnv(env)` (`boot.ts:46-58`). A provider
-   that reads `env.DB` in `register()` therefore throws under introspection and
-   lands as `register: 'threw'`. Is a `ServiceProvider.introspect?` on the
-   plugin's own providers enough, or should `@guren/plugin-cloudflare` ship a
-   `captureWorkersEnv(stubFromWranglerConfig())` for the introspection child,
-   reading `wrangler.jsonc` the way `build.ts:521-532` already does?
-2. **Side effects at import.** `modules/*/index.ts` is imported today
-   (`load-routes.ts:109`); `src/app.ts` is the new exposure. Should `guren
-   introspect` refuse an entry whose module scope calls `listen()` (detected by
-   the throw) with a pointer to the `bin/serve.ts` shape, or report silently?
-3. **`options.boot` callback.** Skipped in §1 because it is arbitrary code over
-   Hono. An app that registers routes inside it (the pre-registrar shape) then
-   shows fewer routes under introspection than at runtime. Report a warning when
-   the callback is present, or run it and accept the exposure?
-4. **`getCookielessAuthPaths()`.** Declared in `boot()` after `mountRoutes()`
-   (`Application.ts:617-618`), so a register-stage manifest cannot list them
-   and `csrf-exemption-audit.ts` keeps its `node_modules` scan. Is a
-   `declareCookielessAuthPath()` moved to `register()` worth the ordering
-   change it would need?
-5. **Schema JSON.** `RouteEntry.schemas` is JSON Schema through the `zod-compat`
-   walker `@guren/openapi` uses. Should `route-contract-check` keep the live Zod
-   object instead, at the price of never running from a manifest file?
+The open questions were closed on acceptance:
+
+1. **Workers-only providers that touch bindings at `register()`.** Part 1 adds
+   `ServiceProvider.introspect?()` to `@guren/plugin-cloudflare`'s own provider
+   and ships no stub built from the wrangler config. A provider that throws is
+   recorded as `register: 'threw'`, and readers treat what it would have bound
+   as unverified.
+2. **Side effects at import.** The reader maps the `listen()` throw to
+   `crashed`, and the message points at the `bin/serve.ts` shape: `src/main.ts`
+   exports the app, and `bootstrapApplication()` boots it and calls `listen()`.
+   It is never reported silently.
+3. **`options.boot` callback.** Not run. When present, the manifest carries a
+   `boot-callback-skipped` warning.
+4. **`getCookielessAuthPaths()`.** The order stays as it is.
+   `csrf-exemption-audit.ts` keeps its `node_modules` scan, in Part 2 as well.
+5. **Schema JSON.** The manifest carries JSON Schema from the zod-compat walker
+   `@guren/openapi` uses, never the live Zod object. A reader that needs key
+   names (`route-contract-check`) reads them from `properties` in Part 2.

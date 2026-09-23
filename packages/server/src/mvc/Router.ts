@@ -11,6 +11,7 @@ import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../inter
 import { trimSlashes } from '../support/trim-slashes'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from '../internal/route-path'
 import { createPrototypeRouteHandler, isPrototypeHandler, type PrototypeRouteHandler } from './prototype'
+import type { MiddlewareEntry } from '../introspection/types'
 
 /** Constructor type for Controller classes. */
 export type ControllerConstructor<T extends Controller = Controller> = (new (...args: any[]) => T) & {
@@ -747,6 +748,38 @@ export class Router<in M extends string = never> {
     }))
   }
 
+  /**
+   * The handler behind each {@link definitions} entry, index-aligned with it
+   * (RFC 0026 §3): the controller class there is reduced to its name.
+   */
+  registeredHandlers(): ReadonlyArray<{ index: number; controller?: ControllerConstructor; action?: string }> {
+    return this.registry.map(({ handler }, index) =>
+      isControllerAction(handler) ? { index, controller: handler[0], action: String(handler[1]) } : { index })
+  }
+
+  /**
+   * Every alias and group resolved, and each route's chain in `mount()` order,
+   * index-aligned with {@link definitions} (RFC 0026 §3). Like `definitions()`,
+   * an unregistered name is reported rather than thrown.
+   */
+  describeMiddleware(): { aliases: Record<string, MiddlewareEntry>; routes: MiddlewareEntry[][] } {
+    const aliases: Record<string, MiddlewareEntry> = {}
+    for (const name of [...this.middlewareAliases.keys(), ...this.middlewareGroups.keys()].sort()) {
+      aliases[name] = this.describeNamedMiddleware(name)
+    }
+
+    const routes = this.registry.map((route) => [
+      ...route.routeMiddlewareNames.map((name) => this.describeNamedMiddleware(name)),
+      ...[...route.scopedMiddlewares, ...route.middlewares].map((handler): MiddlewareEntry => ({
+        kind: 'inline',
+        name: handler.name || null,
+        capabilities: this.aggregateCapabilities([], [handler]),
+      })),
+    ])
+
+    return { aliases, routes }
+  }
+
   applyMiddlewareScope<T>(items: readonly MiddlewareScopeEntry[], callback: () => T): T {
     this.middlewareStack.push([...items])
     try {
@@ -867,6 +900,25 @@ export class Router<in M extends string = never> {
     for (const handler of inline) absorbStamp(capabilitiesOf(handler))
 
     return aggregated
+  }
+
+  private describeNamedMiddleware(name: string): MiddlewareEntry {
+    const capabilities = this.aggregateCapabilities([name], [])
+    if (this.middlewareGroups.has(name)) {
+      return { kind: 'group', name, members: this.expandGroup(name, new Set()), capabilities }
+    }
+    return this.middlewareAliases.has(name)
+      ? { kind: 'alias', name, capabilities }
+      : { kind: 'alias', name, capabilities, unresolved: true }
+  }
+
+  /** A group's alias names through nested groups; a cycle contributes nothing past its first visit. */
+  private expandGroup(name: string, visited: Set<string>): string[] {
+    visited.add(name)
+    return (this.middlewareGroups.get(name) ?? []).flatMap((member) => {
+      if (!this.middlewareGroups.has(member)) return [member]
+      return visited.has(member) ? [] : this.expandGroup(member, visited)
+    })
   }
 
   private resolveMiddlewareNames(names: string[], seen?: Set<string>): MiddlewareHandler[] {

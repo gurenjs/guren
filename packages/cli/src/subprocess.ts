@@ -11,6 +11,8 @@ export interface CapturedRun {
 export interface CapturedOptions {
   /** SIGKILL the child after this many milliseconds and resolve with `timedOut`. */
   timeoutMs?: number
+  /** Laid over this process's environment. */
+  env?: Readonly<Record<string, string>>
 }
 
 /** A subprocess run to completion with its output captured. `command[0]` is the executable. */
@@ -31,7 +33,7 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
     // Colour codes would end up inside findings an agent reads back.
     const child = spawn(executable, args, {
       cwd,
-      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', ...options?.env },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let stdout = ''

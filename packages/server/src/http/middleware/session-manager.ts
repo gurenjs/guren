@@ -2,6 +2,7 @@ import { resolveLazyRedisClient } from '../../redis/lazy-client'
 import { CookieSessionStore } from './cookie-session-store'
 import { RedisSessionStore } from '../../redis/RedisSessionStore'
 import { MemorySessionStore, type SessionCookieOptions, type SessionStore } from './session'
+import type { SessionEntry, SessionStoreEntry } from '../../introspection/types'
 
 export interface MemorySessionDriverOptions {
   /** Clock for expiry, injectable for tests. @default Date.now */
@@ -75,6 +76,13 @@ export type SessionDriverFactory<O = unknown> = (options: O) => SessionStore
 /** A store that can sweep expired rows; `pruneExpired()` calls it where present. */
 interface PrunableSessionStore extends SessionStore {
   deleteExpired(now?: Date): Promise<void>
+}
+
+/** drizzle's `getTableName()`, read through its registry symbol: server must not depend on the ORM. */
+function drizzleTableName(table: unknown): string | undefined {
+  if (!table || typeof table !== 'object') return undefined
+  const name = (table as Record<symbol, unknown>)[Symbol.for('drizzle:Name')]
+  return typeof name === 'string' ? name : undefined
 }
 
 function isPrunable(store: SessionStore): store is PrunableSessionStore {
@@ -159,6 +167,22 @@ export class SessionManager {
 
   getStoreNames(): string[] {
     return Array.from(this.configs.keys())
+  }
+
+  /** The declared stores and the default, building none of them (RFC 0026 §1). */
+  describe(): Omit<SessionEntry, 'source'> {
+    const stores: Record<string, SessionStoreEntry> = {}
+    for (const [name, config] of this.configs) {
+      // Widened: `database` is core's augmentation, absent from server's own view of the union.
+      const driver: string = config.driver
+      const table = driver === 'database' ? drizzleTableName((config as { table?: unknown }).table) : undefined
+      stores[name] = {
+        driver,
+        ...(table === undefined ? {} : { table }),
+        perProcess: PER_PROCESS_SESSION_DRIVERS.has(driver),
+      }
+    }
+    return { default: this.defaultStoreName, stores }
   }
 
   /**
