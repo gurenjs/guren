@@ -117,6 +117,29 @@ describe('registerRootPublicAssets serving opt-in script and style assets', () =
   })
 })
 
+// Workers Static Assets serve public/fonts/ in production, so dev and preview
+// must too, or a self-hosted @font-face works only once deployed.
+describe('registerRootPublicAssets serving self-hosted fonts', () => {
+  const fixture = useAssetFixture('guren-public-assets-fonts-')
+
+  it.each([
+    ['inter.woff2', 'font/woff2'],
+    ['inter.woff', 'font/woff'],
+    ['inter.ttf', 'font/ttf'],
+    ['inter.otf', 'font/otf'],
+  ])('serves public/fonts/%s as %s with the default config', async (file, contentType) => {
+    await fixture.write(`public/fonts/${file}`, 'font bytes')
+    const app = new Application()
+    registerRootPublicAssets(app, fixture.path('public'))
+
+    const response = await app.fetch(new Request(`http://example.com/fonts/${file}`))
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Content-Type')).toBe(contentType)
+    expect(response.headers.get('Content-Disposition')).toBeNull()
+  })
+})
+
 describe('registerRootPublicAssets with a public directory reached through a symlink', () => {
   const fixture = useAssetFixture('guren-public-assets-linked-')
   let app: Application
