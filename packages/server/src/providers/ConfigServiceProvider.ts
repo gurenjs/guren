@@ -4,7 +4,6 @@ import type { AppEnv, EnvSource } from '../config/env'
 import { recordEnvReads } from '../config/env-reads'
 import type { Application, ConfiguredDefinition } from '../http/Application'
 import { warnOnce } from '../support/warn-once'
-import { isIntrospecting } from '../introspection/flag'
 import type { ManifestWarning } from '../introspection/types'
 
 interface ResolvedDefinition {
@@ -71,7 +70,7 @@ export class ConfigServiceProvider extends ServiceProvider {
     }
   }
 
-  /** @internal What the manifest reports under GUREN_INTROSPECT=1 (RFC 0027 §1): env problems and configs left unbound. */
+  /** @internal Env problems reported under introspection, and configs left unbound, for the manifest (RFC 0027 §1). */
   manifestWarnings(): ReadonlyArray<ManifestWarning> {
     return this.warnings
   }
@@ -88,10 +87,10 @@ export class ConfigServiceProvider extends ServiceProvider {
 
     const source = this.container.makeOptional<EnvSource>('env.source')
     // RFC 0026's introspection child has no secrets; it reports rather than failing the manifest.
-    const parsed = schema.parse(source, { mode: isIntrospecting() ? 'report' : 'throw' })
+    const parsed = schema.parse(source, { mode: app.introspecting ? 'report' : 'throw' })
 
     for (const problem of parsed.problems) {
-      warnOnce(`env-invalid:${problem.key}`, `[guren] Invalid environment: ${problem.key} ${problem.message} (reported under GUREN_INTROSPECT=1).`)
+      warnOnce(`env-invalid:${problem.key}`, `[guren] Invalid environment: ${problem.key} ${problem.message} (reported under introspection).`)
       this.warnings.push({ code: 'env-invalid', message: `${problem.key} ${problem.message}` })
     }
 

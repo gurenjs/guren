@@ -24,7 +24,7 @@ export interface AppManifest {
   warnings: ManifestWarning[]
 }
 
-/** How a provider was registered. `app.register` is `Application.register()` after construction, the path an `AutoDiscovery` result takes. */
+/** How a provider was registered. `app.register` is a provider added through `Application.register()` after construction. */
 export type ProviderSource = 'framework' | 'options.providers' | 'module' | 'app.register'
 
 /** `skipped` is a deferred provider: it registers on the first `make()` after boot, which introspection never reaches. */
@@ -44,7 +44,9 @@ export interface ProviderEntry {
 export interface ModuleEntry {
   name: string
   prefix?: string
+  /** Class names, like `ProviderEntry.name`. */
   providers: string[]
+  /** Class names; the console keys a command by the name in its `signature`. */
   commands: string[]
   routeCount: number
 }
@@ -68,6 +70,8 @@ export interface MiddlewareEntry {
   capabilities: MiddlewareCapabilities
   /** A name no alias or group registers; `mount()` refuses it. */
   unresolved?: true
+  /** A group's members no alias registers, which `mount()` refuses the same way. */
+  unresolvedMembers?: string[]
 }
 
 export type JsonSchema = JsonSchemaObject

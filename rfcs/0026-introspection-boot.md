@@ -215,8 +215,7 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 > - `ProviderEntry.source` is `'framework' | 'options.providers' | 'module' |
 >   'app.register'`. Nothing in `Application` runs `AutoDiscovery`, so
 >   `'discovered'` could never be set; `'app.register'` is a provider added
->   through `Application.register()` after construction, which is the path an
->   `AutoDiscovery` result takes.
+>   through `Application.register()` after construction.
 > - `DriverMapEntry.entries[*].driver` is `string | null`: `null` for an entry
 >   registered as a bare factory (`CacheManager.registerStore()`,
 >   `StorageManager.registerDisk()`, and every `QueueManager` driver, whose config
@@ -232,7 +231,11 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 >   map carries each disk's `visibility`, `route` and `serve`. RFC 0015 made the
 >   serve mode per disk, so the draft's single `mode` has no source.
 > - `MiddlewareEntry` gains `unresolved: true` for a name no alias or group
->   registers, which `definitions()` already skips rather than throws on.
+>   registers, which `definitions()` already skips rather than throws on, and a
+>   group entry gains `unresolvedMembers` for members no alias registers.
+> - `Application.introspecting` is true while `introspect()` runs as well as
+>   under the flag, so an in-process `introspect()` reports env problems the
+>   way a CLI run does instead of recording `ConfigServiceProvider` as `threw`.
 > - Warning codes: `boot-callback-skipped`, `env-invalid` and `config-unverified`
 >   (RFC 0027 §1, collected from `ConfigServiceProvider`), `schema-partial`,
 >   `agent-tool`, `section-unreadable` (a bound manager whose construction threw),
@@ -242,7 +245,7 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 >   falls back to `source: 'none'`.
 > - `introspect()` is terminal. A `boot()` after it refuses, since a provider may
 >   have run `introspect()` in place of `register()`, and an `introspect()` after
->   `boot()` refuses too.
+>   `boot()` refuses too, including a boot that failed part way.
 > - The session `database` store's `table` is read through drizzle's
 >   `Symbol.for('drizzle:Name')`, the value `getTableName()` returns, because
 >   `@guren/server` must not depend on the ORM.

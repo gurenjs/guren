@@ -158,6 +158,13 @@ describe('Application.introspect()', () => {
     await expect(app.boot()).rejects.toThrow('This application was introspected')
   })
 
+  test('refuses to introspect an app whose boot failed part way', async () => {
+    const app = createApp({ boot: () => { throw new Error('boot callback failed') } })
+    await expect(app.boot()).rejects.toThrow('boot callback failed')
+
+    await expect(app.introspect()).rejects.toThrow('Cannot introspect an application that has booted')
+  })
+
   test('refuses to introspect an app that booted', async () => {
     const app = createApp()
     await app.boot()
@@ -207,6 +214,17 @@ describe('Application.introspect()', () => {
     expect(destroy?.middleware[0]).toMatchObject({ kind: 'inline', capabilities: { authorization: { resource: { fromMethodMap: true } } } })
   })
 
+  test('names the members of a group that no alias registers', () => {
+    const app = createApp()
+    const router = app.router.aliasMiddleware('auth', requireAuthenticated()).groupMiddleware('web', ['auth', 'missing' as 'auth'])
+    router.middleware('web').group((web) => {
+      web.get('/x', () => 'x')
+    })
+
+    expect(app.router.describeMiddleware().aliases.web).toMatchObject({ members: ['auth', 'missing'], unresolvedMembers: ['missing'] })
+    expect(app.router.describeMiddleware().aliases.auth?.unresolved).toBeUndefined()
+  })
+
   test('reports a middleware name nothing registers instead of throwing', () => {
     const app = createApp()
     app.router.middleware('missing' as never).group((router) => {
@@ -247,6 +265,20 @@ describe('Application.introspect()', () => {
     expect(manifest.agentTools.map((tool) => tool.toolName)).toEqual(['posts.index'])
   })
 
+  test('reports env problems in process too, instead of recording the config provider as thrown', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const app = createApp({ env: defineEnv({ RFC26_IN_PROCESS_KEY: Env.string() }) })
+
+      const manifest = await withEnv({ GUREN_INTROSPECT: undefined, RFC26_IN_PROCESS_KEY: undefined }, () => app.introspect())
+
+      expect(manifest.providers.find((provider) => provider.name === 'ConfigServiceProvider')?.register).toBe('ran')
+      expect(manifest.warnings).toContainEqual({ code: 'env-invalid', message: 'RFC26_IN_PROCESS_KEY required, not set', provider: 'ConfigServiceProvider' })
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   test('turns env problems and configs left unbound into manifest warnings (RFC 0027 §1)', async () => {
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
     const app = createApp({
@@ -285,7 +317,12 @@ describe('GUREN_INTROSPECT=1', () => {
   test('makes listen() throw with a code a reader can match across server copies', async () => {
     const app = createApp()
 
-    const error = await withEnv({ GUREN_INTROSPECT: '1' }, () => app.listen({ port: 0 }).then(() => undefined, (caught: unknown) => caught))
+    let error: unknown
+    try {
+      error = await withEnv({ GUREN_INTROSPECT: '1' }, () => app.listen({ port: 0, vite: false }).then(() => undefined, (caught: unknown) => caught))
+    } finally {
+      await app.stop(true)
+    }
 
     expect(error).toMatchObject({ code: 'GUREN_INTROSPECT_LISTEN' })
     expect(String(error)).toContain('GUREN_INTROSPECT=1')

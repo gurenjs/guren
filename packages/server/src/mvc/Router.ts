@@ -910,14 +910,16 @@ export class Router<in M extends string = never> {
   private describeNamedMiddleware(name: string): MiddlewareEntry {
     const capabilities = this.aggregateCapabilities([name], [])
     if (this.middlewareGroups.has(name)) {
-      return { kind: 'group', name, members: this.expandGroup(name, new Set()), capabilities }
+      const members = this.expandGroup(name, new Set())
+      const unresolved = members.filter((member) => !this.middlewareAliases.has(member))
+      return { kind: 'group', name, members, capabilities, ...(unresolved.length > 0 ? { unresolvedMembers: unresolved } : {}) }
     }
     return this.middlewareAliases.has(name)
       ? { kind: 'alias', name, capabilities }
       : { kind: 'alias', name, capabilities, unresolved: true }
   }
 
-  /** A group's alias names through nested groups; a cycle contributes nothing past its first visit. */
+  /** A group's alias names through nested groups, each group expanded once whatever path reaches it. */
   private expandGroup(name: string, visited: Set<string>): string[] {
     visited.add(name)
     return (this.middlewareGroups.get(name) ?? []).flatMap((member) => {

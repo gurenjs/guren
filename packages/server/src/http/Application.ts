@@ -555,6 +555,8 @@ export class Application {
   private routesRegistered = false
   private bootPromise?: Promise<void>
   private manifestPromise?: Promise<AppManifest>
+  private bootAttempted = false
+  private introspectionRunning = false
   private readonly moduleRouteRanges: ModuleRouteRange[] = []
 
   constructor(private readonly options: ApplicationOptions = {}) {
@@ -846,7 +848,8 @@ export class Application {
    * Memoised; the application cannot boot afterwards.
    */
   async introspect(): Promise<AppManifest> {
-    if (this.bootPromise) {
+    // A failed boot clears `bootPromise` but may have booted providers and run `createApp({ boot })`.
+    if (this.bootAttempted) {
       throw new Error('[guren] Cannot introspect an application that has booted: introspection describes the registered, unbooted app.')
     }
 
@@ -854,7 +857,13 @@ export class Application {
     return this.manifestPromise
   }
 
+  /** True while `introspect()` registers, so config and env report problems as they do under `GUREN_INTROSPECT=1`. */
+  get introspecting(): boolean {
+    return this.introspectionRunning || isIntrospecting()
+  }
+
   private async introspectOnce(): Promise<AppManifest> {
+    this.introspectionRunning = true
     const providers = await this.providerManager.registerAllForIntrospection()
     await this.mountRoutes()
     return buildAppManifest({
@@ -869,6 +878,7 @@ export class Application {
   }
 
   private async bootOnce(): Promise<void> {
+    this.bootAttempted = true
     if (this.options.hostAuthorization !== undefined && this.hasHttpConfig()) {
       throw new Error(
         '[guren] Host authorization is configured twice: createApp({ hostAuthorization }) and config/http.ts. Keep one.',

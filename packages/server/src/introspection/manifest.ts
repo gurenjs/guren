@@ -81,7 +81,8 @@ function describeRoutes(
     const { schemas, controller, middlewareNames, ...rest } = definition
     const label = `${definition.method} ${definition.path}`
     const entry: RouteEntry = {
-      ...rest,
+      // Undefined fields dropped, so the in-memory manifest and its JSON agree key for key.
+      ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)) as typeof rest,
       module: moduleAt(index),
       middleware: chains[index] ?? [],
       schemas: {},
