@@ -21,61 +21,47 @@ const features: Array<{ title: string; body: ReactNode }> = [
     body: (
       <>
         <Code>validateBody()</Code> throws a 422, <Code>findOrFail()</Code> a 404,{' '}
-        <Code>auth.userOrFail()</Code> a 401. You write the happy path and the framework sends the error
-        responses.
+        <Code>userOrFail()</Code> a 401.
       </>
     ),
   },
   {
     title: 'Types from route to React',
-    body: 'Codegen turns routes, page props and the API client into compile-time contracts. Rename a route and the build fails before any link to the old name ships.',
+    body: 'Routes, page props and the API client are checked at compile time.',
   },
   {
     title: 'Drizzle models, Eloquent manners',
     body: (
       <>
-        <Code>Post.where('published', true).get()</Code> runs on Drizzle ORM. Use a model for the
-        conventions and drop to SQL where you need it.
+        <Code>Post.where('published', true).get()</Code>, on top of Drizzle ORM.
       </>
     ),
   },
   {
     title: 'No API layer to babysit',
-    body: 'Inertia.js passes controller props straight to your React components, so there is no REST or GraphQL layer to write and keep in step.',
+    body: 'Inertia passes controller props straight to React.',
   },
   {
     title: 'Batteries actually included',
-    body: 'Auth, queues, mail, cache, events, scheduling, storage and i18n ship with the framework, so you do not assemble them from separate npm packages.',
+    body: 'Auth, queues, mail, cache, events, scheduling, storage and i18n.',
   },
   {
-    title: 'Agents are first-class users',
-    body: (
-      <>
-        <Code>guren context</Code> maps your app, <Code>guren check</Code> verifies that routes, controllers
-        and pages are wired together, and <Code>guren audit</Code> checks security. Every docs page is also
-        served as Markdown, so your agent reads the same docs you do.
-      </>
-    ),
+    title: 'Prototype before the backend',
+    body: 'Build the pages on fixtures, show them, then write the controllers.',
   },
 ]
 
 const agentCommands = [
-  { command: 'guren context User', detail: 'One entity: model, routes, pages, linked docs' },
-  { command: 'guren spec:generate', detail: 'ER, domain and screen views, generated from code' },
-  { command: 'guren check', detail: 'Wiring, doc links, spec freshness' },
+  { command: 'guren context User', detail: 'Everything about one entity' },
+  { command: 'guren spec:generate', detail: 'ER, domain and screen views from code' },
+  { command: 'guren check', detail: 'Wiring, doc links, spec drift' },
   { command: 'guren audit', detail: 'Validation, auth, secrets' },
 ]
 
-interface Benchmark {
-  ratio: number
-  label: string
-  detail: string
-}
-
-const benchmarks: Benchmark[] = [
-  { ratio: 2.3, label: 'SSR throughput', detail: 'Full Inertia SSR pages, same app on a Node.js MVC framework' },
-  { ratio: 3.5, label: 'JSON API throughput', detail: 'The plain JSON path, same-app comparison' },
-  { ratio: 1.8, label: 'Faster cold starts', detail: 'Process start to first response' },
+const benchmarks = [
+  { ratio: 2.3, label: 'SSR throughput' },
+  { ratio: 3.5, label: 'JSON API throughput' },
+  { ratio: 1.8, label: 'Faster cold starts' },
 ]
 
 // Agents on Guren, 2026-08-18: 20 tasks × 3 models × {bare, shipped} × 3 trials.
@@ -91,28 +77,28 @@ const deployTargets = [
   {
     name: 'Bun server',
     Icon: ServerIcon,
-    detail: 'Self-host on any VPS or container. The runtime you develop on is the one that serves production.',
+    detail: 'Any VPS or container, on the runtime you develop on.',
     href: '/docs/guides/deployment',
     command: 'bunx guren deploy --target docker',
   },
   {
     name: 'Cloudflare Workers',
     Icon: GlobeIcon,
-    detail: 'Workers + D1 at the edge, on the free plan if you like. This site is a Guren app running there.',
+    detail: 'Workers and D1 at the edge. This site runs there.',
     href: '/docs/guides/cloudflare',
     command: 'bunx guren plugin @guren/plugin-cloudflare',
   },
   {
     name: 'Vercel',
     Icon: LayersIcon,
-    detail: "One plugin sets up the build, and the app runs on Vercel's Bun runtime, the same engine you develop on.",
+    detail: "Runs on Vercel's Bun runtime.",
     href: '/docs/guides/deployment#vercel-serverless',
     command: 'bunx guren plugin @guren/plugin-vercel',
   },
   {
     name: 'AWS Lambda',
     Icon: FunctionIcon,
-    detail: 'A handler adapter and Node-compatible defaults run the same app on Lambda.',
+    detail: 'A handler adapter with Node-compatible defaults.',
     href: '/docs/guides/serverless',
     command: 'bunx guren plugin @guren/plugin-lambda',
   },
@@ -235,10 +221,9 @@ export default function Home({ codeExamples }: Props) {
                 The <span className="whitespace-nowrap">Bun-first</span> fullstack TypeScript framework.
               </h1>
               <p className="mt-7 max-w-[36rem] text-lg leading-[1.65] text-smoke">
-                Develop on Bun. Deploy to Bun, AWS Lambda, Vercel, or Cloudflare Workers. Your
-                coding agent works from the same map you do: Laravel-style conventions, type
-                safety from the route definition to the React component, and mechanical checks
-                that verify the work. Secure by default, agent-ready by default.
+                Laravel-style conventions, types from the route to the React component, and checks
+                your coding agent runs on its own work. Develop on Bun, deploy to Bun, AWS Lambda,
+                Vercel or Cloudflare Workers.
               </p>
               <div className="mt-10 flex flex-wrap items-center gap-3">
                 <Link href="/docs/guides/getting-started" className={PRIMARY_BUTTON}>
@@ -257,9 +242,8 @@ export default function Home({ codeExamples }: Props) {
               <Tick />
               <SectionHeading>Route to React, one loop</SectionHeading>
               <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">
-                A route points at a controller. The controller validates the input, queries a
-                model and returns an Inertia page, and the React component receives those props with
-                their types checked. You write no serializer and no API client in between.
+                A route points at a controller, and the controller&apos;s props reach the React
+                component type-checked. There is no API client to write.
               </p>
               <div role="tablist" aria-label="Files in the loop" className="relative mt-10">
                 <span aria-hidden className="absolute bottom-5 left-[5px] top-5 w-px bg-white/15" />
@@ -319,11 +303,8 @@ export default function Home({ codeExamples }: Props) {
                   derived where possible, declared where not, checked always
                 </p>
                 <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">
-                  One command gives an agent everything your project knows about an entity, or the
-                  whole map with verified API signatures. The spec stays current by itself: the ER,
-                  domain and screen views are generated from code, decision records link to the
-                  models they govern, and CI fails on a broken link or a view that drifted. Most
-                  mistakes are caught there, before you read the diff.
+                  Your agent reads what the project knows from the code itself, and CI fails when
+                  the wiring, docs or spec drift.
                 </p>
                 <dl className="mt-8 border-b border-white/10">
                   {agentCommands.map((c) => (
@@ -355,12 +336,8 @@ export default function Home({ codeExamples }: Props) {
                   />
                 </a>
                 <figcaption className="mt-4 text-sm leading-relaxed text-smoke">
-                  The blog example&apos;s knowledge graph, drawn from its real docs: plain Markdown
-                  ADRs that name the entities they govern in <Code>frontmatter</Code> and link to the
-                  code and to each other. Select the image to explore it. Your own docs get the same
-                  screen at{' '}
-                  <Code>/_guren/docs</Code> while you develop, and a broken link fails{' '}
-                  <Code>guren check --docs</Code> in CI.
+                  The blog example&apos;s docs graph. Your app gets the same view at{' '}
+                  <Code>/_guren/docs</Code>.
                 </figcaption>
               </figure>
             </div>
@@ -368,10 +345,8 @@ export default function Home({ codeExamples }: Props) {
             <div className="mt-16 grid grid-cols-1 gap-10 border-t border-white/10 pt-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
               <div>
                 <p className="max-w-[34rem] text-[0.9375rem] leading-[1.65] text-smoke">
-                  <em className="text-crimson-50">Agents on Guren</em> measures the effect. It runs 20
-                  bug, security and feature tasks with hidden acceptance tests on three models, with
-                  and without the harness <Code>agent:init</Code> installs: 360 runs, each published
-                  with its patch, logs and verdict.
+                  Measured on 360 runs of 20 tasks across three models, with and without the
+                  harness.
                 </p>
                 <p className="mt-4 text-sm">
                   <TextLink href="https://github.com/gurenjs/agents-on-guren" external>
@@ -419,10 +394,8 @@ export default function Home({ codeExamples }: Props) {
               <Tick />
               <SectionHeading>Fast where it counts</SectionHeading>
               <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">
-                The same spec app was built on Guren and on an equivalent Node.js MVC stack, both
-                self-hosted and benchmarked under identical conditions. The app code is held constant,
-                so the difference comes from Bun: you keep the Laravel-style architecture and change
-                the engine under it. One command reproduces every number.
+                The same app on Guren and on a Node.js MVC framework, under identical conditions.
+                The code is held constant, so the difference is Bun.
               </p>
               <p className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm">
                 <TextLink href="https://github.com/gurenjs/framework-comparison/blob/main/BENCHMARK.md" external>
@@ -443,7 +416,6 @@ export default function Home({ codeExamples }: Props) {
                   </p>
                   <div>
                     <p className="font-bold text-crimson-50">{b.label}</p>
-                    <p className="mt-1 text-sm text-smoke">{b.detail}</p>
                     <div className="mt-4 space-y-1.5" aria-label={`Guren ${b.ratio}×, Node 1×`}>
                       <div className="flex items-center gap-3">
                         <span className="h-2 flex-1 rounded-r-sm bg-gradient-to-r from-crimson-700 to-ember" />
@@ -471,8 +443,7 @@ export default function Home({ codeExamples }: Props) {
             <Tick />
             <SectionHeading>Develop on Bun. Ship where you want.</SectionHeading>
             <p className="mt-5 max-w-[40rem] text-[1.0625rem] leading-[1.65] text-smoke">
-              You develop on Bun, one toolchain for the dev server, the tests and codegen. Deploying
-              goes through an adapter: pick a target, install its plugin and ship the same app.
+              Pick a target, add its plugin, ship the same app.
             </p>
             <ul className="mt-12 border-b border-white/10">
               {deployTargets.map((t) => (
@@ -493,7 +464,7 @@ export default function Home({ codeExamples }: Props) {
                       </code>
                     </span>
                     <span className="text-sm font-semibold text-smoke transition group-hover:text-crimson-300">
-                      Deployment guide
+                      Guide
                     </span>
                   </Link>
                 </li>
@@ -513,8 +484,7 @@ export default function Home({ codeExamples }: Props) {
                 Your first app is one command away
               </h2>
               <p className="mt-5 text-lg text-smoke">
-                Guren v2 is stable. A new app starts on SQLite, with no Docker or database server to
-                set up.
+                Guren v2 is stable. New apps start on SQLite with nothing to set up.
               </p>
               <div className="mt-9">
                 <CopyCommand command="bunx create-guren-app my-app" />
@@ -540,11 +510,8 @@ export default function Home({ codeExamples }: Props) {
                 <span lang="ja" className="font-mincho text-crimson-300">
                   紅蓮
                 </span>
-                ) is Japanese for &ldquo;crimson lotus&rdquo;, the deep red of a blazing flame.
-              </p>
-              <p className="mt-3">
-                It is also a nod to where the framework comes from: Laravel&apos;s conventions,
-                re-grown in TypeScript soil. Same flower, different pond.
+) means &ldquo;crimson lotus&rdquo;: Laravel&apos;s conventions, re-grown in
+                TypeScript. Same flower, different pond.
               </p>
             </aside>
           </div>
