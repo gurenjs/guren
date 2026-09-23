@@ -11,11 +11,12 @@ let cached: string | undefined
  * `bun x guren` hits the npm registry, where the package does not exist.
  */
 export function cliEntry(): string {
-  if (cached) return cached
+  cached ??= siblingEntry('bin') ?? fileURLToPath(import.meta.resolve('@guren/cli/bin'))
+  return cached
+}
+
+/** `<name>.js` beside this module in dist, `<name>.ts` beside it from source; undefined when neither exists. */
+export function siblingEntry(name: string): string | undefined {
   const here = dirname(fileURLToPath(import.meta.url))
-  for (const name of ['bin.js', 'bin.ts']) {
-    const candidate = join(here, name)
-    if (existsSync(candidate)) return (cached = candidate)
-  }
-  return (cached = fileURLToPath(import.meta.resolve('@guren/cli/bin')))
+  return [`${name}.js`, `${name}.ts`].map((file) => join(here, file)).find((candidate) => existsSync(candidate))
 }

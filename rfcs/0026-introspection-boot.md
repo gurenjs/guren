@@ -334,7 +334,12 @@ user's middleware may add it, and an absent value means "not determinable", whic
 > **Amended in implementation (Part 1):** identity resolution runs in the CLI's
 > introspection child, not in `@guren/server`. The child holds the app, walks
 > `app.router.registeredHandlers()`, finds controller files through the CLI's
-> `discoverControllerFiles()` and compares exports with `===`. The server would
+> `discoverControllerFiles()` and compares exports with `===`. A routed class
+> that `@guren/core` or `@guren/server` exports (core's delivery controller)
+> stays `name-only` and is not searched for. The child imports the app files
+> named after a routed class first, and every other controller file only while
+> an app class is still unmatched: an unrouted controller's module scope runs
+> then, and a timeout there names the file it was importing. The server would
 > otherwise restate that discovery rule and import `node:fs` from a module
 > Workers bundles. An in-process `introspect()` therefore reports every
 > controller `resolved: 'name-only'`. Middleware resolution stays in the Router,
@@ -375,8 +380,22 @@ every check that asks: the same shape as `check.ts`'s `loadRouteGraph()`
 > `@guren/server`) from the entry and checks `Application.prototype.introspect`.
 > A scaffolded `src/main.ts` boots at import, and an older server would ignore
 > the flag and run the real boot. `guren introspect` also takes `--app <dir>`
-> and `--timeout <s>`. On failure `--json` prints `{ status, reason, message }`
-> and the command exits 1.
+> and `--timeout <s>`. The child runs in its own process group, killed on
+> timeout, once it exits, and on SIGINT/SIGTERM/SIGHUP to the CLI. The CLI holds
+> the child's stdin open, and the child kills its group when that pipe ends, so
+> a helper a `register()` started outlives no death of the CLI, SIGKILL included.
+> The child resolves `@guren/core`, then `@guren/server`, the way the entry does
+> (ESM conditions): a module that resolves but will not load is `crashed`, and so
+> is neither resolving; an old one is `old-server`. Whether a `listen()` call came
+> from the entry or from a scanned controller file is recorded when it is made,
+> by wrapping `Application.prototype.listen` on that module, not inferred from
+> when its rejection arrives: only the entry's `listen()` refusal is `crashed`.
+> When no provider binds `attachments`, the child reads core's
+> `describeActiveAttachmentEngine()`, the documented fallback the server cannot
+> reach. On failure `--json` prints `{ status, reason, message }`
+> and the command exits 1. An unhandled rejection other than the entry's
+> `listen()` refusal becomes an `unhandled-rejection` warning on an otherwise
+> `ok` manifest.
 
 ### 5. Who reads the manifest, who stays static
 

@@ -197,6 +197,7 @@ Validate your app before shipping. These commands are also designed for AI codin
 | `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus the durable-agent registry in `config/agents.ts`, in-process agents' `appTools()` names and scopes, deferred Inertia props (a `defer()` passed for a prop the page's `Props` declares as required, advisory), doc links, spec-view freshness, architecture boundaries, and (for an app that declares a deploy plugin or the Lambda adapter) the deploy-runtime verdicts `guren doctor` reports, as advisory results | `bunx guren check --json` |
 | `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package, and in-process agents' local tools | `bunx guren audit --json` |
 | `gate` | Every verification stage the scaffolded CI runs — codegen, typecheck, lint, `check` (the `--ci` rule), `audit`, tests — reported together; exits non-zero if any stage fails, and a stage that cannot run fails rather than skips | `bunx guren gate --changed` |
+| `introspect` | Registers the app's providers and routes without booting or listening, then prints the manifest: providers and how each registered, routes with resolved middleware and controller files, and the session, auth, cache, storage, queue and attachments configuration | `bunx guren introspect --json` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
 | `context [Entity]` | Project context map — or, with an entity name, everything about one model: table, relationships, `fillable`/`hidden`/`visible`/`casts`, routes with schemas (matched by `<Entity>Controller`, a `bind` naming the model, or an action body that uses it), pages with Props, resource, policy, linked docs and issues (`--module` disambiguates, `"app"` = project root; `--live` asks `gh` for issue state, `--repo owner/name` overrides the origin remote) | `bunx guren context User --json` |
 | `docs:graph` | The OKF docs relation graph: documents, entities, and code paths as nodes, verified relations as edges. `--entity <Model>` or `--path <file>` narrows to a neighborhood — ask "what governs this?" before renaming | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
@@ -242,6 +243,59 @@ the MCP server exposes it as `guren_gate`, and `AGENTS.md` tells other agents
 to run it before declaring a change done.
 
 Routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) are recognized as protected. Guest flows such as `/login` and `/register` are excluded from authentication checks.
+
+### Introspecting the registered app
+
+`guren introspect` answers from the application itself rather than from its
+source text. It starts a child process with `GUREN_INTROSPECT=1`, imports
+`src/main.ts`, registers every provider and every route, and stops there.
+Routes are not mounted, and provider `boot()` methods, the `createApp({ boot })`
+callback and `listen()` never run, so no port is bound and the scaffold's
+`defineDatabaseConfig()` definition, which connects in its `boot`, does not
+connect. Code that connects at module scope or in `register()` still runs. The
+child loads `.env` from the app root, as `guren dev` does, and a variable set in
+your shell wins over it. With `--app`, the current directory's `.env` files are
+loaded into the CLI as well and reach the child the same way, so they also win
+over the app's.
+
+```bash
+bunx guren introspect                 # providers, routes, services and warnings as tables
+bunx guren introspect --json          # the manifest, for tools
+bunx guren introspect --timeout 60    # allow a slow register() up to 60 seconds (default 30)
+bunx guren introspect --app ../api    # introspect another app root
+```
+
+Each provider is reported with how it registered: `ran`, `introspect-hook`
+(it defines `introspect()`, which runs in place of `register()`), `threw` (the
+message is kept and the other providers still register), or `skipped` for a
+deferred provider. A provider whose `register()` opens a connection or reads a
+runtime binding can define `introspect()` to bind only what the manifest
+describes:
+
+```ts
+import { ServiceProvider } from '@guren/core'
+import Redis from 'ioredis'
+
+export class RedisProvider extends ServiceProvider {
+  register(): void {
+    // Connects as soon as it is constructed.
+    this.container.instance('redis', new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379'))
+  }
+
+  introspect(): void {
+    // The manifest does not describe 'redis', so nothing needs binding here.
+  }
+}
+```
+
+`isIntrospecting()` is the same check for code outside a provider. Under the
+flag `app.boot()` stops after registration and `app.listen()` throws, so an
+entry that calls `listen()` while it is imported fails with a pointer to the
+`bin/serve.ts` shape. On failure `--json` prints `{ "status": "failed",
+"reason", "message" }` and the command exits 1. The reason is one of
+`no-entry`, `import`, `timeout`, `crashed` or `old-server` (an installed
+`@guren/core` from before introspection, detected before the entry is
+imported).
 
 ### Agent-exposed routes
 

@@ -196,6 +196,7 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 | `check` | ルート・コントローラ・ページ・モデル間の整合性(`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む)に加え、`config/agents.ts` の永続エージェントレジストリ・インプロセスエージェントの `appTools()` の名前とスコープ・deferred props(ページの `Props` が必須として宣言している prop に `defer()` を渡していないか。advisory)・docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
 | `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外、インプロセスエージェントのローカルツールを検査 | `bunx guren audit --json` |
 | `gate` | scaffold された CI が回す検証ステージ(codegen・typecheck・lint・`--ci` 規則の `check`・`audit`・テスト)をまとめて実行し、いずれかが失敗すれば非ゼロ exit。実行できないステージは skip ではなく失敗 | `bunx guren gate --changed` |
+| `introspect` | boot も listen もせずにアプリの provider とルートを登録し、マニフェストを出力。provider ごとの登録結果、解決済みのミドルウェアとコントローラのファイルを含むルート、session・auth・cache・storage・queue・attachments の設定を含む | `bunx guren introspect --json` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
 | `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・`fillable`/`hidden`/`visible`/`casts`・スキーマ付きルート(`<Entity>Controller`、モデルを指す `bind`、モデルを使うアクション本体のいずれかで対応付け)・Props付きページ・Resource・Policy・紐付きdocsとIssue — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート。`--live` で `gh` にIssueの状態を問い合わせ、`--repo owner/name` でoriginリモートを上書き) | `bunx guren context User --json` |
 | `docs:graph` | OKF docsのリレーショングラフ。文書・エンティティ・コードパスがノード、検証済みリレーションがエッジ。`--entity <Model>` / `--path <file>` で近傍に絞り、リネーム前に「これを統べるdocsはどれか」を照会 | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
@@ -241,6 +242,56 @@ MCP サーバは `guren_gate` ツールとして公開します。それ以外�
 完了を宣言する前に実行するよう `AGENTS.md` が指示します。
 
 名前付きミドルウェアで保護されたルート(例: `router.middleware('auth').group(...)`)は保護済みと認識されます。`/login` や `/register` などのゲストフローは認証チェックの対象外です。
+
+### 登録済みアプリのイントロスペクション
+
+`guren introspect` はアプリ自身から答えを得ます。ソースコードの文面は読みません。
+`GUREN_INTROSPECT=1` を付けた子プロセスで `src/main.ts` を import し、すべての
+provider とすべてのルートを登録したところで止まります。ルートはマウントしません。
+provider の `boot()`、`createApp({ boot })` のコールバック、`listen()` は実行されないので、
+ポートは使わず、`boot` で接続する scaffold の `defineDatabaseConfig()` の定義も接続しません。
+モジュールスコープや `register()` で接続するコードは実行されます。子プロセスは
+`guren dev` と同じくアプリのルートにある `.env` を読み込み、シェルで設定された
+変数はそれより優先されます。`--app` を使う場合は、カレントディレクトリの `.env`
+ファイルも CLI に読み込まれて同じ経路で子プロセスに渡るため、これもアプリの
+`.env` より優先されます。
+
+```bash
+bunx guren introspect                 # provider・ルート・サービス・警告を表で表示
+bunx guren introspect --json          # ツール向けのマニフェスト
+bunx guren introspect --timeout 60    # 遅い register() を 60 秒まで待つ(既定は 30 秒)
+bunx guren introspect --app ../api    # 別のアプリのルートを調べる
+```
+
+provider にはそれぞれ登録の結果が付きます。`ran`、`introspect-hook`(`introspect()`
+を定義していて、`register()` の代わりにそれが実行された)、`threw`(メッセージが
+残り、他の provider の登録は続く)、deferred provider の `skipped` のいずれかです。
+`register()` で接続を開いたり実行時のバインディングを読んだりする provider は、
+`introspect()` を定義してマニフェストに必要なものだけをバインドできます。
+
+```ts
+import { ServiceProvider } from '@guren/core'
+import Redis from 'ioredis'
+
+export class RedisProvider extends ServiceProvider {
+  register(): void {
+    // Connects as soon as it is constructed.
+    this.container.instance('redis', new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379'))
+  }
+
+  introspect(): void {
+    // The manifest does not describe 'redis', so nothing needs binding here.
+  }
+}
+```
+
+provider の外のコードでは `isIntrospecting()` で同じ判定ができます。フラグの下では
+`app.boot()` が登録の後で止まり、`app.listen()` は例外を投げます。そのため import 中に
+`listen()` を呼ぶエントリは、`bin/serve.ts` の形を案内するメッセージとともに失敗します。
+失敗すると `--json` は `{ "status": "failed", "reason", "message" }` を出力し、終了コードは
+1 になります。reason は `no-entry`、`import`、`timeout`、`crashed`、`old-server`
+のいずれかです。`old-server` は introspection に対応する前の `@guren/core` が
+インストールされている場合で、エントリを import する前に検出します。
 
 ### エージェントに公開したルート
 

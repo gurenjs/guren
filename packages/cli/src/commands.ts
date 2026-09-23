@@ -32,6 +32,7 @@ import {
 } from './commands/make'
 import { ATTACH_ARG, FIELDS_ARG, toWriterOptions } from './commands/scaffold-options'
 import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackCommand, statusCommand } from './commands/database'
+import { introspectCommand } from './commands/introspect'
 import { assertDestructiveCommandAllowed } from './commands/destructive-guard'
 import { defineCommand, keepsProcessAlive } from './define-command'
 import { UsageError } from './run-cli'
@@ -2802,6 +2803,7 @@ export const builtinSubCommands = {
   dev: devCommand,
   'model:list': modelListCommand,
   context: contextCommand,
+  introspect: introspectCommand,
   check: checkCommand,
   audit: auditCommand,
   gate: gateCommand,
