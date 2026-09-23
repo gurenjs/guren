@@ -19,6 +19,14 @@ class AnotherEvent extends Event {
   }
 }
 
+function settleWithin<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`promise did not settle within ${ms}ms`)), ms)
+  })
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
+}
+
 describe('Event', () => {
   it('has a timestamp', () => {
     const event = new TestEvent('hello')
@@ -142,24 +150,23 @@ describe('EventManager', () => {
 
   describe('emitParallel()', () => {
     it('calls listeners in parallel', async () => {
-      const startTime = Date.now()
       const calls: number[] = []
+      const secondStarted = Promise.withResolvers<void>()
 
+      // The first listener finishes only once the second has started, so a
+      // sequential dispatch never settles and the deadline fails the test.
       events.on(TestEvent, async () => {
-        await new Promise((r) => setTimeout(r, 50))
+        await secondStarted.promise
         calls.push(1)
       })
       events.on(TestEvent, async () => {
-        await new Promise((r) => setTimeout(r, 50))
+        secondStarted.resolve()
         calls.push(2)
       })
 
-      await events.emitParallel(new TestEvent('test'))
-      const duration = Date.now() - startTime
+      await settleWithin(events.emitParallel(new TestEvent('test')), 1_000)
 
       expect(calls).toHaveLength(2)
-      // Should complete in ~50ms, not ~100ms (parallel)
-      expect(duration).toBeLessThan(100)
     })
   })
 
