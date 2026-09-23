@@ -19,10 +19,12 @@ import type { PlanAppState } from './plan/app-state'
 import { requirePlanApproval, type PlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { entityDocPath, planDocPath, renderEntityDoc, renderPlanDoc, touchedModels, type PlanCloseContext } from './plan/close-docs'
+import { describeCloseBlockers, formatCloseBlocker } from './plan/close-remedy'
 import type { PlanWaiver } from './plan/decisions'
 import { hasBaseline } from './plan/render'
 import { planSlug } from './plan/state'
-import { readPlanWaivers, whatHoldsElement } from './plan/verification'
+import { derivePlanTasks } from './plan/tasks'
+import { readPlanWaivers } from './plan/verification'
 
 export const PLAN_CLOSE_REPORT_VERSION = 1
 
@@ -92,16 +94,20 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
   }
 
   const waiverRead = await readPlanWaivers(path, plan)
-  const status = await planStatusFile(path, { app: options.app, appRoot, read, waivers: waiverRead, approval: approved })
+  const app = typeof options.app === 'function' ? await options.app() : options.app
+  const status = await planStatusFile(path, { app, appRoot, read, waivers: waiverRead, approval: approved })
   const verification = status.verification
-  const blockers = status.elements
-    .filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
-    .map((element) => `  ${element.id}: ${element.state} (${whatHoldsElement(element)})`)
+  const open = status.elements.filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
+  const blockers: string[] = []
+  if (open.length > 0) {
+    const derivation = derivePlanTasks(plan, { apiOnly: app.apiOnly })
+    blockers.push(...describeCloseBlockers(plan, derivation, open, planPath).map(formatCloseBlocker))
+  }
   if (verification?.unreadable) blockers.push(`  verification records: ${verification.unreadable}`)
   if (verification?.decisionsUnreadable) blockers.push(`  decision log: ${verification.decisionsUnreadable}`)
   if (blockers.length > 0) {
     throw new CliError(
-      `${path} is not closed: every element must be verified or waived with a reason (guren plan:waive), and these are not, each with what holds it:\n${blockers.join('\n')}`,
+      `${path} is not closed: every element must be verified or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:\n${blockers.join('\n')}`,
     )
   }
 

@@ -4,11 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { Router } from '@guren/core'
 import { Hono } from 'hono'
 
 import { extractClassDeclaration } from '../src/model-parser'
 import { ParseCache, parseSourceFile } from '../src/parse-cache'
-import { BUILDERS, REQUEST_METHODS, routePathMatches, scanTestRequests, testCoverage, type TestRequestRoute, type TestRequestScan, type TestRequestSegment } from '../src/test-requests'
+import { BUILDERS, REQUEST_METHODS, routePathCovers, routePathMatches, scanTestRequests, testCoverage, type TestRequestRoute, type TestRequestScan, type TestRequestSegment } from '../src/test-requests'
 import { writeWorkspaceFiles } from './helpers'
 
 let ROOT: string
@@ -262,6 +263,51 @@ describe('routePathMatches', () => {
 
   test('should answer unknown for a constraint it cannot compile', () => {
     expect(routePathMatches('/odd/:id{(}', literal('/odd/1'))).toBe('unknown')
+  })
+})
+
+describe('routePathCovers', () => {
+  /** Earlier route, later route, and requests the later one matches on its own. */
+  const HONO_CASES: Array<[string, string, string[]]> = [
+    ['/comments/:id', '/comments/new', ['/comments/new']],
+    ['/comments/new', '/comments/:id', ['/comments/new', '/comments/7']],
+    ['/comments/:comment', '/comments/:id', ['/comments/7']],
+    ['/comments/*', '/comments/:id', ['/comments/7']],
+    ['/posts/:id', '/posts/:id/edit', ['/posts/1/edit']],
+    ['/posts/:id{[0-9]+}', '/posts/new', ['/posts/new']],
+    ['/feed/:format?', '/feed', ['/feed']],
+    ['/feed', '/feed/:format?', ['/feed', '/feed/rss']],
+    ['/feed/:format', '/feed/:format?', ['/feed', '/feed/rss']],
+    ['/:slug', '/', ['/']],
+    ['/posts/', '/posts', ['/posts']],
+  ]
+
+  test.each(HONO_CASES)('should agree with hono on %s registered before %s', async (earlier, later, requests) => {
+    const app = new Hono()
+    app.get(earlier, (c) => c.text('earlier'))
+    app.get(later, (c) => c.text('later'))
+    const answers = await Promise.all(requests.map(async (path) => (await app.request(path)).text()))
+    expect(routePathCovers(earlier, later)).toBe(answers.every((answer) => answer === 'earlier') ? 'match' : 'none')
+  })
+
+  test('should hand every request to the first route registered through the Router, an ALL route included', async () => {
+    const router = new Router()
+    router.on('ALL', '/comments/:id', (c) => c.text('earlier'))
+    router.get('/comments/new', (c) => c.text('later'))
+    const app = new Hono()
+    router.mount(app)
+
+    expect(router.definitions().map((route) => route.method)).toEqual(['ALL', 'GET'])
+    expect(await (await app.request('/comments/new')).text()).toBe('earlier')
+    expect(routePathCovers('/comments/:id', '/comments/new')).toBe('match')
+  })
+
+  test('should answer unknown, never match or none, where a constraint or a `*` meets what it cannot compare', () => {
+    expect(routePathCovers('/posts/:id{[0-9]+}', '/posts/:slug')).toBe('unknown')
+    expect(routePathCovers('/files/:name', '/files/:path{.+}')).toBe('unknown')
+    expect(routePathCovers('/assets/:name', '/assets/*')).toBe('unknown')
+    expect(routePathCovers('/odd/:id{(}', '/odd/:slug')).toBe('unknown')
+    expect(routePathCovers('/posts/:id', '/archive/:year{[0-9]+}')).toBe('none')
   })
 })
 
