@@ -57,10 +57,6 @@ class ReadLog {
     }
   }
 
-  clear(): void {
-    this.keys.length = 0
-  }
-
   async waitFor(count: number, matches: (key: string) => boolean): Promise<void> {
     const deadline = Date.now() + 2_000
     while (this.keys.filter(matches).length < count) {
@@ -205,8 +201,6 @@ describe.each(drivers)('remember on the %s store', (_name, createStore) => {
       return { title: 'Hello' }
     }
 
-    await cache.store().tags(['posts', 'post:1']).get('post:1')
-    reads.clear()
     const callers = Array.from({ length: 5 }, () =>
       cache.store().tags(['posts', 'post:1']).remember('post:1', 60, callback),
     )
