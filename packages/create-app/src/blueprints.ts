@@ -70,6 +70,14 @@ export interface AppBlueprint {
    * own controllers, routes, and User model with the generic ones.
    */
   includesAuth?: boolean
+  /**
+   * Set when the template renders no pages: no `@guren/inertia-client` and no
+   * `routes/web.ts`, the evidence @guren/cli's `isConfirmedApiOnlyApp()` reads.
+   * `guren add auth`, `add resource` and `add prototype` refuse such an app, so
+   * the scaffolder skips `--auth`/`--prototype` and forces SPA mode.
+   * tests/api-only-mirror.test.ts pins it to the templates.
+   */
+  apiOnly?: boolean
   postScaffold?: (context: BlueprintContext) => Promise<void>
 }
 
@@ -119,6 +127,7 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
     baseTemplate: 'api-only',
     overlayTemplates: {},
     transformFiles: API_TRANSFORM_FILES,
+    apiOnly: true,
   },
   blog: {
     name: 'blog',

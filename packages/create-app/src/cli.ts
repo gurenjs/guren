@@ -335,7 +335,7 @@ const command = defineCommand({
     }
 
     const blueprint = getAppBlueprint(typeof args.blueprint === 'string' ? args.blueprint : undefined)
-    const renderingMode = blueprint.name === 'api'
+    const renderingMode = blueprint.apiOnly
       ? 'spa'
       : await resolveRenderingMode(args.mode)
     const database = await resolveDatabase(args.db)
@@ -354,15 +354,17 @@ const command = defineCommand({
       await updateSsrPackageJson(targetDir)
     }
 
-    if (args.auth && blueprint.includesAuth) {
-      consola.info(`The ${blueprint.name} blueprint already ships authentication — ignoring --auth.`)
-    } else if (args.auth && blueprint.name === 'api') {
-      // `guren add auth` refuses an API-only app, since its scaffold renders
-      // Inertia sign-in pages. The alternative is the one @guren/cli's
-      // make-auth.ts names in that refusal.
-      consola.info('The api blueprint has no pages to sign in on — ignoring --auth. Guard routes/api.ts with createBearerTokenMiddleware from @guren/core instead.')
+    let includeAuth = false
+    if (args.auth) {
+      if (blueprint.includesAuth) {
+        consola.info(`The ${blueprint.name} blueprint already ships authentication — ignoring --auth.`)
+      } else if (blueprint.apiOnly) {
+        // Carries the `instead` of make-auth.ts's API-only refusal in @guren/cli.
+        consola.info(`The ${blueprint.name} blueprint has no pages to sign in on — ignoring --auth. Guard routes/api.ts with createBearerTokenMiddleware from @guren/core instead: https://guren.dev/docs/guides/api-tokens`)
+      } else {
+        includeAuth = true
+      }
     }
-    const includeAuth = Boolean(args.auth) && !blueprint.includesAuth && blueprint.name !== 'api'
 
     const shouldInstall = args.install !== false
     let installed = false
@@ -370,7 +372,7 @@ const command = defineCommand({
       installed = await installDependencies(targetDir)
     }
 
-    if (args.prototype && blueprint.name !== 'api') {
+    if (args.prototype && !blueprint.apiOnly) {
       let prototypeInstalled = false
       if (installed) {
         consola.start('Installing prototype mode...')
@@ -383,7 +385,7 @@ const command = defineCommand({
         consola.warn('Prototype mode was not installed automatically. Run `bunx guren add prototype` inside the app after installing dependencies.')
       }
     } else if (args.prototype) {
-      consola.info('The api blueprint has no pages to prototype — ignoring --prototype.')
+      consola.info(`The ${blueprint.name} blueprint has no pages to prototype — ignoring --prototype.`)
     }
 
     if (agents === null) {
@@ -443,12 +445,9 @@ const command = defineCommand({
     }
     consola.log('')
     consola.info('Add features:')
-    if (blueprint.name === 'api') {
-      // `guren add auth` and `guren add resource` refuse an API-only app, and
-      // `make:controller` writes a JSON controller there, which is what the
-      // add resource refusal in @guren/cli's make-feature.ts suggests instead.
-      consola.log('  bunx guren make:controller Post')
-      consola.log('  Then register its actions in routes/api.ts.')
+    if (blueprint.apiOnly) {
+      // Mirrors API_ONLY_FEATURE_ALTERNATIVE in @guren/cli's make-feature.ts.
+      consola.log('  bunx guren make:controller Post  # then register its actions in routes/api.ts')
     } else {
       if (!blueprint.includesAuth && !authInstalled) {
         consola.log('  bunx guren add auth')
