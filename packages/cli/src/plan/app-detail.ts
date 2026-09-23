@@ -281,6 +281,7 @@ function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: num
   const route = routes[index]!
   const scope = input.provenance[index] ?? null
   const routeMethod = route.method.toUpperCase()
+  const self = `${routeMethod} ${route.path}`
   const site = (candidate: ContextRoute, otherScope: string | null): string =>
     `${candidate.method.toUpperCase()} ${candidate.path}${routeLabel(candidate)}, registered by ${otherScope === null ? (input.routesFile ?? 'the entry registrar') : `modules/${otherScope}`}`
   let uncertain: string | undefined
@@ -295,14 +296,16 @@ function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: num
     if (!before || (method !== routeMethod && method !== 'ALL')) continue
     const covers = routePathCovers(candidate.path, route.path)
     if (covers === 'none') continue
-    if (covers === 'match' && !acrossModules) return { unconfirmed: `${site(candidate, otherScope)}, comes first and answers every request its path matches, so none reaches it` }
+    if (covers === 'match' && !acrossModules) {
+      return { unconfirmed: `${self} is shadowed and never reached: ${site(candidate, otherScope)}, comes first and answers every request its path matches` }
+    }
     uncertain ??= acrossModules
-      ? `${site(candidate, otherScope)}, may answer its requests first: the order follows createApp({ modules }), which this does not read`
-      : `${site(candidate, otherScope)}, comes first, and whether it answers every request this path matches could not be judged`
+      ? `${self} may be shadowed by ${site(candidate, otherScope)}: two modules register in createApp({ modules }) order, which this does not read`
+      : `${self} may be shadowed by ${site(candidate, otherScope)}, which comes first: whether it answers every request this path matches could not be judged`
   }
   if (uncertain !== undefined) return { unconfirmed: uncertain }
   if (scope !== null && input.moduleWarnings.length > 0) {
-    return { unconfirmed: `a module's routes did not load, and one registered before it may answer its requests (${input.moduleWarnings.join(' ')})` }
+    return { unconfirmed: `${self} may be shadowed: a module's routes did not load, and one registered before it may answer its requests (${input.moduleWarnings.join(' ')})` }
   }
   return undefined
 }

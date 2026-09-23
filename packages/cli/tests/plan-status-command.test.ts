@@ -262,7 +262,7 @@ export function registerWebRoutes(router: Router): void {
     expect(states(result)['action.comments.store']).toBe('present')
     expect(states(result)['validator.comment']).toBe('present')
     expect(result.elements.find((element) => element.id === 'route.comments.store')!.notes).toEqual([
-      'Not confirmed as wired: POST /posts/:postId/:section ("posts.section"), registered by routes/web.ts, comes first and answers every request its path matches, so none reaches it.',
+      'Not confirmed as wired: POST /posts/:postId/comments is shadowed and never reached: POST /posts/:postId/:section ("posts.section"), registered by routes/web.ts, comes first and answers every request its path matches.',
     ])
   })
 

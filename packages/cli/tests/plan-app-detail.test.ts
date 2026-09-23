@@ -320,7 +320,7 @@ ${lines.map((line) => `  ${line}`).join('\n')}
 
     expect(shadowedOf(detail)).toEqual({
       'comments.show': undefined,
-      'comments.create': 'GET /comments/:id ("comments.show", PostController.index), registered by routes/web.ts, comes first and answers every request its path matches, so none reaches it',
+      'comments.create': 'GET /comments/new is shadowed and never reached: GET /comments/:id ("comments.show", PostController.index), registered by routes/web.ts, comes first and answers every request its path matches',
       'invoices.index': undefined,
     })
   })
@@ -340,7 +340,7 @@ ${lines.map((line) => `  ${line}`).join('\n')}
       'comments.create': undefined,
       'comments.show': undefined,
       'comments.update': undefined,
-      'comments.store': expect.stringContaining('POST /comments/:id ("comments.update")'),
+      'comments.store': expect.stringContaining('POST /comments/new is shadowed and never reached: POST /comments/:id ("comments.update")'),
       'invoices.index': undefined,
     })
   })
@@ -357,8 +357,8 @@ ${lines.map((line) => `  ${line}`).join('\n')}
     })
 
     const shadowed = shadowedOf(detail)
-    expect(shadowed['legacy.destroy']).toContain('ALL /legacy/* ("legacy"), registered by routes/web.ts, comes first and answers every request')
-    expect(shadowed['posts.slug']).toBe('GET /posts/:id{[0-9]+} ("posts.show"), registered by routes/web.ts, comes first, and whether it answers every request this path matches could not be judged')
+    expect(shadowed['legacy.destroy']).toContain('is shadowed and never reached: ALL /legacy/* ("legacy"), registered by routes/web.ts, comes first and answers every request')
+    expect(shadowed['posts.slug']).toBe('GET /posts/:slug may be shadowed by GET /posts/:id{[0-9]+} ("posts.show"), registered by routes/web.ts, which comes first: whether it answers every request this path matches could not be judged')
   })
 
   test('should put the entry registrar before every module, and never settle two modules against each other', async () => {
@@ -370,14 +370,14 @@ ${lines.map((line) => `  ${line}`).join('\n')}
 
     const shadowed = shadowedOf(detail)
     expect(shadowed.section).toBeUndefined()
-    expect(shadowed['posts.index']).toContain('GET /:section ("section"), registered by routes/web.ts, comes first and answers')
+    expect(shadowed['posts.index']).toContain('GET /posts is shadowed and never reached: GET /:section ("section"), registered by routes/web.ts, comes first and answers')
     expect(shadowed['invoices.index']).toContain('registered by routes/web.ts, comes first and answers')
     expect(shadowed['catalog.invoices']).toContain('registered by routes/web.ts, comes first and answers')
 
     const apart = await detailOf('modules-apart', { ...catalog, 'src/app.ts': entry('{ routes: registerWebRoutes, modules: [billing] }'), 'routes/web.ts': routes() })
     expect(shadowedOf(apart)).toEqual({
-      'invoices.index': 'GET /invoices ("catalog.invoices"), registered by modules/catalog, may answer its requests first: the order follows createApp({ modules }), which this does not read',
-      'catalog.invoices': 'GET /invoices ("invoices.index"), registered by modules/billing, may answer its requests first: the order follows createApp({ modules }), which this does not read',
+      'invoices.index': 'GET /invoices may be shadowed by GET /invoices ("catalog.invoices"), registered by modules/catalog: two modules register in createApp({ modules }) order, which this does not read',
+      'catalog.invoices': 'GET /invoices may be shadowed by GET /invoices ("invoices.index"), registered by modules/billing: two modules register in createApp({ modules }) order, which this does not read',
     })
   })
 
@@ -390,7 +390,7 @@ ${lines.map((line) => `  ${line}`).join('\n')}
 
     expect(shadowedOf(detail)).toEqual({
       'posts.index': undefined,
-      'invoices.index': expect.stringContaining("a module's routes did not load"),
+      'invoices.index': expect.stringContaining("GET /invoices may be shadowed: a module's routes did not load"),
     })
   })
 })

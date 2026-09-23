@@ -20,16 +20,16 @@ import { planStatusFile } from './plan-status'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
 import { planBesideExclusions } from './plan/beside'
+import { describeCloseBlockers, type CloseBlocker } from './plan/close-remedy'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
-import type { PlanElementState } from './plan/status'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
-import { hashFiles, readPlanWaivers, recordStillHolds, whatHoldsElement, type PlanWaiversRead } from './plan/verification'
+import { hashFiles, readPlanWaivers, recordStillHolds, type PlanWaiversRead } from './plan/verification'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
 
@@ -93,9 +93,9 @@ export interface PlanNextReport {
   freshnessUnreadable?: string
   /**
    * With every step verified: the elements `plan:status` still does not count as verified or
-   * waived, which `plan:close` refuses, each with what holds it. Absent while a step is left.
+   * waived, which `plan:close` refuses, each as its refusal prints it. Absent while a step is left.
    */
-  unverified?: Array<{ id: string; state: PlanElementState; holds: string }>
+  unverified?: CloseBlocker[]
   /** Set when every step is verified and the application could not be read to list `unverified`. */
   unverifiedUnreadable?: string
 }
@@ -165,15 +165,16 @@ async function stepContexts(
 async function unverifiedElements(
   path: string,
   plan: PlanDraft,
+  derivation: PlanTaskDerivation,
   root: string,
-  options: PlanNextFileOptions,
+  options: PlanNextFileOptions & { planArgument: string },
   waivers: PlanWaiversRead,
   approval: PlanApprovedStanding | undefined,
 ): Promise<Pick<PlanNextReport, 'unverified' | 'unverifiedUnreadable'>> {
   try {
     const status = await planStatusFile(path, { app: options.statusApp ?? (() => loadPlanAppState(root, { detail: true })), appRoot: root, read: { path, plan }, waivers, approval })
     const open = status.elements.filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
-    return { unverified: open.map((element) => ({ id: element.id, state: element.state, holds: whatHoldsElement(element) })) }
+    return { unverified: describeCloseBlockers(plan, derivation, open, options.planArgument) }
   } catch (error) {
     return { unverifiedUnreadable: error instanceof Error ? error.message : String(error) }
   }
@@ -265,7 +266,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     const reported = [...held, ...waiting].some((step) => step.stalled !== undefined)
     if (previous && !reported) await writePlanActiveStep(root, slug, undefined)
     if (held.length > 0 || waiting.length > 0) return { ...head, step: null }
-    return { ...head, step: null, ...(await unverifiedElements(path, plan, root, options, log, approval)) }
+    return { ...head, step: null, ...(await unverifiedElements(path, plan, derivation, root, { ...options, planArgument: planPath }, log, approval)) }
   }
   const { task, step } = next
 
@@ -400,7 +401,7 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
       lines.push(`Every step is verified. The elements were not judged, so plan:status may still list some that plan:close refuses: ${report.unverifiedUnreadable}`)
     } else if (open.length > 0) {
       lines.push('Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.')
-      for (const element of open) lines.push(`  ${element.id} (${element.state}): ${element.holds}`)
+      for (const element of open) lines.push(`  ${element.id} (${element.state})${element.holds ? `: ${element.holds}` : ''}`, `    ${element.moves}`)
     } else {
       lines.push('Every step is verified. Nothing is left to implement.')
     }

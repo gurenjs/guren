@@ -182,9 +182,15 @@ describe('plan:next', () => {
     expect(report.verified).toEqual(STEPS)
     expect((await readState(app)).active).toBeUndefined()
     // Nothing of the plan is written in this application, so plan:close would refuse every element, and says why.
-    expect(report.unverified).toContainEqual({ id: 'resource.comment', state: 'planned', holds: 'implement it, or waive it' })
+    expect(report.unverified).toContainEqual({
+      id: 'resource.comment',
+      state: 'planned',
+      moves: `Implement it, then run \`bunx guren plan:verify ${plan} --step task/entity/model.comment/http\`; or waive it: \`bunx guren plan:waive ${plan} resource.comment --reason "<why>"\``,
+    })
     const text = formatPlanNext(report, 'comments.plan.json')
-    expect(text).toContain('Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.\n  model.post (planned): The element this alters was not found; implement it, or waive it')
+    expect(text).toContain(
+      `Every step is verified, and these elements are not: plan:close refuses the plan until each is verified or waived.\n  model.post (planned): The element this alters was not found\n    Implement it, then run \`bunx guren plan:verify ${plan} --step task/entity/model.comment/data\`;`,
+    )
     expect(text).not.toContain('Nothing is left to implement')
 
     const unread = await planNextFile(plan, { appRoot: app, now: NOW, statusApp: () => Promise.reject(new Error('the schema threw')) })

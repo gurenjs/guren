@@ -1201,7 +1201,9 @@ never passed: a path with a constraint or a `*` the matcher cannot compare, two
 modules' routes (the CLI loads modules in directory order, the application in
 `createApp({ modules })` order), and a module's route while another module's
 routes did not load. A route a provider registers is not in the definitions and
-is not compared.
+is not compared. Hono answers every `HEAD` request with the `GET` route before
+routing, so a `HEAD` route is never reached whatever the order; a plan cannot
+declare one, and this is not modelled.
 
 **Amended in implementation (`plan:status`):** an element's optional `module`
 is compared, in both directions. Every discovered model, controller, action,
@@ -1766,6 +1768,8 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   fingerprinted, or none of its planned properties matched and no step's
   behaviour reaches it. The last is predicted before any run, so a reader is
   not sent to `plan:verify` only to find the element held as unreached.
+  `plan:next`, once every step is verified, lists the same lines
+  (`plan/close-remedy.ts`), so the two commands give one piece of advice.
 - "Archives the plan" is the doc node. Under the `file` store nothing is moved
   or deleted: the plan, its approvals and its decision log stay committed where
   they are, and `.guren/plans/` is left alone. No command yet refuses to work on

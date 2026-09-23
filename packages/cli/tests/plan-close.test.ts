@@ -8,7 +8,8 @@ import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { builtinSubCommands } from '../src/commands'
 import { loadDocsGraph } from '../src/docs-graph'
-import { describeCloseBlockers, planCloseFile, type PlanCloseReport } from '../src/plan-close'
+import { planCloseFile, type PlanCloseReport } from '../src/plan-close'
+import { describeCloseBlockers } from '../src/plan/close-remedy'
 import { planStatusFile } from '../src/plan-status'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { planApprovalsPath } from '../src/plan/approvals'
@@ -17,7 +18,7 @@ import { planHash } from '../src/plan/identity'
 import { PlanSchema, listPlanElements } from '../src/plan/schema'
 import { PLAN_STATE_VERSION, planDigest, planSlug, planStatePath, type PlanStepRecord } from '../src/plan/state'
 import { PLAN_STATUS_SECTIONS, summarize, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
-import { derivePlanTasks } from '../src/plan/tasks'
+import { derivePlanTasks, listPlanSteps } from '../src/plan/tasks'
 import { applyVerification, hashFiles } from '../src/plan/verification'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, planAppState, writePlanVerifyApp } from './plan-fixture'
@@ -443,7 +444,6 @@ describe('plan:close', () => {
 describe('describeCloseBlockers', () => {
   const plan = PlanSchema.parse(loadApprovedCommentsPlan())
   const derivation = derivePlanTasks(plan, { apiOnly: false })
-  const steps = derivation.tasks.flatMap((task) => task.steps)
   const DATA = 'task/entity/model.comment/data'
   const HTTP = 'task/entity/model.comment/http'
   const verify = (step: string): string => `\`bunx guren plan:verify p.json --step ${step}\``
@@ -460,7 +460,10 @@ describe('describeCloseBlockers', () => {
     files: ['app/x.ts'],
     ...extra,
   })
-  const blockerOf = (entry: PlanElementStatus): string => describeCloseBlockers(plan, steps, [entry], 'p.json')[0]!
+  const blockerOf = (entry: PlanElementStatus): string => {
+    const blocker = describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!
+    return `  ${blocker.id}: ${blocker.state}${blocker.holds ? ` (${blocker.holds})` : ''}\n    ${blocker.moves}`
+  }
 
   test('should name the command that moves each kind of hold', () => {
     const incomplete = 'Verified t by s, and no longer at the state that completes it.'
@@ -503,7 +506,7 @@ describe('describeCloseBlockers', () => {
       waived: [],
       fingerprint: { files: { 'app/x.ts': 'h' }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
     }
-    const records = Object.fromEntries(steps.map((step) => [step.id, record]))
+    const records = Object.fromEntries(listPlanSteps(derivation).map(({ step }) => [step.id, record]))
     const lift = (entry: PlanElementStatus) =>
       applyVerification({ elements: [entry], summary: summarize([entry]) }, derivation, records, 'digest', new Map([['app/x.ts', 'h']]), plan).status.elements[0]!
 
