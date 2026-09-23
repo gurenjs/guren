@@ -316,7 +316,7 @@ const agentEntry = {
 
 - **wrangler の2つの形式をどちらも受け付けます。** レガシーな `migrations[].new_sqlite_classes` のリストと、宣言的な `exports` マップ(`{ "type": "durable-object", "storage": "sqlite" }`)です。wrangler はこの2つを排他として扱うので、どちらか一方を使ってください。新規スキャフォールドは migrations 形式になります。Agents SDK がドキュメント化しているのがそちらだからです。
 - **名前付き環境はそれぞれ個別に検証されます。** `durable_objects` は `env.<name>` ブロックに継承されないので、トップレベルではクラスをホストしていて実際にデプロイする環境ではしていない、という設定もここで捕まります。
-- **`"minify": true` は拒否されます。** wrangler の minifier は識別子をリネームしますが、エージェントクラスは実行時に自分の名前で探されます。マングルされると、問題なく見えたデプロイのあとで全ツール呼び出しが "is not registered" で失敗します。
+- **`"keep_names": false` は拒否されます。** エージェントクラスは実行時に自分の名前で探されます。`keep_names` がないと esbuild がクラス名をリネームすることがあり、問題なく見えたデプロイのあとで全ツール呼び出しが "is not registered" で失敗します。この拒否はエージェントの有無にかかわらず、すべてのアプリに適用されます([Cloudflare Workers へのデプロイ](./cloudflare.md#ビルドとデプロイ))。`"minify": true` は問題ありません。wrangler は `keep_names` で無効にされない限り、minify しても名前を保ちます。
 
 ### インスタンスに誰が到達してよいか
 

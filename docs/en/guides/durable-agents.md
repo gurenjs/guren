@@ -316,7 +316,7 @@ Three details behind that:
 
 - **Both wrangler forms are accepted.** The legacy `migrations[].new_sqlite_classes` list and the declarative `exports` map (`{ "type": "durable-object", "storage": "sqlite" }`). wrangler treats them as mutually exclusive, so use one or the other; a fresh scaffold gets the migrations form, which is what the Agents SDK documents.
 - **Every named environment is verified on its own.** `durable_objects` is not inherited by an `env.<name>` block, so a config that hosts the class at the top level and not in the environment you deploy is caught here.
-- **`"minify": true` is refused.** wrangler's minifier renames identifiers, and an agent class is found at runtime by its own name — mangled, every tool call fails with "is not registered" after a deploy that looked fine.
+- **`"keep_names": false` is refused.** An agent class is found at runtime by its own name. Without `keep_names`, esbuild can rename it, and every tool call then fails with "is not registered" after a deploy that looked fine. The refusal applies to every app, agents or not ([Cloudflare Workers Deployment](./cloudflare.md#build-and-deploy)). `"minify": true` is fine: wrangler keeps names while minifying unless `keep_names` turns that off.
 
 ### Who may address an instance
 

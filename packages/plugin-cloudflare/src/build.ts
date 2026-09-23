@@ -93,6 +93,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // must not take the previous deploy output with it.
   assertOutputDirOutsideRoot(out, root, 'Cloudflare build')
   assertWranglerJsoncIsAuthoritative(root)
+  assertKeepsClassNames(root)
 
   const packageJson = readPackageJson(root)
   const mcpOAuth = options.mcpOAuth === true
@@ -508,8 +509,8 @@ function assertAgentDurableObjects(root: string, agents: AgentExport[]): string[
 
   const bindings = new Set<string>()
   // `durable_objects` is not inherited by a named environment (wrangler's schema
-  // says so), so each one is verified on its own; `minify` and the storage
-  // declarations fall back to the top level the way wrangler inherits them.
+  // says so), so each one is verified on its own; the storage declarations fall
+  // back to the top level the way wrangler inherits them.
   for (const scope of configScopes(config)) {
     assertAgentScopeHosts(configPath, scope, config, agents)
     for (const binding of registeredBindings(scope.config, agents)) {
@@ -536,7 +537,28 @@ function configScopes(config: Record<string, unknown>): ConfigScope[] {
   return scopes
 }
 
-/** One scope's verdict: mangling refused, every registered class bound and SQLite-backed. */
+/**
+ * wrangler bundles with esbuild's `keepNames: keep_names ?? true`, on deploy and in
+ * dev, so `minify` alone keeps class names and only `"keep_names": false` loses them.
+ * Every app is refused, not only one hosting agents: jobs, events and notifications
+ * are keyed by class name too. An unparseable config is reported by the scaffold step.
+ */
+function assertKeepsClassNames(root: string): void {
+  const configPath = resolve(root, 'wrangler.jsonc')
+  const config = readWranglerConfig(configPath)
+  if (!config) {
+    return
+  }
+
+  for (const scope of configScopes(config)) {
+    if ((scope.config.keep_names ?? config.keep_names) !== false) continue
+    throw new Error(
+      `Cloudflare build: ${configPath}${scope.label} sets "keep_names": false. Guren finds a durable agent by its class name, and stores queued jobs, queued events and notifications under theirs unless they pin "static jobName", "static eventName" or a "type" getter. Without keep_names, esbuild renames classes: every class under "minify", and otherwise any top-level class sharing its name with one in another module (two OrderShipped classes bundle as OrderShipped and OrderShipped2). The deploy succeeds, and records the previous deploy wrote stop resolving. Remove "keep_names" from the config (wrangler defaults it to true), or set it to true.`,
+    )
+  }
+}
+
+/** One scope's verdict: every registered class bound and SQLite-backed. */
 function assertAgentScopeHosts(
   configPath: string,
   scope: ConfigScope,
@@ -544,17 +566,6 @@ function assertAgentScopeHosts(
   agents: AgentExport[],
 ): void {
   const where = `${configPath}${scope.label}`
-
-  // An agent finds its registration by `this.constructor.name`, so wrangler's
-  // identifier mangling turns a clean deploy into "is not registered" on every
-  // tool call — the one Guren deploy target where the class-name rule fails at
-  // runtime rather than in a log line.
-  if ((scope.config.minify ?? topLevel.minify) === true) {
-    throw new Error(
-      `Cloudflare build: ${where} sets "minify": true, and this app hosts agents. wrangler's minifier renames identifiers, and an agent class is looked up by its runtime name — mangled, every tool call fails with "is not registered" after a deploy that looked fine. Remove "minify" from the config.`,
-    )
-  }
-
   const bound = new Set(registeredBindings(scope.config, agents).map((binding) => binding.class_name))
   const declaresStorage = Array.isArray(scope.config.migrations) || isRecord(scope.config.exports)
   const sqlite = sqliteBackedClasses(declaresStorage ? scope.config : topLevel)

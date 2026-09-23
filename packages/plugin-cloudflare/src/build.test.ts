@@ -706,6 +706,71 @@ describe('workers runtime configuration', () => {
   })
 })
 
+describe('class names through the wrangler bundle', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-cf-keep-names-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  // An app with no agents: jobs, events and notifications are keyed by class
+  // name too, so the refusal is not the agent registry's alone.
+  test('should refuse a config that turns keep_names off', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'wrangler.jsonc'), { name: 'legacy', main: '.cloudflare/worker.js', keep_names: false })
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /wrangler\.jsonc sets "keep_names": false/,
+    )
+  })
+
+  test('should refuse keep_names turned off in a named environment alone', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'legacy',
+      main: '.cloudflare/worker.js',
+      keep_names: true,
+      env: { production: { keep_names: false } },
+    })
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /\(env\.production\) sets "keep_names": false/,
+    )
+  })
+
+  test('should accept minify, which wrangler bundles with keepNames on unless the config turns it off', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'legacy',
+      main: '.cloudflare/worker.js',
+      minify: true,
+      keep_names: true,
+      env: { production: { minify: true } },
+    })
+
+    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
+  })
+
+  test('should refuse before the output directory is rebuilt', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'wrangler.jsonc'), { name: 'legacy', keep_names: false })
+    mkdirSync(join(root, '.cloudflare'), { recursive: true })
+    writeFileSync(join(root, '.cloudflare/worker.js'), 'previous deploy\n')
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /"keep_names": false/,
+    )
+
+    expect(readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')).toBe('previous deploy\n')
+  })
+})
+
 describe('buildCloudflareOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
   let root: string
 
