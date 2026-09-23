@@ -118,6 +118,18 @@ describe('workflow Bun pins', () => {
     expect(line(OLDEST_TESTED_BUN)).toBe(line(oldest))
   })
 
+  it('keeps bun.lock in a format every matrix version reads', () => {
+    // Measured: Bun 1.4.2 writes `lockfileVersion: 2` for a lockfile it creates from
+    // scratch (an existing v1 stays v1), and Bun 1.3.14 rejects v2 with "Unknown
+    // lockfile version". A trial lane failing its install blocks no PR, so nothing else notices.
+    const lockfileVersion = Number(/"lockfileVersion":\s*(\d+)/.exec(readFileSync(join(repoRoot, 'bun.lock'), 'utf8'))?.[1])
+    const firstMeasuredReader: Record<number, string> = { 1: '0.0.0', 2: '1.4.2' }
+
+    expect(Object.keys(firstMeasuredReader)).toContain(String(lockfileVersion))
+    const reader = firstMeasuredReader[lockfileVersion]!
+    expect(matrix.filter((version) => Bun.semver.order(version, reader) < 0)).toEqual([])
+  })
+
   it("ci.yml's own pins stay inside its matrix", () => {
     // `include:` repeats the version to attach per-version settings; one that
     // fell out of the matrix would configure a job that never runs.
