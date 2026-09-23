@@ -1,6 +1,10 @@
-import { describe, test, expect } from 'bun:test'
-import { createApp } from '@guren/core'
+import { afterEach, describe, test, expect } from 'bun:test'
+import { createApp, resetDefaultApplication } from '@guren/core'
 import { cloudflarePlugin } from './index'
+
+afterEach(() => {
+  resetDefaultApplication()
+})
 
 describe('cloudflarePlugin', () => {
   test('should return an independent provider class per call', () => {

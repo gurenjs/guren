@@ -149,7 +149,7 @@ function describeRoutes(
 function withAbility(entry: MiddlewareEntry, method?: string): MiddlewareEntry {
   const authorization = entry.capabilities.authorization
   if (!authorization) return entry
-  if (authorization.mode === 'all' && authorization.abilities.length === 1) {
+  if (authorization.mode === 'all' && authorization.abilities.length === 1 && !authorization.resource) {
     return { ...entry, ability: authorization.abilities[0]! }
   }
   if (method && authorization.abilities.length === 0 && authorization.resource?.fromMethodMap) {
@@ -161,7 +161,15 @@ function withAbility(entry: MiddlewareEntry, method?: string): MiddlewareEntry {
 
 function describeSession(sources: ManifestSources, warnings: ManifestWarning[]): SessionEntry | undefined {
   const read = readSection<Omit<SessionEntry, 'source'>>(sources, 'session', warnings)
-  if (read.status === 'described') return { source: 'manager', ...read.value }
+  if (read.status === 'described') {
+    if (sources.authOptions?.sessionOptions?.store !== undefined) {
+      warnings.push({
+        code: 'session-configured-twice',
+        message: 'A "session" binding and createApp({ auth: { sessionOptions: { store } } }) both configure sessions; the app refuses to boot until one is removed.',
+      })
+    }
+    return { source: 'manager', ...read.value }
+  }
   // Anything but a plain absence was warned about; the fallback below would contradict it.
   if (read.status !== 'absent') return undefined
 
@@ -170,15 +178,6 @@ function describeSession(sources: ManifestSources, warnings: ManifestWarning[]):
 
   const store = auth.sessionOptions?.store
   if (store === undefined) {
-    // A provider that threw may have been the one binding `session`; `none` would claim otherwise.
-    const thrown = sources.providers.filter((provider) => provider.register === 'threw')
-    if (thrown.length > 0) {
-      warnings.push({
-        code: 'section-unverified',
-        message: `"session" is unbound, and ${thrown.map((provider) => provider.name).join(', ')} threw before it could be ruled out as its provider.`,
-      })
-      return undefined
-    }
     return { source: 'none', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } }
   }
 
@@ -187,8 +186,15 @@ function describeSession(sources: ManifestSources, warnings: ManifestWarning[]):
   return {
     source: 'auth.sessionOptions.store',
     default: 'sessionOptions.store',
-    stores: { 'sessionOptions.store': { driver, perProcess: driver === null ? null : driver === 'MemorySessionStore' } },
+    stores: { 'sessionOptions.store': { driver, perProcess: driver === null ? null : PER_PROCESS_BY_STORE_CLASS[driver] ?? null } },
   }
+}
+
+/** The session store classes server ships; any other class may or may not share state across instances. */
+const PER_PROCESS_BY_STORE_CLASS: Readonly<Record<string, boolean>> = {
+  MemorySessionStore: true,
+  CookieSessionStore: false,
+  RedisSessionStore: false,
 }
 
 type SectionRead<T> = { status: 'described'; value: T } | { status: 'absent' | 'unverified' | 'unreadable' }
@@ -202,11 +208,20 @@ function readSection<T>(sources: ManifestSources, key: string, warnings: Manifes
   const { container } = sources
   if (!container.has(key)) {
     const deferred = sources.providers.find((provider) => provider.register === 'skipped' && provider.provides.includes(key))
-    if (!deferred) return { status: 'absent' }
+    if (deferred) {
+      warnings.push({
+        code: 'section-unverified',
+        message: `"${key}" is supplied by the deferred ${deferred.name}, which registers only after boot.`,
+        provider: deferred.name,
+      })
+      return { status: 'unverified' }
+    }
+    // RFC 0026 §2: a section behind a provider that threw is unverified, never absent.
+    const thrown = sources.providers.filter((provider) => provider.register === 'threw')
+    if (thrown.length === 0) return { status: 'absent' }
     warnings.push({
       code: 'section-unverified',
-      message: `"${key}" is supplied by the deferred ${deferred.name}, which registers only after boot.`,
-      provider: deferred.name,
+      message: `"${key}" is unbound, and ${thrown.map((provider) => provider.name).join(', ')} threw before it could be ruled out as its provider.`,
     })
     return { status: 'unverified' }
   }

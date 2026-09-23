@@ -243,10 +243,14 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 > - Warning codes: `boot-callback-skipped`, `env-invalid` and `config-unverified`
 >   (RFC 0027 §1, collected from `ConfigServiceProvider`), `schema-partial`,
 >   `agent-tool`, `section-unreadable` (a bound manager whose construction threw),
->   `section-unverified` and `controller-import`. `section-unverified` covers a
+>   `section-unverified`, `session-configured-twice` (a `session` binding beside
+>   `auth.sessionOptions.store`, which the app refuses at boot) and
+>   `controller-import`. `section-unverified` covers a
 >   section a deferred provider supplies, a key bound to something without
 >   `describe()`, and a session left unbound while a provider threw: none of them
->   falls back to `source: 'none'`.
+>   falls back to `source: 'none'`. A provider that threw makes every unbound
+>   section unverified, since the manifest cannot tell which key it would have
+>   bound.
 > - `introspect()` is terminal. A `boot()` after it refuses, since a provider may
 >   have run `introspect()` in place of `register()`, and an `introspect()` after
 >   `boot()` refuses too, including a boot that failed part way.

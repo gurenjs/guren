@@ -6,6 +6,7 @@ import {
   Controller,
   createApp,
   definePlugin,
+  MemorySessionStore,
   QueueManager,
   requireAuthenticated,
   ServiceProvider,
@@ -56,7 +57,7 @@ describe('manager sections (RFC 0026 §1)', () => {
     expect(manifest.cache).toEqual({ default: 'redis', entries: { redis: { driver: 'redis' }, custom: { driver: null } } })
     expect(manifest.storage).toEqual({ default: 'media', entries: { media: { driver: 'memory' } } })
     expect(manifest.queue).toEqual({ default: 'sync', entries: { sync: { driver: null } } })
-    expect(manifest.auth).toMatchObject({ guards: ['web'], defaultGuard: 'web', hasher: 'DefaultHasher', providers: {} })
+    expect(manifest.auth).toEqual({ guards: ['web'], defaultGuard: 'web', hasher: 'DefaultHasher', providers: {} })
     expect(manifest.attachments).toBeUndefined()
   })
 
@@ -83,6 +84,30 @@ describe('manager sections (RFC 0026 §1)', () => {
     expect(deferred.warnings).toContainEqual(expect.objectContaining({ code: 'section-unverified', provider: 'DeferredSessionProvider' }))
     expect(thrown.session).toBeUndefined()
     expect(thrown.warnings.find((warning) => warning.code === 'section-unverified')?.message).toContain('ThrowingProvider')
+    expect(thrown.warnings.map((warning) => warning.message)).toContainEqual(expect.stringContaining('"cache" is unbound'))
+  })
+
+  test('warns when a session binding and an explicit store both configure sessions', async () => {
+    class SessionProvider extends ServiceProvider {
+      register(): void {
+        this.container.instance('session', new SessionManager())
+      }
+    }
+
+    const manifest = await createApp({ auth: { sessionOptions: { store: new MemorySessionStore() } }, providers: [SessionProvider] }).introspect()
+
+    expect(manifest.session?.source).toBe('manager')
+    expect(manifest.warnings.map((warning) => warning.code)).toContain('session-configured-twice')
+  })
+
+  test('answers perProcess only for the store classes the framework ships', async () => {
+    class InProcessStore extends MemorySessionStore {}
+
+    const shipped = await createApp({ auth: { sessionOptions: { store: new MemorySessionStore() } } }).introspect()
+    const custom = await createApp({ auth: { sessionOptions: { store: new InProcessStore() } } }).introspect()
+
+    expect(shipped.session?.stores['sessionOptions.store']).toEqual({ driver: 'MemorySessionStore', perProcess: true })
+    expect(custom.session?.stores['sessionOptions.store']).toEqual({ driver: 'InProcessStore', perProcess: null })
   })
 
   test('never falls back to the in-memory session when the bound manager cannot be built', async () => {
@@ -113,7 +138,9 @@ describe('ability on middleware entries', () => {
           .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
           .aliasMiddleware('can-edit', authorizeMiddleware('update-post'))
           .aliasMiddleware('can-any', authorizeMiddleware(['a', 'b']))
+          .aliasMiddleware('can-resource', authorizeResourceMiddleware(() => ({})))
           .groupMiddleware('web', ['auth', 'can-edit'])
+          .groupMiddleware('mixed', ['can-edit', 'can-resource'])
         router.delete('/posts/:id', [PostController, 'update']).middleware(authorizeResourceMiddleware(() => ({})))
       },
     })
@@ -123,6 +150,7 @@ describe('ability on middleware entries', () => {
     expect(manifest.middlewareAliases.web?.ability).toBe('update-post')
     expect(manifest.middlewareAliases['can-edit']?.ability).toBe('update-post')
     expect(manifest.middlewareAliases['can-any']?.ability).toBeUndefined()
+    expect(manifest.middlewareAliases.mixed?.ability).toBeUndefined()
     expect(manifest.middlewareAliases.auth?.ability).toBeUndefined()
     expect(manifest.routes[0]?.middleware[0]).toMatchObject({ kind: 'inline', ability: 'delete' })
   })
@@ -144,6 +172,7 @@ describe('definePlugin() introspection', () => {
     const manifest = await createApp({ providers: [plain(undefined), hooked(undefined)] }).introspect()
 
     expect(calls).toEqual(['plain:register', 'hooked:introspect'])
+    expect(manifest.bindings).toContain('hooked.plugin')
     expect(manifest.providers.find((provider) => provider.name === 'plainPluginProvider')?.register).toBe('ran')
     expect(manifest.providers.find((provider) => provider.name === 'hookedPluginProvider')?.register).toBe('introspect-hook')
   })

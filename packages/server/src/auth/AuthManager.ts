@@ -261,10 +261,9 @@ export class AuthManager implements AuthManagerContract {
 
     bindPasswordHasher(model, hasher)
 
-    this.providers.set(providerName, {
-      factory: () => new ModelUserProvider(model, defaultOptions),
-      description: { kind: 'model', model: model.name, hasher: hasher.constructor.name },
-    })
+    this.registerProvider(providerName, () => new ModelUserProvider(model, defaultOptions))
+    const entry = this.providers.get(providerName)
+    if (entry) entry.description = { kind: 'model', model: model.name, hasher: hasher.constructor.name }
 
     this.registerGuard(guardName, ({ session, manager }) => {
       const provider = manager.getProvider(providerName)
