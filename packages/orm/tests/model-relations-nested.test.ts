@@ -11,9 +11,10 @@ type UserRecord = { id: number; name: string }
 type PostRecord = { id: number; title: string; authorId: number }
 type CommentRecord = { id: number; body: string; postId: number; authorId: number }
 
-function createMultiAdapter(stores: Record<string, PlainObject[]>): ORMAdapter {
+function createMultiAdapter(stores: Record<string, PlainObject[]>, queries: string[] = []): ORMAdapter {
   return {
     async findMany<T extends PlainObject>(table: unknown, options?: FindManyOptions<T>): Promise<T[]> {
+      queries.push(String(table))
       const store = stores[String(table)] ?? []
       const { where } = options ?? {}
       const results = where
@@ -27,6 +28,7 @@ function createMultiAdapter(stores: Record<string, PlainObject[]>): ORMAdapter {
       return results.map((r) => ({ ...r })) as unknown as T[]
     },
     async findUnique<T extends PlainObject>(table: unknown, where: WhereClause<T>): Promise<T | null> {
+      queries.push(String(table))
       const store = stores[String(table)] ?? []
       const record = store.find((r) =>
         Object.entries(where as PlainObject).every(([k, v]) => r[k] === v),
@@ -54,6 +56,7 @@ function setupModels() {
   Post.hasMany('comments', Comment, 'postId', 'id')
   Post.belongsTo('author', User, 'authorId', 'id')
 
+  const queries: string[] = []
   const adapter = createMultiAdapter({
     users: [
       { id: 1, name: 'Alice' },
@@ -69,13 +72,13 @@ function setupModels() {
       { id: 101, body: 'Nice', postId: 10, authorId: 1 },
       { id: 102, body: 'Agreed', postId: 12, authorId: 1 },
     ],
-  })
+  }, queries)
 
   User.useAdapter(adapter)
   Post.useAdapter(adapter)
   Comment.useAdapter(adapter)
 
-  return { User, Post, Comment }
+  return { User, Post, Comment, queries }
 }
 
 describe('nested eager loading', () => {
@@ -182,5 +185,79 @@ describe('withCount', () => {
   it('should reject unknown relations', async () => {
     const { User } = setupModels()
     await expect(User.withCount('nope')).rejects.toThrow('unknown relation "nope"')
+  })
+})
+
+describe('relation loader boundaries', () => {
+  it('loads a shared head once while preserving both nested branches', async () => {
+    const { User, queries } = setupModels()
+    const rows = await User.with(['posts.comments', 'posts.author', 'posts'])
+    expect(queries).toEqual(['users', 'posts', 'comments', 'users'])
+    const posts = rows[0].posts as PlainObject[]
+    expect(posts[0].comments).toHaveLength(2)
+    expect(posts[0].author).toMatchObject({ name: 'Alice' })
+  })
+
+  it('dispatches through protected overrides for parent and nested loaders', async () => {
+    const { User, Post, queries } = setupModels()
+    const calls: string[] = []
+    class CustomUser extends User {
+      protected static override async loadHasMany(...args: Parameters<typeof Model.loadHasMany>): Promise<boolean> {
+        calls.push('hasMany')
+        return super.loadHasMany(...args)
+      }
+    }
+    class CustomPost extends Post {
+      protected static override async loadBelongsTo(...args: Parameters<typeof Model.loadBelongsTo>): Promise<boolean> {
+        calls.push('belongsTo')
+        return super.loadBelongsTo(...args)
+      }
+    }
+    CustomPost.belongsTo('author', User, 'authorId', 'id')
+    CustomUser.hasMany('posts', CustomPost, 'authorId', 'id')
+    const rows = await CustomUser.with('posts.author')
+    expect(rows).toHaveLength(2)
+    expect(calls).toEqual(['hasMany', 'belongsTo'])
+    expect(queries).toEqual(['users', 'posts', 'users'])
+  })
+
+  it('resolves arrow, async and function thunks as lazy model references', async () => {
+    const { User, Post, Comment } = setupModels()
+    User.hasMany('posts', () => Post, 'authorId', 'id')
+    Post.hasMany('comments', async () => Comment, 'postId', 'id')
+    Post.belongsTo('author', function () { return User }, 'authorId', 'id')
+    const rows = await User.with(['posts.comments', 'posts.author'])
+    const posts = rows[0].posts as PlainObject[]
+    expect(posts[0].comments).toHaveLength(2)
+    expect(posts[0].author).toMatchObject({ name: 'Alice' })
+  })
+
+  it('reads a belongsToMany pivot through the parent model adapter', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+    class Role extends Model<{ id: number; name: string }> {
+      static table = 'roles'
+    }
+    User.belongsToMany('roles', Role, 'role_user', 'userId', 'roleId')
+    const parentQueries: string[] = []
+    const relatedQueries: string[] = []
+    User.useAdapter(createMultiAdapter({
+      users: [{ id: 1, name: 'Alice' }],
+      role_user: [{ userId: 1, roleId: 7 }],
+    }, parentQueries))
+    Role.useAdapter(createMultiAdapter({ roles: [{ id: 7, name: 'admin' }] }, relatedQueries))
+    const rows = await User.with('roles')
+    expect(rows[0].roles).toEqual([{ id: 7, name: 'admin' }])
+    expect(parentQueries).toEqual(['users', 'role_user'])
+    expect(relatedQueries).toEqual(['roles'])
+  })
+
+  it('skips descendant queries when a scoped head has no rows', async () => {
+    const { User, Post, queries } = setupModels()
+    Post.addGlobalScope('hidden', query => query.where({ id: -1 }))
+    const rows = await User.with('posts.comments')
+    expect(rows.map(row => row.posts)).toEqual([[], []])
+    expect(queries).toEqual(['users', 'posts'])
   })
 })
