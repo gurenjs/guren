@@ -36,7 +36,7 @@ bunx wrangler deploy
 
 アプリのビルドに先立って、`guren doctor` と同じデプロイランタイムチェックが走ります。セッションや OAuth state がプロセスメモリに置かれている、[Bun でしか読めないパスワードハッシャー](/docs/guides/authentication#パスワードハッシャー)を選んでいる、プロバイダをファイルシステムから探索している、のいずれかに当たると警告を出します(ビルド自体は止まりません)。どれもローカルでは動き、Workers では壊れるものです。警告は Vite の出力の後ろではなく、まだ目を通している位置に出ます。
 
-ビルドは、トップレベルまたはいずれかの `env.<name>` ブロックで `"keep_names": false` を設定した `wrangler.jsonc` も拒否します。Guren はデプロイをまたいで残るレコードにクラス名を書き込みます。キュー投入されたジョブとイベント、保存された通知は、`static jobName`・`static eventName`・`type` ゲッターで名前を固定していなければクラス名をキーに保存されます。[永続エージェント](./durable-agents.md)もクラス名で探されます。wrangler は `keep_names` で無効にされない限り esbuild の `keepNames` を有効にしてバンドルするので、`"minify": true` だけならこれらの名前は保たれます。`keep_names` を無効にすると、minify ではすべてのクラスがリネームされます。minify しなくても、同じ名前のトップレベルクラスが2つあれば2つ目がリネームされます(`OrderShipped2`)。その結果、前回のデプロイが書き込んだレコードを解決できなくなります。
+ビルドは、トップレベルまたはいずれかの `env.<name>` ブロックで `"keep_names": false` を設定した `wrangler.jsonc` も拒否します。Guren はデプロイをまたいで残るレコードにクラス名を書き込みます。キュー投入されたジョブとイベント、保存された通知は、`static jobName`・`static eventName`・`type` ゲッターで名前を固定していなければクラス名をキーに保存されます。[永続エージェント](./durable-agents.md)もクラス名で探されます。wrangler は `keep_names` で無効にされない限り esbuild の `keepNames` を有効にしてバンドルするので、`"minify": true` だけならこれらの名前は保たれます。`keep_names` を無効にすると、minify ではすべてのクラスがリネームされます。minify しなくても、同じ名前のトップレベルクラスが 2 つあれば 2 つ目がリネームされます（`OrderShipped2`）。その結果、前回のデプロイが書き込んだレコードを解決できなくなります。
 
 ## データベース（D1）
 

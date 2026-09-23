@@ -748,7 +748,6 @@ describe('class names through the wrangler bundle', () => {
       name: 'legacy',
       main: '.cloudflare/worker.js',
       minify: true,
-      keep_names: true,
       env: { production: { minify: true } },
     })
 

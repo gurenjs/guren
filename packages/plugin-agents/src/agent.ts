@@ -356,9 +356,9 @@ export class GurenAgent<
     }
 
     // The only identity a Durable Object class carries at runtime — there is no
-    // source path to recover from a constructor. Stable in a deploy bundle by
-    // repo policy: Guren keys durable records on class names, so no deploy
-    // plugin may bundle app code with identifier mangling, and none does.
+    // source path to recover from a constructor. Stable in the worker bundle:
+    // wrangler turns on esbuild's `keepNames` unless the config sets
+    // `"keep_names": false`, which `cloudflare:build` refuses.
     const exportName = this.constructor.name
     const registration = runtime.registrations.get(exportName)
     if (!registration) {

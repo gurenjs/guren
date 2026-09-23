@@ -550,10 +550,12 @@ function assertKeepsClassNames(root: string): void {
     return
   }
 
-  for (const scope of configScopes(config)) {
-    if ((scope.config.keep_names ?? config.keep_names) !== false) continue
+  // The top level is the first scope, so an environment inheriting its `false` is
+  // refused there.
+  const refused = configScopes(config).find((scope) => scope.config.keep_names === false)
+  if (refused) {
     throw new Error(
-      `Cloudflare build: ${configPath}${scope.label} sets "keep_names": false. Guren finds a durable agent by its class name, and stores queued jobs, queued events and notifications under theirs unless they pin "static jobName", "static eventName" or a "type" getter. Without keep_names, esbuild renames classes: every class under "minify", and otherwise any top-level class sharing its name with one in another module (two OrderShipped classes bundle as OrderShipped and OrderShipped2). The deploy succeeds, and records the previous deploy wrote stop resolving. Remove "keep_names" from the config (wrangler defaults it to true), or set it to true.`,
+      `Cloudflare build: ${configPath}${refused.label} sets "keep_names": false. Guren finds a durable agent by its class name, and stores queued jobs, queued events and notifications under theirs unless they pin "static jobName", "static eventName" or a "type" getter. With keep_names off, esbuild renames classes: every class under "minify", and otherwise any top-level class sharing its name with one in another module (two OrderShipped classes bundle as OrderShipped and OrderShipped2). The deploy succeeds, and records the previous deploy wrote stop resolving. Remove "keep_names" from the config (wrangler defaults it to true), or set it to true.`,
     )
   }
 }
