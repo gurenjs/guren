@@ -222,7 +222,8 @@ export async function vendorLocalPackages(vendorRoot: string): Promise<Map<strin
 
 /**
  * The files under an installed copy's `dist/` that differ from this checkout's
- * build: missing, extra, or with other bytes.
+ * build: missing, extra, or with other bytes. Throws when this checkout has no
+ * `dist/`.
  */
 export async function distDifferences(sourceDir: string, installedDir: string): Promise<string[]> {
   const list = async (dir: string): Promise<Set<string>> =>
