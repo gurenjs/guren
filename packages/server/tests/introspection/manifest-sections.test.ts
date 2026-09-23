@@ -2,11 +2,14 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import {
   authorizeMiddleware,
   authorizeResourceMiddleware,
+  Argon2Hasher,
   CacheManager,
   Controller,
+  DefaultHasher,
   createApp,
   definePlugin,
   MemorySessionStore,
+  NodeHasher,
   QueueManager,
   requireAuthenticated,
   ServiceProvider,
@@ -25,6 +28,9 @@ class PostController extends Controller {
   }
 }
 
+/** Set by any factory `describe()` must never call. */
+const built: string[] = []
+
 class ManagersProvider extends ServiceProvider {
   register(): void {
     this.container.instance('session', new SessionManager({
@@ -35,7 +41,10 @@ class ManagersProvider extends ServiceProvider {
     cache.registerStore('custom', () => { throw new Error('built') })
     this.container.instance('cache', cache)
     const storage = new StorageManager({ default: 'media', disks: { media: { driver: 'memory' } } })
-    storage.registerDisk('vault', () => { throw new Error('built') })
+    storage.registerDisk('vault', () => {
+      built.push('storage:vault')
+      throw new Error('built')
+    })
     this.container.instance('storage', storage)
     this.container.instance('queue', new QueueManager({ default: 'sync', drivers: { sync: () => { throw new Error('resolved') } } }))
   }
@@ -49,6 +58,7 @@ class ThrowingProvider extends ServiceProvider {
 
 describe('manager sections (RFC 0026 §1)', () => {
   test('describes the managers without building a store or resolving a driver', async () => {
+    built.length = 0
     const manifest = await createApp({ providers: [ManagersProvider] }).introspect()
 
     expect(manifest.session).toEqual({
@@ -59,7 +69,8 @@ describe('manager sections (RFC 0026 §1)', () => {
     expect(manifest.cache).toEqual({ default: 'redis', entries: { redis: { driver: 'redis' }, custom: { driver: null } } })
     expect(manifest.storage).toEqual({ default: 'media', entries: { media: { driver: 'memory' }, vault: { driver: null } } })
     expect(manifest.queue).toEqual({ default: 'sync', entries: { sync: { driver: null } } })
-    expect(manifest.auth).toEqual({ guards: ['web'], defaultGuard: 'web', hasher: 'DefaultHasher', algorithm: 'scrypt', providers: {} })
+    expect(manifest.auth).toEqual({ guards: ['web'], defaultGuard: 'web', hasher: 'DefaultHasher', algorithm: 'scrypt', requiresBun: false, providers: {} })
+    expect(built).toEqual([])
     expect(manifest.attachments).toBeUndefined()
   })
 
@@ -156,8 +167,31 @@ describe('auth section', () => {
     const scrypt = await createApp({ auth: {} }).introspect()
     const argon2 = await createApp({ auth: { hasher: 'argon2' } }).introspect()
 
-    expect(scrypt.auth).toMatchObject({ hasher: 'DefaultHasher', algorithm: 'scrypt' })
-    expect(argon2.auth).toMatchObject({ hasher: 'DefaultHasher', algorithm: 'argon2' })
+    expect(scrypt.auth).toMatchObject({ hasher: 'DefaultHasher', algorithm: 'scrypt', requiresBun: false })
+    expect(argon2.auth).toMatchObject({ hasher: 'DefaultHasher', algorithm: 'argon2', requiresBun: true })
+  })
+
+  test('names the Bun-only and Node hashers by their class, and a subclass as unknown', async () => {
+    class TracingHasher extends DefaultHasher {}
+    const describe = async (hasher: unknown) => (await createApp({ auth: { hasher: hasher as never } }).introspect()).auth
+
+    expect(await describe(new NodeHasher())).toMatchObject({ hasher: 'NodeHasher', algorithm: 'scrypt', requiresBun: false })
+    expect(await describe(new Argon2Hasher())).toMatchObject({ hasher: 'ScryptHasher', algorithm: 'argon2', requiresBun: true })
+    expect(await describe(new Argon2Hasher({ algorithm: 'bcrypt' }))).toMatchObject({ algorithm: 'bcrypt', requiresBun: true })
+    expect(await describe(new TracingHasher({ algorithm: 'argon2' }))).toMatchObject({ hasher: 'TracingHasher', algorithm: null, requiresBun: null })
+  })
+
+  test('reads a custom hasher\'s algorithm as unknown, whatever fields it carries', async () => {
+    class BcryptHasher {
+      readonly algorithm = 'bcrypt'
+      async hash(value: string) { return value }
+      async verify() { return true }
+      needsRehash() { return false }
+    }
+
+    const manifest = await createApp({ auth: { hasher: new BcryptHasher() as never } }).introspect()
+
+    expect(manifest.auth).toMatchObject({ hasher: 'BcryptHasher', algorithm: null, requiresBun: null })
   })
 
   test('describes a useModel() provider and a bare registerProvider() factory without calling either', async () => {
@@ -177,8 +211,8 @@ describe('auth section', () => {
     const manifest = await createApp({ auth: { hasher: 'argon2' }, providers: [UsersProvider] }).introspect()
 
     expect(manifest.auth?.providers).toEqual({
-      users: { kind: 'model', model: 'User', hasher: 'DefaultHasher', algorithm: 'argon2' },
-      admins: { kind: 'custom', hasher: null, algorithm: null },
+      users: { kind: 'model', model: 'User', hasher: 'DefaultHasher', algorithm: 'argon2', requiresBun: true },
+      admins: { kind: 'custom', hasher: null, algorithm: null, requiresBun: null },
     })
     expect(built).toBe(false)
   })

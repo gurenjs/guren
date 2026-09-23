@@ -103,8 +103,8 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
       : rest
   }
 
-  // A route's absent `name` arrives as an `undefined` key; the copy drops it, so the
-  // in-memory manifest equals its `--json` output key for key.
+  // `undefined` keys (a route's absent `name`, for example) are dropped by the copy,
+  // so the in-memory manifest equals its `--json` output key for key.
   return toPlainJson(manifest)
 }
 

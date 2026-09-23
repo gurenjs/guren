@@ -181,7 +181,7 @@ export interface SessionEntry {
 
 export interface AuthEntry {
   guards: string[]; defaultGuard: string | null
-  providers: Record<string, { kind: string; model?: string; hasher: string }>   // hasher: constructor.name
+  providers: Record<string, { kind: string; model?: string; hasher: string }>   // hasher: constructor.name; amended below
 }
 
 export interface DriverMapEntry { default: string; entries: Record<string, { driver: string }> }
@@ -230,12 +230,16 @@ drizzle's `getTableName()`), `CacheManager.describe()`, `StorageManager.describe
 >   explicit store's class is mapped to its driver first (`MemorySessionStore` to
 >   `memory`, core's `DatabaseSessionStore` to `database`); any other class is
 >   `null`.
-> - `AuthEntry` gains `hasher`, the one the app writes with, and `algorithm`:
->   `DefaultHasher` writes scrypt or, with `hasher: 'argon2'`, Bun-only Argon2id
->   under one class name, so the class alone cannot tell them apart. A provider
->   entry is `{ kind: 'model', model, hasher, algorithm }` for `useModel()` and
->   `{ kind: 'custom', hasher: null, algorithm: null }` for a bare
->   `registerProvider()` factory. `algorithm` is null for a custom hasher.
+> - `AuthEntry` gains `hasher`, the one the app writes with, plus `algorithm`
+>   (`'scrypt' | 'argon2' | 'bcrypt' | null`) and `requiresBun` (`boolean |
+>   null`), because the class name alone hides the answer: `DefaultHasher`
+>   writes scrypt, or Bun-only Argon2id with `hasher: 'argon2'`. Both are read by
+>   exact constructor: `DefaultHasher` reports its algorithm, `NodeHasher` scrypt
+>   without Bun, `ScryptHasher` (exported as `Argon2Hasher`) Argon2id or bcrypt
+>   with Bun, and a subclass or an app's own hasher `null` for both, since it may
+>   override `hash()`. A provider entry is `{ kind: 'model', model, hasher,
+>   algorithm, requiresBun }` for `useModel()` and `{ kind: 'custom', hasher:
+>   null, algorithm: null, requiresBun: null }` for a bare `registerProvider()`.
 > - `AttachmentsEntry.delivery` is `{ prefix, routeName, mounted }`, and a `disks`
 >   map carries each disk's `visibility`, `route` and `serve`. RFC 0015 made the
 >   serve mode per disk, so the draft's single `mode` has no source.
@@ -344,8 +348,8 @@ user's middleware may add it, and an absent value means "not determinable", whic
 > field: the authorization stamp has carried `abilities` since RFC 0016 §4, so
 > `ability` is derived from it by `derivableAbility()`, the rule agent tools
 > use too. It is the one ability of a single-ability `all` stamp, or on a route
-> entry the verb-map ability of a resource stamp whose `fromMethodMap` holds and
-> that names no ability of its own. The stamp is per entry: a group's merges its
+> entry the verb-map ability of a resource stamp whose `fromMethodMap` holds,
+> whose mode is `all`, and that names no ability of its own. The stamp is per entry: a group's merges its
 > members', so a group combining a resource check with a named one has none.
 
 ### 4. `guren introspect --json`

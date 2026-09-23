@@ -11,6 +11,7 @@ import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
 import { hasBearerHeader, type ApiTokenStore } from './api-token'
 import { bindPasswordHasher, createPasswordHasher } from './password/configured-hasher'
+import { describePasswordHasher } from './password/describe-hasher'
 import type { PasswordHasher } from './password/PasswordHasher'
 import type { AuthEntry, AuthProviderEntry } from '../introspection/types'
 import type {
@@ -58,12 +59,6 @@ interface ProviderRegistryEntry<User = unknown> {
   instance?: UserProvider<User>
   /** What `describe()` reports without calling `factory`; absent for a bare `registerProvider()`. */
   description?: AuthProviderEntry
-}
-
-/** `DefaultHasher.algorithm`, read structurally so a custom `PasswordHasher` reads as unknown. */
-function hasherAlgorithm(hasher: PasswordHasher): string | null {
-  const algorithm = (hasher as { algorithm?: unknown }).algorithm
-  return typeof algorithm === 'string' ? algorithm : null
 }
 
 export class AuthManager implements AuthManagerContract {
@@ -275,7 +270,7 @@ export class AuthManager implements AuthManagerContract {
       kind: 'model',
       model: model.name,
       hasher: hasher.constructor.name,
-      algorithm: hasherAlgorithm(hasher),
+      ...describePasswordHasher(hasher),
     })
 
     this.registerGuard(guardName, ({ session, manager }) => {
@@ -353,13 +348,13 @@ export class AuthManager implements AuthManagerContract {
   describe(): AuthEntry {
     const providers: Record<string, AuthProviderEntry> = {}
     for (const [name, entry] of this.providers) {
-      providers[name] = entry.description ? { ...entry.description } : { kind: 'custom', hasher: null, algorithm: null }
+      providers[name] = entry.description ? { ...entry.description } : { kind: 'custom', hasher: null, algorithm: null, requiresBun: null }
     }
     return {
       guards: this.guardNames(),
       defaultGuard: this.defaultGuard,
       hasher: this.passwordHasher.constructor.name,
-      algorithm: hasherAlgorithm(this.passwordHasher),
+      ...describePasswordHasher(this.passwordHasher),
       providers,
     }
   }

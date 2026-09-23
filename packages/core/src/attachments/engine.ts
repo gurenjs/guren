@@ -1502,7 +1502,7 @@ export function resolveDeliveryRoute(): { prefix: string; routeName: string } {
  * The engine an `Attachable` static would use, described (RFC 0026 §1): the
  * default application's registered binding, else the one `configureAttachments()`
  * built last. A deferred provider is not activated to find out, so an engine it
- * would bind after boot is not the one described.
+ * binds at its first resolution is not the one described.
  */
 export function describeActiveAttachmentEngine(): AttachmentsDescription {
   // `has()` before `make()`: `ambientBinding()` would activate a deferred provider.
