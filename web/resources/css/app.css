@@ -100,19 +100,21 @@
    the server renders and reduced motion keeps; data-armed adds the animation
    paused at its start, and data-play runs it once. */
 .vg .vg-out { opacity: 0; }
+.vg .vg-dim { opacity: 0.35; }
+.vg .vg-draw { stroke-dasharray: 1; }
 .vg .vg-light {
   border-color: rgb(252 109 109 / 0.55);
   background-color: rgb(127 29 29 / 0.35);
 }
 
-.vg[data-armed] :is(.vg-out, .vg-in, .vg-pop, .vg-grow, .vg-reveal, .vg-slide, .vg-light) {
+.vg[data-armed] :is(.vg-out, .vg-in, .vg-pop, .vg-grow, .vg-reveal, .vg-slide, .vg-light, .vg-dim, .vg-draw) {
   animation-duration: 0.45s;
   animation-timing-function: cubic-bezier(0.3, 0.7, 0.3, 1);
   animation-fill-mode: both;
   animation-play-state: paused;
 }
 
-.vg[data-armed][data-play] :is(.vg-out, .vg-in, .vg-pop, .vg-grow, .vg-reveal, .vg-slide, .vg-light) {
+.vg[data-armed][data-play] :is(.vg-out, .vg-in, .vg-pop, .vg-grow, .vg-reveal, .vg-slide, .vg-light, .vg-dim, .vg-draw) {
   animation-play-state: running;
 }
 
@@ -121,6 +123,8 @@
 .vg[data-armed] .vg-pop { animation-name: vg-pop; }
 .vg[data-armed] .vg-grow { animation-name: vg-grow; }
 .vg[data-armed] .vg-light { animation-name: vg-light; }
+.vg[data-armed] .vg-dim { animation-name: vg-dim; }
+.vg[data-armed] .vg-draw { animation-name: vg-draw; }
 .vg[data-armed] .vg-slide { animation-name: vg-slide; animation-duration: 0.8s; }
 .vg[data-armed] .vg-reveal {
   animation-name: vg-reveal;
@@ -132,6 +136,8 @@
 @keyframes vg-in { from { opacity: 0; transform: translateY(3px); } }
 @keyframes vg-pop { from { opacity: 0; transform: scale(0.6); } }
 @keyframes vg-grow { from { transform: scaleX(0); } }
+@keyframes vg-dim { from { opacity: 1; } to { opacity: 0.35; } }
+@keyframes vg-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vg-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 @keyframes vg-slide { from { opacity: 0; transform: translateX(-5.5rem); } 25% { opacity: 1; } }
 @keyframes vg-light {

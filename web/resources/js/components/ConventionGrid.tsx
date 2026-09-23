@@ -140,31 +140,37 @@ function Batteries() {
   )
 }
 
+/** The same page fed first by the fixture, then by the controller that replaces it. */
 function PrototypeToController() {
   return (
     <Panel>
-      <div className="rounded border border-white/15 p-3">
-        <div className="mb-2.5 flex items-center justify-between text-[11px]">
-          <span className="text-smoke/70">posts/Index</span>
-          <span className="relative">
-            <span className="vg-out rounded bg-white/10 px-1.5 text-smoke" style={step(1.3)}>
+      <div className="flex items-center">
+        <div className="flex shrink-0 flex-col gap-5">
+          <span className="vg-dim block" style={step(1.75)}>
+            <span className="vg-in block rounded border border-dashed border-white/30 px-2 py-1 text-smoke" style={step(0.2)}>
               fixture
             </span>
-            <span
-              className="vg-in absolute right-0 top-0 rounded bg-crimson-900 px-1.5 text-crimson-300"
-              style={step(1.45)}
-            >
-              controller
-            </span>
+          </span>
+          <span className="vg-in block rounded border border-white/15 px-2 py-1 text-crimson-50" style={step(1.2)}>
+            PostController
           </span>
         </div>
-        {[80, 62, 71].map((width, i) => (
-          <span
-            key={width}
-            className="vg-grow mt-1.5 block h-1.5 origin-left rounded-full bg-crimson-50/25"
-            style={{ ...step(0.25 + i * 0.2), width: `${width}%` }}
-          />
-        ))}
+        <svg viewBox="0 0 40 74" className="h-[74px] w-10 shrink-0 text-crimson-300" fill="none" stroke="currentColor" strokeWidth="1.2">
+          <g className="vg-dim" style={step(1.75)}>
+            <path className="vg-draw" pathLength={1} d="M0 13 C 22 13, 18 37, 40 37" style={step(0.35)} />
+          </g>
+          <path className="vg-draw" pathLength={1} d="M0 61 C 22 61, 18 37, 40 37" style={step(1.35)} />
+        </svg>
+        <div className="vg-light min-w-0 flex-1 rounded border border-white/15 p-2.5" style={step(1.75)}>
+          <p className="truncate text-[11px] text-smoke/70">posts/Index</p>
+          {[88, 64, 76].map((width, i) => (
+            <span
+              key={width}
+              className="vg-grow mt-1.5 block h-1.5 origin-left rounded-full bg-crimson-50/30"
+              style={{ ...step(0.7 + i * 0.12), width: `${width}%` }}
+            />
+          ))}
+        </div>
       </div>
     </Panel>
   )
