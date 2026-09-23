@@ -44,10 +44,10 @@ async function tryAcquire(lockPath: string): Promise<string | undefined> {
   let held = false
   try {
     await writeFile(join(lockPath, token), '')
-    const entries = await entriesOf(lockPath)
-    held = entries?.length === 1 && entries[0] === token
+    const entries = await readdir(lockPath)
+    held = entries.length === 1 && entries[0] === token
   } catch (error) {
-    // ENOENT: a waiter removed the directory while it was still empty.
+    // ENOENT: a waiter removed the directory.
     if (!hasCode(error, 'ENOENT')) throw error
   } finally {
     if (!held) await remove(lockPath, [token])
@@ -67,7 +67,7 @@ export async function withFileLock<T>(lockPath: string, timeoutMs: number, callb
         await remove(lockPath, [token])
       }
     }
-    if (seen === undefined || performance.now() >= takeOverAt) {
+    if (performance.now() >= takeOverAt) {
       const entries = await entriesOf(lockPath)
       if (entries === undefined) continue
       const current = entries.sort().join('/')

@@ -58,6 +58,10 @@ export class FileStore implements CacheStore {
     }
   }
 
+  private locked<T>(filePath: string, callback: () => Promise<T>): Promise<T> {
+    return withFileLock(`${filePath}.lock`, LOCK_TIMEOUT_MS, callback)
+  }
+
   private async deleteCacheFile(filePath: string): Promise<boolean> {
     try {
       await unlink(filePath)
@@ -96,7 +100,7 @@ export class FileStore implements CacheStore {
 
   async add<T>(key: string, value: T): Promise<boolean> {
     const filePath = this.getFilePath(key)
-    return withFileLock(`${filePath}.lock`, LOCK_TIMEOUT_MS, async () => {
+    return this.locked(filePath, async () => {
       const item = await this.readCacheFile(filePath)
       if (item && !this.isExpired(item)) return false
       await this.writeCacheFile(filePath, { value, expiresAt: null })
@@ -125,7 +129,7 @@ export class FileStore implements CacheStore {
 
   async increment(key: string, value = 1): Promise<number> {
     const filePath = this.getFilePath(key)
-    return withFileLock(`${filePath}.lock`, LOCK_TIMEOUT_MS, async () => {
+    return this.locked(filePath, async () => {
       const item = await this.readCacheFile<number>(filePath)
       const active = item && !this.isExpired(item) ? item : null
       const newValue = (active?.value ?? 0) + value
