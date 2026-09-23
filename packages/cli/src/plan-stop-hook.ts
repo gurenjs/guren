@@ -152,9 +152,18 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   if (judgement.kind === 'verified') {
     // An earlier step this run re-checked is not this step's continuation: plan:next returns it once this one is done.
     const broken = report.steps.filter(({ stepId, record: earlier }) => report.reverified.includes(stepId) && earlier.outcome !== 'verified')
-    if (broken.length === 0) return withNotice({ block: false })
-    const lines = broken.flatMap(({ stepId, record: earlier }) => formatPlanStepRecord(stepId, earlier))
-    return withNotice({ block: false, message: `${heading}: the step is verified, and its changes broke an earlier step:\n${lines.join('\n')}\n\`bunx guren plan:next ${active.plan}\` returns it next.` })
+    const unchecked = report.steps.filter(({ stepId }) => report.recheckPending.includes(stepId))
+    if (broken.length === 0 && unchecked.length === 0) return withNotice({ block: false })
+    const said: string[] = []
+    if (broken.length > 0) {
+      const lines = broken.flatMap(({ stepId, record: earlier }) => formatPlanStepRecord(stepId, earlier))
+      said.push(`${heading}: the step is verified, and its changes broke an earlier step:\n${lines.join('\n')}\n\`bunx guren plan:next ${active.plan}\` returns it next.`)
+    }
+    for (const { stepId, record: earlier } of unchecked) {
+      const why = earlier.commands.filter((command) => command.status === 'blocked').map((command) => `${command.command}: ${command.reason ?? 'blocked'}`)
+      said.push(`${heading}: ${stepId}, whose files changed since it verified, could not be re-checked (${why.join('; ')}); its record stays for the next run.`)
+    }
+    return withNotice({ block: false, message: said.join('\n') })
   }
 
   const output = formatPlanStepRecord(active.step, verification.record).join('\n')
