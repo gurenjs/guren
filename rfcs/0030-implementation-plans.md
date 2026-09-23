@@ -1351,7 +1351,9 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   report, and a migration whose output carries one of a short list of database
   signatures (`ECONNREFUSED`, `password authentication failed`,
   `SQLITE_CANTOPEN`, a missing `drizzle-kit`). The list is literal on purpose: a
-  broader one would turn failed migrations into environment problems.
+  broader one would turn failed migrations into environment problems. A
+  `db:migrate` that no migration backs is `failed`, amended below under *a data
+  step's migration*.
 - Tests run as `bun test <files>` on the files whose source carries a step's
   acceptance ids as literal bracketed tokens; a step whose ids no file carries
   fails its tests command with the ids named, as does one whose test files
@@ -1537,6 +1539,51 @@ matched when the plan was approved says nothing about the change. What shipped
   in the middle of that work would stop crediting it. The §2 warning on an `alter` whose
   readable properties all held at approval, which the producer row of Part 2
   asks for, is not part of this change.
+
+**Amended in implementation (drift re-verification, and a data step's
+migration).** Two defects the loop hit once a plan had more than one task.
+
+- A later step that legitimately writes into a file an earlier step's element
+  sits in (a route beside it in `routes/web.ts`, a table in `db/schema.ts`, a
+  second action in its controller) expires the earlier record, and that is the
+  correct reading: the edit may have broken the earlier step. What was wrong is
+  what followed. `plan:next` returned the earlier step as work to implement,
+  and nothing re-ran its verification. A record now drifts
+  (`recordDrift()`) when it was verified against this plan digest, every
+  waiver it rested on still holds, and only fingerprinted files changed.
+  `plan:verify --step <id>` re-runs, in the same invocation and before the
+  step itself, every earlier step in task order whose record drifted, and
+  records each as its commands now say: `verified` again, or `failed` with
+  what broke. The report lists them as `reverified`. A `tests` step is never
+  re-run this way, since `tests:fail` cannot pass once the implementation
+  exists. A whole-plan run already re-ran every step whose record does not
+  stand, and reports the drifted ones as `reverified` too.
+- The `Stop` hook verifies the marked step through the same run, so a drifted
+  earlier step is re-checked on every stop without a continuation of its own:
+  the give-up rules still judge the marked step's record alone. A verified
+  step whose changes broke an earlier one lets the stop through, naming the
+  earlier step, which `plan:next` returns next.
+- `recordStillHolds()` stays the one rule for a step being done. `plan:next`
+  still runs nothing: a drifted step it returns carries the changed files as
+  `drifted`, and the text says to re-check it with `plan:verify --step` rather
+  than re-implement it.
+- Per-element fingerprints were tried first and dropped. Every review of the
+  static span reader found another shape (a router mutator, a base-class
+  override, a registrar called by name) through which an edit outside the span
+  changes the element's behaviour, so a span could only ever fail open.
+- A data step's `db:migrate` passed on a schema no migration covered, since
+  the migration then has nothing to apply. Before the script runs, the command
+  asks the application's own drizzle-kit, resolved through `node_modules` from
+  the application root and never through `bun x`, for
+  `generate --config <config> --explain --output json`, a dry run that writes
+  no migration and opens no database (it may create an empty migrations
+  folder). `no_changes` goes on to the script. Statements (`ok`) or a rename it
+  cannot decide without a hint (`missing_hints`) fail the command, naming what
+  is uncovered, since a migration is the fix. No drizzle config, no
+  drizzle-kit, a timeout, an `error` status or output it cannot read block it
+  with the reason. The dry run compares the whole schema with the migrations
+  folder, so a change outside the plan's tables fails the step too:
+  `db:migrate` would not apply it either.
 
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store

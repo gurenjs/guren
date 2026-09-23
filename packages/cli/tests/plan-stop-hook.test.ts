@@ -67,6 +67,7 @@ function report(stepId: string, stepRecord: PlanStepRecord, blocked: string[] = 
     verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
     steps: [{ stepId, taskId: 'task/entity/model.comment', record: stepRecord }],
     skipped: [],
+    reverified: [],
   }
 }
 
@@ -252,6 +253,20 @@ describe('planStopHookFindings', () => {
     const app = await createApp('verified', { active: active({ continuations: 2 }) })
 
     expect(await planStopHookFindings(app, { stopHookActive: true }, { verify: async () => report(HTTP, record({ outcome: 'verified', incomplete: [] })) })).toEqual({ block: false })
+    expect((await readState(app)).active).toEqual(active({ continuations: 2 }))
+  })
+
+  test('should let a verified step through, naming an earlier step its changes broke, without spending a continuation', async () => {
+    const app = await createApp('broke-earlier', { active: active({ continuations: 2 }) })
+    const failed = record({ outcome: 'failed', commands: [{ command: 'tests', label: 'bun test tests/comments.test.ts', status: 'fail', durationMs: 3, reason: 'a behaviour is not passing', findings: [] }], acceptance: [], incomplete: [] })
+    const verified = report(HTTP, record({ outcome: 'verified', incomplete: [] }))
+    const run = { ...verified, steps: [{ stepId: DATA, taskId: 'task/entity/model.comment', record: failed }, ...verified.steps], reverified: [DATA] }
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: true }, { verify: async () => run })
+
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain(`the step is verified, and its changes broke an earlier step:\n${DATA}: failed (3 ms)`)
+    expect(verdict.message).toContain('`bunx guren plan:next comments.plan.json` returns it next.')
     expect((await readState(app)).active).toEqual(active({ continuations: 2 }))
   })
 

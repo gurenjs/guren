@@ -29,7 +29,7 @@ import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress,
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
-import { hashFiles, readPlanWaivers, recordStillHolds, type PlanWaiversRead } from './plan/verification'
+import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
 
@@ -53,6 +53,8 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
   stalled?: PlanStall
   /** What the step depends on whose freshness is unstamped or unjudged (§4); it holds nothing. */
   unconfirmed?: PlanStepContextElement[]
+  /** Set where the step was verified and only these fingerprinted files changed since: it is re-checked, not re-implemented. */
+  drifted?: string[]
 }
 
 export interface PlanNextStaleElement extends PlanStepContextElement {
@@ -311,6 +313,8 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   }
   await writePlanActiveStep(root, slug, active)
   const unconfirmed = judged.contexts.get(step.id)?.unconfirmed ?? []
+  const record = records[step.id]
+  const drifted = record ? recordDrift(record, digest, hashes, log.waived) : []
 
   return {
     ...head,
@@ -326,6 +330,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       acceptance: plan.tasks.flatMap((intent) => intent.acceptance).filter((behaviour) => behaviours.has(behaviour.id)),
       ...stallOf(step.id),
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
+      ...(drifted.length > 0 ? { drifted } : {}),
     },
   }
 }
@@ -447,7 +452,13 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
       lines.push('', 'Depends on elements whose freshness is not confirmed, which holds nothing:')
       for (const element of step.unconfirmed) lines.push(`  ${element.verdict}  ${element.id}${element.reason ? `: ${element.reason}` : ''}`)
     }
-    lines.push('', `Implement this step only, then run \`bunx guren plan:verify ${planArgument} --step ${step.id}\` and commit once it is verified.`, `Marked in ${report.stateFile}`)
+    const verify = `bunx guren plan:verify ${planArgument} --step ${step.id}`
+    if (step.drifted) {
+      lines.push('', `Verified before; a later step changed files it was verified at: ${step.drifted.join(', ')}.`, `Re-check it with \`${verify}\` rather than re-implementing it, fix only what that run reports, and commit once it is verified.`)
+    } else {
+      lines.push('', `Implement this step only, then run \`${verify}\` and commit once it is verified.`)
+    }
+    lines.push(`Marked in ${report.stateFile}`)
   }
   lines.push(...heldLines(report, planArgument))
   if (report.freshnessUnreadable) {

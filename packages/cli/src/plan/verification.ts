@@ -280,6 +280,17 @@ export function recordStillHolds(record: PlanStepRecord, digest: string, hashes:
   return recordStands(record, digest, hashes) && record.waived.every((id) => waived.has(id))
 }
 
+/**
+ * The fingerprinted files that changed since a record was verified, when they are all that keeps
+ * it from standing: the step was done, and a later step wrote into a file it watched. Its verify
+ * commands are re-run then, not the step re-implemented. Empty for a record that stands or fails
+ * {@link recordStillHolds} for any other reason.
+ */
+export function recordDrift(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>, waived: ReadonlySet<string> = new Set()): string[] {
+  if (record.outcome !== 'verified' || record.planDigest !== digest || !record.waived.every((id) => waived.has(id))) return []
+  return changedFiles(record, hashes)
+}
+
 /** Verified against this plan digest, every fingerprinted file hashing as it did: what a record must be to count at all. */
 export function recordStands(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>): boolean {
   return record.outcome === 'verified' && record.planDigest === digest && changedFiles(record, hashes).length === 0

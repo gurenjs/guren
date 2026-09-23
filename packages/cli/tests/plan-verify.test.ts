@@ -9,7 +9,7 @@ import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPla
 import { planHash } from '../src/plan/identity'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
-import { applyVerification, applyWaivers, behaviourReach, hashFiles, whatHoldsElement, overlayVerification, planWaivers, recordStillHolds, sha256 } from '../src/plan/verification'
+import { applyVerification, applyWaivers, behaviourReach, hashFiles, whatHoldsElement, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
@@ -795,6 +795,19 @@ describe('applyVerification', () => {
     expect(controllerAfter({ [first]: record({ fingerprint: covered }), [last]: record({ fingerprint: { ...covered, files: { [controllerFile]: 'older' } } }) })).toBe('present')
   })
 
+  test('should call a record drifted only where changed files are all that keep it from standing', async () => {
+    const hashes = await hashFiles(ROOT, DATA_FILES)
+    const changed = new Map([...hashes, ['db/schema.ts', 'other']])
+
+    expect(recordDrift(record(), 'digest', changed)).toEqual(['db/schema.ts'])
+    expect(recordStillHolds(record(), 'digest', changed)).toBe(false)
+    expect(recordDrift(record(), 'digest', hashes)).toEqual([])
+    expect(recordDrift(record({ outcome: 'failed' }), 'digest', changed)).toEqual([])
+    expect(recordDrift(record({ planDigest: 'older' }), 'digest', changed)).toEqual([])
+    expect(recordDrift(record({ waived: ['policy.comment'] }), 'digest', changed)).toEqual([])
+    expect(recordDrift(record({ waived: ['policy.comment'] }), 'digest', changed, new Set(['policy.comment']))).toEqual(['db/schema.ts'])
+  })
+
   test('should let a record stand while every fingerprinted file still matches, an empty fingerprint on the plan digest alone', async () => {
     const hashes = await hashFiles(ROOT, DATA_FILES)
     const empty = record({ fingerprint: { ...FINGERPRINT, files: {} } })
@@ -1025,6 +1038,7 @@ describe('formatPlanVerify', () => {
       verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
       steps: steps.map(([stepId, entry]) => ({ stepId, taskId: 'task/entity/model.comment', record: entry })),
       skipped: [],
+      reverified: [],
     })
 
     const behind = formatPlanVerify(report([[DATA, failed], [HTTP, passed]]))
