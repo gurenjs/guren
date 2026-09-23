@@ -103,6 +103,11 @@ describe('tokenizePlanCommand', () => {
     ['guren make:adr "\u202Eevil"', 'U+202E'],
     ['guren make:adr "a\u200Bb"', 'U+200B'],
     ['guren make:adr "a\u2028b"', 'U+2028'],
+    ['guren make:adr "a\u3164b"', 'U+3164'],
+    ['guren make:controller a\u115fb', 'U+115F'],
+    ['guren make:controller a\u1160', 'U+1160'],
+    ['guren make:adr "\uffa0"', 'U+FFA0'],
+    ['guren make:adr "e\u034f"', 'U+034F'],
     ['guren make:adr "$(whoami)"', '"$"'],
     ['guren make:adr "`whoami`"', '"`"'],
     ['guren make:adr "a; b"', '";"'],
@@ -138,6 +143,7 @@ describe('judgePlanCommand', () => {
     ['guren make:adr "Billing... moves to month end"', 'make:adr', ['Billing... moves to month end']],
     ['guren make:controller Admin/Invoice', 'make:controller', ['Admin/Invoice']],
     ['guren lang:publish --path lang/overrides', 'lang:publish', ['--path', 'lang/overrides']],
+    ['guren make:validator Tag --fields "a:string,b:text"', 'make:validator', ['Tag', '--fields', 'a:string,b:text']],
   ])('should allow %j', (command, subcommand, args) => {
     expect(judgePlanCommand(command)).toEqual({ allowed: true, subcommand, args })
   })
@@ -167,6 +173,8 @@ describe('judgePlanCommand', () => {
     ['guren lang:publish --path /Users/x/.ssh --force', 'the argument "/Users/x/.ssh" names an absolute path'],
     ['guren make:lang ja --app ../other', 'the argument "../other" names an absolute path or leaves the application'],
     ['guren lang:publish --path=/etc', 'the argument "--path=/etc"'],
+    ['guren lang:publish --path C:/Users/x/.ssh', 'the argument "C:/Users/x/.ssh" names an absolute path'],
+    ['guren make:lang ja --app=d:/other', 'the argument "--app=d:/other"'],
     ['guren make:lang ja --app=../x', 'the argument "--app=../x"'],
     ['guren make:controller a/../../b', 'the argument "a/../../b"'],
     ['guren make:adr "/abs title"', 'the argument "/abs title"'],

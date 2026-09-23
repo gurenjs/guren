@@ -152,7 +152,11 @@ const BARE = /^[\p{L}\p{N}\p{M}_\-.,:/=@+%]$/u
 /** Inside quotes: that, a space, and `?` (a nullable `--fields` type). No `$`, backtick or `\`, which double quotes still read. */
 const QUOTED = /^[\p{L}\p{N}\p{M}_\-.,:/=@+% ?]$/u
 /** What `JSON.stringify` leaves raw and a terminal or a page may still act on: DEL, C1, line separators, format characters. */
-const UNSAFE_IN_QUOTE = /[\u007F-\u009F\u2028\u2029\p{Cf}]/gu
+const UNSAFE_IN_QUOTE = /[\u007F-\u009F\u2028\u2029\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
+/** Letters and marks that render blank (U+3164, U+115F, U+FFA0, U+034F): refused wherever the sets above admit them. */
+const INVISIBLE = /^\p{Default_Ignorable_Code_Point}$/u
+
+const admits = (set: RegExp, char: string): boolean => set.test(char) && !INVISIBLE.test(char)
 
 function codePoint(char: string): string {
   return `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`
@@ -160,7 +164,7 @@ function codePoint(char: string): string {
 
 function describeCharacter(char: string): string {
   if (char === '\n' || char === '\r') return 'a line break'
-  if (/\p{C}/u.test(char)) return `the control or invisible character ${codePoint(char)}`
+  if (/[\p{C}\p{Default_Ignorable_Code_Point}]/u.test(char)) return `the control or invisible character ${codePoint(char)}`
   if (/\p{Z}/u.test(char)) return `the space or separator ${codePoint(char)}`
   return `"${char}"`
 }
@@ -185,7 +189,7 @@ export function tokenizePlanCommand(command: string): { words: Word[] } | { unre
   for (const char of command) {
     if (quote !== undefined) {
       if (char === quote) quote = undefined
-      else if (QUOTED.test(char) || char === '"' || char === "'") current!.text += char
+      else if (admits(QUOTED, char) || char === '"' || char === "'") current!.text += char
       else return { unreadable: `${describeCharacter(char)} inside quotes is not a character a plan command may carry` }
       continue
     }
@@ -199,7 +203,7 @@ export function tokenizePlanCommand(command: string): { words: Word[] } | { unre
     } else if (char === '=' && (current === undefined || current.text === '')) {
       // zsh expands a word opening with `=` to a command's path, `""=ls` included.
       return { unreadable: 'a word opening with "=" is not something a plan command may carry' }
-    } else if (BARE.test(char)) {
+    } else if (admits(BARE, char)) {
       current ??= { text: '', quoted: false }
       current.text += char
     } else {
@@ -221,7 +225,8 @@ function programLength(words: Word[]): number {
 
 /** `lang:publish --path` and the like take a directory, so each `=`-separated part of a word is held inside the app. */
 function leavesApp(arg: string): boolean {
-  return arg.split('=').some((part) => part.startsWith('/') || part.split('/').includes('..'))
+  // A drive root (`C:/`) is absolute on Windows; `a:string` in `--fields` is not one.
+  return arg.split('=').some((part) => part.startsWith('/') || /^[A-Za-z]:\//.test(part) || part.split('/').includes('..'))
 }
 
 export function judgePlanCommand(command: string): PlanCommandVerdict {
