@@ -547,10 +547,18 @@ export class Application {
   private disposeBunTeardown?: () => void
   private autoSessionAttached = false
   private readonly cookielessAuthPaths = new Set<string>()
+  /** @internal {@link configDefinitions} with where each was listed, for ConfigServiceProvider's errors. */
+  readonly configEntries: ReadonlyArray<ConfiguredDefinition>
   private routesRegistered = false
   private bootPromise?: Promise<void>
 
   constructor(private readonly options: ApplicationOptions = {}) {
+    this.configEntries = [
+      ...(options.config ?? []).map((definition, index) => ({ definition, index })),
+      ...(options.modules ?? []).flatMap((gurenModule) =>
+        (gurenModule.config ?? []).map((definition, index) => ({ definition, index, module: gurenModule.name })),
+      ),
+    ]
     this.hono = new Hono()
     this.container = new Container()
     this.router = new Router()
@@ -579,7 +587,7 @@ export class Application {
     }
 
     // Must stay the first provider registered (RFC 0027 §3).
-    if (options.env || this.configDefinitions.length > 0) {
+    if (options.env || this.configEntries.length > 0) {
       this.providerManager.register(ConfigServiceProvider)
     }
 
@@ -667,14 +675,6 @@ export class Application {
     return this.configEntries.map((entry) => entry.definition)
   }
 
-  /** @internal {@link configDefinitions} with where each was listed, for ConfigServiceProvider's errors. */
-  get configEntries(): ReadonlyArray<ConfiguredDefinition> {
-    const root = (this.options.config ?? []).map((definition, index) => ({ definition, index }))
-    const modules = (this.options.modules ?? []).flatMap((gurenModule) =>
-      (gurenModule.config ?? []).map((definition, index) => ({ definition, index, module: gurenModule.name })),
-    )
-    return [...root, ...modules]
-  }
 
   markAutoSessionAttached(): void {
     this.autoSessionAttached = true

@@ -398,6 +398,11 @@ export async function discoverModuleRoutesFiles(appRoot: string): Promise<Module
   return scanned.filter((entry) => entry.files.length > 0)
 }
 
+/** Files a module's `defineModule()` descriptor may live in, in probe order. */
+export function moduleDescriptorCandidates(moduleDir: string): string[] {
+  return [`${moduleDir}/index.ts`, `${moduleDir}/index.js`]
+}
+
 /**
  * Files a module may keep its routes registrar in, in probe order. The
  * counterpart to {@link discoverModuleRoutesFiles}, which asks only about a

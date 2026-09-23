@@ -12,7 +12,7 @@ import type { RouteDefinition } from '@guren/server'
 import type { File, Node, Statement } from '@babel/types'
 
 import { unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
-import { createAppModuleFiles, createAppOptions, namesModuleDir } from '../config-check'
+import { createAppOptions, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
@@ -646,7 +646,7 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
 
   const imports = importsByLocal(parsed.ast.program.body)
   const hasSpread = options.properties.some((property) => property.type !== 'ObjectProperty')
-  const moduleFiles = createAppModuleFiles(options, parsed.ast.program, root, resolve(root, entryPath))
+  const mountState = (name: string) => moduleMountState(options, parsed.ast.program, root, resolve(root, entryPath), resolve(root, 'modules', name))
   const importedFile = (node: Node | null | undefined): { base: string; imported: string } | null => {
     const value = node ? unwrapTypeAssertion(node) : undefined
     const entry = value?.type === 'Identifier' ? imports.get(value.name) : undefined
@@ -679,12 +679,13 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
   }
 
   function moduleMount(name: string): PlanAppMount {
-    const files = moduleFiles
-    if (typeof files === 'string') {
-      return { unconfirmed: files === 'absent' && !hasSpread ? `createApp() in ${entryPath} lists no modules` : `createApp({ modules }) in ${entryPath} is not an array literal` }
+    switch (mountState(name)) {
+      case 'mounted': return 'mounted'
+      case 'no-modules': return { unconfirmed: `createApp() in ${entryPath} lists no modules` }
+      case 'not-array': return { unconfirmed: `createApp({ modules }) in ${entryPath} is not an array literal` }
+      case 'untraceable': return { unconfirmed: `createApp({ modules }) in ${entryPath} holds an entry this cannot trace to a file` }
+      case 'unlisted': return { unconfirmed: `createApp({ modules }) in ${entryPath} does not list modules/${name}` }
     }
-    const moduleDir = resolve(root, 'modules', name)
-    if (files.some((file) => file !== null && namesModuleDir(file, moduleDir))) return 'mounted'
-    return { unconfirmed: files.includes(null) ? `createApp({ modules }) in ${entryPath} holds an entry this cannot trace to a file` : `createApp({ modules }) in ${entryPath} does not list modules/${name}` }
   }
+
 }

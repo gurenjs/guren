@@ -256,6 +256,17 @@ describe('checkConfigWiring with defineModule({ config }) (RFC 0002)', () => {
     expect(results).toEqual([])
   })
 
+  test('judges nothing when createApp spreads options that may carry the listing module', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [oauth] }`),
+      'src/app.ts': entry('{ config: [cache], ...shared }', `import cache from '../config/cache'\nimport { shared } from './shared'\n`),
+    })
+
+    expect(results).toEqual([])
+  })
+
   test('judges nothing when createApp({ modules }) cannot be traced and a module lists config', async () => {
     const results = await run({
       ...WITH_CACHE,
