@@ -254,18 +254,16 @@ describe('buildLambdaOutput', () => {
         http: '[ShippedEvent.name, ShippedNotification.name].join(",")',
       },
     })
-    for (const dir of ['app/Events', 'app/Notifications', 'node_modules/@guren/core']) {
-      mkdirSync(join(root, dir), { recursive: true })
-    }
-    writeFileSync(join(root, 'node_modules/@guren/core/package.json'), '{ "name": "@guren/core", "type": "module", "main": "index.js" }\n')
-    writeFileSync(join(root, 'node_modules/@guren/core/index.js'), 'export class Event {}\nexport class Notification {}\n')
+    // Unimported bases read as the framework's, and only the plugin's wiring is under test.
+    mkdirSync(join(root, 'app/Events'), { recursive: true })
+    mkdirSync(join(root, 'app/Notifications'), { recursive: true })
     writeFileSync(
       join(root, 'app/Events/OrderShipped.ts'),
-      "import { Event } from '@guren/core'\nexport class OrderShipped extends Event {}\n",
+      'export class OrderShipped extends Event {}\n',
     )
     writeFileSync(
       join(root, 'app/Notifications/OrderShipped.ts'),
-      "import { Notification } from '@guren/core'\nexport class OrderShipped extends Notification {}\n",
+      'export class OrderShipped extends Notification {}\n',
     )
 
     const warnings = await captureWarnings(() => buildLambdaOutput({ rootDir: root, skipAppBuild: true }))

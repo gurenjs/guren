@@ -738,18 +738,19 @@ export const BUN_DEPLOY_MINIFY = { whitespace: true, syntax: true, identifiers: 
  */
 const NAME_KEYED_BASES: ReadonlyMap<string, NameKeyedKind> = new Map([
   ...['Job', 'Event', 'Notification', 'Agent'].map((base) => [base, 'record'] as const),
-  ...['Model', 'AuthenticatableModel', 'defineModel', 'Attachable'].map((base) => [base, 'model'] as const),
+  ...['Model', 'AuthenticatableModel', 'defineModel', 'Attachable', 'SoftDeletes'].map((base) => [base, 'model'] as const),
 ])
 const NAME_PIN = /\bstatic\s+(?:override\s+)?(?:jobName|eventName|agentName)\b|\bget\s+type\s*\(/
-// A heritage is read as its last identifier: `core.Job`, `(0, x.defineModel)(...)`.
-const HERITAGE = String.raw`\s+extends\s+(?:\(0,\s*)?(?:[A-Za-z_$][\w$]*\.)*([A-Za-z_$][\w$]*)`
+// A heritage is read as its last identifier, so `core.Job` and `import_core.defineModel(…)` count.
+const HERITAGE = String.raw`\s+extends\s+(?:[A-Za-z_$][\w$]*\.)*([A-Za-z_$][\w$]*)`
 const SOURCE_CLASS = new RegExp(
   String.raw`^[ \t]*(?:export[ \t]+(?:default[ \t]+)?)?(?:abstract[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)(?:[ \t]*<[^{>\n]*>)?(?:${HERITAGE})?`,
   'gm',
 )
 const BUNDLED_CLASS = new RegExp(String.raw`(?:^|[^\w$.])class\s+([A-Za-z_$][\w$]*)(?:${HERITAGE})?`, 'g')
-const NAMED_IMPORTS = /import\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g
-const IMPORT_SPECIFIER = /^(?:type\s+)?([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/
+// `[^{}]`, not `[^}]`: an unclosed `import {` must not rescan to the end of the file.
+const NAMED_IMPORTS = /import\s+(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^{}]*)\}\s*from\s*['"]([^'"]+)['"]/g
+const IMPORT_SPECIFIER = /^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/
 
 type NameKeyedKind = 'record' | 'model'
 
@@ -758,18 +759,18 @@ export interface RenamedNameKeyedClass {
   readonly name: string
   /** The name the bundle declares instead, and so the class's runtime `.name`. */
   readonly bundledAs: string
-  /** App files declaring an unpinned job, event, notification or agent called `name`. */
-  readonly records: readonly string[]
-  /** App files declaring a model called `name`. */
-  readonly models: readonly string[]
+  /** `record`: a job, event, notification or agent, which can pin its name. */
+  readonly kind: NameKeyedKind
+  /** The app files declaring such a class called `name`. */
+  readonly files: readonly string[]
 }
 
 /**
- * App models and unpinned records (`NAME_KEYED_BASES`) the bundle renamed to `<name><n>`,
- * which happens when another module declares the same top-level name. A declaration counts
- * only when the numbered class extends its base, so a renamed dependency class is not the app's.
- * Bases resolve through each file's named imports (`@guren/*` means the framework's) and the
- * app's own `extends`, read with regexes: this module imports only builtins, not the CLI's AST readers.
+ * App models and unpinned records the bundle renamed to `<name><n>`, which happens when
+ * another module declares the same top-level name. A declaration counts only when the
+ * numbered class extends its base, so a renamed dependency class is not the app's. Read
+ * with regexes, since this module imports only builtins: a base built by an expression
+ * the patterns above do not match (a mixin they do not name) is missed, not guessed.
  */
 export function renamedNameKeyedClasses(
   bundle: string,
@@ -777,7 +778,7 @@ export function renamedNameKeyedClasses(
 ): RenamedNameKeyedClass[] {
   interface Declaration {
     file: string
-    /** The base as the file names it, resolved through an import alias. */
+    /** The exported name of the base, so `Job` for `import { Job as QueuedJob }`. */
     base: string | undefined
     fromFramework: boolean
     pinned: boolean
@@ -809,8 +810,9 @@ export function renamedNameKeyedClasses(
     return undefined
   }
 
-  const bundledBases = new Map<string, Set<string | undefined>>()
+  const bundledBases = new Map<string, Set<string>>()
   for (const [, bundledAs, base] of bundle.matchAll(BUNDLED_CLASS)) {
+    if (base === undefined) continue
     const bases = bundledBases.get(bundledAs!) ?? new Set()
     bases.add(stem(base))
     bundledBases.set(bundledAs!, bases)
@@ -820,15 +822,14 @@ export function renamedNameKeyedClasses(
   for (const [bundledAs, bases] of bundledBases) {
     const name = withoutNumericSuffix(bundledAs)
     if (name === undefined || declared.has(bundledAs)) continue
-    const records: string[] = []
-    const models: string[] = []
+    const files = new Map<NameKeyedKind, string[]>()
     for (const entry of declared.get(name) ?? []) {
-      if (!bases.has(stem(entry.base))) continue
+      if (entry.base === undefined || !bases.has(stem(entry.base))) continue
       const kind = kindOf(entry)
-      if (kind === 'model') models.push(entry.file)
-      else if (kind === 'record' && !entry.pinned) records.push(entry.file)
+      if (kind === undefined || (kind === 'record' && entry.pinned)) continue
+      files.set(kind, [...(files.get(kind) ?? []), entry.file])
     }
-    if (records.length + models.length > 0) renamed.push({ name, bundledAs, records: records.sort(), models: models.sort() })
+    for (const [kind, list] of files) renamed.push({ name, bundledAs, kind, files: list.sort() })
   }
   return renamed
 }
@@ -841,11 +842,11 @@ function withoutNumericSuffix(name: string): string | undefined {
 }
 
 // A base may be renamed in the bundle too, so bases compare without a numeric suffix.
-function stem(name: string | undefined): string | undefined {
-  return name === undefined ? undefined : (withoutNumericSuffix(name) ?? name)
+function stem(name: string): string {
+  return withoutNumericSuffix(name) ?? name
 }
 
-/** Local name → imported name, for a file's `import { A as B } from '…'` statements. */
+/** Local name → exported name, for a file's `import { A as B } from '…'` statements. */
 function namedImports(text: string): Map<string, { name: string; fromFramework: boolean }> {
   const imports = new Map<string, { name: string; fromFramework: boolean }>()
   for (const [, specifiers, from] of text.matchAll(NAMED_IMPORTS)) {
@@ -887,24 +888,18 @@ export async function reportRenamedNameKeyedClasses(
     }
   }
 
-  const declare = (files: readonly string[]) => `${files.join(', ')} ${files.length === 1 ? 'declares' : 'declare'}`
-  for (const { name, bundledAs, records, models } of renamedNameKeyedClasses(bundle, sources)) {
-    const found: string[] = []
-    if (records.length > 0) {
-      found.push(
-        `${declare(records)} a job, event, notification or agent named ${name}, which is stored under its class ` +
-          'name: rename it, or pin `static jobName`, `static eventName`, `get type()` or `static agentName`.',
-      )
-    }
-    if (models.length > 0) {
-      found.push(
-        `${declare(models)} a model named ${name}. Its attachments and polymorphic relations, if it has any, are ` +
-          `stored as ${bundledAs} while \`Model.morphMap\` looks it up as ${name}: a model has no name to pin, so rename the class.`,
-      )
-    }
+  for (const { name, bundledAs, kind, files } of renamedNameKeyedClasses(bundle, sources)) {
+    const declares = `${files.join(', ')} ${files.length === 1 ? 'declares' : 'declare'}`
+    const found =
+      kind === 'record'
+        ? `${declares} a job, event, notification or agent named ${name}, which is stored under its class name: ` +
+          'rename it, or pin `static jobName`, `static eventName`, `get type()` or `static agentName`.'
+        : `${declares} a model named ${name}. Its attachments and polymorphic relations, if it has any, are stored ` +
+          `as ${bundledAs} while \`Model.morphMap\` looks it up as ${name}: a model has no name to pin, so rename the ` +
+          `class (rows already stored as ${bundledAs} need updating).`
     console.warn(
       `${options.label}: the bundle names a class ${name} as ${bundledAs}, because another module declares ` +
-        `${name} too and import order picks which one keeps it. ${found.join(' ')}`,
+        `${name} too and import order picks which one keeps it. ${found}`,
     )
   }
 }

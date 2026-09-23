@@ -856,7 +856,7 @@ describe('renamedNameKeyedClasses', () => {
     const bundle = 'class OrderShipped extends Event{}class OrderShipped2 extends Notification{}'
 
     expect(renamedNameKeyedClasses(bundle, [event, notification])).toEqual([
-      { name: 'OrderShipped', bundledAs: 'OrderShipped2', records: [notification.file], models: [] },
+      { name: 'OrderShipped', bundledAs: 'OrderShipped2', kind: 'record', files: [notification.file] },
     ])
   })
 
@@ -867,7 +867,7 @@ describe('renamedNameKeyedClasses', () => {
     ]
 
     expect(renamedNameKeyedClasses('class SendMail2 extends BaseJob2{}', sources)).toEqual([
-      { name: 'SendMail', bundledAs: 'SendMail2', records: ['app/Jobs/SendMail.ts'], models: [] },
+      { name: 'SendMail', bundledAs: 'SendMail2', kind: 'record', files: ['app/Jobs/SendMail.ts'] },
     ])
   })
 
@@ -876,13 +876,17 @@ describe('renamedNameKeyedClasses', () => {
       { file: 'app/Models/Channel.ts', text: 'export class Channel extends defineModel(channels, {\n  fillable: [],\n}) {}\n' },
       { file: 'app/Models/Photo.ts', text: "export class Photo extends Attachable(defineModel(photos), { image: 'one' }) {}\n" },
       { file: 'app/Models/User.ts', text: "export class User extends AuthenticatableModel {\n  notifiableType = 'User'\n}\n" },
+      { file: 'app/Models/Post.ts', text: 'export class Post extends SoftDeletes(defineModel(posts)) {}\n' },
     ]
-    const bundle = 'class Channel2 extends defineModel(channels){}class Photo2 extends Attachable(defineModel(photos)){}class User2 extends AuthenticatableModel{}'
+    const bundle =
+      'class Channel2 extends defineModel(channels){}class Photo2 extends Attachable(defineModel(photos)){}' +
+      'class User2 extends AuthenticatableModel{}class Post2 extends SoftDeletes(defineModel(posts)){}'
 
     expect(renamedNameKeyedClasses(bundle, sources)).toEqual([
-      { name: 'Channel', bundledAs: 'Channel2', records: [], models: ['app/Models/Channel.ts'] },
-      { name: 'Photo', bundledAs: 'Photo2', records: [], models: ['app/Models/Photo.ts'] },
-      { name: 'User', bundledAs: 'User2', records: [], models: ['app/Models/User.ts'] },
+      { name: 'Channel', bundledAs: 'Channel2', kind: 'model', files: ['app/Models/Channel.ts'] },
+      { name: 'Photo', bundledAs: 'Photo2', kind: 'model', files: ['app/Models/Photo.ts'] },
+      { name: 'User', bundledAs: 'User2', kind: 'model', files: ['app/Models/User.ts'] },
+      { name: 'Post', bundledAs: 'Post2', kind: 'model', files: ['app/Models/Post.ts'] },
     ])
   })
 
@@ -903,13 +907,26 @@ describe('renamedNameKeyedClasses', () => {
     const bundle = 'class SendMail2 extends Job{}class Meetup2 extends Event2{}class Booked2 extends Event{}'
 
     expect(renamedNameKeyedClasses(bundle, sources)).toEqual([
-      { name: 'SendMail', bundledAs: 'SendMail2', records: ['app/Jobs/SendMail.ts'], models: [] },
-      { name: 'Meetup', bundledAs: 'Meetup2', records: [], models: ['app/Models/Meetup.ts'] },
-      { name: 'Booked', bundledAs: 'Booked2', records: ['app/Events/Booked.ts'], models: [] },
+      { name: 'SendMail', bundledAs: 'SendMail2', kind: 'record', files: ['app/Jobs/SendMail.ts'] },
+      { name: 'Meetup', bundledAs: 'Meetup2', kind: 'model', files: ['app/Models/Meetup.ts'] },
+      { name: 'Booked', bundledAs: 'Booked2', kind: 'record', files: ['app/Events/Booked.ts'] },
     ])
   })
 
-  test('should read an extends clause on the next line and a bundled member-expression base', () => {
+  test('should report one result per kind when a record and a model share the renamed name', () => {
+    const sources = [
+      { file: 'app/Models/Event.ts', text: "import { defineModel } from '@guren/core'\nexport class Event extends defineModel(events) {}\n" },
+      { file: 'app/Models/Booked.ts', text: "import { Event } from './Event'\nexport class Booked extends Event {}\n" },
+      { file: 'app/Events/Booked.ts', text: "import { Event } from '@guren/core'\nexport class Booked extends Event {}\n" },
+    ]
+
+    expect(renamedNameKeyedClasses('class Booked2 extends Event{}', sources)).toEqual([
+      { name: 'Booked', bundledAs: 'Booked2', kind: 'model', files: ['app/Models/Booked.ts'] },
+      { name: 'Booked', bundledAs: 'Booked2', kind: 'record', files: ['app/Events/Booked.ts'] },
+    ])
+  })
+
+  test('should read an extends clause on the next line and a member-expression base', () => {
     const sources = [
       {
         file: 'app/Notifications/OrderShippedToCustomerNotification.ts',
@@ -919,16 +936,16 @@ describe('renamedNameKeyedClasses', () => {
     ]
     const bundle =
       'class OrderShippedToCustomerNotification2 extends Notification{}' +
-      'class Channel2 extends (0, import_core.defineModel)(channels){}'
+      'class Channel2 extends import_core.defineModel(channels){}'
 
     expect(renamedNameKeyedClasses(bundle, sources)).toEqual([
       {
         name: 'OrderShippedToCustomerNotification',
         bundledAs: 'OrderShippedToCustomerNotification2',
-        records: ['app/Notifications/OrderShippedToCustomerNotification.ts'],
-        models: [],
+        kind: 'record',
+        files: ['app/Notifications/OrderShippedToCustomerNotification.ts'],
       },
-      { name: 'Channel', bundledAs: 'Channel2', records: [], models: ['app/Models/Channel.ts'] },
+      { name: 'Channel', bundledAs: 'Channel2', kind: 'model', files: ['app/Models/Channel.ts'] },
     ])
   })
 
