@@ -18,7 +18,7 @@ export function isIntrospecting(): boolean {
   return scope.getStore() === true || (typeof process !== 'undefined' && process.env?.[INTROSPECT_ENV_FLAG] === '1')
 }
 
-/** Runs `fn` with {@link isIntrospecting} true for it and everything it awaits. */
+/** Runs `fn` with {@link isIntrospecting} true for it and everything it schedules, timers that outlive it included. */
 export function runIntrospecting<T>(fn: () => T): T {
   return scope.run(true, fn)
 }

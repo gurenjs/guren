@@ -2,6 +2,7 @@ import { deriveAgentTools } from '../agent/derive'
 import type { Container } from '../container/Container'
 import type { GurenModule } from '../container/defineModule'
 import { toJsonSchema } from '../internal/zod-json-schema'
+import { toPlainJson } from './plain-json'
 import type { RouteDefinition, Router } from '../mvc/Router'
 import type { AppManifest, ManifestWarning, MiddlewareEntry, ProviderEntry, RouteEntry } from './types'
 
@@ -41,8 +42,6 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
   const derived = deriveAgentTools(definitions)
   for (const message of derived.warnings) warnings.push({ code: 'agent-tool', message })
 
-  // Round-tripped so it is plain JSON: a nested `undefined` (a schema's `required`, a route's `name`) is dropped
-  // and the in-memory manifest equals its `--json` output key for key.
   const manifest: AppManifest = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -66,7 +65,9 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
     agentTools: derived.tools,
     warnings,
   }
-  return JSON.parse(JSON.stringify(manifest)) as AppManifest
+  // A route's absent `name` arrives as an `undefined` key; the copy drops it, so the
+  // in-memory manifest equals its `--json` output key for key.
+  return toPlainJson(manifest)
 }
 
 function describeRoutes(

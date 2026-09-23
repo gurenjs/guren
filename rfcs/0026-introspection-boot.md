@@ -106,7 +106,7 @@ only for facts that exist nowhere but in a method body.
 async introspect(): Promise<AppManifest>
 
 // @guren/core (re-exported), for providers and app code
-export function isIntrospecting(): boolean   // process.env.GUREN_INTROSPECT === '1'
+export function isIntrospecting(): boolean   // GUREN_INTROSPECT=1, or inside app.introspect() (amended below)
 ```
 
 `introspect()` runs, in order: `providerManager.registerAll()` (with the
@@ -241,14 +241,20 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 >   run enters an `AsyncLocalStorage` scope, and `GUREN_INTROSPECT=1` stays the
 >   CLI child's way to set it for the whole process. A provider prefers the
 >   `introspect?()` hook; `isIntrospecting()` is for a check inside `register()`.
+>   Provider constructors run at `createApp()`, before any introspection, so in
+>   process they see `false` while the CLI child sees `true`: read the flag inside
+>   `register()`, never in a constructor. Timers scheduled inside the run keep
+>   reading `true` after it finished.
 > - A route registrar that throws fails the whole introspection (`introspect()`
 >   rejects, and the CLI reports `crashed`), unlike a provider's `register()`,
 >   which is recorded as `threw` while the rest continue. Routes have no
 >   per-registrar outcome to record, and a partial route list would read as
 >   complete.
-> - The manifest is round-tripped through JSON before it is returned, so it is
->   plain data: a nested `undefined` (an all-optional schema's `required`) is
->   dropped, and the in-memory manifest equals the `--json` output.
+> - The manifest is copied into plain JSON before it is returned: `undefined`
+>   keys are dropped, so the in-memory manifest equals the `--json` output, and
+>   a value JSON cannot carry (a function, a Map, a class instance) throws
+>   rather than vanishing. The schema walker omits an all-optional object's
+>   `required` instead of setting it to `undefined`.
 > - `ConfigServiceProvider` implements `introspect()` itself, parsing the
 >   environment in report mode, so an in-process `introspect()` reports env
 >   problems the way a CLI run does instead of recording the provider `threw`.
