@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
+import { runCommand, type CommandDef } from 'citty'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -31,6 +32,7 @@ import {
 import { checkEnvExample } from '../src/app-env'
 import { loadResolvedConfig } from '../src/resolved-config'
 import { addResource, listBlueprints, runBlueprint } from '../src/blueprints'
+import { builtinSubCommands } from '../src/commands'
 import { runCheck } from '../src/check'
 
 /** Materialize an app file for the provider-wiring patches to target. */
@@ -465,13 +467,15 @@ export default function registerWebRoutes(appRouter: Router): void {
       await writeWorkspaceFiles(workspace.dir, { 'app/Models/Comment.ts': 'export class Comment {}\n' })
       const before = await snapshotTree(workspace.dir)
 
-      await expect(addResource({ name: 'comments', fields: 'body:text' })).rejects.toThrow(
-        'Scaffolding Comment would overwrite a file that already exists:\n  app/Models/Comment.ts\nNothing was scaffolded.',
-      )
+      await expect(runCommand(builtinSubCommands.add as CommandDef<never>, {
+        rawArgs: ['resource', 'comments', '--fields', 'body:text'],
+      })).rejects.toThrow([
+        'Scaffolding Comment would overwrite a file that already exists:',
+        '  app/Models/Comment.ts',
+        'Nothing was scaffolded. Pick another name, or pass --force to overwrite it.',
+      ].join('\n'))
 
       expect(await snapshotTree(workspace.dir)).toEqual(before)
-      expect(await readFile('db/schema.ts', 'utf8')).toBe(PG_SCHEMA_FIXTURE)
-      expect(await readFile('routes/web.ts', 'utf8')).toBe(DEFAULT_ROUTES_FIXTURE)
     })
 
     it('refuses an app with no routes/web.ts, naming the file it wanted', async () => {

@@ -139,9 +139,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     ? `import type { ${singular}Data as ${singular}ResourceData } from '${prototypeTypesSpecifier(singular)}'`
     : `import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'`
 
-  // Composed rather than emitted inline, so the schema names the generated
-  // controller imports and the ones `make:validator` writes cannot drift. At
-  // promotion the prototype run already wrote it, and it is kept as edited.
+  // At promotion the prototype run already wrote it, and it is kept as edited.
   const validator = validatorFile(singular, { ...writerOptions, fields })
   const validatorKept = promoting && !options.force && (await fileExists(appRoot, validator.path))
 
@@ -204,14 +202,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     ...(options.withTest ? [{ ...(await testFile(singular, writerOptions)), flag: '--test' }] : []),
   ]
   // At promotion the pages are the prototype's, possibly hand-edited since; a
-  // page that exists is kept, and only a missing one is written.
+  // page that exists is kept, and only a missing one is written. Past the check,
+  // the pages are the only files `skipExisting` can find already there.
   await assertNoExistingTargets(singular, appRoot, [...backendFiles, ...(promoting ? [] : pageFiles), ...modelFiles], options.force)
-
-  const created = [
-    ...(await writeScaffoldFiles(backendFiles, writerOptions)),
-    ...(await writeScaffoldFiles(pageFiles, { ...writerOptions, skipExisting: promoting })),
-    ...(await writeScaffoldFiles(modelFiles, writerOptions)),
-  ]
+  const created = await writeScaffoldFiles([...backendFiles, ...pageFiles, ...modelFiles], { ...writerOptions, skipExisting: promoting })
 
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens(appRoot)
@@ -290,15 +284,15 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   return created
 }
 
-/** A file the run writes; `flag` names the option that added it, which a refusal offers to drop. */
 interface FeatureFile extends ScaffoldFileEntry {
+  /** The option that added the file; a refusal offers dropping it. */
   flag?: string
 }
 
 /**
- * Refuses before the first write when a file the run would write is already there.
- * Stopping at the first would leave the files written before it behind, and every one
- * is named because `--force` overwrites them all, the author's own files included.
+ * Stopping at the first file already there would leave the files written before it
+ * behind, and every one is named because `--force` overwrites them all, the author's
+ * own files included.
  */
 async function assertNoExistingTargets(singular: string, appRoot: string, files: readonly FeatureFile[], force: boolean | undefined): Promise<void> {
   if (force) return
@@ -310,8 +304,8 @@ async function assertNoExistingTargets(singular: string, appRoot: string, files:
 
   const one = existing.length === 1
   // Dropping a flag is only a way out when every file in the way came from one.
-  const flags = existing.every((file) => file.flag) ? [...new Set(existing.flatMap((file) => (file.flag ? [file.flag] : [])))] : []
-  const pick = flags.length > 0 ? `Drop ${flags.join(' and ')}, pick` : 'Pick'
+  const flags = existing.flatMap((file) => file.flag ?? [])
+  const pick = flags.length === existing.length ? `Drop ${flags.join(' and ')}, pick` : 'Pick'
   throw new CliError([
     `Scaffolding ${singular} would overwrite ${one ? 'a file that already exists' : `${existing.length} files that already exist`}:`,
     ...existing.map((file) => `  ${file.path}${file.flag ? ` (${file.flag})` : ''}`),

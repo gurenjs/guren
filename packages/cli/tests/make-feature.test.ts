@@ -5,11 +5,11 @@ import { join, relative } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
 import { CliError } from '../src/cli-error'
-import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
+import { makeFeature, buildRouteRegistrationHint, type MakeFeatureOptions } from '../src/make-feature'
 import { findMigrationCreatingTable } from '../src/make-migration'
 import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureSuccesses, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, PG_SCHEMA_FIXTURE, runCliBinCaptured, seedApiOnlyApp, seedAttachmentsConfig, snapshotTree, writeWorkspaceFiles } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureSuccesses, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig, snapshotTree, writeWorkspaceFiles } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -659,8 +659,8 @@ describe('makeFeature on an API-only app', () => {
   })
 })
 
-// Each run is judged against the tree it started from, through `cwd` rather than
-// a chdir, so a refusal is held to writing nothing at all.
+// `makeFeature` honours `cwd`, so this block needs none of `createTempWorkspace`'s
+// process-wide chdir.
 describe('makeFeature over files that already exist', () => {
   const HAND_WRITTEN_MODEL = 'export class Comment {}\n'
   let dir: string
@@ -673,54 +673,71 @@ describe('makeFeature over files that already exist', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
-  async function refusal(run: Promise<unknown>): Promise<CliError> {
-    const error = await run.then(() => undefined, (reason: unknown) => reason)
+  it.each<{ name: string; singular: string; seed: Record<string, string>; options: MakeFeatureOptions; message: string[] }>([
+    {
+      name: 'a hand-written model',
+      singular: 'Comment',
+      seed: { 'routes/web.ts': DEFAULT_ROUTES_FIXTURE, 'app/Models/Comment.ts': HAND_WRITTEN_MODEL },
+      options: { fields: 'body:text' },
+      message: [
+        'Scaffolding Comment would overwrite a file that already exists:',
+        '  app/Models/Comment.ts',
+        'Nothing was scaffolded. Pick another name, or pass --force to overwrite it.',
+      ],
+    },
+    {
+      name: 'a page, the model and a --policy file',
+      singular: 'Comment',
+      seed: {
+        'app/Models/Comment.ts': HAND_WRITTEN_MODEL,
+        'resources/js/pages/comments/Show.tsx': 'export default function Show() { return null }\n',
+        'app/Policies/CommentPolicy.ts': 'export class CommentPolicy {}\n',
+      },
+      options: { fields: 'body:text', withPolicy: true },
+      message: [
+        'Scaffolding Comment would overwrite 3 files that already exist:',
+        '  resources/js/pages/comments/Show.tsx',
+        '  app/Models/Comment.ts',
+        '  app/Policies/CommentPolicy.ts (--policy)',
+        'Nothing was scaffolded. Pick another name, or pass --force to overwrite them.',
+      ],
+    },
+    {
+      name: 'only the file --test adds',
+      singular: 'Comment',
+      seed: { 'tests/Comment.test.ts': "import { it } from 'bun:test'\n" },
+      options: { fields: 'body:text', withTest: true, withFactory: true },
+      message: [
+        'Scaffolding Comment would overwrite a file that already exists:',
+        '  tests/Comment.test.ts (--test)',
+        'Nothing was scaffolded. Drop --test, pick another name, or pass --force to overwrite it.',
+      ],
+    },
+    {
+      name: 'the files under the module, not the app\'s own (--module)',
+      singular: 'Invoice',
+      seed: {
+        'modules/billing/app/Models/Invoice.ts': 'export class Invoice {}\n',
+        'resources/js/pages/billing/invoices/Index.tsx': 'export default function Index() { return null }\n',
+        // Not a target of a module run, so neither listed nor touched.
+        'app/Models/Invoice.ts': 'export class Invoice {}\n',
+      },
+      options: { fields: 'title:string', root: 'billing' },
+      message: [
+        'Scaffolding Invoice would overwrite 2 files that already exist:',
+        '  resources/js/pages/billing/invoices/Index.tsx',
+        '  modules/billing/app/Models/Invoice.ts',
+        'Nothing was scaffolded. Pick another name, or pass --force to overwrite them.',
+      ],
+    },
+  ])('refuses over $name, naming each file in the way and writing none', async ({ singular, seed, options, message }) => {
+    await writeWorkspaceFiles(dir, seed)
+    const before = await snapshotTree(dir)
+
+    const error = await makeFeature(singular, { ...options, cwd: dir, announce: false }).then(() => undefined, (reason: unknown) => reason)
+
     expect(error).toBeInstanceOf(CliError)
-    return error as CliError
-  }
-
-  it('refuses over a hand-written model, names it, and writes none of the other files', async () => {
-    await writeWorkspaceFiles(dir, { 'routes/web.ts': DEFAULT_ROUTES_FIXTURE, 'app/Models/Comment.ts': HAND_WRITTEN_MODEL })
-    const before = await snapshotTree(dir)
-
-    const error = await refusal(makeFeature('Comment', { fields: 'body:text', cwd: dir, announce: false }))
-
-    expect(error.message).toBe([
-      'Scaffolding Comment would overwrite a file that already exists:',
-      '  app/Models/Comment.ts',
-      'Nothing was scaffolded. Pick another name, or pass --force to overwrite it.',
-    ].join('\n'))
-    expect(await snapshotTree(dir)).toEqual(before)
-  })
-
-  it('lists every file in the way, marking the ones a flag added', async () => {
-    await writeWorkspaceFiles(dir, {
-      'app/Models/Comment.ts': HAND_WRITTEN_MODEL,
-      'resources/js/pages/comments/Show.tsx': 'export default function Show() { return null }\n',
-      'app/Policies/CommentPolicy.ts': 'export class CommentPolicy {}\n',
-    })
-    const before = await snapshotTree(dir)
-
-    const error = await refusal(makeFeature('Comment', { fields: 'body:text', withPolicy: true, cwd: dir, announce: false }))
-
-    expect(error.message).toBe([
-      'Scaffolding Comment would overwrite 3 files that already exist:',
-      '  resources/js/pages/comments/Show.tsx',
-      '  app/Models/Comment.ts',
-      '  app/Policies/CommentPolicy.ts (--policy)',
-      'Nothing was scaffolded. Pick another name, or pass --force to overwrite them.',
-    ].join('\n'))
-    expect(await snapshotTree(dir)).toEqual(before)
-  })
-
-  it('offers dropping the flag when only the files it adds are in the way', async () => {
-    await writeWorkspaceFiles(dir, { 'tests/Comment.test.ts': "import { it } from 'bun:test'\n" })
-    const before = await snapshotTree(dir)
-
-    const error = await refusal(makeFeature('Comment', { fields: 'body:text', withTest: true, withFactory: true, cwd: dir, announce: false }))
-
-    expect(error.message).toContain('  tests/Comment.test.ts (--test)\n')
-    expect(error.message).toEndWith('Nothing was scaffolded. Drop --test, pick another name, or pass --force to overwrite it.')
+    expect((error as CliError).message).toBe(message.join('\n'))
     expect(await snapshotTree(dir)).toEqual(before)
   })
 
@@ -752,7 +769,7 @@ describe('makeFeature over files that already exist', () => {
       announce: false,
     })
 
-    const expected = [
+    expect(created.map((file) => relative(dir, file))).toEqual([
       'app/Http/Validators/CommentValidator.ts',
       'app/Http/Resources/CommentResource.ts',
       'app/Http/Controllers/CommentController.ts',
@@ -764,61 +781,7 @@ describe('makeFeature over files that already exist', () => {
       'db/factories/CommentFactory.ts',
       'app/Policies/CommentPolicy.ts',
       'tests/Comment.test.ts',
-    ]
-    expect(created.map((file) => relative(dir, file))).toEqual(expected)
-    for (const path of expected) {
-      expect(existsSync(join(dir, path))).toBe(true)
-    }
-  })
-
-  it('looks for the files under the module with --module', async () => {
-    await writeWorkspaceFiles(dir, {
-      'modules/billing/app/Models/Invoice.ts': 'export class Invoice {}\n',
-      'resources/js/pages/billing/invoices/Index.tsx': 'export default function Index() { return null }\n',
-      // The app's own Invoice is not what a module run writes.
-      'app/Models/Invoice.ts': 'export class Invoice {}\n',
-    })
-    const before = await snapshotTree(dir)
-
-    const error = await refusal(makeFeature('Invoice', { fields: 'title:string', root: 'billing', cwd: dir, announce: false }))
-
-    expect(error.message).toBe([
-      'Scaffolding Invoice would overwrite 2 files that already exist:',
-      '  resources/js/pages/billing/invoices/Index.tsx',
-      '  modules/billing/app/Models/Invoice.ts',
-      'Nothing was scaffolded. Pick another name, or pass --force to overwrite them.',
-    ].join('\n'))
-    expect(await snapshotTree(dir)).toEqual(before)
-  })
-
-  it('scaffolds a module feature beside an app model of the same name', async () => {
-    await writeWorkspaceFiles(dir, { 'app/Models/Invoice.ts': 'export class Invoice {}\n' })
-
-    const created = await makeFeature('Invoice', { fields: 'title:string', root: 'billing', cwd: dir, announce: false })
-
-    expect(created.map((file) => relative(dir, file))).toContain('modules/billing/app/Models/Invoice.ts')
-    expect(await readFile(join(dir, 'app/Models/Invoice.ts'), 'utf8')).toBe('export class Invoice {}\n')
-  })
-
-  // The reported case: `add resource` over a hand-written model, through the
-  // command itself, so the exit code and the printed message are what is judged.
-  it('refuses add resource from the command line, exit 1, the app untouched', async () => {
-    await writeWorkspaceFiles(dir, {
-      'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
-      'db/schema.ts': PG_SCHEMA_FIXTURE,
-      'app/Models/Comment.ts': HAND_WRITTEN_MODEL,
-    })
-    const before = await snapshotTree(dir)
-
-    const { stdout, stderr, exitCode } = await runCliBinCaptured(['add', 'resource', 'comments', '--fields', 'body:text'], dir)
-
-    expect(exitCode).toBe(1)
-    const output = stdout + stderr
-    expect(output).toContain('Scaffolding Comment would overwrite a file that already exists:')
-    expect(output).toContain('  app/Models/Comment.ts')
-    expect(output).toContain('Nothing was scaffolded.')
-    expect(output).not.toContain('Use --force to overwrite.')
-    expect(await snapshotTree(dir)).toEqual(before)
+    ])
   })
 })
 
@@ -949,16 +912,24 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       await seedPrototypeApp(workspace.dir)
       await makeFeature('Note', { fields: 'title:string,done:boolean', prototype: true })
       const indexPath = join(workspace.dir, 'resources/js/pages/notes/Index.tsx')
+      const validatorPath = join(workspace.dir, 'app/Http/Validators/NoteValidator.ts')
       await writeFile(indexPath, '// edited during the walkthrough\n' + (await readFile(indexPath, 'utf8')))
+      await writeFile(validatorPath, '// tightened during the walkthrough\n' + (await readFile(validatorPath, 'utf8')))
+      const index = await readFile(indexPath, 'utf8')
+      const validator = await readFile(validatorPath, 'utf8')
 
       const created = await makeFeature('Note', { fields: 'title:string,done:boolean' })
 
-      expect(created.some((file) => file.endsWith('app/Http/Controllers/NoteController.ts'))).toBe(true)
-      expect(created.some((file) => file.endsWith('app/Models/Note.ts'))).toBe(true)
-      expect(created.some((file) => file.endsWith('resources/js/pages/notes/Index.tsx'))).toBe(false)
-      // Kept as the prototype run wrote it, so it is not reported as created.
-      expect(created.some((file) => file.endsWith('app/Http/Validators/NoteValidator.ts'))).toBe(false)
-      expect(await readFile(indexPath, 'utf8')).toStartWith('// edited during the walkthrough')
+      // The pages and validator are kept as edited, so none is reported as created.
+      // The generators report the realpath of the macOS tmpdir symlink.
+      const root = await realpath(workspace.dir)
+      expect(created.map((file) => relative(root, file))).toEqual([
+        'app/Http/Resources/NoteResource.ts',
+        'app/Http/Controllers/NoteController.ts',
+        'app/Models/Note.ts',
+      ])
+      expect(await readFile(indexPath, 'utf8')).toBe(index)
+      expect(await readFile(validatorPath, 'utf8')).toBe(validator)
 
       const resource = await readFile(join(workspace.dir, 'app/Http/Resources/NoteResource.ts'), 'utf8')
       expect(resource).toContain("import type { NoteData } from '@/resources/js/types/Note'")
@@ -972,34 +943,6 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       expect(generated.definitions.find((d) => d.className === 'NoteResource')?.rawType)
         .toContain('.NoteResourceData')
       expect(await readFile(join(workspace.dir, '.guren/data.gen.ts'), 'utf8')).toContain('Note =')
-    } finally {
-      await workspace.cleanup()
-    }
-  })
-
-  it('promotes over the validator and pages the prototype run wrote, kept as edited', async () => {
-    const workspace = await createTempWorkspace('guren-cli-feature-promote-kept-')
-    try {
-      await seedPrototypeApp(workspace.dir)
-      await makeFeature('Note', { fields: 'title:string', prototype: true })
-      const validatorPath = join(workspace.dir, 'app/Http/Validators/NoteValidator.ts')
-      const showPath = join(workspace.dir, 'resources/js/pages/notes/Show.tsx')
-      await writeFile(validatorPath, '// tightened during the walkthrough\n' + (await readFile(validatorPath, 'utf8')))
-      await writeFile(showPath, '// edited during the walkthrough\n' + (await readFile(showPath, 'utf8')))
-      const validator = await readFile(validatorPath, 'utf8')
-      const show = await readFile(showPath, 'utf8')
-
-      const created = await makeFeature('Note', { fields: 'title:string', announce: false })
-
-      // The generators report the realpath of the macOS tmpdir symlink.
-      const root = await realpath(workspace.dir)
-      expect(created.map((file) => relative(root, file)).sort()).toEqual([
-        'app/Http/Controllers/NoteController.ts',
-        'app/Http/Resources/NoteResource.ts',
-        'app/Models/Note.ts',
-      ])
-      expect(await readFile(validatorPath, 'utf8')).toBe(validator)
-      expect(await readFile(showPath, 'utf8')).toBe(show)
     } finally {
       await workspace.cleanup()
     }

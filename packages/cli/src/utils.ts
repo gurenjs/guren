@@ -238,7 +238,11 @@ export type ScaffoldFilesOptions = WriterOptions & {
   skipExisting?: boolean
 }
 
-/** `writeScaffoldFile` over a batch — every path is checked before any write. */
+/**
+ * `writeScaffoldFile` over a batch. Containment is checked for every path before any
+ * write; existence only at each write, so a file already there stops the batch at that
+ * entry with the ones before it written (`skipExisting` skips it instead).
+ */
 export async function writeScaffoldFiles(
   entries: ScaffoldFileEntry[],
   options: ScaffoldFilesOptions = {},
