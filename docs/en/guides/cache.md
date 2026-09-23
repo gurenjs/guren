@@ -96,6 +96,17 @@ const settings = await cache.store().rememberForever('app:settings', async () =>
 })
 ```
 
+### Concurrent Misses
+
+When several calls in one process miss the same key at the same time, the callback runs once and every caller gets its outcome: the same object, or the same error. A callback that throws caches nothing, so the next call runs it again. This applies to `remember` and `rememberForever` on any store you get from `cache.store()`, including tagged caches and stores added with `registerStore()`. A store you construct yourself, such as `new MemoryStore()`, does not share callbacks.
+
+Sharing stops at the process boundary (the isolate, on Cloudflare Workers). Two servers that miss the same key at once each run the callback.
+
+- Callers share one object, so treat the result as read-only: a change made by one caller is visible to the others. Copy it first (`structuredClone(posts)`) if you need to modify it. The memory store returns the stored object itself on every hit, so there a change also alters the cached value.
+- When concurrent calls pass different TTLs, the first caller's TTL is stored.
+- A call that arrives 10 seconds or more after the running callback started runs its own callback instead of waiting. Callers already waiting stay with the first callback, so give slow I/O inside a callback its own timeout.
+- Writing the key through the same store (`set`, `delete`, `setMany`, `deleteMany`, `clear`, or a tagged cache's `set` and `delete`) makes later calls start a new callback rather than join one that began before the write.
+
 ## Configuration
 
 `bunx guren add cache` writes `config/cache.ts`, declares `CACHE_STORE` in `config/env.ts`, and adds the definition to `createApp({ config })`:

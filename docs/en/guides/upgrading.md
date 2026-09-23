@@ -1,5 +1,15 @@
 # Upgrading Guren
 
+## Unreleased: concurrent cache misses share one callback
+
+`remember()` and `rememberForever()` on a store from `cache.store()` run the
+callback once when several calls in one process miss the same key at the same
+time, and every caller receives the same result object or the same error. On
+the file and Redis stores each caller used to get its own copy, so code that
+changes a remembered value in place now changes it for the callers it shares
+the result with. Copy the value before modifying it. See
+[Concurrent Misses](./cache.md#concurrent-misses).
+
 ## Unreleased: queue cancellation and reservations
 
 Jobs now receive a cancellation signal through `this.signal`. Pass it to `fetch`

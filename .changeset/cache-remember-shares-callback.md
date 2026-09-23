@@ -1,0 +1,5 @@
+---
+'@guren/server': minor
+---
+
+`remember()` and `rememberForever()` on a store from `CacheManager.store()` share one callback between the calls in a process that miss the same key while it runs: the callback runs once, and every caller receives the same result object or the same error. A callback that throws caches nothing, so the next call retries. Tagged caches share by the key after tag resolution and store the result under the namespace they read, so a `flush()` while the callback runs no longer leaves its result under the new namespace. A call that arrives 10 seconds or more after the running callback started runs its own instead of waiting, and `set`, `delete`, `setMany`, `deleteMany` or `clear` through the same store make later calls start a new callback. A store constructed directly (`new MemoryStore()`) is unchanged. On the file and Redis stores, concurrent callers now share one object where each used to receive its own copy, so code that changes a remembered value in place should copy it first.

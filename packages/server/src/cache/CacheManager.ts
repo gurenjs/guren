@@ -13,17 +13,28 @@ import { MemoryStore } from './stores/MemoryStore'
 import { RedisStore } from './stores/RedisStore'
 import { FileStore } from './stores/FileStore'
 import { TaggedCache } from './TaggedCache'
+import { pendingComputationsFor, type PendingComputations } from './pending-computations'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
 
-/** Adds tag support to any cache store. */
+/**
+ * Adds tag support to any cache store, and shares one `remember` callback
+ * between the callers that miss the same key at once. A write to a key forgets
+ * its running computation, so a later `remember` does not join one that
+ * started before the write.
+ */
 class TaggableCacheStoreWrapper implements TaggableCacheStore {
-  constructor(private readonly store: CacheStore) {}
+  private readonly pending: PendingComputations
+
+  constructor(private readonly store: CacheStore) {
+    this.pending = pendingComputationsFor(store)
+  }
 
   get<T>(key: string): Promise<T | null> {
     return this.store.get<T>(key)
   }
 
   set<T>(key: string, value: T, ttl?: number): Promise<void> {
+    this.pending.forget(key)
     return this.store.set(key, value, ttl)
   }
 
@@ -32,10 +43,12 @@ class TaggableCacheStoreWrapper implements TaggableCacheStore {
   }
 
   delete(key: string): Promise<boolean> {
+    this.pending.forget(key)
     return this.store.delete(key)
   }
 
   clear(): Promise<void> {
+    this.pending.forgetAll()
     return this.store.clear()
   }
 
@@ -48,11 +61,11 @@ class TaggableCacheStoreWrapper implements TaggableCacheStore {
   }
 
   remember<T>(key: string, ttl: number, callback: () => Promise<T>): Promise<T> {
-    return this.store.remember(key, ttl, callback)
+    return this.pending.run(key, () => this.store.remember(key, ttl, callback))
   }
 
   rememberForever<T>(key: string, callback: () => Promise<T>): Promise<T> {
-    return this.store.rememberForever(key, callback)
+    return this.pending.run(key, () => this.store.rememberForever(key, callback))
   }
 
   getMany<T>(keys: string[]): Promise<Map<string, T | null>> {
@@ -60,10 +73,12 @@ class TaggableCacheStoreWrapper implements TaggableCacheStore {
   }
 
   setMany<T>(items: Map<string, T>, ttl?: number): Promise<void> {
+    for (const key of items.keys()) this.pending.forget(key)
     return this.store.setMany(items, ttl)
   }
 
   deleteMany(keys: string[]): Promise<number> {
+    for (const key of keys) this.pending.forget(key)
     return this.store.deleteMany(keys)
   }
 
