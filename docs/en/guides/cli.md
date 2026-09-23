@@ -276,6 +276,8 @@ entry that calls `listen()` while it is imported fails with a pointer to the
 `@guren/core` from before introspection, detected before the entry is
 imported).
 
+### Agent-exposed routes
+
 
 Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checked by `check` and treated more strictly by `audit`. The rules run in the normal `check` suite and are content-activated: an app with no agent routes contributes no findings, and no controller is scanned.
 

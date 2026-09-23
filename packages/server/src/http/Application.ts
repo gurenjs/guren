@@ -39,7 +39,7 @@ import type { ConfigDefinition } from '../config/define'
 import { ConfigServiceProvider } from '../providers/ConfigServiceProvider'
 import { IntrospectionListenError, isIntrospecting } from '../introspection/flag'
 import type { AppManifest } from '../introspection/types'
-import type { ModuleRouteRange } from '../introspection/manifest'
+import { buildAppManifest, type ModuleRouteRange } from '../introspection/manifest'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
 // still allowing consumers to stub or polyfill it when running elsewhere.
@@ -857,7 +857,6 @@ export class Application {
   private async introspectOnce(): Promise<AppManifest> {
     const providers = await this.providerManager.registerAllForIntrospection()
     await this.mountRoutes()
-    const { buildAppManifest } = await import('../introspection/manifest')
     return buildAppManifest({
       router: this.router,
       container: this.container,

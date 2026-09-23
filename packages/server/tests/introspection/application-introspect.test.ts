@@ -150,7 +150,7 @@ describe('Application.introspect()', () => {
     expect(manifest.warnings.map((warning) => warning.code)).toContain('boot-callback-skipped')
     expect(manifest.schemaVersion).toBe(1)
     expect(manifest.entry).toEqual({ file: null, root: process.cwd(), stage: 'register' })
-    expect(JSON.parse(JSON.stringify(manifest))).toEqual(JSON.parse(JSON.stringify(manifest)) as AppManifest)
+    expect(JSON.parse(JSON.stringify(manifest)) as AppManifest).toEqual(manifest)
   })
 
   test('records every provider with its source and register outcome, continuing past a throw', async () => {
@@ -274,6 +274,31 @@ describe('Application.introspect()', () => {
     const manifest = await createApp({ auth: {} }).introspect()
 
     expect(manifest.session).toEqual({ source: 'none', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } })
+  })
+
+  test('never claims the in-memory fallback while the session binding is unverified', async () => {
+    class DeferredSessionProvider extends ServiceProvider {
+      static override deferred = true
+      static override provides = ['session']
+
+      register(): void {
+        this.container.instance('session', new SessionManager())
+      }
+    }
+
+    const deferred = await createApp({ auth: {}, providers: [DeferredSessionProvider] }).introspect()
+    const thrown = await createApp({ auth: {}, providers: [ThrowingProvider] }).introspect()
+
+    expect(deferred.session).toBeUndefined()
+    expect(deferred.warnings).toContainEqual(expect.objectContaining({ code: 'section-unverified', provider: 'DeferredSessionProvider' }))
+    expect(thrown.session).toBeUndefined()
+    expect(thrown.warnings.find((warning) => warning.code === 'section-unverified')?.message).toContain('ThrowingProvider')
+  })
+
+  test('reports a plugin session driver as unverifiable rather than shared', () => {
+    const manager = new SessionManager({ default: 'dynamo', stores: { dynamo: { driver: 'dynamo' as 'memory' } } })
+
+    expect(manager.describe().stores.dynamo).toEqual({ driver: 'dynamo', perProcess: null })
   })
 
   test('derives agent tools from the registered routes', async () => {

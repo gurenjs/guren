@@ -1506,7 +1506,10 @@ export type EngineDescription = Omit<AttachmentsEntry, 'delivery'> & { delivery?
  * default application's binding, else the one `configureAttachments()` built.
  */
 export function describeActiveAttachmentEngine(): EngineDescription {
-  const engine = ambientBinding(ATTACHMENTS_BINDING) ?? activeEngine
+  // `has()` before `make()`: `ambientBinding()` would activate a deferred provider.
+  const container = ambientContainer()
+  const bound = container?.has(ATTACHMENTS_BINDING) ? container.make(ATTACHMENTS_BINDING) : undefined
+  const engine = bound ?? activeEngine
   return engine ? engine.describe() : { configured: false }
 }
 

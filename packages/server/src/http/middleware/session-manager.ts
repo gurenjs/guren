@@ -179,7 +179,8 @@ export class SessionManager {
       stores[name] = {
         driver,
         ...(table === undefined ? {} : { table }),
-        perProcess: PER_PROCESS_SESSION_DRIVERS.has(driver),
+        // A plugin's driver is unverifiable here, not shared: its `gurenPlugin` manifest says which.
+        perProcess: BUILT_IN_SESSION_DRIVERS.has(driver) ? PER_PROCESS_SESSION_DRIVERS.has(driver) : null,
       }
     }
     return { default: this.defaultStoreName, stores }

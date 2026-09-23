@@ -172,6 +172,14 @@ describe('introspectApp()', () => {
     expect(expectFailure(await introspectApp(dir), 'import')).toContain('missing-module')
   }, 30_000)
 
+  test('reports crashed when the entry loads but registration throws', async () => {
+    const dir = await app('registrar-throws', {
+      'routes/web.ts': "export function registerWebRoutes(): void {\n  throw new Error('registrar exploded')\n}\n",
+    })
+
+    expect(expectFailure(await introspectApp(dir), 'crashed')).toContain('registrar exploded')
+  }, 30_000)
+
   test('reports timeout when a provider never finishes registering', async () => {
     const dir = await app('timeout', {
       'src/app.ts': `import { createApp, ServiceProvider } from '@guren/core'

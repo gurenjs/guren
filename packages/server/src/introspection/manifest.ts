@@ -81,7 +81,7 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
   }
 
   const read = <T>(key: string, describe: (service: unknown) => T | undefined): T | undefined =>
-    readSection(sources.container, key, describe, warnings)
+    readSection(sources, key, describe, warnings)
 
   const session = describeSession(sources, warnings)
   if (session) manifest.session = session
@@ -159,15 +159,29 @@ function withAbility(entry: MiddlewareEntry, method?: string): MiddlewareEntry {
 }
 
 function describeSession(sources: ManifestSources, warnings: ManifestWarning[]): SessionEntry | undefined {
-  const described = readSection(sources.container, 'session', (service) =>
+  const described = readSection(sources, 'session', (service) =>
     callDescribe<Omit<SessionEntry, 'source'>>(service), warnings)
   if (described) return { source: 'manager', ...described }
 
   const auth = sources.authOptions
   if (!auth || auth.autoSession === false) return undefined
 
+  // `readSection()` warned for a deferred provider; `none` would contradict it.
+  if (sources.providers.some((provider) => provider.register === 'skipped' && provider.provides.includes('session'))) {
+    return undefined
+  }
+
   const store = auth.sessionOptions?.store
   if (store === undefined) {
+    // A provider that threw may have been the one binding `session`; `none` would claim otherwise.
+    const thrown = sources.providers.filter((provider) => provider.register === 'threw')
+    if (thrown.length > 0) {
+      warnings.push({
+        code: 'section-unverified',
+        message: `"session" is unbound, and ${thrown.map((provider) => provider.name).join(', ')} threw before it could be ruled out as its provider.`,
+      })
+      return undefined
+    }
     return { source: 'none', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } }
   }
 
@@ -187,15 +201,27 @@ function callDescribe<T>(service: unknown): T | undefined {
 
 /**
  * A section is read only when its container key exists after registration.
- * A manager whose construction throws is reported, never taken as absent.
+ * One a deferred provider supplies, or whose manager throws on construction,
+ * is reported as a warning, never taken as absent.
  */
 function readSection<T>(
-  container: Container,
+  sources: ManifestSources,
   key: string,
   describe: (service: unknown) => T | undefined,
   warnings: ManifestWarning[],
 ): T | undefined {
-  if (!container.has(key)) return undefined
+  const { container } = sources
+  if (!container.has(key)) {
+    const deferred = sources.providers.find((provider) => provider.register === 'skipped' && provider.provides.includes(key))
+    if (deferred) {
+      warnings.push({
+        code: 'section-unverified',
+        message: `"${key}" is supplied by the deferred ${deferred.name}, which registers only after boot.`,
+        provider: deferred.name,
+      })
+    }
+    return undefined
+  }
   try {
     return describe(container.make(key))
   } catch (error) {

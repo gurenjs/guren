@@ -229,7 +229,7 @@ MCP サーバは `guren_gate` ツールとして公開します。それ以外�
 
 ### 登録済みアプリのイントロスペクション
 
-`guren introspect` はソースコードの文面ではなく、アプリ自身から答えを得ます。
+`guren introspect` はアプリ自身から答えを得ます。ソースコードの文面は読みません。
 `GUREN_INTROSPECT=1` を付けた子プロセスで `src/main.ts` を import し、すべての
 provider を登録してすべてのルートをマウントしたところで止まります。provider の
 `boot()`、`createApp({ boot })` のコールバック、`listen()` は実行されないので、
@@ -271,6 +271,8 @@ provider の外のコードでは `isIntrospecting()` で同じ判定ができ�
 1 になります。reason は `no-entry`、`import`、`timeout`、`crashed`、`old-server`
 のいずれかです。`old-server` は introspection に対応する前の `@guren/core` が
 インストールされている場合で、エントリを import する前に検出します。
+
+### エージェントに公開したルート
 
 
 `.agent()` メタデータを宣言したルート([ルーティング](./routing.md)を参照)は、`check` の検査対象になり、`audit` ではより厳しく扱われます。ルールは通常の `check` スイートで実行され、内容によって有効化されます。エージェント公開ルートが存在しないアプリでは findings は生成されず、コントローラの走査も行われません。

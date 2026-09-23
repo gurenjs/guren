@@ -6,7 +6,7 @@
  */
 import { writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { relative } from 'node:path'
+import { basename, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AppManifest } from '@guren/server'
 
@@ -98,7 +98,7 @@ async function resolveControllers(manifest: AppManifest, app: IntrospectableApp,
     const candidates = exportsOf.get(handler.controller)
     if (!route?.controller || !candidates) continue
     // A barrel re-exports the class too; the file named after it declares it.
-    const declared = candidates.find(({ file }) => file.replace(/\.[^./\\]+$/u, '').endsWith(route.controller!.name)) ?? candidates[0]!
+    const declared = candidates.find(({ file }) => basename(file).replace(/\.[^.]+$/u, '') === route.controller!.name) ?? candidates[0]!
     route.controller = {
       ...route.controller,
       file: relative(root, declared.file).split('\\').join('/'),
@@ -120,16 +120,22 @@ async function introspect(root: string): Promise<Introspection> {
     return failed('old-server', 'The app resolves a @guren/server without Application.introspect(). Upgrade @guren/core to a release with RFC 0026 introspection.')
   }
 
-  let app: IntrospectableApp
+  let mod: Record<string, unknown>
   try {
-    app = (await bootstrapApplication(
-      (await import(pathToFileURL(entry).href)) as Record<string, unknown>,
-    )) as IntrospectableApp
+    mod = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
   } catch (error) {
     if (isListenRefusal(error)) return crashedByListen(error)
+    return failed('import', `Could not load ${relative(root, entry)}: ${messageOf(error)}`)
+  }
+
+  // The entry loaded; a `ready` that rejects failed while registering, not importing.
+  let app: IntrospectableApp
+  try {
+    app = (await bootstrapApplication(mod)) as IntrospectableApp
+  } catch (error) {
     const cause = (error as { cause?: unknown } | null)?.cause
     if (isListenRefusal(cause)) return crashedByListen(cause)
-    return failed('import', `Could not load ${relative(root, entry)}: ${messageOf(error)}`)
+    return failed('crashed', messageOf(error))
   }
 
   if (typeof app.introspect !== 'function') {
