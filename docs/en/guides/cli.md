@@ -362,6 +362,8 @@ bunx guren make:module Billing
 
 This scaffolds `modules/billing/{index.ts, routes.ts, db/schema.ts}` and wires it in automatically: `db/schema.ts` gets `export * from '../modules/billing/db/schema'`, and `src/app.ts` gets `billingModule` imported and added to `createApp({ modules: [...] })`.
 
+If your root `db/schema.ts` keeps a schema object for drizzle (`export const schema = { posts, users }`, named `schema` or read by a `typeof`), the module gets one of its own, `export const billingSchema = {}`, and the root object spreads it (`{ posts, users, ...billingSchema }`). Declare the module's tables in `modules/billing/db/schema.ts` and list each one in `billingSchema`. `guren check` reports a table missing from either object, including a module table the root object neither lists nor spreads.
+
 Most `make:*` commands accept `--module <name>` to scaffold inside a module instead of the project root:
 
 ```bash

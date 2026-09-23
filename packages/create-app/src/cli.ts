@@ -412,7 +412,9 @@ const command = defineCommand({
         }
       }
       if (!authInstalled) {
-        consola.warn('Authentication was not scaffolded automatically. Run `bunx guren add auth` inside the app after installing dependencies.')
+        consola.warn(installed
+          ? 'Authentication scaffolding failed (see the output above). Run `bunx guren add auth` inside the app once that is fixed.'
+          : 'Authentication was not scaffolded automatically. Run `bunx guren add auth` inside the app after installing dependencies.')
       }
     }
 
@@ -436,7 +438,7 @@ const command = defineCommand({
     }
     consola.log('')
     consola.info('Add features:')
-    if (!blueprint.includesAuth) {
+    if (!blueprint.includesAuth && !authInstalled) {
       consola.log('  bunx guren add auth')
     }
     consola.log('  bunx guren add resource posts --fields "title:string,body:text"')
@@ -454,11 +456,9 @@ const command = defineCommand({
 
     if (authInstalled) {
       consola.log('')
+      // No database steps of its own: `guren add auth` printed them above,
+      // leaving out `db:make` when it generated the migration itself.
       consola.info('Auth scaffolding was included automatically.')
-      // db:make first: the users table only exists in db/schema.ts until
-      // drizzle-kit generates a migration from it, and db:migrate with an empty
-      // db/migrations applies nothing.
-      consola.info('Set up the users table with: bun run db:make && bun run db:migrate && bun run db:seed')
     }
 
     if (renderingMode === 'ssr') {

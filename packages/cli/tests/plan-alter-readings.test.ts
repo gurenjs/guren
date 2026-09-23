@@ -62,13 +62,35 @@ const PLAN_DOCUMENT = {
   ],
 }
 
+/** `Post` altered to have many `Comment`s, which the application declares but `Post` does not relate to yet. */
+const RELATIONSHIP_PLAN = {
+  ...PLAN_DOCUMENT,
+  title: 'Post comments',
+  views: [],
+  models: [
+    { id: 'model.post', change: { kind: 'alter' }, name: 'Post', table: 'posts', columns: [], relationships: [{ name: 'comments', type: 'hasMany', target: 'model.comment' }], fillable: [] },
+    { id: 'model.comment', change: { kind: 'existing' }, name: 'Comment', table: 'comments', columns: [], relationships: [], fillable: [] },
+  ],
+}
+
+const POST_WITH_COMMENTS = `import { defineModel, type HasManyRecord } from '@guren/core'
+import { posts } from '@/db/schema'
+import type { CommentRecord } from './Comment'
+
+export class Post extends defineModel(posts) {
+  static override relationTypes: { comments: HasManyRecord<CommentRecord> } = { comments: null }
+}
+
+Post.hasMany('comments', () => import('./Comment').then((module) => module.Comment), 'postId', 'id')
+`
+
 function git(dir: string, ...args: string[]): void {
   const result = Bun.spawnSync(['git', '-c', 'user.name=Approver', '-c', 'user.email=approver@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
 }
 
 /** A committed application with the plan beside it, before any of the plan is built. */
-async function createApp(name: string): Promise<{ dir: string; plan: string }> {
+async function createApp(name: string, document: object = PLAN_DOCUMENT): Promise<{ dir: string; plan: string }> {
   const dir = join(ROOT, name)
   await writeWorkspaceFiles(dir, {
     ...PLAN_VERIFY_APP_FILES,
@@ -83,7 +105,7 @@ export class PostController extends Controller {
 `,
     [INDEX]: page('Index', '  posts: string[]'),
     [SHOW]: page('Show', '  post: string'),
-    [PLAN_FILE]: JSON.stringify(PLAN_DOCUMENT),
+    [PLAN_FILE]: JSON.stringify(document),
   })
   await linkWorkspaceCore(dir)
   await mkdir(join(dir, 'node_modules'), { recursive: true })
@@ -170,7 +192,9 @@ describe('an alter judged against how it read at approval', () => {
 
     const unrecorded = await run<PlanStatusReport>('plan:status', app)
     expect(states(unrecorded)).toEqual({ 'view.posts.show': 'unjudged', 'view.posts.index': 'planned' })
-    expect(unrecorded.elements[0]!.reason).toContain('run guren plan:approve on the plan to record the readings it lacks')
+    // A re-approval would record the held match as held, and only the property still to change in time.
+    expect(unrecorded.elements[0]!.reason).not.toContain('plan:approve')
+    expect(unrecorded.elements[1]!.notes).toEqual([expect.stringContaining('no reading of prop total: run guren plan:approve on the plan before changing it')])
 
     // Built before the readings exist: a reading taken now can only miss the change, never credit it.
     await buildTotal(app.dir)
@@ -178,6 +202,21 @@ describe('an alter judged against how it read at approval', () => {
     expect(backfilled).toMatchObject({ alreadyApproved: true, readingsRecorded: ['view.posts.show', 'view.posts.index'] })
     expect(states(await run<PlanStatusReport>('plan:status', app))).toEqual({ 'view.posts.show': 'unjudged', 'view.posts.index': 'unjudged' })
     expect((await run<PlanApproveReport>('plan:approve', app)).readingsRecorded).toBeUndefined()
+  })
+
+  test('should complete a model alter on a relationship written after approval, whose reading was taken before it existed', async () => {
+    const app = await createApp('relationship', RELATIONSHIP_PLAN)
+    await run('plan:approve', app)
+
+    await writeFile(join(app.dir, 'app/Models/Post.ts'), POST_WITH_COMMENTS, 'utf8')
+    git(app.dir, 'commit', '-q', '-am', 'comments')
+    const post = (await run<PlanStatusReport>('plan:status', app)).elements.find((element) => element.id === 'model.post')!
+
+    expect(post.state).toBe('present')
+    expect(post.properties.map((property) => [property.property, property.verdict])).toEqual([
+      ['relationship comments', 'match'],
+      ['relationship comments target', 'match'],
+    ])
   })
 
   test('should carry the first reading to a revision approved after the work, so the change still counts', async () => {

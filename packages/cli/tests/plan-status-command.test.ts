@@ -366,7 +366,8 @@ export class Comment extends defineModel(comments, { fillable: ['body'] }) {
     }
 
     expect(await relationship('relation-annotation-only', annotated)).toEqual([
-      { property: 'relationship post', verdict: 'differ', planned: 'belongsTo Post', actual: 'not declared' },
+      { property: 'relationship post', verdict: 'differ', planned: 'belongsTo', actual: 'not declared' },
+      { property: 'relationship post target', verdict: 'differ', planned: 'Post', actual: 'not declared' },
     ])
     const called = `${annotated}\nComment.belongsTo('post', () => import('./Post.js').then((module) => module.Post), 'postId', 'id')\n`
     expect((await relationship('relation-called', called)).map((property) => property.verdict)).toEqual(['match', 'match'])

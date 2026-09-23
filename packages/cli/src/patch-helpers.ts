@@ -1,10 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import type { File, ObjectExpression } from '@babel/types'
 import { consola } from 'consola'
 import { readIfExists } from './discovery'
 import { DIALECT_BARRELS, DRIZZLE_CORE_SUBPATHS } from './drizzle-specifiers'
 import { parseSourceFile } from './parse-cache'
 import { posix, resolve } from 'node:path'
-import { findSchemaAggregate, type SchemaDialect } from './schema-parser'
+import { findSchemaAggregate, schemaPathFor, topLevelBindings, type SchemaAggregate, type SchemaDialect } from './schema-parser'
+import { importsByLocal, schemaModuleFor } from './schema-binding'
 import { escapeRegExp } from './utils'
 
 export interface PatchResult {
@@ -774,22 +776,26 @@ function statementStart(source: string, offset: number): number {
 }
 
 /**
- * Where `name`'s declaration and its aggregate key go, from the one aggregate reading in
- * `schema-parser.ts`, for an aggregate the file itself identifies. `name` is passed as the
- * extra key so a re-run over a file that already declares the table still recognizes the
- * object listing it.
+ * The root schema's aggregate, from the one aggregate reading in `schema-parser.ts`, when the
+ * file itself identifies it. A shape match the file does not identify is not enough to edit a
+ * hand-kept object: `guren check` grades the same match advisory. `source` is read as the root
+ * `db/schema.ts`, which is where its module imports resolve from.
  */
-function planAggregateSplice(source: string, name: string): AggregateSplice | null {
-  const ast = parseSourceFile(source, 'db/schema.ts')
-  const aggregate = ast && findSchemaAggregate(ast, name)
-  // A shape match the file does not identify is not enough to edit a hand-kept object:
-  // `guren check` grades the same match advisory. Null here also silences
-  // `appendSchemaTable`'s stale-aggregate warning, deliberately — advising by hand the
-  // edit the writer itself declined is that same guess in prose.
-  if (!aggregate?.confident) return null
+function identifiedRootAggregate(source: string, extraKey?: string): { aggregate: SchemaAggregate; ast: File; file: string } | null {
+  const file = resolve(process.cwd(), schemaPathFor(null))
+  const ast = parseSourceFile(source, file)
+  const aggregate = ast && findSchemaAggregate(ast, { extraKey, location: { cwd: process.cwd(), file } })
+  return ast && aggregate?.confident ? { aggregate, ast, file } : null
+}
 
-  const { object, statement, keys } = aggregate
+/** Where one more entry goes in the aggregate's object literal, and its text. */
+function aggregateEntrySplice(source: string, object: ObjectExpression, entry: string): { offset: number; text: string } | null {
   const last = object.properties[object.properties.length - 1]
+  if (!last) {
+    if (object.start == null) return null
+    const multiline = source.slice(object.start, object.end ?? object.start).includes('\n')
+    return { offset: object.start + 1, text: multiline ? `\n${indentOfLine(source, object.start)}  ${entry},` : ` ${entry} ` }
+  }
   const lastStart = last.start ?? -1
   const lastEnd = last.end ?? -1
   if (lastStart < 0 || lastEnd < 0) return null
@@ -802,14 +808,47 @@ function planAggregateSplice(source: string, name: string): AggregateSplice | nu
   const lineEnd = source.indexOf('\n', lastEnd)
   const commented = multiline && lineEnd > 0 && /^\s*,\s*\/\//.test(source.slice(lastEnd, lineEnd))
 
-  return {
-    declarationOffset: statementStart(source, statement.start ?? 0),
-    key: keys.includes(name)
-      ? null
-      : commented
-        ? { offset: lineEnd, text: `\n${indent}${name},` }
-        : { offset: lastEnd, text: `${multiline ? `,\n${indent}` : ', '}${name}` },
-  }
+  return commented
+    ? { offset: lineEnd, text: `\n${indent}${entry},` }
+    : { offset: lastEnd, text: `${multiline ? `,\n${indent}` : ', '}${entry}` }
+}
+
+/**
+ * Where `name`'s declaration and its aggregate key go. `name` is passed as the extra key so
+ * a re-run over a file that already declares the table still recognizes the object listing
+ * it. Null also silences `appendSchemaTable`'s stale-aggregate warning, deliberately:
+ * advising by hand the edit the writer itself declined is the same guess in prose.
+ */
+function planAggregateSplice(source: string, name: string): AggregateSplice | null {
+  const aggregate = identifiedRootAggregate(source, name)?.aggregate
+  if (!aggregate) return null
+
+  const declarationOffset = statementStart(source, aggregate.statement.start ?? 0)
+  if (aggregate.keys.includes(name)) return { declarationOffset, key: null }
+  const key = aggregateEntrySplice(source, aggregate.object, name)
+  return key && { declarationOffset, key }
+}
+
+/**
+ * The root `db/schema.ts` with `...identifier` spread into its schema object, handing `module`'s
+ * tables to that module's own aggregate. `alreadyPresent` when the object spreads `identifier`
+ * already; another reason when it spreads the module otherwise or identifies no aggregate.
+ */
+export function spreadModuleIntoSchema(source: string, module: string, identifier: string): InsertResult {
+  const file = schemaPathFor(null)
+  const root = identifiedRootAggregate(source)
+  if (!root) return { reason: `${file} has no schema object it identifies as one` }
+  const { aggregate, ast } = root
+  const spread = aggregate.delegated.get(module)
+  if (spread === identifier) return { reason: PATCH_REASONS.alreadyPresent }
+  if (spread !== undefined) return { reason: `The schema object in ${file} already spreads modules/${module}'s schema as ${spread || 'a namespace'}` }
+  // An import of `identifier` from the module itself is the binding the spread wants.
+  const imported = importsByLocal(ast.program.body).get(identifier)
+  const fromModule = imported?.imported === identifier && schemaModuleFor(process.cwd(), root.file, imported.source) === module
+  if (topLevelBindings(ast).has(identifier) && !fromModule) return { reason: `${file} already binds ${identifier}` }
+  const entry = aggregateEntrySplice(source, aggregate.object, `...${identifier}`)
+  if (!entry) return { reason: `Could not find where to add an entry to the schema object in ${file}` }
+  return { content: source.slice(0, entry.offset) + entry.text + source.slice(entry.offset) }
 }
 
 /** The offset the line containing `offset` starts at. */

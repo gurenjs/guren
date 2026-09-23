@@ -80,15 +80,18 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
     // The dev-only imports stand in for the ones Guren's own graph makes (the
     // disabled MCP endpoint, Vite when serving locally). Naming them directly
     // keeps the probe to two installed packages, and a bundler follows a literal
-    // dynamic import either way.
+    // dynamic import either way. `createConnection` stands in for app code
+    // reaching past drizzle's own `createPool` import into the client (#507).
     writeFileSync(
       join(root, 'src/lambda.ts'),
-      "import { getDatabase } from '../config/database'\n\n"
+      "import { getDatabase } from '../config/database'\n"
+        + "import { createConnection } from 'mysql2/promise'\n\n"
         + 'export const http = async () => new Response(String(typeof (await getDatabase())))\n\n'
         + 'export const devOnly = async () => [\n'
         + "  await import('vite'),\n"
         + "  await import('@guren/cli'),\n"
-        + ']\n',
+        + ']\n\n'
+        + 'export const mysqlRaw = () => typeof createConnection\n',
     )
   })
 
@@ -117,6 +120,18 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
       // this half, stubbing all four would pass the assertion above just as well
       // and ship a function that cannot reach its own database.
       expect(bundled).toContain('class PostgresError')
+    },
+    120_000,
+  )
+
+  test(
+    'lets application code import a name other than createPool from the stubbed client',
+    async () => {
+      // #507: a stub naming only `createPool` (drizzle's own import) failed `bun
+      // build` on "No matching export" for any other name app code destructured.
+      const bundled = await bundle(['postgres'])
+
+      expect(bundled).toContain('function createConnection')
     },
     120_000,
   )

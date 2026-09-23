@@ -339,12 +339,13 @@ type ObjectTypeRead =
  */
 function readObjectType(source: string, masked: string, namePattern: string): ObjectTypeRead {
   const declaration = new RegExp(
-    // Anchored to column 0: a declaration nested in a namespace or a function
-    // body merely shares the name. `[^{;]*` steps over a heritage clause, with
-    // `;` bounding it so an aliasless declaration cannot run into a later
-    // statement's brace. `declare` is admitted so this reader and
-    // collectTopLevelTypeDeclarations() agree on what counts as declared.
-    `^(?:export\\s+)?(?:declare\\s+)?(?:interface|type)\\s+(${namePattern})\\b\\s*(?:(=)\\s*|(extends[^{;]*))?\\{`,
+    // Anchored to column 0: a declaration nested in a namespace or function body
+    // merely shares the name. `[^{;]*` steps over a heritage clause, bounded by
+    // `;` so an aliasless declaration cannot run into a later statement's brace.
+    // `declare` is admitted so this reader and collectTopLevelTypeDeclarations()
+    // agree on what counts as declared; group 3 is an alias's leading parens.
+    `^(?:export\\s+)?(?:declare\\s+)?(?:interface|type)\\s+(${namePattern})\\b\\s*`
+    + `(?:(=)\\s*((?:\\(\\s*)*)|(extends[^{;]*))?\\{`,
     'mu',
   )
   const match = declaration.exec(masked)
@@ -368,7 +369,7 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
     }
   }
 
-  const [, typeName, isAlias, heritage] = match
+  const [, typeName, isAlias, parens, heritage] = match
 
   // An `extends Record<string, { … }>` puts a brace in front of the real one,
   // and the heritage pattern stops at the first; unbalanced angle brackets are
@@ -416,7 +417,8 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
   // followed by `&`/`|`, a conditional `extends`, or `[` is only its first
   // term. An interface always ends at its brace, so this cannot apply to one.
   if (isAlias) {
-    const rest = masked.slice(end)
+    // The parens matched before the brace are grouping, not composition.
+    const rest = stripLeadingCloseParens(masked.slice(end), countOccurrences(parens, '('))
     if (/^\s*[&|[]/u.test(rest) || /^\s*extends\b/u.test(rest)) {
       return {
         kind: 'unreadable',
@@ -437,6 +439,17 @@ function heritageOf(read: { heritage?: string }): Pick<ResourceDefinition, 'heri
 
 function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
+}
+
+// A short count is a syntax error TypeScript reports; the skip stops rather than fails.
+function stripLeadingCloseParens(text: string, count: number): string {
+  let rest = text
+  for (let i = 0; i < count; i += 1) {
+    const closing = /^\s*\)/u.exec(rest)
+    if (!closing) break
+    rest = rest.slice(closing[0].length)
+  }
+  return rest
 }
 
 /**

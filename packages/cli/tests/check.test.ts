@@ -783,27 +783,224 @@ export const schema = { users, posts }
     expect(report.checks.some(c => c.key.startsWith('schema-aggregate-keys:'))).toBe(false)
   })
 
-  // The shape `make:module` produces: the module's tables reach the root schema
-  // through `export *`, so no identifier exists here for the object to list.
-  it('does not ask the root schema object for a module table it re-exports', async () => {
+  const BILLING_TABLES = `import { pgTable, serial } from '@guren/orm/drizzle/pg'
+
+export const invoices = pgTable('invoices', {
+  id: serial('id').primaryKey(),
+})
+`
+
+  // `export *` puts a module's tables in the root's exports, never in its object.
+  it('asks the root schema object for a module table it neither lists nor spreads', async () => {
     const report = await withWorkspace({
       'db/schema.ts': `${PG_SCHEMA_FIXTURE}
 export * from '../modules/billing/db/schema'
 
 export const schema = { users }
 `,
-      'modules/billing/db/schema.ts': `import { pgTable, serial } from '@guren/orm/drizzle/pg'
+      'modules/billing/db/schema.ts': BILLING_TABLES,
+    })
 
-export const invoices = pgTable('invoices', {
+    const stale = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
+    expect(stale!.status).toBe('warn')
+    expect(stale!.advisory).toBe(false)
+    expect(stale!.message).toContain('invoices (modules/billing/db/schema.ts)')
+    expect(stale!.suggestion).toContain('...billingSchema')
+    expect(report.checks.some(c => c.key === 'schema-aggregate-keys:billing')).toBe(false)
+  })
+
+  it('hands a module spread into the root object to the module aggregate', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+import { billingSchema } from '../modules/billing/db/schema'
+export * from '../modules/billing/db/schema'
+
+export const schema = { users, ...billingSchema }
+`,
+      'modules/billing/db/schema.ts': `${BILLING_TABLES}
+export const receipts = pgTable('receipts', {
+  id: serial('id').primaryKey(),
+})
+
+export const billingSchema = { invoices }
+`,
+    })
+
+    // Nothing in the module names or reads the object; the root spreading it is the evidence.
+    expect(report.checks.find(c => c.key === 'schema-aggregate-keys:app')!.status).toBe('pass')
+    const moduleObject = report.checks.find(c => c.key === 'schema-aggregate-keys:billing')
+    expect(moduleObject!.status).toBe('warn')
+    expect(moduleObject!.advisory).toBe(false)
+    expect(moduleObject!.message).toContain('receipts')
+  })
+
+  // A namespace spread hands the root every export of the module, tables included.
+  it('takes a namespace spread for the whole module', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+import * as billing from '../modules/billing/db/schema'
+export * from '../modules/billing/db/schema'
+
+export const schema = { users, ...billing }
+`,
+      'modules/billing/db/schema.ts': `${BILLING_TABLES}
+export const receipts = pgTable('receipts', {
+  id: serial('id').primaryKey(),
+})
+
+export const billingSchema = { invoices }
+export type BillingSchema = typeof billingSchema
+`,
+    })
+
+    expect(report.checks.find(c => c.key === 'schema-aggregate-keys:app')!.status).toBe('pass')
+    // Every module table already reaches the root, so the module's own object is not asked.
+    expect(report.checks.some(c => c.key === 'schema-aggregate-keys:billing')).toBe(false)
+  })
+
+  // A spread the reader cannot follow is reported unverifiable, never passed.
+  it('reports a spread module aggregate it cannot read, and keeps the root from passing', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+import { billingSchema } from '../modules/billing/db/schema'
+export * from '../modules/billing/db/schema'
+
+export const schema = { users, ...billingSchema }
+`,
+      'modules/billing/db/schema.ts': `${BILLING_TABLES}
+const legacy = {}
+
+export const receipts = pgTable('receipts', {
+  id: serial('id').primaryKey(),
+})
+
+export const billingSchema = { invoices, ...legacy }
+`,
+    })
+
+    const moduleObject = report.checks.find(c => c.key === 'schema-aggregate-keys:billing')
+    expect(moduleObject!.status).toBe('warn')
+    expect(moduleObject!.advisory).toBe(true)
+    expect(moduleObject!.message).toContain('billingSchema')
+    const root = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
+    expect(root!.status).toBe('warn')
+    expect(root!.advisory).toBe(true)
+    expect(root!.message).toContain('receipts (modules/billing/db/schema.ts)')
+  })
+
+  it('does not take a namespace re-export of a module schema for its tables', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export * as billing from '../modules/billing/db/schema'
+`,
+      'modules/billing/db/schema.ts': BILLING_TABLES,
+    })
+
+    expect(report.checks.find(c => c.key === 'module-schema-aggregation:billing')!.status).toBe('warn')
+  })
+
+  it('counts a module table the root object imports and lists by name', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+import { invoices } from '../modules/billing/db/schema'
+export * from '../modules/billing/db/schema'
+
+export const schema = { users, invoices }
+`,
+      'modules/billing/db/schema.ts': `${BILLING_TABLES}
+export const receipts = pgTable('receipts', {
   id: serial('id').primaryKey(),
 })
 `,
     })
 
     const stale = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
-    expect(stale).toBeDefined()
-    expect(stale!.status).toBe('pass')
-    expect(report.checks.some(c => c.key === 'schema-aggregate-keys:billing')).toBe(false)
+    expect(stale!.status).toBe('warn')
+    expect(stale!.message).toContain('receipts (modules/billing/db/schema.ts)')
+    expect(stale!.message).not.toContain('invoices')
+  })
+
+  // The root imports a module schema to spread its aggregate; that import alone puts
+  // none of the module's tables in the root's exports, where drizzle-kit reads them.
+  it('does not take an import of a module schema for its re-export', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+import { billingSchema } from '../modules/billing/db/schema'
+
+export const schema = { users, ...billingSchema }
+`,
+      'modules/billing/db/schema.ts': `${BILLING_TABLES}
+export const billingSchema = { invoices }
+`,
+    })
+
+    const aggregation = report.checks.find(c => c.key === 'module-schema-aggregation:billing')
+    expect(aggregation!.status).toBe('warn')
+    expect(aggregation!.suggestion).toContain("export * from '../modules/billing/db/schema'")
+  })
+
+  // Only an identified root vouches for the module export it spreads: a shape match is
+  // itself advisory, and must not turn the module's object into a gating one.
+  it('leaves a module aggregate advisory when the root spreading it is a shape match', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+import { billingSchema } from '../modules/billing/db/schema'
+export * from '../modules/billing/db/schema'
+
+export const authTables = { users, ...billingSchema }
+`,
+      'modules/billing/db/schema.ts': `${BILLING_TABLES}
+export const receipts = pgTable('receipts', {
+  id: serial('id').primaryKey(),
+})
+
+export const billingSchema = { invoices }
+`,
+    })
+
+    // A shape match holding a spread is no candidate at all: nothing identifies it.
+    expect(report.checks.some(c => c.key === 'schema-aggregate-keys:app')).toBe(false)
+    const moduleObject = report.checks.find(c => c.key === 'schema-aggregate-keys:billing')
+    expect(moduleObject!.status).toBe('warn')
+    expect(moduleObject!.advisory).toBe(true)
+  })
+
+  it('does not take a type-only re-export of a module schema for its tables', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export type * from '../modules/billing/db/schema'
+`,
+      'modules/billing/db/schema.ts': BILLING_TABLES,
+    })
+
+    expect(report.checks.find(c => c.key === 'module-schema-aggregation:billing')!.status).toBe('warn')
+  })
+
+  // Objects the reader accepts only through a module import or as `{}` must not make an
+  // identified root ambiguous, which would silence both the check and the writers.
+  it('keeps the root schema object beside a module grouping and an empty typed object', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+import { invoices } from '../modules/billing/db/schema'
+export * from '../modules/billing/db/schema'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+})
+
+export const schema = { users }
+export const billing = { invoices }
+export const relations = {}
+export type Relations = typeof relations
+`,
+      'modules/billing/db/schema.ts': BILLING_TABLES,
+    })
+
+    const root = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
+    expect(root!.status).toBe('warn')
+    expect(root!.advisory).toBe(false)
+    expect(root!.message).toContain('posts')
+    expect(root!.message).toContain('invoices (modules/billing/db/schema.ts)')
   })
 
   // A spread carries tables the object never names, so the file does not
