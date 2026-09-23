@@ -11,6 +11,7 @@ import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
 import { hasBearerHeader, type ApiTokenStore } from './api-token'
 import { bindPasswordHasher, createPasswordHasher } from './password/configured-hasher'
+import { DefaultHasher } from './password/DefaultHasher'
 import type { PasswordHasher } from './password/PasswordHasher'
 import type { AuthEntry, AuthProviderEntry } from '../introspection/types'
 import type {
@@ -60,10 +61,9 @@ interface ProviderRegistryEntry<User = unknown> {
   description?: AuthProviderEntry
 }
 
-/** `DefaultHasher.algorithm`, read structurally so a custom `PasswordHasher` reads as unknown. */
+/** The framework hasher's algorithm; a custom `PasswordHasher` reads as unknown. */
 function hasherAlgorithm(hasher: PasswordHasher): string | null {
-  const algorithm = (hasher as { algorithm?: unknown }).algorithm
-  return typeof algorithm === 'string' ? algorithm : null
+  return hasher instanceof DefaultHasher ? hasher.algorithm : null
 }
 
 export class AuthManager implements AuthManagerContract {

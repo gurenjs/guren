@@ -160,6 +160,19 @@ describe('auth section', () => {
     expect(argon2.auth).toMatchObject({ hasher: 'DefaultHasher', algorithm: 'argon2' })
   })
 
+  test('reads a custom hasher\'s algorithm as unknown, whatever fields it carries', async () => {
+    class BcryptHasher {
+      readonly algorithm = 'bcrypt'
+      async hash(value: string) { return value }
+      async verify() { return true }
+      needsRehash() { return false }
+    }
+
+    const manifest = await createApp({ auth: { hasher: new BcryptHasher() as never } }).introspect()
+
+    expect(manifest.auth).toMatchObject({ hasher: 'BcryptHasher', algorithm: null })
+  })
+
   test('describes a useModel() provider and a bare registerProvider() factory without calling either', async () => {
     class User {}
     let built = false
