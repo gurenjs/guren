@@ -1,14 +1,11 @@
-import { readFile, writeFile, unlink, readdir, mkdir, rm, rename, rmdir } from 'node:fs/promises'
+import { readFile, writeFile, unlink, readdir, mkdir, rm, rename } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { CacheStore, FileStoreOptions, CachedItem } from '../types'
+import { withFileLock } from './file-lock'
 
 const LOCK_TIMEOUT_MS = 5000
-
-function ignoreMissing(error: NodeJS.ErrnoException): void {
-  if (error.code !== 'ENOENT') throw error
-}
 
 /** File-based cache store. */
 export class FileStore implements CacheStore {
@@ -58,33 +55,12 @@ export class FileStore implements CacheStore {
     }
   }
 
-  // Only for read-modify-write (add, increment). A lock still held at the
-  // deadline is taken over: its owner died mid-operation, and losing one
-  // update beats a key that throws until someone deletes the directory.
+  // Only for read-modify-write (add, increment). A lock held past the timeout
+  // is taken over: its owner most likely died mid-operation, and losing one
+  // update beats a key that stays locked until someone deletes the directory.
   private async withFileLock<T>(filePath: string, callback: () => Promise<T>): Promise<T> {
     await this.ensureDirectory(filePath)
-    const lockPath = `${filePath}.lock`
-    let deadline = Date.now() + LOCK_TIMEOUT_MS
-    for (;;) {
-      try {
-        await mkdir(lockPath)
-        break
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        if (Date.now() >= deadline) {
-          await rmdir(lockPath).catch(ignoreMissing)
-          deadline = Date.now() + LOCK_TIMEOUT_MS
-          continue
-        }
-        await new Promise((resolve) => setTimeout(resolve, 5))
-      }
-    }
-    try {
-      return await callback()
-    } finally {
-      // clear() may have removed the whole tree, lock included.
-      await rmdir(lockPath).catch(ignoreMissing)
-    }
+    return withFileLock(`${filePath}.lock`, LOCK_TIMEOUT_MS, callback)
   }
 
   private async deleteCacheFile(filePath: string): Promise<boolean> {
