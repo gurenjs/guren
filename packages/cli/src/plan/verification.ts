@@ -11,11 +11,11 @@ import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
 import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
-import { listPlanReferences, type PlanReferenceField } from './references'
+import { behaviourCanReach, behaviourReach } from './reach'
 import type { Plan, PlanDraft } from './schema'
 import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus, type PlanVerificationHold } from './status'
-import { planElementParents, type PlanTaskDerivation } from './tasks'
+import type { PlanTaskDerivation } from './tasks'
 
 export function sha256(bytes: Uint8Array | string): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -47,60 +47,6 @@ export interface PlanVerificationSummary {
   staleWaivers: PlanWaiver[]
   /** Set when a decision log exists and could not be read. */
   decisionsUnreadable?: string
-}
-
-/**
- * Which references a behaviour's reach follows (RFC 0030 §6). A route runs its action, which
- * validates, authorizes and responds with what it names; a page shows its props' resources.
- * A view's form and action routes do not: posting to a route shows nothing of the page that
- * links to it. Total, so a new reference is a decision here.
- */
-const REFERENCE_CARRIES_BEHAVIOUR: Record<PlanReferenceField, boolean> = {
-  'acceptance.route': true,
-  'acceptance.inertia': true,
-  'route.action': true,
-  'route.bind': true,
-  'action.params': true,
-  'action.query': true,
-  'action.body': true,
-  'action.policy': true,
-  'action.view': true,
-  'action.resource': true,
-  'view.propResource': true,
-  'resource.model': true,
-  'policy.model': true,
-  'view.actionRoute': false,
-  'view.formValidator': false,
-  'view.formSubmitsTo': false,
-  'column.references': false,
-  'model.relationship': false,
-  'question.affects': false,
-  'flow.node': false,
-  'task.covers': false,
-}
-
-/**
- * The elements the behaviours `acceptanceIds` exercise: what the carrying references reach
- * from them, and the controller of every action reached. Nothing in a plan links a behaviour
- * to a job, event, listener, mail or notification, so none is ever reached.
- */
-export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: Iterable<string>): Set<string> {
-  const edges = new Map<string, string[]>()
-  for (const reference of listPlanReferences(plan)) {
-    if (!REFERENCE_CARRIES_BEHAVIOUR[reference.field]) continue
-    edges.set(reference.from.id, [...(edges.get(reference.from.id) ?? []), reference.to])
-  }
-  const parents = planElementParents(plan)
-  const reached = new Set<string>()
-  const pending = [...acceptanceIds]
-  for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
-    for (const next of [...(edges.get(id) ?? []), parents.get(id)]) {
-      if (next === undefined || reached.has(next)) continue
-      reached.add(next)
-      pending.push(next)
-    }
-  }
-  return reached
 }
 
 /**
@@ -139,6 +85,7 @@ export function applyVerification(
     }),
   )
   const reached = behaviourReach(plan, carriers.flatMap((step) => step.acceptanceIds))
+  const reachable = behaviourCanReach(plan)
 
   for (const task of derivation.tasks) {
     for (const step of task.steps) {
@@ -162,20 +109,26 @@ export function applyVerification(
           element.notes.push(note)
           element.hold = { kind, note }
         }
+        // `reason` is why the readers left it `unjudged`; the lifted state and its hold carry their own account.
+        const settle = (state: 'verified' | 'drifted'): void => {
+          element.state = state
+          delete element.reason
+        }
         if (!awaitsVerification(element)) {
           hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
         } else if (unmatched && !reached.has(id)) {
-          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`)
+          const remedy = reachable.has(id) ? 'add a behaviour that reaches it, or waive it' : 'no behaviour can reach it, so waive it'
+          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: ${remedy}.`)
         } else if (element.files.length === 0 && !needsNoFiles) {
           hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
-          element.state = 'drifted'
+          settle('drifted')
           hold('expired', `${verifiedBy}; now in a file that run did not fingerprint: ${uncovered.join(', ')}.`)
         } else if (changed.length > 0) {
-          element.state = 'drifted'
+          settle('drifted')
           hold('expired', `${verifiedBy}; changed since: ${changed.join(', ')}.`)
         } else {
-          element.state = 'verified'
+          settle('verified')
         }
       }
     }
@@ -200,7 +153,7 @@ export function applyWaivers(status: PlanStatus<PlanElementState>, waivers: Read
     const taken = `Waived ${waiver.at}${waiver.by ? ` by ${waiver.by}` : ''}: ${waiver.reason}`
     if (element.state === 'verified') return { ...element, notes: [...element.notes, `${taken}. It is verified, so the waiver is not needed.`] }
     if (element.change === 'existing') return { ...element, notes: [...element.notes, `${taken}. It is an existing element, no part of completion, so the waiver is not needed.`] }
-    const { hold: _hold, ...rest } = element
+    const { hold: _hold, reason: _reason, ...rest } = element
     return { ...rest, state: 'waived', notes: [...element.notes, taken] }
   })
   return { elements, summary: summarize(elements) }

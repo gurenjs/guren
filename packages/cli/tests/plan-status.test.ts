@@ -630,12 +630,13 @@ describe('judgePlan', () => {
       expect(only(judgePlan(showAlter, app(), [{ ...RESPONSE_HELD, verdict: 'unknown' }]), 'a').state).toBe('wired')
     })
 
-    test('should fail closed on a match with no reading, naming plan:approve as the remedy', () => {
+    test('should fail closed on a match with no reading, without naming plan:approve, which would record it as held', () => {
       for (const readings of [undefined, [], [{ ...RESPONSE_HELD, label: 'PostController.index' }], [{ ...RESPONSE_HELD, planned: 'posts/Index' }]]) {
         const element = only(judgePlan(showAlter, app(), readings), 'a')
 
         expect(element.state).toBe('unjudged')
-        expect(element.reason).toContain('run guren plan:approve on the plan to record the readings it lacks')
+        expect(element.reason).toContain('a reading taken now would find them held')
+        expect(element.reason).not.toContain('plan:approve')
         expect(element.properties[0]).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('no reading of it was recorded') })
       }
     })
@@ -673,6 +674,58 @@ describe('judgePlan', () => {
       expect(readAlterProperties(showAlter, planAppState())).toEqual([])
       // Without detail a page's props read `unknown`, and a blind reading would later credit any match.
       expect(readAlterProperties(view(ALTER, { props: [{ name: 'posts', type: 'Post[]' }] }), planAppState())).toEqual([])
+    })
+
+    test('should credit a relationship an alter adds against the reading taken before it was declared', () => {
+      const document = plan({
+        models: [
+          model(ALTER, { relationships: [{ name: 'author', type: 'belongsTo', target: 'u' }, { name: 'comments', type: 'hasMany', target: 'u' }] }),
+          { id: 'u', change: EXISTING, name: 'User', table: 'users', columns: [], relationships: [], fillable: [] },
+        ],
+      })
+      const readings = readAlterProperties(document, app())
+      const relationships = [
+        { name: 'author', type: 'belongsTo' as const, relatedModel: 'User' },
+        { name: 'comments', type: 'hasMany' as const, relatedModel: 'User' },
+      ]
+      const built = app({
+        models: [
+          { className: 'Post', module: null, file: 'app/Models/Post.ts', table: 'posts', relationships, fillable: ['title'] },
+          { className: 'User', module: null, file: 'app/Models/User.ts', table: 'users', relationships: [], fillable: null },
+        ],
+      })
+
+      expect(readings.filter((entry) => entry.property.startsWith('relationship comments'))).toEqual([
+        reading('m', 'Post', 'relationship comments', 'hasMany', 'differ'),
+        reading('m', 'Post', 'relationship comments target', 'User', 'differ'),
+      ])
+      const element = only(judgePlan(document, built, readings), 'm')
+      expect(element.state).toBe('present')
+      expect(element.properties.filter((property) => property.property.startsWith('relationship comments')).map((property) => property.verdict)).toEqual(['match', 'match'])
+    })
+
+    test('should send an alter no behaviour can reach to a waiver, and a reachable one to a behaviour, when no match counts', () => {
+      const columnAlter = withColumn(ALTER)
+      const column = only(judgePlan(columnAlter, app(), []), 'c')
+      const action = only(judgePlan(showAlter, app(), []), 'a')
+
+      expect(column.state).toBe('unjudged')
+      expect(column.reason).toEndWith('waive it, since no behaviour can reach it.')
+      expect(action.reason).toEndWith('verify the change through a behaviour that reaches it.')
+      const held = only(judgePlan(columnAlter, app(), readAlterProperties(columnAlter, app())), 'c')
+      expect(held.reason).toEndWith('state the change in a property the application did not hold, or waive it, since no behaviour can reach it.')
+    })
+
+    test('should name plan:approve where a planned property still differs and the approval holds no reading of it', () => {
+      const document = view(ALTER, { props: [{ name: 'posts', type: 'Post[]' }, { name: 'total', type: 'number' }] })
+      const lacking = only(judgePlan(document, app(), []), 'v')
+      const recorded = only(judgePlan(document, app(), readAlterProperties(document, app())), 'v')
+
+      expect(lacking.state).toBe('planned')
+      expect(lacking.notes).toEqual([expect.stringMatching(/^The approval recorded no reading of prop total: run guren plan:approve on the plan before changing/u)])
+      expect(recorded.notes).toEqual([])
+      // Nothing approved yet: every alter lacks every reading, and the approval gate already says so.
+      expect(only(judgePlan(document, app()), 'v').notes).toEqual([])
     })
   })
 
