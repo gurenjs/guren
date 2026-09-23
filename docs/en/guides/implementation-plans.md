@@ -249,7 +249,7 @@ Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recor
 
 The first approval writes a `baseline` into the plan: `rev`, the commit the plan was written against, and `contextHash`, a hash per referenced element of what the application holds for it today. That is why it refuses a repository with no commit and a working tree with uncommitted changes (the plan's own files excepted). The approval itself goes to `approvals.json`, beside the plan and never inside it. Commit both.
 
-Validators are never hashed: the stamp finds an element by name, and a validator's name is an exported schema symbol it does not resolve to a file. If another section cannot be read, approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
+Validators are never hashed: the stamp finds each element's file from its name, and it does not resolve a validator's exported schema symbol to a file. If another section cannot be read, approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
 
 The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
 
@@ -271,22 +271,23 @@ The rule is as sharp as freshness, and no sharper. A class another commit adds i
 
 ### Readings of an `alter`
 
-An `alter` changes something that existed before the plan, so a planned property that already held proves nothing about the change. For every `alter`, the approval therefore records what each planned property reads at that moment, on its entry in `approvals.json`. `plan:status` counts an `alter`'s property as done only when it read `differ` or `unknown` at approval and matches now. Approve the plan before implementing it, so the readings describe the application before the work. Approving an edited plan keeps the readings recorded under the same baseline.
+An `alter` changes something that existed before the plan, so a planned property that already held proves nothing about the change. For every `alter`, the approval therefore records what each planned property reads at that moment, on its entry in `approvals.json`. `plan:status` counts an `alter`'s property as done only when it read `differ` or `unknown` at approval and matches now. Approve the plan before implementing it, so the readings describe the application before the work. Approving an edited plan keeps the readings recorded under the same baseline, for each property whose planned value and name in code the edit left as they were.
 
-A matching property with no reading is not counted, and an `alter` left with nothing that counts reads `unjudged`, with a note that says to run `plan:approve` again. On a hash that is already approved, that adds the readings the entry lacks and changes nothing else:
+A matching property with no reading is not counted, and an `alter` left with nothing that counts reads `unjudged`. Its note names two ways out: run `plan:approve` again, or verify the change through a behaviour that reaches it. `plan:approve` on a hash already approved records only the readings the entry lacks:
 
 ```text
 Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in docs/plans/comments/approvals.json: model.post, view.posts.show.
 ```
 
-A reading taken after the work already matches and is never counted, so once the code is written the way out is a behaviour that reaches the element, or a waiver.
+That helps only before the work. A reading taken after the code is written already matches and never counts, so from then on the way out is a behaviour that reaches the element, or a waiver.
 
 ## Implementing: `plan:next` and `plan:verify`
 
-Guren derives the work from the plan, and the order does not depend on a model. Every entity the plan adds or changes is a task, ordered by foreign keys, and every task has up to five kinds of step:
+Guren derives the work from the plan, and the order does not depend on a model. Every entity the plan adds or changes is a task, ordered by foreign keys, and every task has up to six kinds of step:
 
 | Step | Work | Verified by |
 |---|---|---|
+| `commands` | The plan's `commands`, such as `guren add attachments`, in `task/foundation` | `codegen`, `typecheck` |
 | `scaffold` | The first version of a new entity, through `make:feature` | `codegen`, `typecheck` |
 | `tests` | One test per acceptance behaviour, failing | `codegen`, the tests failing |
 | `data` | Table, migration, model relationships and fillable | `codegen`, `db:migrate`, `typecheck` |
@@ -356,7 +357,7 @@ A step ends in one of four outcomes.
 | `verified` | Every command passed and every element the step owns is at the state that completes it |
 | `failed` | A command failed; there is something in the implementation to fix |
 | `incomplete` | The commands passed, but an element is not there yet |
-| `blocked` | The environment could not run a command: a script `package.json` lacks, a tool not installed, a timeout, a database that cannot be reached, no drizzle-kit or drizzle config for the migration check |
+| `blocked` | The environment could not run a command: a script `package.json` lacks, a tool not installed, a timeout, a database that cannot be reached, a migration check with no drizzle-kit or drizzle config, or a drizzle-kit that gives no answer |
 
 From the example, a `data` step whose model relationship does not typecheck yet:
 
@@ -404,13 +405,13 @@ task/entity/model.comment/data: failed (1383 ms)
   pass     typecheck   bun run typecheck
 ```
 
-Generate the migration (`bunx guren make:migration --name create_comments_table`), commit it and verify again. The dry run compares the whole schema with the migrations folder, so a schema change outside the plan fails the step too. An application with no drizzle config, or no drizzle-kit installed, gets `blocked`.
+Generate the migration (`bunx guren make:migration --name create_comments_table`), commit it and verify again. The dry run compares the whole schema with the migrations folder, so a schema change outside the plan fails the step too.
 
 `plan:verify` refuses an unapproved plan before it runs anything, so nothing is recorded against a hash nobody agreed to. Past that, it executes your application: `bun test` boots it and `db:migrate` opens the database it is configured for, so run it against a development or test database, never production. Each command may take 600 seconds before it counts as `blocked`; `--timeout <seconds>` changes that. Without `--step` it runs every step in order and skips the ones whose record still holds; steps whose files changed since they verified are re-checked last, as described next. `--ci` exits 1 when a step it ran did not verify, and `--json` prints the report as data.
 
 ### One step, one commit
 
-A verified step records a fingerprint of the files that hold its elements and of its test files. When one of them changes, the step's elements read `drifted`. A later step often has good reason to write into such a file: a route beside an earlier one in `routes/web.ts`, a table in `db/schema.ts`, a field on a resource. In a copy of the example, a commit after the `pages` step added a field to `CommentResource.ts`, which the `http` step verified, and every element of `http` drifted:
+Change only the elements a step lists, and commit it once it verifies. A verified step records a fingerprint of the files that hold its elements and of its test files. When one of them changes, the step's elements read `drifted`. A later step often has good reason to write into such a file: a route beside an earlier one in `routes/web.ts`, a table in `db/schema.ts`, a field on a resource. In a copy of the example, a commit after the `pages` step added a field to `CommentResource.ts`, a file the `http` step had verified, so the elements of `http` drifted:
 
 ```text
 Routes
@@ -418,16 +419,16 @@ Routes
       Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts.
 ```
 
-`plan:verify --step` re-checks such steps. Once the step it was given verifies, the same run re-checks every earlier step whose files changed, in task order, and records each as `verified` again or `failed` with what broke; the report lists them under "Re-checked". While the given step does not verify, the earlier records are left alone, since the commands the steps share would fail them too, and the report lists them as left for a later run. A `tests` step is re-checked without running anything, because its tests pass once the code exists: it stays verified while exactly one test file carries each of its behaviour ids. Otherwise the run names the behaviour and leaves the step drifted.
+The elements verified only through a behaviour of `http` (its controller and policy, and `model.post` of the `data` step) lost `verified` too, since a step whose files changed carries no reach (see Reading progress).
 
-`plan:next` runs nothing, so when the next step is a drifted one, it says to re-check the step rather than implement it again:
+`plan:verify --step` re-checks such steps. Once the step it was given verifies, the same run re-checks the earlier steps whose files changed, in task order, until one does not verify. Each is recorded with its outcome, `failed` naming what broke, and the report lists them under "Re-checked"; a step that fails its re-check is the one `plan:next` returns next. A re-check that comes out `blocked` is left for a later run. While the given step does not verify, the earlier records are left alone, since the commands the steps share would fail them too, and the report lists them as left for a later run. A `tests` step is re-checked without running anything, because its tests pass once the code exists: it stays verified while exactly one test file carries each of its behaviour ids. Otherwise it names the behaviour and leaves the step drifted.
+
+`plan:next` runs nothing, so when the next step is a drifted one, it says to re-check it:
 
 ```text
 Verified before; files it was verified at have changed since: app/Http/Resources/CommentResource.ts.
 Re-check it with `bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http` rather than re-implementing it, fix only what that run reports, and commit once it is verified.
 ```
-
-Change only the elements the step lists, and commit once it verifies, so that each commit holds one step.
 
 When every step is verified, `plan:next` says so:
 
@@ -443,7 +444,7 @@ In an application with the agent harness (`bunx guren agent:init`), the `plan-im
 plan:verify on stop (docs/plans/comments/plan.json, task/entity/model.comment/data): the step is incomplete, so this turn is not done (continuation 1 of 3).
 ```
 
-The hook verifies the marked step through the same run as `plan:verify --step`, so earlier steps whose files changed are re-checked on every stop that verifies it, without spending a continuation. When the marked step verifies but its changes broke an earlier step, the hook lets the turn end and names that step, and `plan:next` returns it next.
+The hook verifies the marked step through the same run as `plan:verify --step`, so earlier steps whose files changed are re-checked on every stop that verifies it, without spending a continuation. When the marked step verifies but its changes broke an earlier step, the hook lets the turn end and names that step.
 
 It gives up after three continuations, when nothing about the step changed since the last one, when the step or one of its elements is `blocked`, or when something the step depends on went stale since approval. The step is then recorded as stalled:
 
@@ -468,7 +469,7 @@ The `plan-implement` skill tells the agent to report the refusal and leave appro
 bunx guren plan:status docs/plans/comments/plan.json
 ```
 
-`plan:status` compares every element with the code. It imports the routes file, the schema and the validator files and parses source, boots nothing, runs nothing, needs no database, and exits 0 whatever it finds. At the end of the example, with every step verified:
+`plan:status` compares every element with the code. It imports the routes file, the schema and the validator files, and parses source; it boots nothing, runs nothing, needs no database, and exits 0 whatever it finds. At the end of the example, with every step verified:
 
 ```text
 Validators
@@ -498,23 +499,23 @@ Elements the plan changes: 16
 | `wired` | Reachable: a route mounted by `createApp()` that no earlier route answers first, an action such a route dispatches to, a page such an action returns, a validator such a route or action validates with, a side effect the application dispatches, emits, registers or sends |
 | `verified` | Its step verified, and the files it fingerprinted are unchanged |
 | `drifted` | Partly there with a property that differs, or changed since it was verified |
-| `unjudged` | No planned property of it could be read, and nothing else says whether the change happened |
+| `unjudged` | No planned property of it could be read (for an `alter`, none moved since approval), and nothing else says whether the change happened |
 | `blocked` | Cannot be judged here; the line says why |
 | `waived` | Accepted incomplete by a person, with a reason |
 
 A property no scanner reads is never counted as a match, and an element whose planned properties are all unreadable is `unjudged` rather than complete. A kind that has a mount point is the exception: a validator, an action, a route, a page and a side effect complete on being mounted, since the mount is a reading of the element itself. An element that plans no property at all, such as a controller, completes on existing. An `alter` counts only what moved since its readings at approval, whatever it mounts (see Readings of an `alter`, under Approving).
 
-A route is mounted but not reached when a route registered before it, with the same method, answers every request its path matches: a planned `GET /comments/new` after `GET /comments/:id` never receives a request. Such a route stays `present`, and so do an action and a validator only it reaches. The note names the earlier route and the file that registered it; register the planned route first, or change its path.
+A route is mounted but not reached when a route registered before it, with the same method or `ALL`, answers every request its path matches: a planned `GET /comments/new` after `GET /comments/:id` never receives a request. Such a route stays `present`, and so do the action, validator and page only it reaches. The note names the earlier route and the routes file or module that registered it; register the planned route first, or change its path. A route that may be shadowed, where the order or the paths cannot be compared, stays `present` too.
 
-A side effect is mounted when the application's source, outside tests and the class's own file, uses the class through the framework's API: a job dispatched or scheduled, an event emitted, a listener registered, a mail sent or queued, a notification sent. Its step is `incomplete` until that use exists. Which action does it is not checked against the plan's `trigger`.
+A side effect is mounted when the application's source, outside tests and the class's own file, uses the class through the framework's API: a job dispatched or scheduled, an event emitted, a listener registered, a mail sent or queued, a notification sent. Its step is `incomplete` until that use exists. Once it does, the step can verify, but the element stays `wired` and closes only with a waiver (below). Which action uses it is not checked against the plan's `trigger`.
 
-A verified step does not lift an element none of whose planned properties matched beyond its existence. A key a validator or resource declares, and an ability a policy declares, is such a match on existence: it shows the name is there, not what it does. Such an element becomes `verified` only while a behaviour of a step whose record stands reaches it, following the plan's own references: a behaviour's route and expected page, a route's action and bound models, an action's validators, policy and response page or resource, a page's prop resources, the model behind a reached resource or policy, and the controller of an action it reaches. A form's validator, the route the form submits to and the routes a page's buttons call do not carry reach, since a request to a route shows nothing of the page that links to it. The behaviours that count belong to the steps that must see them pass; the `tests` step, which verifies by seeing them fail, never carries reach. So a command, a policy, and a page none of whose planned props matched need a behaviour that reaches them, or a waiver, before the plan can close. Nothing links a behaviour to a job, event, listener, mail or notification, so a side effect closes only with a waiver. `--json` records why an element was not lifted under `hold`.
+A verified step does not lift an element none of whose planned properties matched beyond its existence. A key a validator or resource declares, and an ability a policy declares, count as such a match: they show only that the name exists. Such an element becomes `verified` only while a behaviour of a step whose record stands reaches it, following the plan's own references: a behaviour's route and expected page, a route's action and bound models, an action's validators, policy and response page or resource, a page's prop resources, the model behind a reached resource or policy, and the controller of an action it reaches. A form's validator, the route the form submits to and the routes a page's buttons call do not carry reach, since a request to a route shows nothing of the page that links to it. The behaviours that count belong to the steps that must see them pass; the `tests` step, which verifies by seeing them fail, never carries reach. So an element that matched only on existence (a validator, resource or policy whose keys or abilities are all that matched, a page none of whose planned props matched) needs a behaviour that reaches it, or a waiver, before the plan can close. Nothing links a behaviour to a command, job, event, listener, mail or notification, so these close only with a waiver. `--json` records why an element was not lifted under `hold`.
 
 A planned `body`, `params` or `query` validator counts as matched when the action validates with it or a route holds it as a contract schema. An action that validates with something else, a schema built in place (`this.validateBody(PostSchema.partial())`) included, or through a helper, keeps the action at `present` with a note instead of drifting it.
 
-A validator's `fields` are read off the exported zod schema. Every key is checked; a field's type, whether it is required, and the rules `min`, `max`, `email`, `url` and `uuid` are read only when the field is built from plain pieces (a primitive or `z.coerce.*`, `.optional()`, `.nullable()`, `.default()`, and length, bound and format checks). A transform, a refinement, a union or any other wrapper on the way leaves them `unknown`, with a note naming it. A resource's `fields` are read from the payload type `guren codegen` reads. A key the schema or payload lacks, or a type that differs, makes the element `drifted`, and `plan:verify` reports its step `incomplete`.
+A validator's `fields` are read off the exported zod schema. Every key is checked; a field's type, whether it is required, and the rules `min`, `max`, `email`, `url` and `uuid` are read only when the field is built from plain pieces (a primitive or `z.coerce.*`, `.optional()`, `.nullable()`, `.default()`, and length, bound and format checks), and a coerced field's `required` is never read. A transform, a refinement, a union or any other wrapper on the way leaves them `unknown`; `--json` gives the reason on the property. A resource's `fields` are read from the payload type `guren codegen` reads. A key the schema or payload lacks, or a type, `required` or rule that differs, makes the element `drifted`, and `plan:verify` reports its step `incomplete`.
 
-The report lists what no scanner reads under "Planned, not checkable", so a gap in what Guren can read stays visible rather than passing as green:
+The report lists every planned property left `unknown` under "Planned, not checkable": one no scanner reads, one read but not decidable (a type compared only as text, a bound looser than planned), and an `alter`'s match that already held at approval. A gap in what Guren can judge stays visible rather than passing as green:
 
 ```text
 Planned, not checkable:
@@ -541,7 +542,7 @@ Against the approved baseline: fresh 13, stale 0, unstamped 0, unjudged 1
   unjudged: validator.comment
 ```
 
-An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval), and `unjudged` cannot be read now. Validators always read `unjudged`, since the stamp does not resolve a validator's schema symbol to a file, so the line above appears in any plan that declares a validator. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
+An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval), and `unjudged` cannot be read now. Validators always read `unjudged` (they are never hashed, see Approving), so the line above appears in any plan that declares a validator. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
 
 A stale element holds every step that depends on it. In a copy of the example, another commit registered a `comments.store` route before the implementation started:
 
@@ -591,7 +592,7 @@ When an element will not be finished under this plan, or nothing in the plan can
     No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>", or add a behaviour that reaches it and approve the plan again
 ```
 
-No behaviour can reach a side effect, so of the two ways out only the waiver applies:
+A behaviour never reaches a side effect (see Reading progress), so only the waiver applies:
 
 ```bash
 bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "no behaviour can observe an emitted event; the listener's own plan tests the notification"
@@ -620,7 +621,7 @@ A plan is closed when an approval names its current hash and every element it ch
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http again, since that run no longer holds; or waive it: bunx guren plan:waive docs/plans/comments/plan.json validator.comment --reason "<why>"
 ```
 
-`model.post` is verified only through the behaviours of the `http` step, so that step comes first. An element below its completion state, or `blocked`, needs the code or the environment fixed before `plan:verify`. Where no `plan:verify` run can lift an element, the line names only `plan:waive` and changing the plan. `plan:next` prints the same lines once every step is verified, so the loop does not stop on a plan that cannot close.
+`model.post` is verified only through the behaviours of the `http` step, so that step comes first. An element below its completion state, or `blocked`, needs the code or the environment fixed before `plan:verify`. Where no `plan:verify` run can lift an element, the line names `plan:waive`, and adding a behaviour where one could reach it. `plan:next` prints the same lines once every step is verified, so an agent that has verified every step still sees what keeps the plan open.
 
 When every element is verified or waived, `--dry-run` prints everything the close would write. Then:
 
