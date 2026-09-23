@@ -1,7 +1,55 @@
 @import 'tailwindcss';
 
+/* Self-hosted latin subsets, SIL OFL 1.1 (public/fonts/LICENSE-*.txt), the
+   same files the Guren Deck slides use. Only the weights a page renders load. */
+@font-face {
+  font-family: 'Noto Sans JP';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/noto-sans-jp-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans JP';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/noto-sans-jp-latin-700-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-700-normal.woff2') format('woff2');
+}
+
 @theme {
   --font-family-display: 'Inter', 'Inter var', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-home: 'Noto Sans JP', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* Only 紅蓮 is set in it; no mincho is self-hostable at that size budget. */
+  --font-mincho: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', 'Noto Serif CJK JP', serif;
+  /* The Guren Deck palette: ink is the code surface, smoke the secondary text
+     on crimson-950 (7.5:1), foam the counter-signal for measured numbers. */
+  --color-ink: #1a1212;
+  --color-smoke: #c9a9a9;
+  --color-foam: #9ccfd8;
+  --color-ember: #ff3c28;
   --color-crimson-50: #fff5f5;
   --color-crimson-100: #ffe3e3;
   --color-crimson-200: #ffc9c9;
@@ -27,6 +75,12 @@
   --animate-slide-in-right: slide-in-right 0.3s ease-out both;
   --animate-cursor-blink: cursor-blink 1s step-end infinite;
   --animate-gradient-shift: gradient-shift 8s ease infinite;
+  --animate-unroll: unroll 1.2s cubic-bezier(0.2, 0.7, 0.1, 1) 0.15s both;
+}
+
+@keyframes unroll {
+  from { clip-path: inset(0 0 100% 0); }
+  to { clip-path: inset(0 0 0 0); }
 }
 
 @keyframes slide-in-right {
@@ -486,7 +540,7 @@ body.docs-theme {
 }
 
 /* The code surface has no theme: ink in light and dark alike (the same
-   terminal surface CodeBlock.tsx paints), syntax from rose-pine-moon.
+   --color-ink the home page's code panel paints), syntax from rose-pine-moon.
    !important beats the theme background shiki inlines on the element. */
 .shiki {
   border-radius: var(--g-r-card);

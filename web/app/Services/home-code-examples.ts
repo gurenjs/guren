@@ -46,7 +46,9 @@ export function registerWebRoutes(base: Router) {
   },
   Model: {
     lang: 'typescript',
-    code: `export class Post extends defineModel(posts, { fillable: ['title', 'body'] }) {}
+    code: `export class Post extends defineModel(posts, {
+  fillable: ['title', 'body'],
+}) {}
 
 const post = await Post.findOrFail(id) // missing row? that's a 404
 
