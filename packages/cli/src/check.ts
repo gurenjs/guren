@@ -267,7 +267,7 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
 
   const schemas = parsed.map((entry) => {
     // The root object spreading a module's export is what identifies that export as the module's aggregate.
-    const identifiedAs = entry.module === null ? undefined : rootAggregate?.delegated.get(entry.module) || undefined
+    const identifiedAs = entry.module === null || !rootAggregate?.confident ? undefined : rootAggregate.delegated.get(entry.module) || undefined
     const aggregate = entry.module === null ? rootAggregate : findSchemaAggregate(entry.ast, { location: entry.location, identifiedAs })
     return { ...entry, aggregate, declared: aggregate?.declared ?? declaredTableIdentifiers(entry.ast) }
   })
@@ -299,7 +299,7 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
       if (own.length > 0) fixes.push(`Add ${own.join(', ')} to it, keeping each table's own declaration above the object.`)
       for (const gap of fromModules) {
         const identifier = moduleSchemaAggregateName(gap.module)
-        fixes.push(`Keep ${gap.relPath}'s tables in its own \`export const ${identifier} = { … }\` and spread it into this object: \`...${identifier}\`, imported from '${moduleSchemaSpecifier(gap.module)}'.`)
+        fixes.push(`Keep ${gap.relPath}'s tables in its own \`export const ${identifier} = { … }\` and spread it into this object (\`...${identifier}\`, imported from '${moduleSchemaSpecifier(gap.module)}'), or import ${gap.missing.join(', ')} from there and list them here.`)
       }
     }
 

@@ -247,4 +247,25 @@ export default app
       await workspace.cleanup()
     }
   })
+
+  it('keeps the module schema a bare module when the root already spreads its namespace', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-module-namespace-spread-')
+    try {
+      const root = `${PG_SCHEMA_FIXTURE}
+import * as billing from '../modules/billing/db/schema'
+
+export const schema = { users, ...billing }
+`
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': root })
+
+      await makeModule('billing')
+
+      expect(await readFile(join(workspace.dir, 'modules/billing/db/schema.ts'), 'utf8')).toContain('export {}')
+      const patched = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(patched).toContain('export const schema = { users, ...billing }')
+      expect(patched).not.toContain('billingSchema')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

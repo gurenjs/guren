@@ -777,7 +777,8 @@ function statementStart(source: string, offset: number): number {
 /**
  * The root schema's aggregate, from the one aggregate reading in `schema-parser.ts`, when the
  * file itself identifies it. A shape match the file does not identify is not enough to edit a
- * hand-kept object: `guren check` grades the same match advisory.
+ * hand-kept object: `guren check` grades the same match advisory. `source` is read as the root
+ * `db/schema.ts`, which is where its module imports resolve from.
  */
 function identifiedRootAggregate(source: string, extraKey?: string): SchemaAggregate | null {
   const file = schemaPathFor(null)
@@ -790,7 +791,11 @@ function identifiedRootAggregate(source: string, extraKey?: string): SchemaAggre
 /** Where one more entry goes in the aggregate's object literal, and its text. */
 function aggregateEntrySplice(source: string, object: ObjectExpression, entry: string): { offset: number; text: string } | null {
   const last = object.properties[object.properties.length - 1]
-  if (!last) return object.start == null ? null : { offset: object.start + 1, text: ` ${entry} ` }
+  if (!last) {
+    if (object.start == null) return null
+    const multiline = source.slice(object.start, object.end ?? object.start).includes('\n')
+    return { offset: object.start + 1, text: multiline ? `\n${indentOfLine(source, object.start)}  ${entry},` : ` ${entry} ` }
+  }
   const lastStart = last.start ?? -1
   const lastEnd = last.end ?? -1
   if (lastStart < 0 || lastEnd < 0) return null
@@ -826,14 +831,16 @@ function planAggregateSplice(source: string, name: string): AggregateSplice | nu
 
 /**
  * The root `db/schema.ts` with `...identifier` spread into its schema object, handing `module`'s
- * tables to that module's own aggregate. `alreadyPresent` when the object spreads one from
- * `module` already; another reason when the file identifies no aggregate to keep.
+ * tables to that module's own aggregate. `alreadyPresent` when the object spreads `identifier`
+ * already; another reason when it spreads the module otherwise or identifies no aggregate.
  */
 export function spreadModuleIntoSchema(source: string, module: string, identifier: string): InsertResult {
   const file = schemaPathFor(null)
   const aggregate = identifiedRootAggregate(source)
   if (!aggregate) return { reason: `${file} has no schema object it identifies as one` }
-  if (aggregate.delegated.has(module)) return { reason: PATCH_REASONS.alreadyPresent }
+  const spread = aggregate.delegated.get(module)
+  if (spread === identifier) return { reason: PATCH_REASONS.alreadyPresent }
+  if (spread !== undefined) return { reason: `The schema object in ${file} already spreads modules/${module}'s schema as ${spread || 'a namespace'}` }
   const entry = aggregateEntrySplice(source, aggregate.object, `...${identifier}`)
   if (!entry) return { reason: `Could not find where to add an entry to the schema object in ${file}` }
   return { content: source.slice(0, entry.offset) + entry.text + source.slice(entry.offset) }

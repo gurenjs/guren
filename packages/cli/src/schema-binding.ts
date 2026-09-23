@@ -56,7 +56,7 @@ export function reExportedSchemaModules(cwd: string, filePath: string, body: Sta
   const modules = new Set<string>()
   for (const statement of body) {
     if (statement.type !== 'ExportAllDeclaration' && statement.type !== 'ExportNamedDeclaration') continue
-    if (!statement.source) continue
+    if (!statement.source || statement.exportKind === 'type') continue
     const module = schemaModuleFor(cwd, filePath, statement.source.value)
     if (typeof module === 'string') modules.add(module)
   }

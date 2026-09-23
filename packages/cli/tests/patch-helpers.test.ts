@@ -861,13 +861,16 @@ export const schema = {
     expect(updated.content).toContain('  posts,\n  ...billingSchema,\n}')
   })
 
-  it('leaves an object already spreading the module unchanged, whatever it spreads it as', () => {
+  it('leaves an object spreading the module under another binding alone', () => {
     const source = `${PG_TABLES}
 import * as billing from '../modules/billing/db/schema'
 
 export const schema = { users, posts, ...billing }
 `
-    expect(spreadModuleIntoSchema(source, 'billing', 'billingSchema').reason).toBe(PATCH_REASONS.alreadyPresent)
+    const result = spreadModuleIntoSchema(source, 'billing', 'billingSchema')
+    expect(result.content).toBeUndefined()
+    expect(result.reason).toContain('as a namespace')
+    expect(spreadModuleIntoSchema(source.replace('* as billing', '{ billingSchema }').replace('...billing', '...billingSchema'), 'billing', 'billingSchema').reason).toBe(PATCH_REASONS.alreadyPresent)
   })
 
   it('declines a root whose object nothing identifies as the schema', () => {
@@ -875,6 +878,15 @@ export const schema = { users, posts, ...billing }
 export const authTables = { users }
 `, 'billing', 'billingSchema').content).toBeUndefined()
     expect(spreadModuleIntoSchema(PG_TABLES, 'billing', 'billingSchema').content).toBeUndefined()
+  })
+
+  it('opens an empty multi-line schema object onto its own line', () => {
+    const updated = spreadModuleIntoSchema(`${PG_TABLES}
+export const schema = {
+}
+`, 'billing', 'billingSchema')
+
+    expect(updated.content).toContain('export const schema = {\n  ...billingSchema,\n}')
   })
 })
 

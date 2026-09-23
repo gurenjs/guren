@@ -835,7 +835,8 @@ export const billingSchema = { invoices }
     expect(moduleObject!.message).toContain('receipts')
   })
 
-  it('reads an empty module aggregate the file identifies', async () => {
+  // A namespace spread hands the root every export of the module, tables included.
+  it('takes a namespace spread for the whole module', async () => {
     const report = await withWorkspace({
       'db/schema.ts': `${PG_SCHEMA_FIXTURE}
 import * as billing from '../modules/billing/db/schema'
@@ -850,7 +851,8 @@ export type BillingSchema = typeof billingSchema
     })
 
     expect(report.checks.find(c => c.key === 'schema-aggregate-keys:app')!.status).toBe('pass')
-    expect(report.checks.find(c => c.key === 'schema-aggregate-keys:billing')!.message).toContain('invoices')
+    // An empty object only a `typeof` reads is no candidate: the root names nothing to vouch for.
+    expect(report.checks.some(c => c.key === 'schema-aggregate-keys:billing')).toBe(false)
   })
 
   it('counts a module table the root object imports and lists by name', async () => {
@@ -891,6 +893,70 @@ export const billingSchema = { invoices }
     const aggregation = report.checks.find(c => c.key === 'module-schema-aggregation:billing')
     expect(aggregation!.status).toBe('warn')
     expect(aggregation!.suggestion).toContain("export * from '../modules/billing/db/schema'")
+  })
+
+  // Only an identified root vouches for the module export it spreads: a shape match is
+  // itself advisory, and must not turn the module's object into a gating one.
+  it('leaves a module aggregate advisory when the root spreading it is a shape match', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+import { billingSchema } from '../modules/billing/db/schema'
+export * from '../modules/billing/db/schema'
+
+export const authTables = { users, ...billingSchema }
+`,
+      'modules/billing/db/schema.ts': `${BILLING_TABLES}
+export const receipts = pgTable('receipts', {
+  id: serial('id').primaryKey(),
+})
+
+export const billingSchema = { invoices }
+`,
+    })
+
+    // A shape match holding a spread is no candidate at all: nothing identifies it.
+    expect(report.checks.some(c => c.key === 'schema-aggregate-keys:app')).toBe(false)
+    const moduleObject = report.checks.find(c => c.key === 'schema-aggregate-keys:billing')
+    expect(moduleObject!.status).toBe('warn')
+    expect(moduleObject!.advisory).toBe(true)
+  })
+
+  it('does not take a type-only re-export of a module schema for its tables', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export type * from '../modules/billing/db/schema'
+`,
+      'modules/billing/db/schema.ts': BILLING_TABLES,
+    })
+
+    expect(report.checks.find(c => c.key === 'module-schema-aggregation:billing')!.status).toBe('warn')
+  })
+
+  // Objects the reader accepts only through a module import or as `{}` must not make an
+  // identified root ambiguous, which would silence both the check and the writers.
+  it('keeps the root schema object beside a module grouping and an empty typed object', async () => {
+    const report = await withWorkspace({
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+import { invoices } from '../modules/billing/db/schema'
+export * from '../modules/billing/db/schema'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+})
+
+export const schema = { users }
+export const billing = { invoices }
+export const relations = {}
+export type Relations = typeof relations
+`,
+      'modules/billing/db/schema.ts': BILLING_TABLES,
+    })
+
+    const root = report.checks.find(c => c.key === 'schema-aggregate-keys:app')
+    expect(root!.status).toBe('warn')
+    expect(root!.advisory).toBe(false)
+    expect(root!.message).toContain('posts')
+    expect(root!.message).toContain('invoices (modules/billing/db/schema.ts)')
   })
 
   // A spread carries tables the object never names, so the file does not

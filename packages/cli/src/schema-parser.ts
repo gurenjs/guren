@@ -186,7 +186,8 @@ function typeQueriedNames(ast: File): Set<string> {
  * The app's hand-kept aggregate of its tables (`export const schema = { posts, users }`), handed
  * to drizzle for relational queries; nothing generated reads it, so a missing key goes unnoticed.
  * Positive evidence only: every property a table this file declares (shorthand or `name: name`),
- * a key or spread imported from a module's schema, or `extraKey`; `{}` only when `confident`.
+ * or `extraKey`; a key or spread imported from a module schema only when `confident`, and `{}`
+ * only when named.
  * A second candidate answers null, and `confident` grades what is left.
  */
 export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptions = {}): SchemaAggregate | null {
@@ -247,9 +248,12 @@ export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptio
       if (!isAggregate) continue
 
       const name = declarator.id.name
+      const named = name === 'schema' || name === identifiedAs
       typeQueried ??= typeQueriedNames(ast)
-      const confident = name === 'schema' || name === identifiedAs || typeQueried.has(name)
-      if (object.properties.length === 0 && !confident) continue
+      const confident = named || typeQueried.has(name)
+      // Candidates only on the evidence that identifies them, so an object this reader newly
+      // accepts cannot make an app's identified aggregate ambiguous.
+      if (object.properties.length === 0 ? !named : (listed.size > 0 || delegated.size > 0) && !confident) continue
 
       // A second candidate means the file's shape does not identify one aggregate,
       // so neither can this.
