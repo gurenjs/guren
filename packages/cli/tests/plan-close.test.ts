@@ -461,6 +461,7 @@ describe('describeCloseBlockers', () => {
     ...extra,
   })
   const blockerOf = (entry: PlanElementStatus): string => formatCloseBlocker(describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!)
+  const holdsOf = (entry: PlanElementStatus): string | undefined => describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!.holds
 
   test('should name the command that moves each kind of hold', () => {
     const incomplete = 'Verified t by s, and no longer at the state that completes it.'
@@ -486,7 +487,6 @@ describe('describeCloseBlockers', () => {
   })
 
   test('should name what a run found ahead of the reason the reader gave, except for an incomplete hold', () => {
-    const holdsOf = (entry: PlanElementStatus): string | undefined => describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!.holds
     const expired = 'Verified t by s; changed since: a.ts.'
     const unreached = 'Verified t by s, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.'
     const incomplete = 'Verified t by s, and no longer at the state that completes it.'

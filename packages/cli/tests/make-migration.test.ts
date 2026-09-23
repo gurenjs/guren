@@ -4,19 +4,19 @@ import { existsSync, readdirSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { createTempWorkspace, runCliBin } from './helpers'
+import { createTempWorkspace, runCliBin, type TempWorkspace } from './helpers'
 import { resolveAppDrizzleKit } from '../src/make-migration'
 import * as realUtils from '../src/utils'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
 
 /**
- * The real `drizzle-kit` bin plus a directory it can resolve `drizzle-orm`
- * from, or undefined when neither is installed. Resolved from `examples/blog`
+ * A `node_modules` holding the real `drizzle-kit` and a `drizzle-orm` it can
+ * resolve, or undefined when neither is installed. Resolved from `examples/blog`
  * (bun's isolated layout keeps both out of the root `node_modules`); undefined
  * rather than a throw keeps the suite runnable without the examples installed.
  */
-function resolveDrizzleKit(): { bin: string; nodeModules: string } | undefined {
+function resolveDrizzleKit(): { nodeModules: string } | undefined {
   const from = join(repoRoot, 'examples/blog')
   try {
     // `Bun.resolveSync` can answer from the root `.bun/` store even when blog
@@ -25,14 +25,14 @@ function resolveDrizzleKit(): { bin: string; nodeModules: string } | undefined {
       return undefined
     }
 
-    const bin = join(dirname(Bun.resolveSync('drizzle-kit/package.json', from)), 'bin.cjs')
+    Bun.resolveSync('drizzle-kit/package.json', from)
     // The generated schema imports `drizzle-orm/pg-core`, which drizzle-kit
     // resolves from the *workspace*. A throw here is the skip signal.
     Bun.resolveSync('drizzle-orm/pg-core', from)
 
     // blog's own link farm, not the resolved path: node's resolver finds
     // nothing by bare specifier under bun's isolated layout.
-    return { bin, nodeModules: join(from, 'node_modules') }
+    return { nodeModules: join(from, 'node_modules') }
   } catch {
     return undefined
   }
@@ -68,7 +68,7 @@ await mock.module('../src/utils', () => ({
 const { makeMigration, generateSchemaMigration } = await import('../src/make-migration')
 
 /** A temp workspace (the cwd until cleanup) whose app installs drizzle-kit, as `makeMigration` requires. */
-async function appWorkspace(prefix: string): ReturnType<typeof createTempWorkspace> {
+async function appWorkspace(prefix: string): Promise<TempWorkspace> {
   const workspace = await createTempWorkspace(prefix)
   await seedDrizzleKitManifest(workspace.dir)
   return workspace
@@ -80,7 +80,9 @@ async function seedDrizzleKitManifest(dir: string): Promise<void> {
 }
 
 /** The bin `appWorkspace` seeds, as the cwd spells it (macOS resolves the tmpdir through `/private`). */
-const APP_KIT_BIN = (): string => join(process.cwd(), 'node_modules/drizzle-kit/bin.cjs')
+function appKitBin(): string {
+  return join(process.cwd(), 'node_modules/drizzle-kit/bin.cjs')
+}
 
 function generateOnNextRun(folder: string, name: string): void {
   nextGeneratedMigration = { folder, name }
@@ -187,7 +189,7 @@ describe('makeMigration', () => {
 
       const call = spawnCalls.pop()
       expect(call?.args).toEqual([
-        APP_KIT_BIN(),
+        appKitBin(),
         'generate',
         '--dialect',
         'postgresql',
@@ -229,7 +231,7 @@ describe('makeMigration', () => {
 
       const call = spawnCalls.pop()
       expect(call?.args).toEqual([
-        APP_KIT_BIN(),
+        appKitBin(),
         'generate',
         '--dialect',
         'sqlite',
@@ -498,7 +500,7 @@ describe('makeMigration', () => {
       // The documented override invocation.
       await makeMigration({ schema: './custom/schema.ts', out: './custom/migrations' })
       const call = spawnCalls.pop()
-      expect(call?.args?.[0]).toBe(join(process.cwd(), 'node_modules/drizzle-kit/bin.cjs'))
+      expect(call?.args?.[0]).toBe(appKitBin())
       expect(call?.args).toContain('--driver')
 
       // The exact command `makeMigration` built, so the runtime it picked is what runs drizzle-kit.
@@ -730,12 +732,11 @@ describe('the drizzle-kit make:migration runs', () => {
   })
 
   it('should run the drizzle-kit hoisted into a parent node_modules', async () => {
-    const workspace = await createTempWorkspace('guren-cli-make-migration-hoisted-')
+    const workspace = await appWorkspace('guren-cli-make-migration-hoisted-')
     try {
-      await seedDrizzleKitManifest(workspace.dir)
       await mkdir(join(workspace.dir, 'apps/web'), { recursive: true })
       await writeFile(join(workspace.dir, 'apps/web/drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
-      const hoisted = join(process.cwd(), 'node_modules/drizzle-kit/bin.cjs')
+      const hoisted = appKitBin()
       process.chdir(join(workspace.dir, 'apps/web'))
 
       await makeMigration()
@@ -747,28 +748,29 @@ describe('the drizzle-kit make:migration runs', () => {
     }
   })
 
-  it('should generate a scaffolder\'s migration with a hoisted drizzle-kit, and only hint without one', async () => {
-    const hoisted = await createTempWorkspace('guren-cli-schema-migration-hoisted-')
+  it('should generate a scaffolder\'s migration with a drizzle-kit hoisted into a parent node_modules', async () => {
+    const workspace = await appWorkspace('guren-cli-schema-migration-hoisted-')
     try {
-      await seedDrizzleKitManifest(hoisted.dir)
-      await mkdir(join(hoisted.dir, 'apps/web'), { recursive: true })
-      await writeFile(join(hoisted.dir, 'apps/web/drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
-      process.chdir(join(hoisted.dir, 'apps/web'))
+      await mkdir(join(workspace.dir, 'apps/web'), { recursive: true })
+      await writeFile(join(workspace.dir, 'apps/web/drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
+      process.chdir(join(workspace.dir, 'apps/web'))
 
       expect(await generateSchemaMigration('create_sessions_table', 'sessions')).toBe(true)
       expect(spawnCalls.pop()?.args).toContain('--name=create_sessions_table')
     } finally {
-      await hoisted.cleanup()
+      await workspace.cleanup()
     }
+  })
 
-    const bare = await createTempWorkspace('guren-cli-schema-migration-bare-')
+  it('should only hint at a scaffolder\'s migration when the application installs no drizzle-kit', async () => {
+    const workspace = await createTempWorkspace('guren-cli-schema-migration-bare-')
     try {
-      await writeFile(join(bare.dir, 'drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
+      await writeFile(join(workspace.dir, 'drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
 
       expect(await generateSchemaMigration('create_sessions_table', 'sessions')).toBe(false)
       expect(spawnCalls.length).toBe(0)
     } finally {
-      await bare.cleanup()
+      await workspace.cleanup()
     }
   })
 })
