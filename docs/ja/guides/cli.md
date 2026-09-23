@@ -154,6 +154,13 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 プロトタイプ実行で書いたページとバリデータを残すので、これらは既存ファイルとして
 数えません。
 
+複数のファイルを書き出すほかのコマンドも、最初の書き込みの前に同じ確認をして中断します。
+対象は `make:auth`、`make:module`、`make:ai-agent`(`--test` がフラグにあたります)、
+`deploy`、そして `add` の各ブループリントで、サンプルのイベント・ジョブ・Mailable も
+含みます。ファイルを1つだけ書く `make:*` コマンドも同じ文言で中断します。途中まで
+入ったものを再実行で補うためのブループリント(`add session`、`add cache`、`add schedule`、
+`add ai`、`add prototype`)は、既存のファイルを残して残りだけを書きます。
+
 ## 主要コマンド
 
 | コマンド | 説明 | 例 |
@@ -452,7 +459,7 @@ bunx guren deploy --target railway
 bunx guren deploy --target all --app my-app --port 4000
 ```
 
-`--target` は `docker` / `fly` / `railway` / `all` をサポートします。書き出すファイルがすでにあるとコマンドは止まります。上書きするときは `--force` を付けてください。
+`--target` は `docker` / `fly` / `railway` / `all` をサポートします。書き出すファイルがすでにあると、コマンドは該当するファイルをすべて一覧にして、どれも書き込みません。上書きするときは `--force` を付けてください。
 
 Vercel と AWS Lambda にはプラグインを使います。Vercel は `bunx guren plugin @guren/plugin-vercel`、AWS Lambda は `bunx guren plugin @guren/plugin-lambda` で導入します。`--target vercel` はエラーになります。どちらの手順も[デプロイ](./deployment.md)で説明しています。
 
