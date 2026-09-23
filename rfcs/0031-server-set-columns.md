@@ -146,23 +146,30 @@ unchanged. `set` is removed before the options reach the adapter.
 
 `runCreate` and `runUpdate` build the payload in this order:
 
-1. `filterFillable(data)`, unchanged: denied fields throw, `id` is stripped,
+1. A key that the raw `data` and `set` both carry throws, with a new
+   `reason: 'conflict'`. A validated body that contains a server-owned column
+   means the schema admits it, and that is the bug to surface; it is not
+   resolved in either direction. The check runs before `filterFillable`, so the
+   recommended setup (owner outside `fillable`) gets this diagnosis rather than
+   a `not-fillable` error whose remedy the caller already applied.
+2. `filterFillable(data)`, unchanged: denied fields throw, `id` is stripped,
    anything outside `fillable` throws.
-2. The `set` keys are checked:
+3. The `set` keys are checked:
    - a key in `deniedFields()` throws `MassAssignmentException` with
      `reason: 'denied'` (credential columns stay reachable only through the
      model's own derivation or a force write);
    - `id` throws, since a server-chosen primary key is a system write and
-     belongs to `forceCreate`;
-   - a key that `data` also carries throws, with a new
-     `reason: 'conflict'`. A validated body that contains a server-owned
-     column means the schema admits it, and that is the bug to surface. It is
-     not resolved in either direction.
-3. The two are merged, and the merged payload goes through
+     belongs to `forceCreate`.
+4. The two are merged, and the merged payload goes through
    `preparePersistencePayload` (mutators, casts, password hashing), the
    lifecycle hooks and observers, and the adapter, as every write does today.
 
-The only rule `set` skips is the `fillable` allowlist.
+The only rule `set` skips is the `fillable` allowlist. That exemption is safe
+only while every `set` key is one the author wrote down. Nothing in the types
+stops `Post.create({}, { set: { ...data, authorId: user.id } })`, which passes
+every check above and puts validated request data past `fillable`: RFC 0006's
+risk 1 under a new name. Sections 4 and 5 answer it the way RFC 0006 answered
+the force writes, with an explicit negative and an audit finding.
 
 ### 3. The other write entry points
 
@@ -177,18 +184,23 @@ The only rule `set` skips is the `fillable` allowlist.
 
 ### 4. `MassAssignmentException`
 
-The `not-fillable` remediation names `set`, and the closing negative stays:
+The `not-fillable` remediation names `set`, and the closing negative covers
+`set` as well as the force writes:
 
 > `Post: mass assignment blocked for field(s) "authorId". Add them to fillable
-> if a request may set them; if the server chooses the value, pass it in
-> set: Post.create(data, { set: { authorId } }). Never call
-> forceCreate/forceUpdate with request input.`
+> if a request may set them; if the server chooses the value, name it in
+> set: Post.create(data, { set: { authorId } }). Never pass request input to
+> forceCreate/forceUpdate or spread it into set.`
 
 The `conflict` reason reads:
 
 > `Post: "authorId" is in both the data and set. The data comes from the
 > request, so its schema admits a column the server sets; remove it from the
 > schema.`
+
+Adding `'conflict'` to `MassAssignmentException['reason']` widens a public
+union, so an exhaustive `switch` over it in application code stops compiling.
+Open Question 6 asks whether that is acceptable in a minor.
 
 ### 5. `guren audit`
 
@@ -206,10 +218,17 @@ it:
   relies on that shape, the wider trigger costs no false positives in
   scaffolded apps.
 
-`set` values are not judged. A value written explicitly under a column name
-is a choice the author made in the source, which is the property mass
-assignment protection is about; whether the value is the right one is an
-authorization question for policies and tests.
+A new finding covers `set` itself. In a method that reads a body
+(`validateBody()` or `validated()`), `guren audit` warns when a `set` argument
+is not an object literal or contains a spread. This is a syntactic check on the
+claim `set` rests on, that every key is written out, and unlike the reverted
+allowlist in PR #1024 it never needs to see the schema.
+
+`set` keys are judged; `set` values are not. A key written out under a column
+name is a choice the author made in the source, which is the property mass
+assignment protection is about. Whether the value is the right one, say
+`authorId: user.id` rather than `authorId: body.authorId`, is an authorization
+question for policies and tests.
 
 ### 6. Implementation plan
 
@@ -219,10 +238,14 @@ authorization question for policies and tests.
      the transaction scope and `QueryBuilder.update`;
    - `MassAssignmentException` `reason: 'conflict'` and the new messages;
    - runtime tests for every step in section 2, and type tests beside the
-     existing `optionalOnCreate`/`requireOnCreate` tests.
+     existing `optionalOnCreate`/`requireOnCreate` tests;
+   - type tests showing that `create(data)` and `update(where, data)` without
+     `set` accept and reject exactly what they do today. `Omit<X, never>` is a
+     mapped type, which can collapse a union and change excess-property errors,
+     so this is checked rather than assumed.
 2. **`@guren/cli`** (patch), after part 1 is released, since everything here
    is read by apps against their installed `@guren/core`:
-   - the audit's fix text and the `validated()` trigger;
+   - the audit's fix text, the `validated()` trigger and the `set` finding;
    - harness `rules/orm-models.md`, `entry-body.md`, `skills/guren-api/SKILL.md`
      and `skills/feature/SKILL.md` move to `set`, with owner columns out of
      `fillable`;
@@ -271,10 +294,17 @@ of what is needed.
 
 ## Migration Path
 
-The change is additive. Existing `create`, `update`, `forceCreate` and
+The ORM change is additive. Existing `create`, `update`, `forceCreate` and
 `forceUpdate` calls behave as before, and an existing
 `forceCreate({ ...data, ownerId })` keeps working and keeps its audit warning,
 whose fix text now points at `set`. Nothing is deprecated.
+
+One change is visible after a CLI upgrade. The force-write finding's trigger
+widens to `this.validated()`, so an app scaffolded from today's create-app
+`blog` template, whose `store` reads `validated()` and calls `forceCreate`,
+gets a new warning on that action. It is a warning, `guren gate` still passes,
+and its fix text names the one-line change to `set`. The changeset for part 2
+says so.
 
 Moving a call is mechanical: `Post.forceCreate({ ...data, authorId: author.id })`
 becomes `Post.create(data, { set: { authorId: author.id } })`, and an owner in
@@ -294,6 +324,11 @@ proposed; the audit warning already lists the force-write sites, and the
    off force writes, but they carry no request data, so they gain nothing.
 4. **Relation sugar.** Whether `Post.create(data, { for: { author: user } })`
    should derive `set` from a `belongsTo` definition, and whether that waits
-   for RFC 0025's relation descriptors.
+   for RFC 0025's relation descriptors. RFC 0025's own example keeps
+   `authorId` in `fillable`; it would follow this RFC either way.
 5. **Bulk writes.** There is no `createMany` today (RFC 0006 recorded the
    same). If one is added, it should take `set` for the whole batch.
+6. **`'conflict'` in a minor.** Widening `MassAssignmentException['reason']`
+   breaks an exhaustive `switch` over it at compile time. The alternatives are
+   to accept that in a minor with a changeset note, or to throw a subclass
+   (`MassAssignmentConflictException`) and leave the union as it is.
