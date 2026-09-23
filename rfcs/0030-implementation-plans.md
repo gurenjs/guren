@@ -1038,12 +1038,11 @@ writer the CLI already has:
 ~~Routes go in their own file because the existing patch mounts a registrar
 call and does not insert route lines into `routes/web.ts`.~~
 
-**Amended after re-review (2026-09-23), Part 3.** Five passages here are
-stale: the premise struck above, the "Next steps" account of what
-`make:feature` leaves undone, the table's first and fourth rows, and two
-points of the next paragraph, the generated pages and the relationships and
-fillable left to the agent (the emitter below writes both). What replaces
-them:
+**Amended after re-review (2026-09-23), Part 3.** Stale here: the premise
+struck above; the "Next steps" account of what `make:feature` leaves undone;
+the table's first and fourth rows; and, in the next paragraph, the generated
+pages and the relationships and fillable left to the agent (the emitter below
+writes both). What replaces them:
 
 - `guren add resource` predates this RFC and already writes two of the three
   wirings the table says are missing. It runs `makeFeature` and appends a
@@ -1086,14 +1085,15 @@ them:
   verified step.
 - The scaffold writes the routes file and does not mount it. The `http` step
   mounts it with one `wireRouteRegistrar()` call. This is pending the
-  mounted-routes experiment in the Part 3 note under Phasing, which tests a
-  prediction. `scaffold` runs before `tests` (`plan/tasks.ts:786-818`). A
-  mounted route whose auth middleware, `userOrFail()` or contract validation
-  answers 401, a redirect or 422 before any table exists can pass the slice's
-  `unauthenticated` and `validation` behaviours before the `tests` step runs.
-  A `forbidden` behaviour usually needs the record, so it is not predicted to
-  pass. `tests:fail` needs every case to fail (`plan/verify.ts:172-183`), so
-  that step could never verify.
+  mounted-routes experiment in the Part 3 note under Phasing. The prediction
+  is that a mounted route whose auth middleware, `userOrFail()` or contract
+  validation answers 401, a redirect or 422 before any table exists can pass
+  the slice's `unauthenticated` or `validation` behaviour before the `tests`
+  step, which runs after `scaffold` (`plan/tasks.ts:786-818`). A `forbidden`
+  behaviour usually needs the record, so it is not predicted to pass.
+  `tests:fail` judges each behaviour on its own and needs every case of it to
+  fail (`plan/verify.ts:172-183`), so one such behaviour passing is enough for
+  that step never to verify.
 - A proposal, to settle in the change that implements it: unmounted stubs
   validate with `validateBody(Schema)`. `validated('<name>')` is typed from
   generated route names (`packages/server/src/mvc/Controller.ts:479-481`), so
@@ -2715,7 +2715,7 @@ marks what was read and not run.
 - `guren add resource` already appends a table and inserts route lines, and
   `make:feature` / `add resource` write a fixed CRUD surface (§5 amendment).
 - Route fingerprints fail open for a `routes/<x>.ts` the entry registrar
-  calls, predicted from the code (§5 amendment). #1039 fixes it. It is a
+  calls, predicted from the code (§5 amendment). #1039 is the fix. It is a
   Part 2 defect and lands regardless of the rest.
 
 *Decisions (maintainer, 2026-09-23).*
@@ -2759,9 +2759,9 @@ npm.
 4. Run only that file under `bun test --reporter=junit`; the blog's own suite
    is written for Vitest (Part 2 measurements above).
 
-Both passing confirms the §5 prediction: mounted routes pass the
-`unauthenticated` and `validation` behaviours before the `tests` step, so they
-stay unmounted until `http`. Either failing reopens D3.
+Either passing confirms the §5 prediction and D3 stands: a mounted route
+passes that behaviour before the `tests` step, so the routes stay unmounted
+until `http`. Both failing reopens D3.
 
 *Probes before the headless producer* (D1). None needs shipped code; a script
 in scratch is enough.
@@ -2779,9 +2779,9 @@ in scratch is enough.
   checkout, and prompt the producer to quote both, the working tree's `.env`
   by absolute path included. Grep the output for either canary. Repeat asking
   for them through Grep and Glob patterns. Keep `--tools Read,Grep,Glob` on
-  every run: on macOS and Linux the default tool set leaves out Glob and Grep,
-  and only naming them in `--tools` brings them back
-  (https://code.claude.com/docs/en/cli-reference#cli-flags).
+  every run: on macOS, Linux and WSL the default tool set leaves out Glob and
+  Grep, and `--tools` brings back the ones it names
+  (https://code.claude.com/docs/en/tools-reference#glob-tool-behavior).
 - **Open Question 12, `--resume` under `--bare`.** Run `claude --bare -p …
   --output-format json` and keep its `session_id`, then `claude --bare -p …
   --resume <id> --json-schema …`. Check that the second call succeeds and that
