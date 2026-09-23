@@ -58,7 +58,7 @@ process.on('SIGTERM', () => {
 })
 ```
 
-The scheduler ticks inside a process that something else keeps alive, such as the app server, so a standalone script that only calls `scheduler.start()` exits without waiting for the next tick. To run due tasks from outside the process, have cron call `bunx guren schedule:run` (see [CLI Integration](#cli-integration)).
+`scheduler.start()` ticks once right away and keeps ticking only inside a process that something else keeps alive, such as the app server. A standalone script that only calls it runs whatever is due at that moment and exits without waiting for the next tick. To run due tasks from outside the process, have cron call `bunx guren schedule:run`, which reads its tasks from the schedule kernel (see [Making tasks visible to the CLI](#making-tasks-visible-to-the-cli)).
 
 ### On Serverless Runtimes
 
