@@ -20,10 +20,7 @@ export interface RateLimitStore {
 
 abstract class BaseMemoryStore implements RateLimitStore {
   protected cleanupInterval?: ReturnType<typeof setInterval>
-  /**
-   * Unlike the cache sweep, this interval is not `unref()`ed, so a leaked one
-   * both duplicates work and keeps the process alive on its own.
-   */
+  /** A sweep leaked across a hot reload would run beside this one. */
   private readonly hotReloadClaim: HotDisposableClaim | undefined
 
   constructor(
@@ -35,6 +32,9 @@ abstract class BaseMemoryStore implements RateLimitStore {
     }
 
     this.cleanupInterval = setInterval(() => this.cleanup(), cleanupIntervalMs)
+    // A sweep must not keep alive a process that merely evaluated a routes
+    // module (a CLI command, a test). Workers may return a number: hence the `?.`.
+    this.cleanupInterval.unref?.()
 
     // Subclasses declare no constructor, so a synthetic frame for the implicit
     // one sits between here and the caller; `describeCallerFile()` steps over it.
