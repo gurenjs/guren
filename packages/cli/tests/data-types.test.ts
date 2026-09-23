@@ -405,6 +405,23 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
     expect(warnings[0]).toContain('uses its object body as one operand of a larger type')
   })
 
+  it('still refuses a parenthesized alias whose body is an array element type', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // Not exported on purpose: an exported alias falls back to a reference
+      // with no warning, which would pass without the parens being read.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'type PostPayload = ({ id: number })[]',
+        'PostPayload',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('uses its object body as one operand of a larger type')
+  })
+
   it('tells the author to close an unterminated body instead of rewriting it', async () => {
     await writeWorkspaceFiles(appRoot, {
       'app/Http/Resources/PostResource.ts':

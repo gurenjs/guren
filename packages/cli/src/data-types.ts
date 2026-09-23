@@ -417,8 +417,7 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
   // followed by `&`/`|`, a conditional `extends`, or `[` is only its first
   // term. An interface always ends at its brace, so this cannot apply to one.
   if (isAlias) {
-    // The opening parens matched before the brace are grouping, not
-    // composition; skip their close parens before judging what follows.
+    // The parens matched before the brace are grouping, not composition.
     const rest = stripLeadingCloseParens(masked.slice(end), countOccurrences(parens, '('))
     if (/^\s*[&|[]/u.test(rest) || /^\s*extends\b/u.test(rest)) {
       return {
@@ -442,11 +441,7 @@ function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
-/**
- * Skips up to `count` `)` from the start of `text`, each preceded by optional
- * whitespace, stopping at the first one missing — the close parens of a
- * `({ … })` alias, skipped before judging what follows the body.
- */
+// A short count is a syntax error TypeScript reports; the skip stops rather than fails.
 function stripLeadingCloseParens(text: string, count: number): string {
   let rest = text
   for (let i = 0; i < count; i += 1) {
