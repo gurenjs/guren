@@ -90,9 +90,9 @@ export async function generateDataTypes(
  * The definitions `guren codegen` would emit `data.gen.ts` from, without writing it: the one
  * reading of a resource's payload, which `plan:status` compares a planned resource's fields with.
  */
-export async function readResourceDefinitions(appRoot: string): Promise<ResourceDefinition[]> {
+export async function readResourceDefinitions(appRoot: string): Promise<{ definitions: ResourceDefinition[]; warnings: string[] }> {
   const files = await discoverResourceFiles(appRoot, RESOURCES_DIR)
-  return (await collectResourceDefinitions(appRoot, files, join(appRoot, '.guren'))).definitions
+  return collectResourceDefinitions(appRoot, files, dirname(resolve(appRoot, DEFAULT_OUTPUT_FILE)))
 }
 
 export function buildDataModuleContent(
@@ -424,8 +424,9 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
     }
   }
 
-  const body = source.slice(openIndex, end)
-  return heritage ? { kind: 'body', body, heritage: heritage.replace(/^extends\s+/u, '').trim() } : { kind: 'body', body }
+  // Sliced from the source: the heritage runs up to the brace, and the mask blanks its string literals.
+  const written = heritage ? source.slice(openIndex - heritage.length, openIndex) : undefined
+  return { kind: 'body', body: source.slice(openIndex, end), heritage: written?.replace(/^extends\s+/u, '').trim() }
 }
 
 function heritageOf(read: { heritage?: string }): Pick<ResourceDefinition, 'heritage'> {

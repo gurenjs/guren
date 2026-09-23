@@ -568,9 +568,9 @@ class StatusContext {
       existsInScope(this.app.resources, name, NOUNS.resources, resource.module, classes, (entry) => entry.className === name)
     const payloads = this.detail?.resourcePayloads ?? NO_DETAIL
     const payload = isUnreadable(payloads)
-      ? undefined
-      : payloads.find((candidate) => candidate.className === resource.name && candidate.module === (resource.module ?? null))?.payload
-    const whyUnread = isUnreadable(payloads) ? `the resources could not be read for their payload (${payloads.unreadable})` : 'guren codegen does not discover the class as a resource'
+      ? { unreadable: `the resources could not be read for their payload (${payloads.unreadable})` }
+      : (payloads.find((candidate) => candidate.className === resource.name && candidate.module === (resource.module ?? null))?.payload
+        ?? { unreadable: 'guren codegen does not discover the class as a resource' })
     return this.conclude({
       id: resource.id,
       section: 'resources',
@@ -578,7 +578,7 @@ class StatusContext {
       label: resource.name,
       exists: find(resource.name),
       previous: previousOf(resource.change, find),
-      properties: () => resourceFieldProperties(resource.fields, payload, whyUnread),
+      properties: () => resourceFieldProperties(resource.fields, payload),
       files: () => classFiles(classes, resource.name, resource.module),
     })
   }
@@ -808,7 +808,7 @@ class StatusContext {
       label: validator.name,
       exists: find(validator.name),
       previous: previousOf(validator.change, find),
-      properties: () => validatorFieldProperties(validator.fields, found?.fields, isUnreadable(validators) ? validators.unreadable : 'the validator was not read'),
+      properties: () => validatorFieldProperties(validator.fields, found?.fields ?? { unreadable: isUnreadable(validators) ? validators.unreadable : 'the validator was not read' }),
       mount: () => this.referenceMount(validator.name, found),
       files: () => (found ? [found.file] : []),
     })

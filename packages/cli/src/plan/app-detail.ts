@@ -485,17 +485,18 @@ async function validatorDetail(root: string, cache: ParseCache, contracts: Set<o
     // One unread file makes every absent name unprovable, as with the controller scan.
     if (names === null) return { validators: { unreadable: `${file} could not be read for its exported schemas` }, symbols }
     const module = moduleNameFromRelPath(file)
+    const exported = names.filter((name) => name !== 'default')
     const imported = await importValidatorFile(filePath)
     if (typeof imported === 'string') {
       const fields = { unreadable: `${file} would not import (${imported})` }
-      validators.push(...names.filter((name) => name !== 'default').map((name) => ({ name, file, module, unimported: imported, fields })))
+      validators.push(...exported.map((name) => ({ name, file, module, unimported: imported, fields })))
       continue
     }
     for (const [name, value] of Object.entries(imported)) {
       if (value === null || typeof value !== 'object' || !contracts.has(value)) continue
       symbols.set(value, [...(symbols.get(value) ?? []), name])
     }
-    validators.push(...names.filter((name) => name !== 'default').map((name) => ({ name, file, module, fields: readSchemaFields(name, imported[name]) })))
+    validators.push(...exported.map((name) => ({ name, file, module, fields: readSchemaFields(name, imported[name]) })))
   }
   return { validators, symbols }
 }

@@ -68,7 +68,7 @@ const USERS_TABLE: SourcedSchemaTable = {
   columns: [{ name: 'id', columnName: 'id', type: 'serial', sqlType: 'serial', notNull: true, primaryKey: true, unique: false }],
 }
 
-const NO_FIELDS = { properties: {}, required: [], unrendered: {} }
+const NO_FIELDS = { fields: {} }
 const UNIMPORTED_FIELDS = { unreadable: 'app/Http/Validators/PostValidator.ts would not import (it threw)' }
 
 function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
@@ -466,7 +466,7 @@ const CASES: Case[] = [
   {
     name: 'an added validator whose planned fields cannot be read, on its mount',
     plan: validator(ADD, 'PostPayloadSchema', { fields: [{ name: 'body', type: 'text', required: true, rules: [] }] }),
-    app: app({ routes: [contractRoute(null)], validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: { unreadable: 'PostPayloadSchema is not a zod schema' } }] }),
+    app: app({ routes: [contractRoute(null)], validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: { unreadable: 'PostPayloadSchema: skipped because schema is not a supported Zod schema.' } }] }),
     id: 'val',
     state: 'wired',
   },

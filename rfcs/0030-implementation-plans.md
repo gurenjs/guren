@@ -1618,37 +1618,52 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
 
 - A validator's fields are read off the exported schema object, through the
   Zod to JSON Schema walker that agent tools and OpenAPI already use
-  (`readObjectSchema()`, input side). The object comes from the import the
-  contract-identity match makes, which now runs for every validator file
-  rather than only when a registered route carries a contract. That is the one
-  widening of what `plan:status` executes. A static reading of `z.object({...})`
-  was the first design and was dropped: the blog's own `PostPayloadSchema` is
-  `z.object(baseFields)` over helper calls, which a static reader can only call
-  opaque, and it would be a second reading of what `.default()` or `.pipe()`
-  means for presence.
+  (`toJsonSchema()` per key, both sides; `readObjectSchema()` for presence).
+  The object comes from the import the contract-identity match makes, which now
+  runs for every validator file rather than only when a registered route
+  carries a contract. Every caller that loads the detail therefore imports the
+  validators: `plan:status`, `plan:verify`, `plan:next`, `plan:close`,
+  `guren check --plan` and the `Stop` hook. A static reading of
+  `z.object({...})` was the first design and was dropped: the blog's own
+  `PostPayloadSchema` is `z.object(baseFields)` over helper calls, which a
+  static reader can only call opaque, and it would be a second reading of what
+  `.default()` or `.pipe()` means for presence.
 - Each planned field yields `field <name>`, `field <name> type`,
   `field <name> required` and one `field <name> rule <text>` per rule; each
-  resource field yields `field <name>` and `field <name> type`. A field the
-  schema or payload does not declare is a `differ` and its other properties are
-  `unknown`. An export that reaches no object (`z.lazy()`, a plain object) or a
-  file that would not import leaves every property `unknown` with the reason.
-- A type is a `differ` only across JSON families (a string where the plan says
-  `boolean`); a format the plan's type needs and the schema does not declare
-  (`uuid`, `date`), a number for a planned `integer`, and a union are `unknown`.
-  `required` means a client must send a value, so a key it may omit or send as
-  `null` reads `false`; a union reads `unknown`. Rules are prose, and only
-  `min`, `max`, `email`, `url` and `uuid` are compared: a bound is a `differ`
-  when the schema states another one, and `unknown` when it states none, since
-  a refinement the walker does not render may carry it. That settles the
-  `max(500)` near-miss of cause 3.
+  resource field yields `field <name>` and `field <name> type`. A key the
+  schema's object does not declare is a `differ` and its other properties are
+  `unknown`. An export that reaches no object (`z.lazy()`, a plain object, a
+  zod v3 schema) or a file that would not import leaves every property
+  `unknown` with the reason.
+- A planned `type` describes the validated value, so it is compared with the
+  walker's output side: `z.coerce.number().int()` and `z.stringbool()` match
+  `integer` and `boolean`. A field whose output passes through a `.transform()`
+  is `unknown`, since the walker renders a transform's result as its input. A
+  type is a `differ` only across JSON families and only on a field with no pipe
+  or transform, where both sides are one node; a format the planned type needs
+  and the schema does not declare (`uuid`, `date`), a number for a planned
+  `integer`, and a union are `unknown`.
+- `required` means a client must send a non-null value, so a key it may omit or
+  send as `null` reads `false`; a union reads `unknown`, and so does a key the
+  walker calls required on a field with a transform stage, which may fill a
+  missing value in. Rules are prose, and only `min`, `max`, `email`, `url` and
+  `uuid` are compared. A bound is the tightest either stage states (both stages
+  run), an integer's exclusive bound read as the next integer in. It is a
+  `match` when it equals the planned bound, a `differ` when it is tighter, since
+  it rejects a value the plan accepts, and `unknown` when it is looser or absent,
+  since a refinement the walker does not render may tighten it. That settles
+  the `max(500)` against a planned `max(2000)` near-miss of cause 3.
 - A resource's payload is `guren codegen`'s own reading, the definitions
-  `data.gen.ts` is emitted from (`readResourceDefinitions()`), with the `extends`
-  clause the copied body drops now kept beside it. A payload codegen references
-  rather than copies, or whose type extends anything but `Record<string, ...>`,
-  leaves an absent field `unknown`. A type is compared as a set of union members
-  with `undefined` set aside, and is a `differ` only when both sides are
-  primitive keywords or literals; an alias or an object type is `unknown` unless
-  the text is the same.
+  `data.gen.ts` is emitted from (`readResourceDefinitions()`), with the
+  `extends` clause the copied body drops now kept beside it. A payload codegen
+  references rather than copies, or one whose heritage is anything but a single
+  `Record<string, ...>`, leaves an absent field `unknown`; an index signature,
+  like that heritage, names no member. A type is compared as a set of union
+  members with `undefined` set aside, string literals under one quoting. It is a
+  `differ` only when every member on both sides is a keyword or a literal, and
+  a literal only against a keyword it is not an instance of (`'draft'` against
+  `number`, never against `string`); an alias or an object type is `unknown`
+  unless it reads the same.
 - What this changes downstream. A validator or resource with a matching field
   is no longer an element "none of whose planned properties matched", so the
   verification overlay lifts it without a behaviour reaching it. A differing
@@ -1662,11 +1677,10 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
 - Measured on `examples/blog` (9 validators, 1 resource) and `examples/api` (8
   validators, 2 resources) against hand-written plans that state the code as it
   is: before, all 20 elements carried one `unknown` `fields` property each;
-  after, the 209 per-field properties read 198 `match`, 11 `unknown`, 0
-  `differ`. The unknowns are a union behind a transform (the blog's `remember`
-  and `PostFormSchema.body`, 3), `email` checked by a `.pipe(z.email())` the
-  input side does not show (4), a `min 8` enforced in `superRefine()` (1), and
-  the free-form `positive` (3).
+  after, the 209 per-field properties read 200 `match`, 9 `unknown`, 0
+  `differ`. The unknowns are a type behind a transform (4), a union's presence
+  (1), a `min 8` enforced in `superRefine()` (1), and the free-form `positive`
+  (3).
 
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store

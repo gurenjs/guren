@@ -10,7 +10,7 @@ const ROOT_PREFIX = 'guren-plan-app-detail-'
 let ROOT: string
 
 /** The fixture's validators are plain objects, so their fields are read as unreadable. */
-const NOT_ZOD = { unreadable: expect.stringContaining('is not a zod schema') }
+const NOT_ZOD = { unreadable: expect.stringContaining('not a supported Zod schema') }
 
 const CONTROLLER = `import { Controller } from '@guren/core'
 import { OrphanPayloadSchema, PostPayloadSchema } from '../Validators/PostValidator.js'
