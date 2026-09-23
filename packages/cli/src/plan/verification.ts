@@ -11,7 +11,7 @@ import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
 import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
-import { behaviourCanReach, behaviourReach } from './reach'
+import { behaviourCanReach, behaviourCarriers } from './reach'
 import type { Plan, PlanDraft } from './schema'
 import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus, type PlanVerificationHold } from './status'
@@ -77,15 +77,22 @@ export function applyVerification(
   const lifted = new Map<string, PlanElementStatus<PlanElementState>>(status.elements.map((element) => [element.id, { ...element, notes: [...element.notes] }]))
   const staleSteps: string[] = []
 
-  // Every standing step that ran behaviours counts: one task's behaviour may render a page or return a resource another task placed.
-  const carriers = derivation.tasks.flatMap((task) =>
-    task.steps.filter((step) => {
-      const record = records[step.id]
-      return step.kind !== 'tests' && step.acceptanceIds.length > 0 && record !== undefined && recordStands(record, digest, hashes)
-    }),
-  )
-  const reached = behaviourReach(plan, carriers.flatMap((step) => step.acceptanceIds))
+  // A carrier in any task counts: one task's behaviour may render a page or return a resource another task placed.
+  const carriers = behaviourCarriers(plan, derivation)
+  const stands = (stepId: string): boolean => {
+    const record = records[stepId]
+    return record !== undefined && recordStands(record, digest, hashes)
+  }
   const reachable = behaviourCanReach(plan)
+  const unreached = (id: string): string => {
+    const reaching = carriers.get(id) ?? []
+    if (reaching.length > 0) {
+      const which = reaching.length === 1 ? 'that step' : 'one of those steps'
+      return `no verified run of a step whose behaviours reach it (${reaching.join(', ')}) holds now, so that result is not counted: run plan:verify on ${which}, or waive it`
+    }
+    const remedy = reachable.has(id) ? 'add a behaviour that reaches it, or waive it' : 'no behaviour can reach it, so waive it'
+    return `no verified behaviour reaches it, so that result is not counted: ${remedy}`
+  }
 
   for (const task of derivation.tasks) {
     for (const step of task.steps) {
@@ -116,9 +123,8 @@ export function applyVerification(
         }
         if (!awaitsVerification(element)) {
           hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
-        } else if (unmatched && !reached.has(id)) {
-          const remedy = reachable.has(id) ? 'add a behaviour that reaches it, or waive it' : 'no behaviour can reach it, so waive it'
-          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: ${remedy}.`)
+        } else if (unmatched && !(carriers.get(id) ?? []).some(stands)) {
+          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and ${unreached(id)}.`)
         } else if (element.files.length === 0 && !needsNoFiles) {
           hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {

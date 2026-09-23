@@ -7,7 +7,7 @@
 import type { Plan, PlanDraft } from './schema'
 import { awaitsVerification, type PlanElementState, type PlanElementStatus } from './status'
 import { listPlanSteps, type PlanTaskDerivation } from './tasks'
-import { behaviourCanReach, behaviourReach } from './reach'
+import { behaviourCanReach, behaviourCarriers } from './reach'
 import { restsOnReach } from './verification'
 
 interface BlockerContext {
@@ -36,15 +36,9 @@ export function describeCloseBlockers(
   elements: ReadonlyArray<PlanElementStatus<PlanElementState>>,
   planArgument: string,
 ): CloseBlocker[] {
-  const context: BlockerContext = { planArgument, owners: new Map(), carriers: new Map(), reachable: behaviourCanReach(plan) }
+  const context: BlockerContext = { planArgument, owners: new Map(), carriers: behaviourCarriers(plan, derivation), reachable: behaviourCanReach(plan) }
   for (const { step } of listPlanSteps(derivation)) {
     for (const id of step.elementIds) context.owners.set(id, step.id)
-    if (step.kind === 'tests' || step.acceptanceIds.length === 0) continue
-    for (const id of behaviourReach(plan, step.acceptanceIds)) {
-      const carriers = context.carriers.get(id)
-      if (carriers) carriers.push(step.id)
-      else context.carriers.set(id, [step.id])
-    }
   }
   return elements.map((element) => {
     const hold = element.hold

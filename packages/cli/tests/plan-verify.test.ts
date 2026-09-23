@@ -771,6 +771,27 @@ describe('applyVerification', () => {
     expect(elementOf(applyVerification(onKeys, derivation, { [HTTP]: http }, 'digest', hashes, plan).status, 'resource.comment').hold?.kind).toBe('unreached')
   })
 
+  test('should name the step whose behaviours reach an element, not ask for a behaviour, when that step has no standing run', async () => {
+    const controllerFile = 'app/Http/Controllers/CommentController.ts'
+    const http = record({ fingerprint: { ...FINGERPRINT, files: { [controllerFile]: sha256(FILES[controllerFile]!) } } })
+    const changedHashes = new Map([[controllerFile, 'changed']])
+
+    const drifted = applyVerification(statusOf({ 'controller.comments': { properties: [] } }), derivation, { [HTTP]: http }, 'digest', changedHashes, plan).status
+    const controller = elementOf(drifted, 'controller.comments')
+    expect(controller).toMatchObject({ state: 'present', hold: { kind: 'unreached' } })
+    expect(controller.notes).toEqual([
+      `Verified 2026-09-21T00:00:00.000Z by ${HTTP}, but no planned property of it matched beyond its existence and no verified run of a step whose behaviours reach it (${HTTP}) holds now, so that result is not counted: run plan:verify on that step, or waive it.`,
+    ])
+
+    // Verified by its own step, reached only through another step that never ran.
+    const hashes = await hashFiles(ROOT, DATA_FILES)
+    const unrun = applyVerification(statusOf({ 'model.comment': { properties: [] } }), derivation, { [DATA]: record() }, 'digest', hashes, plan).status
+    const model = elementOf(unrun, 'model.comment')
+    expect(model.hold?.kind).toBe('unreached')
+    expect(model.hold?.note).toContain(`reach it (${HTTP}) holds now`)
+    expect(model.hold?.note).not.toContain('add a behaviour')
+  })
+
   test('should reach an element of a split step\u2019s earlier part through the part that runs the behaviours, while its record stands', async () => {
     const controllerFile = 'app/Http/Controllers/CommentController.ts'
     const split = derivePlanTasks(plan, { splitThreshold: 3 })
