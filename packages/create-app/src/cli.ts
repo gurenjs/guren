@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
 import process from 'node:process'
 import { consola } from 'consola'
@@ -52,6 +52,20 @@ async function runAppCli(targetDir: string, cliArgs: string[]): Promise<boolean>
     stdio: 'inherit',
   })
   return result.status === 0
+}
+
+// `guren add auth` generates the users migration itself when drizzle-kit runs,
+// but exits 0 either way, so the directory is the only record of whether
+// `db:make` is still needed. Any entry but the template's `.gitkeep` counts:
+// drizzle-kit 1.x writes `<timestamp>_<name>/migration.sql`, older lines a flat
+// `<n>_<name>.sql`. `out` is `./db/migrations` in every shipped drizzle.config.ts.
+async function hasGeneratedMigration(appRoot: string): Promise<boolean> {
+  try {
+    const entries = await readdir(resolve(appRoot, 'db/migrations'))
+    return entries.some((entry) => !entry.startsWith('.'))
+  } catch {
+    return false
+  }
 }
 
 async function resolveRenderingMode(flagValue: unknown): Promise<RenderingMode> {
@@ -412,7 +426,9 @@ const command = defineCommand({
         }
       }
       if (!authInstalled) {
-        consola.warn('Authentication was not scaffolded automatically. Run `bunx guren add auth` inside the app after installing dependencies.')
+        consola.warn(installed
+          ? 'Authentication scaffolding failed (see the output above). Run `bunx guren add auth` inside the app once that is fixed.'
+          : 'Authentication was not scaffolded automatically. Run `bunx guren add auth` inside the app after installing dependencies.')
       }
     }
 
@@ -436,7 +452,7 @@ const command = defineCommand({
     }
     consola.log('')
     consola.info('Add features:')
-    if (!blueprint.includesAuth) {
+    if (!blueprint.includesAuth && !authInstalled) {
       consola.log('  bunx guren add auth')
     }
     consola.log('  bunx guren add resource posts --fields "title:string,body:text"')
@@ -455,10 +471,9 @@ const command = defineCommand({
     if (authInstalled) {
       consola.log('')
       consola.info('Auth scaffolding was included automatically.')
-      // db:make first: the users table only exists in db/schema.ts until
-      // drizzle-kit generates a migration from it, and db:migrate with an empty
-      // db/migrations applies nothing.
-      consola.info('Set up the users table with: bun run db:make && bun run db:migrate && bun run db:seed')
+      consola.info(await hasGeneratedMigration(targetDir)
+        ? 'Its migration is already in db/migrations. Set up the users table with: bun run db:migrate && bun run db:seed'
+        : 'Set up the users table with: bun run db:make && bun run db:migrate && bun run db:seed')
     }
 
     if (renderingMode === 'ssr') {
