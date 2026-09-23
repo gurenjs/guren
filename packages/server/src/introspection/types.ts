@@ -136,6 +136,11 @@ export interface AttachmentsEntry {
   delivery?: { prefix: string; routeName: string; mounted: boolean }
 }
 
+/** What an attachments engine reports of itself; the manifest adds `delivery.mounted` from the route registry. */
+export type AttachmentsDescription = Omit<AttachmentsEntry, 'delivery'> & {
+  delivery?: Omit<NonNullable<AttachmentsEntry['delivery']>, 'mounted'>
+}
+
 export interface ManifestWarning {
   code: string
   message: string

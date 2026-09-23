@@ -295,6 +295,19 @@ describe('Application.introspect()', () => {
     expect(thrown.warnings.find((warning) => warning.code === 'section-unverified')?.message).toContain('ThrowingProvider')
   })
 
+  test('never falls back to the in-memory session when the bound manager cannot be built', async () => {
+    class BrokenSessionProvider extends ServiceProvider {
+      register(): void {
+        this.container.singleton('session', () => new SessionManager({ default: 'missing' }))
+      }
+    }
+
+    const manifest = await createApp({ auth: {}, providers: [BrokenSessionProvider] }).introspect()
+
+    expect(manifest.session).toBeUndefined()
+    expect(manifest.warnings.find((warning) => warning.code === 'section-unreadable')?.message).toContain('Session store not found: missing')
+  })
+
   test('reports a plugin session driver as unverifiable rather than shared', () => {
     const manager = new SessionManager({ default: 'dynamo', stores: { dynamo: { driver: 'dynamo' as 'memory' } } })
 

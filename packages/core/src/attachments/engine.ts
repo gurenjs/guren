@@ -11,7 +11,7 @@ import {
   HttpException,
   ValidationException,
   type AppKeyring,
-  type AttachmentsEntry,
+  type AttachmentsDescription,
   type Container,
   type QueueManager,
   type StorageDriver,
@@ -1206,7 +1206,7 @@ export class AttachmentEngine {
    * The configuration as RFC 0026's manifest reports it, touching no disk. The
    * manifest adds `delivery.mounted`, which only the route registry knows.
    */
-  describe(): EngineDescription {
+  describe(): AttachmentsDescription {
     const table = drizzleTableName(this.table)
     return {
       configured: true,
@@ -1498,14 +1498,11 @@ export function resolveDeliveryRoute(): { prefix: string; routeName: string } {
   )
 }
 
-/** {@link AttachmentEngine.describe}'s result: the manifest's entry before it knows whether the delivery route mounted. */
-export type EngineDescription = Omit<AttachmentsEntry, 'delivery'> & { delivery?: { prefix: string; routeName: string } }
-
 /**
  * The engine an `Attachable` static would use, described (RFC 0026 §1): the
  * default application's binding, else the one `configureAttachments()` built.
  */
-export function describeActiveAttachmentEngine(): EngineDescription {
+export function describeActiveAttachmentEngine(): AttachmentsDescription {
   // `has()` before `make()`: `ambientBinding()` would activate a deferred provider.
   const container = ambientContainer()
   const bound = container?.has(ATTACHMENTS_BINDING) ? container.make(ATTACHMENTS_BINDING) : undefined

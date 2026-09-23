@@ -14,6 +14,7 @@ import { RedisStore } from './stores/RedisStore'
 import { FileStore } from './stores/FileStore'
 import { TaggedCache } from './TaggedCache'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
+import { describeDriverMap } from '../introspection/driver-map'
 import type { DriverMapEntry } from '../introspection/types'
 
 /** Adds tag support to any cache store. */
@@ -201,11 +202,7 @@ export class CacheManager {
 
   /** The declared stores and the default, building none of them (RFC 0026 §1). */
   describe(): DriverMapEntry {
-    const entries: DriverMapEntry['entries'] = {}
-    for (const name of this.storeFactories.keys()) {
-      entries[name] = { driver: this.storeDrivers.get(name) ?? null }
-    }
-    return { default: this.defaultStoreName, entries }
+    return describeDriverMap(this.defaultStoreName, this.storeFactories.keys(), (name) => this.storeDrivers.get(name))
   }
 }
 

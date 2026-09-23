@@ -144,14 +144,16 @@ export class ProviderManager {
 
   async registerAll(): Promise<void> {
     for (const provider of this.providers) {
-      if (!this.registered.has(provider)) {
-        await provider.register()
-        // Before marking it registered, so a retried boot runs the check again.
-        this.assertOwnedBindingsKept(provider)
-        this.registered.add(provider)
-        if (isBindingOwner(provider)) this.bindingOwners.push(provider)
-      }
+      if (!this.registered.has(provider)) await this.registerOne(provider, () => provider.register())
     }
+  }
+
+  private async registerOne(provider: ServiceProvider, run: () => void | Promise<void>): Promise<void> {
+    await run()
+    // Before marking it registered, so a retried boot runs the check again.
+    this.assertOwnedBindingsKept(provider)
+    this.registered.add(provider)
+    if (isBindingOwner(provider)) this.bindingOwners.push(provider)
   }
 
   /**
@@ -170,11 +172,8 @@ export class ProviderManager {
 
       const hook = provider.introspect
       try {
-        await (typeof hook === 'function' ? hook.call(provider) : provider.register())
-        this.assertOwnedBindingsKept(provider)
-        this.registered.add(provider)
-        if (isBindingOwner(provider)) this.bindingOwners.push(provider)
-        outcomes.set(provider, { register: typeof hook === 'function' ? 'introspect-hook' : 'ran' })
+        await this.registerOne(provider, hook ? () => hook.call(provider) : () => provider.register())
+        outcomes.set(provider, { register: hook ? 'introspect-hook' : 'ran' })
       } catch (error) {
         outcomes.set(provider, { register: 'threw', error: describeError(error) })
       }

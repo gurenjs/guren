@@ -23,6 +23,7 @@ export type {
 export { isIntrospecting } from './introspection/flag'
 export type {
   AppManifest,
+  AttachmentsDescription,
   AttachmentsEntry,
   AuthEntry,
   AuthProviderEntry,

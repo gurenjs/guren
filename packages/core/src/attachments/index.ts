@@ -5,7 +5,6 @@ export type { ConfigureAttachmentsOptions, ConfiguredAttachments } from './confi
 export { ATTACHMENT_OBJECT_PREFIX, DEFAULT_DELIVERY_ROUTE_NAME, describeActiveAttachmentEngine } from './engine.js'
 export type {
   AttachmentEngine,
-  EngineDescription as AttachmentEngineDescription,
   AttachOptions,
   AttachmentUrlOptions,
   DeliveryOptions,

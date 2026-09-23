@@ -116,7 +116,6 @@ export type {
   AttachmentCollectionSpec,
   AttachmentData,
   AttachmentEngine,
-  AttachmentEngineDescription,
   AttachmentRecord,
   AttachmentSource,
   AttachmentsDeclaration,

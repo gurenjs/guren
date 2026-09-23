@@ -28,7 +28,7 @@ function driverMap(label: string, entry: DriverMapEntry | undefined): string[] {
 }
 
 /** The sections as text tables; `--json` prints the manifest itself. */
-export function renderManifest(manifest: AppManifest): string {
+function renderManifest(manifest: AppManifest): string {
   const services = [
     ...(manifest.session
       ? [`session: ${manifest.session.source}, default ${manifest.session.default}; ${Object.entries(manifest.session.stores).map(([name, store]) => `${name}=${store.driver ?? '?'}`).join(', ')}`]

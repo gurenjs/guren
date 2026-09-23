@@ -6,11 +6,10 @@
  */
 import { writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { basename, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AppManifest } from '@guren/server'
 
-import { discoverControllerFiles } from './discovery'
+import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
 import type { Introspection, IntrospectionFailure } from './introspect'
 import { bootstrapApplication, resolveMainEntry } from './runtime'
 
@@ -29,8 +28,12 @@ interface IntrospectableApp {
 
 let listenRefusal: unknown
 
-function isListenRefusal(error: unknown): boolean {
-  return (error as { code?: unknown } | null)?.code === LISTEN_REFUSED
+/** The refusal itself or anywhere in its `cause` chain: `bootstrapApplication()` wraps a rejected `ready`. */
+function findListenRefusal(error: unknown): unknown {
+  for (let current = error, depth = 0; current && depth < 5; current = (current as { cause?: unknown }).cause, depth++) {
+    if ((current as { code?: unknown }).code === LISTEN_REFUSED) return current
+  }
+  return undefined
 }
 
 function messageOf(error: unknown): string {
@@ -50,7 +53,7 @@ function crashedByListen(error: unknown): Introspection {
  * entry is imported: a scaffolded `src/main.ts` boots at import, and an old
  * server ignores the flag and would run the real boot (migrations, connections).
  */
-async function resolvesOldServer(entry: string): Promise<boolean | undefined> {
+async function resolvesOldServer(entry: string): Promise<boolean> {
   const require = createRequire(entry)
   for (const specifier of ['@guren/core', '@guren/server']) {
     let resolved: string
@@ -63,10 +66,10 @@ async function resolvesOldServer(entry: string): Promise<boolean | undefined> {
       const mod = (await import(pathToFileURL(resolved).href)) as { Application?: { prototype?: IntrospectableApp } }
       return typeof mod.Application?.prototype?.introspect !== 'function'
     } catch {
-      return undefined
+      return false
     }
   }
-  return undefined
+  return false
 }
 
 /**
@@ -85,7 +88,7 @@ async function resolveControllers(manifest: AppManifest, app: IntrospectableApp,
     try {
       mod = (await import(pathToFileURL(file).href)) as Record<string, unknown>
     } catch (error) {
-      manifest.warnings.push({ code: 'controller-import', message: `${relative(root, file)} could not be imported: ${messageOf(error)}` })
+      manifest.warnings.push({ code: 'controller-import', message: `${toPosixRelative(root, file)} could not be imported: ${messageOf(error)}` })
       continue
     }
     for (const [exportName, value] of Object.entries(mod)) {
@@ -98,10 +101,10 @@ async function resolveControllers(manifest: AppManifest, app: IntrospectableApp,
     const candidates = exportsOf.get(handler.controller)
     if (!route?.controller || !candidates) continue
     // A barrel re-exports the class too; the file named after it declares it.
-    const declared = candidates.find(({ file }) => basename(file).replace(/\.[^.]+$/u, '') === route.controller!.name) ?? candidates[0]!
+    const declared = candidates.find(({ file }) => classNameFromPath(file) === route.controller!.name) ?? candidates[0]!
     route.controller = {
       ...route.controller,
-      file: relative(root, declared.file).split('\\').join('/'),
+      file: toPosixRelative(root, declared.file),
       exportName: declared.exportName,
       resolved: 'identity',
     }
@@ -116,7 +119,7 @@ async function introspect(root: string): Promise<Introspection> {
     return failed('no-entry', messageOf(error))
   }
 
-  if ((await resolvesOldServer(entry)) === true) {
+  if (await resolvesOldServer(entry)) {
     return failed('old-server', 'The app resolves a @guren/server without Application.introspect(). Upgrade @guren/core to a release with RFC 0026 introspection.')
   }
 
@@ -124,32 +127,18 @@ async function introspect(root: string): Promise<Introspection> {
   try {
     mod = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
   } catch (error) {
-    if (isListenRefusal(error)) return crashedByListen(error)
-    return failed('import', `Could not load ${relative(root, entry)}: ${messageOf(error)}`)
+    if (findListenRefusal(error)) throw error
+    return failed('import', `Could not load ${toPosixRelative(root, entry)}: ${messageOf(error)}`)
   }
 
-  // The entry loaded; a `ready` that rejects failed while registering, not importing.
-  let app: IntrospectableApp
-  try {
-    app = (await bootstrapApplication(mod)) as IntrospectableApp
-  } catch (error) {
-    const cause = (error as { cause?: unknown } | null)?.cause
-    if (isListenRefusal(cause)) return crashedByListen(cause)
-    return failed('crashed', messageOf(error))
-  }
-
+  // Past the import, a throw is a failure to register: `main()` reports it as `crashed`.
+  const app = (await bootstrapApplication(mod)) as IntrospectableApp
   if (typeof app.introspect !== 'function') {
     return failed('old-server', 'The application has no introspect() method: its @guren/server predates RFC 0026.')
   }
 
-  let manifest: AppManifest
-  try {
-    manifest = await app.introspect()
-  } catch (error) {
-    return failed('crashed', messageOf(error))
-  }
-
-  manifest.entry.file = relative(root, entry).split('\\').join('/')
+  const manifest = await app.introspect()
+  manifest.entry.file = toPosixRelative(root, entry)
   await resolveControllers(manifest, app, root)
   return { status: 'ok', manifest }
 }
@@ -163,7 +152,8 @@ async function main(): Promise<void> {
 
   // A module-scope `app.listen()` with no await rejects outside any frame we hold.
   process.on('unhandledRejection', (reason) => {
-    if (isListenRefusal(reason)) listenRefusal ??= reason
+    const refusal = findListenRefusal(reason)
+    if (refusal) listenRefusal ??= refusal
     else console.error('[guren] Unhandled rejection during introspection:', reason)
   })
 
@@ -171,7 +161,8 @@ async function main(): Promise<void> {
   try {
     result = await introspect(process.cwd())
   } catch (error) {
-    result = failed('crashed', messageOf(error))
+    const refusal = findListenRefusal(error)
+    result = refusal ? crashedByListen(refusal) : failed('crashed', messageOf(error))
   }
   // Let a rejection raised during the last await reach the handler above.
   await new Promise((resolve) => setTimeout(resolve, 0))

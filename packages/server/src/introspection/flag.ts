@@ -1,8 +1,8 @@
 /** Set by the CLI's introspection child before the app's module graph evaluates (RFC 0026 §2). */
-export const INTROSPECT_ENV_FLAG = 'GUREN_INTROSPECT'
+const INTROSPECT_ENV_FLAG = 'GUREN_INTROSPECT'
 
 /** `code` on the error `listen()` throws under the flag; read by duck-typing, since the reader may load another server copy. */
-export const INTROSPECT_LISTEN_REFUSED = 'GUREN_INTROSPECT_LISTEN'
+const INTROSPECT_LISTEN_REFUSED = 'GUREN_INTROSPECT_LISTEN'
 
 /** Whether this process is an introspection run. The one reader of the flag. */
 export function isIntrospecting(): boolean {

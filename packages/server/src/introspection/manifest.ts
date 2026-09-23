@@ -7,7 +7,9 @@ import { toJsonSchema } from '../internal/zod-json-schema'
 import type { RouteDefinition, Router } from '../mvc/Router'
 import type {
   AppManifest,
-  AttachmentsEntry,
+  AttachmentsDescription,
+  AuthEntry,
+  DriverMapEntry,
   MiddlewareEntry,
   ManifestWarning,
   ProviderEntry,
@@ -71,7 +73,9 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
       ...(gurenModule.prefix === undefined ? {} : { prefix: gurenModule.prefix }),
       providers: gurenModule.providers.map((provider) => provider.name),
       commands: gurenModule.commands.map((command) => command.name),
-      routeCount: routes.filter((route) => route.module === gurenModule.name).length,
+      routeCount: sources.moduleRouteRanges
+        .filter((range) => range.module === gurenModule.name)
+        .reduce((count, range) => count + range.end - range.start, 0),
     })),
     routes,
     middlewareAliases,
@@ -80,24 +84,24 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
     warnings,
   }
 
-  const read = <T>(key: string, describe: (service: unknown) => T | undefined): T | undefined =>
-    readSection(sources, key, describe, warnings)
+  const section = <T>(key: string): T | undefined => {
+    const read = readSection<T>(sources, key, warnings)
+    return read.status === 'described' ? read.value : undefined
+  }
 
   const session = describeSession(sources, warnings)
   if (session) manifest.session = session
-  const auth = read('auth', (service) => callDescribe<AppManifest['auth']>(service))
+  const auth = section<AuthEntry>('auth')
   if (auth) manifest.auth = auth
   for (const key of ['cache', 'storage', 'queue'] as const) {
-    const entry = read(key, (service) => callDescribe<AppManifest[typeof key]>(service))
+    const entry = section<DriverMapEntry>(key)
     if (entry) manifest[key] = entry
   }
-  const attachments = read('attachments', (service) => callDescribe<Omit<AttachmentsEntry, 'delivery'> & {
-    delivery?: { prefix: string; routeName: string }
-  }>(service))
+  const attachments = section<AttachmentsDescription>('attachments')
   if (attachments) {
     const { delivery, ...rest } = attachments
     manifest.attachments = delivery
-      ? { ...rest, delivery: { ...delivery, mounted: definitions.some((route) => route.name === delivery.routeName) } }
+      ? { ...rest, delivery: { ...delivery, mounted: sources.router.hasRoute(delivery.routeName) } }
       : rest
   }
 
@@ -159,17 +163,13 @@ function withAbility(entry: MiddlewareEntry, method?: string): MiddlewareEntry {
 }
 
 function describeSession(sources: ManifestSources, warnings: ManifestWarning[]): SessionEntry | undefined {
-  const described = readSection(sources, 'session', (service) =>
-    callDescribe<Omit<SessionEntry, 'source'>>(service), warnings)
-  if (described) return { source: 'manager', ...described }
+  const read = readSection<Omit<SessionEntry, 'source'>>(sources, 'session', warnings)
+  if (read.status === 'described') return { source: 'manager', ...read.value }
+  // Anything but a plain absence was warned about; the fallback below would contradict it.
+  if (read.status !== 'absent') return undefined
 
   const auth = sources.authOptions
   if (!auth || auth.autoSession === false) return undefined
-
-  // `readSection()` warned for a deferred provider; `none` would contradict it.
-  if (sources.providers.some((provider) => provider.register === 'skipped' && provider.provides.includes('session'))) {
-    return undefined
-  }
 
   const store = auth.sessionOptions?.store
   if (store === undefined) {
@@ -194,41 +194,36 @@ function describeSession(sources: ManifestSources, warnings: ManifestWarning[]):
   }
 }
 
-function callDescribe<T>(service: unknown): T | undefined {
-  const describe = (service as { describe?: unknown } | null | undefined)?.describe
-  return typeof describe === 'function' ? (describe.call(service) as T) : undefined
-}
+type SectionRead<T> = { status: 'described'; value: T } | { status: 'absent' | 'unverified' | 'unreadable' }
 
 /**
  * A section is read only when its container key exists after registration.
  * One a deferred provider supplies, or whose manager throws on construction,
- * is reported as a warning, never taken as absent.
+ * is warned about and told apart from a plain absence.
  */
-function readSection<T>(
-  sources: ManifestSources,
-  key: string,
-  describe: (service: unknown) => T | undefined,
-  warnings: ManifestWarning[],
-): T | undefined {
+function readSection<T>(sources: ManifestSources, key: string, warnings: ManifestWarning[]): SectionRead<T> {
   const { container } = sources
   if (!container.has(key)) {
     const deferred = sources.providers.find((provider) => provider.register === 'skipped' && provider.provides.includes(key))
-    if (deferred) {
-      warnings.push({
-        code: 'section-unverified',
-        message: `"${key}" is supplied by the deferred ${deferred.name}, which registers only after boot.`,
-        provider: deferred.name,
-      })
-    }
-    return undefined
+    if (!deferred) return { status: 'absent' }
+    warnings.push({
+      code: 'section-unverified',
+      message: `"${key}" is supplied by the deferred ${deferred.name}, which registers only after boot.`,
+      provider: deferred.name,
+    })
+    return { status: 'unverified' }
   }
+
   try {
-    return describe(container.make(key))
+    const service = container.make(key) as { describe?: () => T } | null | undefined
+    if (typeof service?.describe === 'function') return { status: 'described', value: service.describe() }
+    warnings.push({ code: 'section-unverified', message: `"${key}" is bound to something with no describe().` })
+    return { status: 'unverified' }
   } catch (error) {
     warnings.push({
       code: 'section-unreadable',
       message: `"${key}" is bound but could not be described: ${error instanceof Error ? error.message : String(error)}`,
     })
-    return undefined
+    return { status: 'unreadable' }
   }
 }

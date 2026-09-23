@@ -734,9 +734,9 @@ export class Application {
       }
 
       for (const gurenModule of this.options.modules ?? []) {
-        const start = this.router.registeredHandlers().length
+        const start = this.router.routeCount
         await mountModuleRoutes(this.router, gurenModule)
-        this.moduleRouteRanges.push({ module: gurenModule.name, start, end: this.router.registeredHandlers().length })
+        this.moduleRouteRanges.push({ module: gurenModule.name, start, end: this.router.routeCount })
       }
 
       this.routesRegistered = true

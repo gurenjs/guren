@@ -748,6 +748,11 @@ export class Router<in M extends string = never> {
     }))
   }
 
+  /** How many routes are registered, without building {@link definitions}. */
+  get routeCount(): number {
+    return this.registry.length
+  }
+
   /**
    * The handler behind each {@link definitions} entry, index-aligned with it
    * (RFC 0026 §3): the controller class there is reduced to its name.
@@ -769,7 +774,7 @@ export class Router<in M extends string = never> {
     }
 
     const routes = this.registry.map((route) => [
-      ...route.routeMiddlewareNames.map((name) => this.describeNamedMiddleware(name)),
+      ...route.routeMiddlewareNames.map((name) => aliases[name] ?? this.describeNamedMiddleware(name)),
       ...[...route.scopedMiddlewares, ...route.middlewares].map((handler): MiddlewareEntry => ({
         kind: 'inline',
         name: handler.name || null,

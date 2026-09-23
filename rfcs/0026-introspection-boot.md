@@ -235,8 +235,11 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 >   registers, which `definitions()` already skips rather than throws on.
 > - Warning codes: `boot-callback-skipped`, `env-invalid` and `config-unverified`
 >   (RFC 0027 §1, collected from `ConfigServiceProvider`), `schema-partial`,
->   `agent-tool`, `section-unreadable` (a bound manager whose construction threw)
->   and `controller-import`.
+>   `agent-tool`, `section-unreadable` (a bound manager whose construction threw),
+>   `section-unverified` and `controller-import`. `section-unverified` covers a
+>   section a deferred provider supplies, a key bound to something without
+>   `describe()`, and a session left unbound while a provider threw: none of them
+>   falls back to `source: 'none'`.
 > - `introspect()` is terminal. A `boot()` after it refuses, since a provider may
 >   have run `introspect()` in place of `register()`, and an `introspect()` after
 >   `boot()` refuses too.

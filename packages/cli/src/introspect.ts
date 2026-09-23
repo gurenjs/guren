@@ -4,14 +4,14 @@
  * `guren dev` does, and reads the result the child writes to a temp file.
  * Type-only against `@guren/server`: the app may resolve an older one.
  */
-import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join, resolve } from 'node:path'
 import type { AppManifest } from '@guren/server'
 
-import { bunExecutable, runCaptured, type CapturedExec } from './subprocess'
+import { siblingEntry } from './cli-entry'
+import { outputTail } from './command-output'
+import { bunExecutable, runCaptured } from './subprocess'
 
 export type IntrospectionFailure = 'no-entry' | 'import' | 'timeout' | 'crashed' | 'old-server'
 
@@ -22,8 +22,6 @@ export type Introspection =
 export interface IntrospectOptions {
   /** Wall-clock cap on the child, after which it is killed and the run is `timeout`. */
   timeoutMs?: number
-  /** The subprocess seam, for tests. */
-  exec?: CapturedExec
 }
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
@@ -46,25 +44,17 @@ export function resetIntrospections(): void {
   runs.clear()
 }
 
-let childEntryPath: string | undefined
-
-/** `introspect-child` beside this module: `.js` in dist, `.ts` from source. */
-function childEntry(): string {
-  if (childEntryPath) return childEntryPath
-  const here = dirname(fileURLToPath(import.meta.url))
-  const candidates = ['introspect-child.js', 'introspect-child.ts'].map((name) => join(here, name))
-  childEntryPath = candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!
-  return childEntryPath
-}
-
 async function runIntrospection(root: string, options: IntrospectOptions): Promise<Introspection> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
-  const exec = options.exec ?? runCaptured
+  const child = siblingEntry('introspect-child')
+  if (!child) {
+    return { status: 'failed', reason: 'crashed', message: 'introspect-child is missing beside the CLI; rebuild @guren/cli.' }
+  }
   const dir = await mkdtemp(join(tmpdir(), 'guren-introspect-'))
   const resultFile = join(dir, 'result.json')
 
   try {
-    const run = await exec([bunExecutable(), childEntry(), resultFile], root, {
+    const run = await runCaptured([bunExecutable(), child, resultFile], root, {
       timeoutMs,
       env: { GUREN_INTROSPECT: '1' },
     })
@@ -79,7 +69,7 @@ async function runIntrospection(root: string, options: IntrospectOptions): Promi
     const result = await readResult(resultFile)
     if (result) return result
 
-    const detail = run.stderr.trim().split('\n').slice(-10).join('\n')
+    const detail = outputTail(run.stderr).join('\n')
     return {
       status: 'failed',
       reason: 'crashed',

@@ -10,6 +10,7 @@ import type {
 import { LocalDriver } from './drivers/LocalDriver'
 import { S3Driver } from './drivers/S3Driver'
 import { MemoryDriver } from './drivers/MemoryDriver'
+import { describeDriverMap } from '../introspection/driver-map'
 import type { DriverMapEntry } from '../introspection/types'
 
 export class StorageManager {
@@ -108,11 +109,7 @@ export class StorageManager {
 
   /** The declared disks and the default, building none of them (RFC 0026 §1). */
   describe(): DriverMapEntry {
-    const entries: DriverMapEntry['entries'] = {}
-    for (const name of this.diskFactories.keys()) {
-      entries[name] = { driver: this.diskDrivers.get(name) ?? null }
-    }
-    return { default: this.defaultDiskName, entries }
+    return describeDriverMap(this.defaultDiskName, this.diskFactories.keys(), (name) => this.diskDrivers.get(name))
   }
 }
 

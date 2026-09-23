@@ -201,8 +201,10 @@ export default createApp({ providers: [HangingProvider] })
   test.each([
     ['awaited', 'await app.listen({ port: 0 })'],
     ['bare', 'void app.listen({ port: 0 })'],
+    ['in bootstrap()', 'export async function bootstrap() {\n  await app.listen({ port: 0 })\n  return app\n}'],
+    ['in ready', 'export const ready = app.listen({ port: 0 })'],
   ])('reports a module-scope listen() (%s) as crashed, pointing at bin/serve.ts', async (name, call) => {
-    const dir = await app(`listen-${name}`, {
+    const dir = await app(`listen-${name.replace(/\W+/gu, '-')}`, {
       'src/main.ts': `import app from './app.js'\n\n${call}\n\nexport default app\n`,
     })
 
