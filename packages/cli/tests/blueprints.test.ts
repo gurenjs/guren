@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
+import { runCommand, type CommandDef } from 'citty'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -15,12 +16,14 @@ import {
   PROVIDERLESS_APP_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
   REGISTRAR_LESS_ROUTES_FIXTURE,
+  captureConsolaLines,
   captureWarnings,
   createTempWorkspace,
   readApiOnlyTemplateFile,
   readShippedSchemaFile,
   seedApiOnlyApp,
   seedShippedApiOnlyApp,
+  snapshotTree,
   ENV_SCHEMA_FIXTURE,
   linkWorkspaceCore,
   linkWorkspacePackage,
@@ -30,6 +33,7 @@ import {
 import { checkEnvExample } from '../src/app-env'
 import { loadResolvedConfig } from '../src/resolved-config'
 import { addResource, listBlueprints, runBlueprint } from '../src/blueprints'
+import { builtinSubCommands } from '../src/commands'
 import { runCheck } from '../src/check'
 
 /** Materialize an app file for the provider-wiring patches to target. */
@@ -301,6 +305,36 @@ export default registerWebRoutes
     expect(await readFile('db/schema.ts', 'utf8')).toBe(schemaAfterFirst)
   })
 
+  // A promotion keeps the prototype's validator and pages; `add resource` passes
+  // announce: false, so the command is what reports them, after the written files.
+  it('announces the prototype files a promotion kept after the files it wrote', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+    await writeWorkspaceFiles(workspace.dir, {
+      'resources/js/types/Post.ts': 'export interface PostData extends Record<string, unknown> { id: number }\n',
+      'app/Http/Validators/PostValidator.ts': 'export {}\n',
+      'resources/js/pages/posts/Index.tsx': 'export default function Index() { return null }\n',
+      // Present, so ensureGurenUiTokens stays quiet: it announces its own write.
+      'resources/css/guren.css': '',
+    })
+
+    const lines = await captureConsolaLines(['info', 'success'], () =>
+      runCommand(builtinSubCommands.add as CommandDef<never>, { rawArgs: ['resource', 'Post'] }))
+
+    const created = [
+      'app/Http/Resources/PostResource.ts',
+      'app/Http/Controllers/PostController.ts',
+      'resources/js/pages/posts/Show.tsx',
+      'resources/js/pages/posts/New.tsx',
+      'resources/js/pages/posts/Edit.tsx',
+      'app/Models/Post.ts',
+    ]
+    const kept = ['app/Http/Validators/PostValidator.ts', 'resources/js/pages/posts/Index.tsx']
+    expect(lines.filter((line) => /^(success: Created |info: Kept )/u.test(line))).toEqual([
+      ...created.map((path) => `success: Created ${resolve(process.cwd(), path)}`),
+      ...kept.map((path) => `info: Kept ${resolve(process.cwd(), path)} (pass --force to regenerate it)`),
+    ])
+  })
+
   // A text match on `export const posts = pgTable(` misses this shape; appending a
   // second `posts` export leaves a schema that does not compile.
   it('leaves a table alone that the schema declares with different formatting', async () => {
@@ -457,6 +491,24 @@ export default function registerWebRoutes(appRouter: Router): void {
   // but the table appended to the app's `db/schema.ts` survives. Every reason a
   // patch can fail therefore has to be settled before the first write.
   describe('resource blueprint preflight', () => {
+    // makeFeature refuses before its first write, and runs before either patch:
+    // the table and the route group cannot be taken back once the scaffold stops.
+    it('refuses over a hand-written model and leaves the app byte-identical', async () => {
+      await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+      await writeWorkspaceFiles(workspace.dir, { 'app/Models/Comment.ts': 'export class Comment {}\n' })
+      const before = await snapshotTree(workspace.dir)
+
+      await expect(runCommand(builtinSubCommands.add as CommandDef<never>, {
+        rawArgs: ['resource', 'comments', '--fields', 'body:text'],
+      })).rejects.toThrow([
+        'Scaffolding Comment would overwrite a file that already exists:',
+        '  app/Models/Comment.ts',
+        'Nothing was scaffolded. Pick another name, or pass --force to overwrite it.',
+      ].join('\n'))
+
+      expect(await snapshotTree(workspace.dir)).toEqual(before)
+    })
+
     it('refuses an app with no routes/web.ts, naming the file it wanted', async () => {
       await mkdir('db', { recursive: true })
       await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)

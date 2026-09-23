@@ -54,7 +54,7 @@ import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from './p
 import { formatPlanNext, planNextFile } from './plan-next'
 import { formatPlanWaive, planWaiveFile } from './plan-waive'
 import { formatPlanClose, planCloseFile } from './plan-close'
-import { announceWrittenFiles, type WriterOptions } from './utils'
+import { announceKeptFiles, announceWrittenFiles, type WriterOptions } from './utils'
 import { generateRouteTypes } from './routes-types'
 import { describePageManifestSuppression, generatePageTypes, type PageManifestPlan } from './pages-types'
 import { generateTranslationTypes } from './i18n-types'
@@ -2309,7 +2309,7 @@ const addResourceCommand = defineCommand({
   },
   async run({ args }) {
     const overwritten: string[] = []
-    const { created, schemaUpdated, routesUpdated } = await addResource({
+    const { created, kept, schemaUpdated, routesUpdated } = await addResource({
       name: String(args.name),
       fields: typeof args.fields === 'string' ? args.fields : undefined,
       attach: typeof args.attach === 'string' ? args.attach : undefined,
@@ -2319,6 +2319,7 @@ const addResourceCommand = defineCommand({
     })
 
     announceWrittenFiles(created, overwritten)
+    announceKeptFiles(kept)
 
     consola.info('')
     consola.info(schemaUpdated

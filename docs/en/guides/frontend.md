@@ -1,6 +1,6 @@
 # Frontend Guide
 
-Guren delivers a single-page application experience by combining Inertia.js with React. Controllers return Inertia responses, and the frontend renders the matching React components located under `resources/js/pages/`.
+Guren delivers a single-page application experience by combining Inertia.js with React. Controllers return Inertia responses, and the frontend renders the matching React components located under `resources/js/pages/`. For the parts of the Inertia protocol the server implements, see [Inertia Protocol Support](./inertia.md).
 
 ## Project Structure
 - `resources/js/app.tsx`: Bootstraps the Inertia app and registers global providers.

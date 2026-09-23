@@ -147,6 +147,14 @@ behind and a table appended for routes that were never registered. Use
 it prints the route block to paste and tells you which schema file to add the
 table to.
 
+Both commands also look for every file they would write before writing the first
+one. When some are already there (a model you wrote by hand, say), the command
+lists each of them and writes nothing, and `add resource` leaves `db/schema.ts` and
+`routes/web.ts` unpatched. `--force` overwrites every file on that list, your own
+among them. A file that only `--test`, `--factory` or `--policy` adds is marked
+with its flag, and dropping the flag gets past it. Promoting a prototype keeps the
+pages and validator the prototype run wrote, so those never count.
+
 ## Core Commands
 
 | Command | Description | Example |

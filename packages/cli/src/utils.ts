@@ -138,6 +138,13 @@ export function announceWrittenFiles(files: readonly string[], overwritten: read
   }
 }
 
+/** For the files a scaffold found in place and left as they were, printed after the written ones. */
+export function announceKeptFiles(files: readonly string[]): void {
+  for (const file of files) {
+    consola.info(`Kept ${file} (pass --force to regenerate it)`)
+  }
+}
+
 /**
  * Writes a generated artifact, skipping the write when the file already holds
  * byte-identical content. Codegen re-runs on every save under the watched directories,
@@ -238,7 +245,12 @@ export type ScaffoldFilesOptions = WriterOptions & {
   skipExisting?: boolean
 }
 
-/** `writeScaffoldFile` over a batch — every path is checked before any write. */
+/**
+ * `writeScaffoldFile` over a batch. Every path is containment-checked before the first
+ * write. Existence is not: an existing file stops the batch partway, and with
+ * `skipExisting` every path is probed first and existing ones skipped, though one that
+ * appears after the probe still stops it.
+ */
 export async function writeScaffoldFiles(
   entries: ScaffoldFileEntry[],
   options: ScaffoldFilesOptions = {},
@@ -267,15 +279,21 @@ export async function writeScaffoldFiles(
   return created
 }
 
-export async function scaffoldFile(name: string, config: ScaffoldConfig, options: WriterOptions = {}): Promise<string> {
+/** What `scaffoldFile` writes, for a caller that checks every target before its first write. */
+export function scaffoldFileEntry(name: string, config: ScaffoldConfig, options: WriterOptions = {}): ScaffoldFileEntry {
   const { className, fileName } = resourceName(name)
   const normalizedName = config.suffix ? ensureSuffix(className, config.suffix) : className
   const baseName = config.fileName ? config.fileName({ rawName: name, className, fileName, normalizedName }) : normalizedName
   const extension = config.extension ?? 'ts'
   const dir = options.root ? `modules/${safeModuleName(options.root)}/${config.dir}` : config.dir
-  const filePath = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
+  const path = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
   const contents = config.template({ rawName: name, className, fileName, normalizedName })
-  return writeScaffoldFile(filePath, contents, options)
+  return { path, contents }
+}
+
+export async function scaffoldFile(name: string, config: ScaffoldConfig, options: WriterOptions = {}): Promise<string> {
+  const { path, contents } = scaffoldFileEntry(name, config, options)
+  return writeScaffoldFile(path, contents, options)
 }
 
 export function pascalCase(value: string): string {
