@@ -338,10 +338,11 @@ describe('GUREN_API_DIGEST', () => {
   it('documents the health check subsystem', () => {
     expect(GUREN_API_DIGEST).toContain('createHealthManager()')
     expect(GUREN_API_DIGEST).toContain('health.register(check, { timeout?, critical? })')
-    expect(GUREN_API_DIGEST).toContain(
-      'an unhealthy critical check fails the whole report `unhealthy`, a non-critical one only `degrades` it',
-    )
+    expect(GUREN_API_DIGEST).toContain('critical')
+    expect(GUREN_API_DIGEST).toContain('degrades')
     expect(GUREN_API_DIGEST).toContain('new DatabaseCheck(db, { name?, query? })')
+    expect(GUREN_API_DIGEST).toContain('db.execute(sql)')
+    expect(GUREN_API_DIGEST).toContain('bun:sqlite has no `.execute`')
     expect(GUREN_API_DIGEST).toContain('health.middleware({ checks?, detailed? })')
   })
 

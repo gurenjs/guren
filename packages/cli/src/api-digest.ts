@@ -2,7 +2,9 @@
  * Compact digest of the API signatures agents hunt for most, appended to the
  * `guren context` map so they arrive before any work starts — the glob-scoped
  * rule files under `.claude/rules/` only attach once a matching file is edited.
- * Those rules are the source of truth; keep this a strict summary of them.
+ * Most sections summarize those rules; Health Checks and Redirect Safety have
+ * no rule file and summarize `docs/en/guides/` instead. Keep each section a
+ * strict summary of whichever source backs it.
  */
 export const GUREN_API_DIGEST = `## Guren API Signatures (digest)
 
@@ -55,7 +57,10 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 ### Health Checks (@guren/core)
 - \`const health = createHealthManager()\` · \`health.register(check, { timeout?, critical? })\` — \`timeout\` in ms, default \`5000\`;
   \`critical\` defaults to \`false\` — an unhealthy critical check fails the whole report \`unhealthy\`, a non-critical one only \`degrades\` it
-- \`new DatabaseCheck(db, { name?, query? })\` (defaults \`'database'\`, \`'SELECT 1'\`)
+- \`new DatabaseCheck(db, { name?, query? })\` (defaults \`'database'\`, \`'SELECT 1'\`) — \`db\` is any
+  \`{ query(sql): Promise<unknown> }\`, not a raw Drizzle instance (\`.query\` there is the relational-query
+  namespace, not a function): wrap it, e.g. \`{ query: (sql) => db.execute(sql) }\` on the Postgres/MySQL
+  drivers; bun:sqlite has no \`.execute\`, see \`docs/en/guides/health-checks.md\`
 - \`router.get('/health', health.middleware({ checks?, detailed? }))\` — \`checks\` runs only those names,
   \`detailed\` (default \`true\`) includes per-check results; responds 200 for \`healthy\`/\`degraded\`, 503 for \`unhealthy\`
 
@@ -73,4 +78,4 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   assertUnprocessable / assertJson / assertJsonPath(path, value) / assertInertia(component, props?)\`
 
 Full reference and gotchas: \`.claude/rules/orm-models.md\`, \`controllers-http.md\`, \`routes-codegen.md\`, \`testing.md\`;
-health checks and redirect safety: \`docs/en/guides/health-checks.md\`, \`authentication.md\`.`
+health checks and redirect safety: \`docs/en/guides/health-checks.md\`, \`authentication.md\` in the Guren framework repo.`
