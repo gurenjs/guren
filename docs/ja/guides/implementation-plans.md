@@ -175,6 +175,16 @@ Guren は GET 以外のリクエストへのリダイレクトを 303 で返し�
 
 質問が残っている計画は承認できません。答えは計画を編集して反映します。答えに沿って要素を直し、質問を消し、決めたことを `assumptions` に残してください。承認前の計画は、`plan.json` を直接編集して変えるのが普通のやり方です。
 
+### コマンド
+
+計画の `commands` は `plan:next` が実装エージェントに渡し、エージェントは書かれたとおりに実行します。そのため、どのコマンドも Guren のジェネレーターでなければなりません。
+
+```json
+{ "id": "command.attachments", "command": "guren add attachments", "reason": "Comments take images." }
+```
+
+通るのは `guren <subcommand>` か `bunx guren <subcommand>` の形で、サブコマンドが `make:migration` 以外の `make:*`、`lang:publish`、`add plugin` 以外の `add <blueprint>` のいずれかであるコマンドです。引数に使えるのは文字、数字、`_-.,:/=@+%` です。空白を含む値は一重引用符か二重引用符で囲みます (`--fields "title:string,body:text?"`)。シェルの演算子、`$`、バックスラッシュ、閉じていない引用符があると検査は失敗します。絶対パスの引数や、`..` でアプリケーションの外へ出る引数も失敗します (`--path /etc`、`--app=../other`)。この検査が制限するのはシェルの構文とジェネレーターの書き込み先で、`--force` などジェネレーターごとの他のフラグは判断しません。これ以外のコマンドも失敗します。`bun run db:migrate` は計画からではなく、`data` ステップの検証コマンドとして実行されます。この検査が失敗している間は `plan:approve` が拒否します。こうしたコマンドを持つ計画には、下書きでも承認済みでも、`plan:next` はステップを渡しません。
+
 ## 描画と検査: `plan:render`
 
 ```bash
@@ -606,7 +616,7 @@ A held step is a person’s decision: undo the change that moved it, or edit the
 bunx guren check --plan
 ```
 
-`check --plan` は、開いている計画をまとめて調べます。対象はアプリケーションのルートにある `*.plan.json` と、`docs/plans/` の下の `plan.json` と `*.plan.json` です。開いているとは、現在のハッシュで承認されていて、まだ閉じていないことを指します。報告するのは、`drifted` の要素を持つ計画と、同じ要素を変更する二つの計画です。同じかどうかは id ではなく、アプリケーションの中で何を変えるかで判断します。例の途中で、`posts.excerpt` を改名する二つ目の計画を承認したときの出力です。
+`check --plan` は、開いている計画をまとめて調べます。対象はアプリケーションのルートにある `*.plan.json` と、`docs/plans/` の下の `plan.json` と `*.plan.json` です。開いているとは、現在のハッシュで承認されていて、まだ閉じていないことを指します。報告するのは、`drifted` の要素を持つ計画、上の検査で拒否されるコマンドを持つ計画 (その検査ができる前に承認されたもの)、同じ要素を変更する二つの計画です。同じかどうかは id ではなく、アプリケーションの中で何を変えるかで判断します。例の途中で、`posts.excerpt` を改名する二つ目の計画を承認したときの出力です。
 
 ```text
  WARN  [warn] Approved plan drifted: docs/plans/comments/plan.json has 2 drifted element(s): model.comment, resource.comment.

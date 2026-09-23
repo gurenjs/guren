@@ -25,6 +25,7 @@ import {
   type PlanAppUnreadable,
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
+import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
 import { judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
 import {
@@ -97,6 +98,7 @@ export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResul
   const index = indexPlan(plan)
 
   checkDuplicateIds(plan, results)
+  checkCommands(plan, results)
   checkInternalReferences(plan, index, results)
   checkChangeConsistency(plan, results)
   checkAgainstApp(plan, app, results)
@@ -149,6 +151,7 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 /** The heading each key is grouped under; the renderer groups on `title`. */
 const TITLES: Record<string, string> = {
   'plan:duplicate-id': 'Plan element ids',
+  'plan:command': 'Plan commands',
   'plan:reference': 'Plan references',
   'plan:change-consistency': 'Plan change consistency',
   'plan:app-collision': 'Plan against the application',
@@ -181,6 +184,19 @@ function checkDuplicateIds(plan: PlanDraft, results: PlanCheckResult[]): void {
       finding('plan:duplicate-id', 'fail', `The id "${id}" is declared by more than one element.`, {
         elementId: id,
         suggestion: 'Ids share one namespace, since a revision addresses an element by id alone.',
+      }),
+    )
+  }
+}
+
+/** `plan:next` hands a command to the implementing agent as written, so only the allowlist's forms pass (§8). */
+function checkCommands(plan: PlanDraft, results: PlanCheckResult[]): void {
+  for (const { id, quoted, reason } of refusedPlanCommands(plan.commands)) {
+    results.push(
+      finding('plan:command', 'fail', `The command ${quoted} is refused: ${reason}.`, {
+        elementId: id,
+        section: 'commands',
+        suggestion: `A plan's commands are ${PLAN_COMMAND_FORM} naming a generator (make:*, add <blueprint>); other work belongs to a step.`,
       }),
     )
   }
