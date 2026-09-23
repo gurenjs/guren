@@ -1467,7 +1467,9 @@ each rule was read.
   behaviour reaches is a gap in the plan that no implementation closes. Such an
   element carries a note ending in "add a behaviour that reaches it, or waive
   it", or, where no behaviour could reach it (`behaviourCanReach()`: a column,
-  a command, a side effect), in "no behaviour can reach it, so waive it". Where
+  a command, a side effect), in "no behaviour can reach it, so waive it", and
+  in only "waive it" where `plan:verify` cannot fingerprint the element, since
+  a behaviour added then would leave it held as unfingerprinted. Where
   the plan has a step whose behaviours reach it but no run of that step stands,
   the note names the step and ends in "run plan:verify on that step, or waive
   it" ("on one of those steps" when several reach it; only "waive it" when
@@ -2086,9 +2088,9 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   behaviour and approving again is offered beside the waiver only for an
   element some behaviour could reach (`behaviourCanReach()`, the reach walk
   seeded with every element of a section a carrying reference names and the
-  plan's behaviours); a
-  column, a command, a job, event, listener, mail or notification is sent to
-  `plan:waive` alone.
+  plan's behaviours) and that `plan:verify` can fingerprint; a
+  column, a command, a job, event, listener, mail or notification, and an
+  element `plan:verify` cannot fingerprint, are sent to `plan:waive` alone.
   `plan:next`, once every step is verified, lists the same lines
   (`plan/close-remedy.ts`), so the two commands give one piece of advice.
 - "Archives the plan" is the doc node. Under the `file` store nothing is moved

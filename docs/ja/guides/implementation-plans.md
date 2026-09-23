@@ -658,7 +658,7 @@ The decision log is committed with the plan. A waiver names this plan hash, so a
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http; or waive it: bunx guren plan:waive docs/plans/comments/plan.json controller.comments --reason "<why>"
 ```
 
-`controller.comments` は `http` の振る舞いを通してしか verified にならないので、そのステップを確かめ直せば一緒に持ち上がります。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には `plan:waive` が示されます。足りないのが届く振る舞いだけの要素には、振る舞いを足して計画を承認し直す道も示されます。ただしカラム、コマンド、side effect には waiver だけです (「要素を waive する」の節を参照してください)。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられない理由がエージェントにも分かります。
+`controller.comments` は `http` の振る舞いを通してしか verified にならないので、そのステップを確かめ直せば一緒に持ち上がります。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には `plan:waive` が示されます。足りないのが届く振る舞いだけの要素には、振る舞いを足して計画を承認し直す道も示されます。ただしカラム、コマンド、side effect には waiver だけです (「要素を waive する」の節を参照してください)。`plan:verify` が指紋を取れない要素にも、waiver だけが示されます。どの実行でも持ち上がらないからです。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられない理由がエージェントにも分かります。
 
 すべての要素が verified か waived になったら、`--dry-run` で書き込む内容を確かめられます。問題がなければ閉じます。
 
