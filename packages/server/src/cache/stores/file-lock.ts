@@ -1,59 +1,78 @@
+// A lock is a directory of token files, each written once by one acquisition
+// attempt. An attempt holds the lock only when it then reads its own token alone,
+// which two attempts writing into one directory cannot both do: an empty directory
+// has no holder, so removing one is always safe. A waiter takes a lock over when it
+// reads the same entries `timeoutMs` apart, as they were there the whole time; only
+// this process's clock is read. An older release's lock is an empty directory, so
+// the two releases do not reliably exclude each other.
 import { mkdir, readdir, rmdir, unlink, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 const POLL_MS = 5
 
-async function succeeds(operation: Promise<unknown>, ...tolerated: string[]): Promise<boolean> {
-  try {
-    await operation
-    return true
-  } catch (error) {
-    if (tolerated.includes((error as NodeJS.ErrnoException).code ?? '')) return false
-    throw error
-  }
+function hasCode(error: unknown, code: string): boolean {
+  return (error as NodeJS.ErrnoException).code === code
 }
 
-async function listEntries(lockPath: string): Promise<string[] | undefined> {
+async function entriesOf(lockPath: string): Promise<string[] | undefined> {
   try {
     return await readdir(lockPath)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    if (hasCode(error, 'ENOENT')) return undefined
     throw error
   }
 }
 
-// A missing token means a waiter took the lock over, or FileStore.clear() removed the tree.
-async function removeToken(lockPath: string, token: string): Promise<void> {
-  if (await succeeds(unlink(join(lockPath, token)), 'ENOENT')) await succeeds(rmdir(lockPath), 'ENOENT', 'ENOTEMPTY')
+// Best effort: whatever a failure leaves behind is taken over after the timeout.
+async function remove(lockPath: string, names: string[]): Promise<void> {
+  for (const name of names) await unlink(join(lockPath, name)).catch(() => undefined)
+  await rmdir(lockPath).catch(() => undefined)
 }
 
-// The lock is a directory of token files, each written once by one acquisition
-// attempt; an attempt holds the lock when it reads its own token alone, which two
-// attempts writing into one directory cannot both do. A waiter takes over when it
-// reads the same entries `timeoutMs` apart, as they were present throughout; only
-// this process's clock is read. An empty directory has no owner from this release.
+async function tryAcquire(lockPath: string): Promise<string | undefined> {
+  try {
+    await mkdir(lockPath)
+  } catch (error) {
+    if (hasCode(error, 'EEXIST')) return undefined
+    if (!hasCode(error, 'ENOENT')) throw error
+    // FileStore.clear() removed the parent.
+    await mkdir(dirname(lockPath), { recursive: true })
+    return tryAcquire(lockPath)
+  }
+  const token = randomUUID()
+  let held = false
+  try {
+    await writeFile(join(lockPath, token), '')
+    const entries = await entriesOf(lockPath)
+    held = entries?.length === 1 && entries[0] === token
+  } catch (error) {
+    // ENOENT: a waiter removed the directory while it was still empty.
+    if (!hasCode(error, 'ENOENT')) throw error
+  } finally {
+    if (!held) await remove(lockPath, [token])
+  }
+  return held ? token : undefined
+}
+
 export async function withFileLock<T>(lockPath: string, timeoutMs: number, callback: () => Promise<T>): Promise<T> {
-  let token = ''
   let seen: string | undefined
   let takeOverAt = 0
   for (;;) {
-    if (await succeeds(mkdir(lockPath), 'EEXIST')) {
-      token = randomUUID()
-      if (await succeeds(writeFile(join(lockPath, token), ''), 'ENOENT')) {
-        const entries = await listEntries(lockPath)
-        if (entries?.length === 1 && entries[0] === token) break
-        await removeToken(lockPath, token)
+    const token = await tryAcquire(lockPath)
+    if (token !== undefined) {
+      try {
+        return await callback()
+      } finally {
+        await remove(lockPath, [token])
       }
-      continue
     }
     if (seen === undefined || performance.now() >= takeOverAt) {
-      const entries = await listEntries(lockPath)
+      const entries = await entriesOf(lockPath)
       if (entries === undefined) continue
       const current = entries.sort().join('/')
       if (current === seen) {
-        for (const entry of entries) await succeeds(unlink(join(lockPath, entry)), 'ENOENT')
-        await succeeds(rmdir(lockPath), 'ENOENT', 'ENOTEMPTY')
+        await remove(lockPath, entries)
         seen = undefined
         continue
       }
@@ -61,10 +80,5 @@ export async function withFileLock<T>(lockPath: string, timeoutMs: number, callb
       takeOverAt = performance.now() + timeoutMs
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_MS))
-  }
-  try {
-    return await callback()
-  } finally {
-    await removeToken(lockPath, token)
   }
 }

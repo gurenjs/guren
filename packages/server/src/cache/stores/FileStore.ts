@@ -5,6 +5,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { CacheStore, FileStoreOptions, CachedItem } from '../types'
 import { withFileLock } from './file-lock'
 
+// Locks only guard read-modify-write (add, increment). One held this long is taken
+// over: its owner most likely died mid-operation, and losing one update beats a key
+// that stays locked until someone deletes the directory.
 const LOCK_TIMEOUT_MS = 5000
 
 /** File-based cache store. */
@@ -55,14 +58,6 @@ export class FileStore implements CacheStore {
     }
   }
 
-  // Only for read-modify-write (add, increment). A lock held past the timeout
-  // is taken over: its owner most likely died mid-operation, and losing one
-  // update beats a key that stays locked until someone deletes the directory.
-  private async withFileLock<T>(filePath: string, callback: () => Promise<T>): Promise<T> {
-    await this.ensureDirectory(filePath)
-    return withFileLock(`${filePath}.lock`, LOCK_TIMEOUT_MS, callback)
-  }
-
   private async deleteCacheFile(filePath: string): Promise<boolean> {
     try {
       await unlink(filePath)
@@ -101,7 +96,7 @@ export class FileStore implements CacheStore {
 
   async add<T>(key: string, value: T): Promise<boolean> {
     const filePath = this.getFilePath(key)
-    return this.withFileLock(filePath, async () => {
+    return withFileLock(`${filePath}.lock`, LOCK_TIMEOUT_MS, async () => {
       const item = await this.readCacheFile(filePath)
       if (item && !this.isExpired(item)) return false
       await this.writeCacheFile(filePath, { value, expiresAt: null })
@@ -130,7 +125,7 @@ export class FileStore implements CacheStore {
 
   async increment(key: string, value = 1): Promise<number> {
     const filePath = this.getFilePath(key)
-    return this.withFileLock(filePath, async () => {
+    return withFileLock(`${filePath}.lock`, LOCK_TIMEOUT_MS, async () => {
       const item = await this.readCacheFile<number>(filePath)
       const active = item && !this.isExpired(item) ? item : null
       const newValue = (active?.value ?? 0) + value

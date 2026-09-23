@@ -17,26 +17,45 @@ async function until(condition: () => boolean): Promise<void> {
 describe('withFileLock', () => {
   let directory: string
   let lockPath: string
+  let holds: PromiseWithResolvers<void>[]
+  let calls: Promise<unknown>[]
+
+  function hold(): PromiseWithResolvers<void> {
+    const gate = Promise.withResolvers<void>()
+    holds.push(gate)
+    return gate
+  }
+
+  function lock<T>(timeoutMs: number, callback: () => Promise<T>): Promise<T> {
+    const call = withFileLock(lockPath, timeoutMs, callback)
+    calls.push(call)
+    return call
+  }
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'file-lock-'))
     lockPath = join(directory, 'key.cache.lock')
+    holds = []
+    calls = []
   })
 
+  // A failed assertion leaves holders and waiters running, and a waiter recreates a missing directory.
   afterEach(async () => {
+    for (const gate of holds) gate.resolve()
+    await Promise.allSettled(calls)
     await rm(directory, { recursive: true, force: true })
   })
 
   it('keeps a second caller out until the holder releases, then removes the lock', async () => {
     const events: string[] = []
-    const held = Promise.withResolvers<void>()
-    const first = withFileLock(lockPath, 60_000, async () => {
+    const held = hold()
+    const first = lock(60_000, async () => {
       events.push('first:in')
       await held.promise
       events.push('first:out')
     })
     await until(() => events.includes('first:in'))
-    const second = withFileLock(lockPath, 60_000, async () => {
+    const second = lock(60_000, async () => {
       events.push('second:in')
     })
     await Bun.sleep(50)
@@ -50,15 +69,15 @@ describe('withFileLock', () => {
 
   it('takes over a lock held past the timeout, and the displaced holder does not release its successor', async () => {
     const events: string[] = []
-    const firstHeld = Promise.withResolvers<void>()
-    const secondHeld = Promise.withResolvers<void>()
-    const first = withFileLock(lockPath, 50, async () => {
+    const firstHeld = hold()
+    const secondHeld = hold()
+    const first = lock(50, async () => {
       events.push('first:in')
       await firstHeld.promise
       events.push('first:out')
     })
     await until(() => events.includes('first:in'))
-    const second = withFileLock(lockPath, 50, async () => {
+    const second = lock(50, async () => {
       events.push('second:in')
       await secondHeld.promise
       events.push('second:out')
@@ -69,7 +88,7 @@ describe('withFileLock', () => {
 
     firstHeld.resolve()
     await first
-    const third = withFileLock(lockPath, 60_000, async () => {
+    const third = lock(60_000, async () => {
       events.push('third:in')
     })
     await Bun.sleep(50)
@@ -85,7 +104,7 @@ describe('withFileLock', () => {
     await mkdir(lockPath)
     await writeFile(join(lockPath, 'owner-a'), '')
     let entered = false
-    const waiter = withFileLock(lockPath, 600, async () => {
+    const waiter = lock(600, async () => {
       entered = true
     })
     await Bun.sleep(200)
@@ -102,9 +121,16 @@ describe('withFileLock', () => {
     expect(existsSync(lockPath)).toBe(false)
   })
 
+  it('creates a missing parent directory, as FileStore.clear() leaves one', async () => {
+    lockPath = join(directory, 'cleared', 'key.cache.lock')
+    expect(await lock(60_000, async () => 'ran')).toBe('ran')
+    expect(existsSync(join(directory, 'cleared'))).toBe(true)
+    expect(existsSync(lockPath)).toBe(false)
+  })
+
   it('takes over an empty lock directory, which a process that died before writing its token leaves', async () => {
     await mkdir(lockPath)
-    expect(await withFileLock(lockPath, 50, async () => 'ran')).toBe('ran')
+    expect(await lock(50, async () => 'ran')).toBe('ran')
     expect(existsSync(lockPath)).toBe(false)
   })
 
@@ -112,7 +138,7 @@ describe('withFileLock', () => {
     await mkdir(lockPath)
     await writeFile(join(lockPath, 'dead-a'), '')
     await writeFile(join(lockPath, 'dead-b'), '')
-    expect(await withFileLock(lockPath, 50, async () => 'ran')).toBe('ran')
+    expect(await lock(50, async () => 'ran')).toBe('ran')
     expect(existsSync(lockPath)).toBe(false)
   })
 })
