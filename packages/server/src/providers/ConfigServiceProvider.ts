@@ -50,7 +50,7 @@ export class ConfigServiceProvider extends ServiceProvider {
       const config = definition.resolve(env)
 
       // Reachable only where parsing reported rather than threw, which is
-      // introspection (`introspect()` below). Binding would hand the redacted placeholder
+      // introspection (`introspect()` above). Binding would hand the redacted placeholder
       // to a manager constructor that validates it; nothing bound answers 503 instead.
       const placeholders = [...read].filter((key) => this.unset.has(key))
       if (placeholders.length > 0) {
