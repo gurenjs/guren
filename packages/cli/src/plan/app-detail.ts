@@ -21,8 +21,10 @@ import {
   discoverEventFiles,
   discoverJobFiles,
   discoverListenerFiles,
+  discoverMailFiles,
   discoverModelFiles,
   discoverModuleRoutesFiles,
+  discoverNotificationFiles,
   discoverPolicyFiles,
   discoverResourceFiles,
   discoverRoutesFiles,
@@ -41,11 +43,13 @@ import type { PagePropKeys } from '../page-props-extractor'
 import { ParseCache } from '../parse-cache'
 import { resolveAppEntry } from '../provider-registrar'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../route-registrar'
-import { importsByLocal, specifierBase } from '../schema-binding'
+import { importsByLocal, specifierBase, withoutExtension } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
 import { routePathCovers } from '../test-requests'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
 import { readResourcePayloads, readSchemaFields, type PlanAppResourcePayload, type PlanAppSchemaFields } from './field-readers'
+import { readPolicyAbilities, type PlanAppPolicyAbilities } from './policy-abilities'
+import { scanSideEffectUses, type SideEffectUses } from './side-effect-uses'
 
 /** `mounted`, or why this command could not confirm it. Absence of evidence is never `mounted`. */
 export type PlanAppMount = 'mounted' | { unconfirmed: string }
@@ -139,7 +143,22 @@ export interface PlanAppRouteFile {
   identifiers: string[]
 }
 
-export type PlanAppSideEffectKind = 'job' | 'event' | 'listener'
+/** A policy class and its abilities, or why they could not be read. */
+export interface PlanAppPolicyDetail extends PlanAppClassDetail {
+  abilities: PlanAppPolicyAbilities | PlanAppUnreadable
+}
+
+export type PlanAppSideEffectKind = 'job' | 'event' | 'listener' | 'mail' | 'notification'
+
+/** A side-effect class and where the application's source uses it (`side-effect-uses.ts`). */
+export interface PlanAppSideEffectDetail extends PlanAppClassDetail {
+  /** App files that dispatch, register or send it: a use, which is what `wired` rests on. */
+  usedIn: string[]
+  /** App files that may use it in a way the scan cannot confirm: a listener in an `on()` handler whose event is no class. */
+  unprovenIn: string[]
+  /** App files naming it outside imports and types without a use, for the note on one nothing wires. */
+  mentionedIn: string[]
+}
 
 export interface PlanAppDetail {
   routes: PlanAppRouteDetail[] | PlanAppUnreadable
@@ -159,9 +178,11 @@ export interface PlanAppDetail {
   resources: PlanAppClassDetail[]
   /** What `guren codegen` reads each resource's payload as, for a planned resource's fields. */
   resourcePayloads: PlanAppResourcePayload[] | PlanAppUnreadable
-  policies: PlanAppClassDetail[]
+  policies: PlanAppPolicyDetail[]
   routeFiles: PlanAppRouteFile[]
-  sideEffects: Record<PlanAppSideEffectKind, PlanAppClassDetail[]>
+  sideEffects: Record<PlanAppSideEffectKind, PlanAppSideEffectDetail[]>
+  /** Per kind, why an absent use proves nothing: a source file that did not parse, a scan that failed, `AutoDiscovery`. */
+  sideEffectUsesUnread?: Partial<Record<PlanAppSideEffectKind, string>>
 }
 
 /** What `loadPlanAppState()` already holds when it asks for the detail. */
@@ -220,9 +241,9 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     validatorDetail(root, cache, contractSchemaObjects(input.definitions)),
     classDetail(root, discoverResourceFiles),
     readResourcePayloads(root),
-    classDetail(root, discoverPolicyFiles),
+    policyDetail(root, cache),
     routeFileDetail(root, cache, input.routesFile),
-    sideEffectDetail(root),
+    sideEffectDetail(root, cache),
     mountDetail(root, cache, input),
   ])
 
@@ -239,7 +260,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     resourcePayloads,
     policies,
     routeFiles,
-    sideEffects,
+    ...sideEffects,
   }
 }
 
@@ -556,13 +577,42 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
   return details
 }
 
-async function sideEffectDetail(root: string): Promise<PlanAppDetail['sideEffects']> {
-  const [job, event, listener] = await Promise.all([
-    classDetail(root, discoverJobFiles),
-    classDetail(root, discoverEventFiles),
-    classDetail(root, discoverListenerFiles),
-  ])
-  return { job, event, listener }
+async function policyDetail(root: string, cache: ParseCache): Promise<PlanAppPolicyDetail[]> {
+  const policies = await classDetail(root, discoverPolicyFiles)
+  return Promise.all(
+    policies.map(async (policy) => {
+      const parsed = await cache.get(resolve(root, policy.file))
+      return { ...policy, abilities: parsed ? readPolicyAbilities(parsed.ast, policy.className) : { unreadable: `${policy.file} could not be parsed` } }
+    }),
+  )
+}
+
+const SIDE_EFFECT_DISCOVERY: Record<PlanAppSideEffectKind, (appRoot: string) => Promise<string[]>> = {
+  job: discoverJobFiles,
+  event: discoverEventFiles,
+  listener: discoverListenerFiles,
+  mail: discoverMailFiles,
+  notification: discoverNotificationFiles,
+}
+
+async function sideEffectDetail(root: string, cache: ParseCache): Promise<Pick<PlanAppDetail, 'sideEffects' | 'sideEffectUsesUnread'>> {
+  const kinds = Object.keys(SIDE_EFFECT_DISCOVERY) as PlanAppSideEffectKind[]
+  const classes = await Promise.all(kinds.map(async (kind) => [kind, await classDetail(root, SIDE_EFFECT_DISCOVERY[kind])] as const))
+  const targets = classes.flatMap(([kind, entries]) => entries.map((entry) => ({ ...entry, kind })))
+  const read = await scanSideEffectUses(root, cache, targets).catch((error: unknown) => ({ unreadable: reasonOf(error) }))
+  const uses = 'unreadable' in read ? undefined : read.byFile
+  const sideEffects = Object.fromEntries(
+    classes.map(([kind, entries]) => [kind, entries.map((entry) => ({ ...entry, usedIn: [], unprovenIn: [], mentionedIn: [], ...uses?.get(entry.file) }))]),
+  ) as PlanAppDetail['sideEffects']
+  return { sideEffects, ...unreadUses(kinds, read) }
+}
+
+function unreadUses(kinds: PlanAppSideEffectKind[], read: SideEffectUses | PlanAppUnreadable): Pick<PlanAppDetail, 'sideEffectUsesUnread'> {
+  const everyKind = (reason: string) => ({ sideEffectUsesUnread: Object.fromEntries(kinds.map((kind) => [kind, reason])) })
+  if ('unreadable' in read) return everyKind(read.unreadable)
+  if (read.unparsed.length > 0) return everyKind(`${read.unparsed.join(', ')} could not be parsed`)
+  const discovers = read.discoversListeners[0]
+  return discovers ? { sideEffectUsesUnread: { listener: `${discovers} constructs AutoDiscovery, which finds listeners by directory rather than by name` } } : {}
 }
 
 /** The export `resolveRegistrar()` would pick from a routes file, by the loader's own order. */
@@ -574,10 +624,6 @@ function registrarExport(ast: File): string | null {
     ?? names.find((name) => REGISTRAR_PATTERN.test(name))
     ?? null
   )
-}
-
-function withoutExtension(path: string): string {
-  return path.replace(/\.[cm]?[jt]sx?$/u, '')
 }
 
 /**

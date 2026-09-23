@@ -103,16 +103,21 @@ export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: Iterable<s
   return reached
 }
 
-/** Whether a planned property of the element matched as more than a key's existence, which says nothing of its shape. */
-export function hasShapeMatch(element: Pick<PlanElementStatus<PlanElementState>, 'properties'>): boolean {
-  return element.properties.some((property) => property.verdict === 'match' && !property.existence)
+/**
+ * Whether a verified step lifts the element only while a verified behaviour reaches it (RFC 0030
+ * §6): no planned property of it matched beyond an existence (`existence`: a key a validator or
+ * resource declares, an ability a policy names), which says nothing of the planned shape or rule.
+ * The one rule the overlay and `plan:close`'s remedies ask. A `drop` is re-read on every status.
+ */
+export function restsOnReach(element: Pick<PlanElementStatus<PlanElementState>, 'change' | 'properties'>): boolean {
+  return element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match' && !property.existence)
 }
 
 /**
  * An element its step verified is `verified` while every fingerprinted file still hashes the
  * same, `drifted` once one does not or cannot be read. Lifted: one at its completion state or
  * `unjudged`, in files the record covers, since a result nothing could expire is not one. A
- * `drop` has no file, its absence re-read per status. One no property of which matched lifts
+ * `drop` has no file, its absence re-read per status. An element that `restsOnReach()` is lifted
  * only while a behaviour of a standing step, in any task, reaches it.
  */
 export function applyVerification(
@@ -150,7 +155,7 @@ export function applyVerification(
         const element = lifted.get(id)
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
-        const unmatched = element.change !== 'drop' && !hasShapeMatch(element)
+        const unmatched = restsOnReach(element)
         // An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers.
         const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
         const hold = (kind: PlanVerificationHold, note: string): void => {

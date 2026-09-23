@@ -1,7 +1,6 @@
+import { NOTIFICATIONS_DIR } from './discovery'
 import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
-
-const NOTIFICATIONS_DIR = 'app/Notifications'
 
 function notificationTemplate(className: string): string {
   return `import { Notification, type NotificationMailMessage } from '@guren/core'

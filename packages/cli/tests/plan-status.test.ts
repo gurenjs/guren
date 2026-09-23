@@ -97,9 +97,9 @@ function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
     validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: NO_FIELDS }],
     resources: [{ className: 'PostResource', module: null, file: 'app/Http/Resources/PostResource.ts' }],
     resourcePayloads: [],
-    policies: [{ className: 'PostPolicy', module: null, file: 'app/Policies/PostPolicy.ts' }],
+    policies: [{ className: 'PostPolicy', module: null, file: 'app/Policies/PostPolicy.ts', abilities: { unreadable: 'the fixture reads none' } }],
     routeFiles: [{ file: 'routes/web.ts', identifiers: ['PostController', 'PostPayloadSchema'] }],
-    sideEffects: { job: [{ className: 'SendDigest', module: null, file: 'app/Jobs/SendDigest.ts' }], event: [], listener: [] },
+    sideEffects: { job: [{ className: 'SendDigest', module: null, file: 'app/Jobs/SendDigest.ts', usedIn: [], unprovenIn: [], mentionedIn: [] }], event: [], listener: [], mail: [], notification: [] },
     ...overrides,
   } as PlanAppDetail
 }
@@ -473,7 +473,7 @@ const CASES: Case[] = [
   { name: 'a policy when the directory would not open', plan: plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [] }] }), app: app({}, { policies: UNREADABLE }), id: 'pol', state: 'blocked' },
   { name: 'an added job', plan: plan({ sideEffects: [{ id: 'job', change: ADD, kind: 'job', name: 'SendDigest', trigger: 't', description: 'd' }] }), app: app(), id: 'job', state: 'present' },
   { name: 'an added job with no file', plan: plan({ sideEffects: [{ id: 'job', change: ADD, kind: 'job', name: 'Reindex', trigger: 't', description: 'd' }] }), app: app(), id: 'job', state: 'planned' },
-  { name: 'a mail class, which nothing discovers', plan: plan({ sideEffects: [{ id: 'mail', change: ADD, kind: 'mail', name: 'Welcome', trigger: 't', description: 'd' }] }), app: app(), id: 'mail', state: 'unjudged' },
+  { name: 'an added mail class with no file', plan: plan({ sideEffects: [{ id: 'mail', change: ADD, kind: 'mail', name: 'Welcome', trigger: 't', description: 'd' }] }), app: app(), id: 'mail', state: 'planned' },
   { name: 'a command', plan: plan({ commands: [{ id: 'cmd', command: 'guren add attachments', reason: 'covers' }] }), app: app(), id: 'cmd', state: 'unjudged' },
 
   // the app root each element sits in, both ways round
@@ -504,7 +504,7 @@ const CASES: Case[] = [
   {
     name: 'a policy the plan puts at the project root and only a module declares',
     plan: plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [] }] }),
-    app: app({ policies: [{ className: 'PostPolicy', module: 'billing', file: 'modules/billing/app/Policies/PostPolicy.ts' }] }),
+    app: app({ policies: [{ className: 'PostPolicy', module: 'billing', file: 'modules/billing/app/Policies/PostPolicy.ts', abilities: { declared: [], fields: [] } }] }),
     id: 'pol',
     state: 'planned',
   },
@@ -512,7 +512,7 @@ const CASES: Case[] = [
   {
     name: 'a job the plan puts at the project root and only a module declares',
     plan: plan({ sideEffects: [{ id: 'job', change: ADD, kind: 'job', name: 'SendDigest', trigger: 't', description: 'd' }] }),
-    app: app({ sideEffects: { job: [{ className: 'SendDigest', module: 'billing', file: 'modules/billing/app/Jobs/SendDigest.ts' }], event: [], listener: [] } }),
+    app: app({ sideEffects: { job: [{ className: 'SendDigest', module: 'billing', file: 'modules/billing/app/Jobs/SendDigest.ts', usedIn: [], unprovenIn: [], mentionedIn: [] }], event: [], listener: [], mail: [], notification: [] } }),
     id: 'job',
     state: 'planned',
   },
@@ -716,7 +716,7 @@ describe('judgePlan', () => {
       const reasons = only(judgePlan(document, app()), 'pol').properties.map((property) => property.reason)
       const scoped = only(judgePlan(document, planAppState({ policies: ['PostPolicy'] })), 'pol').reason
 
-      expect(reasons).toEqual(["nothing reads a policy's abilities"])
+      expect(reasons).toEqual(["the policy's abilities could not be read (the fixture reads none)", 'a rule is prose, and nothing reads what an ability method decides'])
       expect(scoped).toBe('nothing reads which app root each policy sits in')
     })
   })

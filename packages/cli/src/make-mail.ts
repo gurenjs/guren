@@ -1,7 +1,6 @@
+import { MAIL_DIR } from './discovery'
 import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
-
-const MAIL_DIR = 'app/Mail'
 
 function mailTemplate(className: string): string {
   const subject = className.replace(/Mail$/, '')

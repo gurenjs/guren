@@ -232,8 +232,10 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.actions).toContainEqual(expect.objectContaining({ key: 'InvoiceController.index', module: 'billing' }))
     expect(detail.validators).toContainEqual({ name: 'InvoicePayloadSchema', file: 'modules/billing/app/Http/Validators/InvoiceValidator.ts', module: 'billing', fields: NOT_ZOD })
     expect(detail.resources).toEqual([{ className: 'InvoiceResource', module: 'billing', file: 'modules/billing/app/Http/Resources/InvoiceResource.ts' }])
-    expect(detail.policies).toEqual([{ className: 'InvoicePolicy', module: 'billing', file: 'modules/billing/app/Policies/InvoicePolicy.ts' }])
-    expect(detail.sideEffects.job).toEqual([{ className: 'ChargeInvoice', module: 'billing', file: 'modules/billing/app/Jobs/ChargeInvoice.ts' }])
+    expect(detail.policies).toEqual([
+      { className: 'InvoicePolicy', module: 'billing', file: 'modules/billing/app/Policies/InvoicePolicy.ts', abilities: { declared: [], fields: [] } },
+    ])
+    expect(detail.sideEffects.job).toEqual([{ className: 'ChargeInvoice', module: 'billing', file: 'modules/billing/app/Jobs/ChargeInvoice.ts', usedIn: [], unprovenIn: [], mentionedIn: [] }])
   })
 
   test('should leave a barrel out, so a re-export does not enter a symbol under the forwarding file’s app root', async () => {

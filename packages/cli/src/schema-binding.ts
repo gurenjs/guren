@@ -42,6 +42,11 @@ export function specifierBase(cwd: string, fromFile: string, specifier: string):
   return null
 }
 
+/** A module path as an import names it: `.js` in an import of a `.ts` file is the same module. */
+export function withoutExtension(path: string): string {
+  return path.replace(/\.[cm]?[jt]sx?$/u, '')
+}
+
 export interface ImportEntry {
   source: string
   /** The *exported* name a local aliases; empty for default and namespace imports, which have none. */
