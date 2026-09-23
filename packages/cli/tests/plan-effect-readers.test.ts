@@ -143,8 +143,52 @@ describe('judgePlan on policy abilities', () => {
 
     const [blocker] = describeCloseBlockers(document, derivePlanTasks(document), [lifted], 'p.json')
 
-    expect(blocker!.moves).toStartWith("Only the names of its abilities matched and no step's behaviour reaches it")
+    expect(blocker!.moves).toStartWith("No planned property of it matched beyond its existence and no step's behaviour reaches it")
     expect(blocker!.moves).toContain('plan:waive')
+  })
+
+  test('should hold an ability name and a key existence alike, and lift a shape match, on one plan', () => {
+    const document = plan({
+      policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [{ name: 'update', rule: 'only the author' }] }],
+      resources: [
+        { id: 'res.keys', change: ADD, name: 'PostResource', model: 'm', fields: [{ name: 'body', type: 'string' }] },
+        { id: 'res.shape', change: ADD, name: 'TagResource', model: 'm', fields: [{ name: 'label', type: 'string' }] },
+      ],
+    })
+    const payload = (className: string, name: string, type: string) => ({ className, module: null, file: `app/Http/Resources/${className}.ts`, payload: { members: [{ name, type, optional: false }] } })
+    const app = planAppState({
+      resources: ['PostResource', 'TagResource'],
+      detail: {
+        ...state({ policies: [policy({ declared: ['update'], fields: [] })] }).detail!,
+        resources: ['PostResource', 'TagResource'].map((className) => ({ className, module: null, file: `app/Http/Resources/${className}.ts` })),
+        resourcePayloads: [payload('PostResource', 'body', 'BodyAlias'), payload('TagResource', 'label', 'string')],
+      },
+    })
+    const derivation = derivePlanTasks(document)
+    const record: PlanStepRecord = {
+      outcome: 'verified',
+      planDigest: 'digest',
+      ranAt: 't',
+      durationMs: 1,
+      commands: [],
+      acceptance: [],
+      incomplete: [],
+      waived: [],
+      fingerprint: { files: {}, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
+    }
+    const files = ['app/Policies/PostPolicy.ts', 'app/Http/Resources/PostResource.ts', 'app/Http/Resources/TagResource.ts']
+    record.fingerprint.files = Object.fromEntries(files.map((file) => [file, 'h']))
+    const records = Object.fromEntries(listPlanSteps(derivation).map(({ step }) => [step.id, record]))
+    const lifted = applyVerification(judgePlan(document, app), derivation, records, 'digest', new Map(files.map((file) => [file, 'h'])), document).status.elements
+    const byId = (id: string) => lifted.find((element) => element.id === id)!
+
+    expect(byId('pol').properties.find((property) => property.property === 'ability update')).toMatchObject({ verdict: 'match', existence: true })
+    expect(byId('res.keys').properties.find((property) => property.property === 'field body')).toMatchObject({ verdict: 'match', existence: true })
+    expect(byId('pol').hold?.kind).toBe('unreached')
+    expect(byId('res.keys').hold?.kind).toBe('unreached')
+    expect(byId('res.shape').state).toBe('verified')
+    const blockers = describeCloseBlockers(document, derivation, [byId('pol'), byId('res.keys')], 'p.json')
+    for (const blocker of blockers) expect(blocker.moves).toStartWith("No planned property of it matched beyond its existence and no step's behaviour reaches it")
   })
 
   test('should call a policy whose class could not be resolved unjudged, with every ability unknown', () => {
