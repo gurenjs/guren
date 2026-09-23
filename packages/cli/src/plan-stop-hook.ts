@@ -149,9 +149,9 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   const blockedElements = report.elements.filter((element) => owned.has(element.id) && element.state === 'blocked')
   const stale = report.staleContext?.find((context) => context.stepId === active.step)?.stale ?? []
   const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive, stale)
-  // An earlier step this run re-checked is not this step's continuation: plan:next returns it once this one is done.
-  const broken = report.steps.filter((step) => report.reverified.includes(step.stepId) && step.record.outcome !== 'verified')
   if (judgement.kind === 'verified') {
+    // An earlier step this run re-checked is not this step's continuation: plan:next returns it once this one is done.
+    const broken = report.steps.filter(({ stepId, record: earlier }) => report.reverified.includes(stepId) && earlier.outcome !== 'verified')
     if (broken.length === 0) return withNotice({ block: false })
     const lines = broken.flatMap(({ stepId, record: earlier }) => formatPlanStepRecord(stepId, earlier))
     return withNotice({ block: false, message: `${heading}: the step is verified, and its changes broke an earlier step:\n${lines.join('\n')}\n\`bunx guren plan:next ${active.plan}\` returns it next.` })

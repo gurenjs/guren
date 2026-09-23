@@ -216,6 +216,7 @@ export class PlanVerifier {
   private readonly declaredIds: string[]
   private readonly check: () => Promise<CheckReport>
   private readonly testFiles: () => Promise<string[]>
+  private readonly drizzleKit: () => Promise<AppDrizzleKit>
   private readonly now: () => Date
   private judged: Promise<{ status: PlanStatus; elements: Map<string, PlanElementStatus> }> | undefined
   private testFilesPromise: Promise<string[]> | undefined
@@ -228,6 +229,7 @@ export class PlanVerifier {
     this.declaredIds = planAcceptanceIds(plan)
     this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true }))
     this.testFiles = options.testFiles ?? (() => discoverTestFiles(options.root))
+    this.drizzleKit = options.drizzleKit ?? (() => resolveAppDrizzleKit(options.root))
     this.now = options.now ?? (() => new Date())
   }
 
@@ -376,8 +378,11 @@ export class PlanVerifier {
    * blocks it.
    */
   private async migrate(): Promise<CommandOutcome> {
-    const uncovered = resolveScriptCommand(this.options.scripts, 'db:migrate', null) ? await this.migrationCoverage() : undefined
-    return uncovered ?? this.script('db:migrate', null, OUTPUT_ERROR_PATTERN, DATABASE_SIGNATURES)
+    if (resolveScriptCommand(this.options.scripts, 'db:migrate', null)) {
+      const refused = await this.migrationCoverage()
+      if (refused) return refused
+    }
+    return this.script('db:migrate', null, OUTPUT_ERROR_PATTERN, DATABASE_SIGNATURES)
   }
 
   private timedOut(label: string): CommandOutcome {
@@ -386,7 +391,7 @@ export class PlanVerifier {
 
   private async migrationCoverage(): Promise<CommandOutcome | undefined> {
     const label = 'drizzle-kit generate --explain'
-    const kit = await (this.options.drizzleKit ?? (() => resolveAppDrizzleKit(this.options.root)))()
+    const kit = await this.drizzleKit()
     if ('missing' in kit) return { label, status: 'blocked', reason: `cannot tell whether a migration covers the schema: ${kit.missing}`, findings: [] }
     const result = await this.exec([bunExecutable(), kit.bin, 'generate', '--config', kit.config, '--explain', '--output', 'json'])
     if (result.timedOut) return this.timedOut(label)

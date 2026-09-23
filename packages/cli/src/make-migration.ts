@@ -113,14 +113,16 @@ export async function resolveAppDrizzleKit(root: string): Promise<AppDrizzleKit>
   for (let dir = resolve(root); ; dir = dirname(dir)) {
     const manifest = resolve(dir, 'node_modules', 'drizzle-kit', 'package.json')
     const text = await readFile(manifest, 'utf8').catch(() => undefined)
-    let read: { bin?: string | Record<string, string> } | undefined
-    try {
-      read = text === undefined ? undefined : (JSON.parse(text) as typeof read)
-    } catch {
-      return { missing: `${manifest} does not parse as JSON` }
+    if (text !== undefined) {
+      let declared: { bin?: string | Record<string, string> }
+      try {
+        declared = JSON.parse(text) as typeof declared
+      } catch {
+        return { missing: `${manifest} does not parse as JSON` }
+      }
+      const bin = typeof declared.bin === 'string' ? declared.bin : declared.bin?.['drizzle-kit']
+      if (bin) return { bin: resolve(dirname(manifest), bin), config }
     }
-    const bin = typeof read?.bin === 'string' ? read.bin : read?.bin?.['drizzle-kit']
-    if (bin) return { bin: resolve(dirname(manifest), bin), config }
     if (dirname(dir) === dir) return { missing: 'drizzle-kit is not installed in the application' }
   }
 }

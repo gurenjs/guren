@@ -1,17 +1,16 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 
 import { formatPlanNext, planNextFile } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { planDigest, writePlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
-import { createTempRoot, writeWorkspaceFiles } from './helpers'
+import { CLI_BIN_PATH, createTempRoot, writeWorkspaceFiles } from './helpers'
 import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
 
 let ROOT: string
-const CLI = resolve(import.meta.dir, '../src/bin.ts')
 
 const COMMENTS_HTTP = 'task/entity/model.comment/http'
 const DELETION_HTTP = 'task/story/task.comment-deletion/http'
@@ -110,7 +109,7 @@ function git(dir: string, ...args: string[]): void {
  * the steps here rewrite it between runs.
  */
 function verify(app: string, step: string): PlanVerifyReport {
-  const result = Bun.spawnSync([process.execPath, CLI, 'plan:verify', join(app, 'comments.plan.json'), '--app', app, '--json', '--step', step], { cwd: app, stdout: 'pipe', stderr: 'pipe' })
+  const result = Bun.spawnSync([process.execPath, CLI_BIN_PATH, 'plan:verify', join(app, 'comments.plan.json'), '--app', app, '--json', '--step', step], { cwd: app, stdout: 'pipe', stderr: 'pipe' })
   const stdout = result.stdout.toString()
   try {
     return JSON.parse(stdout) as PlanVerifyReport

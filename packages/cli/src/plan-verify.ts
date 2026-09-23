@@ -19,7 +19,7 @@ import { hasBaseline } from './plan/render'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext } from './plan/step-context'
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
 import { judgePlan, type PlanStatus } from './plan/status'
-import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
+import { derivePlanTasks, findPlanStep, listPlanSteps, planStepIds } from './plan/tasks'
 import { hashFiles, overlayVerification, readPlanWaivers, recordDrift, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
 import { PlanVerifier, type PlanStepVerification } from './plan/verify'
 import { runCaptured } from './subprocess'
@@ -35,7 +35,8 @@ export interface PlanVerifyReport extends PlanStatusReport {
   /**
    * Steps verified before whose fingerprinted files a later step changed, run again here: every
    * such step in a whole-plan run, and those before `--step` otherwise, so the step that wrote
-   * into a shared file re-checks the ones it may have broken. A `tests` step is not among them.
+   * into a shared file re-checks the ones it may have broken. In a `--step` run a `tests` step
+   * is not among them.
    */
   reverified: string[]
   verification: PlanVerificationSummary
@@ -78,6 +79,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   // must be the same set, and a second read could answer differently.
   const log = await readPlanWaivers(path, plan)
   let stepIds: string[]
+  let reverified: string[]
   const skipped: string[] = []
   const records = before.state?.steps ?? {}
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
@@ -94,11 +96,13 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
       }
       return true
     })
+    reverified = stepIds.filter(drifted)
   } else if (findPlanStep(derivation, options.step)) {
-    // `tests:fail` cannot pass once the implementation exists, so a `tests` step is never re-run here.
-    const ids = planStepIds(derivation)
-    const earlier = ids.slice(0, ids.indexOf(options.step)).filter((id) => findPlanStep(derivation, id)?.step.kind !== 'tests' && drifted(id))
-    stepIds = [...earlier, options.step]
+    // A `tests` step is never re-run here: its `tests:fail` cannot pass once the implementation exists.
+    const steps = listPlanSteps(derivation).map(({ step }) => step)
+    const earlier = steps.slice(0, steps.findIndex((step) => step.id === options.step))
+    reverified = earlier.filter((step) => step.kind !== 'tests' && drifted(step.id)).map((step) => step.id)
+    stepIds = [...reverified, options.step]
   } else {
     throw new CliError(`No step "${options.step}" is derived from this plan. The steps are:\n${planStepIds(derivation).map((id) => `  ${id}`).join('\n')}`)
   }
@@ -137,7 +141,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     verification: overlaid.verification,
     steps,
     skipped,
-    reverified: stepIds.filter((id) => id !== options.step && drifted(id)),
+    reverified,
     ...(freshness ? { freshness } : {}),
     ...(approval ? { approval } : {}),
     ...(staleContext.length > 0 ? { staleContext } : {}),

@@ -1559,7 +1559,9 @@ migration).** Two defects the loop hit once a plan had more than one task.
   exists. A whole-plan run already re-ran every step whose record does not
   stand, and reports the drifted ones as `reverified` too.
 - The `Stop` hook verifies the marked step through the same run, so a drifted
-  earlier step is re-checked on every stop without a continuation of its own:
+  earlier step is re-checked on every stop that verifies the marked step (one
+  whose record still stands returns before any run), without a continuation of
+  its own:
   the give-up rules still judge the marked step's record alone. A verified
   step whose changes broke an earlier one lets the stop through, naming the
   earlier step, which `plan:next` returns next.

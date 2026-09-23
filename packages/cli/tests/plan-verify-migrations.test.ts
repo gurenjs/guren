@@ -6,6 +6,7 @@ import { runCommand, type CommandDef } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
 import type { PlanVerifyReport } from '../src/plan-verify'
+import type { PlanCommandRecord } from '../src/plan/state'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
 import { approvePlanFile, createPlanVerifyApp, loadApprovedCommentsPlan, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
 
@@ -68,7 +69,7 @@ describe('plan:verify on a data step', () => {
     return JSON.parse(log.mock.calls.map((call) => String(call[0])).join('\n')) as PlanVerifyReport
   }
 
-  function migrate(report: PlanVerifyReport): PlanVerifyReport['steps'][number]['record']['commands'][number] {
+  function migrate(report: PlanVerifyReport): PlanCommandRecord {
     return report.steps[0]!.record.commands.find((command) => command.command === 'db:migrate')!
   }
 
