@@ -8,7 +8,7 @@ Guren のブロードキャスティングは、接続中のクライアント�
 - **Channel**: イベントをブロードキャストするための名前付き経路。チャンネルはpublic、private、presenceのいずれか。
 - **BroadcastDriver**: イベント配信のバックエンド（MemoryまたはRedis）。
 - **SSE (Server-Sent Events)**: ブラウザクライアントへイベントを送り込むための組み込み機能。
-- **WebSocket Clients**: ソケットクライアントの登録・購読・解除を扱う基盤API。
+- **WebSockets**: 同じチャンネルを配信するソケットのエンドポイントと、独自のソケットルート向けのライフサイクルAPI。
 
 ## チャンネルタイプ
 
@@ -155,23 +155,82 @@ SSE エンドポイントは `?channels=` クエリパラメータを受け取�
 
 ## WebSocket 基盤
 
-`BroadcastManager` には WebSocket クライアントのライフサイクルAPIがあります。  
-クライアント登録、チャンネル購読、解除を SSE と同じブロードキャスト経路で扱えます。
+`broadcast.webSocketMiddleware()` は SSE エンドポイントの WebSocket 版です。GET ルートに載せると、リクエストがソケットにアップグレードされます。届くイベント、チャンネルの認可関数、ドライバーは SSE と共通です。
+
+```ts
+import { Router } from '@guren/core'
+
+export function registerBroadcastRoutes(router: Router): void {
+  router.get('/broadcasting/socket', broadcast.webSocketMiddleware({
+    // The user of the upgrade request authorizes every channel the socket
+    // subscribes to, for as long as it stays open
+    getUser: (ctx) => ctx.get('user'),
+  }))
+}
+```
+
+アップグレードには Bun のサーバーが要り、`app.listen()` がそれを用意します。`app.listen()` は、`hono/bun` の `upgradeWebSocket` が前提とする WebSocket ハンドラーを `Bun.serve` に渡します。アップグレードできないランタイム（Node 上の `app.fetch()`、Workers、Lambda）では、このルートは 501 を返します。
+
+フレームはすべて JSON です。サーバーは `{ event, data }` を送ります。最初に届く `connected` イベントには、`clientId` と `?channels=` で購読したチャンネルの一覧が入っています。クライアントは `{ action, channel }` を送って購読と購読解除を行います。各メッセージは `POST /broadcasting/auth` へのリクエストと同じく認可され、結果は `subscription` イベントで返ります。
+
+```ts
+const socket = new WebSocket(
+  `${location.origin.replace(/^http/, 'ws')}/broadcasting/socket?channels=announcements`
+)
+
+socket.addEventListener('open', () => {
+  socket.send(JSON.stringify({ action: 'subscribe', channel: 'private-orders.123' }))
+})
+
+socket.addEventListener('message', (e) => {
+  const { event, data } = JSON.parse(e.data)
+  if (event === 'subscription') {
+    // e.g. { channel: 'private-orders.123', authorized: true, subscribed: true }
+    console.log('Subscription:', data)
+  } else if (event === 'OrderUpdated') {
+    console.log('Order updated:', data)
+  }
+})
+
+// Later
+socket.send(JSON.stringify({ action: 'unsubscribe', channel: 'private-orders.123' }))
+```
+
+メッセージは届いた順に処理されます。拒否されたチャンネルには `authorized: false` が返り、イベントは届きません。`connected` で受け取った `clientId` は `POST /broadcasting/auth` でも使えます。
+
+### Origin の検査
+
+WebSocket のハンドシェイクには CORS が適用されません。ブラウザは、どのサイトから開かれたソケットにもアプリの Cookie を付けて送ります。そのため、他サイトのページがログイン中のユーザーとしてソケットを開けてしまいます（Cross-Site WebSocket Hijacking）。このルートは、`Origin` のホストがリクエスト自身のホストと異なるハンドシェイクを 403 で拒否します。アプリの前段にあるプロキシが `Host` を書き換える場合は、公開しているオリジンを列挙してください。
+
+```ts
+broadcast.webSocketMiddleware({
+  getUser: (ctx) => ctx.get('user'),
+  allowedOrigins: ['https://app.example.com'],
+})
+```
+
+`Origin` のないハンドシェイクはブラウザ以外からの接続で、ユーザーの Cookie を持っていません。この検査は通りますが、チャンネルの認可はほかのソケットと同じく必要です。
+
+### 独自のソケットルート
+
+独自のプロトコルを持つルートには、下位の API が引き続き使えます。`subscribeWebSocketClient()` は、SSE の `subscribeClient()` と同じく認可を行いません。渡すのはサーバーが選んだチャンネルに限り、クライアントが指定したチャンネルは先に `broadcast.authorize()` を通してください。クライアントをユーザー ID 付きで登録しておくと、`POST /broadcasting/auth` はそのユーザーからのリクエストに限ってチャンネルを追加します。ソケットの open ハンドラーでは次のように書きます。
 
 ```ts
 const clientId = broadcast.registerWebSocketClient({
-  send: (event, data) => socket.send(JSON.stringify({ event, data })),
-  close: () => socket.close(),
+  userId: user.id,
+  send: (event, data) => ws.send(JSON.stringify({ event, data })),
+  close: () => ws.close(),
 })
 
-broadcast.subscribeWebSocketClient(clientId, 'notifications')
+if (await broadcast.authorize(channel, user)) {
+  broadcast.subscribeWebSocketClient(clientId, channel)
+}
 
-// 後で解除
-broadcast.unsubscribeWebSocketClient(clientId, 'notifications')
+// When the socket closes
 broadcast.removeWebSocketClient(clientId)
 ```
 
-このAPIを使えば、Bun の WebSocket upgrade ルートを既存の channel/driver 構成につなげられます。
+こうしたルートでは `Origin` の検査も自分で行います。`broadcast.disconnectAll()` は、SSE ストリームに加えて WebSocket クライアントも閉じます。
 
 ### 型安全 channel codegen
 
@@ -262,7 +321,7 @@ eventSource.onerror = (error) => {
 
 ### チャンネルの認可（クライアント）
 
-プライベート・プレゼンスチャンネルは `POST /broadcasting/auth` を通じて購読します。`{ clientId, channel }` を含む 1 回のリクエストで、現在のユーザーに対するチャンネル認可と、SSE 接続への購読が同時に行われます。レスポンスには、チャンネルごとに両方の結果が入っています。
+プライベート・プレゼンスチャンネルは `POST /broadcasting/auth` を通じて購読します。`{ clientId, channel }` を含む 1 回のリクエストで、現在のユーザーに対するチャンネル認可と、SSE 接続（または WebSocket）への購読が同時に行われます。レスポンスには、チャンネルごとに両方の結果が入っています。
 
 ```ts
 async function subscribeToPrivateChannel(channel: string) {

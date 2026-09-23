@@ -42,6 +42,7 @@ declare const Bun:
       port?: number
       hostname?: string
       fetch: (request: Request, server: BunServer) => Response | Promise<Response>
+      websocket?: unknown
     }): BunServer | undefined
   }
   | undefined
@@ -999,6 +1000,11 @@ export class Application {
       await loadDevBanner()
     }
 
+    // Awaited here for the banner's two reasons. It is the handler that hono's
+    // `upgradeWebSocket` hands an upgraded socket to; without it `server.upgrade()`
+    // throws. `hono/bun` reads the `Bun` global at load, so only this path imports it.
+    const { websocket } = await import('hono/bun')
+
     const shouldStartVite =
       vite !== false &&
       typeof process !== 'undefined' &&
@@ -1073,8 +1079,10 @@ export class Application {
           port: attemptPort,
           hostname,
           // Bun's convention for reaching the live server from a handler:
-          // middleware reads `ctx.env.server.requestIP()` for the socket peer.
+          // middleware reads `ctx.env.server.requestIP()` for the socket peer,
+          // and `upgradeWebSocket` calls `ctx.env.server.upgrade()`.
           fetch: (request: Request, server: BunServer) => this.fetch(request, { server }),
+          websocket,
         })
         break
       } catch (error) {

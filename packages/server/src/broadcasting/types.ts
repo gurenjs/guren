@@ -88,6 +88,21 @@ export interface SSEMiddlewareOptions {
   getUser?: (ctx: unknown) => unknown | Promise<unknown>
 }
 
+export interface WebSocketMiddlewareOptions {
+  /**
+   * Resolves the user from the upgrade request. That one user authorizes the
+   * `?channels=` query and every `subscribe` message for the socket's lifetime.
+   */
+  getUser?: (ctx: unknown) => unknown | Promise<unknown>
+
+  /**
+   * Origins that may open a socket besides the request's own host, such as
+   * `https://app.example.com` behind a proxy that rewrites `Host`. Any other
+   * browser `Origin` is refused with 403.
+   */
+  allowedOrigins?: string[]
+}
+
 export interface AuthMiddlewareOptions {
   getUser?: (ctx: unknown) => unknown | Promise<unknown>
 }

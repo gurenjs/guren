@@ -863,6 +863,7 @@ export type {
   BroadcastDriverFactory,
   ChannelRegistration,
   SSEMiddlewareOptions,
+  WebSocketMiddlewareOptions,
   AuthMiddlewareOptions,
   BroadcastableEvent,
   MemoryDriverOptions as BroadcastMemoryDriverOptions,
