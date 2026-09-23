@@ -1368,8 +1368,9 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   invocation, and `tests` and `tests:fail` judge the same run.
 - The fingerprint is the SHA-256 of every file the status readers found the
   step's elements in (a model's file, the controller's for an action, the
-  schema file for a column, the entry routes file for an entry route and every
-  routes file of a module for a module's, the page component, a validator's
+  schema file for a column, the entry routes file and every file under the
+  project's `routes/` for an entry route and every routes file of a module for
+  a module's (nothing says which file declared it), the page component, a validator's
   file) plus the selected test files, and the environment (`runtime`,
   `platform`, `arch`, `hostname`). A file that cannot be read at verify time is
   recorded as `null`, which never matches. The environment is recorded and

@@ -358,6 +358,9 @@ export function discoverNotificationFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, NOTIFICATIONS_DIR)
 }
 
+/** The directory {@link discoverRoutesFiles} reads, relative to an app root. */
+export const ROUTES_DIR = 'routes'
+
 /**
  * Route files under `<appRoot>/routes/`, tests excluded. Scoped to the given root
  * on purpose, unlike the `discover*Files` siblings that fan out over
@@ -366,7 +369,7 @@ export function discoverNotificationFiles(appRoot: string): Promise<string[]> {
  * See {@link discoverModuleRoutesFiles}.
  */
 export function discoverRoutesFiles(appRoot: string): Promise<string[]> {
-  return collectFiles(resolve(appRoot, 'routes'), IMPORTABLE_EXTENSIONS).then((files) =>
+  return collectFiles(resolve(appRoot, ROUTES_DIR), IMPORTABLE_EXTENSIONS).then((files) =>
     files.filter((file) => !TEST_FILE_PATTERN.test(file)),
   )
 }

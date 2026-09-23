@@ -950,5 +950,17 @@ describe('judgePlan', () => {
       })
       expect(only(judgePlan(route(ADD, { name: 'posts.missing' }), app()), 'r').files).toEqual([])
     })
+
+    test('should name every routes file of its scope for a route, since nothing says which file declared it', () => {
+      const routeFiles = ['routes/web.ts', 'routes/comments.ts', 'routes/admin/users.ts', 'modules/billing/routes.ts', 'modules/billing/routes/invoices.ts', 'modules/shop/routes.ts'].map((file) => ({ file, identifiers: [] }))
+      const [index] = detail().routes as PlanAppRouteDetail[]
+      const routeIn = (module: string | null): PlanAppRouteDetail => ({ ...index!, module })
+      const filesOf = (overrides: Partial<PlanAppDetail>): string[] => only(judgePlan(route(EXISTING), app(overrides)), 'r').files
+
+      expect(filesOf({ routeFiles, routes: [routeIn(null)] })).toEqual(['routes/web.ts', 'routes/comments.ts', 'routes/admin/users.ts'])
+      expect(filesOf({ routeFiles, routes: [routeIn('billing')] })).toEqual(['modules/billing/routes.ts', 'modules/billing/routes/invoices.ts'])
+      // The entry file did not parse, so the detail skipped it; the route still names it.
+      expect(filesOf({ routeFiles: routeFiles.slice(1), routes: [routeIn(null)] })).toEqual(['routes/web.ts', 'routes/comments.ts', 'routes/admin/users.ts'])
+    })
   })
 })

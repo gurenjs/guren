@@ -4,9 +4,10 @@ import { join } from 'node:path'
 
 import { formatPlanNext, planNextFile } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
+import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { planDigest, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
-import { sha256 } from '../src/plan/verification'
+import { hashFiles, recordDrift, sha256 } from '../src/plan/verification'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { CLI_BIN_PATH, createTempRoot, writeWorkspaceFiles } from './helpers'
 import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
@@ -332,5 +333,64 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
     expect(next.step?.id).toBe(COMMENTS_HTTP)
     expect(next.step?.drifted).toEqual(['app/Http/Controllers/CommentController.ts', 'routes/web.ts'])
     expect(formatPlanNext(next, 'comments.plan.json')).toContain(`Re-check it with \`bunx guren plan:verify comments.plan.json --step ${COMMENTS_HTTP}\` rather than re-implementing it`)
+  }, 60_000)
+})
+
+/** The entry registrar calling one in a routes file of its own, which declares the store route. */
+const SPLIT_ROUTES = {
+  'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+import { registerCommentRoutes } from './comments.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostController, 'index']).name('posts.index')
+  registerCommentRoutes(router)
+}
+`,
+  'routes/comments.ts': `import type { Router } from '@guren/core'
+import { CommentController } from '../app/Http/Controllers/CommentController.js'
+
+export function registerCommentRoutes(router: Router): void {
+  router.post('/posts/:postId/comments', [CommentController, 'store']).name('comments.store')
+}
+`,
+}
+
+describe('plan:verify fingerprints every routes file an entry route may be declared in', () => {
+  test('should turn a verified route drifted when the routes file its entry registrar calls changes', async () => {
+    const app = await createPlanVerifyApp(join(await createTempRoot('guren-plan-verify-split-routes-'), 'app'), {
+      ...APP,
+      ...DRIZZLE_KIT_STUB_FILES,
+      ...SPLIT_ROUTES,
+      '.gitignore': 'node_modules\n',
+      'tests/comments.test.ts': COMMENT_TESTS.replace('../routes/web.ts', '../routes/comments.ts'),
+      'comments.plan.json': JSON.stringify(splitPlan()),
+    })
+    const planPath = join(app, 'comments.plan.json')
+    await approvePlanFile(planPath)
+    await waiveForTest(planPath, ['action.comments.destroy', 'resource.comment', 'policy.comment'])
+    expect(outcome(verify(app, COMMENTS_HTTP), COMMENTS_HTTP)).toBe('verified')
+    const state = JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, PlanStepRecord> }
+    const record = state.steps[COMMENTS_HTTP]!
+    expect(Object.keys(record.fingerprint.files)).toEqual(expect.arrayContaining(['routes/web.ts', 'routes/comments.ts']))
+    for (const id of planStepIds(derivePlanTasks(parsePlanDocument(splitPlan()))).filter((step) => step !== COMMENTS_HTTP)) {
+      await writePlanStepRecord(app, 'comments', id, doneRecord())
+    }
+
+    // Nothing the readers compare moves, so only the fingerprint can tell the route's file changed.
+    await writeFile(join(app, 'routes/comments.ts'), `${SPLIT_ROUTES['routes/comments.ts']}\n// the moderation routes go here\n`, 'utf8')
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'the comment routes, touched')
+
+    const status = Bun.spawnSync([process.execPath, CLI_BIN_PATH, 'plan:status', planPath, '--app', app, '--json'], { cwd: app, stdout: 'pipe', stderr: 'pipe' })
+    const store = (JSON.parse(status.stdout.toString()) as PlanStatusReport).elements.find((element) => element.id === 'route.comments.store')!
+    expect(store.state).toBe('drifted')
+    expect(store.notes.join('\n')).toContain('changed since: routes/comments.ts')
+    const hashes = await hashFiles(app, Object.keys(record.fingerprint.files))
+    expect(recordDrift(record, record.planDigest, hashes, new Set(record.waived))).toEqual(['routes/comments.ts'])
+    const next = await planNextFile(planPath, { appRoot: app })
+    expect(next.step?.id).toBe(COMMENTS_HTTP)
+    expect(next.step?.drifted).toEqual(['routes/comments.ts'])
   }, 60_000)
 })

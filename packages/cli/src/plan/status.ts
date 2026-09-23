@@ -7,6 +7,7 @@
  */
 
 import { CONTRACT_SEGMENTS } from '../contract-segments'
+import { ROUTES_DIR } from '../discovery'
 import type { SchemaColumnDefault, SchemaConstraint } from '../schema-parser'
 import type { RuntimeSchemaColumn, SourcedSchemaTable } from '../schema-runtime'
 import type {
@@ -1008,11 +1009,18 @@ class StatusContext {
     })
   }
 
-  /** The entry file for an entry route; every routes file of its module for a module's, since nothing says which declared it. */
+  /**
+   * Every routes file of the route's scope, since nothing says which declared it: for an entry
+   * route the entry file and the project's `routes/` files (the scope `routes-check.ts` reads),
+   * for a module's every routes file of that module. The entry file is kept even when it did not parse.
+   */
   private routeFiles(route: PlanAppRouteDetail): string[] {
-    if (route.module === null) return route.file === undefined ? [] : [route.file]
+    const files = (this.detail?.routeFiles ?? []).map((entry) => entry.file)
+    if (route.module === null) {
+      return [...new Set([...(route.file === undefined ? [] : [route.file]), ...files.filter((file) => file.startsWith(`${ROUTES_DIR}/`))])]
+    }
     const prefix = `modules/${route.module}/`
-    return (this.detail?.routeFiles ?? []).map((entry) => entry.file).filter((file) => file.startsWith(prefix))
+    return files.filter((file) => file.startsWith(prefix))
   }
 
   private routeProperties(route: PlanRoute, actual: PlanAppRouteDetail): PlanPropertyStatus[] {
